@@ -200,7 +200,7 @@ public:
     /// \p output value will be <tt>{-256}</tt>.
     /// \endparblock
     template<class BinaryFunction = ::rocprim::plus<T>>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void reduce(T input,
                 T& output,
                 storage_type& storage,
@@ -225,7 +225,7 @@ public:
     /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
     template<class BinaryFunction = ::rocprim::plus<T>>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void reduce(T input,
                 T& output,
                 BinaryFunction reduce_op = BinaryFunction())
@@ -284,7 +284,7 @@ public:
         unsigned int ItemsPerThread,
         class BinaryFunction = ::rocprim::plus<T>
     >
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void reduce(T (&input)[ItemsPerThread],
                 T& output,
                 storage_type& storage,
@@ -313,7 +313,7 @@ public:
         unsigned int ItemsPerThread,
         class BinaryFunction = ::rocprim::plus<T>
     >
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void reduce(T (&input)[ItemsPerThread],
                 T& output,
                 BinaryFunction reduce_op = BinaryFunction())
@@ -368,7 +368,7 @@ public:
     /// \endcode
     /// \endparblock
     template<class BinaryFunction = ::rocprim::plus<T>>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void reduce(T input,
                 T& output,
                 unsigned int valid_items,
@@ -396,7 +396,7 @@ public:
     /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
     template<class BinaryFunction = ::rocprim::plus<T>>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void reduce(T input,
                 T& output,
                 unsigned int valid_items,

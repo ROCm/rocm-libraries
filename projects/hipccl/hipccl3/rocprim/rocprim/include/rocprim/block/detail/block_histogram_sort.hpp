@@ -72,7 +72,7 @@ public:
     using storage_type = detail::raw_storage<storage_type_>;
 
     template<class Counter>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void composite(T (&input)[ItemsPerThread],
                    Counter hist[Bins])
     {
@@ -81,7 +81,7 @@ public:
     }
 
     template<class Counter>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void composite(T (&input)[ItemsPerThread],
                    Counter hist[Bins],
                    storage_type& storage)
@@ -139,12 +139,12 @@ private:
     {
         storage_type &storage;
 
-        ROCPRIM_DEVICE inline
+        ROCPRIM_DEVICE ROCPRIM_INLINE
         discontinuity_op(storage_type &storage) : storage(storage)
         {
         }
 
-        ROCPRIM_DEVICE inline
+        ROCPRIM_DEVICE ROCPRIM_INLINE
         bool operator()(const T& a, const T& b, unsigned int b_index) const
         {
             storage_type_& storage_ = storage.get();

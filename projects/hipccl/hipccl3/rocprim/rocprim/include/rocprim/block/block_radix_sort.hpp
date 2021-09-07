@@ -80,7 +80,7 @@ public:
     using storage_type = detail::raw_storage<storage_type_>;
 
     template<unsigned int ItemsPerThread>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void exclusive_scan(const unsigned int (&input)[ItemsPerThread],
                         unsigned int (&output)[ItemsPerThread],
                         unsigned int& reduction,
@@ -275,7 +275,7 @@ public:
     /// If the \p input values across threads in a block are <tt>{[256, 255], ..., [4, 3], [2, 1]}}</tt>, then
     /// then after sort they will be equal <tt>{[1, 2], [3, 4]  ..., [255, 256]}</tt>.
     /// \endparblock
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort(Key (&keys)[ItemsPerThread],
               storage_type& storage,
               unsigned int begin_bit = 0,
@@ -297,7 +297,7 @@ public:
     /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
     /// value: \p <tt>8 * sizeof(Key)</tt>.
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort(Key (&keys)[ItemsPerThread],
               unsigned int begin_bit = 0,
               unsigned int end_bit = 8 * sizeof(Key))
@@ -347,7 +347,7 @@ public:
     /// If the \p input values across threads in a block are <tt>{[1, 2], [3, 4]  ..., [255, 256]}</tt>,
     /// then after sort they will be equal <tt>{[256, 255], ..., [4, 3], [2, 1]}</tt>.
     /// \endparblock
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort_desc(Key (&keys)[ItemsPerThread],
                    storage_type& storage,
                    unsigned int begin_bit = 0,
@@ -369,7 +369,7 @@ public:
     /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
     /// value: \p <tt>8 * sizeof(Key)</tt>.
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort_desc(Key (&keys)[ItemsPerThread],
                    unsigned int begin_bit = 0,
                    unsigned int end_bit = 8 * sizeof(Key))
@@ -428,7 +428,7 @@ public:
     /// equal <tt>{[128, 128], [127, 127]  ..., [2, 2], [1, 1]}</tt>.
     /// \endparblock
     template<bool WithValues = with_values>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort(Key (&keys)[ItemsPerThread],
               typename std::enable_if<WithValues, Value>::type (&values)[ItemsPerThread],
               storage_type& storage,
@@ -455,7 +455,7 @@ public:
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
     /// value: \p <tt>8 * sizeof(Key)</tt>.
     template<bool WithValues = with_values>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort(Key (&keys)[ItemsPerThread],
               typename std::enable_if<WithValues, Value>::type (&values)[ItemsPerThread],
               unsigned int begin_bit = 0,
@@ -515,7 +515,7 @@ public:
     /// will be equal <tt>{[1, 1], [2, 2]  ..., [128, 128]}</tt>.
     /// \endparblock
     template<bool WithValues = with_values>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort_desc(Key (&keys)[ItemsPerThread],
                    typename std::enable_if<WithValues, Value>::type (&values)[ItemsPerThread],
                    storage_type& storage,
@@ -542,7 +542,7 @@ public:
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
     /// value: \p <tt>8 * sizeof(Key)</tt>.
     template<bool WithValues = with_values>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort_desc(Key (&keys)[ItemsPerThread],
                    typename std::enable_if<WithValues, Value>::type (&values)[ItemsPerThread],
                    unsigned int begin_bit = 0,
@@ -594,7 +594,7 @@ public:
     /// If the \p input values across threads in a block are <tt>{[256, 255], ..., [4, 3], [2, 1]}}</tt>, then
     /// then after sort they will be equal <tt>{[1, 129], [2, 130]  ..., [128, 256]}</tt>.
     /// \endparblock
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort_to_striped(Key (&keys)[ItemsPerThread],
                          storage_type& storage,
                          unsigned int begin_bit = 0,
@@ -617,7 +617,7 @@ public:
     /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
     /// value: \p <tt>8 * sizeof(Key)</tt>.
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort_to_striped(Key (&keys)[ItemsPerThread],
                          unsigned int begin_bit = 0,
                          unsigned int end_bit = 8 * sizeof(Key))
@@ -668,7 +668,7 @@ public:
     /// If the \p input values across threads in a block are <tt>{[1, 2], [3, 4]  ..., [255, 256]}</tt>,
     /// then after sort they will be equal <tt>{[256, 128], ..., [130, 2], [129, 1]}</tt>.
     /// \endparblock
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort_desc_to_striped(Key (&keys)[ItemsPerThread],
                               storage_type& storage,
                               unsigned int begin_bit = 0,
@@ -691,7 +691,7 @@ public:
     /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
     /// value: \p <tt>8 * sizeof(Key)</tt>.
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort_desc_to_striped(Key (&keys)[ItemsPerThread],
                               unsigned int begin_bit = 0,
                               unsigned int end_bit = 8 * sizeof(Key))
@@ -750,7 +750,7 @@ public:
     /// equal <tt>{[-8, -4], [-7, -3], [-6, -2], [-5, -1]}</tt>.
     /// \endparblock
     template<bool WithValues = with_values>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort_to_striped(Key (&keys)[ItemsPerThread],
                          typename std::enable_if<WithValues, Value>::type (&values)[ItemsPerThread],
                          storage_type& storage,
@@ -775,7 +775,7 @@ public:
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
     /// value: \p <tt>8 * sizeof(Key)</tt>.
     template<bool WithValues = with_values>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort_to_striped(Key (&keys)[ItemsPerThread],
                          typename std::enable_if<WithValues, Value>::type (&values)[ItemsPerThread],
                          unsigned int begin_bit = 0,
@@ -835,7 +835,7 @@ public:
     /// equal <tt>{[10, 50], [20, 60], [30, 70], [40, 80]}</tt>.
     /// \endparblock
     template<bool WithValues = with_values>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort_desc_to_striped(Key (&keys)[ItemsPerThread],
                               typename std::enable_if<WithValues, Value>::type (&values)[ItemsPerThread],
                               storage_type& storage,
@@ -860,7 +860,7 @@ public:
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
     /// value: \p <tt>8 * sizeof(Key)</tt>.
     template<bool WithValues = with_values>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort_desc_to_striped(Key (&keys)[ItemsPerThread],
                               typename std::enable_if<WithValues, Value>::type (&values)[ItemsPerThread],
                               unsigned int begin_bit = 0,
@@ -873,7 +873,7 @@ public:
 private:
 
     template<bool Descending, bool ToStriped = false, class SortedValue>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort_impl(Key (&keys)[ItemsPerThread],
                    SortedValue (&values)[ItemsPerThread],
                    storage_type& storage,
@@ -934,7 +934,7 @@ private:
         }
     }
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void exchange_keys(storage_type& storage,
                        bit_key_type (&bit_keys)[ItemsPerThread],
                        const unsigned int (&ranks)[ItemsPerThread])
@@ -945,7 +945,7 @@ private:
     }
 
     template<class SortedValue>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void exchange_values(storage_type& storage,
                          SortedValue (&values)[ItemsPerThread],
                          const unsigned int (&ranks)[ItemsPerThread])
@@ -955,7 +955,7 @@ private:
         values_exchange_type().scatter_to_blocked(values, values, ranks, storage_.values_exchange);
     }
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void exchange_values(storage_type& storage,
                          empty_type (&values)[ItemsPerThread],
                          const unsigned int (&ranks)[ItemsPerThread])
@@ -965,7 +965,7 @@ private:
         (void) ranks;
     }
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void to_striped_keys(storage_type& storage,
                          bit_key_type (&bit_keys)[ItemsPerThread])
     {
@@ -975,7 +975,7 @@ private:
     }
 
     template<class SortedValue>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void to_striped_values(storage_type& storage,
                            SortedValue (&values)[ItemsPerThread])
     {
@@ -984,7 +984,7 @@ private:
         values_exchange_type().blocked_to_striped(values, values, storage_.values_exchange);
     }
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void to_striped_values(storage_type& storage,
                            empty_type * values)
     {

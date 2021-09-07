@@ -46,7 +46,7 @@ public:
     using storage_type = detail::empty_storage_type;
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void inclusive_scan(T input, T& output, BinaryFunction scan_op)
     {
         output = input;
@@ -62,7 +62,7 @@ public:
     }
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void inclusive_scan(T input, T& output,
                         storage_type& storage, BinaryFunction scan_op)
     {
@@ -71,7 +71,7 @@ public:
     }
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void inclusive_scan(T input, T& output, T& reduction,
                         BinaryFunction scan_op)
     {
@@ -81,7 +81,7 @@ public:
     }
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void inclusive_scan(T input, T& output, T& reduction,
                         storage_type& storage, BinaryFunction scan_op)
     {
@@ -90,7 +90,7 @@ public:
     }
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void exclusive_scan(T input, T& output, T init, BinaryFunction scan_op)
     {
         inclusive_scan(input, output, scan_op);
@@ -99,7 +99,7 @@ public:
     }
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void exclusive_scan(T input, T& output, T init,
                         storage_type& storage, BinaryFunction scan_op)
     {
@@ -108,7 +108,7 @@ public:
     }
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void exclusive_scan(T input, T& output,
                         storage_type& storage, BinaryFunction scan_op)
     {
@@ -119,7 +119,7 @@ public:
     }
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void exclusive_scan(T input, T& output, T init, T& reduction,
                         BinaryFunction scan_op)
     {
@@ -131,7 +131,7 @@ public:
     }
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void exclusive_scan(T input, T& output, T init, T& reduction,
                         storage_type& storage, BinaryFunction scan_op)
     {
@@ -140,7 +140,7 @@ public:
     }
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void scan(T input, T& inclusive_output, T& exclusive_output, T init,
               BinaryFunction scan_op)
     {
@@ -150,7 +150,7 @@ public:
     }
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void scan(T input, T& inclusive_output, T& exclusive_output, T init,
               storage_type& storage, BinaryFunction scan_op)
     {
@@ -159,7 +159,7 @@ public:
     }
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void scan(T input, T& inclusive_output, T& exclusive_output,
               storage_type& storage, BinaryFunction scan_op)
     {
@@ -170,7 +170,7 @@ public:
     }
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void scan(T input, T& inclusive_output, T& exclusive_output, T init, T& reduction,
               BinaryFunction scan_op)
     {
@@ -182,7 +182,7 @@ public:
     }
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void scan(T input, T& inclusive_output, T& exclusive_output, T init, T& reduction,
               storage_type& storage, BinaryFunction scan_op)
     {
@@ -190,7 +190,7 @@ public:
         scan(input, inclusive_output, exclusive_output, init, reduction, scan_op);
     }
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     T broadcast(T input, const unsigned int src_lane, storage_type& storage)
     {
         (void) storage;
@@ -198,7 +198,7 @@ public:
     }
 
 protected:
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void to_exclusive(T inclusive_input, T& exclusive_output, storage_type& storage)
     {
         (void) storage;
@@ -208,7 +208,7 @@ protected:
 private:
     // Changes inclusive scan results to exclusive scan results
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void to_exclusive(T inclusive_input, T& exclusive_output, T init,
                       BinaryFunction scan_op)
     {
@@ -222,7 +222,7 @@ private:
         }
     }
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void to_exclusive(T inclusive_input, T& exclusive_output)
     {
         // shift to get exclusive results

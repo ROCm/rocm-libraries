@@ -47,7 +47,7 @@ namespace detail
 // Wrapping functions that allow to call proper methods (with or without values)
 // (a variant with values is enabled only when Value is not empty_type)
 template<bool Descending = false, class SortType, class SortKey, class SortValue, unsigned int ItemsPerThread>
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 void sort_block(SortType sorter,
                 SortKey (&keys)[ItemsPerThread],
                 SortValue (&values)[ItemsPerThread],
@@ -66,7 +66,7 @@ void sort_block(SortType sorter,
 }
 
 template<bool Descending = false, class SortType, class SortKey, unsigned int ItemsPerThread>
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 void sort_block(SortType sorter,
                 SortKey (&keys)[ItemsPerThread],
                 ::rocprim::empty_type (&values)[ItemsPerThread],
@@ -107,7 +107,7 @@ struct radix_digit_count_helper
     };
 
     template<bool IsFull = false, class KeysInputIterator>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void count_digits(KeysInputIterator keys_input,
                       unsigned int begin_offset,
                       unsigned int end_offset,
@@ -231,7 +231,7 @@ struct radix_sort_single_helper
         class ValuesInputIterator,
         class ValuesOutputIterator
     >
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort_single(KeysInputIterator keys_input,
                      KeysOutputIterator keys_output,
                      ValuesInputIterator values_input,
@@ -352,7 +352,7 @@ struct radix_sort_and_scatter_helper
         class ValuesInputIterator,
         class ValuesOutputIterator
     >
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort_and_scatter(KeysInputIterator keys_input,
                           KeysOutputIterator keys_output,
                           ValuesInputIterator values_input,
@@ -492,7 +492,7 @@ template<
     bool Descending,
     class KeysInputIterator
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 void fill_digit_counts(KeysInputIterator keys_input,
                        unsigned int size,
                        unsigned int * batch_digit_counts,
@@ -558,7 +558,7 @@ template<
     unsigned int ItemsPerThread,
     unsigned int RadixBits
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 void scan_batches(unsigned int * batch_digit_counts,
                   unsigned int * digit_counts,
                   unsigned int batches)
@@ -596,7 +596,7 @@ void scan_batches(unsigned int * batch_digit_counts,
 }
 
 template<unsigned int RadixBits>
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 void scan_digits(unsigned int * digit_counts)
 {
     constexpr unsigned int radix_size = 1 << RadixBits;
@@ -619,7 +619,7 @@ template<
     class ValuesInputIterator,
     class ValuesOutputIterator
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 void sort_single(KeysInputIterator keys_input,
                  KeysOutputIterator keys_output,
                  ValuesInputIterator values_input,
@@ -655,7 +655,7 @@ template<
     class ValuesInputIterator,
     class ValuesOutputIterator
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 void sort_and_scatter(KeysInputIterator keys_input,
                       KeysOutputIterator keys_output,
                       ValuesInputIterator values_input,
@@ -734,7 +734,7 @@ template<
     class Value,
     unsigned int ItemsPerThread
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 typename std::enable_if<!WithValues>::type
 block_load_radix_impl(const unsigned int flat_id,
                       const unsigned int block_offset,
@@ -775,7 +775,7 @@ template<
     class Value,
     unsigned int ItemsPerThread
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 typename std::enable_if<WithValues>::type
 block_load_radix_impl(const unsigned int flat_id,
                  const unsigned int block_offset,
@@ -828,7 +828,7 @@ struct radix_merge_compare;
 template<class T>
 struct radix_merge_compare<false, false, T>
 {
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     bool operator()(const T& a, const T& b) const
     {
         return b > a;
@@ -838,7 +838,7 @@ struct radix_merge_compare<false, false, T>
 template<class T>
 struct radix_merge_compare<true, false, T>
 {
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     bool operator()(const T& a, const T& b) const
     {
         return a > b;
@@ -860,7 +860,7 @@ struct radix_merge_compare<false, true, T>
         radix_mask = radix_mask_upper ^ radix_mask_bottom;
     }
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     bool operator()(const T& a, const T& b) const
     {
         const bit_key_type encoded_key_a = key_codec::encode(a);
@@ -889,7 +889,7 @@ struct radix_merge_compare<true, true, T>
     }
 
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     bool operator()(const T& a, const T& b) const
     {
         const bit_key_type encoded_key_a = key_codec::encode(a);
@@ -905,7 +905,7 @@ struct radix_merge_compare<true, true, T>
 template<>
 struct radix_merge_compare<false, false, rocprim::half>
 {
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     bool operator()(const rocprim::half& a, const rocprim::half& b) const
     {
         return __hgt(b, a);
@@ -915,7 +915,7 @@ struct radix_merge_compare<false, false, rocprim::half>
 template<>
 struct radix_merge_compare<true, false, rocprim::half>
 {
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     bool operator()(const rocprim::half& a, const rocprim::half& b) const
     {
         return __hgt(a, b);
@@ -937,7 +937,7 @@ struct radix_merge_compare<false, true, rocprim::half>
         radix_mask = radix_mask_upper ^ radix_mask_bottom;
     }
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     bool operator()(const rocprim::half& a, const rocprim::half& b) const
     {
         const bit_key_type encoded_key_a = key_codec::encode(a);
@@ -966,7 +966,7 @@ struct radix_merge_compare<true, true, rocprim::half>
     }
 
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     bool operator()(const rocprim::half& a, const rocprim::half& b) const
     {
         const bit_key_type encoded_key_a = key_codec::encode(a);
@@ -988,7 +988,7 @@ template<
     class ValuesOutputIterator,
     class BinaryFunction
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 void radix_block_merge_impl(KeysInputIterator keys_input,
                             KeysOutputIterator keys_output,
                             ValuesInputIterator values_input,

@@ -43,7 +43,7 @@ class warp_sort_shuffle
 {
 private:
     template<int warp, class V, class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     typename std::enable_if<!(WarpSize > warp)>::type
     swap(Key& k, V& v, int mask, bool dir, BinaryFunction compare_function)
     {
@@ -55,7 +55,7 @@ private:
     }
 
     template<int warp, class V, class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     typename std::enable_if<(WarpSize > warp)>::type
     swap(Key& k, V& v, int mask, bool dir, BinaryFunction compare_function)
     {
@@ -70,7 +70,7 @@ private:
     }
 
     template<int warp, class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     typename std::enable_if<!(WarpSize > warp)>::type
     swap(Key& k, int mask, bool dir, BinaryFunction compare_function)
     {
@@ -81,7 +81,7 @@ private:
     }
 
     template<int warp, class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     typename std::enable_if<(WarpSize > warp)>::type
     swap(Key& k, int mask, bool dir, BinaryFunction compare_function)
     {
@@ -94,7 +94,7 @@ private:
     }
 
     template<class BinaryFunction, class... KeyValue>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void bitonic_sort(BinaryFunction compare_function, KeyValue&... kv)
     {
         static_assert(
@@ -137,7 +137,7 @@ public:
     using storage_type = ::rocprim::detail::empty_storage_type;
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort(Key& thread_value, BinaryFunction compare_function)
     {
         // sort by value only
@@ -145,7 +145,7 @@ public:
     }
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort(Key& thread_value, storage_type& storage,
               BinaryFunction compare_function)
     {
@@ -154,7 +154,7 @@ public:
     }
 
     template<class BinaryFunction, class V = Value>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     typename std::enable_if<(sizeof(V) <= sizeof(int))>::type
     sort(Key& thread_key, Value& thread_value,
          BinaryFunction compare_function)
@@ -163,7 +163,7 @@ public:
     }
 
     template<class BinaryFunction, class V = Value>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     typename std::enable_if<!(sizeof(V) <= sizeof(int))>::type
     sort(Key& thread_key, Value& thread_value,
          BinaryFunction compare_function)
@@ -175,7 +175,7 @@ public:
     }
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort(Key& thread_key, Value& thread_value,
               storage_type& storage, BinaryFunction compare_function)
     {

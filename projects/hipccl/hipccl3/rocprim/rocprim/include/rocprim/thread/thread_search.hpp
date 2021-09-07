@@ -91,7 +91,7 @@ template <
     typename InputIteratorT,
     typename OffsetT,
     typename T>
-ROCPRIM_DEVICE inline OffsetT lower_bound(
+ROCPRIM_DEVICE ROCPRIM_INLINE OffsetT lower_bound(
     InputIteratorT      input,
     OffsetT             num_items,
     T                   val)
@@ -127,7 +127,7 @@ template <
     typename InputIteratorT,
     typename OffsetT,
     typename T>
-ROCPRIM_DEVICE inline OffsetT upper_bound(
+ROCPRIM_DEVICE ROCPRIM_INLINE OffsetT upper_bound(
     InputIteratorT      input,              ///< [in] Input sequence
     OffsetT             num_items,          ///< [in] Input sequence length
     T                   val)                ///< [in] Search key

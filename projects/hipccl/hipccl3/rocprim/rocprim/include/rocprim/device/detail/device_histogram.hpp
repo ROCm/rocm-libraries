@@ -245,7 +245,7 @@ template<
     unsigned int Channels,
     class Sample
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 typename std::enable_if<is_sample_vectorizable<ItemsPerThread, Channels, Sample>::value>::type
 load_samples(unsigned int flat_id,
              Sample * samples,
@@ -278,7 +278,7 @@ template<
     unsigned int Channels,
     class Sample
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 typename std::enable_if<!is_sample_vectorizable<ItemsPerThread, Channels, Sample>::value>::type
 load_samples(unsigned int flat_id,
              Sample * samples,
@@ -298,7 +298,7 @@ template<
     class Sample,
     class SampleIterator
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 void load_samples(unsigned int flat_id,
                   SampleIterator samples,
                   sample_vector<Sample, Channels> (&values)[ItemsPerThread])
@@ -325,7 +325,7 @@ template<
     class Sample,
     class SampleIterator
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 void load_samples(unsigned int flat_id,
                   SampleIterator samples,
                   sample_vector<Sample, Channels> (&values)[ItemsPerThread],
@@ -352,7 +352,7 @@ template<
     unsigned int ActiveChannels,
     class Counter
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 void init_histogram(fixed_array<Counter *, ActiveChannels> histogram,
                     fixed_array<unsigned int, ActiveChannels> bins)
 {
@@ -378,7 +378,7 @@ template<
     class Counter,
     class SampleToBinOp
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 void histogram_shared(SampleIterator samples,
                       unsigned int columns,
                       unsigned int rows,
@@ -485,7 +485,7 @@ template<
     class Counter,
     class SampleToBinOp
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 void histogram_global(SampleIterator samples,
                       unsigned int columns,
                       unsigned int row_stride,

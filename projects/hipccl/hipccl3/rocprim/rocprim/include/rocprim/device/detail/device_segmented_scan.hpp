@@ -48,7 +48,7 @@ template<
     unsigned int ItemsPerThread,
     class BinaryFunction
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 auto segmented_scan_block_scan(T (&input)[ItemsPerThread],
                                T (&output)[ItemsPerThread],
                                T& prefix,
@@ -78,7 +78,7 @@ template<
     unsigned int ItemsPerThread,
     class BinaryFunction
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 auto segmented_scan_block_scan(T (&input)[ItemsPerThread],
                                T (&output)[ItemsPerThread],
                                T& prefix,
@@ -119,7 +119,7 @@ template<
     class InitValueType,
     class BinaryFunction
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 void segmented_scan(InputIterator input,
                     OutputIterator output,
                     OffsetIterator begin_offsets,

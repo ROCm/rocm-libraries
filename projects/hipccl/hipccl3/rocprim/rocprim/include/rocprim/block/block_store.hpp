@@ -159,7 +159,7 @@ public:
     /// * The type \p T must be such that an object of type \p InputIterator
     /// can be dereferenced and then implicitly converted to \p T.
     template<class OutputIterator>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void store(OutputIterator block_output,
                T (&items)[ItemsPerThread])
     {
@@ -181,7 +181,7 @@ public:
     /// * The type \p T must be such that an object of type \p InputIterator
     /// can be dereferenced and then implicitly converted to \p T.
     template<class OutputIterator>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void store(OutputIterator block_output,
                T (&items)[ItemsPerThread],
                unsigned int valid)
@@ -221,7 +221,7 @@ public:
     /// }
     /// \endcode
     template<class OutputIterator>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void store(OutputIterator block_output,
                T (&items)[ItemsPerThread],
                storage_type& storage)
@@ -263,7 +263,7 @@ public:
     /// }
     /// \endcode
     template<class OutputIterator>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void store(OutputIterator block_output,
                T (&items)[ItemsPerThread],
                unsigned int valid,
@@ -298,7 +298,7 @@ public:
     using storage_type = storage_type_; // only for Doxygen
     #endif
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void store(T* block_output,
                T (&_items)[ItemsPerThread])
     {
@@ -307,7 +307,7 @@ public:
     }
 
     template<class OutputIterator, class U>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void store(OutputIterator block_output,
                U (&items)[ItemsPerThread])
     {
@@ -316,7 +316,7 @@ public:
     }
 
     template<class OutputIterator>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void store(OutputIterator block_output,
                T (&items)[ItemsPerThread],
                unsigned int valid)
@@ -325,7 +325,7 @@ public:
         block_store_direct_blocked(flat_id, block_output, items, valid);
     }
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void store(T* block_output,
                T (&items)[ItemsPerThread],
                storage_type& storage)
@@ -335,7 +335,7 @@ public:
     }
 
     template<class OutputIterator, class U>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void store(OutputIterator block_output,
                U (&items)[ItemsPerThread],
                storage_type& storage)
@@ -345,7 +345,7 @@ public:
     }
 
     template<class OutputIterator>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void store(OutputIterator block_output,
                T (&items)[ItemsPerThread],
                unsigned int valid,
@@ -373,7 +373,7 @@ public:
     using storage_type = typename block_exchange_type::storage_type;
 
     template<class OutputIterator>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void store(OutputIterator block_output,
                T (&items)[ItemsPerThread])
     {
@@ -384,7 +384,7 @@ public:
     }
 
     template<class OutputIterator>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void store(OutputIterator block_output,
                T (&items)[ItemsPerThread],
                unsigned int valid)
@@ -396,7 +396,7 @@ public:
     }
 
     template<class OutputIterator>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void store(OutputIterator block_output,
                T (&items)[ItemsPerThread],
                storage_type& storage)
@@ -407,7 +407,7 @@ public:
     }
 
     template<class OutputIterator>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void store(OutputIterator block_output,
                T (&items)[ItemsPerThread],
                unsigned int valid,
@@ -439,7 +439,7 @@ public:
     using storage_type = typename block_exchange_type::storage_type;
 
     template<class OutputIterator>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void store(OutputIterator block_output,
                T (&items)[ItemsPerThread])
     {
@@ -450,7 +450,7 @@ public:
     }
 
     template<class OutputIterator>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void store(OutputIterator block_output,
                T (&items)[ItemsPerThread],
                unsigned int valid)
@@ -462,7 +462,7 @@ public:
     }
 
     template<class OutputIterator>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void store(OutputIterator block_output,
                T (&items)[ItemsPerThread],
                storage_type& storage)
@@ -473,7 +473,7 @@ public:
     }
 
     template<class OutputIterator>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void store(OutputIterator block_output,
                T (&items)[ItemsPerThread],
                unsigned int valid,

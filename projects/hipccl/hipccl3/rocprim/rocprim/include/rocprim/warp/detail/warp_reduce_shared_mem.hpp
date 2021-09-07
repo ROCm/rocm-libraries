@@ -51,7 +51,7 @@ public:
     using storage_type = detail::raw_storage<storage_type_>;
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void reduce(T input, T& output, storage_type& storage, BinaryFunction reduce_op)
     {
         constexpr unsigned int ceiling = next_power_of_two(WarpSize);
@@ -75,7 +75,7 @@ public:
     }
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void reduce(T input, T& output, unsigned int valid_items,
                 storage_type& storage, BinaryFunction reduce_op)
     {
@@ -100,7 +100,7 @@ public:
     }
 
     template<class Flag, class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void head_segmented_reduce(T input, T& output, Flag flag,
                                storage_type& storage, BinaryFunction reduce_op)
     {
@@ -108,7 +108,7 @@ public:
     }
 
     template<class Flag, class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void tail_segmented_reduce(T input, T& output, Flag flag,
                                storage_type& storage, BinaryFunction reduce_op)
     {
@@ -117,7 +117,7 @@ public:
 
 private:
     template<bool HeadSegmented, class Flag, class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void segmented_reduce(T input, T& output, Flag flag,
                           storage_type& storage, BinaryFunction reduce_op)
     {
@@ -141,7 +141,7 @@ private:
     }
 
     template<bool Switch>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     typename std::enable_if<(Switch == false)>::type
     set_output(T& output, storage_type& storage)
     {
@@ -151,7 +151,7 @@ private:
     }
 
     template<bool Switch>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     typename std::enable_if<(Switch == true)>::type
     set_output(T& output, storage_type& storage)
     {

@@ -27,7 +27,7 @@ namespace detail
 {
 
 template<class Size>
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 Size get_binary_search_middle(Size left, Size right)
 {
     // Instead of `/ 2` we use `* 33 / 64`, i.e. the middle is slightly moved.
@@ -41,7 +41,7 @@ Size get_binary_search_middle(Size left, Size right)
 }
 
 template<class RandomAccessIterator, class Size, class T, class BinaryPredicate>
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 Size lower_bound_n(RandomAccessIterator first,
                    Size size,
                    const T& value,
@@ -65,7 +65,7 @@ Size lower_bound_n(RandomAccessIterator first,
 }
 
 template<class RandomAccessIterator, class Size, class T, class BinaryPredicate>
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 Size upper_bound_n(RandomAccessIterator first,
                    Size size,
                    const T& value,
@@ -91,7 +91,7 @@ Size upper_bound_n(RandomAccessIterator first,
 struct lower_bound_search_op
 {
     template<class HaystackIterator, class CompareOp, class Size, class T>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     Size operator()(HaystackIterator haystack, Size size, const T& value, CompareOp compare_op) const
     {
         return lower_bound_n(haystack, size, value, compare_op);
@@ -101,7 +101,7 @@ struct lower_bound_search_op
 struct upper_bound_search_op
 {
     template<class HaystackIterator, class CompareOp, class Size, class T>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     Size operator()(HaystackIterator haystack, Size size, const T& value, CompareOp compare_op) const
     {
         return upper_bound_n(haystack, size, value, compare_op);
@@ -111,7 +111,7 @@ struct upper_bound_search_op
 struct binary_search_op
 {
     template<class HaystackIterator, class CompareOp, class Size, class T>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     bool operator()(HaystackIterator haystack, Size size, const T& value, CompareOp compare_op) const
     {
         const Size n = lower_bound_n(haystack, size, value, compare_op);

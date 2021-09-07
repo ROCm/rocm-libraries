@@ -46,7 +46,7 @@ namespace detail
 {
 
 template<class LookBackScanState>
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 void init_lookback_scan_state_kernel_impl(LookBackScanState lookback_scan_state,
                                           const unsigned int number_of_blocks,
                                           ordered_block_id<unsigned int> ordered_bid)
@@ -72,7 +72,7 @@ template<
     unsigned int ItemsPerThread,
     class BinaryFunction
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 auto lookback_block_scan(T (&values)[ItemsPerThread],
                          T /* initial_value */,
                          T& reduction,
@@ -97,7 +97,7 @@ template<
     unsigned int ItemsPerThread,
     class BinaryFunction
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 auto lookback_block_scan(T (&values)[ItemsPerThread],
                          T initial_value,
                          T& reduction,
@@ -125,7 +125,7 @@ template<
     class PrefixCallback,
     class BinaryFunction
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 auto lookback_block_scan(T (&values)[ItemsPerThread],
                          typename BlockScan::storage_type& storage,
                          PrefixCallback& prefix_callback_op,
@@ -150,7 +150,7 @@ template<
     class PrefixCallback,
     class BinaryFunction
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 auto lookback_block_scan(T (&values)[ItemsPerThread],
                          typename BlockScan::storage_type& storage,
                          PrefixCallback& prefix_callback_op,
@@ -176,7 +176,7 @@ template<
     class ResultType,
     class LookbackScanState
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 void lookback_scan_kernel_impl(InputIterator input,
                                OutputIterator output,
                                const size_t size,

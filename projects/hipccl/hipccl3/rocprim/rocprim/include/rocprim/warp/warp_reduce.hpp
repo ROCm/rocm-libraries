@@ -177,7 +177,7 @@ public:
     /// \endcode
     /// \endparblock
     template<class BinaryFunction = ::rocprim::plus<T>, unsigned int FunctionWarpSize = WarpSize>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     auto reduce(T input,
                 T& output,
                 storage_type& storage,
@@ -190,7 +190,7 @@ public:
     /// \brief Performs reduction across threads in a logical warp.
     /// Invalid Warp Size
     template<class BinaryFunction = ::rocprim::plus<T>, unsigned int FunctionWarpSize = WarpSize>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     auto reduce(T ,
                 T& ,
                 storage_type& ,
@@ -249,7 +249,7 @@ public:
     /// \endcode
     /// \endparblock
     template<class BinaryFunction = ::rocprim::plus<T>, unsigned int FunctionWarpSize = WarpSize>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     auto reduce(T input,
                 T& output,
                 int valid_items,
@@ -263,7 +263,7 @@ public:
     /// \brief Performs reduction across threads in a logical warp.
     /// Invalid Warp Size
     template<class BinaryFunction = ::rocprim::plus<T>, unsigned int FunctionWarpSize = WarpSize>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     auto reduce(T ,
                 T& ,
                 int ,
@@ -295,7 +295,7 @@ public:
     /// Synchronization barrier should be placed before \p storage is reused
     /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     template<class Flag, class BinaryFunction = ::rocprim::plus<T>, unsigned int FunctionWarpSize = WarpSize>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     auto head_segmented_reduce(T input,
                                T& output,
                                Flag flag,
@@ -309,7 +309,7 @@ public:
     /// \brief Performs head-segmented reduction across threads in a logical warp.
     /// Invalid Warp Size
     template<class Flag, class BinaryFunction = ::rocprim::plus<T>, unsigned int FunctionWarpSize = WarpSize>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     auto head_segmented_reduce(T ,
                                T& ,
                                Flag ,
@@ -341,7 +341,7 @@ public:
     /// Synchronization barrier should be placed before \p storage is reused
     /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
     template<class Flag, class BinaryFunction = ::rocprim::plus<T>, unsigned int FunctionWarpSize = WarpSize>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     auto tail_segmented_reduce(T input,
                                T& output,
                                Flag flag,
@@ -355,7 +355,7 @@ public:
     /// \brief Performs tail-segmented reduction across threads in a logical warp.
     /// Invalid Warp Size
     template<class Flag, class BinaryFunction = ::rocprim::plus<T>, unsigned int FunctionWarpSize = WarpSize>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     auto tail_segmented_reduce(T ,
                                T& ,
                                Flag ,

@@ -64,7 +64,7 @@ public:
     using storage_type = detail::raw_storage<storage_type_<Key, Value>>;
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort(Key& thread_key,
               storage_type& storage,
               BinaryFunction compare_function)
@@ -77,7 +77,7 @@ public:
     }
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort(Key& thread_key,
               BinaryFunction compare_function)
     {
@@ -86,7 +86,7 @@ public:
     }
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort(Key& thread_key,
               Value& thread_value,
               storage_type& storage,
@@ -100,7 +100,7 @@ public:
     }
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort(Key& thread_key,
               Value& thread_value,
               BinaryFunction compare_function)
@@ -110,7 +110,7 @@ public:
     }
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort(Key& thread_key,
               storage_type& storage,
               const unsigned int size,
@@ -124,7 +124,7 @@ public:
     }
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort(Key& thread_key,
               Value& thread_value,
               storage_type& storage,
@@ -139,7 +139,7 @@ public:
     }
 
 private:
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void copy_to_shared(Key& k, const unsigned int flat_tid, storage_type& storage)
     {
         storage_type_<Key, Value>& storage_ = storage.get();
@@ -147,7 +147,7 @@ private:
         ::rocprim::syncthreads();
     }
 
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void copy_to_shared(Key& k, Value& v, const unsigned int flat_tid, storage_type& storage)
     {
         storage_type_<Key, Value>& storage_ = storage.get();
@@ -157,7 +157,7 @@ private:
     }
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void swap(Key& key,
               const unsigned int flat_tid,
               const unsigned int next_id,
@@ -176,7 +176,7 @@ private:
     }
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void swap(Key& key,
               Value& value,
               const unsigned int flat_tid,
@@ -202,7 +202,7 @@ private:
         class BinaryFunction,
         class... KeyValue
     >
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     typename std::enable_if<(Size <= ::rocprim::device_warp_size())>::type
     sort_power_two(const unsigned int flat_tid,
                    storage_type& storage,
@@ -217,7 +217,7 @@ private:
     }
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void warp_swap(Key& k, Value& v, int mask, bool dir, BinaryFunction compare_function)
     {
         Key k1    = warp_shuffle_xor(k, mask);
@@ -230,7 +230,7 @@ private:
     }
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void warp_swap(Key& k, int mask, bool dir, BinaryFunction compare_function)
     {
         Key k1    = warp_shuffle_xor(k, mask);
@@ -246,7 +246,7 @@ private:
         class BinaryFunction,
         class... KeyValue
     >
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     typename std::enable_if<(Size > ::rocprim::device_warp_size())>::type
     sort_power_two(const unsigned int flat_tid,
                    storage_type& storage,
@@ -292,7 +292,7 @@ private:
         class BinaryFunction,
         class... KeyValue
     >
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     typename std::enable_if<detail::is_power_of_two(Size)>::type
     sort_impl(const unsigned int flat_tid,
               storage_type& storage,
@@ -315,7 +315,7 @@ private:
         class BinaryFunction,
         class... KeyValue
     >
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     typename std::enable_if<!detail::is_power_of_two(Size)>::type
     sort_impl(const unsigned int flat_tid,
               storage_type& storage,
@@ -348,7 +348,7 @@ private:
         class BinaryFunction,
         class... KeyValue
     >
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void sort_impl(const unsigned int flat_tid,
                    const unsigned int size,
                    storage_type& storage,

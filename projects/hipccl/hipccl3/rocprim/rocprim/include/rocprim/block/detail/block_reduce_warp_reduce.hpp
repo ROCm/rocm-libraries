@@ -75,7 +75,7 @@ public:
     using storage_type = detail::raw_storage<storage_type_>;
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void reduce(T input,
                 T& output,
                 storage_type& storage,
@@ -88,7 +88,7 @@ public:
     }
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void reduce(T input,
                 T& output,
                 BinaryFunction reduce_op)
@@ -98,7 +98,7 @@ public:
     }
 
     template<unsigned int ItemsPerThread, class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void reduce(T (&input)[ItemsPerThread],
                 T& output,
                 storage_type& storage,
@@ -123,7 +123,7 @@ public:
     }
 
     template<unsigned int ItemsPerThread, class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void reduce(T (&input)[ItemsPerThread],
                 T& output,
                 BinaryFunction reduce_op)
@@ -133,7 +133,7 @@ public:
     }
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void reduce(T input,
                 T& output,
                 unsigned int valid_items,
@@ -147,7 +147,7 @@ public:
     }
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void reduce(T input,
                 T& output,
                 unsigned int valid_items,
@@ -159,7 +159,7 @@ public:
 
 private:
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void reduce_impl(const unsigned int flat_tid,
                      T input,
                      T& output,
@@ -197,7 +197,7 @@ private:
     }
 
     template<bool UseValid, class WarpReduce, class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     auto warp_reduce(T input,
                      T& output,
                      const unsigned int valid_items,
@@ -210,7 +210,7 @@ private:
     }
 
     template<bool UseValid, class WarpReduce, class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     auto warp_reduce(T input,
                      T& output,
                      const unsigned int valid_items,
@@ -224,7 +224,7 @@ private:
     }
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void reduce_impl(const unsigned int flat_tid,
                      T input,
                      T& output,

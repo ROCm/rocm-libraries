@@ -76,7 +76,7 @@ template<
     class OutputIterator,
     class UnaryFunction
 >
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 void transform_kernel_impl(InputIterator input,
                            const size_t input_size,
                            OutputIterator output,

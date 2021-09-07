@@ -138,7 +138,7 @@ struct get_unsigned_bits_type<T,8>
 };
 
 template<typename T, typename UnsignedBits>
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 auto TwiddleIn(UnsignedBits key)
     -> typename std::enable_if<is_floating_point<T>::value, UnsignedBits>::type
 {
@@ -148,7 +148,7 @@ auto TwiddleIn(UnsignedBits key)
 }
 
 template<typename T, typename UnsignedBits>
-static ROCPRIM_DEVICE inline
+static ROCPRIM_DEVICE ROCPRIM_INLINE
 auto TwiddleIn(UnsignedBits key)
     -> typename std::enable_if<is_unsigned<T>::value, UnsignedBits>::type
 {
@@ -156,7 +156,7 @@ auto TwiddleIn(UnsignedBits key)
 };
 
 template<typename T, typename UnsignedBits>
-static ROCPRIM_DEVICE inline
+static ROCPRIM_DEVICE ROCPRIM_INLINE
 auto TwiddleIn(UnsignedBits key)
     -> typename std::enable_if<is_integral<T>::value && is_signed<T>::value, UnsignedBits>::type
 {
@@ -165,7 +165,7 @@ auto TwiddleIn(UnsignedBits key)
 };
 
 template<typename T, typename UnsignedBits>
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 auto TwiddleOut(UnsignedBits key)
     -> typename std::enable_if<is_floating_point<T>::value, UnsignedBits>::type
 {
@@ -175,7 +175,7 @@ auto TwiddleOut(UnsignedBits key)
 }
 
 template<typename T, typename UnsignedBits>
-static ROCPRIM_DEVICE inline
+static ROCPRIM_DEVICE ROCPRIM_INLINE
 auto TwiddleOut(UnsignedBits key)
     -> typename std::enable_if<is_unsigned<T>::value, UnsignedBits>::type
 {
@@ -183,7 +183,7 @@ auto TwiddleOut(UnsignedBits key)
 };
 
 template<typename T, typename UnsignedBits>
-static ROCPRIM_DEVICE inline
+static ROCPRIM_DEVICE ROCPRIM_INLINE
 auto TwiddleOut(UnsignedBits key)
     -> typename std::enable_if<is_integral<T>::value && is_signed<T>::value, UnsignedBits>::type
 {

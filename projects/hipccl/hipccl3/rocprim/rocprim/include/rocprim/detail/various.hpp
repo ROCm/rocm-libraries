@@ -159,7 +159,7 @@ struct match_fundamental_type
 };
 
 template<class T>
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 auto store_volatile(T * output, T value)
     -> typename std::enable_if<std::is_fundamental<T>::value>::type
 {
@@ -173,7 +173,7 @@ auto store_volatile(T * output, T value)
 }
 
 template<class T>
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 auto store_volatile(T * output, T value)
     -> typename std::enable_if<!std::is_fundamental<T>::value>::type
 {
@@ -191,7 +191,7 @@ auto store_volatile(T * output, T value)
 }
 
 template<class T>
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 auto load_volatile(T * input)
     -> typename std::enable_if<std::is_fundamental<T>::value, T>::type
 {
@@ -206,7 +206,7 @@ auto load_volatile(T * input)
 }
 
 template<class T>
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 auto load_volatile(T * input)
     -> typename std::enable_if<!std::is_fundamental<T>::value, T>::type
 {

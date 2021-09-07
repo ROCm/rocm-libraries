@@ -33,7 +33,7 @@ BEGIN_ROCPRIM_NAMESPACE
 /// for the <tt>i</tt>-th thread of the warp and the <tt>i</tt>-th thread is active.
 ///
 /// \param predicate - input to be evaluated for all active lanes
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 lane_mask_type ballot(int predicate)
 {
     return ::__ballot(predicate);
@@ -43,7 +43,7 @@ lane_mask_type ballot(int predicate)
 ///
 /// For each thread, this function returns the number of active threads which
 /// have <tt>i</tt>-th bit of \p x set and come before the current thread.
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 unsigned int masked_bit_count(lane_mask_type x, unsigned int add = 0)
 {
     int c;
@@ -75,7 +75,7 @@ unsigned int masked_bit_count(lane_mask_type x, unsigned int add = 0)
 namespace detail
 {
 
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 int warp_any(int predicate)
 {
 #ifndef __HIP_CPU_RT__
@@ -93,7 +93,7 @@ int warp_any(int predicate)
 #endif
 }
 
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 int warp_all(int predicate)
 {
 #ifndef __HIP_CPU_RT__
@@ -121,7 +121,7 @@ int warp_all(int predicate)
  * LABEL_BITS of \p label as the calling thread.
  */
 template <int LABEL_BITS>
-ROCPRIM_DEVICE inline
+ROCPRIM_DEVICE ROCPRIM_INLINE
 unsigned int MatchAny(unsigned int label)
 {
     unsigned int retval;

@@ -48,7 +48,7 @@ public:
     using storage_type = detail::empty_storage_type;
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void reduce(T input, T& output, BinaryFunction reduce_op)
     {
         output = input;
@@ -89,7 +89,7 @@ public:
     }
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void reduce(T input, T& output, storage_type& storage, BinaryFunction reduce_op)
     {
         (void) storage; // disables unused parameter warning
@@ -97,7 +97,7 @@ public:
     }
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void reduce(T input, T& output, unsigned int valid_items, BinaryFunction reduce_op)
     {
         // Fallback to shuffle-based implementation
@@ -106,7 +106,7 @@ public:
     }
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void reduce(T input, T& output, unsigned int valid_items,
                 storage_type& storage, BinaryFunction reduce_op)
     {
@@ -115,7 +115,7 @@ public:
     }
 
     template<class Flag, class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void head_segmented_reduce(T input, T& output, Flag flag, BinaryFunction reduce_op)
     {
         // Fallback to shuffle-based implementation
@@ -124,7 +124,7 @@ public:
     }
 
     template<class Flag, class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void tail_segmented_reduce(T input, T& output, Flag flag, BinaryFunction reduce_op)
     {
         // Fallback to shuffle-based implementation
@@ -133,7 +133,7 @@ public:
     }
 
     template<class Flag, class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void head_segmented_reduce(T input, T& output, Flag flag,
                                storage_type& storage, BinaryFunction reduce_op)
     {
@@ -143,7 +143,7 @@ public:
     }
 
     template<class Flag, class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_INLINE
     void tail_segmented_reduce(T input, T& output, Flag flag,
                                storage_type& storage, BinaryFunction reduce_op)
     {
