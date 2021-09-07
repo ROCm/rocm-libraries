@@ -20,5 +20,22 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+function(add_relative_test test_name test_target)
+    get_target_property(EXE_PATH ${test_target} RUNTIME_OUTPUT_DIRECTORY)
+    if(EXE_PATH STREQUAL "EXE_PATH-NOTFOUND")
+        set(EXE_PATH ".")
+    endif()
+    get_filename_component(EXE_PATH "${EXE_PATH}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_BINARY_DIR}")
+    get_target_property(EXE_NAME ${test_target} RUNTIME_OUTPUT_NAME)
+    if(EXE_NAME STREQUAL "EXE_NAME-NOTFOUND")
+        get_target_property(EXE_NAME ${test_target} OUTPUT_NAME)
+        if(EXE_NAME STREQUAL "EXE_NAME-NOTFOUND")
+            set(EXE_NAME "${test_target}")
+        endif()
+    endif()
+    file(RELATIVE_PATH rel_path "${CMAKE_CURRENT_BINARY_DIR}" "${EXE_PATH}/${EXE_NAME}")
+    add_test(NAME "${test_name}" COMMAND "./${rel_path}")
+endfunction()
+
 # hipCUB tests
 add_subdirectory(hipcub)
