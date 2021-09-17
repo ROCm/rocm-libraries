@@ -174,6 +174,7 @@ public:
     {
     }
 
+    //! \skip_doxy_start
     ROCPRIM_HOST_DEVICE inline
     zip_iterator& operator++()
     {
@@ -302,6 +303,7 @@ public:
     {
         return os;
     }
+    //! \skip_doxy_end
 
 private:
     IteratorTuple iterator_tuple_;

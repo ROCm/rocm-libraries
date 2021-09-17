@@ -86,6 +86,7 @@ public:
     ROCPRIM_HOST_DEVICE inline
     ~discard_iterator() = default;
 
+    //! \skip_doxy_start
     ROCPRIM_HOST_DEVICE inline
     discard_iterator& operator++()
     {
@@ -203,6 +204,7 @@ public:
     {
         return os;
     }
+    //! \skip_doxy_end
 
 private:
     mutable size_t index_;

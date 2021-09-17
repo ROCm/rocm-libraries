@@ -183,6 +183,7 @@ public:
         return hipDestroyTextureObject(texture_object);
     }
 
+    //! \skip_doxy_start
     ROCPRIM_HOST_DEVICE inline
     texture_cache_iterator& operator++()
     {
@@ -317,6 +318,7 @@ public:
     {
         return os;
     }
+    //! \skip_doxy_end
 
 private:
     using texture_type = typename ::rocprim::detail::match_texture_type<T>::type;
