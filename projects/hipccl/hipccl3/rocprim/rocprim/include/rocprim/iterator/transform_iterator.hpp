@@ -91,6 +91,7 @@ public:
     {
     }
 
+    //! \skip_doxy_start
     ROCPRIM_HOST_DEVICE inline
     transform_iterator& operator++()
     {
@@ -212,6 +213,7 @@ public:
     {
         return os;
     }
+    //! \skip_doxy_end
 
 private:
     InputIterator iterator_;

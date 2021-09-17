@@ -252,7 +252,7 @@ public:
     }
 
 
-    /// \brief The thread block rotates a blocked arrange of \input items,
+    /// \brief The thread block rotates a blocked arrange of input items,
     /// shifting it up by one item
     ///
     /// \param [in]  input -  The calling thread's input items
@@ -323,7 +323,7 @@ public:
 
 
 
-    /// \brief The thread block rotates a blocked arrange of \input items,
+    /// \brief The thread block rotates a blocked arrange of input items,
     /// shifting it up by one item
     ///
     /// \param [in]  input - The calling thread's input items
@@ -368,7 +368,7 @@ public:
         block_suffix = storage->prev[BlockSize - 1];
     }
 
-    /// \brief The thread block rotates a blocked arrange of \input items,
+    /// \brief The thread block rotates a blocked arrange of input items,
     /// shifting it down by one item
     ///
     /// \param [in]  input -  The calling thread's input items
@@ -436,7 +436,7 @@ public:
         }
     }
 
-    /// \brief The thread block rotates a blocked arrange of \input items,
+    /// \brief The thread block rotates a blocked arrange of input items,
     /// shifting it down by one item
     ///
     /// \param [in]  input -  The calling thread's input items
