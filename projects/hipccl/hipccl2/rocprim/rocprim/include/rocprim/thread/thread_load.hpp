@@ -107,7 +107,6 @@ ROCPRIM_ASM_THREAD_LOAD_GROUP(load_cs, "", "");
 /// \tparam MODIFIER        - Value in enum for determine which type of cache store modifier to be used
 /// \tparam InputIteratorT - Type of Output Iterator
 /// \param itr [in]         - Iterator to location where data is to be stored
-/// \param val [in]         - Data to be stored
 /// \return Data that is loaded from memory
 template <
     cache_load_modifier MODIFIER = load_default,

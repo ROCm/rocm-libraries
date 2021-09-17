@@ -100,6 +100,12 @@ variables:
     paths:
       - $CMAKE_LATEST_PATH
 
+.deps:doc:
+  stage: test:doc
+  before_script:
+    - $SUDO_CMD apt update -qq
+    - $SUDO_CMD apt install -y -qq doxygen
+
 build:cmake-latest:
   extends:
     - .deps:cmake-latest
@@ -349,3 +355,14 @@ test:deb:
       --build .
     - $SUDO_CMD ctest --output-on-failure --repeat-until-fail 2
     - $SUDO_CMD dpkg -r rocprim
+
+test:doc:
+  stage: test
+  needs: []
+  before_script:
+    - $SUDO_CMD rm /etc/apt/sources.list.d/rocm.list
+    - $SUDO_CMD apt-get update -qq
+    - $SUDO_CMD apt-get install -y -qq doxygen
+  script:
+    - cd doc
+    - $SUDO_CMD doxygen Doxyfile

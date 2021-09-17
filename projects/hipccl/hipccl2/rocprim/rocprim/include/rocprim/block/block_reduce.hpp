@@ -45,7 +45,7 @@ enum class block_reduce_algorithm
     using_warp_reduce,
     /// \brief An algorithm which limits calculations to a single hardware warp.
     raking_reduce,
-    /// \bried raking reduce that supports only commutative operators
+    /// \brief raking reduce that supports only commutative operators
     raking_reduce_commutative_only,
     /// \brief Default block_reduce algorithm.
     default_algorithm = using_warp_reduce,

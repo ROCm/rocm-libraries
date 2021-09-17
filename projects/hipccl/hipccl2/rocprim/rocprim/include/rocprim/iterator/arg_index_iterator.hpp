@@ -102,6 +102,7 @@ public:
         return *this;
     }
 
+    //! \skip_doxy_start
     ROCPRIM_HOST_DEVICE inline
     arg_index_iterator operator++(int)
     {
@@ -211,6 +212,7 @@ public:
     {
         return os;
     }
+    //! \skip_doxy_end
 
 private:
     InputIterator iterator_;
