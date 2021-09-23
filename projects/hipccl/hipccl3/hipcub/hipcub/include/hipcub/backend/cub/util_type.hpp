@@ -1,7 +1,7 @@
 /******************************************************************************
- * Copyright (c) 2011, Duane Merrill.  All rights reserved.
+ * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2020, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2021, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -27,14 +27,47 @@
  *
  ******************************************************************************/
 
-#ifndef HIPCUB_UTIL_TYPES_HPP_
-#define HIPCUB_UTIL_TYPES_HPP_
+#ifndef HIPCUB_CUB_UTIL_TYPE_HPP_
+#define HIPCUB_CUB_UTIL_TYPE_HPP_
 
-#ifdef __HIP_PLATFORM_HCC__
-    #include "backend/rocprim/util_type.hpp"
-#elif defined(__HIP_PLATFORM_NVCC__)
-    #include "backend/cub/util_type.hpp"
+#include "../../config.hpp"
+
+#include <cub/util_type.cuh>
+
+#if (__CUDACC_VER_MAJOR__ >= 11 || CUDA_VERSION >= 11000) && !__NVCOMPILER_CUDA__
+    #include <cuda_bf16.h>
 #endif
 
+//TODO: Remove this section after CUB update
+
+/// Optional outer namespace(s)
+CUB_NS_PREFIX
+
+namespace cub {
+
+#if (__CUDACC_VER_MAJOR__ >= 11 || CUDA_VERSION >= 11000) && !__NVCOMPILER_CUDA__
+
+template <>
+struct FpLimits<__nv_bfloat16>
+{
+    static __host__ __device__ __forceinline__ __nv_bfloat16 Max() {
+        unsigned short max_word = 0x7F7F;
+        return reinterpret_cast<__nv_bfloat16&>(max_word);
+    }
+
+    static __host__ __device__ __forceinline__ __nv_bfloat16 Lowest() {
+        unsigned short lowest_word = 0xFF7F;
+        return reinterpret_cast<__nv_bfloat16&>(lowest_word);
+    }
+};
+
+#if (__CUDACC_VER_MAJOR__ >= 11 || CUDA_VERSION >= 11000) && !__NVCOMPILER_CUDA__
+    template <> struct NumericTraits<__nv_bfloat16> :   BaseTraits<FLOATING_POINT, true, false, unsigned short, __nv_bfloat16> {};
+#endif
 
 #endif
+
+}
+CUB_NS_POSTFIX  // Optional outer namespace(s)
+
+#endif // HIPCUB_CUB_UTIL_TYPE_HPP_

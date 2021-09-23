@@ -26,6 +26,7 @@
 # by nvcc compiler (CMake's CUDA package handles this).
 
 # A function for automatic detection of the lowest CC of the installed NV GPUs
+# Minimum is 7.0
 function(hip_cuda_detect_lowest_cc out_variable)
     set(__cufile ${PROJECT_BINARY_DIR}/detect_nvgpus_cc.cu)
 
@@ -45,6 +46,9 @@ function(hip_cuda_detect_lowest_cc out_variable)
         "      if (prop.major < major || (prop.major == major && prop.minor < minor)){\n"
         "        major = prop.major; minor = prop.minor;\n"
         "      }\n"
+        "  }\n"
+        "  if (major < 7 || (major == 7 && minor < 0)){\n"
+        "     major = 7; minor = 0;\n"
         "  }\n"
         "  std::printf(\"%d%d\", major, minor);\n"
         "  return 0;\n"
@@ -110,10 +114,9 @@ execute_process(
 # Update list parameter
 string(REPLACE ";" " " HIP_NVCC_FLAGS ${HIP_NVCC_FLAGS})
 
-set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} ${HIP_CPP_CONFIG_FLAGS} ${HIP_NVCC_FLAGS}"
+set(CMAKE_CUDA_FLAGS "${HIP_CPP_CONFIG_FLAGS} ${HIP_NVCC_FLAGS}"
     CACHE STRING "Cuda compile flags" FORCE)
 
 # Ignore warnings about #pragma unroll
 # and about deprecated CUDA function(s) used in hip/nvcc_detail/hip_runtime_api.h
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${HIP_CPP_CONFIG_FLAGS_STRIP} -Wno-unknown-pragmas -Wno-deprecated-declarations"
-    CACHE STRING "compile flags" FORCE)
+# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${HIP_CPP_CONFIG_FLAGS_STRIP} -Wno-unknown-pragmas -Wno-deprecated-declarations" CACHE STRING "compile flags" FORCE)

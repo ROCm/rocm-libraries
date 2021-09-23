@@ -23,7 +23,7 @@
 #include "common_benchmark_header.hpp"
 
 // HIP API
-#include "hipcub/device/device_segmented_radix_sort.hpp"
+#include "hipcub/hipcub.hpp"
 
 
 #ifndef DEFAULT_N

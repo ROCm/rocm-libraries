@@ -273,15 +273,21 @@ void add_sort_pairs_benchmarks(std::vector<benchmark::internal::Benchmark*>& ben
 {
     using custom_float2 = benchmark_utils::custom_type<float, float>;
     using custom_double2 = benchmark_utils::custom_type<double, double>;
+    using custom_char_double = benchmark_utils::custom_type<char, double>;
+    using custom_double_char = benchmark_utils::custom_type<double, char>;
 
     CREATE_SORT_PAIRS_BENCHMARK(int, float)
     CREATE_SORT_PAIRS_BENCHMARK(int, double)
     CREATE_SORT_PAIRS_BENCHMARK(int, custom_float2)
     CREATE_SORT_PAIRS_BENCHMARK(int, custom_double2)
+    CREATE_SORT_PAIRS_BENCHMARK(int, custom_char_double)
+    CREATE_SORT_PAIRS_BENCHMARK(int, custom_double_char)
 
     CREATE_SORT_PAIRS_BENCHMARK(long long, float)
     CREATE_SORT_PAIRS_BENCHMARK(long long, double)
     CREATE_SORT_PAIRS_BENCHMARK(long long, custom_float2)
+    CREATE_SORT_PAIRS_BENCHMARK(long long, custom_char_double)
+    CREATE_SORT_PAIRS_BENCHMARK(long long, custom_double_char)
     CREATE_SORT_PAIRS_BENCHMARK(long long, custom_double2)
 
     CREATE_SORT_PAIRS_BENCHMARK(int8_t, int8_t)

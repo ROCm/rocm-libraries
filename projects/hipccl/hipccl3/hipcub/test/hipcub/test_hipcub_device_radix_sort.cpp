@@ -24,6 +24,7 @@
 
 // hipcub API
 #include "hipcub/device/device_radix_sort.hpp"
+#include "test_sort_comparator.hpp"
 
 template<
     class Key,
@@ -57,6 +58,12 @@ typedef ::testing::Types<
     params<double, unsigned int>,
     params<double, int, true>,
     params<float, int>,
+    #if (__CUDA_ARCH__ >= 700 || !defined(__HIP_PLATFORM_NVIDIA__))
+    params<test_utils::half, int>,
+    params<test_utils::half, int, true>,
+    params<test_utils::bfloat16, int>,
+    params<test_utils::bfloat16, int, true>,
+    #endif
     params<int, test_utils::custom_test_type<float>>,
 
     // start_bit and end_bit
@@ -73,54 +80,6 @@ typedef ::testing::Types<
 > Params;
 
 TYPED_TEST_SUITE(HipcubDeviceRadixSort, Params);
-
-template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
-struct key_comparator
-{
-private:
-    template<unsigned int CStartBit, unsigned int CEndBit>
-    constexpr static bool all_bits()
-    {
-        return (CStartBit == 0 && CEndBit == sizeof(Key) * 8);
-    }
-
-    template<unsigned int CStartBit, unsigned int CEndBit>
-    auto compare(const Key& lhs, const Key& rhs) const
-        -> typename std::enable_if<all_bits<CStartBit, CEndBit>(), bool>::type
-    {
-        return Descending ? (rhs < lhs) : (lhs < rhs);
-    }
-
-    template<unsigned int CStartBit, unsigned int CEndBit>
-    auto compare(const Key& lhs, const Key& rhs) const
-        -> typename std::enable_if<!all_bits<CStartBit, CEndBit>(), bool>::type
-    {
-        auto mask = (1ull << (EndBit - StartBit)) - 1;
-        auto l = (static_cast<unsigned long long>(lhs) >> StartBit) & mask;
-        auto r = (static_cast<unsigned long long>(rhs) >> StartBit) & mask;
-        return Descending ? (r < l) : (l < r);
-    }
-
-public:
-    static_assert(
-        key_comparator::all_bits<StartBit, EndBit>() || std::is_unsigned<Key>::value,
-        "Test supports start and end bits only for unsigned integers"
-    );
-
-    bool operator()(const Key& lhs, const Key& rhs)
-    {
-        return this->compare<StartBit, EndBit>(lhs, rhs);
-    }
-};
-
-template<class Key, class Value, bool Descending, unsigned int StartBit, unsigned int EndBit>
-struct key_value_comparator
-{
-    bool operator()(const std::pair<Key, Value>& lhs, const std::pair<Key, Value>& rhs)
-    {
-        return key_comparator<Key, Descending, StartBit, EndBit>()(lhs.first, rhs.first);
-    }
-};
 
 std::vector<size_t> get_sizes()
 {
@@ -155,26 +114,13 @@ TYPED_TEST(HipcubDeviceRadixSort, SortKeys)
 
             // Generate data
             std::vector<key_type> keys_input;
-            if(std::is_floating_point<key_type>::value)
-            {
-                keys_input = test_utils::get_random_data<key_type>(
-                    size,
-                    (key_type)-1000,
-                    (key_type)+1000,
-                    seed_value
-                );
-            }
-            else
-            {
-                keys_input = test_utils::get_random_data<key_type>(
-                    size,
-                    std::numeric_limits<key_type>::min(),
-                    std::numeric_limits<key_type>::max(),
-                    seed_value + seed_value_addition
-                );
-            }
-
-            key_type * d_keys_input;
+            keys_input = test_utils::get_random_data<key_type>(
+                size,
+                std::numeric_limits<key_type>::min(),
+                std::numeric_limits<key_type>::max(),
+                seed_value + seed_value_addition
+            );
+            key_type *d_keys_input;
             key_type * d_keys_output;
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_input, size * sizeof(key_type)));
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_output, size * sizeof(key_type)));
@@ -241,10 +187,7 @@ TYPED_TEST(HipcubDeviceRadixSort, SortKeys)
 
             HIP_CHECK(hipFree(d_keys_output));
 
-            for(size_t i = 0; i < size; i++)
-            {
-                ASSERT_EQ(keys_output[i], expected[i]);
-            }
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected));
         }
     }
 }
@@ -275,25 +218,12 @@ TYPED_TEST(HipcubDeviceRadixSort, SortPairs)
 
             // Generate data
             std::vector<key_type> keys_input;
-            if(std::is_floating_point<key_type>::value)
-            {
-                keys_input = test_utils::get_random_data<key_type>(
-                    size,
-                    (key_type)-1000,
-                    (key_type)+1000,
-                    seed_value
-                );
-            }
-            else
-            {
-                keys_input = test_utils::get_random_data<key_type>(
-                    size,
-                    std::numeric_limits<key_type>::min(),
-                    std::numeric_limits<key_type>::max(),
-                    seed_value + seed_value_addition
-                );
-            }
-
+            keys_input = test_utils::get_random_data<key_type>(
+                size,
+                std::numeric_limits<key_type>::min(),
+                std::numeric_limits<key_type>::max(),
+                seed_value + seed_value_addition
+            );
             std::vector<value_type> values_input(size);
             std::iota(values_input.begin(), values_input.end(), 0);
 
@@ -396,11 +326,16 @@ TYPED_TEST(HipcubDeviceRadixSort, SortPairs)
             HIP_CHECK(hipFree(d_keys_output));
             HIP_CHECK(hipFree(d_values_output));
 
+            std::vector<key_type> keys_expected(size);
+            std::vector<value_type> values_expected(size);
             for(size_t i = 0; i < size; i++)
             {
-                ASSERT_EQ(keys_output[i], expected[i].first);
-                ASSERT_EQ(values_output[i], expected[i].second);
+                keys_expected[i] = expected[i].first;
+                values_expected[i] = expected[i].second;
             }
+
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, keys_expected));
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(values_output, values_expected));
         }
     }
 }
@@ -430,25 +365,12 @@ TYPED_TEST(HipcubDeviceRadixSort, SortKeysDoubleBuffer)
 
             // Generate data
             std::vector<key_type> keys_input;
-            if(std::is_floating_point<key_type>::value)
-            {
-                keys_input = test_utils::get_random_data<key_type>(
-                    size,
-                    (key_type)-1000,
-                    (key_type)+1000,
-                    seed_value
-                );
-            }
-            else
-            {
-                keys_input = test_utils::get_random_data<key_type>(
-                    size,
-                    std::numeric_limits<key_type>::min(),
-                    std::numeric_limits<key_type>::max(),
-                    seed_value + seed_value_addition
-                );
-            }
-
+            keys_input = test_utils::get_random_data<key_type>(
+                size,
+                std::numeric_limits<key_type>::min(),
+                std::numeric_limits<key_type>::max(),
+                seed_value + seed_value_addition
+            );
             key_type * d_keys_input;
             key_type * d_keys_output;
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_input, size * sizeof(key_type)));
@@ -518,10 +440,7 @@ TYPED_TEST(HipcubDeviceRadixSort, SortKeysDoubleBuffer)
             HIP_CHECK(hipFree(d_keys_input));
             HIP_CHECK(hipFree(d_keys_output));
 
-            for(size_t i = 0; i < size; i++)
-            {
-                ASSERT_EQ(keys_output[i], expected[i]);
-            }
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected));
         }
     }
 }
@@ -552,25 +471,12 @@ TYPED_TEST(HipcubDeviceRadixSort, SortPairsDoubleBuffer)
 
             // Generate data
             std::vector<key_type> keys_input;
-            if(std::is_floating_point<key_type>::value)
-            {
-                keys_input = test_utils::get_random_data<key_type>(
-                    size,
-                    (key_type)-1000,
-                    (key_type)+1000,
-                    seed_value
-                );
-            }
-            else
-            {
-                keys_input = test_utils::get_random_data<key_type>(
-                    size,
-                    std::numeric_limits<key_type>::min(),
-                    std::numeric_limits<key_type>::max(),
-                    seed_value + seed_value_addition
-                );
-            }
-
+            keys_input = test_utils::get_random_data<key_type>(
+                size,
+                std::numeric_limits<key_type>::min(),
+                std::numeric_limits<key_type>::max(),
+                seed_value + seed_value_addition
+            );
             std::vector<value_type> values_input(size);
             std::iota(values_input.begin(), values_input.end(), 0);
 
@@ -676,11 +582,16 @@ TYPED_TEST(HipcubDeviceRadixSort, SortPairsDoubleBuffer)
             HIP_CHECK(hipFree(d_values_input));
             HIP_CHECK(hipFree(d_values_output));
 
+            std::vector<key_type> keys_expected(size);
+            std::vector<value_type> values_expected(size);
             for(size_t i = 0; i < size; i++)
             {
-                ASSERT_EQ(keys_output[i], expected[i].first);
-                ASSERT_EQ(values_output[i], expected[i].second);
+                keys_expected[i] = expected[i].first;
+                values_expected[i] = expected[i].second;
             }
+
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, keys_expected));
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(values_output, values_expected));
         }
     }
 }

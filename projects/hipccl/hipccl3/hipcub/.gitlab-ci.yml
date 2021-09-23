@@ -28,14 +28,15 @@ stages:
 variables:
   SUDO_CMD: "" # Must be "sudo" on images which don't use root user
   DEPS_DIR: "$CI_PROJECT_DIR/__dependencies"
-  CMAKE_MINIMUM_URL: "https://cmake.org/files/v3.10/cmake-3.10.2-Linux-x86_64.tar.gz"
+  CMAKE_ROCM_MINIMUM_URL: "https://cmake.org/files/v3.10/cmake-3.10.2-Linux-x86_64.tar.gz"
+  CMAKE_NVIDIA_MINIMUM_URL: "https://cmake.org/files/v3.15/cmake-3.15.7-Linux-x86_64.tar.gz"
   # General build flags
   CXXFLAGS: ""
   CMAKE_OPTIONS: ""
   # Local build options
   LOCAL_CXXFLAGS: ""
   LOCAL_CMAKE_OPTIONS: ""
-  ROCM_LATEST_PATH: "/opt/rocm-4.2.0/"
+  ROCM_LATEST_PATH: "/opt/rocm-4.3.0/"
 
 # hipCUB with rocPRIM backend
 .rocm:
@@ -45,27 +46,34 @@ variables:
     - rocm
   image: rocm/rocm-terminal:latest
   before_script:
+    - $SUDO_CMD rm /etc/apt/sources.list.d/rocm.list
     - $SUDO_CMD apt-get update -qq
-    - $SUDO_CMD apt-get install -y -qq libidn11 libnuma-dev libunwind-dev git wget tar xz-utils bzip2 build-essential pkg-config  ninja-build ca-certificates
+    - $SUDO_CMD apt-get install -y -qq wget libidn11 libnuma-dev libunwind-dev git tar xz-utils bzip2 build-essential pkg-config  ninja-build ca-certificates
+    - $SUDO_CMD wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | $SUDO_CMD apt-key add -
+    - $SUDO_CMD echo 'deb [arch=amd64] https://repo.radeon.com/rocm/apt/debian/ ubuntu main' | sudo tee /etc/apt/sources.list.d/rocm.list
+    - $SUDO_CMD apt-get update -qq
     - hipconfig
     # cmake
     - mkdir -p $DEPS_DIR/cmake
-    - wget --no-check-certificate --quiet -O - $CMAKE_MINIMUM_URL | tar --strip-components=1 -xz -C $DEPS_DIR/cmake
+    - wget --no-check-certificate --quiet -O - $CMAKE_ROCM_MINIMUM_URL | tar --strip-components=1 -xz -C $DEPS_DIR/cmake
     - export PATH=$DEPS_DIR/cmake/bin:$PATH
     # Combine global build options with local options
     - export CXXFLAGS=$CXXFLAGS" "$LOCAL_CXXFLAGS
     - export CMAKE_OPTIONS=$CXXFLAGS" "$LOCAL_CMAKE_OPTIONS
-
 .rocm:build:
   extends: .rocm
   before_script:
     # We need to duplicate before script
+    - $SUDO_CMD rm /etc/apt/sources.list.d/rocm.list
     - $SUDO_CMD apt-get update -qq
-    - $SUDO_CMD apt-get install -y -qq libidn11 libnuma-dev libunwind-dev git wget tar xz-utils bzip2 build-essential pkg-config  ninja-build ca-certificates
+    - $SUDO_CMD apt-get install -y -qq wget libidn11 libnuma-dev libunwind-dev git tar xz-utils bzip2 build-essential pkg-config  ninja-build ca-certificates
+    - $SUDO_CMD wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | $SUDO_CMD apt-key add -
+    - $SUDO_CMD echo 'deb [arch=amd64] https://repo.radeon.com/rocm/apt/debian/ ubuntu main' | sudo tee /etc/apt/sources.list.d/rocm.list
+    - $SUDO_CMD apt-get update -qq
     - hipconfig
     # cmake
     - mkdir -p $DEPS_DIR/cmake
-    - wget --no-check-certificate --quiet -O - $CMAKE_MINIMUM_URL | tar --strip-components=1 -xz -C $DEPS_DIR/cmake
+    - wget --no-check-certificate --quiet -O - $CMAKE_ROCM_MINIMUM_URL | tar --strip-components=1 -xz -C $DEPS_DIR/cmake
     - export PATH=$DEPS_DIR/cmake/bin:$PATH
     # Combine global build options with local options
     - export CXXFLAGS=$CXXFLAGS" "$LOCAL_CXXFLAGS
@@ -84,6 +92,7 @@ variables:
       -D CMAKE_BUILD_TYPE=Release
       -D BUILD_TEST=OFF
       -D BUILD_EXAMPLE=OFF
+      -D ROCM_DEP_ROCMCORE=OFF
       -B build
       ../.
     - $SUDO_CMD cpack
@@ -127,7 +136,7 @@ build:rocm-benchmark:
   extends: .rocm:build
   stage: build
   only:
-    - fix_benchmarks
+    - add_bf16
     - develop_stream
     - develop
     - master
@@ -162,13 +171,14 @@ test:rocm_vega20:
   script:
     - cd build
     - $SUDO_CMD ctest --output-on-failure --repeat-until-fail 2
+  allow_failure: true
 
 benchmark:rocm_vega20:
   extends: .rocm
   stage: benchmark
   when: manual
   only:
-    - fix_benchmarks
+    - add_bf16
     - develop_stream
     - develop
     - master
@@ -201,7 +211,7 @@ benchmark:rocm_s9300:
   stage: benchmark
   when: manual
   only:
-    - fix_benchmarks
+    - add_bf16
     - develop_stream
     - develop
     - master
@@ -232,7 +242,7 @@ benchmark:rocm_mi25:
   stage: benchmark
   when: manual
   only:
-    - fix_benchmarks
+    - add_bf16
     - develop_stream
     - develop
     - master
@@ -274,6 +284,7 @@ test:rocm_package:
     - $SUDO_CMD ctest --output-on-failure --repeat-until-fail 2
     - $SUDO_CMD dpkg -r hipcub
     - $SUDO_CMD dpkg -r rocprim
+  allow_failure: true
 
 test:rocm_install:
   extends: .rocm
@@ -302,21 +313,21 @@ test:rocm_install:
     - CXX=hipcc cmake ../test/extra/.
     - make VERBOSE=1
     - $SUDO_CMD ctest --output-on-failure --repeat-until-fail 2
-
+  allow_failure: true
 
 # hipCUB with CUB backend
 
 .nvcc:
   tags:
     - nvcc
-  image: nvidia/cuda:10.2-devel-ubuntu18.04
+  image: nvidia/cuda:11.3.1-devel-ubuntu18.04
   before_script:
     - nvidia-smi
     # HIP-nvcc
     - $SUDO_CMD apt-get update -qq
     - $SUDO_CMD apt-get install -y -qq libnuma-dev libunwind-dev git wget tar xz-utils bzip2 build-essential pkg-config ninja-build protobuf-compiler gcc-8 g++-8 libidn11 ca-certificates
-    - wget -qO - http://repo.radeon.com/rocm/apt/debian/rocm.gpg.key | $SUDO_CMD apt-key add -
-    - echo 'deb [arch=amd64] http://repo.radeon.com/rocm/apt/debian/ xenial main' | $SUDO_CMD tee /etc/apt/sources.list.d/rocm.list
+    - $SUDO_CMD wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | $SUDO_CMD apt-key add -
+    - $SUDO_CMD echo 'deb [arch=amd64] https://repo.radeon.com/rocm/apt/debian/ ubuntu main' | $SUDO_CMD tee /etc/apt/sources.list.d/rocm.list
     - $SUDO_CMD apt-get update -qq
     - $SUDO_CMD apt-get install -y hip-base
     # Install hip-nvcc ignoring dependencies because it depends on cuda metapackage
@@ -329,7 +340,7 @@ test:rocm_install:
     - hipconfig
     # cmake
     - mkdir -p $DEPS_DIR/cmake
-    - wget --no-check-certificate --quiet -O - $CMAKE_MINIMUM_URL | tar --strip-components=1 -xz -C $DEPS_DIR/cmake
+    - wget --no-check-certificate --quiet -O - $CMAKE_NVIDIA_MINIMUM_URL | tar --strip-components=1 -xz -C $DEPS_DIR/cmake
     - export PATH=$DEPS_DIR/cmake/bin:$PATH
     # Combine global build options with local options
     - export CXXFLAGS=$CXXFLAGS" "$LOCAL_CXXFLAGS
@@ -340,16 +351,16 @@ build:nvcc:
   stage: build
   script:
     - mkdir build
-    - cd build
     - cmake
       -G Ninja
       -D CMAKE_BUILD_TYPE=Release
       -D BUILD_TEST=ON
       -D BUILD_EXAMPLE=ON
       -B build
-      ../.
+      .
     - cmake
-      --build ./
+      --build build
+    - cd build
     - $SUDO_CMD cpack
       -G "DEB;ZIP"
   artifacts:
@@ -368,13 +379,12 @@ build:nvcc-benchmark:
   extends: .nvcc
   stage: build
   only:
-    - fix_benchmarks
+    - add_bf16
     - develop_stream
     - develop
     - master
   script:
     - mkdir build
-    - cd build
     - cmake
       -G Ninja
       -D CMAKE_BUILD_TYPE=Release
@@ -382,9 +392,9 @@ build:nvcc-benchmark:
       -D CMAKE_CXX_COMPILER=g++-8
       -D CMAKE_C_COMPILER=g++-8
       -B build
-      ../.
+      .
     - cmake
-      --build ./
+      --build build
   artifacts:
     paths:
       - build/benchmark/*
@@ -405,7 +415,7 @@ benchmark:nvcc_titanv:
   stage: benchmark
   when: manual
   only:
-    - fix_benchmarks
+    - add_bf16
     - develop_stream
     - develop
     - master
@@ -413,33 +423,6 @@ benchmark:nvcc_titanv:
     - build:nvcc-benchmark
   script:
     - CUDA_VISIBLE_DEVICES=0
-    - cmake
-      -D BENCHMARK_BINARY_DIR=build/benchmark
-      -P ${CI_PROJECT_DIR}/.gitlab/cmake-run-benchmarks.txt
-  allow_failure: true
-
-test:nvcc_980:
-  extends: .nvcc
-  stage: test
-  needs:
-    - build:nvcc
-  script:
-    - cd build
-    - CUDA_VISIBLE_DEVICES=1 ctest --output-on-failure --repeat-until-fail 2
-
-benchmark:nvcc_980:
-  extends: .nvcc
-  stage: benchmark
-  when: manual
-  only:
-    - fix_benchmarks
-    - develop_stream
-    - develop
-    - master
-  needs:
-    - build:nvcc-benchmark
-  script:
-    - CUDA_VISIBLE_DEVICES=1
     - cmake
       -D BENCHMARK_BINARY_DIR=build/benchmark
       -P ${CI_PROJECT_DIR}/.gitlab/cmake-run-benchmarks.txt
@@ -458,6 +441,7 @@ test:nvcc_package:
     - make VERBOSE=1
     - ctest --output-on-failure --repeat-until-fail 2
     - $SUDO_CMD dpkg -r hipcub_nvcc
+  allow_failure: true
 
 test:nvcc_install:
   extends: .nvcc
@@ -472,3 +456,23 @@ test:nvcc_install:
     - cmake ../test/extra/.
     - make VERBOSE=1
     - ctest --output-on-failure --repeat-until-fail 2
+
+test:doc:
+  variables:
+    SUDO_CMD: "sudo -E"
+  tags:
+    - rocm # Do it on rocm machine
+  image: rocm/rocm-terminal:latest
+  stage: test
+  needs: []
+  before_script:
+    - $SUDO_CMD rm /etc/apt/sources.list.d/rocm.list
+    - $SUDO_CMD apt-get update -qq
+    # Do we need all of this?
+    - $SUDO_CMD apt-get install -y -qq wget git tar xz-utils bzip2 texlive-latex-recommended texlive-latex-extra texlive-fonts-recommended latexmk python-pip python3-sphinx doxygen
+    - $SUDO_CMD -H pip install sphinx_rtd_theme breathe==4.12.0 exhale
+    - $SUDO_CMD wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | $SUDO_CMD apt-key add -
+    - $SUDO_CMD echo 'deb [arch=amd64] https://repo.radeon.com/rocm/apt/debian/ ubuntu main' | sudo tee /etc/apt/sources.list.d/rocm.list
+    - $SUDO_CMD apt-get update -qq
+  script:
+    - bash -x ./docs/run_doc.sh

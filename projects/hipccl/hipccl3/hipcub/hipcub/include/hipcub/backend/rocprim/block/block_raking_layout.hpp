@@ -45,7 +45,7 @@
 BEGIN_HIPCUB_NAMESPACE
 
 /**
- * \brief BlockRakingLayout provides a conflict-free shared memory layout abstraction for 1D raking across thread block data.    ![](raking.png)
+ * \brief BlockRakingLayout provides a conflict-free shared memory layout abstraction for 1D raking across thread block data.
  * \ingroup BlockModule
  *
  * \par Overview
@@ -95,6 +95,7 @@ struct block_raking_layout
     };
 
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS    // Do not document
     /**
      * \brief Shared memory storage type
      */
@@ -102,6 +103,8 @@ struct block_raking_layout
     {
         T buff[BlockRakingLayout::GRID_ELEMENTS];
     };
+
+#endif
 
     /// Alias wrapper allowing storage to be unioned
     struct TempStorage : Uninitialized<_TempStorage> {};

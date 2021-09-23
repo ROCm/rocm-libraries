@@ -54,9 +54,10 @@ else()
     INTERFACE
       hipcub
   )
-  target_include_directories(hipcub_cub SYSTEM
+  target_include_directories(hipcub_cub
     INTERFACE
       ${CUB_INCLUDE_DIR}
+      ${THRUST_INCLUDE_DIR}
   )
 endif()
 

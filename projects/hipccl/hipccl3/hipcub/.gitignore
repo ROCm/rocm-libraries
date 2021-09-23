@@ -5,6 +5,8 @@ build/
 
 ### Docs dirs ###
 /docs/docBin/
+/docs/api/
+/docs/hipCUB.tag
 
 # Created by https://www.gitignore.io/api/c++,cmake
 

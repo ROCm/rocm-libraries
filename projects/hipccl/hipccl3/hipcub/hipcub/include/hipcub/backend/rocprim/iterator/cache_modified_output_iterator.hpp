@@ -173,12 +173,16 @@ public:
         return (ptr != rhs.ptr);
     }
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS    // Do not document
+
     /// ostream operator
     friend std::ostream& operator<<(std::ostream& os, const self_type& itr)
     {
         (void)itr;
         return os;
     }
+
+#endif
 };
 
 END_HIPCUB_NAMESPACE
