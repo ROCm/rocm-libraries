@@ -2,8 +2,16 @@
 
 See README.md on how to build the hipCUB documentation using Doxygen.
 
+## [Latest changes]
+### Fixed
+- Added missing includes to hipcub.hpp
+### Added
+- Bfloat16 support to test cases (device_reduce & device_radix_sort)
+### Changed
+- NVCC Minimum Compute Capability now 7.0
+
 ## (Unreleased) hipCUB-2.10.12 for ROCm 4.5.0
-### Addded
+### Added
 - Initial HIP on Windows support. See README for instructions on how to build and install.
 ### Changed
 - Packaging changed to a development package (called hipcub-dev for `.deb` packages, and hipcub-devel for `.rpm` packages). As hipCUB is a header-only library, there is no runtime package. To aid in the transition, the development package sets the "provides" field to provide the package hipcub, so that existing packages depending on hipcub can continue to work. This provides feature is introduced as a deprecated feature and will be removed in a future ROCm release.

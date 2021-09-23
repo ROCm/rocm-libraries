@@ -27,6 +27,8 @@
 #include "hipcub/block/block_load.hpp"
 #include "hipcub/block/block_store.hpp"
 
+#include "test_sort_comparator.hpp"
+
 template<
     class Key,
     class Value,
@@ -92,54 +94,6 @@ typedef ::testing::Types<
 > Params;
 
 TYPED_TEST_SUITE(HipcubBlockRadixSort, Params);
-
-template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
-struct key_comparator
-{
-private:
-    template<unsigned int CStartBit, unsigned int CEndBit>
-    constexpr static bool all_bits()
-    {
-        return (CStartBit == 0 && CEndBit == sizeof(Key) * 8);
-    }
-
-    template<unsigned int CStartBit, unsigned int CEndBit>
-    auto compare(const Key& lhs, const Key& rhs) const
-        -> typename std::enable_if<all_bits<CStartBit, CEndBit>(), bool>::type
-    {
-        return Descending ? (rhs < lhs) : (lhs < rhs);
-    }
-
-    template<unsigned int CStartBit, unsigned int CEndBit>
-    auto compare(const Key& lhs, const Key& rhs) const
-        -> typename std::enable_if<!all_bits<CStartBit, CEndBit>(), bool>::type
-    {
-        auto mask = (1ull << (EndBit - StartBit)) - 1;
-        auto l = (static_cast<unsigned long long>(lhs) >> StartBit) & mask;
-        auto r = (static_cast<unsigned long long>(rhs) >> StartBit) & mask;
-        return Descending ? (r < l) : (l < r);
-    }
-
-public:
-    static_assert(
-        key_comparator::all_bits<StartBit, EndBit>() || std::is_unsigned<Key>::value,
-        "Test supports start and end bits only for unsigned integers"
-    );
-
-    bool operator()(const Key& lhs, const Key& rhs)
-    {
-        return this->compare<StartBit, EndBit>(lhs, rhs);
-    }
-};
-
-template<class Key, class Value, bool Descending, unsigned int StartBit, unsigned int EndBit>
-struct key_value_comparator
-{
-    bool operator()(const std::pair<Key, Value>& lhs, const std::pair<Key, Value>& rhs)
-    {
-        return key_comparator<Key, Descending, StartBit, EndBit>()(lhs.first, rhs.first);
-    }
-};
 
 template<
     unsigned int BlockSize,

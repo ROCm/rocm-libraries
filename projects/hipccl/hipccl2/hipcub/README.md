@@ -8,16 +8,19 @@ environment, hipCUB uses the rocPRIM library as the backend.  However, on CUDA p
 ## Requirements
 
 * Git
-* CMake (3.5.1 or later)
+* CMake (3.10.2 or later)
 * For AMD GPUs:
   * AMD [ROCm](https://rocm.github.io/install.html) platform (1.8.0 or later)
     * Including [HIP-clang](https://github.com/ROCm-Developer-Tools/HIP/blob/master/INSTALL.md#hip-clang) compiler, which must be
       set as C++ compiler on ROCm platform.
   * [rocPRIM](https://github.com/ROCmSoftwarePlatform/rocPRIM) library
-    * It will be automatically downloaded and built by CMake script.
+    * Automatically downloaded and built by CMake script.
+    * Requires CMake 3.10.2 or later.
 * For NVIDIA GPUs:
   * CUDA Toolkit
-  * CUB library (automatically downloaded and by CMake script)
+  * CUB library
+    * Automatically downloaded and built by CMake script.
+    * Requires CMake 3.15.0 or later.
 * Python 3.6 or higher (HIP on Windows only, only required for install scripts)
 * Visual Studio 2019 with clang support (HIP on Windows only)
 * Strawberry Perl (HIP on Windows only)
@@ -179,7 +182,7 @@ cd hipCUB; cd build
 cd hipCUB; cd docs
 
 # run doxygen and sphinx
-./run_docs.sh
+./run_doc.sh
 
 # open docBin/html/index.html
 

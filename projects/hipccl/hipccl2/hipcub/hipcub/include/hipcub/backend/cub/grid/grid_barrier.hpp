@@ -1,7 +1,7 @@
 /******************************************************************************
- * Copyright (c) 2011, Duane Merrill.  All rights reserved.
+ * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2020, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2020, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -27,14 +27,36 @@
  *
  ******************************************************************************/
 
-#ifndef HIPCUB_UTIL_TYPES_HPP_
-#define HIPCUB_UTIL_TYPES_HPP_
+#ifndef HIPCUB_CUB_GRID_GRID_BARRIER_HPP_
+#define HIPCUB_CUB_GRID_GRID_BARRIER_HPP_
 
-#ifdef __HIP_PLATFORM_HCC__
-    #include "backend/rocprim/util_type.hpp"
-#elif defined(__HIP_PLATFORM_NVCC__)
-    #include "backend/cub/util_type.hpp"
-#endif
+#include "../../../config.hpp"
+
+#include <cub/grid/grid_barrier.cuh>
+
+BEGIN_HIPCUB_NAMESPACE
+
+class GridBarrierLifetime : public ::cub::GridBarrierLifetime
+{
+public:
+    hipError_t HostReset()
+    {
+        return hipCUDAErrorTohipError(
+            ::cub::GridBarrierLifetime::HostReset()
+        );
+    }
 
 
-#endif
+
+
+    hipError_t Setup(int sweep_grid_size)
+    {
+        return hipCUDAErrorTohipError(
+            ::cub::GridBarrierLifetime::Setup(sweep_grid_size)
+        );
+    }
+};
+
+END_HIPCUB_NAMESPACE
+
+#endif // HIPCUB_CUB_GRID_GRID_BARRIER_HPP_

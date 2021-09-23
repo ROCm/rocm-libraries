@@ -79,11 +79,16 @@ struct DigitExtractor
         : current_bit(current_bit), mask((1 << num_bits) - 1)
     { }
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS    // Do not document
+
     HIPCUB_DEVICE __inline__ int Digit(UnsignedBits key)
     {
         return int(key >> UnsignedBits(current_bit)) & mask;
 
     }
+    
+#endif
+
 };
 
 END_HIPCUB_NAMESPACE

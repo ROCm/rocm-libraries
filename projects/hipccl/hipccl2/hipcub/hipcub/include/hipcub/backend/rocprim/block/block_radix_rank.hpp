@@ -155,6 +155,7 @@ private:
             ARCH>
         BlockScan;
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS    // Do not document
 
     /// Shared memory storage layout type for BlockRadixRank
     struct __align__(16) _TempStorage
@@ -170,6 +171,7 @@ private:
         typename BlockScan::TempStorage block_scan;
     };
 
+#endif
 
     /******************************************************************************
      * Thread fields
@@ -514,7 +516,7 @@ private:
             ARCH>
         BlockScanT;
 
-
+#ifndef DOXYGEN_SHOULD_SKIP_THIS    // Do not document
     /// Shared memory storage layout type for BlockRadixRank
     struct __align__(16) _TempStorage
     {
@@ -527,7 +529,7 @@ private:
 
         } aliasable;
     };
-
+#endif
 
     /******************************************************************************
      * Thread fields

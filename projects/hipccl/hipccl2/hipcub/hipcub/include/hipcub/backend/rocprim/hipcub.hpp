@@ -39,14 +39,26 @@
 
 // Iterator
 #include "iterator/arg_index_input_iterator.hpp"
+#include "iterator/cache_modified_input_iterator.hpp"
+#include "iterator/cache_modified_output_iterator.hpp"
+#include "iterator/constant_input_iterator.hpp"
 #include "iterator/counting_input_iterator.hpp"
-#include "iterator/tex_obj_input_iterator.hpp"
-#include "iterator/transform_input_iterator.hpp"
 #include "iterator/discard_output_iterator.hpp"
+#include "iterator/tex_obj_input_iterator.hpp"
+#include "iterator/tex_ref_input_iterator.hpp"
+#include "iterator/transform_input_iterator.hpp"
 
 // Warp
 #include "warp/warp_reduce.hpp"
 #include "warp/warp_scan.hpp"
+
+// Thread
+#include "thread/thread_load.hpp"
+#include "thread/thread_operators.hpp"
+#include "thread/thread_reduce.hpp"
+#include "thread/thread_scan.hpp"
+#include "thread/thread_search.hpp"
+#include "thread/thread_store.hpp"
 
 // Block
 #include "block/block_discontinuity.hpp"

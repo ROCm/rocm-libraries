@@ -58,7 +58,7 @@ include( ROCMInstallSymlinks )
 include( ROCMCheckTargetIds OPTIONAL )
 
 #Set the AMDGPU_TARGETS with backward compatiblity
-set(AMDGPU_TARGETS "all" CACHE STRING "Compile for which gpu architectures?")  
+set(AMDGPU_TARGETS "all" CACHE STRING "Compile for which gpu architectures?")
 if(COMMAND rocm_check_target_ids)
   rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
     TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx1030"
@@ -105,6 +105,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra")
 # Build options
 option(BUILD_TEST "Build tests (requires googletest)" OFF)
 option(DOWNLOAD_ROCPRIM "Download rocPRIM and do not search for rocPRIM package" OFF)
+option(DOWNLOAD_CUB "Download CUB and thrust. Do not search for CUB package" OFF)
 option(BUILD_BENCHMARK "Build benchmarks" OFF)
 option(BUILD_EXAMPLE "Build Examples" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)

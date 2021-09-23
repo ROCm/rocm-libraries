@@ -37,9 +37,16 @@
 
 #include <rocprim/detail/various.hpp>
 
+#include <hip/hip_fp16.h>
+#include <hip/hip_bfloat16.h>
+
 BEGIN_HIPCUB_NAMESPACE
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS    // Do not document
+
 using NullType = ::rocprim::empty_type;
+
+#endif
 
 template<bool B, typename T, typename F>
 struct If
@@ -137,11 +144,15 @@ struct Int2Type
     enum {VALUE = A};
 };
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS // Do not document
+
 template<
     class Key,
     class Value
 >
 using KeyValuePair = ::rocprim::key_value_pair<Key, Value>;
+
+#endif
 
 namespace detail
 {
@@ -163,9 +174,13 @@ void update_double_buffer(DoubleBuffer<T>& target, ::rocprim::double_buffer<T>& 
     }
 }
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS // Do not document
+
 template <typename T>
 using is_integral_or_enum =
   std::integral_constant<bool, std::is_integral<T>::value || std::is_enum<T>::value>;
+
+#endif
 
 }
 
@@ -514,8 +529,6 @@ struct FpLimits<double>
     }
 };
 
-
-#if (__CUDACC_VER_MAJOR__ >= 9 || CUDA_VERSION >= 9000) && !__NVCOMPILER_CUDA__
 template <>
 struct FpLimits<__half>
 {
@@ -529,8 +542,20 @@ struct FpLimits<__half>
         return reinterpret_cast<__half&>(lowest_word);
     }
 };
-#endif
 
+template <>
+struct FpLimits<hip_bfloat16>
+{
+    static __host__ __device__ __forceinline__ hip_bfloat16  Max() {
+        unsigned short max_word = 0x7F7F;
+        return reinterpret_cast<hip_bfloat16 &>(max_word);
+    }
+
+    static __host__ __device__ __forceinline__ hip_bfloat16  Lowest() {
+        unsigned short lowest_word = 0xFF7F;
+        return reinterpret_cast<hip_bfloat16 &>(lowest_word);
+    }
+};
 
 /**
  * Basic type traits (fp primitive specialization)
@@ -595,9 +620,8 @@ template <> struct NumericTraits<unsigned long long> :  BaseTraits<UNSIGNED_INTE
 
 template <> struct NumericTraits<float> :               BaseTraits<FLOATING_POINT, true, false, unsigned int, float> {};
 template <> struct NumericTraits<double> :              BaseTraits<FLOATING_POINT, true, false, unsigned long long, double> {};
-#if (__CUDACC_VER_MAJOR__ >= 9 || CUDA_VERSION >= 9000) && !__NVCOMPILER_CUDA__
-    template <> struct NumericTraits<__half> :          BaseTraits<FLOATING_POINT, true, false, unsigned short, __half> {};
-#endif
+template <> struct NumericTraits<__half> :              BaseTraits<FLOATING_POINT, true, false, unsigned short, __half> {};
+template <> struct NumericTraits<hip_bfloat16 > :       BaseTraits<FLOATING_POINT, true, false, unsigned short, hip_bfloat16 > {};
 
 template <> struct NumericTraits<bool> :                BaseTraits<UNSIGNED_INTEGER, true, false, typename UnitWord<bool>::VolatileWord, bool> {};
 

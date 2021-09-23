@@ -34,7 +34,7 @@
      #include "../backend/rocprim/grid/grid_barrier.hpp"
  #elif defined(__HIP_PLATFORM_NVCC__)
      #include "../config.hpp"
-     #include <cub/grid/grid_barrier.cuh>
+     #include "../backend/cub/grid/grid_barrier.hpp"
  #endif
 
  #endif // HIPCUB_GRID_GRID_BARRIER_HPP_
