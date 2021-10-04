@@ -47,6 +47,10 @@ enum class block_store_method
     /// between reads), because of reduced memory coalescing.
     block_store_direct,
 
+    /// A striped arrangement of items is stored into a blocked arrangement on continuous
+    /// memory.
+    block_store_striped,
+
     /// A blocked arrangement of items is stored into a blocked arrangement on continuous
     /// memory using vectorization as an optimization.
     /// \par Performance Notes:
@@ -98,6 +102,7 @@ enum class block_store_method
 /// \par Overview
 /// * The \p block_store class has a number of different methods to store data:
 ///   * [block_store_direct](\ref ::block_store_method::block_store_direct)
+///   * [block_store_striped](\ref ::block_store_method::block_store_striped)
 ///   * [block_store_vectorize](\ref ::block_store_method::block_store_vectorize)
 ///   * [block_store_transpose](\ref ::block_store_method::block_store_transpose)
 ///   * [block_store_warp_transpose](\ref ::block_store_method::block_store_warp_transpose)
@@ -278,6 +283,69 @@ public:
 // end of group blockmodule
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
+
+template<
+    class T,
+    unsigned int BlockSizeX,
+    unsigned int ItemsPerThread,
+    unsigned int BlockSizeY,
+    unsigned int BlockSizeZ
+    >
+class block_store<T, BlockSizeX, ItemsPerThread, block_store_method::block_store_striped, BlockSizeY, BlockSizeZ>
+{
+    static constexpr unsigned int BlockSize = BlockSizeX * BlockSizeY * BlockSizeZ;
+private:
+    using storage_type_ = typename ::rocprim::detail::empty_storage_type;
+
+public:
+    #ifndef DOXYGEN_SHOULD_SKIP_THIS // hides storage_type implementation for Doxygen
+    using storage_type = typename ::rocprim::detail::empty_storage_type;
+    #else
+    using storage_type = storage_type_; // only for Doxygen
+    #endif
+
+    template<class OutputIterator>
+    ROCPRIM_DEVICE inline
+    void store(OutputIterator block_output,
+               T (&items)[ItemsPerThread])
+    {
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
+        block_store_direct_striped<BlockSize>(flat_id, block_output, items);
+    }
+
+    template<class OutputIterator>
+    ROCPRIM_DEVICE inline
+    void store(OutputIterator block_output,
+               T (&items)[ItemsPerThread],
+               unsigned int valid)
+    {
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
+        block_store_direct_striped<BlockSize>(flat_id, block_output, items, valid);
+    }
+
+    template<class OutputIterator>
+    ROCPRIM_DEVICE inline
+    void store(OutputIterator block_output,
+               T (&items)[ItemsPerThread],
+               storage_type& storage)
+    {
+        (void) storage;
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
+        block_store_direct_striped<BlockSize>(flat_id, block_output, items);
+    }
+
+    template<class OutputIterator>
+    ROCPRIM_DEVICE inline
+    void store(OutputIterator block_output,
+               T (&items)[ItemsPerThread],
+               unsigned int valid,
+               storage_type& storage)
+    {
+        (void) storage;
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
+        block_store_direct_striped<BlockSize>(flat_id, block_output, items, valid);
+    }
+};
 
 template<
     class T,

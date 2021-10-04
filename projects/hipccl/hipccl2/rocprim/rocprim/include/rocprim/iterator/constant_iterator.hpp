@@ -82,6 +82,7 @@ public:
     ROCPRIM_HOST_DEVICE inline
     ~constant_iterator() = default;
 
+    //! \skip_doxy_start
     ROCPRIM_HOST_DEVICE inline
     value_type operator*() const
     {
@@ -155,16 +156,18 @@ public:
     {
         return static_cast<difference_type>(index_ - other.index_);
     }
+    //! \skip_doxy_end
 
-    // constant_iterator is not writable, so we don't return reference,
-    // just something convertible to reference. That matches requirement
-    // of RandomAccessIterator concept
+    /// Constant_iterator is not writable, so we don't return reference,
+    /// just something convertible to reference. That matches requirement
+    /// of RandomAccessIterator concept
     ROCPRIM_HOST_DEVICE inline
     value_type operator[](difference_type) const
     {
         return value_;
     }
 
+    //! \skip_doxy_start
     ROCPRIM_HOST_DEVICE inline
     bool operator==(constant_iterator other) const
     {
@@ -206,6 +209,7 @@ public:
         os << "[" << iter.value_ << "]";
         return os;
     }
+    //! \skip_doxy_end
 
 private:
     inline
