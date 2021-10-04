@@ -52,12 +52,13 @@ public:
                             OutputIteratorT d_out,
                             int num_items,
                             hipStream_t stream = 0,
-                            bool debug_synchronous = false)
+                            bool debug_synchronous = false,
+                            size_t size_limit = size_t(std::numeric_limits<int>::max()) + 1)
     {
         return InclusiveScan(
             d_temp_storage, temp_storage_bytes,
             d_in, d_out, ::hipcub::Sum(), num_items,
-            stream, debug_synchronous
+            stream, debug_synchronous, size_limit
         );
     }
 
@@ -74,13 +75,14 @@ public:
                              ScanOpT scan_op,
                              int num_items,
                              hipStream_t stream = 0,
-                             bool debug_synchronous = false)
+                             bool debug_synchronous = false,
+                             size_t size_limit = size_t(std::numeric_limits<int>::max()) + 1)
     {
         return ::rocprim::inclusive_scan(
             d_temp_storage, temp_storage_bytes,
             d_in, d_out, num_items,
             ::hipcub::detail::convert_result_type<InputIteratorT, OutputIteratorT>(scan_op),
-            stream, debug_synchronous
+            stream, debug_synchronous, size_limit
         );
     }
 
@@ -95,13 +97,14 @@ public:
                             OutputIteratorT d_out,
                             int num_items,
                             hipStream_t stream = 0,
-                            bool debug_synchronous = false)
+                            bool debug_synchronous = false,
+                            size_t size_limit = size_t(std::numeric_limits<int>::max()) + 1)
     {
         using T = typename std::iterator_traits<InputIteratorT>::value_type;
         return ExclusiveScan(
             d_temp_storage, temp_storage_bytes,
             d_in, d_out, ::hipcub::Sum(), T(0), num_items,
-            stream, debug_synchronous
+            stream, debug_synchronous, size_limit
         );
     }
 
@@ -120,13 +123,14 @@ public:
                              InitValueT init_value,
                              int num_items,
                              hipStream_t stream = 0,
-                             bool debug_synchronous = false)
+                             bool debug_synchronous = false,
+                             size_t size_limit = size_t(std::numeric_limits<int>::max()) + 1)
     {
         return ::rocprim::exclusive_scan(
             d_temp_storage, temp_storage_bytes,
             d_in, d_out, init_value, num_items,
             ::hipcub::detail::convert_result_type<InputIteratorT, OutputIteratorT>(scan_op),
-            stream, debug_synchronous
+            stream, debug_synchronous, size_limit
         );
     }
 };
