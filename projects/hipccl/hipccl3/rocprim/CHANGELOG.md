@@ -5,8 +5,10 @@ Full documentation for rocPRIM is available at [https://codedocs.xyz/ROCmSoftwar
 ## [Unreleased rocPRIM-2.10.12 for ROCm 5.0.0]
 ### Fixed
 - Enable bfloat16 tests and reduce threshold for bfloat16
-### Changed
+### Addded
 - Added scan size limit feature
+- Add block_load_striped and block_store_striped
+### Changed
 - Revert old Fiji workaround, because they solved the issue at compiler side
 - Update README cmake minimum version number
 ### Known issues

@@ -87,6 +87,7 @@ public:
     {
     }
 
+    //! \skip_doxy_start
     ROCPRIM_HOST_DEVICE inline
     counting_iterator& operator++()
     {
@@ -211,6 +212,7 @@ public:
         os << "[" << iter.value_ << "]";
         return os;
     }
+    //! \skip_doxy_end
 
 private:
     template<class T>

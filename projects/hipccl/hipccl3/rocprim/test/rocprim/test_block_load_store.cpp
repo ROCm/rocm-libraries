@@ -80,3 +80,14 @@ struct SecondPart;
 #define name_suffix SecondPart
 
 #include "test_block_load_store.hpp"
+
+#undef suite_name
+#undef warp_params
+#undef name_suffix
+
+struct ThirdPart;
+#define suite_name RocprimBlockLoadStoreClassTests
+#define warp_params ClassParamsThirdPart
+#define name_suffix ThirdPart
+
+#include "test_block_load_store.hpp"
