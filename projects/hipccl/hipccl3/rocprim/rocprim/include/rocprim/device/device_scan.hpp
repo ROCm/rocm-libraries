@@ -458,6 +458,7 @@ auto scan_impl(void * temporary_storage,
 
     if(number_of_blocks > 1)
     {
+         number_of_blocks = (limited_size + items_per_block - 1)/items_per_block;
         // Create and initialize lookback_scan_state obj
         auto scan_state = scan_state_type::create(temporary_storage, number_of_blocks);
         auto scan_state_with_sleep = scan_state_with_sleep_type::create(temporary_storage, number_of_blocks);

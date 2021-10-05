@@ -63,8 +63,7 @@ typedef ::testing::Types<
     DeviceMergeParams<int8_t, int8_t>,
     DeviceMergeParams<uint8_t, uint8_t>,
     DeviceMergeParams<rocprim::half, rocprim::half, test_utils::half_less>,
-    //TODO: Disable bfloat16 test until we get a better bfloat16 implemetation for host side
-    //DeviceMergeParams<rocprim::bfloat16, rocprim::bfloat16, test_utils::bfloat16_less>,
+    DeviceMergeParams<rocprim::bfloat16, rocprim::bfloat16, test_utils::bfloat16_less>,
     DeviceMergeParams<custom_double2, custom_int2, ::rocprim::greater<custom_double2> >,
     DeviceMergeParams<custom_int2, char>
 > RocprimDeviceMergeTestsParams;
@@ -276,8 +275,8 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKeyValue)
             std::sort(keys_input2.begin(), keys_input2.end(), compare_op);
             std::vector<value_type> values_input1(size1);
             std::vector<value_type> values_input2(size2);
-            std::iota(values_input1.begin(), values_input1.end(), 0);
-            std::iota(values_input2.begin(), values_input2.end(), size1);
+            test_utils::iota(values_input1.begin(), values_input1.end(), 0);
+            test_utils::iota(values_input2.begin(), values_input2.end(), size1);
             std::vector<key_type> keys_output(size1 + size2, (key_type)0);
             std::vector<value_type> values_output(size1 + size2, (value_type)0);
 

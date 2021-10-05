@@ -74,6 +74,7 @@ typedef ::testing::Types<
     DeviceScanParams<int, int, rocprim::plus<int>, false, 512 >,
     //DeviceScanParams<float, float, rocprim::maximum<float> >,
     DeviceScanParams<float, float, rocprim::plus<float>, false, 1024 >,
+    DeviceScanParams<int, int, rocprim::plus<int>, false, 524288 >,
     DeviceScanParams<int, int, rocprim::plus<int>, false, 1048576 >,
     DeviceScanParams<int8_t, int8_t, rocprim::maximum<int8_t>>,
     DeviceScanParams<uint8_t, uint8_t, rocprim::maximum<uint8_t>>,

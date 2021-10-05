@@ -1462,6 +1462,16 @@ void assert_eq(const rocprim::bfloat16& result, const rocprim::bfloat16& expecte
     ASSERT_EQ(bfloat16_to_native(result), bfloat16_to_native(expected));
 }
 
+//TODO: Use custom iota until the follwing PR merge: https://github.com/ROCm-Developer-Tools/HIP/pull/2303
+template<class ForwardIt, class T>
+void iota(ForwardIt first, ForwardIt last, T value)
+{
+    using value_type = typename std::iterator_traits<ForwardIt>::value_type;
+    while(first != last) {
+        *first++ = static_cast<value_type>(value);
+        ++value;
+    }
+}
 
 } // end test_utils namespace
 

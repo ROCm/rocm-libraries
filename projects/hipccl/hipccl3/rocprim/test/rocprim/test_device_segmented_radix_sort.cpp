@@ -67,17 +67,15 @@ typedef ::testing::Types<
     params<uint8_t, uint8_t, false, 0, 8, 0, 1000>,
     params<rocprim::half, rocprim::half, true, 0, 16, 2000, 10000>,
     params<rocprim::half, rocprim::half, false, 0, 16, 0, 1000>,
-    //TODO: Disable bfloat16 test until we get a better bfloat16 implemetation for host side
-    //params<rocprim::bfloat16, rocprim::bfloat16, true, 0, 16, 2000, 10000>,
-    //params<rocprim::bfloat16, rocprim::bfloat16, false, 0, 16, 0, 1000>,
+    params<rocprim::bfloat16, rocprim::bfloat16, true, 0, 16, 2000, 10000>,
+    params<rocprim::bfloat16, rocprim::bfloat16, false, 0, 16, 0, 1000>,
     params<float, int, false, 0, 32, 0, 1000>,
 
     // start_bit and end_bit
     params<uint8_t, uint8_t, true, 2, 5, 0, 10000>,
     params<uint8_t, uint8_t, false, 2, 6, 1000, 10000>,
     params<unsigned short, rocprim::half, true, 4, 10, 0, 10000>,
-    //TODO: Disable bfloat16 test until we get a better bfloat16 implemetation for host side
-    //params<unsigned short, rocprim::bfloat16, true, 4, 10, 0, 10000>,
+    params<unsigned short, rocprim::bfloat16, true, 4, 10, 0, 10000>,
     params<unsigned char, int, true, 2, 5, 0, 100>,
     params<unsigned short, int, true, 4, 10, 0, 10000>,
     params<unsigned int, short, false, 3, 22, 1000, 10000>,
@@ -336,7 +334,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairs)
             offsets.push_back(size);
 
             std::vector<value_type> values_input(size);
-            std::iota(values_input.begin(), values_input.end(), 0);
+            test_utils::iota(values_input.begin(), values_input.end(), 0);
 
             key_type * d_keys_input;
             key_type * d_keys_output;
@@ -706,7 +704,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairsDoubleBuffer)
             offsets.push_back(size);
 
             std::vector<value_type> values_input(size);
-            std::iota(values_input.begin(), values_input.end(), 0);
+            test_utils::iota(values_input.begin(), values_input.end(), 0);
 
             key_type * d_keys_input;
             key_type * d_keys_output;
