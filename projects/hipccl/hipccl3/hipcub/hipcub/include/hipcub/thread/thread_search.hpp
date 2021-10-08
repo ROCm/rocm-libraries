@@ -35,9 +35,9 @@
  #ifndef HIPCUB_THREAD_THREAD_SEARCH_HPP_
  #define HIPCUB_THREAD_THREAD_SEARCH_HPP_
 
-#ifdef __HIP_PLATFORM_HCC__
+#ifdef __HIP_PLATFORM_AMD__
     #include "../backend/rocprim/thread/thread_search.hpp"
-#elif defined(__HIP_PLATFORM_NVCC__)
+#elif defined(__HIP_PLATFORM_NVIDIA__)
     #include "../config.hpp"
     #include <cub/thread/thread_search.cuh>
 #endif

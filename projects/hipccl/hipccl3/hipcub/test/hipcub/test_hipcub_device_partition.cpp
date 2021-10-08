@@ -249,7 +249,7 @@ TYPED_TEST(HipcubDevicePartitionTests, If)
 
     hipStream_t stream = 0; // default stream
 
-#ifdef __HIP_PLATFORM_NVCC__
+#ifdef __HIP_PLATFORM_NVIDIA__
     TestSelectOp select_op;
 #else
     auto select_op = [] __host__ __device__ (const T& value) -> bool

@@ -30,9 +30,9 @@
 #ifndef HIPCUB_CONSTANT_INPUT_ITERATOR_HPP_
 #define HIPCUB_CONSTANT_INPUT_ITERATOR_HPP_
 
-#ifdef __HIP_PLATFORM_HCC__
+#ifdef __HIP_PLATFORM_AMD__
     #include "../backend/rocprim/iterator/constant_input_iterator.hpp"
-#elif defined(__HIP_PLATFORM_NVCC__)
+#elif defined(__HIP_PLATFORM_NVIDIA__)
     #include "../config.hpp"
     #include <cub/iterator/constant_input_iterator.cuh>
 #endif

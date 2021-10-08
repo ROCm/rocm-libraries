@@ -28,9 +28,9 @@
 #endif
 
 // hipCUB API
-#ifdef __HIP_PLATFORM_HCC__
+#ifdef __HIP_PLATFORM_AMD__
     #include "hipcub/backend/rocprim/util_ptx.hpp"
-#elif defined(__HIP_PLATFORM_NVCC__)
+#elif defined(__HIP_PLATFORM_NVIDIA__)
     #include "hipcub/config.hpp"
     #include <cub/util_ptx.cuh>
 #endif

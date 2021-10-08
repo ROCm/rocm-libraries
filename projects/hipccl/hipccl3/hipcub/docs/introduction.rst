@@ -19,7 +19,7 @@ rocPRIM library as the backend, however, on CUDA platforms it uses CUB instead.
 - When rocPRIM is used as backend ``HIPCUB_ROCPRIM_API`` is defined.
 - When CUB is used as backend ``HIPCUB_CUB_API`` is defined.
 - Backends are automaticaly selected based on platform detected by HIP layer
-  (``__HIP_PLATFORM_HCC__``, ``__HIP_PLATFORM_NVCC__``).
+  (``__HIP_PLATFORM_AMD__``, ``__HIP_PLATFORM_NVIDIA__``).
 
 rocPRIM backend
 ====================================

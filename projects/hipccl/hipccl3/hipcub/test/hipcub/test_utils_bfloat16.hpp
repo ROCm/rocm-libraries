@@ -31,93 +31,78 @@ namespace test_utils
 {
 
 /// \brief Bfloat16-precision floating point type
-#ifdef __HIP_PLATFORM_HCC__
+#ifdef __HIP_PLATFORM_AMD__
 using bfloat16 = ::hip_bfloat16;
 #elif defined(__HIP_PLATFORM_NVIDIA__)
 using bfloat16 = ::__nv_bfloat16;
 #endif
 
-#ifdef __HIP_CPU_RT__
 using native_bfloat16 = bfloat16_t;
-#else
-using native_bfloat16 = bfloat16_t;
-#endif
-// hipCUB
 
 // Support bfloat16 operators on host side
-HIPCUB_HOST inline
-test_utils::native_bfloat16 bfloat16_to_native(const test_utils::bfloat16& x)
-{
-    return *reinterpret_cast<const test_utils::native_bfloat16 *>(&x);
-}
-
 HIPCUB_HOST inline
 test_utils::bfloat16 native_to_bfloat16(const test_utils::native_bfloat16& x)
 {
     return *reinterpret_cast<const test_utils::bfloat16 *>(&x);
 }
 
-struct bfloat16_less
+template<>
+HIPCUB_HOST_DEVICE inline bool test_utils::less::operator()<test_utils::bfloat16>(
+    const test_utils::bfloat16 & a,
+    const test_utils::bfloat16 & b) const
 {
-    HIPCUB_HOST_DEVICE inline
-    bool operator()(const test_utils::bfloat16& a, const test_utils::bfloat16& b) const
-    {
-        #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-        return a < b;
-        #else
-        return bfloat16_to_native(a) < bfloat16_to_native(b);
-        #endif
-    }
-};
+#if defined(__HIP_DEVICE_COMPILE__)
+    return a < b;
+#else
+    return test_utils::native_bfloat16(a) < test_utils::native_bfloat16(b);
+#endif
+}
 
-struct bfloat16_less_equal
+template<>
+HIPCUB_HOST_DEVICE inline bool test_utils::less_equal::operator()<test_utils::bfloat16>(
+    const test_utils::bfloat16 & a,
+    const test_utils::bfloat16 & b) const
 {
-    HIPCUB_HOST_DEVICE inline
-    bool operator()(const test_utils::bfloat16& a, const test_utils::bfloat16& b) const
-    {
-        #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-        return a <= b;
-        #else
-        return bfloat16_to_native(a) <= bfloat16_to_native(b);
-        #endif
-    }
-};
+#if defined(__HIP_DEVICE_COMPILE__)
+    return a <= b;
+#else
+    return test_utils::native_bfloat16(a) <= test_utils::native_bfloat16(b);
+#endif
+}
 
-struct bfloat16_greater
+template<>
+HIPCUB_HOST_DEVICE inline bool test_utils::greater::operator()<test_utils::bfloat16>(
+    const test_utils::bfloat16 & a,
+    const test_utils::bfloat16 & b) const
 {
-    HIPCUB_HOST_DEVICE inline
-    bool operator()(const test_utils::bfloat16& a, const test_utils::bfloat16& b) const
-    {
-        #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-        return a > b;
-        #else
-        return bfloat16_to_native(a) > bfloat16_to_native(b);
-        #endif
-    }
-};
+#if defined(__HIP_DEVICE_COMPILE__)
+    return a > b;
+#else
+    return test_utils::native_bfloat16(a) > test_utils::native_bfloat16(b);
+#endif
+}
 
-struct bfloat16_greater_equal
+template<>
+HIPCUB_HOST_DEVICE inline bool test_utils::greater_equal::operator()<test_utils::bfloat16>(
+    const test_utils::bfloat16 & a,
+    const test_utils::bfloat16 & b) const
 {
-    HIPCUB_HOST_DEVICE inline
-    bool operator()(const test_utils::bfloat16& a, const test_utils::bfloat16& b) const
-    {
-        #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-        return a >= b;
-        #else
-        return bfloat16_to_native(a) >= bfloat16_to_native(b);
-        #endif
-    }
-};
+#if defined(__HIP_DEVICE_COMPILE__)
+    return a >= b;
+#else
+    return test_utils::native_bfloat16(a) >= test_utils::native_bfloat16(b);
+#endif
+}
 
 struct bfloat16_equal_to
 {
     HIPCUB_HOST_DEVICE inline
     bool operator()(const test_utils::bfloat16& a, const test_utils::bfloat16& b) const
     {
-        #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+        #if defined(__HIP_DEVICE_COMPILE__)
         return a == b;
         #else
-        return bfloat16_to_native(a) == bfloat16_to_native(b);
+        return test_utils::native_bfloat16(a) == test_utils::native_bfloat16(b);
         #endif
     }
 };
@@ -127,10 +112,10 @@ struct bfloat16_not_equal_to
     HIPCUB_HOST_DEVICE inline
     bool operator()(const test_utils::bfloat16& a, const test_utils::bfloat16& b) const
     {
-        #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+        #if defined(__HIP_DEVICE_COMPILE__)
         return a != b;
         #else
-        return bfloat16_to_native(a) != bfloat16_to_native(b);
+        return test_utils::native_bfloat16(a) != test_utils::native_bfloat16(b);
         #endif
     }
 };
@@ -140,10 +125,10 @@ struct bfloat16_plus
     HIPCUB_HOST_DEVICE inline
     test_utils::bfloat16 operator()(const test_utils::bfloat16& a, const test_utils::bfloat16& b) const
     {
-        #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+        #if defined(__HIP_DEVICE_COMPILE__)
         return a + b;
         #else
-        return native_to_bfloat16(bfloat16_to_native(a) + bfloat16_to_native(b));
+        return native_to_bfloat16(test_utils::native_bfloat16(a) + test_utils::native_bfloat16(b));
         #endif
     }
 };
@@ -153,10 +138,10 @@ struct bfloat16_minus
     HIPCUB_HOST_DEVICE inline
     test_utils::bfloat16 operator()(const test_utils::bfloat16& a, const test_utils::bfloat16& b) const
     {
-        #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+        #if defined(__HIP_DEVICE_COMPILE__)
         return a - b;
         #else
-        return native_to_bfloat16(bfloat16_to_native(a) - bfloat16_to_native(b));
+        return native_to_bfloat16(test_utils::native_bfloat16(a) - test_utils::native_bfloat16(b));
         #endif
     }
 };
@@ -166,10 +151,10 @@ struct bfloat16_multiplies
     HIPCUB_HOST_DEVICE inline
     test_utils::bfloat16 operator()(const test_utils::bfloat16& a, const test_utils::bfloat16& b) const
     {
-        #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+        #if defined(__HIP_DEVICE_COMPILE__)
         return a * b;
         #else
-        return native_to_bfloat16(bfloat16_to_native(a) * bfloat16_to_native(b));
+        return native_to_bfloat16(test_utils::native_bfloat16(a) * test_utils::native_bfloat16(b));
         #endif
     }
 };
@@ -179,10 +164,10 @@ struct bfloat16_maximum
     HIPCUB_HOST_DEVICE inline
     test_utils::bfloat16 operator()(const test_utils::bfloat16& a, const test_utils::bfloat16& b) const
     {
-        #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+        #if defined(__HIP_DEVICE_COMPILE__)
         return a < b ? b : a;
         #else
-        return bfloat16_to_native(a) < bfloat16_to_native(b) ? b : a;
+        return test_utils::native_bfloat16(a) < test_utils::native_bfloat16(b) ? b : a;
         #endif
     }
 };
@@ -192,14 +177,28 @@ struct bfloat16_minimum
     HIPCUB_HOST_DEVICE inline
     test_utils::bfloat16 operator()(const test_utils::bfloat16& a, const test_utils::bfloat16& b) const
     {
-        #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+        #if defined(__HIP_DEVICE_COMPILE__)
         return a < b ? a : b;
         #else
-        return bfloat16_to_native(a) < bfloat16_to_native(b) ? a : b;
+        return test_utils::native_bfloat16(a) < test_utils::native_bfloat16(b) ? a : b;
         #endif
     }
 };
 
+template<bool Descending>
+struct key_comparator<test_utils::bfloat16, Descending, 0, sizeof(test_utils::bfloat16) * 8>
+{
+    bool operator()(const test_utils::bfloat16 & lhs, const test_utils::bfloat16 & rhs)
+    {
+        // HIP's bfloat16 doesn't have __host__ comparison operators, use test_utils::native_bfloat16 instead
+        return key_comparator<test_utils::native_bfloat16,
+                              Descending,
+                              0,
+                              sizeof(test_utils::native_bfloat16) * 8>()(
+            test_utils::native_bfloat16(lhs),
+            test_utils::native_bfloat16(rhs));
+    }
+};
 }
 
 #endif // HIPCUB_TEST_HIPCUB_TEST_UTILS_BFLOAT16_HPP_

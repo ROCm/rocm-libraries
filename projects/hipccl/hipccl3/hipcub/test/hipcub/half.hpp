@@ -36,7 +36,7 @@
  #include <stdint.h>
  #include <hipcub/util_type.hpp>
 
- #if defined(__HIP_PLATFORM_NVCC__)
+ #if defined(__HIP_PLATFORM_NVIDIA__)
      #include <cuda_fp16.h>
  #endif
 

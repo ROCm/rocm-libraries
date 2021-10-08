@@ -55,6 +55,8 @@ enum BlockLoadAlgorithm
 {
     BLOCK_LOAD_DIRECT
         = detail::to_BlockLoadAlgorithm_enum(::rocprim::block_load_method::block_load_direct),
+    BLOCK_LOAD_STRIPED
+        = detail::to_BlockLoadAlgorithm_enum(::rocprim::block_load_method::block_load_striped),
     BLOCK_LOAD_VECTORIZE
         = detail::to_BlockLoadAlgorithm_enum(::rocprim::block_load_method::block_load_vectorize),
     BLOCK_LOAD_TRANSPOSE

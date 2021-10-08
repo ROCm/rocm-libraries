@@ -88,7 +88,7 @@ typedef ::testing::Types<
     params<float, HIPCUB_WARP_SIZE_32>,
     params<double, HIPCUB_WARP_SIZE_32>,
     params<unsigned char, HIPCUB_WARP_SIZE_32>
-#ifdef __HIP_PLATFORM_HCC__
+#ifdef __HIP_PLATFORM_AMD__
     ,params<float, HIPCUB_WARP_SIZE_64>,
     params<double, HIPCUB_WARP_SIZE_64>,
     params<unsigned char, HIPCUB_WARP_SIZE_64>

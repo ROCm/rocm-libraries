@@ -59,7 +59,7 @@ struct bfloat16_t
 {
     uint16_t __x;
 
-#ifdef __HIP_PLATFORM_HCC__
+#ifdef __HIP_PLATFORM_AMD__
 
     /// Constructor from hip_bfloat16
     __host__ __device__ __forceinline__
@@ -68,7 +68,7 @@ struct bfloat16_t
         __x = reinterpret_cast<const uint16_t&>(other);
     }
 
-#elif defined(__HIP_PLATFORM_NVCC__)
+#elif defined(__HIP_PLATFORM_NVIDIA__)
 
     /// Constructor from __nv_bfloat16
     __host__ __device__ __forceinline__
@@ -111,7 +111,7 @@ struct bfloat16_t
         this->__x = ir;
     }
 
-#ifdef __HIP_PLATFORM_HCC__
+#ifdef __HIP_PLATFORM_AMD__
 
     /// Cast to hip_bfloat16
     __host__ __device__ __forceinline__
@@ -120,7 +120,7 @@ struct bfloat16_t
         return reinterpret_cast<const hip_bfloat16 &>(__x);
     }
 
-#elif defined(__HIP_PLATFORM_NVCC__)
+#elif defined(__HIP_PLATFORM_NVIDIA__)
 
     /// Cast to __nv_bfloat16
     __host__ __device__ __forceinline__
@@ -245,7 +245,7 @@ std::ostream& operator<<(std::ostream &out, const bfloat16_t &x)
     return out;
 }
 
-#if defined(__HIP_PLATFORM_NVCC__)
+#if defined(__HIP_PLATFORM_NVIDIA__)
 
     /// Insert formatted \p __nv_bfloat16 into the output stream
     std::ostream& operator<<(std::ostream &out, const __nv_bfloat16 &x)

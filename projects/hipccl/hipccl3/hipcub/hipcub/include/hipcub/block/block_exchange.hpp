@@ -30,9 +30,9 @@
 #ifndef HIPCUB_BLOCK_BLOCK_EXCHANGE_HPP_
 #define HIPCUB_BLOCK_BLOCK_EXCHANGE_HPP_
 
-#ifdef __HIP_PLATFORM_HCC__
+#ifdef __HIP_PLATFORM_AMD__
     #include "../backend/rocprim/block/block_exchange.hpp"
-#elif defined(__HIP_PLATFORM_NVCC__)
+#elif defined(__HIP_PLATFORM_NVIDIA__)
     #include "../config.hpp"
     #include <cub/block/block_exchange.cuh>
 #endif

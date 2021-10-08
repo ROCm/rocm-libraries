@@ -16,7 +16,7 @@ environment hipCUB uses rocPRIM library as the backend, however, on CUDA platfor
 - When using hipCUB you should only include `<hipcub/hipcub.hpp>` header.
 - When rocPRIM is used as backend `HIPCUB_ROCPRIM_API` is defined.
 - When CUB is used as backend `HIPCUB_CUB_API` is defined.
-- Backends are automaticaly selected based on platform detected by HIP layer (`__HIP_PLATFORM_HCC__`, `__HIP_PLATFORM_NVCC__`).
+- Backends are automaticaly selected based on platform detected by HIP layer (`__HIP_PLATFORM_AMD__`, `__HIP_PLATFORM_NVIDIA__`).
 
 @section hipcub_rocprim rocPRIM backend
 

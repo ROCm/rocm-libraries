@@ -40,10 +40,10 @@
 #define END_HIPCUB_NAMESPACE \
     } /* hipcub */
 
-#ifdef __HIP_PLATFORM_HCC__
+#ifdef __HIP_PLATFORM_AMD__
     #define HIPCUB_ROCPRIM_API 1
     #define HIPCUB_RUNTIME_FUNCTION __host__
-#elif defined(__HIP_PLATFORM_NVCC__)
+#elif defined(__HIP_PLATFORM_NVIDIA__)
     #define HIPCUB_CUB_API 1
     #define HIPCUB_RUNTIME_FUNCTION CUB_RUNTIME_FUNCTION
 

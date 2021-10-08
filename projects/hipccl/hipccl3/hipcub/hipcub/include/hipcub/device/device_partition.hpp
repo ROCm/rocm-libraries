@@ -30,9 +30,9 @@
 #ifndef HIPCUB_DEVICE_PARTITION_HPP_
 #define HIPCUB_DEVICE_PARTITION_HPP_
 #include <iostream>
-#ifdef __HIP_PLATFORM_HCC__
+#ifdef __HIP_PLATFORM_AMD__
     #include "../backend/rocprim/device/device_partition.hpp"
-#elif defined(__HIP_PLATFORM_NVCC__)
+#elif defined(__HIP_PLATFORM_NVIDIA__)
     #include "../backend/cub/device/device_partition.hpp"
 #endif
 

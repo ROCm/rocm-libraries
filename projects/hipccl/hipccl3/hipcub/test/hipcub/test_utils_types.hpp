@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2019-2021 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -18,24 +18,27 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#ifndef HIPCUB_HPP_
-#define HIPCUB_HPP_
+#ifndef TEST_TEST_UTILS_TYPES_HPP_
+#define TEST_TEST_UTILS_TYPES_HPP_
 
-#define HIPCUB_MAIN_HEADER_INCLUDED
+#include "test_utils.hpp"
 
-/// \file
-///
-/// Meta-header to include all hipCUB APIs.
+// Global utility defines
+#define test_suite_type_def_helper(name, suffix) \
+template<class Params> \
+class name ## suffix : public ::testing::Test { \
+public: \
+    using params = Params; \
+};
 
-// Meta configuration for hipCUB
-#include "config.hpp"
-// Version
-#include "hipcub_version.hpp"
+#define test_suite_type_def(name, suffix) test_suite_type_def_helper(name, suffix)
 
-#ifdef __HIP_PLATFORM_AMD__
-    #include "backend/rocprim/hipcub.hpp"
-#elif defined(__HIP_PLATFORM_NVIDIA__)
-    #include "backend/cub/hipcub.hpp"
-#endif
+#define typed_test_suite_def_helper(name, suffix, params) TYPED_TEST_SUITE(name ## suffix, params)
 
-#endif // HIPCUB_HPP_
+#define typed_test_suite_def(name, suffix, params) typed_test_suite_def_helper(name, suffix, params)
+
+#define typed_test_def_helper(suite, suffix, name) TYPED_TEST(suite ## suffix, name)
+
+#define typed_test_def(suite, suffix, name) typed_test_def_helper(suite, suffix, name)
+
+#endif // TEST_TEST_UTILS_TYPES_HPP_

@@ -30,9 +30,9 @@
 #ifndef HIPCUB_WARP_WARP_SCAN_HPP_
 #define HIPCUB_WARP_WARP_SCAN_HPP_
 
-#ifdef __HIP_PLATFORM_HCC__
+#ifdef __HIP_PLATFORM_AMD__
     #include "../backend/rocprim/warp/warp_scan.hpp"
-#elif defined(__HIP_PLATFORM_NVCC__)
+#elif defined(__HIP_PLATFORM_NVIDIA__)
     #include "../config.hpp"
     #include <cub/warp/warp_scan.cuh>
 #endif
