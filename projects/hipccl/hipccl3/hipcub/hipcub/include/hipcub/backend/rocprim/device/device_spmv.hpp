@@ -139,7 +139,7 @@ template <typename ValueT>
             size_t block_size = min(num_cols, DeviceSpmv::CsrMVKernel_MaxThreads);
             size_t grid_size = num_rows;
             CsrMVKernel<<<grid_size, block_size, 0, stream>>>(spmv_params);
-            status = hipPeekAtLastError();
+            status = hipGetLastError();
         }
         return status;
     }
