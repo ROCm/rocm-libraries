@@ -33,8 +33,8 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14 -fms-extensions -fms-compatib
 
 # flags for clang direct use with hip
 # -x hip causes linker error
-#set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -x hip -IC:/hip/include/hip -D__HIP_PLATFORM_HCC__ -D__HIP_ROCclr__ -DHIP_CLANG_HCC_COMPAT_MODE=1")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -I${HIP_DIR}/include/hip -D__HIP_PLATFORM_HCC__ -D__HIP_ROCclr__ -DHIP_CLANG_HCC_COMPAT_MODE=1")
+#set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -x hip -IC:/hip/include/hip -D__HIP_PLATFORM_AMD__ -D__HIP_ROCclr__ -DHIP_CLANG_HCC_COMPAT_MODE=1")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -I${HIP_DIR}/include/hip -D__HIP_PLATFORM_AMD__ -D__HIP_ROCclr__ -DHIP_CLANG_HCC_COMPAT_MODE=1")
 
 if (DEFINED ENV{VCPKG_PATH})
   file(TO_CMAKE_PATH "$ENV{VCPKG_PATH}" VCPKG_PATH)

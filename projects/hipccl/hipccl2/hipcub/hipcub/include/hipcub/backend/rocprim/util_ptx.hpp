@@ -196,11 +196,11 @@ auto unsigned_bit_extract(UnsignedBits source,
                           unsigned int num_bits)
     -> typename std::enable_if<sizeof(UnsignedBits) == 8, unsigned int>::type
 {
-    #ifdef __HIP_PLATFORM_HCC__
+    #ifdef __HIP_PLATFORM_AMD__
         return __bitextract_u64(source, bit_start, num_bits);
     #else
         return (source << (64 - bit_start - num_bits)) >> (64 - num_bits);
-    #endif // __HIP_PLATFORM_HCC__
+    #endif // __HIP_PLATFORM_AMD__
 }
 
 template <typename UnsignedBits>
@@ -210,11 +210,11 @@ auto unsigned_bit_extract(UnsignedBits source,
                           unsigned int num_bits)
     -> typename std::enable_if<sizeof(UnsignedBits) < 8, unsigned int>::type
 {
-    #ifdef __HIP_PLATFORM_HCC__
+    #ifdef __HIP_PLATFORM_AMD__
         return __bitextract_u32(source, bit_start, num_bits);
     #else
         return (static_cast<unsigned int>(source) << (32 - bit_start - num_bits)) >> (32 - num_bits);
-    #endif // __HIP_PLATFORM_HCC__
+    #endif // __HIP_PLATFORM_AMD__
 }
 
 } // end namespace detail
@@ -241,14 +241,14 @@ void BFI(unsigned int &ret,
          unsigned int bit_start,
          unsigned int num_bits)
 {
-    #ifdef __HIP_PLATFORM_HCC__
+    #ifdef __HIP_PLATFORM_AMD__
         ret = __bitinsert_u32(x, y, bit_start, num_bits);
     #else
         x <<= bit_start;
         unsigned int MASK_X = ((1 << num_bits) - 1) << bit_start;
         unsigned int MASK_Y = ~MASK_X;
         ret = (y & MASK_Y) | (x & MASK_X);
-    #endif // __HIP_PLATFORM_HCC__
+    #endif // __HIP_PLATFORM_AMD__
 }
 
 HIPCUB_DEVICE inline

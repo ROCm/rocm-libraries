@@ -55,6 +55,8 @@ enum BlockStoreAlgorithm
 {
     BLOCK_STORE_DIRECT
         = detail::to_BlockStoreAlgorithm_enum(::rocprim::block_store_method::block_store_direct),
+    BLOCK_STORE_STRIPED
+        = detail::to_BlockStoreAlgorithm_enum(::rocprim::block_store_method::block_store_striped),
     BLOCK_STORE_VECTORIZE
         = detail::to_BlockStoreAlgorithm_enum(::rocprim::block_store_method::block_store_vectorize),
     BLOCK_STORE_TRANSPOSE

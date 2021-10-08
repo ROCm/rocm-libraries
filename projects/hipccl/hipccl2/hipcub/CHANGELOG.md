@@ -2,13 +2,15 @@
 
 See README.md on how to build the hipCUB documentation using Doxygen.
 
-## [Latest changes]
+## (Unreleased)  hipCUB-2.10.13 for ROCm 5.0
 ### Fixed
 - Added missing includes to hipcub.hpp
 ### Added
 - Bfloat16 support to test cases (device_reduce & device_radix_sort)
+- Device merge sort
+- API update to CUB 1.14.0
 ### Changed
-- NVCC Minimum Compute Capability now 7.0
+- The SetupNVCC.cmake automatic target selector select all of the capabalities of all available card for NVIDIA backend.
 
 ## (Unreleased) hipCUB-2.10.12 for ROCm 4.5.0
 ### Added

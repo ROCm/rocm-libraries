@@ -30,10 +30,10 @@
 #ifndef HIPCUB_ITERATOR_CACHE_MODIFIED_INPUT_HPP_
 #define HIPCUB_ITERATOR_CACHE_MODIFIED_INPUT_HPP_
 
-#ifdef __HIP_PLATFORM_HCC__
+#ifdef __HIP_PLATFORM_AMD__
     #include "../config.hpp"
     #include "../backend/rocprim/iterator/cache_modified_input_iterator.hpp"
-#elif defined(__HIP_PLATFORM_NVCC__)
+#elif defined(__HIP_PLATFORM_NVIDIA__)
     #include "../config.hpp"
     #include <cub/iterator/cache_modified_input_iterator.cuh>
 #endif

@@ -30,7 +30,7 @@
 #ifndef HIPCUB_THREAD_THREAD_STORE_HPP_
 #define HIPCUB_THREAD_THREAD_STORE_HPP_
 
-#ifdef __HIP_PLATFORM_HCC__
+#ifdef __HIP_PLATFORM_AMD__
 
     #ifndef HIPCUB_THREAD_STORE_USE_CACHE_MODIFIERS
         #define HIPCUB_THREAD_STORE_USE_CACHE_MODIFIERS 1
@@ -38,7 +38,7 @@
 
     #include "../config.hpp"
     #include "../backend/rocprim/thread/thread_store.hpp"
-#elif defined(__HIP_PLATFORM_NVCC__)
+#elif defined(__HIP_PLATFORM_NVIDIA__)
     #include "../config.hpp"
     #include <cub/thread/thread_store.cuh>
 #endif

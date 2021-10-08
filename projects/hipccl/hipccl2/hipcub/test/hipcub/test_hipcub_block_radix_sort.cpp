@@ -27,7 +27,7 @@
 #include "hipcub/block/block_load.hpp"
 #include "hipcub/block/block_store.hpp"
 
-#include "test_sort_comparator.hpp"
+
 
 template<
     class Key,
@@ -189,7 +189,7 @@ TYPED_TEST(HipcubBlockRadixSort, SortKeys)
             std::stable_sort(
                 expected.begin() + (i * items_per_block),
                 expected.begin() + ((i + 1) * items_per_block),
-                key_comparator<key_type, descending, start_bit, end_bit>()
+                test_utils::key_comparator<key_type, descending, start_bit, end_bit>()
             );
         }
 
@@ -360,7 +360,7 @@ TYPED_TEST(HipcubBlockRadixSort, SortKeysValues)
             std::stable_sort(
                 expected.begin() + (i * items_per_block),
                 expected.begin() + ((i + 1) * items_per_block),
-                key_value_comparator<key_type, value_type, descending, start_bit, end_bit>()
+                test_utils::key_value_comparator<key_type, value_type, descending, start_bit, end_bit>()
             );
         }
 

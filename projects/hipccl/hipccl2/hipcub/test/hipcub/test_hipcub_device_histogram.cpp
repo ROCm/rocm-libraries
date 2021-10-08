@@ -22,7 +22,7 @@
 
 // CUB's implementation of DeviceHistogram has unused parameters,
 // disable the warning because all warnings are threated as errors:
-#ifdef __HIP_PLATFORM_NVCC__
+#ifdef __HIP_PLATFORM_NVIDIA__
     #pragma GCC diagnostic ignored "-Wunused-parameter"
 #endif
 

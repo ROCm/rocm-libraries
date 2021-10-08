@@ -37,6 +37,7 @@ variables:
   LOCAL_CXXFLAGS: ""
   LOCAL_CMAKE_OPTIONS: ""
   ROCM_LATEST_PATH: "/opt/rocm-4.3.0/"
+  ROCPRIM_GIT_BRANCH: "develop_stream"
 
 # hipCUB with rocPRIM backend
 .rocm:
@@ -79,7 +80,7 @@ variables:
     - export CXXFLAGS=$CXXFLAGS" "$LOCAL_CXXFLAGS
     - export CMAKE_OPTIONS=$CXXFLAGS" "$LOCAL_CMAKE_OPTIONS
     # Install rocPRIM package
-    - branch_name="develop_stream"
+    - branch_name="$ROCPRIM_GIT_BRANCH"
     - if [ $CI_COMMIT_BRANCH == develop ] || [ $CI_COMMIT_BRANCH == master ]; then branch_name=$CI_COMMIT_BRANCH;
     - fi;
     - git clone -b $branch_name https://gitlab-ci-token:${CI_JOB_TOKEN}@${ROCPRIM_GIT_URL}
@@ -267,7 +268,7 @@ test:rocm_package:
     # Install rocPRIM package
     - echo ${ROCPRIM_GIT_URL}
     - echo $ROCPRIM_GIT_URL
-    - git clone -b develop_stream https://gitlab-ci-token:${CI_JOB_TOKEN}@${ROCPRIM_GIT_URL}
+    - git clone -b $ROCPRIM_GIT_BRANCH https://gitlab-ci-token:${CI_JOB_TOKEN}@${ROCPRIM_GIT_URL}
     - cd rocPRIM
     - mkdir build
     - cd build
@@ -296,7 +297,7 @@ test:rocm_install:
     # Install rocPRIM package
     - echo ${ROCPRIM_GIT_URL}
     - echo $ROCPRIM_GIT_URL
-    - git clone -b develop_stream https://gitlab-ci-token:${CI_JOB_TOKEN}@${ROCPRIM_GIT_URL}
+    - git clone -b $ROCPRIM_GIT_BRANCH https://gitlab-ci-token:${CI_JOB_TOKEN}@${ROCPRIM_GIT_URL}
     - cd rocPRIM
     - mkdir build
     - cd build
@@ -423,6 +424,33 @@ benchmark:nvcc_titanv:
     - build:nvcc-benchmark
   script:
     - CUDA_VISIBLE_DEVICES=0
+    - cmake
+      -D BENCHMARK_BINARY_DIR=build/benchmark
+      -P ${CI_PROJECT_DIR}/.gitlab/cmake-run-benchmarks.txt
+  allow_failure: true
+
+test:nvcc_980:
+  extends: .nvcc
+  stage: test
+  needs:
+    - build:nvcc
+  script:
+    - cd build
+    - CUDA_VISIBLE_DEVICES=1 ctest --output-on-failure --repeat-until-fail 2
+
+benchmark:nvcc_980:
+  extends: .nvcc
+  stage: benchmark
+  when: manual
+  only:
+    - fix_benchmarks
+    - develop_stream
+    - develop
+    - master
+  needs:
+    - build:nvcc-benchmark
+  script:
+    - CUDA_VISIBLE_DEVICES=1
     - cmake
       -D BENCHMARK_BINARY_DIR=build/benchmark
       -P ${CI_PROJECT_DIR}/.gitlab/cmake-run-benchmarks.txt

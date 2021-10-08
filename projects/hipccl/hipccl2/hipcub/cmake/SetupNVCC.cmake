@@ -25,32 +25,30 @@
 # hcc. On CUDA host can be compiled by any C++ compiler while device code is compiled
 # by nvcc compiler (CMake's CUDA package handles this).
 
-# A function for automatic detection of the lowest CC of the installed NV GPUs
-# Minimum is 7.0
-function(hip_cuda_detect_lowest_cc out_variable)
+# A function for automatic detection of the CC of the installed NV GPUs
+function(hip_cuda_detect_cc out_variable)
     set(__cufile ${PROJECT_BINARY_DIR}/detect_nvgpus_cc.cu)
 
     file(WRITE ${__cufile} ""
-        "#include <cstdio>\n"
+        "#include <iostream>\n"
+        "#include <set>\n"
         "int main()\n"
         "{\n"
         "  int count = 0;\n"
         "  if (cudaSuccess != cudaGetDeviceCount(&count)) return -1;\n"
         "  if (count == 0) return -1;\n"
-        "  int major = 1000;\n"
-        "  int minor = 1000;\n"
+        "  std::set<int> list_cc;\n"
         "  for (int device = 0; device < count; ++device)\n"
         "  {\n"
         "    cudaDeviceProp prop;\n"
         "    if (cudaSuccess == cudaGetDeviceProperties(&prop, device))\n"
-        "      if (prop.major < major || (prop.major == major && prop.minor < minor)){\n"
-        "        major = prop.major; minor = prop.minor;\n"
-        "      }\n"
+        "      list_cc.insert(prop.major*10+prop.minor);\n"
         "  }\n"
-        "  if (major < 7 || (major == 7 && minor < 0)){\n"
-        "     major = 7; minor = 0;\n"
+        "  for (std::set<int>::iterator itr = list_cc.begin(); itr != list_cc.end(); itr++)\n"
+        "  {\n"
+        "    if(itr != list_cc.begin()) std::cout << ';';\n"
+        "    std::cout << *itr;\n"
         "  }\n"
-        "  std::printf(\"%d%d\", major, minor);\n"
         "  return 0;\n"
         "}\n")
 
@@ -61,14 +59,14 @@ function(hip_cuda_detect_lowest_cc out_variable)
     )
 
     if(__nvcc_res EQUAL 0)
-        set(HIP_CUDA_lowest_cc ${__nvcc_out} CACHE INTERNAL "The lowest CC of installed NV GPUs" FORCE)
+        set(HIP_CUDA_detected_cc ${__nvcc_out} CACHE INTERNAL "The detected CC of installed NV GPUs" FORCE)
     endif()
 
-    if(NOT HIP_CUDA_lowest_cc)
-        set(HIP_CUDA_lowest_cc "35")
-        set(${out_variable} ${HIP_CUDA_lowest_cc} PARENT_SCOPE)
+    if(NOT HIP_CUDA_detected_cc)
+        set(HIP_CUDA_detected_cc "35")
+        set(${out_variable} ${HIP_CUDA_detected_cc} PARENT_SCOPE)
     else()
-        set(${out_variable} ${HIP_CUDA_lowest_cc} PARENT_SCOPE)
+        set(${out_variable} ${HIP_CUDA_detected_cc} PARENT_SCOPE)
     endif()
 endfunction()
 
@@ -92,8 +90,8 @@ set(HIP_NVCC_FLAGS " ${HIP_NVCC_FLAGS} -Wno-deprecated-gpu-targets -Xcompiler -W
 set(DEFAULT_NVGPU_TARGETS "")
 # If NVGPU_TARGETS is empty get default value for it
 if("x${NVGPU_TARGETS}" STREQUAL "x")
-    hip_cuda_detect_lowest_cc(lowest_cc)
-    set(DEFAULT_NVGPU_TARGETS "${lowest_cc}")
+    hip_cuda_detect_cc(detected_cc)
+    set(DEFAULT_NVGPU_TARGETS "${detected_cc}")
 endif()
 set(NVGPU_TARGETS "${DEFAULT_NVGPU_TARGETS}"
     CACHE STRING "List of NVIDIA GPU targets (compute capabilities), for example \"35;50\""

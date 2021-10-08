@@ -30,10 +30,10 @@
 #ifndef HIPCUB_UTIL_TYPES_HPP_
 #define HIPCUB_UTIL_TYPES_HPP_
 
-#ifdef __HIP_PLATFORM_HCC__
+#ifdef __HIP_PLATFORM_AMD__
     #include "backend/rocprim/util_type.hpp"
-#elif defined(__HIP_PLATFORM_NVCC__)
-    #include "backend/cub/util_type.hpp"
+#elif defined(__HIP_PLATFORM_NVIDIA__)
+    #include <cub/util_type.cuh>
 #endif
 
 

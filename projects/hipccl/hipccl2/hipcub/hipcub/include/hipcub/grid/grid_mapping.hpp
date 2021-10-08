@@ -30,9 +30,9 @@
  #ifndef HIPCUB_GRID_GRID_MAPPING_HPP_
  #define HIPCUB_GRID_GRID_MAPPING_HPP_
 
- #ifdef __HIP_PLATFORM_HCC__
+ #ifdef __HIP_PLATFORM_AMD__
      #include "../backend/rocprim/grid/grid_mapping.hpp"
- #elif defined(__HIP_PLATFORM_NVCC__)
+ #elif defined(__HIP_PLATFORM_NVIDIA__)
      #include "../config.hpp"
      #include <cub/grid/grid_mapping.cuh>
  #endif

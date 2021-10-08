@@ -24,7 +24,7 @@
 
 // hipcub API
 #include "hipcub/device/device_segmented_radix_sort.hpp"
-#include "test_sort_comparator.hpp"
+
 
 template<
     class Key,
@@ -179,7 +179,7 @@ TYPED_TEST(HipcubDeviceSegmentedRadixSort, SortKeys)
                 std::stable_sort(
                     expected.begin() + offsets[i],
                     expected.begin() + offsets[i + 1],
-                    key_comparator<key_type, descending, start_bit, end_bit>()
+                    test_utils::key_comparator<key_type, descending, start_bit, end_bit>()
                 );
             }
 
@@ -359,7 +359,7 @@ TYPED_TEST(HipcubDeviceSegmentedRadixSort, SortPairs)
                 std::stable_sort(
                     expected.begin() + offsets[i],
                     expected.begin() + offsets[i + 1],
-                    key_value_comparator<key_type, value_type, descending, start_bit, end_bit>()
+                    test_utils::key_value_comparator<key_type, value_type, descending, start_bit, end_bit>()
                 );
             }
 
@@ -529,7 +529,7 @@ TYPED_TEST(HipcubDeviceSegmentedRadixSort, SortKeysDoubleBuffer)
                 std::stable_sort(
                     expected.begin() + offsets[i],
                     expected.begin() + offsets[i + 1],
-                    key_comparator<key_type, descending, start_bit, end_bit>()
+                    test_utils::key_comparator<key_type, descending, start_bit, end_bit>()
                 );
             }
 
@@ -711,7 +711,7 @@ TYPED_TEST(HipcubDeviceSegmentedRadixSort, SortPairsDoubleBuffer)
                 std::stable_sort(
                     expected.begin() + offsets[i],
                     expected.begin() + offsets[i + 1],
-                    key_value_comparator<key_type, value_type, descending, start_bit, end_bit>()
+                    test_utils::key_value_comparator<key_type, value_type, descending, start_bit, end_bit>()
                 );
             }
 

@@ -30,9 +30,9 @@
 #ifndef HIPCUB_DEVICE_DEVICE_SCAN_HPP_
 #define HIPCUB_DEVICE_DEVICE_SCAN_HPP_
 
-#ifdef __HIP_PLATFORM_HCC__
+#ifdef __HIP_PLATFORM_AMD__
     #include "../backend/rocprim/device/device_scan.hpp"
-#elif defined(__HIP_PLATFORM_NVCC__)
+#elif defined(__HIP_PLATFORM_NVIDIA__)
     #include "../backend/cub/device/device_scan.hpp"
 #endif
 

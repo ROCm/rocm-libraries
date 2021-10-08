@@ -352,12 +352,12 @@ public:
      */
     template <
         typename        UnsignedBits,
-        int             KEYS_PER_THREAD>
+        int             KEYS_PER_THREAD,
+        typename        DigitExtractorT>
     HIPCUB_DEVICE inline void RankKeys(
         UnsignedBits    (&keys)[KEYS_PER_THREAD],           ///< [in] Keys for this tile
         int             (&ranks)[KEYS_PER_THREAD],          ///< [out] For each key, the local rank within the tile
-        int             current_bit,                        ///< [in] The least-significant bit position of the current digit to extract
-        int             num_bits)                           ///< [in] The number of bits in the current digit
+        DigitExtractorT digit_extractor)                    ///< [in] The digit extractor
     {
         DigitCounter    thread_prefixes[KEYS_PER_THREAD];   // For each key, the count of previous keys in this tile having the same digit
         DigitCounter*   digit_counters[KEYS_PER_THREAD];    // For each key, the byte-offset of its corresponding digit counter in smem
@@ -369,7 +369,7 @@ public:
         for (int ITEM = 0; ITEM < KEYS_PER_THREAD; ++ITEM)
         {
             // Get digit
-            unsigned int digit = BFE(keys[ITEM], current_bit, num_bits);
+            unsigned int digit = digit_extractor.Digit(keys[ITEM]);
 
             // Get sub-counter
             unsigned int sub_counter = digit >> LOG_COUNTER_LANES;
@@ -415,16 +415,16 @@ public:
      */
     template <
         typename        UnsignedBits,
-        int             KEYS_PER_THREAD>
+        int             KEYS_PER_THREAD,
+        typename        DigitExtractorT>
     HIPCUB_DEVICE inline void RankKeys(
         UnsignedBits    (&keys)[KEYS_PER_THREAD],           ///< [in] Keys for this tile
         int             (&ranks)[KEYS_PER_THREAD],          ///< [out] For each key, the local rank within the tile (out parameter)
-        int             current_bit,                        ///< [in] The least-significant bit position of the current digit to extract
-        int             num_bits,                           ///< [in] The number of bits in the current digit
+        DigitExtractorT digit_extractor,                    ///< [in] The digit extractor
         int             (&exclusive_digit_prefix)[BINS_TRACKED_PER_THREAD])            ///< [out] The exclusive prefix sum for the digits [(threadIdx.x * BINS_TRACKED_PER_THREAD) ... (threadIdx.x * BINS_TRACKED_PER_THREAD) + BINS_TRACKED_PER_THREAD - 1]
     {
         // Rank keys
-        RankKeys(keys, ranks, current_bit, num_bits);
+        RankKeys(keys, ranks, digit_extractor);
 
         // Get the inclusive and exclusive digit totals corresponding to the calling thread.
         #pragma unroll
@@ -577,12 +577,12 @@ public:
      */
     template <
         typename        UnsignedBits,
-        int             KEYS_PER_THREAD>
-    HIPCUB_DEVICE inline void RankKeys(
+        int             KEYS_PER_THREAD,
+        typename        DigitExtractorT>
+    __device__ __forceinline__ void RankKeys(
         UnsignedBits    (&keys)[KEYS_PER_THREAD],           ///< [in] Keys for this tile
         int             (&ranks)[KEYS_PER_THREAD],          ///< [out] For each key, the local rank within the tile
-        int             current_bit,                        ///< [in] The least-significant bit position of the current digit to extract
-        int             num_bits)                           ///< [in] The number of bits in the current digit
+        DigitExtractorT digit_extractor)                    ///< [in] The digit extractor
     {
         // Initialize shared digit counters
 
@@ -602,7 +602,7 @@ public:
         for (int ITEM = 0; ITEM < KEYS_PER_THREAD; ++ITEM)
         {
             // My digit
-            uint32_t digit = BFE(keys[ITEM], current_bit, num_bits);
+            uint32_t digit = digit_extractor.Digit(keys[ITEM]);
 
             if (IS_DESCENDING)
                 digit = RADIX_DIGITS - digit - 1;
@@ -668,15 +668,15 @@ public:
      */
     template <
         typename        UnsignedBits,
-        int             KEYS_PER_THREAD>
-    HIPCUB_DEVICE inline void RankKeys(
+        int             KEYS_PER_THREAD,
+        typename        DigitExtractorT>
+    __device__ __forceinline__ void RankKeys(
         UnsignedBits    (&keys)[KEYS_PER_THREAD],           ///< [in] Keys for this tile
         int             (&ranks)[KEYS_PER_THREAD],          ///< [out] For each key, the local rank within the tile (out parameter)
-        int             current_bit,                        ///< [in] The least-significant bit position of the current digit to extract
-        int             num_bits,                           ///< [in] The number of bits in the current digit
+        DigitExtractorT digit_extractor,                    ///< [in] The digit extractor
         int             (&exclusive_digit_prefix)[BINS_TRACKED_PER_THREAD])            ///< [out] The exclusive prefix sum for the digits [(threadIdx.x * BINS_TRACKED_PER_THREAD) ... (threadIdx.x * BINS_TRACKED_PER_THREAD) + BINS_TRACKED_PER_THREAD - 1]
     {
-        RankKeys(keys, ranks, current_bit, num_bits);
+        RankKeys(keys, ranks, digit_extractor);
 
         // Get exclusive count for each digit
         #pragma unroll

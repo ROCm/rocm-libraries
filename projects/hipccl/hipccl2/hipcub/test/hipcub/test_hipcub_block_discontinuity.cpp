@@ -70,46 +70,6 @@ struct custom_flag_op2
     }
 };
 
-struct less
-{
-    template<class T>
-    HIPCUB_HOST_DEVICE inline
-    constexpr bool operator()(const T& a, const T& b) const
-    {
-        return a < b;
-    }
-};
-
-struct less_equal
-{
-    template<class T>
-    HIPCUB_HOST_DEVICE inline
-    constexpr bool operator()(const T& a, const T& b) const
-    {
-        return a <= b;
-    }
-};
-
-struct greater
-{
-    template<class T>
-    HIPCUB_HOST_DEVICE inline
-    constexpr bool operator()(const T& a, const T& b) const
-    {
-        return a > b;
-    }
-};
-
-struct greater_equal
-{
-    template<class T>
-    HIPCUB_HOST_DEVICE inline
-    constexpr bool operator()(const T& a, const T& b) const
-    {
-        return a >= b;
-    }
-};
-
 template<class T, class FlagOp>
 bool apply(FlagOp flag_op, const T& a, const T& b, unsigned int)
 {
@@ -120,27 +80,27 @@ typedef ::testing::Types<
     // Power of 2 BlockSize
     params<unsigned int, int, 64U, 1, hipcub::Equality>,
     params<int, bool, 128U, 1, hipcub::Inequality>,
-    params<float, int, 256U, 1, less>,
-    params<char, char, 1024U, 1, less_equal>,
+    params<float, int, 256U, 1, test_utils::less>,
+    params<char, char, 1024U, 1, test_utils::less_equal>,
     params<int, bool, 256U, 1, custom_flag_op1<int> >,
 
     // Non-power of 2 BlockSize
-    params<double, unsigned int, 65U, 1, greater>,
+    params<double, unsigned int, 65U, 1, test_utils::greater>,
     params<float, int, 37U, 1, custom_flag_op1<float> >,
-    params<long long, char, 510U, 1, greater_equal>,
+    params<long long, char, 510U, 1, test_utils::greater_equal>,
     params<unsigned int, long long, 162U, 1, hipcub::Inequality>,
     params<unsigned char, bool, 255U, 1, hipcub::Equality>,
 
     // Power of 2 BlockSize and ItemsPerThread > 1
     params<int, char, 64U, 2, custom_flag_op2<int> >,
-    params<int, short, 128U, 4, less>,
+    params<int, short, 128U, 4, test_utils::less>,
     params<unsigned short, unsigned char, 256U, 7, custom_flag_op2<unsigned short> >,
     params<short, short, 512U, 8, hipcub::Equality>,
 
     // Non-power of 2 BlockSize and ItemsPerThread > 1
     params<double, int, 33U, 5, custom_flag_op2<double> >,
     params<double, unsigned int, 464U, 2, hipcub::Equality>,
-    params<unsigned short, int, 100U, 3, greater>,
+    params<unsigned short, int, 100U, 3, test_utils::greater>,
     params<short, bool, 234U, 9, custom_flag_op1<short> >
 > Params;
 

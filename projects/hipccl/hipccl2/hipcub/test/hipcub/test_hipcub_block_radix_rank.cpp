@@ -39,7 +39,7 @@
 #include "hipcub/block/block_exchange.hpp"
 #include "hipcub/block/block_radix_rank.hpp"
 
-#include "test_sort_comparator.hpp"
+#include "hipcub/block/radix_rank_sort_operations.hpp"
 
 namespace hipcub_test {
 
@@ -69,7 +69,7 @@ private:
         BLOCK_THREADS               = BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z,
 
         // Whether or not there are values to be trucked along with keys
-        #ifdef __HIP_PLATFORM_HCC__
+        #ifdef __HIP_PLATFORM_AMD__
         KEYS_ONLY                   = rocprim::Equals<ValueT, hipcub::NullType>::VALUE,
         #else
         KEYS_ONLY                   = cub::Equals<ValueT, hipcub::NullType>::VALUE,
@@ -79,6 +79,7 @@ private:
     // KeyT traits and unsigned bits type
     typedef hipcub::Traits<KeyT>                KeyTraits;
     typedef typename KeyTraits::UnsignedBits    UnsignedBits;
+    typedef hipcub::BFEDigitExtractor<KeyT>     DigitExtractorT;
 
     /// Ascending BlockRadixRank utility type
     typedef hipcub::BlockRadixRank<
@@ -147,30 +148,26 @@ private:
     __device__ __forceinline__ void RankKeys(
         UnsignedBits    (&unsigned_keys)[ITEMS_PER_THREAD],
         int             (&ranks)[ITEMS_PER_THREAD],
-        int             begin_bit,
-        int             pass_bits,
+        DigitExtractorT digit_extractor,
         hipcub::Int2Type<false> /*is_descending*/)
     {
         AscendingBlockRadixRank(temp_storage.asending_ranking_storage).RankKeys(
             unsigned_keys,
             ranks,
-            begin_bit,
-            pass_bits);
+            digit_extractor);
     }
 
     /// Rank keys (specialized for descending sort)
     __device__ __forceinline__ void RankKeys(
         UnsignedBits    (&unsigned_keys)[ITEMS_PER_THREAD],
         int             (&ranks)[ITEMS_PER_THREAD],
-        int             begin_bit,
-        int             pass_bits,
+        DigitExtractorT digit_extractor,
         hipcub::Int2Type<true>  /*is_descending*/)
     {
         DescendingBlockRadixRank(temp_storage.descending_ranking_storage).RankKeys(
             unsigned_keys,
             ranks,
-            begin_bit,
-            pass_bits);
+            digit_extractor);
     }
 
     /// ExchangeValues (specialized for key-value sort, to-blocked arrangement)
@@ -232,10 +229,11 @@ private:
         while (true)
         {
             int pass_bits = min(RADIX_BITS, end_bit - begin_bit);
+            DigitExtractorT digit_extractor(begin_bit, pass_bits);
 
             // Rank the blocked keys
             int ranks[ITEMS_PER_THREAD];
-            RankKeys(unsigned_keys, ranks, begin_bit, pass_bits, is_descending);
+            RankKeys(unsigned_keys, ranks, digit_extractor, is_descending);
             begin_bit += RADIX_BITS;
 
             __syncthreads();
@@ -288,10 +286,11 @@ public:
         while (true)
         {
             int pass_bits = min(RADIX_BITS, end_bit - begin_bit);
+            DigitExtractorT digit_extractor(begin_bit, pass_bits);
 
             // Rank the blocked keys
             int ranks[ITEMS_PER_THREAD];
-            RankKeys(unsigned_keys, ranks, begin_bit, pass_bits, is_descending);
+            RankKeys(unsigned_keys, ranks, digit_extractor, is_descending);
             begin_bit += RADIX_BITS;
 
             __syncthreads();
@@ -585,7 +584,7 @@ TYPED_TEST(HipcubBlockRadixSort, SortKeys)
             std::stable_sort(
                 expected.begin() + (i * items_per_block),
                 expected.begin() + ((i + 1) * items_per_block),
-                key_comparator<key_type, descending, start_bit, end_bit>()
+                test_utils::key_comparator<key_type, descending, start_bit, end_bit>()
             );
         }
 
@@ -757,7 +756,7 @@ TYPED_TEST(HipcubBlockRadixSort, SortKeysValues)
             std::stable_sort(
                 expected.begin() + (i * items_per_block),
                 expected.begin() + ((i + 1) * items_per_block),
-                key_value_comparator<key_type, value_type, descending, start_bit, end_bit>()
+                test_utils::key_value_comparator<key_type, value_type, descending, start_bit, end_bit>()
             );
         }
 

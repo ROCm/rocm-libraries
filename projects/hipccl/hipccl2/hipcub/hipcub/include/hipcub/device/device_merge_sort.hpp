@@ -27,47 +27,13 @@
  *
  ******************************************************************************/
 
-#ifndef HIPCUB_CUB_UTIL_TYPE_HPP_
-#define HIPCUB_CUB_UTIL_TYPE_HPP_
+#ifndef HIPCUB_DEVICE_DEVICE_MERGE_SORT_HPP_
+#define HIPCUB_DEVICE_DEVICE_MERGE_SORT_HPP_
 
-#include "../../config.hpp"
-
-#include <cub/util_type.cuh>
-
-#if (__CUDACC_VER_MAJOR__ >= 11 || CUDA_VERSION >= 11000) && !__NVCOMPILER_CUDA__
-    #include <cuda_bf16.h>
+#ifdef __HIP_PLATFORM_AMD__
+    #include "../backend/rocprim/device/device_merge_sort.hpp"
+#elif defined(__HIP_PLATFORM_NVIDIA__)
+    #include "../backend/cub/device/device_merge_sort.hpp"
 #endif
 
-//TODO: Remove this section after CUB update
-
-/// Optional outer namespace(s)
-CUB_NS_PREFIX
-
-namespace cub {
-
-#if (__CUDACC_VER_MAJOR__ >= 11 || CUDA_VERSION >= 11000) && !__NVCOMPILER_CUDA__
-
-template <>
-struct FpLimits<__nv_bfloat16>
-{
-    static __host__ __device__ __forceinline__ __nv_bfloat16 Max() {
-        unsigned short max_word = 0x7F7F;
-        return reinterpret_cast<__nv_bfloat16&>(max_word);
-    }
-
-    static __host__ __device__ __forceinline__ __nv_bfloat16 Lowest() {
-        unsigned short lowest_word = 0xFF7F;
-        return reinterpret_cast<__nv_bfloat16&>(lowest_word);
-    }
-};
-
-#if (__CUDACC_VER_MAJOR__ >= 11 || CUDA_VERSION >= 11000) && !__NVCOMPILER_CUDA__
-    template <> struct NumericTraits<__nv_bfloat16> :   BaseTraits<FLOATING_POINT, true, false, unsigned short, __nv_bfloat16> {};
-#endif
-
-#endif
-
-}
-CUB_NS_POSTFIX  // Optional outer namespace(s)
-
-#endif // HIPCUB_CUB_UTIL_TYPE_HPP_
+#endif // HIPCUB_DEVICE_DEVICE_MERGE_SORT_HPP_

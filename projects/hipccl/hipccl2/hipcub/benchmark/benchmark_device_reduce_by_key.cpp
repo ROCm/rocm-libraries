@@ -22,7 +22,7 @@
 
 // CUB's implementation of single_pass_scan_operators has maybe uninitialized parameters,
 // disable the warning because all warnings are threated as errors:
-#ifdef __HIP_PLATFORM_NVCC__
+#ifdef __HIP_PLATFORM_NVIDIA__
     #pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 #endif
 

@@ -30,9 +30,9 @@
  #ifndef HIPCUB_GRID_GRID_BARRIER_HPP_
  #define HIPCUB_GRID_GRID_BARRIER_HPP_
 
- #ifdef __HIP_PLATFORM_HCC__
+ #ifdef __HIP_PLATFORM_AMD__
      #include "../backend/rocprim/grid/grid_barrier.hpp"
- #elif defined(__HIP_PLATFORM_NVCC__)
+ #elif defined(__HIP_PLATFORM_NVIDIA__)
      #include "../config.hpp"
      #include "../backend/cub/grid/grid_barrier.hpp"
  #endif
