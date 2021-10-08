@@ -167,7 +167,7 @@ TYPED_TEST(RocprimTransformIteratorTests, TransformReduce)
                 TestFixture::debug_synchronous
             )
         );
-        HIP_CHECK(hipPeekAtLastError());
+        HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         HIP_CHECK(

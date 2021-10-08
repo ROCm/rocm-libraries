@@ -137,7 +137,7 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
                 d_input, d_output, input[0]
             );
         }
-        HIP_CHECK(hipPeekAtLastError());
+        HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         auto end = std::chrono::high_resolution_clock::now();

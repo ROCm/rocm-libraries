@@ -76,7 +76,7 @@ TEST(HIPTests, Saxpy)
         dim3((N + 255)/256), dim3(256), 0, 0,
         d_x, d_y, a, N
     );
-    HIP_CHECK(hipPeekAtLastError());
+    HIP_CHECK(hipGetLastError());
 
     HIP_CHECK(
         hipMemcpy(

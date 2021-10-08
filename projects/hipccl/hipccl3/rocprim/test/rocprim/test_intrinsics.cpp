@@ -173,7 +173,7 @@ TYPED_TEST(RocprimIntrinsicsTests, ShuffleUp)
                     dim3(1), dim3(hardware_warp_size), 0, 0,
                     device_data, delta, logical_warp_size
                 );
-                HIP_CHECK(hipPeekAtLastError());
+                HIP_CHECK(hipGetLastError());
                 HIP_CHECK(hipDeviceSynchronize());
 
                 // Read from device memory
@@ -276,7 +276,7 @@ TYPED_TEST(RocprimIntrinsicsTests, ShuffleDown)
                     dim3(1), dim3(hardware_warp_size), 0, 0,
                     device_data, delta, logical_warp_size
                 );
-                HIP_CHECK(hipPeekAtLastError());
+                HIP_CHECK(hipGetLastError());
                 HIP_CHECK(hipDeviceSynchronize());
 
                 // Read from device memory
@@ -392,7 +392,7 @@ TYPED_TEST(RocprimIntrinsicsTests, ShuffleIndex)
                 dim3(1), dim3(hardware_warp_size), 0, 0,
                 device_data, device_src_lanes, logical_warp_size
             );
-            HIP_CHECK(hipPeekAtLastError());
+            HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipDeviceSynchronize());
 
             // Read from device memory
@@ -492,7 +492,7 @@ TEST(RocprimIntrinsicsTests, ShuffleUpCustomStruct)
                     dim3(1), dim3(hardware_warp_size), 0, 0,
                     device_data, delta, logical_warp_size
                 );
-                HIP_CHECK(hipPeekAtLastError());
+                HIP_CHECK(hipGetLastError());
                 HIP_CHECK(hipDeviceSynchronize());
 
                 // Read from device memory
@@ -591,7 +591,7 @@ TEST(RocprimIntrinsicsTests, ShuffleUpCustomAlignedStruct)
                     dim3(1), dim3(hardware_warp_size), 0, 0,
                     device_data, delta, logical_warp_size
                 );
-                HIP_CHECK(hipPeekAtLastError());
+                HIP_CHECK(hipGetLastError());
                 HIP_CHECK(hipDeviceSynchronize());
 
                 // Read from device memory

@@ -120,7 +120,7 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, ReduceSum)
             );
         }
 
-        HIP_CHECK(hipPeekAtLastError());
+        HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Read from device memory
@@ -239,7 +239,7 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, AllReduceSum)
             );
         }
 
-        HIP_CHECK(hipPeekAtLastError());
+        HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Read from device memory
@@ -355,7 +355,7 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, ReduceSumValid)
             );
         }
 
-        HIP_CHECK(hipPeekAtLastError());
+        HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Read from device memory
@@ -476,7 +476,7 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, AllReduceSumValid)
             );
         }
 
-        HIP_CHECK(hipPeekAtLastError());
+        HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Read from device memory
@@ -601,7 +601,7 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, ReduceCustomStruct)
             );
         }
 
-        HIP_CHECK(hipPeekAtLastError());
+        HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Read from device memory
@@ -738,7 +738,7 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, HeadSegmentedReduceSum)
             );
         }
 
-        HIP_CHECK(hipPeekAtLastError());
+        HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Read from device memory
@@ -898,7 +898,7 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, TailSegmentedReduceSum)
             );
         }
 
-        HIP_CHECK(hipPeekAtLastError());
+        HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Read from device memory

@@ -123,7 +123,7 @@ auto execute_warp_reduce_kernel(T* input, T* output, Flag* /* flags */,
         dim3(size/BlockSize), dim3(BlockSize), 0, stream,
         input, output
     );
-    HIP_CHECK(hipPeekAtLastError());
+    HIP_CHECK(hipGetLastError());
 }
 
 template<
@@ -145,7 +145,7 @@ auto execute_warp_reduce_kernel(T* input, T* output, Flag* flags,
         dim3(size/BlockSize), dim3(BlockSize), 0, stream,
         input, flags, output
     );
-    HIP_CHECK(hipPeekAtLastError());
+    HIP_CHECK(hipGetLastError());
 }
 
 template<

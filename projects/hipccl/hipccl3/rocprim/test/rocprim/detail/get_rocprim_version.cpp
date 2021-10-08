@@ -42,7 +42,7 @@ unsigned int get_rocprim_version_on_device()
         dim3(1), dim3(1), 0, 0,
         d_version
     );
-    HIP_CHECK(hipPeekAtLastError());
+    HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
 
     HIP_CHECK(
