@@ -125,7 +125,7 @@ TYPED_TEST(RocprimTextureCacheIteratorTests, Transform)
                 transform<T>(), stream, debug_synchronous
             )
         );
-        HIP_CHECK(hipPeekAtLastError());
+        HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Copy output to host

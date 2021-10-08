@@ -92,7 +92,7 @@ typed_test_def(RocprimWarpSortShuffleBasedTests, name_suffix, Sort)
             d_output
         );
 
-        HIP_CHECK(hipPeekAtLastError());
+        HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Read from device memory
@@ -203,7 +203,7 @@ typed_test_def(RocprimWarpSortShuffleBasedTests, name_suffix, SortKeyInt)
             d_output_key, d_output_value
         );
 
-        HIP_CHECK(hipPeekAtLastError());
+        HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Read from device memory

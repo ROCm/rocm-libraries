@@ -521,7 +521,7 @@ auto test_block_scan_input_arrays()
             device_output
         );
 
-        HIP_CHECK(hipPeekAtLastError());
+        HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Read from device memory
@@ -624,7 +624,7 @@ auto test_block_scan_input_arrays()
             device_output, device_output_reductions
         );
 
-        HIP_CHECK(hipPeekAtLastError());
+        HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Read from device memory
@@ -740,7 +740,7 @@ auto test_block_scan_input_arrays()
             device_output, device_output_bp, block_prefix
         );
 
-        HIP_CHECK(hipPeekAtLastError());
+        HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Read from device memory
@@ -836,7 +836,7 @@ auto test_block_scan_input_arrays()
             device_output, init
         );
 
-        HIP_CHECK(hipPeekAtLastError());
+        HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Read from device memory
@@ -940,7 +940,7 @@ auto test_block_scan_input_arrays()
             device_output, device_output_reductions, init
         );
 
-        HIP_CHECK(hipPeekAtLastError());
+        HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Read from device memory
@@ -1050,7 +1050,7 @@ auto test_block_scan_input_arrays()
             device_output, device_output_bp, block_prefix
         );
 
-        HIP_CHECK(hipPeekAtLastError());
+        HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Read from device memory

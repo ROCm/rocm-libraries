@@ -63,7 +63,7 @@ void transform_kernel(InputIterator input,
 
 #define ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(name, size, start) \
     { \
-        auto _error = hipPeekAtLastError(); \
+        auto _error = hipGetLastError(); \
         if(_error != hipSuccess) return _error; \
         if(debug_synchronous) \
         { \

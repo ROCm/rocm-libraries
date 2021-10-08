@@ -238,7 +238,7 @@ auto test_block_exchange()
         dim3(grid_size), dim3(block_size), 0, 0,
         device_input, device_output
     );
-    HIP_CHECK(hipPeekAtLastError());
+    HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
 
     // Reading results
@@ -322,7 +322,7 @@ auto test_block_exchange()
         dim3(grid_size), dim3(block_size), 0, 0,
         device_input, device_output
     );
-    HIP_CHECK(hipPeekAtLastError());
+    HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
 
     // Reading results
@@ -418,7 +418,7 @@ auto test_block_exchange()
         dim3(grid_size), dim3(block_size), 0, 0,
         device_input, device_output
     );
-    HIP_CHECK(hipPeekAtLastError());
+    HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
 
     // Reading results
@@ -512,7 +512,7 @@ auto test_block_exchange()
         dim3(grid_size), dim3(block_size), 0, 0,
         device_input, device_output
     );
-    HIP_CHECK(hipPeekAtLastError());
+    HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
 
     // Reading results
@@ -613,7 +613,7 @@ auto test_block_exchange()
         dim3(grid_size), dim3(block_size), 0, 0,
         device_input, device_output, device_ranks
     );
-    HIP_CHECK(hipPeekAtLastError());
+    HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
 
     // Reading results
@@ -717,7 +717,7 @@ auto test_block_exchange()
         dim3(grid_size), dim3(block_size), 0, 0,
         device_input, device_output, device_ranks
     );
-    HIP_CHECK(hipPeekAtLastError());
+    HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
 
     // Reading results

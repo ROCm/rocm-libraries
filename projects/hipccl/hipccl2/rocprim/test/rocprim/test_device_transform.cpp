@@ -183,7 +183,7 @@ TYPED_TEST(RocprimDeviceTransformTests, Transform)
                     input.size(), transform<U>(), stream, debug_synchronous
                 )
             );
-            HIP_CHECK(hipPeekAtLastError());
+            HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipDeviceSynchronize());
 
             // Copy output to host
@@ -316,7 +316,7 @@ TYPED_TEST(RocprimDeviceTransformTests, BinaryTransform)
                     input1.size(), binary_transform<T1, T2, U>(), stream, debug_synchronous
                 )
             );
-            HIP_CHECK(hipPeekAtLastError());
+            HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipDeviceSynchronize());
 
             // Copy output to host

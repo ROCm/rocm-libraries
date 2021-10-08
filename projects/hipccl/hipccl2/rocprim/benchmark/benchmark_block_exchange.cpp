@@ -305,7 +305,7 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
             dim3(size/items_per_block), dim3(BlockSize), 0, stream,
             d_input, d_ranks, d_output
         );
-        HIP_CHECK(hipPeekAtLastError());
+        HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         auto end = std::chrono::high_resolution_clock::now();

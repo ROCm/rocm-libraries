@@ -261,7 +261,7 @@ auto test_block_adjacent_difference()
             dim3(grid_size), dim3(block_size), 0, 0,
             device_input, device_heads
         );
-        HIP_CHECK(hipPeekAtLastError());
+        HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Reading results
@@ -373,7 +373,7 @@ auto test_block_adjacent_difference()
             dim3(grid_size), dim3(block_size), 0, 0,
             device_input, device_tails
         );
-        HIP_CHECK(hipPeekAtLastError());
+        HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Reading results
@@ -499,7 +499,7 @@ auto test_block_adjacent_difference()
             dim3(grid_size), dim3(block_size), 0, 0,
             device_input, device_heads, device_tails
         );
-        HIP_CHECK(hipPeekAtLastError());
+        HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         // Reading results
