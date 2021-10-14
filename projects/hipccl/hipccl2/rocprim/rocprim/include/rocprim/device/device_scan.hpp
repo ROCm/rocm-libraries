@@ -431,7 +431,7 @@ auto scan_impl(void * temporary_storage,
     size_t limited_size = std::min<size_t>(size, aligned_size_limit);
     const bool use_limited_size = limited_size == aligned_size_limit;
 
-    unsigned int number_of_blocks = (size + items_per_block - 1)/items_per_block;
+    unsigned int number_of_blocks = (limited_size + items_per_block - 1)/items_per_block;
 
     // Calculate required temporary storage
     size_t scan_state_bytes = ::rocprim::detail::align_size(
@@ -456,9 +456,8 @@ auto scan_impl(void * temporary_storage,
     if( number_of_blocks == 0u )
         return hipSuccess;
 
-    if(number_of_blocks > 1)
+    if(number_of_blocks > 1 || use_limited_size)
     {
-         number_of_blocks = (limited_size + items_per_block - 1)/items_per_block;
         // Create and initialize lookback_scan_state obj
         auto scan_state = scan_state_type::create(temporary_storage, number_of_blocks);
         auto scan_state_with_sleep = scan_state_with_sleep_type::create(temporary_storage, number_of_blocks);
@@ -492,7 +491,7 @@ auto scan_impl(void * temporary_storage,
         int asicRevision = 0;
 #endif
 
-        unsigned int number_of_launch = (size + limited_size - 1)/limited_size;
+        size_t number_of_launch = (size + limited_size - 1)/limited_size;
         for (size_t i = 0, offset = 0; i < number_of_launch; i++, offset+=limited_size )
         {
             size_t current_size = std::min<size_t>(size - offset, limited_size);

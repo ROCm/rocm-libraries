@@ -30,6 +30,10 @@
 // required test headers
 #include "test_utils_types.hpp"
 
+#include <functional>
+#include <iterator>
+#include <numeric>
+
 // Params for tests
 template<
     class InputType,
@@ -112,7 +116,8 @@ std::vector<size_t> get_sizes(int seed_value)
         0, 1, 10, 53, 211,
         1024, 2048, 5096,
         34567, (1 << 18),
-        (1 << 20) - 12345
+        (1 << 20) - 12345,
+        (1 << 20) + 1
     };
     const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(3, 1, 100000, seed_value);
     sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
@@ -692,4 +697,182 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanByKey)
             hipFree(d_temp_storage);
         }
     }
+}
+
+TEST(RocprimDeviceScanTests, LargeIndicesInclusiveScan)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using T = unsigned int;
+    using Iterator = typename rocprim::counting_iterator<T>;
+    const bool debug_synchronous = false;
+
+    const size_t size = (1ul << 31) + 1ul;
+
+    hipStream_t stream = 0; // default
+
+    unsigned int seed_value = rand();
+    SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+    // Create counting_iterator<U> with random starting point
+    Iterator input_begin(test_utils::get_random_value<T>(0, 200, seed_value));
+
+    std::vector<T> output(size);
+    T * d_output;
+    HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, output.size() * sizeof(T)));
+    HIP_CHECK(hipDeviceSynchronize());
+
+    // Calculate expected results on host
+    std::vector<T> expected(size);
+    test_utils::host_inclusive_scan(
+        input_begin,
+        input_begin + size,
+        expected.begin(),
+        ::rocprim::plus<T>()
+    );
+
+    // temp storage
+    size_t temp_storage_size_bytes;
+    void * d_temp_storage = nullptr;
+
+    // Get temporary array size
+    HIP_CHECK(
+        rocprim::inclusive_scan(
+            d_temp_storage, temp_storage_size_bytes,
+            input_begin, d_output, size,
+            ::rocprim::plus<T>(),
+            stream, debug_synchronous
+        )
+    );
+
+    // temp_storage_size_bytes must be >0
+    ASSERT_GT(temp_storage_size_bytes, 0);
+
+    // allocate temporary storage
+    HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
+    HIP_CHECK(hipDeviceSynchronize());
+
+    // Run
+    HIP_CHECK(
+        rocprim::inclusive_scan(
+            d_temp_storage, temp_storage_size_bytes,
+            input_begin, d_output, size,
+            ::rocprim::plus<T>(),
+            stream, debug_synchronous
+        )
+    );
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipDeviceSynchronize());
+
+    // Copy output to host
+    HIP_CHECK(
+        hipMemcpy(
+            output.data(), d_output,
+            output.size() * sizeof(T),
+            hipMemcpyDeviceToHost
+        )
+    );
+    HIP_CHECK(hipDeviceSynchronize());
+
+    // Validating results
+    for(size_t i = 0; i < output.size(); i++)
+    {
+        ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
+    }
+
+    hipFree(d_temp_storage);
+    hipFree(d_output);
+}
+
+TEST(RocprimDeviceScanTests, LargeIndicesExclusiveScan)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using T = unsigned int;
+    using Iterator = typename rocprim::counting_iterator<T>;
+    const bool debug_synchronous = false;
+
+    const size_t size = (1ul << 31) + 1ul;
+
+    hipStream_t stream = 0; // default
+
+    unsigned int seed_value = rand();
+    SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+    // Create counting_iterator<U> with random starting point
+    Iterator input_begin(test_utils::get_random_value<T>(0, 200, seed_value));
+    T initial_value = test_utils::get_random_value<T>(1, 10, seed_value);
+
+    std::vector<T> output(size);
+    T * d_output;
+    HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, output.size() * sizeof(T)));
+    HIP_CHECK(hipDeviceSynchronize());
+
+    // Calculate expected results on host
+    std::vector<T> expected(size);
+    test_utils::host_exclusive_scan(
+        input_begin,
+        input_begin + size,
+        initial_value,
+        expected.begin(),
+        ::rocprim::plus<T>()
+    );
+
+    // temp storage
+    size_t temp_storage_size_bytes;
+    void * d_temp_storage = nullptr;
+
+    // Get temporary array size
+    HIP_CHECK(
+        rocprim::exclusive_scan(
+            d_temp_storage, temp_storage_size_bytes,
+            input_begin, d_output,
+            initial_value, size,
+            ::rocprim::plus<T>(),
+            stream, debug_synchronous
+        )
+    );
+
+    // temp_storage_size_bytes must be >0
+    ASSERT_GT(temp_storage_size_bytes, 0);
+
+    // allocate temporary storage
+    HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
+    HIP_CHECK(hipDeviceSynchronize());
+
+    // Run
+    HIP_CHECK(
+        rocprim::exclusive_scan(
+            d_temp_storage, temp_storage_size_bytes,
+            input_begin, d_output,
+            initial_value, size,
+            ::rocprim::plus<T>(),
+            stream, debug_synchronous
+        )
+    );
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipDeviceSynchronize());
+
+    // Copy output to host
+    HIP_CHECK(
+        hipMemcpy(
+            output.data(), d_output,
+            output.size() * sizeof(T),
+            hipMemcpyDeviceToHost
+        )
+    );
+    HIP_CHECK(hipDeviceSynchronize());
+
+    // Validating results
+    for(size_t i = 0; i < output.size(); i++)
+    {
+        ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
+    }
+
+    hipFree(d_temp_storage);
+    hipFree(d_output);
 }
