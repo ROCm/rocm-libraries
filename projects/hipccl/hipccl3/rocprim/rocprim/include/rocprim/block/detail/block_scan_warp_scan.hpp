@@ -178,6 +178,7 @@ public:
         {
             output[0] = scan_op(thread_input, input[0]);
         }
+
         // Final thread-local scan
         ROCPRIM_UNROLL
         for(unsigned int i = 1; i < ItemsPerThread; i++)
