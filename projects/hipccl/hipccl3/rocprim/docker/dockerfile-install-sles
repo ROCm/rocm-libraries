@@ -1,6 +1,0 @@
-# Parameters related to building rocfft
-ARG base_image
-
-FROM ${base_image}
-LABEL maintainer="rocprim-maintainer@amd.com"
-
