@@ -1,5 +1,0 @@
-# Parameters related to building hipcub
-ARG base_image
-
-FROM ${base_image}
-LABEL maintainer="hipcub.maintainer@amd.com"
