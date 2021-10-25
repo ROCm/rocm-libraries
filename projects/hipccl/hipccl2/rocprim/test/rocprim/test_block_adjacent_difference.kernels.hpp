@@ -186,7 +186,6 @@ auto test_block_adjacent_difference()
 {
     using type = Type;
     // std::vector<bool> is a special case that will cause an error in hipMemcpy
-    // http://en.cppreference.com/w/cpp/container/vector_bool
     using stored_flag_type = typename std::conditional<
                                std::is_same<bool, FlagType>::value,
                                int,
@@ -298,7 +297,6 @@ auto test_block_adjacent_difference()
 {
     using type = Type;
     // std::vector<bool> is a special case that will cause an error in hipMemcpy
-    // http://en.cppreference.com/w/cpp/container/vector_bool
     using stored_flag_type = typename std::conditional<
                                std::is_same<bool, FlagType>::value,
                                int,
@@ -410,7 +408,6 @@ auto test_block_adjacent_difference()
 {
     using type = Type;
     // std::vector<bool> is a special case that will cause an error in hipMemcpy
-    // http://en.cppreference.com/w/cpp/container/vector_bool
     using stored_flag_type = typename std::conditional<
                                std::is_same<bool, FlagType>::value,
                                int,

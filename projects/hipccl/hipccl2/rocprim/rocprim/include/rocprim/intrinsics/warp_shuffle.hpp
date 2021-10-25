@@ -35,8 +35,6 @@ namespace detail
 {
 
 #ifdef __HIP_CPU_RT__
-// Taken from the notes of https://en.cppreference.com/w/cpp/numeric/bit_cast
-//
 // TODO: consider adding macro checks relaying to std::bit_cast when compiled
 //       using C++20.
 template <class To, class From>

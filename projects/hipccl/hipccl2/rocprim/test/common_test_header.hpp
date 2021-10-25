@@ -80,7 +80,6 @@ int obtain_device_from_ctest()
             amdgpu_target.cend(),
             amdgpu_target.begin(),
             // Feeding std::toupper plainly results in implicitly truncating conversions between int and char triggering warnings.
-            // See: https://en.cppreference.com/mwiki/index.php?title=cpp/string/byte/toupper&oldid=94327
             [](unsigned char c){ return static_cast<char>(std::toupper(c)); }
         );
         std::string reqs = std::getenv((rg0 + "_" + amdgpu_target).c_str());
