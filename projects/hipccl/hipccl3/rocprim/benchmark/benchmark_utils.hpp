@@ -94,8 +94,8 @@ struct half_equal_to
     }
 };
 
-// std::uniform_int_distribution is undefined for anything other than listed
-// https://en.cppreference.com/w/cpp/numeric/random/uniform_int_distribution
+// std::uniform_int_distribution is undefined for anything other than:
+// short, int, long, long long, unsigned short, unsigned int, unsigned long, or unsigned long long
 template <typename T>
 struct is_valid_for_int_distribution :
     std::integral_constant<bool,

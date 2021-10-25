@@ -155,8 +155,6 @@
 // Original code with ISO-conforming overload control
 //
 // NOTE: ShiftLess helper is needed, because partial specializations cannot refer to the free template args.
-//       See: https://stackoverflow.com/questions/2615905/c-template-nontype-parameter-arithmetic
-
 template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit, bool ShiftLess = (StartBit == 0 && EndBit == sizeof(Key) * 8)>
 struct key_comparator
 {

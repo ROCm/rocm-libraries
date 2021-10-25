@@ -29,7 +29,7 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-// invoke_result is based on https://en.cppreference.com/w/cpp/types/result_of
+// invoke_result is based on std::invoke_result.
 // The main difference is using ROCPRIM_HOST_DEVICE, this allows to
 // use invoke_result with device-only lambdas/functors in host-only functions
 // on HIP-clang.
