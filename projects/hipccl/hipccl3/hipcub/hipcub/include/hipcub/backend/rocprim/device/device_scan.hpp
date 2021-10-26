@@ -30,11 +30,6 @@
 #ifndef HIPCUB_ROCPRIM_DEVICE_DEVICE_SCAN_HPP_
 #define HIPCUB_ROCPRIM_DEVICE_DEVICE_SCAN_HPP_
 
-#ifndef HIPCUB_DEVICE_SCAN_SIZE_LIMIT
-#define HIPCUB_DEVICE_SCAN_SIZE_LIMIT size_t(std::numeric_limits<int>::max()) + 1
-#endif
-
-
 #include <iostream>
 #include "../../../config.hpp"
 
@@ -85,8 +80,7 @@ public:
             d_temp_storage, temp_storage_bytes,
             d_in, d_out, num_items,
             ::hipcub::detail::convert_result_type<InputIteratorT, OutputIteratorT>(scan_op),
-            stream, debug_synchronous,
-            HIPCUB_DEVICE_SCAN_SIZE_LIMIT
+            stream, debug_synchronous
         );
     }
 
@@ -132,8 +126,7 @@ public:
             d_temp_storage, temp_storage_bytes,
             d_in, d_out, init_value, num_items,
             ::hipcub::detail::convert_result_type<InputIteratorT, OutputIteratorT>(scan_op),
-            stream, debug_synchronous,
-            HIPCUB_DEVICE_SCAN_SIZE_LIMIT
+            stream, debug_synchronous
         );
     }
 };
