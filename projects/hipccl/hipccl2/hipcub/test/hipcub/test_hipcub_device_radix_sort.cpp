@@ -25,6 +25,7 @@
 // hipcub API
 #include "hipcub/device/device_radix_sort.hpp"
 
+// Ordinary numbers test
 
 template<
     class Key,
