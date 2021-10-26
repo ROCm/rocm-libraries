@@ -36,11 +36,13 @@ def runTestCommand (platform, project)
     def hmmTestCommandExclude = "--exclude-regex \"${hmmExcludeRegex}\""
     if (platform.jenkinsLabel.contains('gfx90a'))
     {
-        hmmTestCommand = """
-                            export HSA_XNACK=1
-                            export ROCPRIM_USE_HMM=1
-                            ${testCommand} ${hmmTestCommandExclude}
-                         """
+        hmmTestCommand = ""
+                        // temporarily disable hmm tests
+                        //  """
+                        //     export HSA_XNACK=1
+                        //     export ROCPRIM_USE_HMM=1
+                        //     ${testCommand} ${hmmTestCommandExclude}
+                        //  """
     }
     def command = """#!/usr/bin/env bash
                 set -x
