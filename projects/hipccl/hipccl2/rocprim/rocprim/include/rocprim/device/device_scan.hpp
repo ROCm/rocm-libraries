@@ -204,14 +204,10 @@ auto scan_impl(void * temporary_storage,
                const size_t size,
                BinaryFunction scan_op,
                const hipStream_t stream,
-               bool debug_synchronous,
-               size_t size_limit)
+               bool debug_synchronous)
     -> typename std::enable_if<!Config::use_lookback, hipError_t>::type
 {
-    using input_type = typename std::iterator_traits<InputIterator>::value_type;
-    using result_type = typename ::rocprim::detail::match_result_type<
-        input_type, BinaryFunction
-    >::type;
+    using result_type = InitValueType;
 
     using config = Config;
 
@@ -219,7 +215,8 @@ auto scan_impl(void * temporary_storage,
     constexpr unsigned int items_per_thread = config::items_per_thread;
     constexpr auto items_per_block = block_size * items_per_thread;
 
-    size_t aligned_size_limit = std::max<size_t>(size_limit - size_limit % items_per_block, items_per_block);
+    static constexpr size_t size_limit = config::size_limit;
+    static constexpr size_t aligned_size_limit = std::max<size_t>(size_limit - size_limit % items_per_block, items_per_block);
     size_t limited_size = std::min<size_t>(size, aligned_size_limit);
     const bool use_limited_size = limited_size == aligned_size_limit;
     size_t nested_prefixes_size_bytes = scan_get_temporary_storage_bytes<result_type>(limited_size, items_per_block);
@@ -406,16 +403,10 @@ auto scan_impl(void * temporary_storage,
                const size_t size,
                BinaryFunction scan_op,
                const hipStream_t stream,
-               bool debug_synchronous,
-               size_t size_limit)
+               bool debug_synchronous)
     -> typename std::enable_if<Config::use_lookback, hipError_t>::type
 {
-    using input_type = typename std::iterator_traits<InputIterator>::value_type;
-    using result_type = typename std::remove_reference<
-        typename ::rocprim::detail::match_result_type<
-            input_type, BinaryFunction
-        >::type
-    >::type;
+    using result_type = InitValueType;
 
     using config = Config;
 
@@ -427,7 +418,8 @@ auto scan_impl(void * temporary_storage,
     constexpr unsigned int items_per_thread = config::items_per_thread;
     constexpr auto items_per_block = block_size * items_per_thread;
 
-    size_t aligned_size_limit = std::max<size_t>(size_limit - size_limit % items_per_block, items_per_block);
+    static constexpr size_t size_limit = config::size_limit;
+    static constexpr size_t aligned_size_limit = std::max<size_t>(size_limit - size_limit % items_per_block, items_per_block);
     size_t limited_size = std::min<size_t>(size, aligned_size_limit);
     const bool use_limited_size = limited_size == aligned_size_limit;
 
@@ -652,7 +644,6 @@ auto scan_impl(void * temporary_storage,
 /// Default is BinaryFunction().
 /// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
 /// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
-/// \param [in] size_limit - [optional] Set the maximum size which handled at the same time
 /// launch is forced in order to check for errors. Default value is \p false.
 ///
 /// \returns \p hipSuccess (\p 0) after successful scan; otherwise a HIP runtime error of
@@ -704,13 +695,10 @@ hipError_t inclusive_scan(void * temporary_storage,
                           const size_t size,
                           BinaryFunction scan_op = BinaryFunction(),
                           const hipStream_t stream = 0,
-                          bool debug_synchronous = false,
-                          size_t size_limit = size_t(std::numeric_limits<int>::max()) + 1)
+                          bool debug_synchronous = false)
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
-    using result_type = typename ::rocprim::detail::match_result_type<
-        input_type, BinaryFunction
-    >::type;
+    using result_type = input_type;
 
     // Get default config if Config is default_config
     using config = detail::default_or_custom_config<
@@ -722,7 +710,7 @@ hipError_t inclusive_scan(void * temporary_storage,
         temporary_storage, storage_size,
         // result_type() is a dummy initial value (not used)
         input, output, result_type{}, size,
-        scan_op, stream, debug_synchronous, size_limit
+        scan_op, stream, debug_synchronous
     );
 }
 
@@ -765,7 +753,6 @@ hipError_t inclusive_scan(void * temporary_storage,
 /// The default value is \p BinaryFunction().
 /// \param [in] stream - [optional] HIP stream object. The default is \p 0 (default stream).
 /// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
-/// \param [in] size_limit - [optional] Set the maximum size which handled at the same time
 /// launch is forced in order to check for errors. The default value is \p false.
 ///
 /// \returns \p hipSuccess (\p 0) after successful scan; otherwise a HIP runtime error of
@@ -827,13 +814,9 @@ hipError_t exclusive_scan(void * temporary_storage,
                           const size_t size,
                           BinaryFunction scan_op = BinaryFunction(),
                           const hipStream_t stream = 0,
-                          bool debug_synchronous = false,
-                          size_t size_limit = size_t(std::numeric_limits<int>::max()) + 1)
+                          bool debug_synchronous = false)
 {
-    using input_type = typename std::iterator_traits<InputIterator>::value_type;
-    using result_type = typename ::rocprim::detail::match_result_type<
-        input_type, BinaryFunction
-    >::type;
+    using result_type = InitValueType;
 
     // Get default config if Config is default_config
     using config = detail::default_or_custom_config<
@@ -844,7 +827,7 @@ hipError_t exclusive_scan(void * temporary_storage,
     return detail::scan_impl<true, config>(
         temporary_storage, storage_size,
         input, output, initial_value, size,
-        scan_op, stream, debug_synchronous, size_limit
+        scan_op, stream, debug_synchronous
     );
 }
 

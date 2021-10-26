@@ -29,6 +29,7 @@
 
 // required test headers
 #include "test_utils_types.hpp"
+#include <numeric>
 
 // Params for tests
 template<
@@ -498,7 +499,7 @@ TYPED_TEST(RocprimDeviceSelectTests, Unique)
                 std::vector<T> input(size);
                 {
                     std::vector<T> input01 = test_utils::get_random_data01<T>(size, p, seed_value);
-                    test_utils::host_inclusive_scan(
+                    std::partial_sum(
                         input01.begin(), input01.end(), input.begin(), scan_op_type()
                     );
                 }
@@ -663,7 +664,7 @@ TEST(RocprimDeviceSelectTests, UniqueGuardedOperator)
                 std::vector<F> input_flag(size);
                 {
                     std::vector<T> input01 = test_utils::get_random_data01<T>(size, p, seed_value + 1);
-                    test_utils::host_inclusive_scan(
+                    std::partial_sum(
                         input01.begin(), input01.end(), input_flag.begin(), scan_op_type()
                     );
                 }

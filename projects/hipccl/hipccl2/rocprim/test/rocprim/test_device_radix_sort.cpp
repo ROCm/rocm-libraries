@@ -84,6 +84,9 @@ typedef ::testing::Types<
     params<unsigned short, test_utils::custom_test_type<double>, false, 8, 11>,
 
     // huge sizes to check correctness of more than 1 block per batch
+    params<int, char, false, 0, 32, true>,
+    params<int, char, true, 0, 32, true>,
+    params<float, char, false, 0, 32, true>,
     params<float, char, true, 0, 32, true>
 > Params;
 
@@ -148,6 +151,10 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeys)
                     seed_index
                 );
             }
+            // put +0.0 and -0.0
+            if(size >= 1) keys_input[0] = key_type( 0.0);
+            if(size >= 2) keys_input[1] = key_type(-0.0);
+            if(size >= 3) keys_input[2] = key_type( 0.0);
 
             key_type * d_keys_input;
             key_type * d_keys_output;
@@ -211,7 +218,6 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeys)
                     )
                 );
             }
-
 
             std::vector<key_type> keys_output(size);
             HIP_CHECK(

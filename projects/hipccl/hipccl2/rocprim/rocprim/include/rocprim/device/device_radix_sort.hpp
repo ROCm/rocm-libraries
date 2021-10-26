@@ -503,7 +503,7 @@ hipError_t radix_sort_iterations_impl(void * temporary_storage,
     const unsigned int iterations = ::rocprim::detail::ceiling_div(bits, config::long_radix_bits);
     const unsigned int radix_bits_diff = config::long_radix_bits - config::short_radix_bits;
     const unsigned int short_iterations = radix_bits_diff != 0
-        ? ::rocprim::min(iterations, (config::long_radix_bits * iterations - bits) / radix_bits_diff)
+        ? ::rocprim::min(iterations, (config::long_radix_bits * iterations - bits) / std::max(1u, radix_bits_diff))
         : 0;
     const unsigned int long_iterations = iterations - short_iterations;
 

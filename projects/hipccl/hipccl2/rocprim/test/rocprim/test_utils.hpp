@@ -636,40 +636,12 @@ inline auto get_random_value(U min, V max, seed_type seed_value)
     return get_random_data<T>(random_data_generation_segments, min, max, seed_value)[0];
 }
 
-// Can't use std::prefix_sum for inclusive/exclusive scan, because
-// it does not handle short[] -> int(int a, int b) { a + b; } -> int[]
-// they way we expect. That's because sum in std::prefix_sum's implementation
-// is of type typename std::iterator_traits<InputIt>::value_type (short)
-template<class InputIt, class OutputIt, class BinaryOperation>
-OutputIt host_inclusive_scan(InputIt first, InputIt last,
-                             OutputIt d_first, BinaryOperation op)
-{
-    using input_type = typename std::iterator_traits<InputIt>::value_type;
-    using result_type = typename ::rocprim::detail::match_result_type<
-        input_type, BinaryOperation
-    >::type;
-
-    if (first == last) return d_first;
-
-    result_type sum = *first;
-    *d_first = sum;
-
-    while (++first != last) {
-       sum = op(sum, *first);
-       *++d_first = sum;
-    }
-    return ++d_first;
-}
-
 template<class InputIt, class T, class OutputIt, class BinaryOperation>
 OutputIt host_exclusive_scan(InputIt first, InputIt last,
                              T initial_value, OutputIt d_first,
                              BinaryOperation op)
 {
-    using input_type = typename std::iterator_traits<InputIt>::value_type;
-    using result_type = typename ::rocprim::detail::match_result_type<
-        input_type, BinaryOperation
-    >::type;
+    using result_type = T;
 
     if (first == last) return d_first;
 
@@ -690,10 +662,7 @@ OutputIt host_exclusive_scan_by_key(InputIt first, InputIt last, KeyIt k_first,
                                     T initial_value, OutputIt d_first,
                                     BinaryOperation op, KeyCompare key_compare_op)
 {
-    using input_type = typename std::iterator_traits<InputIt>::value_type;
-    using result_type = typename ::rocprim::detail::match_result_type<
-        input_type, BinaryOperation
-    >::type;
+    using result_type = T;
 
     if (first == last) return d_first;
 
@@ -1391,6 +1360,19 @@ auto assert_near(const custom_test_type<T>& result, const custom_test_type<T>& e
     auto diff2 = std::max<T>(std::abs(percent * expected.y), T(percent));
     ASSERT_NEAR(result.x, expected.x, diff1);
     ASSERT_NEAR(result.y, expected.y, diff2);
+}
+
+template<class T>
+void assert_bit_eq(const std::vector<T>& result, const std::vector<T>& expected)
+{
+    ASSERT_EQ(result.size(), expected.size());
+    for(size_t i = 0; i < result.size(); i++)
+    {
+        bool the_same = true;
+        for(size_t j = 0; j < sizeof(T); j++)
+            the_same &= ((reinterpret_cast<const uint8_t*>(&result[i]))[j] == (reinterpret_cast<const uint8_t*>(&expected[i]))[j]);
+        ASSERT_EQ(true, the_same) << "where index = " << i;
+    }
 }
 
 template<class T>

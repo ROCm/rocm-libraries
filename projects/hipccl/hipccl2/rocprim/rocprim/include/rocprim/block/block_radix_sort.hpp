@@ -897,7 +897,7 @@ private:
             unsigned int bits[ItemsPerThread];
             for(unsigned int i = 0; i < ItemsPerThread; i++)
             {
-                bits[i] = (bit_keys[i] >> bit) & 1;
+                bits[i] = key_codec::extract_digit(bit_keys[i], bit, 1);
             }
 
             unsigned int ranks[ItemsPerThread];

@@ -40,10 +40,12 @@ BEGIN_ROCPRIM_NAMESPACE
 /// \tparam BlockSize - number of threads in a block.
 /// \tparam ItemsPerThread - number of items processed by each thread.
 /// \tparam BlockReduceMethod - algorithm for block reduce.
+/// \tparam SizeLimit - limit on the number of items reduced by a single launch
 template<
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
-    ::rocprim::block_reduce_algorithm BlockReduceMethod
+    ::rocprim::block_reduce_algorithm BlockReduceMethod,
+    unsigned int SizeLimit = ROCPRIM_GRID_SIZE_LIMIT
 >
 struct reduce_config
 {
@@ -53,6 +55,8 @@ struct reduce_config
     static constexpr unsigned int items_per_thread = ItemsPerThread;
     /// \brief Algorithm for block reduce.
     static constexpr block_reduce_algorithm block_reduce_method = BlockReduceMethod;
+    /// \brief Limit on the number of items reduced by a single launch
+    static constexpr unsigned int size_limit = SizeLimit;
 };
 
 namespace detail

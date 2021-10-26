@@ -45,13 +45,15 @@ BEGIN_ROCPRIM_NAMESPACE
 /// \tparam BlockLoadMethod - method for loading input values.
 /// \tparam StoreLoadMethod - method for storing values.
 /// \tparam BlockScanMethod - algorithm for block scan.
+/// \tparam SizeLimit - limit on the number of items for a single scan kernel launch.
 template<
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
     bool UseLookback,
     ::rocprim::block_load_method BlockLoadMethod,
     ::rocprim::block_store_method BlockStoreMethod,
-    ::rocprim::block_scan_algorithm BlockScanMethod
+    ::rocprim::block_scan_algorithm BlockScanMethod,
+    unsigned int SizeLimit = ROCPRIM_GRID_SIZE_LIMIT
 >
 struct scan_config
 {
@@ -67,6 +69,8 @@ struct scan_config
     static constexpr ::rocprim::block_store_method block_store_method = BlockStoreMethod;
     /// \brief Algorithm for block scan.
     static constexpr ::rocprim::block_scan_algorithm block_scan_method = BlockScanMethod;
+    /// \brief Limit on the number of items for a single scan kernel launch.
+    static constexpr unsigned int size_limit = SizeLimit;
 };
 
 namespace detail

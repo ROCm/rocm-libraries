@@ -21,6 +21,7 @@
 #ifndef ROCPRIM_DEVICE_DEVICE_TRANSFORM_HPP_
 #define ROCPRIM_DEVICE_DEVICE_TRANSFORM_HPP_
 
+#include <algorithm>
 #include <type_traits>
 #include <iterator>
 
@@ -165,24 +166,38 @@ hipError_t transform(InputIterator input,
     // Start point for time measurements
     std::chrono::high_resolution_clock::time_point start;
 
+    static constexpr auto size_limit = config::size_limit;
+    static constexpr auto number_of_blocks_limit
+        = std::max<size_t>(size_limit / items_per_block, 1);
+
     auto number_of_blocks = (size + items_per_block - 1)/items_per_block;
     if(debug_synchronous)
     {
         std::cout << "block_size " << block_size << '\n';
         std::cout << "number of blocks " << number_of_blocks << '\n';
+        std::cout << "number of blocks limit " << number_of_blocks_limit << '\n';
         std::cout << "items_per_block " << items_per_block << '\n';
     }
 
-    if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-    hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(detail::transform_kernel<
-            block_size, items_per_thread, result_type,
-            InputIterator, OutputIterator, UnaryFunction
-        >),
-        dim3(number_of_blocks), dim3(block_size), 0, stream,
-        input, size, output, transform_op
-    );
-    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("transform_kernel", size, start);
+    static constexpr auto aligned_size_limit = number_of_blocks_limit * items_per_block;
+
+    // Launch number_of_blocks_limit blocks while there is still at least as many blocks left as the limit
+    const auto number_of_launch = (size + aligned_size_limit - 1) / aligned_size_limit;
+    for(size_t i = 0, offset = 0; i < number_of_launch; ++i, offset += aligned_size_limit) {
+        const auto current_size = std::min(size - offset, aligned_size_limit);
+        const auto current_blocks = (current_size + items_per_block - 1) / items_per_block;
+
+        if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
+        hipLaunchKernelGGL(
+            HIP_KERNEL_NAME(detail::transform_kernel<
+                block_size, items_per_thread, result_type,
+                InputIterator, OutputIterator, UnaryFunction
+            >),
+            dim3(current_blocks), dim3(block_size), 0, stream,
+            input + offset, current_size, output + offset, transform_op
+        );
+        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("transform_kernel", current_size, start);
+    }
 
     return hipSuccess;
 }

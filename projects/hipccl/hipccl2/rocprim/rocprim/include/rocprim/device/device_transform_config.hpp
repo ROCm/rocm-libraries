@@ -35,8 +35,10 @@
 BEGIN_ROCPRIM_NAMESPACE
 
 /// \brief Configuration of device-level transform primitives.
-template<unsigned int BlockSize, unsigned int ItemsPerThread>
-using transform_config = kernel_config<BlockSize, ItemsPerThread>;
+template <unsigned int BlockSize,
+          unsigned int ItemsPerThread,
+          unsigned int SizeLimit = ROCPRIM_GRID_SIZE_LIMIT>
+using transform_config = kernel_config<BlockSize, ItemsPerThread, SizeLimit>;
 
 namespace detail
 {
