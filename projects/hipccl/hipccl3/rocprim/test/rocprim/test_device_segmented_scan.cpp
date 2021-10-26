@@ -28,6 +28,8 @@
 // required test headers
 #include "test_utils_types.hpp"
 
+#include <numeric>
+
 template<
     class Input,
     class Output,
@@ -68,7 +70,8 @@ typedef ::testing::Types<
     params<custom_int2, custom_short2, rocprim::maximum<custom_int2>, 10, 1000, 10000>,
     params<float, double, rocprim::maximum<double>, 50, 2, 10>,
     params<float, float, rocprim::plus<float>, 123, 100, 200, true>,
-    params<rocprim::bfloat16, float, rocprim::plus<float>, 0, 10, 300, true>,
+    //TODO: Disable bfloat16 test until the follwing PR merge: https://github.com/ROCm-Developer-Tools/HIP/pull/2303
+    //params<rocprim::bfloat16, float, rocprim::plus<float>, 0, 10, 300, true>,
     params<rocprim::bfloat16, rocprim::bfloat16, test_utils::bfloat16_minimum, 0, 1000, 30000>,
 #ifndef __HIP__
     // hip-clang does not allow to convert half to float
@@ -105,7 +108,7 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScan)
     using scan_op_type = typename TestFixture::params::scan_op_type;
     static constexpr bool use_identity_iterator =
         TestFixture::params::use_identity_iterator;
-    using result_type = output_type;
+    using result_type = input_type;
 
     using offset_type = unsigned int;
     const bool debug_synchronous = false;
@@ -247,7 +250,7 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScan)
     using scan_op_type = typename TestFixture::params::scan_op_type;
     static constexpr bool use_identity_iterator =
         TestFixture::params::use_identity_iterator;
-    using result_type = output_type;
+    using result_type = input_type;
     using offset_type = unsigned int;
 
     const input_type init = input_type{TestFixture::params::init};
@@ -450,7 +453,7 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScanUsingHeadFlags)
 
             // Calculate expected results on host
             std::vector<output_type> expected(input.size());
-            test_utils::host_inclusive_scan(
+            std::partial_sum(
                 rocprim::make_zip_iterator(
                     rocprim::make_tuple(input.begin(), flags.begin())
                 ),
@@ -632,7 +635,7 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScanUsingHeadFlags)
                 );
             }
             // Now we can run inclusive scan and get segmented exclusive results
-            test_utils::host_inclusive_scan(
+            std::partial_sum(
                 rocprim::make_zip_iterator(
                     rocprim::make_tuple(expected.begin(), flags.begin())
                 ),
@@ -643,13 +646,13 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScanUsingHeadFlags)
                     rocprim::make_tuple(expected.begin(), rocprim::make_discard_iterator())
                 ),
                 [scan_op](const rocprim::tuple<output_type, flag_type>& t1,
-                        const rocprim::tuple<output_type, flag_type>& t2)
+                          const rocprim::tuple<output_type, flag_type>& t2)
                     -> rocprim::tuple<output_type, flag_type>
                 {
                     if(!rocprim::get<1>(t2))
                     {
                         return rocprim::make_tuple(
-                            scan_op(rocprim::get<0>(t1), rocprim::get<0>(t2)),
+                            (input_type) scan_op(rocprim::get<0>(t1), rocprim::get<0>(t2)),
                             rocprim::get<1>(t1) + rocprim::get<1>(t2)
                         );
                     }

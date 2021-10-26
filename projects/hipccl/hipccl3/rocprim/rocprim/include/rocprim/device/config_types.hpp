@@ -41,13 +41,17 @@ struct default_config { };
 ///
 /// \tparam BlockSize - number of threads in a block.
 /// \tparam ItemsPerThread - number of items processed by each thread.
-template<unsigned int BlockSize, unsigned int ItemsPerThread>
+template <unsigned int BlockSize,
+          unsigned int ItemsPerThread,
+          unsigned int SizeLimit = ROCPRIM_GRID_SIZE_LIMIT>
 struct kernel_config
 {
     /// \brief Number of threads in a block.
     static constexpr unsigned int block_size = BlockSize;
     /// \brief Number of items processed by each thread.
     static constexpr unsigned int items_per_thread = ItemsPerThread;
+    /// \brief Number of items processed by a single kernel launch.
+    static constexpr unsigned int size_limit = SizeLimit;
 };
 
 namespace detail

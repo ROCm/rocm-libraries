@@ -6,10 +6,16 @@ Full documentation for rocPRIM is available at [https://codedocs.xyz/ROCmSoftwar
 ### Fixed
 - Enable bfloat16 tests and reduce threshold for bfloat16
 - Fix device scan limit_size feature
-### Addded
+### Added
 - Added scan size limit feature
+- Added reduce size limit feature
+- Added transform size limit feature
 - Add block_load_striped and block_store_striped
 ### Changed
+- size_limit for scan, reduce and transform can now be set in the config struct instead of a parameter
+- Device_scan and device_segmented_scan: `inclusive_scan` now uses the input-type as accumulator-type, `exclusive_scan` uses initial-value-type. 
+  - This particularly changes behaviour of small-size input types with large-size output types (e.g. `short` input, `int` output).
+  - And low-res input with high-res output (e.g. `float` input, `double` output)
 - Revert old Fiji workaround, because they solved the issue at compiler side
 - Update README cmake minimum version number
 ### Known issues
@@ -18,7 +24,7 @@ Full documentation for rocPRIM is available at [https://codedocs.xyz/ROCmSoftwar
 - ReduceEmptyInput cause random faulire with bfloat16
 
 ## [Unreleased rocPRIM-2.10.11 for ROCm 4.5.0]
-### Addded
+### Added
 - Initial HIP on Windows support. See README for instructions on how to build and install.
 - bfloat16 support added.
 ### Changed

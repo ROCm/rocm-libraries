@@ -27,6 +27,8 @@
 #define END_ROCPRIM_NAMESPACE \
     } /* rocprim */
 
+#include <limits>
+
 #include <hip/hip_runtime.h>
 #include <hip/hip_fp16.h>
 #include <hip/hip_bfloat16.h>
@@ -113,6 +115,10 @@
 #else
 #define ROCPRIM_UNROLL _Pragma("unroll")
 #define ROCPRIM_NO_UNROLL _Pragma("nounroll")
+#endif
+
+#ifndef ROCPRIM_GRID_SIZE_LIMIT
+#define ROCPRIM_GRID_SIZE_LIMIT std::numeric_limits<unsigned int>::max()
 #endif
 
 #endif // ROCPRIM_CONFIG_HPP_
