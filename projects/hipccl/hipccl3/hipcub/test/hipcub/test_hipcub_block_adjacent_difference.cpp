@@ -237,7 +237,6 @@ TYPED_TEST(HipcubBlockAdjacentDifference, FlagHeads)
 {
   using type = typename TestFixture::params::type;
   // std::vector<bool> is a special case that will cause an error in hipMemcpy
-  // http://en.cppreference.com/w/cpp/container/vector_bool
   using stored_flag_type = typename std::conditional<
                              std::is_same<bool, typename TestFixture::params::flag_type>::value,
                              int,
@@ -340,7 +339,6 @@ TYPED_TEST(HipcubBlockAdjacentDifference, FlagTails)
 {
   using type = typename TestFixture::params::type;
   // std::vector<bool> is a special case that will cause an error in hipMemcpy
-  // http://en.cppreference.com/w/cpp/container/vector_bool
   using stored_flag_type = typename std::conditional<
                              std::is_same<bool, typename TestFixture::params::flag_type>::value,
                              int,
@@ -443,7 +441,6 @@ TYPED_TEST(HipcubBlockAdjacentDifference, FlagHeadsAndTails)
 {
   using type = typename TestFixture::params::type;
   // std::vector<bool> is a special case that will cause an error in hipMemcpy
-  // http://en.cppreference.com/w/cpp/container/vector_bool
   using stored_flag_type = typename std::conditional<
                              std::is_same<bool, typename TestFixture::params::flag_type>::value,
                              int,
