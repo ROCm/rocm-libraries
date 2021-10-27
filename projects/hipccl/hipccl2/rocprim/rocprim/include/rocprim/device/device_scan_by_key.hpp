@@ -303,7 +303,10 @@ hipError_t exclusive_scan_by_key(void * temporary_storage,
                                  const hipStream_t stream = 0,
                                  bool debug_synchronous = false)
 {
-    using result_type = InitialValueType;
+    using input_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
+    using result_type = typename ::rocprim::detail::match_result_type<
+        input_type, BinaryFunction
+    >::type;
     using flag_type = bool;
     using headflag_scan_op_wrapper_type =
         detail::headflag_scan_op_wrapper<

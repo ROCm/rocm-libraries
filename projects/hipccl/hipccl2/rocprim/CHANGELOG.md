@@ -13,9 +13,6 @@ Full documentation for rocPRIM is available at [https://codedocs.xyz/ROCmSoftwar
 - Add block_load_striped and block_store_striped
 ### Changed
 - size_limit for scan, reduce and transform can now be set in the config struct instead of a parameter
-- Device_scan and device_segmented_scan: `inclusive_scan` now uses the input-type as accumulator-type, `exclusive_scan` uses initial-value-type. 
-  - This particularly changes behaviour of small-size input types with large-size output types (e.g. `short` input, `int` output).
-  - And low-res input with high-res output (e.g. `float` input, `double` output)
 - Revert old Fiji workaround, because they solved the issue at compiler side
 - Update README cmake minimum version number
 ### Known issues
