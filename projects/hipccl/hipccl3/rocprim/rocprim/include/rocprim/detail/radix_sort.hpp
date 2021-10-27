@@ -160,8 +160,8 @@ struct radix_key_codec_base<bool>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     static unsigned int extract_digit(bit_key_type bit_key, unsigned int start, unsigned int length)
     {
-        (void)length;
-        return bit_key >> start;
+        unsigned int mask = (1u << length) - 1;
+        return (unsigned int)(bit_key >> start) & mask;
     }
 };
 
