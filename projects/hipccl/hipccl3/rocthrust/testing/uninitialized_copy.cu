@@ -188,9 +188,8 @@ struct CopyConstructTest
 
 struct TestUninitializedCopyNonPODDevice
 {
-  void operator()(const size_t dummy)
+  void operator()(const size_t)
   {
-    (void)dummy;
     typedef CopyConstructTest T;
 
     thrust::device_vector<T> v1(5), v2(5);
@@ -215,9 +214,8 @@ DECLARE_UNITTEST(TestUninitializedCopyNonPODDevice);
 
 struct TestUninitializedCopyNNonPODDevice
 {
-  void operator()(const size_t dummy)
+  void operator()(const size_t)
   {
-    (void)dummy;
     typedef CopyConstructTest T;
 
     thrust::device_vector<T> v1(5), v2(5);
@@ -242,9 +240,8 @@ DECLARE_UNITTEST(TestUninitializedCopyNNonPODDevice);
 
 struct TestUninitializedCopyNonPODHost
 {
-  void operator()(const size_t dummy)
+  void operator()(const size_t)
   {
-    (void)dummy;
     typedef CopyConstructTest T;
 
     thrust::host_vector<T> v1(5), v2(5);
@@ -269,9 +266,8 @@ DECLARE_UNITTEST(TestUninitializedCopyNonPODHost);
 
 struct TestUninitializedCopyNNonPODHost
 {
-  void operator()(const size_t dummy)
+  void operator()(const size_t)
   {
-    (void)dummy;
     typedef CopyConstructTest T;
 
     thrust::host_vector<T> v1(5), v2(5);

@@ -24,9 +24,7 @@
 #include <thrust/detail/config.h>
 #include <thrust/detail/execution_policy.h>
 
-namespace thrust
-{
-
+THRUST_NAMESPACE_BEGIN
 
 /*! \addtogroup reductions
  *  \{
@@ -52,11 +50,11 @@ namespace thrust
  *  \return \c true, if the sequences are equal; \c false, otherwise.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam InputIterator1 is a model of <a href="http://www.sgi.com/tech/stl/InputIterator.html">Input Iterator</a>,
- *          and \p InputIterator1's \c value_type is a model of <a href="http://www.sgi.com/tech/stl/EqualityComparable.html">Equality Comparable</a>,
+ *  \tparam InputIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
+ *          and \p InputIterator1's \c value_type is a model of <a href="https://en.cppreference.com/w/cpp/concepts/equality_comparable">Equality Comparable</a>,
  *          and \p InputIterator1's \c value_type can be compared for equality with \c InputIterator2's \c value_type.
- *  \tparam InputIterator2 is a model of <a href="http://www.sgi.com/tech/stl/InputIterator.html">Input Iterator</a>,
- *          and \p InputIterator2's \c value_type is a model of <a href="http://www.sgi.com/tech/stl/EqualityComparable.html">Equality Comparable</a>,
+ *  \tparam InputIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
+ *          and \p InputIterator2's \c value_type is a model of <a href="https://en.cppreference.com/w/cpp/concepts/equality_comparable">Equality Comparable</a>,
  *          and \p InputIterator2's \c value_type can be compared for equality with \c InputIterator1's \c value_type.
  *
  *  The following code snippet demonstrates how to use \p equal to test
@@ -74,7 +72,7 @@ namespace thrust
  *  // result == false
  *  \endcode
  *
- *  \see http://www.sgi.com/tech/stl/equal.html
+ *  \see https://en.cppreference.com/w/cpp/algorithm/equal
  */
 template<typename DerivedPolicy, typename InputIterator1, typename InputIterator2>
 __host__ __device__
@@ -93,11 +91,11 @@ bool equal(const thrust::detail::execution_policy_base<DerivedPolicy> &exec, Inp
  *  \param first2 The beginning of the second sequence.
  *  \return \c true, if the sequences are equal; \c false, otherwise.
  *
- *  \tparam InputIterator1 is a model of <a href="http://www.sgi.com/tech/stl/InputIterator.html">Input Iterator</a>,
- *          and \p InputIterator1's \c value_type is a model of <a href="http://www.sgi.com/tech/stl/EqualityComparable.html">Equality Comparable</a>,
+ *  \tparam InputIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
+ *          and \p InputIterator1's \c value_type is a model of <a href="https://en.cppreference.com/w/cpp/concepts/equality_comparable">Equality Comparable</a>,
  *          and \p InputIterator1's \c value_type can be compared for equality with \c InputIterator2's \c value_type.
- *  \tparam InputIterator2 is a model of <a href="http://www.sgi.com/tech/stl/InputIterator.html">Input Iterator</a>,
- *          and \p InputIterator2's \c value_type is a model of <a href="http://www.sgi.com/tech/stl/EqualityComparable.html">Equality Comparable</a>,
+ *  \tparam InputIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
+ *          and \p InputIterator2's \c value_type is a model of <a href="https://en.cppreference.com/w/cpp/concepts/equality_comparable">Equality Comparable</a>,
  *          and \p InputIterator2's \c value_type can be compared for equality with \c InputIterator1's \c value_type.
  *
  *  The following code snippet demonstrates how to use \p equal to test
@@ -114,7 +112,7 @@ bool equal(const thrust::detail::execution_policy_base<DerivedPolicy> &exec, Inp
  *  // result == false
  *  \endcode
  *
- *  \see http://www.sgi.com/tech/stl/equal.html
+ *  \see https://en.cppreference.com/w/cpp/algorithm/equal
  */
 template <typename InputIterator1, typename InputIterator2>
 bool equal(InputIterator1 first1, InputIterator1 last1,
@@ -139,11 +137,11 @@ bool equal(InputIterator1 first1, InputIterator1 last1,
  *  \return \c true, if the sequences are equal; \c false, otherwise.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam InputIterator1 is a model of <a href="http://www.sgi.com/tech/stl/InputIterator.html">Input Iterator</a>,
+ *  \tparam InputIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
  *          and \p InputIterator1's \c value_type is convertible to \p BinaryPredicate's \c first_argument_type.
- *  \tparam InputIterator2 is a model of <a href="http://www.sgi.com/tech/stl/InputIterator.html">Input Iterator</a>,
+ *  \tparam InputIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
  *          and \p InputIterator2's \c value_type is convertible to \p BinaryPredicate's \c second_argument_type.
- *  \tparam BinaryPredicate is a model of <a href="http://www.sgi.com/tech/stl/BinaryPredicate.html">Binary Predicate</a>.
+ *  \tparam BinaryPredicate is a model of <a href="https://en.cppreference.com/w/cpp/named_req/BinaryPredicate">Binary Predicate</a>.
  *
  *  The following code snippet demonstrates how to use \p equal to compare the
  *  elements in two ranges modulo 2 using the \p thrust::host execution policy.
@@ -170,7 +168,7 @@ bool equal(InputIterator1 first1, InputIterator1 last1,
  *  // result is false
  *  \endcode
  *
- *  \see http://www.sgi.com/tech/stl/equal.html
+ *  \see https://en.cppreference.com/w/cpp/algorithm/equal
  */
 template<typename DerivedPolicy, typename InputIterator1, typename InputIterator2, typename BinaryPredicate>
 __host__ __device__
@@ -191,11 +189,11 @@ bool equal(const thrust::detail::execution_policy_base<DerivedPolicy> &exec, Inp
  *  \param binary_pred Binary predicate used to test element equality.
  *  \return \c true, if the sequences are equal; \c false, otherwise.
  *
- *  \tparam InputIterator1 is a model of <a href="http://www.sgi.com/tech/stl/InputIterator.html">Input Iterator</a>,
+ *  \tparam InputIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
  *          and \p InputIterator1's \c value_type is convertible to \p BinaryPredicate's \c first_argument_type.
- *  \tparam InputIterator2 is a model of <a href="http://www.sgi.com/tech/stl/InputIterator.html">Input Iterator</a>,
+ *  \tparam InputIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
  *          and \p InputIterator2's \c value_type is convertible to \p BinaryPredicate's \c second_argument_type.
- *  \tparam BinaryPredicate is a model of <a href="http://www.sgi.com/tech/stl/BinaryPredicate.html">Binary Predicate</a>.
+ *  \tparam BinaryPredicate is a model of <a href="https://en.cppreference.com/w/cpp/named_req/BinaryPredicate">Binary Predicate</a>.
  *
  *  The following code snippet demonstrates how to use \p equal to compare the
  *  elements in two ranges modulo 2.
@@ -220,7 +218,7 @@ bool equal(const thrust::detail::execution_policy_base<DerivedPolicy> &exec, Inp
  *  // result is true
  *  \endcode
  *
- *  \see http://www.sgi.com/tech/stl/equal.html
+ *  \see https://en.cppreference.com/w/cpp/algorithm/equal
  */
 template <typename InputIterator1, typename InputIterator2, 
           typename BinaryPredicate>
@@ -232,7 +230,6 @@ bool equal(InputIterator1 first1, InputIterator1 last1,
  *  \} // end reductions
  */
 
-} // end namespace thrust
+THRUST_NAMESPACE_END
 
 #include <thrust/detail/equal.inl>
-

@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright (c) 2019-2021, Advanced Micro Devices, Inc.  All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@
 
 /*! \file thrust/system/hip/vector.h
  *  \brief A dynamically-sizable array of elements which reside in memory available to
- *         Thrust's hip system.
+ *         Thrust's HIP system.
  */
 
 #pragma once
@@ -27,44 +27,63 @@
 #include <thrust/detail/vector_base.h>
 #include <vector>
 
-namespace thrust
-{
-
-// forward declaration of host_vector
-template<typename T, typename Allocator> class host_vector;
-
+THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
 
-/*! \p hip_rocprim::vector is a container that supports random access to elements,
+/*! \p hip::vector is a container that supports random access to elements,
  *  constant time removal of elements at the end, and linear time insertion
  *  and removal of elements at the beginning or in the middle. The number of
- *  elements in a \p hip_rocprim::vector may vary dynamically; memory management is
- *  automatic. The elements contained in a \p hip_rocprim::vector reside in memory
- *  available to the \p hip_rocprim system.
+ *  elements in a \p hip::vector may vary dynamically; memory management is
+ *  automatic. The elements contained in a \p hip::vector reside in memory
+ *  accessible by the \p hip system.
  *
- *  \tparam T The element type of the \p hip_rocprim::vector.
- *  \tparam Allocator The allocator type of the \p hip_rocprim::vector. Defaults to \p hip_rocprim::allocator.
+ *  \tparam T The element type of the \p hip::vector.
+ *  \tparam Allocator The allocator type of the \p hip::vector.
+ *          Defaults to \p hip::allocator.
  *
- *  \see http://www.sgi.com/tech/stl/Vector.html
+ *  \see https://en.cppreference.com/w/cpp/container/vector
  *  \see host_vector For the documentation of the complete interface which is
- *                   shared by \p hip_rocprim::vector
+ *                   shared by \p hip::vector
  *  \see device_vector
+ *  \see universal_vector
  */
- template<typename T, typename Allocator = allocator<T> >
- using vector = thrust::detail::vector_base<T, Allocator>;
+template <typename T, typename Allocator = thrust::system::hip::allocator<T>>
+using vector = thrust::detail::vector_base<T, Allocator>;
 
+/*! \p hip::universal_vector is a container that supports random access to
+ *  elements, constant time removal of elements at the end, and linear time
+ *  insertion and removal of elements at the beginning or in the middle. The
+ *  number of elements in a \p hip::universal_vector may vary dynamically;
+ *  memory management is automatic. The elements contained in a
+ *  \p hip::universal_vector reside in memory accessible by the \p hip system
+ *  and host systems.
+ *
+ *  \tparam T The element type of the \p hip::universal_vector.
+ *  \tparam Allocator The allocator type of the \p hip::universal_vector.
+ *          Defaults to \p hip::universal_allocator.
+ *
+ *  \see https://en.cppreference.com/w/cpp/container/vector
+ *  \see host_vector For the documentation of the complete interface which is
+ *                   shared by \p hip::universal_vector
+ *  \see device_vector
+ *  \see universal_vector
+ */
+template <typename T, typename Allocator = thrust::system::hip::universal_allocator<T>>
+using universal_vector = thrust::detail::vector_base<T, Allocator>;
 
-} // end hip_rocprim
+} // namespace hip_rocprim
 
-// alias system::hip_rocprim names at top-level
-namespace hip_rocprim
+namespace system { namespace hip
 {
-
 using thrust::hip_rocprim::vector;
+using thrust::hip_rocprim::universal_vector;
+}}
 
-} // end hip_rocprim
+namespace hip
+{
+using thrust::hip_rocprim::vector;
+using thrust::hip_rocprim::universal_vector;
+}
 
-} // end thrust
-
-#include <thrust/system/hip/detail/vector.inl>
+THRUST_NAMESPACE_END

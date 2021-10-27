@@ -39,8 +39,7 @@
 // #include this for stl's iterator tags
 #include <iterator>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 
 /*! \addtogroup iterators
  *  \addtogroup iterator_tags Iterator Tags
@@ -55,7 +54,7 @@ namespace thrust
  *  representation of the Input Device Iterator concept within the C++ type
  *  system.
  *
- *  \see http://www.sgi.com/tech/sgi/input_iterator_tag.html, iterator_traits,
+ *  \see https://en.cppreference.com/w/cpp/iterator/iterator_tags  iterator_traits,
  *  output_device_iterator_tag, forward_device_iterator_tag,
  *  bidirectional_device_iterator_tag, random_access_device_iterator_tag,
  *  input_host_iterator_tag, output_host_iterator_tag, forward_host_iterator_tag,
@@ -74,7 +73,7 @@ struct input_device_iterator_tag
  *  representation of the Output Device Iterator concept within the C++ type
  *  system.
  *
- *  \see http://www.sgi.com/tech/sgi/output_iterator_tag.html, iterator_traits,
+ *  \see https://en.cppreference.com/w/cpp/iterator/iterator_tags  iterator_traits,
  *  input_device_iterator_tag, forward_device_iterator_tag,
  *  bidirectional_device_iterator_tag, random_access_device_iterator_tag,
  *  input_host_iterator_tag, output_host_iterator_tag, forward_host_iterator_tag,
@@ -93,7 +92,7 @@ struct output_device_iterator_tag
  *  representation of the Forward Device Iterator concept within the C++ type
  *  system.
  *
- *  \see http://www.sgi.com/tech/sgi/forward_iterator_tag.html, iterator_traits,
+ *  \see https://en.cppreference.com/w/cpp/iterator/iterator_tags  iterator_traits,
  *  input_device_iterator_tag, output_device_iterator_tag,
  *  bidirectional_device_iterator_tag, random_access_device_iterator_tag,
  *  input_host_iterator_tag, output_host_iterator_tag, forward_host_iterator_tag,
@@ -112,7 +111,7 @@ struct forward_device_iterator_tag
  *  representation of the Bidirectional Device Iterator concept within the C++
  *  type system.
  *
- *  \see http://www.sgi.com/tech/sgi/bidirectional_iterator_tag.html,
+ *  \see https://en.cppreference.com/w/cpp/iterator/iterator_tags 
  *  iterator_traits, input_device_iterator_tag, output_device_iterator_tag,
  *  forward_device_iterator_tag, random_access_device_iterator_tag,
  *  input_host_iterator_tag, output_host_iterator_tag, forward_host_iterator_tag,
@@ -131,7 +130,7 @@ struct bidirectional_device_iterator_tag
  *  representation of the Random Access Device Iterator concept within the C++
  *  type system.
  *
- *  \see http://www.sgi.com/tech/sgi/random_access_iterator_tag.html,
+ *  \see https://en.cppreference.com/w/cpp/iterator/iterator_tags 
  *  iterator_traits, input_device_iterator_tag, output_device_iterator_tag,
  *  forward_device_iterator_tag, bidirectional_device_iterator_tag,
  *  input_host_iterator_tag, output_host_iterator_tag, forward_host_iterator_tag,
@@ -150,7 +149,7 @@ struct random_access_device_iterator_tag
  *  representation of the Input Host Iterator concept within the C++
  *  type system.
  *
- *  \see http://www.sgi.com/tech/sgi/input_iterator_tag.html,
+ *  \see https://en.cppreference.com/w/cpp/iterator/iterator_tags 
  *  iterator_traits, input_device_iterator_tag, output_device_iterator_tag,
  *  forward_device_iterator_tag, bidirectional_device_iterator_tag,
  *  random_access_device_iterator_tag,
@@ -164,7 +163,7 @@ typedef std::input_iterator_tag input_host_iterator_tag;
  *  representation of the Output Host Iterator concept within the C++
  *  type system.
  *
- *  \see http://www.sgi.com/tech/sgi/output_iterator_tag.html,
+ *  \see https://en.cppreference.com/w/cpp/iterator/iterator_tags 
  *  iterator_traits, input_device_iterator_tag, output_device_iterator_tag,
  *  forward_device_iterator_tag, bidirectional_device_iterator_tag,
  *  random_access_device_iterator_tag,
@@ -178,7 +177,7 @@ typedef std::output_iterator_tag output_host_iterator_tag;
  *  representation of the Forward Host Iterator concept within the C++
  *  type system.
  *
- *  \see http://www.sgi.com/tech/sgi/forward_iterator_tag.html,
+ *  \see https://en.cppreference.com/w/cpp/iterator/iterator_tags 
  *  iterator_traits, input_device_iterator_tag, output_device_iterator_tag,
  *  forward_device_iterator_tag, bidirectional_device_iterator_tag,
  *  random_access_device_iterator_tag,
@@ -192,7 +191,7 @@ typedef std::forward_iterator_tag forward_host_iterator_tag;
  *  representation of the Forward Host Iterator concept within the C++
  *  type system.
  *
- *  \see http://www.sgi.com/tech/sgi/bidirectional_iterator_tag.html,
+ *  \see https://en.cppreference.com/w/cpp/iterator/iterator_tags 
  *  iterator_traits, input_device_iterator_tag, output_device_iterator_tag,
  *  forward_device_iterator_tag, bidirectional_device_iterator_tag,
  *  random_access_device_iterator_tag,
@@ -206,7 +205,7 @@ typedef std::bidirectional_iterator_tag bidirectional_host_iterator_tag;
  *  representation of the Forward Host Iterator concept within the C++
  *  type system.
  *
- *  \see http://www.sgi.com/tech/sgi/random_access_iterator_tag.html,
+ *  \see https://en.cppreference.com/w/cpp/iterator/iterator_tags 
  *  iterator_traits, input_device_iterator_tag, output_device_iterator_tag,
  *  forward_device_iterator_tag, bidirectional_device_iterator_tag,
  *  random_access_device_iterator_tag,
@@ -218,7 +217,7 @@ typedef std::random_access_iterator_tag random_access_host_iterator_tag;
 /*! \} // end iterator_tag_classes
  */
 
-} // end namespace thrust
+THRUST_NAMESPACE_END
 
 #include <thrust/iterator/detail/universal_categories.h>
 

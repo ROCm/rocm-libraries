@@ -9,10 +9,9 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/detail/cpp11_required.h>
-#include <thrust/detail/modern_gcc_required.h>
+#include <thrust/detail/cpp14_required.h>
 
-#if THRUST_CPP_DIALECT >= 2011 && !defined(THRUST_LEGACY_GCC)
+#if THRUST_CPP_DIALECT >= 2014
 
 #include <thrust/optional.h>
 #include <thrust/detail/type_deduction.h>
@@ -32,8 +31,7 @@
 #include <type_traits>
 #include <thrust/detail/memory_wrapper.h>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 
 // Forward declaration.
 struct new_stream_t;
@@ -363,7 +361,7 @@ try_acquire_stream(int device, unique_eager_future<X>& parent) noexcept;
 template <typename... Dependencies>
 __host__
 acquired_stream acquire_stream(int device, Dependencies&... deps) noexcept;
-
+  
 template <typename... Dependencies>
 __host__
 unique_eager_event
@@ -522,7 +520,7 @@ public:
 
   // Precondition: `true == valid_content()`.
   __host__
-  pointer data()
+  pointer data() 
   {
     if (!valid_content())
       throw thrust::event_error(event_errc::no_content);
@@ -532,7 +530,7 @@ public:
 
   // Precondition: `true == valid_content()`.
   __host__
-  const_pointer data() const
+  const_pointer data() const 
   {
     if (!valid_content())
       throw thrust::event_error(event_errc::no_content);
@@ -586,8 +584,8 @@ private:
   int device_ = 0;
   pointer content_;
 
-  explicit weak_promise(int device, pointer content)
-    : device_(device), content_(std::move(content))
+  explicit weak_promise(int device_id, pointer content)
+    : device_(device_id), content_(std::move(content))
   {}
 
 public:
@@ -675,7 +673,7 @@ public:
   }
 
   THRUST_NODISCARD __host__ __device__
-  value_type extract()
+  value_type extract() 
   {
     return std::move(value_);
   }
@@ -698,9 +696,9 @@ protected:
 
   __host__
   explicit unique_eager_event(
-    int device, std::unique_ptr<detail::async_signal> async_signal
+    int device_id, std::unique_ptr<detail::async_signal> async_signal
   )
-    : device_(device), async_signal_(std::move(async_signal))
+    : device_(device_id), async_signal_(std::move(async_signal))
   {}
 
 public:
@@ -785,7 +783,7 @@ public:
   friend __host__
   optional<detail::unique_stream>
   thrust::system::cuda::detail::try_acquire_stream(
-    int device, unique_eager_event& parent
+    int device_id, unique_eager_event& parent
     ) noexcept;
 
   template <typename... Dependencies>
@@ -813,9 +811,9 @@ private:
 
   __host__
   explicit unique_eager_future(
-    int device, std::unique_ptr<detail::async_value<value_type>> async_signal
+    int device_id, std::unique_ptr<detail::async_value<value_type>> async_signal
   )
-    : device_(device), async_signal_(std::move(async_signal))
+    : device_(device_id), async_signal_(std::move(async_signal))
   {}
 
 public:
@@ -943,7 +941,7 @@ public:
   friend __host__
   optional<detail::unique_stream>
   thrust::system::cuda::detail::try_acquire_stream(
-    int device, unique_eager_future<X>& parent
+    int device_id, unique_eager_future<X>& parent
     ) noexcept;
 
   template <
@@ -998,12 +996,12 @@ try_acquire_stream(int, ready_future<X>&) noexcept
 
 __host__
 optional<unique_stream>
-try_acquire_stream(int device, unique_eager_event& parent) noexcept
+try_acquire_stream(int device_id, unique_eager_event& parent) noexcept
 {
   // We have unique ownership, so we can always steal the stream if the future
   // has one as long as they are on the same device as us.
   if (parent.valid_stream())
-    if (device == parent.device_)
+    if (device_id == parent.device_)
       return std::move(parent.async_signal_->stream());
 
   return {};
@@ -1012,12 +1010,12 @@ try_acquire_stream(int device, unique_eager_event& parent) noexcept
 template <typename X>
 __host__
 optional<unique_stream>
-try_acquire_stream(int device, unique_eager_future<X>& parent) noexcept
+try_acquire_stream(int device_id, unique_eager_future<X>& parent) noexcept
 {
   // We have unique ownership, so we can always steal the stream if the future
   // has one as long as they are on the same device as us.
   if (parent.valid_stream())
-    if (device == parent.device_)
+    if (device_id == parent.device_)
       return std::move(parent.async_signal_->stream());
 
   return {};
@@ -1039,27 +1037,27 @@ acquired_stream acquire_stream_impl(
 template <typename... Dependencies, std::size_t I0, std::size_t... Is>
 __host__
 acquired_stream acquire_stream_impl(
-  int device
+  int device_id
 , std::tuple<Dependencies...>& deps, index_sequence<I0, Is...>
 ) noexcept
 {
-  auto tr = try_acquire_stream(device, std::get<I0>(deps));
+  auto tr = try_acquire_stream(device_id, std::get<I0>(deps));
 
   if (tr)
     return {std::move(*tr), {I0}};
   else
-    return acquire_stream_impl(device, deps, index_sequence<Is...>{});
+    return acquire_stream_impl(device_id, deps, index_sequence<Is...>{});
 }
 
 template <typename... Dependencies>
 __host__
 acquired_stream acquire_stream(
-  int device
+  int device_id
 , std::tuple<Dependencies...>& deps
 ) noexcept
 {
   return acquire_stream_impl(
-    device, deps, make_index_sequence<sizeof...(Dependencies)>{}
+    device_id, deps, make_index_sequence<sizeof...(Dependencies)>{}
   );
 }
 
@@ -1272,11 +1270,11 @@ template <typename... Dependencies>
 __host__
 unique_eager_event make_dependent_event(std::tuple<Dependencies...>&& deps)
 {
-  int device = 0;
-  thrust::cuda_cub::throw_on_error(cudaGetDevice(&device));
+  int device_id = 0;
+  thrust::cuda_cub::throw_on_error(cudaGetDevice(&device_id));
 
   // First, either steal a stream from one of our children or make a new one.
-  auto as = acquire_stream(device, deps);
+  auto as = acquire_stream(device_id, deps);
 
   // Then, make the stream we've acquired asynchronously wait on all of our
   // dependencies, except the one we stole the stream from.
@@ -1296,7 +1294,7 @@ unique_eager_event make_dependent_event(std::tuple<Dependencies...>&& deps)
   );
 
   // Finally, we create the event object.
-  return unique_eager_event(device, std::move(sig));
+  return unique_eager_event(device_id, std::move(sig));
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1309,11 +1307,11 @@ __host__
 unique_eager_future_promise_pair<X, XPointer>
 make_dependent_future(ComputeContent&& cc, std::tuple<Dependencies...>&& deps)
 {
-  int device = 0;
-  thrust::cuda_cub::throw_on_error(cudaGetDevice(&device));
+  int device_id = 0;
+  thrust::cuda_cub::throw_on_error(cudaGetDevice(&device_id));
 
   // First, either steal a stream from one of our children or make a new one.
-  auto as = acquire_stream(device, deps);
+  auto as = acquire_stream(device_id, deps);
 
   // Then, make the stream we've acquired asynchronously wait on all of our
   // dependencies, except the one we stole the stream from.
@@ -1333,10 +1331,10 @@ make_dependent_future(ComputeContent&& cc, std::tuple<Dependencies...>&& deps)
   std::unique_ptr<async_signal_type> sig(
     new async_signal_type(std::move(as.stream), std::move(ka), std::move(cc))
   );
-
+ 
   // Finally, we create the promise and future objects.
-  weak_promise<X, XPointer> child_prom(device, sig->data());
-  unique_eager_future<X> child_fut(device, std::move(sig));
+  weak_promise<X, XPointer> child_prom(device_id, sig->data());
+  unique_eager_future<X> child_fut(device_id, std::move(sig));
 
   return unique_eager_future_promise_pair<X, XPointer>
     {std::move(child_fut), std::move(child_prom)};
@@ -1352,7 +1350,7 @@ unique_eager_event when_all(Events&&... evs)
 // TODO: Constrain to events, futures, and maybe streams (currently allows keep
 // alives).
 {
-  return detail::make_dependent_event(std::make_tuple(std::move(evs)...));
+  return detail::make_dependent_event(std::make_tuple(std::move(evs)...)); 
 }
 
 // ADL hook for transparent `.after` move support.
@@ -1368,6 +1366,7 @@ THRUST_DECLTYPE_RETURNS(std::move(dependency))
 
 }} // namespace system::cuda
 
-} // end namespace thrust
+THRUST_NAMESPACE_END
 
-#endif
+#endif // C++14
+

@@ -35,9 +35,7 @@ TYPED_TEST(AdjacentDifferenceTests, TestAdjacentDifferenceSimple)
 
     Vector input(3);
     Vector output(3);
-    input[0] = 1;
-    input[1] = 4;
-    input[2] = 6;
+    input[0] = 1; input[1] = 4; input[2] = 6;
 
     typename Vector::iterator result;
 

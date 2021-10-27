@@ -28,7 +28,7 @@
 #include <thrust/detail/config.h>
 #include <thrust/detail/execution_policy.h>
 
-namespace thrust {
+THRUST_NAMESPACE_BEGIN
 
 /*! \addtogroup reordering
 *  \ingroup algorithms
@@ -116,7 +116,7 @@ __host__ __device__ void shuffle(RandomIterator first, RandomIterator last,
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
  *  \tparam RandomIterator is a random access iterator
- *  \tparam OutputIterator is a model of <a href="http://www.sgi.com/tech/stl/OutputIterator.html">Output Iterator</a>.
+ *  \tparam OutputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>.
  *  \tparam URBG is a uniform random bit generator
  *
  *  The following code snippet demonstrates how to use \p shuffle_copy to create a random permutation.
@@ -151,7 +151,7 @@ __host__ __device__ void shuffle_copy(
  *  \param g A UniformRandomBitGenerator
  *
  *  \tparam RandomIterator is a random access iterator
- *  \tparam OutputIterator is a model of <a href="http://www.sgi.com/tech/stl/OutputIterator.html">Output Iterator</a>.
+ *  \tparam OutputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>.
  *  \tparam URBG is a uniform random bit generator
  *
  *  The following code snippet demonstrates how to use \p shuffle_copy to create a random permutation.
@@ -173,7 +173,7 @@ template <typename RandomIterator, typename OutputIterator, typename URBG>
 __host__ __device__ void shuffle_copy(RandomIterator first, RandomIterator last,
                                       OutputIterator result, URBG&& g);
 
-}  // namespace thrust
+THRUST_NAMESPACE_END
 
 #include <thrust/detail/shuffle.inl>
 #endif

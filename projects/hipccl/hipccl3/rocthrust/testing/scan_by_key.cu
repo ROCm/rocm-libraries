@@ -18,6 +18,7 @@
 #include <unittest/unittest.h>
 #include <thrust/scan.h>
 #include <thrust/functional.h>
+#include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/transform_iterator.h>
 #include <thrust/iterator/retag.h>
 #include <thrust/random.h>
@@ -383,27 +384,20 @@ DECLARE_VECTOR_UNITTEST(TestScanByKeyReusedKeys);
 template <typename T>
 void TestInclusiveScanByKey(const size_t n)
 {
-    // XXX WAR nvbug 1541533
-#if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC
-    if(typeid(T) == typeid(char) ||
-       typeid(T) == typeid(unsigned char))
-    {
-      KNOWN_FAILURE;
-    }
-#endif
-
     thrust::host_vector<int> h_keys(n);
     thrust::default_random_engine rng;
     for(size_t i = 0, k = 0; i < n; i++){
-        h_keys[i] = k;
+        h_keys[i] = static_cast<int>(k);
         if (rng() % 10 == 0)
+        {
             k++;
+        }
     }
     thrust::device_vector<int> d_keys = h_keys;
 
     thrust::host_vector<T>   h_vals = unittest::random_integers<int>(n);
     for(size_t i = 0; i < n; i++)
-        h_vals[i] = i % 10;
+        h_vals[i] = static_cast<int>(i % 10);
     thrust::device_vector<T> d_vals = h_vals;
 
     thrust::host_vector<T>   h_output(n);
@@ -422,15 +416,19 @@ void TestExclusiveScanByKey(const size_t n)
     thrust::host_vector<int> h_keys(n);
     thrust::default_random_engine rng;
     for(size_t i = 0, k = 0; i < n; i++){
-        h_keys[i] = k;
+        h_keys[i] = static_cast<int>(k);
         if (rng() % 10 == 0)
+        {
             k++;
+        }
     }
     thrust::device_vector<int> d_keys = h_keys;
 
     thrust::host_vector<T>   h_vals = unittest::random_integers<int>(n);
     for(size_t i = 0; i < n; i++)
-        h_vals[i] = i % 10;
+    {
+        h_vals[i] = static_cast<int>(i % 10);
+    }
     thrust::device_vector<T> d_vals = h_vals;
 
     thrust::host_vector<T>   h_output(n);
@@ -452,27 +450,22 @@ DECLARE_VARIABLE_UNITTEST(TestExclusiveScanByKey);
 template <typename T>
 void TestInclusiveScanByKeyInPlace(const size_t n)
 {
-    // XXX WAR nvbug 1541533
-#if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC
-    if(typeid(T) == typeid(char) ||
-       typeid(T) == typeid(unsigned char))
-    {
-      KNOWN_FAILURE;
-    }
-#endif
-
     thrust::host_vector<int> h_keys(n);
     thrust::default_random_engine rng;
     for(size_t i = 0, k = 0; i < n; i++){
-        h_keys[i] = k;
+        h_keys[i] = static_cast<int>(k);
         if (rng() % 10 == 0)
+        {
             k++;
+        }
     }
     thrust::device_vector<int> d_keys = h_keys;
 
     thrust::host_vector<T>   h_vals = unittest::random_integers<int>(n);
     for(size_t i = 0; i < n; i++)
-        h_vals[i] = i % 10;
+    {
+        h_vals[i] = static_cast<int>(i % 10);
+    }
     thrust::device_vector<T> d_vals = h_vals;
 
     thrust::host_vector<T>   h_output(n);
@@ -494,15 +487,19 @@ void TestExclusiveScanByKeyInPlace(const size_t n)
     thrust::host_vector<int> h_keys(n);
     thrust::default_random_engine rng;
     for(size_t i = 0, k = 0; i < n; i++){
-        h_keys[i] = k;
+        h_keys[i] = static_cast<int>(k);
         if (rng() % 10 == 0)
+        {
             k++;
+        }
     }
     thrust::device_vector<int> d_keys = h_keys;
 
     thrust::host_vector<T>   h_vals = unittest::random_integers<int>(n);
     for(size_t i = 0; i < n; i++)
-        h_vals[i] = i % 10;
+    {
+        h_vals[i] = static_cast<int>(i % 10);
+    }
     thrust::device_vector<T> d_vals = h_vals;
 
     thrust::host_vector<T>   h_output = h_vals;
@@ -521,9 +518,11 @@ void TestScanByKeyMixedTypes(void)
     thrust::host_vector<int> h_keys(n);
     thrust::default_random_engine rng;
     for(size_t i = 0, k = 0; i < n; i++){
-        h_keys[i] = k;
+        h_keys[i] = static_cast<int>(k);
         if (rng() % 10 == 0)
+        {
             k++;
+        }
     }
     thrust::device_vector<int> d_keys = h_keys;
 
@@ -561,6 +560,74 @@ void TestScanByKeyMixedTypes(void)
 DECLARE_UNITTEST(TestScanByKeyMixedTypes);
 
 
+template <typename T>
+void TestScanByKeyDiscardOutput(std::size_t n)
+{
+  thrust::host_vector<T> h_keys(n);
+  thrust::default_random_engine rng;
+
+  for (size_t i = 0, k = 0; i < n; i++)
+  {
+    h_keys[i] = static_cast<T>(k);
+    if (rng() % 10 == 0)
+    {
+      k++;
+    }
+  }
+  thrust::device_vector<T> d_keys = h_keys;
+
+  thrust::host_vector<T> h_vals(n);
+  for(size_t i = 0; i < n; i++)
+  {
+    h_vals[i] = static_cast<T>(i % 10);
+  }
+  thrust::device_vector<T> d_vals = h_vals;
+
+  auto out = thrust::make_discard_iterator();
+
+  // These are no-ops, but they should compile.
+  thrust::exclusive_scan_by_key(d_keys.cbegin(),
+                                d_keys.cend(),
+                                d_vals.cbegin(),
+                                out);
+  thrust::exclusive_scan_by_key(d_keys.cbegin(),
+                                d_keys.cend(),
+                                d_vals.cbegin(),
+                                out,
+                                T{});
+  thrust::exclusive_scan_by_key(d_keys.cbegin(),
+                                d_keys.cend(),
+                                d_vals.cbegin(),
+                                out,
+                                T{},
+                                thrust::equal_to<T>{});
+  thrust::exclusive_scan_by_key(d_keys.cbegin(),
+                                d_keys.cend(),
+                                d_vals.cbegin(),
+                                out,
+                                T{},
+                                thrust::equal_to<T>{},
+                                thrust::multiplies<T>{});
+
+  thrust::inclusive_scan_by_key(d_keys.cbegin(),
+                                d_keys.cend(),
+                                d_vals.cbegin(),
+                                out);
+  thrust::inclusive_scan_by_key(d_keys.cbegin(),
+                                d_keys.cend(),
+                                d_vals.cbegin(),
+                                out,
+                                thrust::equal_to<T>{});
+  thrust::inclusive_scan_by_key(d_keys.cbegin(),
+                                d_keys.cend(),
+                                d_vals.cbegin(),
+                                out,
+                                thrust::equal_to<T>{},
+                                thrust::multiplies<T>{});
+}
+DECLARE_VARIABLE_UNITTEST(TestScanByKeyDiscardOutput);
+
+
 void TestScanByKeyLargeInput()
 {
     const unsigned int N = 1 << 20;
@@ -580,10 +647,12 @@ void TestScanByKeyLargeInput()
         // define segments
         thrust::host_vector<unsigned int> h_keys(n);
         thrust::default_random_engine rng;
-        for(size_t i = 0, k = 0; i < n; i++){
-            h_keys[i] = k;
+        for(size_t j = 0, k = 0; j < n; j++){
+            h_keys[j] = static_cast<unsigned int>(k);
             if (rng() % 100 == 0)
+            {
                 k++;
+            }
         }
         thrust::device_vector<unsigned int> d_keys = h_keys;
 
@@ -611,10 +680,12 @@ void _TestScanByKeyWithLargeTypes(void)
     thrust::default_random_engine rng;
     for(size_t i = 0, k = 0; i < h_vals.size(); i++)
     {
-        h_vals[i] = FixedVector<T,N>(i);
-        h_keys[i]  = k;
+        h_keys[i] = static_cast<unsigned int>(k);
+        h_vals[i] = FixedVector<T,N>(static_cast<T>(i));
         if (rng() % 5 == 0)
+        {
             k++;
+        }
     }
 
     thrust::device_vector<   unsigned int   > d_keys = h_keys;

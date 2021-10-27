@@ -32,8 +32,7 @@
 #include <thread>
 
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace system
 {
 namespace tbb
@@ -338,4 +337,4 @@ template<typename DerivedPolicy, typename Iterator1, typename Iterator2, typenam
 } // end detail
 } // end tbb
 } // end system
-} // end thrust
+THRUST_NAMESPACE_END

@@ -42,8 +42,7 @@
 // rocprim include
 #include <rocprim/rocprim.hpp>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
 namespace __scan_by_key
@@ -331,7 +330,7 @@ exclusive_scan_by_key(execution_policy<Derived>& policy,
         return thrust::exclusive_scan_by_key( cvt_to_seq(derived_cast(policy)), key_first, key_last, value_first, value_result, init, binary_pred, scan_op);
       }
   };
-  
+
   #if __THRUST_HAS_HIPRT__
     return workaround::par(policy, key_first, key_last, value_first, value_result, init, binary_pred, scan_op);
   #else
@@ -398,7 +397,7 @@ exclusive_scan_by_key(execution_policy<Derived>& policy,
 }
 
 } // namespace hip_rocprim
-} // end namespace thrust
+THRUST_NAMESPACE_END
 
 #include <thrust/scan.h>
 

@@ -26,6 +26,7 @@
  ******************************************************************************/
 #pragma once
 
+#include <thrust/detail/config.h>
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 #include <thrust/system/cuda/config.h>
@@ -41,8 +42,9 @@
 #include <thrust/distance.h>
 #include <thrust/detail/alignment.h>
 
-namespace thrust
-{
+#include <cub/util_math.cuh>
+
+THRUST_NAMESPACE_BEGIN
 // XXX declare generic copy_if interface
 // to avoid circulular dependency from thrust/copy.h
 template <typename DerivedPolicy, typename InputIterator, typename OutputIterator, typename Predicate>
@@ -190,11 +192,11 @@ namespace __copy_if {
 
       union TempStorage
       {
-        struct
+        struct ScanStorage
         {
           typename BlockScan::TempStorage          scan;
           typename TilePrefixCallback::TempStorage prefix;
-        };
+        } scan_storage;
 
         typename BlockLoadItems::TempStorage   load_items;
         typename BlockLoadStencil::TempStorage load_stencil;
@@ -419,7 +421,7 @@ namespace __copy_if {
         Size num_selections_prefix = 0;
         if (IS_FIRST_TILE)
         {
-          BlockScan(storage.scan)
+          BlockScan(storage.scan_storage.scan)
               .ExclusiveSum(selection_flags,
                             selection_idx,
                             num_tile_selections);
@@ -442,10 +444,10 @@ namespace __copy_if {
         else
         {
           TilePrefixCallback prefix_cb(tile_state,
-                                       storage.prefix,
+                                       storage.scan_storage.prefix,
                                        cub::Sum(),
                                        tile_idx);
-          BlockScan(storage.scan)
+          BlockScan(storage.scan_storage.scan)
               .ExclusiveSum(selection_flags,
                             selection_idx,
                             prefix_cb);
@@ -636,7 +638,7 @@ namespace __copy_if {
     typename get_plan<copy_if_agent>::type copy_if_plan = copy_if_agent::get_plan(stream);
 
     int tile_size = copy_if_plan.items_per_tile;
-    size_t num_tiles = (num_items + tile_size - 1) / tile_size;
+    size_t num_tiles = cub::DivideAndRoundUp(num_items, tile_size);
 
     size_t vshmem_size = core::vshmem_size(copy_if_plan.shared_memory_size,
                                            num_tiles);
@@ -851,7 +853,7 @@ copy_if(execution_policy<Derived> &policy,
 }    // func copy_if
 
 }    // namespace cuda_cub
-} // end namespace thrust
+THRUST_NAMESPACE_END
 
 #include <thrust/copy.h>
 #endif

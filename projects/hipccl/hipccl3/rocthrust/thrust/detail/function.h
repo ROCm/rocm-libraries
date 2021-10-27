@@ -19,13 +19,12 @@
 #include <thrust/detail/config.h>
 #include <thrust/detail/raw_reference_cast.h>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
+
 namespace detail
 {
 
-
-template<typename Function, typename Result>
+template <typename Function, typename Result>
   struct wrapped_function
 {
   // mutable because Function::operator() might be const
@@ -51,37 +50,46 @@ template<typename Function, typename Result>
 
   __thrust_exec_check_disable__
   template <typename Argument>
-    inline __host__ __device__ Result operator()(const Argument& x) const
+  inline __host__ __device__
+  Result operator()(const Argument& x) const
   {
     return static_cast<Result>(m_f(thrust::raw_reference_cast(x)));
   }
 
   __thrust_exec_check_disable__
   template <typename Argument1, typename Argument2>
-    inline __host__ __device__ Result operator()(Argument1& x, Argument2& y) const
+  inline __host__ __device__
+  Result operator()(Argument1& x, Argument2& y) const
   {
-    return static_cast<Result>(m_f(thrust::raw_reference_cast(x), thrust::raw_reference_cast(y)));
+    return static_cast<Result>(m_f(thrust::raw_reference_cast(x),
+                                   thrust::raw_reference_cast(y)));
   }
 
   __thrust_exec_check_disable__
   template <typename Argument1, typename Argument2>
-    inline __host__ __device__ Result operator()(const Argument1& x, Argument2& y) const
+  inline __host__ __device__
+  Result operator()(const Argument1& x, Argument2& y) const
   {
-    return static_cast<Result>(m_f(thrust::raw_reference_cast(x), thrust::raw_reference_cast(y)));
+    return static_cast<Result>(m_f(thrust::raw_reference_cast(x),
+                                   thrust::raw_reference_cast(y)));
   }
 
   __thrust_exec_check_disable__
   template <typename Argument1, typename Argument2>
-    inline __host__ __device__ Result operator()(const Argument1& x, const Argument2& y) const
+  inline __host__ __device__
+  Result operator()(const Argument1& x, const Argument2& y) const
   {
-    return static_cast<Result>(m_f(thrust::raw_reference_cast(x), thrust::raw_reference_cast(y)));
+    return static_cast<Result>(m_f(thrust::raw_reference_cast(x),
+                                   thrust::raw_reference_cast(y)));
   }
 
   __thrust_exec_check_disable__
-  template<typename Argument1, typename Argument2>
-    inline __host__ __device__ Result operator()(Argument1 &x, const Argument2 &y) const
+  template <typename Argument1, typename Argument2>
+  inline __host__ __device__
+  Result operator()(Argument1& x, const Argument2& y) const
   {
-    return static_cast<Result>(m_f(thrust::raw_reference_cast(x), thrust::raw_reference_cast(y)));
+    return static_cast<Result>(m_f(thrust::raw_reference_cast(x),
+                                   thrust::raw_reference_cast(y)));
   }
 }; // end wrapped_function
 
@@ -149,4 +157,5 @@ struct wrapped_function<Function, void>
 }; // end wrapped_function
 
 } // namespace detail
-} // namespace thrust
+
+THRUST_NAMESPACE_END

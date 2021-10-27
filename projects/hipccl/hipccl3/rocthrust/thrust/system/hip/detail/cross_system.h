@@ -31,8 +31,7 @@
 #include <thrust/system/cpp/detail/execution_policy.h>
 #include <thrust/system/hip/detail/execution_policy.h>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
 
@@ -59,7 +58,7 @@ struct cross_system : execution_policy<cross_system<Sys1, Sys2> >
 #if THRUST_CPP_DIALECT >= 2011
   // Device to host.
   template <class Sys1, class Sys2>
-  THRUST_CONSTEXPR __host__ __device__
+  constexpr __host__ __device__
   auto direction_of_copy(
     thrust::system::hip::execution_policy<Sys1> const&
   , thrust::cpp::execution_policy<Sys2> const&
@@ -72,7 +71,7 @@ struct cross_system : execution_policy<cross_system<Sys1, Sys2> >
 
   // Host to device.
   template <class Sys1, class Sys2>
-  THRUST_CONSTEXPR __host__ __device__
+  constexpr __host__ __device__
   auto direction_of_copy(
     thrust::cpp::execution_policy<Sys1> const&
   , thrust::system::hip::execution_policy<Sys2> const&
@@ -85,7 +84,7 @@ struct cross_system : execution_policy<cross_system<Sys1, Sys2> >
 
   // Device to device.
   template <class Sys1, class Sys2>
-  THRUST_CONSTEXPR __host__ __device__
+  constexpr __host__ __device__
   auto direction_of_copy(
     thrust::system::hip::execution_policy<Sys1> const&
   , thrust::system::hip::execution_policy<Sys2> const&
@@ -98,7 +97,7 @@ struct cross_system : execution_policy<cross_system<Sys1, Sys2> >
 
   // Device to device.
   template <class DerivedPolicy>
-  THRUST_CONSTEXPR __host__ __device__
+  constexpr __host__ __device__
   auto direction_of_copy(execution_policy<DerivedPolicy> const &)
   THRUST_DECLTYPE_RETURNS(
     thrust::detail::integral_constant<
@@ -107,7 +106,7 @@ struct cross_system : execution_policy<cross_system<Sys1, Sys2> >
   )
 
   template <class Sys1, class Sys2>
-  THRUST_CONSTEXPR __host__ __device__
+  constexpr __host__ __device__
   auto direction_of_copy(
     execution_policy<cross_system<Sys1, Sys2>> const &systems
   )
@@ -124,7 +123,7 @@ struct cross_system : execution_policy<cross_system<Sys1, Sys2> >
             typename Direction =
               decltype(direction_of_copy(std::declval<ExecutionPolicy0>(),
                                          std::declval<ExecutionPolicy1>()))>
-  THRUST_CONSTEXPR __host__ __device__
+  constexpr __host__ __device__
   auto is_device_to_host_copy(
     ExecutionPolicy0 const&
   , ExecutionPolicy1 const&
@@ -141,7 +140,7 @@ struct cross_system : execution_policy<cross_system<Sys1, Sys2> >
             // MSVC2015 WAR: put decltype here instead of in trailing return type
             typename Direction =
               decltype(direction_of_copy(std::declval<ExecutionPolicy>()))>
-  THRUST_CONSTEXPR __host__ __device__
+  constexpr __host__ __device__
   auto is_device_to_host_copy(ExecutionPolicy const& )
     noexcept ->
       thrust::detail::integral_constant<
@@ -157,7 +156,7 @@ struct cross_system : execution_policy<cross_system<Sys1, Sys2> >
             typename Direction =
               decltype(direction_of_copy(std::declval<ExecutionPolicy0>(),
                                          std::declval<ExecutionPolicy1>()))>
-  THRUST_CONSTEXPR __host__ __device__
+  constexpr __host__ __device__
   auto is_host_to_device_copy(
     ExecutionPolicy0 const&
   , ExecutionPolicy1 const&
@@ -174,7 +173,7 @@ struct cross_system : execution_policy<cross_system<Sys1, Sys2> >
             // MSVC2015 WAR: put decltype here instead of in trailing return type
             typename Direction =
               decltype(direction_of_copy(std::declval<ExecutionPolicy>()))>
-  THRUST_CONSTEXPR __host__ __device__
+  constexpr __host__ __device__
   auto is_host_to_device_copy(ExecutionPolicy const& )
     noexcept ->
       thrust::detail::integral_constant<
@@ -190,7 +189,7 @@ struct cross_system : execution_policy<cross_system<Sys1, Sys2> >
             typename Direction =
               decltype(direction_of_copy(std::declval<ExecutionPolicy0>(),
                                          std::declval<ExecutionPolicy1>()))>
-  THRUST_CONSTEXPR __host__ __device__
+  constexpr __host__ __device__
   auto is_device_to_device_copy(
     ExecutionPolicy0 const&
   , ExecutionPolicy1 const&
@@ -207,7 +206,7 @@ struct cross_system : execution_policy<cross_system<Sys1, Sys2> >
             // MSVC2015 WAR: put decltype here instead of in trailing return type
             typename Direction =
               decltype(direction_of_copy(std::declval<ExecutionPolicy>()))>
-  THRUST_CONSTEXPR __host__ __device__
+  constexpr __host__ __device__
   auto is_device_to_device_copy(ExecutionPolicy const& )
     noexcept ->
       thrust::detail::integral_constant<
@@ -343,4 +342,4 @@ struct cross_system : execution_policy<cross_system<Sys1, Sys2> >
   }
 
 } // namespace hip_rocprim
-} // end namespace thrust
+THRUST_NAMESPACE_END

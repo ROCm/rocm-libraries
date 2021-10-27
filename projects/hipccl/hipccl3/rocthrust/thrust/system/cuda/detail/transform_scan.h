@@ -26,14 +26,14 @@
  ******************************************************************************/
 #pragma once
 
+#include <thrust/detail/config.h>
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 #include <iterator>
 #include <thrust/system/cuda/detail/scan.h>
 #include <thrust/distance.h>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 
 namespace cuda_cub {
 
@@ -86,12 +86,11 @@ transform_exclusive_scan(execution_policy<Derived> &policy,
                          InputIt                    last,
                          OutputIt                   result,
                          TransformOp                transform_op,
-                         T                          init,
+                         InitialValueType           init,
                          ScanOp                     scan_op)
 {
   // Use the initial value type per https://wg21.link/P0571
   using result_type = typename std::remove_reference<InitialValueType>::type;
-
 
   typedef typename iterator_traits<InputIt>::difference_type size_type;
   size_type num_items = static_cast<size_type>(thrust::distance(first, last));
@@ -110,5 +109,5 @@ transform_exclusive_scan(execution_policy<Derived> &policy,
 
 }    // namespace cuda_cub
 
-} // end namespace thrust
+THRUST_NAMESPACE_END
 #endif

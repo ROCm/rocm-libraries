@@ -30,8 +30,7 @@
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 #include <thrust/system/hip/detail/copy_if.h>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
 
@@ -107,5 +106,5 @@ remove_copy(execution_policy<Derived>& policy,
 }
 
 } // namespace hip_rocprim
-} // end namespace thrust
+THRUST_NAMESPACE_END
 #endif

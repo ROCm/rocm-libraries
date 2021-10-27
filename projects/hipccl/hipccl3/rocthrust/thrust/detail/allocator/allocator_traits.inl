@@ -26,8 +26,7 @@
 #include <thrust/detail/memory_wrapper.h>
 #include <new>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace detail
 {
   #if THRUST_CPP_DIALECT >= 2011
@@ -459,4 +458,4 @@ __host__ __device__
 
 
 } // end detail
-} // end thrust
+THRUST_NAMESPACE_END

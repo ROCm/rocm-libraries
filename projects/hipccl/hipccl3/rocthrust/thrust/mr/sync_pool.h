@@ -20,6 +20,7 @@
 
 #pragma once
 
+#include <thrust/detail/config.h>
 #include <thrust/detail/cpp11_required.h>
 
 #if THRUST_CPP_DIALECT >= 2011
@@ -28,8 +29,7 @@
 
 #include <thrust/mr/pool.h>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace mr
 {
 
@@ -89,13 +89,13 @@ public:
         upstream_pool.release();
     }
 
-    THRUST_NODISCARD virtual void_ptr do_allocate(std::size_t bytes, std::size_t alignment = THRUST_MR_DEFAULT_ALIGNMENT) THRUST_OVERRIDE
+    THRUST_NODISCARD virtual void_ptr do_allocate(std::size_t bytes, std::size_t alignment = THRUST_MR_DEFAULT_ALIGNMENT) override
     {
         lock_t lock(mtx);
         return upstream_pool.do_allocate(bytes, alignment);
     }
 
-    virtual void do_deallocate(void_ptr p, std::size_t n, std::size_t alignment = THRUST_MR_DEFAULT_ALIGNMENT) THRUST_OVERRIDE
+    virtual void do_deallocate(void_ptr p, std::size_t n, std::size_t alignment = THRUST_MR_DEFAULT_ALIGNMENT) override
     {
         lock_t lock(mtx);
         upstream_pool.do_deallocate(p, n, alignment);
@@ -110,7 +110,7 @@ private:
  */
 
 } // end mr
-} // end thrust
+THRUST_NAMESPACE_END
 
 #endif // THRUST_CPP_DIALECT >= 2011
 

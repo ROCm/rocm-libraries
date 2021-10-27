@@ -41,8 +41,7 @@
 #include <mutex>
 #include <unordered_map>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 
 namespace hip_rocprim
 {
@@ -63,7 +62,7 @@ MR * get_per_device_resource(execution_policy<DerivedPolicy>&)
 
 }
 
-} // end namespace thrust
+THRUST_NAMESPACE_END
 
 #endif
 

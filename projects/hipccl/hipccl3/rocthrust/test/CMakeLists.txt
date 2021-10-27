@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright 2019 Advanced Micro Devices, Inc.
+# Copyright 2019-2021 Advanced Micro Devices, Inc.
 # ########################################################################
 
 if(NOT CMAKE_VERSION VERSION_LESS 3.12)
@@ -99,7 +99,7 @@ function(add_rocthrust_test TEST)
       foreach( file_i ${third_party_dlls})
         add_custom_command( TARGET ${TEST_TARGET} POST_BUILD COMMAND ${CMAKE_COMMAND} ARGS -E copy_if_different ${file_i} ${PROJECT_BINARY_DIR}/test )
       endforeach( file_i )
-    endif()        
+    endif()
 endfunction()
 
 # ****************************************************************************
@@ -112,6 +112,7 @@ add_rocthrust_test("allocator")
 add_rocthrust_test("allocator_aware_policies")
 add_rocthrust_test("async_copy")
 add_rocthrust_test("async_reduce")
+add_rocthrust_test("async_scan")
 add_rocthrust_test("async_sort")
 add_rocthrust_test("async_transform")
 add_rocthrust_test("binary_search")
@@ -157,6 +158,7 @@ add_rocthrust_test("pair_reduce")
 add_rocthrust_test("pair_scan")
 add_rocthrust_test("pair_sort")
 add_rocthrust_test("pair_transform")
+add_rocthrust_test("parallel_for")
 add_rocthrust_test("partition")
 add_rocthrust_test("partition_point")
 add_rocthrust_test("permutation_iterator")
@@ -206,6 +208,7 @@ add_rocthrust_test("uninitialized_copy")
 add_rocthrust_test("uninitialized_fill")
 add_rocthrust_test("unique")
 add_rocthrust_test("unique_by_key")
+add_rocthrust_test("universal_memory")
 add_rocthrust_test("vector")
 add_rocthrust_test("vector_allocators")
 add_rocthrust_test("vector_insert")

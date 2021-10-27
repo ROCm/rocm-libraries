@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-21 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -122,4 +122,25 @@ TYPED_TEST(PrimitiveTransformIteratorTests, TransformIteratorReduce)
             ASSERT_NEAR(h_result, d_result, error_margin);
         }
     }
+}
+
+struct ExtractValue{
+    int operator()(std::unique_ptr<int> const& n){
+        return *n;
+    }
+};
+
+TEST(TransformIteratorTests, TestTransformIteratorNonCopyable)
+{
+    thrust::host_vector<std::unique_ptr<int>> hv(4);
+    hv[0].reset(new int{1});
+    hv[1].reset(new int{2});
+    hv[2].reset(new int{3});
+    hv[3].reset(new int{4});
+
+    auto transformed = thrust::make_transform_iterator(hv.begin(), ExtractValue{});
+    ASSERT_EQ(transformed[0], 1);
+    ASSERT_EQ(transformed[1], 2);
+    ASSERT_EQ(transformed[2], 3);
+    ASSERT_EQ(transformed[3], 4);
 }

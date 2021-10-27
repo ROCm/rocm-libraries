@@ -47,7 +47,7 @@ struct thrust::detail::pointer_traits<alloc_id>
     }
 };
 
-class dummy_resource THRUST_FINAL : public thrust::mr::memory_resource<alloc_id>
+class dummy_resource final : public thrust::mr::memory_resource<alloc_id>
 {
 public:
     dummy_resource() : id_to_allocate(0), id_to_deallocate(0)
@@ -60,7 +60,7 @@ public:
         EXPECT_EQ(id_to_deallocate, 0u);
     }
 
-    virtual alloc_id do_allocate(std::size_t bytes, std::size_t alignment) THRUST_OVERRIDE
+    virtual alloc_id do_allocate(std::size_t bytes, std::size_t alignment) override
     {
         EXPECT_EQ(static_cast<bool>(id_to_allocate), true);
 
@@ -74,7 +74,7 @@ public:
         return ret;
     }
 
-    virtual void do_deallocate(alloc_id p, std::size_t bytes, std::size_t alignment) THRUST_OVERRIDE
+    virtual void do_deallocate(alloc_id p, std::size_t bytes, std::size_t alignment) override
     {
         ASSERT_EQ(p.size, bytes);
         ASSERT_EQ(p.alignment, alignment);
@@ -293,7 +293,7 @@ TEST(MrDisjointPoolTests, TestUnsynchronizedDisjointGlobalPool)
 TEST(MrDisjointPoolTests, TestSynchronizedDisjointGlobalPool)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-    
+
     TestDisjointGlobalPool<thrust::mr::disjoint_synchronized_pool_resource>();
 }
 #endif

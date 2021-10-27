@@ -39,9 +39,12 @@ variables:
     - s9300
     - rocm
   before_script:
+    - $SUDO_CMD rm /etc/apt/sources.list.d/rocm.list
     - $SUDO_CMD apt update -qq
     # | Used in the script    | Build tools | Fetch from https:// | rocminfo calls lsmod
     - $SUDO_CMD apt install -y -qq libidn11 wget tar xz-utils bzip2 libnuma-dev libunwind-dev git build-essential pkg-config ninja-build ca-certificates kmod
+    - $SUDO_CMD apt-get install -y -qq wget libidn11 libnuma-dev libunwind-dev git tar xz-utils bzip2 build-essential pkg-config  ninja-build ca-certificates
+    - $SUDO_CMD wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | $SUDO_CMD apt-key add -
     # Fetch CMake only if the cache has not been restored
     - if [ ! -d $CMAKE_MINIMUM_PATH ]; then mkdir -p $CMAKE_MINIMUM_PATH; wget --no-check-certificate --quiet -O - $CMAKE_MINIMUM_URL | tar --strip-components=1 -xz -C $CMAKE_MINIMUM_PATH
     - fi
@@ -63,9 +66,12 @@ variables:
     - mi25
     - rocm
   before_script:
+    - $SUDO_CMD rm /etc/apt/sources.list.d/rocm.list
     - $SUDO_CMD apt update -qq
     # | Used in the script    | Build tools | Fetch from https:// | rocminfo calls lsmod
     - $SUDO_CMD apt install -y -qq wget tar xz-utils bzip2 libnuma-dev libunwind-dev git build-essential pkg-config ninja-build ca-certificates kmod
+    - $SUDO_CMD apt-get install -y -qq wget libidn11 libnuma-dev libunwind-dev git tar xz-utils bzip2 build-essential pkg-config  ninja-build ca-certificates
+    - $SUDO_CMD wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | $SUDO_CMD apt-key add -
     # Fetch CMake only if the cache has not been restored
     - if [ ! -d $CMAKE_LATEST_PATH ]; then mkdir -p $CMAKE_LATEST_PATH; wget --no-check-certificate --quiet -O - $CMAKE_LATEST_URL | tar --strip-components=1 -xz -C $CMAKE_LATEST_PATH;
     - fi;
@@ -89,6 +95,16 @@ build:cmake-latest:
   script:
     - mkdir -p $BUILD_LATEST_DIR
     - cd $BUILD_LATEST_DIR
+    - git clone https://github.com/RadeonOpenCompute/rocm-cmake.git
+    - cd rocm-cmake && mkdir build && cd build
+    - cmake
+      -G Ninja
+      -D CMAKE_CXX_COMPILER=hipcc
+      -D CMAKE_BUILD_TYPE=Release
+      ../
+    - $SUDO_CMD cmake
+        --build ./ --target install
+    - cd .. && cd ..
     - cmake
       -G Ninja
       -D CMAKE_CXX_COMPILER=hipcc
@@ -108,7 +124,7 @@ build:cmake-latest:
     paths:
     - $BUILD_LATEST_DIR/test/*
     - $BUILD_LATEST_DIR/testing/*
-    - $BUILD_LATEST_DIR/gtest/*
+    - $BUILD_LATEST_DIR/deps/*
     - $BUILD_LATEST_DIR/CMakeCache.txt
     - $BUILD_LATEST_DIR/CTestTestfile.cmake
     exclude:
@@ -124,6 +140,16 @@ build:cmake-minimum:
   script:
     - mkdir -p $BUILD_MINIMUM_DIR
     - cd $BUILD_MINIMUM_DIR
+    - git clone https://github.com/RadeonOpenCompute/rocm-cmake.git
+    - cd rocm-cmake && mkdir build && cd build
+    - cmake
+      -G Ninja
+      -D CMAKE_CXX_COMPILER=hipcc
+      -D CMAKE_BUILD_TYPE=Release
+      ../
+    - $SUDO_CMD cmake
+        --build ./ --target install
+    - cd .. && cd ..
     - cmake
       -G Ninja
       -D CMAKE_CXX_COMPILER=hipcc
@@ -177,6 +203,16 @@ deploy:deb:
     # Install rocPRIM package
     - echo ${ROCPRIM_GIT_URL}
     - echo $ROCPRIM_GIT_URL
+    - git clone https://github.com/RadeonOpenCompute/rocm-cmake.git
+    - cd rocm-cmake && mkdir build && cd build
+    - cmake
+      -G Ninja
+      -D CMAKE_CXX_COMPILER=hipcc
+      -D CMAKE_BUILD_TYPE=Release
+      ../
+    - $SUDO_CMD cmake
+        --build ./ --target install
+    - cd .. && cd ..
     - git clone -b develop_stream https://gitlab-ci-token:${CI_JOB_TOKEN}@${ROCPRIM_GIT_URL}
     - cmake
       -G Ninja
@@ -205,3 +241,19 @@ deploy:deb:
     # Remove rocPRIM and rocThrust
     - $SUDO_CMD dpkg -r rocthrust
     - $SUDO_CMD dpkg -r rocprim
+
+test:doc:
+  variables:
+    SUDO_CMD: "sudo -E"
+  tags:
+    - rocm # Do it on rocm machine
+  image: rocm/rocm-terminal:latest
+  stage: test
+  needs: []
+  before_script:
+    - $SUDO_CMD rm /etc/apt/sources.list.d/rocm.list
+    - $SUDO_CMD apt update -qq
+    - $SUDO_CMD apt install -y -qq texlive-latex-recommended texlive-latex-extra texlive-fonts-recommended latexmk python-pip python3-sphinx doxygen
+    - $SUDO_CMD -H pip install sphinx_rtd_theme breathe==4.12.0 exhale
+  script:
+    - $SUDO_CMD bash -x ./docs/run_doc.sh

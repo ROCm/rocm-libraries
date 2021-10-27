@@ -49,7 +49,7 @@ void TestTransformReduceDispatchExplicit()
                              vec.begin(),
                              0,
                              0,
-                             thrust::plus<int>());
+                             0);
 
     ASSERT_EQUAL(true, sys.is_valid());
 }
@@ -79,7 +79,7 @@ void TestTransformReduceDispatchImplicit()
                              thrust::retag<my_tag>(vec.begin()),
                              0,
                              0,
-                             thrust::plus<int>());
+                             0);
 
     ASSERT_EQUAL(13, vec.front());
 }

@@ -62,7 +62,7 @@ struct TestZipIteratorScan
                     d_result.begin(),
                     TuplePlus<Tuple>());
     ASSERT_EQUAL_QUIET(h_result, d_result);
-   
+
     // exclusive_scan (tuple output)
     exclusive_scan( make_zip_iterator(make_tuple(h_data0.begin(), h_data1.begin())),
                     make_zip_iterator(make_tuple(h_data0.end(),   h_data1.end())),
@@ -80,7 +80,7 @@ struct TestZipIteratorScan
     host_vector<T>   h_result1(n);
     device_vector<T> d_result0(n);
     device_vector<T> d_result1(n);
-    
+
     // inclusive_scan (zip_iterator output)
     inclusive_scan( make_zip_iterator(make_tuple(h_data0.begin(), h_data1.begin())),
                     make_zip_iterator(make_tuple(h_data0.end(),   h_data1.end())),
@@ -92,7 +92,7 @@ struct TestZipIteratorScan
                     TuplePlus<Tuple>());
     ASSERT_EQUAL_QUIET(h_result0, d_result0);
     ASSERT_EQUAL_QUIET(h_result1, d_result1);
-    
+
     // exclusive_scan (zip_iterator output)
     exclusive_scan( make_zip_iterator(make_tuple(h_data0.begin(), h_data1.begin())),
                     make_zip_iterator(make_tuple(h_data0.end(),   h_data1.end())),
@@ -109,4 +109,3 @@ struct TestZipIteratorScan
   }
 };
 VariableUnitTest<TestZipIteratorScan, SignedIntegralTypes> TestZipIteratorScanInstance;
-

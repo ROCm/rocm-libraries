@@ -82,6 +82,7 @@ option(BUILD_EXAMPLES "Build examples" OFF)
 option(BUILD_BENCHMARKS "Build benchmarks" OFF)
 option(DOWNLOAD_ROCPRIM "Download rocPRIM and do not search for rocPRIM package" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
+option(ENABLE_UPSTREAM_TESTS "Enable upstream tests" OFF)
 
 set(RNG_SEED_COUNT 0 CACHE STRING "Number of true random sequences to test each input size for")
 set(PRNG_SEEDS 1 CACHE STRING "Seeds of pseudo random sequences to test each input size for")
@@ -137,6 +138,9 @@ add_subdirectory(thrust)
 
 # Tests
 if(BUILD_TEST)
+  if (ENABLE_UPSTREAM_TESTS)
+    enable_testing()
+  endif()
   # We still want the testing to be compiled to catch some errors
   #TODO: Get testing folder working with HIP on Windows
   if (NOT WIN32)

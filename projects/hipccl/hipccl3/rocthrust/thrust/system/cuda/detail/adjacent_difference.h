@@ -26,6 +26,7 @@
  ******************************************************************************/
 #pragma once
 
+#include <thrust/detail/config.h>
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 #include <thrust/system/cuda/config.h>
@@ -43,8 +44,9 @@
 #include <thrust/detail/mpl/math.h>
 #include <thrust/detail/minmax.h>
 
-namespace thrust
-{
+#include <cub/util_math.cuh>
+
+THRUST_NAMESPACE_BEGIN
 
 template <typename DerivedPolicy, typename InputIterator, typename OutputIterator, typename BinaryFunction>
 __host__ __device__ OutputIterator
@@ -394,7 +396,7 @@ namespace __adjacent_difference {
 
 
     Size tile_size = difference_plan.items_per_tile;
-    Size num_tiles = (num_items + tile_size - 1) / tile_size;
+    Size num_tiles = cub::DivideAndRoundUp(num_items, tile_size);
 
     size_t tmp1        = num_tiles * sizeof(input_type);
     size_t vshmem_size = core::vshmem_size(difference_plan.shared_memory_size,
@@ -531,9 +533,10 @@ adjacent_difference(execution_policy<Derived> &policy,
 
 
 } // namespace cuda_cub
-} // end namespace thrust
+THRUST_NAMESPACE_END
 
 //
 #include <thrust/memory.h>
 #include <thrust/adjacent_difference.h>
 #endif
+

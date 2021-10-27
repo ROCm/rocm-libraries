@@ -26,6 +26,7 @@
  ******************************************************************************/
 #pragma once
 
+#include <thrust/detail/config.h>
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 #include <thrust/system/cuda/config.h>
@@ -34,8 +35,7 @@
 #include <thrust/detail/minmax.h>
 #include <thrust/distance.h>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace cuda_cub {
 
 // XXX forward declare to circumvent circular depedency
@@ -67,13 +67,12 @@ find(execution_policy<Derived> &policy,
      T const& value);
 
 }; // namespace cuda_cub
-} // end namespace thrust
+THRUST_NAMESPACE_END
 
 #include <thrust/system/cuda/detail/reduce.h>
 #include <thrust/iterator/zip_iterator.h>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace cuda_cub {
 
 namespace __find_if {
@@ -112,10 +111,10 @@ find_if_n(execution_policy<Derived>& policy,
           Predicate                  predicate)
 {
   typedef typename thrust::tuple<bool,Size> result_type;
-
+  
   // empty sequence
   if(num_items == 0) return first;
-
+  
   // this implementation breaks up the sequence into separate intervals
   // in an attempt to early-out as soon as a value is found
   //
@@ -126,7 +125,7 @@ find_if_n(execution_policy<Derived>& policy,
   // TODO incorporate sizeof(InputType) into interval_threshold and round to multiple of 32
   const Size interval_threshold = 1 << 20;
   const Size interval_size = (thrust::min)(interval_threshold, num_items);
-
+  
   // force transform_iterator output to bool
   typedef transform_input_iterator_t<bool,
                                      InputIt,
@@ -166,7 +165,7 @@ find_if_n(execution_policy<Derived>& policy,
       return first + thrust::get<1>(result);
     }
   }
-
+  
   //nothing was found if we reach here...
   return first + num_items;
 }
@@ -206,13 +205,14 @@ find(execution_policy<Derived> &policy,
      T const& value)
 {
   using thrust::placeholders::_1;
+
   return cuda_cub::find_if(policy,
                         first,
                         last,
-                         _1 == value);
+                        _1 == value);
 }
 
 
 } // namespace cuda_cub
-} // end namespace thrust
+THRUST_NAMESPACE_END
 #endif

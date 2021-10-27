@@ -43,7 +43,6 @@ template<typename T>
     typedef uninitialized_allocator<U> other;
   };
 
-
   // note that construct is annotated as
   // a __host__ __device__ function
   __host__ __device__
@@ -77,3 +76,4 @@ int main()
 
   return 0;
 }
+

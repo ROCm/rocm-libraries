@@ -107,7 +107,7 @@ struct tracked_pointer : thrust::iterator_facade<
     }
 };
 
-class tracked_resource THRUST_FINAL : public thrust::mr::memory_resource<tracked_pointer<void> >
+class tracked_resource final : public thrust::mr::memory_resource<tracked_pointer<void> >
 {
 public:
     tracked_resource() : id_to_allocate(0), id_to_deallocate(0)
@@ -120,7 +120,7 @@ public:
         EXPECT_EQ(id_to_deallocate, 0u);
     }
 
-    virtual tracked_pointer<void> do_allocate(std::size_t n, std::size_t alignment = THRUST_MR_DEFAULT_ALIGNMENT) THRUST_OVERRIDE
+    virtual tracked_pointer<void> do_allocate(std::size_t n, std::size_t alignment = THRUST_MR_DEFAULT_ALIGNMENT) override
     {
         EXPECT_EQ(static_cast<bool>(id_to_allocate), true);
 
@@ -135,7 +135,7 @@ public:
         return ret;
     }
 
-    virtual void do_deallocate(tracked_pointer<void> p, std::size_t n, std::size_t alignment = THRUST_MR_DEFAULT_ALIGNMENT) THRUST_OVERRIDE
+    virtual void do_deallocate(tracked_pointer<void> p, std::size_t n, std::size_t alignment = THRUST_MR_DEFAULT_ALIGNMENT) override
     {
         ASSERT_EQ(p.size, n);
         ASSERT_EQ(p.alignment, alignment);
@@ -358,7 +358,7 @@ TEST(MrPoolTests, TestUnsynchronizedGlobalPool)
 TEST(MrPoolTests, TestSynchronizedGlobalPool)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-    
+
     TestGlobalPool<thrust::mr::synchronized_pool_resource>();
 }
 #endif

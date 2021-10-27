@@ -16,7 +16,7 @@ struct SumTupleFunctor
   Tuple operator()(const Tuple &lhs, const Tuple &rhs)
   {
     using thrust::get;
-  
+
     return thrust::make_tuple(get<0>(lhs) + get<0>(rhs),
                               get<1>(lhs) + get<1>(rhs));
   }
@@ -47,7 +47,7 @@ struct TestTupleScan
      host_vector< tuple<T,T> > h_input(n);
      transform(h_t1.begin(), h_t1.end(), h_t2.begin(), h_input.begin(), MakeTupleFunctor());
      device_vector< tuple<T,T> > d_input = h_input;
-     
+
      // allocate output
      tuple<T,T> zero(0,0);
      host_vector  < tuple<T,T> > h_output(n, zero);
@@ -79,4 +79,3 @@ struct TestTupleScan
   }
 };
 VariableUnitTest<TestTupleScan, IntegralTypes> TestTupleScanInstance;
-

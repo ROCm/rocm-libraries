@@ -19,8 +19,7 @@
 
 #include <thrust/detail/config.h>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace detail
 {
 
@@ -67,4 +66,4 @@ template<typename BaseAllocator>
 }; // end no_throw_allocator
 
 } // end detail
-} // end thrust
+THRUST_NAMESPACE_END

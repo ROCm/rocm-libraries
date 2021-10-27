@@ -47,8 +47,7 @@
 
 #include <type_traits>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 
 namespace system { namespace cuda { namespace detail
 {
@@ -67,7 +66,7 @@ struct async_transform_fn
 
   template <typename Index>
   __host__ __device__
-  void operator()(Index idxTHRUST_RETURNS
+  void operator()(Index idx)
   {
     output_[idx] = op_(thrust::raw_reference_cast(first_[idx]));
   }
@@ -155,8 +154,9 @@ THRUST_RETURNS(
 
 } // cuda_cub
 
-} // end namespace thrust
+THRUST_NAMESPACE_END
 
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 
 #endif
+

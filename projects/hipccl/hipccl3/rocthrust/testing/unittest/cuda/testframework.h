@@ -11,12 +11,14 @@ class CUDATestDriver
   public:
     int current_device_architecture() const;
 
+    bool supports_managed_memory() const;
+
   private:
     std::vector<int> target_devices(const ArgumentMap &kwargs);
 
     bool check_cuda_error(bool concise);
 
-    virtual bool post_test_sanity_check(const UnitTest &test, bool concise);
+    virtual bool post_test_smoke_check(const UnitTest &test, bool concise);
 
     virtual bool run_tests(const ArgumentSet &args, const ArgumentMap &kwargs);
 };

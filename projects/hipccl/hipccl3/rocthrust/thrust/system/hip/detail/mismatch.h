@@ -33,8 +33,7 @@
 #include <thrust/system/hip/config.h>
 #include <thrust/system/hip/detail/execution_policy.h>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
 
@@ -53,12 +52,11 @@ namespace hip_rocprim
              InputIt1                   last1,
              InputIt2                   first2);
 } // namespace hip_rocprim
-} // end namespace thrust
+THRUST_NAMESPACE_END
 
 #include <thrust/system/hip/detail/find.h>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
 
@@ -94,5 +92,5 @@ namespace hip_rocprim
     }
 
 } // namespace hip_rocprim
-} // end namespace thrust
+THRUST_NAMESPACE_END
 #endif

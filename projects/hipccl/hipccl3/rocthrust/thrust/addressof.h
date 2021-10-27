@@ -11,8 +11,8 @@
 #  include <thrust/detail/memory_wrapper.h>
 #endif
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
+
 ///////////////////////////////////////////////////////////////////////////////
 
 /*! Obtains the actual address of the object or function arg, even in presence of overloaded operator&.
@@ -28,4 +28,4 @@ T* addressof(T& arg)
 
 ///////////////////////////////////////////////////////////////////////////////
 
-} // end namespace thrust
+THRUST_NAMESPACE_END

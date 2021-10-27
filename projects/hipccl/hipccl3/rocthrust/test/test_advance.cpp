@@ -22,8 +22,6 @@
 
 TESTS_DEFINE(AdvanceVectorTests, VectorSignedIntegerTestsParams);
 
-// TODO expand this with other iterator types (forward, bidirectional, etc.)
-
 TYPED_TEST(AdvanceVectorTests, TestAdvance)
 {
     using Vector = typename TestFixture::input_type;
@@ -49,4 +47,66 @@ TYPED_TEST(AdvanceVectorTests, TestAdvance)
     thrust::advance(i, -10);
 
     ASSERT_EQ(*i, T(10));
+}
+
+TYPED_TEST(AdvanceVectorTests, TestNext)
+{
+    using Vector = typename TestFixture::input_type;
+    using T      = typename Vector::value_type;
+
+    typedef typename Vector::iterator Iterator;
+
+    Vector v(10);
+    thrust::sequence(v.begin(), v.end());
+
+    Iterator const i0 = v.begin();
+
+    Iterator const i1 = thrust::next(i0);
+
+    ASSERT_EQ(*i0, T(0));
+    ASSERT_EQ(*i1, T(1));
+
+    Iterator const i2 = thrust::next(i1, 8);
+
+    ASSERT_EQ(*i0, T(0));
+    ASSERT_EQ(*i1, T(1));
+    ASSERT_EQ(*i2, T(9));
+
+    Iterator const i3 = thrust::next(i2, -4);
+
+    ASSERT_EQ(*i0, T(0));
+    ASSERT_EQ(*i1, T(1));
+    ASSERT_EQ(*i2, T(9));
+    ASSERT_EQ(*i3, T(5));
+}
+
+TYPED_TEST(AdvanceVectorTests, TestPrev)
+{
+    using Vector = typename TestFixture::input_type;
+    using T      = typename Vector::value_type;
+
+    typedef typename Vector::iterator Iterator;
+
+    Vector v(10);
+    thrust::sequence(v.begin(), v.end());
+
+    Iterator const i0 = v.end();
+
+    Iterator const i1 = thrust::prev(i0);
+
+    ASSERT_EQ_QUIET(i0, v.end());
+    ASSERT_EQ(*i1, T(9));
+
+    Iterator const i2 = thrust::prev(i1, 8);
+
+    ASSERT_EQ_QUIET(i0, v.end());
+    ASSERT_EQ(*i1, T(9));
+    ASSERT_EQ(*i2, T(1));
+
+    Iterator const i3 = thrust::prev(i2, -4);
+
+    ASSERT_EQ_QUIET(i0, v.end());
+    ASSERT_EQ(*i1, T(9));
+    ASSERT_EQ(*i2, T(1));
+    ASSERT_EQ(*i3, T(5));
 }

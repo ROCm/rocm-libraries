@@ -23,12 +23,7 @@
 #include <thrust/detail/config.h>
 #include <thrust/detail/execution_policy.h>
 
-// empty Doxygen comment below so namespace thrust's documentation will be extracted
-
-/*!
- */
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 
 /*! \addtogroup utility
  *  \{
@@ -47,7 +42,7 @@ namespace thrust
  *  \param b The second value of interest. After completion,
  *           the value of a will be returned here.
  *
- *  \tparam Assignable is a model of <a href="http://www.sgi.com/tech/stl/Assignable.html">Assignable</a>.
+ *  \tparam Assignable is a model of <a href="https://en.cppreference.com/w/cpp/named_req/CopyAssignable">Assignable</a>.
  *
  *  The following code snippet demonstrates how to use \p swap to
  *  swap the contents of two variables.
@@ -94,9 +89,9 @@ inline void swap(Assignable1 &a, Assignable2 &b);
  *          sequence to swap.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam ForwardIterator1 is a model of <a href="http://www.sgi.com/tech/stl/ForwardIterator.html">Forward Iterator</a>,
+ *  \tparam ForwardIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward Iterator</a>,
  *          and \p ForwardIterator1's \c value_type must be convertible to \p ForwardIterator2's \c value_type.
- *  \tparam ForwardIterator2 is a model of <a href="http://www.sgi.com/tech/stl/ForwardIterator.html">Forward Iterator</a>,
+ *  \tparam ForwardIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward Iterator</a>,
  *          and \p ForwardIterator2's \c value_type must be convertible to \p ForwardIterator1's \c value_type.
  *
  *  \pre \p first1 may equal \p first2, but the range <tt>[first1, last1)</tt> shall not overlap the range <tt>[first2, first2 + (last1 - first1))</tt> otherwise.
@@ -121,7 +116,7 @@ inline void swap(Assignable1 &a, Assignable2 &b);
  *  // v1[0] == 3, v1[1] == 4, v2[0] == 1, v2[1] == 2
  *  \endcode
  *
- *  \see http://www.sgi.com/tech/stl/swap_ranges.html
+ *  \see https://en.cppreference.com/w/cpp/algorithm/swap_ranges
  *  \see \c swap
  */
 template<typename DerivedPolicy,
@@ -146,9 +141,9 @@ __host__ __device__
  *  \return An iterator pointing to one position past the last element of the second
  *          sequence to swap.
  *
- *  \tparam ForwardIterator1 is a model of <a href="http://www.sgi.com/tech/stl/ForwardIterator.html">Forward Iterator</a>,
+ *  \tparam ForwardIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward Iterator</a>,
  *          and \p ForwardIterator1's \c value_type must be convertible to \p ForwardIterator2's \c value_type.
- *  \tparam ForwardIterator2 is a model of <a href="http://www.sgi.com/tech/stl/ForwardIterator.html">Forward Iterator</a>,
+ *  \tparam ForwardIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward Iterator</a>,
  *          and \p ForwardIterator2's \c value_type must be convertible to \p ForwardIterator1's \c value_type.
  *
  *  \pre \p first1 may equal \p first2, but the range <tt>[first1, last1)</tt> shall not overlap the range <tt>[first2, first2 + (last1 - first1))</tt> otherwise.
@@ -171,7 +166,7 @@ __host__ __device__
  *  // v1[0] == 3, v1[1] == 4, v2[0] == 1, v2[1] == 2
  *  \endcode
  *
- *  \see http://www.sgi.com/tech/stl/swap_ranges.html
+ *  \see https://en.cppreference.com/w/cpp/algorithm/swap_ranges
  *  \see \c swap
  */
 template<typename ForwardIterator1,
@@ -184,8 +179,6 @@ template<typename ForwardIterator1,
 /*! \} // copying
  */
 
-
-} // end thrust
+THRUST_NAMESPACE_END
 
 #include <thrust/detail/swap.inl>
-

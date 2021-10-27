@@ -30,8 +30,7 @@
 #include <thrust/detail/seq.h>
 #include <thrust/system/hip/detail/par.h>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
     template <int PAR>
@@ -91,4 +90,4 @@ struct cvt_to_seq_impl<
 #endif
 
 } // namespace hip_rocprim
-} // end namespace thrust
+THRUST_NAMESPACE_END

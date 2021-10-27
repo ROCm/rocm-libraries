@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019, 2021, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -34,27 +34,32 @@
 #include <thrust/detail/type_traits/result_of_adaptable_function.h>
 #include <thrust/system/hip/detail/par_to_seq.h>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
 namespace __parallel_for
 {
-    template <unsigned int BlockSize, unsigned int ItemsPerThread>
+    template <unsigned int BlockSize,
+              unsigned int ItemsPerThread,
+              unsigned int SizeLimit = THRUST_HIP_GRID_SIZE_LIMIT>
     struct kernel_config
     {
-        static constexpr unsigned int block_size       = BlockSize;
+        /// \brief Number of threads in a block.
+        static constexpr unsigned int block_size = BlockSize;
+        /// \brief Number of items processed by each thread.
         static constexpr unsigned int items_per_thread = ItemsPerThread;
+        /// \brief Number of items processed by a single kernel launch.
+        static constexpr unsigned int size_limit = SizeLimit;
     };
 
-    template <unsigned int BlockSize, unsigned int ItemsPerThread, class F, class Size>
+    template <unsigned int BlockSize, class F, class Size, unsigned int ItemsPerThread>
     __global__
     THRUST_HIP_LAUNCH_BOUNDS(BlockSize)
-    void kernel(F f, Size num_items)
+    void kernel(F f, Size num_items, Size offset)
     {
         constexpr auto     items_per_block = BlockSize * ItemsPerThread;
         Size               tile_base       = blockIdx.x * items_per_block;
-        Size               num_remaining   = num_items - tile_base;
+        Size               num_remaining   = num_items - offset - tile_base;
         const unsigned int items_in_tile   = static_cast<unsigned int>(
             num_remaining < (Size)items_per_block ? num_remaining : items_per_block);
 
@@ -64,7 +69,7 @@ namespace __parallel_for
             for(unsigned int i = 0; i < ItemsPerThread; i++)
             {
                 unsigned int idx = BlockSize * i + threadIdx.x;
-                f(tile_base + idx);
+                f(offset + tile_base + idx);
             }
         }
         else
@@ -74,7 +79,7 @@ namespace __parallel_for
             {
                 unsigned int idx = BlockSize * i + threadIdx.x;
                 if(idx < items_in_tile)
-                    f(tile_base + idx);
+                    f(offset + tile_base + idx);
             }
         }
     }
@@ -90,16 +95,26 @@ namespace __parallel_for
 
         constexpr unsigned int block_size       = config::block_size;
         constexpr unsigned int items_per_thread = config::items_per_thread;
-        constexpr auto         items_per_block  = block_size * items_per_thread;
-        const auto number_of_blocks = (num_items + items_per_block - 1) / items_per_block;
+        constexpr auto items_per_block          = block_size * items_per_thread;
 
-        hipLaunchKernelGGL(HIP_KERNEL_NAME(kernel<block_size, items_per_thread, F, Size>),
-                           dim3(number_of_blocks),
-                           dim3(block_size),
-                           0,
-                           stream,
-                           f,
-                           num_items);
+        // Find maximum number of items per one step and number of steps
+        constexpr size_t aligned_size_limit     = (config::size_limit / items_per_block) * items_per_block;
+        const Size number_of_launch             = (num_items + aligned_size_limit - 1) / aligned_size_limit;
+
+        for(Size i = 0, offset = 0; i < number_of_launch; ++i, offset += aligned_size_limit)
+        {
+            const size_t current_items = std::min<size_t>(num_items - offset, aligned_size_limit);
+            const unsigned int number_of_blocks = (current_items + items_per_block - 1) / items_per_block;
+
+            hipLaunchKernelGGL(HIP_KERNEL_NAME(kernel<block_size, F, Size, items_per_thread>),
+                               dim3(number_of_blocks),
+                               dim3(block_size),
+                               0,
+                               stream,
+                               f,
+                               num_items,
+                               offset);
+        }
 
         auto error = hipPeekAtLastError();
         if(error != hipSuccess)
@@ -151,5 +166,5 @@ parallel_for(execution_policy<Derived>& policy, F f, Size count)
 }
 
 } // namespace hip_rocprim
-} // end namespace thrust
+THRUST_NAMESPACE_END
 #endif

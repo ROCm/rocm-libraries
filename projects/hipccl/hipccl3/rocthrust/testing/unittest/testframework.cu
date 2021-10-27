@@ -15,7 +15,6 @@
  *  limitations under the License.
  */
 
-#include "unittest/ctest.h"
 #include "unittest/testframework.h"
 #include "unittest/exceptions.h"
 #include <thrust/memory.h>
@@ -23,6 +22,10 @@
 // #include backends' testframework.h, if they exist and are required for the build
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 #include <unittest/cuda/testframework.h>
+#endif
+
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
+#include <unittest/hip/testframework.h>
 #endif
 
 #include <iostream>
@@ -275,7 +278,7 @@ void UnitTestDriver::list_tests(void)
 }
 
 
-bool UnitTestDriver::post_test_sanity_check(const UnitTest &/*test*/, bool /*concise*/)
+bool UnitTestDriver::post_test_smoke_check(const UnitTest &/*test*/, bool /*concise*/)
 {
   return true;
 }
@@ -284,12 +287,12 @@ bool UnitTestDriver::post_test_sanity_check(const UnitTest &/*test*/, bool /*con
 bool UnitTestDriver::run_tests(std::vector<UnitTest *>& tests_to_run, const ArgumentMap& kwargs)
 {
   std::time_t start_time = std::time(0);
-  
+
   THRUST_DISABLE_MSVC_FORCING_VALUE_TO_BOOL_WARNING_BEGIN
   bool verbose = kwargs.count("verbose");
   bool concise = kwargs.count("concise");
   THRUST_DISABLE_MSVC_FORCING_VALUE_TO_BOOL_WARNING_END
-  
+
   std::vector< TestResult > test_results;
 
   if(verbose && concise)
@@ -381,7 +384,7 @@ bool UnitTestDriver::run_tests(std::vector<UnitTest *>& tests_to_run, const Argu
        }
      }
 
-     if(!post_test_sanity_check(test, concise))
+     if(!post_test_smoke_check(test, concise))
      {
        return false;
      }
@@ -529,8 +532,6 @@ int main(int argc, char **argv)
     set_test_sizes("default");
   }
 
-  unittest::set_device_from_ctest();
-
   bool passed = UnitTestDriver::s_driver().run_tests(args, kwargs);
 
   if(kwargs.count("concise"))
@@ -540,3 +541,10 @@ int main(int argc, char **argv)
 
   return (passed) ? EXIT_SUCCESS : EXIT_FAILURE;
 }
+
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
+bool supports_managed_memory() {
+    const HIPTestDriver* driver = dynamic_cast<const HIPTestDriver*>(&UnitTestDriver::s_driver());
+    return driver == nullptr || driver->supports_managed_memory();
+}
+#endif

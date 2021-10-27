@@ -28,8 +28,7 @@
 
 // Contributed by Erich Elsen
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace system
 {
 namespace detail
@@ -146,4 +145,4 @@ InputIterator find_if_not(thrust::execution_policy<DerivedPolicy> &exec,
 } // end namespace generic
 } // end namespace detail
 } // end namespace system
-} // end namespace thrust
+THRUST_NAMESPACE_END

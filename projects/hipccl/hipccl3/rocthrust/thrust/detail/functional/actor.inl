@@ -31,8 +31,7 @@
 
 #include <type_traits>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 
 namespace detail
 {
@@ -41,7 +40,7 @@ namespace functional
 
 template<typename Eval>
   __host__ __device__
-  THRUST_CONSTEXPR actor<Eval>
+  constexpr actor<Eval>
     ::actor()
       : eval_type()
 {}
@@ -110,4 +109,4 @@ template<typename Eval>
 
 } // end functional
 } // end detail
-} // end thrust
+THRUST_NAMESPACE_END

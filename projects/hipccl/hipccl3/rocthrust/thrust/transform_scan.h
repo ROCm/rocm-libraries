@@ -24,9 +24,7 @@
 #include <thrust/detail/config.h>
 #include <thrust/detail/execution_policy.h>
 
-namespace thrust
-{
-
+THRUST_NAMESPACE_BEGIN
 
 /*! \addtogroup algorithms
  */
@@ -64,13 +62,13 @@ namespace thrust
  *  \return The end of the output sequence.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam InputIterator is a model of <a href="http://www.sgi.com/tech/stl/InputIterator.html">Input Iterator</a>
+ *  \tparam InputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>
  *                               and \c InputIterator's \c value_type is convertible to \c unary_op's input type.
- *  \tparam OutputIterator is a model of <a href="http://www.sgi.com/tech/stl/OutputIterator.html">Output Iterator</a>.
- *  \tparam UnaryFunction is a model of <a href="http://www.sgi.com/tech/stl/UnaryFunction.html">Unary Function</a>
+ *  \tparam OutputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>.
+ *  \tparam UnaryFunction is a model of <a href="https://en.cppreference.com/w/cpp/utility/functional/unary_function">Unary Function</a>
  *                               and accepts inputs of \c InputIterator's \c value_type.  \c UnaryFunction's result_type
  *                               is convertable to \c OutputIterator's \c value_type.
- *  \tparam AssociativeOperator is a model of <a href="http://www.sgi.com/tech/stl/BinaryFunction.html">Binary Function</a>
+ *  \tparam AssociativeOperator is a model of <a href="https://en.cppreference.com/w/cpp/utility/functional/binary_function">Binary Function</a>
  *                              and \c AssociativeOperator's \c result_type is
  *                              convertible to \c OutputIterator's \c value_type.
  *
@@ -130,13 +128,13 @@ __host__ __device__
  *  \param binary_op The associatve operator used to 'sum' transformed values.
  *  \return The end of the output sequence.
  *
- *  \tparam InputIterator is a model of <a href="http://www.sgi.com/tech/stl/InputIterator.html">Input Iterator</a>
+ *  \tparam InputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>
  *                               and \c InputIterator's \c value_type is convertible to \c unary_op's input type.
- *  \tparam OutputIterator is a model of <a href="http://www.sgi.com/tech/stl/OutputIterator.html">Output Iterator</a>.
- *  \tparam UnaryFunction is a model of <a href="http://www.sgi.com/tech/stl/UnaryFunction.html">Unary Function</a>
+ *  \tparam OutputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>.
+ *  \tparam UnaryFunction is a model of <a href="https://en.cppreference.com/w/cpp/utility/functional/unary_function">Unary Function</a>
  *                               and accepts inputs of \c InputIterator's \c value_type.  \c UnaryFunction's result_type
  *                               is convertable to \c OutputIterator's \c value_type.
- *  \tparam AssociativeOperator is a model of <a href="http://www.sgi.com/tech/stl/BinaryFunction.html">Binary Function</a>
+ *  \tparam AssociativeOperator is a model of <a href="https://en.cppreference.com/w/cpp/utility/functional/binary_function">Binary Function</a>
  *                              and \c AssociativeOperator's \c result_type is
  *                              convertible to \c OutputIterator's \c value_type.
  *
@@ -195,14 +193,14 @@ template<typename InputIterator,
  *  \return The end of the output sequence.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam InputIterator is a model of <a href="http://www.sgi.com/tech/stl/InputIterator.html">Input Iterator</a>
+ *  \tparam InputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>
  *                               and \c InputIterator's \c value_type is convertible to \c unary_op's input type.
- *  \tparam OutputIterator is a model of <a href="http://www.sgi.com/tech/stl/OutputIterator.html">Output Iterator</a>.
- *  \tparam UnaryFunction is a model of <a href="http://www.sgi.com/tech/stl/UnaryFunction.html">Unary Function</a>
+ *  \tparam OutputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>.
+ *  \tparam UnaryFunction is a model of <a href="https://en.cppreference.com/w/cpp/utility/functional/unary_function">Unary Function</a>
  *                               and accepts inputs of \c InputIterator's \c value_type.  \c UnaryFunction's result_type
  *                               is convertable to \c OutputIterator's \c value_type.
  *  \tparam T is convertible to \c OutputIterator's \c value_type.
- *  \tparam AssociativeOperator is a model of <a href="http://www.sgi.com/tech/stl/BinaryFunction.html">Binary Function</a>
+ *  \tparam AssociativeOperator is a model of <a href="https://en.cppreference.com/w/cpp/utility/functional/binary_function">Binary Function</a>
  *                              and \c AssociativeOperator's \c result_type is
  *                              convertible to \c OutputIterator's \c value_type.
  *
@@ -265,14 +263,14 @@ __host__ __device__
  *  \param binary_op The associatve operator used to 'sum' transformed values.
  *  \return The end of the output sequence.
  *
- *  \tparam InputIterator is a model of <a href="http://www.sgi.com/tech/stl/InputIterator.html">Input Iterator</a>
+ *  \tparam InputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>
  *                               and \c InputIterator's \c value_type is convertible to \c unary_op's input type.
- *  \tparam OutputIterator is a model of <a href="http://www.sgi.com/tech/stl/OutputIterator.html">Output Iterator</a>.
- *  \tparam UnaryFunction is a model of <a href="http://www.sgi.com/tech/stl/UnaryFunction.html">Unary Function</a>
+ *  \tparam OutputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>.
+ *  \tparam UnaryFunction is a model of <a href="https://en.cppreference.com/w/cpp/utility/functional/unary_function">Unary Function</a>
  *                               and accepts inputs of \c InputIterator's \c value_type.  \c UnaryFunction's result_type
  *                               is convertable to \c OutputIterator's \c value_type.
  *  \tparam T is convertible to \c OutputIterator's \c value_type.
- *  \tparam AssociativeOperator is a model of <a href="http://www.sgi.com/tech/stl/BinaryFunction.html">Binary Function</a>
+ *  \tparam AssociativeOperator is a model of <a href="https://en.cppreference.com/w/cpp/utility/functional/binary_function">Binary Function</a>
  *                              and \c AssociativeOperator's \c result_type is
  *                              convertible to \c OutputIterator's \c value_type.
  *
@@ -317,8 +315,6 @@ template<typename InputIterator,
 /*! \} // end prefixsums
  */
 
-	
-} // end namespace thrust
+THRUST_NAMESPACE_END
 
 #include <thrust/detail/transform_scan.inl>
-

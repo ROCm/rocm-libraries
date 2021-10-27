@@ -24,9 +24,7 @@
 #include <thrust/detail/config.h>
 #include <thrust/detail/execution_policy.h>
 
-namespace thrust
-{
-
+THRUST_NAMESPACE_BEGIN
 
 /*! \addtogroup reordering
  *  \ingroup algorithms
@@ -44,7 +42,7 @@ namespace thrust
  *  \param last The end of the range to reverse.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam BidirectionalIterator is a model of <a href="http://www.sgi.com/tech/stl/BidirectionalIterator.html">Bidirectional Iterator</a> and
+ *  \tparam BidirectionalIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/bidirectional_iterator">Bidirectional Iterator</a> and
  *          \p BidirectionalIterator is mutable.
  *
  *  The following code snippet demonstrates how to use \p reverse to reverse a
@@ -62,7 +60,7 @@ namespace thrust
  *  // v is now {5, 4, 3, 2, 1, 0}
  *  \endcode
  *  
- *  \see http://www.sgi.com/tech/stl/reverse.html
+ *  \see https://en.cppreference.com/w/cpp/algorithm/reverse
  *  \see \p reverse_copy
  *  \see \p reverse_iterator
  */
@@ -80,7 +78,7 @@ __host__ __device__
  *  \param first The beginning of the range to reverse.
  *  \param last The end of the range to reverse.
  *
- *  \tparam BidirectionalIterator is a model of <a href="http://www.sgi.com/tech/stl/BidirectionalIterator.html">Bidirectional Iterator</a> and
+ *  \tparam BidirectionalIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/bidirectional_iterator">Bidirectional Iterator</a> and
  *          \p BidirectionalIterator is mutable.
  *
  *  The following code snippet demonstrates how to use \p reverse to reverse a
@@ -96,7 +94,7 @@ __host__ __device__
  *  // v is now {5, 4, 3, 2, 1, 0}
  *  \endcode
  *  
- *  \see http://www.sgi.com/tech/stl/reverse.html
+ *  \see https://en.cppreference.com/w/cpp/algorithm/reverse
  *  \see \p reverse_copy
  *  \see \p reverse_iterator
  */
@@ -124,9 +122,9 @@ template<typename BidirectionalIterator>
  *  \param result The beginning of the output range.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam BidirectionalIterator is a model of <a href="http://www.sgi.com/tech/stl/BidirectionalIterator.html">Bidirectional Iterator</a>,
+ *  \tparam BidirectionalIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/bidirectional_iterator">Bidirectional Iterator</a>,
  *          and \p BidirectionalIterator's \p value_type is convertible to \p OutputIterator's \p value_type.
- *  \tparam OutputIterator is a model of <a href="http://www.sgi.com/tech/stl/OutputIterator.html">Output Iterator</a>.
+ *  \tparam OutputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>.
  *
  *  \pre The range <tt>[first, last)</tt> and the range <tt>[result, result + (last - first))</tt> shall not overlap.
  *
@@ -147,7 +145,7 @@ template<typename BidirectionalIterator>
  *  // output is now  {5, 4, 3, 2, 1, 0}
  *  \endcode
  *  
- *  \see http://www.sgi.com/tech/stl/reverse_copy.html
+ *  \see https://en.cppreference.com/w/cpp/algorithm/reverse_copy
  *  \see \p reverse
  *  \see \p reverse_iterator
  */
@@ -174,9 +172,9 @@ __host__ __device__
  *  \param last The end of the range to reverse.
  *  \param result The beginning of the output range.
  *
- *  \tparam BidirectionalIterator is a model of <a href="http://www.sgi.com/tech/stl/BidirectionalIterator.html">Bidirectional Iterator</a>,
+ *  \tparam BidirectionalIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/bidirectional_iterator">Bidirectional Iterator</a>,
  *          and \p BidirectionalIterator's \p value_type is convertible to \p OutputIterator's \p value_type.
- *  \tparam OutputIterator is a model of <a href="http://www.sgi.com/tech/stl/OutputIterator.html">Output Iterator</a>.
+ *  \tparam OutputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>.
  *
  *  \pre The range <tt>[first, last)</tt> and the range <tt>[result, result + (last - first))</tt> shall not overlap.
  *
@@ -195,7 +193,7 @@ __host__ __device__
  *  // output is now  {5, 4, 3, 2, 1, 0}
  *  \endcode
  *  
- *  \see http://www.sgi.com/tech/stl/reverse_copy.html
+ *  \see https://en.cppreference.com/w/cpp/algorithm/reverse_copy
  *  \see \p reverse
  *  \see \p reverse_iterator
  */
@@ -208,8 +206,6 @@ template<typename BidirectionalIterator, typename OutputIterator>
 /*! \} // end reordering
  */
 
-
-} // end thrust
+THRUST_NAMESPACE_END
 
 #include <thrust/detail/reverse.inl>
-

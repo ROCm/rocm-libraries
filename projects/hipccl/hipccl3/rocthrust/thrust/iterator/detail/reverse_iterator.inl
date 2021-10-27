@@ -14,11 +14,12 @@
  *  limitations under the License.
  */
 
+#include <thrust/detail/config.h>
+
 #include <thrust/iterator/reverse_iterator.h>
 #include <thrust/iterator/iterator_traits.h>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 
 namespace detail
 {
@@ -111,4 +112,4 @@ reverse_iterator<BidirectionalIterator> make_reverse_iterator(BidirectionalItera
 } // end make_reverse_iterator()
 
 
-} // end thrust
+THRUST_NAMESPACE_END

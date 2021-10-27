@@ -16,6 +16,9 @@
  */
  
 #include <unittest/unittest.h>
+
+#include <thrust/detail/config.h>
+
 #include <thrust/scan.h>
 #include <thrust/functional.h>
 #include <thrust/iterator/discard_iterator.h>
@@ -497,7 +500,9 @@ void _TestScanWithLargeTypes(void)
     thrust::host_vector< FixedVector<T,N> > h_output(n);
 
     for(size_t i = 0; i < h_input.size(); i++)
-        h_input[i] = FixedVector<T,N>(i);
+    {
+        h_input[i] = FixedVector<T, N>(static_cast<T>(i));
+    }
 
     thrust::device_vector< FixedVector<T,N> > d_input = h_input;
     thrust::device_vector< FixedVector<T,N> > d_output(n);
@@ -598,15 +603,14 @@ struct only_set_when_expected_it
     }
 };
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 template<>
 struct iterator_traits<only_set_when_expected_it>
 {
     typedef long long value_type;
     typedef only_set_when_expected_it reference;
 };
-}
+THRUST_NAMESPACE_END
 
 void TestInclusiveScanWithBigIndexesHelper(int magnitude)
 {

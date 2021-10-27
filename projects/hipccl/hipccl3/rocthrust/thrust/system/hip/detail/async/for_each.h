@@ -47,8 +47,7 @@
 
 #include <type_traits>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 
 namespace system { namespace hip { namespace detail
 {
@@ -157,7 +156,7 @@ THRUST_RETURNS(
 
 } // hip_rocprim
 
-} // end namespace thrust
+THRUST_NAMESPACE_END
 
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 

@@ -27,8 +27,7 @@
 #include <thrust/system/error_code.h>
 #include <thrust/system/hip/detail/guarded_driver_types.h>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 
 namespace system
 {
@@ -178,6 +177,6 @@ namespace errc = system::hip::errc;
 
 using system::hip_category;
 
-} // end namespace thrust
+THRUST_NAMESPACE_END
 
 #include <thrust/system/hip/detail/error.inl>

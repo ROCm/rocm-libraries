@@ -37,8 +37,7 @@
 
 #include <rocprim/rocprim.hpp>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
 namespace __binary_search
@@ -678,6 +677,6 @@ bool binary_search(execution_policy<Derived>& policy,
 }
 
 } // namespace hip_rocprim
-} // end namespace thrust
+THRUST_NAMESPACE_END
 
 #endif

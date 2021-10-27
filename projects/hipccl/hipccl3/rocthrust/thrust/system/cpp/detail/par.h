@@ -20,8 +20,7 @@
 #include <thrust/detail/allocator_aware_execution_policy.h>
 #include <thrust/system/cpp/detail/execution_policy.h>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace system
 {
 namespace cpp
@@ -35,7 +34,7 @@ struct par_t : thrust::system::cpp::detail::execution_policy<par_t>,
     thrust::system::cpp::detail::execution_policy>
 {
   __host__ __device__
-  THRUST_CONSTEXPR par_t() : thrust::system::cpp::detail::execution_policy<par_t>() {}
+  constexpr par_t() : thrust::system::cpp::detail::execution_policy<par_t>() {}
 };
 
 
@@ -58,4 +57,4 @@ using thrust::system::cpp::par;
 
 
 } // end cpp
-} // end thrust
+THRUST_NAMESPACE_END

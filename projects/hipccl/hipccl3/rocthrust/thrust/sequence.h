@@ -24,9 +24,7 @@
 #include <thrust/detail/config.h>
 #include <thrust/detail/execution_policy.h>
 
-namespace thrust
-{
-
+THRUST_NAMESPACE_BEGIN
 
 /*! \addtogroup transformations
  *  \{
@@ -45,7 +43,7 @@ namespace thrust
  *  \param last The end of the sequence.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam ForwardIterator is a model of <a href="http://www.sgi.com/tech/stl/ForwardIterator.html">Forward Iterator</a>,
+ *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward Iterator</a>,
  *          and \p ForwardIterator is mutable,
  *          and if \c x and \c y are objects of \c ForwardIterator's \c value_type, then <tt>x + y</tt> is defined,
  *          and if \c T is \p ForwardIterator's \c value_type, then <tt>T(0)</tt> is defined.
@@ -66,7 +64,7 @@ namespace thrust
  *  \note Unlike the similar C++ STL function \c std::iota, \p sequence offers no
  *        guarantee on order of execution.
  *
- *  \see http://www.sgi.com/tech/stl/iota.html
+ *  \see https://en.cppreference.com/w/cpp/algorithm/iota
  */
 template<typename DerivedPolicy, typename ForwardIterator>
 __host__ __device__
@@ -83,7 +81,7 @@ __host__ __device__
  *  \param first The beginning of the sequence.
  *  \param last The end of the sequence.
  *
- *  \tparam ForwardIterator is a model of <a href="http://www.sgi.com/tech/stl/ForwardIterator.html">Forward Iterator</a>,
+ *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward Iterator</a>,
  *          and \p ForwardIterator is mutable,
  *          and if \c x and \c y are objects of \c ForwardIterator's \c value_type, then <tt>x + y</tt> is defined,
  *          and if \c T is \p ForwardIterator's \c value_type, then <tt>T(0)</tt> is defined.
@@ -103,7 +101,7 @@ __host__ __device__
  *  \note Unlike the similar C++ STL function \c std::iota, \p sequence offers no
  *        guarantee on order of execution.
  *
- *  \see http://www.sgi.com/tech/stl/iota.html
+ *  \see https://en.cppreference.com/w/cpp/algorithm/iota
  */
 template<typename ForwardIterator>
   void sequence(ForwardIterator first,
@@ -123,11 +121,11 @@ template<typename ForwardIterator>
  *  \param init The first value of the sequence of numbers.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam ForwardIterator is a model of <a href="http://www.sgi.com/tech/stl/ForwardIterator.html">Forward Iterator</a>,
+ *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward Iterator</a>,
  *          and \p ForwardIterator is mutable,
  *          and if \c x and \c y are objects of \c ForwardIterator's \c value_type, then <tt>x + y</tt> is defined,
  *          and if \c T is \p ForwardIterator's \c value_type, then <tt>T(0)</tt> is defined.
- *  \tparam T is a model of <a href="http://www.sgi.com/tech/stl/Assignable.html">Assignable</a>,
+ *  \tparam T is a model of <a href="https://en.cppreference.com/w/cpp/named_req/CopyAssignable">Assignable</a>,
  *          and \p T is convertible to \p ForwardIterator's \c value_type.
  *
  *  The following code snippet demonstrates how to use \p sequence to fill a range
@@ -147,7 +145,7 @@ template<typename ForwardIterator>
  *  \note Unlike the similar C++ STL function \c std::iota, \p sequence offers no
  *        guarantee on order of execution.
  *
- *  \see http://www.sgi.com/tech/stl/iota.html
+ *  \see https://en.cppreference.com/w/cpp/algorithm/iota
  */
 template<typename DerivedPolicy, typename ForwardIterator, typename T>
 __host__ __device__
@@ -166,11 +164,11 @@ __host__ __device__
  *  \param last The end of the sequence.
  *  \param init The first value of the sequence of numbers.
  *
- *  \tparam ForwardIterator is a model of <a href="http://www.sgi.com/tech/stl/ForwardIterator.html">Forward Iterator</a>,
+ *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward Iterator</a>,
  *          and \p ForwardIterator is mutable,
  *          and if \c x and \c y are objects of \c ForwardIterator's \c value_type, then <tt>x + y</tt> is defined,
  *          and if \c T is \p ForwardIterator's \c value_type, then <tt>T(0)</tt> is defined.
- *  \tparam T is a model of <a href="http://www.sgi.com/tech/stl/Assignable.html">Assignable</a>,
+ *  \tparam T is a model of <a href="https://en.cppreference.com/w/cpp/named_req/CopyAssignable">Assignable</a>,
  *          and \p T is convertible to \p ForwardIterator's \c value_type.
  *
  *  The following code snippet demonstrates how to use \p sequence to fill a range
@@ -188,7 +186,7 @@ __host__ __device__
  *  \note Unlike the similar C++ STL function \c std::iota, \p sequence offers no
  *        guarantee on order of execution.
  *
- *  \see http://www.sgi.com/tech/stl/iota.html
+ *  \see https://en.cppreference.com/w/cpp/algorithm/iota
  */
 template<typename ForwardIterator, typename T>
   void sequence(ForwardIterator first,
@@ -210,11 +208,11 @@ template<typename ForwardIterator, typename T>
  *  \param step The difference between consecutive elements.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam ForwardIterator is a model of <a href="http://www.sgi.com/tech/stl/ForwardIterator.html">Forward Iterator</a>,
+ *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward Iterator</a>,
  *          and \p ForwardIterator is mutable,
  *          and if \c x and \c y are objects of \c ForwardIterator's \c value_type, then <tt>x + y</tt> is defined,
  *          and if \c T is \p ForwardIterator's \c value_type, then <tt>T(0)</tt> is defined.
- *  \tparam T is a model of <a href="http://www.sgi.com/tech/stl/Assignable.html">Assignable</a>,
+ *  \tparam T is a model of <a href="https://en.cppreference.com/w/cpp/named_req/CopyAssignable">Assignable</a>,
  *          and \p T is convertible to \p ForwardIterator's \c value_type.
  *
  *  The following code snippet demonstrates how to use \p sequence to fill a range
@@ -234,7 +232,7 @@ template<typename ForwardIterator, typename T>
  *  \note Unlike the similar C++ STL function \c std::iota, \p sequence offers no
  *        guarantee on order of execution.
  *
- *  \see http://www.sgi.com/tech/stl/iota.html
+ *  \see https://en.cppreference.com/w/cpp/algorithm/iota
  */
 template<typename DerivedPolicy, typename ForwardIterator, typename T>
 __host__ __device__
@@ -255,11 +253,11 @@ __host__ __device__
  *  \param init The first value of the sequence of numbers
  *  \param step The difference between consecutive elements.
  *
- *  \tparam ForwardIterator is a model of <a href="http://www.sgi.com/tech/stl/ForwardIterator.html">Forward Iterator</a>,
+ *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward Iterator</a>,
  *          and \p ForwardIterator is mutable,
  *          and if \c x and \c y are objects of \c ForwardIterator's \c value_type, then <tt>x + y</tt> is defined,
  *          and if \c T is \p ForwardIterator's \c value_type, then <tt>T(0)</tt> is defined.
- *  \tparam T is a model of <a href="http://www.sgi.com/tech/stl/Assignable.html">Assignable</a>,
+ *  \tparam T is a model of <a href="https://en.cppreference.com/w/cpp/named_req/CopyAssignable">Assignable</a>,
  *          and \p T is convertible to \p ForwardIterator's \c value_type.
  *
  *  The following code snippet demonstrates how to use \p sequence to fill a range
@@ -277,7 +275,7 @@ __host__ __device__
  *  \note Unlike the similar C++ STL function \c std::iota, \p sequence offers no
  *        guarantee on order of execution.
  *
- *  \see http://www.sgi.com/tech/stl/iota.html
+ *  \see https://en.cppreference.com/w/cpp/algorithm/iota
  */
 template<typename ForwardIterator, typename T>
   void sequence(ForwardIterator first,
@@ -289,8 +287,7 @@ template<typename ForwardIterator, typename T>
 /*! \} // end transformations
  */
 
-
-} // end namespace thrust
+THRUST_NAMESPACE_END
 
 #include <thrust/detail/sequence.inl>
 

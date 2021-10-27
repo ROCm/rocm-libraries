@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2021, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -30,8 +30,7 @@
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 #include <thrust/system/hip/detail/execution_policy.h>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
     template <class Derived, class ItemsIt, class ResultIt>
@@ -47,7 +46,7 @@ namespace hip_rocprim
             ItemsIt                    first,
             ItemsIt                    last);
 } // namespace hip_rocprim
-} // end namespace thrust
+THRUST_NAMESPACE_END
 
 #include <thrust/advance.h>
 #include <thrust/distance.h>
@@ -55,8 +54,7 @@ namespace hip_rocprim
 #include <thrust/system/hip/detail/copy.h>
 #include <thrust/system/hip/detail/swap_ranges.h>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
     template <class Derived, class ItemsIt, class ResultIt>
@@ -67,7 +65,7 @@ namespace hip_rocprim
                  ResultIt                   result)
     {
         return hip_rocprim::copy(
-            policy, make_reverse_iterator(last), make_reverse_iterator(first), result
+            policy, thrust::make_reverse_iterator(last), thrust::make_reverse_iterator(first), result
         );
     }
 
@@ -82,8 +80,8 @@ namespace hip_rocprim
         ItemsIt         mid(first);
         thrust::advance(mid, N / 2);
 
-        hip_rocprim::swap_ranges(policy, first, mid, make_reverse_iterator(last));
+        hip_rocprim::swap_ranges(policy, first, mid, thrust::make_reverse_iterator(last));
     }
 } // namespace hip_rocprim
-} // end namespace thrust
+THRUST_NAMESPACE_END
 #endif

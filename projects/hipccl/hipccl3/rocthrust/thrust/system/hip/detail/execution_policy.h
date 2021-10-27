@@ -40,8 +40,7 @@
   #include <thrust/detail/dependencies_aware_execution_policy.h>
 #endif
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 
 namespace hip_rocprim
 {
@@ -53,7 +52,7 @@ namespace hip_rocprim
     template <>
     struct execution_policy<tag> : thrust::execution_policy<tag>
     {
-        typedef tag tag_type; 
+        typedef tag tag_type;
     };
 
     struct tag : execution_policy<tag>
@@ -97,4 +96,4 @@ namespace hip
 } // namespace hip
 
 
-} // end namespace thrust
+THRUST_NAMESPACE_END

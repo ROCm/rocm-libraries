@@ -17,7 +17,7 @@
 
 
 /*! \file device_ptr.h
- *  \brief A pointer to a variable which resides in the "device" system's memory space
+ *  \brief A pointer to a variable which resides memory accessible to devices.
  */
 
 #pragma once
@@ -25,8 +25,7 @@
 #include <thrust/detail/config.h>
 #include <thrust/memory.h>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 
 /*! \addtogroup memory_management Memory Management
  *  \addtogroup memory_management_classes Memory Management Classes
@@ -90,7 +89,7 @@ template<typename T>
 
     /*! \p device_ptr's copy constructor is templated to allow copying to a
      *  <tt>device_ptr<const T></tt> from a <tt>T *</tt>.
-     *  
+     *
      *  \param ptr A raw pointer to copy from, presumed to point to a location in
      *         device memory.
      */
@@ -190,7 +189,7 @@ inline device_ptr<T> device_pointer_cast(const device_ptr<T> &ptr);
 /*! \}
  */
 
-} // end thrust
+THRUST_NAMESPACE_END
 
 #include <thrust/detail/device_ptr.inl>
 #include <thrust/detail/raw_pointer_cast.h>

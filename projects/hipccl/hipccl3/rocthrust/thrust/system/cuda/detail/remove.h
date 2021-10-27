@@ -26,16 +26,16 @@
  ******************************************************************************/
 #pragma once
 
+#include <thrust/detail/config.h>
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 #include <thrust/system/cuda/detail/copy_if.h>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace cuda_cub {
 
 // in-place
-
+  
 template <class Derived,
           class InputIt,
           class StencilIt,
@@ -75,6 +75,7 @@ remove(execution_policy<Derived> &policy,
        const T &                  value)
 {
   using thrust::placeholders::_1;
+
   return cuda_cub::remove_if(policy, first, last, _1 == value);
 }
 
@@ -129,5 +130,5 @@ remove_copy(execution_policy<Derived> &policy,
 }
 
 }    // namespace cuda_cub
-} // end namespace thrust
+THRUST_NAMESPACE_END
 #endif

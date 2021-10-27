@@ -26,12 +26,12 @@
  ******************************************************************************/
 #pragma once
 
+#include <thrust/detail/config.h>
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 #include <thrust/system/cuda/detail/execution_policy.h>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace cuda_cub {
 
 template <class Derived, class ItemsIt, class ResultIt>
@@ -48,7 +48,7 @@ reverse(execution_policy<Derived> &policy,
         ItemsIt                    last);
 
 }    // namespace cuda_cub
-} // end namespace thrust
+THRUST_NAMESPACE_END
 
 #include <thrust/advance.h>
 #include <thrust/distance.h>
@@ -56,8 +56,7 @@ reverse(execution_policy<Derived> &policy,
 #include <thrust/system/cuda/detail/copy.h>
 #include <thrust/iterator/reverse_iterator.h>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace cuda_cub {
 
 template <class Derived,
@@ -70,8 +69,8 @@ reverse_copy(execution_policy<Derived> &policy,
              ResultIt                   result)
 {
   return cuda_cub::copy(policy,
-                        make_reverse_iterator(last),
-                        make_reverse_iterator(first),
+                        thrust::make_reverse_iterator(last),
+                        thrust::make_reverse_iterator(first),
                         result);
 }
 
@@ -89,10 +88,10 @@ reverse(execution_policy<Derived> &policy,
   ItemsIt mid(first);
   thrust::advance(mid, N / 2);
 
-  cuda_cub::swap_ranges(policy, first, mid, make_reverse_iterator(last));
+  cuda_cub::swap_ranges(policy, first, mid, thrust::make_reverse_iterator(last));
 }
 
 
 }    // namespace cuda_cub
-} // end namespace thrust
+THRUST_NAMESPACE_END
 #endif

@@ -47,7 +47,7 @@
  *         <tt>THRUST_VERSION / 100 % 1000</tt> is the minor version.
  *         <tt>THRUST_VERSION / 100000</tt> is the major version.
  */
-#define THRUST_VERSION 101100
+#define THRUST_VERSION 101400
 
 /*! \def THRUST_MAJOR_VERSION
  *  \brief The preprocessor macro \p THRUST_MAJOR_VERSION encodes the
@@ -70,14 +70,6 @@
 /*! \def THRUST_PATCH_NUMBER
  *  \brief The preprocessor macro \p THRUST_PATCH_NUMBER encodes the
  *         patch number of the Thrust library.
+ *         Legacy; will be 0 for all future releases.
  */
 #define THRUST_PATCH_NUMBER 0
-
-/*! \namespace thrust
- *  \brief \p thrust is the top-level namespace which contains all Thrust
- *         functions and types.
- */
-namespace thrust
-{
-
-}

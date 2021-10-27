@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright© 2020 Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright© 2020-2021 Advanced Micro Devices, Inc. All rights reserved.
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
  *     * Redistributions of source code must retain the above copyright
@@ -42,14 +42,13 @@
 #include <thrust/detail/cstdint.h>
 #include <thrust/detail/execute_with_allocator.h>
 #include <thrust/system/hip/memory_resource.h>
-#include <thrust/memory/detail/host_system_resource.h>
+#include <thrust/mr/host_memory_resource.h>
 #include <thrust/mr/allocator.h>
 #include <thrust/mr/disjoint_sync_pool.h>
 #include <thrust/mr/sync_pool.h>
 #include <thrust/per_device_resource.h>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 
 namespace system { namespace hip { namespace detail
 {
@@ -120,7 +119,7 @@ THRUST_RETURNS(
 
 }}} // namespace system::hip::detail
 
-} // end namespace thrust
+THRUST_NAMESPACE_END
 
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 

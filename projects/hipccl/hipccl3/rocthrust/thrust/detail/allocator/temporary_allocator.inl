@@ -29,8 +29,7 @@
 #include <thrust/system/hip/detail/terminate.h>
 #endif
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace detail
 {
 
@@ -78,4 +77,4 @@ __host__ __device__
 
 
 } // end detail
-} // end thrust
+THRUST_NAMESPACE_END

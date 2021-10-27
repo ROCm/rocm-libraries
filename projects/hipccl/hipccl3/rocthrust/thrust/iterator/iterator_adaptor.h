@@ -37,8 +37,7 @@
 #include <thrust/detail/use_default.h>
 #include <thrust/iterator/detail/iterator_adaptor_base.h>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 
 /*! \addtogroup iterators
  *  \{
@@ -201,7 +200,10 @@ template<typename Derived,
     void advance(typename iterator_adaptor::difference_type n)
     {
       // XXX statically assert on random_access_traversal_tag
-      m_iterator += n;
+
+      // counting_iterator will pick eg. diff_t=int64 when base=int32.
+      // Explicitly cast to avoid static conversion warnings.
+      m_iterator = static_cast<base_type>(m_iterator + n);
     }
 
     __thrust_exec_check_disable__
@@ -236,5 +238,5 @@ template<typename Derived,
 /*! \} // end iterators
  */
 
-} // end thrust
+THRUST_NAMESPACE_END
 

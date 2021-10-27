@@ -6,6 +6,9 @@ doc/html/
 doc/xml/
 doc/latex/
 doc/*.tag
+docs/_build/
+docs/api/
+docs/docBin/
 
 # Created by https://www.gitignore.io/api/c++,cmake
 
@@ -64,3 +67,4 @@ discrete_voronoi.pgm
 # End of https://www.gitignore.io/api/c++,cmake
 
 .vscode
+docs/_build/doctrees/environment.pickle

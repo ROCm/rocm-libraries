@@ -36,35 +36,34 @@
 #include <cub/block/block_store.cuh>
 #include <cub/block/block_scan.cuh>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 
 namespace cuda_cub {
 namespace core {
 
-  #ifdef __NVCOMPILER_CUDA__
-  #  if (__NVCOMPILER_CUDA_ARCH__ >= 600)
-  #    define THRUST_TUNING_ARCH sm60
-  #  elif (__NVCOMPILER_CUDA_ARCH__ >= 520)
-  #    define THRUST_TUNING_ARCH sm52
-  #  elif (__NVCOMPILER_CUDA_ARCH__ >= 350)
-  #    define THRUST_TUNING_ARCH sm35
-  #  else
-  #    define THRUST_TUNING_ARCH sm30
-  #  endif
-  #else
-  #  if (__CUDA_ARCH__ >= 600)
-  #    define THRUST_TUNING_ARCH sm60
-  #  elif (__CUDA_ARCH__ >= 520)
-  #    define THRUST_TUNING_ARCH sm52
-  #  elif (__CUDA_ARCH__ >= 350)
-  #    define THRUST_TUNING_ARCH sm35
-  #  elif (__CUDA_ARCH__ >= 300)
-  #    define THRUST_TUNING_ARCH sm30
-  #  elif !defined (__CUDA_ARCH__)
-  #    define THRUST_TUNING_ARCH sm30
-  #  endif
-  #endif
+#ifdef __NVCOMPILER_CUDA__
+#  if (__NVCOMPILER_CUDA_ARCH__ >= 600)
+#    define THRUST_TUNING_ARCH sm60
+#  elif (__NVCOMPILER_CUDA_ARCH__ >= 520)
+#    define THRUST_TUNING_ARCH sm52
+#  elif (__NVCOMPILER_CUDA_ARCH__ >= 350)
+#    define THRUST_TUNING_ARCH sm35
+#  else
+#    define THRUST_TUNING_ARCH sm30
+#  endif
+#else
+#  if (__CUDA_ARCH__ >= 600)
+#    define THRUST_TUNING_ARCH sm60
+#  elif (__CUDA_ARCH__ >= 520)
+#    define THRUST_TUNING_ARCH sm52
+#  elif (__CUDA_ARCH__ >= 350)
+#    define THRUST_TUNING_ARCH sm35
+#  elif (__CUDA_ARCH__ >= 300)
+#    define THRUST_TUNING_ARCH sm30
+#  elif !defined (__CUDA_ARCH__)
+#    define THRUST_TUNING_ARCH sm30
+#  endif
+#endif
 
   // Typelist - a container of types, supports up to 10 types
   // --------------------------------------------------------------------------
@@ -535,7 +534,7 @@ namespace core {
         cub::CacheModifiedInputIterator<PtxPlan::LOAD_MODIFIER,
                                         value_type,
                                         size_type>,
-        It>::type type;
+                                        It>::type type;
   };    // struct Iterator
 
   template <class PtxPlan, class It>
@@ -574,16 +573,13 @@ namespace core {
             class T    = typename iterator_traits<It>::value_type>
   struct BlockLoad
   {
-    typedef cub::BlockLoad<T,
-                           PtxPlan::BLOCK_THREADS,
-                           PtxPlan::ITEMS_PER_THREAD,
-                           PtxPlan::LOAD_ALGORITHM,
-                           1,
-                           1,
-                           get_arch<PtxPlan>::type::ver>
-
-
-        type;
+    using type = cub::BlockLoad<T,
+                                PtxPlan::BLOCK_THREADS,
+                                PtxPlan::ITEMS_PER_THREAD,
+                                PtxPlan::LOAD_ALGORITHM,
+                                1,
+                                1,
+                                get_arch<PtxPlan>::type::ver>;
   };
 
   // BlockStore
@@ -594,16 +590,16 @@ namespace core {
             class T = typename iterator_traits<It>::value_type>
   struct BlockStore
   {
-    typedef cub::BlockStore<T,
-                            PtxPlan::BLOCK_THREADS,
-                            PtxPlan::ITEMS_PER_THREAD,
-                            PtxPlan::STORE_ALGORITHM,
-                            1,
-                            1,
-                            get_arch<PtxPlan>::type::ver>
-        type;
+    using type = cub::BlockStore<T,
+                                 PtxPlan::BLOCK_THREADS,
+                                 PtxPlan::ITEMS_PER_THREAD,
+                                 PtxPlan::STORE_ALGORITHM,
+                                 1,
+                                 1,
+                                 get_arch<PtxPlan>::type::ver>;
   };
-  // cuda_otional
+
+  // cuda_optional
   // --------------
   // used for function that return cudaError_t along with the result
   //
@@ -651,11 +647,11 @@ namespace core {
     cub::CTA_SYNC();
   }
 
-  #define CUDA_CUB_RET_IF_FAIL(e) \
-    {                             \
-      auto const error = (e);     \
-      if (cub::Debug(error, __FILE__, __LINE__)) return error; \
-    }
+#define CUDA_CUB_RET_IF_FAIL(e) \
+  {                             \
+    auto const error = (e);     \
+    if (cub::Debug(error, __FILE__, __LINE__)) return error; \
+  }
 
   // uninitialized
   // -------
@@ -770,4 +766,4 @@ using core::sm35;
 using core::sm30;
 } // namespace cuda_
 
-} // end namespace thrust
+THRUST_NAMESPACE_END

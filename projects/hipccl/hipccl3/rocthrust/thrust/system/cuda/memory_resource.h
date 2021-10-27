@@ -1,5 +1,5 @@
 /*
- *  Copyright 2018 NVIDIA Corporation
+ *  Copyright 2018-2020 NVIDIA Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -20,18 +20,18 @@
 
 #pragma once
 
+#include <thrust/detail/config.h>
+
 #include <thrust/mr/memory_resource.h>
 #include <thrust/system/cuda/detail/guarded_cuda_runtime_api.h>
-#include <thrust/system/cuda/detail/managed_memory_pointer.h>
 #include <thrust/system/cuda/pointer.h>
 #include <thrust/system/detail/bad_alloc.h>
 #include <thrust/system/cuda/error.h>
 #include <thrust/system/cuda/detail/util.h>
 
-#include <thrust/memory/detail/host_system_resource.h>
+#include <thrust/mr/host_memory_resource.h>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 
 namespace system
 {
@@ -46,10 +46,10 @@ namespace detail
     typedef cudaError_t (*deallocation_fn)(void *);
 
     template<allocation_fn Alloc, deallocation_fn Dealloc, typename Pointer>
-    class cuda_memory_resource THRUST_FINAL : public mr::memory_resource<Pointer>
+    class cuda_memory_resource final : public mr::memory_resource<Pointer>
     {
     public:
-        Pointer do_allocate(std::size_t bytes, std::size_t alignment = THRUST_MR_DEFAULT_ALIGNMENT) THRUST_OVERRIDE
+        Pointer do_allocate(std::size_t bytes, std::size_t alignment = THRUST_MR_DEFAULT_ALIGNMENT) override
         {
             (void)alignment;
 
@@ -65,7 +65,7 @@ namespace detail
             return Pointer(ret);
         }
 
-        void do_deallocate(Pointer p, std::size_t bytes, std::size_t alignment) THRUST_OVERRIDE
+        void do_deallocate(Pointer p, std::size_t bytes, std::size_t alignment) override
         {
             (void)bytes;
             (void)alignment;
@@ -88,23 +88,39 @@ namespace detail
         thrust::cuda::pointer<void> >
         device_memory_resource;
     typedef detail::cuda_memory_resource<detail::cudaMallocManaged, cudaFree,
-        detail::managed_memory_pointer<void> >
+        thrust::cuda::universal_pointer<void> >
         managed_memory_resource;
     typedef detail::cuda_memory_resource<cudaMallocHost, cudaFreeHost,
-        thrust::host_memory_resource::pointer>
+        thrust::cuda::universal_pointer<void> >
         pinned_memory_resource;
 
 } // end detail
 //! \endcond
 
-/*! The memory resource for the CUDA system. Uses <tt>cudaMalloc</tt> and wraps the result with \p cuda::pointer. */
+/*! The memory resource for the CUDA system. Uses <tt>cudaMalloc</tt> and wraps
+ *  the result with \p cuda::pointer.
+ */
 typedef detail::device_memory_resource memory_resource;
-/*! The universal memory resource for the CUDA system. Uses <tt>cudaMallocManaged</tt> and wraps the result with \p cuda::pointer. */
+/*! The universal memory resource for the CUDA system. Uses
+ *  <tt>cudaMallocManaged</tt> and wraps the result with
+ *  \p cuda::universal_pointer.
+ */
 typedef detail::managed_memory_resource universal_memory_resource;
-/*! The host pinned memory resource for the CUDA system. Uses <tt>cudaMallocHost</tt> and wraps the result with \p cuda::pointer. */
+/*! The host pinned memory resource for the CUDA system. Uses
+ *  <tt>cudaMallocHost</tt> and wraps the result with \p
+ *  cuda::universal_pointer.
+ */
 typedef detail::pinned_memory_resource universal_host_pinned_memory_resource;
 
 } // end cuda
 } // end system
 
-} // end namespace thrust
+namespace cuda
+{
+using thrust::system::cuda::memory_resource;
+using thrust::system::cuda::universal_memory_resource;
+using thrust::system::cuda::universal_host_pinned_memory_resource;
+}
+
+THRUST_NAMESPACE_END
+

@@ -785,7 +785,7 @@ struct test_async_reduce_after
     );
 
     ASSERT_EQUAL(true, f0.valid_stream());
- 
+
     auto const f0_stream = f0.stream().native_handle();
 
     auto f1 = thrust::async::reduce(
@@ -975,6 +975,7 @@ struct test_async_reduce_allocator_on_then_after
     KNOWN_FAILURE;
     // FIXME: The below fails because you can't combine allocator attachment,
     // `.on`, and `.after`.
+#if 0
     ASSERT_EQUAL_QUIET(stream1, f2.stream().native_handle());
 
     // This potentially runs concurrently with the copies.
@@ -986,6 +987,7 @@ struct test_async_reduce_allocator_on_then_after
 
     thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream0));
     thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream1));
+#endif
   }
 };
 DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES(
@@ -1133,4 +1135,3 @@ DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES(
 // TODO: when_all from reductions.
 
 #endif
-

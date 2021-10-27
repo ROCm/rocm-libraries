@@ -47,8 +47,7 @@
   #define THRUST_HIP_PRINTF(text, ...)
 #endif
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
 
@@ -587,4 +586,4 @@ struct counting_iterator_t
 }; // struct count_iterator_t
 
 } // hip_rocprim
-} // end namespace thrust
+THRUST_NAMESPACE_END

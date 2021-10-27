@@ -17,8 +17,7 @@
 
 #pragma once
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim {
 
 namespace detail {
@@ -39,4 +38,4 @@ namespace detail {
 
 }
 }
-} // end namespace thrust
+THRUST_NAMESPACE_END

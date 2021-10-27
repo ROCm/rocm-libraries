@@ -1,5 +1,5 @@
 /*
- *  Copyright 2018 NVIDIA Corporation
+ *  Copyright 2008-2020 NVIDIA Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -14,20 +14,13 @@
  *  limitations under the License.
  */
 
+
+/*! \file universal_ptr.h
+ *  \brief A pointer to a variable which resides memory accessible to both
+ *         hosts and devices.
+ */
+
 #pragma once
 
-#include <thrust/detail/config.h>
-
-// #include the host system's memory_resource header
-#define __THRUST_HOST_SYSTEM_MEMORY_HEADER <__THRUST_HOST_SYSTEM_ROOT/memory_resource.h>
-#include __THRUST_HOST_SYSTEM_MEMORY_HEADER
-#undef __THRUST_HOST_SYSTEM_MEMORY_HEADER
-
-namespace thrust
-{
-
-typedef thrust::system::__THRUST_HOST_SYSTEM_NAMESPACE::memory_resource
-    host_memory_resource;
-
-} // end thrust
+#include <thrust/universal_allocator.h>
 

@@ -24,14 +24,15 @@
 
 #include <thrust/tuple.h>
 #include <thrust/iterator/iterator_traits.h>
+#include <thrust/detail/config.h>
 #include <thrust/detail/static_assert.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/iterator/detail/tuple_of_iterator_references.h>
 #include <thrust/detail/raw_reference_cast.h>
 #include <thrust/detail/memory_wrapper.h> // for ::new
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
+
 namespace detail
 {
 
@@ -194,7 +195,7 @@ template<typename Generator>
   // XXX change to an rvalue reference upon c++0x (which either a named variable
   //     or temporary can bind to)
   template<typename T>
-  __host__ __device__
+  __host__
   void operator()(const T &x)
   {
     // we have to be naughty and const_cast this to get it to work
@@ -554,4 +555,5 @@ template<typename Compare>
 
 
 } // end namespace detail
-} // end namespace thrust
+
+THRUST_NAMESPACE_END

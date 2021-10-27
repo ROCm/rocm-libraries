@@ -32,8 +32,7 @@
 #include <thrust/distance.h>
 #include <thrust/system/hip/detail/reduce.h>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
 
@@ -56,5 +55,5 @@ transform_reduce(execution_policy<Derived>& policy,
 }
 
 } // namespace hip_rocprim
-} // end namespace thrust
+THRUST_NAMESPACE_END
 #endif

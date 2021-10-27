@@ -18,11 +18,13 @@
 
 #pragma once
 
+#include <thrust/detail/config.h>
+
 #include <thrust/complex.h>
 #include <thrust/detail/type_traits.h>
 #include <cmath>
 
-namespace thrust {
+THRUST_NAMESPACE_BEGIN
 
 template <typename T0, typename T1>
 __host__ __device__
@@ -57,4 +59,4 @@ pow(const T0& x, const complex<T1>& y)
   return exp(log(T(x)) * complex<T>(y));
 }
 
-} // end namespace thrust
+THRUST_NAMESPACE_END

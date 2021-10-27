@@ -26,8 +26,7 @@
 #include <thrust/detail/function.h>
 #include <thrust/system/detail/sequential/execution_policy.h>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace system
 {
 namespace detail
@@ -52,8 +51,8 @@ __host__ __device__
                                        BinaryPredicate binary_pred,
                                        BinaryFunction binary_op)
 {
-  typedef typename thrust::iterator_traits<InputIterator1>::value_type KeyType;
-  typedef typename thrust::iterator_traits<OutputIterator>::value_type ValueType;
+  using KeyType = typename thrust::iterator_traits<InputIterator1>::value_type;
+  using ValueType = typename thrust::iterator_traits<InputIterator2>::value_type;
 
   // wrap binary_op
   thrust::detail::wrapped_function<
@@ -105,8 +104,8 @@ __host__ __device__
                                        BinaryPredicate binary_pred,
                                        BinaryFunction binary_op)
 {
-  typedef typename thrust::iterator_traits<InputIterator1>::value_type KeyType;
-  typedef typename thrust::iterator_traits<OutputIterator>::value_type ValueType;
+  using KeyType = typename thrust::iterator_traits<InputIterator1>::value_type;
+  using ValueType = T;
 
   if(first1 != last1)
   {
@@ -146,5 +145,5 @@ __host__ __device__
 } // end namespace sequential
 } // end namespace detail
 } // end namespace system
-} // end namespace thrust
+THRUST_NAMESPACE_END
 

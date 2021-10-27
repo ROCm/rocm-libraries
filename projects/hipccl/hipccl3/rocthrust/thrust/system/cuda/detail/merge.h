@@ -26,6 +26,8 @@ j * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
  ******************************************************************************/
 #pragma once
 
+#include <thrust/detail/config.h>
+
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 #include <thrust/detail/cstdint.h>
 #include <thrust/detail/temporary_array.h>
@@ -43,8 +45,7 @@ j * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
 #include <thrust/distance.h>
 
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace cuda_cub {
 
 namespace __merge {
@@ -1014,5 +1015,5 @@ merge_by_key(execution_policy<Derived> &policy,
 
 
 }    // namespace cuda_cub
-} // end namespace thrust
+THRUST_NAMESPACE_END
 #endif

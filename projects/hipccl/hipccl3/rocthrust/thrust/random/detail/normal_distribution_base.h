@@ -34,9 +34,7 @@
   #include <thrust/random/detail/erfcinv.h>
 #endif
 
-
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace random
 {
 namespace detail
@@ -151,4 +149,4 @@ template<typename RealType>
 
 } // end detail
 } // end random
-} // end thrust
+THRUST_NAMESPACE_END

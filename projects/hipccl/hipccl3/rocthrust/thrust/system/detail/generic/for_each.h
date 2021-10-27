@@ -27,8 +27,7 @@
 #include <thrust/system/detail/generic/tag.h>
 #include <thrust/detail/static_assert.h>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace system
 {
 namespace detail
@@ -73,5 +72,5 @@ InputIterator for_each_n(thrust::execution_policy<DerivedPolicy> &,
 } // end namespace generic
 } // end namespace detail
 } // end namespace system
-} // end namespace thrust
+THRUST_NAMESPACE_END
 

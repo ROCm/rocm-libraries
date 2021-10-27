@@ -2074,8 +2074,6 @@ PREDEFINED             = THRUST_NOEXCEPT=noexcept \
                          "THRUST_DEFAULT={}" \
                          "THRUST_NODISCARD=[[nodiscard]]" \
                          "THRUST_MR_DEFAULT_ALIGNMENT=alignof(max_align_t)" \
-                         "THRUST_FINAL=final" \
-                         "THRUST_OVERRIDE=" \
                          "THRUST_BEGIN_NS=namespace thrust {" \
                          "THRUST_END_NS=}" \
                          "cuda_cub=system::cuda" \

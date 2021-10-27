@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright© 2019-2021 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -34,12 +34,33 @@
 #include <thrust/system/hip/detail/execution_policy.h>
 #include <thrust/system/hip/detail/transform.h>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
 
-template <class Derived, class Iterator, class TabulateOp>
+namespace __tabulate {
+
+  template <class Iterator, class TabulateOp, class Size>
+  struct functor
+  {
+    Iterator items;
+    TabulateOp op;
+
+    __host__ __device__
+    functor(Iterator items_, TabulateOp op_)
+        : items(items_), op(op_) {}
+
+    void __device__ operator()(Size idx)
+    {
+      items[idx] = op(idx);
+    }
+  };    // struct functor
+
+}    // namespace __tabulate
+
+template <class Derived,
+          class Iterator,
+          class TabulateOp>
 void THRUST_HIP_FUNCTION
 tabulate(execution_policy<Derived>& policy,
          Iterator                   first,
@@ -48,15 +69,20 @@ tabulate(execution_policy<Derived>& policy,
 {
     typedef typename iterator_traits<Iterator>::difference_type size_type;
 
-    hip_rocprim::transform(
-        policy,
-        thrust::make_counting_iterator<size_type>(0),
-        thrust::make_counting_iterator<size_type>(thrust::distance(first, last)),
-        first,
-        [tabulate_op](size_type i) mutable { return tabulate_op(i); }
+    size_type count = thrust::distance(first, last);
+
+    typedef __tabulate::functor<Iterator, TabulateOp, size_type> functor_t;
+
+    hip_rocprim::parallel_for(policy,
+                              functor_t(first, tabulate_op),
+                              count);
+
+    hip_rocprim::throw_on_error(
+        hip_rocprim::synchronize(policy),
+        "tabulate: failed to synchronize"
     );
 }
 
 } // namespace hip_rocprim
-} // end namespace thrust
+THRUST_NAMESPACE_END
 #endif

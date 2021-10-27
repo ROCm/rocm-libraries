@@ -25,8 +25,7 @@
 
 #include <type_traits>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace detail
 {
 namespace functional
@@ -133,4 +132,4 @@ struct transparent_binary_operator
 
 } // end functional
 } // end detail
-} // end thrust
+THRUST_NAMESPACE_END

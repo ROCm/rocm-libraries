@@ -49,8 +49,7 @@
 // rocprim include
 #include <rocprim/rocprim.hpp>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 
 template <typename DerivedPolicy,
           typename InputIterator1,
@@ -278,6 +277,6 @@ reduce_by_key(execution_policy<Derived>& policy,
 }
 
 } // namespace  hip_rocprim
-} // end namespace thrust
+THRUST_NAMESPACE_END
 
 #endif

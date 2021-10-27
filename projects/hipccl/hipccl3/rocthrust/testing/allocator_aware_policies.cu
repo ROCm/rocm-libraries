@@ -24,14 +24,14 @@ struct test_allocator_t
 test_allocator_t<int> test_allocator = test_allocator_t<int>();
 const test_allocator_t<int> const_test_allocator = test_allocator_t<int>();
 
-struct test_memory_resource_t THRUST_FINAL : thrust::mr::memory_resource<>
+struct test_memory_resource_t final : thrust::mr::memory_resource<>
 {
-    void * do_allocate(std::size_t size, std::size_t) THRUST_OVERRIDE
+    void * do_allocate(std::size_t size, std::size_t) override
     {
         return reinterpret_cast<void *>(size);
     }
 
-    void do_deallocate(void * ptr, std::size_t size, std::size_t) THRUST_OVERRIDE
+    void do_deallocate(void * ptr, std::size_t size, std::size_t) override
     {
         ASSERT_EQUAL(ptr, reinterpret_cast<void *>(size));
     }
@@ -134,10 +134,6 @@ typedef policy_info<
     thrust::system::cpp::detail::execution_policy
 > cpp_par_info;
 typedef policy_info<
-    thrust::system::THRUST_DEVICE_BACKEND::detail::par_t,
-    thrust::THRUST_DEVICE_BACKEND_DETAIL::execute_on_stream_base
-> THRUST_DEVICE_BACKEND_par_info;
-typedef policy_info<
     thrust::system::omp::detail::par_t,
     thrust::system::omp::detail::execution_policy
 > omp_par_info;
@@ -153,6 +149,13 @@ typedef policy_info<
 > cuda_par_info;
 #endif
 
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
+typedef policy_info<
+    thrust::system::hip::detail::par_t,
+    thrust::hip_rocprim::execute_on_stream_base
+> hip_par_info;
+#endif
+
 SimpleUnitTest<
     TestAllocatorAttachment,
     unittest::type_list<
@@ -160,8 +163,10 @@ SimpleUnitTest<
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
         cuda_par_info,
 #endif
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
+        hip_par_info,
+#endif
         cpp_par_info,
-        THRUST_DEVICE_BACKEND_par_info,
         omp_par_info,
         tbb_par_info
     >
