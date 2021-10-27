@@ -20,8 +20,7 @@
 #include <thrust/system/hip/detail/guarded_hip_runtime_api.h>
 #include <thrust/system/hip/error.h>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace system
 {
 
@@ -50,7 +49,7 @@ namespace detail
         }
 
         inline virtual std::string message(int ev) const
-        {      
+        {
             char const* const unknown_str  = "unknown error";
             char const* const unknown_name = "hipErrorUnknown";
             char const* c_str  = ::hipGetErrorString(static_cast<hipError_t>(ev));
@@ -83,4 +82,4 @@ const error_category& hip_category(void)
 }
 
 } // end namespace system
-} // end namespace thrust
+THRUST_NAMESPACE_END

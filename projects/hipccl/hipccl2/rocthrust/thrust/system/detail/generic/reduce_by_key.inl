@@ -21,6 +21,8 @@
 
 #pragma once
 
+#include <thrust/detail/config.h>
+
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/iterator/detail/minimum_system.h>
 #include <thrust/detail/type_traits.h>
@@ -35,8 +37,7 @@
 #include <thrust/scan.h>
 #include <thrust/detail/temporary_array.h>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace system
 {
 namespace detail
@@ -93,7 +94,6 @@ __host__ __device__
 
     // Use the input iterator's value type per https://wg21.link/P0571
     using ValueType = typename thrust::iterator_value<InputIterator2>::type;
-
 
     if (keys_first == keys_last)
         return thrust::make_pair(keys_output, values_output);
@@ -194,4 +194,4 @@ __host__ __device__
 } // end namespace generic
 } // end namespace detail
 } // end namespace system
-} // end namespace thrust
+THRUST_NAMESPACE_END

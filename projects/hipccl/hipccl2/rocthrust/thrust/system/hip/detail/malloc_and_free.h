@@ -31,8 +31,7 @@
 #include <thrust/system/hip/detail/util.h>
 #include <thrust/system/detail/bad_alloc.h>
 #include <thrust/detail/malloc_and_free.h>
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
 
@@ -69,7 +68,7 @@ if (THRUST_IS_HOST_CODE) {
     if(status != hipSuccess)
     {
         // Clear global hip error state.
-        hipError_t clear_error_status = hipGetLastError(); 
+        hipError_t clear_error_status = hipGetLastError();
         THRUST_UNUSED_VAR(clear_error_status);
         throw thrust::system::detail::bad_alloc(thrust::hip_category().message(status).c_str());
     }
@@ -106,4 +105,4 @@ free(execution_policy<DerivedPolicy>&, Pointer ptr)
 } // end free()
 
 } // namespace hip_rocprim
-} // end namespace thrust
+THRUST_NAMESPACE_END

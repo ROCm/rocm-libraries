@@ -256,7 +256,7 @@ TYPED_TEST(AsyncSortTests, AsyncSortLessNoWait)
     TestAsyncSort<T, sort_invoker_less, do_not_wait_for_futures>();
 };
 
-TYPED_TEST(AsyncSortTests, AsyncSortPloicyLess)
+TYPED_TEST(AsyncSortTests, AsyncSortPolicyLess)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
     using T = typename TestFixture::input_type;

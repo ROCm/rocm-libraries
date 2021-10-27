@@ -31,15 +31,16 @@ struct test_allocator_t
 test_allocator_t<int> test_allocator = test_allocator_t<int>();
 const test_allocator_t<int> const_test_allocator = test_allocator_t<int>();
 
-struct test_memory_resource_t THRUST_FINAL : thrust::mr::memory_resource<>
+struct test_memory_resource_t final : thrust::mr::memory_resource<>
 {
-    void * do_allocate(std::size_t, std::size_t) THRUST_OVERRIDE
+    void * do_allocate(std::size_t size, std::size_t) override
     {
-        return NULL;
+        return reinterpret_cast<void *>(size);
     }
 
-    void do_deallocate(void *, std::size_t, std::size_t) THRUST_OVERRIDE
+    void do_deallocate(void * ptr, std::size_t size, std::size_t) override
     {
+        ASSERT_EQ(ptr, reinterpret_cast<void *>(size));
     }
 } test_memory_resource;
 
@@ -87,15 +88,45 @@ struct TestAllocatorAttachment
             >::value), true);
     }
 
+    template<typename Policy>
+    void test_temporary_allocation_valid(Policy policy)
+    {
+        using thrust::detail::get_temporary_buffer;
+
+        return_temporary_buffer(
+            policy,
+            get_temporary_buffer<int>(
+                policy,
+                123
+            ).first,
+            123
+        );
+    }
     void operator()()
     {
         typename PolicyInfo::policy policy;
 
+        // test correctness of attachment
         assert_correct<test_allocator_t<int> >(policy(test_allocator_t<int>()));
         assert_correct<test_allocator_t<int>&>(policy(test_allocator));
         assert_correct<test_allocator_t<int> >(policy(const_test_allocator));
 
         assert_npa_correct<test_memory_resource_t>(policy(&test_memory_resource));
+        // test whether the resulting policy is actually usable
+        // a real allocator is necessary here, unlike above
+        std::allocator<int> alloc;
+        const std::allocator<int> const_alloc;
+
+        test_temporary_allocation_valid(policy(std::allocator<int>()));
+        test_temporary_allocation_valid(policy(alloc));
+        test_temporary_allocation_valid(policy(const_alloc));
+        test_temporary_allocation_valid(policy(&test_memory_resource));
+
+        #if THRUST_CPP_DIALECT >= 2011
+        test_temporary_allocation_valid(policy(std::allocator<int>()).after(1));
+        test_temporary_allocation_valid(policy(alloc).after(1));
+        test_temporary_allocation_valid(policy(const_alloc).after(1));
+        #endif
     }
 };
 
@@ -134,7 +165,7 @@ TYPED_TEST(AllocatorAwarePoliciesTests, TestAllocatorAttachmentInstance)
   using T = typename TestFixture::input_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-  
+
   TestAllocatorAttachment<T> test;
   test();
 }

@@ -20,8 +20,7 @@
 #include <thrust/system/cpp/vector.h>
 #include <utility>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace system
 {
 namespace cpp
@@ -122,4 +121,4 @@ template<typename T, typename Allocator>
 
 } // end cpp
 } // end system
-} // end thrust
+THRUST_NAMESPACE_END

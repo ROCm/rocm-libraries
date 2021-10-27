@@ -25,9 +25,7 @@
 #include <thrust/detail/execution_policy.h>
 #include <thrust/pair.h>
 
-namespace thrust
-{
-
+THRUST_NAMESPACE_BEGIN
 
 /*! \addtogroup algorithms
  */
@@ -57,9 +55,9 @@ namespace thrust
  *  \return The first position where the sequences differ.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam InputIterator1 is a model of <a href="http://www.sgi.com/tech/stl/InputIterator.html">Input Iterator</a>
+ *  \tparam InputIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>
  *          and \p InputIterator1's \c value_type is equality comparable to \p InputIterator2's \c value_type.
- *  \tparam InputIterator2 is a model of <a href="http://www.sgi.com/tech/stl/InputIterator.html">Input Iterator</a>.
+ *  \tparam InputIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>.
  *
  *  \code
  *  #include <thrust/mismatch.h>
@@ -109,9 +107,9 @@ thrust::pair<InputIterator1, InputIterator2> mismatch(const thrust::detail::exec
  *  \param first2 The beginning of the second sequence.
  *  \return The first position where the sequences differ.
  *
- *  \tparam InputIterator1 is a model of <a href="http://www.sgi.com/tech/stl/InputIterator.html">Input Iterator</a>
+ *  \tparam InputIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>
  *          and \p InputIterator1's \c value_type is equality comparable to \p InputIterator2's \c value_type.
- *  \tparam InputIterator2 is a model of <a href="http://www.sgi.com/tech/stl/InputIterator.html">Input Iterator</a>.
+ *  \tparam InputIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>.
  *
  *  \code
  *  #include <thrust/mismatch.h>
@@ -163,9 +161,9 @@ thrust::pair<InputIterator1, InputIterator2> mismatch(InputIterator1 first1,
  *  \return The first position where the sequences differ.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam InputIterator1 is a model of <a href="http://www.sgi.com/tech/stl/InputIterator.html">Input Iterator</a>.
- *  \tparam InputIterator2 is a model of <a href="http://www.sgi.com/tech/stl/InputIterator.html">Input Iterator</a>.
- *  \tparam Predicate is a model of <a href="http://www.sgi.com/tech/stl/BinaryPredicate.html">Input Iterator</a>.
+ *  \tparam InputIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>.
+ *  \tparam InputIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>.
+ *  \tparam Predicate is a model of <a href="https://en.cppreference.com/w/cpp/named_req/BinaryPredicate">Input Iterator</a>.
  *
  *  \code
  *  #include <thrust/mismatch.h>
@@ -217,9 +215,9 @@ thrust::pair<InputIterator1, InputIterator2> mismatch(const thrust::detail::exec
  *  \param pred   The binary predicate to compare elements.
  *  \return The first position where the sequences differ.
  *
- *  \tparam InputIterator1 is a model of <a href="http://www.sgi.com/tech/stl/InputIterator.html">Input Iterator</a>.
- *  \tparam InputIterator2 is a model of <a href="http://www.sgi.com/tech/stl/InputIterator.html">Input Iterator</a>.
- *  \tparam Predicate is a model of <a href="http://www.sgi.com/tech/stl/BinaryPredicate.html">Input Iterator</a>.
+ *  \tparam InputIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>.
+ *  \tparam InputIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>.
+ *  \tparam Predicate is a model of <a href="https://en.cppreference.com/w/cpp/named_req/BinaryPredicate">Input Iterator</a>.
  *
  *  \code
  *  #include <thrust/mismatch.h>
@@ -254,7 +252,6 @@ thrust::pair<InputIterator1, InputIterator2> mismatch(InputIterator1 first1,
 /*! \} // end searching
  */
 
-} // end namespace thrust
+THRUST_NAMESPACE_END
 
 #include <thrust/detail/mismatch.inl>
-

@@ -14,11 +14,11 @@
  *  limitations under the License.
  */
 
-#pragma once
-
 /*! \file thrust/system/cpp/execution_policy.h
- *  \brief Execution policies for Thrust's standard C++ system.
+ *  \brief Execution policies for Thrust's Standard C++ system.
  */
+
+#pragma once
 
 #include <thrust/detail/config.h>
 
@@ -76,8 +76,7 @@
 // define these entities here for the purpose of Doxygenating them
 // they are actually defined elsewhere
 #if 0
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace system
 {
 namespace cpp
@@ -104,7 +103,7 @@ struct execution_policy : thrust::execution_policy<DerivedPolicy>
 struct tag : thrust::system::cpp::execution_policy<tag> { unspecified };
 
 
-/*! 
+/*!
  *  \p thrust::system::cpp::par is the parallel execution policy associated with Thrust's standard
  *  C++ backend system.
  *
@@ -151,7 +150,7 @@ static const unspecified par;
 
 } // end cpp
 } // end system
-} // end thrust
+THRUST_NAMESPACE_END
 #endif
 
 

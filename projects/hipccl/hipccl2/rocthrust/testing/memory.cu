@@ -166,7 +166,7 @@ DECLARE_UNITTEST(TestSelectSystemSameTypes);
 
 void TestGetTemporaryBuffer()
 {
-  const size_t n = 9001;
+  const std::ptrdiff_t n = 9001;
 
   thrust::device_system_tag dev_tag;
   typedef thrust::pointer<int, thrust::device_system_tag> pointer;
@@ -188,7 +188,7 @@ DECLARE_UNITTEST(TestGetTemporaryBuffer);
 
 void TestMalloc()
 {
-  const size_t n = 9001;
+  const std::ptrdiff_t n = 9001;
 
   thrust::device_system_tag dev_tag;
   typedef thrust::pointer<int, thrust::device_system_tag> pointer;

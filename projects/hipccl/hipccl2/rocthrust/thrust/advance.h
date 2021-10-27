@@ -23,8 +23,7 @@
 
 #include <thrust/detail/config.h>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 
 /*! \addtogroup iterators
  *  \{
@@ -38,7 +37,7 @@ namespace thrust
  *  \param i The iterator to be advanced.
  *  \param n The distance by which to advance the iterator.
  *
- *  \tparam InputIterator is a model of <a href="http://www.sgi.com/tech/stl/InputIterator.html">Input Iterator</a>.
+ *  \tparam InputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>.
  *  \tparam Distance is an integral type that is convertible to \p InputIterator's distance type.
  *
  *  \pre \p n shall be negative only for bidirectional and random access iterators.
@@ -58,7 +57,7 @@ namespace thrust
  *  // iter - vec.begin() == 7
  *  \endcode
  *
- *  \see http://www.sgi.com/tech/stl/advance.html
+ *  \see https://en.cppreference.com/w/cpp/iterator/advance
  */
 template <typename InputIterator, typename Distance>
 __host__ __device__
@@ -135,7 +134,7 @@ BidirectionalIterator prev(
 /*! \} // end iterators
  */
 
-} // end thrust
+THRUST_NAMESPACE_END
 
 #include <thrust/detail/advance.inl>
 

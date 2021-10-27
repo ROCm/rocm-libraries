@@ -30,8 +30,7 @@
 #include <thrust/detail/contiguous_storage.h>
 #include <vector>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 
 namespace detail
 {
@@ -422,8 +421,8 @@ template<typename T, typename Alloc>
      *  \param first The beginning of the range to copy.
      *  \param last  The end of the range to copy.
      *
-     *  \tparam InputIterator is a model of <a href="http://www.sgi.com/tech/stl/InputIterator.html>Input Iterator</a>,
-     *                        and \p InputIterator's \c value_type is a model of <a href="http://www.sgi.com/tech/stl/Assignable.html">Assignable</a>.
+     *  \tparam InputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator>Input Iterator</a>,
+     *                        and \p InputIterator's \c value_type is a model of <a href="https://en.cppreference.com/w/cpp/named_req/CopyAssignable">Assignable</a>.
      */
     template<typename InputIterator>
     void insert(iterator position, InputIterator first, InputIterator last);
@@ -439,7 +438,7 @@ template<typename T, typename Alloc>
      *  \param first The beginning of the range to copy.
      *  \param last  The end of the range to copy.
      *
-     *  \tparam InputIterator is a model of <a href="http://www.sgi.com/tech/stl/InputIterator">Input Iterator</a>.
+     *  \tparam InputIterator is a model of <a href="https://en.cppreference.com/w/cpp/named_req/InputIterator">Input Iterator</a>.
      */
     template<typename InputIterator>
     void assign(InputIterator first, InputIterator last);
@@ -582,6 +581,6 @@ template<typename T1, typename Alloc1,
 bool operator!=(const std::vector<T1,Alloc1>&         lhs,
                 const detail::vector_base<T2,Alloc2>& rhs);
 
-} // end thrust
+THRUST_NAMESPACE_END
 
 #include <thrust/detail/vector_base.inl>

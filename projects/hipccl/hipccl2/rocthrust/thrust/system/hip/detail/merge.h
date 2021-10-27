@@ -47,8 +47,7 @@
 // rocPRIM includes
 #include <rocprim/rocprim.hpp>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
 namespace __merge
@@ -425,5 +424,5 @@ merge_by_key(execution_policy<Derived>& policy,
 
 } // namespace hip_rocprim
 
-} // end namespace thrust
+THRUST_NAMESPACE_END
 #endif

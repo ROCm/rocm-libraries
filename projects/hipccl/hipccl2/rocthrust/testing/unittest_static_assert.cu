@@ -12,7 +12,7 @@ template<typename T>
 struct static_assertion
 {
     __host__ __device__
-    int operator()() const
+    T operator()() const
     {
         THRUST_STATIC_ASSERT(dependent_false<T>::value);
         return 0;
@@ -22,9 +22,9 @@ struct static_assertion
 template<typename V>
 void TestStaticAssertAssert()
 {
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_OMP && THRUST_HOST_SYSTEM != THRUST_HOST_SYSTEM_OMP
+    using value_type = typename V::value_type;
     V test(10);
-    ASSERT_STATIC_ASSERT(thrust::generate(test.begin(), test.end(), static_assertion<int>()));
-#endif
+    ASSERT_STATIC_ASSERT(thrust::generate(test.begin(), test.end(),
+                                          static_assertion<value_type>()));
 }
 DECLARE_VECTOR_UNITTEST(TestStaticAssertAssert);

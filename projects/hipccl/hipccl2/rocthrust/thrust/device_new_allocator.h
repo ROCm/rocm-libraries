@@ -29,8 +29,7 @@
 #include <limits>
 #include <stdexcept>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 
 /*! \addtogroup memory_management_classes Memory Management Classes
  *  \ingroup memory_management
@@ -42,7 +41,7 @@ namespace thrust
  *
  *  \see device_new
  *  \see device_ptr
- *  \see http://www.sgi.com/tech/stl/Allocators.html
+ *  \see https://en.cppreference.com/w/cpp/memory/allocator
  */
 template<typename T>
   class device_new_allocator
@@ -168,5 +167,4 @@ template<typename T>
 /*! \}
  */
 
-} // end thrust
-
+THRUST_NAMESPACE_END

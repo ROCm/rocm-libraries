@@ -1,5 +1,5 @@
 /*
- *  Copyright 2008-2013 NVIDIA Corporation
+ *  Copyright 2008-2020 NVIDIA Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -19,10 +19,10 @@
 #include <thrust/detail/config.h>
 #include <thrust/detail/use_default.h>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 
-template<typename Element, typename Pointer, typename Derived = use_default> class reference;
+template <typename Element, typename Pointer, typename Derived = use_default>
+class reference;
 
-} // end thrust
+THRUST_NAMESPACE_END
 

@@ -22,15 +22,15 @@
 
 #include <limits>
 
+#include <thrust/detail/config.h>
 #include <thrust/detail/config/exec_check_disable.h>
+#include <thrust/detail/config/memory_resource.h>
 #include <thrust/detail/type_traits/pointer_traits.h>
 
-#include <thrust/mr/detail/config.h>
 #include <thrust/mr/validator.h>
 #include <thrust/mr/polymorphic_adaptor.h>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace mr
 {
 
@@ -157,7 +157,7 @@ private:
 /*! Compares the allocators for equality by comparing the underlying memory resources. */
 template<typename T, typename MR>
 __host__ __device__
-bool operator==(const allocator<T, MR> & lhs, const allocator<T, MR> & rhs) THRUST_NOEXCEPT
+bool operator==(const allocator<T, MR> & lhs, const allocator<T, MR> & rhs) noexcept
 {
     return *lhs.resource() == *rhs.resource();
 }
@@ -165,7 +165,7 @@ bool operator==(const allocator<T, MR> & lhs, const allocator<T, MR> & rhs) THRU
 /*! Compares the allocators for inequality by comparing the underlying memory resources. */
 template<typename T, typename MR>
 __host__ __device__
-bool operator!=(const allocator<T, MR> & lhs, const allocator<T, MR> & rhs) THRUST_NOEXCEPT
+bool operator!=(const allocator<T, MR> & lhs, const allocator<T, MR> & rhs) noexcept
 {
     return !(lhs == rhs);
 }
@@ -175,7 +175,7 @@ bool operator!=(const allocator<T, MR> & lhs, const allocator<T, MR> & rhs) THRU
 template<typename T, typename Pointer>
 using polymorphic_allocator = allocator<T, polymorphic_adaptor_resource<Pointer> >;
 
-#else //C++11
+#else // C++11
 
 template<typename T, typename Pointer>
 class polymorphic_allocator : public allocator<T, polymorphic_adaptor_resource<Pointer> >
@@ -190,7 +190,7 @@ public:
     }
 };
 
-#endif //C++11
+#endif // C++11
 
 /*! A helper allocator class that uses global instances of a given upstream memory resource. Requires the memory resource
  *      to be default constructible.
@@ -246,4 +246,4 @@ public:
 };
 
 } // end mr
-} // end thrust
+THRUST_NAMESPACE_END

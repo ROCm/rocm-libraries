@@ -1,6 +1,6 @@
 ///
 // optional - An implementation of std::optional with extensions
-// Written in 2017 by Simon Brand (@TartanLlama)
+// Written in 2017 by Sy Brand (@TartanLlama)
 //
 // To the extent possible under law, the author(s) have dedicated all
 // copyright and related and neighboring rights to this software to the
@@ -73,8 +73,7 @@
      !defined(__clang__))
 #ifndef THRUST_GCC_LESS_8_TRIVIALLY_COPY_CONSTRUCTIBLE_MUTEX
 #define THRUST_GCC_LESS_8_TRIVIALLY_COPY_CONSTRUCTIBLE_MUTEX
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
   namespace detail {
       template<class T>
       struct is_trivially_copy_constructible : std::is_trivially_copy_constructible<T>{};
@@ -84,7 +83,7 @@ namespace thrust
           : std::is_trivially_copy_constructible<T>{};
 #endif
   }
-} // end namespace thrust
+THRUST_NAMESPACE_END
 #endif
 
 #define THRUST_OPTIONAL_IS_TRIVIALLY_COPY_CONSTRUCTIBLE(T)                                     \
@@ -163,8 +162,8 @@ namespace thrust
 #define THRUST_OPTIONAL_CPP11_CONSTEXPR constexpr
 #endif
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
+
 #ifndef THRUST_MONOSTATE_INPLACE_MUTEX
 #define THRUST_MONOSTATE_INPLACE_MUTEX
 /// \brief Used to represent an optional with no data; essentially a bool
@@ -491,7 +490,7 @@ template <class T> struct optional_operations_base : optional_storage_base<T> {
   template <class... Args>
   __host__ __device__
   void construct(Args &&... args) noexcept {
-    new (addressof(this->m_value)) T(std::forward<Args>(args)...);
+    new (thrust::addressof(this->m_value)) T(std::forward<Args>(args)...);
     this->m_has_value = true;
   }
 
@@ -841,7 +840,7 @@ public:
 // The different versions for C++14 and 11 are needed because deduced return
 // types are not SFINAE-safe. This provides better support for things like
 // generic lambdas. C.f.
-// http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2017/p0826r0.html
+// http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2017/p0826r0
 #if defined(THRUST_OPTIONAL_CPP14) && !defined(THRUST_OPTIONAL_GCC49) &&               \
     !defined(THRUST_OPTIONAL_GCC54) && !defined(THRUST_OPTIONAL_GCC55)
   /// \group and_then
@@ -2126,7 +2125,7 @@ public:
 // The different versions for C++14 and 11 are needed because deduced return
 // types are not SFINAE-safe. This provides better support for things like
 // generic lambdas. C.f.
-// http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2017/p0826r0.html
+// http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2017/p0826r0
 #if defined(THRUST_OPTIONAL_CPP14) && !defined(THRUST_OPTIONAL_GCC49) &&               \
     !defined(THRUST_OPTIONAL_GCC54) && !defined(THRUST_OPTIONAL_GCC55)
   /// \group and_then
@@ -2866,18 +2865,18 @@ private:
   T *m_value;
 };
 
-} // end namespace thrust
+THRUST_NAMESPACE_END
 
 namespace std {
 // TODO SFINAE
-template <class T> struct hash<thrust::optional<T>> {
+template <class T> struct hash<THRUST_NS_QUALIFIER::optional<T>> {
   __thrust_exec_check_disable__
   __host__ __device__
-  ::std::size_t operator()(const thrust::optional<T> &o) const {
+  ::std::size_t operator()(const THRUST_NS_QUALIFIER::optional<T> &o) const {
     if (!o.has_value())
       return 0;
 
-    return std::hash<thrust::detail::remove_const_t<T>>()(*o);
+    return std::hash<THRUST_NS_QUALIFIER::detail::remove_const_t<T>>()(*o);
   }
 };
 } // namespace std

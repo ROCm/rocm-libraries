@@ -26,6 +26,7 @@
  ******************************************************************************/
 #pragma once
 
+#include <thrust/detail/config.h>
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 #include <thrust/system/cuda/config.h>
@@ -43,8 +44,9 @@
 #include <thrust/pair.h>
 #include <thrust/distance.h>
 
-namespace thrust
-{
+#include <cub/util_math.cuh>
+
+THRUST_NAMESPACE_BEGIN
 namespace cuda_cub {
 
 namespace __partition {
@@ -164,11 +166,11 @@ namespace __partition {
 
       union TempStorage
       {
-        struct
+        struct ScanStorage
         {
           typename BlockScan::TempStorage          scan;
           typename TilePrefixCallback::TempStorage prefix;
-        };
+        } scan_storage;
 
         typename BlockLoadItems::TempStorage   load_items;
         typename BlockLoadStencil::TempStorage load_stencil;
@@ -415,7 +417,7 @@ namespace __partition {
         Size num_rejected_prefix   = 0;
         if (IS_FIRST_TILE)
         {
-          BlockScan(temp_storage.scan)
+          BlockScan(temp_storage.scan_storage.scan)
               .ExclusiveSum(selection_flags,
                             selection_idx,
                             num_tile_selections);
@@ -438,10 +440,10 @@ namespace __partition {
         else
         {
           TilePrefixCallback prefix_cb(tile_state,
-                                       temp_storage.prefix,
+                                       temp_storage.scan_storage.prefix,
                                        cub::Sum(),
                                        tile_idx);
-          BlockScan(temp_storage.scan)
+          BlockScan(temp_storage.scan_storage.scan)
               .ExclusiveSum(selection_flags,
                             selection_idx,
                             prefix_cb);
@@ -645,7 +647,7 @@ namespace __partition {
     typename get_plan<partition_agent>::type partition_plan = partition_agent::get_plan(stream);
 
     int tile_size = partition_plan.items_per_tile;
-    size_t num_tiles = (num_items + tile_size - 1) / tile_size;
+    size_t num_tiles = cub::DivideAndRoundUp(num_items, tile_size);
 
     size_t vshmem_storage = core::vshmem_size(partition_plan.shared_memory_size,
                                               num_tiles);
@@ -661,9 +663,9 @@ namespace __partition {
 
     void* allocations[2] = {NULL, NULL};
     status = cub::AliasTemporaries(d_temp_storage,
-                                   temp_storage_bytes,
-                                   allocations,
-                                   allocation_sizes);
+                                                temp_storage_bytes,
+                                                allocations,
+                                                allocation_sizes);
     CUDA_CUB_RET_IF_FAIL(status);
 
     if (d_temp_storage == NULL)
@@ -1142,5 +1144,5 @@ is_partitioned(execution_policy<Derived> &policy,
 
 
 }    // namespace cuda_cub
-} // end namespace thrust
+THRUST_NAMESPACE_END
 #endif

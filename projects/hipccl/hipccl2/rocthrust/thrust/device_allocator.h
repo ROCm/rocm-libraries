@@ -16,7 +16,8 @@
 
 
 /*! \file device_allocator.h
- *  \brief An allocator which creates new elements in device memory
+ *  \brief An allocator which creates new elements in memory accessible by
+ *         devices.
  */
 
 #pragma once
@@ -24,13 +25,12 @@
 #include <thrust/detail/config.h>
 #include <thrust/device_ptr.h>
 #include <thrust/mr/allocator.h>
-#include <thrust/memory/detail/device_system_resource.h>
+#include <thrust/mr/device_memory_resource.h>
 
 #include <limits>
 #include <stdexcept>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 
 /** \addtogroup memory_resources Memory Resources
  *  \ingroup memory_management_classes
@@ -42,7 +42,7 @@ namespace thrust
  *      a \p device_ptr.
  */
 template<typename Upstream>
-class device_ptr_memory_resource THRUST_FINAL
+class device_ptr_memory_resource final
     : public thrust::mr::memory_resource<
         device_ptr<void>
     >
@@ -68,13 +68,13 @@ public:
     }
 
     THRUST_NODISCARD __host__
-    virtual pointer do_allocate(std::size_t bytes, std::size_t alignment = THRUST_MR_DEFAULT_ALIGNMENT) THRUST_OVERRIDE
+    virtual pointer do_allocate(std::size_t bytes, std::size_t alignment = THRUST_MR_DEFAULT_ALIGNMENT) override
     {
         return pointer(m_upstream->do_allocate(bytes, alignment).get());
     }
 
     __host__
-    virtual void do_deallocate(pointer p, std::size_t bytes, std::size_t alignment) THRUST_OVERRIDE
+    virtual void do_deallocate(pointer p, std::size_t bytes, std::size_t alignment) override
     {
         m_upstream->do_deallocate(upstream_ptr(p.get()), bytes, alignment);
     }
@@ -83,13 +83,10 @@ private:
     Upstream * m_upstream;
 };
 
-/*! \}
- */
-
-/*! \addtogroup memory_management Memory Management
- *  \addtogroup memory_management_classes Memory Management Classes
- *  \ingroup memory_management
- *  \{
+/*! \brief An allocator which creates new elements in memory accessible by
+ *         devices.
+ *
+ *  \see https://en.cppreference.com/w/cpp/named_req/Allocator
  */
 template<typename T>
 class device_allocator
@@ -142,5 +139,4 @@ public:
 /*! \}
  */
 
-} // end thrust
-
+THRUST_NAMESPACE_END

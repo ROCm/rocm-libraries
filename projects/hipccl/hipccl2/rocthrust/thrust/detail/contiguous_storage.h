@@ -21,8 +21,7 @@
 #include <thrust/detail/allocator/allocator_traits.h>
 #include <thrust/detail/config.h>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 
 namespace detail
 {
@@ -231,6 +230,6 @@ template<typename T, typename Alloc>
 __host__ __device__
 void swap(detail::contiguous_storage<T,Alloc> &lhs, detail::contiguous_storage<T,Alloc> &rhs);
 
-} // end thrust
+THRUST_NAMESPACE_END
 
 #include <thrust/detail/contiguous_storage.inl>

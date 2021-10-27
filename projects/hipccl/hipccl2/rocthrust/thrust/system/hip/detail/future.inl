@@ -10,10 +10,9 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/detail/cpp11_required.h>
-#include <thrust/detail/modern_gcc_required.h>
+#include <thrust/detail/cpp14_required.h>
 
-#if THRUST_CPP_DIALECT >= 2011 && !defined(THRUST_LEGACY_GCC)
+#if THRUST_CPP_DIALECT >= 2014
 
 #include <thrust/optional.h>
 #include <thrust/detail/type_deduction.h>
@@ -33,8 +32,7 @@
 #include <type_traits>
 #include <thrust/detail/memory_wrapper.h>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 
 // Forward declaration.
 struct new_stream_t;
@@ -212,6 +210,7 @@ public:
   __host__ unique_stream(unique_stream &&o) noexcept
     : handle_(std::move(o.handle_))
   {}
+
   __thrust_exec_check_disable__
   unique_stream& operator=(unique_stream const&) = delete;
   __thrust_exec_check_disable__
@@ -623,7 +622,7 @@ public:
 
 ///////////////////////////////////////////////////////////////////////////////
 
-} // detail
+} // namespace detail
 
 struct ready_event final
 {
@@ -813,9 +812,9 @@ private:
 
   __host__
   explicit unique_eager_future(
-    int device, std::unique_ptr<detail::async_value<value_type>> async_signal
+    int device_id, std::unique_ptr<detail::async_value<value_type>> async_signal
   )
-    : device_(device), async_signal_(std::move(async_signal))
+    : device_(device_id), async_signal_(std::move(async_signal))
   {}
 
 public:
@@ -943,7 +942,7 @@ public:
   friend __host__
   optional<detail::unique_stream>
   thrust::system::hip::detail::try_acquire_stream(
-    int device, unique_eager_future<X>& parent
+    int device_id, unique_eager_future<X>& parent
     ) noexcept;
 
   template <
@@ -998,12 +997,12 @@ try_acquire_stream(int, ready_future<X>&) noexcept
 
 __host__
 optional<unique_stream>
-try_acquire_stream(int device, unique_eager_event& parent) noexcept
+try_acquire_stream(int device_id, unique_eager_event& parent) noexcept
 {
   // We have unique ownership, so we can always steal the stream if the future
   // has one as long as they are on the same device as us.
   if (parent.valid_stream())
-    if (device == parent.device_)
+    if (device_id == parent.device_)
       return std::move(parent.async_signal_->stream());
 
   return {};
@@ -1012,12 +1011,12 @@ try_acquire_stream(int device, unique_eager_event& parent) noexcept
 template <typename X>
 __host__
 optional<unique_stream>
-try_acquire_stream(int device, unique_eager_future<X>& parent) noexcept
+try_acquire_stream(int device_id, unique_eager_future<X>& parent) noexcept
 {
   // We have unique ownership, so we can always steal the stream if the future
   // has one as long as they are on the same device as us.
   if (parent.valid_stream())
-    if (device == parent.device_)
+    if (device_id == parent.device_)
       return std::move(parent.async_signal_->stream());
 
   return {};
@@ -1039,27 +1038,27 @@ acquired_stream acquire_stream_impl(
 template <typename... Dependencies, std::size_t I0, std::size_t... Is>
 __host__
 acquired_stream acquire_stream_impl(
-  int device
+  int device_id
 , std::tuple<Dependencies...>& deps, index_sequence<I0, Is...>
 ) noexcept
 {
-  auto tr = try_acquire_stream(device, std::get<I0>(deps));
+  auto tr = try_acquire_stream(device_id, std::get<I0>(deps));
 
   if (tr)
     return {std::move(*tr), {I0}};
   else
-    return acquire_stream_impl(device, deps, index_sequence<Is...>{});
+    return acquire_stream_impl(device_id, deps, index_sequence<Is...>{});
 }
 
 template <typename... Dependencies>
 __host__
 acquired_stream acquire_stream(
-  int device
+  int device_id
 , std::tuple<Dependencies...>& deps
 ) noexcept
 {
   return acquire_stream_impl(
-    device, deps, make_index_sequence<sizeof...(Dependencies)>{}
+    device_id, deps, make_index_sequence<sizeof...(Dependencies)>{}
   );
 }
 
@@ -1272,11 +1271,11 @@ template <typename... Dependencies>
 __host__
 unique_eager_event make_dependent_event(std::tuple<Dependencies...>&& deps)
 {
-  int device = 0;
-  thrust::hip_rocprim::throw_on_error(hipGetDevice(&device));
+  int device_id = 0;
+  thrust::hip_rocprim::throw_on_error(hipGetDevice(&device_id));
 
   // First, either steal a stream from one of our children or make a new one.
-  auto as = acquire_stream(device, deps);
+  auto as = acquire_stream(device_id, deps);
 
   // Then, make the stream we've acquired asynchronously wait on all of our
   // dependencies, except the one we stole the stream from.
@@ -1296,7 +1295,7 @@ unique_eager_event make_dependent_event(std::tuple<Dependencies...>&& deps)
   );
 
   // Finally, we create the event object.
-  return unique_eager_event(device, std::move(sig));
+  return unique_eager_event(device_id, std::move(sig));
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1309,11 +1308,11 @@ __host__
 unique_eager_future_promise_pair<X, XPointer>
 make_dependent_future(ComputeContent&& cc, std::tuple<Dependencies...>&& deps)
 {
-  int device = 0;
-  thrust::hip_rocprim::throw_on_error(hipGetDevice(&device));
+  int device_id = 0;
+  thrust::hip_rocprim::throw_on_error(hipGetDevice(&device_id));
 
   // First, either steal a stream from one of our children or make a new one.
-  auto as = acquire_stream(device, deps);
+  auto as = acquire_stream(device_id, deps);
 
   // Then, make the stream we've acquired asynchronously wait on all of our
   // dependencies, except the one we stole the stream from.
@@ -1335,8 +1334,8 @@ make_dependent_future(ComputeContent&& cc, std::tuple<Dependencies...>&& deps)
   );
 
   // Finally, we create the promise and future objects.
-  weak_promise<X, XPointer> child_prom(device, sig->data());
-  unique_eager_future<X> child_fut(device, std::move(sig));
+  weak_promise<X, XPointer> child_prom(device_id, sig->data());
+  unique_eager_future<X> child_fut(device_id, std::move(sig));
 
   return unique_eager_future_promise_pair<X, XPointer>
     {std::move(child_fut), std::move(child_prom)};
@@ -1368,6 +1367,6 @@ THRUST_DECLTYPE_RETURNS(std::move(dependency))
 
 }} // namespace system::hip
 
-} // end namespace thrust
+THRUST_NAMESPACE_END
 
-#endif
+#endif // C++14

@@ -149,7 +149,7 @@ struct comp_mod3
     comp_mod3(T * table) : table(table) {}
 
     __host__ __device__
-    bool operator()(T a, T b) const
+    bool operator()(T a, T b)
     {
         return table[(int) a] < table[(int) b];
     }

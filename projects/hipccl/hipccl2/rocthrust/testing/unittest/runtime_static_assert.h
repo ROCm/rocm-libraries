@@ -18,7 +18,7 @@ namespace unittest
 #include <thrust/device_new.h>
 #include <thrust/device_delete.h>
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA || THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
 
 #define ASSERT_STATIC_ASSERT(X) \
     { \

@@ -36,8 +36,7 @@
 #include <thrust/system/hip/detail/par_to_seq.h>
 #include <thrust/system/hip/detail/parallel_for.h>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 
 namespace hip_rocprim
 {
@@ -96,5 +95,5 @@ swap_ranges(execution_policy<Derived>& policy,
 
 } // namespace hip_rocprim
 
-} // end namespace thrust
+THRUST_NAMESPACE_END
 #endif

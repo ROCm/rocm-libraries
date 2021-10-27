@@ -16,16 +16,16 @@
 
 #pragma once
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 #include <thrust/detail/config.h>
+
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 #include <thrust/system/cuda/config.h>
 #include <thrust/system/cuda/detail/execution_policy.h>
 #include <thrust/detail/raw_pointer_cast.h>
 #include <thrust/system/cuda/detail/copy.h>
 
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace cuda_cub {
 
 
@@ -47,11 +47,15 @@ inline __host__ __device__
     }
   };
 
-#ifndef __CUDA_ARCH__
-  war_nvbugs_881631::host_path(exec,dst,src);
-#else
-  war_nvbugs_881631::device_path(exec,dst,src);
-#endif // __CUDA_ARCH__
+  if (THRUST_IS_HOST_CODE) {
+    #if THRUST_INCLUDE_HOST_CODE
+      war_nvbugs_881631::host_path(exec,dst,src);
+    #endif
+  } else {
+    #if THRUST_INCLUDE_DEVICE_CODE
+      war_nvbugs_881631::device_path(exec,dst,src);
+    #endif
+  }
 } // end assign_value()
 
 
@@ -80,19 +84,19 @@ inline __host__ __device__
   };
 
   if (THRUST_IS_HOST_CODE) {
-     #if THRUST_INCLUDE_HOST_CODE
-       war_nvbugs_881631::host_path(systems,dst,src);
-     #endif
-   } else {
-     #if THRUST_INCLUDE_DEVICE_CODE
-       war_nvbugs_881631::device_path(systems,dst,src);
-     #endif
-   }
+    #if THRUST_INCLUDE_HOST_CODE
+      war_nvbugs_881631::host_path(systems,dst,src);
+    #endif
+  } else {
+    #if THRUST_INCLUDE_DEVICE_CODE
+      war_nvbugs_881631::device_path(systems,dst,src);
+    #endif
+  }
 } // end assign_value()
 
 
 
 
 } // end cuda_cub
-} // end namespace thrust
+THRUST_NAMESPACE_END
 #endif

@@ -18,8 +18,7 @@
 #include <thrust/system/detail/generic/distance.h>
 #include <thrust/iterator/iterator_traits.h>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace system
 {
 namespace detail
@@ -60,7 +59,7 @@ inline __host__ __device__
 
 } // end detail
 
-
+__thrust_exec_check_disable__
 template<typename InputIterator>
 inline __host__ __device__
   typename thrust::iterator_traits<InputIterator>::difference_type
@@ -75,5 +74,5 @@ inline __host__ __device__
 } // end namespace generic
 } // end namespace detail
 } // end namespace system
-} // end namespace thrust
+THRUST_NAMESPACE_END
 

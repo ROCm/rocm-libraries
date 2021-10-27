@@ -22,6 +22,7 @@
 #pragma once
 
 #include <thrust/detail/algorithm_wrapper.h>
+#include <thrust/detail/config.h>
 
 #include <thrust/host_vector.h>
 #include <thrust/binary_search.h>
@@ -33,8 +34,7 @@
 
 #include <cassert>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace mr
 {
 
@@ -68,7 +68,7 @@ namespace mr
  *  \tparam Bookkeeper the type of memory resources that will be used for allocating bookkeeping memory
  */
 template<typename Upstream, typename Bookkeeper>
-class disjoint_unsynchronized_pool_resource THRUST_FINAL
+class disjoint_unsynchronized_pool_resource final
     : public memory_resource<typename Upstream::pointer>,
         private validator2<Upstream, Bookkeeper>
 {
@@ -315,7 +315,7 @@ public:
         m_cached_oversized.clear();
     }
 
-    THRUST_NODISCARD virtual void_ptr do_allocate(std::size_t bytes, std::size_t alignment = THRUST_MR_DEFAULT_ALIGNMENT) THRUST_OVERRIDE
+    THRUST_NODISCARD virtual void_ptr do_allocate(std::size_t bytes, std::size_t alignment = THRUST_MR_DEFAULT_ALIGNMENT) override
     {
         bytes = (std::max)(bytes, m_options.smallest_block_size);
         assert(detail::is_power_of_2(alignment));
@@ -442,7 +442,7 @@ public:
         return ret;
     }
 
-    virtual void do_deallocate(void_ptr p, std::size_t n, std::size_t alignment = THRUST_MR_DEFAULT_ALIGNMENT) THRUST_OVERRIDE
+    virtual void do_deallocate(void_ptr p, std::size_t n, std::size_t alignment = THRUST_MR_DEFAULT_ALIGNMENT) override
     {
         n = (std::max)(n, m_options.smallest_block_size);
         assert(detail::is_power_of_2(alignment));
@@ -485,4 +485,4 @@ public:
  */
 
 } // end mr
-} // end thrust
+THRUST_NAMESPACE_END

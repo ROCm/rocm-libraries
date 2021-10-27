@@ -40,8 +40,7 @@
 #endif
 
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
 
@@ -93,7 +92,7 @@ namespace hip_rocprim
         typedef execution_policy<par_t> base_t;
 
         __device__ __host__
-        THRUST_CONSTEXPR par_t() : base_t()
+        constexpr par_t() : base_t()
         {
         }
 
@@ -127,4 +126,4 @@ namespace hip
     using thrust::hip_rocprim::par;
 } // namespace hip
 
-} // end namespace thrust
+THRUST_NAMESPACE_END

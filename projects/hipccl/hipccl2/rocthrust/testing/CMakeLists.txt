@@ -36,6 +36,21 @@ else() # Workaround
     )
     add_library(testframework STATIC unittest/testframework.cu)
 endif()
+
+if(HIP_COMPILER STREQUAL "nvcc")
+    set_source_files_properties(unittest/cuda/testframework.cu
+        PROPERTIES
+            LANGUAGE CXX
+    )
+    target_sources(testframework PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/unittest/cuda/testframework.cu)
+elseif(HIP_COMPILER STREQUAL "hcc" OR HIP_COMPILER STREQUAL "clang")
+    set_source_files_properties(unittest/hip/testframework.cu
+    PROPERTIES
+        LANGUAGE CXX
+    )
+    target_sources(testframework PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/unittest/hip/testframework.cu)
+endif()
+
 target_link_libraries(testframework
     PUBLIC
         testing_common
@@ -74,11 +89,22 @@ function(add_thrust_test TEST)
         PROPERTIES
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/testing/"
     )
-    add_test(${TEST} ${TEST_TARGET})
-    set_tests_properties(${TEST}
-        PROPERTIES
-            LABELS upstream
-    )
+    if(AMDGPU_TEST_TARGETS)
+    foreach(AMDGPU_TARGET IN LISTS AMDGPU_TEST_TARGETS)
+        add_test("${AMDGPU_TARGET}-${TEST}" ${TEST_TARGET})
+        set_tests_properties("${AMDGPU_TARGET}-${TEST}"
+            PROPERTIES
+                RESOURCE_GROUPS "1,${AMDGPU_TARGET}:1"
+                LABELS "upstream;${AMDGPU_TARGET}"
+        )
+    endforeach()
+    else()
+        add_test(${TEST} ${TEST_TARGET})
+        set_tests_properties(${TEST}
+            PROPERTIES
+                LABELS upstream
+        )
+    endif()
 endfunction()
 
 # ****************************************************************************
@@ -216,7 +242,7 @@ add_thrust_test("transform_iterator")
 add_thrust_test("transform_input_output_iterator")
 add_thrust_test("transform_output_iterator")
 add_thrust_test("transform_reduce")
-add_thrust_test("transform_scan")
+# add_thrust_test("transform_scan")
 add_thrust_test("trivial_sequence")
 add_thrust_test("tuple")
 add_thrust_test("tuple_algorithms")
@@ -229,6 +255,7 @@ add_thrust_test("uninitialized_copy")
 add_thrust_test("uninitialized_fill")
 add_thrust_test("unique")
 add_thrust_test("unique_by_key")
+add_thrust_test("universal_memory")
 add_thrust_test("unittest_static_assert")
 add_thrust_test("unittest_tester")
 add_thrust_test("vector")
@@ -242,3 +269,6 @@ add_thrust_test("zip_iterator_reduce_by_key")
 add_thrust_test("zip_iterator_scan")
 add_thrust_test("zip_iterator_sort")
 add_thrust_test("zip_iterator_sort_by_key")
+
+# async test
+add_subdirectory(async)

@@ -28,8 +28,7 @@
 #include <thrust/system/system_error.h>
 #include <thrust/system/cuda/error.h>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 
 namespace system
 {
@@ -48,7 +47,7 @@ namespace experimental
 /*! \p pinned_allocator is a CUDA-specific host memory allocator
  *  that employs \c cudaMallocHost for allocation.
  *
- *  \see http://www.sgi.com/tech/stl/Allocators.html
+ *  \see https://en.cppreference.com/w/cpp/memory/allocator
  */
 template<typename T> class pinned_allocator;
 
@@ -240,5 +239,5 @@ using thrust::system::cuda::experimental::pinned_allocator;
 
 } // end cuda
 
-} // end thrust
+THRUST_NAMESPACE_END
 

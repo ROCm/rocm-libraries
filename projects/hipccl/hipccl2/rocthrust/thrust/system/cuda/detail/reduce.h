@@ -26,6 +26,7 @@
  ******************************************************************************/
 #pragma once
 
+#include <thrust/detail/config.h>
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 #include <thrust/system/cuda/config.h>
@@ -46,8 +47,9 @@
 #include <thrust/distance.h>
 #include <thrust/detail/alignment.h>
 
-namespace thrust
-{
+#include <cub/util_math.cuh>
+
+THRUST_NAMESPACE_BEGIN
 
 // forward declare generic reduce
 // to circumvent circular dependency
@@ -802,8 +804,7 @@ namespace __reduce {
       else if (reduce_plan.grid_mapping == cub::GRID_MAPPING_DYNAMIC)
       {
         // Work is distributed dynamically
-        size_t num_tiles = (num_items + reduce_plan.items_per_tile - 1) /
-          reduce_plan.items_per_tile;
+        size_t num_tiles = cub::DivideAndRoundUp(num_items, reduce_plan.items_per_tile);
 
         // if not enough to fill the device with threadblocks
         // then fill the device with threadblocks
@@ -1068,7 +1069,7 @@ reduce(execution_policy<Derived> &policy,
 
 } // namespace cuda_cub
 
-} // end namespace thrust
+THRUST_NAMESPACE_END
 
 #include <thrust/memory.h>
 #include <thrust/reduce.h>

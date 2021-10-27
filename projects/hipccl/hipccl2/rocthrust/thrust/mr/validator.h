@@ -16,11 +16,12 @@
 
 #pragma once
 
-#include "detail/config.h"
-#include "memory_resource.h"
+#include <thrust/detail/config.h>
 
-namespace thrust
-{
+#include <thrust/detail/config/memory_resource.h>
+#include <thrust/mr/memory_resource.h>
+
+THRUST_NAMESPACE_BEGIN
 namespace mr
 {
 
@@ -46,4 +47,4 @@ struct validator2<T, T> : private validator<T>
 };
 
 } // end mr
-} // end thrust
+THRUST_NAMESPACE_END

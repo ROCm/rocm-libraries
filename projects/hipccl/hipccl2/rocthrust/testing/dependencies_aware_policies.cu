@@ -13,6 +13,10 @@
 #include <thrust/system/omp/detail/par.h>
 #include <thrust/system/tbb/detail/par.h>
 
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
+#  include <thrust/system/hip/detail/par.h>
+#endif
+
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 #  include <thrust/system/cuda/detail/par.h>
 #endif
@@ -168,6 +172,13 @@ typedef policy_info<
     thrust::system::tbb::detail::par_t,
     thrust::system::tbb::detail::execution_policy
 > tbb_par_info;
+
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
+typedef policy_info<
+    thrust::system::hip::detail::par_t,
+    thrust::hip_rocprim::execute_on_stream_base
+> hip_par_info;
+#endif
 
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 typedef policy_info<

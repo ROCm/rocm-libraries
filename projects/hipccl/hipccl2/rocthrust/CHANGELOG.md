@@ -2,13 +2,20 @@
 
 Full documentation for rocThrust is available at [https://rocthrust.readthedocs.io/en/latest/](https://rocthrust.readthedocs.io/en/latest/)
 
+## (Unreleased) rocThrust 2.13.0 for ROCm 5.0
+### Added
+- Updated to match upstream Thrust 1.13.0
+- Updated to match upstream Thrust 1.14.0
+- Added async scan
+
 ## (Unreleased) rocThrust-2.11.2 for ROCm 4.5.0
-### Addded
+### Added
 - Initial HIP on Windows support. See README for instructions on how to build and install.
 ### Changed
 - Packaging changed to a development package (called rocthrust-dev for `.deb` packages, and rocthrust-devel for `.rpm` packages). As rocThrust is a header-only library, there is no runtime package. To aid in the transition, the development package sets the "provides" field to provide the package rocthrust, so that existing packages depending on rocthrust can continue to work. This provides feature is introduced as a deprecated feature and will be removed in a future ROCm release.
 ### Known issues
 - async_copy, partition, and stable_sort_by_key unit tests are failing on HIP on Windows.
+- Mixed type exclusive scan algorithm still not using the initial value type for results type.
 
 ## [Unreleased rocThrust-2.11.1 for ROCm 4.4.0]
 ### Added

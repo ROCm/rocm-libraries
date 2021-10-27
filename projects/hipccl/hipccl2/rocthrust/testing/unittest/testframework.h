@@ -29,9 +29,11 @@
 #include "util.h"
 
 #include <thrust/limits.h>
+#include <thrust/detail/config.h>
 #include <thrust/detail/integer_traits.h>
-#include <thrust/memory/detail/device_system_resource.h>
-#include <thrust/memory/detail/host_system_resource.h>
+#include <thrust/mr/host_memory_resource.h>
+#include <thrust/mr/device_memory_resource.h>
+#include <thrust/mr/universal_memory_resource.h>
 #include <thrust/mr/allocator.h>
 
 // define some common lists of types
@@ -95,10 +97,13 @@ public:
         fill(0);
     }
 
+    // Allow construction from any integral numeric.
+    template <typename T,
+              typename = typename std::enable_if<std::is_integral<T>::value>::type>
     __host__ __device__
-    custom_numeric(int i)
+    custom_numeric(const T& i)
     {
-        fill(i);
+        fill(static_cast<int>(i));
     }
 
     __host__ __device__
@@ -241,8 +246,7 @@ private:
     }
 };
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 
 template <>
 struct numeric_limits<custom_numeric> : numeric_limits<int> {};
@@ -256,7 +260,9 @@ class integer_traits<custom_numeric>
   : public integer_traits_base<int, INT_MIN, INT_MAX>
 {};
 
-}} // namespace thrust::detail
+} // namespace detail
+
+THRUST_NAMESPACE_END
 
 typedef unittest::type_list<char,
                             signed char,
@@ -318,6 +324,9 @@ typedef std::map<std::string, std::string> ArgumentMap;
 
 std::vector<size_t> get_test_sizes(void);
 void                set_test_sizes(const std::string&);
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
+bool                supports_managed_memory();
+#endif
 
 class UnitTest {
     public:
@@ -348,7 +357,7 @@ protected:
   // \param test The UnitTest of interest
   // \param concise Whether or not to suppress output
   // \return true if all is well; false if the tests must be immediately aborted
-  virtual bool post_test_sanity_check(const UnitTest &test, bool concise);
+  virtual bool post_test_smoke_check(const UnitTest &test, bool concise);
 
 public:
   inline virtual ~UnitTestDriver() {};
@@ -376,11 +385,12 @@ class NAME##UnitTest : public UnitTest {                         \
     public:                                                      \
     NAME##UnitTest() : UnitTest(#NAME) {}                        \
     void run(){                                                  \
-            TEST();                                              \
+        TEST();                                                  \
     }                                                            \
 };                                                               \
 NAME##UnitTest NAME##Instance
 
+#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_HIP
 // Macro to create host and device versions of a
 // unit test for a bunch of data types
 #define DECLARE_VECTOR_UNITTEST(VTEST)                          \
@@ -405,15 +415,16 @@ void VTEST##Device(void) {                                      \
     VTEST< thrust::device_vector<int,                           \
         thrust::mr::stateless_resource_allocator<int,           \
             thrust::device_memory_resource> > >();              \
-    VTEST< thrust::device_vector<int,                           \
-        thrust::mr::stateless_resource_allocator<int,           \
-            thrust::universal_memory_resource> > >();           \
+}                                                               \
+void VTEST##Universal(void) {                                   \
+    VTEST< thrust::universal_vector<int> >();                   \
     VTEST< thrust::device_vector<int,                           \
         thrust::mr::stateless_resource_allocator<int,           \
             thrust::universal_host_pinned_memory_resource> > >();\
 }                                                               \
 DECLARE_UNITTEST(VTEST##Host);                                  \
-DECLARE_UNITTEST(VTEST##Device);
+DECLARE_UNITTEST(VTEST##Device);                                \
+DECLARE_UNITTEST(VTEST##Universal);
 
 // Same as above, but only for integral types
 #define DECLARE_INTEGRAL_VECTOR_UNITTEST(VTEST)                 \
@@ -427,8 +438,71 @@ void VTEST##Device(void) {                                      \
     VTEST< thrust::device_vector<short> >();                    \
     VTEST< thrust::device_vector<int> >();                      \
 }                                                               \
+void VTEST##Universal(void) {                                   \
+    VTEST< thrust::universal_vector<int> >();                   \
+    VTEST< thrust::device_vector<int,                           \
+        thrust::mr::stateless_resource_allocator<int,           \
+            thrust::universal_host_pinned_memory_resource> > >();\
+}                                                               \
 DECLARE_UNITTEST(VTEST##Host);                                  \
-DECLARE_UNITTEST(VTEST##Device);
+DECLARE_UNITTEST(VTEST##Device);                                \
+DECLARE_UNITTEST(VTEST##Universal);
+#else // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
+// Macro to create host and device versions of a
+// unit test for a bunch of data types
+#define DECLARE_VECTOR_UNITTEST(VTEST)                          \
+void VTEST##Host(void) {                                        \
+    VTEST< thrust::host_vector<signed char> >();                \
+    VTEST< thrust::host_vector<short> >();                      \
+    VTEST< thrust::host_vector<int> >();                        \
+    VTEST< thrust::host_vector<float> >();                      \
+    VTEST< thrust::host_vector<custom_numeric> >();             \
+    /* MR vectors */                                            \
+    VTEST< thrust::host_vector<int,                             \
+        thrust::mr::stateless_resource_allocator<int,           \
+            thrust::host_memory_resource> > >();                \
+}                                                               \
+void VTEST##Device(void) {                                      \
+    VTEST< thrust::device_vector<signed char> >();              \
+    VTEST< thrust::device_vector<short> >();                    \
+    VTEST< thrust::device_vector<int> >();                      \
+    VTEST< thrust::device_vector<float> >();                    \
+    VTEST< thrust::device_vector<custom_numeric> >();           \
+    /* MR vectors */                                            \
+    VTEST< thrust::device_vector<int,                           \
+        thrust::mr::stateless_resource_allocator<int,           \
+            thrust::device_memory_resource> > >();              \
+}                                                               \
+void VTEST##Universal(void) {                                   \
+    if(supports_managed_memory()) {                             \
+        VTEST< thrust::universal_vector<int> >();               \
+    }                                                           \
+}                                                               \
+DECLARE_UNITTEST(VTEST##Host);                                  \
+DECLARE_UNITTEST(VTEST##Device);                                \
+DECLARE_UNITTEST(VTEST##Universal);
+
+// Same as above, but only for integral types
+#define DECLARE_INTEGRAL_VECTOR_UNITTEST(VTEST)                 \
+void VTEST##Host(void) {                                        \
+    VTEST< thrust::host_vector<signed char> >();                \
+    VTEST< thrust::host_vector<short> >();                      \
+    VTEST< thrust::host_vector<int> >();                        \
+}                                                               \
+void VTEST##Device(void) {                                      \
+    VTEST< thrust::device_vector<signed char> >();              \
+    VTEST< thrust::device_vector<short> >();                    \
+    VTEST< thrust::device_vector<int> >();                      \
+}                                                               \
+void VTEST##Universal(void) {                                   \
+    if(supports_managed_memory()) {                             \
+        VTEST< thrust::universal_vector<int> >();               \
+    }                                                           \
+}                                                               \
+DECLARE_UNITTEST(VTEST##Host);                                  \
+DECLARE_UNITTEST(VTEST##Device);                                \
+DECLARE_UNITTEST(VTEST##Universal);
+#endif
 
 // Macro to create instances of a test for several data types.
 #define DECLARE_GENERIC_UNITTEST(TEST)                           \
@@ -444,6 +518,22 @@ class TEST##UnitTest : public UnitTest {                         \
         TEST<int>();                                             \
         TEST<unsigned int>();                                    \
         TEST<float>();                                           \
+    }                                                            \
+};                                                               \
+TEST##UnitTest TEST##Instance
+
+// Macro to create instances of a test for several array sizes.
+#define DECLARE_SIZED_UNITTEST(TEST)                             \
+class TEST##UnitTest : public UnitTest {                         \
+    public:                                                      \
+    TEST##UnitTest() : UnitTest(#TEST) {}                        \
+    void run()                                                   \
+    {                                                            \
+        std::vector<size_t> sizes = get_test_sizes();            \
+        for(size_t i = 0; i != sizes.size(); ++i)                \
+        {                                                        \
+            TEST(sizes[i]);                                      \
+        }                                                        \
     }                                                            \
 };                                                               \
 TEST##UnitTest TEST##Instance
@@ -468,7 +558,7 @@ class TEST##UnitTest : public UnitTest {                         \
             TEST<double>(sizes[i]);                              \
         }                                                        \
     }                                                            \
-};                                                               \
+};                                                                 \
 TEST##UnitTest TEST##Instance
 
 #define DECLARE_INTEGRAL_VARIABLE_UNITTEST(TEST)                 \

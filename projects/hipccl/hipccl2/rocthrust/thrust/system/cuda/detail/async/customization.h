@@ -42,14 +42,13 @@
 #include <thrust/detail/cstdint.h>
 #include <thrust/detail/execute_with_allocator.h>
 #include <thrust/system/cuda/memory_resource.h>
-#include <thrust/memory/detail/host_system_resource.h>
+#include <thrust/mr/host_memory_resource.h>
 #include <thrust/mr/allocator.h>
 #include <thrust/mr/disjoint_sync_pool.h>
 #include <thrust/mr/sync_pool.h>
 #include <thrust/per_device_resource.h>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 
 namespace system { namespace cuda { namespace detail
 {
@@ -120,8 +119,9 @@ THRUST_RETURNS(
 
 }}} // namespace system::cuda::detail
 
-} // end namespace thrust
+THRUST_NAMESPACE_END
 
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 
 #endif
+

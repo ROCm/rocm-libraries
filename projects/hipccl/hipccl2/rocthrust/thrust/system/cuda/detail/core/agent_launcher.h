@@ -26,8 +26,9 @@
  ******************************************************************************/
 #pragma once
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 #include <thrust/detail/config.h>
+
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 #include <thrust/system/cuda/detail/guarded_cuda_runtime_api.h>
 #include <thrust/system/cuda/detail/core/triple_chevron_launch.h>
 #include <thrust/system/cuda/detail/core/util.h>
@@ -42,8 +43,7 @@ template<int...> class ID_impl;
 template<int... I> class Foo { ID_impl<I...> t;};
 #endif
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace cuda_cub {
 namespace core {
 
@@ -1180,5 +1180,5 @@ namespace core {
 
 }    // namespace core
 }
-} // end namespace thrust
+THRUST_NAMESPACE_END
 #endif

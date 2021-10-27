@@ -28,6 +28,8 @@
 
 #if 0
 
+#include <thrust/detail/config.h>
+
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 #include <thrust/detail/cstdint.h>
 #include <thrust/detail/temporary_array.h>
@@ -44,8 +46,7 @@
 #  define BS_SIMPLE
 #endif
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace cuda_cub {
 
 namespace __binary_search {
@@ -775,7 +776,7 @@ lower_bound(execution_policy<Derived>& policy,
 }
 
 }    // namespace cuda_cub
-} // end namespace thrust
+THRUST_NAMESPACE_END
 #endif
 
 #endif

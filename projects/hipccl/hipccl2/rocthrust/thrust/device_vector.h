@@ -16,7 +16,8 @@
 
 
 /*! \file device_vector.h
- *  \brief A dynamically-sizable array of elements which reside in the "device" memory space
+ *  \brief A dynamically-sizable array of elements which resides in memory
+ *         accessible to devices.
  */
 
 #pragma once
@@ -28,11 +29,7 @@
 #include <vector>
 #include <utility>
 
-namespace thrust
-{
-
-// forward declaration of host_vector
-template<typename T, typename Alloc> class host_vector;
+THRUST_NAMESPACE_BEGIN
 
 /*! \addtogroup container_classes Container Classes
  *  \addtogroup device_containers Device Containers
@@ -44,12 +41,13 @@ template<typename T, typename Alloc> class host_vector;
  *  constant time removal of elements at the end, and linear time insertion
  *  and removal of elements at the beginning or in the middle. The number of
  *  elements in a \p device_vector may vary dynamically; memory management is
- *  automatic. The memory associated with a \p device_vector resides in the memory
- *  space of a parallel device.
+ *  automatic. The memory associated with a \p device_vector resides in the
+ *  memory accessible to devices.
  *
- *  \see http://www.sgi.com/tech/stl/Vector.html
+ *  \see https://en.cppreference.com/w/cpp/container/vector
  *  \see device_allocator
  *  \see host_vector
+ *  \see universal_vector
  */
 template<typename T, typename Alloc = thrust::device_allocator<T> >
   class device_vector
@@ -153,7 +151,6 @@ template<typename T, typename Alloc = thrust::device_allocator<T> >
     /*! Move assign operator moves from another \p device_vector.
      *  \param v The device_vector to move.
      */
-
      device_vector &operator=(device_vector &&v)
      { Parent::operator=(std::move(v)); return *this; }
   #endif // THRUST_CPP_DIALECT >= 2011
@@ -186,17 +183,18 @@ template<typename T, typename Alloc = thrust::device_allocator<T> >
     device_vector &operator=(const std::vector<OtherT,OtherAlloc> &v)
     { Parent::operator=(v); return *this;}
 
-    /*! Copy constructor copies from an exemplar \p host_vector with possibly different type.
-     *  \param v The \p host_vector to copy.
+    /*! Copy construct from a \p vector_base of related type..
+     *  \param v The \p vector_base to copy.
      */
     template<typename OtherT, typename OtherAlloc>
-    device_vector(const host_vector<OtherT,OtherAlloc> &v);
+    device_vector(const detail::vector_base<OtherT,OtherAlloc> &v)
+      :Parent(v) {}
 
-    /*! Assign operator copies from an examplar \p host_vector.
-     *  \param v The \p host_vector to copy.
+    /*! Assign a \p vector_base of related type.
+     *  \param v The \p vector_base to copy.
      */
     template<typename OtherT, typename OtherAlloc>
-    device_vector &operator=(const host_vector<OtherT,OtherAlloc> &v)
+    device_vector &operator=(const detail::vector_base<OtherT,OtherAlloc> &v)
     { Parent::operator=(v); return *this; }
 
     /*! This constructor builds a \p device_vector from a range.
@@ -448,8 +446,8 @@ template<typename T, typename Alloc = thrust::device_allocator<T> >
      *  \param first The beginning of the range to copy.
      *  \param last  The end of the range to copy.
      *
-     *  \tparam InputIterator is a model of <a href="http://www.sgi.com/tech/stl/InputIterator.html>Input Iterator</a>,
-     *                        and \p InputIterator's \c value_type is a model of <a href="http://www.sgi.com/tech/stl/Assignable.html">Assignable</a>.
+     *  \tparam InputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator>Input Iterator</a>,
+     *                        and \p InputIterator's \c value_type is a model of <a href="https://en.cppreference.com/w/cpp/named_req/CopyAssignable">Assignable</a>.
      */
     template<typename InputIterator>
     void insert(iterator position, InputIterator first, InputIterator last);
@@ -465,7 +463,7 @@ template<typename T, typename Alloc = thrust::device_allocator<T> >
      *  \param first The beginning of the range to copy.
      *  \param last  The end of the range to copy.
      *
-     *  \tparam InputIterator is a model of <a href="http://www.sgi.com/tech/stl/InputIterator">Input Iterator</a>.
+     *  \tparam InputIterator is a model of <a href="https://en.cppreference.com/w/cpp/named_req/InputIterator">Input Iterator</a>.
      */
     template<typename InputIterator>
     void assign(InputIterator first, InputIterator last);
@@ -475,7 +473,7 @@ template<typename T, typename Alloc = thrust::device_allocator<T> >
      */
     allocator_type get_allocator(void) const;
 #endif // end doxygen-only members
-}; // end device_vector
+};
 
 /*! Exchanges the values of two vectors.
  *  \p x The first \p device_vector of interest.
@@ -485,11 +483,9 @@ template<typename T, typename Alloc>
   void swap(device_vector<T,Alloc> &a, device_vector<T,Alloc> &b)
 {
   a.swap(b);
-} // end swap()
+}
 
 /*! \}
  */
 
-} // end thrust
-
-#include <thrust/detail/device_vector.inl>
+THRUST_NAMESPACE_END

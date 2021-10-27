@@ -26,6 +26,7 @@
  ******************************************************************************/
 #pragma once
 
+#include <thrust/detail/config.h>
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
 #include <thrust/system/cuda/config.h>
@@ -37,8 +38,9 @@
 #include <thrust/pair.h>
 #include <thrust/distance.h>
 
-namespace thrust
-{
+#include <cub/util_math.cuh>
+
+THRUST_NAMESPACE_BEGIN
 namespace cuda_cub {
 
 namespace __extrema {
@@ -129,7 +131,7 @@ namespace __extrema {
       pair_type const &rhs_max = get<1>(rhs);
       pair_type const &lhs_max = get<1>(lhs);
       return thrust::make_tuple(arg_min_t(predicate)(lhs_min, rhs_min),
-                        arg_max_t(predicate)(lhs_max, rhs_max));
+                                arg_max_t(predicate)(lhs_max, rhs_max));
     }
 
     struct duplicate_tuple
@@ -259,8 +261,7 @@ namespace __extrema {
       else if (reduce_plan.grid_mapping == cub::GRID_MAPPING_DYNAMIC)
       {
         // Work is distributed dynamically
-        size_t num_tiles = (num_items + reduce_plan.items_per_tile - 1) /
-          reduce_plan.items_per_tile;
+        size_t num_tiles = cub::DivideAndRoundUp(num_items, reduce_plan.items_per_tile);
 
         // if not enough to fill the device with threadblocks
         // then fill the device with threadblocks
@@ -564,5 +565,5 @@ minmax_element(execution_policy<Derived> &policy,
 
 
 } // namespace cuda_cub
-} // end namespace thrust
+THRUST_NAMESPACE_END
 #endif

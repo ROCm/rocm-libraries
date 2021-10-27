@@ -53,7 +53,8 @@ void TestVectorLowerBoundDescendingSimple(void)
     Vector input(10);
     thrust::sequence(input.begin(), input.end());
 
-    typedef typename vector_like<Vector, int>::type IntVector;
+    typedef typename Vector::difference_type int_type;
+    typedef typename vector_like<Vector, int_type>::type IntVector;
 
     // test with integral output type
     IntVector integral_output(10);
@@ -89,11 +90,13 @@ void TestVectorUpperBoundDescendingSimple(void)
     Vector input(10);
     thrust::sequence(input.begin(), input.end());
 
-    typedef typename vector_like<Vector, int>::type IntVector;
+    typedef typename Vector::difference_type int_type;
+    typedef typename Vector::value_type T;
+    typedef typename vector_like<Vector, int_type>::type IntVector;
 
     // test with integral output type
     IntVector integral_output(10);
-    typename IntVector::iterator output_end = thrust::upper_bound(vec.begin(), vec.end(), input.begin(), input.end(), integral_output.begin(), thrust::greater<int>());
+    typename IntVector::iterator output_end = thrust::upper_bound(vec.begin(), vec.end(), input.begin(), input.end(), integral_output.begin(), thrust::greater<T>());
 
     ASSERT_EQUAL_QUIET(output_end, integral_output.end());
 
@@ -126,11 +129,13 @@ void TestVectorBinarySearchDescendingSimple(void)
   thrust::sequence(input.begin(), input.end());
 
   typedef typename vector_like<Vector, bool>::type BoolVector;
-  typedef typename vector_like<Vector,  int>::type IntVector;
+  typedef typename Vector::difference_type int_type;
+  typedef typename Vector::value_type T;
+  typedef typename vector_like<Vector,  int_type>::type IntVector;
 
   // test with boolean output type
   BoolVector bool_output(10);
-  typename BoolVector::iterator bool_output_end = thrust::binary_search(vec.begin(), vec.end(), input.begin(), input.end(), bool_output.begin(), thrust::greater<int>());
+  typename BoolVector::iterator bool_output_end = thrust::binary_search(vec.begin(), vec.end(), input.begin(), input.end(), bool_output.begin(), thrust::greater<T>());
 
   ASSERT_EQUAL_QUIET(bool_output_end, bool_output.end());
 
@@ -147,7 +152,7 @@ void TestVectorBinarySearchDescendingSimple(void)
 
   // test with integral output type
   IntVector integral_output(10, 2);
-  typename IntVector::iterator int_output_end = thrust::binary_search(vec.begin(), vec.end(), input.begin(), input.end(), integral_output.begin(), thrust::greater<int>());
+  typename IntVector::iterator int_output_end = thrust::binary_search(vec.begin(), vec.end(), input.begin(), input.end(), integral_output.begin(), thrust::greater<T>());
 
   ASSERT_EQUAL_QUIET(int_output_end, integral_output.end());
 
@@ -176,8 +181,9 @@ struct TestVectorLowerBoundDescending
     thrust::host_vector<T>   h_input = unittest::random_integers<T>(2*n);
     thrust::device_vector<T> d_input = h_input;
 
-    thrust::host_vector<int>   h_output(2*n);
-    thrust::device_vector<int> d_output(2*n);
+    typedef typename thrust::host_vector<T>::difference_type int_type;
+    thrust::host_vector<int_type>   h_output(2*n);
+    thrust::device_vector<int_type> d_output(2*n);
 
     thrust::lower_bound(h_vec.begin(), h_vec.end(), h_input.begin(), h_input.end(), h_output.begin(), thrust::greater<T>());
     thrust::lower_bound(d_vec.begin(), d_vec.end(), d_input.begin(), d_input.end(), d_output.begin(), thrust::greater<T>());
@@ -199,8 +205,9 @@ struct TestVectorUpperBoundDescending
     thrust::host_vector<T>   h_input = unittest::random_integers<T>(2*n);
     thrust::device_vector<T> d_input = h_input;
 
-    thrust::host_vector<int>   h_output(2*n);
-    thrust::device_vector<int> d_output(2*n);
+    typedef typename thrust::host_vector<T>::difference_type int_type;
+    thrust::host_vector<int_type>   h_output(2*n);
+    thrust::device_vector<int_type> d_output(2*n);
 
     thrust::upper_bound(h_vec.begin(), h_vec.end(), h_input.begin(), h_input.end(), h_output.begin(), thrust::greater<T>());
     thrust::upper_bound(d_vec.begin(), d_vec.end(), d_input.begin(), d_input.end(), d_output.begin(), thrust::greater<T>());
@@ -221,8 +228,9 @@ struct TestVectorBinarySearchDescending
     thrust::host_vector<T>   h_input = unittest::random_integers<T>(2*n);
     thrust::device_vector<T> d_input = h_input;
 
-    thrust::host_vector<int>   h_output(2*n);
-    thrust::device_vector<int> d_output(2*n);
+    typedef typename thrust::host_vector<T>::difference_type int_type;
+    thrust::host_vector<int_type>   h_output(2*n);
+    thrust::device_vector<int_type> d_output(2*n);
 
     thrust::binary_search(h_vec.begin(), h_vec.end(), h_input.begin(), h_input.end(), h_output.begin(), thrust::greater<T>());
     thrust::binary_search(d_vec.begin(), d_vec.end(), d_input.begin(), d_input.end(), d_output.begin(), thrust::greater<T>());

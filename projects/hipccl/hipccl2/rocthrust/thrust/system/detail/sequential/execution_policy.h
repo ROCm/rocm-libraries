@@ -20,8 +20,7 @@
 #include <thrust/detail/config.h>
 #include <thrust/detail/execution_policy.h>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace system
 {
 namespace detail
@@ -51,7 +50,7 @@ template<>
 // tag's definition comes before the generic definition of execution_policy
 struct tag : execution_policy<tag>
 {
-  __host__ __device__ THRUST_CONSTEXPR tag() {}
+  __host__ __device__ constexpr tag() {}
 };
 
 // allow conversion to tag when it is not a successor
@@ -73,4 +72,4 @@ THRUST_INLINE_CONSTANT tag seq;
 } // end sequential
 } // end detail
 } // end system
-} // end thrust
+THRUST_NAMESPACE_END

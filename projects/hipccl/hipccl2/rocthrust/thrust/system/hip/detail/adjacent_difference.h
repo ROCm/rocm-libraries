@@ -43,8 +43,7 @@
 // rocprim include
 #include <rocprim/rocprim.hpp>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 
 template <typename DerivedPolicy,
           typename InputIterator,
@@ -477,7 +476,7 @@ adjacent_difference(execution_policy<Derived>& policy,
 }
 
 } // namespace hip_rocprim
-} // end namespace thrust
+THRUST_NAMESPACE_END
 
 //
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP

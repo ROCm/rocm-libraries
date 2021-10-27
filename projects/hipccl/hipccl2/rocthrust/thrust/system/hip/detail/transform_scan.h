@@ -37,8 +37,7 @@
 #include <thrust/detail/alignment.h>
 #include <thrust/detail/cstdint.h>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 
 namespace hip_rocprim
 {
@@ -68,7 +67,11 @@ transform_inclusive_scan(execution_policy<Derived>& policy,
         transformed_iterator_t;
 
     return hip_rocprim::inclusive_scan_n(
-        policy, transformed_iterator_t(first, transform_op), num_items, result, scan_op
+        policy,
+        transformed_iterator_t(first, transform_op),
+        num_items,
+        result,
+        scan_op
     );
 }
 
@@ -96,11 +99,15 @@ transform_exclusive_scan(execution_policy<Derived>& policy,
         transformed_iterator_t;
 
     return hip_rocprim::exclusive_scan_n(
-        policy, transformed_iterator_t(first, transform_op), num_items, result, init, scan_op
+        policy,
+        transformed_iterator_t(first, transform_op),
+        num_items,
+        result, init,
+        scan_op
     );
 }
 
 } // namespace hip_rocprim
 
-} // end namespace thrust
+THRUST_NAMESPACE_END
 #endif

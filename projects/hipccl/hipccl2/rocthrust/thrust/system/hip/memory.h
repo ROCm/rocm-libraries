@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2018 NVIDIA Corporation
- *  Modifications Copyright© 2019-2020 Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright© 2019-2021 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@
  */
 
 /*! \file thrust/system/hip/memory.h
- *  \brief Managing memory associated with Thrust's hip system.
+ *  \brief Managing memory associated with Thrust's HIP system.
  */
 
 #pragma once
@@ -28,47 +28,9 @@
 #include <thrust/mr/allocator.h>
 #include <ostream>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
-
-/*! \addtogroup system_backends Systems
- *  \ingroup system
- *  \{
- */
-
-/*! \namespace thrust::system::hip
- *  \brief \p thrust::system::hip is the namespace containing functionality for allocating, manipulating,
- *         and deallocating memory available to Thrust's hip backend system.
- *         The identifiers are provided in a separate namespace underneath <tt>thrust::system</tt>
- *         for import convenience but are also aliased in the top-level <tt>thrust::hip</tt>
- *         namespace for easy access.
- *
- */
-
-
-/*! \p pointer stores a pointer to an object allocated in memory available to the hip system.
- *  This type provides type safety when dispatching standard algorithms on ranges resident
- *  in hip memory.
- *
- *  \p pointer has pointer semantics: it may be dereferenced and manipulated with pointer arithmetic.
- *
- *  \p pointer can be created with the function \p hip::malloc, or by explicitly calling its constructor
- *  with a raw pointer.
- *
- *  The raw pointer encapsulated by a \p pointer may be obtained by eiter its <tt>get</tt> member function
- *  or the \p raw_pointer_cast function.
- *
- *  \note \p pointer is not a "smart" pointer; it is the programmer's responsibility to deallocate memory
- *  pointed to by \p pointer.
- *
- *  \tparam T specifies the type of the pointee.
- *
- *  \see hip::malloc
- *  \see hip::free
- *  \see raw_pointer_cast
- */
 
 /*! Allocates an area of memory available to Thrust's <tt>hip</tt> system.
  *  \param n Number of bytes to allocate.
@@ -85,7 +47,7 @@ inline __host__ __device__ pointer<void> malloc(std::size_t n);
 /*! Allocates a typed area of memory available to Thrust's <tt>hip</tt> system.
  *  \param n Number of elements to allocate.
  *  \return A <tt>hip::pointer<T></tt> pointing to the beginning of the newly
- *          allocated memory. A null <tt>hip::pointer<T></tt> is returned if
+ *          allocated elements. A null <tt>hip::pointer<T></tt> is returned if
  *          an error occurs.
  *  \note The <tt>hip::pointer<T></tt> returned by this function must be
  *        deallocated with \p hip::free.
@@ -103,38 +65,45 @@ inline __host__ __device__ pointer<T> malloc(std::size_t n);
  */
 inline __host__ __device__ void free(pointer<void> ptr);
 
-/*! \p hip::allocator is the default allocator used by the \p hip system's containers such as
- *  <tt>hip::vector</tt> if no user-specified allocator is provided. \p hip::allocator allocates
- *  (deallocates) storage with \p hip::malloc (\p hip::free).
+/*! \p hip::allocator is the default allocator used by the \p hip system's
+ *  containers such as <tt>hip::vector</tt> if no user-specified allocator is
+ *  provided. \p hip::allocator allocates (deallocates) storage with \p
+ *  hip::malloc (\p hip::free).
  */
+template<typename T>
+using allocator = thrust::mr::stateless_resource_allocator<
+  T, thrust::system::hip::memory_resource
+>;
 
- template<typename T>
- using allocator = thrust::mr::stateless_resource_allocator<T, system::hip::memory_resource>;
+/*! \p hip::universal_allocator allocates memory that can be used by the \p hip
+ *  system and host systems.
+ */
+template<typename T>
+using universal_allocator = thrust::mr::stateless_resource_allocator<
+  T, thrust::system::hip::universal_memory_resource
+>;
 
 } // namespace hip_rocprim
 
-namespace system
+namespace system { namespace hip
 {
+using thrust::hip_rocprim::malloc;
+using thrust::hip_rocprim::free;
+using thrust::hip_rocprim::allocator;
+using thrust::hip_rocprim::universal_allocator;
+}} // namespace system::hip
 
 /*! \namespace thrust::hip
- *  \brief \p thrust::hip is a top-level alias for thrust::system::hip.
+ *  \brief \p thrust::hip is a top-level alias for \p thrust::system::hip.
  */
-
 namespace hip
 {
-    using thrust::hip_rocprim::allocator;
-    using thrust::hip_rocprim::free;
-    using thrust::hip_rocprim::malloc;
+using thrust::hip_rocprim::malloc;
+using thrust::hip_rocprim::free;
+using thrust::hip_rocprim::allocator;
+using thrust::hip_rocprim::universal_allocator;
 } // namespace hip
-} /// namespace system
 
-namespace hip
-{
-    using thrust::hip_rocprim::allocator;
-    using thrust::hip_rocprim::free;
-    using thrust::hip_rocprim::malloc;
-} // end hip
-
-} // end namespace thrust
+THRUST_NAMESPACE_END
 
 #include <thrust/system/hip/detail/memory.inl>

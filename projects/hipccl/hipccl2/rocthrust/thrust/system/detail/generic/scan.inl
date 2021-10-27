@@ -26,8 +26,7 @@
 #include <thrust/detail/type_traits/iterator/is_output_iterator.h>
 #include <thrust/functional.h>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace system
 {
 namespace detail
@@ -45,7 +44,7 @@ __host__ __device__
                                 InputIterator last,
                                 OutputIterator result)
 {
-
+  // assume plus as the associative operator
   return thrust::inclusive_scan(exec, first, last, result, thrust::plus<>());
 } // end inclusive_scan()
 
@@ -61,9 +60,7 @@ __host__ __device__
 {
   // Use the input iterator's value type per https://wg21.link/P0571
   using ValueType = typename thrust::iterator_value<InputIterator>::type;
-
-  // assume 0 as the initialization value
-  return thrust::exclusive_scan(exec, first, last, result, ValueType(0));
+  return thrust::exclusive_scan(exec, first, last, result, ValueType{});
 } // end exclusive_scan()
 
 
@@ -79,7 +76,7 @@ __host__ __device__
                                 T init)
 {
   // assume plus as the associative operator
-  return thrust::exclusive_scan(exec, first, last, result, init, thrust::plus<T>());
+  return thrust::exclusive_scan(exec, first, last, result, init, thrust::plus<>());
 } // end exclusive_scan()
 
 
@@ -126,4 +123,4 @@ __host__ __device__
 } // end namespace generic
 } // end namespace detail
 } // end namespace system
-} // end namespace thrust
+THRUST_NAMESPACE_END

@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <list>
 #include <iterator>
+#include <thrust/detail/config.h>
 #include <thrust/sequence.h>
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/iterator/counting_iterator.h>
@@ -372,9 +373,6 @@ void TestCopyIfSequence(const size_t n)
     thrust::host_vector<T>   h_data(n); thrust::sequence(h_data.begin(), h_data.end());
     thrust::device_vector<T> d_data(n); thrust::sequence(d_data.begin(), d_data.end());
 
-    thrust::host_vector<T>   h_result(n);
-    thrust::device_vector<T> d_result(n);
-
     typename thrust::host_vector<T>::iterator   h_new_end;
     typename thrust::device_vector<T>::iterator d_new_end;
 
@@ -440,9 +438,6 @@ void TestCopyIfStencil(const size_t n)
 
     thrust::host_vector<T>   h_stencil = unittest::random_integers<T>(n);
     thrust::device_vector<T> d_stencil = unittest::random_integers<T>(n);
-
-    thrust::host_vector<T>   h_result(n);
-    thrust::device_vector<T> d_result(n);
 
     typename thrust::host_vector<T>::iterator   h_new_end;
     typename thrust::device_vector<T>::iterator d_new_end;
@@ -771,15 +766,14 @@ struct only_set_when_expected_it
     }
 };
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace detail
 {
 // We need this type to pass as a non-const ref for unary_transform_functor
 // to compile:
 template <>
 struct is_non_const_reference<only_set_when_expected_it> : thrust::true_type {};
-}
+} // end namespace detail
 
 template<>
 struct iterator_traits<only_set_when_expected_it>
@@ -788,7 +782,7 @@ struct iterator_traits<only_set_when_expected_it>
     typedef only_set_when_expected_it reference;
     typedef thrust::random_access_device_iterator_tag iterator_category;
 };
-}
+THRUST_NAMESPACE_END
 
 void TestCopyWithBigIndexesHelper(int magnitude)
 {

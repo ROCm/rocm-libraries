@@ -24,9 +24,7 @@
 #include <thrust/detail/config.h>
 #include <thrust/detail/execution_policy.h>
 
-namespace thrust
-{
-
+THRUST_NAMESPACE_BEGIN
 
 /*! \addtogroup stream_compaction Stream Compaction
  *  \ingroup reordering
@@ -54,9 +52,9 @@ namespace thrust
  *          elements which are not equal to \p value.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam ForwardIterator is a model of <a href="http://www.sgi.com/tech/stl/ForwardIterator.html">Forward Iterator</a>,
+ *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward Iterator</a>,
  *          and \p ForwardIterator is mutable.
- *  \tparam T is a model of <a href="http://www.sgi.com/tech/stl/EqualityComparable.html">Equality Comparable</a>,
+ *  \tparam T is a model of <a href="https://en.cppreference.com/w/cpp/concepts/equality_comparable">Equality Comparable</a>,
  *          and objects of type \p T can be compared for equality with objects of \p ForwardIterator's \c value_type.
  *
  *  The following code snippet demonstrates how to use \p remove to remove a number
@@ -82,12 +80,12 @@ namespace thrust
  *  range after elements have been removed from it; it follows that the elements
  *  after that iterator are of no interest, and may be discarded. If you are
  *  removing elements from a
- *  <a href="http://www.sgi.com/tech/stl/Sequence.html">Sequence</a>, you may
+ *  <a href="https://en.cppreference.com/w/cpp/container">Sequence</a>, you may
  *  simply erase them. That is, a reasonable way of removing elements from a
- *  <a href="http://www.sgi.com/tech/stl/Sequence.html">Sequence</a> is
+ *  <a href="https://en.cppreference.com/w/cpp/container">Sequence</a> is
  *  <tt>S.erase(remove(S.begin(), S.end(), x), S.end())</tt>.
  *
- *  \see http://www.sgi.com/tech/stl/remove.html
+ *  \see https://en.cppreference.com/w/cpp/algorithm/remove
  *  \see remove_if
  *  \see remove_copy
  *  \see remove_copy_if
@@ -117,9 +115,9 @@ __host__ __device__
  *  \return A \p ForwardIterator pointing to the end of the resulting range of
  *          elements which are not equal to \p value.
  *
- *  \tparam ForwardIterator is a model of <a href="http://www.sgi.com/tech/stl/ForwardIterator.html">Forward Iterator</a>,
+ *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward Iterator</a>,
  *          and \p ForwardIterator is mutable.
- *  \tparam T is a model of <a href="http://www.sgi.com/tech/stl/EqualityComparable.html">Equality Comparable</a>,
+ *  \tparam T is a model of <a href="https://en.cppreference.com/w/cpp/concepts/equality_comparable">Equality Comparable</a>,
  *          and objects of type \p T can be compared for equality with objects of \p ForwardIterator's \c value_type.
  *
  *  The following code snippet demonstrates how to use \p remove to remove a number
@@ -144,12 +142,12 @@ __host__ __device__
  *  range after elements have been removed from it; it follows that the elements
  *  after that iterator are of no interest, and may be discarded. If you are
  *  removing elements from a
- *  <a href="http://www.sgi.com/tech/stl/Sequence.html">Sequence</a>, you may
+ *  <a href="https://en.cppreference.com/w/cpp/container">Sequence</a>, you may
  *  simply erase them. That is, a reasonable way of removing elements from a
- *  <a href="http://www.sgi.com/tech/stl/Sequence.html">Sequence</a> is
+ *  <a href="https://en.cppreference.com/w/cpp/container">Sequence</a> is
  *  <tt>S.erase(remove(S.begin(), S.end(), x), S.end())</tt>.
  *
- *  \see http://www.sgi.com/tech/stl/remove.html
+ *  \see https://en.cppreference.com/w/cpp/algorithm/remove
  *  \see remove_if
  *  \see remove_copy
  *  \see remove_copy_if
@@ -179,10 +177,10 @@ template<typename ForwardIterator,
  *          which are not equal to \p value.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam InputIterator is a model of <a href="http://www.sgi.com/tech/stl/InputIterator.html">Input Iterator</a>,
+ *  \tparam InputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
  *          and \p InputIterator's \c value_type is convertible to a type in \p OutputIterator's set of \c value_types.
- *  \tparam OutputIterator is a model of <a href="http://www.sgi.com/tech/stl/OutputIterator.html">Output Iterator</a>.
- *  \tparam T is a model of <a href="http://www.sgi.com/tech/stl/EqualityComparable">Equality Comparable</a>,
+ *  \tparam OutputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>.
+ *  \tparam T is a model of <a href="https://en.cppreference.com/w/cpp/concepts/equality_comparable">Equality Comparable</a>,
  *          and objects of type \p T can be compared for equality with objects of \p InputIterator's \c value_type.
  *
  *  \pre The range <tt>[first, last)</tt> shall not overlap the range <tt>[result, result + (last - first))</tt>.
@@ -203,7 +201,7 @@ template<typename ForwardIterator,
  *  // result is now {-2, -1, 1, 2}
  *  \endcode
  *
- *  \see http://www.sgi.com/tech/stl/remove_copy.html
+ *  \see https://en.cppreference.com/w/cpp/algorithm/remove_copy
  *  \see remove
  *  \see remove_if
  *  \see remove_copy_if
@@ -234,10 +232,10 @@ __host__ __device__
  *  \return An OutputIterator pointing to the end of the resulting range of elements
  *          which are not equal to \p value.
  *
- *  \tparam InputIterator is a model of <a href="http://www.sgi.com/tech/stl/InputIterator.html">Input Iterator</a>,
+ *  \tparam InputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
  *          and \p InputIterator's \c value_type is convertible to a type in \p OutputIterator's set of \c value_types.
- *  \tparam OutputIterator is a model of <a href="http://www.sgi.com/tech/stl/OutputIterator.html">Output Iterator</a>.
- *  \tparam T is a model of <a href="http://www.sgi.com/tech/stl/EqualityComparable">Equality Comparable</a>,
+ *  \tparam OutputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>.
+ *  \tparam T is a model of <a href="https://en.cppreference.com/w/cpp/concepts/equality_comparable">Equality Comparable</a>,
  *          and objects of type \p T can be compared for equality with objects of \p InputIterator's \c value_type.
  *
  *  \pre The range <tt>[first, last)</tt> shall not overlap the range <tt>[result, result + (last - first))</tt>.
@@ -256,7 +254,7 @@ __host__ __device__
  *  // result is now {-2, -1, 1, 2}
  *  \endcode
  *
- *  \see http://www.sgi.com/tech/stl/remove_copy.html
+ *  \see https://en.cppreference.com/w/cpp/algorithm/remove_copy
  *  \see remove
  *  \see remove_if
  *  \see remove_copy_if
@@ -290,10 +288,10 @@ template<typename InputIterator,
  *          elements for which \p pred evaluated to \c true.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam ForwardIterator is a model of <a href="http://www.sgi.com/tech/ForwardIterator.html">Forward Iterator</a>,
+ *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward Iterator</a>,
  *          \p ForwardIterator is mutable,
  *          and \p ForwardIterator's \c value_type is convertible to \p Predicate's \c argument_type.
- *  \tparam Predicate is a model of <a href="http://www.sgi.com/tech/Predicate.html">Predicate</a>.
+ *  \tparam Predicate is a model of <a href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>.
  *
  *  The following code snippet demonstrates how to use \p remove_if to remove
  *  all even numbers from an array of integers using the \p thrust::host execution policy for
@@ -329,12 +327,12 @@ template<typename InputIterator,
  *  range after elements have been removed from it; it follows that the elements
  *  after that iterator are of no interest, and may be discarded. If you are
  *  removing elements from a
- *  <a href="http://www.sgi.com/tech/stl/Sequence.html">Sequence</a>, you may
+ *  <a href="https://en.cppreference.com/w/cpp/container">Sequence</a>, you may
  *  simply erase them. That is, a reasonable way of removing elements from a
- *  <a href="http://www.sgi.com/tech/stl/Sequence.html">Sequence</a> is
+ *  <a href="https://en.cppreference.com/w/cpp/container">Sequence</a> is
  *  <tt>S.erase(remove_if(S.begin(), S.end(), pred), S.end())</tt>.
  *
- *  \see http://www.sgi.com/tech/stl/remove_if.html
+ *  \see https://en.cppreference.com/w/cpp/algorithm/remove
  *  \see remove
  *  \see remove_copy
  *  \see remove_copy_if
@@ -365,10 +363,10 @@ __host__ __device__
  *  \return A ForwardIterator pointing to the end of the resulting range of
  *          elements for which \p pred evaluated to \c true.
  *
- *  \tparam ForwardIterator is a model of <a href="http://www.sgi.com/tech/ForwardIterator.html">Forward Iterator</a>,
+ *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward Iterator</a>,
  *          \p ForwardIterator is mutable,
  *          and \p ForwardIterator's \c value_type is convertible to \p Predicate's \c argument_type.
- *  \tparam Predicate is a model of <a href="http://www.sgi.com/tech/Predicate.html">Predicate</a>.
+ *  \tparam Predicate is a model of <a href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>.
  *
  *  The following code snippet demonstrates how to use \p remove_if to remove
  *  all even numbers from an array of integers.
@@ -402,12 +400,12 @@ __host__ __device__
  *  range after elements have been removed from it; it follows that the elements
  *  after that iterator are of no interest, and may be discarded. If you are
  *  removing elements from a
- *  <a href="http://www.sgi.com/tech/stl/Sequence.html">Sequence</a>, you may
+ *  <a href="https://en.cppreference.com/w/cpp/container">Sequence</a>, you may
  *  simply erase them. That is, a reasonable way of removing elements from a
- *  <a href="http://www.sgi.com/tech/stl/Sequence.html">Sequence</a> is
+ *  <a href="https://en.cppreference.com/w/cpp/container">Sequence</a> is
  *  <tt>S.erase(remove_if(S.begin(), S.end(), pred), S.end())</tt>.
  *
- *  \see http://www.sgi.com/tech/stl/remove_if.html
+ *  \see https://en.cppreference.com/w/cpp/algorithm/remove
  *  \see remove
  *  \see remove_copy
  *  \see remove_copy_if
@@ -438,11 +436,11 @@ template<typename ForwardIterator,
  *  \return An OutputIterator pointing to the end of the resulting range.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam InputIterator is a model of <a href="http://www.sgi.com/tech/stl/InputIterator.html">Input Iterator</a>,
+ *  \tparam InputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
  *          \p InputIterator's \c value_type is convertible to a type in \p OutputIterator's set of \c value_types,
  *          and \p InputIterator's \c value_type is convertible to \p Predicate's \c argument_type.
- *  \tparam OutputIterator is a model of <a href="http://www.sgi.com/tech/stl/OutputIterator.html">Output Iterator</a>.
- *  \tparam Predicate is a model of <a href="http://www.sgi.com/tech/stl/Predicate.html">Predicate</a>.
+ *  \tparam OutputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>.
+ *  \tparam Predicate is a model of <a href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>.
  *
  *  \pre The range <tt>[first, last)</tt> shall not overlap the range <tt>[result, result + (last - first))</tt>.
  *
@@ -471,7 +469,7 @@ template<typename ForwardIterator,
  *  // result is now {-1, 1}
  *  \endcode
  *
- *  \see http://www.sgi.com/tech/stl/remove_copy_if.html
+ *  \see https://en.cppreference.com/w/cpp/algorithm/remove_copy
  *  \see remove
  *  \see remove_copy
  *  \see remove_if
@@ -503,11 +501,11 @@ __host__ __device__
  *              to the resulting sequence.
  *  \return An OutputIterator pointing to the end of the resulting range.
  *
- *  \tparam InputIterator is a model of <a href="http://www.sgi.com/tech/stl/InputIterator.html">Input Iterator</a>,
+ *  \tparam InputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
  *          \p InputIterator's \c value_type is convertible to a type in \p OutputIterator's set of \c value_types,
  *          and \p InputIterator's \c value_type is convertible to \p Predicate's \c argument_type.
- *  \tparam OutputIterator is a model of <a href="http://www.sgi.com/tech/stl/OutputIterator.html">Output Iterator</a>.
- *  \tparam Predicate is a model of <a href="http://www.sgi.com/tech/stl/Predicate.html">Predicate</a>.
+ *  \tparam OutputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>.
+ *  \tparam Predicate is a model of <a href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>.
  *
  *  \pre The range <tt>[first, last)</tt> shall not overlap the range <tt>[result, result + (last - first))</tt>.
  *
@@ -534,7 +532,7 @@ __host__ __device__
  *  // result is now {-1, 1}
  *  \endcode
  *
- *  \see http://www.sgi.com/tech/stl/remove_copy_if.html
+ *  \see https://en.cppreference.com/w/cpp/algorithm/remove_copy
  *  \see remove
  *  \see remove_copy
  *  \see remove_if
@@ -569,11 +567,11 @@ template<typename InputIterator,
  *          elements for which \p pred evaluated to \c true.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam ForwardIterator is a model of <a href="http://www.sgi.com/tech/ForwardIterator.html">Forward Iterator</a>
+ *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward Iterator</a>
  *          and \p ForwardIterator is mutable.
- *  \tparam InputIterator is a model of <a href="http://www.sgi.com/tech/stl/InputIterator.html">Input Iterator</a>,
+ *  \tparam InputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
  *          and \p InputIterator's \c value_type is convertible to \p Predicate's \c argument_type.
- *  \tparam Predicate is a model of <a href="http://www.sgi.com/tech/Predicate.html">Predicate</a>.
+ *  \tparam Predicate is a model of <a href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>.
  *
  *  \pre The range <tt>[first, last)</tt> shall not overlap the range <tt>[result, result + (last - first))</tt>.
  *  \pre The range <tt>[stencil, stencil + (last - first))</tt> shall not overlap the range <tt>[result, result + (last - first))</tt>.
@@ -597,7 +595,7 @@ template<typename InputIterator,
  *
  *  \note The range <tt>[first, last)</tt> is not permitted to overlap with the range <tt>[stencil, stencil + (last - first))</tt>.
  *
- *  \see http://www.sgi.com/tech/stl/remove_if.html
+ *  \see https://en.cppreference.com/w/cpp/algorithm/remove
  *  \see remove
  *  \see remove_copy
  *  \see remove_copy_if
@@ -631,11 +629,11 @@ __host__ __device__
  *  \return A ForwardIterator pointing to the end of the resulting range of
  *          elements for which \p pred evaluated to \c true.
  *
- *  \tparam ForwardIterator is a model of <a href="http://www.sgi.com/tech/ForwardIterator.html">Forward Iterator</a>
+ *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward Iterator</a>
  *          and \p ForwardIterator is mutable.
- *  \tparam InputIterator is a model of <a href="http://www.sgi.com/tech/stl/InputIterator.html">Input Iterator</a>,
+ *  \tparam InputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
  *          and \p InputIterator's \c value_type is convertible to \p Predicate's \c argument_type.
- *  \tparam Predicate is a model of <a href="http://www.sgi.com/tech/Predicate.html">Predicate</a>.
+ *  \tparam Predicate is a model of <a href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>.
  *
  *  \pre The range <tt>[first, last)</tt> shall not overlap the range <tt>[result, result + (last - first))</tt>.
  *  \pre The range <tt>[stencil, stencil + (last - first))</tt> shall not overlap the range <tt>[result, result + (last - first))</tt>.
@@ -657,7 +655,7 @@ __host__ __device__
  *
  *  \note The range <tt>[first, last)</tt> is not permitted to overlap with the range <tt>[stencil, stencil + (last - first))</tt>.
  *
- *  \see http://www.sgi.com/tech/stl/remove_if.html
+ *  \see https://en.cppreference.com/w/cpp/algorithm/remove
  *  \see remove
  *  \see remove_copy
  *  \see remove_copy_if
@@ -692,12 +690,12 @@ template<typename ForwardIterator,
  *  \return An OutputIterator pointing to the end of the resulting range.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam InputIterator1 is a model of <a href="http://www.sgi.com/tech/stl/InputIterator.html">Input Iterator</a>,
+ *  \tparam InputIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
  *          \p InputIterator1's \c value_type is convertible to a type in \p OutputIterator's set of \c value_types.
- *  \tparam InputIterator2 is a model of <a href="http://www.sgi.com/tech/stl/InputIterator.html">Input Iterator</a>,
+ *  \tparam InputIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
  *          and \p InputIterator2's \c value_type is convertible to \p Predicate's \c argument_type.
- *  \tparam OutputIterator is a model of <a href="http://www.sgi.com/tech/stl/OutputIterator.html">Output Iterator</a>.
- *  \tparam Predicate is a model of <a href="http://www.sgi.com/tech/stl/Predicate.html">Predicate</a>.
+ *  \tparam OutputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>.
+ *  \tparam Predicate is a model of <a href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>.
  *
  *  \pre The range <tt>[stencil, stencil + (last - first))</tt> shall not overlap the range <tt>[result, result + (last - first))</tt>.
  *
@@ -718,7 +716,7 @@ template<typename ForwardIterator,
  *  // result is now {-1, 1}
  *  \endcode
  *
- *  \see http://www.sgi.com/tech/stl/remove_copy_if.html
+ *  \see https://en.cppreference.com/w/cpp/algorithm/remove_copy
  *  \see remove
  *  \see remove_copy
  *  \see remove_if
@@ -755,12 +753,12 @@ __host__ __device__
  *              to the resulting sequence.
  *  \return An OutputIterator pointing to the end of the resulting range.
  *
- *  \tparam InputIterator1 is a model of <a href="http://www.sgi.com/tech/stl/InputIterator.html">Input Iterator</a>,
+ *  \tparam InputIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
  *          \p InputIterator1's \c value_type is convertible to a type in \p OutputIterator's set of \c value_types.
- *  \tparam InputIterator2 is a model of <a href="http://www.sgi.com/tech/stl/InputIterator.html">Input Iterator</a>,
+ *  \tparam InputIterator2 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
  *          and \p InputIterator2's \c value_type is convertible to \p Predicate's \c argument_type.
- *  \tparam OutputIterator is a model of <a href="http://www.sgi.com/tech/stl/OutputIterator.html">Output Iterator</a>.
- *  \tparam Predicate is a model of <a href="http://www.sgi.com/tech/stl/Predicate.html">Predicate</a>.
+ *  \tparam OutputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>.
+ *  \tparam Predicate is a model of <a href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>.
  *
  *  \pre The range <tt>[stencil, stencil + (last - first))</tt> shall not overlap the range <tt>[result, result + (last - first))</tt>.
  *
@@ -779,7 +777,7 @@ __host__ __device__
  *  // result is now {-1, 1}
  *  \endcode
  *
- *  \see http://www.sgi.com/tech/stl/remove_copy_if.html
+ *  \see https://en.cppreference.com/w/cpp/algorithm/remove_copy
  *  \see remove
  *  \see remove_copy
  *  \see remove_if
@@ -799,8 +797,6 @@ template<typename InputIterator1,
 /*! \} // end stream_compaction
  */
 
-
-} // end thrust
+THRUST_NAMESPACE_END
 
 #include <thrust/detail/remove.inl>
-

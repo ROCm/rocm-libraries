@@ -24,9 +24,7 @@
 #include <thrust/detail/config.h>
 #include <thrust/detail/execution_policy.h>
 
-namespace thrust
-{
-
+THRUST_NAMESPACE_BEGIN
 
 /*! \addtogroup transformations
  *  \{
@@ -45,9 +43,9 @@ namespace thrust
  *             elements in the range <tt>[first,last)</tt>.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam ForwardIterator is a model of <a href="http://www.sgi.com/tech/stl/ForwardIterator.html">Forward Iterator</a>,
+ *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward Iterator</a>,
  *          and \p ForwardIterator is mutable.
- *  \tparam Generator is a model of <a href="http://www.sgi.com/tech/stl/Generator.html">Generator</a>,
+ *  \tparam Generator is a model of <a href="https://en.cppreference.com/w/cpp/utility/functional">Generator</a>,
  *          and \p Generator's \c result_type is convertible to \p ForwardIterator's \c value_type.
  *
  *  The following code snippet demonstrates how to fill a \c host_vector with random numbers,
@@ -67,7 +65,7 @@ namespace thrust
  *  \endcode
  *
  *  \see generate_n
- *  \see http://www.sgi.com/tech/stl/generate.html
+ *  \see https://en.cppreference.com/w/cpp/algorithm/generate
  */
 template<typename DerivedPolicy,
          typename ForwardIterator,
@@ -87,9 +85,9 @@ __host__ __device__
  *  \param gen A function argument, taking no parameters, used to generate values to assign to
  *             elements in the range <tt>[first,last)</tt>.
  *
- *  \tparam ForwardIterator is a model of <a href="http://www.sgi.com/tech/stl/ForwardIterator.html">Forward Iterator</a>,
+ *  \tparam ForwardIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/forward_iterator">Forward Iterator</a>,
  *          and \p ForwardIterator is mutable.
- *  \tparam Generator is a model of <a href="http://www.sgi.com/tech/stl/Generator.html">Generator</a>,
+ *  \tparam Generator is a model of <a href="https://en.cppreference.com/w/cpp/utility/functional">Generator</a>,
  *          and \p Generator's \c result_type is convertible to \p ForwardIterator's \c value_type.
  *
  *  The following code snippet demonstrates how to fill a \c host_vector with random numbers,
@@ -109,7 +107,7 @@ __host__ __device__
  *  \endcode
  *
  *  \see generate_n
- *  \see http://www.sgi.com/tech/stl/generate.html
+ *  \see https://en.cppreference.com/w/cpp/algorithm/generate
  */
 template<typename ForwardIterator,
          typename Generator>
@@ -130,9 +128,9 @@ template<typename ForwardIterator,
  *             elements in the range <tt>[first,first + n)</tt>.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
- *  \tparam OutputIterator is a model of <a href="http://www.sgi.com/tech/stl/OutputIterator.html">Output Iterator</a>.
+ *  \tparam OutputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>.
  *  \tparam Size is an integral type (either signed or unsigned).
- *  \tparam Generator is a model of <a href="http://www.sgi.com/tech/stl/Generator.html">Generator</a>,
+ *  \tparam Generator is a model of <a href="https://en.cppreference.com/w/cpp/utility/functional">Generator</a>,
  *          and \p Generator's \c result_type is convertible to a type in \p OutputIterator's set of \c value_types.
  *
  *  The following code snippet demonstrates how to fill a \c host_vector with random numbers,
@@ -152,7 +150,7 @@ template<typename ForwardIterator,
  *  \endcode
  *
  *  \see generate
- *  \see http://www.sgi.com/tech/stl/generate.html
+ *  \see https://en.cppreference.com/w/cpp/algorithm/generate
  */
 template<typename DerivedPolicy,
          typename OutputIterator,
@@ -173,9 +171,9 @@ __host__ __device__
  *  \param gen A function argument, taking no parameters, used to generate values to assign to
  *             elements in the range <tt>[first,first + n)</tt>.
  *
- *  \tparam OutputIterator is a model of <a href="http://www.sgi.com/tech/stl/OutputIterator.html">Output Iterator</a>.
+ *  \tparam OutputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>.
  *  \tparam Size is an integral type (either signed or unsigned).
- *  \tparam Generator is a model of <a href="http://www.sgi.com/tech/stl/Generator.html">Generator</a>,
+ *  \tparam Generator is a model of <a href="https://en.cppreference.com/w/cpp/utility/functional">Generator</a>,
  *          and \p Generator's \c result_type is convertible to a type in \p OutputIterator's set of \c value_types.
  *
  *  The following code snippet demonstrates how to fill a \c host_vector with random numbers,
@@ -194,7 +192,7 @@ __host__ __device__
  *  \endcode
  *
  *  \see generate
- *  \see http://www.sgi.com/tech/stl/generate.html
+ *  \see https://en.cppreference.com/w/cpp/algorithm/generate
  */
 template<typename OutputIterator,
          typename Size,
@@ -207,7 +205,7 @@ template<typename OutputIterator,
 /*! \} // end transformations
  */
 
-} // end namespace thrust
+THRUST_NAMESPACE_END
 
 #include <thrust/detail/generate.inl>
 
