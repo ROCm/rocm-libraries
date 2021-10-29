@@ -811,6 +811,22 @@ block_load_radix_impl(const unsigned int flat_id,
     }
 }
 
+template<class T>
+ROCPRIM_DEVICE ROCPRIM_INLINE
+auto compare_nans(const T& a, const T& b)
+    -> typename std::enable_if<rocprim::is_floating_point<T>::value, bool>::type
+{
+    return (a != a) && (b == b);
+}
+
+template<class T>
+ROCPRIM_DEVICE ROCPRIM_INLINE
+auto compare_nans(const T&, const T&)
+    -> typename std::enable_if<!rocprim::is_floating_point<T>::value, bool>::type
+{
+    return false;
+}
+
 template<
     bool Descending,
     bool UseRadixMask,
@@ -824,7 +840,7 @@ struct radix_merge_compare<false, false, T>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     bool operator()(const T& a, const T& b) const
     {
-        return b > a;
+        return compare_nans<T>(b, a) || b > a;
     }
 };
 
@@ -834,7 +850,7 @@ struct radix_merge_compare<true, false, T>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     bool operator()(const T& a, const T& b) const
     {
-        return a > b;
+        return compare_nans<T>(a, b) || a > b;
     }
 };
 
@@ -898,7 +914,7 @@ struct radix_merge_compare<false, false, rocprim::half>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     bool operator()(const rocprim::half& a, const rocprim::half& b) const
     {
-        return __hgt(b, a);
+        return (__hisnan(b) && !__hisnan(a)) || __hgt(b, a);
     }
 };
 
@@ -908,7 +924,7 @@ struct radix_merge_compare<true, false, rocprim::half>
     ROCPRIM_DEVICE ROCPRIM_INLINE
     bool operator()(const rocprim::half& a, const rocprim::half& b) const
     {
-        return __hgt(a, b);
+        return (!__hisnan(b) && __hisnan(a)) || __hgt(a, b);
     }
 };
 
