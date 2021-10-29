@@ -1407,7 +1407,8 @@ void assert_bit_eq(const std::vector<T>& result, const std::vector<T>& expected)
 }
 
 template<class T>
-void assert_eq(const std::vector<T>& result, const std::vector<T>& expected)
+auto assert_eq(const std::vector<T>& result, const std::vector<T>& expected)
+    -> typename std::enable_if<!rocprim::is_floating_point<T>::value, void>::type
 {
     ASSERT_EQ(result.size(), expected.size());
     for(size_t i = 0; i < result.size(); i++)
@@ -1416,7 +1417,21 @@ void assert_eq(const std::vector<T>& result, const std::vector<T>& expected)
     }
 }
 
-void assert_eq(const std::vector<rocprim::half>& result, const std::vector<rocprim::half>& expected)
+template<class T>
+auto assert_eq(const std::vector<T>& result, const std::vector<T>& expected)
+    -> typename std::enable_if<rocprim::is_floating_point<T>::value, void>::type
+{
+    ASSERT_EQ(result.size(), expected.size());
+    for(size_t i = 0; i < result.size(); i++)
+    {
+        if( result[i] != result[i] )
+            ASSERT_EQ(result[i] != result[i], expected[i] != expected[i]) << "NAN check failed where index = " << i;
+        else
+            ASSERT_EQ(result[i], expected[i]) << "where index = " << i;
+    }
+}
+
+auto assert_eq(const std::vector<rocprim::half>& result, const std::vector<rocprim::half>& expected)
 {
     ASSERT_EQ(result.size(), expected.size());
     for(size_t i = 0; i < result.size(); i++)
@@ -1425,7 +1440,7 @@ void assert_eq(const std::vector<rocprim::half>& result, const std::vector<rocpr
     }
 }
 
-void assert_eq(const std::vector<rocprim::bfloat16>& result, const std::vector<rocprim::bfloat16>& expected)
+auto assert_eq(const std::vector<rocprim::bfloat16>& result, const std::vector<rocprim::bfloat16>& expected)
 {
     ASSERT_EQ(result.size(), expected.size());
     for(size_t i = 0; i < result.size(); i++)
@@ -1460,17 +1475,28 @@ void custom_assert_eq(const std::vector<rocprim::bfloat16>& result, const std::v
 }
 
 template<class T>
-void assert_eq(const T& result, const T& expected)
+auto assert_eq(const T& result, const T& expected)
+    -> typename std::enable_if<!rocprim::is_floating_point<T>::value, void>::type
 {
     ASSERT_EQ(result, expected);
 }
 
-void assert_eq(const rocprim::half& result, const rocprim::half& expected)
+template<class T>
+auto assert_eq(const T& result, const T& expected)
+    -> typename std::enable_if<rocprim::is_floating_point<T>::value, void>::type
+{
+    if( result != result )
+        ASSERT_EQ( result != result, expected != expected);
+    else
+        ASSERT_EQ(result, expected);
+}
+
+auto assert_eq(const rocprim::half& result, const rocprim::half& expected)
 {
     ASSERT_EQ(half_to_native(result), half_to_native(expected));
 }
 
-void assert_eq(const rocprim::bfloat16& result, const rocprim::bfloat16& expected)
+auto assert_eq(const rocprim::bfloat16& result, const rocprim::bfloat16& expected)
 {
     ASSERT_EQ(bfloat16_to_native(result), bfloat16_to_native(expected));
 }
