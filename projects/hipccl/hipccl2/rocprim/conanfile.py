@@ -19,5 +19,5 @@ class ConanPkgReqs(ConanFile):
 
     def requirements(self):
         if self.options.clients:
-            self.requires("gtest/1.10.0")
+            self.requires("gtest/1.11.0")
             self.requires("benchmark/1.5.2")
