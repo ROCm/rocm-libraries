@@ -1,4 +1,4 @@
-// Copyright (c) 2019 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2019-2021 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -30,12 +30,6 @@ template<class Size>
 ROCPRIM_DEVICE ROCPRIM_INLINE
 Size get_binary_search_middle(Size left, Size right)
 {
-    // Instead of `/ 2` we use `* 33 / 64`, i.e. the middle is slightly moved.
-    // This greatly reduces address aliasing and hence cache misses for (nearly-)power-of-two
-    // sizes of haystack (when addresses are mapped to the same cache line).
-    // For random needles and (nearly-)power-of-two sizes, this change increases performance
-    // 4-20 times making it equal to performance of arbitrary sizes of haystack.
-    // See https://www.pvk.ca/Blog/2012/07/30/binary-search-is-a-pathological-case-for-caches/
     const Size d = right - left;
     return left + d / 2 + d / 64;
 }
