@@ -28,11 +28,6 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-// Fast division by unsigned "constant"
-// Used for fast division on device by precomputing magic numbers on host,
-// hence no division by arbitrary values in kernel code.
-// Hacker's Delight, Chapter 10, Integer Division By Constants (http://www.hackersdelight.org/)
-// http://www.hackersdelight.org/hdcodetxt/magicu.c.txt
 struct uint_fast_div
 {
     unsigned int magic; // Magic number
