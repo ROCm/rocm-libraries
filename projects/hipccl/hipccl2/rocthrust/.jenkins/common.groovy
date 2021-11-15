@@ -36,11 +36,13 @@ def runTestCommand (platform, project)
 
     if (platform.jenkinsLabel.contains('gfx90a'))
     {
-        hmmTestCommand = """
-                            export HSA_XNACK=1
-                            export ROCTHRUST_USE_HMM=1
-                            ${testCommand} -R device_ptr.hip
-                         """
+        hmmTestCommand = ""
+                        // temporarily disable hmm testing
+                        //  """
+                        //     export HSA_XNACK=1
+                        //     export ROCTHRUST_USE_HMM=1
+                        //     ${testCommand} -R device_ptr.hip
+                        //  """
     }
 
     def command = """
