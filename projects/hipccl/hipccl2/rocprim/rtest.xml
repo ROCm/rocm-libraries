@@ -6,6 +6,6 @@
   <run name="all_tests">{CTEST_FILTER} {CTEST_REGEX}</run>
 </test>
 <test sets="osdb">
-  <run name="all_tests">{CTEST_FILTER} rocprim.device_scan</run>
+  <run name="all_tests">{CTEST_FILTER} {CTEST_REGEX}</run>
 </test>
 </testset>
