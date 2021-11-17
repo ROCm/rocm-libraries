@@ -208,9 +208,7 @@ auto scan_impl(void * temporary_storage,
     -> typename std::enable_if<!Config::use_lookback, hipError_t>::type
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
-    using result_type = typename ::rocprim::detail::match_result_type<
-        input_type, BinaryFunction
-    >::type;
+    using result_type = typename std::conditional<Exclusive, InitValueType, input_type>::type;
 
     using config = Config;
 
@@ -219,7 +217,7 @@ auto scan_impl(void * temporary_storage,
     constexpr auto items_per_block = block_size * items_per_thread;
 
     static constexpr size_t size_limit = config::size_limit;
-    static constexpr size_t aligned_size_limit = std::max<size_t>(size_limit - size_limit % items_per_block, items_per_block);
+    static constexpr size_t aligned_size_limit = ::rocprim::max<size_t>(size_limit - size_limit % items_per_block, items_per_block);
     size_t limited_size = std::min<size_t>(size, aligned_size_limit);
     const bool use_limited_size = limited_size == aligned_size_limit;
     size_t nested_prefixes_size_bytes = scan_get_temporary_storage_bytes<result_type>(limited_size, items_per_block);
@@ -343,7 +341,7 @@ auto scan_impl(void * temporary_storage,
                 input + offset,
                 current_size,
                 output + offset,
-                static_cast<result_type>(initial_value),
+                initial_value,
                 scan_op,
                 block_prefixes,
                 previous_last_element,
@@ -382,7 +380,7 @@ auto scan_impl(void * temporary_storage,
                 InputIterator, OutputIterator, BinaryFunction
             >),
             dim3(1), dim3(block_size), 0, stream,
-            input, size, static_cast<result_type>(initial_value), output, scan_op
+            input, size, initial_value, output, scan_op
         );
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("single_scan_kernel", size, start);
     }
@@ -410,9 +408,7 @@ auto scan_impl(void * temporary_storage,
     -> typename std::enable_if<Config::use_lookback, hipError_t>::type
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
-    using result_type = typename ::rocprim::detail::match_result_type<
-        input_type, BinaryFunction
-    >::type;
+    using result_type = typename std::conditional<Exclusive, InitValueType, input_type>::type;
 
     using config = Config;
 
@@ -425,7 +421,7 @@ auto scan_impl(void * temporary_storage,
     constexpr auto items_per_block = block_size * items_per_thread;
 
     static constexpr size_t size_limit = config::size_limit;
-    static constexpr size_t aligned_size_limit = std::max<size_t>(size_limit - size_limit % items_per_block, items_per_block);
+    static constexpr size_t aligned_size_limit = ::rocprim::max<size_t>(size_limit - size_limit % items_per_block, items_per_block);
     size_t limited_size = std::min<size_t>(size, aligned_size_limit);
     const bool use_limited_size = limited_size == aligned_size_limit;
 
@@ -537,7 +533,7 @@ auto scan_impl(void * temporary_storage,
                         BinaryFunction, result_type, scan_state_with_sleep_type
                     >),
                     dim3(grid_size), dim3(block_size), 0, stream,
-                    input + offset, output + offset, current_size, static_cast<result_type>(initial_value),
+                    input + offset, output + offset, current_size, initial_value,
                     scan_op, scan_state_with_sleep, number_of_blocks, ordered_bid,
                     previous_last_element, new_last_element,
                     i != size_t(0), number_of_launch > 1
@@ -563,7 +559,7 @@ auto scan_impl(void * temporary_storage,
                         BinaryFunction, result_type, scan_state_type
                     >),
                     dim3(grid_size), dim3(block_size), 0, stream,
-                    input + offset, output + offset, current_size, static_cast<result_type>(initial_value),
+                    input + offset, output + offset, current_size, initial_value,
                     scan_op, scan_state, number_of_blocks, ordered_bid,
                     previous_last_element, new_last_element,
                     i != size_t(0), number_of_launch > 1
@@ -601,7 +597,7 @@ auto scan_impl(void * temporary_storage,
                 InputIterator, OutputIterator, BinaryFunction
             >),
             dim3(1), dim3(block_size), 0, stream,
-            input, size, static_cast<result_type>(initial_value), output, scan_op
+            input, size, initial_value, output, scan_op
         );
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("single_scan_kernel", size, start);
     }
@@ -704,20 +700,17 @@ hipError_t inclusive_scan(void * temporary_storage,
                           bool debug_synchronous = false)
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
-    using result_type = typename ::rocprim::detail::match_result_type<
-        input_type, BinaryFunction
-    >::type;
 
     // Get default config if Config is default_config
     using config = detail::default_or_custom_config<
         Config,
-        detail::default_scan_config<ROCPRIM_TARGET_ARCH, result_type>
-    >;
+        detail::default_scan_config<ROCPRIM_TARGET_ARCH, input_type>
+        >;
 
     return detail::scan_impl<false, config>(
         temporary_storage, storage_size,
-        // result_type() is a dummy initial value (not used)
-        input, output, result_type{}, size,
+        // input_type() is a dummy initial value (not used)
+        input, output, input_type(), size,
         scan_op, stream, debug_synchronous
     );
 }
@@ -824,10 +817,7 @@ hipError_t exclusive_scan(void * temporary_storage,
                           const hipStream_t stream = 0,
                           bool debug_synchronous = false)
 {
-    using input_type = typename std::iterator_traits<InputIterator>::value_type;
-    using result_type = typename ::rocprim::detail::match_result_type<
-        input_type, BinaryFunction
-    >::type;
+    using result_type = InitValueType;
 
     // Get default config if Config is default_config
     using config = detail::default_or_custom_config<

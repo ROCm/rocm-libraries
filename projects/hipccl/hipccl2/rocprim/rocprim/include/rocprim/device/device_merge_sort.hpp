@@ -41,6 +41,7 @@ namespace detail
 
 template<
     unsigned int BlockSize,
+    unsigned int ItemsPerThread,
     class KeysInputIterator,
     class KeysOutputIterator,
     class ValuesInputIterator,
@@ -56,7 +57,7 @@ void block_sort_kernel(KeysInputIterator keys_input,
                        const size_t size,
                        BinaryFunction compare_function)
 {
-    block_sort_kernel_impl<BlockSize>(
+    block_sort_kernel_impl<BlockSize, ItemsPerThread>(
         keys_input, keys_output, values_input, values_output,
         size, compare_function
     );
@@ -142,8 +143,14 @@ hipError_t merge_sort_impl(void * temporary_storage,
         default_merge_sort_config<ROCPRIM_TARGET_ARCH, key_type, value_type>
     >;
 
-    // Block size
-    static constexpr unsigned int block_size = config::block_size;
+    static constexpr unsigned int merge_block_size = config::merge_config::block_size;
+
+    static constexpr unsigned int sort_block_size  = config::sort_config::block_size;
+    static constexpr unsigned int sort_items_per_thread = config::sort_config::items_per_thread;
+    static constexpr unsigned int sort_items_per_block= sort_block_size * sort_items_per_thread;
+
+    static_assert(sort_items_per_block % merge_block_size == 0,
+                  "Merge block size must be a divisor of the items per block of the sort step");
 
     const size_t keys_bytes = ::rocprim::detail::align_size(size * sizeof(key_type));
     const size_t values_bytes =
@@ -163,11 +170,16 @@ hipError_t merge_sort_impl(void * temporary_storage,
     if( size == size_t(0) )
         return hipSuccess;
 
-    auto number_of_blocks = (size + block_size - 1)/block_size;
+    const auto sort_number_of_blocks = (size + sort_items_per_block - 1) / sort_items_per_block;
+    const auto merge_number_of_blocks = (size + merge_block_size - 1) / merge_block_size;
     if(debug_synchronous)
     {
-        std::cout << "block_size " << block_size << '\n';
-        std::cout << "number of blocks " << number_of_blocks << '\n';
+        std::cout << "sort_block_size: " << sort_block_size << '\n';
+        std::cout << "sort_items_per_thread: " << sort_items_per_thread << '\n';
+        std::cout << "sort_items_per_block: " << sort_items_per_block << '\n';
+        std::cout << "sort_number_of_blocks: " << sort_number_of_blocks << '\n';
+        std::cout << "merge_block_size: " << merge_block_size << '\n';
+        std::cout << "merge_number_of_blocks: " << merge_number_of_blocks << '\n';
     }
 
     char* ptr = reinterpret_cast<char*>(temporary_storage);
@@ -180,25 +192,24 @@ hipError_t merge_sort_impl(void * temporary_storage,
     std::chrono::high_resolution_clock::time_point start;
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
 
-    const unsigned int grid_size = number_of_blocks;
     hipLaunchKernelGGL(
-        HIP_KERNEL_NAME(block_sort_kernel<block_size>),
-        dim3(grid_size), dim3(block_size), 0, stream,
+        HIP_KERNEL_NAME(block_sort_kernel<sort_block_size, sort_items_per_thread>),
+        dim3(sort_number_of_blocks), dim3(sort_block_size), 0, stream,
         keys_input, keys_buffer, values_input, values_buffer,
         size, compare_function
     );
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("block_sort_kernel", size, start);
 
     bool temporary_store = true;
-    for(unsigned int block = block_size; block < size; block *= 2)
+    for(unsigned int block = sort_items_per_block; block < size; block *= 2)
     {
         temporary_store = !temporary_store;
         if(temporary_store)
         {
             if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
             hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(block_merge_kernel<block_size>),
-                dim3(grid_size), dim3(block_size), 0, stream,
+                HIP_KERNEL_NAME(block_merge_kernel<merge_block_size>),
+                dim3(merge_number_of_blocks), dim3(merge_block_size), 0, stream,
                 keys_output, keys_buffer, values_output, values_buffer,
                 size, block, compare_function
             );
@@ -208,8 +219,8 @@ hipError_t merge_sort_impl(void * temporary_storage,
         {
             if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
             hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(block_merge_kernel<block_size>),
-                dim3(grid_size), dim3(block_size), 0, stream,
+                HIP_KERNEL_NAME(block_merge_kernel<merge_block_size>),
+                dim3(merge_number_of_blocks), dim3(merge_block_size), 0, stream,
                 keys_buffer, keys_output, values_buffer, values_output,
                 size, block, compare_function
             );

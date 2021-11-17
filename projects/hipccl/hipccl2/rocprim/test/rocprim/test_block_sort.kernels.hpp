@@ -38,6 +38,27 @@ void sort_key_kernel(key_type * device_key_output)
     device_key_output[index] = key;
 }
 
+template<
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread,
+    class key_type
+>
+__global__
+__launch_bounds__(BlockSize)
+void sort_keys_kernel(key_type * device_key_output)
+{
+    const unsigned int lid = threadIdx.x;
+    const unsigned int block_offset = blockIdx.x * ItemsPerThread * BlockSize;
+
+    key_type keys[ItemsPerThread];
+    ::rocprim::block_load_direct_striped<BlockSize>(lid, device_key_output + block_offset, keys);
+
+    ::rocprim::block_sort<key_type, BlockSize, ItemsPerThread> sort;
+    sort.sort(keys);
+
+    ::rocprim::block_store_direct_blocked(lid, device_key_output + block_offset, keys);
+}
+
 template<class Key, class Value>
 struct pair_comparator
 {
@@ -63,7 +84,7 @@ void sort_key_value_kernel(key_type * device_key_output, value_type * device_val
     const unsigned int index = (blockIdx.x * BlockSize) + threadIdx.x;
     key_type key = device_key_output[index];
     value_type value = device_value_output[index];
-    rocprim::block_sort<key_type, BlockSize, value_type> bsort;
+    rocprim::block_sort<key_type, BlockSize, 1, value_type> bsort;
     bsort.sort(key, value);
     device_key_output[index] = key;
     device_value_output[index] = value;
@@ -91,10 +112,17 @@ void custom_sort_key_value_kernel(key_type * device_key_output, value_type * dev
     const unsigned int index = (blockIdx.x * BlockSize) + threadIdx.x;
     key_type key = device_key_output[index];
     value_type value = device_value_output[index];
-    rocprim::block_sort<key_type, BlockSize, value_type> bsort;
+    rocprim::block_sort<key_type, BlockSize, 1, value_type> bsort;
     bsort.sort(key, value, rocprim::greater<key_type>());
     device_key_output[index] = key;
     device_value_output[index] = value;
+}
+
+template<class T>
+inline constexpr bool is_power_of_two(const T x)
+{
+    static_assert(::rocprim::is_integral<T>::value, "T must be integer type");
+    return (x > 0) && ((x & (x - 1)) == 0);
 }
 
 #endif // TEST_BLOCK_SORT_KERNELS_HPP_

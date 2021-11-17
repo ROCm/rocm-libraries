@@ -11,10 +11,19 @@ Full documentation for rocPRIM is available at [https://codedocs.xyz/ROCmSoftwar
 - Added reduce size limit feature
 - Added transform size limit feature
 - Add block_load_striped and block_store_striped
+- Add gather_to_blocked to gather values from other threads into a blocked arrangement
+- The block sizes for device merge sorts initial block sort and its merge steps are now separate in its kernel config
+    - the block sort step supports multiple items per thread
 ### Changed
 - size_limit for scan, reduce and transform can now be set in the config struct instead of a parameter
+- Device_scan and device_segmented_scan: `inclusive_scan` now uses the input-type as accumulator-type, `exclusive_scan` uses initial-value-type. 
+  - This particularly changes behaviour of small-size input types with large-size output types (e.g. `short` input, `int` output).
+  - And low-res input with high-res output (e.g. `float` input, `double` output)
 - Revert old Fiji workaround, because they solved the issue at compiler side
 - Update README cmake minimum version number
+- Block sort support multiple items per thread
+    - currently only powers of two block sizes, and items per threads are supported and only for full blocks
+- Bumped the minimum required version of CMake to 3.16
 ### Known issues
 - Unit tests may soft hang on MI200 when running in hipMallocManaged mode.
 - block_histogram, device_scan unit tests failing for HIP on Windows

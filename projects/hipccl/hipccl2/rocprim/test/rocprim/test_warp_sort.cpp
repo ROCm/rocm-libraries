@@ -45,6 +45,17 @@ struct Integral;
 #undef warp_params
 #undef name_suffix
 
+struct Integral;
+#define suite_name RocprimWarpSortShuffleBasedTests
+#define warp_params WarpSortParamsIntegralMultiThread
+#define name_suffix IntegralMultiThread
+
+#include "test_warp_sort.hpp"
+
+#undef suite_name
+#undef warp_params
+#undef name_suffix
+
 struct Floating;
 #define suite_name RocprimWarpSortShuffleBasedTests
 #define warp_params WarpSortParamsFloating

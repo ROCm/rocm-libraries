@@ -6,7 +6,7 @@ performant GPU-accelerated code on AMD ROCm platform.
 ## Requirements
 
 * Git
-* CMake (3.10.2 or later)
+* CMake (3.16 or later)
 * AMD [ROCm](https://rocm.github.io/install.html) platform (1.8.2 or later)
   * Including [HIP-clang](https://github.com/ROCm-Developer-Tools/HIP/blob/master/INSTALL.md#hip-clang) compiler
 * Python 3.6 or higher (HIP on Windows only, required only for install script)
