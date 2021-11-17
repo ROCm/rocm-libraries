@@ -57,7 +57,8 @@
       #define ROCPRIM_INLINE inline __attribute__((always_inline))
     #else
       #define ROCPRIM_INLINE inline
-    #endif    
+    #endif
+    #define ROCPRIM_FORCE_INLINE __attribute__((always_inline))
 #endif
 
 #if ( defined(__gfx801__) || \

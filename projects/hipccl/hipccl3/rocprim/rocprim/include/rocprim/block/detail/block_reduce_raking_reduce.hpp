@@ -94,7 +94,7 @@ public:
     /// \param output   [out] Variable containing reduction output
     /// \param reduce_op [in] Binary reduction operator
     template<class BinaryFunction>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void reduce(T input,
                 T& output,
                 BinaryFunction reduce_op)
@@ -138,7 +138,7 @@ public:
     /// \param output   [out] Variable containing reduction output
     /// \param reduce_op [in] Binary reduction operator
     template<unsigned int ItemsPerThread, class BinaryFunction>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void reduce(T (&input)[ItemsPerThread],
                 T& output,
                 BinaryFunction reduce_op)
@@ -174,7 +174,7 @@ public:
     /// \param valid_items [in] Number of valid elements (may be less than BlockSize)
     /// \param reduce_op [in] Binary reduction operator
     template<class BinaryFunction>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void reduce(T input,
                 T& output,
                 unsigned int valid_items,

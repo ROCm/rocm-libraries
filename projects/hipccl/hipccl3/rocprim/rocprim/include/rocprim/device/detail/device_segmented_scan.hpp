@@ -119,7 +119,7 @@ template<
     class InitValueType,
     class BinaryFunction
 >
-ROCPRIM_DEVICE ROCPRIM_INLINE
+ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
 void segmented_scan(InputIterator input,
                     OutputIterator output,
                     OffsetIterator begin_offsets,

@@ -72,7 +72,7 @@ public:
     using storage_type = detail::raw_storage<storage_type_>;
 
     template<class Counter>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void composite(T (&input)[ItemsPerThread],
                    Counter hist[Bins])
     {

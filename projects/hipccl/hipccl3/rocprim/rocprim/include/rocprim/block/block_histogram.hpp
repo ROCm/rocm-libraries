@@ -240,7 +240,7 @@ public:
     /// \param [in] input - reference to an array containing thread input values.
     /// \param [out] hist - histogram bin count.
     template<class Counter>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void composite(T (&input)[ItemsPerThread],
                    Counter hist[Bins])
     {
@@ -310,7 +310,7 @@ public:
     /// \param [in] input - reference to an array containing thread input values.
     /// \param [out] hist - histogram bin count.
     template<class Counter>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void histogram(T (&input)[ItemsPerThread],
                    Counter hist[Bins])
     {

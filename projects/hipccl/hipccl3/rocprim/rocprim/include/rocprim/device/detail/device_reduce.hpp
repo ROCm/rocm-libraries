@@ -80,7 +80,7 @@ template<
     class InitValueType,
     class BinaryFunction
 >
-ROCPRIM_DEVICE ROCPRIM_INLINE
+ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
 void block_reduce_kernel_impl(InputIterator input,
                               const size_t input_size,
                               OutputIterator output,

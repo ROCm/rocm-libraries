@@ -220,7 +220,7 @@ public:
     /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
     template<class BinaryFunction = ::rocprim::plus<T>>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void inclusive_scan(T input,
                         T& output,
                         BinaryFunction scan_op = BinaryFunction())
@@ -306,7 +306,7 @@ public:
     /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
     template<class BinaryFunction = ::rocprim::plus<T>>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void inclusive_scan(T input,
                         T& output,
                         T& reduction,
@@ -492,7 +492,7 @@ public:
         unsigned int ItemsPerThread,
         class BinaryFunction = ::rocprim::plus<T>
     >
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void inclusive_scan(T (&input)[ItemsPerThread],
                         T (&output)[ItemsPerThread],
                         BinaryFunction scan_op = BinaryFunction())
@@ -599,7 +599,7 @@ public:
         unsigned int ItemsPerThread,
         class BinaryFunction = ::rocprim::plus<T>
     >
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void inclusive_scan(T (&input)[ItemsPerThread],
                         T (&output)[ItemsPerThread],
                         T& reduction,
@@ -793,7 +793,7 @@ public:
     /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
     template<class BinaryFunction = ::rocprim::plus<T>>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void exclusive_scan(T input,
                         T& output,
                         T init,
@@ -887,7 +887,7 @@ public:
     /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
     template<class BinaryFunction = ::rocprim::plus<T>>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void exclusive_scan(T input,
                         T& output,
                         T init,
@@ -1081,7 +1081,7 @@ public:
         unsigned int ItemsPerThread,
         class BinaryFunction = ::rocprim::plus<T>
     >
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void exclusive_scan(T (&input)[ItemsPerThread],
                         T (&output)[ItemsPerThread],
                         T init,
@@ -1197,7 +1197,7 @@ public:
         unsigned int ItemsPerThread,
         class BinaryFunction = ::rocprim::plus<T>
     >
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void exclusive_scan(T (&input)[ItemsPerThread],
                         T (&output)[ItemsPerThread],
                         T init,

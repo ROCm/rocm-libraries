@@ -6,6 +6,7 @@ Full documentation for rocPRIM is available at [https://codedocs.xyz/ROCmSoftwar
 ### Fixed
 - Enable bfloat16 tests and reduce threshold for bfloat16
 - Fix device scan limit_size feature
+- Non-optimized builds no longer trigger local memory limit errors
 ### Added
 - Added scan size limit feature
 - Added reduce size limit feature

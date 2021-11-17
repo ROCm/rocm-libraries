@@ -176,7 +176,7 @@ template<
     class ResultType,
     class LookbackScanState
 >
-ROCPRIM_DEVICE ROCPRIM_INLINE
+ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
 void lookback_scan_kernel_impl(InputIterator input,
                                OutputIterator output,
                                const size_t size,

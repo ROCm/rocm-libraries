@@ -126,7 +126,7 @@ public:
     /// \param [in] input - array that data is loaded from.
     /// \param [out] output - array that data is loaded to.
     template<class U>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void blocked_to_striped(const T (&input)[ItemsPerThread],
                             U (&output)[ItemsPerThread])
     {
@@ -192,7 +192,7 @@ public:
     /// \param [in] input - array that data is loaded from.
     /// \param [out] output - array that data is loaded to.
     template<class U>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void striped_to_blocked(const T (&input)[ItemsPerThread],
                             U (&output)[ItemsPerThread])
     {
@@ -258,7 +258,7 @@ public:
     /// \param [in] input - array that data is loaded from.
     /// \param [out] output - array that data is loaded to.
     template<class U>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void blocked_to_warp_striped(const T (&input)[ItemsPerThread],
                                  U (&output)[ItemsPerThread])
     {
@@ -329,7 +329,7 @@ public:
     /// \param [in] input - array that data is loaded from.
     /// \param [out] output - array that data is loaded to.
     template<class U>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void warp_striped_to_blocked(const T (&input)[ItemsPerThread],
                                  U (&output)[ItemsPerThread])
     {
@@ -402,7 +402,7 @@ public:
     /// \param [out] output - array that data is loaded to.
     /// \param [out] ranks - array that has rank of data.
     template<class U, class Offset>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void scatter_to_blocked(const T (&input)[ItemsPerThread],
                             U (&output)[ItemsPerThread],
                             const Offset (&ranks)[ItemsPerThread])
@@ -412,7 +412,7 @@ public:
     }
 
     template<class U, class Offset>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void gather_from_striped(const T (&input)[ItemsPerThread],
                                    U (&output)[ItemsPerThread],
                                    const Offset (&ranks)[ItemsPerThread])
@@ -509,7 +509,7 @@ public:
     /// \param [out] output - array that data is loaded to.
     /// \param [out] ranks - array that has rank of data.
     template<class U, class Offset>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void scatter_to_striped(const T (&input)[ItemsPerThread],
                             U (&output)[ItemsPerThread],
                             const Offset (&ranks)[ItemsPerThread])
@@ -586,7 +586,7 @@ public:
     /// \param [out] output - array that data is loaded to.
     /// \param [in] ranks - array that has rank of data.
     template<class U, class Offset>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void scatter_to_striped_guarded(const T (&input)[ItemsPerThread],
                                     U (&output)[ItemsPerThread],
                                     const Offset (&ranks)[ItemsPerThread])
@@ -668,7 +668,7 @@ public:
     /// \param [in] ranks - array that has rank of data.
     /// \param [in] is_valid - array that has flags to denote validity.
     template<class U, class Offset, class ValidFlag>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void scatter_to_striped_flagged(const T (&input)[ItemsPerThread],
                                     U (&output)[ItemsPerThread],
                                     const Offset (&ranks)[ItemsPerThread],

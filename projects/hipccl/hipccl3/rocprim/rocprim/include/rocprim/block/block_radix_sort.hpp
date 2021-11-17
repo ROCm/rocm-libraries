@@ -297,7 +297,7 @@ public:
     /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
     /// value: \p <tt>8 * sizeof(Key)</tt>.
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void sort(Key (&keys)[ItemsPerThread],
               unsigned int begin_bit = 0,
               unsigned int end_bit = 8 * sizeof(Key))
@@ -369,7 +369,7 @@ public:
     /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
     /// value: \p <tt>8 * sizeof(Key)</tt>.
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void sort_desc(Key (&keys)[ItemsPerThread],
                    unsigned int begin_bit = 0,
                    unsigned int end_bit = 8 * sizeof(Key))
@@ -455,7 +455,7 @@ public:
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
     /// value: \p <tt>8 * sizeof(Key)</tt>.
     template<bool WithValues = with_values>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void sort(Key (&keys)[ItemsPerThread],
               typename std::enable_if<WithValues, Value>::type (&values)[ItemsPerThread],
               unsigned int begin_bit = 0,
@@ -542,7 +542,7 @@ public:
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
     /// value: \p <tt>8 * sizeof(Key)</tt>.
     template<bool WithValues = with_values>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void sort_desc(Key (&keys)[ItemsPerThread],
                    typename std::enable_if<WithValues, Value>::type (&values)[ItemsPerThread],
                    unsigned int begin_bit = 0,
@@ -617,7 +617,7 @@ public:
     /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
     /// value: \p <tt>8 * sizeof(Key)</tt>.
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void sort_to_striped(Key (&keys)[ItemsPerThread],
                          unsigned int begin_bit = 0,
                          unsigned int end_bit = 8 * sizeof(Key))
@@ -691,7 +691,7 @@ public:
     /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
     /// value: \p <tt>8 * sizeof(Key)</tt>.
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void sort_desc_to_striped(Key (&keys)[ItemsPerThread],
                               unsigned int begin_bit = 0,
                               unsigned int end_bit = 8 * sizeof(Key))
@@ -775,7 +775,7 @@ public:
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
     /// value: \p <tt>8 * sizeof(Key)</tt>.
     template<bool WithValues = with_values>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void sort_to_striped(Key (&keys)[ItemsPerThread],
                          typename std::enable_if<WithValues, Value>::type (&values)[ItemsPerThread],
                          unsigned int begin_bit = 0,
@@ -860,7 +860,7 @@ public:
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
     /// value: \p <tt>8 * sizeof(Key)</tt>.
     template<bool WithValues = with_values>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void sort_desc_to_striped(Key (&keys)[ItemsPerThread],
                               typename std::enable_if<WithValues, Value>::type (&values)[ItemsPerThread],
                               unsigned int begin_bit = 0,

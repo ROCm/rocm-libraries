@@ -441,7 +441,7 @@ public:
     using storage_type = typename block_exchange_type::storage_type;
 
     template<class OutputIterator>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void store(OutputIterator block_output,
                T (&items)[ItemsPerThread])
     {
@@ -452,7 +452,7 @@ public:
     }
 
     template<class OutputIterator>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void store(OutputIterator block_output,
                T (&items)[ItemsPerThread],
                unsigned int valid)
@@ -507,7 +507,7 @@ public:
     using storage_type = typename block_exchange_type::storage_type;
 
     template<class OutputIterator>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void store(OutputIterator block_output,
                T (&items)[ItemsPerThread])
     {
@@ -518,7 +518,7 @@ public:
     }
 
     template<class OutputIterator>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void store(OutputIterator block_output,
                T (&items)[ItemsPerThread],
                unsigned int valid)

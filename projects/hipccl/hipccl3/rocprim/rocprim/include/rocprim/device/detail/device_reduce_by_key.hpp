@@ -156,7 +156,7 @@ template<
     class KeysInputIterator,
     class KeyCompareFunction
 >
-ROCPRIM_DEVICE ROCPRIM_INLINE
+ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
 void fill_unique_counts(KeysInputIterator keys_input,
                         unsigned int size,
                         unsigned int * unique_counts,
@@ -278,7 +278,7 @@ template<
     unsigned int ItemsPerThread,
     class UniqueCountOutputIterator
 >
-ROCPRIM_DEVICE ROCPRIM_INLINE
+ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
 void scan_unique_counts(unsigned int * unique_counts,
                         UniqueCountOutputIterator unique_count_output,
                         unsigned int batches)
@@ -327,7 +327,7 @@ template<
     class KeyCompareFunction,
     class BinaryFunction
 >
-ROCPRIM_DEVICE ROCPRIM_INLINE
+ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
 void reduce_by_key(KeysInputIterator keys_input,
                    ValuesInputIterator values_input,
                    unsigned int size,
@@ -561,7 +561,7 @@ template<
     class AggregatesOutputIterator,
     class BinaryFunction
 >
-ROCPRIM_DEVICE ROCPRIM_INLINE
+ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
 void scan_and_scatter_carry_outs(const carry_out<Result> * carry_outs,
                                  const Result * leading_aggregates,
                                  AggregatesOutputIterator aggregates_output,

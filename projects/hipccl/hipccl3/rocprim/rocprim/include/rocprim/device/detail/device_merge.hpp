@@ -367,7 +367,7 @@ template<
     class ValuesOutputIterator,
     class BinaryFunction
 >
-ROCPRIM_DEVICE ROCPRIM_INLINE
+ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
 void merge_kernel_impl(IndexIterator indices,
                        KeysInputIterator1 keys_input1,
                        KeysInputIterator2 keys_input2,

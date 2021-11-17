@@ -485,7 +485,7 @@ template<
     bool Descending,
     class KeysInputIterator
 >
-ROCPRIM_DEVICE ROCPRIM_INLINE
+ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
 void fill_digit_counts(KeysInputIterator keys_input,
                        unsigned int size,
                        unsigned int * batch_digit_counts,
@@ -551,7 +551,7 @@ template<
     unsigned int ItemsPerThread,
     unsigned int RadixBits
 >
-ROCPRIM_DEVICE ROCPRIM_INLINE
+ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
 void scan_batches(unsigned int * batch_digit_counts,
                   unsigned int * digit_counts,
                   unsigned int batches)
@@ -589,7 +589,7 @@ void scan_batches(unsigned int * batch_digit_counts,
 }
 
 template<unsigned int RadixBits>
-ROCPRIM_DEVICE ROCPRIM_INLINE
+ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
 void scan_digits(unsigned int * digit_counts)
 {
     constexpr unsigned int radix_size = 1 << RadixBits;
@@ -612,7 +612,7 @@ template<
     class ValuesInputIterator,
     class ValuesOutputIterator
 >
-ROCPRIM_DEVICE ROCPRIM_INLINE
+ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
 void sort_single(KeysInputIterator keys_input,
                  KeysOutputIterator keys_output,
                  ValuesInputIterator values_input,
@@ -648,7 +648,7 @@ template<
     class ValuesInputIterator,
     class ValuesOutputIterator
 >
-ROCPRIM_DEVICE ROCPRIM_INLINE
+ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
 void sort_and_scatter(KeysInputIterator keys_input,
                       KeysOutputIterator keys_output,
                       ValuesInputIterator values_input,
