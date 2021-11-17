@@ -135,7 +135,7 @@ hipError_t reduce_impl(void * temporary_storage,
     std::chrono::high_resolution_clock::time_point start;
 
     static constexpr auto size_limit             = config::size_limit;
-    static constexpr auto number_of_blocks_limit = std::max<size_t>(size_limit / items_per_block, 1);
+    static constexpr auto number_of_blocks_limit = ::rocprim::max<size_t>(size_limit / items_per_block, 1);
 
     auto number_of_blocks = (size + items_per_block - 1)/items_per_block;
     if(debug_synchronous)

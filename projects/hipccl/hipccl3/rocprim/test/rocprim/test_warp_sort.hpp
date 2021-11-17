@@ -34,16 +34,19 @@ typed_test_def(RocprimWarpSortShuffleBasedTests, name_suffix, Sort)
     using T = typename TestFixture::params::type;
     using binary_op_type = typename test_utils::select_less_operator<T>::type;
     static constexpr size_t logical_warp_size = TestFixture::params::warp_size;
+    static constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
 
     // The different warp sizes
     static constexpr size_t ws32 = size_t(ROCPRIM_WARP_SIZE_32);
     static constexpr size_t ws64 = size_t(ROCPRIM_WARP_SIZE_64);
 
     const unsigned int current_device_warp_size = rocprim::host_warp_size();
-    const size_t block_size = std::max<size_t>(current_device_warp_size, logical_warp_size * 4);
+    static constexpr size_t block_size = std::max<size_t>(256U, logical_warp_size * 4);
 
     static constexpr unsigned int grid_size = 4;
-    const size_t size = block_size * grid_size;
+    const size_t size = items_per_thread * block_size * grid_size;
+
+    SCOPED_TRACE(testing::Message() << "with size= " << size);
 
     // Check if warp size is supported
     if( logical_warp_size > current_device_warp_size ||
@@ -66,9 +69,11 @@ typed_test_def(RocprimWarpSortShuffleBasedTests, name_suffix, Sort)
         // Calculate expected results on host
         std::vector<T> expected(output);
         binary_op_type binary_op;
-        for(size_t i = 0; i < output.size() / logical_warp_size; i++)
+        for(size_t i = 0; i < output.size() / logical_warp_size / items_per_thread; i++)
         {
-            std::sort(expected.begin() + (i * logical_warp_size), expected.begin() + ((i + 1) * logical_warp_size), binary_op);
+            std::sort(expected.begin() + (i * logical_warp_size * items_per_thread),
+                      expected.begin() + ((i + 1) * logical_warp_size * items_per_thread),
+                      binary_op);
         }
 
         // Writing to device memory
@@ -87,7 +92,9 @@ typed_test_def(RocprimWarpSortShuffleBasedTests, name_suffix, Sort)
 
         // Launching kernel
         hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(test_hip_warp_sort<T, logical_warp_size>),
+            HIP_KERNEL_NAME(test_hip_warp_sort<
+                items_per_thread, block_size, logical_warp_size, T
+            >),
             dim3(grid_size), dim3(block_size), 0, 0,
             d_output
         );
@@ -123,16 +130,19 @@ typed_test_def(RocprimWarpSortShuffleBasedTests, name_suffix, SortKeyInt)
     using value_op_type = typename test_utils::select_less_operator<T>::type;
     using eq_op_type = typename test_utils::select_equal_to_operator<T>::type;
     static constexpr size_t logical_warp_size = TestFixture::params::warp_size;
+    static constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
 
     // The different warp sizes
     static constexpr size_t ws32 = size_t(ROCPRIM_WARP_SIZE_32);
     static constexpr size_t ws64 = size_t(ROCPRIM_WARP_SIZE_64);
 
     const unsigned int current_device_warp_size = rocprim::host_warp_size();
-    const size_t block_size = std::max<size_t>(current_device_warp_size, logical_warp_size * 4);
+    static constexpr size_t block_size = std::max<size_t>(256U, logical_warp_size * 4);
 
     static constexpr unsigned int grid_size = 4;
-    const size_t size = block_size * grid_size;
+    const size_t size = items_per_thread * block_size * grid_size;
+
+    SCOPED_TRACE(testing::Message() << "with size= " << size);
 
     // Check if warp size is supported
     if( logical_warp_size > current_device_warp_size ||
@@ -163,11 +173,10 @@ typed_test_def(RocprimWarpSortShuffleBasedTests, name_suffix, SortKeyInt)
 
         // Calculate expected results on host
         std::vector<pair> expected(target);
-        for(size_t i = 0; i < expected.size() / logical_warp_size; i++)
+        for(size_t i = 0; i < expected.size() / logical_warp_size / items_per_thread; i++)
         {
-            std::sort(expected.begin() + (i * logical_warp_size),
-                    expected.begin() + ((i + 1) * logical_warp_size)
-            );
+            std::sort(expected.begin() + (i * logical_warp_size * items_per_thread),
+                      expected.begin() + ((i + 1) * logical_warp_size * items_per_thread));
         }
 
         // Writing to device memory
@@ -198,7 +207,9 @@ typed_test_def(RocprimWarpSortShuffleBasedTests, name_suffix, SortKeyInt)
 
         // Launching kernel
         hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(test_hip_sort_key_value_kernel<T, T, logical_warp_size>),
+            HIP_KERNEL_NAME(test_hip_sort_key_value_kernel<
+                items_per_thread, block_size, logical_warp_size, T, T
+            >),
             dim3(grid_size), dim3(block_size), 0, 0,
             d_output_key, d_output_value
         );

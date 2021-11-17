@@ -75,6 +75,9 @@ public:
     static constexpr size_t size_limit = Params::size_limit;
 };
 
+template<class Params>
+class RocprimDeviceReducePrecisionTests : public RocprimDeviceReduceTests<Params>{};
+
 typedef ::testing::Types<
     DeviceReduceParams<unsigned int>,
     DeviceReduceParams<long, long, true>,
@@ -93,6 +96,12 @@ typedef ::testing::Types<
     DeviceReduceParams<test_utils::custom_test_type<int>, test_utils::custom_test_type<float>>
 > RocprimDeviceReduceTestsParams;
 
+typedef ::testing::Types<
+    DeviceReduceParams<float, float, false, 2048>,
+    DeviceReduceParams<rocprim::half, rocprim::half>,
+    DeviceReduceParams<rocprim::bfloat16, rocprim::bfloat16>
+> RocprimDeviceReducePrecisionTestsParams;
+
 std::vector<size_t> get_sizes(int seed_value)
 {
     std::vector<size_t> sizes = {
@@ -107,6 +116,7 @@ std::vector<size_t> get_sizes(int seed_value)
 }
 
 TYPED_TEST_SUITE(RocprimDeviceReduceTests, RocprimDeviceReduceTestsParams);
+TYPED_TEST_SUITE(RocprimDeviceReducePrecisionTests, RocprimDeviceReducePrecisionTestsParams);
 
 TYPED_TEST(RocprimDeviceReduceTests, ReduceEmptyInput)
 {
@@ -171,7 +181,7 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceEmptyInput)
     hipFree(d_temp_storage);
 }
 
-TYPED_TEST(RocprimDeviceReduceTests, Reduce)
+TYPED_TEST(RocprimDeviceReduceTests, ReduceSum)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
@@ -179,7 +189,7 @@ TYPED_TEST(RocprimDeviceReduceTests, Reduce)
 
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
-    using binary_op_type = typename test_utils::select_plus_operator<U>::type;
+
     const bool debug_synchronous = TestFixture::debug_synchronous;
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
     using Config = size_limit_config_t<TestFixture::size_limit>;
@@ -196,24 +206,9 @@ TYPED_TEST(RocprimDeviceReduceTests, Reduce)
 
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
-            // precision of half differs between host and device with large plus reductions
-            if(std::is_same<U, rocprim::half>::value && size >= 1024)
-            {
-                break;
-            }
-
-            // precision of bfloat16 differs between host and device with large plus reductions
-            if(std::is_same<U, rocprim::bfloat16>::value && size >= 512)
-            {
-                break;
-            }
-
             // Generate data
-            std::vector<T> input = test_utils::get_random_data<T>(size, 1, 100, seed_value);
+            std::vector<T> input = test_utils::get_random_data<T>(size, 0, 100, seed_value);
             std::vector<U> output(1, (U)0);
-
-            // reduce function
-            binary_op_type plus_op;
 
             T * d_input;
             U * d_output;
@@ -229,12 +224,7 @@ TYPED_TEST(RocprimDeviceReduceTests, Reduce)
             HIP_CHECK(hipDeviceSynchronize());
 
             // Calculate expected results on host
-            U expected = U(0);
-            for(unsigned int i = 0; i < input.size(); i++)
-            {
-                expected = plus_op(expected, input[i]);
-            }
-
+            U expected = test_utils::host_reduce(input.begin(), input.end(), rocprim::plus<U>());
             // temp storage
             size_t temp_storage_size_bytes;
             void * d_temp_storage = nullptr;
@@ -623,5 +613,96 @@ TEST(RocprimDeviceReduceTests, LargeIndices)
             hipFree(d_temp_storage);
             hipFree(d_output);
         }
+    }
+}
+
+TYPED_TEST(RocprimDeviceReducePrecisionTests, ReduceSumInputEqualExponentFunction)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using T = typename TestFixture::input_type;
+    using U = typename TestFixture::output_type;
+
+    const bool            debug_synchronous     = TestFixture::debug_synchronous;
+    static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
+    using Config                                = size_limit_config_t<TestFixture::size_limit>;
+
+    const std::vector<size_t> sizes = get_sizes(42);
+    for(auto size : sizes)
+    {
+        hipStream_t stream = 0; // default
+
+        SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+        // numeric_limits<T>::denorm_min() does not work...
+        T lowest = static_cast<T>(
+            -1.0
+            * static_cast<double>(
+                test_utils::numeric_limits<
+                    T>::min())); // smallest (closest to zero) normal (negative) non-zero number
+
+        // Generate data
+        std::vector<T> input(size, lowest);
+        std::vector<U> output(1, (U)0);
+
+        T* d_input;
+        U* d_output;
+        HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, input.size() * sizeof(T)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, output.size() * sizeof(U)));
+        HIP_CHECK(
+            hipMemcpy(d_input, input.data(), input.size() * sizeof(T), hipMemcpyHostToDevice));
+        HIP_CHECK(hipDeviceSynchronize());
+
+        // Calculate expected results on host mathematically (instead of using reduce on host)
+        U expected  = static_cast<U>(static_cast<double>(size) * static_cast<double>(lowest));
+
+        // temp storage
+        size_t temp_storage_size_bytes;
+        void*  d_temp_storage = nullptr;
+        // Get size of d_temp_storage
+        HIP_CHECK(rocprim::reduce<Config>(
+            d_temp_storage,
+            temp_storage_size_bytes,
+            d_input,
+            test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
+            input.size(),
+            rocprim::plus<U>(),
+            stream,
+            debug_synchronous));
+
+        // temp_storage_size_bytes must be >0
+        ASSERT_GT(temp_storage_size_bytes, 0);
+
+        // allocate temporary storage
+        HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
+        HIP_CHECK(hipDeviceSynchronize());
+
+        // Run
+        HIP_CHECK(rocprim::reduce<Config>(
+            d_temp_storage,
+            temp_storage_size_bytes,
+            d_input,
+            test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
+            input.size(),
+            rocprim::plus<U>(),
+            stream,
+            debug_synchronous));
+        HIP_CHECK(hipGetLastError());
+        HIP_CHECK(hipDeviceSynchronize());
+
+        // Copy output to host
+        HIP_CHECK(
+            hipMemcpy(output.data(), d_output, output.size() * sizeof(U), hipMemcpyDeviceToHost));
+        HIP_CHECK(hipDeviceSynchronize());
+
+        // Check if output values are as expected
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(
+            output[0], expected, test_utils::precision_threshold<T>::percentage));
+
+        hipFree(d_input);
+        hipFree(d_output);
+        hipFree(d_temp_storage);
     }
 }

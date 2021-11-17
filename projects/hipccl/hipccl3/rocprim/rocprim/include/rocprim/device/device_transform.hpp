@@ -168,7 +168,7 @@ hipError_t transform(InputIterator input,
 
     static constexpr auto size_limit = config::size_limit;
     static constexpr auto number_of_blocks_limit
-        = std::max<size_t>(size_limit / items_per_block, 1);
+        = ::rocprim::max<size_t>(size_limit / items_per_block, 1);
 
     auto number_of_blocks = (size + items_per_block - 1)/items_per_block;
     if(debug_synchronous)

@@ -56,8 +56,13 @@ struct select_block_sort_impl;
 template<>
 struct select_block_sort_impl<block_sort_algorithm::bitonic_sort>
 {
-    template<class Key, unsigned int BlockSizeX, unsigned int BlockSizeY, unsigned int BlockSizeZ, class Value>
-    using type = block_sort_bitonic<Key, BlockSizeX, BlockSizeY, BlockSizeZ, Value>;
+    template <class Key,
+              unsigned int BlockSizeX,
+              unsigned int BlockSizeY,
+              unsigned int BlockSizeZ,
+              unsigned int ItemsPerThread,
+              class Value>
+    using type = block_sort_bitonic<Key, BlockSizeX, BlockSizeY, BlockSizeZ, ItemsPerThread, Value>;
 };
 
 } // end namespace detail
@@ -68,6 +73,8 @@ struct select_block_sort_impl<block_sort_algorithm::bitonic_sort>
 ///
 /// \tparam Key - the key type.
 /// \tparam BlockSize - the number of threads in a block.
+/// \tparam ItemsPerThread - number of items processed by each thread.
+/// The total range will be BlockSize * ItemsPerThread long
 /// \tparam Value - the value type. Default type empty_type indicates
 /// a keys-only sort.
 /// \tparam Algorithm - selected sort algorithm, block_sort_algorithm::default_algorithm by default.
@@ -106,6 +113,7 @@ struct select_block_sort_impl<block_sort_algorithm::bitonic_sort>
 template<
     class Key,
     unsigned int BlockSizeX,
+    unsigned int ItemsPerThread = 1,
     class Value = empty_type,
     block_sort_algorithm Algorithm = block_sort_algorithm::default_algorithm,
     unsigned int BlockSizeY = 1,
@@ -113,10 +121,10 @@ template<
 >
 class block_sort
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
-    : private detail::select_block_sort_impl<Algorithm>::template type<Key, BlockSizeX, BlockSizeY, BlockSizeZ, Value>
+    : private detail::select_block_sort_impl<Algorithm>::template type<Key, BlockSizeX, BlockSizeY, BlockSizeZ, ItemsPerThread, Value>
 #endif
 {
-    using base_type = typename detail::select_block_sort_impl<Algorithm>::template type<Key, BlockSizeX, BlockSizeY, BlockSizeZ, Value>;
+    using base_type = typename detail::select_block_sort_impl<Algorithm>::template type<Key, BlockSizeX, BlockSizeY, BlockSizeZ, ItemsPerThread, Value>;
 public:
     /// \brief Struct used to allocate a temporary memory that is required for thread
     /// communication during operations provided by related parallel primitive.
@@ -145,6 +153,14 @@ public:
               BinaryFunction compare_function = BinaryFunction())
     {
         base_type::sort(thread_key, compare_function);
+    }
+
+    template <class BinaryFunction = ::rocprim::less<Key>>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void sort(Key (&thread_keys)[ItemsPerThread],
+              BinaryFunction compare_function = BinaryFunction())
+    {
+        base_type::sort(thread_keys, compare_function);
     }
 
     /// \brief Block sort for any data type.
@@ -197,6 +213,15 @@ public:
         base_type::sort(thread_key, storage, compare_function);
     }
 
+    template <class BinaryFunction = ::rocprim::less<Key>>
+    ROCPRIM_DEVICE ROCPRIM_INLINE 
+    void sort(Key (&thread_keys)[ItemsPerThread],
+              storage_type&  storage,
+              BinaryFunction compare_function = BinaryFunction())
+    {
+        base_type::sort(thread_keys, storage, compare_function);
+    }
+
     /// \brief Block sort by key for any data type.
     ///
     /// \tparam BinaryFunction - type of binary function used for sort. Default type
@@ -216,6 +241,15 @@ public:
               BinaryFunction compare_function = BinaryFunction())
     {
         base_type::sort(thread_key, thread_value, compare_function);
+    }
+
+    template<class BinaryFunction = ::rocprim::less<Key>>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void sort(Key (&thread_keys)[ItemsPerThread],
+              Value (&thread_values)[ItemsPerThread],
+              BinaryFunction compare_function = BinaryFunction())
+    {
+        base_type::sort(thread_keys, thread_values, compare_function);
     }
 
     /// \brief Block sort by key for any data type.
@@ -268,6 +302,16 @@ public:
               BinaryFunction compare_function = BinaryFunction())
     {
         base_type::sort(thread_key, thread_value, storage, compare_function);
+    }
+
+    template<class BinaryFunction = ::rocprim::less<Key>>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void sort(Key (&thread_keys)[ItemsPerThread],
+              Value (&thread_values)[ItemsPerThread],
+              storage_type& storage,
+              BinaryFunction compare_function = BinaryFunction())
+    {
+        base_type::sort(thread_keys, thread_values, storage, compare_function);
     }
 
     /// \brief Block sort by key for any data type. If \p size is

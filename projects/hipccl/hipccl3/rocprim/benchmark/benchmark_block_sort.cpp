@@ -25,6 +25,7 @@
 #include <vector>
 #include <limits>
 #include <string>
+#include <type_traits>
 #include <cstdio>
 #include <cstdlib>
 
@@ -56,7 +57,8 @@ const size_t DEFAULT_N = 1024 * 1024 * 128;
 enum class benchmark_kinds
 {
     sort_keys,
-    sort_pairs
+    sort_pairs,
+    stable_sort
 };
 
 namespace rp = rocprim;
@@ -64,59 +66,110 @@ namespace rp = rocprim;
 template<
     class T,
     unsigned int BlockSize,
-    unsigned int Trials
+    unsigned int ItemsPerThread
 >
 __global__
 __launch_bounds__(BlockSize)
 void sort_keys_kernel(const T * input, T * output)
 {
-    const unsigned int index = (blockIdx.x * BlockSize) + threadIdx.x;
 
-    T key = input[index];
+    const unsigned int lid = threadIdx.x;
+    const unsigned int block_offset = blockIdx.x * ItemsPerThread * BlockSize;
 
-    ROCPRIM_NO_UNROLL
-    for(unsigned int trial = 0; trial < Trials; trial++)
-    {
-        rp::block_sort<T, BlockSize> bsort;
-        bsort.sort(key);
-    }
+    T keys[ItemsPerThread];
+    rp::block_load_direct_striped<BlockSize>(lid, input + block_offset, keys);
 
-    output[index] = key;
+    rp::block_sort<T, BlockSize, ItemsPerThread> bsort;
+    bsort.sort(keys);
+
+    rp::block_store_direct_blocked(lid, output + block_offset, keys);
 }
 
 template<
     class T,
     unsigned int BlockSize,
-    unsigned int Trials
+    unsigned int ItemsPerThread
 >
 __global__
 __launch_bounds__(BlockSize)
 void sort_pairs_kernel(const T * input, T * output)
 {
-    const unsigned int index = (blockIdx.x * BlockSize) + threadIdx.x;
+    const unsigned int lid = threadIdx.x;
+    const unsigned int block_offset = blockIdx.x * ItemsPerThread * BlockSize;
 
-    T key = input[index];
-    T value = key + T(1);
+    T keys[ItemsPerThread];
+    T values[ItemsPerThread];
+    rp::block_load_direct_striped<BlockSize>(lid, input + block_offset, keys);
 
-    ROCPRIM_NO_UNROLL
-    for(unsigned int trial = 0; trial < Trials; trial++)
-    {
-        rp::block_sort<T, BlockSize, T> bsort;
-        bsort.sort(key, value);
+    ROCPRIM_UNROLL
+    for(unsigned int item = 0; item < ItemsPerThread; ++item) {
+        values[item] = keys[item] + T(1);
     }
 
-    output[index] = key + value;
+    rp::block_sort<T, BlockSize, ItemsPerThread, T> bsort;
+    bsort.sort(keys, values);
+
+    ROCPRIM_UNROLL
+    for(unsigned int item = 0; item < ItemsPerThread; ++item) {
+        keys[item] = keys[item] + values[item];
+    }
+
+    rp::block_store_direct_blocked(lid, output + block_offset, keys);
 }
 
 template<
     class T,
     unsigned int BlockSize,
+    unsigned int ItemsPerThread
+>
+__global__
+__launch_bounds__(BlockSize)
+void stable_sort_kernel(const T* input, T* output)
+{
+    const unsigned int lid = threadIdx.x;
+    const unsigned int block_offset = blockIdx.x * ItemsPerThread * BlockSize;
+
+    T keys[ItemsPerThread];
+    rp::block_load_direct_striped<BlockSize>(lid, input + block_offset, keys);
+
+    using stable_key_type = rocprim::tuple<T, unsigned int>;
+    stable_key_type stable_keys[ItemsPerThread];
+
+    ROCPRIM_UNROLL
+    for(unsigned int item = 0; item < ItemsPerThread; ++item) {
+        stable_keys[item] = rp::make_tuple(keys[item], ItemsPerThread * lid + item);
+    }
+
+    // Special comparison that preserves relative order of equal keys
+    auto stable_compare_function
+        = [](const stable_key_type& a, const stable_key_type& b) mutable -> bool {
+        const bool ab = rp::less<T> {}(rp::get<0>(a), rp::get<0>(b));
+        const bool ba = rp::less<T> {}(rp::get<0>(b), rp::get<0>(a));
+        return ab || (!ba && (rp::get<1>(a) < rp::get<1>(b)));
+    };
+
+    rp::block_sort<stable_key_type, BlockSize, ItemsPerThread> bsort;
+    bsort.sort(stable_keys, stable_compare_function);
+
+    ROCPRIM_UNROLL
+    for(unsigned int item = 0; item < ItemsPerThread; ++item) {
+        keys[item] = rp::get<0>(stable_keys[item]);
+    }
+
+    rp::block_store_direct_blocked(lid, output + block_offset, keys);
+}
+
+template<
+    class T,
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread,
     unsigned int Trials = 10
 >
 void run_benchmark(benchmark::State& state, benchmark_kinds benchmark_kind, hipStream_t stream, size_t N)
 {
     static constexpr auto block_size = BlockSize;
-    const auto size = block_size * ((N + block_size - 1)/block_size);
+    static constexpr auto items_per_block = BlockSize * ItemsPerThread;
+    const auto size = items_per_block * ((N + items_per_block - 1) / items_per_block);
 
     std::vector<T> input;
     if(std::is_floating_point<T>::value)
@@ -150,19 +203,36 @@ void run_benchmark(benchmark::State& state, benchmark_kinds benchmark_kind, hipS
 
         if(benchmark_kind == benchmark_kinds::sort_keys)
         {
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(sort_keys_kernel<T, block_size, Trials>),
-                dim3(size/block_size), dim3(block_size), 0, stream,
-                d_input, d_output
-            );
+            ROCPRIM_NO_UNROLL
+            for(unsigned int trial = 0; trial < Trials; ++trial) {
+                hipLaunchKernelGGL(
+                    HIP_KERNEL_NAME(sort_keys_kernel<T, block_size, ItemsPerThread>),
+                    dim3(size / items_per_block), dim3(block_size), 0, stream,
+                    d_input, d_output
+                );
+            }
         }
         else if(benchmark_kind == benchmark_kinds::sort_pairs)
         {
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(sort_pairs_kernel<T, block_size, Trials>),
-                dim3(size/block_size), dim3(block_size), 0, stream,
-                d_input, d_output
-            );
+            ROCPRIM_NO_UNROLL
+            for(unsigned int trial = 0; trial < Trials; ++trial) {
+                hipLaunchKernelGGL(
+                    HIP_KERNEL_NAME(sort_pairs_kernel<T, block_size, ItemsPerThread>),
+                    dim3(size / items_per_block), dim3(block_size), 0, stream,
+                    d_input, d_output
+                );
+            }
+        }
+        else if(benchmark_kind == benchmark_kinds::stable_sort)
+        {
+            ROCPRIM_NO_UNROLL
+            for(unsigned int trial = 0; trial < Trials; ++trial) {
+                hipLaunchKernelGGL(
+                    HIP_KERNEL_NAME(stable_sort_kernel<T, block_size, ItemsPerThread>),
+                    dim3(size / items_per_block), dim3(block_size), 0, stream,
+                    d_input, d_output
+                );
+            }
         }
         HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
@@ -179,12 +249,14 @@ void run_benchmark(benchmark::State& state, benchmark_kinds benchmark_kind, hipS
     HIP_CHECK(hipFree(d_output));
 }
 
-#define CREATE_BENCHMARK(T, BS) \
+#define CREATE_BENCHMARK_ITEMS(T, BS, ITEMS) \
 benchmark::RegisterBenchmark( \
-    (std::string("block_sort<" #T ", " #BS ">.") + name).c_str(), \
-    run_benchmark<T, BS>, \
+    (std::string("block_sort<" #T ", " #BS ", " #ITEMS ">.") + name).c_str(), \
+    run_benchmark<T, BS, ITEMS>, \
     benchmark_kind, stream, size \
 )
+
+#define CREATE_BENCHMARK(T, BS) CREATE_BENCHMARK_ITEMS(T, BS, 1)
 
 void add_benchmarks(benchmark_kinds benchmark_kind,
                     const std::string& name,
@@ -194,45 +266,109 @@ void add_benchmarks(benchmark_kinds benchmark_kind,
 {
     std::vector<benchmark::internal::Benchmark*> bs =
     {
-        CREATE_BENCHMARK(int, 64),
-        CREATE_BENCHMARK(int, 128),
-        CREATE_BENCHMARK(int, 192),
-        CREATE_BENCHMARK(int, 256),
-        CREATE_BENCHMARK(int, 320),
-        CREATE_BENCHMARK(int, 512),
-        CREATE_BENCHMARK(int, 1024),
+        CREATE_BENCHMARK_ITEMS(int, 64, 1),
+        CREATE_BENCHMARK_ITEMS(int, 64,  2),
+        CREATE_BENCHMARK_ITEMS(int, 128, 1),
+        CREATE_BENCHMARK_ITEMS(int, 64,  4),
+        CREATE_BENCHMARK_ITEMS(int, 128, 2),
+        CREATE_BENCHMARK_ITEMS(int, 256, 1),
+        CREATE_BENCHMARK_ITEMS(int, 64,  8),
+        CREATE_BENCHMARK_ITEMS(int, 128, 4),
+        CREATE_BENCHMARK_ITEMS(int, 256, 2),
+        CREATE_BENCHMARK_ITEMS(int, 512, 1),
+        CREATE_BENCHMARK_ITEMS(int, 128,  8),
+        CREATE_BENCHMARK_ITEMS(int, 256,  4),
+        CREATE_BENCHMARK_ITEMS(int, 512,  2),
+        CREATE_BENCHMARK_ITEMS(int, 1024, 1),
+        CREATE_BENCHMARK_ITEMS(int, 256, 8),
+        CREATE_BENCHMARK_ITEMS(int, 512, 4),
+        CREATE_BENCHMARK_ITEMS(int, 1024, 2),
+        CREATE_BENCHMARK_ITEMS(int, 512, 8),
+        CREATE_BENCHMARK_ITEMS(int, 1024, 4),
+        CREATE_BENCHMARK_ITEMS(int, 1024, 8),
+        
+        CREATE_BENCHMARK_ITEMS(int8_t, 64, 1),
+        CREATE_BENCHMARK_ITEMS(int8_t, 64,  2),
+        CREATE_BENCHMARK_ITEMS(int8_t, 128, 1),
+        CREATE_BENCHMARK_ITEMS(int8_t, 64,  4),
+        CREATE_BENCHMARK_ITEMS(int8_t, 128, 2),
+        CREATE_BENCHMARK_ITEMS(int8_t, 256, 1),
+        CREATE_BENCHMARK_ITEMS(int8_t, 64,  8),
+        CREATE_BENCHMARK_ITEMS(int8_t, 128, 4),
+        CREATE_BENCHMARK_ITEMS(int8_t, 256, 2),
+        CREATE_BENCHMARK_ITEMS(int8_t, 512, 1),
+        CREATE_BENCHMARK_ITEMS(int8_t, 128,  8),
+        CREATE_BENCHMARK_ITEMS(int8_t, 256,  4),
+        CREATE_BENCHMARK_ITEMS(int8_t, 512,  2),
+        CREATE_BENCHMARK_ITEMS(int8_t, 1024, 1),
+        CREATE_BENCHMARK_ITEMS(int8_t, 256, 8),
+        CREATE_BENCHMARK_ITEMS(int8_t, 512, 4),
+        CREATE_BENCHMARK_ITEMS(int8_t, 1024, 2),
+        CREATE_BENCHMARK_ITEMS(int8_t, 512, 8),
+        CREATE_BENCHMARK_ITEMS(int8_t, 1024, 4),
+        CREATE_BENCHMARK_ITEMS(int8_t, 1024, 8),
 
-        CREATE_BENCHMARK(int8_t, 64),
-        CREATE_BENCHMARK(int8_t, 128),
-        CREATE_BENCHMARK(int8_t, 192),
-        CREATE_BENCHMARK(int8_t, 256),
-        CREATE_BENCHMARK(int8_t, 320),
-        CREATE_BENCHMARK(int8_t, 512),
-        CREATE_BENCHMARK(int8_t, 1024),
+        CREATE_BENCHMARK_ITEMS(uint8_t, 64, 1),
+        CREATE_BENCHMARK_ITEMS(uint8_t, 64,  2),
+        CREATE_BENCHMARK_ITEMS(uint8_t, 128, 1),
+        CREATE_BENCHMARK_ITEMS(uint8_t, 64,  4),
+        CREATE_BENCHMARK_ITEMS(uint8_t, 128, 2),
+        CREATE_BENCHMARK_ITEMS(uint8_t, 256, 1),
+        CREATE_BENCHMARK_ITEMS(uint8_t, 64,  8),
+        CREATE_BENCHMARK_ITEMS(uint8_t, 128, 4),
+        CREATE_BENCHMARK_ITEMS(uint8_t, 256, 2),
+        CREATE_BENCHMARK_ITEMS(uint8_t, 512, 1),
+        CREATE_BENCHMARK_ITEMS(uint8_t, 128,  8),
+        CREATE_BENCHMARK_ITEMS(uint8_t, 256,  4),
+        CREATE_BENCHMARK_ITEMS(uint8_t, 512,  2),
+        CREATE_BENCHMARK_ITEMS(uint8_t, 1024, 1),
+        CREATE_BENCHMARK_ITEMS(uint8_t, 256, 8),
+        CREATE_BENCHMARK_ITEMS(uint8_t, 512, 4),
+        CREATE_BENCHMARK_ITEMS(uint8_t, 1024, 2),
+        CREATE_BENCHMARK_ITEMS(uint8_t, 512, 8),
+        CREATE_BENCHMARK_ITEMS(uint8_t, 1024, 4),
+        CREATE_BENCHMARK_ITEMS(uint8_t, 1024, 8),
 
-        CREATE_BENCHMARK(uint8_t, 64),
-        CREATE_BENCHMARK(uint8_t, 128),
-        CREATE_BENCHMARK(uint8_t, 192),
-        CREATE_BENCHMARK(uint8_t, 256),
-        CREATE_BENCHMARK(uint8_t, 320),
-        CREATE_BENCHMARK(uint8_t, 512),
-        CREATE_BENCHMARK(uint8_t, 1024),
+        CREATE_BENCHMARK_ITEMS(rocprim::half, 64, 1),
+        CREATE_BENCHMARK_ITEMS(rocprim::half, 64,  2),
+        CREATE_BENCHMARK_ITEMS(rocprim::half, 128, 1),
+        CREATE_BENCHMARK_ITEMS(rocprim::half, 64,  4),
+        CREATE_BENCHMARK_ITEMS(rocprim::half, 128, 2),
+        CREATE_BENCHMARK_ITEMS(rocprim::half, 256, 1),
+        CREATE_BENCHMARK_ITEMS(rocprim::half, 64,  8),
+        CREATE_BENCHMARK_ITEMS(rocprim::half, 128, 4),
+        CREATE_BENCHMARK_ITEMS(rocprim::half, 256, 2),
+        CREATE_BENCHMARK_ITEMS(rocprim::half, 512, 1),
+        CREATE_BENCHMARK_ITEMS(rocprim::half, 128,  8),
+        CREATE_BENCHMARK_ITEMS(rocprim::half, 256,  4),
+        CREATE_BENCHMARK_ITEMS(rocprim::half, 512,  2),
+        CREATE_BENCHMARK_ITEMS(rocprim::half, 1024, 1),
+        CREATE_BENCHMARK_ITEMS(rocprim::half, 256, 8),
+        CREATE_BENCHMARK_ITEMS(rocprim::half, 512, 4),
+        CREATE_BENCHMARK_ITEMS(rocprim::half, 1024, 2),
+        CREATE_BENCHMARK_ITEMS(rocprim::half, 512, 8),
+        CREATE_BENCHMARK_ITEMS(rocprim::half, 1024, 4),
+        CREATE_BENCHMARK_ITEMS(rocprim::half, 1024, 8),
 
-        CREATE_BENCHMARK(rocprim::half, 64),
-        CREATE_BENCHMARK(rocprim::half, 128),
-        CREATE_BENCHMARK(rocprim::half, 192),
-        CREATE_BENCHMARK(rocprim::half, 256),
-        CREATE_BENCHMARK(rocprim::half, 320),
-        CREATE_BENCHMARK(rocprim::half, 512),
-        CREATE_BENCHMARK(rocprim::half, 1024),
-
-        CREATE_BENCHMARK(long long, 64),
-        CREATE_BENCHMARK(long long, 128),
-        CREATE_BENCHMARK(long long, 192),
-        CREATE_BENCHMARK(long long, 256),
-        CREATE_BENCHMARK(long long, 320),
-        CREATE_BENCHMARK(long long, 512),
-        CREATE_BENCHMARK(long long, 1024)
+        CREATE_BENCHMARK_ITEMS(long long, 64, 1),
+        CREATE_BENCHMARK_ITEMS(long long, 64,  2),
+        CREATE_BENCHMARK_ITEMS(long long, 128, 1),
+        CREATE_BENCHMARK_ITEMS(long long, 64,  4),
+        CREATE_BENCHMARK_ITEMS(long long, 128, 2),
+        CREATE_BENCHMARK_ITEMS(long long, 256, 1),
+        CREATE_BENCHMARK_ITEMS(long long, 64,  8),
+        CREATE_BENCHMARK_ITEMS(long long, 128, 4),
+        CREATE_BENCHMARK_ITEMS(long long, 256, 2),
+        CREATE_BENCHMARK_ITEMS(long long, 512, 1),
+        CREATE_BENCHMARK_ITEMS(long long, 128,  8),
+        CREATE_BENCHMARK_ITEMS(long long, 256,  4),
+        CREATE_BENCHMARK_ITEMS(long long, 512,  2),
+        CREATE_BENCHMARK_ITEMS(long long, 1024, 1),
+        CREATE_BENCHMARK_ITEMS(long long, 256, 8),
+        CREATE_BENCHMARK_ITEMS(long long, 512, 4),
+        CREATE_BENCHMARK_ITEMS(long long, 1024, 2),
+        CREATE_BENCHMARK_ITEMS(long long, 512, 8),
+        CREATE_BENCHMARK_ITEMS(long long, 1024, 4)
     };
 
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
@@ -260,8 +396,9 @@ int main(int argc, char *argv[])
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks;
-    add_benchmarks(benchmark_kinds::sort_keys, "sort(keys)", benchmarks, stream, size);
-    add_benchmarks(benchmark_kinds::sort_pairs, "sort(keys, values)", benchmarks, stream, size);
+    add_benchmarks(benchmark_kinds::sort_keys,   "sort(keys)", benchmarks, stream, size);
+    add_benchmarks(benchmark_kinds::sort_pairs,  "sort(keys, values)", benchmarks, stream, size);
+    add_benchmarks(benchmark_kinds::stable_sort, "stable_sort(keys)", benchmarks, stream, size);
 
     // Use manual timing
     for(auto& b : benchmarks)

@@ -20,10 +20,12 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include <algorithm>
 #include <iostream>
 #include <chrono>
 #include <vector>
 #include <limits>
+#include <utility>
 #include <string>
 #include <cstdio>
 #include <cstdlib>
@@ -58,7 +60,7 @@ namespace rp = rocprim;
 const unsigned int batch_size = 10;
 const unsigned int warmup_size = 5;
 
-template<class Key>
+template<class Key, class Config = rp::default_config>
 void run_sort_keys_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
 {
     using key_type = Key;
@@ -95,7 +97,7 @@ void run_sort_keys_benchmark(benchmark::State& state, hipStream_t stream, size_t
     void * d_temporary_storage = nullptr;
     size_t temporary_storage_bytes = 0;
     HIP_CHECK(
-        rp::merge_sort(
+        rp::merge_sort<Config>(
             d_temporary_storage, temporary_storage_bytes,
             d_keys_input, d_keys_output, size,
             lesser_op, stream, false
@@ -109,7 +111,7 @@ void run_sort_keys_benchmark(benchmark::State& state, hipStream_t stream, size_t
     for(size_t i = 0; i < warmup_size; i++)
     {
         HIP_CHECK(
-            rp::merge_sort(
+            rp::merge_sort<Config>(
                 d_temporary_storage, temporary_storage_bytes,
                 d_keys_input, d_keys_output, size,
                 lesser_op, stream, false
@@ -125,7 +127,7 @@ void run_sort_keys_benchmark(benchmark::State& state, hipStream_t stream, size_t
         for(size_t i = 0; i < batch_size; i++)
         {
             HIP_CHECK(
-                rp::merge_sort(
+                rp::merge_sort<Config>(
                     d_temporary_storage, temporary_storage_bytes,
                     d_keys_input, d_keys_output, size,
                     lesser_op, stream, false
@@ -147,7 +149,7 @@ void run_sort_keys_benchmark(benchmark::State& state, hipStream_t stream, size_t
     HIP_CHECK(hipFree(d_keys_output));
 }
 
-template<class Key, class Value>
+template<class Key, class Value, class Config = rp::default_config>
 void run_sort_pairs_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
 {
     using key_type = Key;
@@ -200,7 +202,7 @@ void run_sort_pairs_benchmark(benchmark::State& state, hipStream_t stream, size_
     void * d_temporary_storage = nullptr;
     size_t temporary_storage_bytes = 0;
     HIP_CHECK(
-        rp::merge_sort(
+        rp::merge_sort<Config>(
             d_temporary_storage, temporary_storage_bytes,
             d_keys_input, d_keys_output, d_values_input, d_values_output, size,
             lesser_op, stream, false
@@ -214,7 +216,7 @@ void run_sort_pairs_benchmark(benchmark::State& state, hipStream_t stream, size_
     for(size_t i = 0; i < warmup_size; i++)
     {
         HIP_CHECK(
-            rp::merge_sort(
+            rp::merge_sort<Config>(
                 d_temporary_storage, temporary_storage_bytes,
                 d_keys_input, d_keys_output, d_values_input, d_values_output, size,
                 lesser_op, stream, false
@@ -230,7 +232,7 @@ void run_sort_pairs_benchmark(benchmark::State& state, hipStream_t stream, size_
         for(size_t i = 0; i < batch_size; i++)
         {
             HIP_CHECK(
-                rp::merge_sort(
+                rp::merge_sort<Config>(
                     d_temporary_storage, temporary_storage_bytes,
                     d_keys_input, d_keys_output, d_values_input, d_values_output, size,
                     lesser_op, stream, false
@@ -255,6 +257,261 @@ void run_sort_pairs_benchmark(benchmark::State& state, hipStream_t stream, size_
     HIP_CHECK(hipFree(d_values_input));
     HIP_CHECK(hipFree(d_values_output));
 }
+
+#ifdef BENCHMARK_CONFIG_TUNING
+
+template <typename T>
+struct Traits
+{
+    static const char* name;
+};
+// Generic definition as a fall-back:
+template <typename T>
+const char* Traits<T>::name = "unknown";
+
+// Explicit definitions
+template <>
+const char* Traits<int>::name = "int";
+template <>
+const char* Traits<short>::name = "short";
+template <>
+const char* Traits<int8_t>::name = "int8_t";
+template <>
+const char* Traits<uint8_t>::name = "uint8_t";
+template <>
+const char* Traits<rocprim::half>::name = "rocprim::half";
+template <>
+const char* Traits<long long>::name = "long long";
+template <>
+const char* Traits<float>::name = "float";
+template <>
+const char* Traits<double>::name = "double";
+template <>
+const char* Traits<custom_type<int, int>>::name = "custom_int2";
+template <>
+const char* Traits<custom_type<float, float>>::name = "custom_float2";
+template <>
+const char* Traits<custom_type<double, double>>::name = "custom_double2";
+template <>
+const char* Traits<custom_type<char, double>>::name = "custom_char_double";
+template <>
+const char* Traits<custom_type<long long, double>>::name = "custom_longlong_double";
+
+template <typename T, T, typename>
+struct make_index_range_impl;
+
+template <typename T, T Start, T... I>
+struct make_index_range_impl<T, Start, std::integer_sequence<T, I...>>
+{
+    using type = std::integer_sequence<T, (Start + I)...>;
+};
+
+// make a std::integer_sequence with values from Start to End inclusive
+template <typename T, T Start, T End>
+using make_index_range =
+    typename make_index_range_impl<T, Start, std::make_integer_sequence<T, End - Start + 1>>::type;
+
+template <typename T, template <T> class Function, T... I, typename... Args>
+void static_for_each_impl(std::integer_sequence<T, I...>, Args... args)
+{
+    int a[] = {(Function<I> {}(args...), 0)...};
+    static_cast<void>(a);
+}
+
+// call the supplied template with all values of the std::integer_sequence Indices
+template <typename Indices,
+          template <typename Indices::value_type>
+          class Function,
+          typename... Args>
+void static_for_each(Args... args)
+{
+    static_for_each_impl<typename Indices::value_type, Function>(Indices {}, args...);
+}
+
+template <class Key, class Value>
+struct name_prefix_fn
+{
+    auto operator()()
+    {
+        return std::string {"sort_pairs<"} + Traits<Key>::name + ", " + Traits<Value>::name;
+    };
+};
+
+template <class Key>
+struct name_prefix_fn<Key, rp::empty_type>
+{
+    auto operator()()
+    {
+        return std::string {"sort_keys<"} + Traits<Key>::name;
+    };
+};
+
+template <class Key, class Value>
+struct select_benchmark_function
+{
+    template <typename Config>
+    static void run(benchmark::State& state, hipStream_t stream, size_t size)
+    {
+        run_sort_pairs_benchmark<Key, Value, Config>(state, stream, size);
+    }
+};
+
+template <class Key>
+struct select_benchmark_function<Key, rp::empty_type>
+{
+    template <typename Config>
+    static void run(benchmark::State& state, hipStream_t stream, size_t size)
+    {
+        run_sort_keys_benchmark<Key, Config>(state, stream, size);
+    }
+};
+
+template <class Key, class Value = rp::empty_type>
+struct create_benchmarks
+{
+    template <unsigned int MergeBlockSizeExponent>
+    struct sweep_config_3d
+    {
+        template <unsigned int SortBlockSizeExponent>
+        struct sweep_config_2d
+        {
+            template <unsigned int SortItemsPerThreadExponent>
+            struct sweep_config
+            {
+                constexpr static auto merge_block_size      = 1u << MergeBlockSizeExponent;
+                constexpr static auto sort_block_size       = 1u << SortBlockSizeExponent;
+                constexpr static auto sort_items_per_thread = 1u << SortItemsPerThreadExponent;
+
+                std::string get_name()
+                {
+                    return name_prefix_fn<Key, Value> {}() + ", " + std::to_string(merge_block_size)
+                           + ", " + std::to_string(sort_block_size) + ", "
+                           + std::to_string(sort_items_per_thread) + ">";
+                }
+
+                void operator()(std::vector<benchmark::internal::Benchmark*>& benchmarks,
+                                hipStream_t                                   stream,
+                                size_t                                        size)
+                {
+                    using config = rp::
+                        merge_sort_config<merge_block_size, sort_block_size, sort_items_per_thread>;
+
+                    benchmarks.emplace_back(benchmark::RegisterBenchmark(
+                        get_name().c_str(), [=](benchmark::State& state) {
+                            select_benchmark_function<Key, Value>::template run<config>(
+                                state, stream, size);
+                        }));
+                }
+            };
+
+            void operator()(std::vector<benchmark::internal::Benchmark*>& benchmarks,
+                            hipStream_t                                   stream,
+                            size_t                                        size)
+            {
+                // Sort items per block must be divisible by merge_block_size, so make
+                // the items per thread at least as large that the items_per_block
+                // is equal to merge_block_size.
+                static constexpr auto min_items_per_thread
+                    = MergeBlockSizeExponent
+                      - std::min(SortBlockSizeExponent, MergeBlockSizeExponent);
+
+                // Very large block sizes don't work with large items_per_blocks since
+                // shared memory is limited
+                static constexpr auto max_items_per_thread
+                    = std::min(4u, 11u - SortBlockSizeExponent);
+
+                static_for_each<
+                    make_index_range<unsigned int, min_items_per_thread, max_items_per_thread>,
+                    sweep_config>(benchmarks, stream, size);
+            }
+        };
+
+        void operator()(std::vector<benchmark::internal::Benchmark*>& benchmarks,
+                        hipStream_t                                   stream,
+                        size_t                                        size)
+        {
+            static_for_each<make_index_range<unsigned int, 6, 10>, sweep_config_2d>(
+                benchmarks, stream, size);
+        }
+    };
+};
+
+void add_sort_keys_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
+                              hipStream_t                                   stream,
+                              size_t                                        size)
+{
+    using merge_block_size_range = make_index_range<unsigned int, 6, 10>;
+
+    static_for_each<merge_block_size_range, create_benchmarks<int>::sweep_config_3d>(
+        benchmarks, stream, size);
+
+    static_for_each<merge_block_size_range, create_benchmarks<long long>::sweep_config_3d>(
+        benchmarks, stream, size);
+
+    static_for_each<merge_block_size_range, create_benchmarks<int8_t>::sweep_config_3d>(
+        benchmarks, stream, size);
+
+    static_for_each<merge_block_size_range, create_benchmarks<uint8_t>::sweep_config_3d>(
+        benchmarks, stream, size);
+    
+    static_for_each<merge_block_size_range, create_benchmarks<rocprim::half>::sweep_config_3d>(
+        benchmarks, stream, size);
+
+    static_for_each<merge_block_size_range, create_benchmarks<short>::sweep_config_3d>(
+        benchmarks, stream, size);
+}
+
+void add_sort_pairs_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
+                              hipStream_t                                   stream,
+                              size_t                                        size)
+{
+    using custom_float2  = custom_type<float, float>;
+    using custom_double2 = custom_type<double, double>;
+
+    using custom_int2            = custom_type<int, int>;
+    using custom_char_double     = custom_type<char, double>;
+    using custom_longlong_double = custom_type<long long, double>;
+
+    using merge_block_size_range = make_index_range<unsigned int, 6, 10>;
+
+    static_for_each<merge_block_size_range, create_benchmarks<int, float>::sweep_config_3d>(
+        benchmarks, stream, size);
+
+    static_for_each<merge_block_size_range, create_benchmarks<long long, double>::sweep_config_3d>(
+        benchmarks, stream, size);
+
+    static_for_each<merge_block_size_range, create_benchmarks<int8_t, int8_t>::sweep_config_3d>(
+        benchmarks, stream, size);
+
+    static_for_each<merge_block_size_range, create_benchmarks<uint8_t, uint8_t>::sweep_config_3d>(
+        benchmarks, stream, size);
+    
+    static_for_each<merge_block_size_range, create_benchmarks<rocprim::half, rocprim::half>::sweep_config_3d>(
+        benchmarks, stream, size);
+
+    static_for_each<merge_block_size_range, create_benchmarks<short, short>::sweep_config_3d>(
+        benchmarks, stream, size);
+
+    static_for_each<merge_block_size_range, create_benchmarks<int, custom_float2>::sweep_config_3d>(
+        benchmarks, stream, size);
+
+    static_for_each<merge_block_size_range, create_benchmarks<long long, custom_double2>::sweep_config_3d>(
+        benchmarks, stream, size);
+
+    static_for_each<merge_block_size_range, create_benchmarks<custom_double2, custom_double2>::sweep_config_3d>(
+        benchmarks, stream, size);
+
+    static_for_each<merge_block_size_range, create_benchmarks<custom_int2, custom_double2>::sweep_config_3d>(
+        benchmarks, stream, size);
+
+    static_for_each<merge_block_size_range, create_benchmarks<custom_int2, custom_char_double>::sweep_config_3d>(
+        benchmarks, stream, size);
+
+    static_for_each<merge_block_size_range, create_benchmarks<custom_int2, custom_longlong_double>::sweep_config_3d>(
+        benchmarks, stream, size);
+}
+
+#else // BENCHMARK_CONFIG_TUNING
 
 #define CREATE_SORT_KEYS_BENCHMARK(Key) \
 benchmark::RegisterBenchmark( \
@@ -315,6 +572,8 @@ void add_sort_pairs_benchmarks(std::vector<benchmark::internal::Benchmark*>& ben
     };
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
 }
+
+#endif // BENCHMARK_CONFIG_TUNING
 
 int main(int argc, char *argv[])
 {

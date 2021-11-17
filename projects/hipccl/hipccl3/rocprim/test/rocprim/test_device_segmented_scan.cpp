@@ -108,7 +108,7 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScan)
     using scan_op_type = typename TestFixture::params::scan_op_type;
     static constexpr bool use_identity_iterator =
         TestFixture::params::use_identity_iterator;
-    using result_type = output_type;
+    using result_type = input_type;
 
     using offset_type = unsigned int;
     const bool debug_synchronous = false;
@@ -250,7 +250,7 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScan)
     using scan_op_type = typename TestFixture::params::scan_op_type;
     static constexpr bool use_identity_iterator =
         TestFixture::params::use_identity_iterator;
-    using result_type = output_type;
+    using result_type = input_type;
     using offset_type = unsigned int;
 
     const input_type init = input_type{TestFixture::params::init};
@@ -453,7 +453,7 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScanUsingHeadFlags)
 
             // Calculate expected results on host
             std::vector<output_type> expected(input.size());
-            test_utils::host_inclusive_scan(
+            std::partial_sum(
                 rocprim::make_zip_iterator(
                     rocprim::make_tuple(input.begin(), flags.begin())
                 ),
@@ -635,7 +635,7 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScanUsingHeadFlags)
                 );
             }
             // Now we can run inclusive scan and get segmented exclusive results
-            test_utils::host_inclusive_scan(
+            std::partial_sum(
                 rocprim::make_zip_iterator(
                     rocprim::make_tuple(expected.begin(), flags.begin())
                 ),
@@ -652,7 +652,7 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScanUsingHeadFlags)
                     if(!rocprim::get<1>(t2))
                     {
                         return rocprim::make_tuple(
-                            scan_op(rocprim::get<0>(t1), rocprim::get<0>(t2)),
+                            static_cast<input_type>(scan_op(rocprim::get<0>(t1), rocprim::get<0>(t2))),
                             rocprim::get<1>(t1) + rocprim::get<1>(t2)
                         );
                     }

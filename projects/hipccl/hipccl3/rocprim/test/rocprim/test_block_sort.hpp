@@ -322,3 +322,75 @@ typed_test_def(suite_name, name_suffix, CustomSortKeyValue)
     }
 
 }
+
+typed_test_def(suite_name, name_suffix, SortKeysMultipleItemsPerThread)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using key_type = typename TestFixture::key_type;
+    using binary_op_type = typename std::conditional<std::is_same<key_type, rocprim::half>::value, test_utils::half_less, rocprim::less<key_type>>::type;
+    static constexpr size_t block_size = TestFixture::block_size;
+    static constexpr size_t items_per_thread = 4;
+    const size_t size = block_size * items_per_thread * 1134;
+    const size_t grid_size = size / ( block_size * items_per_thread);
+
+    // Only power of two items_per_threads are supported
+    // items_per_thread is only supported if blocksize is a power of two
+    if(!is_power_of_two(items_per_thread) || !is_power_of_two(block_size))
+        GTEST_SKIP();
+
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    {
+        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+
+        // Generate data
+        std::vector<key_type> output = test_utils::get_random_data<key_type>(size, -100, 100, seed_value);
+
+        // Calculate expected results on host
+        std::vector<key_type> expected(output);
+        binary_op_type binary_op;
+        for(size_t i = 0; i < output.size() / block_size / items_per_thread; i++)
+        {
+            std::sort(
+                expected.begin() + (i * block_size * items_per_thread),
+                expected.begin() + ((i + 1) * block_size * items_per_thread),
+                binary_op
+            );
+        }
+
+        // Preparing device
+        key_type * device_key_output;
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_key_output, output.size() * sizeof(key_type)));
+
+        HIP_CHECK(
+            hipMemcpy(
+                device_key_output, output.data(),
+                output.size() * sizeof(key_type),
+                hipMemcpyHostToDevice
+            )
+        );
+
+        // Running kernel
+        hipLaunchKernelGGL(
+            HIP_KERNEL_NAME(sort_keys_kernel<block_size, items_per_thread, key_type>),
+            dim3(grid_size), dim3(block_size), 0, 0,
+            device_key_output
+        );
+
+        // Reading results back
+        HIP_CHECK(
+            hipMemcpy(
+                output.data(), device_key_output,
+                output.size() * sizeof(key_type),
+                hipMemcpyDeviceToHost
+            )
+        );
+
+        test_utils::assert_eq(output, expected);
+
+        HIP_CHECK(hipFree(device_key_output));
+    }
+}

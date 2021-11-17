@@ -411,6 +411,16 @@ public:
         scatter_to_blocked(input, output, ranks, storage);
     }
 
+    template<class U, class Offset>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void gather_from_striped(const T (&input)[ItemsPerThread],
+                                   U (&output)[ItemsPerThread],
+                                   const Offset (&ranks)[ItemsPerThread])
+    {
+        ROCPRIM_SHARED_MEMORY storage_type storage;
+        gather_from_striped(input, output, ranks, storage);
+    }
+
     /// \brief Scatters items to a blocked arrangement based on their ranks
     /// across the thread block, using temporary storage.
     ///
@@ -463,6 +473,29 @@ public:
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
             output[i] = storage_.buffer[index(flat_id * ItemsPerThread + i)];
+        }
+    }
+
+    template <class U, class Offset>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void gather_from_striped(const T (&input)[ItemsPerThread],
+                             U (&output)[ItemsPerThread],
+                             const Offset (&ranks)[ItemsPerThread],
+                             storage_type& storage)
+    {
+        const unsigned int flat_id = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
+        storage_type_& storage_ = storage.get();
+
+        for(unsigned int i = 0; i < ItemsPerThread; i++)
+        {
+            storage_.buffer[index(i * BlockSize + flat_id)] = input[i];
+        }
+        ::rocprim::syncthreads();
+
+        for(unsigned int i = 0; i < ItemsPerThread; i++)
+        {
+            const Offset rank = ranks[i];
+            output[i] = storage_.buffer[index(rank)];
         }
     }
 
