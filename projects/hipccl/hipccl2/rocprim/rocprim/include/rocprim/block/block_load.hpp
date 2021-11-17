@@ -655,7 +655,7 @@ public:
     using storage_type = typename block_exchange_type::storage_type;
 
     template<class InputIterator>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void load(InputIterator block_input,
               T (&items)[ItemsPerThread])
     {
@@ -670,7 +670,7 @@ public:
     }
 
     template<class InputIterator>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void load(InputIterator block_input,
               T (&items)[ItemsPerThread],
               unsigned int valid)
@@ -689,7 +689,7 @@ public:
         class InputIterator,
         class Default
     >
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void load(InputIterator block_input,
               T (&items)[ItemsPerThread],
               unsigned int valid,
@@ -779,7 +779,7 @@ public:
     using storage_type = typename block_exchange_type::storage_type;
 
     template<class InputIterator>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void load(InputIterator block_input,
               T (&items)[ItemsPerThread])
     {
@@ -794,7 +794,7 @@ public:
     }
 
     template<class InputIterator>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void load(InputIterator block_input,
               T (&items)[ItemsPerThread],
               unsigned int valid)
@@ -814,7 +814,7 @@ public:
         class InputIterator,
         class Default
     >
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void load(InputIterator block_input,
               T (&items)[ItemsPerThread],
               unsigned int valid,

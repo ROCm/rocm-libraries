@@ -466,7 +466,7 @@ template<
     class InequalityOp,
     class OffsetLookbackScanState
 >
-ROCPRIM_DEVICE ROCPRIM_INLINE
+ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
 void partition_kernel_impl(InputIterator input,
                            FlagIterator flags,
                            OutputIterator output,

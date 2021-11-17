@@ -93,7 +93,7 @@ public:
     }
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void sort(Key& thread_key,
               BinaryFunction compare_function)
     {
@@ -102,7 +102,7 @@ public:
     }
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void sort(Key (&thread_keys)[ItemsPerThread],
               BinaryFunction compare_function)
     {
@@ -139,7 +139,7 @@ public:
     }
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void sort(Key& thread_key,
               Value& thread_value,
               BinaryFunction compare_function)
@@ -149,7 +149,7 @@ public:
     }
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void sort(Key (&thread_keys)[ItemsPerThread],
               Value (&thread_values)[ItemsPerThread],
               BinaryFunction compare_function)

@@ -78,7 +78,7 @@ public:
         class ValuesInputIterator,
         class ValuesOutputIterator
     >
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void sort(KeysInputIterator keys_input,
               key_type * keys_tmp,
               KeysOutputIterator keys_output,
@@ -144,7 +144,7 @@ public:
     }
 
     // When all iterators are raw pointers, this overload is used to minimize code duplication in the kernel
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void sort(key_type * keys_input,
               key_type * keys_tmp,
               key_type * keys_output,
@@ -219,7 +219,7 @@ private:
         class ValuesInputIterator,
         class ValuesOutputIterator
     >
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void sort(KeysInputIterator keys_input,
               KeysOutputIterator keys_output,
               ValuesInputIterator values_input,
@@ -475,7 +475,7 @@ template<
     class ValuesOutputIterator,
     class OffsetIterator
 >
-ROCPRIM_DEVICE ROCPRIM_INLINE
+ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
 void segmented_sort(KeysInputIterator keys_input,
                     typename std::iterator_traits<KeysInputIterator>::value_type * keys_tmp,
                     KeysOutputIterator keys_output,

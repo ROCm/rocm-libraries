@@ -225,7 +225,7 @@ public:
     /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
     template<class BinaryFunction = ::rocprim::plus<T>>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void reduce(T input,
                 T& output,
                 BinaryFunction reduce_op = BinaryFunction())
@@ -313,7 +313,7 @@ public:
         unsigned int ItemsPerThread,
         class BinaryFunction = ::rocprim::plus<T>
     >
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void reduce(T (&input)[ItemsPerThread],
                 T& output,
                 BinaryFunction reduce_op = BinaryFunction())
@@ -396,7 +396,7 @@ public:
     /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
     template<class BinaryFunction = ::rocprim::plus<T>>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void reduce(T input,
                 T& output,
                 unsigned int valid_items,

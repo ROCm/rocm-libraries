@@ -82,7 +82,7 @@ public:
     }
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void inclusive_scan(T input,
                         T& output,
                         BinaryFunction scan_op)
@@ -105,7 +105,7 @@ public:
     }
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void inclusive_scan(T input,
                         T& output,
                         T& reduction,
@@ -172,7 +172,7 @@ public:
     }
 
     template<unsigned int ItemsPerThread, class BinaryFunction>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void inclusive_scan(T (&input)[ItemsPerThread],
                         T (&output)[ItemsPerThread],
                         BinaryFunction scan_op)
@@ -196,7 +196,7 @@ public:
     }
 
     template<unsigned int ItemsPerThread, class BinaryFunction>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void inclusive_scan(T (&input)[ItemsPerThread],
                         T (&output)[ItemsPerThread],
                         T& reduction,
@@ -269,7 +269,7 @@ public:
     }
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void exclusive_scan(T input,
                         T& output,
                         T init,
@@ -298,7 +298,7 @@ public:
     }
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void exclusive_scan(T input,
                         T& output,
                         T init,
@@ -378,7 +378,7 @@ public:
     }
 
     template<unsigned int ItemsPerThread, class BinaryFunction>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void exclusive_scan(T (&input)[ItemsPerThread],
                         T (&output)[ItemsPerThread],
                         T init,
@@ -404,7 +404,7 @@ public:
     }
 
     template<unsigned int ItemsPerThread, class BinaryFunction>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void exclusive_scan(T (&input)[ItemsPerThread],
                         T (&output)[ItemsPerThread],
                         T init,

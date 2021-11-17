@@ -102,7 +102,7 @@ template<
     class BinaryFunction,
     class ResultType
 >
-ROCPRIM_DEVICE ROCPRIM_INLINE
+ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
 void single_scan_kernel_impl(InputIterator input,
                              const size_t input_size,
                              ResultType initial_value,
@@ -173,7 +173,7 @@ template<
     class BinaryFunction,
     class ResultType
 >
-ROCPRIM_DEVICE ROCPRIM_INLINE
+ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
 void block_reduce_kernel_impl(InputIterator input,
                               BinaryFunction scan_op,
                               ResultType * block_prefixes)
@@ -320,7 +320,7 @@ template<
     class BinaryFunction,
     class ResultType
 >
-ROCPRIM_DEVICE ROCPRIM_INLINE
+ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
 void final_scan_kernel_impl(InputIterator input,
                             const size_t input_size,
                             OutputIterator output,

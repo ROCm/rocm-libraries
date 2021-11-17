@@ -319,7 +319,7 @@ template<
     class ValuesOutputIterator,
     class BinaryFunction
 >
-ROCPRIM_DEVICE ROCPRIM_INLINE
+ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
 void block_sort_kernel_impl(KeysInputIterator keys_input,
                             KeysOutputIterator keys_output,
                             ValuesInputIterator values_input,

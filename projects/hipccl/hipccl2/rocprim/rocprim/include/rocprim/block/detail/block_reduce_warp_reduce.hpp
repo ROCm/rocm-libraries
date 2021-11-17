@@ -88,7 +88,7 @@ public:
     }
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void reduce(T input,
                 T& output,
                 BinaryFunction reduce_op)
@@ -123,7 +123,7 @@ public:
     }
 
     template<unsigned int ItemsPerThread, class BinaryFunction>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void reduce(T (&input)[ItemsPerThread],
                 T& output,
                 BinaryFunction reduce_op)
@@ -147,7 +147,7 @@ public:
     }
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void reduce(T input,
                 T& output,
                 unsigned int valid_items,
