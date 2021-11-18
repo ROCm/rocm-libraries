@@ -14,8 +14,11 @@ stages:
 
 variables:
   # Tested CMake versions
-  CMAKE_MINIMUM_VERSION: 3.10.2
-  CMAKE_LATEST_VERSION: 3.17.0
+  CMAKE_MINIMUM_VERSION: 3.16.9
+  CMAKE_MINIMUM_URL: "https://cmake.org/files/v3.16/cmake-3.16.9-Linux-x86_64.tar.gz"
+
+  CMAKE_LATEST_VERSION: 3.21.4
+  CMAKE_LATEST_URL: "https://cmake.org/files/v3.21/cmake-3.21.4-linux-x86_64.tar.gz"
   # Cluster config
 
   # Image-specific helper
@@ -23,20 +26,17 @@ variables:
   # Helper variables
   DEPS_DIR: $CI_PROJECT_DIR/deps
   BUILD_DIR: $CI_PROJECT_DIR/build
-  CMAKE_MINIMUM_URL: "https://cmake.org/files/v3.10/cmake-3.10.2-Linux-x86_64.tar.gz"
-  CMAKE_MINIMUM_PATH: "$CI_PROJECT_DIR/deps/cmake-3.10.2"
-  CMAKE_LATEST_URL: "https://cmake.org/files/v3.16/cmake-3.16.0-Linux-x86_64.tar.gz"
-  CMAKE_LATEST_PATH: "$CI_PROJECT_DIR/deps/cmake-3.17.0"
-  BUILD_MINIMUM_DIR: $CI_PROJECT_DIR/build/cmake-3.10.2
-  BUILD_LATEST_DIR: $CI_PROJECT_DIR/build/cmake-3.17.0
-  PACKAGE_DIR: $CI_PROJECT_DIR/build/package
+  CMAKE_MINIMUM_PATH: $DEPS_DIR/cmake-$CMAKE_MINIMUM_VERSION
+  BUILD_MINIMUM_DIR: $BUILD_DIR/cmake-$CMAKE_MINIMUM_VERSION
+  CMAKE_LATEST_PATH: $DEPS_DIR/cmake-$CMAKE_LATEST_VERSION
+  BUILD_LATEST_DIR: $BUILD_DIR/cmake-$CMAKE_LATEST_VERSION
+  PACKAGE_DIR: $BUILD_DIR/package
+  ROCPRIM_GIT_BRANCH: develop_stream
 
 .deps:cmake-minimum:
   #stage: build:cmake_minimum
   stage: build
-  # Workaround tags until HAL is broken
   tags:
-    - s9300
     - rocm
   before_script:
     - $SUDO_CMD rm /etc/apt/sources.list.d/rocm.list
@@ -61,9 +61,7 @@ variables:
 .deps:cmake-latest:
   #stage: build:cmake_latest
   stage: build
-  # Workaround tags until HAL is broken
   tags:
-    - mi25
     - rocm
   before_script:
     - $SUDO_CMD rm /etc/apt/sources.list.d/rocm.list
@@ -93,6 +91,27 @@ build:cmake-latest:
   extends:
     - .deps:cmake-latest
   script:
+      # Install rocPRIM package
+    - branch_name="$ROCPRIM_GIT_BRANCH"
+    - if [ $CI_COMMIT_BRANCH == develop ] || [ $CI_COMMIT_BRANCH == master ]; then branch_name=$CI_COMMIT_BRANCH;
+    - fi;
+    - git clone -b $branch_name https://gitlab-ci-token:${CI_JOB_TOKEN}@${ROCPRIM_GIT_URL}
+    - cd rocPRIM
+    - mkdir build
+    - cd build
+    - cmake
+      -G Ninja
+      -D CMAKE_CXX_COMPILER=hipcc
+      -D CMAKE_BUILD_TYPE=Release
+      -D BUILD_TEST=OFF
+      -D BUILD_EXAMPLE=OFF
+      -D ROCM_DEP_ROCMCORE=OFF
+      ../.
+    - cpack
+      -G "DEB"
+    - $SUDO_CMD dpkg -i rocprim*.deb
+    - cd ../..
+    # Build rocThrust
     - mkdir -p $BUILD_LATEST_DIR
     - cd $BUILD_LATEST_DIR
     - git clone https://github.com/RadeonOpenCompute/rocm-cmake.git
@@ -138,6 +157,27 @@ build:cmake-minimum:
   #  - job: build:cmake-latest
   #    artifacts: false
   script:
+    # Install rocPRIM package
+    - branch_name="$ROCPRIM_GIT_BRANCH"
+    - if [ $CI_COMMIT_BRANCH == develop ] || [ $CI_COMMIT_BRANCH == master ]; then branch_name=$CI_COMMIT_BRANCH;
+    - fi;
+    - git clone -b $branch_name https://gitlab-ci-token:${CI_JOB_TOKEN}@${ROCPRIM_GIT_URL}
+    - cd rocPRIM
+    - mkdir build
+    - cd build
+    - cmake
+      -G Ninja
+      -D CMAKE_CXX_COMPILER=hipcc
+      -D CMAKE_BUILD_TYPE=Release
+      -D BUILD_TEST=OFF
+      -D BUILD_EXAMPLE=OFF
+      -D ROCM_DEP_ROCMCORE=OFF
+      ../.
+    - cpack
+      -G "DEB"
+    - $SUDO_CMD dpkg -i rocprim*.deb
+    - cd ../..
+    # Build rocThrust
     - mkdir -p $BUILD_MINIMUM_DIR
     - cd $BUILD_MINIMUM_DIR
     - git clone https://github.com/RadeonOpenCompute/rocm-cmake.git
@@ -182,7 +222,7 @@ package:deb:
   script:
     - mkdir -p $PACKAGE_DIR
     - cd $BUILD_MINIMUM_DIR
-    - $SUDO_CMD cpack
+    - cpack
       -G "DEB;ZIP"
       -B $PACKAGE_DIR
   artifacts:
@@ -200,9 +240,6 @@ deploy:deb:
   extends:
     - .deps:cmake-minimum
   script:
-    # Install rocPRIM package
-    - echo ${ROCPRIM_GIT_URL}
-    - echo $ROCPRIM_GIT_URL
     - git clone https://github.com/RadeonOpenCompute/rocm-cmake.git
     - cd rocm-cmake && mkdir build && cd build
     - cmake
@@ -213,17 +250,23 @@ deploy:deb:
     - $SUDO_CMD cmake
         --build ./ --target install
     - cd .. && cd ..
-    - git clone -b develop_stream https://gitlab-ci-token:${CI_JOB_TOKEN}@${ROCPRIM_GIT_URL}
+    # Package rocPRIM
+    - branch_name="$ROCPRIM_GIT_BRANCH"
+    - if [ $CI_COMMIT_BRANCH == develop ] || [ $CI_COMMIT_BRANCH == master ]; then branch_name=$CI_COMMIT_BRANCH;
+    - fi;
+    - git clone -b $branch_name https://gitlab-ci-token:${CI_JOB_TOKEN}@${ROCPRIM_GIT_URL}
     - cmake
       -G Ninja
       -D CMAKE_CXX_COMPILER=hipcc
       -D CMAKE_BUILD_TYPE=Release
       -D ONLY_INSTALL=ON
-      -B $PACKAGE_DIR
-      ./rocPRIM
-    - $SUDO_CMD cpack
-      -G "DEB;ZIP"
-      -B $PACKAGE_DIR
+      -B rocPRIM/build
+      rocPRIM
+    - cd rocPRIM/build &&
+      cpack
+        -G "DEB;ZIP"
+        -B $PACKAGE_DIR &&
+      cd ../..
     # Install rocPRIM and rocThrust
     - $SUDO_CMD dpkg -i $PACKAGE_DIR/rocprim*.deb
     - $SUDO_CMD dpkg -i $PACKAGE_DIR/rocthrust*.deb

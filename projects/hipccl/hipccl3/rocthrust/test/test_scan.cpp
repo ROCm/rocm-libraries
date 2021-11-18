@@ -323,13 +323,12 @@ TEST(ScanTests, TestScanMixedTypesHost)
     TestScanMixedTypes<thrust::host_vector<int>, thrust::host_vector<float>>();
 }
 
-// TODO: Fix mixed type tests
-/*TEST(ScanTests, TestScanMixedTypesDevice)
+TEST(ScanTests, TestScanMixedTypesDevice)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     TestScanMixedTypes<thrust::device_vector<int>, thrust::device_vector<float>>();
-}*/
+}
 
 TYPED_TEST(ScanVariablesTests, TestScanWithOperator)
 {
@@ -510,8 +509,7 @@ TYPED_TEST(ScanVariablesTests, TestScanToDiscardIterator)
     }
 }
 
-// TODO: Fix mixed type tests
-/*TEST(ScanTests, TestScanMixedTypes)
+TEST(ScanTests, TestScanMixedTypes)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -559,7 +557,7 @@ TYPED_TEST(ScanVariablesTests, TestScanToDiscardIterator)
         thrust::exclusive_scan(d_input.begin(), d_input.end(), d_int_output.begin(), (float)3.5);
         ASSERT_EQ(d_int_output, h_int_output);
     }
-}*/
+}
 
 template <typename T, unsigned int N>
 void _TestScanWithLargeTypes(void)

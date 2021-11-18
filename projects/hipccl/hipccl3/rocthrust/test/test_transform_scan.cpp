@@ -383,7 +383,7 @@ TYPED_TEST(TransformScanVariablesTests, TestTransformScanToDiscardIterator)
     }
 }
 
-/*TYPED_TEST(TransformScanVariablesTests, TestValueCategoryDeduction)
+TYPED_TEST(TransformScanVariablesTests, TestValueCategoryDeduction)
 {
     using T = typename TestFixture::input_type;
 
@@ -430,4 +430,4 @@ TYPED_TEST(TransformScanVariablesTests, TestTransformScanToDiscardIterator)
     ASSERT_EQ(T{8}, vec[7]);
     ASSERT_EQ(T{8}, vec[8]);
     ASSERT_EQ(T{8}, vec[9]);
-}*/
+}

@@ -250,14 +250,13 @@ inclusive_scan_by_key(execution_policy<Derived>& policy,
                       ValOutputIt                value_result,
                       BinaryPred                 binary_pred)
 {
-    typedef typename thrust::iterator_traits<ValOutputIt>::value_type value_type;
     return hip_rocprim::inclusive_scan_by_key(policy,
                                               key_first,
                                               key_last,
                                               value_first,
                                               value_result,
                                               binary_pred,
-                                              plus<value_type>());
+                                              thrust::plus<>());
 }
 
 template <class Derived, class KeyInputIt, class ValInputIt, class ValOutputIt>
@@ -268,10 +267,12 @@ inclusive_scan_by_key(execution_policy<Derived>& policy,
                       ValInputIt                 value_first,
                       ValOutputIt                value_result)
 {
-    typedef typename thrust::iterator_traits<KeyInputIt>::value_type key_type;
-    return hip_rocprim::inclusive_scan_by_key(
-        policy, key_first, key_last, value_first, value_result, equal_to<key_type>()
-    );
+    return hip_rocprim::inclusive_scan_by_key(policy,
+                                              key_first,
+                                              key_last,
+                                              value_first,
+                                              value_result,
+                                              thrust::equal_to<>());
 }
 
 //---------------------------
@@ -364,7 +365,7 @@ exclusive_scan_by_key(execution_policy<Derived>& policy,
                                               value_result,
                                               init,
                                               binary_pred,
-                                              plus<Init>());
+                                              plus<>());
 }
 
 template <class Derived, class KeyInputIt, class ValInputIt, class ValOutputIt, class Init>
@@ -376,10 +377,13 @@ exclusive_scan_by_key(execution_policy<Derived>& policy,
                       ValOutputIt                value_result,
                       Init                       init)
 {
-    typedef typename iterator_traits<KeyInputIt>::value_type key_type;
-    return hip_rocprim::exclusive_scan_by_key(
-        policy, key_first, key_last, value_first, value_result, init, equal_to<key_type>()
-    );
+    return hip_rocprim::exclusive_scan_by_key(policy,
+                                           key_first,
+                                           key_last,
+                                           value_first,
+                                           value_result,
+                                           init,
+                                           equal_to<>());
 }
 
 template <class Derived, class KeyInputIt, class ValInputIt, class ValOutputIt>
@@ -390,11 +394,15 @@ exclusive_scan_by_key(execution_policy<Derived>& policy,
                       ValInputIt                 value_first,
                       ValOutputIt                value_result)
 {
-    typedef typename iterator_traits<ValOutputIt>::value_type value_type;
-    return hip_rocprim::exclusive_scan_by_key(
-        policy, key_first, key_last, value_first, value_result, value_type(0)
-    );
+    typedef typename iterator_traits<ValInputIt>::value_type value_type;
+    return hip_rocprim::exclusive_scan_by_key(policy,
+                                              key_first,
+                                              key_last,
+                                              value_first,
+                                              value_result,
+                                              value_type{});
 }
+
 
 } // namespace hip_rocprim
 THRUST_NAMESPACE_END
