@@ -14,7 +14,7 @@
  *  See the License for the specific language governing permissions and
  *  limitations under the License.
  */
- 
+
 #include <unittest/unittest.h>
 #include <thrust/scan.h>
 #include <thrust/functional.h>
@@ -262,7 +262,7 @@ struct head_flag_predicate
 {
     template <typename T>
     __host__ __device__
-    bool operator()(const T&, const T& b)
+    bool operator()(const T&, const T& b) const
     {
         return b ? false : true;
     }
@@ -369,7 +369,7 @@ void TestScanByKeyReusedKeys(void)
     ASSERT_EQUAL(output[6], 13);
 
     thrust::exclusive_scan_by_key(keys.begin(), keys.end(), vals.begin(), output.begin(), typename Vector::value_type(10));
-    
+
     ASSERT_EQUAL(output[0], 10);
     ASSERT_EQUAL(output[1], 10);
     ASSERT_EQUAL(output[2], 12);

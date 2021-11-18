@@ -7,6 +7,10 @@ Full documentation for rocThrust is available at [https://rocthrust.readthedocs.
 - Updated to match upstream Thrust 1.13.0
 - Updated to match upstream Thrust 1.14.0
 - Added async scan
+### Changed
+- Scan algorithms: `inclusive_scan` now uses the input-type as accumulator-type, `exclusive_scan` uses initial-value-type.
+    - This particularly changes behaviour of small-size input types with large-size output types (e.g. `short` input, `int` output).
+    - And low-res input with high-res output (e.g. `float` input, `double` output)
 
 ## (Unreleased) rocThrust-2.11.2 for ROCm 4.5.0
 ### Added

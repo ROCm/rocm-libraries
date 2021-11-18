@@ -118,7 +118,6 @@ namespace hip
             }
 
             // Run reduction.
-
             thrust::hip_rocprim::throw_on_error(rocprim::inclusive_scan(tmp_ptr,
                                                                         tmp_size,
                                                                         first,

@@ -14,7 +14,7 @@
  *  See the License for the specific language governing permissions and
  *  limitations under the License.
  */
- 
+
 #include <unittest/unittest.h>
 #include <thrust/copy.h>
 
@@ -207,7 +207,7 @@ DECLARE_UNITTEST(TestCopyVectorBool);
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
 // Workaround: std::back_insert_iterator has void value_type.
-THRUST_BEGIN_NS
+THRUST_NAMESPACE_BEGIN
 template <> struct access_traits<void>
 {
   typedef const int& const_type;
@@ -215,7 +215,7 @@ template <> struct access_traits<void>
 
   typedef const int& parameter_type;
 };
-THRUST_END_NS
+THRUST_NAMESPACE_END
 
 #endif
 
