@@ -36,7 +36,7 @@ target_include_directories(rocprim
     $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include/rocprim>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:rocprim/include/>
+    $<INSTALL_INTERFACE:include/>
 )
 
 # This target links against HIP library
@@ -53,14 +53,13 @@ set(INCLUDE_INSTALL_DIR ${CMAKE_INSTALL_INCLUDEDIR})
 # does not support header-only libraries (INTERFACE targets)
 rocm_install_targets(
   TARGETS rocprim rocprim_hip
-  PREFIX rocprim
 )
 
 rocm_install(
   DIRECTORY
     "include/"
     "${PROJECT_BINARY_DIR}/rocprim/include/"
-  DESTINATION rocprim/include/
+  DESTINATION include/
   FILES_MATCHING
   PATTERN "*.h"
   PATTERN "*.hpp"
@@ -70,10 +69,6 @@ rocm_install(
 # Export targets
 rocm_export_targets(
   TARGETS roc::rocprim roc::rocprim_hip
-  PREFIX rocprim
   DEPENDS PACKAGE hip
   NAMESPACE roc::
 )
-
-# Create symlinks
-rocm_install_symlink_subdir(rocprim)
