@@ -172,13 +172,19 @@ if [[ "${build_codecoverage}" == true ]]; then
     codecoverage="ON"
 fi
 
-
+#Debug Prints
+echo "rocm path : ${rocm_path}"
+echo "compiler  :${compiler}"
+echo "cmake_executable  :${cmake_executable}"
+echo "cmake_common_options  :${cmake_common_options}"
+echo "benchmark  :${benchmark}"
+echo "clients  :${clients}"
 if [[ "${build_relocatable}" == true ]]; then
     CXX=${rocm_path}/bin/${compiler} ${cmake_executable} ${cmake_common_options} \
        -DCMAKE_INSTALL_PREFIX=${rocm_path} -DBUILD_BENCHMARK=${benchmark} \
-       -DCMAKE_PREFIX_PATH="${rocm_path}  ${rocm_path}/hip" \
+       -DCMAKE_PREFIX_PATH="${rocm_path}" \
        -DBUILD_BENCHMARK=${benchmark} -DBUILD_TEST=${clients} \
-       -DCMAKE_MODULE_PATH="${rocm_path}/hip/cmake" ../../.     # or cmake-gui ../.
+       -DCMAKE_MODULE_PATH="${rocm_path}/lib/cmake/hip" ../../.     # or cmake-gui ../.
 else
     CXX=${rocm_path}/bin/${compiler} ${cmake_executable} ${cmake_common_options} -DBUILD_BENCHMARK=${benchmark} \
        -DBUILD_TEST=${clients} -DCMAKE_BUILD_TYPE=${build_type} -DBUILD_CODE_COVERAGE=${codecoverage}  ../../. # or cmake-gui ../.
