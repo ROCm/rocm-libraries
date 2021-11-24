@@ -192,17 +192,17 @@ typedef ::testing::Types<
 > BlockHistAtomicParamsFloating;
 
 typedef ::testing::Types<
-    block_param_type(uint8_t, int),
+    block_param_type(int, uint8_t),
     block_param_type(uint8_t, uint8_t),
-    block_param_type(uint8_t, short),
-    block_param_type(uint8_t, int8_t)
+    block_param_type(short, uint8_t),
+    block_param_type(int, int8_t)
 > BlockHistSortParamsIntegral;
 
 typedef ::testing::Types<
-    block_param_type(unsigned short, rocprim::half),
-    block_param_type(unsigned int, rocprim::half),
-    block_param_type(unsigned short, rocprim::bfloat16),
-    block_param_type(unsigned int, rocprim::bfloat16)
+    block_param_type(rocprim::half, unsigned short),
+    block_param_type(rocprim::half, unsigned int),
+    block_param_type(rocprim::bfloat16, unsigned short),
+    block_param_type(rocprim::bfloat16, unsigned int)
 > BlockHistSortParamsFloating;
 
 static constexpr size_t n_items = 7;

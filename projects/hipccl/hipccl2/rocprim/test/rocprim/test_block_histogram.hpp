@@ -20,6 +20,34 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+// For intellisense: make the file stand-alone
+#ifndef suite_name_atomic
+
+// required rocprim headers
+#include <rocprim/block/block_load.hpp>
+#include <rocprim/block/block_store.hpp>
+#include <rocprim/block/block_histogram.hpp>
+
+// required test headers
+#include "test_utils_types.hpp"
+#include "common_test_header.hpp"
+
+// kernel definitions
+#include "test_block_histogram.kernels.hpp"
+
+// Start stamping out tests
+struct RocprimBlockHistogramAtomicInputArrayTests;
+struct RocprimBlockHistogramSortInputArrayTests;
+
+struct Integral;
+#define suite_name_atomic RocprimBlockHistogramAtomicInputArrayTests
+#define suite_name_sort RocprimBlockHistogramSortInputArrayTests
+#define block_params_atomic BlockHistAtomicParamsIntegral
+#define block_params_sort BlockHistSortParamsIntegral
+#define name_suffix Integral
+
+#endif
+
 block_histo_test_suite_type_def(suite_name_atomic, name_suffix)
 block_histo_test_suite_type_def(suite_name_sort, name_suffix)
 

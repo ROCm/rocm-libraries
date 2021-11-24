@@ -23,6 +23,15 @@
 #ifndef TEST_BLOCK_HISTOGRAM_KERNELS_HPP_
 #define TEST_BLOCK_HISTOGRAM_KERNELS_HPP_
 
+// required rocprim headers
+#include <rocprim/block/block_load.hpp>
+#include <rocprim/block/block_store.hpp>
+#include <rocprim/block/block_histogram.hpp>
+
+// required test headers
+#include "test_utils_types.hpp"
+#include "common_test_header.hpp"
+
 template<
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
@@ -33,7 +42,7 @@ template<
 >
 __global__
 __launch_bounds__(BlockSize)
-void histogram_kernel(T* device_output, T* device_output_bin)
+void histogram_kernel(T* device_output, BinType* device_output_bin)
 {
     const unsigned int index = ((blockIdx.x * BlockSize) + threadIdx.x) * ItemsPerThread;
     unsigned int global_offset = blockIdx.x * BinSize;
@@ -47,6 +56,7 @@ void histogram_kernel(T* device_output, T* device_output_bin)
 
     rocprim::block_histogram<T, BlockSize, ItemsPerThread, BinSize, Algorithm> bhist;
     bhist.histogram(in_out, hist);
+    rocprim::syncthreads();
 
     ROCPRIM_UNROLL
     for (unsigned int offset = 0; offset < BinSize; offset += BlockSize)
@@ -94,15 +104,16 @@ void test_block_histogram_input_arrays()
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with ItemsPerThread= " << items_per_thread);
 
         // Generate data
         std::vector<T> output = test_utils::get_random_data<T>(size, 0, bin - 1, seed_value);
 
         // Output histogram results
-        std::vector<T> output_bin(bin_sizes, 0);
+        std::vector<BinType> output_bin(bin_sizes, 0);
 
         // Calculate expected results on host
-        std::vector<T> expected_bin(output_bin.size(), 0);
+        std::vector<BinType> expected_bin(output_bin.size(), 0);
         for(size_t i = 0; i < output.size() / items_per_block; i++)
         {
             for(size_t j = 0; j < items_per_block; j++)
@@ -116,8 +127,8 @@ void test_block_histogram_input_arrays()
         // Preparing device
         T* device_output;
         HIP_CHECK(test_common_utils::hipMallocHelper(&device_output, output.size() * sizeof(T)));
-        T* device_output_bin;
-        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output_bin, output_bin.size() * sizeof(T)));
+        BinType* device_output_bin;
+        HIP_CHECK(test_common_utils::hipMallocHelper(&device_output_bin, output_bin.size() * sizeof(BinType)));
 
         HIP_CHECK(
             hipMemcpy(
@@ -130,7 +141,7 @@ void test_block_histogram_input_arrays()
         HIP_CHECK(
             hipMemcpy(
                 device_output_bin, output_bin.data(),
-                output_bin.size() * sizeof(T),
+                output_bin.size() * sizeof(BinType),
                 hipMemcpyHostToDevice
             )
         );
@@ -146,12 +157,12 @@ void test_block_histogram_input_arrays()
         HIP_CHECK(
             hipMemcpy(
                 output_bin.data(), device_output_bin,
-                output_bin.size() * sizeof(T),
+                output_bin.size() * sizeof(BinType),
                 hipMemcpyDeviceToHost
             )
         );
 
-        test_utils::assert_near(output_bin, expected_bin, test_utils::precision_threshold<BinType>::percentage);
+        test_utils::assert_eq(output_bin, expected_bin);
 
         HIP_CHECK(hipFree(device_output));
         HIP_CHECK(hipFree(device_output_bin));
