@@ -706,7 +706,7 @@ OutputIt host_exclusive_scan_by_key(InputIt first, InputIt last, KeyIt k_first,
 
     while ((first+1) != last)
     {
-        if(key_compare_op(*k_first, *++k_first))
+        if(key_compare_op(*k_first, *(k_first+1)))
         {
             sum = op(sum, *first);
         }
@@ -714,6 +714,7 @@ OutputIt host_exclusive_scan_by_key(InputIt first, InputIt last, KeyIt k_first,
         {
             sum = initial_value;
         }
+	k_first++;
         *++d_first = sum;
         first++;
     }
