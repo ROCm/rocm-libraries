@@ -34,7 +34,7 @@ project(hipcub LANGUAGES CXX)
 # CMake modules
 list(APPEND CMAKE_MODULE_PATH
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake
-  ${HIP_PATH}/cmake /opt/rocm/lib/cmake/hip # FindHIP.cmake
+  ${HIP_PATH}/cmake /opt/rocm/hip/cmake # FindHIP.cmake
 )
 
 # Set a default build type if none was specified
