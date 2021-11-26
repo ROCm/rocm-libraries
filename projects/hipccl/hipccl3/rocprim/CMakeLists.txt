@@ -43,7 +43,7 @@ option(ONLY_INSTALL "Only install" OFF)
 # CMake modules
 list(APPEND CMAKE_MODULE_PATH
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake
-  ${HIP_PATH}/lib/cmake/hip /opt/rocm/lib/cmake/hip # FindHIP.cmake
+  ${HIP_PATH}/cmake /opt/rocm/hip/cmake # FindHIP.cmake
 )
 
 # Set a default build type if none was specified
@@ -97,7 +97,7 @@ if(NOT USE_HIP_CPU)
   if (NOT WIN32)
     include(cmake/VerifyCompiler.cmake)
   endif()
-  list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH} ${ROCM_PATH}/llvm /opt/rocm/llvm /opt/rocm)
+  list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH} ${ROCM_PATH}/hip ${ROCM_PATH}/llvm /opt/rocm/llvm /opt/rocm/hip)
   find_package(hip REQUIRED CONFIG PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm)
 endif()
 # Build options
