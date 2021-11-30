@@ -233,7 +233,8 @@ TYPED_TEST(ReducePrimitiveTests, TestReduceCountingIterator)
     const std::vector<size_t> sizes = get_sizes();
     for(auto size : sizes)
     {
-        size_t n = thrust::min<size_t>(size, std::numeric_limits<T>::max());
+        size_t n = std::is_integral<T>::value ?
+            thrust::min<size_t>(size, std::numeric_limits<T>::max()) : size;
 
         thrust::counting_iterator<T, thrust::host_system_tag> h_first
             = thrust::make_counting_iterator<T>(0);
