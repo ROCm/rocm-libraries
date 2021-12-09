@@ -43,7 +43,7 @@ struct DeviceReduceParams
     using input_type = InputType;
     using output_type = OutputType;
     // Tests output iterator with void value_type (OutputIterator concept)
-    static constexpr bool use_identity_iterator =  UseIdentityIterator;
+    static constexpr bool use_identity_iterator = UseIdentityIterator;
     static constexpr size_t size_limit = SizeLimit;
 };
 

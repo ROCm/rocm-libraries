@@ -28,7 +28,11 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, ReduceSum)
 {
     // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
     using T = typename TestFixture::params::type;
-    using binary_op_type = typename test_utils::select_plus_operator<T>::type;
+     // for bfloat16 and half we use double for host-side accumulation
+    using binary_op_type_host = typename test_utils::select_plus_operator_host<T>::type;
+    binary_op_type_host binary_op_host;
+    using acc_type = typename test_utils::select_plus_operator_host<T>::acc_type;
+
     static constexpr size_t logical_warp_size = TestFixture::params::warp_size;
 
     int device_id = test_common_utils::obtain_device_from_ctest();
@@ -77,16 +81,15 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, ReduceSum)
 
         // Calculate expected results on host
         std::vector<T> expected(output.size(), (T)1);
-        binary_op_type binary_op;
         for(size_t i = 0; i < output.size(); i++)
         {
-            T value = (T)0;
+            acc_type value(0);
             for(size_t j = 0; j < logical_warp_size; j++)
             {
                 auto idx = i * logical_warp_size + j;
-                value = apply(binary_op, value, input[idx]);
+                value = binary_op_host(input[idx], value);
             }
-            expected[i] = value;
+            expected[i] = static_cast<T>(value);
         }
 
         T* device_input;
@@ -147,7 +150,11 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, AllReduceSum)
 
     // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
     using T = typename TestFixture::params::type;
-    using binary_op_type = typename test_utils::select_plus_operator<T>::type;
+     // for bfloat16 and half we use double for host-side accumulation
+    using binary_op_type_host = typename test_utils::select_plus_operator_host<T>::type;
+    binary_op_type_host binary_op_host;
+    using acc_type = typename test_utils::select_plus_operator_host<T>::acc_type;
+
     static constexpr size_t logical_warp_size = TestFixture::params::warp_size;
 
     // The different warp sizes
@@ -192,19 +199,18 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, AllReduceSum)
 
         // Calculate expected results on host
         std::vector<T> expected(output.size(), (T)0);
-        binary_op_type binary_op;
         for(size_t i = 0; i < output.size() / logical_warp_size; i++)
         {
-            T value = (T)0;
+            acc_type value(0);
             for(size_t j = 0; j < logical_warp_size; j++)
             {
                 auto idx = i * logical_warp_size + j;
-                value = apply(binary_op, value, input[idx]);
+                value = binary_op_host(input[idx], value);
             }
             for (size_t j = 0; j < logical_warp_size; j++)
             {
                 auto idx = i * logical_warp_size + j;
-                expected[idx] = value;
+                expected[idx] = static_cast<T>(value);
             }
         }
 
@@ -266,7 +272,11 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, ReduceSumValid)
 
     // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
     using T = typename TestFixture::params::type;
-    using binary_op_type = typename test_utils::select_plus_operator<T>::type;
+     // for bfloat16 and half we use double for host-side accumulation
+    using binary_op_type_host = typename test_utils::select_plus_operator_host<T>::type;
+    binary_op_type_host binary_op_host;
+    using acc_type = typename test_utils::select_plus_operator_host<T>::acc_type;
+
     static constexpr size_t logical_warp_size = TestFixture::params::warp_size;
 
     // The different warp sizes
@@ -312,16 +322,15 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, ReduceSumValid)
 
         // Calculate expected results on host
         std::vector<T> expected(output.size(), (T)1);
-        binary_op_type binary_op;
         for(size_t i = 0; i < output.size(); i++)
         {
-            T value = (T)0;
+            acc_type value(0);
             for(size_t j = 0; j < valid; j++)
             {
                 auto idx = i * logical_warp_size + j;
-                value = apply(binary_op, value, input[idx]);
+                value = binary_op_host(input[idx], value);
             }
-            expected[i] = value;
+            expected[i] = static_cast<T>(value);
         }
 
         T* device_input;
@@ -383,7 +392,11 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, AllReduceSumValid)
 
     // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
     using T = typename TestFixture::params::type;
-    using binary_op_type = typename test_utils::select_plus_operator<T>::type;
+     // for bfloat16 and half we use double for host-side accumulation
+    using binary_op_type_host = typename test_utils::select_plus_operator_host<T>::type;
+    binary_op_type_host binary_op_host;
+    using acc_type = typename test_utils::select_plus_operator_host<T>::acc_type;
+
     static constexpr size_t logical_warp_size = TestFixture::params::warp_size;
 
     // The different warp sizes
@@ -429,19 +442,18 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, AllReduceSumValid)
 
         // Calculate expected results on host
         std::vector<T> expected(output.size(), (T)0);
-        binary_op_type binary_op;
         for(size_t i = 0; i < output.size() / logical_warp_size; i++)
         {
-            T value = (T)0;
+            acc_type value(0);
             for(size_t j = 0; j < valid; j++)
             {
                 auto idx = i * logical_warp_size + j;
-                value = apply(binary_op, value, input[idx]);
+                value = binary_op_host(input[idx], value);
             }
             for (size_t j = 0; j < logical_warp_size; j++)
             {
                 auto idx = i * logical_warp_size + j;
-                expected[idx] = value;
+                expected[idx] = static_cast<T>(value);
             }
         }
 
@@ -504,6 +516,13 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, ReduceCustomStruct)
 
     using base_type = typename TestFixture::params::type;
     using T = test_utils::custom_test_type<base_type>;
+    using acc_type = base_type;
+    if(std::is_same<acc_type, rocprim::bfloat16>::value)
+        GTEST_SKIP();
+    /* Enable the following when assignment operator has been added to hip_bfloat16
+     * https://github.com/ROCm-Developer-Tools/HIP/pull/2303/files
+     * using acc_type = typename std::conditional<std::is_same<base_type,rocprim::bfloat16>::value ||
+                                                   std::is_same<base_type,rocprim::half>::value, double, base_type>::type; */
 
     // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
     static constexpr size_t logical_warp_size = TestFixture::params::warp_size;
@@ -561,13 +580,13 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, ReduceCustomStruct)
         std::vector<T> expected(output.size());
         for(size_t i = 0; i < output.size(); i++)
         {
-            T value{(base_type)0, (base_type)0};
+            test_utils::custom_test_type<acc_type> value{(acc_type)0, (acc_type)0};
             for(size_t j = 0; j < logical_warp_size; j++)
             {
                 auto idx = i * logical_warp_size + j;
-                value = value + input[idx];
+                value = value + static_cast<test_utils::custom_test_type<acc_type>>(input[idx]);
             }
-            expected[i] = value;
+            expected[i] = static_cast<T>(value);
         }
 
         T* device_input;
@@ -629,7 +648,11 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, HeadSegmentedReduceSum)
 
     // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
     using T = typename TestFixture::params::type;
-    using binary_op_type = typename test_utils::select_plus_operator<T>::type;
+     // for bfloat16 and half we use double for host-side accumulation
+    using binary_op_type_host = typename test_utils::select_plus_operator_host<T>::type;
+    binary_op_type_host binary_op_host;
+    using acc_type = typename test_utils::select_plus_operator_host<T>::acc_type;
+
     using flag_type = unsigned char;
     static constexpr size_t logical_warp_size = TestFixture::params::warp_size;
 
@@ -702,23 +725,22 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, HeadSegmentedReduceSum)
 
         // Calculate expected results on host
         std::vector<T> expected(output.size());
-        binary_op_type binary_op;
         size_t segment_head_index = 0;
-        T reduction = input[0];
+        acc_type reduction(input[0]);
         for(size_t i = 0; i < output.size(); i++)
         {
             if(i%logical_warp_size == 0 || flags[i])
             {
-                expected[segment_head_index] = reduction;
+                expected[segment_head_index] = static_cast<T>(reduction);
                 segment_head_index = i;
                 reduction = input[i];
             }
             else
             {
-                reduction = apply(binary_op, reduction, input[i]);
+                reduction = binary_op_host(input[i], reduction);
             }
         }
-        expected[segment_head_index] = reduction;
+        expected[segment_head_index] = static_cast<T>(reduction);
 
         // Launching kernel
         if (current_device_warp_size == ws32)
@@ -778,7 +800,11 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, TailSegmentedReduceSum)
 
     // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
     using T = typename TestFixture::params::type;
-    using binary_op_type = typename test_utils::select_plus_operator<T>::type;
+     // for bfloat16 and half we use double for host-side accumulation
+    using binary_op_type_host = typename test_utils::select_plus_operator_host<T>::type;
+    binary_op_type_host binary_op_host;
+    using acc_type = typename test_utils::select_plus_operator_host<T>::acc_type;
+
     using flag_type = unsigned char;
     static constexpr size_t logical_warp_size = TestFixture::params::warp_size;
 
@@ -851,10 +877,9 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, TailSegmentedReduceSum)
 
         // Calculate expected results on host
         std::vector<T> expected(output.size());
-        binary_op_type binary_op;
         std::vector<size_t> segment_indexes;
         size_t segment_index = 0;
-        T reduction;
+        acc_type reduction;
         for(size_t i = 0; i < output.size(); i++)
         {
             // single value segments
@@ -870,12 +895,12 @@ typed_test_def(RocprimWarpReduceTests, name_suffix, TailSegmentedReduceSum)
                 auto next = i + 1;
                 while(next < output.size() && !flags[next])
                 {
-                    reduction = apply(binary_op, reduction, input[next]);
+                    reduction = binary_op_host(input[next], reduction);
                     i++;
                     next++;
                 }
                 i++;
-                expected[segment_index] = apply(binary_op, reduction, input[i]);
+                expected[segment_index] = static_cast<T>(binary_op_host(reduction, input[i]));
                 segment_indexes.push_back(segment_index);
             }
         }

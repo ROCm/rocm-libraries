@@ -250,9 +250,10 @@ hipError_t segmented_radix_sort_impl(void * temporary_storage,
 /// \param [in] end_offsets - iterator to the first element in the range of ending offsets.
 /// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
 /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
+/// Non-default value not supported for floating-point key-types.
 /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
 /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
-/// value: \p <tt>8 * sizeof(Key)</tt>.
+/// value: \p <tt>8 * sizeof(Key)</tt>. Non-default value not supported for floating-point key-types.
 /// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
 /// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
@@ -371,9 +372,10 @@ hipError_t segmented_radix_sort_keys(void * temporary_storage,
 /// \param [in] end_offsets - iterator to the first element in the range of ending offsets.
 /// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
 /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
+/// Non-default value not supported for floating-point key-types.
 /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
 /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
-/// value: \p <tt>8 * sizeof(Key)</tt>.
+/// value: \p <tt>8 * sizeof(Key)</tt>. Non-default value not supported for floating-point key-types.
 /// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
 /// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
@@ -499,9 +501,10 @@ hipError_t segmented_radix_sort_keys_desc(void * temporary_storage,
 /// \param [in] end_offsets - iterator to the first element in the range of ending offsets.
 /// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
 /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
+/// Non-default value not supported for floating-point key-types.
 /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
 /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
-/// value: \p <tt>8 * sizeof(Key)</tt>.
+/// value: \p <tt>8 * sizeof(Key)</tt>. Non-default value not supported for floating-point key-types.
 /// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
 /// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
@@ -639,9 +642,10 @@ hipError_t segmented_radix_sort_pairs(void * temporary_storage,
 /// \param [in] end_offsets - iterator to the first element in the range of ending offsets.
 /// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
 /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
+/// Non-default value not supported for floating-point key-types.
 /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
 /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
-/// value: \p <tt>8 * sizeof(Key)</tt>.
+/// value: \p <tt>8 * sizeof(Key)</tt>. Non-default value not supported for floating-point key-types.
 /// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
 /// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
@@ -770,9 +774,10 @@ hipError_t segmented_radix_sort_pairs_desc(void * temporary_storage,
 /// \param [in] end_offsets - iterator to the first element in the range of ending offsets.
 /// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
 /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
+/// Non-default value not supported for floating-point key-types.
 /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
 /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
-/// value: \p <tt>8 * sizeof(Key)</tt>.
+/// value: \p <tt>8 * sizeof(Key)</tt>. Non-default value not supported for floating-point key-types.
 /// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
 /// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
@@ -897,9 +902,10 @@ hipError_t segmented_radix_sort_keys(void * temporary_storage,
 /// \param [in] end_offsets - iterator to the first element in the range of ending offsets.
 /// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
 /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
+/// Non-default value not supported for floating-point key-types.
 /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
 /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
-/// value: \p <tt>8 * sizeof(Key)</tt>.
+/// value: \p <tt>8 * sizeof(Key)</tt>. Non-default value not supported for floating-point key-types.
 /// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
 /// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
@@ -1027,9 +1033,10 @@ hipError_t segmented_radix_sort_keys_desc(void * temporary_storage,
 /// \param [in] end_offsets - iterator to the first element in the range of ending offsets.
 /// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
 /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
+/// Non-default value not supported for floating-point key-types.
 /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
 /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
-/// value: \p <tt>8 * sizeof(Key)</tt>.
+/// value: \p <tt>8 * sizeof(Key)</tt>. Non-default value not supported for floating-point key-types.
 /// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
 /// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.
@@ -1169,9 +1176,10 @@ hipError_t segmented_radix_sort_pairs(void * temporary_storage,
 /// \param [in] end_offsets - iterator to the first element in the range of ending offsets.
 /// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
 /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
+/// Non-default value not supported for floating-point key-types.
 /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
 /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
-/// value: \p <tt>8 * sizeof(Key)</tt>.
+/// value: \p <tt>8 * sizeof(Key)</tt>. Non-default value not supported for floating-point key-types.
 /// \param [in] stream - [optional] HIP stream object. Default is \p 0 (default stream).
 /// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. Default value is \p false.

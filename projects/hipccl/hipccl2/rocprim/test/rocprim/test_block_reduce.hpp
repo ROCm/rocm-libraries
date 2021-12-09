@@ -33,7 +33,12 @@ typed_test_def(suite_name_single, name_suffix, Reduce)
     HIP_CHECK(hipSetDevice(device_id));
 
     using T = typename TestFixture::input_type;
-    using binary_op_type = typename test_utils::select_plus_operator<T>::type;
+    using binary_op_type = rocprim::plus<T>;
+     // for bfloat16 and half we use double for host-side accumulation
+    using binary_op_type_host = typename test_utils::select_plus_operator_host<T>::type;
+    binary_op_type_host binary_op_host;
+    using acc_type = typename test_utils::select_plus_operator_host<T>::acc_type;
+
     constexpr size_t block_size = TestFixture::block_size;
 
     // Given block size not supported
@@ -56,16 +61,15 @@ typed_test_def(suite_name_single, name_suffix, Reduce)
 
         // Calculate expected results on host
         std::vector<T> expected_reductions(output_reductions.size(), (T)0);
-        binary_op_type binary_op;
         for(size_t i = 0; i < output.size() / block_size; i++)
         {
-            T value = (T)0;
+            acc_type value(0);
             for(size_t j = 0; j < block_size; j++)
             {
                 auto idx = i * block_size + j;
-                value = apply(binary_op, value, output[idx]);
+                value = binary_op_host(value, output[idx]);
             }
-            expected_reductions[i] = value;
+            expected_reductions[i] = static_cast<T>(value);
         }
 
         // Preparing device
@@ -135,7 +139,7 @@ typed_test_def(suite_name_single, name_suffix, ReduceMultiplies)
             for(size_t j = 0; j < block_size; j++)
             {
                 auto idx = i * block_size + j;
-                value = apply(binary_op, value, output[idx]);
+                value = binary_op(value, output[idx]);
             }
             expected_reductions[i] = value;
         }
@@ -173,7 +177,12 @@ typed_test_def(suite_name_single, name_suffix, ReduceValid)
     HIP_CHECK(hipSetDevice(device_id));
 
     using T = typename TestFixture::input_type;
-    using binary_op_type = typename test_utils::select_plus_operator<T>::type;
+    using binary_op_type = rocprim::plus<T>;
+     // for bfloat16 and half we use double for host-side accumulation
+    using binary_op_type_host = typename test_utils::select_plus_operator_host<T>::type;
+    binary_op_type_host binary_op_host;
+    using acc_type = typename test_utils::select_plus_operator_host<T>::acc_type;
+
     constexpr size_t block_size = TestFixture::block_size;
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
@@ -197,16 +206,15 @@ typed_test_def(suite_name_single, name_suffix, ReduceValid)
 
         // Calculate expected results on host
         std::vector<T> expected_reductions(output_reductions.size(), (T)0);
-        binary_op_type binary_op;
         for(size_t i = 0; i < output.size() / block_size; i++)
         {
-            T value = static_cast<T>(0);
+            acc_type value(0);
             for(size_t j = 0; j < valid_items; j++)
             {
                 auto idx = i * block_size + j;
-                value = apply(binary_op, value, output[idx]);
+                value = binary_op_host(value, output[idx]);
             }
-            expected_reductions[i] = value;
+            expected_reductions[i] = static_cast<T>(value);
         }
 
         // Preparing device

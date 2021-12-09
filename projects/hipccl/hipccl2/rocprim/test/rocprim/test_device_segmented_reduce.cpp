@@ -108,14 +108,23 @@ TYPED_TEST(RocprimDeviceSegmentedReduce, Reduce)
     using input_type = typename TestFixture::params::input_type;
     using output_type = typename TestFixture::params::output_type;
     using reduce_op_type = typename TestFixture::params::reduce_op_type;
+    // for bfloat16 and half we use double for host-side accumulation
+    using reduce_op_type_host = typename std::conditional<std::is_same<reduce_op_type,test_utils::bfloat16_plus>::value ||
+                                                         std::is_same<reduce_op_type,test_utils::half_plus>::value,
+                                                     rocprim::plus<double>, reduce_op_type>::type;
+    reduce_op_type reduce_op;
+    reduce_op_type_host reduce_op_host;
+
     constexpr bool use_identity_iterator = TestFixture::params::use_identity_iterator;
 
-    using result_type = output_type;
+    // for bfloat16 and half we use double for host-side accumulation
+    using result_type = typename std::conditional<
+        std::is_same<reduce_op_type_host,rocprim::plus<double>>::value, double, output_type>::type;
     using offset_type = unsigned int;
 
     const input_type init = (input_type)TestFixture::params::init;
     const bool debug_synchronous = false;
-    reduce_op_type reduce_op;
+    SCOPED_TRACE(testing::Message() << "with reduce_op_type_host= " << typeid(reduce_op_host).name());
 
     std::random_device rd;
     std::default_random_engine gen(rd());
@@ -158,9 +167,9 @@ TYPED_TEST(RocprimDeviceSegmentedReduce, Reduce)
                 result_type aggregate = init;
                 for(size_t i = offset; i < end; i++)
                 {
-                    aggregate = reduce_op(aggregate, values_input[i]);
+                    aggregate = reduce_op_host(aggregate, values_input[i]);
                 }
-                aggregates_expected.push_back(aggregate);
+                aggregates_expected.push_back(static_cast<output_type>(aggregate));
 
                 segments_count++;
                 offset += segment_length;

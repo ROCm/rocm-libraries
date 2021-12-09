@@ -26,6 +26,7 @@
 // Meta configuration for rocPRIM
 #include "config.hpp"
 
+#include "types/future_value.hpp"
 #include "types/double_buffer.hpp"
 #include "types/integer_sequence.hpp"
 #include "types/key_value_pair.hpp"

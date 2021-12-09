@@ -82,6 +82,11 @@ typedef ::testing::Types<
     params<unsigned short, rocprim::bfloat16, false, 3, 11>,
     params<unsigned long long, char, false, 8, 20>,
     params<unsigned short, test_utils::custom_test_type<double>, false, 8, 11>,
+    // some params used by PyTorch's Randperm()
+    params<int64_t, int64_t, false, 0, 34>,
+    params<int64_t, float, true, 0, 34>,
+    params<int64_t, rocprim::half, true, 0, 34>,
+    params<int64_t, int64_t, false, 0, 34, true>,
 
     // huge sizes to check correctness of more than 1 block per batch
     params<int, char, false, 0, 32, true>,

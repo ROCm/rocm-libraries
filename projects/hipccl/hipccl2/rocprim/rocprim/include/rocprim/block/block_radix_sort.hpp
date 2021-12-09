@@ -240,9 +240,10 @@ public:
     /// \param [in] storage - reference to a temporary storage object of type storage_type.
     /// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
     /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
+    /// Non-default value not supported for floating-point key-types.
     /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
-    /// value: \p <tt>8 * sizeof(Key)</tt>.
+    /// value: \p <tt>8 * sizeof(Key)</tt>. Non-default value not supported for floating-point key-types.
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
@@ -294,9 +295,10 @@ public:
     /// \param [in, out] keys - reference to an array of keys provided by a thread.
     /// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
     /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
+    /// Non-default value not supported for floating-point key-types.
     /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
-    /// value: \p <tt>8 * sizeof(Key)</tt>.
+    /// value: \p <tt>8 * sizeof(Key)</tt>. Non-default value not supported for floating-point key-types.
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void sort(Key (&keys)[ItemsPerThread],
               unsigned int begin_bit = 0,
@@ -312,9 +314,10 @@ public:
     /// \param [in] storage - reference to a temporary storage object of type storage_type.
     /// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
     /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
+    /// Non-default value not supported for floating-point key-types.
     /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
-    /// value: \p <tt>8 * sizeof(Key)</tt>.
+    /// value: \p <tt>8 * sizeof(Key)</tt>. Non-default value not supported for floating-point key-types.
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
@@ -366,9 +369,10 @@ public:
     /// \param [in, out] keys - reference to an array of keys provided by a thread.
     /// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
     /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
+    /// Non-default value not supported for floating-point key-types.
     /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
-    /// value: \p <tt>8 * sizeof(Key)</tt>.
+    /// value: \p <tt>8 * sizeof(Key)</tt>. Non-default value not supported for floating-point key-types.
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void sort_desc(Key (&keys)[ItemsPerThread],
                    unsigned int begin_bit = 0,
@@ -388,9 +392,10 @@ public:
     /// \param [in] storage - reference to a temporary storage object of type storage_type.
     /// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
     /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
+    /// Non-default value not supported for floating-point key-types.
     /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
-    /// value: \p <tt>8 * sizeof(Key)</tt>.
+    /// value: \p <tt>8 * sizeof(Key)</tt>. Non-default value not supported for floating-point key-types.
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
@@ -451,9 +456,10 @@ public:
     /// \param [in, out] values - reference to an array of values provided by a thread.
     /// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
     /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
+    /// Non-default value not supported for floating-point key-types.
     /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
-    /// value: \p <tt>8 * sizeof(Key)</tt>.
+    /// value: \p <tt>8 * sizeof(Key)</tt>. Non-default value not supported for floating-point key-types.
     template<bool WithValues = with_values>
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void sort(Key (&keys)[ItemsPerThread],
@@ -475,9 +481,10 @@ public:
     /// \param [in] storage - reference to a temporary storage object of type storage_type.
     /// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
     /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
+    /// Non-default value not supported for floating-point key-types.
     /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
-    /// value: \p <tt>8 * sizeof(Key)</tt>.
+    /// value: \p <tt>8 * sizeof(Key)</tt>. Non-default value not supported for floating-point key-types.
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
@@ -538,9 +545,10 @@ public:
     /// \param [in, out] values - reference to an array of values provided by a thread.
     /// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
     /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
+    /// Non-default value not supported for floating-point key-types.
     /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
-    /// value: \p <tt>8 * sizeof(Key)</tt>.
+    /// value: \p <tt>8 * sizeof(Key)</tt>. Non-default value not supported for floating-point key-types.
     template<bool WithValues = with_values>
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void sort_desc(Key (&keys)[ItemsPerThread],
@@ -559,9 +567,10 @@ public:
     /// \param [in] storage - reference to a temporary storage object of type storage_type.
     /// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
     /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
+    /// Non-default value not supported for floating-point key-types.
     /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
-    /// value: \p <tt>8 * sizeof(Key)</tt>.
+    /// value: \p <tt>8 * sizeof(Key)</tt>. Non-default value not supported for floating-point key-types.
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
@@ -614,9 +623,10 @@ public:
     /// \param [in, out] keys - reference to an array of keys provided by a thread.
     /// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
     /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
+    /// Non-default value not supported for floating-point key-types.
     /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
-    /// value: \p <tt>8 * sizeof(Key)</tt>.
+    /// value: \p <tt>8 * sizeof(Key)</tt>. Non-default value not supported for floating-point key-types.
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void sort_to_striped(Key (&keys)[ItemsPerThread],
                          unsigned int begin_bit = 0,
@@ -633,9 +643,10 @@ public:
     /// \param [in] storage - reference to a temporary storage object of type storage_type.
     /// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
     /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
+    /// Non-default value not supported for floating-point key-types.
     /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
-    /// value: \p <tt>8 * sizeof(Key)</tt>.
+    /// value: \p <tt>8 * sizeof(Key)</tt>. Non-default value not supported for floating-point key-types.
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
@@ -688,9 +699,10 @@ public:
     /// \param [in, out] keys - reference to an array of keys provided by a thread.
     /// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
     /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
+    /// Non-default value not supported for floating-point key-types.
     /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
-    /// value: \p <tt>8 * sizeof(Key)</tt>.
+    /// value: \p <tt>8 * sizeof(Key)</tt>. Non-default value not supported for floating-point key-types.
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void sort_desc_to_striped(Key (&keys)[ItemsPerThread],
                               unsigned int begin_bit = 0,
@@ -710,9 +722,10 @@ public:
     /// \param [in] storage - reference to a temporary storage object of type storage_type.
     /// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
     /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
+    /// Non-default value not supported for floating-point key-types.
     /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
-    /// value: \p <tt>8 * sizeof(Key)</tt>.
+    /// value: \p <tt>8 * sizeof(Key)</tt>. Non-default value not supported for floating-point key-types.
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused
@@ -771,9 +784,10 @@ public:
     /// \param [in, out] values - reference to an array of values provided by a thread.
     /// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
     /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
+    /// Non-default value not supported for floating-point key-types.
     /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
-    /// value: \p <tt>8 * sizeof(Key)</tt>.
+    /// value: \p <tt>8 * sizeof(Key)</tt>. Non-default value not supported for floating-point key-types.
     template<bool WithValues = with_values>
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
     void sort_to_striped(Key (&keys)[ItemsPerThread],
@@ -795,9 +809,10 @@ public:
     /// \param [in] storage - reference to a temporary storage object of type storage_type.
     /// \param [in] begin_bit - [optional] index of the first (least significant) bit used in
     /// key comparison. Must be in range <tt>[0; 8 * sizeof(Key))</tt>. Default value: \p 0.
+    /// Non-default value not supported for floating-point key-types.
     /// \param [in] end_bit - [optional] past-the-end index (most significant) bit used in
     /// key comparison. Must be in range <tt>(begin_bit; 8 * sizeof(Key)]</tt>. Default
-    /// value: \p <tt>8 * sizeof(Key)</tt>.
+    /// value: \p <tt>8 * sizeof(Key)</tt>. Non-default value not supported for floating-point key-types.
     ///
     /// \par Storage reusage
     /// Synchronization barrier should be placed before \p storage is reused

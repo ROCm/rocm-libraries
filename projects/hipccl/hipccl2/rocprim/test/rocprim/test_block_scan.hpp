@@ -29,7 +29,10 @@ typed_test_suite_def(suite_name_array, name_suffix, block_params);
 typed_test_def(suite_name_single, name_suffix, InclusiveScan)
 {
     using T = typename TestFixture::input_type;
-    using binary_op_type = typename test_utils::select_plus_operator<T>::type;
+ // for bfloat16 and half we use double for host-side accumulation
+    using binary_op_type_host = typename test_utils::select_plus_operator_host<T>::type;
+    binary_op_type_host binary_op_host;
+    using acc_type = typename test_utils::select_plus_operator_host<T>::acc_type;
     constexpr size_t block_size = TestFixture::block_size;
 
     int device_id = test_common_utils::obtain_device_from_ctest();
@@ -56,13 +59,14 @@ typed_test_def(suite_name_single, name_suffix, InclusiveScan)
 
         // Calculate expected results on host
         std::vector<T> expected(output.size(), (T)0);
-        binary_op_type binary_op;
         for(size_t i = 0; i < output.size() / block_size; i++)
         {
+            acc_type accumulator(0);
             for(size_t j = 0; j < block_size; j++)
             {
                 auto idx = i * block_size + j;
-                expected[idx] = apply(binary_op, output[idx], expected[j > 0 ? idx-1 : idx]);
+                accumulator = binary_op_host(output[idx], accumulator);
+                expected[idx] = static_cast<T>(accumulator);
             }
         }
 
@@ -88,7 +92,10 @@ typed_test_def(suite_name_single, name_suffix, InclusiveScan)
 typed_test_def(suite_name_single, name_suffix, InclusiveScanReduce)
 {
     using T = typename TestFixture::input_type;
-    using binary_op_type = typename test_utils::select_plus_operator<T>::type;
+ // for bfloat16 and half we use double for host-side accumulation
+    using binary_op_type_host = typename test_utils::select_plus_operator_host<T>::type;
+    binary_op_type_host binary_op_host;
+    using acc_type = typename test_utils::select_plus_operator_host<T>::acc_type;
     constexpr size_t block_size = TestFixture::block_size;
 
     int device_id = test_common_utils::obtain_device_from_ctest();
@@ -117,13 +124,14 @@ typed_test_def(suite_name_single, name_suffix, InclusiveScanReduce)
         // Calculate expected results on host
         std::vector<T> expected(output.size(), (T)0);
         std::vector<T> expected_reductions(output_reductions.size(), (T)0);
-        binary_op_type binary_op;
         for(size_t i = 0; i < output.size() / block_size; i++)
         {
+            acc_type accumulator(0);
             for(size_t j = 0; j < block_size; j++)
             {
                 auto idx = i * block_size + j;
-                expected[idx] = apply(binary_op, output[idx], expected[j > 0 ? idx-1 : idx]);
+                accumulator = binary_op_host(output[idx], accumulator);
+                expected[idx] = static_cast<T>(accumulator);
             }
             expected_reductions[i] = expected[(i+1) * block_size - 1];
         }
@@ -158,7 +166,11 @@ typed_test_def(suite_name_single, name_suffix, InclusiveScanReduce)
 typed_test_def(suite_name_single, name_suffix, InclusiveScanPrefixCallback)
 {
     using T = typename TestFixture::input_type;
-    using binary_op_type = typename test_utils::select_plus_operator<T>::type;
+     // for bfloat16 and half we use double for host-side accumulation
+    using binary_op_type_host = typename test_utils::select_plus_operator_host<T>::type;
+    binary_op_type_host binary_op_host;
+    using acc_type = typename test_utils::select_plus_operator_host<T>::acc_type;
+
     constexpr size_t block_size = TestFixture::block_size;
 
     int device_id = test_common_utils::obtain_device_from_ctest();
@@ -188,14 +200,14 @@ typed_test_def(suite_name_single, name_suffix, InclusiveScanPrefixCallback)
         // Calculate expected results on host
         std::vector<T> expected(output.size(), (T)0);
         std::vector<T> expected_block_prefixes(output_block_prefixes.size(), (T)0);
-        binary_op_type binary_op;
         for(size_t i = 0; i < output.size() / block_size; i++)
         {
-            expected[i * block_size] = block_prefix;
+            acc_type accumulator = block_prefix;
             for(size_t j = 0; j < block_size; j++)
             {
                 auto idx = i * block_size + j;
-                expected[idx] = apply(binary_op, output[idx], expected[j > 0 ? idx-1 : idx]);
+                accumulator = binary_op_host(output[idx], accumulator);
+                expected[idx] = static_cast<T>(accumulator);
             }
             expected_block_prefixes[i] = expected[(i+1) * block_size - 1];
         }
@@ -230,7 +242,11 @@ typed_test_def(suite_name_single, name_suffix, InclusiveScanPrefixCallback)
 typed_test_def(suite_name_single, name_suffix, ExclusiveScan)
 {
     using T = typename TestFixture::input_type;
-    using binary_op_type = typename test_utils::select_plus_operator<T>::type;
+     // for bfloat16 and half we use double for host-side accumulation
+    using binary_op_type_host = typename test_utils::select_plus_operator_host<T>::type;
+    binary_op_type_host binary_op_host;
+    using acc_type = typename test_utils::select_plus_operator_host<T>::acc_type;
+
     constexpr size_t block_size = TestFixture::block_size;
 
     int device_id = test_common_utils::obtain_device_from_ctest();
@@ -258,14 +274,15 @@ typed_test_def(suite_name_single, name_suffix, ExclusiveScan)
 
         // Calculate expected results on host
         std::vector<T> expected(output.size(), (T)0);
-        binary_op_type binary_op;
         for(size_t i = 0; i < output.size() / block_size; i++)
         {
+            acc_type accumulator(init);
             expected[i * block_size] = init;
             for(size_t j = 1; j < block_size; j++)
             {
                 auto idx = i * block_size + j;
-                expected[idx] = apply(binary_op, output[idx-1], expected[idx-1]);
+                accumulator = binary_op_host(output[idx-1], accumulator);
+                expected[idx] = static_cast<T>(accumulator);
             }
         }
 
@@ -291,7 +308,11 @@ typed_test_def(suite_name_single, name_suffix, ExclusiveScan)
 typed_test_def(suite_name_single, name_suffix, ExclusiveScanReduce)
 {
     using T = typename TestFixture::input_type;
-    using binary_op_type = typename test_utils::select_plus_operator<T>::type;
+     // for bfloat16 and half we use double for host-side accumulation
+    using binary_op_type_host = typename test_utils::select_plus_operator_host<T>::type;
+    binary_op_type_host binary_op_host;
+    using acc_type = typename test_utils::select_plus_operator_host<T>::acc_type;
+
     constexpr size_t block_size = TestFixture::block_size;
 
     int device_id = test_common_utils::obtain_device_from_ctest();
@@ -322,21 +343,23 @@ typed_test_def(suite_name_single, name_suffix, ExclusiveScanReduce)
         // Calculate expected results on host
         std::vector<T> expected(output.size(), (T)0);
         std::vector<T> expected_reductions(output_reductions.size(), (T)0);
-        binary_op_type binary_op;
         for(size_t i = 0; i < output.size() / block_size; i++)
         {
+            acc_type accumulator(init);
             expected[i * block_size] = init;
             for(size_t j = 1; j < block_size; j++)
             {
                 auto idx = i * block_size + j;
-                expected[idx] = apply(binary_op, output[idx-1], expected[idx-1]);
+                accumulator = binary_op_host(output[idx-1], accumulator);
+                expected[idx] = static_cast<T>(accumulator);
             }
-
+            acc_type accumulator_reductions(0);
             expected_reductions[i] = 0;
             for(size_t j = 0; j < block_size; j++)
             {
                 auto idx = i * block_size + j;
-                expected_reductions[i] = apply(binary_op, expected_reductions[i], output[idx]);
+                accumulator_reductions = binary_op_host(accumulator_reductions, output[idx]);
+                expected_reductions[i] = static_cast<T>(accumulator_reductions);
             }
         }
 
@@ -370,7 +393,11 @@ typed_test_def(suite_name_single, name_suffix, ExclusiveScanReduce)
 typed_test_def(suite_name_single, name_suffix, ExclusiveScanPrefixCallback)
 {
     using T = typename TestFixture::input_type;
-    using binary_op_type = typename test_utils::select_plus_operator<T>::type;
+     // for bfloat16 and half we use double for host-side accumulation
+    using binary_op_type_host = typename test_utils::select_plus_operator_host<T>::type;
+    binary_op_type_host binary_op_host;
+    using acc_type = typename test_utils::select_plus_operator_host<T>::acc_type;
+
     constexpr size_t block_size = TestFixture::block_size;
 
     int device_id = test_common_utils::obtain_device_from_ctest();
@@ -400,21 +427,24 @@ typed_test_def(suite_name_single, name_suffix, ExclusiveScanPrefixCallback)
         // Calculate expected results on host
         std::vector<T> expected(output.size(), (T)0);
         std::vector<T> expected_block_prefixes(output_block_prefixes.size(), (T)0);
-        binary_op_type binary_op;
         for(size_t i = 0; i < output.size() / block_size; i++)
         {
+            acc_type accumulator = block_prefix;
             expected[i * block_size] = block_prefix;
             for(size_t j = 1; j < block_size; j++)
             {
                 auto idx = i * block_size + j;
-                expected[idx] = apply(binary_op, output[idx-1], expected[idx-1]);
+                accumulator = binary_op_host(output[idx-1], accumulator);
+                expected[idx] = static_cast<T>(accumulator);
             }
 
+            acc_type accumulator_block_prefixes = block_prefix;
             expected_block_prefixes[i] = block_prefix;
             for(size_t j = 0; j < block_size; j++)
             {
                 auto idx = i * block_size + j;
-                expected_block_prefixes[i] = apply(binary_op, expected_block_prefixes[i], output[idx]);
+                accumulator_block_prefixes = binary_op_host(output[idx], accumulator_block_prefixes);
+                expected_block_prefixes[i] = static_cast<T>(accumulator_block_prefixes);
             }
         }
 
