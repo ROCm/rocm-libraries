@@ -186,7 +186,7 @@ TYPED_TEST(RocprimTransformIteratorTests, TransformReduce)
         }
         else if(std::is_floating_point<value_type>::value)
         {
-            auto tolerance = std::max<value_type>(std::abs(0.1f * expected), value_type(test_utils::precision_threshold<value_type>::percentage));
+            auto tolerance = std::abs(test_utils::precision_threshold<value_type>::percentage * expected);
             ASSERT_NEAR(output[0], expected, tolerance);
         }
 

@@ -2,6 +2,14 @@
 
 Full documentation for rocPRIM is available at [https://codedocs.xyz/ROCmSoftwarePlatform/rocPRIM/](https://codedocs.xyz/ROCmSoftwarePlatform/rocPRIM/)
 
+## [Unreleased rocPRIM-2.10.13 for ROCm 5.1.0]
+### Fixed
+- Fixed radix sort int64_t bug introduced in [2.10.11]
+### Added
+- Future value
+### Changed
+- The reduce/scan algorithm precision issues in the tests has been resolved for half types.
+
 ## [Unreleased rocPRIM-2.10.12 for ROCm 5.0.0]
 ### Fixed
 - Enable bfloat16 tests and reduce threshold for bfloat16
@@ -17,7 +25,7 @@ Full documentation for rocPRIM is available at [https://codedocs.xyz/ROCmSoftwar
     - the block sort step supports multiple items per thread
 ### Changed
 - size_limit for scan, reduce and transform can now be set in the config struct instead of a parameter
-- Device_scan and device_segmented_scan: `inclusive_scan` now uses the input-type as accumulator-type, `exclusive_scan` uses initial-value-type. 
+- Device_scan and device_segmented_scan: `inclusive_scan` now uses the input-type as accumulator-type, `exclusive_scan` uses initial-value-type.
   - This particularly changes behaviour of small-size input types with large-size output types (e.g. `short` input, `int` output).
   - And low-res input with high-res output (e.g. `float` input, `double` output)
 - Revert old Fiji workaround, because they solved the issue at compiler side

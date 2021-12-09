@@ -90,8 +90,7 @@ struct static_run_algo
         }
         else
         {
-            float threshold_multiplier = std::is_same<T, ::rocprim::bfloat16>::value ? 10.0f : 5.0f;
-            test_utils::assert_near(output_reductions, expected_reductions, threshold_multiplier * test_utils::precision_threshold<T>::percentage);
+            test_utils::assert_near(output_reductions, expected_reductions, test_utils::precision_threshold<T>::percentage);
         }
     }
 };
@@ -157,8 +156,7 @@ struct static_run_valid
         );
 
         // Verifying results
-        float threshold_multiplier = std::is_same<T, ::rocprim::bfloat16>::value ? 10.0f : 5.0f;
-        test_utils::assert_near(output_reductions, expected_reductions, threshold_multiplier * test_utils::precision_threshold<T>::percentage);
+        test_utils::assert_near(output_reductions, expected_reductions, test_utils::precision_threshold<T>::percentage);
     }
 };
 
@@ -200,7 +198,7 @@ template<
 >
 void test_block_reduce_input_arrays()
 {
-    using binary_op_type = typename test_utils::select_maximum_operator<T>::type;;
+    using binary_op_type = typename test_utils::select_maximum_operator<T>::type;
     static constexpr auto algorithm = Algorithm;
     static constexpr size_t block_size = BlockSize;
     static constexpr size_t items_per_thread = ItemsPerThread;
@@ -235,7 +233,7 @@ void test_block_reduce_input_arrays()
             for(size_t j = 0; j < items_per_block; j++)
             {
                 auto idx = i * items_per_block + j;
-                value = apply(binary_op, value, output[idx]);
+                value = binary_op(value, output[idx]);
             }
             expected_reductions[i] = value;
         }
@@ -279,8 +277,7 @@ void test_block_reduce_input_arrays()
         );
 
         // Verifying results
-        float threshold_multiplier = std::is_same<T, ::rocprim::bfloat16>::value ? 10.0f : 5.0f;
-        test_utils::assert_near(output_reductions, expected_reductions, threshold_multiplier * test_utils::precision_threshold<T>::percentage);
+        test_utils::assert_near(output_reductions, expected_reductions, test_utils::precision_threshold<T>::percentage);
 
         HIP_CHECK(hipFree(device_output));
         HIP_CHECK(hipFree(device_output_reductions));

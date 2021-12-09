@@ -475,7 +475,7 @@ TYPED_TEST(RocprimDeviceSelectTests, Unique)
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
     using op_type = typename test_utils::select_equal_to_operator<T>::type;
-    using scan_op_type = typename test_utils::select_plus_operator<T>::type;
+    using scan_op_type = rocprim::plus<T>;
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
@@ -638,7 +638,7 @@ TEST(RocprimDeviceSelectTests, UniqueGuardedOperator)
     using T = int64_t;
     using F = int64_t;
     using U = int64_t;
-    using scan_op_type = typename test_utils::select_plus_operator<T>::type;
+    using scan_op_type = rocprim::plus<T>;
     static constexpr bool use_identity_iterator = false;
     const bool debug_synchronous = false;
 

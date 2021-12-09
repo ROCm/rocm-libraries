@@ -210,12 +210,6 @@ static constexpr unsigned int items[n_items] = {
     1, 2, 4, 5, 7, 15, 32
 };
 
-template<class T, class BinaryOp>
-T apply(BinaryOp binary_op, const T& a, const T& b)
-{
-    return binary_op(a, b);
-}
-
 // Global utility defines
 #define test_suite_type_def_helper(name, suffix) \
     template<class Params> \

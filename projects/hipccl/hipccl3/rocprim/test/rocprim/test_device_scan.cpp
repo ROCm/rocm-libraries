@@ -256,7 +256,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScan)
 
             // Calculate expected results on host
             std::vector<U> expected(input.size());
-            std::partial_sum(
+            test_utils::host_inclusive_scan(
                 input.begin(), input.end(),
                 expected.begin(), scan_op
             );
@@ -504,29 +504,10 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanByKey)
 
             // Calculate expected results on host
             std::vector<U> expected(input.size());
-            std::partial_sum(
-                rocprim::make_zip_iterator(
-                    rocprim::make_tuple(input.begin(), keys.begin())
-                ),
-                rocprim::make_zip_iterator(
-                    rocprim::make_tuple(input.end(), keys.end())
-                ),
-                rocprim::make_zip_iterator(
-                    rocprim::make_tuple(expected.begin(), rocprim::make_discard_iterator())
-                ),
-                [scan_op, keys_compare_op](const rocprim::tuple<U, K>& t1,
-                                        const rocprim::tuple<U, K>& t2)
-                    -> rocprim::tuple<U, K>
-                {
-                    if(keys_compare_op(rocprim::get<1>(t1), rocprim::get<1>(t2)))
-                    {
-                        return rocprim::make_tuple(
-                            scan_op(rocprim::get<0>(t1), rocprim::get<0>(t2)),
-                            rocprim::get<1>(t2)
-                        );
-                    }
-                    return t2;
-                }
+            test_utils::host_inclusive_scan_by_key(
+                input.begin(), input.end(), keys.begin(),
+                expected.begin(),
+                scan_op, keys_compare_op
             );
 
             // temp storage
@@ -747,7 +728,7 @@ public:
     using pointer           = conditional_discard_value*;
     using iterator_category = std::random_access_iterator_tag;
     using difference_type   = std::ptrdiff_t;
-    
+
     __host__ __device__ single_index_iterator(T* value, size_t expected_index, size_t index = 0)
         : value_{value}
         , expected_index_{expected_index}
@@ -871,7 +852,7 @@ TEST(RocprimDeviceScanTests, LargeIndicesInclusiveScan)
             HIP_CHECK(hipMemcpy(&output, d_output, sizeof(T), hipMemcpyDeviceToHost));
             HIP_CHECK(hipDeviceSynchronize());
 
-            // Sum of 'size' increasing numbers starting at 'n' is size * (2n + size - 1) 
+            // Sum of 'size' increasing numbers starting at 'n' is size * (2n + size - 1)
             // The division is not integer division but either (size) or (2n + size - 1) has to be even.
             const T multiplicand_1 = size;
             const T multiplicand_2 = 2 * (*input_begin) + size - 1;
@@ -964,7 +945,7 @@ TEST(RocprimDeviceScanTests, LargeIndicesExclusiveScan)
             HIP_CHECK(hipMemcpy(&output, d_output, sizeof(T), hipMemcpyDeviceToHost));
             HIP_CHECK(hipDeviceSynchronize());
 
-            // Sum of 'size' - 1 increasing numbers starting at 'n' is (size - 1) * (2n + size - 2) 
+            // Sum of 'size' - 1 increasing numbers starting at 'n' is (size - 1) * (2n + size - 2)
             // The division is not integer division but either (size - 1) or (2n + size - 2) has to be even.
             const T multiplicand_1 = size - 1;
             const T multiplicand_2 = 2 * (*input_begin) + size - 2;

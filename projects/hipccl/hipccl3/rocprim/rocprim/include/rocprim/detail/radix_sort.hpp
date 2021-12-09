@@ -62,7 +62,7 @@ struct radix_key_codec_integral<Key, BitKey, typename std::enable_if<::rocprim::
     static unsigned int extract_digit(bit_key_type bit_key, unsigned int start, unsigned int length)
     {
         unsigned int mask = (1u << length) - 1;
-        return (unsigned int)(bit_key >> start) & mask;
+        return static_cast<unsigned int>(bit_key >> start) & mask;
     }
 };
 
@@ -90,7 +90,7 @@ struct radix_key_codec_integral<Key, BitKey, typename std::enable_if<::rocprim::
     static unsigned int extract_digit(bit_key_type bit_key, unsigned int start, unsigned int length)
     {
         unsigned int mask = (1u << length) - 1;
-        return (unsigned int)(bit_key >> start) & mask;
+        return static_cast<unsigned int>(bit_key >> start) & mask;
     }
 };
 
@@ -123,7 +123,7 @@ struct radix_key_codec_floating
         // -0.0 should be treated as +0.0 for stable sort
         // -0.0 is encoded as inverted sign_bit, +0.0 as sign_bit
         // or vice versa for descending sort
-        return (unsigned int)((bit_key == sign_bit ? ~sign_bit : bit_key) >> start) & mask;
+        return static_cast<unsigned int>((bit_key == sign_bit ? ~sign_bit : bit_key) >> start) & mask;
     }
 };
 
@@ -161,7 +161,7 @@ struct radix_key_codec_base<bool>
     static unsigned int extract_digit(bit_key_type bit_key, unsigned int start, unsigned int length)
     {
         unsigned int mask = (1u << length) - 1;
-        return (unsigned int)(bit_key >> start) & mask;
+        return static_cast<unsigned int>(bit_key >> start) & mask;
     }
 };
 

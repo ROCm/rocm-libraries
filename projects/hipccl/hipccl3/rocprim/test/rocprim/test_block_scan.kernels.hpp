@@ -498,7 +498,7 @@ auto test_block_scan_input_arrays()
             for(size_t j = 0; j < items_per_block; j++)
             {
                 auto idx = i * items_per_block + j;
-                expected[idx] = apply(binary_op, output[idx], expected[j > 0 ? idx-1 : idx]);
+                expected[idx] = binary_op(output[idx], expected[j > 0 ? idx-1 : idx]);
             }
         }
 
@@ -585,7 +585,7 @@ auto test_block_scan_input_arrays()
             for(size_t j = 0; j < items_per_block; j++)
             {
                 auto idx = i * items_per_block + j;
-                expected[idx] = apply(binary_op, output[idx], expected[j > 0 ? idx-1 : idx]);
+                expected[idx] = binary_op(output[idx], expected[j > 0 ? idx-1 : idx]);
             }
             expected_reductions[i] = expected[(i+1) * items_per_block - 1];
         }
@@ -699,7 +699,7 @@ auto test_block_scan_input_arrays()
             for(size_t j = 0; j < items_per_block; j++)
             {
                 auto idx = i * items_per_block + j;
-                expected[idx] = apply(binary_op, output[idx], expected[j > 0 ? idx-1 : idx]);
+                expected[idx] = binary_op(output[idx], expected[j > 0 ? idx-1 : idx]);
             }
             expected_block_prefixes[i] = expected[(i+1) * items_per_block - 1];
         }
@@ -813,7 +813,7 @@ auto test_block_scan_input_arrays()
             for(size_t j = 1; j < items_per_block; j++)
             {
                 auto idx = i * items_per_block + j;
-                expected[idx] = apply(binary_op, output[idx-1], expected[idx-1]);
+                expected[idx] = binary_op(output[idx-1], expected[idx-1]);
             }
         }
 
@@ -903,12 +903,12 @@ auto test_block_scan_input_arrays()
             for(size_t j = 1; j < items_per_block; j++)
             {
                 auto idx = i * items_per_block + j;
-                expected[idx] = apply(binary_op, output[idx-1], expected[idx-1]);
+                expected[idx] = binary_op(output[idx-1], expected[idx-1]);
             }
             for(size_t j = 0; j < items_per_block; j++)
             {
                 auto idx = i * items_per_block + j;
-                expected_reductions[i] = apply(binary_op, expected_reductions[i], output[idx]);
+                expected_reductions[i] = binary_op(expected_reductions[i], output[idx]);
             }
         }
 
@@ -1012,13 +1012,13 @@ auto test_block_scan_input_arrays()
             for(size_t j = 1; j < items_per_block; j++)
             {
                 auto idx = i * items_per_block + j;
-                expected[idx] = apply(binary_op, output[idx-1], expected[idx-1]);
+                expected[idx] = binary_op(output[idx-1], expected[idx-1]);
             }
             expected_block_prefixes[i] = block_prefix;
             for(size_t j = 0; j < items_per_block; j++)
             {
                 auto idx = i * items_per_block + j;
-                expected_block_prefixes[i] = apply(binary_op, expected_block_prefixes[i], output[idx]);
+                expected_block_prefixes[i] = binary_op(expected_block_prefixes[i], output[idx]);
             }
         }
 
