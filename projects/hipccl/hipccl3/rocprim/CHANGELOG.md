@@ -9,6 +9,8 @@ Full documentation for rocPRIM is available at [https://codedocs.xyz/ROCmSoftwar
 - Future value
 ### Changed
 - The reduce/scan algorithm precision issues in the tests has been resolved for half types.
+### Known issues
+- device_segmented_radix_sort, device_scan unit tests failing for HIP on Windows
 
 ## [Unreleased rocPRIM-2.10.12 for ROCm 5.0.0]
 ### Fixed
@@ -35,7 +37,7 @@ Full documentation for rocPRIM is available at [https://codedocs.xyz/ROCmSoftwar
 - Bumped the minimum required version of CMake to 3.16
 ### Known issues
 - Unit tests may soft hang on MI200 when running in hipMallocManaged mode.
-- block_histogram, device_scan unit tests failing for HIP on Windows
+- device_segmented_radix_sort, device_scan unit tests failing for HIP on Windows
 - ReduceEmptyInput cause random faulire with bfloat16
 
 ## [Unreleased rocPRIM-2.10.11 for ROCm 4.5.0]
