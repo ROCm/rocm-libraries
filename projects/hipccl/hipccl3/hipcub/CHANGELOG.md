@@ -19,14 +19,14 @@ See README.md on how to build the hipCUB documentation using Doxygen.
 ### Changed
 - Packaging changed to a development package (called hipcub-dev for `.deb` packages, and hipcub-devel for `.rpm` packages). As hipCUB is a header-only library, there is no runtime package. To aid in the transition, the development package sets the "provides" field to provide the package hipcub, so that existing packages depending on hipcub can continue to work. This provides feature is introduced as a deprecated feature and will be removed in a future ROCm release.
 
-## [Unreleased hipCUB-2.10.11 for ROCm 4.4.0]
+## [hipCUB-2.10.11 for ROCm 4.4.0]
 ### Added
 - gfx1030 support added.
 - Address Sanitizer build option
 ### Fixed
 - BlockRadixRank unit test failure fixed.
 
-## [Unreleased hipCUB-2.10.10 for ROCm 4.3.0]
+## [hipCUB-2.10.10 for ROCm 4.3.0]
 ### Added
 - DiscardOutputIterator to backend header
 
