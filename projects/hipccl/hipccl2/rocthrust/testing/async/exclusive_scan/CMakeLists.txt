@@ -31,7 +31,7 @@ function(add_thrust_test_exclusive TEST)
         PROPERTIES
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/testing/"
     )
-    add_test(${TEST} ${TEST_TARGET})
+    add_test(NAME ${TEST} COMMAND ${TEST_TARGET})
     set_tests_properties(${TEST}
         PROPERTIES
             LABELS upstream

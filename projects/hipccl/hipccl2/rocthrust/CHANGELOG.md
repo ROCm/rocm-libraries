@@ -6,6 +6,7 @@ Full documentation for rocThrust is available at [https://rocthrust.readthedocs.
 ### Added
 - Updated to match upstream Thrust 1.13.0
 - Updated to match upstream Thrust 1.14.0
+- Updated to match upstream Thrust 1.15.0
 - Added async scan
 ### Changed
 - Scan algorithms: `inclusive_scan` now uses the input-type as accumulator-type, `exclusive_scan` uses initial-value-type.
