@@ -62,8 +62,7 @@ typedef ::testing::Types<
     DeviceSelectParams<int8_t, int8_t>,
     DeviceSelectParams<uint8_t, uint8_t>,
     DeviceSelectParams<rocprim::half, rocprim::half>,
-    //TODO: Disable bfloat16 test until the follwing PR merge: https://github.com/ROCm-Developer-Tools/HIP/pull/2303
-    //DeviceSelectParams<rocprim::bfloat16, rocprim::bfloat16>,
+    DeviceSelectParams<rocprim::bfloat16, rocprim::bfloat16>,
     DeviceSelectParams<unsigned char, float, int, true>,
     DeviceSelectParams<double, double, int, true>,
     DeviceSelectParams<test_utils::custom_test_type<double>, test_utils::custom_test_type<double>, int, true>
@@ -212,7 +211,7 @@ TYPED_TEST(RocprimDeviceSelectTests, Flagged)
                 )
             );
             HIP_CHECK(hipDeviceSynchronize());
-            ASSERT_NO_FATAL_FAILURE(test_utils::custom_assert_eq(output, expected, expected.size()));
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected, expected.size()));
 
             hipFree(d_input);
             hipFree(d_flags);
@@ -381,7 +380,7 @@ TYPED_TEST(RocprimDeviceSelectTests, SelectOp)
                 )
             );
             HIP_CHECK(hipDeviceSynchronize());
-            ASSERT_NO_FATAL_FAILURE(test_utils::custom_assert_eq(output, expected, expected.size()));
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected, expected.size()));
 
             hipFree(d_input);
             hipFree(d_output);
@@ -596,7 +595,7 @@ TYPED_TEST(RocprimDeviceSelectTests, Unique)
                     )
                 );
                 HIP_CHECK(hipDeviceSynchronize());
-                ASSERT_NO_FATAL_FAILURE(test_utils::custom_assert_eq(output, expected, expected.size()));
+                ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected, expected.size()));
 
                 hipFree(d_input);
                 hipFree(d_output);
@@ -773,7 +772,7 @@ TEST(RocprimDeviceSelectTests, UniqueGuardedOperator)
                     )
                 );
                 HIP_CHECK(hipDeviceSynchronize());
-                ASSERT_NO_FATAL_FAILURE(test_utils::custom_assert_eq(output, expected, expected.size()));
+                ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected, expected.size()));
 
                 hipFree(d_input);
                 hipFree(d_flag);

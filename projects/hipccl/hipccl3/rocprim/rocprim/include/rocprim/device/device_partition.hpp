@@ -48,9 +48,9 @@ template<
     class FlagIterator,
     class OutputIterator,
     class SelectedCountOutputIterator,
-    class UnaryPredicate,
     class InequalityOp,
-    class OffsetLookbackScanState
+    class OffsetLookbackScanState,
+    class... UnaryPredicates
 >
 ROCPRIM_KERNEL
 __launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
@@ -59,17 +59,18 @@ void partition_kernel(InputIterator input,
                       OutputIterator output,
                       SelectedCountOutputIterator selected_count_output,
                       const size_t size,
-                      UnaryPredicate predicate,
                       InequalityOp inequality_op,
                       OffsetLookbackScanState offset_scan_state,
                       const unsigned int number_of_blocks,
-                      ordered_block_id<unsigned int> ordered_bid)
+                      ordered_block_id<unsigned int> ordered_bid,
+                      UnaryPredicates... predicates)
 {
     partition_kernel_impl<SelectMethod, OnlySelected, Config>(
-        input, flags, output, selected_count_output, size, predicate,
-        inequality_op, offset_scan_state, number_of_blocks, ordered_bid
+        input, flags, output, selected_count_output, size, inequality_op,
+        offset_scan_state, number_of_blocks, ordered_bid, predicates...
     );
 }
+
 
 template<class OffsetLookBackScanState>
 ROCPRIM_KERNEL
@@ -115,12 +116,13 @@ template<
      // if true, it doesn't copy rejected values to output
     bool OnlySelected,
     class Config,
+    class OffsetT,
     class InputIterator,
     class FlagIterator,
     class OutputIterator,
-    class UnaryPredicate,
     class InequalityOp,
-    class SelectedCountOutputIterator
+    class SelectedCountOutputIterator,
+    class... UnaryPredicates
 >
 inline
 hipError_t partition_impl(void * temporary_storage,
@@ -130,12 +132,12 @@ hipError_t partition_impl(void * temporary_storage,
                           OutputIterator output,
                           SelectedCountOutputIterator selected_count_output,
                           const size_t size,
-                          UnaryPredicate predicate,
                           InequalityOp inequality_op,
                           const hipStream_t stream,
-                          bool debug_synchronous)
+                          bool debug_synchronous,
+                          UnaryPredicates... predicates)
 {
-    using offset_type = unsigned int;
+    using offset_type = OffsetT;
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
 
     // Get default config if Config is default_config
@@ -230,25 +232,21 @@ hipError_t partition_impl(void * temporary_storage,
     {
         hipLaunchKernelGGL(
             HIP_KERNEL_NAME(partition_kernel<
-                SelectMethod, OnlySelected, config,
-                InputIterator, FlagIterator, OutputIterator, SelectedCountOutputIterator,
-                UnaryPredicate, InequalityOp, offset_scan_state_with_sleep_type
+                SelectMethod, OnlySelected, config
             >),
             dim3(grid_size), dim3(block_size), 0, stream,
-            input, flags, output, selected_count_output, size, predicate,
-            inequality_op, offset_scan_state_with_sleep, number_of_blocks, ordered_bid
+            input, flags, output, selected_count_output, size, inequality_op,
+            offset_scan_state_with_sleep, number_of_blocks, ordered_bid, predicates...
         );
     } else
     {
         hipLaunchKernelGGL(
             HIP_KERNEL_NAME(partition_kernel<
-                SelectMethod, OnlySelected, config,
-                InputIterator, FlagIterator, OutputIterator, SelectedCountOutputIterator,
-                UnaryPredicate, InequalityOp, offset_scan_state_type
+                SelectMethod, OnlySelected, config
             >),
             dim3(grid_size), dim3(block_size), 0, stream,
-            input, flags, output, selected_count_output, size, predicate,
-            inequality_op, offset_scan_state, number_of_blocks, ordered_bid
+            input, flags, output, selected_count_output, size, inequality_op,
+            offset_scan_state, number_of_blocks, ordered_bid, predicates...
         );
     }
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("partition_kernel", size, start)
@@ -362,10 +360,11 @@ hipError_t partition(void * temporary_storage,
     using unary_predicate_type = ::rocprim::empty_type;
     // Dummy inequality operation
     using inequality_op_type = ::rocprim::empty_type;
+    using offset_type = unsigned int;
 
-    return detail::partition_impl<detail::select_method::flag, false, Config>(
+    return detail::partition_impl<detail::select_method::flag, false, Config, offset_type>(
         temporary_storage, storage_size, input, flags, output, selected_count_output,
-        size, unary_predicate_type(), inequality_op_type(), stream, debug_synchronous
+        size, inequality_op_type(), stream, debug_synchronous, unary_predicate_type()
     );
 }
 
@@ -479,10 +478,180 @@ hipError_t partition(void * temporary_storage,
     flag_type * flags = nullptr;
     // Dummy inequality operation
     using inequality_op_type = ::rocprim::empty_type;
+    using offset_type = unsigned int;
 
-    return detail::partition_impl<detail::select_method::predicate, false, Config>(
+    return detail::partition_impl<detail::select_method::predicate, false, Config, offset_type>(
         temporary_storage, storage_size, input, flags, output, selected_count_output,
-        size, predicate, inequality_op_type(), stream, debug_synchronous
+        size, inequality_op_type(), stream, debug_synchronous, predicate
+    );
+}
+
+/// \brief Parallel select primitive for device level using two selection predicates.
+///
+/// Performs a device-wide three-way partition using two selection predicates. Partition copies
+/// the values from \p input to either \p output_first_part or \p output_second_part or
+/// \p output_unselected according to the following criteria:
+/// The value is copied to \p output_first_part if the predicate \p select_first_part_op invoked
+/// with the value returns \p true. It is copied to \p output_second_part if \p select_first_part_op
+/// returns \p false and \p select_second_part_op returns \p true, and it is copied to
+/// \p output_unselected otherwise.
+///
+/// \par Overview
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage is a null pointer.
+/// * Range specified by \p selected_count_output must have at least 2 elements.
+/// * Relative order is preserved for the elements.
+/// * The number of elements written to \p output_first_part is equal to the number of elements
+/// in the input for which \p select_first_part_op returned \p true.
+/// * The number of elements written to \p output_second_part is equal to the number of elements
+/// in the input for which \p select_first_part_op returned \p false and \p select_second_part_op
+/// returned \p true.
+/// * The number of elements written to \p output_unselected is equal to the number of input elements
+/// minus the number of elements written to \p output_first_part minus the number of elements written
+/// to \p output_second_part.
+///
+/// \tparam Config - [optional] configuration of the primitive. It can be \p select_config or
+/// a custom class with the same members.
+/// \tparam InputIterator - random-access iterator type of the input range. It can be
+/// a simple pointer type.
+/// \tparam FirstOutputIterator - random-access iterator type of the first output range. It can be
+/// a simple pointer type.
+/// \tparam SecondOutputIterator - random-access iterator type of the second output range. It can be
+/// a simple pointer type.
+/// \tparam UnselectedOutputIterator - random-access iterator type of the unselected output range.
+/// It can be a simple pointer type.
+/// \tparam SelectedCountOutputIterator - random-access iterator type of the selected_count_output
+/// value. It can be a simple pointer type.
+/// \tparam FirstUnaryPredicate - type of the first unary selection predicate.
+/// \tparam SecondUnaryPredicate - type of the second unary selection predicate.
+///
+/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the select operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] input - iterator to the first element in the range to select values from.
+/// \param [out] output_first_part - iterator to the first element in the first output range.
+/// \param [out] output_second_part - iterator to the first element in the second output range.
+/// \param [out] output_unselected - iterator to the first element in the unselected output range.
+/// \param [out] selected_count_output - iterator to the total number of selected values in
+/// \p output_first_part and \p output_second_part respectively.
+/// \param [in] size - number of element in the input range.
+/// \param [in] select_first_part_op - unary function object which returns \p true if the element
+/// should be in \p output_first_part range
+/// The signature of the function should be equivalent to the following:
+/// <tt>bool f(const T &a);</tt>. The signature does not need to have
+/// <tt>const &</tt>, but function object must not modify the object passed to it.
+/// \param [in] select_second_part_op - unary function object which returns \p true if the element
+/// should be in \p output_second_part range (given that \p select_first_part_op returned \p false)
+/// The signature of the function should be equivalent to the following:
+/// <tt>bool f(const T &a);</tt>. The signature does not need to have
+/// <tt>const &</tt>, but function object must not modify the object passed to it.
+/// \param [in] stream - [optional] HIP stream object. The default is \p 0 (default stream).
+/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. The default value is \p false.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level three-way partition operation is performed on an array of
+/// integer values, even values are copied to the first partition, odd and 3-divisible values
+/// are copied to the second partition, and the rest of the values are copied to the
+/// unselected partition
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// auto first_predicate =
+///     [] __device__ (int a) -> bool
+///     {
+///         return (a%2) == 0;
+///     };
+/// auto second_predicate =
+///     [] __device__ (int a) -> bool
+///     {
+///         return (a%3) == 0;
+///     };
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// size_t input_size;          // e.g., 8
+/// int * input;                // e.g., [1, 2, 3, 4, 5, 6, 7, 8]
+/// int * output_first_part;    // array of 8 elements
+/// int * output_second_part;   // array of 8 elements
+/// int * output_unselected;    // array of 8 elements
+/// size_t * output_count;      // array of 2 elements
+///
+/// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
+/// // Get required size of the temporary storage
+/// rocprim::partition_three_way(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input,
+///     output_first_part, output_second_part, output_unselected,
+///     output_count,
+///     input_size,
+///     first_predicate,
+///     second_predicate
+/// );
+///
+/// // allocate temporary storage
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
+///
+/// // perform partition
+/// rocprim::partition_three_way(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input,
+///     output_first_part, output_second_part, output_unselected,
+///     output_count,
+///     input_size,
+///     first_predicate,
+///     second_predicate
+/// );
+/// // elements denoted by '*' were not modified
+/// // output_first_part:  [2, 4, 6, 8, *, *, *, *]
+/// // output_second_part: [3, *, *, *, *, *, *, *]
+/// // output_unselected:  [1, 5, 7, *, *, *, *, *]
+/// // output_count:       [4, 1]
+/// \endcode
+/// \endparblock
+template <
+    class Config = default_config,
+    typename InputIterator,
+    typename FirstOutputIterator,
+    typename SecondOutputIterator,
+    typename UnselectedOutputIterator,
+    typename SelectedCountOutputIterator,
+    typename FirstUnaryPredicate,
+    typename SecondUnaryPredicate>
+inline
+hipError_t partition_three_way(void * temporary_storage,
+                               size_t& storage_size,
+                               InputIterator input,
+                               FirstOutputIterator output_first_part,
+                               SecondOutputIterator output_second_part,
+                               UnselectedOutputIterator output_unselected,
+                               SelectedCountOutputIterator selected_count_output,
+                               const size_t size,
+                               FirstUnaryPredicate select_first_part_op,
+                               SecondUnaryPredicate select_second_part_op,
+                               const hipStream_t stream = 0,
+                               const bool debug_synchronous = false)
+{
+    // Dummy flag type
+    using flag_type = ::rocprim::empty_type;
+    flag_type * flags = nullptr;
+    // Dummy inequality operation
+    using inequality_op_type = ::rocprim::empty_type;
+    using offset_type = uint2;
+    using output_iterator_tuple = tuple<
+        FirstOutputIterator,
+        SecondOutputIterator,
+        UnselectedOutputIterator>;
+
+    output_iterator_tuple output{ output_first_part, output_second_part, output_unselected };
+
+    return detail::partition_impl<detail::select_method::predicate, false, Config, offset_type>(
+        temporary_storage, storage_size, input, flags, output, selected_count_output,
+        size, inequality_op_type(), stream, debug_synchronous,
+        select_first_part_op, select_second_part_op
     );
 }
 

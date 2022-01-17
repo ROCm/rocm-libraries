@@ -7,6 +7,7 @@ Full documentation for rocPRIM is available at [https://codedocs.xyz/ROCmSoftwar
 - Fixed radix sort int64_t bug introduced in [2.10.11]
 ### Added
 - Future value
+- Added device partition_three_way to partition input to three output iterators based on two predicates
 ### Changed
 - The reduce/scan algorithm precision issues in the tests has been resolved for half types.
 ### Known issues

@@ -70,8 +70,7 @@ typedef ::testing::Types<
     params<custom_int2, custom_short2, rocprim::maximum<custom_int2>, 10, 1000, 10000>,
     params<float, double, rocprim::maximum<double>, 50, 2, 10>,
     params<float, float, rocprim::plus<float>, 123, 100, 200, true>,
-    //TODO: Disable bfloat16 test until the follwing PR merge: https://github.com/ROCm-Developer-Tools/HIP/pull/2303
-    //params<rocprim::bfloat16, float, rocprim::plus<float>, 0, 10, 300, true>,
+    params<rocprim::bfloat16, float, rocprim::plus<rocprim::bfloat16>, 0, 10, 300, true>,
     params<rocprim::bfloat16, rocprim::bfloat16, test_utils::bfloat16_minimum, 0, 1000, 30000>,
 #ifndef __HIP__
     // hip-clang does not allow to convert half to float
@@ -108,7 +107,19 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScan)
     using scan_op_type = typename TestFixture::params::scan_op_type;
     static constexpr bool use_identity_iterator =
         TestFixture::params::use_identity_iterator;
-    using result_type = input_type;
+
+    // use double for accumulation of bfloat16 and half inputs on host-side if operator is rocprim::plus
+    using is_plus_op            = test_utils::is_plus_operator<scan_op_type>;
+    using is_plus_op_value_type = typename is_plus_op::value_type;
+    using scan_op_type_host     = typename std::conditional<
+        is_plus_op::value,
+        typename test_utils::select_plus_operator_host<is_plus_op_value_type>::type,
+        scan_op_type>::type;
+    using acc_type = typename std::conditional<
+        is_plus_op::value,
+        typename test_utils::select_plus_operator_host<input_type>::acc_type,
+        input_type>::type;
+    scan_op_type_host scan_op_host;
 
     using offset_type = unsigned int;
     const bool debug_synchronous = false;
@@ -153,12 +164,12 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScan)
                 offsets.push_back(offset);
 
                 const size_t end = std::min(size, offset + segment_length);
-                result_type aggregate = values_input[offset];
+                acc_type aggregate = values_input[offset];
                 values_expected[offset] = aggregate;
                 for(size_t i = offset + 1; i < end; i++)
                 {
-                    aggregate = scan_op(aggregate, values_input[i]);
-                    values_expected[i] = aggregate;
+                    aggregate = scan_op_host(aggregate, values_input[i]);
+                    values_expected[i] = static_cast<output_type>(aggregate);
                 }
 
                 segments_count++;
@@ -228,7 +239,7 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScan)
             );
             HIP_CHECK(hipDeviceSynchronize());
 
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(values_output, values_expected, test_utils::precision_threshold<output_type>::percentage));
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(values_output, values_expected, test_utils::precision_threshold<input_type>::percentage));
 
             HIP_CHECK(hipFree(d_temporary_storage));
             HIP_CHECK(hipFree(d_values_input));
@@ -250,7 +261,20 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScan)
     using scan_op_type = typename TestFixture::params::scan_op_type;
     static constexpr bool use_identity_iterator =
         TestFixture::params::use_identity_iterator;
-    using result_type = input_type;
+
+    // use double for accumulation of bfloat16 and half inputs on host-side if operator is rocprim::plus
+    using is_plus_op            = test_utils::is_plus_operator<scan_op_type>;
+    using is_plus_op_value_type = typename is_plus_op::value_type;
+    using scan_op_type_host     = typename std::conditional<
+        is_plus_op::value,
+        typename test_utils::select_plus_operator_host<is_plus_op_value_type>::type,
+        scan_op_type>::type;
+    using acc_type = typename std::conditional<
+        is_plus_op::value,
+        typename test_utils::select_plus_operator_host<input_type>::acc_type,
+        input_type>::type;
+    scan_op_type_host scan_op_host;
+
     using offset_type = unsigned int;
 
     const input_type init = input_type{TestFixture::params::init};
@@ -296,12 +320,12 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScan)
                 offsets.push_back(offset);
 
                 const size_t end = std::min(size, offset + segment_length);
-                result_type aggregate = init;
+                acc_type aggregate = init;
                 values_expected[offset] = aggregate;
                 for(size_t i = offset + 1; i < end; i++)
                 {
-                    aggregate = scan_op(aggregate, values_input[i-1]);
-                    values_expected[i] = aggregate;
+                    aggregate = scan_op_host(aggregate, values_input[i-1]);
+                    values_expected[i] = static_cast<output_type>(aggregate);
                 }
 
                 segments_count++;
@@ -372,7 +396,7 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScan)
             );
             HIP_CHECK(hipDeviceSynchronize());
 
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(values_output, values_expected, test_utils::precision_threshold<output_type>::percentage));
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(values_output, values_expected, test_utils::precision_threshold<input_type>::percentage));
 
             HIP_CHECK(hipFree(d_temporary_storage));
             HIP_CHECK(hipFree(d_values_input));
@@ -394,6 +418,22 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScanUsingHeadFlags)
     using flag_type = unsigned int;
     using output_type = typename TestFixture::params::output_type;
     using scan_op_type = typename TestFixture::params::scan_op_type;
+
+    // scan function
+    scan_op_type scan_op;
+    // use double for accumulation of bfloat16 and half inputs on host-side if operator is rocprim::plus
+    using is_plus_op            = test_utils::is_plus_operator<scan_op_type>;
+    using is_plus_op_value_type = typename is_plus_op::value_type;
+    using scan_op_type_host     = typename std::conditional<
+        is_plus_op::value,
+        typename test_utils::select_plus_operator_host<is_plus_op_value_type>::type,
+        scan_op_type>::type;
+    using acc_type = typename std::conditional<
+        is_plus_op::value,
+        typename test_utils::select_plus_operator_host<input_type>::acc_type,
+        input_type>::type;
+    scan_op_type_host scan_op_host;
+
     const bool debug_synchronous = false;
 
     hipStream_t stream = 0; // default stream
@@ -448,35 +488,10 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScanUsingHeadFlags)
             );
             HIP_CHECK(hipDeviceSynchronize());
 
-            // scan function
-            scan_op_type scan_op;
-
             // Calculate expected results on host
             std::vector<output_type> expected(input.size());
-            std::partial_sum(
-                rocprim::make_zip_iterator(
-                    rocprim::make_tuple(input.begin(), flags.begin())
-                ),
-                rocprim::make_zip_iterator(
-                    rocprim::make_tuple(input.end(), flags.end())
-                ),
-                rocprim::make_zip_iterator(
-                    rocprim::make_tuple(expected.begin(), rocprim::make_discard_iterator())
-                ),
-                [scan_op](const rocprim::tuple<output_type, flag_type>& t1,
-                        const rocprim::tuple<output_type, flag_type>& t2)
-                    -> rocprim::tuple<output_type, flag_type>
-                {
-                    if(!rocprim::get<1>(t2))
-                    {
-                        return rocprim::make_tuple(
-                            scan_op(rocprim::get<0>(t1), rocprim::get<0>(t2)),
-                            rocprim::get<1>(t1) + rocprim::get<1>(t2)
-                        );
-                    }
-                    return t2;
-                }
-            );
+
+            test_utils::host_inclusive_segmented_scan_headflags<acc_type>(input.begin(), input.end(), flags.begin(), expected.begin(), scan_op_host);
 
             // temp storage
             size_t temp_storage_size_bytes;
@@ -521,10 +536,7 @@ TYPED_TEST(RocprimDeviceSegmentedScan, InclusiveScanUsingHeadFlags)
             );
             HIP_CHECK(hipDeviceSynchronize());
 
-            float multiplier = 1;
-            if(std::is_same<scan_op_type,rocprim::plus<float>>::value)
-                multiplier = 100;
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected, multiplier*test_utils::precision_threshold<output_type>::percentage));
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected, test_utils::precision_threshold<input_type>::percentage));
 
             HIP_CHECK(hipFree(d_temp_storage));
             HIP_CHECK(hipFree(d_input));
@@ -547,6 +559,22 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScanUsingHeadFlags)
     using output_type = typename TestFixture::params::output_type;
     using scan_op_type = typename TestFixture::params::scan_op_type;
     const input_type init = input_type{TestFixture::params::init};
+
+    // scan function
+    scan_op_type scan_op;
+    // use double for accumulation of bfloat16 and half inputs on host-side if operator is rocprim::plus
+    using is_plus_op            = test_utils::is_plus_operator<scan_op_type>;
+    using is_plus_op_value_type = typename is_plus_op::value_type;
+    using scan_op_type_host     = typename std::conditional<
+        is_plus_op::value,
+        typename test_utils::select_plus_operator_host<is_plus_op_value_type>::type,
+        scan_op_type>::type;
+    using acc_type = typename std::conditional<
+        is_plus_op::value,
+        typename test_utils::select_plus_operator_host<input_type>::acc_type,
+        input_type>::type;
+    scan_op_type_host scan_op_host;
+
     const bool debug_synchronous = false;
 
     hipStream_t stream = 0; // default stream
@@ -601,67 +629,10 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScanUsingHeadFlags)
             );
             HIP_CHECK(hipDeviceSynchronize());
 
-            // scan function
-            scan_op_type scan_op;
-
             // Calculate expected results on host
             std::vector<output_type> expected(input.size());
-            // Modify input to perform exclusive operation on initial input.
-            // This shifts input one to the right and initializes segments with init.
-            if( size != 0 )
-                expected[0] = init;
 
-            if( size != 0 )
-            {
-                std::transform(
-                    rocprim::make_zip_iterator(
-                        rocprim::make_tuple(input.begin(), flags.begin()+1)
-                    ),
-                    rocprim::make_zip_iterator(
-                        rocprim::make_tuple(input.end() - 1, flags.end())
-                    ),
-                    rocprim::make_zip_iterator(
-                        rocprim::make_tuple(expected.begin() + 1, rocprim::make_discard_iterator())
-                    ),
-                    [init](const rocprim::tuple<input_type, flag_type>& t)
-                        -> rocprim::tuple<input_type, flag_type>
-                    {
-                        if(rocprim::get<1>(t))
-                        {
-                            return rocprim::make_tuple(
-                                init,
-                                rocprim::get<1>(t)
-                            );
-                        }
-                        return t;
-                    }
-                );
-            }
-            // Now we can run inclusive scan and get segmented exclusive results
-            std::partial_sum(
-                rocprim::make_zip_iterator(
-                    rocprim::make_tuple(expected.begin(), flags.begin())
-                ),
-                rocprim::make_zip_iterator(
-                    rocprim::make_tuple(expected.end(), flags.end())
-                ),
-                rocprim::make_zip_iterator(
-                    rocprim::make_tuple(expected.begin(), rocprim::make_discard_iterator())
-                ),
-                [scan_op](const rocprim::tuple<output_type, flag_type>& t1,
-                          const rocprim::tuple<output_type, flag_type>& t2)
-                    -> rocprim::tuple<output_type, flag_type>
-                {
-                    if(!rocprim::get<1>(t2))
-                    {
-                        return rocprim::make_tuple(
-                            static_cast<input_type>(scan_op(rocprim::get<0>(t1), rocprim::get<0>(t2))),
-                            rocprim::get<1>(t1) + rocprim::get<1>(t2)
-                        );
-                    }
-                    return t2;
-                }
-            );
+            test_utils::host_exclusive_segmented_scan_headflags(input.begin(), input.end(), flags.begin(), expected.begin(), scan_op_host, acc_type(init));
 
             // temp storage
             size_t temp_storage_size_bytes;
@@ -703,10 +674,8 @@ TYPED_TEST(RocprimDeviceSegmentedScan, ExclusiveScanUsingHeadFlags)
                 )
             );
             HIP_CHECK(hipDeviceSynchronize());
-            float multiplier = 1;
-            if(std::is_same<scan_op_type,rocprim::plus<float>>::value)
-                multiplier = 100;
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected, multiplier*test_utils::precision_threshold<output_type>::percentage));
+
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected, test_utils::precision_threshold<input_type>::percentage));
 
             HIP_CHECK(hipFree(d_temp_storage));
             HIP_CHECK(hipFree(d_input));

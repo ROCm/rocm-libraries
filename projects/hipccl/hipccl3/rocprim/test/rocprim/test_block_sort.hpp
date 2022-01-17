@@ -20,6 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include "test_utils_sort_comparator.hpp"
 block_sort_test_suite_type_def(suite_name, name_suffix)
 
 typed_test_suite_def(suite_name, name_suffix, block_params);
@@ -243,7 +244,7 @@ typed_test_def(suite_name, name_suffix, CustomSortKeyValue)
             std::sort(
                 expected.begin() + (i * block_size),
                 expected.begin() + ((i + 1) * block_size),
-                key_value_comparator<key_type, value_type>()
+                test_utils::key_value_comparator<key_type, value_type, true, 0, sizeof(key_type)*8>()
             );
         }
 

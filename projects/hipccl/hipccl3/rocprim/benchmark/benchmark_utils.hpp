@@ -263,4 +263,17 @@ inline auto get_random_data(size_t size, T min, T max, size_t max_random_size = 
     return data;
 }
 
+bool is_warp_size_supported(const unsigned int required_warp_size)
+{
+    return ::rocprim::host_warp_size() >= required_warp_size;
+}
+
+template<unsigned int LogicalWarpSize>
+struct DeviceSelectWarpSize
+{
+    static constexpr unsigned int value = ::rocprim::device_warp_size() >= LogicalWarpSize
+        ? LogicalWarpSize
+        : ::rocprim::device_warp_size();
+};
+
 #endif // ROCPRIM_BENCHMARK_UTILS_HPP_

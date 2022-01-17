@@ -90,16 +90,6 @@ void sort_key_value_kernel(key_type * device_key_output, value_type * device_val
     device_value_output[index] = value;
 }
 
-template<class Key, class Value>
-struct key_value_comparator
-{
-    using greater_key = typename test_utils::select_greater_operator<Key>::type;
-    bool operator()(const std::pair<Key, Value>& lhs, const std::pair<Key, Value>& rhs)
-    {
-        return greater_key()(lhs.first, rhs.first);
-    }
-};
-
 template<
     unsigned int BlockSize,
     class key_type,

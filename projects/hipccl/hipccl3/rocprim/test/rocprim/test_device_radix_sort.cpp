@@ -27,7 +27,7 @@
 
 // required test headers
 #include "test_utils_types.hpp"
-#include "test_sort_comparator.hpp"
+#include "test_utils_sort_comparator.hpp"
 
 template<
     class Key,
@@ -146,6 +146,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeys)
             if(rocprim::is_floating_point<key_type>::value)
             {
                 keys_input = test_utils::get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000, seed_value);
+                test_utils::add_special_values(keys_input, seed_value);
             }
             else
             {
@@ -155,33 +156,6 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeys)
                     std::numeric_limits<key_type>::max(),
                     seed_index
                 );
-            }
-            // put +0.0 and -0.0
-            if( std::is_same<float, key_type>::value || std::is_same<double, key_type>::value )
-            {
-                if(size >= 1) keys_input[0] = key_type( 0.0);
-                if(size >= 2) keys_input[1] = key_type(-0.0);
-                if(size >= 3) keys_input[2] = key_type( 0.0);
-                if(size >= 4) keys_input[3] = std::numeric_limits<key_type>::signaling_NaN();
-
-                if( size > 20ul )
-                {
-                    keys_input[size / 2 + 1] = std::numeric_limits<key_type>::signaling_NaN();
-                    keys_input[size / 2 + 2] = std::numeric_limits<key_type>::signaling_NaN();
-                    keys_input[size / 2 + 3] = std::numeric_limits<key_type>::signaling_NaN();
-                    keys_input[size / 2 + 4] = std::numeric_limits<key_type>::signaling_NaN();
-                    keys_input[size / 2 + 5] = std::numeric_limits<key_type>::signaling_NaN();
-                }
-
-
-                if( size > 100ul )
-                {
-                    keys_input[size / 3 + 1] = std::numeric_limits<key_type>::signaling_NaN();
-                    keys_input[size / 3 + 2] = std::numeric_limits<key_type>::signaling_NaN();
-                    keys_input[size / 3 + 3] = std::numeric_limits<key_type>::signaling_NaN();
-                    keys_input[size / 3 + 4] = std::numeric_limits<key_type>::signaling_NaN();
-                    keys_input[size / 3 + 5] = std::numeric_limits<key_type>::signaling_NaN();
-                }
             }
 
             key_type * d_keys_input;
@@ -205,7 +179,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeys)
 
             // Calculate expected results on host
             std::vector<key_type> expected(keys_input);
-            std::stable_sort(expected.begin(), expected.end(), key_comparator<key_type, descending, start_bit, end_bit>());
+            std::stable_sort(expected.begin(), expected.end(), test_utils::key_comparator<key_type, descending, start_bit, end_bit>());
 
             // Use custom config
             using config = rocprim::radix_sort_config<8, 5, rocprim::kernel_config<256, 3>, rocprim::kernel_config<256, 8>>;
@@ -263,10 +237,9 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeys)
                 HIP_CHECK(hipFree(d_keys_output));
             }
 
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected));
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_bit_eq(keys_output, expected));
         }
     }
-
 }
 
 TYPED_TEST(RocprimDeviceRadixSort, SortPairs)
@@ -311,6 +284,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairs)
             if(rocprim::is_floating_point<key_type>::value)
             {
                 keys_input = test_utils::get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000, seed_value);
+                test_utils::add_special_values(keys_input, seed_value);
             }
             else
             {
@@ -320,14 +294,6 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairs)
                     std::numeric_limits<key_type>::max(),
                     seed_index
                 );
-            }
-
-            if( std::is_same<float, key_type>::value || std::is_same<double, key_type>::value )
-            {
-                if(size >= 1) keys_input[0] = key_type( 0.0);
-                if(size >= 2) keys_input[1] = key_type(-0.0);
-                if(size >= 3) keys_input[2] = key_type( 0.0);
-                if(size >= 4) keys_input[3] = std::numeric_limits<key_type>::signaling_NaN();
             }
 
             std::vector<value_type> values_input(size);
@@ -381,7 +347,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairs)
             }
             std::stable_sort(
                 expected.begin(), expected.end(),
-                key_value_comparator<key_type, value_type, descending, start_bit, end_bit>()
+                test_utils::key_value_comparator<key_type, value_type, descending, start_bit, end_bit>()
             );
             std::vector<key_type> keys_expected(size);
             std::vector<value_type> values_expected(size);
@@ -456,8 +422,8 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairs)
                 HIP_CHECK(hipFree(d_values_output));
             }
 
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, keys_expected));
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(values_output, values_expected));
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_bit_eq(keys_output, keys_expected));
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_bit_eq(values_output, values_expected));
         }
     }
 
@@ -501,6 +467,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeysDoubleBuffer)
             if(rocprim::is_floating_point<key_type>::value)
             {
                 keys_input = test_utils::get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000, seed_value);
+                test_utils::add_special_values(keys_input, seed_value);
             }
             else
             {
@@ -526,7 +493,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeysDoubleBuffer)
 
             // Calculate expected results on host
             std::vector<key_type> expected(keys_input);
-            std::stable_sort(expected.begin(), expected.end(), key_comparator<key_type, descending, start_bit, end_bit>());
+            std::stable_sort(expected.begin(), expected.end(), test_utils::key_comparator<key_type, descending, start_bit, end_bit>());
 
             rocprim::double_buffer<key_type> d_keys(d_keys_input, d_keys_output);
 
@@ -581,7 +548,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeysDoubleBuffer)
             HIP_CHECK(hipFree(d_keys_input));
             HIP_CHECK(hipFree(d_keys_output));
 
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected));
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_bit_eq(keys_output, expected));
         }
     }
 
@@ -626,6 +593,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairsDoubleBuffer)
             if(rocprim::is_floating_point<key_type>::value)
             {
                 keys_input = test_utils::get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000, seed_value);
+                test_utils::add_special_values(keys_input, seed_value);
             }
             else
             {
@@ -674,7 +642,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairsDoubleBuffer)
             }
             std::stable_sort(
                 expected.begin(), expected.end(),
-                key_value_comparator<key_type, value_type, descending, start_bit, end_bit>()
+                test_utils::key_value_comparator<key_type, value_type, descending, start_bit, end_bit>()
             );
             std::vector<key_type> keys_expected(size);
             std::vector<value_type> values_expected(size);
@@ -749,8 +717,8 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairsDoubleBuffer)
             HIP_CHECK(hipFree(d_values_input));
             HIP_CHECK(hipFree(d_values_output));
 
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, keys_expected));
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(values_output, values_expected));
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_bit_eq(keys_output, keys_expected));
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_bit_eq(values_output, values_expected));
         }
     }
 }

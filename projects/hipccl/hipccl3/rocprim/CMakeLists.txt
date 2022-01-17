@@ -101,8 +101,6 @@ if(NOT USE_HIP_CPU)
   find_package(hip REQUIRED CONFIG PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm)
 endif()
 # Build options
-# Disable -Werror
-option(DISABLE_WERROR "Disable building with Werror" ON)
 option(BUILD_TEST "Build tests (requires googletest)" OFF)
 option(BUILD_BENCHMARK "Build benchmarks" OFF)
 option(BUILD_EXAMPLE "Build examples" OFF)

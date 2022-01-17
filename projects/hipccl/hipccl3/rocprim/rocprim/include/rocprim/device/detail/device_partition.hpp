@@ -327,6 +327,63 @@ auto partition_block_load_flags(InputIterator block_predecessor,
 }
 
 template<
+    select_method SelectMethod,
+    unsigned int BlockSize,
+    class BlockLoadFlagsType,
+    class BlockDiscontinuityType,
+    class InputIterator,
+    class FlagIterator,
+    class ValueType,
+    unsigned int ItemsPerThread,
+    class FirstUnaryPredicate,
+    class SecondUnaryPredicate,
+    class InequalityOp,
+    class StorageType
+>
+ROCPRIM_DEVICE ROCPRIM_INLINE
+void partition_block_load_flags(InputIterator /*block_predecessor*/,
+                                FlagIterator /* block_flags */,
+                                ValueType (&values)[ItemsPerThread],
+                                bool (&is_selected)[2][ItemsPerThread],
+                                FirstUnaryPredicate select_first_part_op,
+                                SecondUnaryPredicate select_second_part_op,
+                                InequalityOp /*inequality_op*/,
+                                StorageType& /*storage*/,
+                                const unsigned int /*block_id*/,
+                                const unsigned int block_thread_id,
+                                const bool is_last_block,
+                                const unsigned int valid_in_last_block)
+{
+    if(is_last_block)
+    {
+        const auto offset = block_thread_id * ItemsPerThread;
+        ROCPRIM_UNROLL
+        for(unsigned int i = 0; i < ItemsPerThread; i++)
+        {
+            if((offset + i) < valid_in_last_block)
+            {
+                is_selected[0][i] = select_first_part_op(values[i]);
+                is_selected[1][i] = !is_selected[0][i] && select_second_part_op(values[i]);
+            }
+            else
+            {
+                is_selected[0][i] = false;
+                is_selected[1][i] = false;
+            }
+        }
+    }
+    else
+    {
+        ROCPRIM_UNROLL
+        for(unsigned int i = 0; i < ItemsPerThread; i++)
+        {
+            is_selected[0][i] = select_first_part_op(values[i]);
+            is_selected[1][i] = !is_selected[0][i] && select_second_part_op(values[i]);
+        }
+    }
+}
+
+template<
     bool OnlySelected,
     unsigned int BlockSize,
     class ValueType,
@@ -455,6 +512,141 @@ auto partition_scatter(ValueType (&values)[ItemsPerThread],
 }
 
 template<
+    bool OnlySelected,
+    unsigned int BlockSize,
+    class ValueType,
+    unsigned int ItemsPerThread,
+    class OffsetType,
+    class OutputType,
+    class ScatterStorageType
+>
+ROCPRIM_DEVICE ROCPRIM_INLINE
+void partition_scatter(ValueType (&values)[ItemsPerThread],
+                       bool (&is_selected)[2][ItemsPerThread],
+                       OffsetType (&output_indices)[ItemsPerThread],
+                       OutputType output,
+                       const size_t /*size*/,
+                       const OffsetType selected_prefix,
+                       const OffsetType selected_in_block,
+                       ScatterStorageType& storage,
+                       const unsigned int flat_block_id,
+                       const unsigned int flat_block_thread_id,
+                       const bool is_last_block,
+                       const unsigned int valid_in_last_block)
+{
+    constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
+    auto scatter_storage = storage.get();
+
+    ROCPRIM_UNROLL
+    for(unsigned int i = 0; i < ItemsPerThread; i++)
+    {
+        const unsigned int first_selected_item_index = output_indices[i].x - selected_prefix.x;
+        const unsigned int second_selected_item_index = output_indices[i].y - selected_prefix.y
+            + selected_in_block.x;
+        unsigned int scatter_index{};
+
+        if(is_selected[0][i])
+        {
+            scatter_index = first_selected_item_index;
+        }
+        else if(is_selected[1][i])
+        {
+            scatter_index = second_selected_item_index;
+        }
+        else
+        {
+            const unsigned int item_index = (flat_block_thread_id * ItemsPerThread) + i;
+            const unsigned int unselected_item_index = (item_index - first_selected_item_index - second_selected_item_index)
+                + 2*selected_in_block.x + selected_in_block.y;
+            scatter_index = unselected_item_index;
+        }
+        scatter_storage[scatter_index] = values[i];
+    }
+    ::rocprim::syncthreads();
+
+    ROCPRIM_UNROLL
+    for(unsigned int i = 0; i < ItemsPerThread; i++)
+    {
+        const unsigned int item_index = (i * BlockSize) + flat_block_thread_id;
+        if (!is_last_block || item_index < valid_in_last_block)
+        {
+            if(item_index < selected_in_block.x)
+            {
+                get<0>(output)[item_index + selected_prefix.x] = scatter_storage[item_index];
+            }
+            else if(item_index < selected_in_block.x + selected_in_block.y)
+            {
+                get<1>(output)[item_index - selected_in_block.x + selected_prefix.y]
+                    = scatter_storage[item_index];
+            }
+            else
+            {
+                const unsigned int all_items_in_previous_blocks = items_per_block * flat_block_id;
+                const unsigned int unselected_items_in_previous_blocks = all_items_in_previous_blocks
+                    - selected_prefix.x - selected_prefix.y;
+                const unsigned int output_index = item_index + unselected_items_in_previous_blocks
+                    - selected_in_block.x - selected_in_block.y;
+                get<2>(output)[output_index] = scatter_storage[item_index];
+            }
+        }
+    }
+}
+
+template<
+    unsigned int items_per_thread,
+    class offset_type
+>
+ROCPRIM_DEVICE ROCPRIM_INLINE
+void convert_selected_to_indices(offset_type (&output_indices)[items_per_thread],
+                                 bool (&is_selected)[items_per_thread])
+{
+    ROCPRIM_UNROLL
+    for(unsigned int i = 0; i < items_per_thread; i++)
+    {
+        output_indices[i] = is_selected[i] ? 1 : 0;
+    }
+}
+
+template<
+    unsigned int items_per_thread
+>
+ROCPRIM_DEVICE ROCPRIM_INLINE
+void convert_selected_to_indices(uint2 (&output_indices)[items_per_thread],
+                                 bool (&is_selected)[2][items_per_thread])
+{
+    ROCPRIM_UNROLL
+    for(unsigned int i = 0; i < items_per_thread; i++)
+    {
+        output_indices[i].x = is_selected[0][i] ? 1 : 0;
+        output_indices[i].y = is_selected[1][i] ? 1 : 0;
+    }
+}
+
+template<
+    class SelectedCountOutputIterator,
+    class OffsetT
+>
+ROCPRIM_DEVICE ROCPRIM_INLINE
+void store_selected_count(SelectedCountOutputIterator selected_count_output,
+                          const OffsetT selected_prefix,
+                          const OffsetT selected_in_block)
+{
+    selected_count_output[0] = selected_prefix + selected_in_block;
+}
+
+template<
+    class SelectedCountOutputIterator
+>
+ROCPRIM_DEVICE ROCPRIM_INLINE
+void store_selected_count(SelectedCountOutputIterator selected_count_output,
+                          const uint2 selected_prefix,
+                          const uint2 selected_in_block)
+{
+    selected_count_output[0] = selected_prefix.x + selected_in_block.x;
+    selected_count_output[1] = selected_prefix.y + selected_in_block.y;
+}
+
+template<
     select_method SelectMethod,
     bool OnlySelected,
     class Config,
@@ -462,9 +654,9 @@ template<
     class FlagIterator,
     class OutputIterator,
     class SelectedCountOutputIterator,
-    class UnaryPredicate,
     class InequalityOp,
-    class OffsetLookbackScanState
+    class OffsetLookbackScanState,
+    class... UnaryPredicates
 >
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
 void partition_kernel_impl(InputIterator input,
@@ -472,11 +664,11 @@ void partition_kernel_impl(InputIterator input,
                            OutputIterator output,
                            SelectedCountOutputIterator selected_count_output,
                            const size_t size,
-                           UnaryPredicate predicate,
                            InequalityOp inequality_op,
                            OffsetLookbackScanState offset_scan_state,
                            const unsigned int number_of_blocks,
-                           ordered_block_id<unsigned int> ordered_bid)
+                           ordered_block_id<unsigned int> ordered_bid,
+                           UnaryPredicates... predicates)
 {
     constexpr auto block_size = Config::block_size;
     constexpr auto items_per_thread = Config::items_per_thread;
@@ -512,6 +704,11 @@ void partition_kernel_impl(InputIterator input,
     using exchange_storage_type = value_type[items_per_block];
     using raw_exchange_storage_type = typename detail::raw_storage<exchange_storage_type>;
 
+    using is_selected_type = std::conditional_t<
+        sizeof...(UnaryPredicates) == 1,
+        bool[items_per_thread],
+        bool[sizeof...(UnaryPredicates)][items_per_thread]>;
+
     ROCPRIM_SHARED_MEMORY struct
     {
         typename order_bid_type::storage_type ordered_bid;
@@ -531,7 +728,7 @@ void partition_kernel_impl(InputIterator input,
     const auto valid_in_last_block = size - items_per_block * (number_of_blocks - 1);
 
     value_type values[items_per_thread];
-    bool is_selected[items_per_thread];
+    is_selected_type is_selected;
     offset_type output_indices[items_per_thread];
 
     // Load input values into values
@@ -568,7 +765,7 @@ void partition_kernel_impl(InputIterator input,
         flags + block_offset,
         values,
         is_selected,
-        predicate,
+        predicates ...,
         inequality_op,
         storage,
         flat_block_id,
@@ -578,16 +775,12 @@ void partition_kernel_impl(InputIterator input,
     );
 
     // Convert true/false is_selected flags to 0s and 1s
-    ROCPRIM_UNROLL
-    for(unsigned int i = 0; i < items_per_thread; i++)
-    {
-        output_indices[i] = is_selected[i] ? 1 : 0;
-    }
+    convert_selected_to_indices(output_indices, is_selected);
 
     // Number of selected values in previous blocks
-    offset_type selected_prefix = 0;
+    offset_type selected_prefix{};
     // Number of selected values in this block
-    offset_type selected_in_block = 0;
+    offset_type selected_in_block{};
 
     // Calculate number of selected values in block and their indices
     if(flat_block_id == 0)
@@ -596,7 +789,7 @@ void partition_kernel_impl(InputIterator input,
             .exclusive_scan(
                 output_indices,
                 output_indices,
-                offset_type(0), /** initial value */
+                offset_type{}, /** initial value */
                 selected_in_block,
                 storage.scan_offsets,
                 ::rocprim::plus<offset_type>()
@@ -640,7 +833,7 @@ void partition_kernel_impl(InputIterator input,
     // Last block in grid stores number of selected values
     if(flat_block_id == (number_of_blocks - 1) && flat_block_thread_id == 0)
     {
-        selected_count_output[0] = selected_prefix + selected_in_block;
+        store_selected_count(selected_count_output, selected_prefix, selected_in_block);
     }
 }
 
