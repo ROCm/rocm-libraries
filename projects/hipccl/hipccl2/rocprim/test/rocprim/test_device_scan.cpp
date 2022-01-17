@@ -38,7 +38,7 @@
 template<
     class InputType,
     class OutputType = InputType,
-    class ScanOp = ::rocprim::plus<OutputType>,
+    class ScanOp = ::rocprim::plus<InputType>,
     // Tests output iterator with void value_type (OutputIterator concept)
     // scan-by-key primitives don't support output iterator with void value_type
     bool UseIdentityIteratorIfSupported = false,
@@ -89,8 +89,7 @@ typedef ::testing::Types<
     DeviceScanParams<rocprim::half, float>,
 #endif
     DeviceScanParams<rocprim::bfloat16, rocprim::bfloat16, test_utils::bfloat16_maximum>,
-    //TODO: Disable bfloat16 test until the follwing PR merge: https://github.com/ROCm-Developer-Tools/HIP/pull/2303
-    //DeviceScanParams<rocprim::bfloat16, float>,
+    DeviceScanParams<rocprim::bfloat16, float>,
     // Large
     DeviceScanParams<int, double, rocprim::plus<int> >,
     DeviceScanParams<int, double, rocprim::plus<double> >,

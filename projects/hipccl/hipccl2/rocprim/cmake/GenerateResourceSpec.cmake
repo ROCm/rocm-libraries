@@ -109,6 +109,7 @@ while(IT1 LESS COUNT)
   string(REGEX REPLACE [[,$]] "" JSON_PAYLOAD ${JSON_PAYLOAD})
   string(APPEND JSON_PAYLOAD "\n      ],")
   set(IT1 ${IT2})
+  set(IP1 ${IP2})
 endwhile()
 string(REGEX REPLACE [[,$]] "" JSON_PAYLOAD ${JSON_PAYLOAD})
 

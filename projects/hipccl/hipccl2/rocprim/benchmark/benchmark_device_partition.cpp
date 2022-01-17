@@ -103,7 +103,7 @@ void run_flagged_benchmark(benchmark::State& state,
     size_t temp_storage_size_bytes;
 
     // Get size of d_temp_storage
-    rocprim::partition(
+    HIP_CHECK(rocprim::partition(
         nullptr,
         temp_storage_size_bytes,
         d_input,
@@ -112,7 +112,7 @@ void run_flagged_benchmark(benchmark::State& state,
         d_selected_count_output,
         input.size(),
         stream
-    );
+    ));
     HIP_CHECK(hipDeviceSynchronize());
 
     // allocate temporary storage
@@ -123,7 +123,7 @@ void run_flagged_benchmark(benchmark::State& state,
     // Warm-up
     for(size_t i = 0; i < 10; i++)
     {
-        rocprim::partition(
+        HIP_CHECK(rocprim::partition(
             d_temp_storage,
             temp_storage_size_bytes,
             d_input,
@@ -132,7 +132,7 @@ void run_flagged_benchmark(benchmark::State& state,
             d_selected_count_output,
             input.size(),
             stream
-        );
+        ));
     }
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -142,7 +142,7 @@ void run_flagged_benchmark(benchmark::State& state,
         auto start = std::chrono::high_resolution_clock::now();
         for(size_t i = 0; i < batch_size; i++)
         {
-            rocprim::partition(
+            HIP_CHECK(rocprim::partition(
                 d_temp_storage,
                 temp_storage_size_bytes,
                 d_input,
@@ -151,7 +151,7 @@ void run_flagged_benchmark(benchmark::State& state,
                 d_selected_count_output,
                 input.size(),
                 stream
-            );
+            ));
         }
         HIP_CHECK(hipDeviceSynchronize());
 
@@ -178,11 +178,11 @@ void run_if_benchmark(benchmark::State& state,
 {
     auto select_op = [true_probability] __device__ (const T& value) -> bool
     {
-        if(value < T(10000 * true_probability)) return true;
+        if(value < T(127 * true_probability)) return true;
         return false;
     };
 
-    std::vector<T> input = get_random_data<T>(size, T(0), T(10000));
+    std::vector<T> input = get_random_data<T>(size, T(0), T(127));
     T * d_input;
     T * d_output;
     unsigned int * d_selected_count_output;
@@ -201,7 +201,7 @@ void run_if_benchmark(benchmark::State& state,
     size_t temp_storage_size_bytes;
 
     // Get size of d_temp_storage
-    rocprim::partition(
+    HIP_CHECK(rocprim::partition(
         nullptr,
         temp_storage_size_bytes,
         d_input,
@@ -210,7 +210,7 @@ void run_if_benchmark(benchmark::State& state,
         input.size(),
         select_op,
         stream
-    );
+    ));
     HIP_CHECK(hipDeviceSynchronize());
 
     // allocate temporary storage
@@ -221,7 +221,7 @@ void run_if_benchmark(benchmark::State& state,
     // Warm-up
     for(size_t i = 0; i < 10; i++)
     {
-        rocprim::partition(
+        HIP_CHECK(rocprim::partition(
             d_temp_storage,
             temp_storage_size_bytes,
             d_input,
@@ -230,7 +230,7 @@ void run_if_benchmark(benchmark::State& state,
             input.size(),
             select_op,
             stream
-        );
+        ));
     }
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -240,7 +240,7 @@ void run_if_benchmark(benchmark::State& state,
         auto start = std::chrono::high_resolution_clock::now();
         for(size_t i = 0; i < batch_size; i++)
         {
-            rocprim::partition(
+            HIP_CHECK(rocprim::partition(
                 d_temp_storage,
                 temp_storage_size_bytes,
                 d_input,
@@ -249,7 +249,7 @@ void run_if_benchmark(benchmark::State& state,
                 input.size(),
                 select_op,
                 stream
-            );
+            ));
         }
         HIP_CHECK(hipDeviceSynchronize());
 
@@ -267,6 +267,122 @@ void run_if_benchmark(benchmark::State& state,
     hipFree(d_temp_storage);
 }
 
+template<class T>
+void run_three_way_benchmark(benchmark::State& state,
+                             size_t size,
+                             const hipStream_t stream,
+                             float first_probability,
+                             float second_probability)
+{
+    auto first_select_op = [first_probability] __device__ (const T& value)
+    {
+        return value < T(127 * first_probability);
+    };
+    auto second_select_op = [second_probability] __device__ (const T& value)
+    {
+        return value < T(127 * second_probability);
+    };
+
+    std::vector<T> input = get_random_data<T>(size, T(0), T(127));
+    T * d_input;
+    T * d_output_first;
+    T * d_output_second;
+    T * d_output_unselected;
+    unsigned int * d_selected_count_output;
+    HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
+    HIP_CHECK(hipMalloc(&d_output_first, input.size() * sizeof(T)));
+    HIP_CHECK(hipMalloc(&d_output_second, input.size() * sizeof(T)));
+    HIP_CHECK(hipMalloc(&d_output_unselected, input.size() * sizeof(T)));
+    HIP_CHECK(hipMalloc(&d_selected_count_output, 2 * sizeof(unsigned int)));
+    HIP_CHECK(
+        hipMemcpy(
+            d_input, input.data(),
+            input.size() * sizeof(T),
+            hipMemcpyHostToDevice
+        )
+    );
+    HIP_CHECK(hipDeviceSynchronize());
+    // Allocate temporary storage memory
+    size_t temp_storage_size_bytes;
+
+    // Get size of d_temp_storage
+    HIP_CHECK(rocprim::partition_three_way(
+        nullptr,
+        temp_storage_size_bytes,
+        d_input,
+        d_output_first,
+        d_output_second,
+        d_output_unselected,
+        d_selected_count_output,
+        input.size(),
+        first_select_op,
+        second_select_op,
+        stream
+    ));
+    HIP_CHECK(hipDeviceSynchronize());
+
+    // allocate temporary storage
+    void * d_temp_storage = nullptr;
+    HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+    HIP_CHECK(hipDeviceSynchronize());
+
+    // Warm-up
+    for(size_t i = 0; i < 10; i++)
+    {
+        HIP_CHECK(rocprim::partition_three_way(
+            d_temp_storage,
+            temp_storage_size_bytes,
+            d_input,
+            d_output_first,
+            d_output_second,
+            d_output_unselected,
+            d_selected_count_output,
+            input.size(),
+            first_select_op,
+            second_select_op,
+            stream
+        ));
+    }
+    HIP_CHECK(hipDeviceSynchronize());
+
+    const unsigned int batch_size = 10;
+    for(auto _ : state)
+    {
+        auto start = std::chrono::high_resolution_clock::now();
+        for(size_t i = 0; i < batch_size; i++)
+        {
+            HIP_CHECK(rocprim::partition_three_way(
+                d_temp_storage,
+                temp_storage_size_bytes,
+                d_input,
+                d_output_first,
+                d_output_second,
+                d_output_unselected,
+                d_selected_count_output,
+                input.size(),
+                first_select_op,
+                second_select_op,
+                stream
+            ));
+        }
+        HIP_CHECK(hipDeviceSynchronize());
+
+        auto end = std::chrono::high_resolution_clock::now();
+        auto elapsed_seconds =
+            std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+        state.SetIterationTime(elapsed_seconds.count());
+    }
+    state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(T));
+    state.SetItemsProcessed(state.iterations() * batch_size * size);
+
+    hipFree(d_input);
+    hipFree(d_output_first);
+    hipFree(d_output_second);
+    hipFree(d_output_unselected);
+    hipFree(d_selected_count_output);
+    hipFree(d_temp_storage);
+}
+
 #define CREATE_PARTITION_FLAGGED_BENCHMARK(T, F, p) \
 benchmark::RegisterBenchmark( \
     ("partition(flags)<" #T "," #F ", "#T", unsigned int>(p = " #p")"), \
@@ -277,6 +393,12 @@ benchmark::RegisterBenchmark( \
 benchmark::RegisterBenchmark( \
     ("partition(if)<" #T ", "#T", unsigned int>(p = " #p")"), \
     run_if_benchmark<T>, size, stream, p \
+)
+
+#define CREATE_PARTITION_THREE_WAY_BENCHMARK(T, p1, p2) \
+benchmark::RegisterBenchmark( \
+    ("partition(three_way)<" #T ", "#T", unsigned int>(p1 = " #p1", p2 = "#p2")"), \
+    run_three_way_benchmark<T>, size, stream, p1, p2 \
 )
 
 #define BENCHMARK_FLAGGED_TYPE(type, value) \
@@ -290,6 +412,12 @@ benchmark::RegisterBenchmark( \
     CREATE_PARTITION_IF_BENCHMARK(type, 0.25f), \
     CREATE_PARTITION_IF_BENCHMARK(type, 0.5f), \
     CREATE_PARTITION_IF_BENCHMARK(type, 0.75f)
+
+#define BENCHMARK_THREE_WAY_TYPE(type) \
+    CREATE_PARTITION_THREE_WAY_BENCHMARK(type, 0.05f, 0.25f), \
+    CREATE_PARTITION_THREE_WAY_BENCHMARK(type, 0.25f, 0.5f), \
+    CREATE_PARTITION_THREE_WAY_BENCHMARK(type, 0.5f, 0.75f), \
+    CREATE_PARTITION_THREE_WAY_BENCHMARK(type, 0.75f, 1.f)
 
 int main(int argc, char *argv[])
 {
@@ -331,7 +459,15 @@ int main(int argc, char *argv[])
         BENCHMARK_IF_TYPE(uint8_t),
         BENCHMARK_IF_TYPE(int8_t),
         BENCHMARK_IF_TYPE(rocprim::half),
-        BENCHMARK_IF_TYPE(custom_int_double)
+        BENCHMARK_IF_TYPE(custom_int_double),
+
+        BENCHMARK_THREE_WAY_TYPE(int),
+        BENCHMARK_THREE_WAY_TYPE(float),
+        BENCHMARK_THREE_WAY_TYPE(double),
+        BENCHMARK_THREE_WAY_TYPE(uint8_t),
+        BENCHMARK_THREE_WAY_TYPE(int8_t),
+        BENCHMARK_THREE_WAY_TYPE(rocprim::half),
+        BENCHMARK_THREE_WAY_TYPE(custom_int_double)
     };
 
     // Use manual timing

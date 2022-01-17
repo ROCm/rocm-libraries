@@ -27,7 +27,7 @@
 
 // required test headers
 #include "test_utils_types.hpp"
-#include "test_sort_comparator.hpp"
+#include "test_utils_sort_comparator.hpp"
 
 template<
     class Key,
@@ -199,7 +199,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeys)
                 std::stable_sort(
                     expected.begin() + offsets[i],
                     expected.begin() + offsets[i + 1],
-                    key_comparator<key_type, descending, start_bit, end_bit>()
+                    test_utils::key_comparator<key_type, descending, start_bit, end_bit>()
                 );
             }
 
@@ -383,7 +383,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairs)
                 std::stable_sort(
                     expected.begin() + offsets[i],
                     expected.begin() + offsets[i + 1],
-                    key_value_comparator<key_type, value_type, descending, start_bit, end_bit>()
+                    test_utils::key_value_comparator<key_type, value_type, descending, start_bit, end_bit>()
                 );
             }
             std::vector<key_type> keys_expected(size);
@@ -564,7 +564,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeysDoubleBuffer)
                 std::stable_sort(
                     expected.begin() + offsets[i],
                     expected.begin() + offsets[i + 1],
-                    key_comparator<key_type, descending, start_bit, end_bit>()
+                    test_utils::key_comparator<key_type, descending, start_bit, end_bit>()
                 );
             }
 
@@ -753,7 +753,7 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortPairsDoubleBuffer)
                 std::stable_sort(
                     expected.begin() + offsets[i],
                     expected.begin() + offsets[i + 1],
-                    key_value_comparator<key_type, value_type, descending, start_bit, end_bit>()
+                    test_utils::key_value_comparator<key_type, value_type, descending, start_bit, end_bit>()
                 );
             }
             std::vector<key_type> keys_expected(size);

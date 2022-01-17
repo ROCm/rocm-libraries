@@ -30,7 +30,7 @@
 
 // required test headers
 #include "test_utils_types.hpp"
-#include "test_sort_comparator.hpp"
+#include "test_utils_sort_comparator.hpp"
 
 // kernel definitions
 #include "test_block_radix_sort.kernels.hpp"

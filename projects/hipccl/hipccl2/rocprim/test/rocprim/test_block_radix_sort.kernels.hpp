@@ -197,7 +197,7 @@ auto test_block_radix_sort()
             std::stable_sort(
                 expected.begin() + (i * items_per_block),
                 expected.begin() + ((i + 1) * items_per_block),
-                key_comparator<key_type, descending, start_bit, end_bit>()
+                test_utils::key_comparator<key_type, descending, start_bit, end_bit>()
             );
         }
 
@@ -307,7 +307,7 @@ auto test_block_radix_sort()
             std::stable_sort(
                 expected.begin() + (i * items_per_block),
                 expected.begin() + ((i + 1) * items_per_block),
-                key_value_comparator<key_type, value_type, descending, start_bit, end_bit>()
+                test_utils::key_value_comparator<key_type, value_type, descending, start_bit, end_bit>()
             );
         }
 

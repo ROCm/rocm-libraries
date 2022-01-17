@@ -894,13 +894,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, InclusiveScanCustomType)
 
     using base_type = typename TestFixture::params::type;
     using T = test_utils::custom_test_type<base_type>;
-    using acc_type = base_type;
-    if(std::is_same<acc_type, rocprim::bfloat16>::value)
-        GTEST_SKIP();
-    /* Enable the following when assignment operator has been added to hip_bfloat16
-     * https://github.com/ROCm-Developer-Tools/HIP/pull/2303/files
-     * using acc_type = typename std::conditional<std::is_same<base_type,rocprim::bfloat16>::value ||
-                                                   std::is_same<base_type,rocprim::half>::value, double, base_type>::type; */
+    using acc_type = typename test_utils::select_plus_operator_host<base_type>::acc_type;
 
     // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
     static constexpr size_t logical_warp_size = TestFixture::params::warp_size;

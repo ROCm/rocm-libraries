@@ -158,10 +158,11 @@ hipError_t select(void * temporary_storage,
     using unary_predicate_type = ::rocprim::empty_type;
     // Dummy inequality operation
     using inequality_op_type = ::rocprim::empty_type;
+    using offset_type = unsigned int;
 
-    return detail::partition_impl<detail::select_method::flag, true, Config>(
+    return detail::partition_impl<detail::select_method::flag, true, Config, offset_type>(
         temporary_storage, storage_size, input, flags, output, selected_count_output,
-        size, unary_predicate_type(), inequality_op_type(), stream, debug_synchronous
+        size, inequality_op_type(), stream, debug_synchronous, unary_predicate_type()
     );
 }
 
@@ -267,13 +268,14 @@ hipError_t select(void * temporary_storage,
 {
     // Dummy flag type
     using flag_type = ::rocprim::empty_type;
+    using offset_type = unsigned int;
     flag_type * flags = nullptr;
     // Dummy inequality operation
     using inequality_op_type = ::rocprim::empty_type;
 
-    return detail::partition_impl<detail::select_method::predicate, true, Config>(
+    return detail::partition_impl<detail::select_method::predicate, true, Config, offset_type>(
         temporary_storage, storage_size, input, flags, output, selected_count_output,
-        size, predicate, inequality_op_type(), stream, debug_synchronous
+        size, inequality_op_type(), stream, debug_synchronous, predicate
     );
 }
 
@@ -371,7 +373,7 @@ hipError_t unique(void * temporary_storage,
 {
     // Dummy unary predicate
     using unary_predicate_type = ::rocprim::empty_type;
-
+    using offset_type = unsigned int;
     // Dummy flag type
     using flag_type = ::rocprim::empty_type;
     flag_type * flags = nullptr;
@@ -379,9 +381,9 @@ hipError_t unique(void * temporary_storage,
     // Convert equality operator to inequality operator
     auto inequality_op = detail::inequality_wrapper<EqualityOp>(equality_op);
 
-    return detail::partition_impl<detail::select_method::unique, true, Config>(
+    return detail::partition_impl<detail::select_method::unique, true, Config, offset_type>(
         temporary_storage, storage_size, input, flags, output, unique_count_output,
-        size, unary_predicate_type(), inequality_op, stream, debug_synchronous
+        size, inequality_op, stream, debug_synchronous, unary_predicate_type()
     );
 }
 

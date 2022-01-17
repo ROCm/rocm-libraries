@@ -32,7 +32,6 @@ cd rocPRIM; mkdir build; cd build
 
 # Configure rocPRIM, setup options for your system.
 # Build options:
-#   DISABLE_WERROR - ON by default, This flag disable the -Werror compiler flag
 #   ONLY_INSTALL - OFF by default, If this flag is on, the build ignore the BUILD_* flags
 #   BUILD_TEST - OFF by default,
 #   BUILD_EXAMPLE - OFF by default,
