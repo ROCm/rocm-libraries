@@ -160,7 +160,9 @@ if [[ "${build_clients}" == true ]]; then
 fi
 
 if [[ "${build_address_sanitizer}" == true ]]; then
-    cmake_common_options="$cmake_common_options -DBUILD_ADDRESS_SANITIZER=ON"
+    CFLAGS="${CLFAGS} -fsanitize=address -shared-libasan"
+    CXXFLAGS="${CXXFLAGS} -fsanitize=address -shared-libasan"
+    LDFLAGS="${LDFLAGS} -fuse-ld=lld -fsanitize=address -shared-libasan"
 fi
 
 codecoverage="OFF"
