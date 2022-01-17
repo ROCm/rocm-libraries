@@ -23,6 +23,17 @@
 
 #include "test_header.hpp"
 
+TESTS_DEFINE(CountingIteratorTests, NumericalTestsParams);
+
+TYPED_TEST(CountingIteratorTests, TestCountingDefaultConstructor)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+
+  thrust::counting_iterator<T> iter0;
+  ASSERT_EQ(*iter0, T{});
+}
+
 TEST(CountingIteratorTests, TestCountingIteratorCopyConstructor)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());

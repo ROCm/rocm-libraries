@@ -649,8 +649,8 @@ template<typename T1, typename T2>
   typedef struct { char array[2]; } no_type;
 
   template<typename T> static typename add_reference<T>::type declval();
-
-  template<unsigned int> struct helper { typedef void * type; };
+  
+  template<size_t> struct helper { typedef void * type; };
 
   template<typename U1, typename U2> static yes_type test(typename helper<sizeof(declval<U1>() = declval<U2>())>::type);
 
