@@ -24,6 +24,7 @@
 
 // hipcub API
 #include "hipcub/device/device_reduce.hpp"
+#include <bitset>
 
 // Params for tests
 template<
@@ -55,6 +56,7 @@ typedef ::testing::Types<
     DeviceReduceParams<short>,
     DeviceReduceParams<short, float>,
     DeviceReduceParams<int, double>,
+    DeviceReduceParams<test_utils::half, float>,
     DeviceReduceParams<test_utils::bfloat16, float>
     #ifdef __HIP_PLATFORM_AMD__
     ,
@@ -86,12 +88,13 @@ std::vector<size_t> get_sizes()
  * \brief Arg max functor - Because NVIDIA's hipcub::ArgMax doesn't work with bfloat16 (HOST-SIDE)
  */
 struct ArgMax {
-    template<typename OffsetT>
-    __host__ __device__ __forceinline__ hipcub::KeyValuePair <OffsetT, test_utils::bfloat16> operator()(
-        const hipcub::KeyValuePair <OffsetT, test_utils::bfloat16> &a,
-        const hipcub::KeyValuePair <OffsetT, test_utils::bfloat16> &b) const {
-        const hipcub::KeyValuePair <OffsetT, test_utils::native_bfloat16> native_a(a.key,a.value);
-        const hipcub::KeyValuePair <OffsetT, test_utils::native_bfloat16> native_b(b.key,b.value);
+    template<typename OffsetT, class T, std::enable_if_t<std::is_same<T, test_utils::half>::value ||
+                                                         std::is_same<T, test_utils::bfloat16>::value, bool> = true>
+    HIPCUB_HOST_DEVICE __forceinline__ hipcub::KeyValuePair <OffsetT, T> operator()(
+        const hipcub::KeyValuePair <OffsetT, T> &a,
+        const hipcub::KeyValuePair <OffsetT, T> &b) const {
+        const hipcub::KeyValuePair <OffsetT, float> native_a(a.key,a.value);
+        const hipcub::KeyValuePair <OffsetT, float> native_b(b.key,b.value);
 
         if ((native_b.value > native_a.value) || ((native_a.value == native_b.value) && (native_b.key < native_a.key)))
             return b;
@@ -102,12 +105,13 @@ struct ArgMax {
  * \brief Arg min functor - Because NVIDIA's hipcub::ArgMax doesn't work with bfloat16 (HOST-SIDE)
  */
 struct ArgMin {
-    template<typename OffsetT>
-    __host__ __device__ __forceinline__ hipcub::KeyValuePair <OffsetT, test_utils::bfloat16> operator()(
-        const hipcub::KeyValuePair <OffsetT, test_utils::bfloat16> &a,
-        const hipcub::KeyValuePair <OffsetT, test_utils::bfloat16> &b) const {
-        const hipcub::KeyValuePair <OffsetT, test_utils::native_bfloat16> native_a(a.key,a.value);
-        const hipcub::KeyValuePair <OffsetT, test_utils::native_bfloat16> native_b(b.key,b.value);
+    template<typename OffsetT, class T, std::enable_if_t<std::is_same<T, test_utils::half>::value ||
+                                                         std::is_same<T, test_utils::bfloat16>::value, bool> = true>
+    HIPCUB_HOST_DEVICE __forceinline__ hipcub::KeyValuePair <OffsetT, T> operator()(
+        const hipcub::KeyValuePair <OffsetT, T> &a,
+        const hipcub::KeyValuePair <OffsetT, T> &b) const {
+        const hipcub::KeyValuePair <OffsetT, float> native_a(a.key,a.value);
+        const hipcub::KeyValuePair <OffsetT, float> native_b(b.key,b.value);
 
         if ((native_b.value < native_a.value) || ((native_a.value == native_b.value) && (native_b.key < native_a.key)))
             return b;
@@ -137,6 +141,7 @@ struct ArgMinSelector {
     typedef hipcub::ArgMin type;
 };
 
+#ifdef __HIP_PLATFORM_NVIDIA__
 template<>
 struct ArgMinSelector<test_utils::half> {
     typedef ArgMin type;
@@ -146,11 +151,12 @@ template<>
 struct ArgMinSelector<test_utils::bfloat16> {
     typedef ArgMin type;
 };
+#endif
 // END - Code has been added because NVIDIA's hipcub::ArgMax doesn't work with bfloat16 (HOST-SIDE)
 
 TYPED_TEST_SUITE(HipcubDeviceReduceTests, HipcubDeviceReduceTestsParams);
 
-TYPED_TEST(HipcubDeviceReduceTests, Reduce)
+TYPED_TEST(HipcubDeviceReduceTests, ReduceSum)
 {
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
@@ -268,7 +274,7 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceMinimum)
 
             // Generate data
             std::vector<T> input = test_utils::get_random_data<T>(size, 1.0f, 100.0f, seed_value);
-            std::vector<U> output(1, (U) 0.0f);
+            std::vector<U> output(1, U(0.0f));
 
             T * d_input;
             U * d_output;
@@ -285,7 +291,7 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceMinimum)
 
             hipcub::Min min_op;
             // Calculate expected results on host
-            U expected = U(std::numeric_limits<U>::max());
+            U expected = U(test_utils::numeric_limits<U>::max());
             for(unsigned int i = 0; i < input.size(); i++)
             {
                 expected = min_op(expected, U(input[i]));
@@ -378,7 +384,7 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceArgMinimum)
 
             // Calculate expected results on host
             Iterator x(input.data());
-            const key_value max(1, std::numeric_limits<T>::max());
+            const key_value max(1, test_utils::numeric_limits<T>::max());
             using ArgMin = typename ArgMinSelector<T>::type; // Because NVIDIA's hipcub::ArgMin doesn't work with bfloat16 (HOST-SIDE)
             key_value expected = std::accumulate(x, x + size, max, ArgMin());
 
@@ -470,7 +476,7 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceArgMaximum)
 
             // Calculate expected results on host
             Iterator x(input.data());
-            const key_value min(1, std::numeric_limits<T>::lowest());
+            const key_value min(1, test_utils::numeric_limits<T>::lowest());
             using ArgMax = typename ArgMaxSelector<T>::type; // Because NVIDIA's hipcub::ArgMax doesn't work with bfloat16 (HOST-SIDE)
             key_value expected = std::accumulate(x, x + size, min, ArgMax());
 

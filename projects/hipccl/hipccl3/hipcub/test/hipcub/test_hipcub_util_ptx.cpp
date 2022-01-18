@@ -22,6 +22,12 @@
 
 #include "common_test_header.hpp"
 
+#include <algorithm>
+#include <ostream>
+#include <utility>
+
+#include <cstdint>
+
 // Custom structure
 struct custom_notaligned
 {
@@ -710,4 +716,144 @@ TEST(HipcubUtilPtxTests, WarpId)
     {
         ASSERT_EQ(warp_id_no, size/block_size);
     }
+}
+
+enum class TestStatus : uint8_t {
+    Failed = 0,
+    Passed = 1
+};
+
+std::ostream& operator<<(std::ostream& lhs, TestStatus rhs) {
+    switch(rhs) {
+        case TestStatus::Failed:
+            return lhs << "F";
+        case TestStatus::Passed:
+            return lhs << "P";
+    }
+    return lhs << "Unknown(" << static_cast<int>(rhs) << ")";
+}
+
+HIPCUB_DEVICE bool is_lane_in_mask(const uint64_t mask, const unsigned int lane) {
+    return (uint64_t(1) << lane) & mask;
+}
+
+template <unsigned int LogicalWarpSize>
+HIPCUB_DEVICE
+std::enable_if_t<(HIPCUB_DEVICE_WARP_THREADS >= LogicalWarpSize), TestStatus>
+test_warp_mask_pow_two() {
+    const unsigned int logical_warp_id = hipcub::LaneId() / LogicalWarpSize;
+    const uint64_t mask = hipcub::WarpMask<LogicalWarpSize>(logical_warp_id);
+
+    const unsigned int warp_start = logical_warp_id * LogicalWarpSize;
+    const unsigned int next_warp_start = (logical_warp_id + 1) * LogicalWarpSize;
+    for (unsigned int lane = 0; lane < warp_start; ++lane) {
+        if(is_lane_in_mask(mask, lane)) {
+            return TestStatus::Failed;
+        }
+    }
+    for (unsigned int lane = warp_start; lane < next_warp_start; ++lane) {
+        if(!is_lane_in_mask(mask, lane)) {
+            return TestStatus::Failed;
+        }
+    }
+    for (unsigned int lane = next_warp_start; lane < 64; ++lane) {
+        if(is_lane_in_mask(mask, lane)) {
+            return TestStatus::Failed;
+        }
+    }
+    return TestStatus::Passed;
+}
+
+template <unsigned int LogicalWarpSize>
+HIPCUB_DEVICE
+std::enable_if_t<!(HIPCUB_DEVICE_WARP_THREADS >= LogicalWarpSize), TestStatus>
+test_warp_mask_pow_two() {
+    return TestStatus::Passed;
+}
+
+template <unsigned int LogicalWarpSize>
+HIPCUB_DEVICE
+std::enable_if_t<(HIPCUB_DEVICE_WARP_THREADS >= LogicalWarpSize), TestStatus>
+test_warp_mask_non_pow_two() {
+    const unsigned int logical_warp_id = hipcub::LaneId() / LogicalWarpSize;
+    const uint64_t mask = hipcub::WarpMask<LogicalWarpSize>(logical_warp_id);
+
+    for (unsigned int lane = 0; lane < LogicalWarpSize; ++lane) {
+        if(!is_lane_in_mask(mask, lane)) {
+            return TestStatus::Failed;
+        }
+    }
+    for (unsigned int lane = LogicalWarpSize; lane < 64; ++lane) {
+        if(is_lane_in_mask(mask, lane)) {
+            return TestStatus::Failed;
+        }
+    }
+    return TestStatus::Passed;
+}
+
+template <unsigned int LogicalWarpSize>
+HIPCUB_DEVICE
+std::enable_if_t<!(HIPCUB_DEVICE_WARP_THREADS >= LogicalWarpSize), TestStatus>
+test_warp_mask_non_pow_two() {
+    return TestStatus::Passed;
+}
+
+template<unsigned int LogicalWarpSize>
+__global__ void device_test_warp_mask(TestStatus* statuses) {
+    constexpr bool is_power_of_two = test_utils::is_power_of_two(LogicalWarpSize);
+    statuses[threadIdx.x] = is_power_of_two
+                                ? test_warp_mask_pow_two<LogicalWarpSize>()
+                                : test_warp_mask_non_pow_two<LogicalWarpSize>();
+}
+
+template <unsigned int LogicalWarpSize>
+void test_warp_size(std::vector<TestStatus>& statuses, TestStatus* d_statuses, const unsigned int device_warp_size) {
+    if(LogicalWarpSize > device_warp_size) {
+        return;
+    }
+
+    statuses.clear();
+    statuses.insert(statuses.begin(), device_warp_size, TestStatus::Failed);
+
+    HIP_CHECK(hipMemcpy(d_statuses, statuses.data(),
+                        statuses.size() * sizeof(statuses[0]),
+                        hipMemcpyHostToDevice));
+
+    hipLaunchKernelGGL(device_test_warp_mask<LogicalWarpSize>, dim3(1),
+                       dim3(device_warp_size), 0, 0, d_statuses);
+    HIP_CHECK(hipGetLastError());
+
+    HIP_CHECK(hipMemcpy(statuses.data(), d_statuses,
+                        statuses.size() * sizeof(statuses[0]),
+                        hipMemcpyDeviceToHost));
+
+    SCOPED_TRACE(testing::Message() << "where LogicalWarpSize = " << LogicalWarpSize);
+    ASSERT_TRUE(std::all_of(
+        statuses.begin(), statuses.end(),
+        [](const TestStatus status) { return status == TestStatus::Passed; }));
+}
+
+template<unsigned int... LogicalWarpSizes>
+void test_all_warp_sizes(std::integer_sequence<unsigned int, LogicalWarpSizes...>) {
+    const int device_warp_size = HIPCUB_HOST_WARP_THREADS;
+    ASSERT_GT(device_warp_size, 0);
+
+    SCOPED_TRACE(testing::Message() << "where device warp size = " << device_warp_size);
+
+    TestStatus* d_statuses = nullptr;
+    HIP_CHECK(test_common_utils::hipMallocHelper(
+        &d_statuses, static_cast<size_t>(device_warp_size)));
+
+    // Call the test with each logical warp size in the range [1, 64]
+    auto statuses = std::vector<TestStatus>();
+    const auto ignore = 
+        {(test_warp_size<LogicalWarpSizes + 1>(statuses, d_statuses, static_cast<unsigned int>(device_warp_size)), 0)...};
+    static_cast<void>(ignore);
+
+    HIP_CHECK(hipFree(d_statuses));
+}
+
+TEST(HipcubUtilPtxTests, WarpMask) {
+    using sequence = std::make_integer_sequence<unsigned int, 64>;
+    test_all_warp_sizes(sequence{});
 }

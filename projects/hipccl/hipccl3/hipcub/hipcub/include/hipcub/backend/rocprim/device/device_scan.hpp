@@ -36,6 +36,8 @@
 #include "../thread/thread_operators.hpp"
 
 #include <rocprim/device/device_scan.hpp>
+#include <rocprim/device/device_scan_by_key.hpp>
+
 BEGIN_HIPCUB_NAMESPACE
 
 class DeviceScan
@@ -79,7 +81,7 @@ public:
         return ::rocprim::inclusive_scan(
             d_temp_storage, temp_storage_bytes,
             d_in, d_out, num_items,
-            ::hipcub::detail::convert_result_type<InputIteratorT, OutputIteratorT>(scan_op),
+            scan_op,
             stream, debug_synchronous
         );
     }
@@ -125,8 +127,142 @@ public:
         return ::rocprim::exclusive_scan(
             d_temp_storage, temp_storage_bytes,
             d_in, d_out, init_value, num_items,
-            ::hipcub::detail::convert_result_type<InputIteratorT, OutputIteratorT>(scan_op),
+            scan_op,
             stream, debug_synchronous
+        );
+    }
+
+    template <
+        typename InputIteratorT,
+        typename OutputIteratorT,
+        typename ScanOpT,
+        typename InitValueT,
+        typename InitValueIterT = InitValueT*
+    >
+    HIPCUB_RUNTIME_FUNCTION static
+    hipError_t ExclusiveScan(void *d_temp_storage,
+                             size_t &temp_storage_bytes,
+                             InputIteratorT d_in,
+                             OutputIteratorT d_out,
+                             ScanOpT scan_op,
+                             FutureValue<InitValueT, InitValueIterT> init_value,
+                             int num_items,
+                             hipStream_t stream = 0,
+                             bool debug_synchronous = false)
+    {
+        return ::rocprim::exclusive_scan(
+            d_temp_storage, temp_storage_bytes,
+            d_in, d_out, init_value, num_items,
+            scan_op,
+            stream, debug_synchronous
+        );
+    }
+
+    template <
+        typename KeysInputIteratorT,
+        typename ValuesInputIteratorT,
+        typename ValuesOutputIteratorT,
+        typename EqualityOpT = ::hipcub::Equality
+    >
+    HIPCUB_RUNTIME_FUNCTION static
+    hipError_t ExclusiveSumByKey(void *d_temp_storage,
+                                 size_t &temp_storage_bytes,
+                                 KeysInputIteratorT d_keys_in,
+                                 ValuesInputIteratorT d_values_in,
+                                 ValuesOutputIteratorT d_values_out,
+                                 int num_items,
+                                 EqualityOpT equality_op = EqualityOpT(),
+                                 hipStream_t stream = 0,
+                                 bool debug_synchronous = false)
+    {
+        using in_value_type = typename std::iterator_traits<ValuesInputIteratorT>::value_type;
+
+        return ::rocprim::exclusive_scan_by_key(
+            d_temp_storage, temp_storage_bytes,
+            d_keys_in, d_values_in, d_values_out,
+            static_cast<in_value_type>(0), static_cast<size_t>(num_items),
+            ::hipcub::Sum(), equality_op, stream, debug_synchronous
+        );
+    }
+
+    template <
+        typename KeysInputIteratorT,
+        typename ValuesInputIteratorT,
+        typename ValuesOutputIteratorT,
+        typename ScanOpT,
+        typename InitValueT,
+        typename EqualityOpT = ::hipcub::Equality
+    >
+    HIPCUB_RUNTIME_FUNCTION static
+    hipError_t ExclusiveScanByKey(void *d_temp_storage,
+                                  size_t &temp_storage_bytes,
+                                  KeysInputIteratorT d_keys_in,
+                                  ValuesInputIteratorT d_values_in,
+                                  ValuesOutputIteratorT d_values_out,
+                                  ScanOpT scan_op,
+                                  InitValueT init_value,
+                                  int num_items,
+                                  EqualityOpT equality_op = EqualityOpT(),
+                                  hipStream_t stream = 0,
+                                  bool debug_synchronous = false)
+    {
+        return ::rocprim::exclusive_scan_by_key(
+            d_temp_storage, temp_storage_bytes,
+            d_keys_in, d_values_in, d_values_out,
+            init_value, static_cast<size_t>(num_items),
+            scan_op, equality_op, stream, debug_synchronous
+        );
+    }
+
+    template <
+        typename KeysInputIteratorT,
+        typename ValuesInputIteratorT,
+        typename ValuesOutputIteratorT,
+        typename EqualityOpT = ::hipcub::Equality
+    >
+    HIPCUB_RUNTIME_FUNCTION static
+    hipError_t InclusiveSumByKey(void *d_temp_storage,
+                                 size_t &temp_storage_bytes,
+                                 KeysInputIteratorT d_keys_in,
+                                 ValuesInputIteratorT d_values_in,
+                                 ValuesOutputIteratorT d_values_out,
+                                 int num_items,
+                                 EqualityOpT equality_op = EqualityOpT(),
+                                 hipStream_t stream = 0,
+                                 bool debug_synchronous = false)
+    {
+        return ::rocprim::inclusive_scan_by_key(
+            d_temp_storage, temp_storage_bytes,
+            d_keys_in, d_values_in, d_values_out,
+            static_cast<size_t>(num_items), ::hipcub::Sum(),
+            equality_op, stream, debug_synchronous
+        );
+    }
+
+    template <
+        typename KeysInputIteratorT,
+        typename ValuesInputIteratorT,
+        typename ValuesOutputIteratorT,
+        typename ScanOpT,
+        typename EqualityOpT = ::hipcub::Equality
+    >
+    HIPCUB_RUNTIME_FUNCTION static
+    hipError_t InclusiveScanByKey(void *d_temp_storage,
+                                  size_t &temp_storage_bytes,
+                                  KeysInputIteratorT d_keys_in,
+                                  ValuesInputIteratorT d_values_in,
+                                  ValuesOutputIteratorT d_values_out,
+                                  ScanOpT scan_op,
+                                  int num_items,
+                                  EqualityOpT equality_op = EqualityOpT(),
+                                  hipStream_t stream = 0,
+                                  bool debug_synchronous = false)
+    {
+        return ::rocprim::inclusive_scan_by_key(
+            d_temp_storage, temp_storage_bytes,
+            d_keys_in, d_values_in, d_values_out,
+            static_cast<size_t>(num_items), scan_op,
+            equality_op, stream, debug_synchronous
         );
     }
 };
