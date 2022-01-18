@@ -11,7 +11,7 @@ Full documentation for rocPRIM is available at [https://codedocs.xyz/ROCmSoftwar
 ### Changed
 - The reduce/scan algorithm precision issues in the tests has been resolved for half types.
 ### Known issues
-- device_segmented_radix_sort, device_scan unit tests failing for HIP on Windows
+- device_segmented_radix_sort unit test failing for HIP on Windows
 
 ## [Unreleased rocPRIM-2.10.12 for ROCm 5.0.0]
 ### Fixed
