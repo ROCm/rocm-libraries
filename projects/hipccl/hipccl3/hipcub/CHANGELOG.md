@@ -2,26 +2,29 @@
 
 See README.md on how to build the hipCUB documentation using Doxygen.
 
-## (Unreleased)  hipCUB-2.10.13 for ROCm 5.0
+## (Unreleased) hipCUB-2.11.0 for ROCm 5.1.0
+### Added
+- Device segmented sort
+- Warp merge sort, WarpMask and thread sort from cub 1.15.0 supported in hipCUB
+- Device three way partition
+### Changed
+- Device_scan and device_segmented_scan: inclusive_scan now uses the input-type as accumulator-type, exclusive_scan uses initial-value-type.
+  - This particularly changes behaviour of small-size input types with large-size output types (e.g. short input, int output).
+  - And low-res input with high-res output (e.g. float input, double output)
+  - Block merge sort no longer supports non power of two blocksizes
+
+## hipCUB-2.10.13 for ROCm 5.0.0
 ### Fixed
 - Added missing includes to hipcub.hpp
 ### Added
 - Bfloat16 support to test cases (device_reduce & device_radix_sort)
 - Device merge sort
 - Block merge sort
-- Device segmented sort
 - API update to CUB 1.14.0
-- Warp merge sort, WarpMask and thread sort from cub 1.15.0 supported in hipCUB
-- Device three way partition
 ### Changed
 - The SetupNVCC.cmake automatic target selector select all of the capabalities of all available card for NVIDIA backend.
-- Device_scan and device_segmented_scan: inclusive_scan now uses the input-type as accumulator-type, exclusive_scan uses initial-value-type.
-  - This particularly changes behaviour of small-size input types with large-size output types (e.g. short input, int output).
-  - And low-res input with high-res output (e.g. float input, double output)
-  - Block merge sort no longer supports non power of two blocksizes
 
-
-## (Unreleased) hipCUB-2.10.12 for ROCm 4.5.0
+## hipCUB-2.10.12 for ROCm 4.5.0
 ### Added
 - Initial HIP on Windows support. See README for instructions on how to build and install.
 ### Changed
