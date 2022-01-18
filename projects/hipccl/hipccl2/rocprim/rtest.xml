@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <testset failure-regex="[1-9]\d* tests failed">
 <var name="CTEST_FILTER" value="ctest --output-on-failure --exclude-regex"></var>
-<var name="CTEST_REGEX" value="&quot;(rocprim.device_scan|rocprim.block_histogram)&quot;"></var>
+<var name="CTEST_REGEX" value="&quot;(rocprim.device_segmented_radix_sort)&quot;"></var>
 <test sets="psdb">
   <run name="all_tests">{CTEST_FILTER} {CTEST_REGEX}</run>
 </test>

@@ -377,7 +377,7 @@ OutputIt host_exclusive_scan_by_key_impl(InputIt first, InputIt last, KeyIt k_fi
 
     while ((first+1) != last)
     {
-        if(key_compare_op(*k_first, *++k_first))
+        if(key_compare_op(*k_first, *(k_first+1)))
         {
             sum = op(sum, *first);
         }
@@ -385,6 +385,7 @@ OutputIt host_exclusive_scan_by_key_impl(InputIt first, InputIt last, KeyIt k_fi
         {
             sum = initial_value;
         }
+        k_first++;
         *++d_first = sum;
         first++;
     }
@@ -425,7 +426,7 @@ OutputIt host_inclusive_scan_by_key_impl(InputIt first, InputIt last, KeyIt k_fi
 
     while (++first != last)
     {
-        if(key_compare_op(*k_first, *++k_first))
+        if(key_compare_op(*k_first, *(k_first+1)))
         {
             sum = op(sum, *first);
         }
@@ -433,6 +434,7 @@ OutputIt host_inclusive_scan_by_key_impl(InputIt first, InputIt last, KeyIt k_fi
         {
             sum = *first;
         }
+        k_first++;
         *++d_first = sum;
     }
     return ++d_first;
