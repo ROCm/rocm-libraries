@@ -48,6 +48,22 @@ public:
     using params = Params;
 };
 
+// char not supported for std::uniform_int_distribution in VS C++
+#if defined(WIN32)
+using HipcubBlockRunLengthDecodeTestParams = ::testing::Types<
+    Params<int, int, 256, 4, 4>,
+    Params<float, int, 256, 4, 4>,
+
+    Params<int, int, 256, 8, 8>,
+    Params<float, int, 256, 8, 8>,
+
+    Params<int, int, 256, 1, 14>,
+    Params<float, int, 256, 1, 14>,
+
+    Params<int, int, 256, 9, 7>,
+    Params<float, int, 256, 9, 7>
+>;
+#else
 using HipcubBlockRunLengthDecodeTestParams = ::testing::Types<
     Params<int, int, 256, 4, 4>,
     Params<double, char, 256, 4, 4>,
@@ -69,6 +85,7 @@ using HipcubBlockRunLengthDecodeTestParams = ::testing::Types<
     Params<char, long long, 256, 9, 7>,
     Params<float, int, 256, 9, 7>
 >;
+#endif
 
 TYPED_TEST_SUITE(HipcubBlockRunLengthDecodeTest, HipcubBlockRunLengthDecodeTestParams);
 
