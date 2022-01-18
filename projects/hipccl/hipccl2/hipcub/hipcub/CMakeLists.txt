@@ -76,6 +76,7 @@ rocm_install(
   DIRECTORY
     "include/"
     "${PROJECT_BINARY_DIR}/hipcub/include/"
+  COMPONENT devel
   DESTINATION hipcub/include/
   FILES_MATCHING
   PATTERN "*.h"

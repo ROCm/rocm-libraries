@@ -34,6 +34,7 @@
 #include <iterator>
 
 #include <hip/hip_fp16.h> // __half
+#include <hip/hip_bfloat16.h> // hip_bfloat16
 
 #include "../../../config.hpp"
 #include "../iterator/arg_index_input_iterator.hpp"
@@ -62,6 +63,13 @@ __half get_lowest_value<__half>()
     return lowest_value;
 }
 
+template<>
+inline
+hip_bfloat16 get_lowest_value<hip_bfloat16>()
+{
+    return hip_bfloat16(-3.38953138925e+38f);
+}
+
 template<class T>
 inline
 T get_max_value()
@@ -76,6 +84,13 @@ __half get_max_value<__half>()
     unsigned short max_half = 0x7bff;
     __half max_value = *reinterpret_cast<__half*>(&max_half);
     return max_value;
+}
+
+template<>
+inline
+hip_bfloat16 get_max_value<hip_bfloat16>()
+{
+    return hip_bfloat16(3.38953138925e+38f);
 }
 
 } // end detail namespace

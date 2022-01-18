@@ -135,7 +135,7 @@ struct ArgMin
 namespace detail
 {
 
-// CUB uses value_type of OutputIteratorT (if not void) as a type of intermediate results in scan and reduce,
+// CUB uses value_type of OutputIteratorT (if not void) as a type of intermediate results in reduce,
 // for example:
 //
 // /// The output value type

@@ -20,7 +20,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-cmake_minimum_required(VERSION 3.10.2 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
+cmake_policy(VERSION 3.16...3.21)
 
 # Install prefix
 set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix, prepended onto install directories")
@@ -153,8 +154,8 @@ if(HIP_COMPILER STREQUAL "hcc" OR HIP_COMPILER STREQUAL "clang")
   set(CPACK_DEBIAN_PACKAGE_REPLACES "cub-hip")
   set(CPACK_RPM_PACKAGE_OBSOLETES "cub-hip")
 else()
-  set(CPACK_DEBIAN_PACKAGE_DEPENDS "hip-nvcc (>= 1.5)")
-  set(CPACK_RPM_PACKAGE_REQUIRES "hip-nvcc >= 1.5")
+  set(CPACK_DEBIAN_PACKAGE_DEPENDS "hip-dev (>= 4.4)")
+  set(CPACK_RPM_PACKAGE_REQUIRES "hip-dev >= 4.4")
 endif()
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.txt")
 # if(NOT CPACK_PACKAGING_INSTALL_PREFIX)

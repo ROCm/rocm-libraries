@@ -49,8 +49,12 @@
 #include "iterator/transform_input_iterator.hpp"
 
 // Warp
+#include "warp/warp_exchange.hpp"
+#include "warp/warp_load.hpp"
+#include "warp/warp_merge_sort.hpp"
 #include "warp/warp_reduce.hpp"
 #include "warp/warp_scan.hpp"
+#include "warp/warp_store.hpp"
 
 // Thread
 #include "thread/thread_load.hpp"
@@ -58,6 +62,7 @@
 #include "thread/thread_reduce.hpp"
 #include "thread/thread_scan.hpp"
 #include "thread/thread_search.hpp"
+#include "thread/thread_sort.hpp"
 #include "thread/thread_store.hpp"
 
 // Block
@@ -78,6 +83,7 @@
 #include "device/device_scan.hpp"
 #include "device/device_segmented_radix_sort.hpp"
 #include "device/device_segmented_reduce.hpp"
+#include "device/device_segmented_sort.hpp"
 #include "device/device_select.hpp"
 
 #endif // HIPCUB_ROCPRIM_HIPCUB_HPP_

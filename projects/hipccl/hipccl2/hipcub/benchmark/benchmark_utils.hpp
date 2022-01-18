@@ -323,6 +323,52 @@ inline auto get_random_data(size_t size, T min, T max, size_t max_random_size = 
     return data;
 }
 
+template<typename T>
+std::vector<T> get_random_segments(const size_t size,
+                                   const size_t max_segment_length,
+                                   const int seed_value)
+{
+    static_assert(std::is_arithmetic<T>::value, "Key type must be arithmetic");
+
+    std::default_random_engine prng(seed_value);
+    std::uniform_int_distribution<size_t> segment_length_distribution(max_segment_length);
+    using key_distribution_type = std::conditional_t<
+        std::is_integral<T>::value,
+        std::uniform_int_distribution<T>,
+        std::uniform_real_distribution<T>
+    >;
+    key_distribution_type key_distribution(std::numeric_limits<T>::max());
+    std::vector<T> keys(size);
+
+    size_t keys_start_index = 0;
+    while (keys_start_index < size)
+    {
+        const size_t new_segment_length = segment_length_distribution(prng);
+        const size_t new_segment_end = std::min(size, keys_start_index + new_segment_length);
+        const T key = key_distribution(prng);
+        std::fill(
+            std::next(keys.begin(), keys_start_index),
+            std::next(keys.begin(), new_segment_end),
+            key
+        );
+        keys_start_index += new_segment_length;
+    }
+    return keys;
+}
+
+bool is_warp_size_supported(const unsigned required_warp_size)
+{
+    return HIPCUB_HOST_WARP_THREADS >= required_warp_size;
+}
+
+template<unsigned LogicalWarpSize>
+struct DeviceSelectWarpSize
+{
+    static constexpr unsigned value = HIPCUB_DEVICE_WARP_THREADS >= LogicalWarpSize
+        ? LogicalWarpSize
+        : HIPCUB_DEVICE_WARP_THREADS;
+};
+
 } // end benchmark_util namespace
 
 // Need for hipcub::DeviceReduce::Min/Max etc.

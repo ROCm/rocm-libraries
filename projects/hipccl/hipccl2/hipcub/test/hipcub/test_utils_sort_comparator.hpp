@@ -27,145 +27,92 @@
 #include <rocprim/type_traits.hpp>
 #endif
 
+#include "test_utils_half.hpp"
+#include "test_utils_bfloat16.hpp"
+
 namespace test_utils
 {
-// Original C++17 logic
-//
-// template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
-// struct key_comparator
-//{
-//    bool operator()(const Key& lhs, const Key& rhs)
-//    {
-//        if constexpr (rocprim::is_unsigned<Key>::value)
-//        {
-//            if constexpr (StartBit == 0 && (EndBit == sizeof(Key) * 8))
-//            {
-//                return Descending ? (rhs < lhs) : (lhs < rhs);
-//            }
-//            else
-//            {
-//                auto mask = (1ull << (EndBit - StartBit)) - 1;
-//                auto l = (static_cast<unsigned long long>(lhs) >> StartBit) & mask;
-//                auto r = (static_cast<unsigned long long>(rhs) >> StartBit) & mask;
-//                return Descending ? (r < l) : (l < r);
-//            }
-//        }
-//        else
-//        {
-//            if constexpr (std::is_same_v<Key, rocprim::half>)
-//            {
-//                float l = static_cast<float>(lhs);
-//                float r = static_cast<float>(rhs);
-//                return Descending ? (r < l) : (l < r);
-//            }
-//            else
-//            {
-//                return Descending ? (rhs < lhs) : (lhs < rhs);
-//            }
-//        }
-//    }
-//};
 
-// Faulty C++14 backported logic (consider fixing)
-//
-// template<class Key, bool Descending>
-// bool generic_key_compare(const Key& lhs, const Key& rhs) { return Descending ? (rhs < lhs) : (lhs < rhs); }
-//
-// template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
-// auto discriminate_bits(const Key& lhs, const Key& rhs) -> typename std::enable_if<StartBit == 0 && EndBit == sizeof(Key) * 8, bool>::type
-//{
-//    // TODO: pick adequately sized integral type (instead of 1ull) based on Key.
-//    //       Needed to safely silence "'argument': conversion from 'unsigned __int64' to 'const Key', possible loss of data" auto mask = (1ull << (EndBit - StartBit)) - 1; auto l = (static_cast<unsigned long long>(lhs) >> StartBit) & mask; auto r = (static_cast<unsigned long long>(rhs) >> StartBit) & mask; return generic_key_compare<Key, Descending>(l, r);
-//}
-//
-// template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
-// auto discriminate_bits(const Key& lhs, const Key& rhs) -> typename std::enable_if<!(StartBit == 0 && EndBit == sizeof(Key) * 8), bool>::type
-//{
-//    return generic_key_compare<Key, Descending>(lhs, rhs);
-//}
-//
-// template<class Key, bool Descending>
-// auto discriminate_half(const Key& lhs, const Key& rhs) -> typename std::enable_if<std::is_same<Key, rocprim::half>::value, bool>::type
-//{
-//    // HIP's half doesn't have __host__ comparison operators, use floats instead
-//    return generic_key_compare<float, Descending>((float)lhs, (float)rhs);
-//}
-//
-// template<class Key, bool Descending>
-// auto discriminate_half(const Key& lhs, const Key& rhs) -> typename std::enable_if<!std::is_same<Key, rocprim::half>::value, bool>::type
-//{
-//    return generic_key_compare<Key, Descending>(lhs, rhs);
-//}
-//
-// template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
-// auto discriminate_unsigned(const Key& lhs, const Key& rhs) -> typename std::enable_if<rocprim::is_unsigned<Key>::value, bool>::type
-//{
-//    return discriminate_bits<Key, Descending, StartBit, EndBit>(lhs, rhs);
-//}
-//
-// template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
-// auto discriminate_unsigned(const Key& lhs, const Key& rhs) -> typename std::enable_if<!rocprim::is_unsigned<Key>::value, bool>::type
-//{
-//    return discriminate_half<Key, Descending>(lhs, rhs);
-//}
-//
-// template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
-// struct key_comparator
-//{
-//    bool operator()(const Key& lhs, const Key& rhs)
-//    {
-//        return discriminate_unsigned<Key, Descending, StartBit, EndBit>(lhs, rhs);
-//    }
-//};
-//
-// template<class Key, class Value, bool Descending, unsigned int StartBit, unsigned int EndBit>
-// struct key_value_comparator
-//{
-//    bool operator()(const std::pair<Key, Value>& lhs, const std::pair<Key, Value>& rhs)
-//    {
-//        return key_comparator<Key, Descending, StartBit, EndBit>()(lhs.first, rhs.first);
-//    }
-//};
-
-// Original code with ISO-conforming overload control
-//
-// NOTE: ShiftLess helper is needed, because partial specializations cannot refer to the free template args.
-//       See: https://stackoverflow.com/questions/2615905/c-template-nontype-parameter-arithmetic
-
-template<class Key,
-         bool         Descending,
-         unsigned int StartBit,
-         unsigned int EndBit,
-         bool         ShiftLess = (StartBit == 0 && EndBit == sizeof(Key) * 8)>
-struct key_comparator
+template<class T>
+constexpr auto is_floating_nan_host(const T& a)
+    -> typename std::enable_if<std::is_floating_point<T>::value, bool>::type
 {
-#ifdef __HIP_PLATFORM_AMD__
-    static_assert(rocprim::is_unsigned<Key>::value,
-                  "Test supports start and end bits only for unsigned integers");
-#endif
+    return (a != a);
+}
 
-    bool operator()(const Key & lhs, const Key & rhs)
+template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit, bool ShiftLess = (StartBit == 0 && EndBit == sizeof(Key) * 8), class Enable = void>
+struct key_comparator {};
+
+template <class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
+struct key_comparator<Key, Descending, StartBit, EndBit, false, typename std::enable_if<std::is_integral<Key>::value>::type>
+{
+    static constexpr Key radix_mask_upper  = (Key(1) << EndBit) - 1;
+    static constexpr Key radix_mask_bottom = (Key(1) << StartBit) - 1;
+    static constexpr Key radix_mask = radix_mask_upper ^ radix_mask_bottom;
+
+    bool operator()(const Key& lhs, const Key& rhs)
     {
-        auto mask = (1ull << (EndBit - StartBit)) - 1;
-        auto l    = (static_cast<unsigned long long>(lhs) >> StartBit) & mask;
-        auto r    = (static_cast<unsigned long long>(rhs) >> StartBit) & mask;
+        Key l = lhs & radix_mask;
+        Key r = rhs & radix_mask;
         return Descending ? (r < l) : (l < r);
     }
 };
 
-template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
-struct key_comparator<Key, Descending, StartBit, EndBit, true>
+template <class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
+struct key_comparator<Key, Descending, StartBit, EndBit, false, typename std::enable_if<std::is_floating_point<Key>::value>::type>
 {
-    bool operator()(const Key & lhs, const Key & rhs)
+    // Floating-point types do not support StartBit and EndBit.
+    bool operator()(const Key&, const Key&)
+    {
+        return false;
+    }
+};
+
+template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
+struct key_comparator<Key, Descending, StartBit, EndBit, true, typename std::enable_if<std::is_integral<Key>::value>::type>
+{
+    bool operator()(const Key& lhs, const Key& rhs)
     {
         return Descending ? (rhs < lhs) : (lhs < rhs);
+    }
+};
+
+template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
+struct key_comparator<Key, Descending, StartBit, EndBit, true, typename std::enable_if<std::is_floating_point<Key>::value>::type>
+{
+    bool operator()(const Key& lhs, const Key& rhs)
+    {
+        if(is_floating_nan_host(lhs) && is_floating_nan_host(rhs) && std::signbit(lhs) == std::signbit(rhs)){
+            return false;
+        }
+        if(Descending){
+            if(is_floating_nan_host(lhs)) return !std::signbit(lhs);
+            if(is_floating_nan_host(rhs)) return std::signbit(rhs);
+            return (rhs < lhs);
+        }else{
+            if(is_floating_nan_host(lhs)) return std::signbit(lhs);
+            if(is_floating_nan_host(rhs)) return !std::signbit(rhs);
+            return (lhs < rhs);
+        }
+    }
+};
+
+template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
+struct key_comparator<Key, Descending, StartBit, EndBit, true,
+                      typename std::enable_if<std::is_same<Key, test_utils::half>::value ||
+                                              std::is_same<Key, test_utils::bfloat16>::value>::type>
+{
+    bool operator()(const Key& lhs, const Key& rhs)
+    {
+        // HIP's half and bfloat16 doesn't have __host__ comparison operators, use floats instead
+        return key_comparator<float, Descending, 0, sizeof(float) * 8>()(lhs, rhs);
     }
 };
 
 template<class Key, class Value, bool Descending, unsigned int StartBit, unsigned int EndBit>
 struct key_value_comparator
 {
-    bool operator()(const std::pair<Key, Value> & lhs, const std::pair<Key, Value> & rhs)
+    bool operator()(const std::pair<Key, Value>& lhs, const std::pair<Key, Value>& rhs)
     {
         return key_comparator<Key, Descending, StartBit, EndBit>()(lhs.first, rhs.first);
     }
@@ -206,6 +153,109 @@ struct greater_equal
         return a >= b;
     }
 };
+
+// HALF
+template<>
+HIPCUB_HOST_DEVICE inline bool test_utils::less::operator()<test_utils::half>(
+    const test_utils::half & a,
+    const test_utils::half & b) const
+{
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__HIP_PLATFORM_AMD__) || __CUDA_ARCH__ >= 530
+    return __hlt(a, b);
+#else
+    return test_utils::native_half(a) < test_utils::native_half(b);
+#endif
+}
+
+template<>
+HIPCUB_HOST_DEVICE inline bool test_utils::less_equal::operator()<test_utils::half>(
+    const test_utils::half & a,
+    const test_utils::half & b) const
+{
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__HIP_PLATFORM_AMD__) || __CUDA_ARCH__ >= 530
+    return __hle(a, b);
+#else
+    return test_utils::native_half(a) <= test_utils::native_half(b);
+#endif
+}
+
+template<>
+HIPCUB_HOST_DEVICE inline bool test_utils::greater::operator()<test_utils::half>(
+    const test_utils::half & a,
+    const test_utils::half & b) const
+{
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__HIP_PLATFORM_AMD__) || __CUDA_ARCH__ >= 530
+    return __hgt(a, b);
+#else
+    return test_utils::native_half(a) > test_utils::native_half(b);
+#endif
+}
+
+template<>
+HIPCUB_HOST_DEVICE inline bool test_utils::greater_equal::operator()<test_utils::half>(
+    const test_utils::half & a,
+    const test_utils::half & b) const
+{
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__HIP_PLATFORM_AMD__) || __CUDA_ARCH__ >= 530
+    return __hge(a, b);
+#else
+    return test_utils::native_half(a) >= test_utils::native_half(b);
+#endif
+}
+// END HALF
+
+// BFLOAT16
+
+template<>
+HIPCUB_HOST_DEVICE inline bool test_utils::less::operator()<test_utils::bfloat16>(
+    const test_utils::bfloat16 & a,
+    const test_utils::bfloat16 & b) const
+{
+#if defined(__HIP_DEVICE_COMPILE__)
+    return a < b;
+#else
+    return test_utils::native_bfloat16(a) < test_utils::native_bfloat16(b);
+#endif
+}
+
+template<>
+HIPCUB_HOST_DEVICE inline bool test_utils::less_equal::operator()<test_utils::bfloat16>(
+    const test_utils::bfloat16 & a,
+    const test_utils::bfloat16 & b) const
+{
+#if defined(__HIP_DEVICE_COMPILE__)
+    return a <= b;
+#else
+    return test_utils::native_bfloat16(a) <= test_utils::native_bfloat16(b);
+#endif
+}
+
+template<>
+HIPCUB_HOST_DEVICE inline bool test_utils::greater::operator()<test_utils::bfloat16>(
+    const test_utils::bfloat16 & a,
+    const test_utils::bfloat16 & b) const
+{
+#if defined(__HIP_DEVICE_COMPILE__)
+    return a > b;
+#else
+    return test_utils::native_bfloat16(a) > test_utils::native_bfloat16(b);
+#endif
+}
+
+template<>
+HIPCUB_HOST_DEVICE inline bool test_utils::greater_equal::operator()<test_utils::bfloat16>(
+    const test_utils::bfloat16 & a,
+    const test_utils::bfloat16 & b) const
+{
+#if defined(__HIP_DEVICE_COMPILE__)
+    return a >= b;
+#else
+    return test_utils::native_bfloat16(a) >= test_utils::native_bfloat16(b);
+#endif
+}
+// END BFLOAT16
+
+
 
 }
 #endif // TEST_UTILS_SORT_COMPARATOR_HPP_

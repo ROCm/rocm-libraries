@@ -101,6 +101,45 @@ struct DevicePartition
             )
         );
     }
+
+    template <typename InputIteratorT,
+              typename FirstOutputIteratorT,
+              typename SecondOutputIteratorT,
+              typename UnselectedOutputIteratorT,
+              typename NumSelectedIteratorT,
+              typename SelectFirstPartOp,
+              typename SelectSecondPartOp>
+    HIPCUB_RUNTIME_FUNCTION __forceinline__ static hipError_t
+    If(void *d_temp_storage,
+       std::size_t &temp_storage_bytes,
+       InputIteratorT d_in,
+       FirstOutputIteratorT d_first_part_out,
+       SecondOutputIteratorT d_second_part_out,
+       UnselectedOutputIteratorT d_unselected_out,
+       NumSelectedIteratorT d_num_selected_out,
+       int num_items,
+       SelectFirstPartOp select_first_part_op,
+       SelectSecondPartOp select_second_part_op,
+       hipStream_t stream     = 0,
+       bool debug_synchronous = false)
+    {
+        return hipCUDAErrorTohipError(
+            ::cub::DevicePartition::If(
+                d_temp_storage,
+                temp_storage_bytes,
+                d_in,
+                d_first_part_out,
+                d_second_part_out,
+                d_unselected_out,
+                d_num_selected_out,
+                num_items,
+                select_first_part_op,
+                select_second_part_op,
+                stream,
+                debug_synchronous
+            )
+        );
+    }
 };
 
 END_HIPCUB_NAMESPACE

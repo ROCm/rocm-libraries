@@ -82,6 +82,22 @@ unsigned int WarpId()
     return ::rocprim::warp_id();
 }
 
+template <int LOGICAL_WARP_THREADS, int /* ARCH */ = 0>
+HIPCUB_DEVICE inline 
+uint64_t WarpMask(unsigned int warp_id) {
+    constexpr bool is_pow_of_two = ::rocprim::detail::is_power_of_two(LOGICAL_WARP_THREADS);
+    constexpr bool is_arch_warp =
+        LOGICAL_WARP_THREADS == ::rocprim::device_warp_size();
+
+    uint64_t member_mask = uint64_t(-1) >> (64 - LOGICAL_WARP_THREADS);
+
+    if (is_pow_of_two && !is_arch_warp) {
+        member_mask <<= warp_id * LOGICAL_WARP_THREADS;
+    }
+
+    return member_mask;
+}
+
 // Returns the warp lane mask of all lanes less than the calling thread
 HIPCUB_DEVICE inline
 uint64_t LaneMaskLt()
@@ -279,8 +295,8 @@ void CTA_SYNC()
 HIPCUB_DEVICE inline
 void WARP_SYNC(unsigned int member_mask)
 {
-    // Does nothing, on ROCm threads in warp are always in sync
     (void) member_mask;
+    ::rocprim::wave_barrier();
 }
 
 HIPCUB_DEVICE inline
