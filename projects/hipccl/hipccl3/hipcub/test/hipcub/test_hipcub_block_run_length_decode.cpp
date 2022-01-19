@@ -48,22 +48,6 @@ public:
     using params = Params;
 };
 
-// char not supported for std::uniform_int_distribution in VS C++
-#if defined(WIN32)
-using HipcubBlockRunLengthDecodeTestParams = ::testing::Types<
-    Params<int, int, 256, 4, 4>,
-    Params<float, int, 256, 4, 4>,
-
-    Params<int, int, 256, 8, 8>,
-    Params<float, int, 256, 8, 8>,
-
-    Params<int, int, 256, 1, 14>,
-    Params<float, int, 256, 1, 14>,
-
-    Params<int, int, 256, 9, 7>,
-    Params<float, int, 256, 9, 7>
->;
-#else
 using HipcubBlockRunLengthDecodeTestParams = ::testing::Types<
     Params<int, int, 256, 4, 4>,
     Params<double, char, 256, 4, 4>,
@@ -85,7 +69,6 @@ using HipcubBlockRunLengthDecodeTestParams = ::testing::Types<
     Params<char, long long, 256, 9, 7>,
     Params<float, int, 256, 9, 7>
 >;
-#endif
 
 TYPED_TEST_SUITE(HipcubBlockRunLengthDecodeTest, HipcubBlockRunLengthDecodeTestParams);
 
@@ -146,60 +129,41 @@ TYPED_TEST(HipcubBlockRunLengthDecodeTest, TestDecode)
     constexpr unsigned runs_per_thread = TestFixture::params::runs_per_thread;
     constexpr unsigned decoded_items_per_thread = TestFixture::params::decoded_items_per_thread;
 
-    using ItemDistribution = std::conditional_t<
-        std::is_integral<ItemT>::value,
-        std::uniform_int_distribution<ItemT>,
-        std::uniform_real_distribution<ItemT>
-    >;
-
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         const unsigned seed_value = seed_index >= random_seeds_count ? seeds[seed_index] : rand();
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        std::default_random_engine prng(seed_value);
-        ItemDistribution run_item_dist = []() {
-            if (std::is_integral<ItemT>::value)
-            {
-                return ItemDistribution(
-                    std::numeric_limits<ItemT>::min(),
-                    std::numeric_limits<ItemT>::max()
-                );
-            }
-            else if (std::is_floating_point<ItemT>::value)
-            {
-                return ItemDistribution(
-                    static_cast<ItemT>(-1000),
-                    static_cast<ItemT>(1000)
-                );
-            }
-            else
-            {
-                throw std::logic_error("ItemT must be either integral or floating point");
-            }
-        }();
         const LengthT max_run_length = static_cast<LengthT>(
             std::min(1000ll, static_cast<long long>(std::numeric_limits<LengthT>::max())));
-        std::uniform_int_distribution<LengthT> run_length_dist(1, max_run_length);
 
-        std::vector<ItemT> run_items;
-        std::vector<LengthT> run_lengths;
         size_t num_runs = runs_per_thread * block_size;
+        auto run_items = test_utils::get_random_data<ItemT>(
+            num_runs,
+            std::numeric_limits<ItemT>::min(),
+            std::numeric_limits<ItemT>::max(),
+            seed_value
+        );
+        auto run_lengths = test_utils::get_random_data<LengthT>(
+            num_runs,
+            static_cast<LengthT>(1),
+            max_run_length,
+            seed_value
+        );
 
-        while (run_items.size() < num_runs)
-        {
-            run_items.push_back(run_item_dist(prng));
-            run_lengths.push_back(run_length_dist(prng));
-        }
-
+        std::default_random_engine prng(seed_value);
         std::uniform_int_distribution<size_t> num_empty_runs_dist(1, 4);
         const size_t num_trailing_empty_runs = num_empty_runs_dist(prng);
         num_runs += num_trailing_empty_runs;
-        for (size_t i = 0; i < num_trailing_empty_runs; ++i)
-        {
-            run_items.push_back(run_item_dist(prng));
-            run_lengths.push_back(0);
-        }
+        
+        const auto empty_run_items = test_utils::get_random_data<ItemT>(
+            num_trailing_empty_runs,
+            std::numeric_limits<ItemT>::min(),
+            std::numeric_limits<ItemT>::max(),
+            seed_value
+        );
+        run_items.insert(run_items.end(), empty_run_items.begin(), empty_run_items.end());
+        run_lengths.insert(run_lengths.end(), num_trailing_empty_runs, static_cast<LengthT>(0));
 
         std::vector<ItemT> expected;
         for (size_t i = 0; i < run_items.size(); ++i)
