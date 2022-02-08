@@ -65,8 +65,10 @@ HIPCUB_DEVICE __forceinline__ T AsmThreadLoad(void * ptr)
     HIPCUB_DEVICE __forceinline__ type AsmThreadLoad<cache_modifier, type>(void * ptr)                        \
     {                                                                                                         \
         interim_type retval;                                                                                  \
-        asm volatile(#asm_operator " %0, %1 " llvm_cache_modifier : "=" #output_modifier(retval) : "v"(ptr)); \
-        asm volatile("s_waitcnt " wait_cmd "(%0)" : : "I"(0x00));                                             \
+        asm volatile(                                                                                         \
+            #asm_operator " %0, %1 " llvm_cache_modifier "\n"                                                 \
+            "\ts_waitcnt " wait_cmd "(0)" : "=" #output_modifier(retval) : "v"(ptr)                            \
+        );                                                                                                    \
         return retval;                                                                                        \
     }
 
