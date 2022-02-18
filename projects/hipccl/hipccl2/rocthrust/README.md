@@ -1,6 +1,4 @@
-# Thrust
-
-HIP back-end for Thrust (alpha release).
+# rocThrust
 
 ## Introduction
 
@@ -228,7 +226,6 @@ Documentation is available [here](https://rocthrust.readthedocs.io/en/latest/).
 
 Bugs and feature requests can be reported through [the issue tracker](https://github.com/ROCmSoftwarePlatform/rocThrust/issues).
 
-## Contributions and License
+## License
 
-Contributions of any kind are most welcome! More details are found at [CONTRIBUTING](./CONTRIBUTING.md)
-and [LICENSE](./LICENSE.txt).
+rocThrust is distributed under the [Apache 2.0 LICENSE](./LICENSE).
