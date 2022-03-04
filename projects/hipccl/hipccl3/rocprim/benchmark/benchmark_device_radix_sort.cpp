@@ -44,10 +44,10 @@ auto sort_keys_add_benchmark(
 {
     benchmarks.push_back(
         benchmark::RegisterBenchmark(
-            (std::string("sort_keys") + "<" + typeid(Key).name() + "radix_sort_config<" +
+            (std::string("sort_keys") + "<" + Traits<Key>::TYPE_NAME + ",radix_sort_config<" +
              std::to_string(LRB) + ", " + std::to_string(SRB) + ", kernel_config<" +
              std::to_string(BlockSize1) + ", " + std::to_string(ItemsPerThread1) + ">, kernel_config<" +
-             std::to_string(BlockSize2) + ", " + std::to_string(ItemsPerThread2) + "> >").c_str(),
+             std::to_string(BlockSize2) + ", " + std::to_string(ItemsPerThread2) + ">>>").c_str(),
             [=](benchmark::State& state) {
                 run_sort_keys_benchmark<
                     Key,
@@ -80,9 +80,9 @@ auto sort_keys_add_benchmark(
     benchmarks.push_back(
         benchmark::RegisterBenchmark(
             (std::string("sort_pairs") + "<" + Traits<Key>::TYPE_NAME + "," + Traits<Value>::TYPE_NAME +
-             "radix_sort_config<" + std::to_string(LRB) + ", " + std::to_string(SRB) + ", kernel_config<" +
+             ",radix_sort_config<" + std::to_string(LRB) + ", " + std::to_string(SRB) + ", kernel_config<" +
              std::to_string(BlockSize1) + ", " + std::to_string(ItemsPerThread1) + ">, kernel_config<" +
-             std::to_string(BlockSize2) + ", " + std::to_string(ItemsPerThread2) + "> >").c_str(),
+             std::to_string(BlockSize2) + ", " + std::to_string(ItemsPerThread2) + ">>>").c_str(),
             [=](benchmark::State& state) {
                 run_sort_pairs_benchmark<
                     Key, Value,

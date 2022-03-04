@@ -125,6 +125,22 @@ struct scan_config_90a
     >;
 };
 
+template<class Value>
+struct scan_config_908
+{
+    static constexpr unsigned int item_scale =
+        ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
+
+    using type = scan_config<
+        limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_32>::value,
+        ::rocprim::max(1u, 20u / item_scale),
+        ROCPRIM_DETAIL_USE_LOOKBACK_SCAN,
+        ::rocprim::block_load_method::block_load_transpose,
+        ::rocprim::block_store_method::block_store_transpose,
+        ::rocprim::block_scan_algorithm::using_warp_scan
+    >;
+};
+
 // TODO: We need to update these parameters
 template<class Value>
 struct scan_config_1030
@@ -149,6 +165,7 @@ struct default_scan_config
         select_arch_case<803, scan_config_803<Value>>,
         select_arch_case<900, scan_config_900<Value>>,
         select_arch_case<ROCPRIM_ARCH_90a, scan_config_90a<Value>>,
+        select_arch_case<908, scan_config_908<Value>>,
         select_arch_case<1030, scan_config_1030<Value>>,
         scan_config_900<Value>
     > { };

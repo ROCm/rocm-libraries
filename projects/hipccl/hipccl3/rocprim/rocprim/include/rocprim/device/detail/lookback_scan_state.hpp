@@ -235,7 +235,7 @@ public:
         const auto n = ::rocprim::host_warp_size() + number_of_blocks;
         lookback_scan_state state;
 
-        auto ptr = reinterpret_cast<char*>(temp_storage);
+        auto ptr = static_cast<char*>(temp_storage);
 
         state.prefixes_flags = reinterpret_cast<flag_type*>(ptr);
         ptr += ::rocprim::detail::align_size(n * sizeof(flag_type));
@@ -433,6 +433,27 @@ protected:
     BinaryFunction     scan_op_;
     LookbackScanState& scan_state_;
 };
+
+inline hipError_t is_sleep_scan_state_used(bool& use_sleep)
+{
+    hipDeviceProp_t prop;
+    int             deviceId;
+    if(const hipError_t error = hipGetDevice(&deviceId))
+    {
+        return error;
+    }
+    else if(const hipError_t error = hipGetDeviceProperties(&prop, deviceId))
+    {
+        return error;
+    }
+#if HIP_VERSION >= 307
+    const int asicRevision = prop.asicRevision;
+#else
+    const int asicRevision = 0;
+#endif
+    use_sleep = prop.gcnArch == 908 && asicRevision < 2;
+    return hipSuccess;
+}
 
 } // end of detail namespace
 

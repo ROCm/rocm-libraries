@@ -344,7 +344,9 @@ benchmark::RegisterBenchmark( \
     CREATE_SORT_KEYS_BENCHMARK(type, 10), \
     CREATE_SORT_KEYS_BENCHMARK(type, 100), \
     CREATE_SORT_KEYS_BENCHMARK(type, 1000), \
-    CREATE_SORT_KEYS_BENCHMARK(type, 10000)
+    CREATE_SORT_KEYS_BENCHMARK(type, 10000), \
+    CREATE_SORT_KEYS_BENCHMARK(type, 100000), \
+    CREATE_SORT_KEYS_BENCHMARK(type, 1000000)
 
 void add_sort_keys_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
                               hipStream_t stream,
@@ -375,7 +377,9 @@ benchmark::RegisterBenchmark( \
     CREATE_SORT_PAIRS_BENCHMARK(type, value, 10), \
     CREATE_SORT_PAIRS_BENCHMARK(type, value, 100), \
     CREATE_SORT_PAIRS_BENCHMARK(type, value, 1000), \
-    CREATE_SORT_PAIRS_BENCHMARK(type, value, 10000)
+    CREATE_SORT_PAIRS_BENCHMARK(type, value, 10000), \
+    CREATE_SORT_PAIRS_BENCHMARK(type, value, 100000), \
+    CREATE_SORT_PAIRS_BENCHMARK(type, value, 1000000)
 
 void add_sort_pairs_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
                                hipStream_t stream,

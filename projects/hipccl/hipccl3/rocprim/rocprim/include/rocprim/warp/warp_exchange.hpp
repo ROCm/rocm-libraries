@@ -345,6 +345,71 @@ public:
             output[i] = work_array[i];
         }
     }
+
+    /// \brief Orders \p input values according to ranks using temporary storage,
+    /// then writes the values to \p output in a striped manner.
+    /// No values in \p ranks should exists that exceed \p WarpSize*ItemsPerThread-1 .
+    /// \tparam U - [inferred] the output type.
+    ///
+    /// \param [in] input - array that data is loaded from.
+    /// \param [out] output - array that data is loaded to.
+    /// \param [in] ranks - array containing the positions.
+    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    ///
+    /// \par Storage reusage
+    /// Synchronization barrier should be placed before \p storage is reused
+    /// or repurposed: \p __syncthreads() or \p rocprim::syncthreads().
+    ///
+    /// \par Example.
+    /// \code{.cpp}
+    /// __global__ void example_kernel(...)
+    /// {
+    ///     constexpr unsigned int threads_per_block = 128;
+    ///     constexpr unsigned int threads_per_warp  =   8;
+    ///     constexpr unsigned int items_per_thread  =   4;
+    ///     constexpr unsigned int warps_per_block   = threads_per_block / threads_per_warp;
+    ///     const unsigned int warp_id = hipThreadIdx_x / threads_per_warp;
+    ///     // specialize warp_exchange for int, warp of 8 threads and 4 items per thread
+    ///     using warp_exchange_int = rocprim::warp_exchange<int, items_per_thread, threads_per_warp>;
+    ///     // allocate storage in shared memory
+    ///     __shared__ warp_exchange_int::storage_type storage[warps_per_block];
+    ///
+    ///     int items[items_per_thread];
+    ///
+    ///     // data-type of `ranks` should be able to contain warp_size*items_per_thread unique elements
+    ///     // unsigned short is sufficient for up to 1024*64 elements
+    ///     unsigned short ranks[items_per_thread];
+    ///     ...
+    ///     warp_exchange_int w_exchange;
+    ///     w_exchange.scatter_to_striped(items, items, ranks, storage[warp_id]);
+    ///     ...
+    /// }
+    /// \endcode
+    template<class U, class OffsetT>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void scatter_to_striped(
+            const T (&input)[ItemsPerThread],
+            U (&output)[ItemsPerThread],
+            const OffsetT (&ranks)[ItemsPerThread],
+            storage_type& storage)
+    {
+        const unsigned int flat_id = ::rocprim::detail::logical_lane_id<WarpSize>();
+        storage_type_& storage_ = storage.get();
+
+        ROCPRIM_UNROLL
+        for (unsigned int i = 0; i < ItemsPerThread; i++)
+        {
+            storage_.buffer[ranks[i]] = input[i];
+        }
+        ::rocprim::wave_barrier();
+
+        ROCPRIM_UNROLL
+        for (unsigned int i = 0; i < ItemsPerThread; i++)
+        {
+            unsigned int item_offset = (i * WarpSize) + flat_id;
+            output[i] = storage_.buffer[item_offset];
+        }
+    }
 };
 
 END_ROCPRIM_NAMESPACE

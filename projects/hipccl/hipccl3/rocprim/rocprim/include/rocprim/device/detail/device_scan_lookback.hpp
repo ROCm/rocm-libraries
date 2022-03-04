@@ -33,6 +33,7 @@
 #include "../../block/block_store.hpp"
 #include "../../block/block_scan.hpp"
 
+#include "device_scan_common.hpp"
 #include "lookback_scan_state.hpp"
 #include "ordered_block_id.hpp"
 
@@ -44,128 +45,6 @@ BEGIN_ROCPRIM_NAMESPACE
 
 namespace detail
 {
-
-template<class LookBackScanState>
-ROCPRIM_DEVICE ROCPRIM_INLINE
-void init_lookback_scan_state_kernel_impl(LookBackScanState lookback_scan_state,
-                                          const unsigned int number_of_blocks,
-                                          ordered_block_id<unsigned int> ordered_bid)
-{
-    const unsigned int block_id = ::rocprim::detail::block_id<0>();
-    const unsigned int block_size = ::rocprim::detail::block_size<0>();
-    const unsigned int block_thread_id = ::rocprim::detail::block_thread_id<0>();
-    const unsigned int id = (block_id * block_size) + block_thread_id;
-
-    // Reset ordered_block_id
-    if(id == 0)
-    {
-        ordered_bid.reset();
-    }
-    // Initialize lookback scan status
-    lookback_scan_state.initialize_prefix(id, number_of_blocks);
-}
-
-template<
-    bool Exclusive,
-    class BlockScan,
-    class T,
-    unsigned int ItemsPerThread,
-    class BinaryFunction
->
-ROCPRIM_DEVICE ROCPRIM_INLINE
-auto lookback_block_scan(T (&values)[ItemsPerThread],
-                         T /* initial_value */,
-                         T& reduction,
-                         typename BlockScan::storage_type& storage,
-                         BinaryFunction scan_op)
-    -> typename std::enable_if<!Exclusive>::type
-{
-    BlockScan()
-        .inclusive_scan(
-            values, // input
-            values, // output
-            reduction,
-            storage,
-            scan_op
-        );
-}
-
-template<
-    bool Exclusive,
-    class BlockScan,
-    class T,
-    unsigned int ItemsPerThread,
-    class BinaryFunction
->
-ROCPRIM_DEVICE ROCPRIM_INLINE
-auto lookback_block_scan(T (&values)[ItemsPerThread],
-                         T initial_value,
-                         T& reduction,
-                         typename BlockScan::storage_type& storage,
-                         BinaryFunction scan_op)
-    -> typename std::enable_if<Exclusive>::type
-{
-    BlockScan()
-        .exclusive_scan(
-            values, // input
-            values, // output
-            initial_value,
-            reduction,
-            storage,
-            scan_op
-        );
-    reduction = scan_op(initial_value, reduction);
-}
-
-template<
-    bool Exclusive,
-    class BlockScan,
-    class T,
-    unsigned int ItemsPerThread,
-    class PrefixCallback,
-    class BinaryFunction
->
-ROCPRIM_DEVICE ROCPRIM_INLINE
-auto lookback_block_scan(T (&values)[ItemsPerThread],
-                         typename BlockScan::storage_type& storage,
-                         PrefixCallback& prefix_callback_op,
-                         BinaryFunction scan_op)
-    -> typename std::enable_if<!Exclusive>::type
-{
-    BlockScan()
-        .inclusive_scan(
-            values, // input
-            values, // output
-            storage,
-            prefix_callback_op,
-            scan_op
-        );
-}
-
-template<
-    bool Exclusive,
-    class BlockScan,
-    class T,
-    unsigned int ItemsPerThread,
-    class PrefixCallback,
-    class BinaryFunction
->
-ROCPRIM_DEVICE ROCPRIM_INLINE
-auto lookback_block_scan(T (&values)[ItemsPerThread],
-                         typename BlockScan::storage_type& storage,
-                         PrefixCallback& prefix_callback_op,
-                         BinaryFunction scan_op)
-    -> typename std::enable_if<Exclusive>::type
-{
-    BlockScan()
-        .exclusive_scan(
-            values, // input
-            values, // output
-            storage,
-            prefix_callback_op,
-            scan_op
-        );
-}
 
 template<
     bool Exclusive,

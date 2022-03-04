@@ -130,8 +130,9 @@ public:
             return std::vector<T>();
         }else {
             std::vector<T> r = {test_utils::numeric_limits<T>::quiet_NaN(),
-                                //sign_bit_flip(test_utils::numeric_limits<T>::quiet_NaN()),
-                                //test_utils::numeric_limits<T>::signaling_NaN(), // signaling_NaN not supported on NVIDIA yet
+                                sign_bit_flip(test_utils::numeric_limits<T>::quiet_NaN()),
+                                // TODO: switch on when signaling_NaN will be supported on NVIDIA
+                                //test_utils::numeric_limits<T>::signaling_NaN(),
                                 //sign_bit_flip(test_utils::numeric_limits<T>::signaling_NaN()),
                                 test_utils::numeric_limits<T>::infinity(),
                                 sign_bit_flip(test_utils::numeric_limits<T>::infinity()),

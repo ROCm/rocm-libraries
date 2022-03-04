@@ -30,6 +30,7 @@
 #include "../detail/various.hpp"
 
 #include "device_select_config.hpp"
+#include "detail/device_scan_common.hpp"
 #include "detail/device_partition.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
@@ -68,19 +69,6 @@ void partition_kernel(InputIterator input,
     partition_kernel_impl<SelectMethod, OnlySelected, Config>(
         input, flags, output, selected_count_output, size, inequality_op,
         offset_scan_state, number_of_blocks, ordered_bid, predicates...
-    );
-}
-
-
-template<class OffsetLookBackScanState>
-ROCPRIM_KERNEL
-__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
-void init_offset_scan_state_kernel(OffsetLookBackScanState offset_scan_state,
-                                   const unsigned int number_of_blocks,
-                                   ordered_block_id<unsigned int> ordered_bid)
-{
-    init_lookback_scan_state_kernel_impl(
-        offset_scan_state, number_of_blocks, ordered_bid
     );
 }
 
@@ -210,14 +198,14 @@ hipError_t partition_impl(void * temporary_storage,
     if (prop.gcnArch == 908 && asicRevision < 2)
     {
         hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(init_offset_scan_state_kernel<offset_scan_state_with_sleep_type>),
+            HIP_KERNEL_NAME(init_lookback_scan_state_kernel<offset_scan_state_with_sleep_type>),
             dim3(grid_size), dim3(block_size), 0, stream,
             offset_scan_state_with_sleep, number_of_blocks, ordered_bid
         );
     } else
     {
         hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(init_offset_scan_state_kernel<offset_scan_state_type>),
+            HIP_KERNEL_NAME(init_lookback_scan_state_kernel<offset_scan_state_type>),
             dim3(grid_size), dim3(block_size), 0, stream,
             offset_scan_state, number_of_blocks, ordered_bid
         );
