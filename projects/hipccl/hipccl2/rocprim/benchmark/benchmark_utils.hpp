@@ -276,4 +276,67 @@ struct DeviceSelectWarpSize
         : ::rocprim::device_warp_size();
 };
 
+template<typename T>
+std::vector<T> get_random_segments(const size_t size,
+                                   const size_t max_segment_length,
+                                   const int seed_value)
+{
+    static_assert(std::is_arithmetic<T>::value, "Key type must be arithmetic");
+
+    std::default_random_engine prng(seed_value);
+    std::uniform_int_distribution<size_t> segment_length_distribution(max_segment_length);
+    using key_distribution_type = std::conditional_t<
+        std::is_integral<T>::value,
+        std::uniform_int_distribution<T>,
+        std::uniform_real_distribution<T>
+    >;
+    key_distribution_type key_distribution(std::numeric_limits<T>::max());
+    std::vector<T> keys(size);
+
+    size_t keys_start_index = 0;
+    while (keys_start_index < size)
+    {
+        const size_t new_segment_length = segment_length_distribution(prng);
+        const size_t new_segment_end = std::min(size, keys_start_index + new_segment_length);
+        const T key = key_distribution(prng);
+        std::fill(
+            keys.begin() + keys_start_index,
+            keys.begin() + new_segment_end,
+            key
+        );
+        keys_start_index += new_segment_length;
+    }
+    return keys;
+}
+
+template <typename T, T, typename>
+struct make_index_range_impl;
+
+template <typename T, T Start, T... I>
+struct make_index_range_impl<T, Start, std::integer_sequence<T, I...>>
+{
+    using type = std::integer_sequence<T, (Start + I)...>;
+};
+
+// make a std::integer_sequence with values from Start to End inclusive
+template <typename T, T Start, T End>
+using make_index_range =
+    typename make_index_range_impl<T, Start, std::make_integer_sequence<T, End - Start + 1>>::type;
+
+template <typename T, template <T> class Function, T... I, typename... Args>
+void static_for_each_impl(std::integer_sequence<T, I...>, Args... args)
+{
+    int a[] = {(Function<I> {}(args...), 0)...};
+    static_cast<void>(a);
+}
+
+// call the supplied template with all values of the std::integer_sequence Indices
+template <typename Indices,
+          template <typename Indices::value_type> class Function,
+          typename... Args>
+void static_for_each(Args... args)
+{
+    static_for_each_impl<typename Indices::value_type, Function>(Indices {}, args...);
+}
+
 #endif // ROCPRIM_BENCHMARK_UTILS_HPP_

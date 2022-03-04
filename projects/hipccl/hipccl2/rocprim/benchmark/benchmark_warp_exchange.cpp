@@ -42,102 +42,6 @@
 const size_t DEFAULT_N = 1024 * 1024 * 32;
 #endif
 
-template<
-    class T,
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
-    unsigned int LogicalWarpSize,
-    class Op
->
-__global__
-__launch_bounds__(BlockSize)
-void warp_exchange_kernel(T* d_output, unsigned int trials)
-{
-    T thread_data[ItemsPerThread];
-
-    ROCPRIM_UNROLL
-    for(unsigned int i = 0; i < ItemsPerThread; i++)
-    {
-        thread_data[i] = static_cast<T>(i);
-    }
-
-    using warp_exchange_type = ::rocprim::warp_exchange<
-        T,
-        ItemsPerThread,
-        DeviceSelectWarpSize<LogicalWarpSize>::value
-    >;
-    constexpr unsigned int warps_in_block = BlockSize / LogicalWarpSize;
-    const unsigned int warp_id = hipThreadIdx_x / LogicalWarpSize;
-    ROCPRIM_SHARED_MEMORY typename warp_exchange_type::storage_type storage[warps_in_block];
-
-    for(unsigned int i = 0; i < trials; i++)
-    {
-        Op{}(warp_exchange_type(), thread_data, storage[warp_id]);
-        ::rocprim::wave_barrier();
-    }
-
-    ROCPRIM_UNROLL
-    for(unsigned int i = 0; i < ItemsPerThread; i++)
-    {
-        const unsigned int global_idx =
-            (BlockSize * hipBlockIdx_x + hipThreadIdx_x) * ItemsPerThread + i;
-        d_output[global_idx] = thread_data[i];
-    }
-}
-
-template<
-    class T,
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
-    unsigned int LogicalWarpSize,
-    class Op
->
-void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
-{
-    constexpr unsigned int trials = 200;
-    constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
-    const unsigned int size = items_per_block * ((N + items_per_block - 1) / items_per_block);
-
-    T * d_output;
-    HIP_CHECK(hipMalloc(&d_output, size * sizeof(T)));
-
-    for(auto _ : state)
-    {
-        auto start = std::chrono::high_resolution_clock::now();
-        
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(warp_exchange_kernel<
-                    T,
-                    BlockSize,
-                    ItemsPerThread,
-                    LogicalWarpSize,
-                    Op
-                >
-            ),
-            dim3(size / items_per_block), dim3(BlockSize), 0, stream,
-            d_output, trials
-        );
-        
-        HIP_CHECK(hipPeekAtLastError())
-        HIP_CHECK(hipDeviceSynchronize());
-        auto end = std::chrono::high_resolution_clock::now();
-        auto elapsed_seconds =
-            std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
-        state.SetIterationTime(elapsed_seconds.count());
-    }
-    state.SetBytesProcessed(state.iterations() * trials * size * sizeof(T));
-    state.SetItemsProcessed(state.iterations() * trials * size);
-
-    HIP_CHECK(hipFree(d_output));
-}
-
-#define CREATE_BENCHMARK(T, BS, IT, WS, OP) \
-benchmark::RegisterBenchmark( \
-    "warp_exchange_striped_to_blocked<"#T", "#BS", "#IT", "#WS", "#OP">.", \
-    &run_benchmark<T, BS, IT, WS, OP>, \
-    stream, size \
-)
-
 struct BlockedToStripedOp
 {
     template<
@@ -202,6 +106,172 @@ struct StripedToBlockedShuffleOp
     }
 };
 
+struct ScatterToStripedOp
+{
+    template<
+        class T,
+        class OffsetT,
+        class warp_exchange_type,
+        unsigned int ItemsPerThread
+    >
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    void operator()(warp_exchange_type warp_exchange,
+                    T (&thread_data)[ItemsPerThread],
+                    const OffsetT (&ranks)[ItemsPerThread],
+                    typename warp_exchange_type::storage_type& storage)
+    {
+        warp_exchange.scatter_to_striped(thread_data, thread_data, ranks, storage);
+    }
+};
+
+template<
+    class T,
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread,
+    unsigned int LogicalWarpSize,
+    class Op
+>
+__global__
+__launch_bounds__(BlockSize)
+auto warp_exchange_kernel(T* d_output, unsigned int trials) -> typename std::enable_if<!std::is_same<Op, ScatterToStripedOp>::value, void>::type
+{
+    T thread_data[ItemsPerThread];
+
+    ROCPRIM_UNROLL
+    for(unsigned int i = 0; i < ItemsPerThread; i++)
+    {
+        // generate unique value each data-element
+        thread_data[i] = static_cast<T>(hipThreadIdx_x*ItemsPerThread+i);
+    }
+
+    using warp_exchange_type = ::rocprim::warp_exchange<
+        T,
+        ItemsPerThread,
+        DeviceSelectWarpSize<LogicalWarpSize>::value
+    >;
+    constexpr unsigned int warps_in_block = BlockSize / LogicalWarpSize;
+    const unsigned int warp_id = hipThreadIdx_x / LogicalWarpSize;
+    ROCPRIM_SHARED_MEMORY typename warp_exchange_type::storage_type storage[warps_in_block];
+
+    ROCPRIM_NO_UNROLL
+    for(unsigned int i = 0; i < trials; i++)
+    {
+        Op{}(warp_exchange_type(), thread_data, storage[warp_id]);
+        ::rocprim::wave_barrier();
+    }
+
+    ROCPRIM_UNROLL
+    for(unsigned int i = 0; i < ItemsPerThread; i++)
+    {
+        const unsigned int global_idx =
+            (BlockSize * hipBlockIdx_x + hipThreadIdx_x) * ItemsPerThread + i;
+        d_output[global_idx] = thread_data[i];
+    }
+}
+
+template<
+    class T,
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread,
+    unsigned int LogicalWarpSize,
+    class Op
+    >
+__global__
+__launch_bounds__(BlockSize)
+    auto warp_exchange_kernel(T* d_output, unsigned int trials) -> typename std::enable_if<std::is_same<Op, ScatterToStripedOp>::value, void>::type
+{
+    T thread_data[ItemsPerThread];
+    unsigned int thread_ranks[ItemsPerThread];
+    constexpr unsigned int warps_in_block = BlockSize / LogicalWarpSize;
+    const unsigned int warp_id = hipThreadIdx_x / LogicalWarpSize;
+    const unsigned int lane_id = hipThreadIdx_x % LogicalWarpSize;
+
+    ROCPRIM_UNROLL
+    for(unsigned int i = 0; i < ItemsPerThread; i++)
+    {
+        // generate unique value each data-element
+        thread_data[i] = static_cast<T>(hipThreadIdx_x*ItemsPerThread+i);
+        // generate unique destination location for each data-element
+        const unsigned int s_lane_id = i % 2 == 0 ? LogicalWarpSize - 1 - lane_id : lane_id;
+        thread_ranks[i] = s_lane_id*ItemsPerThread+i; // scatter values in warp across whole storage
+    }
+
+    using warp_exchange_type = ::rocprim::warp_exchange<
+        T,
+        ItemsPerThread,
+        DeviceSelectWarpSize<LogicalWarpSize>::value
+        >;
+    ROCPRIM_SHARED_MEMORY typename warp_exchange_type::storage_type storage[warps_in_block];
+
+    ROCPRIM_NO_UNROLL
+    for(unsigned int i = 0; i < trials; i++)
+    {
+        Op{}(warp_exchange_type(), thread_data, thread_ranks, storage[warp_id]);
+        ::rocprim::wave_barrier();
+    }
+
+    ROCPRIM_UNROLL
+    for(unsigned int i = 0; i < ItemsPerThread; i++)
+    {
+        const unsigned int global_idx =
+            (BlockSize * hipBlockIdx_x + hipThreadIdx_x) * ItemsPerThread + i;
+        d_output[global_idx] = thread_data[i];
+    }
+}
+
+template<
+    class T,
+    unsigned int BlockSize,
+    unsigned int ItemsPerThread,
+    unsigned int LogicalWarpSize,
+    class Op
+>
+void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
+{
+    constexpr unsigned int trials = 200;
+    constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
+    const unsigned int size = items_per_block * ((N + items_per_block - 1) / items_per_block);
+
+    T * d_output;
+    HIP_CHECK(hipMalloc(&d_output, size * sizeof(T)));
+
+    for(auto _ : state)
+    {
+        auto start = std::chrono::high_resolution_clock::now();
+        
+        hipLaunchKernelGGL(
+            HIP_KERNEL_NAME(warp_exchange_kernel<
+                    T,
+                    BlockSize,
+                    ItemsPerThread,
+                    LogicalWarpSize,
+                    Op
+                >
+            ),
+            dim3(size / items_per_block), dim3(BlockSize), 0, stream,
+            d_output, trials
+        );
+        
+        HIP_CHECK(hipPeekAtLastError())
+        HIP_CHECK(hipDeviceSynchronize());
+        auto end = std::chrono::high_resolution_clock::now();
+        auto elapsed_seconds =
+            std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+        state.SetIterationTime(elapsed_seconds.count());
+    }
+    state.SetBytesProcessed(state.iterations() * trials * size * sizeof(T));
+    state.SetItemsProcessed(state.iterations() * trials * size);
+
+    HIP_CHECK(hipFree(d_output));
+}
+
+#define CREATE_BENCHMARK(T, BS, IT, WS, OP) \
+benchmark::RegisterBenchmark( \
+    "warp_exchange<"#T", "#BS", "#IT", "#WS", "#OP">.", \
+    &run_benchmark<T, BS, IT, WS, OP>, \
+    stream, size \
+)
+
 int main(int argc, char *argv[])
 {
     cli::Parser parser(argc, argv);
@@ -250,7 +320,14 @@ int main(int argc, char *argv[])
         CREATE_BENCHMARK(int, 256,  4, 16, StripedToBlockedShuffleOp),
         CREATE_BENCHMARK(int, 256,  4, 32, StripedToBlockedShuffleOp),
         CREATE_BENCHMARK(int, 256, 16, 16, StripedToBlockedShuffleOp),
-        CREATE_BENCHMARK(int, 256, 16, 32, StripedToBlockedShuffleOp)
+        CREATE_BENCHMARK(int, 256, 16, 32, StripedToBlockedShuffleOp),
+
+        CREATE_BENCHMARK(int, 256,  1, 16, ScatterToStripedOp),
+        CREATE_BENCHMARK(int, 256,  1, 32, ScatterToStripedOp),
+        CREATE_BENCHMARK(int, 256,  4, 16, ScatterToStripedOp),
+        CREATE_BENCHMARK(int, 256,  4, 32, ScatterToStripedOp),
+        CREATE_BENCHMARK(int, 256, 16, 16, ScatterToStripedOp),
+        CREATE_BENCHMARK(int, 256, 16, 32, ScatterToStripedOp)
     };
 
     if(is_warp_size_supported(64))
@@ -270,7 +347,11 @@ int main(int argc, char *argv[])
 
             CREATE_BENCHMARK(int, 256,  1, 64, StripedToBlockedShuffleOp),
             CREATE_BENCHMARK(int, 256,  4, 64, StripedToBlockedShuffleOp),
-            CREATE_BENCHMARK(int, 256, 16, 64, StripedToBlockedShuffleOp)
+            CREATE_BENCHMARK(int, 256, 16, 64, StripedToBlockedShuffleOp),
+
+            CREATE_BENCHMARK(int, 256,  1, 64, ScatterToStripedOp),
+            CREATE_BENCHMARK(int, 256,  4, 64, ScatterToStripedOp),
+            CREATE_BENCHMARK(int, 256, 16, 64, ScatterToStripedOp)
         };
         benchmarks.insert(
             benchmarks.end(),

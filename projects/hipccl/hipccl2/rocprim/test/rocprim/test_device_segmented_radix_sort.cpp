@@ -571,7 +571,8 @@ TYPED_TEST(RocprimDeviceSegmentedRadixSort, SortKeysDoubleBuffer)
             rocprim::double_buffer<key_type> d_keys(d_keys_input, d_keys_output);
 
             // Use custom config
-            using config = rocprim::segmented_radix_sort_config<7, 4, rocprim::kernel_config<192, 5>>;
+            using config = rocprim::segmented_radix_sort_config<7, 4, rocprim::kernel_config<192, 5>,
+                rocprim::select_warp_sort_config_t<key_type>>;
 
             size_t temporary_storage_bytes = 0;
             HIP_CHECK(

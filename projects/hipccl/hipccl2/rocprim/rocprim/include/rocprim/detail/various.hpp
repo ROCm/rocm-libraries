@@ -54,10 +54,11 @@ constexpr T next_power_of_two(const T x, const T acc = 1)
     return acc >= x ? acc : next_power_of_two(x, 2 * acc);
 }
 
-template<class T>
-ROCPRIM_HOST_DEVICE inline
-constexpr auto ceiling_div(T a, T b)
-    -> typename std::enable_if<::rocprim::is_integral<T>::value, T>::type
+template <
+    typename T,
+    typename U,
+    std::enable_if_t<::rocprim::is_integral<T>::value && ::rocprim::is_integral<U>::value, int> = 0>
+ROCPRIM_HOST_DEVICE inline constexpr auto ceiling_div(const T a, const U b)
 {
     return (a + b - 1) / b;
 }

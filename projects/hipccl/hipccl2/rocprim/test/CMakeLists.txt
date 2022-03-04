@@ -119,7 +119,8 @@ endfunction()
 # ****************************************************************************
 
 # HIP tests without using rocPRIM
-add_hip_test("hip.device_api" test_hip_api.cpp)
+add_hip_test("hip.device_api" hip/test_hip_api.cpp)
+add_hip_test("hip.async_copy" hip/test_hip_async_copy.cpp)
 
 # rocPRIM test
 add_subdirectory(rocprim)

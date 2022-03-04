@@ -49,13 +49,13 @@ struct radix_key_codec_integral<Key, BitKey, typename std::enable_if<::rocprim::
     ROCPRIM_DEVICE ROCPRIM_INLINE
     static bit_key_type encode(Key key)
     {
-        return *reinterpret_cast<bit_key_type *>(&key);
+        return __builtin_bit_cast(bit_key_type, key);
     }
 
     ROCPRIM_DEVICE ROCPRIM_INLINE
     static Key decode(bit_key_type bit_key)
     {
-        return *reinterpret_cast<Key *>(&bit_key);
+        return __builtin_bit_cast(Key, bit_key);
     }
 
     ROCPRIM_DEVICE ROCPRIM_INLINE
@@ -76,14 +76,15 @@ struct radix_key_codec_integral<Key, BitKey, typename std::enable_if<::rocprim::
     ROCPRIM_DEVICE ROCPRIM_INLINE
     static bit_key_type encode(Key key)
     {
-        return sign_bit ^ *reinterpret_cast<bit_key_type *>(&key);
+        const bit_key_type bit_key = __builtin_bit_cast(bit_key_type, key);
+        return sign_bit ^ bit_key;
     }
 
     ROCPRIM_DEVICE ROCPRIM_INLINE
     static Key decode(bit_key_type bit_key)
     {
         bit_key ^= sign_bit;
-        return *reinterpret_cast<Key *>(&bit_key);
+        return __builtin_bit_cast(Key, bit_key);
     }
 
     ROCPRIM_DEVICE ROCPRIM_INLINE
@@ -94,17 +95,56 @@ struct radix_key_codec_integral<Key, BitKey, typename std::enable_if<::rocprim::
     }
 };
 
+template<class Key>
+struct float_bit_mask;
+
+template<>
+struct float_bit_mask<float>
+{
+    static constexpr uint32_t sign_bit = 0x80000000;
+    static constexpr uint32_t exponent = 0x7F800000;
+    static constexpr uint32_t mantissa = 0x007FFFFF;
+    using bit_type = uint32_t;
+};
+
+template<>
+struct float_bit_mask<double>
+{
+    static constexpr uint64_t sign_bit = 0x8000000000000000;
+    static constexpr uint64_t exponent = 0x7FF0000000000000;
+    static constexpr uint64_t mantissa = 0x000FFFFFFFFFFFFF;
+    using bit_type = uint64_t;
+};
+
+template<>
+struct float_bit_mask<rocprim::bfloat16>
+{
+    static constexpr uint16_t sign_bit = 0x8000;
+    static constexpr uint16_t exponent = 0x7F80;
+    static constexpr uint16_t mantissa = 0x007F;
+    using bit_type = uint16_t;
+};
+
+template<>
+struct float_bit_mask<rocprim::half>
+{
+    static constexpr uint16_t sign_bit = 0x8000;
+    static constexpr uint16_t exponent = 0x7C00;
+    static constexpr uint16_t mantissa = 0x03FF;
+    using bit_type = uint16_t;
+};
+
 template<class Key, class BitKey>
 struct radix_key_codec_floating
 {
     using bit_key_type = BitKey;
 
-    static constexpr bit_key_type sign_bit = bit_key_type(1) << (sizeof(bit_key_type) * 8 - 1);
+    static constexpr bit_key_type sign_bit = float_bit_mask<Key>::sign_bit;
 
     ROCPRIM_DEVICE ROCPRIM_INLINE
     static bit_key_type encode(Key key)
     {
-        bit_key_type bit_key = *reinterpret_cast<bit_key_type *>(&key);
+        bit_key_type bit_key = __builtin_bit_cast(bit_key_type, key);
         bit_key ^= (sign_bit & bit_key) == 0 ? sign_bit : bit_key_type(-1);
         return bit_key;
     }
@@ -113,17 +153,20 @@ struct radix_key_codec_floating
     static Key decode(bit_key_type bit_key)
     {
         bit_key ^= (sign_bit & bit_key) == 0 ? bit_key_type(-1) : sign_bit;
-        return *reinterpret_cast<Key *>(&bit_key);
+        return __builtin_bit_cast(Key, bit_key);
     }
 
     ROCPRIM_DEVICE ROCPRIM_INLINE
     static unsigned int extract_digit(bit_key_type bit_key, unsigned int start, unsigned int length)
     {
         unsigned int mask = (1u << length) - 1;
+        
         // -0.0 should be treated as +0.0 for stable sort
         // -0.0 is encoded as inverted sign_bit, +0.0 as sign_bit
         // or vice versa for descending sort
-        return static_cast<unsigned int>((bit_key == sign_bit ? ~sign_bit : bit_key) >> start) & mask;
+        bit_key_type key = bit_key == sign_bit ? bit_key_type(~sign_bit) : bit_key;
+        
+        return static_cast<unsigned int>(key >> start) & mask;
     }
 };
 

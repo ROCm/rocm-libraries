@@ -32,8 +32,9 @@
 
 #include "device_scan_config.hpp"
 #include "device_transform.hpp"
-#include "detail/device_scan_reduce_then_scan.hpp"
+#include "detail/device_scan_common.hpp"
 #include "detail/device_scan_lookback.hpp"
+#include "detail/device_scan_reduce_then_scan.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -146,18 +147,6 @@ void lookback_scan_kernel(InputIterator input,
         lookback_scan_state, number_of_blocks, ordered_bid,
         previous_last_element, new_last_element,
         override_first_value, save_last_value
-    );
-}
-
-template<class LookBackScanState>
-ROCPRIM_KERNEL
-__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
-void init_lookback_scan_state_kernel(LookBackScanState lookback_scan_state,
-                                     const unsigned int number_of_blocks,
-                                     ordered_block_id<unsigned int> ordered_bid)
-{
-    init_lookback_scan_state_kernel_impl(
-        lookback_scan_state, number_of_blocks, ordered_bid
     );
 }
 

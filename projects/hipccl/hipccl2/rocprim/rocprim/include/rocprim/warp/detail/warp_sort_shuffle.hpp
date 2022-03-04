@@ -500,7 +500,7 @@ public:
               storage_type& storage, BinaryFunction compare_function)
     {
         (void) storage;
-        sort(compare_function, thread_keys, thread_values);
+        sort(thread_keys, thread_values, compare_function);
     }
 };
 
