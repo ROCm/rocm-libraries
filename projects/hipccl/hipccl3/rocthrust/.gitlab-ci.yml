@@ -1,119 +1,92 @@
 # ########################################################################
-# Copyright 2019 Advanced Micro Devices, Inc.
+# Copyright 2019-2021 Advanced Micro Devices, Inc.
 # ########################################################################
 
-image: rocm/rocm-terminal:latest
+include:
+  - project: 'amd/ci-templates'
+    ref: main
+    file:
+      - /defaults.yaml
+      - /deps-cmake.yaml
+      - /deps-rocm.yaml
+      - /gpus-rocm.yaml
 
 stages:
-  #- build:cmake_latest   # Tests if builds succeed (CMake)
-  #- build:cmake_minimum  # Tests if builds succeed (CMake)
   - build   # Tests if builds succeed (CMake)
   - test    # Tests if unit tests are passing (CTest)
-  - package
-  - deploy
 
 variables:
-  # Tested CMake versions
-  CMAKE_MINIMUM_VERSION: 3.16.9
-  CMAKE_MINIMUM_URL: "https://cmake.org/files/v3.16/cmake-3.16.9-Linux-x86_64.tar.gz"
-
-  CMAKE_LATEST_VERSION: 3.21.4
-  CMAKE_LATEST_URL: "https://cmake.org/files/v3.21/cmake-3.21.4-linux-x86_64.tar.gz"
-  # Cluster config
-
-  # Image-specific helper
-  SUDO_CMD: "sudo -E" # Must be "sudo" on images which don't use root user
   # Helper variables
-  DEPS_DIR: $CI_PROJECT_DIR/deps
-  BUILD_DIR: $CI_PROJECT_DIR/build
-  CMAKE_MINIMUM_PATH: $DEPS_DIR/cmake-$CMAKE_MINIMUM_VERSION
-  BUILD_MINIMUM_DIR: $BUILD_DIR/cmake-$CMAKE_MINIMUM_VERSION
-  CMAKE_LATEST_PATH: $DEPS_DIR/cmake-$CMAKE_LATEST_VERSION
-  BUILD_LATEST_DIR: $BUILD_DIR/cmake-$CMAKE_LATEST_VERSION
   PACKAGE_DIR: $BUILD_DIR/package
   ROCPRIM_GIT_BRANCH: develop_stream
 
-.deps:cmake-minimum:
-  #stage: build:cmake_minimum
-  stage: build
-  tags:
-    - rocm
+.deps:doc:
+  image: sphinxdoc/sphinx-latexpdf
   before_script:
-    - $SUDO_CMD rm /etc/apt/sources.list.d/rocm.list
     - $SUDO_CMD apt update -qq
-    # | Used in the script    | Build tools | Fetch from https:// | rocminfo calls lsmod
-    - $SUDO_CMD apt install -y -qq libidn11 wget tar xz-utils bzip2 libnuma-dev libunwind-dev git build-essential pkg-config ninja-build ca-certificates kmod
-    - $SUDO_CMD apt-get install -y -qq wget libidn11 libnuma-dev libunwind-dev git tar xz-utils bzip2 build-essential pkg-config  ninja-build ca-certificates
-    - $SUDO_CMD wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | $SUDO_CMD apt-key add -
-    # Fetch CMake only if the cache has not been restored
-    - if [ ! -d $CMAKE_MINIMUM_PATH ]; then mkdir -p $CMAKE_MINIMUM_PATH; wget --no-check-certificate --quiet -O - $CMAKE_MINIMUM_URL | tar --strip-components=1 -xz -C $CMAKE_MINIMUM_PATH
-    - fi
-    - export PATH=$CMAKE_MINIMUM_PATH/bin:$PATH
-    # Debug printing of environment for context when errors occur
-    - hipconfig
-    # Setup ~/.netrc
-    - echo -e "machine projects.streamhpc.com\nlogin gitlab-ci-token\npassword ${CI_JOB_TOKEN}" > ~/.netrc
-  cache:
-    key: $CMAKE_MINIMUM_VERSION
-    paths:
-      - $CMAKE_MINIMUM_PATH
+    - $SUDO_CMD apt install -y -qq doxygen
+    - $SUDO_CMD pip3 install sphinx_rtd_theme breathe exhale
 
-.deps:cmake-latest:
-  #stage: build:cmake_latest
-  stage: build
-  tags:
-    - rocm
+.cmake-latest:
+  extends:
+    - .deps:rocm
+    - .deps:cmake-latest
   before_script:
-    - $SUDO_CMD rm /etc/apt/sources.list.d/rocm.list
-    - $SUDO_CMD apt update -qq
-    # | Used in the script    | Build tools | Fetch from https:// | rocminfo calls lsmod
-    - $SUDO_CMD apt install -y -qq wget tar xz-utils bzip2 libnuma-dev libunwind-dev git build-essential pkg-config ninja-build ca-certificates kmod
-    - $SUDO_CMD apt-get install -y -qq wget libidn11 libnuma-dev libunwind-dev git tar xz-utils bzip2 build-essential pkg-config  ninja-build ca-certificates
-    - $SUDO_CMD wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | $SUDO_CMD apt-key add -
-    # Fetch CMake only if the cache has not been restored
-    - if [ ! -d $CMAKE_LATEST_PATH ]; then mkdir -p $CMAKE_LATEST_PATH; wget --no-check-certificate --quiet -O - $CMAKE_LATEST_URL | tar --strip-components=1 -xz -C $CMAKE_LATEST_PATH;
+    - !reference [".deps:rocm", before_script]
+    - !reference [".deps:cmake-latest", before_script]
+
+.cmake-minimum:
+  extends:
+    - .deps:rocm
+    - .deps:cmake-minimum
+  before_script:
+    - !reference [".deps:rocm", before_script]
+    - !reference [".deps:cmake-minimum", before_script]
+
+.install-rocprim:
+  script:
+    - git clone https://github.com/RadeonOpenCompute/rocm-cmake.git
+    - cd rocm-cmake && mkdir build && cd build
+    - cmake
+      -G Ninja
+      -D CMAKE_CXX_COMPILER=hipcc
+      -D CMAKE_BUILD_TYPE=Release
+      ../
+    - $SUDO_CMD cmake
+        --build ./ --target install
+
+    - branch_name="$ROCPRIM_GIT_BRANCH"
+    - if [ $CI_COMMIT_BRANCH == develop ] || [ $CI_COMMIT_BRANCH == master ]; then branch_name=$CI_COMMIT_BRANCH;
     - fi;
-    - export PATH=$CMAKE_LATEST_PATH/bin:$PATH
-    # Debug printing of environment for context when errors occur
-    - hipconfig
-    # Setup ~/.netrc
-    - echo -e "machine projects.streamhpc.com\nlogin gitlab-ci-token\npassword ${CI_JOB_TOKEN}" > ~/.netrc
+    - git clone -b $branch_name https://gitlab-ci-token:${CI_JOB_TOKEN}@${ROCPRIM_GIT_URL}
+    - cd rocPRIM
+    - mkdir build
+    - cd build
+    - cmake
+      -G Ninja
+      -D CMAKE_CXX_COMPILER=hipcc
+      -D CMAKE_BUILD_TYPE=Release
+      -D BUILD_TEST=OFF
+      -D BUILD_EXAMPLE=OFF
+      -D ROCM_DEP_ROCMCORE=OFF
+      ../.
+    - cpack
+      -G "DEB"
+    - $SUDO_CMD dpkg -i rocprim*.deb
+
+.build:common:
+  stage: build
+  extends:
+    - .gpus:rocm-gpus
+  script:
+    - !reference [.install-rocprim, script]
     # Setup env vars for testing
     - rng_seed_count=0; prng_seeds="0";
     - if [ $CI_COMMIT_BRANCH == develop_stream ] ; then rng_seed_count=3; prng_seeds="0 1000";
     - fi;
-  cache:
-    key: $CMAKE_LATEST_VERSION
-    paths:
-      - $CMAKE_LATEST_PATH
-
-build:cmake-latest:
-  extends:
-    - .deps:cmake-latest
-  script:
-      # Install rocPRIM package
-    - branch_name="$ROCPRIM_GIT_BRANCH"
-    - if [ $CI_COMMIT_BRANCH == develop ] || [ $CI_COMMIT_BRANCH == master ]; then branch_name=$CI_COMMIT_BRANCH;
-    - fi;
-    - git clone -b $branch_name https://gitlab-ci-token:${CI_JOB_TOKEN}@${ROCPRIM_GIT_URL}
-    - cd rocPRIM
-    - mkdir build
-    - cd build
-    - cmake
-      -G Ninja
-      -D CMAKE_CXX_COMPILER=hipcc
-      -D CMAKE_BUILD_TYPE=Release
-      -D BUILD_TEST=OFF
-      -D BUILD_EXAMPLE=OFF
-      -D ROCM_DEP_ROCMCORE=OFF
-      ../.
-    - cpack
-      -G "DEB"
-    - $SUDO_CMD dpkg -i rocprim*.deb
-    - cd ../..
     # Build rocThrust
-    - mkdir -p $BUILD_LATEST_DIR
-    - cd $BUILD_LATEST_DIR
+    - mkdir -p $BUILD_DIR
+    - cd $BUILD_DIR
     - git clone https://github.com/RadeonOpenCompute/rocm-cmake.git
     - cd rocm-cmake && mkdir build && cd build
     - cmake
@@ -123,7 +96,7 @@ build:cmake-latest:
       ../
     - $SUDO_CMD cmake
         --build ./ --target install
-    - cd .. && cd ..
+    - cd ../..
     - cmake
       -G Ninja
       -D CMAKE_CXX_COMPILER=hipcc
@@ -131,172 +104,107 @@ build:cmake-latest:
       -D BUILD_TEST=ON
       -D BUILD_EXAMPLES=ON
       -D BUILD_BENCHMARKS=ON
-      -D AMDGPU_TARGETS="gfx803;gfx900;gfx906"
-      -D AMDGPU_TEST_TARGETS="gfx803;gfx900;gfx906"
+      -D AMDGPU_TARGETS=$GPU_TARGETS
+      -D AMDGPU_TEST_TARGETS=$GPU_TARGETS
       -D RNG_SEED_COUNT=$rng_seed_count
       -D PRNG_SEEDS=$prng_seeds
       -S $CI_PROJECT_DIR
-      -B $BUILD_LATEST_DIR
+      -B $BUILD_DIR
     - cmake
-      --build $BUILD_LATEST_DIR
+      --build $BUILD_DIR
   artifacts:
     paths:
-    - $BUILD_LATEST_DIR/test/*
-    - $BUILD_LATEST_DIR/testing/*
-    - $BUILD_LATEST_DIR/deps/*
-    - $BUILD_LATEST_DIR/CMakeCache.txt
-    - $BUILD_LATEST_DIR/CTestTestfile.cmake
+    - $BUILD_DIR/test/*
+    - $BUILD_DIR/testing/*
+    - $BUILD_DIR/deps/*
+    - $BUILD_DIR/CMakeCache.txt
+    - $BUILD_DIR/CTestTestfile.cmake
     exclude:
-    - $BUILD_LATEST_DIR/**/*.o
+    - $BUILD_DIR/**/*.o
     expire_in: 2 weeks
+
+build:cmake-latest:
+  stage: build
+  extends:
+    - .cmake-latest
+    - .build:common
 
 build:cmake-minimum:
-  extends:
-    - .deps:cmake-minimum
-  #needs:
-  #  - job: build:cmake-latest
-  #    artifacts: false
-  script:
-    # Install rocPRIM package
-    - branch_name="$ROCPRIM_GIT_BRANCH"
-    - if [ $CI_COMMIT_BRANCH == develop ] || [ $CI_COMMIT_BRANCH == master ]; then branch_name=$CI_COMMIT_BRANCH;
-    - fi;
-    - git clone -b $branch_name https://gitlab-ci-token:${CI_JOB_TOKEN}@${ROCPRIM_GIT_URL}
-    - cd rocPRIM
-    - mkdir build
-    - cd build
-    - cmake
-      -G Ninja
-      -D CMAKE_CXX_COMPILER=hipcc
-      -D CMAKE_BUILD_TYPE=Release
-      -D BUILD_TEST=OFF
-      -D BUILD_EXAMPLE=OFF
-      -D ROCM_DEP_ROCMCORE=OFF
-      ../.
-    - cpack
-      -G "DEB"
-    - $SUDO_CMD dpkg -i rocprim*.deb
-    - cd ../..
-    # Build rocThrust
-    - mkdir -p $BUILD_MINIMUM_DIR
-    - cd $BUILD_MINIMUM_DIR
-    - git clone https://github.com/RadeonOpenCompute/rocm-cmake.git
-    - cd rocm-cmake && mkdir build && cd build
-    - cmake
-      -G Ninja
-      -D CMAKE_CXX_COMPILER=hipcc
-      -D CMAKE_BUILD_TYPE=Release
-      ../
-    - $SUDO_CMD cmake
-        --build ./ --target install
-    - cd .. && cd ..
-    - cmake
-      -G Ninja
-      -D CMAKE_CXX_COMPILER=hipcc
-      -D CMAKE_BUILD_TYPE=Release
-      -D BUILD_TEST=ON
-      -D BUILD_EXAMPLES=ON
-      -D BUILD_BENCHMARKS=ON
-      -D DISABLE_WERROR=OFF
-      -B $BUILD_MINIMUM_DIR
-      ../../.
-    - cmake
-      --build ./
-  artifacts:
-    paths:
-    - $BUILD_MINIMUM_DIR/*
-    exclude:
-    - $BUILD_MINIMUM_DIR/*test*/*
-    - $BUILD_MINIMUM_DIR/benchmarks/*
-    - $BUILD_MINIMUM_DIR/internal/*
-    - $BUILD_MINIMUM_DIR/examples/*
-    expire_in: 2 weeks
-
-package:deb:
-  stage: package
-  extends:
-    - .deps:cmake-minimum
+  stage: build
   needs:
-    - job: build:cmake-minimum
-      artifacts: true
+    - job: build:cmake-latest
+      artifacts: false
+  extends:
+    - .cmake-minimum
+    - .build:common
+
+build:package:
+  stage: build
+  extends:
+    - .cmake-minimum
   script:
-    - mkdir -p $PACKAGE_DIR
-    - cd $BUILD_MINIMUM_DIR
+    - !reference [.install-rocprim, script]
+    - cmake
+      -S $CI_PROJECT_DIR
+      -B $PACKAGE_DIR
+      -G Ninja
+      -D CMAKE_BUILD_TYPE=release
+      -D CMAKE_CXX_COMPILER=hipcc
+    - cd $PACKAGE_DIR
     - cpack
       -G "DEB;ZIP"
-      -B $PACKAGE_DIR
   artifacts:
     paths:
       - $PACKAGE_DIR/rocthrust*.deb
       - $PACKAGE_DIR/rocthrust*.zip
     expire_in: 2 weeks
 
-include: '.gitlab-ci-gputest.yml'
-
-deploy:deb:
-  stage: deploy
+test:package:
+  stage: test
   needs:
-    - package:deb
+    - build:package
   extends:
-    - .deps:cmake-minimum
+    - .cmake-minimum
   script:
-    - git clone https://github.com/RadeonOpenCompute/rocm-cmake.git
-    - cd rocm-cmake && mkdir build && cd build
-    - cmake
-      -G Ninja
-      -D CMAKE_CXX_COMPILER=hipcc
-      -D CMAKE_BUILD_TYPE=Release
-      ../
-    - $SUDO_CMD cmake
-        --build ./ --target install
-    - cd .. && cd ..
-    # Package rocPRIM
-    - branch_name="$ROCPRIM_GIT_BRANCH"
-    - if [ $CI_COMMIT_BRANCH == develop ] || [ $CI_COMMIT_BRANCH == master ]; then branch_name=$CI_COMMIT_BRANCH;
-    - fi;
-    - git clone -b $branch_name https://gitlab-ci-token:${CI_JOB_TOKEN}@${ROCPRIM_GIT_URL}
-    - cmake
-      -G Ninja
-      -D CMAKE_CXX_COMPILER=hipcc
-      -D CMAKE_BUILD_TYPE=Release
-      -D ONLY_INSTALL=ON
-      -B rocPRIM/build
-      rocPRIM
-    - cd rocPRIM/build &&
-      cpack
-        -G "DEB;ZIP"
-        -B $PACKAGE_DIR &&
-      cd ../..
-    # Install rocPRIM and rocThrust
-    - $SUDO_CMD dpkg -i $PACKAGE_DIR/rocprim*.deb
+    - !reference [.install-rocprim, script]
     - $SUDO_CMD dpkg -i $PACKAGE_DIR/rocthrust*.deb
     # Test install
-    - mkdir -p package_test
-    - cd package_test
     - cmake
+      -S $CI_PROJECT_DIR/extra
+      -B package_test
       -G Ninja
       -D CMAKE_CXX_COMPILER=hipcc
       -D CMAKE_BUILD_TYPE=Release
-      -B .
-      $CI_PROJECT_DIR/extra
+      -D ROCPRIM_ROOT=/opt/rocm/rocprim
     - cmake
-      --build .
+      --build package_test
     # Remove rocPRIM and rocThrust
-    - $SUDO_CMD dpkg -r rocthrust
-    - $SUDO_CMD dpkg -r rocprim
+    - $SUDO_CMD dpkg -r rocthrust-dev
+    - $SUDO_CMD dpkg -r rocprim-dev
 
 test:doc:
-  variables:
-    SUDO_CMD: "sudo -E"
-  tags:
-    - rocm # Do it on rocm machine
-  image: rocm/rocm-terminal:latest
-  stage: test
+  extends: .deps:doc
   needs: []
-  before_script:
-    - $SUDO_CMD rm /etc/apt/sources.list.d/rocm.list
-    - $SUDO_CMD apt update -qq
-    - $SUDO_CMD apt install -y -qq texlive-latex-recommended texlive-latex-extra texlive-fonts-recommended latexmk python-pip python3-sphinx doxygen
-    - $SUDO_CMD -H pip install sphinx_rtd_theme breathe==4.12.0 exhale
+  stage: test
   script:
-    - $SUDO_CMD bash -x ./docs/run_doc.sh
+    - bash -x ./docs/run_doc.sh
+
+test:
+  stage: test
+  extends:
+    - .cmake-latest
+    - .gpus:rocm
+  needs:
+    - build:cmake-latest
+  script:
+    - cd $BUILD_DIR
+    - cmake
+      -D CMAKE_PREFIX_PATH=/opt/rocm
+      -P $CI_PROJECT_DIR/cmake/GenerateResourceSpec.cmake
+    - cat ./resources.json
+    - ctest
+      --output-on-failure
+      --repeat-until-fail 2
+      --tests-regex $GPU_TARGET
+      --resource-spec-file ./resources.json
+      --parallel $PARALLEL_JOBS
