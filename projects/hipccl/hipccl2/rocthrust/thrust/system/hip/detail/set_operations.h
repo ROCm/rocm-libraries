@@ -953,7 +953,7 @@ namespace __set_operations
         if(debug_synchronous)
             start = std::chrono::high_resolution_clock::now();
         auto grid_size = (number_of_blocks + block_size - 1) / block_size;
-        hipLaunchKernelGGL(HIP_KERNEL_NAME(rocprim::detail::init_offset_scan_state_kernel),
+        hipLaunchKernelGGL(HIP_KERNEL_NAME(rocprim::detail::init_lookback_scan_state_kernel),
                            dim3(grid_size),
                            dim3(block_size),
                            0,
