@@ -55,6 +55,7 @@ endif()
 
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Add paths to linker search and installed rpath")
 
+set(BUILD_SHARED_LIBS OFF) # don't build client dependencies as shared
 if(NOT USE_HIP_CPU)
   # Get dependencies (required here to get rocm-cmake)
   include(cmake/Dependencies.cmake)
@@ -134,14 +135,20 @@ print_configuration_summary()
 # rocPRIM library
 add_subdirectory(rocprim)
 
+if(NOT ONLY_INSTALL AND (BUILD_TEST OR BUILD_BENCHMARK))
+  rocm_package_setup_component(clients)
+endif()
+
 # Tests
 if(BUILD_TEST AND NOT ONLY_INSTALL)
+  rocm_package_setup_client_component(tests)
   enable_testing()
   add_subdirectory(test)
 endif()
 
 # Benchmarks
 if(BUILD_BENCHMARK AND NOT ONLY_INSTALL)
+  rocm_package_setup_client_component(benchmarks)
   add_subdirectory(benchmark)
 endif()
 
@@ -151,9 +158,8 @@ if(BUILD_EXAMPLE AND NOT ONLY_INSTALL)
 endif()
 
 # Package
-
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "hip-rocclr (>= 3.5.0)")
-set(CPACK_RPM_PACKAGE_REQUIRES "hip-rocclr >= 3.5.0")
+set(BUILD_SHARED_LIBS ON) # Build as though shared library for naming
+rocm_package_add_dependencies(DEPENDS "hip-rocclr >= 3.5.0")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.txt")
 set(CPACK_RPM_PACKAGE_LICENSE "MIT")
 

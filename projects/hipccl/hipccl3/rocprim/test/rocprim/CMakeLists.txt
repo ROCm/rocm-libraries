@@ -30,7 +30,7 @@ function(add_rocprim_test TEST_NAME TEST_SOURCES)
 
   target_include_directories(${TEST_TARGET} SYSTEM BEFORE
     PUBLIC
-      ${COMMON_TEST_HEADER_DIRECTORY}
+      $<BUILD_INTERFACE:${COMMON_TEST_HEADER_DIRECTORY}>
   )
 
   if(TARGET GTest::GTest)
@@ -93,6 +93,7 @@ function(add_rocprim_test TEST_NAME TEST_SOURCES)
               LABELS "hip"
       )
   endif()
+
   if (WIN32 AND NOT DEFINED DLLS_COPIED_2)
     set(DLLS_COPIED_2 "YES")
     set(DLLS_COPIED_2 ${DLLS_COPIED_2} PARENT_SCOPE)
