@@ -26,6 +26,7 @@ function(add_thrust_benchmark BENCHMARK)
         PROPERTIES
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/benchmarks/"
     )
+    rocm_install(TARGETS ${BENCHMARK_TARGET} COMPONENT benchmarks)
 endfunction()
 
 # ****************************************************************************
