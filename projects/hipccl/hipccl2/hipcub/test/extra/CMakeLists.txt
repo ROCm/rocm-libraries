@@ -155,8 +155,8 @@ function(add_hipcub_test TEST_NAME TEST_SOURCES)
     )
     target_include_directories(${TEST_TARGET}
       PRIVATE
-        ${CUB_INCLUDE_DIR}
-        ${THRUST_INCLUDE_DIR}
+        $<BUILD_INTERFACE:${CUB_INCLUDE_DIR}>
+        $<BUILD_INTERFACE:${THRUST_INCLUDE_DIR}>
     )
   elseif(HIP_COMPILER STREQUAL "hcc" OR HIP_COMPILER STREQUAL "clang")
     target_link_libraries(${TEST_TARGET}

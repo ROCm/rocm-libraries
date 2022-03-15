@@ -24,7 +24,7 @@ function(add_hipcub_example EXAMPLE_NAME EXAMPLE_SOURCES)
   add_executable(${EXAMPLE_TARGET} ${EXAMPLE_SOURCES})
   target_include_directories(${EXAMPLE_TARGET} SYSTEM BEFORE
     PUBLIC
-      ${GEXAMPLE_INCLUDE_DIRS}
+      $<BUILD_INTERFACE:${GEXAMPLE_INCLUDE_DIRS}>
   )
   target_link_libraries(${EXAMPLE_TARGET}
     PRIVATE

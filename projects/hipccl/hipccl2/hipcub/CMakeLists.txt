@@ -56,7 +56,8 @@ include( ROCMCreatePackage )
 include( ROCMInstallTargets )
 include( ROCMPackageConfigHelpers )
 include( ROCMInstallSymlinks )
-include( ROCMCheckTargetIds OPTIONAL )
+include( ROCMCheckTargetIds )
+include( ROCMClients )
 
 #Set the AMDGPU_TARGETS with backward compatiblity
 set(AMDGPU_TARGETS "all" CACHE STRING "Compile for which gpu architectures?")
@@ -131,9 +132,14 @@ print_configuration_summary()
 # hipCUB library
 add_subdirectory(hipcub)
 
+if(BUILD_TEST OR (BUILD_BENCHMARK AND NOT ONLY_INSTALL))
+  rocm_package_setup_component(clients)
+endif()
+
 # Tests
 if(BUILD_TEST)
   enable_testing()
+  rocm_package_setup_client_component(tests)
   add_subdirectory(test)
 endif()
 
@@ -144,18 +150,18 @@ endif()
 
 # Benchmarks
 if(BUILD_BENCHMARK AND NOT ONLY_INSTALL)
+  rocm_package_setup_client_component(benchmarks)
   add_subdirectory(benchmark)
 endif()
 
 # Package
 if(HIP_COMPILER STREQUAL "hcc" OR HIP_COMPILER STREQUAL "clang")
-  set(CPACK_DEBIAN_PACKAGE_DEPENDS "rocprim-dev (>= 2.10.1)")
-  set(CPACK_RPM_PACKAGE_REQUIRES "rocprim-devel >= 2.10.1")
+  rocm_package_add_deb_dependencies(DEPENDS "rocprim-dev >= 2.10.1")
+  rocm_package_add_rpm_dependencies(DEPENDS "rocprim-devel >= 2.10.1")
   set(CPACK_DEBIAN_PACKAGE_REPLACES "cub-hip")
   set(CPACK_RPM_PACKAGE_OBSOLETES "cub-hip")
 else()
-  set(CPACK_DEBIAN_PACKAGE_DEPENDS "hip-dev (>= 4.4)")
-  set(CPACK_RPM_PACKAGE_REQUIRES "hip-dev >= 4.4")
+  rocm_package_add_dependencies(DEPENDS "hip-dev >= 4.4")
 endif()
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.txt")
 # if(NOT CPACK_PACKAGING_INSTALL_PREFIX)

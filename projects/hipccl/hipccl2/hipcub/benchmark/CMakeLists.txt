@@ -25,7 +25,7 @@ function(add_hipcub_benchmark BENCHMARK_SOURCE)
   add_executable(${BENCHMARK_TARGET} ${BENCHMARK_SOURCE})
   target_include_directories(${BENCHMARK_TARGET} SYSTEM BEFORE
     PUBLIC
-      "${GOOGLEBENCHMARK_ROOT}/include"
+      "$<BUILD_INTERFACE:${GOOGLEBENCHMARK_ROOT}/include>"
   )
   target_link_libraries(${BENCHMARK_TARGET}
     PRIVATE
@@ -48,6 +48,7 @@ function(add_hipcub_benchmark BENCHMARK_SOURCE)
     PROPERTIES
       RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/benchmark"
   )
+  rocm_install(TARGETS ${BENCHMARK_TARGET} COMPONENT benchmarks)
   if (WIN32 AND NOT DEFINED DLLS_COPIED)
     set(DLLS_COPIED "YES")
     set(DLLS_COPIED ${DLLS_COPIED} PARENT_SCOPE)
