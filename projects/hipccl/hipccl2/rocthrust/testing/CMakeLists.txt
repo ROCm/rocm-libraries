@@ -7,8 +7,8 @@ target_include_directories(testing_common
     SYSTEM
     BEFORE
     INTERFACE
-        ${GTEST_INCLUDE_DIRS}
-        .
+        $<BUILD_INTERFACE:${GTEST_INCLUDE_DIRS}>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}>
 )
 target_link_libraries(testing_common
     INTERFACE
@@ -105,6 +105,7 @@ function(add_thrust_test TEST)
                 LABELS upstream
         )
     endif()
+    rocm_install(TARGETS ${TEST_TARGET} COMPONENT tests)
 endfunction()
 
 # ****************************************************************************

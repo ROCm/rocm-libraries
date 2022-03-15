@@ -40,7 +40,8 @@ include( ROCMCreatePackage )
 include( ROCMInstallTargets )
 include( ROCMPackageConfigHelpers )
 include( ROCMInstallSymlinks )
-include( ROCMCheckTargetIds OPTIONAL )
+include( ROCMCheckTargetIds )
+include( ROCMClients )
 
 # Detect compiler support for target ID
 # This section is deprecated. Please use rocm_check_target_ids for future use.
@@ -136,8 +137,13 @@ print_configuration_summary()
 # Thrust (with HIP backend)
 add_subdirectory(thrust)
 
+if(BUILD_TEST OR BUILD_BENCHMARKS)
+  rocm_package_setup_component(clients)
+endif()
+
 # Tests
 if(BUILD_TEST)
+  rocm_package_setup_client_component(tests)
   if (ENABLE_UPSTREAM_TESTS)
     enable_testing()
   endif()
@@ -166,10 +172,10 @@ set(THRUST_OPTIONS_RELEASE ${THRUST_OPTIONS_WARNINGS})
 # Package
 set(CPACK_DEBIAN_ARCHIVE_TYPE "gnutar")
 
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "rocprim-dev (>= 2.10.1)") # 1.5.18263 is HIP version in ROCm 1.8.2
+rocm_package_add_deb_dependencies(DEPENDS "rocprim-dev >= 2.10.1")
+rocm_package_add_rpm_dependencies(DEPENDS "rocprim-devel >= 2.10.1")
 set(CPACK_DEBIAN_PACKAGE_CONFLICTS "hip-thrust, thrust")
 set(CPACK_RPM_PACKAGE_CONFLICTS "hip-thrust, thrust")
-set(CPACK_RPM_PACKAGE_REQUIRES "rocprim-devel >= 2.10.1")
 
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 set(CPACK_RPM_PACKAGE_LICENSE "ASL 2.0")

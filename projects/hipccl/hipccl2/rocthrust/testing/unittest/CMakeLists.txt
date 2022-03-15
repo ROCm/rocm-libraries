@@ -16,6 +16,6 @@ foreach(thrust_target IN LISTS THRUST_TARGETS)
 
   add_library(${framework_target} STATIC ${framework_srcs})
   target_link_libraries(${framework_target} PUBLIC ${thrust_target})
-  target_include_directories(${framework_target} PRIVATE "${Thrust_SOURCE_DIR}/testing")
+  target_include_directories(${framework_target} PRIVATE $<BUILD_INTERFACE:"${Thrust_SOURCE_DIR}/testing">)
   thrust_clone_target_properties(${framework_target} ${thrust_target})
 endforeach()

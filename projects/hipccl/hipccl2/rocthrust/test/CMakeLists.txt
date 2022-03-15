@@ -44,8 +44,8 @@ function(add_rocthrust_test TEST)
     add_executable(${TEST_TARGET} ${TEST_SOURCE})
     target_include_directories(${TEST_TARGET} SYSTEM BEFORE
         PUBLIC
-            ${GTEST_INCLUDE_DIRS}
-            ${CMAKE_CURRENT_BINARY_DIR}
+            $<BUILD_INTERFACE:${GTEST_INCLUDE_DIRS}>
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
     )
     target_link_libraries(${TEST_TARGET}
         PRIVATE
@@ -81,6 +81,7 @@ function(add_rocthrust_test TEST)
                 LABELS "hip"
         )
     endif()
+    rocm_install(TARGETS ${TEST_TARGET} COMPONENT tests)
     if (WIN32 AND NOT DEFINED DLLS_COPIED)
       set(DLLS_COPIED "YES")
       set(DLLS_COPIED ${DLLS_COPIED} PARENT_SCOPE)
