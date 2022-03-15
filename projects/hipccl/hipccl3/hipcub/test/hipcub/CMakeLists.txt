@@ -25,7 +25,7 @@ function(add_hipcub_test TEST_NAME TEST_SOURCES)
   add_executable(${TEST_TARGET} ${TEST_SOURCES})
   target_include_directories(${TEST_TARGET} SYSTEM BEFORE
     PUBLIC
-      ${GTEST_INCLUDE_DIRS}
+      $<BUILD_INTERFACE:${GTEST_INCLUDE_DIRS}>
   )
   target_link_libraries(${TEST_TARGET}
     PRIVATE
