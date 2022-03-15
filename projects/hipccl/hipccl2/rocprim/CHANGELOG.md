@@ -12,6 +12,7 @@ Full documentation for rocPRIM is available at [https://codedocs.xyz/ROCmSoftwar
 ### Added
 - Future value
 - Added device partition_three_way to partition input to three output iterators based on two predicates
+- Added File/Folder Reorg Changes and Enabled Backward compatibility support using wrapper headers.
 ### Changed
 - The reduce/scan algorithm precision issues in the tests has been resolved for half types.
 ### Known issues

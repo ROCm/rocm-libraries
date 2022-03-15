@@ -43,7 +43,7 @@ option(ONLY_INSTALL "Only install" OFF)
 # CMake modules
 list(APPEND CMAKE_MODULE_PATH
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake
-  ${HIP_PATH}/cmake /opt/rocm/hip/cmake # FindHIP.cmake
+  ${HIP_PATH}/lib/cmake/hip ${HIP_PATH}/cmake /opt/rocm/lib/cmake/hip /opt/rocm/hip/cmake # FindHIP.cmake
 )
 
 # Set a default build type if none was specified
@@ -98,7 +98,7 @@ if(NOT USE_HIP_CPU)
   if (NOT WIN32)
     include(cmake/VerifyCompiler.cmake)
   endif()
-  list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH} ${ROCM_PATH}/hip ${ROCM_PATH}/llvm /opt/rocm/llvm /opt/rocm/hip)
+  list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH} ${ROCM_PATH}/hip ${ROCM_PATH}/llvm /opt/rocm/llvm /opt/rocm /opt/rocm/hip)
   find_package(hip REQUIRED CONFIG PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm)
 endif()
 # Build options
@@ -108,6 +108,17 @@ option(BUILD_EXAMPLE "Build examples" OFF)
 # Disables building tests, benchmarks, examples
 option(ONLY_INSTALL "Only install" OFF)
 option(BUILD_CODE_COVERAGE "Build with code coverage enabled" OFF)
+
+# FOR HANDLING ENABLE/DISABLE OPTIONAL BACKWARD COMPATIBILITY for FILE/FOLDER REORG
+option(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY "Build with file/folder reorg with backward compatibility enabled" ON)
+if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY)
+  rocm_wrap_header_dir(
+    "${PROJECT_SOURCE_DIR}/rocprim/include/rocprim"
+    WRAPPER_LOCATIONS rocprim/include/rocprim
+    OUTPUT_LOCATIONS rocprim/wrapper/include/rocprim
+    PATTERNS *.hpp
+  )
+endif()
 
 if(BUILD_CODE_COVERAGE)
   add_compile_options(-fprofile-arcs -ftest-coverage)
