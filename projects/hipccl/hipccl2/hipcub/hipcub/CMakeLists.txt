@@ -22,21 +22,30 @@
 
 # hipCUB header-only library
 
-# Configure a header file to pass the hipCUB version
+# Configure a header file to pass the hipCUB version. Changing the out path as it conflict with header wrapper
 configure_file(
   "${CMAKE_CURRENT_SOURCE_DIR}/include/hipcub/hipcub_version.hpp.in"
-  "${CMAKE_CURRENT_BINARY_DIR}/include/hipcub/hipcub_version.hpp"
+  "${CMAKE_CURRENT_BINARY_DIR}/cub/include/hipcub/hipcub_version.hpp"
   @ONLY
 )
+
+# Create wrapper for generated version file
+if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY)
+  rocm_wrap_header_file(
+      "hipcub_version.hpp"
+      WRAPPER_LOCATIONS cub/include/hipcub
+      OUTPUT_LOCATIONS cub/wrapper/include/hipcub
+  )
+endif()
 
 # Only header target, does not include dependencies
 add_library(hipcub INTERFACE)
 target_include_directories(hipcub
   INTERFACE
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include/hipcub>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/cub/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/cub/include/hipcub>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:hipcub/include/>
+    $<INSTALL_INTERFACE:include/>
 )
 
 if(HIP_COMPILER STREQUAL "hcc" OR HIP_COMPILER STREQUAL "clang")
@@ -70,19 +79,28 @@ set(INCLUDE_INSTALL_DIR ${CMAKE_INSTALL_INCLUDEDIR})
 # does not support header-only libraries (INTERFACE targets)
 rocm_install_targets(
   TARGETS hipcub
-  PREFIX hipcub
 )
 rocm_install(
   DIRECTORY
-    "include/"
-    "${PROJECT_BINARY_DIR}/hipcub/include/"
+  "include/"
+  "${PROJECT_BINARY_DIR}/hipcub/cub/include/"
   COMPONENT devel
-  DESTINATION hipcub/include/
+  DESTINATION include/
   FILES_MATCHING
   PATTERN "*.h"
   PATTERN "*.hpp"
   PERMISSIONS OWNER_WRITE OWNER_READ GROUP_READ WORLD_READ
 )
+
+# Install the wrapper to hipcub folder. 
+# Wrappers would be in /opt/rocm-xxx/hipcub/include/hipcub
+if (BUILD_FILE_REORG_BACKWARD_COMPATIBILITY)
+  rocm_install(
+    DIRECTORY
+    "${PROJECT_BINARY_DIR}/cub/wrapper/"
+    DESTINATION hipcub/ 
+  )
+endif()
 
 include(ROCMExportTargetsHeaderOnly)
 
@@ -90,17 +108,13 @@ include(ROCMExportTargetsHeaderOnly)
 if(HIP_COMPILER STREQUAL "hcc" OR HIP_COMPILER STREQUAL "clang")
   rocm_export_targets_header_only(
     TARGETS hip::hipcub
-    PREFIX hipcub
     DEPENDS PACKAGE rocprim
     NAMESPACE hip::
   )
 else()
   rocm_export_targets_header_only(
     TARGETS hip::hipcub
-    PREFIX hipcub
     NAMESPACE hip::
   )
 endif()
 
-# Create symlinks
-rocm_install_symlink_subdir(hipcub)

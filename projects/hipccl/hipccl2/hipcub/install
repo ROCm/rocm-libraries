@@ -18,6 +18,7 @@ function display_help()
     echo "    [-g|--debug] -DCMAKE_BUILD_TYPE=Debug (default is =Release)"
     echo "    [--hip-clang] build library for amdgpu backend using hip-clang"
     echo "    [--address-sanitizer] build with address sanitizer enabled"
+    echo "    [--rm-legacy-include-dir] Remove legacy include dir Packaging added for file/folder reorg backward compatibility"
 }
 
 
@@ -33,6 +34,7 @@ run_tests=false
 rocm_path=/opt/rocm
 build_relocatable=false
 build_address_sanitizer=false
+build_freorg_bkwdcomp=true
 
 # #################################################
 # Parameter parsing
@@ -41,7 +43,7 @@ build_address_sanitizer=false
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ $? -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,debug,hip-clang,test,package,relocatable,address-sanitizer --options hicdtpr -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,debug,hip-clang,test,package,relocatable,address-sanitizer,rm-legacy-include-dir --options hicdtpr -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
@@ -88,9 +90,12 @@ while true; do
 	--hip-clang)
 	    build_hip_clang=true
 	    shift ;;
-    --address-sanitizer)
-        build_address_sanitizer=true
-        shift ;;
+        --address-sanitizer)
+            build_address_sanitizer=true
+            shift ;;
+	--rm-legacy-include-dir)
+            build_freorg_bkwdcomp=false
+            shift ;;
 	--) shift ; break ;;
 	*)  echo "Unexpected command line parameter received; aborting";
 	    exit 1
@@ -144,12 +149,18 @@ if [[ "${build_address_sanitizer}" == true ]]; then
     cmake_common_options="$cmake_common_options -DBUILD_ADDRESS_SANITIZER=ON"
 fi
 
+#Enable backward compatibility wrappers
+if [[ "${build_freorg_bkwdcomp}" == true ]]; then
+    cmake_common_options="${cmake_common_options} -DBUILD_FILE_REORG_BACKWARD_COMPATIBILITY=ON"
+else
+    cmake_common_options="${cmake_common_options} -DBUILD_FILE_REORG_BACKWARD_COMPATIBILITY=OFF"
+fi
 
 if [[ "${build_relocatable}" == true ]]; then
     CXX=$rocm_path/bin/${compiler} ${cmake_executable} \
         -DCMAKE_INSTALL_PREFIX=${rocm_path} \
         -DCMAKE_PREFIX_PATH="${rocm_path} ${rocm_path}/hcc ${rocm_path}/hip" \
-        -DCMAKE_MODULE_PATH="${rocm_path}/hip/cmake" \
+        -DCMAKE_MODULE_PATH="${rocm_path}/lib/cmake/hip ${rocm_path}/hip/cmake" \
         -Drocprim_DIR=${rocm_path}/rocprim \
         ${cmake_common_options} \
         ${build_tests} ${build_type} ../../. # or cmake-gui ../.
