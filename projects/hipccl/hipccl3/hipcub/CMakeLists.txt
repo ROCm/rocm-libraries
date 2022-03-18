@@ -27,7 +27,7 @@ cmake_policy(VERSION 3.16...3.21)
 set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix, prepended onto install directories")
 
 #Adding CMAKE_PREFIX_PATH
-list( APPEND CMAKE_PREFIX_PATH /opt/rocm/llvm /opt/rocm )
+list( APPEND CMAKE_PREFIX_PATH /opt/rocm/llvm /opt/rocm ${ROCM_PATH})
 
 # hipCUB project
 project(hipcub LANGUAGES CXX)
@@ -36,6 +36,7 @@ project(hipcub LANGUAGES CXX)
 list(APPEND CMAKE_MODULE_PATH
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake
   ${HIP_PATH}/cmake /opt/rocm/hip/cmake # FindHIP.cmake
+  ${ROCM_PATH}/lib/cmake/hip /opt/rocm/lib/cmake/hip # FindHIP.cmake
 )
 
 # Set a default build type if none was specified
@@ -56,6 +57,7 @@ include( ROCMCreatePackage )
 include( ROCMInstallTargets )
 include( ROCMPackageConfigHelpers )
 include( ROCMInstallSymlinks )
+include( ROCMHeaderWrapper )
 include( ROCMCheckTargetIds )
 include( ROCMClients )
 
@@ -111,6 +113,8 @@ option(DOWNLOAD_CUB "Download CUB and thrust. Do not search for CUB package" OFF
 option(BUILD_BENCHMARK "Build benchmarks" OFF)
 option(BUILD_EXAMPLE "Build Examples" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
+#Set the header wrapper ON by default. 
+option(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY "Build with file/folder reorg with backward compatibility enabled" ON)
 
 if(BUILD_ADDRESS_SANITIZER)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -shared-libasan")
@@ -152,6 +156,18 @@ endif()
 if(BUILD_BENCHMARK AND NOT ONLY_INSTALL)
   rocm_package_setup_client_component(benchmarks)
   add_subdirectory(benchmark)
+endif()
+
+# Create header wrapper for backward compatibility
+if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY)
+  rocm_wrap_header_dir(
+            ${PROJECT_SOURCE_DIR}/hipcub/include/hipcub/
+	    PATTERNS "*.h"
+	    PATTERN "*.hpp"
+	    GUARDS SYMLINK WRAPPER
+	    WRAPPER_LOCATIONS cub/include/hipcub/
+            OUTPUT_LOCATIONS cub/wrapper/include/hipcub/
+	  )
 endif()
 
 # Package
