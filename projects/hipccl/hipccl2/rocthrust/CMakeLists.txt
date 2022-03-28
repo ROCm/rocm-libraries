@@ -174,15 +174,13 @@ endif()
 #Create header wrapper for backward compatibility
 if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY)
   rocm_wrap_header_dir(
-            ${CMAKE_SOURCE_DIR}/thrust
-	    PATTERNS "*.h"
-	    PATTERNS "*.inl"
-	    PATTERN "*.cuh"
-	    PATTERN "*.hpp"
-	    GUARDS SYMLINK WRAPPER
-	    WRAPPER_LOCATIONS rocthrust/include/thrust
-            OUTPUT_LOCATIONS rocthrust/wrapper/include/thrust
-	  )
+      ${CMAKE_SOURCE_DIR}/thrust
+      PATTERNS "*.h" "*.inl" "*.cuh" "*.hpp"
+      HEADER_LOCATION include/thrust
+      GUARDS SYMLINK WRAPPER
+      WRAPPER_LOCATIONS rocthrust/include/thrust
+      OUTPUT_LOCATIONS rocthrust/wrapper/include/thrust
+  )
 endif( )
 
 set(THRUST_OPTIONS_DEBUG ${THRUST_OPTIONS_WARNINGS})
