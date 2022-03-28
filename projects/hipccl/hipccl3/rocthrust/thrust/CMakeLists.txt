@@ -15,6 +15,7 @@ configure_file(
 if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY)
   rocm_wrap_header_file(
       "rocthrust_version.hpp"
+      HEADER_LOCATION include/thrust
       WRAPPER_LOCATIONS rocthrust/include/thrust
       OUTPUT_LOCATIONS rocthrust/wrapper/include/thrust
   )
@@ -54,7 +55,7 @@ rocm_install(
   DIRECTORY
     "./"
     "${PROJECT_BINARY_DIR}/thrust/include/"
-  DESTINATION include/rocthrust
+  DESTINATION include/thrust
   FILES_MATCHING
   PATTERN "*.h"
   PATTERN "*.cuh"
