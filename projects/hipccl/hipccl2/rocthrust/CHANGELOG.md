@@ -6,9 +6,11 @@ Full documentation for rocThrust is available at [https://rocthrust.readthedocs.
 ### Added
 - Packages for tests and benchmark executable on all supported OSes using CPack.
 
-## (Unreleased) rocThrust 2.14.0 for ROCm 5.1
+## rocThrust 2.14.0 for ROCm 5.1
 ### Added
 - Updated to match upstream Thrust 1.15.0
+### Known issues
+- async_copy, partition, and stable_sort_by_key unit tests are failing on HIP on Windows.
 
 ## rocThrust 2.13.0 for ROCm 5.0
 - Updated to match upstream Thrust 1.13.0
