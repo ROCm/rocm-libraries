@@ -5,6 +5,7 @@ Full documentation for rocPRIM is available at [https://codedocs.xyz/ROCmSoftwar
 ## [Unreleased rocPRIM-2.10.14 for ROCm 5.2.0]
 ### Added
 - Packages for tests and benchmark executable on all supported OSes using CPack.
+- Added File/Folder Reorg Changes and Enabled Backward compatibility support using wrapper headers.
 
 ## [Unreleased rocPRIM-2.10.13 for ROCm 5.1.0]
 ### Fixed
@@ -12,7 +13,6 @@ Full documentation for rocPRIM is available at [https://codedocs.xyz/ROCmSoftwar
 ### Added
 - Future value
 - Added device partition_three_way to partition input to three output iterators based on two predicates
-- Added File/Folder Reorg Changes and Enabled Backward compatibility support using wrapper headers.
 ### Changed
 - The reduce/scan algorithm precision issues in the tests has been resolved for half types.
 ### Known issues
