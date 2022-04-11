@@ -34,23 +34,6 @@
 // kernel definitions
 #include "test_block_adjacent_difference.kernels.hpp"
 
-TEST(RocprimBlockAdjacentDifference, Traits)
-{
-    ASSERT_FALSE((rocprim::detail::with_b_index_arg<int, rocprim::less<int>>::value));
-    ASSERT_FALSE((rocprim::detail::with_b_index_arg<int, custom_flag_op2>::value));
-    ASSERT_TRUE((rocprim::detail::with_b_index_arg<int, custom_flag_op1<int>>::value));
-
-    auto f1 = [](const int& a, const int& b, unsigned int b_index) { return (a == b) || (b_index % 10 == 0); };
-    auto f2 = [](const int& a, const int& b) { return (a == b); };
-    ASSERT_TRUE((rocprim::detail::with_b_index_arg<int, decltype(f1)>::value));
-    ASSERT_FALSE((rocprim::detail::with_b_index_arg<int, decltype(f2)>::value));
-
-    auto f3 = [](int a, int b, int b_index) { return (a == b) || (b_index % 10 == 0); };
-    auto f4 = [](const int a, const int b) { return (a == b); };
-    ASSERT_TRUE((rocprim::detail::with_b_index_arg<int, decltype(f3)>::value));
-    ASSERT_FALSE((rocprim::detail::with_b_index_arg<int, decltype(f4)>::value));
-}
-
 // Start stamping out tests
 struct RocprimBlockAdjacentDifference;
 

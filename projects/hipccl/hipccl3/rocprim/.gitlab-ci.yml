@@ -24,6 +24,7 @@ include:
   - project: 'amd/ci-templates'
     ref: main
     file:
+      - /defaults.yaml
       - /deps-cmake.yaml
       - /deps-rocm.yaml
       - /gpus-rocm.yaml

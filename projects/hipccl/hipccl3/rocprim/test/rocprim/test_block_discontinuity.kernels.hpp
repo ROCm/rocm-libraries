@@ -44,16 +44,15 @@ struct custom_flag_op2
 };
 
 // Host (CPU) implementaions of the wrapping function that allows to pass 3 args
-template<class T, class FlagOp>
-typename std::enable_if<rocprim::detail::with_b_index_arg<T, FlagOp>::value, bool>::type
-apply(FlagOp flag_op, const T& a, const T& b, unsigned int b_index)
+template <class T, class FlagOp>
+auto apply(FlagOp flag_op, const T& a, const T& b, unsigned int b_index)
+    -> decltype(flag_op(a, b, b_index))
 {
     return flag_op(a, b, b_index);
 }
 
 template<class T, class FlagOp>
-typename std::enable_if<!rocprim::detail::with_b_index_arg<T, FlagOp>::value, bool>::type
-apply(FlagOp flag_op, const T& a, const T& b, unsigned int)
+auto apply(FlagOp flag_op, const T& a, const T& b, unsigned int) -> decltype(flag_op(a, b))
 {
     return flag_op(a, b);
 }

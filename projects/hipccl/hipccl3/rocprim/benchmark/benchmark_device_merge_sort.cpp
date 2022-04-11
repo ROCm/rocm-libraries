@@ -260,43 +260,6 @@ void run_sort_pairs_benchmark(benchmark::State& state, hipStream_t stream, size_
 
 #ifdef BENCHMARK_CONFIG_TUNING
 
-template <typename T>
-struct Traits
-{
-    static const char* name;
-};
-// Generic definition as a fall-back:
-template <typename T>
-const char* Traits<T>::name = "unknown";
-
-// Explicit definitions
-template <>
-const char* Traits<int>::name = "int";
-template <>
-const char* Traits<short>::name = "short";
-template <>
-const char* Traits<int8_t>::name = "int8_t";
-template <>
-const char* Traits<uint8_t>::name = "uint8_t";
-template <>
-const char* Traits<rocprim::half>::name = "rocprim::half";
-template <>
-const char* Traits<long long>::name = "long long";
-template <>
-const char* Traits<float>::name = "float";
-template <>
-const char* Traits<double>::name = "double";
-template <>
-const char* Traits<custom_type<int, int>>::name = "custom_int2";
-template <>
-const char* Traits<custom_type<float, float>>::name = "custom_float2";
-template <>
-const char* Traits<custom_type<double, double>>::name = "custom_double2";
-template <>
-const char* Traits<custom_type<char, double>>::name = "custom_char_double";
-template <>
-const char* Traits<custom_type<long long, double>>::name = "custom_longlong_double";
-
 template <class Key, class Value>
 struct name_prefix_fn
 {

@@ -84,7 +84,7 @@ struct less<void>
     }
 };
 
-template<class T>
+template<class T = void>
 struct less_equal
 {
     ROCPRIM_HOST_DEVICE inline
@@ -94,7 +94,18 @@ struct less_equal
     }
 };
 
-template<class T>
+template<>
+struct less_equal<void>
+{
+    template <typename T>
+    ROCPRIM_HOST_DEVICE inline
+    constexpr bool operator()(const T& a, const T& b) const
+    {
+        return a <= b;
+    }
+};
+
+template<class T = void>
 struct greater
 {
     ROCPRIM_HOST_DEVICE inline
@@ -104,7 +115,18 @@ struct greater
     }
 };
 
-template<class T>
+template<>
+struct greater<void>
+{
+    template <typename T>
+    ROCPRIM_HOST_DEVICE inline
+    constexpr bool operator()(const T& a, const T& b) const
+    {
+        return a > b;
+    }
+};
+
+template<class T = void>
 struct greater_equal
 {
     ROCPRIM_HOST_DEVICE inline
@@ -114,7 +136,18 @@ struct greater_equal
     }
 };
 
-template<class T>
+template<>
+struct greater_equal<void>
+{
+    template <typename T>
+    ROCPRIM_HOST_DEVICE inline
+    constexpr bool operator()(const T& a, const T& b) const
+    {
+        return a >= b;
+    }
+};
+
+template<class T = void>
 struct equal_to
 {
     ROCPRIM_HOST_DEVICE inline
@@ -124,7 +157,18 @@ struct equal_to
     }
 };
 
-template<class T>
+template<>
+struct equal_to<void>
+{
+    template <typename T>
+    ROCPRIM_HOST_DEVICE inline
+    constexpr bool operator()(const T& a, const T& b) const
+    {
+        return a == b;
+    }
+};
+
+template<class T = void>
 struct not_equal_to
 {
     ROCPRIM_HOST_DEVICE inline
@@ -134,7 +178,18 @@ struct not_equal_to
     }
 };
 
-template<class T>
+template<>
+struct not_equal_to<void>
+{
+    template <typename T>
+    ROCPRIM_HOST_DEVICE inline
+    constexpr bool operator()(const T& a, const T& b) const
+    {
+        return a != b;
+    }
+};
+
+template<class T = void>
 struct plus
 {
     ROCPRIM_HOST_DEVICE inline
@@ -144,7 +199,18 @@ struct plus
     }
 };
 
-template<class T>
+template<>
+struct plus<void>
+{
+    template <typename T>
+    ROCPRIM_HOST_DEVICE inline
+    constexpr T operator()(const T& a, const T& b) const
+    {
+        return a + b;
+    }
+};
+
+template<class T = void>
 struct minus
 {
     ROCPRIM_HOST_DEVICE inline
@@ -154,7 +220,18 @@ struct minus
     }
 };
 
-template<class T>
+template<>
+struct minus<void>
+{
+    template <typename T>
+    ROCPRIM_HOST_DEVICE inline
+    constexpr T operator()(const T& a, const T& b) const
+    {
+        return a - b;
+    }
+};
+
+template<class T = void>
 struct multiplies
 {
     ROCPRIM_HOST_DEVICE inline
@@ -164,7 +241,18 @@ struct multiplies
     }
 };
 
-template<class T>
+template<>
+struct multiplies<void>
+{
+    template <typename T>
+    ROCPRIM_HOST_DEVICE inline
+    constexpr T operator()(const T& a, const T& b) const
+    {
+        return a * b;
+    }
+};
+
+template<class T = void>
 struct maximum
 {
     ROCPRIM_HOST_DEVICE inline
@@ -174,7 +262,18 @@ struct maximum
     }
 };
 
-template<class T>
+template<>
+struct maximum<void>
+{
+    template <typename T>
+    ROCPRIM_HOST_DEVICE inline
+    constexpr T operator()(const T& a, const T& b) const
+    {
+        return a < b ? b : a;
+    }
+};
+
+template<class T = void>
 struct minimum
 {
     ROCPRIM_HOST_DEVICE inline
@@ -184,9 +283,31 @@ struct minimum
     }
 };
 
-template<class T>
+template<>
+struct minimum<void>
+{
+    template <typename T>
+    ROCPRIM_HOST_DEVICE inline
+    constexpr T operator()(const T& a, const T& b) const
+    {
+        return a < b ? a : b;
+    }
+};
+
+template<class T = void>
 struct identity
 {
+    ROCPRIM_HOST_DEVICE inline
+    constexpr T operator()(const T& a) const
+    {
+        return a;
+    }
+};
+
+template<>
+struct identity<void>
+{
+    template <typename T>
     ROCPRIM_HOST_DEVICE inline
     constexpr T operator()(const T& a) const
     {

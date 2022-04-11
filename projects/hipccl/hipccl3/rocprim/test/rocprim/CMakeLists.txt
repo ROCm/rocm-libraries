@@ -27,6 +27,7 @@ function(add_rocprim_test TEST_NAME TEST_SOURCES)
   get_filename_component(TEST_TARGET ${TEST_MAIN_SOURCE} NAME_WE)
 
   add_executable(${TEST_TARGET} ${TEST_SOURCES})
+  rocm_install(TARGETS ${TEST_TARGET} COMPONENT tests)
 
   target_include_directories(${TEST_TARGET} SYSTEM BEFORE
     PUBLIC
@@ -131,6 +132,7 @@ add_rocprim_test("rocprim.block_sort" test_block_sort.cpp)
 add_rocprim_test("rocprim.constant_iterator" test_constant_iterator.cpp)
 add_rocprim_test("rocprim.counting_iterator" test_counting_iterator.cpp)
 add_rocprim_test("rocprim.device_binary_search" test_device_binary_search.cpp)
+add_rocprim_test("rocprim.device_adjacent_difference" test_device_adjacent_difference.cpp)
 add_rocprim_test("rocprim.device_histogram" test_device_histogram.cpp)
 add_rocprim_test("rocprim.device_merge" test_device_merge.cpp)
 add_rocprim_test("rocprim.device_merge_sort" test_device_merge_sort.cpp)

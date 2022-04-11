@@ -106,11 +106,15 @@ struct radix_digit_count_helper
         unsigned int digit_counts[warps_no][radix_size];
     };
 
-    template<bool IsFull = false, class KeysInputIterator>
+    template<
+        bool IsFull = false,
+        class KeysInputIterator,
+        class Offset
+    >
     ROCPRIM_DEVICE ROCPRIM_INLINE
     void count_digits(KeysInputIterator keys_input,
-                      unsigned int begin_offset,
-                      unsigned int end_offset,
+                      Offset begin_offset,
+                      Offset end_offset,
                       unsigned int bit,
                       unsigned int current_radix_bits,
                       storage_type& storage,
@@ -135,7 +139,7 @@ struct radix_digit_count_helper
         }
         ::rocprim::syncthreads();
 
-        for(unsigned int block_offset = begin_offset; block_offset < end_offset; block_offset += items_per_block)
+        for(Offset block_offset = begin_offset; block_offset < end_offset; block_offset += items_per_block)
         {
             key_type keys[ItemsPerThread];
             unsigned int valid_count;
@@ -300,7 +304,8 @@ template<
     unsigned int RadixBits,
     bool Descending,
     class Key,
-    class Value
+    class Value,
+    class Offset
 >
 struct radix_sort_and_scatter_helper
 {
@@ -340,7 +345,7 @@ struct radix_sort_and_scatter_helper
         unsigned short starts[radix_size];
         unsigned short ends[radix_size];
 
-        unsigned int digit_starts[radix_size];
+        Offset digit_starts[radix_size];
     };
 
     template<
@@ -355,11 +360,11 @@ struct radix_sort_and_scatter_helper
                           KeysOutputIterator keys_output,
                           ValuesInputIterator values_input,
                           ValuesOutputIterator values_output,
-                          unsigned int begin_offset,
-                          unsigned int end_offset,
+                          Offset begin_offset,
+                          Offset end_offset,
                           unsigned int bit,
                           unsigned int current_radix_bits,
-                          unsigned int digit_start, // i-th thread must pass i-th digit's value
+                          Offset digit_start, // i-th thread must pass i-th digit's value
                           storage_type& storage)
     {
         const unsigned int flat_id = ::rocprim::detail::block_thread_id<0>();
@@ -369,7 +374,7 @@ struct radix_sort_and_scatter_helper
             storage.digit_starts[flat_id] = digit_start;
         }
 
-        for(unsigned int block_offset = begin_offset; block_offset < end_offset; block_offset += items_per_block)
+        for(Offset block_offset = begin_offset; block_offset < end_offset; block_offset += items_per_block)
         {
             key_type keys[ItemsPerThread];
             value_type values[ItemsPerThread];
@@ -452,7 +457,7 @@ struct radix_sort_and_scatter_helper
                 const unsigned int pos = i * BlockSize + flat_id;
                 if(IsFull || (pos < valid_count))
                 {
-                    const unsigned int dst = pos - storage.starts[digit] + storage.digit_starts[digit];
+                    const Offset dst = pos - storage.starts[digit] + storage.digit_starts[digit];
                     keys_output[dst] = key_codec::decode(bit_keys[i]);
                     if(with_values)
                     {
@@ -483,12 +488,13 @@ template<
     unsigned int ItemsPerThread,
     unsigned int RadixBits,
     bool Descending,
-    class KeysInputIterator
+    class KeysInputIterator,
+    class Offset
 >
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
 void fill_digit_counts(KeysInputIterator keys_input,
-                       unsigned int size,
-                       unsigned int * batch_digit_counts,
+                       Offset size,
+                       Offset * batch_digit_counts,
                        unsigned int bit,
                        unsigned int current_radix_bits,
                        unsigned int blocks_per_full_batch,
@@ -504,7 +510,7 @@ void fill_digit_counts(KeysInputIterator keys_input,
     const unsigned int flat_id = ::rocprim::detail::block_thread_id<0>();
     const unsigned int batch_id = ::rocprim::detail::block_id<0>();
 
-    unsigned int block_offset;
+    Offset block_offset;
     unsigned int blocks_per_batch;
     if(batch_id < full_batches)
     {
@@ -549,28 +555,29 @@ void fill_digit_counts(KeysInputIterator keys_input,
 template<
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
-    unsigned int RadixBits
+    unsigned int RadixBits,
+    class Offset
 >
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
-void scan_batches(unsigned int * batch_digit_counts,
-                  unsigned int * digit_counts,
+void scan_batches(Offset * batch_digit_counts,
+                  Offset * digit_counts,
                   unsigned int batches)
 {
     constexpr unsigned int radix_size = 1 << RadixBits;
 
-    using scan_type = typename ::rocprim::block_scan<unsigned int, BlockSize>;
+    using scan_type = typename ::rocprim::block_scan<Offset, BlockSize>;
 
     const unsigned int digit = ::rocprim::detail::block_id<0>();
     const unsigned int flat_id = ::rocprim::detail::block_thread_id<0>();
 
-    unsigned int values[ItemsPerThread];
+    Offset values[ItemsPerThread];
     for(unsigned int i = 0; i < ItemsPerThread; i++)
     {
         const unsigned int batch_id = flat_id * ItemsPerThread + i;
         values[i] = (batch_id < batches ? batch_digit_counts[batch_id * radix_size + digit] : 0);
     }
 
-    unsigned int digit_count;
+    Offset digit_count;
     scan_type().exclusive_scan(values, values, 0, digit_count);
 
     for(unsigned int i = 0; i < ItemsPerThread; i++)
@@ -588,17 +595,20 @@ void scan_batches(unsigned int * batch_digit_counts,
     }
 }
 
-template<unsigned int RadixBits>
+template<
+    unsigned int RadixBits,
+    class Offset
+>
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
-void scan_digits(unsigned int * digit_counts)
+void scan_digits(Offset * digit_counts)
 {
     constexpr unsigned int radix_size = 1 << RadixBits;
 
-    using scan_type = typename ::rocprim::block_scan<unsigned int, radix_size>;
+    using scan_type = typename ::rocprim::block_scan<Offset, radix_size>;
 
     const unsigned int flat_id = ::rocprim::detail::block_thread_id<0>();
 
-    unsigned int value = digit_counts[flat_id];
+    Offset value = digit_counts[flat_id];
     scan_type().exclusive_scan(value, value, 0);
     digit_counts[flat_id] = value;
 }
@@ -646,16 +656,17 @@ template<
     class KeysInputIterator,
     class KeysOutputIterator,
     class ValuesInputIterator,
-    class ValuesOutputIterator
+    class ValuesOutputIterator,
+    class Offset
 >
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
 void sort_and_scatter(KeysInputIterator keys_input,
                       KeysOutputIterator keys_output,
                       ValuesInputIterator values_input,
                       ValuesOutputIterator values_output,
-                      unsigned int size,
-                      const unsigned int * batch_digit_starts,
-                      const unsigned int * digit_starts,
+                      Offset size,
+                      const Offset * batch_digit_starts,
+                      const Offset * digit_starts,
                       unsigned int bit,
                       unsigned int current_radix_bits,
                       unsigned int blocks_per_full_batch,
@@ -669,7 +680,7 @@ void sort_and_scatter(KeysInputIterator keys_input,
 
     using sort_and_scatter_helper = radix_sort_and_scatter_helper<
         BlockSize, ItemsPerThread, RadixBits, Descending,
-        key_type, value_type
+        key_type, value_type, Offset
     >;
 
     ROCPRIM_SHARED_MEMORY typename sort_and_scatter_helper::storage_type storage;
@@ -677,7 +688,7 @@ void sort_and_scatter(KeysInputIterator keys_input,
     const unsigned int flat_id = ::rocprim::detail::block_thread_id<0>();
     const unsigned int batch_id = ::rocprim::detail::block_id<0>();
 
-    unsigned int block_offset;
+    Offset block_offset;
     unsigned int blocks_per_batch;
     if(batch_id < full_batches)
     {
@@ -691,7 +702,7 @@ void sort_and_scatter(KeysInputIterator keys_input,
     }
     block_offset *= items_per_block;
 
-    unsigned int digit_start = 0;
+    Offset digit_start = 0;
     if(flat_id < radix_size)
     {
         digit_start = digit_starts[flat_id] + batch_digit_starts[batch_id * radix_size + flat_id];
