@@ -7,7 +7,7 @@ Full documentation for rocPRIM is available at [https://codedocs.xyz/ROCmSoftwar
 - Packages for tests and benchmark executable on all supported OSes using CPack.
 - Added File/Folder Reorg Changes and Enabled Backward compatibility support using wrapper headers.
 
-## [Unreleased rocPRIM-2.10.13 for ROCm 5.1.0]
+## [Released rocPRIM-2.10.13 for ROCm 5.1.0]
 ### Fixed
 - Fixed radix sort int64_t bug introduced in [2.10.11]
 ### Added
