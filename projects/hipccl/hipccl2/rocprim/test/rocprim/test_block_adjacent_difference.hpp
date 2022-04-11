@@ -70,3 +70,71 @@ typed_test_def(RocprimBlockAdjacentDifference, name_suffix, FlagHeadsAndTails)
     static_for<4, 6, type, flag_type, flag_op_type_3, 2, block_size>::run();
     static_for<6, n_items, type, flag_type, flag_op_type_4, 2, block_size>::run();
 }
+
+typed_test_def(RocprimBlockAdjacentDifference, name_suffix, SubtractLeft)
+{
+    using T = typename TestFixture::params::input_type;
+
+    using op_type_1 = rocprim::minus<>;
+    using op_type_2 = rocprim::plus<>;
+    using op_type_3 = test_op<T>;
+
+    constexpr size_t block_size = TestFixture::params::block_size;
+
+    // clang-format off
+    static_for<0, 2,       T, T, op_type_1, 3, block_size>::run();
+    static_for<2, 4,       T, T, op_type_2, 3, block_size>::run();
+    static_for<4, n_items, T, T, op_type_3, 3, block_size>::run();
+    // clang-format on
+}
+
+typed_test_def(RocprimBlockAdjacentDifference, name_suffix, SubtractRight)
+{
+    using T = typename TestFixture::params::input_type;
+
+    using op_type_1 = rocprim::minus<>;
+    using op_type_2 = rocprim::plus<>;
+    using op_type_3 = test_op<T>;
+
+    constexpr size_t block_size = TestFixture::params::block_size;
+
+    // clang-format off
+    static_for<0, 2,       T, T, op_type_1, 4, block_size>::run();
+    static_for<2, 4,       T, T, op_type_2, 4, block_size>::run();
+    static_for<4, n_items, T, T, op_type_3, 4, block_size>::run();
+    // clang-format on
+}
+
+typed_test_def(RocprimBlockAdjacentDifference, name_suffix, SubtractLeftPartial)
+{
+    using T = typename TestFixture::params::input_type;
+
+    using op_type_1 = rocprim::minus<>;
+    using op_type_2 = rocprim::plus<>;
+    using op_type_3 = test_op<T>;
+
+    constexpr size_t block_size = TestFixture::params::block_size;
+
+    // clang-format off
+    static_for<0, 2,       T, T, op_type_1, 5, block_size>::run();
+    static_for<2, 4,       T, T, op_type_2, 5, block_size>::run();
+    static_for<4, n_items, T, T, op_type_3, 5, block_size>::run();
+    // clang-format on
+}
+
+typed_test_def(RocprimBlockAdjacentDifference, name_suffix, SubtractRightPartial)
+{
+    using T = typename TestFixture::params::input_type;
+
+    using op_type_1 = rocprim::minus<>;
+    using op_type_2 = rocprim::plus<>;
+    using op_type_3 = test_op<T>;
+
+    constexpr size_t block_size = TestFixture::params::block_size;
+
+    // clang-format off
+    static_for<0, 2,       T, T, op_type_1, 6, block_size>::run();
+    static_for<2, 4,       T, T, op_type_2, 6, block_size>::run();
+    static_for<4, n_items, T, T, op_type_3, 6, block_size>::run();
+    // clang-format on
+}

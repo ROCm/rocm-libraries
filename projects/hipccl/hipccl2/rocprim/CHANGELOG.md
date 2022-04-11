@@ -6,6 +6,10 @@ Full documentation for rocPRIM is available at [https://codedocs.xyz/ROCmSoftwar
 ### Added
 - Packages for tests and benchmark executable on all supported OSes using CPack.
 - Added File/Folder Reorg Changes and Enabled Backward compatibility support using wrapper headers.
+- Added File/Folder Reorg Changes and Enabled Backward compatibility support using wrapper headers.
+- New functions `subtract_left` and `subtract_right` in `block_adjacent_difference` to apply functions
+  on pairs of adjacent items distributed between threads in a block.
+- New device level `adjacent_difference` primitives.
 
 ## [Released rocPRIM-2.10.13 for ROCm 5.1.0]
 ### Fixed
@@ -15,6 +19,14 @@ Full documentation for rocPRIM is available at [https://codedocs.xyz/ROCmSoftwar
 - Added device partition_three_way to partition input to three output iterators based on two predicates
 ### Changed
 - The reduce/scan algorithm precision issues in the tests has been resolved for half types.
+- The device radix sort algorithm supports indexing with 64 bit unsigned integers.
+  - The indexer type is chosen based on the type argument of parameter `size`.
+  - If `sizeof(size)` is not larger than 4 bytes, the indexer type is 32 bit unsigned int,
+  - Else the indexer type is 64 bit unsigned int.
+  - The maximum problem size is based on the compile time configuration of the algorithm according to the following formula:
+    - `max_problem_size = (UINT_MAX + 1) * config::scan::block_size * config::scan::items_per_thread`.
+- The flags API of `block_adjacent_difference` is now deprecated and will be removed in a future
+  version.
 ### Known issues
 - device_segmented_radix_sort unit test failing for HIP on Windows
 

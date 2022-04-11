@@ -309,6 +309,9 @@ struct select_type_impl<Fallback> : type_identity<extract_type<Fallback>> { };
 template <typename... Cases>
 using select_type = typename select_type_impl<Cases...>::type;
 
+template <bool Value>
+using bool_constant = std::integral_constant<bool, Value>;
+
 } // end namespace detail
 END_ROCPRIM_NAMESPACE
 

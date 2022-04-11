@@ -159,9 +159,10 @@ hipError_t select(void * temporary_storage,
     // Dummy inequality operation
     using inequality_op_type = ::rocprim::empty_type;
     using offset_type = unsigned int;
+    rocprim::empty_type* const no_values = nullptr; // key only
 
     return detail::partition_impl<detail::select_method::flag, true, Config, offset_type>(
-        temporary_storage, storage_size, input, flags, output, selected_count_output,
+        temporary_storage, storage_size, input, no_values, flags, output, no_values, selected_count_output,
         size, inequality_op_type(), stream, debug_synchronous, unary_predicate_type()
     );
 }
@@ -272,9 +273,10 @@ hipError_t select(void * temporary_storage,
     flag_type * flags = nullptr;
     // Dummy inequality operation
     using inequality_op_type = ::rocprim::empty_type;
+    rocprim::empty_type* const no_values = nullptr; // key only
 
     return detail::partition_impl<detail::select_method::predicate, true, Config, offset_type>(
-        temporary_storage, storage_size, input, flags, output, selected_count_output,
+        temporary_storage, storage_size, input, no_values, flags, output, no_values, selected_count_output,
         size, inequality_op_type(), stream, debug_synchronous, predicate
     );
 }
@@ -286,7 +288,7 @@ hipError_t select(void * temporary_storage,
 ///
 /// \par Overview
 /// * Returns the required size of \p temporary_storage in \p storage_size
-/// if \p temporary_storage in a null pointer.
+/// if \p temporary_storage is a null pointer.
 /// * Range specified by \p input must have at least \p size elements.
 /// * Range specified by \p output must have at least so many elements, that all selected
 /// values can be copied into it.
@@ -376,15 +378,106 @@ hipError_t unique(void * temporary_storage,
     using offset_type = unsigned int;
     // Dummy flag type
     using flag_type = ::rocprim::empty_type;
-    flag_type * flags = nullptr;
+    const flag_type * flags = nullptr;
+    rocprim::empty_type* const no_values = nullptr; // key only
 
     // Convert equality operator to inequality operator
     auto inequality_op = detail::inequality_wrapper<EqualityOp>(equality_op);
 
     return detail::partition_impl<detail::select_method::unique, true, Config, offset_type>(
-        temporary_storage, storage_size, input, flags, output, unique_count_output,
+        temporary_storage, storage_size, input, no_values, flags, output, no_values, unique_count_output,
         size, inequality_op, stream, debug_synchronous, unary_predicate_type()
     );
+}
+
+/// \brief Device-level parallel unique by key primitive.
+///
+/// From given \p input range unique primitive eliminates all but the first element from every
+/// consecutive group of equivalent elements and copies them and their corresponding keys into
+/// \p output.
+///
+/// \par Overview
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage is a null pointer.
+/// * Ranges specified by \p keys_input and value_input must have at least \p size elements each.
+/// * Ranges specified by \p keys_output and values_output each must have at least so many elements,
+/// that all selected values can be copied into them.
+/// * Range specified by \p unique_count_output must have at least 1 element.
+/// * By default <tt>InputIterator::value_type</tt>'s equality operator is used to check
+/// if elements are equivalent.
+///
+/// \tparam KeyIterator - random-access iterator type of the input key range. It can be
+/// a simple pointer type.
+/// \tparam ValueIterator - random-access iterator type of the input value range. It can be
+/// a simple pointer type.
+/// \tparam OutputKeyIterator - random-access iterator type of the output key range. It can be
+/// a simple pointer type.
+/// \tparam OutputValueIterator - random-access iterator type of the output value range. It can be
+/// a simple pointer type.
+/// \tparam UniqueCountOutputIterator - random-access iterator type of the unique_count_output
+/// value used to return number of unique keys and values. It can be a simple pointer type.
+/// \tparam EqualityOp - type of an binary operator used to compare keys for equality.
+///
+/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the unique operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] keys_input - iterator to the first element in the range to select keys from.
+/// \param [in] values_input - iterator to the first element in the range of values corresponding to keys
+/// \param [out] keys_output - iterator to the first element in the output key range.
+/// \param [out] values_output - iterator to the first element in the output value range.
+/// \param [out] unique_count_output - iterator to the total number of selected values (length of \p output).
+/// \param [in] size - number of element in the input range.
+/// \param [in] equality_op - [optional] binary function object used to compare input values for equality.
+/// The signature of the function should be equivalent to the following:
+/// <tt>bool equal_to(const T &a, const T &b);</tt>. The signature does not need to have
+/// <tt>const &</tt>, but function object must not modify the object passed to it.
+/// \param [in] stream - [optional] HIP stream object. The default is \p 0 (default stream).
+/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. The default value is \p false.
+template <typename Config = default_config,
+          typename KeyIterator,
+          typename ValueIterator,
+          typename OutputKeyIterator,
+          typename OutputValueIterator,
+          typename UniqueCountOutputIterator,
+          typename EqualityOp
+          = ::rocprim::equal_to<typename std::iterator_traits<KeyIterator>::value_type>>
+inline hipError_t unique_by_key(void*                           temporary_storage,
+                                size_t&                         storage_size,
+                                const KeyIterator               keys_input,
+                                const ValueIterator             values_input,
+                                const OutputKeyIterator         keys_output,
+                                const OutputValueIterator       values_output,
+                                const UniqueCountOutputIterator unique_count_output,
+                                const size_t                    size,
+                                const EqualityOp                equality_op       = EqualityOp(),
+                                const hipStream_t               stream            = 0,
+                                const bool                      debug_synchronous = false)
+{
+    using offset_type = unsigned int;
+    // Dummy flag
+    ::rocprim::empty_type* const no_flags = nullptr;
+    // Dummy predicate
+    const auto no_predicate = ::rocprim::empty_type{};
+
+    // Convert equality operator to inequality operator
+    const auto inequality_op = detail::inequality_wrapper<EqualityOp>(equality_op);
+
+    return detail::partition_impl<detail::select_method::unique, true, Config, offset_type>(
+        temporary_storage,
+        storage_size,
+        keys_input,
+        values_input,
+        no_flags,
+        keys_output,
+        values_output,
+        unique_count_output,
+        size,
+        inequality_op,
+        stream,
+        debug_synchronous,
+        no_predicate);
 }
 
 #undef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR

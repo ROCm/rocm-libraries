@@ -38,7 +38,6 @@ function(add_relative_test test_name test_target)
     endif()
     file(RELATIVE_PATH rel_path "${CMAKE_CURRENT_BINARY_DIR}" "${EXE_PATH}/${EXE_NAME}")
     add_test(NAME "${test_name}" COMMAND "./${rel_path}")
-    rocm_install(TARGETS ${test_target} COMPONENT tests)
 endfunction()
 
 function(add_hip_test TEST_NAME TEST_SOURCES)
@@ -47,6 +46,7 @@ function(add_hip_test TEST_NAME TEST_SOURCES)
   get_filename_component(TEST_TARGET ${TEST_MAIN_SOURCE} NAME_WE)
 
   add_executable(${TEST_TARGET} ${TEST_SOURCES})
+  rocm_install(TARGETS ${TEST_TARGET} COMPONENT tests)
 
   target_include_directories(${TEST_TARGET} SYSTEM BEFORE
     PUBLIC

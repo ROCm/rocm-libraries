@@ -122,4 +122,10 @@
 #define ROCPRIM_GRID_SIZE_LIMIT std::numeric_limits<unsigned int>::max()
 #endif
 
+#if __cpp_if_constexpr >= 201606
+#define ROCPRIM_IF_CONSTEXPR constexpr
+#else
+#define ROCPRIM_IF_CONSTEXPR
+#endif
+
 #endif // ROCPRIM_CONFIG_HPP_

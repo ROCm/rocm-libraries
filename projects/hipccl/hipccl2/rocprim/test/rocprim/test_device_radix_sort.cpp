@@ -35,7 +35,7 @@ template<
     bool Descending = false,
     unsigned int StartBit = 0,
     unsigned int EndBit = sizeof(Key) * 8,
-    bool CheckHugeSizes = false
+    bool CheckLargeSizes = false
 >
 struct params
 {
@@ -44,7 +44,7 @@ struct params
     static constexpr bool descending = Descending;
     static constexpr unsigned int start_bit = StartBit;
     static constexpr unsigned int end_bit = EndBit;
-    static constexpr bool check_huge_sizes = CheckHugeSizes;
+    static constexpr bool check_large_sizes = CheckLargeSizes;
 };
 
 template<class Params>
@@ -88,7 +88,7 @@ typedef ::testing::Types<
     params<int64_t, rocprim::half, true, 0, 34>,
     params<int64_t, int64_t, false, 0, 34, true>,
 
-    // huge sizes to check correctness of more than 1 block per batch
+    // large sizes to check correctness of more than 1 block per batch
     params<int, char, false, 0, 32, true>,
     params<int, char, true, 0, 32, true>,
     params<float, char, false, 0, 32, true>,
@@ -97,10 +97,10 @@ typedef ::testing::Types<
 
 TYPED_TEST_SUITE(RocprimDeviceRadixSort, Params);
 
-std::vector<size_t> get_sizes(int seed_value)
+std::vector<unsigned int> get_sizes(int seed_value)
 {
-    std::vector<size_t> sizes = { 0, 1, 10, 53, 211, 1024, 2049, 2345, 4096, 8196, 34567, (1 << 16) - 1220, (1 << 23) - 76543 };
-    const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(10, 1, 100000, seed_value);
+    std::vector<unsigned int> sizes = { 0, 1, 10, 53, 211, 1024, 2049, 2345, 4096, 8196, 34567, (1 << 16) - 1220, (1 << 23) - 76543 };
+    const std::vector<unsigned int> random_sizes = test_utils::get_random_data<unsigned int>(10, 1, 100000, seed_value);
     sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
     return sizes;
 }
@@ -115,7 +115,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeys)
     constexpr bool descending = TestFixture::params::descending;
     constexpr unsigned int start_bit = TestFixture::params::start_bit;
     constexpr unsigned int end_bit = TestFixture::params::end_bit;
-    constexpr bool check_huge_sizes = TestFixture::params::check_huge_sizes;
+    constexpr bool check_large_sizes = TestFixture::params::check_large_sizes;
 
     hipStream_t stream = 0;
 
@@ -128,9 +128,9 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeys)
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : get_sizes(seed_value))
+        for(unsigned int size : get_sizes(seed_value))
         {
-            if(size > (1 << 20) && !check_huge_sizes) continue;
+            if(size > (1 << 20) && !check_large_sizes) continue;
             if (size == 0 && test_common_utils::use_hmm())
             {
                 // hipMallocManaged() currently doesnt support zero byte allocation
@@ -253,7 +253,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairs)
     constexpr bool descending = TestFixture::params::descending;
     constexpr unsigned int start_bit = TestFixture::params::start_bit;
     constexpr unsigned int end_bit = TestFixture::params::end_bit;
-    constexpr bool check_huge_sizes = TestFixture::params::check_huge_sizes;
+    constexpr bool check_large_sizes = TestFixture::params::check_large_sizes;
 
     hipStream_t stream = 0;
 
@@ -266,9 +266,9 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairs)
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        for(size_t size : get_sizes(seed_value))
+        for(unsigned int size : get_sizes(seed_value))
         {
-            if(size > (1 << 20) && !check_huge_sizes) continue;
+            if(size > (1 << 20) && !check_large_sizes) continue;
             if (size == 0 && test_common_utils::use_hmm())
             {
                 // hipMallocManaged() currently doesnt support zero byte allocation
@@ -439,7 +439,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeysDoubleBuffer)
     constexpr bool descending = TestFixture::params::descending;
     constexpr unsigned int start_bit = TestFixture::params::start_bit;
     constexpr unsigned int end_bit = TestFixture::params::end_bit;
-    constexpr bool check_huge_sizes = TestFixture::params::check_huge_sizes;
+    constexpr bool check_large_sizes = TestFixture::params::check_large_sizes;
 
     hipStream_t stream = 0;
 
@@ -450,10 +450,9 @@ TYPED_TEST(RocprimDeviceRadixSort, SortKeysDoubleBuffer)
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        const std::vector<size_t> sizes = get_sizes(seed_value);
-        for(size_t size : sizes)
+        for(unsigned int size : get_sizes(seed_value))
         {
-            if(size > (1 << 20) && !check_huge_sizes) continue;
+            if(size > (1 << 20) && !check_large_sizes) continue;
             if (size == 0 && test_common_utils::use_hmm())
             {
                 // hipMallocManaged() currently doesnt support zero byte allocation
@@ -565,7 +564,7 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairsDoubleBuffer)
     constexpr bool descending = TestFixture::params::descending;
     constexpr unsigned int start_bit = TestFixture::params::start_bit;
     constexpr unsigned int end_bit = TestFixture::params::end_bit;
-    constexpr bool check_huge_sizes = TestFixture::params::check_huge_sizes;
+    constexpr bool check_large_sizes = TestFixture::params::check_large_sizes;
 
     hipStream_t stream = 0;
 
@@ -576,10 +575,9 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairsDoubleBuffer)
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
-        const std::vector<size_t> sizes = get_sizes(seed_value);
-        for(size_t size : sizes)
+        for(unsigned int size : get_sizes(seed_value))
         {
-            if(size > (1 << 20) && !check_huge_sizes) continue;
+            if(size > (1 << 20) && !check_large_sizes) continue;
             if (size == 0 && test_common_utils::use_hmm())
             {
                 // hipMallocManaged() currently doesnt support zero byte allocation
@@ -721,4 +719,77 @@ TYPED_TEST(RocprimDeviceRadixSort, SortPairsDoubleBuffer)
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_bit_eq(values_output, values_expected));
         }
     }
+}
+
+TEST(RocprimDeviceRadixSort, SortKeysOver4G)
+{
+    using key_type = uint8_t;
+    constexpr unsigned int start_bit = 0;
+    constexpr unsigned int end_bit = 8ull * sizeof(key_type);
+    constexpr hipStream_t stream = 0;
+    constexpr bool debug_synchronous = false;
+    constexpr size_t size = (1ull << 32) + 32;
+    constexpr size_t number_of_possible_keys = 1ull << (8ull * sizeof(key_type));
+    assert(std::is_unsigned<key_type>::value);
+    std::vector<size_t> histogram(number_of_possible_keys, 0);
+    const int seed_value = rand();
+
+    const int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    std::vector<key_type> keys_input = test_utils::get_random_data<key_type>(
+        size,
+        std::numeric_limits<key_type>::min(),
+        std::numeric_limits<key_type>::max(),
+        seed_value);
+
+    //generate histogram of the randomly generated values
+    std::for_each(keys_input.begin(), keys_input.end(), [&](const key_type &a){
+        histogram[a]++;
+    });
+
+    key_type * d_keys_input_output{};
+    HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_input_output, size * sizeof(key_type)));
+    HIP_CHECK(hipMemcpy(d_keys_input_output, keys_input.data(), size * sizeof(key_type), hipMemcpyHostToDevice));
+
+    size_t temporary_storage_bytes;
+    HIP_CHECK(
+        rocprim::radix_sort_keys(
+            nullptr, temporary_storage_bytes,
+            d_keys_input_output, d_keys_input_output, size,
+            start_bit, end_bit,
+            stream, debug_synchronous
+        )
+    );
+
+    ASSERT_GT(temporary_storage_bytes, 0);
+    void * d_temporary_storage;
+    HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
+
+    HIP_CHECK(
+        rocprim::radix_sort_keys(
+            d_temporary_storage, temporary_storage_bytes,
+            d_keys_input_output, d_keys_input_output, size,
+            start_bit, end_bit,
+            stream, debug_synchronous
+        )
+    );
+    
+    std::vector<key_type> output(keys_input.size());
+    HIP_CHECK(hipMemcpy(output.data(), d_keys_input_output, size * sizeof(key_type), hipMemcpyDeviceToHost));
+
+    size_t counter = 0;
+    for(size_t i = 0; i <= std::numeric_limits<key_type>::max(); ++i)
+    {
+        for(size_t j = 0; j < histogram[i]; ++j)
+        {
+            ASSERT_EQ(static_cast<size_t>(output[counter]), i);
+            ++counter;
+        }
+    }
+    ASSERT_EQ(counter, size);
+
+    HIP_CHECK(hipFree(d_keys_input_output));
+    HIP_CHECK(hipFree(d_temporary_storage));
 }

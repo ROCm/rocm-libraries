@@ -26,6 +26,7 @@
 
 #include "../config.hpp"
 #include "../functional.hpp"
+#include "../types.hpp"
 #include "../type_traits.hpp"
 #include "../detail/various.hpp"
 
@@ -45,19 +46,23 @@ template<
     select_method SelectMethod,
     bool OnlySelected,
     class Config,
-    class InputIterator,
+    class KeyIterator,
+    class ValueIterator,
     class FlagIterator,
-    class OutputIterator,
+    class OutputKeyIterator,
+    class OutputValueIterator,
     class SelectedCountOutputIterator,
     class InequalityOp,
     class OffsetLookbackScanState,
     class... UnaryPredicates
 >
 ROCPRIM_KERNEL
-__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
-void partition_kernel(InputIterator input,
+__launch_bounds__(Config::block_size)
+void partition_kernel(KeyIterator keys_input,
+                      ValueIterator values_input,
                       FlagIterator flags,
-                      OutputIterator output,
+                      OutputKeyIterator keys_output,
+                      OutputValueIterator values_output,
                       SelectedCountOutputIterator selected_count_output,
                       const size_t size,
                       InequalityOp inequality_op,
@@ -67,7 +72,7 @@ void partition_kernel(InputIterator input,
                       UnaryPredicates... predicates)
 {
     partition_kernel_impl<SelectMethod, OnlySelected, Config>(
-        input, flags, output, selected_count_output, size, inequality_op,
+        keys_input, values_input, flags, keys_output, values_output, selected_count_output, size, inequality_op,
         offset_scan_state, number_of_blocks, ordered_bid, predicates...
     );
 }
@@ -105,9 +110,11 @@ template<
     bool OnlySelected,
     class Config,
     class OffsetT,
-    class InputIterator,
+    class KeyIterator,
+    class ValueIterator, // can be rocprim::empty_type* for key only
     class FlagIterator,
-    class OutputIterator,
+    class OutputKeyIterator,
+    class OutputValueIterator, // can be rocprim::empty_type* for key only
     class InequalityOp,
     class SelectedCountOutputIterator,
     class... UnaryPredicates
@@ -115,9 +122,11 @@ template<
 inline
 hipError_t partition_impl(void * temporary_storage,
                           size_t& storage_size,
-                          InputIterator input,
+                          KeyIterator keys_input,
+                          ValueIterator values_input,
                           FlagIterator flags,
-                          OutputIterator output,
+                          OutputKeyIterator keys_output,
+                          OutputValueIterator values_output,
                           SelectedCountOutputIterator selected_count_output,
                           const size_t size,
                           InequalityOp inequality_op,
@@ -126,12 +135,13 @@ hipError_t partition_impl(void * temporary_storage,
                           UnaryPredicates... predicates)
 {
     using offset_type = OffsetT;
-    using input_type = typename std::iterator_traits<InputIterator>::value_type;
+    using key_type = typename std::iterator_traits<KeyIterator>::value_type;
+    using value_type = typename std::iterator_traits<ValueIterator>::value_type;
 
     // Get default config if Config is default_config
     using config = default_or_custom_config<
         Config,
-        default_select_config<ROCPRIM_TARGET_ARCH, input_type>
+        default_select_config<ROCPRIM_TARGET_ARCH, key_type, value_type>
     >;
 
     using offset_scan_state_type = detail::lookback_scan_state<offset_type>;
@@ -223,8 +233,8 @@ hipError_t partition_impl(void * temporary_storage,
                 SelectMethod, OnlySelected, config
             >),
             dim3(grid_size), dim3(block_size), 0, stream,
-            input, flags, output, selected_count_output, size, inequality_op,
-            offset_scan_state_with_sleep, number_of_blocks, ordered_bid, predicates...
+            keys_input, values_input, flags, keys_output, values_output, selected_count_output,
+            size, inequality_op, offset_scan_state_with_sleep, number_of_blocks, ordered_bid, predicates...
         );
     } else
     {
@@ -233,8 +243,8 @@ hipError_t partition_impl(void * temporary_storage,
                 SelectMethod, OnlySelected, config
             >),
             dim3(grid_size), dim3(block_size), 0, stream,
-            input, flags, output, selected_count_output, size, inequality_op,
-            offset_scan_state, number_of_blocks, ordered_bid, predicates...
+            keys_input, values_input, flags, keys_output, values_output, selected_count_output,
+            size, inequality_op, offset_scan_state, number_of_blocks, ordered_bid, predicates...
         );
     }
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("partition_kernel", size, start)
@@ -349,9 +359,10 @@ hipError_t partition(void * temporary_storage,
     // Dummy inequality operation
     using inequality_op_type = ::rocprim::empty_type;
     using offset_type = unsigned int;
+    rocprim::empty_type* const no_values = nullptr; // key only
 
     return detail::partition_impl<detail::select_method::flag, false, Config, offset_type>(
-        temporary_storage, storage_size, input, flags, output, selected_count_output,
+        temporary_storage, storage_size, input, no_values, flags, output, no_values, selected_count_output,
         size, inequality_op_type(), stream, debug_synchronous, unary_predicate_type()
     );
 }
@@ -467,9 +478,10 @@ hipError_t partition(void * temporary_storage,
     // Dummy inequality operation
     using inequality_op_type = ::rocprim::empty_type;
     using offset_type = unsigned int;
+    rocprim::empty_type* const no_values = nullptr; // key only
 
     return detail::partition_impl<detail::select_method::predicate, false, Config, offset_type>(
-        temporary_storage, storage_size, input, flags, output, selected_count_output,
+        temporary_storage, storage_size, input, no_values, flags, output, no_values, selected_count_output,
         size, inequality_op_type(), stream, debug_synchronous, predicate
     );
 }
@@ -629,15 +641,19 @@ hipError_t partition_three_way(void * temporary_storage,
     // Dummy inequality operation
     using inequality_op_type = ::rocprim::empty_type;
     using offset_type = uint2;
-    using output_iterator_tuple = tuple<
+    using output_key_iterator_tuple = tuple<
         FirstOutputIterator,
         SecondOutputIterator,
         UnselectedOutputIterator>;
+    using output_value_iterator_tuple
+        = tuple<::rocprim::empty_type*, ::rocprim::empty_type*, ::rocprim::empty_type*>;
+    rocprim::empty_type* const no_input_values = nullptr; // key only
+    const output_value_iterator_tuple no_output_values {nullptr, nullptr, nullptr}; // key only
 
-    output_iterator_tuple output{ output_first_part, output_second_part, output_unselected };
+    output_key_iterator_tuple output{ output_first_part, output_second_part, output_unselected };
 
     return detail::partition_impl<detail::select_method::predicate, false, Config, offset_type>(
-        temporary_storage, storage_size, input, flags, output, selected_count_output,
+        temporary_storage, storage_size, input, no_input_values, flags, output, no_output_values, selected_count_output,
         size, inequality_op_type(), stream, debug_synchronous,
         select_first_part_op, select_second_part_op
     );

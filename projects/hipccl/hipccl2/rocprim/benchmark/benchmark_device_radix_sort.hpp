@@ -50,28 +50,6 @@
     } \
   }
 
-template <typename T>
-struct Traits
-{
-    static const char * TYPE_NAME;
-};
-// Generic definition as a fall-back:
-template <typename T> const char * Traits<T>::TYPE_NAME = "unknown";
-
-// Explicit definitions
-template < > const char * Traits< int >::TYPE_NAME = "int";
-template < > const char * Traits< short >::TYPE_NAME = "short";
-template < > const char * Traits< int8_t >::TYPE_NAME = "int8_t";
-template < > const char * Traits< uint8_t >::TYPE_NAME = "uint8_t";
-template < > const char * Traits< rocprim::half >::TYPE_NAME = "rocprim::half";
-template < > const char * Traits< long long >::TYPE_NAME = "long long";
-template < > const char * Traits< float >::TYPE_NAME = "float";
-template < > const char * Traits< double >::TYPE_NAME = "double";
-template < > const char * Traits< float2 >::TYPE_NAME = "float2";
-template < > const char * Traits< double2 >::TYPE_NAME = "double2";
-template < > const char * Traits< custom_type<float, float> >::TYPE_NAME = "custom_float2";
-template < > const char * Traits< custom_type<double, double> >::TYPE_NAME = "custom_double2";
-
 namespace rp = rocprim;
 
 const unsigned int batch_size = 10;

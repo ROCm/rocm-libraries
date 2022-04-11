@@ -38,9 +38,19 @@ BEGIN_ROCPRIM_NAMESPACE
 ///
 /// \tparam LogicalWarpSize - number of threads in the logical warp.
 /// \tparam ItemsPerThread - number of items processed by a thread.
+/// \tparam BlockSize - number of threads per block in the kernel
+/// which processes the small segments.
+/// \tparam PartitioningThreshold - if the number of segments is at least this threshold, the
+/// segments are partitioned to a small and a large segment collection. Both collections are
+/// sorted by different kernels. Otherwise, all segments are sorted by a single kernel.
+/// \tparam EnableUnpartitionedWarpSort - If set to \p true, warp sort can be used to sort
+/// the small segments, even if the total number of segments is below \p PartitioningThreshold.
 template<
     unsigned int LogicalWarpSize,
-    unsigned int ItemsPerThread
+    unsigned int ItemsPerThread,
+    unsigned int BlockSize = 256,
+    unsigned int PartitioningThreshold = 3000,
+    bool EnableUnpartitionedWarpSort = true
 >
 struct WarpSortConfig
 {
@@ -48,12 +58,32 @@ struct WarpSortConfig
     static constexpr unsigned int logical_warp_size = LogicalWarpSize;
     /// \brief The number of items processed by a thread.
     static constexpr unsigned int items_per_thread = ItemsPerThread;
+    /// \brief The number of threads per block in the small segment processing kernel.
+    static constexpr unsigned int block_size = BlockSize;
+    /// \brief If the number of segments is at least \p partitioning_threshold, then the segments are partitioned into
+    /// small and large segment groups, and each group is handled by a different, specialized kernel.
+    static constexpr unsigned int partitioning_threshold = PartitioningThreshold;
+    /// \brief If set to \p true, warp sort can be used to sort the small segments, even if the total number of
+    /// segments is below \p PartitioningThreshold.
+    static constexpr bool enable_unpartitioned_warp_sort = EnableUnpartitionedWarpSort;
 };
 
 /// \brief Indicates if the warp level sorting is disabled in the
 /// device segmented radix sort configuration.
 struct DisabledWarpSortConfig
 {
+    /// \brief The number of threads in the logical warp.
+    static constexpr unsigned int logical_warp_size = 1;
+    /// \brief The number of items processed by a thread.
+    static constexpr unsigned int items_per_thread = 1;
+    /// \brief The number of threads per block in the small segment processing kernel.
+    static constexpr unsigned int block_size = 1;
+    /// \brief If the number of segments is at least \p partitioning_threshold, then the segments are partitioned into
+    /// small and large segment groups, and each group is handled by a different, specialized kernel.
+    static constexpr unsigned int partitioning_threshold = 0;
+    /// \brief If set to \p true, warp sort can be used to sort the small segments, even if the total number of
+    /// segments is below \p PartitioningThreshold.
+    static constexpr bool enable_unpartitioned_warp_sort = false;
 };
 
 /// \brief Selects the appropriate \p WarpSortConfig based on the size of the key type.
@@ -62,9 +92,15 @@ struct DisabledWarpSortConfig
 template<class Key>
 using select_warp_sort_config_t =
     std::conditional_t<
-        sizeof(Key) < 4,
+        sizeof(Key) < 2,
         DisabledWarpSortConfig,
-        WarpSortConfig<32, 4>
+        WarpSortConfig<
+            32,                 //< logical warp size
+            4,                  //< items per thread
+            256,                //< block size for the small kernel
+            3000,               //< partitioning threshold
+            (sizeof(Key) > 2)   //< enable unpartitioned warp sort
+        >
     >;
 
 /// \brief Configuration of device-level segmented radix sort operation.
@@ -87,7 +123,7 @@ template<
     unsigned int LongRadixBits,
     unsigned int ShortRadixBits,
     class SortConfig,
-    class WarpSortConfig
+    class WarpSortConfig = DisabledWarpSortConfig
 >
 struct segmented_radix_sort_config
 {

@@ -53,13 +53,14 @@ template<
     unsigned int ItemsPerThread,
     unsigned int RadixBits,
     bool Descending,
-    class KeysInputIterator
+    class KeysInputIterator,
+    class Offset
 >
 ROCPRIM_KERNEL
 __launch_bounds__(BlockSize)
 void fill_digit_counts_kernel(KeysInputIterator keys_input,
-                              unsigned int size,
-                              unsigned int * batch_digit_counts,
+                              Offset size,
+                              Offset * batch_digit_counts,
                               unsigned int bit,
                               unsigned int current_radix_bits,
                               unsigned int blocks_per_full_batch,
@@ -76,21 +77,25 @@ void fill_digit_counts_kernel(KeysInputIterator keys_input,
 template<
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
-    unsigned int RadixBits
+    unsigned int RadixBits,
+    class Offset
 >
 ROCPRIM_KERNEL
 __launch_bounds__(BlockSize)
-void scan_batches_kernel(unsigned int * batch_digit_counts,
-                         unsigned int * digit_counts,
+void scan_batches_kernel(Offset * batch_digit_counts,
+                         Offset * digit_counts,
                          unsigned int batches)
 {
     scan_batches<BlockSize, ItemsPerThread, RadixBits>(batch_digit_counts, digit_counts, batches);
 }
 
-template<unsigned int RadixBits>
+template<
+    unsigned int RadixBits,
+    class Offset
+>
 ROCPRIM_KERNEL
 __launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
-void scan_digits_kernel(unsigned int * digit_counts)
+void scan_digits_kernel(Offset * digit_counts)
 {
     scan_digits<RadixBits>(digit_counts);
 }
@@ -103,7 +108,8 @@ template<
     class KeysInputIterator,
     class KeysOutputIterator,
     class ValuesInputIterator,
-    class ValuesOutputIterator
+    class ValuesOutputIterator,
+    class Offset
 >
 ROCPRIM_KERNEL
 __launch_bounds__(BlockSize)
@@ -111,9 +117,9 @@ void sort_and_scatter_kernel(KeysInputIterator keys_input,
                              KeysOutputIterator keys_output,
                              ValuesInputIterator values_input,
                              ValuesOutputIterator values_output,
-                             unsigned int size,
-                             const unsigned int * batch_digit_starts,
-                             const unsigned int * digit_starts,
+                             Offset size,
+                             const Offset * batch_digit_starts,
+                             const Offset * digit_starts,
                              unsigned int bit,
                              unsigned int current_radix_bits,
                              unsigned int blocks_per_full_batch,
@@ -153,7 +159,8 @@ template<
     class KeysInputIterator,
     class KeysOutputIterator,
     class ValuesInputIterator,
-    class ValuesOutputIterator
+    class ValuesOutputIterator,
+    class Offset
 >
 inline
 hipError_t radix_sort_iteration(KeysInputIterator keys_input,
@@ -162,9 +169,9 @@ hipError_t radix_sort_iteration(KeysInputIterator keys_input,
                                 ValuesInputIterator values_input,
                                 typename std::iterator_traits<ValuesInputIterator>::value_type * values_tmp,
                                 ValuesOutputIterator values_output,
-                                unsigned int size,
-                                unsigned int * batch_digit_counts,
-                                unsigned int * digit_counts,
+                                Offset size,
+                                Offset * batch_digit_counts,
+                                Offset * digit_counts,
                                 bool from_input,
                                 bool to_output,
                                 unsigned int bit,
@@ -262,8 +269,8 @@ hipError_t radix_sort_iteration(KeysInputIterator keys_input,
                 >),
                 dim3(batches), dim3(Config::sort::block_size), 0, stream,
                 keys_input, keys_output, values_input, values_output, size,
-                const_cast<const unsigned int *>(batch_digit_counts),
-                const_cast<const unsigned int *>(digit_counts),
+                const_cast<const Offset *>(batch_digit_counts),
+                const_cast<const Offset *>(digit_counts),
                 bit, current_radix_bits,
                 blocks_per_full_batch, full_batches
             );
@@ -276,8 +283,8 @@ hipError_t radix_sort_iteration(KeysInputIterator keys_input,
                 >),
                 dim3(batches), dim3(Config::sort::block_size), 0, stream,
                 keys_input, keys_tmp, values_input, values_tmp, size,
-                const_cast<const unsigned int *>(batch_digit_counts),
-                const_cast<const unsigned int *>(digit_counts),
+                const_cast<const Offset *>(batch_digit_counts),
+                const_cast<const Offset *>(digit_counts),
                 bit, current_radix_bits,
                 blocks_per_full_batch, full_batches
             );
@@ -293,8 +300,8 @@ hipError_t radix_sort_iteration(KeysInputIterator keys_input,
                 >),
                 dim3(batches), dim3(Config::sort::block_size), 0, stream,
                 keys_tmp, keys_output, values_tmp, values_output, size,
-                const_cast<const unsigned int *>(batch_digit_counts),
-                const_cast<const unsigned int *>(digit_counts),
+                const_cast<const Offset *>(batch_digit_counts),
+                const_cast<const Offset *>(digit_counts),
                 bit, current_radix_bits,
                 blocks_per_full_batch, full_batches
             );
@@ -307,8 +314,8 @@ hipError_t radix_sort_iteration(KeysInputIterator keys_input,
                 >),
                 dim3(batches), dim3(Config::sort::block_size), 0, stream,
                 keys_output, keys_tmp, values_output, values_tmp, size,
-                const_cast<const unsigned int *>(batch_digit_counts),
-                const_cast<const unsigned int *>(digit_counts),
+                const_cast<const Offset *>(batch_digit_counts),
+                const_cast<const Offset *>(digit_counts),
                 bit, current_radix_bits,
                 blocks_per_full_batch, full_batches
             );
@@ -451,6 +458,12 @@ hipError_t radix_sort_merge_impl(void * temporary_storage,
     return hipSuccess;
 }
 
+template<class Size>
+using offset_type_t = std::conditional_t<
+    sizeof(Size) <= 4,
+    unsigned int,
+    size_t
+>;
 
 template<
     class Config,
@@ -458,7 +471,8 @@ template<
     class KeysInputIterator,
     class KeysOutputIterator,
     class ValuesInputIterator,
-    class ValuesOutputIterator
+    class ValuesOutputIterator,
+    class Size
 >
 inline
 hipError_t radix_sort_iterations_impl(void * temporary_storage,
@@ -469,7 +483,7 @@ hipError_t radix_sort_iterations_impl(void * temporary_storage,
                                       ValuesInputIterator values_input,
                                       typename std::iterator_traits<ValuesInputIterator>::value_type * values_tmp,
                                       ValuesOutputIterator values_output,
-                                      unsigned int size,
+                                      Size size,
                                       bool& is_result_in_output,
                                       unsigned int begin_bit,
                                       unsigned int end_bit,
@@ -478,6 +492,7 @@ hipError_t radix_sort_iterations_impl(void * temporary_storage,
 {
     using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
     using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
+    using offset_type = offset_type_t<Size>;
 
     using config = default_or_custom_config<
         Config,
@@ -491,7 +506,7 @@ hipError_t radix_sort_iterations_impl(void * temporary_storage,
     constexpr unsigned int scan_size = config::scan::block_size * config::scan::items_per_thread;
     constexpr unsigned int sort_size = config::sort::block_size * config::sort::items_per_thread;
 
-    const unsigned int blocks = std::max(1u, ::rocprim::detail::ceiling_div(size, sort_size));
+    const unsigned int blocks = static_cast<unsigned int>(::rocprim::detail::ceiling_div(size, sort_size));
     const unsigned int blocks_per_full_batch = ::rocprim::detail::ceiling_div(blocks, scan_size);
     const unsigned int full_batches = blocks % scan_size != 0
         ? blocks % scan_size
@@ -508,8 +523,8 @@ hipError_t radix_sort_iterations_impl(void * temporary_storage,
     const unsigned int long_iterations = iterations - short_iterations;
 
     const size_t batch_digit_counts_bytes =
-        ::rocprim::detail::align_size(batches * max_radix_size * sizeof(unsigned int));
-    const size_t digit_counts_bytes = ::rocprim::detail::align_size(max_radix_size * sizeof(unsigned int));
+        ::rocprim::detail::align_size(batches * max_radix_size * sizeof(offset_type));
+    const size_t digit_counts_bytes = ::rocprim::detail::align_size(max_radix_size * sizeof(offset_type));
     const size_t keys_bytes = ::rocprim::detail::align_size(size * sizeof(key_type));
     const size_t values_bytes = with_values ? ::rocprim::detail::align_size(size * sizeof(value_type)) : 0;
     if(temporary_storage == nullptr)
@@ -527,6 +542,8 @@ hipError_t radix_sort_iterations_impl(void * temporary_storage,
 
     if(debug_synchronous)
     {
+        std::cout << "scan_size " << scan_size << '\n';
+        std::cout << "sort_size " << sort_size << '\n';
         std::cout << "blocks " << blocks << '\n';
         std::cout << "blocks_per_full_batch " << blocks_per_full_batch << '\n';
         std::cout << "full_batches " << full_batches << '\n';
@@ -539,9 +556,9 @@ hipError_t radix_sort_iterations_impl(void * temporary_storage,
     }
 
     char * ptr = reinterpret_cast<char *>(temporary_storage);
-    unsigned int * batch_digit_counts = reinterpret_cast<unsigned int *>(ptr);
+    offset_type * batch_digit_counts = reinterpret_cast<offset_type *>(ptr);
     ptr += batch_digit_counts_bytes;
-    unsigned int * digit_counts = reinterpret_cast<unsigned int *>(ptr);
+    offset_type * digit_counts = reinterpret_cast<offset_type *>(ptr);
     ptr += digit_counts_bytes;
     if(!with_double_buffer)
     {
@@ -582,8 +599,8 @@ hipError_t radix_sort_iterations_impl(void * temporary_storage,
     for(unsigned int i = 0; i < long_iterations; i++)
     {
         hipError_t error = radix_sort_iteration<config, config::long_radix_bits, Descending>(
-            keys_input, keys_tmp, keys_output, values_input, values_tmp, values_output, size,
-            batch_digit_counts, digit_counts,
+            keys_input, keys_tmp, keys_output, values_input, values_tmp, values_output,
+            static_cast<offset_type>(size), batch_digit_counts, digit_counts,
             from_input, to_output,
             bit, end_bit,
             blocks_per_full_batch, full_batches, batches,
@@ -599,8 +616,8 @@ hipError_t radix_sort_iterations_impl(void * temporary_storage,
     for(unsigned int i = 0; i < short_iterations; i++)
     {
         hipError_t error = radix_sort_iteration<config, config::short_radix_bits, Descending>(
-            keys_input, keys_tmp, keys_output, values_input, values_tmp, values_output, size,
-            batch_digit_counts, digit_counts,
+            keys_input, keys_tmp, keys_output, values_input, values_tmp, values_output,
+            static_cast<offset_type>(size), batch_digit_counts, digit_counts,
             from_input, to_output,
             bit, end_bit,
             blocks_per_full_batch, full_batches, batches,
@@ -623,7 +640,8 @@ template<
     class KeysInputIterator,
     class KeysOutputIterator,
     class ValuesInputIterator,
-    class ValuesOutputIterator
+    class ValuesOutputIterator,
+    class Size
 >
 inline
 hipError_t radix_sort_impl(void * temporary_storage,
@@ -634,7 +652,7 @@ hipError_t radix_sort_impl(void * temporary_storage,
                            ValuesInputIterator values_input,
                            typename std::iterator_traits<ValuesInputIterator>::value_type * values_tmp,
                            ValuesOutputIterator values_output,
-                           unsigned int size,
+                           Size size,
                            bool& is_result_in_output,
                            unsigned int begin_bit,
                            unsigned int end_bit,
@@ -670,7 +688,7 @@ hipError_t radix_sort_impl(void * temporary_storage,
             keys_output,
             values_input,
             values_output,
-            size,
+            static_cast<unsigned int>(size),
             is_result_in_output,
             begin_bit,
             end_bit,
@@ -689,7 +707,7 @@ hipError_t radix_sort_impl(void * temporary_storage,
             values_input,
             values_tmp,
             values_output,
-            size,
+            static_cast<unsigned int>(size),
             is_result_in_output,
             begin_bit,
             end_bit,
@@ -744,6 +762,7 @@ hipError_t radix_sort_impl(void * temporary_storage,
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam KeysOutputIterator - random-access iterator type of the output range. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam Size - integral type that represents the problem size.
 ///
 /// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
@@ -801,6 +820,7 @@ template<
     class Config = default_config,
     class KeysInputIterator,
     class KeysOutputIterator,
+    class Size,
     class Key = typename std::iterator_traits<KeysInputIterator>::value_type
 >
 inline
@@ -808,12 +828,13 @@ hipError_t radix_sort_keys(void * temporary_storage,
                            size_t& storage_size,
                            KeysInputIterator keys_input,
                            KeysOutputIterator keys_output,
-                           unsigned int size,
+                           Size size,
                            unsigned int begin_bit = 0,
                            unsigned int end_bit = 8 * sizeof(Key),
                            hipStream_t stream = 0,
                            bool debug_synchronous = false)
 {
+    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
     empty_type * values = nullptr;
     bool ignored;
     return detail::radix_sort_impl<Config, false>(
@@ -848,6 +869,7 @@ hipError_t radix_sort_keys(void * temporary_storage,
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam KeysOutputIterator - random-access iterator type of the output range. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam Size - integral type that represents the problem size.
 ///
 /// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
@@ -905,6 +927,7 @@ template<
     class Config = default_config,
     class KeysInputIterator,
     class KeysOutputIterator,
+    class Size,
     class Key = typename std::iterator_traits<KeysInputIterator>::value_type
 >
 inline
@@ -912,12 +935,13 @@ hipError_t radix_sort_keys_desc(void * temporary_storage,
                                 size_t& storage_size,
                                 KeysInputIterator keys_input,
                                 KeysOutputIterator keys_output,
-                                unsigned int size,
+                                Size size,
                                 unsigned int begin_bit = 0,
                                 unsigned int end_bit = 8 * sizeof(Key),
                                 hipStream_t stream = 0,
                                 bool debug_synchronous = false)
 {
+    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
     empty_type * values = nullptr;
     bool ignored;
     return detail::radix_sort_impl<Config, true>(
@@ -957,6 +981,7 @@ hipError_t radix_sort_keys_desc(void * temporary_storage,
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam ValuesOutputIterator - random-access iterator type of the output range. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam Size - integral type that represents the problem size.
 ///
 /// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
@@ -1027,6 +1052,7 @@ template<
     class KeysOutputIterator,
     class ValuesInputIterator,
     class ValuesOutputIterator,
+    class Size,
     class Key = typename std::iterator_traits<KeysInputIterator>::value_type
 >
 inline
@@ -1036,12 +1062,13 @@ hipError_t radix_sort_pairs(void * temporary_storage,
                             KeysOutputIterator keys_output,
                             ValuesInputIterator values_input,
                             ValuesOutputIterator values_output,
-                            unsigned int size,
+                            Size size,
                             unsigned int begin_bit = 0,
                             unsigned int end_bit = 8 * sizeof(Key),
                             hipStream_t stream = 0,
                             bool debug_synchronous = false)
 {
+    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
     bool ignored;
     return detail::radix_sort_impl<Config, false>(
         temporary_storage, storage_size,
@@ -1080,6 +1107,7 @@ hipError_t radix_sort_pairs(void * temporary_storage,
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam ValuesOutputIterator - random-access iterator type of the output range. Must meet the
 /// requirements of a C++ OutputIterator concept. It can be a simple pointer type.
+/// \tparam Size - integral type that represents the problem size.
 ///
 /// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
@@ -1146,6 +1174,7 @@ template<
     class KeysOutputIterator,
     class ValuesInputIterator,
     class ValuesOutputIterator,
+    class Size,
     class Key = typename std::iterator_traits<KeysInputIterator>::value_type
 >
 inline
@@ -1155,12 +1184,13 @@ hipError_t radix_sort_pairs_desc(void * temporary_storage,
                                  KeysOutputIterator keys_output,
                                  ValuesInputIterator values_input,
                                  ValuesOutputIterator values_output,
-                                 unsigned int size,
+                                 Size size,
                                  unsigned int begin_bit = 0,
                                  unsigned int end_bit = 8 * sizeof(Key),
                                  hipStream_t stream = 0,
                                  bool debug_synchronous = false)
 {
+    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
     bool ignored;
     return detail::radix_sort_impl<Config, true>(
         temporary_storage, storage_size,
@@ -1196,6 +1226,7 @@ hipError_t radix_sort_pairs_desc(void * temporary_storage,
 /// \tparam Config - [optional] configuration of the primitive. It can be \p radix_sort_config or
 /// a custom class with the same members.
 /// \tparam Key - key type. Must be an integral type or a floating-point type.
+/// \tparam Size - integral type that represents the problem size.
 ///
 /// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
@@ -1253,18 +1284,20 @@ hipError_t radix_sort_pairs_desc(void * temporary_storage,
 /// \endparblock
 template<
     class Config = default_config,
-    class Key
+    class Key,
+    class Size
 >
 inline
 hipError_t radix_sort_keys(void * temporary_storage,
                            size_t& storage_size,
                            double_buffer<Key>& keys,
-                           unsigned int size,
+                           Size size,
                            unsigned int begin_bit = 0,
                            unsigned int end_bit = 8 * sizeof(Key),
                            hipStream_t stream = 0,
                            bool debug_synchronous = false)
 {
+    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
     empty_type * values = nullptr;
     bool is_result_in_output;
     hipError_t error = detail::radix_sort_impl<Config, false>(
@@ -1306,6 +1339,7 @@ hipError_t radix_sort_keys(void * temporary_storage,
 /// \tparam Config - [optional] configuration of the primitive. It can be \p radix_sort_config or
 /// a custom class with the same members.
 /// \tparam Key - key type. Must be an integral type or a floating-point type.
+/// \tparam Size - integral type that represents the problem size.
 ///
 /// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
@@ -1363,18 +1397,20 @@ hipError_t radix_sort_keys(void * temporary_storage,
 /// \endparblock
 template<
     class Config = default_config,
-    class Key
+    class Key,
+    class Size
 >
 inline
 hipError_t radix_sort_keys_desc(void * temporary_storage,
                                 size_t& storage_size,
                                 double_buffer<Key>& keys,
-                                unsigned int size,
+                                Size size,
                                 unsigned int begin_bit = 0,
                                 unsigned int end_bit = 8 * sizeof(Key),
                                 hipStream_t stream = 0,
                                 bool debug_synchronous = false)
 {
+    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
     empty_type * values = nullptr;
     bool is_result_in_output;
     hipError_t error = detail::radix_sort_impl<Config, true>(
@@ -1417,6 +1453,7 @@ hipError_t radix_sort_keys_desc(void * temporary_storage,
 /// a custom class with the same members.
 /// \tparam Key - key type. Must be an integral type or a floating-point type.
 /// \tparam Value - value type.
+/// \tparam Size - integral type that represents the problem size.
 ///
 /// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
@@ -1487,19 +1524,21 @@ hipError_t radix_sort_keys_desc(void * temporary_storage,
 template<
     class Config = default_config,
     class Key,
-    class Value
+    class Value,
+    class Size
 >
 inline
 hipError_t radix_sort_pairs(void * temporary_storage,
                             size_t& storage_size,
                             double_buffer<Key>& keys,
                             double_buffer<Value>& values,
-                            unsigned int size,
+                            Size size,
                             unsigned int begin_bit = 0,
                             unsigned int end_bit = 8 * sizeof(Key),
                             hipStream_t stream = 0,
                             bool debug_synchronous = false)
 {
+    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
     bool is_result_in_output;
     hipError_t error = detail::radix_sort_impl<Config, false>(
         temporary_storage, storage_size,
@@ -1542,6 +1581,7 @@ hipError_t radix_sort_pairs(void * temporary_storage,
 /// a custom class with the same members.
 /// \tparam Key - key type. Must be an integral type or a floating-point type.
 /// \tparam Value - value type.
+/// \tparam Size - integral type that represents the problem size.
 ///
 /// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
@@ -1606,19 +1646,21 @@ hipError_t radix_sort_pairs(void * temporary_storage,
 template<
     class Config = default_config,
     class Key,
-    class Value
+    class Value,
+    class Size
 >
 inline
 hipError_t radix_sort_pairs_desc(void * temporary_storage,
                                  size_t& storage_size,
                                  double_buffer<Key>& keys,
                                  double_buffer<Value>& values,
-                                 unsigned int size,
+                                 Size size,
                                  unsigned int begin_bit = 0,
                                  unsigned int end_bit = 8 * sizeof(Key),
                                  hipStream_t stream = 0,
                                  bool debug_synchronous = false)
 {
+    static_assert(std::is_integral<Size>::value, "Size must be an integral type.");
     bool is_result_in_output;
     hipError_t error = detail::radix_sort_impl<Config, true>(
         temporary_storage, storage_size,

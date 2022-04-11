@@ -66,7 +66,7 @@ class segmented_radix_sort_helper
     using scan_type = typename ::rocprim::block_scan<unsigned int, radix_size>;
     using sort_and_scatter_helper = radix_sort_and_scatter_helper<
         BlockSize, ItemsPerThread, RadixBits, Descending,
-        key_type, value_type>;
+        key_type, value_type, unsigned int>;
 
 public:
 
@@ -558,10 +558,6 @@ public:
               unsigned int end_bit,
               storage_type& storage)
     {
-        if(::rocprim::flat_block_thread_id() >= logical_warp_size)
-        {
-            return;
-        }
         const unsigned int num_items = end_offset - begin_offset;
         const key_type out_of_bounds = key_codec::decode(bit_key_type(-1));
 
@@ -574,7 +570,8 @@ public:
         for(unsigned int i = 0; i < items_per_thread; i++)
         {
             ::rocprim::get<0>(stable_keys[i]) = keys[i];
-            ::rocprim::get<1>(stable_keys[i]) = ::rocprim::lane_id() + logical_warp_size * i;
+            ::rocprim::get<1>(stable_keys[i]) =
+                ::rocprim::detail::logical_lane_id<logical_warp_size>() + logical_warp_size * i;
         }
 
         if(with_values)
@@ -586,7 +583,10 @@ public:
         ::rocprim::wave_barrier();
         if(begin_bit == 0 && end_bit == 8 * sizeof(key_type))
         {
-            sort_type().sort(stable_keys, values, storage.sort, make_stable_comparator(radix_comparator_type<false>{}));
+            sort_type().sort(stable_keys,
+                             values,
+                             storage.sort,
+                             make_stable_comparator(radix_comparator_type<false>{}));
         }
         else
         {
@@ -679,6 +679,7 @@ void segmented_sort(KeysInputIterator keys_input,
     constexpr unsigned int block_size = Config::sort::block_size;
     constexpr unsigned int items_per_thread = Config::sort::items_per_thread;
     constexpr unsigned int items_per_block = block_size * items_per_thread;
+    constexpr bool warp_sort_enabled = Config::warp_sort_config::enable_unpartitioned_warp_sort;
 
     using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
     using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
@@ -724,7 +725,7 @@ void segmented_sort(KeysInputIterator keys_input,
 
     if(end_offset - begin_offset > items_per_block)
     {
-        // Long segment
+        // Large segment
         unsigned int bit = begin_bit;
         for(unsigned int i = 0; i < long_iterations; i++)
         {
@@ -753,9 +754,9 @@ void segmented_sort(KeysInputIterator keys_input,
             bit += short_radix_bits;
         }
     }
-    else if (end_offset - begin_offset > items_per_warp)
+    else if(!warp_sort_enabled || end_offset - begin_offset > items_per_warp)
     {
-        // Short segment
+        // Small segment
         single_block_helper_type().sort(
             keys_input, keys_tmp, keys_output, values_input, values_tmp, values_output,
             ((long_iterations + short_iterations) % 2 == 0) != to_output,
@@ -764,8 +765,9 @@ void segmented_sort(KeysInputIterator keys_input,
             storage.single_block_helper
         );
     }
-    else
+    else if(::rocprim::flat_block_thread_id() < Config::warp_sort_config::logical_warp_size)
     {
+        // Single warp segment
         warp_sort_helper_type().sort(
             keys_input, keys_tmp, keys_output,
             values_input, values_tmp, values_output,
@@ -774,6 +776,178 @@ void segmented_sort(KeysInputIterator keys_input,
             begin_bit, end_bit, storage.warp_sort_helper
         );
     }
+}
+
+template<
+    class Config,
+    bool Descending,
+    class KeysInputIterator,
+    class KeysOutputIterator,
+    class ValuesInputIterator,
+    class ValuesOutputIterator,
+    class SegmentIndexIterator,
+    class OffsetIterator
+>
+ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
+void segmented_sort_large(KeysInputIterator keys_input,
+                          typename std::iterator_traits<KeysInputIterator>::value_type * keys_tmp,
+                          KeysOutputIterator keys_output,
+                          ValuesInputIterator values_input,
+                          typename std::iterator_traits<ValuesInputIterator>::value_type * values_tmp,
+                          ValuesOutputIterator values_output,
+                          bool to_output,
+                          SegmentIndexIterator segment_indices,
+                          OffsetIterator begin_offsets,
+                          OffsetIterator end_offsets,
+                          unsigned int long_iterations,
+                          unsigned int short_iterations,
+                          unsigned int begin_bit,
+                          unsigned int end_bit)
+{
+    constexpr unsigned int long_radix_bits = Config::long_radix_bits;
+    constexpr unsigned int short_radix_bits = Config::short_radix_bits;
+    constexpr unsigned int block_size = Config::sort::block_size;
+    constexpr unsigned int items_per_thread = Config::sort::items_per_thread;
+    constexpr unsigned int items_per_block = block_size * items_per_thread;
+
+    using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
+    using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
+
+    using single_block_helper_type = segmented_radix_sort_single_block_helper<
+        key_type, value_type,
+        block_size, items_per_thread,
+        Descending
+    >;
+    using long_radix_helper_type = segmented_radix_sort_helper<
+        key_type, value_type,
+        ::rocprim::device_warp_size(), block_size, items_per_thread,
+        long_radix_bits, Descending
+    >;
+    using short_radix_helper_type = segmented_radix_sort_helper<
+        key_type, value_type,
+        ::rocprim::device_warp_size(), block_size, items_per_thread,
+        short_radix_bits, Descending
+    >;
+
+    ROCPRIM_SHARED_MEMORY union
+    {
+        typename single_block_helper_type::storage_type single_block_helper;
+        typename long_radix_helper_type::storage_type long_radix_helper;
+        typename short_radix_helper_type::storage_type short_radix_helper;
+    } storage;
+
+    const unsigned int block_id = ::rocprim::detail::block_id<0>();
+    const unsigned int segment_id = segment_indices[block_id];
+    const unsigned int begin_offset = begin_offsets[segment_id];
+    const unsigned int end_offset = end_offsets[segment_id];
+
+    if(end_offset <= begin_offset)
+    {
+        return;
+    }
+
+    if(end_offset - begin_offset > items_per_block)
+    {
+        unsigned int bit = begin_bit;
+        for(unsigned int i = 0; i < long_iterations; i++)
+        {
+            long_radix_helper_type().sort(
+                keys_input, keys_tmp, keys_output, values_input, values_tmp, values_output,
+                to_output,
+                begin_offset, end_offset,
+                bit, begin_bit, end_bit,
+                storage.long_radix_helper
+            );
+
+            to_output = !to_output;
+            bit += long_radix_bits;
+        }
+        for(unsigned int i = 0; i < short_iterations; i++)
+        {
+            short_radix_helper_type().sort(
+                keys_input, keys_tmp, keys_output, values_input, values_tmp, values_output,
+                to_output,
+                begin_offset, end_offset,
+                bit, begin_bit, end_bit,
+                storage.short_radix_helper
+            );
+
+            to_output = !to_output;
+            bit += short_radix_bits;
+        }
+    }
+    else
+    {
+        single_block_helper_type().sort(
+            keys_input, keys_tmp, keys_output, values_input, values_tmp, values_output,
+            ((long_iterations + short_iterations) % 2 == 0) != to_output,
+            begin_offset, end_offset,
+            begin_bit, end_bit,
+            storage.single_block_helper
+        );
+    }
+}
+
+template<
+    class Config,
+    bool Descending,
+    class KeysInputIterator,
+    class KeysOutputIterator,
+    class ValuesInputIterator,
+    class ValuesOutputIterator,
+    class SegmentIndexIterator,
+    class OffsetIterator
+>
+ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
+void segmented_sort_small(KeysInputIterator keys_input,
+                          typename std::iterator_traits<KeysInputIterator>::value_type * keys_tmp,
+                          KeysOutputIterator keys_output,
+                          ValuesInputIterator values_input,
+                          typename std::iterator_traits<ValuesInputIterator>::value_type * values_tmp,
+                          ValuesOutputIterator values_output,
+                          bool to_output,
+                          unsigned int num_segments,
+                          SegmentIndexIterator segment_indices,
+                          OffsetIterator begin_offsets,
+                          OffsetIterator end_offsets,
+                          unsigned int begin_bit,
+                          unsigned int end_bit)
+{
+    static constexpr unsigned int block_size = Config::block_size;
+    static constexpr unsigned int logical_warp_size = Config::logical_warp_size;
+    static_assert(block_size % logical_warp_size == 0, "logical_warp_size must be a divisor of block_size");
+    static constexpr unsigned int warps_per_block = block_size / logical_warp_size;
+
+    using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
+    using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
+
+    using warp_sort_helper_type = segmented_warp_sort_helper<
+        Config, key_type, value_type, Descending
+    >;
+
+    ROCPRIM_SHARED_MEMORY typename warp_sort_helper_type::storage_type storage;
+
+    const unsigned int block_id = ::rocprim::detail::block_id<0>();
+    const unsigned int logical_warp_id = ::rocprim::detail::logical_warp_id<logical_warp_size>();
+    const unsigned int segment_index = block_id * warps_per_block + logical_warp_id;
+    if(segment_index >= num_segments)
+    {
+        return;
+    }
+
+    const unsigned int segment_id = segment_indices[segment_index];
+    const unsigned int begin_offset = begin_offsets[segment_id];
+    const unsigned int end_offset = end_offsets[segment_id];
+    if(end_offset <= begin_offset)
+    {
+        return;
+    }
+    warp_sort_helper_type().sort(
+        keys_input, keys_tmp, keys_output,
+        values_input, values_tmp, values_output,
+        to_output, begin_offset, end_offset,
+        begin_bit, end_bit, storage
+    );
 }
 
 } // end namespace detail
