@@ -206,6 +206,7 @@ test:rocm_install:
 .nvcc:
   extends:
     - .deps:nvcc
+    - .gpus:nvcc-gpus
     - .deps:cmake-minimum
   before_script:
     - !reference [".deps:nvcc", before_script]
@@ -220,6 +221,7 @@ build:nvcc:
       -D CMAKE_BUILD_TYPE=Release
       -D BUILD_TEST=ON
       -D BUILD_EXAMPLE=ON
+      -D NVGPU_TARGETS="$GPU_TARGETS"
       -B build
       -S .
     - cmake --build build
@@ -251,6 +253,7 @@ build:nvcc-benchmark:
       -D BUILD_BENCHMARK=ON
       -D CMAKE_CXX_COMPILER=g++-8
       -D CMAKE_C_COMPILER=gcc-8
+      -D NVGPU_TARGETS="$GPU_TARGETS"
       -B build
       -S .
     - cmake --build build

@@ -68,6 +68,7 @@ endfunction()
 # ****************************************************************************
 # Benchmarks
 # ****************************************************************************
+add_hipcub_benchmark(benchmark_block_adjacent_difference.cpp)
 add_hipcub_benchmark(benchmark_block_discontinuity.cpp)
 add_hipcub_benchmark(benchmark_block_exchange.cpp)
 add_hipcub_benchmark(benchmark_block_histogram.cpp)
@@ -76,6 +77,7 @@ add_hipcub_benchmark(benchmark_block_radix_sort.cpp)
 add_hipcub_benchmark(benchmark_block_reduce.cpp)
 add_hipcub_benchmark(benchmark_block_run_length_decode.cpp)
 add_hipcub_benchmark(benchmark_block_scan.cpp)
+add_hipcub_benchmark(benchmark_device_adjacent_difference.cpp)
 add_hipcub_benchmark(benchmark_device_histogram.cpp)
 add_hipcub_benchmark(benchmark_device_partition.cpp)
 add_hipcub_benchmark(benchmark_device_radix_sort.cpp)

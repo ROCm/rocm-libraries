@@ -174,7 +174,7 @@ struct half_t
         {
             if (mantissa)
             {
-                f = 0x7fffffff;     // not a number
+                f = 0x7fffffff | (sign << 31);     // not a number
             }
             else
             {

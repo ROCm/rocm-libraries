@@ -56,55 +56,54 @@ include(VerifyCompiler)
 include(DownloadProject)
 if(HIP_COMPILER STREQUAL "nvcc")
   file(
-    DOWNLOAD https://github.com/NVlabs/cub/archive/1.15.0.zip
-    ${CMAKE_CURRENT_BINARY_DIR}/cub-1.15.0.zip
+    DOWNLOAD https://github.com/NVlabs/cub/archive/1.16.0.zip
+    ${CMAKE_CURRENT_BINARY_DIR}/cub-1.16.0.zip
     STATUS cub_download_status LOG cub_download_log
   )
   list(GET cub_download_status 0 cub_download_error_code)
   if(cub_download_error_code)
     message(FATAL_ERROR "Error: downloading "
-      "https://github.com/NVlabs/cub/archive/1.15.0.zip failed "
+      "https://github.com/NVlabs/cub/archive/1.16.0.zip failed "
       "error_code: ${cub_download_error_code} "
       "log: ${cub_download_log} "
     )
   endif()
 
   execute_process(
-    COMMAND ${CMAKE_COMMAND} -E tar xzf ${CMAKE_CURRENT_BINARY_DIR}/cub-1.15.0.zip
+    COMMAND ${CMAKE_COMMAND} -E tar xzf ${CMAKE_CURRENT_BINARY_DIR}/cub-1.16.0.zip
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     RESULT_VARIABLE cub_unpack_error_code
   )
   if(cub_unpack_error_code)
-    message(FATAL_ERROR "Error: unpacking ${CMAKE_CURRENT_BINARY_DIR}/cub-1.15.0.zip failed")
+    message(FATAL_ERROR "Error: unpacking ${CMAKE_CURRENT_BINARY_DIR}/cub-1.16.0.zip failed")
   endif()
-  set(CUB_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/cub-1.15.0/ CACHE PATH "" FORCE)
+  set(CUB_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/cub-1.16.0/ CACHE PATH "" FORCE)
   message(STATUS "CUB_INCLUDE_DIR: ${CUB_INCLUDE_DIR}")
 
-  if(NOT DEFINED THRUST_INCLUDE_DIR)
-    file(
-      DOWNLOAD https://github.com/NVIDIA/thrust/archive/1.15.0.zip
-      ${CMAKE_CURRENT_BINARY_DIR}/thrust-1.15.0.zip
-      STATUS thrust_download_status LOG thrust_download_log
+  file(
+    DOWNLOAD https://github.com/NVIDIA/thrust/archive/1.16.0.zip
+    ${CMAKE_CURRENT_BINARY_DIR}/thrust-1.16.0.zip
+    STATUS thrust_download_status LOG thrust_download_log
+  )
+  list(GET thrust_download_status 0 thrust_download_error_code)
+  if(thrust_download_error_code)
+    message(FATAL_ERROR "Error: downloading "
+      "https://github.com/NVIDIA/thrust/archive/1.16.0.zip failed "
+      "error_code: ${thrust_download_error_code} "
+      "log: ${thrust_download_log} "
     )
-    list(GET thrust_download_status 0 thrust_download_error_code)
-    if(thrust_download_error_code)
-      message(FATAL_ERROR "Error: downloading "
-        "https://github.com/NVIDIA/thrust/archive/1.15.0.zip failed "
-        "error_code: ${thrust_download_error_code} "
-        "log: ${thrust_download_log} "
-      )
-    endif()
-
-    execute_process(
-      COMMAND ${CMAKE_COMMAND} -E tar xzf ${CMAKE_CURRENT_BINARY_DIR}/thrust-1.15.0.zip
-      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-      RESULT_VARIABLE thrust_unpack_error_code
-    )
-    if(thrust_unpack_error_code)
-      message(FATAL_ERROR "Error: unpacking ${CMAKE_CURRENT_BINARY_DIR}/thrust-1.15.0.zip failed")
-    endif()
-    set(THRUST_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/thrust-1.15.0/ CACHE PATH "")
   endif()
+
+  execute_process(
+    COMMAND ${CMAKE_COMMAND} -E tar xzf ${CMAKE_CURRENT_BINARY_DIR}/thrust-1.16.0.zip
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    RESULT_VARIABLE thrust_unpack_error_code
+  )
+  if(thrust_unpack_error_code)
+    message(FATAL_ERROR "Error: unpacking ${CMAKE_CURRENT_BINARY_DIR}/thrust-1.16.0.zip failed")
+  endif()
+  set(THRUST_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/thrust-1.16.0/ CACHE PATH "" FORCE)
+  message(STATUS "THRUST_INCLUDE_DIR: ${THRUST_INCLUDE_DIR}")
 endif()
 
 # Download rocPRIM (only for ROCm platform)

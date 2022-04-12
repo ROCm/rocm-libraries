@@ -105,9 +105,9 @@ private:
     typedef unsigned short DigitCounter;
 
     // Integer type for packing DigitCounters into columns of shared memory banks
-    typedef typename If<(SMEM_CONFIG == hipSharedMemBankSizeEightByte),
+    typedef typename std::conditional<(SMEM_CONFIG == hipSharedMemBankSizeEightByte),
         unsigned long long,
-        unsigned int>::Type PackedCounter;
+        unsigned int>::type PackedCounter;
 
     enum
     {

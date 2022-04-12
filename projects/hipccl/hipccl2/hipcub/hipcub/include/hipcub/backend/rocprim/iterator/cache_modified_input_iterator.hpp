@@ -69,7 +69,7 @@ public:
     __host__ __device__ __forceinline__ CacheModifiedInputIterator(
         ValueType* ptr)     ///< Native pointer to wrap
     :
-        ptr(const_cast<typename RemoveQualifiers<ValueType>::Type *>(ptr))
+        ptr(const_cast<typename std::remove_cv<ValueType>::type *>(ptr))
     {}
 
     /// Postfix increment

@@ -368,6 +368,139 @@ void run_unique_benchmark(benchmark::State& state,
     hipFree(d_temp_storage);
 }
 
+template<class KeyT, class ValueT>
+void run_unique_by_key_benchmark(benchmark::State& state,
+                                 size_t size,
+                                 const hipStream_t stream,
+                                 float discontinuity_probability)
+{
+    hipcub::Sum op;
+
+    std::vector<KeyT> input_keys(size);
+    {
+        auto input01 = benchmark_utils::get_random_data01<KeyT>(size, discontinuity_probability);
+        auto acc = input01[0];
+
+        input_keys[0] = acc;
+
+        for (size_t i = 1; i < input01.size(); i++)
+        {
+            input_keys[i] = op(acc, input01[i]);
+        }
+    }
+
+    const auto input_values = benchmark_utils::get_random_data<ValueT>(size, ValueT(-1000), ValueT(1000));
+    unsigned int selected_count_output = 0;
+
+    KeyT* d_keys_input;
+    ValueT* d_values_input;
+    KeyT* d_keys_output;
+    ValueT* d_values_output;
+    unsigned int* d_selected_count_output;
+
+    HIP_CHECK(hipMalloc(&d_keys_input, input_keys.size() * sizeof(input_keys[0])));
+    HIP_CHECK(hipMalloc(&d_values_input, input_values.size() * sizeof(input_values[0])));
+    HIP_CHECK(hipMalloc(&d_keys_output, input_keys.size() * sizeof(input_keys[0])));
+    HIP_CHECK(hipMalloc(&d_values_output, input_values.size() * sizeof(input_values[0])));
+    HIP_CHECK(hipMalloc(&d_selected_count_output, sizeof(selected_count_output)));
+
+    HIP_CHECK(
+        hipMemcpy(
+            d_keys_input,
+            input_keys.data(),
+            input_keys.size() * sizeof(input_keys[0]),
+            hipMemcpyHostToDevice
+        )
+    );
+    HIP_CHECK(
+        hipMemcpy(
+            d_values_input,
+            input_values.data(),
+            input_values.size() * sizeof(input_values[0]),
+            hipMemcpyHostToDevice
+        )
+    );
+
+    // Allocate temporary storage memory
+    size_t temp_storage_size_bytes;
+
+    // Get size of d_temp_storage
+    HIP_CHECK(
+        hipcub::DeviceSelect::UniqueByKey(
+            nullptr,
+            temp_storage_size_bytes,
+            d_keys_input,
+            d_values_input,
+            d_keys_output,
+            d_values_output,
+            d_selected_count_output,
+            input_keys.size(),
+            stream
+        )
+    );
+    HIP_CHECK(hipDeviceSynchronize());
+
+    // allocate temporary storage
+    void* d_temp_storage = nullptr;
+    HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
+    HIP_CHECK(hipDeviceSynchronize());
+
+    // Warm-up
+    for (size_t i = 0; i < 10; i++)
+    {
+        HIP_CHECK(
+            hipcub::DeviceSelect::UniqueByKey(
+                d_temp_storage,
+                temp_storage_size_bytes,
+                d_keys_input,
+                d_values_input,
+                d_keys_output,
+                d_values_output,
+                d_selected_count_output,
+                input_keys.size(),
+                stream
+            )
+        );
+    }
+    HIP_CHECK(hipDeviceSynchronize());
+
+    const unsigned int batch_size = 10;
+    for (auto _ : state)
+    {
+        auto start = std::chrono::high_resolution_clock::now();
+        for (size_t i = 0; i < batch_size; i++)
+        {
+            HIP_CHECK(
+                hipcub::DeviceSelect::UniqueByKey(
+                    d_temp_storage,
+                    temp_storage_size_bytes,
+                    d_keys_input,
+                    d_values_input,
+                    d_keys_output,
+                    d_values_output,
+                    d_selected_count_output,
+                    input_keys.size(),
+                    stream
+                )
+            );
+        }
+        HIP_CHECK(hipDeviceSynchronize());
+
+        auto end = std::chrono::high_resolution_clock::now();
+        auto elapsed_seconds = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+        state.SetIterationTime(elapsed_seconds.count());
+    }
+    state.SetBytesProcessed(state.iterations() * batch_size * size * (sizeof(KeyT) + sizeof(ValueT)));
+    state.SetItemsProcessed(state.iterations() * batch_size * size);
+
+    hipFree(d_keys_input);
+    hipFree(d_values_input);
+    hipFree(d_keys_output);
+    hipFree(d_values_output);
+    hipFree(d_selected_count_output);
+    hipFree(d_temp_storage);
+}
+
 #define CREATE_SELECT_FLAGGED_BENCHMARK(T, F, p) \
 benchmark::RegisterBenchmark( \
     ("select_flagged<" #T "," #F ", "#T", unsigned int>(p = " #p")"), \
@@ -384,6 +517,12 @@ benchmark::RegisterBenchmark( \
 benchmark::RegisterBenchmark( \
     ("unique<" #T ", "#T", unsigned int>(p = " #p")"), \
     &run_unique_benchmark<T>, size, stream, p \
+)
+
+#define CREATE_UNIQUE_BY_KEY_BENCHMARK(K, V, p) \
+benchmark::RegisterBenchmark( \
+    ("unique_by_key<" #K ", "#V", unsigned int>(p = " #p")"), \
+    &run_unique_by_key_benchmark<K, V>, size, stream, p \
 )
 
 #define BENCHMARK_FLAGGED_TYPE(type, value) \
@@ -403,6 +542,12 @@ benchmark::RegisterBenchmark( \
     CREATE_UNIQUE_BENCHMARK(type, 0.25f), \
     CREATE_UNIQUE_BENCHMARK(type, 0.5f), \
     CREATE_UNIQUE_BENCHMARK(type, 0.75f)
+
+#define BENCHMARK_UNIQUE_BY_KEY_TYPE(key_type, value_type) \
+    CREATE_UNIQUE_BY_KEY_BENCHMARK(key_type, value_type, 0.05f), \
+    CREATE_UNIQUE_BY_KEY_BENCHMARK(key_type, value_type, 0.25f), \
+    CREATE_UNIQUE_BY_KEY_BENCHMARK(key_type, value_type, 0.5f), \
+    CREATE_UNIQUE_BY_KEY_BENCHMARK(key_type, value_type, 0.75f)
 
 int main(int argc, char *argv[])
 {
@@ -449,7 +594,14 @@ int main(int argc, char *argv[])
         BENCHMARK_UNIQUE_TYPE(double),
         BENCHMARK_UNIQUE_TYPE(uint8_t),
         BENCHMARK_UNIQUE_TYPE(int8_t),
-        BENCHMARK_UNIQUE_TYPE(custom_int_double)
+        BENCHMARK_UNIQUE_TYPE(custom_int_double),
+
+        BENCHMARK_UNIQUE_BY_KEY_TYPE(int, int),
+        BENCHMARK_UNIQUE_BY_KEY_TYPE(float, double),
+        BENCHMARK_UNIQUE_BY_KEY_TYPE(double, custom_double2),
+        BENCHMARK_UNIQUE_BY_KEY_TYPE(uint8_t, uint8_t),
+        BENCHMARK_UNIQUE_BY_KEY_TYPE(int8_t, double),
+        BENCHMARK_UNIQUE_BY_KEY_TYPE(custom_int_double, custom_int_double)
     };
 
     // Use manual timing
