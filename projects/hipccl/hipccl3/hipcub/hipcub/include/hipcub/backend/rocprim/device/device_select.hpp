@@ -110,6 +110,34 @@ public:
             stream, debug_synchronous
         );
     }
+
+    template <
+        typename KeyIteratorT,
+        typename ValueIteratorT,
+        typename OutputKeyIteratorT,
+        typename OutputValueIteratorT,
+        typename NumSelectedIteratorT
+    >
+    HIPCUB_RUNTIME_FUNCTION static
+    hipError_t UniqueByKey(void *d_temp_storage,
+                           size_t &temp_storage_bytes,
+                           KeyIteratorT d_keys_input,
+                           ValueIteratorT d_values_input,
+                           OutputKeyIteratorT d_keys_output,
+                           OutputValueIteratorT d_values_output,
+                           NumSelectedIteratorT d_num_selected_out,
+                           int num_items,
+                           hipStream_t stream = 0,
+                           bool debug_synchronous = false)
+    {
+        return ::rocprim::unique_by_key(
+            d_temp_storage, temp_storage_bytes,
+            d_keys_input, d_values_input, 
+            d_keys_output, d_values_output,
+            d_num_selected_out, num_items, hipcub::Equality(),
+            stream, debug_synchronous
+        );
+    }
 };
 
 END_HIPCUB_NAMESPACE

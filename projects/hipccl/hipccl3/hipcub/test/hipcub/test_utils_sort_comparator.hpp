@@ -97,10 +97,22 @@ struct key_comparator<Key, Descending, StartBit, EndBit, true, typename std::ena
     }
 };
 
+// TODO: Merge this half specialization with bfloat16 below, once NVidia fixed its __half2float conversion for -NaN
 template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
 struct key_comparator<Key, Descending, StartBit, EndBit, true,
-                      typename std::enable_if<std::is_same<Key, test_utils::half>::value ||
-                                              std::is_same<Key, test_utils::bfloat16>::value>::type>
+                      typename std::enable_if<std::is_same<Key, test_utils::half>::value>::type>
+{
+    bool operator()(const Key& lhs, const Key& rhs)
+    {
+        test_utils::native_half lhs_native(lhs);
+        test_utils::native_half rhs_native(rhs);
+        return key_comparator<float, Descending, 0, sizeof(float) * 8>()(lhs_native, rhs_native);
+    }
+};
+
+template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
+struct key_comparator<Key, Descending, StartBit, EndBit, true,
+                      typename std::enable_if<std::is_same<Key, test_utils::bfloat16>::value>::type>
 {
     bool operator()(const Key& lhs, const Key& rhs)
     {

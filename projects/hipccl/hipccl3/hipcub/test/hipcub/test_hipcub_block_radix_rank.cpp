@@ -72,7 +72,7 @@ private:
         #ifdef __HIP_PLATFORM_AMD__
         KEYS_ONLY                   = rocprim::Equals<ValueT, hipcub::NullType>::VALUE,
         #else
-        KEYS_ONLY                   = cub::Equals<ValueT, hipcub::NullType>::VALUE,
+        KEYS_ONLY                   = std::is_same<ValueT, hipcub::NullType>::value,
         #endif
     };
 

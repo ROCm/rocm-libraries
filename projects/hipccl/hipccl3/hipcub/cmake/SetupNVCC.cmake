@@ -63,7 +63,7 @@ function(hip_cuda_detect_cc out_variable)
     endif()
 
     if(NOT HIP_CUDA_detected_cc)
-        set(HIP_CUDA_detected_cc "35")
+        set(HIP_CUDA_detected_cc "53")
         set(${out_variable} ${HIP_CUDA_detected_cc} PARENT_SCOPE)
     else()
         set(${out_variable} ${HIP_CUDA_detected_cc} PARENT_SCOPE)
@@ -81,6 +81,7 @@ endif()
 
 # Get CUDA
 enable_language("CUDA")
+set(CMAKE_CUDA_STANDARD 14)
 
 # Suppressing warnings
 set(HIP_NVCC_FLAGS " ${HIP_NVCC_FLAGS} -Wno-deprecated-gpu-targets -Xcompiler -Wno-return-type -Wno-deprecated-declarations ")
@@ -96,11 +97,14 @@ endif()
 set(NVGPU_TARGETS "${DEFAULT_NVGPU_TARGETS}"
     CACHE STRING "List of NVIDIA GPU targets (compute capabilities), for example \"35;50\""
 )
-# Generate compiler flags based on targeted CUDA architectures
-foreach(CUDA_ARCH ${NVGPU_TARGETS})
-    list(APPEND HIP_NVCC_FLAGS "--generate-code arch=compute_${CUDA_ARCH},code=sm_${CUDA_ARCH} ")
-    list(APPEND HIP_NVCC_FLAGS "--generate-code arch=compute_${CUDA_ARCH},code=compute_${CUDA_ARCH} ")
-endforeach()
+set(CMAKE_CUDA_ARCHITECTURES ${NVGPU_TARGETS})
+# Generate compiler flags based on targeted CUDA architectures if CMake doesn't. (Controlled by policy CP0104, on by default after 3.18)
+if(CMAKE_VERSION VERSION_LESS "3.18")
+    foreach(CUDA_ARCH ${NVGPU_TARGETS})
+        list(APPEND HIP_NVCC_FLAGS "--generate-code arch=compute_${CUDA_ARCH},code=sm_${CUDA_ARCH} ")
+        list(APPEND HIP_NVCC_FLAGS "--generate-code arch=compute_${CUDA_ARCH},code=compute_${CUDA_ARCH} ")
+    endforeach()
+endif()
 
 execute_process(
     COMMAND ${HIP_HIPCONFIG_EXECUTABLE} --cpp_config

@@ -80,6 +80,7 @@
 
 // Device functions must be wrapped so they return
 // hipError_t instead of cudaError_t
+#include "device/device_adjacent_difference.hpp"
 #include "device/device_histogram.hpp"
 #include "device/device_radix_sort.hpp"
 #include "device/device_reduce.hpp"
