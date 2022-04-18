@@ -46,6 +46,7 @@ TEST(InnerProductTests, UsingHip)
 TYPED_TEST(InnerProductTests, InnerProductSimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -60,7 +61,7 @@ TYPED_TEST(InnerProductTests, InnerProductSimple)
     v2[2] = 6;
 
     T init   = 3;
-    T result = thrust::inner_product(v1.begin(), v1.end(), v2.begin(), init);
+    T result = thrust::inner_product(Policy{}, v1.begin(), v1.end(), v2.begin(), init);
 
     ASSERT_NEAR(result, (T)7, (T)0.01);
 }
@@ -107,6 +108,7 @@ TEST(InnerProductTests, InnerProductDispatchImplicit)
 TYPED_TEST(InnerProductTests, InnerProductWithOperator)
 {
     using Vector   = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T        = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -125,7 +127,7 @@ TYPED_TEST(InnerProductTests, InnerProductWithOperator)
     // compute (v1 - v2) and perform a multiplies reduction
     T init   = 3;
     T result = thrust::inner_product(
-        v1.begin(), v1.end(), v2.begin(), init, thrust::multiplies<T>(), thrust::minus<T>());
+        Policy{}, v1.begin(), v1.end(), v2.begin(), init, thrust::multiplies<T>(), thrust::minus<T>());
     ASSERT_NEAR(result, (T)90, error_margin);
 }
 

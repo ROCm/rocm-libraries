@@ -39,6 +39,7 @@ TEST(MergeByKeyTests, UsingHip)
 TYPED_TEST(MergeByKeyTests, MergeByKeySimple)
 {
     using Vector   = typename TestFixture::input_type;
+    using Policy   = typename TestFixture::execution_policy;
     using Iterator = typename Vector::iterator;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -79,7 +80,8 @@ TYPED_TEST(MergeByKeyTests, MergeByKeySimple)
 
     Vector result_key(7), result_val(7);
 
-    thrust::pair<Iterator, Iterator> ends = thrust::merge_by_key(a_key.begin(),
+    thrust::pair<Iterator, Iterator> ends = thrust::merge_by_key(Policy{},
+                                                                 a_key.begin(),
                                                                  a_key.end(),
                                                                  b_key.begin(),
                                                                  b_key.end(),

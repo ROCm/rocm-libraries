@@ -26,6 +26,7 @@ TESTS_DEFINE(MinMaxElementPrimitiveTests, NumericalTestsParams);
 TYPED_TEST(MinmaxElementTests, TestMinmaxElementSimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -37,15 +38,16 @@ TYPED_TEST(MinmaxElementTests, TestMinmaxElementSimple)
     data[4] = 5;
     data[5] = 1;
 
-    ASSERT_EQ(*thrust::minmax_element(data.begin(), data.end()).first, 1);
-    ASSERT_EQ(*thrust::minmax_element(data.begin(), data.end()).second, 5);
-    ASSERT_EQ(thrust::minmax_element(data.begin(), data.end()).first - data.begin(), 2);
-    ASSERT_EQ(thrust::minmax_element(data.begin(), data.end()).second - data.begin(), 1);
+    ASSERT_EQ(*thrust::minmax_element(Policy{}, data.begin(), data.end()).first, 1);
+    ASSERT_EQ(*thrust::minmax_element(Policy{}, data.begin(), data.end()).second, 5);
+    ASSERT_EQ(thrust::minmax_element(Policy{}, data.begin(), data.end()).first - data.begin(), 2);
+    ASSERT_EQ(thrust::minmax_element(Policy{}, data.begin(), data.end()).second - data.begin(), 1);
 }
 
 TYPED_TEST(MinmaxElementTests, TestMinmaxElementWithTransform)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -63,12 +65,14 @@ TYPED_TEST(MinmaxElementTests, TestMinmaxElementWithTransform)
     data[5] = 1;
 
     ASSERT_EQ(
-        *thrust::minmax_element(thrust::make_transform_iterator(data.begin(), thrust::negate<T>()),
+        *thrust::minmax_element(Policy{},
+                                thrust::make_transform_iterator(data.begin(), thrust::negate<T>()),
                                 thrust::make_transform_iterator(data.end(), thrust::negate<T>()))
              .first,
         -5);
     ASSERT_EQ(
-        *thrust::minmax_element(thrust::make_transform_iterator(data.begin(), thrust::negate<T>()),
+        *thrust::minmax_element(Policy{},
+                                thrust::make_transform_iterator(data.begin(), thrust::negate<T>()),
                                 thrust::make_transform_iterator(data.end(), thrust::negate<T>()))
              .second,
         -1);

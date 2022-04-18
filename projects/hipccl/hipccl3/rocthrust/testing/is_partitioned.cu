@@ -80,7 +80,7 @@ DECLARE_INTEGRAL_VECTOR_UNITTEST(TestIsPartitioned);
 
 template<typename InputIterator, typename Predicate>
 __host__ __device__
-bool is_partitioned(my_system &system, InputIterator, InputIterator, Predicate)
+bool is_partitioned(my_system &system, InputIterator /*first*/, InputIterator, Predicate)
 {
   system.validate_dispatch();
   return false;

@@ -119,6 +119,10 @@ namespace __scan
                                                             debug_sync),
                                     "scan failed on 2nd step");
 
+        hip_rocprim::throw_on_error(
+            hip_rocprim::synchronize_optional(policy),
+            "inclusive_scan: failed to synchronize"
+        );
 
         return output_it + num_items;
     }
@@ -167,6 +171,11 @@ namespace __scan
                                                             stream,
                                                             debug_sync),
                                     "scan failed on 2nd step");
+
+        hip_rocprim::throw_on_error(
+            hip_rocprim::synchronize_optional(policy),
+            "exclusive_scan: failed to synchronize"
+        );
 
         return output_it + num_items;
     }

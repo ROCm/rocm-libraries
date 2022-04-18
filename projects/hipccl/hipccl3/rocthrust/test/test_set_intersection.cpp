@@ -77,6 +77,7 @@ TEST(SetIntersectionTests, TestSetIntersectionDispatchImplicit)
 TYPED_TEST(SetIntersectionTests, TestSetIntersectionSimple)
 {
     using Vector   = typename TestFixture::input_type;
+    using Policy   = typename TestFixture::execution_policy;
     using Iterator = typename Vector::iterator;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -97,7 +98,7 @@ TYPED_TEST(SetIntersectionTests, TestSetIntersectionSimple)
 
     Vector result(2);
 
-    Iterator end = thrust::set_intersection(a.begin(), a.end(), b.begin(), b.end(), result.begin());
+    Iterator end = thrust::set_intersection(Policy{}, a.begin(), a.end(), b.begin(), b.end(), result.begin());
 
     EXPECT_EQ(result.end(), end);
     ASSERT_EQ(ref, result);

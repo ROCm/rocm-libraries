@@ -27,6 +27,7 @@ TESTS_DEFINE(BinarySearchDescendingTests, FullTestsParams);
 TYPED_TEST(BinarySearchDescendingTests, TestScalarLowerBoundDescendingSimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -40,30 +41,31 @@ TYPED_TEST(BinarySearchDescendingTests, TestScalarLowerBoundDescendingSimple)
     vec[4] = 0;
 
     ASSERT_EQ_QUIET(vec.begin() + 4,
-                    thrust::lower_bound(vec.begin(), vec.end(), 0, thrust::greater<T>()));
+                    thrust::lower_bound(Policy{}, vec.begin(), vec.end(), 0, thrust::greater<T>()));
     ASSERT_EQ_QUIET(vec.begin() + 4,
-                    thrust::lower_bound(vec.begin(), vec.end(), 1, thrust::greater<T>()));
+                    thrust::lower_bound(Policy{}, vec.begin(), vec.end(), 1, thrust::greater<T>()));
     ASSERT_EQ_QUIET(vec.begin() + 3,
-                    thrust::lower_bound(vec.begin(), vec.end(), 2, thrust::greater<T>()));
+                    thrust::lower_bound(Policy{}, vec.begin(), vec.end(), 2, thrust::greater<T>()));
     ASSERT_EQ_QUIET(vec.begin() + 3,
-                    thrust::lower_bound(vec.begin(), vec.end(), 3, thrust::greater<T>()));
+                    thrust::lower_bound(Policy{}, vec.begin(), vec.end(), 3, thrust::greater<T>()));
     ASSERT_EQ_QUIET(vec.begin() + 3,
-                    thrust::lower_bound(vec.begin(), vec.end(), 4, thrust::greater<T>()));
+                    thrust::lower_bound(Policy{}, vec.begin(), vec.end(), 4, thrust::greater<T>()));
     ASSERT_EQ_QUIET(vec.begin() + 2,
-                    thrust::lower_bound(vec.begin(), vec.end(), 5, thrust::greater<T>()));
+                    thrust::lower_bound(Policy{}, vec.begin(), vec.end(), 5, thrust::greater<T>()));
     ASSERT_EQ_QUIET(vec.begin() + 2,
-                    thrust::lower_bound(vec.begin(), vec.end(), 6, thrust::greater<T>()));
+                    thrust::lower_bound(Policy{}, vec.begin(), vec.end(), 6, thrust::greater<T>()));
     ASSERT_EQ_QUIET(vec.begin() + 1,
-                    thrust::lower_bound(vec.begin(), vec.end(), 7, thrust::greater<T>()));
+                    thrust::lower_bound(Policy{}, vec.begin(), vec.end(), 7, thrust::greater<T>()));
     ASSERT_EQ_QUIET(vec.begin() + 0,
-                    thrust::lower_bound(vec.begin(), vec.end(), 8, thrust::greater<T>()));
+                    thrust::lower_bound(Policy{}, vec.begin(), vec.end(), 8, thrust::greater<T>()));
     ASSERT_EQ_QUIET(vec.begin() + 0,
-                    thrust::lower_bound(vec.begin(), vec.end(), 9, thrust::greater<T>()));
+                    thrust::lower_bound(Policy{}, vec.begin(), vec.end(), 9, thrust::greater<T>()));
 }
 
 TYPED_TEST(BinarySearchDescendingTests, TestScalarUpperBoundDescendingSimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
 
     typedef typename Vector::value_type T;
 
@@ -78,30 +80,31 @@ TYPED_TEST(BinarySearchDescendingTests, TestScalarUpperBoundDescendingSimple)
     vec[4] = 0;
 
     ASSERT_EQ_QUIET(vec.begin() + 5,
-                    thrust::upper_bound(vec.begin(), vec.end(), 0, thrust::greater<T>()));
+                    thrust::upper_bound(Policy{}, vec.begin(), vec.end(), 0, thrust::greater<T>()));
     ASSERT_EQ_QUIET(vec.begin() + 4,
-                    thrust::upper_bound(vec.begin(), vec.end(), 1, thrust::greater<T>()));
+                    thrust::upper_bound(Policy{}, vec.begin(), vec.end(), 1, thrust::greater<T>()));
     ASSERT_EQ_QUIET(vec.begin() + 4,
-                    thrust::upper_bound(vec.begin(), vec.end(), 2, thrust::greater<T>()));
+                    thrust::upper_bound(Policy{}, vec.begin(), vec.end(), 2, thrust::greater<T>()));
     ASSERT_EQ_QUIET(vec.begin() + 3,
-                    thrust::upper_bound(vec.begin(), vec.end(), 3, thrust::greater<T>()));
+                    thrust::upper_bound(Policy{}, vec.begin(), vec.end(), 3, thrust::greater<T>()));
     ASSERT_EQ_QUIET(vec.begin() + 3,
-                    thrust::upper_bound(vec.begin(), vec.end(), 4, thrust::greater<T>()));
+                    thrust::upper_bound(Policy{}, vec.begin(), vec.end(), 4, thrust::greater<T>()));
     ASSERT_EQ_QUIET(vec.begin() + 3,
-                    thrust::upper_bound(vec.begin(), vec.end(), 5, thrust::greater<T>()));
+                    thrust::upper_bound(Policy{}, vec.begin(), vec.end(), 5, thrust::greater<T>()));
     ASSERT_EQ_QUIET(vec.begin() + 2,
-                    thrust::upper_bound(vec.begin(), vec.end(), 6, thrust::greater<T>()));
+                    thrust::upper_bound(Policy{}, vec.begin(), vec.end(), 6, thrust::greater<T>()));
     ASSERT_EQ_QUIET(vec.begin() + 2,
-                    thrust::upper_bound(vec.begin(), vec.end(), 7, thrust::greater<T>()));
+                    thrust::upper_bound(Policy{}, vec.begin(), vec.end(), 7, thrust::greater<T>()));
     ASSERT_EQ_QUIET(vec.begin() + 1,
-                    thrust::upper_bound(vec.begin(), vec.end(), 8, thrust::greater<T>()));
+                    thrust::upper_bound(Policy{}, vec.begin(), vec.end(), 8, thrust::greater<T>()));
     ASSERT_EQ_QUIET(vec.begin() + 0,
-                    thrust::upper_bound(vec.begin(), vec.end(), 9, thrust::greater<T>()));
+                    thrust::upper_bound(Policy{}, vec.begin(), vec.end(), 9, thrust::greater<T>()));
 }
 
 TYPED_TEST(BinarySearchDescendingTests, TestScalarBinarySearchDescendingSimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     typedef typename Vector::value_type T;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -114,21 +117,22 @@ TYPED_TEST(BinarySearchDescendingTests, TestScalarBinarySearchDescendingSimple)
     vec[3] = 2;
     vec[4] = 0;
 
-    ASSERT_EQ(true, thrust::binary_search(vec.begin(), vec.end(), 0, thrust::greater<T>()));
-    ASSERT_EQ(false, thrust::binary_search(vec.begin(), vec.end(), 1, thrust::greater<T>()));
-    ASSERT_EQ(true, thrust::binary_search(vec.begin(), vec.end(), 2, thrust::greater<T>()));
-    ASSERT_EQ(false, thrust::binary_search(vec.begin(), vec.end(), 3, thrust::greater<T>()));
-    ASSERT_EQ(false, thrust::binary_search(vec.begin(), vec.end(), 4, thrust::greater<T>()));
-    ASSERT_EQ(true, thrust::binary_search(vec.begin(), vec.end(), 5, thrust::greater<T>()));
-    ASSERT_EQ(false, thrust::binary_search(vec.begin(), vec.end(), 6, thrust::greater<T>()));
-    ASSERT_EQ(true, thrust::binary_search(vec.begin(), vec.end(), 7, thrust::greater<T>()));
-    ASSERT_EQ(true, thrust::binary_search(vec.begin(), vec.end(), 8, thrust::greater<T>()));
-    ASSERT_EQ(false, thrust::binary_search(vec.begin(), vec.end(), 9, thrust::greater<T>()));
+    ASSERT_EQ(true,  thrust::binary_search(Policy{}, vec.begin(), vec.end(), 0, thrust::greater<T>()));
+    ASSERT_EQ(false, thrust::binary_search(Policy{}, vec.begin(), vec.end(), 1, thrust::greater<T>()));
+    ASSERT_EQ(true,  thrust::binary_search(Policy{}, vec.begin(), vec.end(), 2, thrust::greater<T>()));
+    ASSERT_EQ(false, thrust::binary_search(Policy{}, vec.begin(), vec.end(), 3, thrust::greater<T>()));
+    ASSERT_EQ(false, thrust::binary_search(Policy{}, vec.begin(), vec.end(), 4, thrust::greater<T>()));
+    ASSERT_EQ(true,  thrust::binary_search(Policy{}, vec.begin(), vec.end(), 5, thrust::greater<T>()));
+    ASSERT_EQ(false, thrust::binary_search(Policy{}, vec.begin(), vec.end(), 6, thrust::greater<T>()));
+    ASSERT_EQ(true,  thrust::binary_search(Policy{}, vec.begin(), vec.end(), 7, thrust::greater<T>()));
+    ASSERT_EQ(true,  thrust::binary_search(Policy{}, vec.begin(), vec.end(), 8, thrust::greater<T>()));
+    ASSERT_EQ(false, thrust::binary_search(Policy{}, vec.begin(), vec.end(), 9, thrust::greater<T>()));
 }
 
 TYPED_TEST(BinarySearchDescendingTests, TestScalarEqualRangeDescendingSimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     typedef typename Vector::value_type T;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -142,44 +146,44 @@ TYPED_TEST(BinarySearchDescendingTests, TestScalarEqualRangeDescendingSimple)
     vec[4] = 0;
 
     ASSERT_EQ_QUIET(vec.begin() + 4,
-                    thrust::equal_range(vec.begin(), vec.end(), 0, thrust::greater<T>()).first);
+                    thrust::equal_range(Policy{}, vec.begin(), vec.end(), 0, thrust::greater<T>()).first);
     ASSERT_EQ_QUIET(vec.begin() + 4,
-                    thrust::equal_range(vec.begin(), vec.end(), 1, thrust::greater<T>()).first);
+                    thrust::equal_range(Policy{}, vec.begin(), vec.end(), 1, thrust::greater<T>()).first);
     ASSERT_EQ_QUIET(vec.begin() + 3,
-                    thrust::equal_range(vec.begin(), vec.end(), 2, thrust::greater<T>()).first);
+                    thrust::equal_range(Policy{}, vec.begin(), vec.end(), 2, thrust::greater<T>()).first);
     ASSERT_EQ_QUIET(vec.begin() + 3,
-                    thrust::equal_range(vec.begin(), vec.end(), 3, thrust::greater<T>()).first);
+                    thrust::equal_range(Policy{}, vec.begin(), vec.end(), 3, thrust::greater<T>()).first);
     ASSERT_EQ_QUIET(vec.begin() + 3,
-                    thrust::equal_range(vec.begin(), vec.end(), 4, thrust::greater<T>()).first);
+                    thrust::equal_range(Policy{}, vec.begin(), vec.end(), 4, thrust::greater<T>()).first);
     ASSERT_EQ_QUIET(vec.begin() + 2,
-                    thrust::equal_range(vec.begin(), vec.end(), 5, thrust::greater<T>()).first);
+                    thrust::equal_range(Policy{}, vec.begin(), vec.end(), 5, thrust::greater<T>()).first);
     ASSERT_EQ_QUIET(vec.begin() + 2,
-                    thrust::equal_range(vec.begin(), vec.end(), 6, thrust::greater<T>()).first);
+                    thrust::equal_range(Policy{}, vec.begin(), vec.end(), 6, thrust::greater<T>()).first);
     ASSERT_EQ_QUIET(vec.begin() + 1,
-                    thrust::equal_range(vec.begin(), vec.end(), 7, thrust::greater<T>()).first);
+                    thrust::equal_range(Policy{}, vec.begin(), vec.end(), 7, thrust::greater<T>()).first);
     ASSERT_EQ_QUIET(vec.begin() + 0,
-                    thrust::equal_range(vec.begin(), vec.end(), 8, thrust::greater<T>()).first);
+                    thrust::equal_range(Policy{}, vec.begin(), vec.end(), 8, thrust::greater<T>()).first);
     ASSERT_EQ_QUIET(vec.begin() + 0,
-                    thrust::equal_range(vec.begin(), vec.end(), 9, thrust::greater<T>()).first);
+                    thrust::equal_range(Policy{}, vec.begin(), vec.end(), 9, thrust::greater<T>()).first);
 
     ASSERT_EQ_QUIET(vec.begin() + 5,
-                    thrust::equal_range(vec.begin(), vec.end(), 0, thrust::greater<T>()).second);
+                    thrust::equal_range(Policy{}, vec.begin(), vec.end(), 0, thrust::greater<T>()).second);
     ASSERT_EQ_QUIET(vec.begin() + 4,
-                    thrust::equal_range(vec.begin(), vec.end(), 1, thrust::greater<T>()).second);
+                    thrust::equal_range(Policy{}, vec.begin(), vec.end(), 1, thrust::greater<T>()).second);
     ASSERT_EQ_QUIET(vec.begin() + 4,
-                    thrust::equal_range(vec.begin(), vec.end(), 2, thrust::greater<T>()).second);
+                    thrust::equal_range(Policy{}, vec.begin(), vec.end(), 2, thrust::greater<T>()).second);
     ASSERT_EQ_QUIET(vec.begin() + 3,
-                    thrust::equal_range(vec.begin(), vec.end(), 3, thrust::greater<T>()).second);
+                    thrust::equal_range(Policy{}, vec.begin(), vec.end(), 3, thrust::greater<T>()).second);
     ASSERT_EQ_QUIET(vec.begin() + 3,
-                    thrust::equal_range(vec.begin(), vec.end(), 4, thrust::greater<T>()).second);
+                    thrust::equal_range(Policy{}, vec.begin(), vec.end(), 4, thrust::greater<T>()).second);
     ASSERT_EQ_QUIET(vec.begin() + 3,
-                    thrust::equal_range(vec.begin(), vec.end(), 5, thrust::greater<T>()).second);
+                    thrust::equal_range(Policy{}, vec.begin(), vec.end(), 5, thrust::greater<T>()).second);
     ASSERT_EQ_QUIET(vec.begin() + 2,
-                    thrust::equal_range(vec.begin(), vec.end(), 6, thrust::greater<T>()).second);
+                    thrust::equal_range(Policy{}, vec.begin(), vec.end(), 6, thrust::greater<T>()).second);
     ASSERT_EQ_QUIET(vec.begin() + 2,
-                    thrust::equal_range(vec.begin(), vec.end(), 7, thrust::greater<T>()).second);
+                    thrust::equal_range(Policy{}, vec.begin(), vec.end(), 7, thrust::greater<T>()).second);
     ASSERT_EQ_QUIET(vec.begin() + 1,
-                    thrust::equal_range(vec.begin(), vec.end(), 8, thrust::greater<T>()).second);
+                    thrust::equal_range(Policy{}, vec.begin(), vec.end(), 8, thrust::greater<T>()).second);
     ASSERT_EQ_QUIET(vec.begin() + 0,
-                    thrust::equal_range(vec.begin(), vec.end(), 9, thrust::greater<T>()).second);
+                    thrust::equal_range(Policy{}, vec.begin(), vec.end(), 9, thrust::greater<T>()).second);
 }

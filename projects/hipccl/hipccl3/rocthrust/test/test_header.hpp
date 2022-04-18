@@ -64,21 +64,30 @@ int set_device_from_ctest()
 }
 
 // Input type parameter
-template <class InputType>
+template <class InputType, class ExecutionPolicy = std::decay_t<decltype(thrust::hip::par)>>
 struct Params
 {
     using input_type = InputType;
+    using execution_policy = thrust::detail::host_t;
+};
+
+template <class T, class ExecutionPolicy>
+struct Params<thrust::device_vector<T>, ExecutionPolicy>
+{
+    using input_type = thrust::device_vector<T>;
+    using execution_policy = ExecutionPolicy;
 };
 
 // Definition of typed test cases with given parameter type
-#define TESTS_DEFINE(x, y)                              \
-    template <class Params>                             \
-    class x : public ::testing::Test                    \
-    {                                                   \
-    public:                                             \
-        using input_type = typename Params::input_type; \
-    };                                                  \
-                                                        \
+#define TESTS_DEFINE(x, y)                                          \
+    template <class Params>                                         \
+    class x : public ::testing::Test                                \
+    {                                                               \
+    public:                                                         \
+        using input_type = typename Params::input_type;             \
+        using execution_policy = typename Params::execution_policy; \
+    };                                                              \
+                                                                    \
     TYPED_TEST_SUITE(x, y);
 
 // Set of test parameter types
@@ -94,6 +103,7 @@ typedef ::testing::Types<Params<thrust::host_vector<short>>,
                          Params<thrust::host_vector<double>>,
                          Params<thrust::device_vector<short>>,
                          Params<thrust::device_vector<int>>,
+                         Params<thrust::device_vector<int>, std::decay_t<decltype(thrust::hip::par_nosync)>>,
                          Params<thrust::device_vector<long long>>,
                          Params<thrust::device_vector<unsigned short>>,
                          Params<thrust::device_vector<unsigned int>>,

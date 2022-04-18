@@ -81,6 +81,7 @@ protected:
 TYPED_TEST(SortPermutationIteratorsTests, TestSortPermutationIterator)
 {
     using Vector   = typename TestFixture::input_type;
+    using Policy   = typename TestFixture::execution_policy;
     using T        = typename Vector::value_type;
     using Iterator = typename Vector::iterator;
 
@@ -100,7 +101,7 @@ TYPED_TEST(SortPermutationIteratorsTests, TestSortPermutationIterator)
 
     strided_range<Iterator> S(A.begin(), A.end(), 2);
 
-    thrust::sort(S.begin(), S.end());
+    thrust::sort(Policy{}, S.begin(), S.end());
 
     ASSERT_EQ(A[0], T(0));
     ASSERT_EQ(A[1], T(9));
@@ -117,6 +118,7 @@ TYPED_TEST(SortPermutationIteratorsTests, TestSortPermutationIterator)
 TYPED_TEST(SortPermutationIteratorsTests, TestStableSortPermutationIterator)
 {
     using Vector   = typename TestFixture::input_type;
+    using Policy   = typename TestFixture::execution_policy;
     using T        = typename Vector::value_type;
     using Iterator = typename Vector::iterator;
 
@@ -136,7 +138,7 @@ TYPED_TEST(SortPermutationIteratorsTests, TestStableSortPermutationIterator)
 
     strided_range<Iterator> S(A.begin(), A.end(), 2);
 
-    thrust::stable_sort(S.begin(), S.end());
+    thrust::stable_sort(Policy{}, S.begin(), S.end());
 
     ASSERT_EQ(A[0], T(0));
     ASSERT_EQ(A[1], T(9));
@@ -153,6 +155,7 @@ TYPED_TEST(SortPermutationIteratorsTests, TestStableSortPermutationIterator)
 TYPED_TEST(SortPermutationIteratorsTests, TestSortByKeyPermutationIterator)
 {
     using Vector    = typename TestFixture::input_type;
+    using Policy    = typename TestFixture::execution_policy;
     using ValueType = typename Vector::value_type;
     using Iterator  = typename Vector::iterator;
 
@@ -183,7 +186,7 @@ TYPED_TEST(SortPermutationIteratorsTests, TestSortByKeyPermutationIterator)
     strided_range<Iterator> S(A.begin(), A.end(), 2);
     strided_range<Iterator> T(B.begin(), B.end(), 2);
 
-    thrust::sort_by_key(S.begin(), S.end(), T.begin());
+    thrust::sort_by_key(Policy{}, S.begin(), S.end(), T.begin());
 
     ASSERT_EQ(A[0], ValueType(0));
     ASSERT_EQ(A[1], ValueType(9));
@@ -211,6 +214,7 @@ TYPED_TEST(SortPermutationIteratorsTests, TestSortByKeyPermutationIterator)
 TYPED_TEST(SortPermutationIteratorsTests, TestStableSortByKeyPermutationIterator)
 {
     using Vector    = typename TestFixture::input_type;
+    using Policy    = typename TestFixture::execution_policy;
     using ValueType = typename Vector::value_type;
     using Iterator  = typename Vector::iterator;
 
@@ -241,7 +245,7 @@ TYPED_TEST(SortPermutationIteratorsTests, TestStableSortByKeyPermutationIterator
     strided_range<Iterator> S(A.begin(), A.end(), 2);
     strided_range<Iterator> T(B.begin(), B.end(), 2);
 
-    thrust::stable_sort_by_key(S.begin(), S.end(), T.begin());
+    thrust::stable_sort_by_key(Policy{}, S.begin(), S.end(), T.begin());
 
     ASSERT_EQ(A[0], ValueType(0));
     ASSERT_EQ(A[1], ValueType(9));

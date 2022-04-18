@@ -37,6 +37,7 @@ struct plus_mod_10
 TYPED_TEST(ReduceTests, TestReduceSimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -47,10 +48,10 @@ TYPED_TEST(ReduceTests, TestReduceSimple)
     v[2] = 3;
 
     // no initializer
-    ASSERT_EQ(thrust::reduce(v.begin(), v.end()), 2);
+    ASSERT_EQ(thrust::reduce(Policy{}, v.begin(), v.end()), 2);
 
     // with initializer
-    ASSERT_EQ(thrust::reduce(v.begin(), v.end(), T(10)), 12);
+    ASSERT_EQ(thrust::reduce(Policy{}, v.begin(), v.end(), T(10)), 12);
 }
 
 template <typename InputIterator>
@@ -121,6 +122,7 @@ TYPED_TEST(ReducePrimitiveTests, TestReduce)
 TYPED_TEST(ReduceTests, TestReduceMixedTypes)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -134,7 +136,7 @@ TYPED_TEST(ReduceTests, TestReduceMixedTypes)
         float_input[3] = T(4.5);
 
         // float -> int should use using plus<int> operator by default
-        ASSERT_EQ(thrust::reduce(float_input.begin(), float_input.end(), (int)0), 10);
+        ASSERT_EQ(thrust::reduce(Policy{}, float_input.begin(), float_input.end(), (int)0), 10);
     }
     else
     {
@@ -145,7 +147,7 @@ TYPED_TEST(ReduceTests, TestReduceMixedTypes)
         int_input[3] = T(4);
 
         // int -> float should use using plus<float> operator by default
-        ASSERT_EQ(thrust::reduce(int_input.begin(), int_input.end(), (float)0.5), 10.5);
+        ASSERT_EQ(thrust::reduce(Policy{}, int_input.begin(), int_input.end(), (float)0.5), 10.5);
     }
 }
 
@@ -197,6 +199,7 @@ struct plus_mod3
 TYPED_TEST(ReduceTests, TestReduceWithIndirection)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -219,7 +222,7 @@ TYPED_TEST(ReduceTests, TestReduceWithIndirection)
     table[5] = 2;
 
     T result = thrust::reduce(
-        data.begin(), data.end(), T(0), plus_mod3<T>(thrust::raw_pointer_cast(&table[0])));
+        Policy{}, data.begin(), data.end(), T(0), plus_mod3<T>(thrust::raw_pointer_cast(&table[0])));
 
     ASSERT_EQ(result, T(1));
 }

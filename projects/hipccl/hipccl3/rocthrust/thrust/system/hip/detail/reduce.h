@@ -114,7 +114,6 @@ namespace __reduce
                                                     stream,
                                                     debug_sync),
                                     "reduce failed on 2nd step");
-
         T return_value = hip_rocprim::get_value(policy, d_ret_ptr);
 
         return return_value;

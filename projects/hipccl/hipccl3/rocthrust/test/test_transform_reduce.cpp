@@ -76,6 +76,7 @@ TEST(TransformReduceTests, TestTransformReduceDispatchImplicit)
 TYPED_TEST(TransformReduceTests, TestTransformReduceSimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -87,7 +88,7 @@ TYPED_TEST(TransformReduceTests, TestTransformReduceSimple)
 
     T init   = T(10);
     T result = thrust::transform_reduce(
-        data.begin(), data.end(), thrust::negate<T>(), init, thrust::plus<T>());
+        Policy{}, data.begin(), data.end(), thrust::negate<T>(), init, thrust::plus<T>());
 
     ASSERT_EQ(result, T(8));
 }

@@ -438,17 +438,17 @@ TYPED_TEST(ShuffleVariablesTests, TestBijectionLength)
 
     thrust::default_random_engine g(0xD5);
 
-    uint64_t m = 3;
+    uint64_t m = 31;
     thrust::system::detail::generic::feistel_bijection f(m, g);
-    ASSERT_EQ(f.nearest_power_of_two(), uint64_t(4));
+    ASSERT_EQ(f.nearest_power_of_two(), uint64_t(32));
 
-    m = 2;
+    m = 32;
     f = thrust::system::detail::generic::feistel_bijection(m, g);
-    ASSERT_EQ(f.nearest_power_of_two(), uint64_t(2));
+    ASSERT_EQ(f.nearest_power_of_two(), uint64_t(32));
 
-    m = 0;
+    m = 1;
     f = thrust::system::detail::generic::feistel_bijection(m, g);
-    ASSERT_EQ(f.nearest_power_of_two(), uint64_t(1));
+    ASSERT_EQ(f.nearest_power_of_two(), uint64_t(16));
 }
 
 // Individual input keys should be permuted to output locations with uniform
@@ -551,7 +551,7 @@ TYPED_TEST(ShuffleVectorTests, TestShuffleEvenSpacingBetweenOccurances)
     thrust::host_vector<T> h_results;
     Vector sequence(shuffle_size);
     thrust::sequence(sequence.begin(), sequence.end(), 0);
-    thrust::default_random_engine g(0xD5);
+    thrust::default_random_engine g(0xD6);
     for (auto i = 0ull; i < num_samples; i++) {
         thrust::shuffle(sequence.begin(), sequence.end(), g);
         thrust::host_vector<T> tmp(sequence.begin(), sequence.end());

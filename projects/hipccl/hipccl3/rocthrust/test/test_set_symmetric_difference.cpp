@@ -80,6 +80,7 @@ TEST(SetSymmetricDifferenceTests, TestSetSymmetricDifferenceDispatchImplicit)
 TYPED_TEST(SetSymmetricDifferenceTests, TestSetSymmetricDifferenceSimple)
 {
     using Vector   = typename TestFixture::input_type;
+    using Policy   = typename TestFixture::execution_policy;
     using Iterator = typename Vector::iterator;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -106,7 +107,7 @@ TYPED_TEST(SetSymmetricDifferenceTests, TestSetSymmetricDifferenceSimple)
     Vector result(5);
 
     Iterator end
-        = thrust::set_symmetric_difference(a.begin(), a.end(), b.begin(), b.end(), result.begin());
+        = thrust::set_symmetric_difference(Policy{}, a.begin(), a.end(), b.begin(), b.end(), result.begin());
 
     EXPECT_EQ(result.end(), end);
     ASSERT_EQ(ref, result);

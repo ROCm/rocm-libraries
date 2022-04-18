@@ -365,6 +365,7 @@ struct mod_3
 TYPED_TEST(CopyTests, TestCopyIfSimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -379,7 +380,7 @@ TYPED_TEST(CopyTests, TestCopyIfSimple)
     Vector dest(3);
 
     typename Vector::iterator dest_end
-        = thrust::copy_if(v.begin(), v.end(), dest.begin(), is_even<T>());
+        = thrust::copy_if(Policy{}, v.begin(), v.end(), dest.begin(), is_even<T>());
 
     ASSERT_EQ(T(0), dest[0]);
     ASSERT_EQ(T(2), dest[1]);
@@ -514,6 +515,7 @@ TYPED_TEST(CopyIntegerTests, TestCopyIfStencil)
 TYPED_TEST(CopyTests, TestCopyCountingIterator)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -522,7 +524,7 @@ TYPED_TEST(CopyTests, TestCopyCountingIterator)
 
     Vector vec(4);
 
-    thrust::copy(iter, iter + 4, vec.begin());
+    thrust::copy(Policy{}, iter, iter + 4, vec.begin());
 
     ASSERT_EQ(vec[0], T(1));
     ASSERT_EQ(vec[1], T(2));
@@ -533,6 +535,7 @@ TYPED_TEST(CopyTests, TestCopyCountingIterator)
 TYPED_TEST(CopyTests, TestCopyZipIterator)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -548,7 +551,8 @@ TYPED_TEST(CopyTests, TestCopyZipIterator)
     Vector v3(3, T(0));
     Vector v4(3, T(0));
 
-    thrust::copy(thrust::make_zip_iterator(thrust::make_tuple(v1.begin(), v2.begin())),
+    thrust::copy(Policy{},
+                 thrust::make_zip_iterator(thrust::make_tuple(v1.begin(), v2.begin())),
                  thrust::make_zip_iterator(thrust::make_tuple(v1.end(), v2.end())),
                  thrust::make_zip_iterator(thrust::make_tuple(v3.begin(), v4.begin())));
 
@@ -559,6 +563,7 @@ TYPED_TEST(CopyTests, TestCopyZipIterator)
 TYPED_TEST(CopyTests, TestCopyConstantIteratorToZipIterator)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -566,7 +571,8 @@ TYPED_TEST(CopyTests, TestCopyConstantIteratorToZipIterator)
     Vector v1(3, T(0));
     Vector v2(3, T(0));
 
-    thrust::copy(thrust::make_constant_iterator(thrust::tuple<T, T>(4, 7)),
+    thrust::copy(Policy{},
+                 thrust::make_constant_iterator(thrust::tuple<T, T>(4, 7)),
                  thrust::make_constant_iterator(thrust::tuple<T, T>(4, 7)) + v1.size(),
                  thrust::make_zip_iterator(thrust::make_tuple(v1.begin(), v2.begin())));
 

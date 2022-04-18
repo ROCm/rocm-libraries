@@ -189,6 +189,7 @@ struct vector_like
 TYPED_TEST(BinarySearchVectorTests, TestScalarLowerBoundSimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -201,17 +202,17 @@ TYPED_TEST(BinarySearchVectorTests, TestScalarLowerBoundSimple)
     vec[4] = 8;
 
     Vector input(10);
-    thrust::sequence(input.begin(), input.end());
+    thrust::sequence(Policy{}, input.begin(), input.end());
 
     typedef typename vector_like<Vector, int>::type IntVector;
 
     // test with integral output type
     IntVector integral_output(10);
     thrust::lower_bound(
-        vec.begin(), vec.end(), input.begin(), input.end(), integral_output.begin());
+        Policy{}, vec.begin(), vec.end(), input.begin(), input.end(), integral_output.begin());
 
     typename IntVector::iterator output_end = thrust::lower_bound(
-        vec.begin(), vec.end(), input.begin(), input.end(), integral_output.begin());
+        Policy{}, vec.begin(), vec.end(), input.begin(), input.end(), integral_output.begin());
 
     ASSERT_EQ((output_end - integral_output.begin()), 10);
 
@@ -293,6 +294,7 @@ TEST(BinarySearchVectorTests, TestVectorLowerBoundDispatchImplicit)
 TYPED_TEST(BinarySearchVectorTests, TestVectorUpperBoundSimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -305,14 +307,14 @@ TYPED_TEST(BinarySearchVectorTests, TestVectorUpperBoundSimple)
     vec[4] = 8;
 
     Vector input(10);
-    thrust::sequence(input.begin(), input.end());
+    thrust::sequence(Policy{}, input.begin(), input.end());
 
     typedef typename vector_like<Vector, int>::type IntVector;
 
     // test with integral output type
     IntVector                    integral_output(10);
     typename IntVector::iterator output_end = thrust::upper_bound(
-        vec.begin(), vec.end(), input.begin(), input.end(), integral_output.begin());
+        Policy{}, vec.begin(), vec.end(), input.begin(), input.end(), integral_output.begin());
 
     ASSERT_EQ((output_end - integral_output.begin()), 10);
 
@@ -394,6 +396,7 @@ TEST(BinarySearchVectorTests, TestVectorUpperBoundDispatchImplicit)
 TYPED_TEST(BinarySearchVectorTests, TestVectorBinarySearchSimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -406,7 +409,7 @@ TYPED_TEST(BinarySearchVectorTests, TestVectorBinarySearchSimple)
     vec[4] = 8;
 
     Vector input(10);
-    thrust::sequence(input.begin(), input.end());
+    thrust::sequence(Policy{}, input.begin(), input.end());
 
     typedef typename vector_like<Vector, bool>::type BoolVector;
     typedef typename vector_like<Vector, int>::type  IntVector;
@@ -414,7 +417,7 @@ TYPED_TEST(BinarySearchVectorTests, TestVectorBinarySearchSimple)
     // test with boolean output type
     BoolVector                    bool_output(10);
     typename BoolVector::iterator bool_output_end = thrust::binary_search(
-        vec.begin(), vec.end(), input.begin(), input.end(), bool_output.begin());
+        Policy{}, vec.begin(), vec.end(), input.begin(), input.end(), bool_output.begin());
 
     ASSERT_EQ((bool_output_end - bool_output.begin()), 10);
 
@@ -432,7 +435,7 @@ TYPED_TEST(BinarySearchVectorTests, TestVectorBinarySearchSimple)
     // test with integral output type
     IntVector                    integral_output(10, 2);
     typename IntVector::iterator int_output_end = thrust::binary_search(
-        vec.begin(), vec.end(), input.begin(), input.end(), integral_output.begin());
+        Policy{}, vec.begin(), vec.end(), input.begin(), input.end(), integral_output.begin());
 
     ASSERT_EQ((int_output_end - integral_output.begin()), 10);
 

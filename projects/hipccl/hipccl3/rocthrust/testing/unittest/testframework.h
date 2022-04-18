@@ -17,13 +17,13 @@
 
 #pragma once
 
-#include <string>
-#include <vector>
-#include <set>
-#include <map>
+#include <cstdio>
 #include <iostream>
-
-#include <stdio.h>
+#include <map>
+#include <set>
+#include <string>
+#include <type_traits>
+#include <vector>
 
 #include "meta.h"
 #include "util.h"
@@ -558,7 +558,7 @@ class TEST##UnitTest : public UnitTest {                         \
             TEST<double>(sizes[i]);                              \
         }                                                        \
     }                                                            \
-};                                                                 \
+};                                                               \
 TEST##UnitTest TEST##Instance
 
 #define DECLARE_INTEGRAL_VARIABLE_UNITTEST(TEST)                 \

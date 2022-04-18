@@ -106,6 +106,7 @@ TYPED_TEST(SetIntersectionByKeyTests, TestSetDifferenceByKeyDispatchImplicit)
 TYPED_TEST(SetIntersectionByKeyTests, TestSetDifferenceByKeySimple)
 {
     using Vector   = typename TestFixture::input_type;
+    using Policy   = typename TestFixture::execution_policy;
     using Iterator = typename Vector::iterator;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -141,7 +142,8 @@ TYPED_TEST(SetIntersectionByKeyTests, TestSetDifferenceByKeySimple)
 
     Vector result_key(2), result_val(2);
 
-    thrust::pair<Iterator, Iterator> end = thrust::set_difference_by_key(a_key.begin(),
+    thrust::pair<Iterator, Iterator> end = thrust::set_difference_by_key(Policy{},
+                                                                         a_key.begin(),
                                                                          a_key.end(),
                                                                          b_key.begin(),
                                                                          b_key.end(),

@@ -49,6 +49,7 @@ struct is_true : thrust::unary_function<T, bool>
 TYPED_TEST(RemoveTests, TestRemoveSimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -60,7 +61,7 @@ TYPED_TEST(RemoveTests, TestRemoveSimple)
     data[3] = T(3);
     data[4] = T(2);
 
-    typename Vector::iterator end = thrust::remove(data.begin(), data.end(), (T)2);
+    typename Vector::iterator end = thrust::remove(Policy{}, data.begin(), data.end(), (T)2);
 
     ASSERT_EQ(end - data.begin(), 3);
 
@@ -108,6 +109,7 @@ TEST(RemoveTests, TestRemoveDispatchImplicit)
 TYPED_TEST(RemoveTests, TestRemoveCopySimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -122,7 +124,7 @@ TYPED_TEST(RemoveTests, TestRemoveCopySimple)
     Vector result(5);
 
     typename Vector::iterator end
-        = thrust::remove_copy(data.begin(), data.end(), result.begin(), T(2));
+        = thrust::remove_copy(Policy{}, data.begin(), data.end(), result.begin(), T(2));
 
     ASSERT_EQ(end - result.begin(), 3);
 
@@ -175,6 +177,7 @@ TEST(RemoveTests, TestRemoveCopyDispatchImplicit)
 TYPED_TEST(RemoveTests, TestRemoveIfSimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -186,7 +189,7 @@ TYPED_TEST(RemoveTests, TestRemoveIfSimple)
     data[3] = 3;
     data[4] = 2;
 
-    typename Vector::iterator end = thrust::remove_if(data.begin(), data.end(), is_even<T>());
+    typename Vector::iterator end = thrust::remove_if(Policy{}, data.begin(), data.end(), is_even<T>());
 
     ASSERT_EQ(end - data.begin(), 3);
 
@@ -237,6 +240,7 @@ TEST(RemoveTests, TestRemoveIfDispatchImplicit)
 TYPED_TEST(RemoveTests, TestRemoveIfStencilSimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -256,7 +260,7 @@ TYPED_TEST(RemoveTests, TestRemoveIfStencilSimple)
     stencil[4] = 1;
 
     typename Vector::iterator end
-        = thrust::remove_if(data.begin(), data.end(), stencil.begin(), thrust::identity<T>());
+        = thrust::remove_if(Policy{}, data.begin(), data.end(), stencil.begin(), thrust::identity<T>());
 
     ASSERT_EQ(end - data.begin(), 3);
 
@@ -310,6 +314,7 @@ TEST(RemoveTests, TestRemoveIfStencilDispatchImplicit)
 TYPED_TEST(RemoveTests, TestRemoveCopyIfSimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -324,7 +329,7 @@ TYPED_TEST(RemoveTests, TestRemoveCopyIfSimple)
     Vector result(5);
 
     typename Vector::iterator end
-        = thrust::remove_copy_if(data.begin(), data.end(), result.begin(), is_even<T>());
+        = thrust::remove_copy_if(Policy{}, data.begin(), data.end(), result.begin(), is_even<T>());
 
     ASSERT_EQ(end - result.begin(), 3);
 
@@ -378,6 +383,7 @@ TEST(RemoveTests, TestRemoveCopyIfDispatchImplicit)
 TYPED_TEST(RemoveTests, TestRemoveCopyIfStencilSimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -399,7 +405,7 @@ TYPED_TEST(RemoveTests, TestRemoveCopyIfStencilSimple)
     Vector result(5);
 
     typename Vector::iterator end = thrust::remove_copy_if(
-        data.begin(), data.end(), stencil.begin(), result.begin(), thrust::identity<T>());
+        Policy{}, data.begin(), data.end(), stencil.begin(), result.begin(), thrust::identity<T>());
 
     ASSERT_EQ(end - result.begin(), 3);
 

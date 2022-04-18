@@ -121,7 +121,7 @@ __host__ __device__ inline int isfinite(double x){
 
 #else
 
-#  if defined(__CUDACC__) && !(defined(__CUDA__) && defined(__clang__)) && !defined(__NVCOMPILER_CUDA__)
+#  if defined(__CUDACC__) && !(defined(__CUDA__) && defined(__clang__)) && !defined(_NVHPC_CUDA)
 // NVCC implements at least some signature of these as functions not macros.
 using ::isinf;
 using ::isnan;
@@ -173,8 +173,8 @@ __host__ __device__ inline float copysignf(float x, float y){
 
 
 
-#ifndef __CUDACC__
-#ifndef __HIP__
+#if !defined(__CUDACC__) && !defined(_NVHPC_CUDA)
+
 // Simple approximation to log1p as Visual Studio is lacking one
 __host__ __device__ inline double log1p(double x){
   double u = 1.0+x;
@@ -220,8 +220,6 @@ inline double hypot(double x, double y){
 #endif // _MSC_VER <= 1500
 
 #endif // __CUDACC__
-
-#endif // _MSC_VER
 
 } // namespace complex
 

@@ -93,6 +93,7 @@ TEST(ReverseIteratorTests, ReverseIteratorIncrement)
 TYPED_TEST(ReverseIteratorTests, ReverseIteratorCopy)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -105,7 +106,8 @@ TYPED_TEST(ReverseIteratorTests, ReverseIteratorCopy)
 
     Vector destination(4, 0);
 
-    thrust::copy(thrust::make_reverse_iterator(source.end()),
+    thrust::copy(Policy{},
+                 thrust::make_reverse_iterator(source.end()),
                  thrust::make_reverse_iterator(source.begin()),
                  destination.begin());
 

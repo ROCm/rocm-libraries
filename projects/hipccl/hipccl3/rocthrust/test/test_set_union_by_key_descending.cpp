@@ -28,6 +28,7 @@ TESTS_DEFINE(SetUnionByKeyDescendingPrimitiveTests, NumericalTestsParams);
 TYPED_TEST(SetUnionByKeyDescendingTests, TestSetUnionByKeyDescendingSimple)
 {
     using Vector   = typename TestFixture::input_type;
+    using Policy   = typename TestFixture::execution_policy;
     using Iterator = typename Vector::iterator;
     using T        = typename Vector::value_type;
 
@@ -66,7 +67,8 @@ TYPED_TEST(SetUnionByKeyDescendingTests, TestSetUnionByKeyDescendingSimple)
 
     Vector result_key(5), result_val(5);
 
-    thrust::pair<Iterator, Iterator> end = thrust::set_union_by_key(a_key.begin(),
+    thrust::pair<Iterator, Iterator> end = thrust::set_union_by_key(Policy{},
+                                                                    a_key.begin(),
                                                                     a_key.end(),
                                                                     b_key.begin(),
                                                                     b_key.end(),

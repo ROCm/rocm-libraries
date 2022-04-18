@@ -71,13 +71,14 @@ TEST(SequenceTests, SequenceDispatchImplicit)
 TYPED_TEST(SequenceTests, SequenceSimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector v(5);
 
-    thrust::sequence(v.begin(), v.end());
+    thrust::sequence(Policy{}, v.begin(), v.end());
 
     ASSERT_EQ(v[0], 0);
     ASSERT_EQ(v[1], 1);
@@ -85,7 +86,7 @@ TYPED_TEST(SequenceTests, SequenceSimple)
     ASSERT_EQ(v[3], 3);
     ASSERT_EQ(v[4], 4);
 
-    thrust::sequence(v.begin(), v.end(), (T)10);
+    thrust::sequence(Policy{}, v.begin(), v.end(), (T)10);
 
     ASSERT_EQ(v[0], 10);
     ASSERT_EQ(v[1], 11);
@@ -93,7 +94,7 @@ TYPED_TEST(SequenceTests, SequenceSimple)
     ASSERT_EQ(v[3], 13);
     ASSERT_EQ(v[4], 14);
 
-    thrust::sequence(v.begin(), v.end(), (T)10, (T)2);
+    thrust::sequence(Policy{}, v.begin(), v.end(), (T)10, (T)2);
 
     ASSERT_EQ(v[0], 10);
     ASSERT_EQ(v[1], 12);

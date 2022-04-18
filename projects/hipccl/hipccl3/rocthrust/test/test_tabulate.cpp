@@ -66,6 +66,7 @@ TEST(TabulateTests, TestTabulateDispatchImplicit)
 TYPED_TEST(TabulateTests, TestTabulateSimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
     using namespace thrust::placeholders;
 
@@ -73,7 +74,7 @@ TYPED_TEST(TabulateTests, TestTabulateSimple)
 
     Vector v(5);
 
-    thrust::tabulate(v.begin(), v.end(), thrust::identity<T>());
+    thrust::tabulate(Policy{}, v.begin(), v.end(), thrust::identity<T>());
 
     ASSERT_EQ(v[0], T(0));
     ASSERT_EQ(v[1], T(1));
@@ -81,7 +82,7 @@ TYPED_TEST(TabulateTests, TestTabulateSimple)
     ASSERT_EQ(v[3], T(3));
     ASSERT_EQ(v[4], T(4));
 
-    thrust::tabulate(v.begin(), v.end(), -_1);
+    thrust::tabulate(Policy{}, v.begin(), v.end(), -_1);
 
     ASSERT_EQ(v[0], T(0));
     ASSERT_EQ(v[1], T(-1));
@@ -89,7 +90,7 @@ TYPED_TEST(TabulateTests, TestTabulateSimple)
     ASSERT_EQ(v[3], T(-3));
     ASSERT_EQ(v[4], T(-4));
 
-    thrust::tabulate(v.begin(), v.end(), _1 * _1 * _1);
+    thrust::tabulate(Policy{}, v.begin(), v.end(), _1 * _1 * _1);
 
     ASSERT_EQ(v[0], T(0));
     ASSERT_EQ(v[1], T(1));
@@ -111,13 +112,14 @@ struct nonconst_op
 TYPED_TEST(TabulateTests, TestTabulateSimpleNonConstOP)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector v(5);
 
-    thrust::tabulate(v.begin(), v.end(), nonconst_op<T>());
+    thrust::tabulate(Policy{}, v.begin(), v.end(), nonconst_op<T>());
 
     ASSERT_EQ(v[0], T(0));
     ASSERT_EQ(v[1], T(0));

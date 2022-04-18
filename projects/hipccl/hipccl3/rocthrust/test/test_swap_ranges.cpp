@@ -76,6 +76,7 @@ TEST(SwapRangesTests, SwapRangesDispatchImplicit)
 TYPED_TEST(SwapRangesTests, SwapRangesSimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -93,7 +94,7 @@ TYPED_TEST(SwapRangesTests, SwapRangesSimple)
     v2[3] = 8;
     v2[4] = 9;
 
-    thrust::swap_ranges(v1.begin(), v1.end(), v2.begin());
+    thrust::swap_ranges(Policy{}, v1.begin(), v1.end(), v2.begin());
 
     ASSERT_EQ(v1[0], 5);
     ASSERT_EQ(v1[1], 6);

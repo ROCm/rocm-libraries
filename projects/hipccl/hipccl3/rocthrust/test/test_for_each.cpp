@@ -164,6 +164,7 @@ public:
 TYPED_TEST(ForEachVectorTests, TestForEachSimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -180,7 +181,7 @@ TYPED_TEST(ForEachVectorTests, TestForEachSimple)
     mark_present_for_each<T> f;
     f.ptr = thrust::raw_pointer_cast(output.data());
 
-    typename Vector::iterator result = thrust::for_each(input.begin(), input.end(), f);
+    typename Vector::iterator result = thrust::for_each(Policy{}, input.begin(), input.end(), f);
 
     ASSERT_EQ(output[0], T(0));
     ASSERT_EQ(output[1], T(0));
@@ -233,6 +234,7 @@ TEST(ForEachVectorTests, TestForEachDispatchImplicit)
 TYPED_TEST(ForEachVectorTests, TestForEachNSimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -249,7 +251,7 @@ TYPED_TEST(ForEachVectorTests, TestForEachNSimple)
     mark_present_for_each<T> f;
     f.ptr = thrust::raw_pointer_cast(output.data());
 
-    typename Vector::iterator result = thrust::for_each_n(input.begin(), input.size(), f);
+    typename Vector::iterator result = thrust::for_each_n(Policy{}, input.begin(), input.size(), f);
 
     ASSERT_EQ(output[0], T(0));
     ASSERT_EQ(output[1], T(0));

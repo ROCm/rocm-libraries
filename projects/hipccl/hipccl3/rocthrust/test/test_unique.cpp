@@ -114,6 +114,7 @@ struct is_equal_div_10_unique
 TYPED_TEST(UniqueTests, TestUniqueSimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -132,7 +133,7 @@ TYPED_TEST(UniqueTests, TestUniqueSimple)
 
     typename Vector::iterator new_last;
 
-    new_last = thrust::unique(data.begin(), data.end());
+    new_last = thrust::unique(Policy{}, data.begin(), data.end());
 
     ASSERT_EQ(new_last - data.begin(), 7);
     ASSERT_EQ(data[0], 11);
@@ -143,7 +144,7 @@ TYPED_TEST(UniqueTests, TestUniqueSimple)
     ASSERT_EQ(data[5], 31);
     ASSERT_EQ(data[6], 37);
 
-    new_last = thrust::unique(data.begin(), new_last, is_equal_div_10_unique<T>());
+    new_last = thrust::unique(Policy{}, data.begin(), new_last, is_equal_div_10_unique<T>());
 
     ASSERT_EQ(new_last - data.begin(), 3);
     ASSERT_EQ(data[0], 11);
@@ -188,6 +189,7 @@ TYPED_TEST(UniqueIntegralTests, TestUnique)
 TYPED_TEST(UniqueTests, TestUniqueCopySimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -208,7 +210,7 @@ TYPED_TEST(UniqueTests, TestUniqueCopySimple)
 
     typename Vector::iterator new_last;
 
-    new_last = thrust::unique_copy(data.begin(), data.end(), output.begin());
+    new_last = thrust::unique_copy(Policy{}, data.begin(), data.end(), output.begin());
 
     ASSERT_EQ(new_last - output.begin(), 7);
     ASSERT_EQ(output[0], 11);
@@ -220,7 +222,7 @@ TYPED_TEST(UniqueTests, TestUniqueCopySimple)
     ASSERT_EQ(output[6], 37);
 
     new_last
-        = thrust::unique_copy(output.begin(), new_last, data.begin(), is_equal_div_10_unique<T>());
+        = thrust::unique_copy(Policy{}, output.begin(), new_last, data.begin(), is_equal_div_10_unique<T>());
 
     ASSERT_EQ(new_last - data.begin(), 3);
     ASSERT_EQ(data[0], 11);

@@ -175,6 +175,7 @@ TYPED_TEST(SetUnionKeyValuePrimitiveTests, TestSetUnionKeyValueDescending)
 TYPED_TEST(SetUnionKeyValueTests, TestSetUnionKeyValueSimple)
 {
     using Vector   = typename TestFixture::input_type;
+    using Policy   = typename TestFixture::execution_policy;
     using Iterator = typename Vector::iterator;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -198,7 +199,7 @@ TYPED_TEST(SetUnionKeyValueTests, TestSetUnionKeyValueSimple)
 
     Vector result(5);
 
-    Iterator end = thrust::set_union(a.begin(), a.end(), b.begin(), b.end(), result.begin());
+    Iterator end = thrust::set_union(Policy{}, a.begin(), a.end(), b.begin(), b.end(), result.begin());
 
     EXPECT_EQ(result.end(), end);
     ASSERT_EQ(ref, result);
@@ -207,6 +208,7 @@ TYPED_TEST(SetUnionKeyValueTests, TestSetUnionKeyValueSimple)
 TYPED_TEST(SetUnionKeyValueTests, TestSetUnionKeyValueWithEquivalentElementsSimple)
 {
     using Vector   = typename TestFixture::input_type;
+    using Policy   = typename TestFixture::execution_policy;
     using Iterator = typename Vector::iterator;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -231,7 +233,7 @@ TYPED_TEST(SetUnionKeyValueTests, TestSetUnionKeyValueWithEquivalentElementsSimp
 
     Vector result(5);
 
-    Iterator end = thrust::set_union(a.begin(), a.end(), b.begin(), b.end(), result.begin());
+    Iterator end = thrust::set_union(Policy{}, a.begin(), a.end(), b.begin(), b.end(), result.begin());
 
     EXPECT_EQ(result.end(), end);
     ASSERT_EQ(ref, result);

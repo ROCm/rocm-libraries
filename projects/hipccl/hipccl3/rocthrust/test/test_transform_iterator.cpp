@@ -37,6 +37,7 @@ TEST(TransformIteratorTests, UsingHip)
 TYPED_TEST(TransformIteratorTests, TransformIterator)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -48,12 +49,12 @@ TYPED_TEST(TransformIteratorTests, TransformIterator)
     Vector output(4);
 
     // initialize input
-    thrust::sequence(input.begin(), input.end(), 1);
+    thrust::sequence(Policy{}, input.begin(), input.end(), 1);
 
     // construct transform_iterator
     thrust::transform_iterator<UnaryFunction, Iterator> iter(input.begin(), UnaryFunction());
 
-    thrust::copy(iter, iter + 4, output.begin());
+    thrust::copy(Policy{}, iter, iter + 4, output.begin());
 
     ASSERT_EQ(output[0], (T)-1);
     ASSERT_EQ(output[1], (T)-2);
@@ -64,6 +65,7 @@ TYPED_TEST(TransformIteratorTests, TransformIterator)
 TYPED_TEST(TransformIteratorTests, MakeTransformIterator)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -75,12 +77,13 @@ TYPED_TEST(TransformIteratorTests, MakeTransformIterator)
     Vector output(4);
 
     // initialize input
-    thrust::sequence(input.begin(), input.end(), 1);
+    thrust::sequence(Policy{}, input.begin(), input.end(), 1);
 
     // construct transform_iterator
     thrust::transform_iterator<UnaryFunction, Iterator> iter(input.begin(), UnaryFunction());
 
-    thrust::copy(thrust::make_transform_iterator(input.begin(), UnaryFunction()),
+    thrust::copy(Policy{},
+                 thrust::make_transform_iterator(input.begin(), UnaryFunction()),
                  thrust::make_transform_iterator(input.end(), UnaryFunction()),
                  output.begin());
 

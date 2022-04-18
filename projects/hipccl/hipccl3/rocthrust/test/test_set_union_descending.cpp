@@ -30,6 +30,7 @@ TESTS_DEFINE(SetUnionDescendingPrimitiveTests, NumericalTestsParams);
 TYPED_TEST(SetUnionDescendingTests, TestSetUnionDescendingSimple)
 {
     using Vector   = typename TestFixture::input_type;
+    using Policy   = typename TestFixture::execution_policy;
     using Iterator = typename Vector::iterator;
     using T        = typename Vector::value_type;
 
@@ -55,7 +56,7 @@ TYPED_TEST(SetUnionDescendingTests, TestSetUnionDescendingSimple)
     Vector result(5);
 
     Iterator end = thrust::set_union(
-        a.begin(), a.end(), b.begin(), b.end(), result.begin(), thrust::greater<T>());
+        Policy{}, a.begin(), a.end(), b.begin(), b.end(), result.begin(), thrust::greater<T>());
 
     EXPECT_EQ(result.end(), end);
     ASSERT_EQ(ref, result);

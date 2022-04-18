@@ -37,6 +37,7 @@ struct vector_like
 TYPED_TEST(BinarySearchVectorDescendingTests, TestVectorLowerBoundDescendingSimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -56,7 +57,8 @@ TYPED_TEST(BinarySearchVectorDescendingTests, TestVectorLowerBoundDescendingSimp
 
     // test with integral output type
     IntVector                    integral_output(10);
-    typename IntVector::iterator output_end = thrust::lower_bound(vec.begin(),
+    typename IntVector::iterator output_end = thrust::lower_bound(Policy{},
+                                                                  vec.begin(),
                                                                   vec.end(),
                                                                   input.begin(),
                                                                   input.end(),
@@ -80,6 +82,7 @@ TYPED_TEST(BinarySearchVectorDescendingTests, TestVectorLowerBoundDescendingSimp
 TYPED_TEST(BinarySearchVectorDescendingTests, TestVectorUpperBoundDescendingSimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -98,7 +101,8 @@ TYPED_TEST(BinarySearchVectorDescendingTests, TestVectorUpperBoundDescendingSimp
 
     // test with integral output type
     IntVector                    integral_output(10);
-    typename IntVector::iterator output_end = thrust::upper_bound(vec.begin(),
+    typename IntVector::iterator output_end = thrust::upper_bound(Policy{},
+                                                                  vec.begin(),
                                                                   vec.end(),
                                                                   input.begin(),
                                                                   input.end(),
@@ -122,6 +126,7 @@ TYPED_TEST(BinarySearchVectorDescendingTests, TestVectorUpperBoundDescendingSimp
 TYPED_TEST(BinarySearchVectorDescendingTests, TestVectorBinarySearchDescendingSimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -141,7 +146,8 @@ TYPED_TEST(BinarySearchVectorDescendingTests, TestVectorBinarySearchDescendingSi
 
     // test with boolean output type
     BoolVector                    bool_output(10);
-    typename BoolVector::iterator bool_output_end = thrust::binary_search(vec.begin(),
+    typename BoolVector::iterator bool_output_end = thrust::binary_search(Policy{},
+                                                                          vec.begin(),
                                                                           vec.end(),
                                                                           input.begin(),
                                                                           input.end(),
@@ -163,7 +169,8 @@ TYPED_TEST(BinarySearchVectorDescendingTests, TestVectorBinarySearchDescendingSi
 
     // test with integral output type
     IntVector                    integral_output(10, 2);
-    typename IntVector::iterator int_output_end = thrust::binary_search(vec.begin(),
+    typename IntVector::iterator int_output_end = thrust::binary_search(Policy{},
+                                                                        vec.begin(),
                                                                         vec.end(),
                                                                         input.begin(),
                                                                         input.end(),
