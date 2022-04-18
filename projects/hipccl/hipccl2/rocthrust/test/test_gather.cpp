@@ -37,6 +37,7 @@ TEST(GatherTests, UsingHip)
 TYPED_TEST(GatherTests, GatherSimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -63,7 +64,7 @@ TYPED_TEST(GatherTests, GatherSimple)
     dst[3] = 0;
     dst[4] = 0;
 
-    thrust::gather(map.begin(), map.end(), src.begin(), dst.begin());
+    thrust::gather(Policy{}, map.begin(), map.end(), src.begin(), dst.begin());
 
     ASSERT_EQ(dst[0], 6);
     ASSERT_EQ(dst[1], 2);
@@ -217,6 +218,7 @@ TYPED_TEST(PrimitiveGatherTests, GatherToDiscardIterator)
 TYPED_TEST(GatherTests, GatherIfSimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -249,7 +251,7 @@ TYPED_TEST(GatherTests, GatherIfSimple)
     dst[3] = 0;
     dst[4] = 0;
 
-    thrust::gather_if(map.begin(), map.end(), flg.begin(), src.begin(), dst.begin());
+    thrust::gather_if(Policy{}, map.begin(), map.end(), flg.begin(), src.begin(), dst.begin());
 
     ASSERT_EQ(dst[0], 0);
     ASSERT_EQ(dst[1], 2);
@@ -474,26 +476,28 @@ TYPED_TEST(PrimitiveGatherTests, GatherIfToDiscardIterator)
 TYPED_TEST(GatherTests, TestGatherCountingIterator)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector source(10);
-    thrust::sequence(source.begin(), source.end(), 0);
+    thrust::sequence(Policy{}, source.begin(), source.end(), 0);
 
     Vector map(10);
-    thrust::sequence(map.begin(), map.end(), 0);
+    thrust::sequence(Policy{}, map.begin(), map.end(), 0);
 
     Vector output(10);
 
     // source has any_system_tag
-    thrust::fill(output.begin(), output.end(), 0);
-    thrust::gather(map.begin(), map.end(), thrust::make_counting_iterator(0), output.begin());
+    thrust::fill(Policy{}, output.begin(), output.end(), 0);
+    thrust::gather(Policy{}, map.begin(), map.end(), thrust::make_counting_iterator(0), output.begin());
 
     ASSERT_EQ(output, map);
 
     // map has any_system_tag
-    thrust::fill(output.begin(), output.end(), 0);
-    thrust::gather(thrust::make_counting_iterator(0),
+    thrust::fill(Policy{}, output.begin(), output.end(), 0);
+    thrust::gather(Policy{},
+                   thrust::make_counting_iterator(0),
                    thrust::make_counting_iterator((int)source.size()),
                    source.begin(),
                    output.begin());
@@ -501,8 +505,9 @@ TYPED_TEST(GatherTests, TestGatherCountingIterator)
     ASSERT_EQ(output, map);
 
     // source and map have any_system_tag
-    thrust::fill(output.begin(), output.end(), 0);
-    thrust::gather(thrust::make_counting_iterator(0),
+    thrust::fill(Policy{}, output.begin(), output.end(), 0);
+    thrust::gather(Policy{},
+                   thrust::make_counting_iterator(0),
                    thrust::make_counting_iterator((int)output.size()),
                    thrust::make_counting_iterator(0),
                    output.begin());

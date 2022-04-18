@@ -323,6 +323,7 @@ void InitializeSimpleKeySortTest(Vector& unsorted_keys, Vector& sorted_keys)
 TYPED_TEST(SortVector, TestSortSimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -331,7 +332,7 @@ TYPED_TEST(SortVector, TestSortSimple)
 
     InitializeSimpleKeySortTest(unsorted_keys, sorted_keys);
 
-    thrust::sort(unsorted_keys.begin(), unsorted_keys.end());
+    thrust::sort(Policy{}, unsorted_keys.begin(), unsorted_keys.end());
 
     ASSERT_EQ(unsorted_keys, sorted_keys);
 }

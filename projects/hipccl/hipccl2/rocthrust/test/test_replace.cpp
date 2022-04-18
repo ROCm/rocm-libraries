@@ -36,6 +36,7 @@ TEST(ReplaceTests, UsingHip)
 TYPED_TEST(ReplaceTests, SimpleReplace)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -47,8 +48,8 @@ TYPED_TEST(ReplaceTests, SimpleReplace)
     data[3] = 3;
     data[4] = 2;
 
-    thrust::replace(data.begin(), data.end(), (T)1, (T)4);
-    thrust::replace(data.begin(), data.end(), (T)2, (T)5);
+    thrust::replace(Policy{}, data.begin(), data.end(), (T)1, (T)4);
+    thrust::replace(Policy{}, data.begin(), data.end(), (T)2, (T)5);
 
     Vector result(5);
     result[0] = 4;
@@ -133,6 +134,7 @@ TYPED_TEST(PrimitiveReplaceTests, ReplaceWithRandomDataAndDifferentSizes)
 TYPED_TEST(ReplaceTests, SimpleCopyReplace)
 {
     using Vector      = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T           = typename Vector::value_type;
     const size_t size = 5;
 
@@ -147,8 +149,8 @@ TYPED_TEST(ReplaceTests, SimpleCopyReplace)
 
     Vector dest(size);
 
-    thrust::replace_copy(data.begin(), data.end(), dest.begin(), (T)1, (T)4);
-    thrust::replace_copy(dest.begin(), dest.end(), dest.begin(), (T)2, (T)5);
+    thrust::replace_copy(Policy{}, data.begin(), data.end(), dest.begin(), (T)1, (T)4);
+    thrust::replace_copy(Policy{}, dest.begin(), dest.end(), dest.begin(), (T)2, (T)5);
 
     Vector result(size);
     result[0] = 4;
@@ -380,6 +382,7 @@ TEST(ReplaceTests, ValidateDispatchImplicitReplaceIf)
 TYPED_TEST(ReplaceTests, ReplaceIfStencilSimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
     size_t size  = 5;
 
@@ -399,7 +402,7 @@ TYPED_TEST(ReplaceTests, ReplaceIfStencilSimple)
     stencil[3] = 3;
     stencil[4] = 7;
 
-    thrust::replace_if(data.begin(), data.end(), stencil.begin(), less_than_five<T>(), (T)0);
+    thrust::replace_if(Policy{}, data.begin(), data.end(), stencil.begin(), less_than_five<T>(), (T)0);
 
     Vector result(5);
     result[0] = 1;
@@ -488,6 +491,7 @@ TYPED_TEST(PrimitiveReplaceTests, ReplaceIfWithRandomData)
 TYPED_TEST(ReplaceTests, ReplaceCopyIfSimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
     size_t size  = 5;
 
@@ -501,7 +505,7 @@ TYPED_TEST(ReplaceTests, ReplaceCopyIfSimple)
     data[4] = 5;
 
     Vector dest(5);
-    thrust::replace_copy_if(data.begin(), data.end(), dest.begin(), less_than_five<T>(), (T)0);
+    thrust::replace_copy_if(Policy{}, data.begin(), data.end(), dest.begin(), less_than_five<T>(), (T)0);
 
     Vector result(5);
     result[0] = 0;
@@ -564,6 +568,7 @@ TEST(ReplaceTests, ReplaceCopyIfDispatchImplicit)
 TYPED_TEST(ReplaceTests, ReplaceCopyIfStencilSimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
     size_t size  = 5;
 
@@ -585,7 +590,7 @@ TYPED_TEST(ReplaceTests, ReplaceCopyIfStencilSimple)
 
     Vector dest(5);
     thrust::replace_copy_if(
-        data.begin(), data.end(), stencil.begin(), dest.begin(), less_than_five<T>(), (T)0);
+        Policy{}, data.begin(), data.end(), stencil.begin(), dest.begin(), less_than_five<T>(), (T)0);
 
     Vector result(5);
     result[0] = 0;

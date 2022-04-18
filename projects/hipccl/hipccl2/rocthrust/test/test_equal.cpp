@@ -29,6 +29,7 @@ TESTS_DEFINE(EqualsPrimitiveTests, NumericalTestsParams);
 TYPED_TEST(EqualTests, TestEqualSimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -46,17 +47,17 @@ TYPED_TEST(EqualTests, TestEqualSimple)
     v2[3] = T(6);
     v2[4] = T(1);
 
-    ASSERT_EQ(thrust::equal(v1.begin(), v1.end(), v1.begin()), true);
-    ASSERT_EQ(thrust::equal(v1.begin(), v1.end(), v2.begin()), false);
-    ASSERT_EQ(thrust::equal(v2.begin(), v2.end(), v2.begin()), true);
+    ASSERT_EQ(thrust::equal(Policy{}, v1.begin(), v1.end(), v1.begin()), true);
+    ASSERT_EQ(thrust::equal(Policy{}, v1.begin(), v1.end(), v2.begin()), false);
+    ASSERT_EQ(thrust::equal(Policy{}, v2.begin(), v2.end(), v2.begin()), true);
 
-    ASSERT_EQ(thrust::equal(v1.begin(), v1.begin() + 0, v1.begin()), true);
-    ASSERT_EQ(thrust::equal(v1.begin(), v1.begin() + 1, v1.begin()), true);
-    ASSERT_EQ(thrust::equal(v1.begin(), v1.begin() + 3, v2.begin()), true);
-    ASSERT_EQ(thrust::equal(v1.begin(), v1.begin() + 4, v2.begin()), false);
+    ASSERT_EQ(thrust::equal(Policy{}, v1.begin(), v1.begin() + 0, v1.begin()), true);
+    ASSERT_EQ(thrust::equal(Policy{}, v1.begin(), v1.begin() + 1, v1.begin()), true);
+    ASSERT_EQ(thrust::equal(Policy{}, v1.begin(), v1.begin() + 3, v2.begin()), true);
+    ASSERT_EQ(thrust::equal(Policy{}, v1.begin(), v1.begin() + 4, v2.begin()), false);
 
-    ASSERT_EQ(thrust::equal(v1.begin(), v1.end(), v2.begin(), thrust::less_equal<T>()), true);
-    ASSERT_EQ(thrust::equal(v1.begin(), v1.end(), v2.begin(), thrust::greater<T>()), false);
+    ASSERT_EQ(thrust::equal(Policy{}, v1.begin(), v1.end(), v2.begin(), thrust::less_equal<T>()), true);
+    ASSERT_EQ(thrust::equal(Policy{}, v1.begin(), v1.end(), v2.begin(), thrust::greater<T>()), false);
 }
 
 TYPED_TEST(EqualsPrimitiveTests, TestEqual)

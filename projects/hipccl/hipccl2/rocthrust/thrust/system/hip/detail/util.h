@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights meserved.
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2022 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -51,37 +51,83 @@ THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
 
-  inline __host__ __device__ hipStream_t default_stream()
-  {
-    #ifdef HIP_API_PER_THREAD_DEFAULT_STREAM
-      return hipStreamPerThread;
+inline __host__ __device__ hipStream_t default_stream()
+{
+  #ifdef HIP_API_PER_THREAD_DEFAULT_STREAM
+    return hipStreamPerThread;
+  #else
+    return hipStreamDefault; // There's not hipStreamLegacy
+  #endif
+}
+
+template <class Derived>
+hipStream_t __host__ __device__
+get_stream(execution_policy<Derived>&)
+{
+    return default_stream();
+}
+
+// Fallback implementation of the customization point.
+template <class Derived> __host__ __device__
+bool must_perform_optional_stream_synchronization(execution_policy<Derived> &)
+{
+  return true;
+}
+
+// Entry point/interface.
+template <class Derived> __host__ __device__
+bool must_perform_optional_synchronization(execution_policy<Derived> &policy)
+{
+  return must_perform_optional_stream_synchronization(derived_cast(policy));
+}
+
+template <class Derived>
+hipError_t synchronize_stream(execution_policy<Derived>& policy)
+{
+  hipError_t result;
+if (THRUST_IS_HOST_CODE) {
+  #if THRUST_INCLUDE_HOST_CODE
+    hipStreamSynchronize(stream(policy));
+    result = hipGetLastError();
+  #endif
+} else {
+  #if THRUST_INCLUDE_DEVICE_CODE
+    #if __THRUST_HAS_HIPRT__
+      THRUST_UNUSED_VAR(policy);
+      hipDeviceSynchronize();
+      result = hipGetLastError();
     #else
-      return hipStreamDefault; // There's not hipStreamLegacy
+      THRUST_UNUSED_VAR(policy);
+      result = hipSuccess;
     #endif
-  }
+  #endif
+}
+return result;
+}
 
-  template <class Derived>
-  hipStream_t __host__ __device__
-  get_stream(execution_policy<Derived>&)
-  {
-      return default_stream();
-  }
-
-  template <class Derived>
-  hipError_t synchronize_stream(execution_policy<Derived>& policy)
-  {
-    hipError_t result;
+// Fallback implementation of the customization point.
+template <class Derived> __host__ __device__
+hipError_t synchronize_stream_optional(execution_policy<Derived> &policy)
+{
+  hipError_t result;
   if (THRUST_IS_HOST_CODE) {
     #if THRUST_INCLUDE_HOST_CODE
-      hipStreamSynchronize(stream(policy));
-      result = hipGetLastError();
+      if(must_perform_optional_synchronization(policy)){
+        hipStreamSynchronize(stream(policy));
+        result = hipGetLastError();
+      }else{
+        result = hipSuccess;
+      }
     #endif
   } else {
     #if THRUST_INCLUDE_DEVICE_CODE
       #if __THRUST_HAS_HIPRT__
-        THRUST_UNUSED_VAR(policy);
-        hipDeviceSynchronize();
-        result = hipGetLastError();
+        if(must_perform_optional_synchronization(policy)){
+          hipDeviceSynchronize();
+          result = hipGetLastError();
+        }else{
+          result = hipSuccess;
+        }
       #else
         THRUST_UNUSED_VAR(policy);
         result = hipSuccess;
@@ -89,7 +135,14 @@ namespace hip_rocprim
     #endif
   }
   return result;
-  }
+}
+
+// Entry point/interface.
+template <class Policy> __host__ __device__
+hipError_t synchronize_optional(Policy &policy)
+{
+  return synchronize_stream_optional(derived_cast(policy));
+}
 
 __thrust_exec_check_disable__ template <class Policy>
 __host__ __device__ hipError_t synchronize(Policy& policy)

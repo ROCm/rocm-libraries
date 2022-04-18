@@ -234,6 +234,7 @@ TYPED_TEST(CopyNTests, TestCopyNListTo)
 TYPED_TEST(CopyNTests, TestCopyNCountingIterator)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -242,7 +243,7 @@ TYPED_TEST(CopyNTests, TestCopyNCountingIterator)
 
     Vector vec(4);
 
-    thrust::copy_n(iter, 4, vec.begin());
+    thrust::copy_n(Policy{}, iter, 4, vec.begin());
 
     ASSERT_EQ(vec[0], T(1));
     ASSERT_EQ(vec[1], T(2));
@@ -253,6 +254,7 @@ TYPED_TEST(CopyNTests, TestCopyNCountingIterator)
 TYPED_TEST(CopyNTests, TestCopyNZipIterator)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -268,7 +270,8 @@ TYPED_TEST(CopyNTests, TestCopyNZipIterator)
     Vector v3(3, T(0));
     Vector v4(3, T(0));
 
-    thrust::copy_n(thrust::make_zip_iterator(thrust::make_tuple(v1.begin(), v2.begin())),
+    thrust::copy_n(Policy{},
+                   thrust::make_zip_iterator(thrust::make_tuple(v1.begin(), v2.begin())),
                    3,
                    thrust::make_zip_iterator(thrust::make_tuple(v3.begin(), v4.begin())));
 
@@ -279,6 +282,7 @@ TYPED_TEST(CopyNTests, TestCopyNZipIterator)
 TYPED_TEST(CopyNTests, TestCopyNConstantIteratorToZipIterator)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -286,7 +290,8 @@ TYPED_TEST(CopyNTests, TestCopyNConstantIteratorToZipIterator)
     Vector v1(3, T(0));
     Vector v2(3, T(0));
 
-    thrust::copy_n(thrust::make_constant_iterator(thrust::tuple<T, T>(4, 7)),
+    thrust::copy_n(Policy{},
+                   thrust::make_constant_iterator(thrust::tuple<T, T>(4, 7)),
                    v1.size(),
                    thrust::make_zip_iterator(thrust::make_tuple(v1.begin(), v2.begin())));
 

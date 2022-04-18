@@ -28,6 +28,7 @@ TESTS_DEFINE(MismatchTests, FullTestsParams);
 TYPED_TEST(MismatchTests, TestMismatchSimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -43,13 +44,13 @@ TYPED_TEST(MismatchTests, TestMismatchSimple)
     a[3] = T(4);
     b[3] = T(3);
 
-    ASSERT_EQ(thrust::mismatch(a.begin(), a.end(), b.begin()).first - a.begin(), 2);
-    ASSERT_EQ(thrust::mismatch(a.begin(), a.end(), b.begin()).second - b.begin(), 2);
+    ASSERT_EQ(thrust::mismatch(Policy{}, a.begin(), a.end(), b.begin()).first - a.begin(), 2);
+    ASSERT_EQ(thrust::mismatch(Policy{}, a.begin(), a.end(), b.begin()).second - b.begin(), 2);
 
     b[2] = T(3);
 
-    ASSERT_EQ(thrust::mismatch(a.begin(), a.end(), b.begin()).first - a.begin(), 3);
-    ASSERT_EQ(thrust::mismatch(a.begin(), a.end(), b.begin()).second - b.begin(), 3);
+    ASSERT_EQ(thrust::mismatch(Policy{}, a.begin(), a.end(), b.begin()).first - a.begin(), 3);
+    ASSERT_EQ(thrust::mismatch(Policy{}, a.begin(), a.end(), b.begin()).second - b.begin(), 3);
 
     b[3] = T(4);
 

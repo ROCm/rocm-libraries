@@ -148,6 +148,11 @@ find_if_n(execution_policy<Derived>& policy,
         }
     }
 
+    hip_rocprim::throw_on_error(
+        hip_rocprim::synchronize_optional(policy),
+        "find_if_n: failed to synchronize"
+    );
+
     //nothing was found if we reach here...
     return first + num_items;
 }

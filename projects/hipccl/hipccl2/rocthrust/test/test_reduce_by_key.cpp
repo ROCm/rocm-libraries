@@ -19,6 +19,7 @@
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
 #include <thrust/reduce.h>
+#include <thrust/unique.h>
 
 #include "test_header.hpp"
 
@@ -67,6 +68,7 @@ void initialize_values(Vector& values)
 TYPED_TEST(ReduceByKeysTests, TestReduceByKeySimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -84,7 +86,7 @@ TYPED_TEST(ReduceByKeysTests, TestReduceByKeySimple)
     Vector output_values(values.size());
 
     new_last = thrust::reduce_by_key(
-        keys.begin(), keys.end(), values.begin(), output_keys.begin(), output_values.begin());
+        Policy{}, keys.begin(), keys.end(), values.begin(), output_keys.begin(), output_values.begin());
 
     ASSERT_EQ(new_last.first - output_keys.begin(), 5);
     ASSERT_EQ(new_last.second - output_values.begin(), 5);
@@ -104,7 +106,8 @@ TYPED_TEST(ReduceByKeysTests, TestReduceByKeySimple)
     initialize_keys(keys);
     initialize_values(values);
 
-    new_last = thrust::reduce_by_key(keys.begin(),
+    new_last = thrust::reduce_by_key(Policy{},
+                                     keys.begin(),
                                      keys.end(),
                                      values.begin(),
                                      output_keys.begin(),
@@ -125,7 +128,8 @@ TYPED_TEST(ReduceByKeysTests, TestReduceByKeySimple)
     initialize_keys(keys);
     initialize_values(values);
 
-    new_last = thrust::reduce_by_key(keys.begin(),
+    new_last = thrust::reduce_by_key(Policy{},
+                                     keys.begin(),
                                      keys.end(),
                                      values.begin(),
                                      output_keys.begin(),

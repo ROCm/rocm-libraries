@@ -1,6 +1,5 @@
 /*
- *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Copyright 2021 NVIDIA Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -15,26 +14,14 @@
  *  limitations under the License.
  */
 
-/*! \file forceinline.h
- *  \brief Defines __thrust_forceinline__
- */
-
 #pragma once
 
-#include <thrust/detail/config.h>
+// When a compiler uses Thrust as part of its implementation of Standard C++
+// algorithms, a cycle of included files may result when Thrust code tries to
+// use a standard algorithm.  Having a macro that is defined only when Thrust
+// is including an algorithms-related header gives the compiler a chance to
+// detect and break the cycle of includes.
 
-#if defined(__CUDACC__) || defined(_NVHPC_CUDA)
-
-#define __thrust_forceinline__ __forceinline__
-
-#elif THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
-
-#define __thrust_forceinline__ __forceinline__
-
-#else
-
-// TODO add
-
-#define __thrust_forceinline__
-
-#endif
+#define THRUST_INCLUDING_ALGORITHMS_HEADER
+#include <numeric>
+#undef  THRUST_INCLUDING_ALGORITHMS_HEADER

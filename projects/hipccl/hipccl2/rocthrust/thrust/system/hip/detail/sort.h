@@ -150,6 +150,10 @@ namespace __merge_sort
                                             stream,
                                             debug_sync);
         hip_rocprim::throw_on_error(status, "merge_sort: failed on 2nd step");
+        hip_rocprim::throw_on_error(
+            hip_rocprim::synchronize_optional(policy),
+            "merge_sort: failed to synchronize"
+        );
     }
 } // namespace __merge_sort
 
@@ -314,6 +318,10 @@ namespace __radix_sort
                                                        stream,
                                                        debug_sync);
         hip_rocprim::throw_on_error(status, "radix_sort: failed on 2nd step");
+        hip_rocprim::throw_on_error(
+            hip_rocprim::synchronize_optional(policy),
+            "radix sort: failed to synchronize"
+        );
     }
 } // __radix_sort
 

@@ -146,6 +146,10 @@ parallel_for(execution_policy<Derived>& policy, F f, Size count)
             hipStream_t stream = hip_rocprim::stream(policy);
             hipError_t  status = __parallel_for::parallel_for(count, f, stream);
             hip_rocprim::throw_on_error(status, "parallel_for failed");
+            hip_rocprim::throw_on_error(
+                hip_rocprim::synchronize_optional(policy),
+                "parallel_for: failed to synchronize"
+            );
 #endif
         }
 

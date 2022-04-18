@@ -73,7 +73,7 @@
 #endif // THRUST_HOST_COMPILER
 
 // figure out which device compiler we're using
-#if defined(__CUDACC__)
+#if defined(__CUDACC__) || defined(_NVHPC_CUDA)
 #define THRUST_DEVICE_COMPILER THRUST_DEVICE_COMPILER_NVCC
 #elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC
 #define THRUST_DEVICE_COMPILER THRUST_DEVICE_COMPILER_MSVC
@@ -93,7 +93,7 @@
 #endif
 
 // is the device compiler capable of compiling omp?
-#ifdef _OPENMP
+#if defined(_OPENMP) || defined(_NVHPC_STDPAR_OPENMP)
 #define THRUST_DEVICE_COMPILER_IS_OMP_CAPABLE THRUST_TRUE
 #else
 #define THRUST_DEVICE_COMPILER_IS_OMP_CAPABLE THRUST_FALSE

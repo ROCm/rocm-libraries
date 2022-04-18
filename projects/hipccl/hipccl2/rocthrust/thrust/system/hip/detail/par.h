@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2020, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2022, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -83,6 +83,53 @@ namespace hip_rocprim
             : base_t(stream) {};
     };
 
+    template <class Derived>
+    struct execute_on_stream_nosync_base : execution_policy<Derived>
+    {
+    private:
+        hipStream_t stream;
+
+    public:
+        __host__ __device__
+            execute_on_stream_nosync_base(hipStream_t stream_ = default_stream())
+                : stream(stream_){}
+
+        THRUST_HIP_RUNTIME_FUNCTION
+        Derived
+        on(hipStream_t const &s) const
+        {
+            Derived result = derived_cast(*this);
+            result.stream  = s;
+            return result;
+        }
+
+        private:
+        friend __host__ __device__
+        hipStream_t
+        get_stream(const execute_on_stream_nosync_base &exec)
+        {
+            return exec.stream;
+        }
+
+        friend __host__ __device__
+        bool
+        must_perform_optional_stream_synchronization(const execute_on_stream_nosync_base &)
+        {
+            return false;
+        }
+    };
+
+    struct execute_on_stream_nosync : execute_on_stream_nosync_base<execute_on_stream_nosync>
+    {
+        typedef execute_on_stream_nosync_base<execute_on_stream_nosync> base_t;
+
+        __host__ __device__
+        execute_on_stream_nosync() : base_t(){};
+        __host__ __device__
+        execute_on_stream_nosync(hipStream_t stream) 
+        : base_t(stream){};
+    };
+
     struct par_t : execution_policy<par_t>,
         thrust::detail::allocator_aware_execution_policy<execute_on_stream_base>
     #if THRUST_CPP_DIALECT >= 2011
@@ -106,7 +153,38 @@ namespace hip_rocprim
         }
     };
 
+    struct par_nosync_t : execution_policy<par_nosync_t>,
+        thrust::detail::allocator_aware_execution_policy<execute_on_stream_nosync_base>
+    #if THRUST_CPP_DIALECT >= 2011
+        , thrust::detail::dependencies_aware_execution_policy<execute_on_stream_nosync_base>
+    #endif
+    {
+        typedef execution_policy<par_nosync_t> base_t;
+
+        __host__ __device__
+        constexpr par_nosync_t() : base_t() {}
+
+        typedef execute_on_stream_nosync stream_attachment_type;
+
+        THRUST_HIP_RUNTIME_FUNCTION
+        stream_attachment_type
+        on(hipStream_t const &stream) const
+        {
+            return execute_on_stream_nosync(stream);
+        }
+
+    private:
+        //this function is defined to allow non-blocking calls on the default_stream() with thrust::cuda::par_nosync
+        //without explicitly using thrust::cuda::par_nosync.on(default_stream())
+        friend __host__ __device__  bool
+        must_perform_optional_stream_synchronization(const par_nosync_t &)
+        {
+            return false;
+        }
+    };
+
 THRUST_INLINE_CONSTANT par_t par;
+THRUST_INLINE_CONSTANT par_nosync_t par_nosync;
 } // namespace hip_rocprim
 
 namespace system
@@ -114,9 +192,11 @@ namespace system
     namespace hip
     {
         using thrust::hip_rocprim::par;
+        using thrust::hip_rocprim::par_nosync;
         namespace detail
         {
             using thrust::hip_rocprim::par_t;
+            using thrust::hip_rocprim::par_nosync_t;
         }
     } // namesapce hip
 } // namespace system
@@ -124,6 +204,7 @@ namespace system
 namespace hip
 {
     using thrust::hip_rocprim::par;
+    using thrust::hip_rocprim::par_nosync;
 } // namespace hip
 
 THRUST_NAMESPACE_END

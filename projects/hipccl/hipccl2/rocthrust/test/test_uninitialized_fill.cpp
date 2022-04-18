@@ -103,6 +103,7 @@ TEST(UninitializedFillTests, TestUninitializedFillNDispatchImplicit)
 TYPED_TEST(UninitializedFillTests, TestUninitializedFillPOD)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -116,7 +117,7 @@ TYPED_TEST(UninitializedFillTests, TestUninitializedFillPOD)
 
     T exemplar(7);
 
-    thrust::uninitialized_fill(v.begin() + 1, v.begin() + 4, exemplar);
+    thrust::uninitialized_fill(Policy{}, v.begin() + 1, v.begin() + 4, exemplar);
 
     ASSERT_EQ(v[0], T(0));
     ASSERT_EQ(v[1], exemplar);
@@ -126,7 +127,7 @@ TYPED_TEST(UninitializedFillTests, TestUninitializedFillPOD)
 
     exemplar = T(8);
 
-    thrust::uninitialized_fill(v.begin() + 0, v.begin() + 3, exemplar);
+    thrust::uninitialized_fill(Policy{}, v.begin() + 0, v.begin() + 3, exemplar);
 
     ASSERT_EQ(v[0], exemplar);
     ASSERT_EQ(v[1], exemplar);
@@ -136,7 +137,7 @@ TYPED_TEST(UninitializedFillTests, TestUninitializedFillPOD)
 
     exemplar = T(9);
 
-    thrust::uninitialized_fill(v.begin() + 2, v.end(), exemplar);
+    thrust::uninitialized_fill(Policy{}, v.begin() + 2, v.end(), exemplar);
 
     ASSERT_EQ(v[0], T(8));
     ASSERT_EQ(v[1], T(8));
@@ -146,7 +147,7 @@ TYPED_TEST(UninitializedFillTests, TestUninitializedFillPOD)
 
     exemplar = T(1);
 
-    thrust::uninitialized_fill(v.begin(), v.end(), exemplar);
+    thrust::uninitialized_fill(Policy{}, v.begin(), v.end(), exemplar);
 
     ASSERT_EQ(v[0], exemplar);
     ASSERT_EQ(v[1], exemplar);

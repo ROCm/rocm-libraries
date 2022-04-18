@@ -27,6 +27,7 @@ TESTS_DEFINE(SetSymmetricDifferenceDescendingPrimitiveTests, NumericalTestsParam
 TYPED_TEST(SetSymmetricDifferenceDescendingTests, TestSetSymmetricDifferenceDescendingSimple)
 {
     using Vector   = typename TestFixture::input_type;
+    using Policy   = typename TestFixture::execution_policy;
     using T        = typename Vector::value_type;
     using Iterator = typename Vector::iterator;
 
@@ -54,7 +55,7 @@ TYPED_TEST(SetSymmetricDifferenceDescendingTests, TestSetSymmetricDifferenceDesc
     Vector result(5);
 
     Iterator end = thrust::set_symmetric_difference(
-        a.begin(), a.end(), b.begin(), b.end(), result.begin(), thrust::greater<T>());
+        Policy{}, a.begin(), a.end(), b.begin(), b.end(), result.begin(), thrust::greater<T>());
 
     EXPECT_EQ(result.end(), end);
     ASSERT_EQ(ref, result);

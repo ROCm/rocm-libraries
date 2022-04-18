@@ -106,6 +106,7 @@ TEST(UninitializedCopyTests, TestUninitializedCopyNDispatchImplicit)
 TYPED_TEST(UninitializedCopyTests, TestUninitializedCopySimplePOD)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -119,7 +120,7 @@ TYPED_TEST(UninitializedCopyTests, TestUninitializedCopySimplePOD)
 
     // copy to Vector
     Vector v2(5);
-    thrust::uninitialized_copy(v1.begin(), v1.end(), v2.begin());
+    thrust::uninitialized_copy(Policy{}, v1.begin(), v1.end(), v2.begin());
     ASSERT_EQ(v2[0], T(0));
     ASSERT_EQ(v2[1], T(1));
     ASSERT_EQ(v2[2], T(2));
@@ -130,6 +131,7 @@ TYPED_TEST(UninitializedCopyTests, TestUninitializedCopySimplePOD)
 TYPED_TEST(UninitializedCopyTests, TestUninitializedCopyNSimplePOD)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -143,7 +145,7 @@ TYPED_TEST(UninitializedCopyTests, TestUninitializedCopyNSimplePOD)
 
     // copy to Vector
     Vector v2(5);
-    thrust::uninitialized_copy_n(v1.begin(), v1.size(), v2.begin());
+    thrust::uninitialized_copy_n(Policy{}, v1.begin(), v1.size(), v2.begin());
     ASSERT_EQ(v2[0], T(0));
     ASSERT_EQ(v2[1], T(1));
     ASSERT_EQ(v2[2], T(2));

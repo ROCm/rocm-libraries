@@ -94,7 +94,10 @@ namespace __binary_search
                                                          debug_sync),
                                     "lower_bound: failed on 2nt call");
 
-
+        hip_rocprim::throw_on_error(
+            hip_rocprim::synchronize_optional(policy),
+            "lower_bound: failed to synchronize"
+        );
 
         return result + needles_size;
     }
@@ -151,7 +154,10 @@ namespace __binary_search
                                                          debug_sync),
                                     "upper_bound: failed on 2nt call");
 
-
+        hip_rocprim::throw_on_error(
+            hip_rocprim::synchronize_optional(policy),
+            "upper_bound: failed to synchronize"
+        );
 
         return result + needles_size;
     }
@@ -207,6 +213,11 @@ namespace __binary_search
                                                            stream,
                                                            debug_sync),
                                     "binary_search: failed on 2nt call");
+
+        hip_rocprim::throw_on_error(
+            hip_rocprim::synchronize_optional(policy),
+            "binary_search: failed to synchronize"
+        );
 
         return result + needles_size;
     }

@@ -76,6 +76,7 @@ struct less_than_value_pred
 TYPED_TEST(FindTests, TestFindSimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -87,12 +88,12 @@ TYPED_TEST(FindTests, TestFindSimple)
     vec[3] = T(3);
     vec[4] = T(5);
 
-    ASSERT_EQ(thrust::find(vec.begin(), vec.end(), T(0)) - vec.begin(), 5);
-    ASSERT_EQ(thrust::find(vec.begin(), vec.end(), T(1)) - vec.begin(), 0);
-    ASSERT_EQ(thrust::find(vec.begin(), vec.end(), T(2)) - vec.begin(), 1);
-    ASSERT_EQ(thrust::find(vec.begin(), vec.end(), T(3)) - vec.begin(), 2);
-    ASSERT_EQ(thrust::find(vec.begin(), vec.end(), T(4)) - vec.begin(), 5);
-    ASSERT_EQ(thrust::find(vec.begin(), vec.end(), T(5)) - vec.begin(), 4);
+    ASSERT_EQ(thrust::find(Policy{}, vec.begin(), vec.end(), T(0)) - vec.begin(), 5);
+    ASSERT_EQ(thrust::find(Policy{}, vec.begin(), vec.end(), T(1)) - vec.begin(), 0);
+    ASSERT_EQ(thrust::find(Policy{}, vec.begin(), vec.end(), T(2)) - vec.begin(), 1);
+    ASSERT_EQ(thrust::find(Policy{}, vec.begin(), vec.end(), T(3)) - vec.begin(), 2);
+    ASSERT_EQ(thrust::find(Policy{}, vec.begin(), vec.end(), T(4)) - vec.begin(), 5);
+    ASSERT_EQ(thrust::find(Policy{}, vec.begin(), vec.end(), T(5)) - vec.begin(), 4);
 }
 
 template <typename InputIterator, typename T>
@@ -135,6 +136,7 @@ TEST(FindTests, TestFindDispatchImplicit)
 TYPED_TEST(FindTests, TestFindIfSimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -146,12 +148,12 @@ TYPED_TEST(FindTests, TestFindIfSimple)
     vec[3] = T(3);
     vec[4] = T(5);
 
-    ASSERT_EQ(thrust::find_if(vec.begin(), vec.end(), equal_to_value_pred<T>(0)) - vec.begin(), 5);
-    ASSERT_EQ(thrust::find_if(vec.begin(), vec.end(), equal_to_value_pred<T>(1)) - vec.begin(), 0);
-    ASSERT_EQ(thrust::find_if(vec.begin(), vec.end(), equal_to_value_pred<T>(2)) - vec.begin(), 1);
-    ASSERT_EQ(thrust::find_if(vec.begin(), vec.end(), equal_to_value_pred<T>(3)) - vec.begin(), 2);
-    ASSERT_EQ(thrust::find_if(vec.begin(), vec.end(), equal_to_value_pred<T>(4)) - vec.begin(), 5);
-    ASSERT_EQ(thrust::find_if(vec.begin(), vec.end(), equal_to_value_pred<T>(5)) - vec.begin(), 4);
+    ASSERT_EQ(thrust::find_if(Policy{}, vec.begin(), vec.end(), equal_to_value_pred<T>(0)) - vec.begin(), 5);
+    ASSERT_EQ(thrust::find_if(Policy{}, vec.begin(), vec.end(), equal_to_value_pred<T>(1)) - vec.begin(), 0);
+    ASSERT_EQ(thrust::find_if(Policy{}, vec.begin(), vec.end(), equal_to_value_pred<T>(2)) - vec.begin(), 1);
+    ASSERT_EQ(thrust::find_if(Policy{}, vec.begin(), vec.end(), equal_to_value_pred<T>(3)) - vec.begin(), 2);
+    ASSERT_EQ(thrust::find_if(Policy{}, vec.begin(), vec.end(), equal_to_value_pred<T>(4)) - vec.begin(), 5);
+    ASSERT_EQ(thrust::find_if(Policy{}, vec.begin(), vec.end(), equal_to_value_pred<T>(5)) - vec.begin(), 4);
 }
 
 template <typename InputIterator, typename Predicate>
@@ -196,6 +198,7 @@ TEST(FindTests, TestFindIfDispatchImplicit)
 TYPED_TEST(FindTests, TestFindIfNotSimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -208,17 +211,17 @@ TYPED_TEST(FindTests, TestFindIfNotSimple)
     vec[4] = T(4);
 
     ASSERT_EQ(
-        0, thrust::find_if_not(vec.begin(), vec.end(), less_than_value_pred<T>(0)) - vec.begin());
+        0, thrust::find_if_not(Policy{}, vec.begin(), vec.end(), less_than_value_pred<T>(0)) - vec.begin());
     ASSERT_EQ(
-        1, thrust::find_if_not(vec.begin(), vec.end(), less_than_value_pred<T>(1)) - vec.begin());
+        1, thrust::find_if_not(Policy{}, vec.begin(), vec.end(), less_than_value_pred<T>(1)) - vec.begin());
     ASSERT_EQ(
-        2, thrust::find_if_not(vec.begin(), vec.end(), less_than_value_pred<T>(2)) - vec.begin());
+        2, thrust::find_if_not(Policy{}, vec.begin(), vec.end(), less_than_value_pred<T>(2)) - vec.begin());
     ASSERT_EQ(
-        3, thrust::find_if_not(vec.begin(), vec.end(), less_than_value_pred<T>(3)) - vec.begin());
+        3, thrust::find_if_not(Policy{}, vec.begin(), vec.end(), less_than_value_pred<T>(3)) - vec.begin());
     ASSERT_EQ(
-        4, thrust::find_if_not(vec.begin(), vec.end(), less_than_value_pred<T>(4)) - vec.begin());
+        4, thrust::find_if_not(Policy{}, vec.begin(), vec.end(), less_than_value_pred<T>(4)) - vec.begin());
     ASSERT_EQ(
-        5, thrust::find_if_not(vec.begin(), vec.end(), less_than_value_pred<T>(5)) - vec.begin());
+        5, thrust::find_if_not(Policy{}, vec.begin(), vec.end(), less_than_value_pred<T>(5)) - vec.begin());
 }
 
 template <typename InputIterator, typename Predicate>
@@ -263,6 +266,7 @@ TEST(FindTests, TestFindIfNotDispatchImplicit)
 TYPED_TEST(FindTests, TestFind)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     using HostIterator   = typename thrust::host_vector<T>::iterator;
@@ -286,23 +290,25 @@ TYPED_TEST(FindTests, TestFind)
             DeviceIterator d_iter;
 
             h_iter = thrust::find(h_data.begin(), h_data.end(), T(0));
-            d_iter = thrust::find(d_data.begin(), d_data.end(), T(0));
+            d_iter = thrust::find(Policy{}, d_data.begin(), d_data.end(), T(0));
             ASSERT_EQ(h_iter - h_data.begin(), d_iter - d_data.begin());
 
             for(size_t i = 1; i < size; i *= 2)
             {
                 T sample = h_data[i];
                 h_iter   = thrust::find(h_data.begin(), h_data.end(), sample);
-                d_iter   = thrust::find(d_data.begin(), d_data.end(), sample);
+                d_iter   = thrust::find(Policy{}, d_data.begin(), d_data.end(), sample);
                 ASSERT_EQ(h_iter - h_data.begin(), d_iter - d_data.begin());
             }
         }
     }
 }
 
+
 TYPED_TEST(FindTests, TestFindIf)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     using HostIterator   = typename thrust::host_vector<T>::iterator;
@@ -326,7 +332,7 @@ TYPED_TEST(FindTests, TestFindIf)
             DeviceIterator d_iter;
 
             h_iter = thrust::find_if(h_data.begin(), h_data.end(), equal_to_value_pred<T>(0));
-            d_iter = thrust::find_if(d_data.begin(), d_data.end(), equal_to_value_pred<T>(0));
+            d_iter = thrust::find_if(Policy{}, d_data.begin(), d_data.end(), equal_to_value_pred<T>(0));
             ASSERT_EQ(h_iter - h_data.begin(), d_iter - d_data.begin());
 
             for(size_t i = 1; i < size; i *= 2)
@@ -335,7 +341,7 @@ TYPED_TEST(FindTests, TestFindIf)
                 h_iter
                     = thrust::find_if(h_data.begin(), h_data.end(), equal_to_value_pred<T>(sample));
                 d_iter
-                    = thrust::find_if(d_data.begin(), d_data.end(), equal_to_value_pred<T>(sample));
+                    = thrust::find_if(Policy{}, d_data.begin(), d_data.end(), equal_to_value_pred<T>(sample));
                 ASSERT_EQ(h_iter - h_data.begin(), d_iter - d_data.begin());
             }
         }
@@ -345,6 +351,7 @@ TYPED_TEST(FindTests, TestFindIf)
 TYPED_TEST(FindTests, TestFindIfNot)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     using HostIterator   = typename thrust::host_vector<T>::iterator;
@@ -370,7 +377,7 @@ TYPED_TEST(FindTests, TestFindIfNot)
             h_iter
                 = thrust::find_if_not(h_data.begin(), h_data.end(), not_equal_to_value_pred<T>(0));
             d_iter
-                = thrust::find_if_not(d_data.begin(), d_data.end(), not_equal_to_value_pred<T>(0));
+                = thrust::find_if_not(Policy{}, d_data.begin(), d_data.end(), not_equal_to_value_pred<T>(0));
             ASSERT_EQ(h_iter - h_data.begin(), d_iter - d_data.begin());
 
             for(size_t i = 1; i < size; i *= 2)
@@ -379,7 +386,7 @@ TYPED_TEST(FindTests, TestFindIfNot)
                 h_iter   = thrust::find_if_not(
                     h_data.begin(), h_data.end(), not_equal_to_value_pred<T>(sample));
                 d_iter = thrust::find_if_not(
-                    d_data.begin(), d_data.end(), not_equal_to_value_pred<T>(sample));
+                    Policy{}, d_data.begin(), d_data.end(), not_equal_to_value_pred<T>(sample));
                 ASSERT_EQ(h_iter - h_data.begin(), d_iter - d_data.begin());
             }
         }

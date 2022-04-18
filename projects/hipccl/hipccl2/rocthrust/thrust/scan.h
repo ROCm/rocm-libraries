@@ -44,15 +44,15 @@ THRUST_NAMESPACE_BEGIN
  *  This version of \p inclusive_scan assumes plus as the associative operator.
  *  When the input and output sequences are the same, the scan is performed
  *  in-place.
-
+ *
  *  \p inclusive_scan is similar to \c std::partial_sum in the STL.  The primary
  *  difference between the two functions is that \c std::partial_sum guarantees
  *  a serial summation order, while \p inclusive_scan requires associativity of
  *  the binary operation to parallelize the prefix sum.
  *
- *  Note that currently mixing scan input and output types can cause undefined behaviour.
- *  This issue can be avoided by casting the input iterators to match the appropriate output type
- *  via transform_iterator().
+ *  Results are not deterministic for pseudo-associative operators (e.g.,
+ *  addition of floating-point types). Results for pseudo-associative
+ *  operators may vary from run to run.
  *
  *  The algorithm's execution is parallelized as determined by \p exec.
  *
@@ -111,14 +111,14 @@ __host__ __device__
  *  When the input and output sequences are the same, the scan is performed
  *  in-place.
  *
- *  Note that currently mixing scan input and output types can cause undefined behaviour.
- *  This issue can be avoided by casting the input iterators to match the appropriate output type
- *  via transform_iterator().
- *
  *  \p inclusive_scan is similar to \c std::partial_sum in the STL.  The primary
  *  difference between the two functions is that \c std::partial_sum guarantees
  *  a serial summation order, while \p inclusive_scan requires associativity of
  *  the binary operation to parallelize the prefix sum.
+ *
+ *  Results are not deterministic for pseudo-associative operators (e.g.,
+ *  addition of floating-point types). Results for pseudo-associative
+ *  operators may vary from run to run.
  *
  *  \param first The beginning of the input sequence.
  *  \param last The end of the input sequence.
@@ -168,9 +168,9 @@ template<typename InputIterator,
  *  a serial summation order, while \p inclusive_scan requires associativity of
  *  the binary operation to parallelize the prefix sum.
  *
- *  Note that currently mixing scan input and output types can cause undefined behaviour.
- *  This issue can be avoided by casting the input iterators to match the appropriate output type
- *  via transform_iterator().
+ *  Results are not deterministic for pseudo-associative operators (e.g.,
+ *  addition of floating-point types). Results for pseudo-associative
+ *  operators may vary from run to run.
  *
  *  The algorithm's execution is parallelized as determined by \p exec.
  *
@@ -232,9 +232,9 @@ __host__ __device__
  *  a serial summation order, while \p inclusive_scan requires associativity of
  *  the binary operation to parallelize the prefix sum.
  *
- *  Note that currently mixing scan input and output types can cause undefined behaviour.
- *  This issue can be avoided by casting the input iterators to match the appropriate output type
- *  via transform_iterator().
+ *  Results are not deterministic for pseudo-associative operators (e.g.,
+ *  addition of floating-point types). Results for pseudo-associative
+ *  operators may vary from run to run.
  *
  *  \param first The beginning of the input sequence.
  *  \param last The end of the input sequence.
@@ -287,8 +287,9 @@ template<typename InputIterator,
  *  associative operator and \c 0 as the initial value.  When the input and
  *  output sequences are the same, the scan is performed in-place.
  *
- *  Note that currently mixing scan input and output types can cause undefined behaviour.
- *  This issue can be avoided by supplying an initial value type argument to exclusive_scan.
+ *  Results are not deterministic for pseudo-associative operators (e.g.,
+ *  addition of floating-point types). Results for pseudo-associative
+ *  operators may vary from run to run.
  *
  *  The algorithm's execution is parallelized as determined by \p exec.
  *
@@ -346,8 +347,9 @@ __host__ __device__
  *  associative operator and \c 0 as the initial value.  When the input and
  *  output sequences are the same, the scan is performed in-place.
  *
- *  Note that currently mixing scan input and output types can cause undefined behaviour.
- *  This issue can be avoided by supplying an initial value type argument to \p exclusive_scan.
+ *  Results are not deterministic for pseudo-associative operators (e.g.,
+ *  addition of floating-point types). Results for pseudo-associative
+ *  operators may vary from run to run.
  *
  *  \param first The beginning of the input sequence.
  *  \param last The end of the input sequence.
@@ -395,8 +397,9 @@ template<typename InputIterator,
  *  operator but requires an initial value \p init.  When the input and
  *  output sequences are the same, the scan is performed in-place.
  *
- *  Note that currently mixing scan input and output types can cause undefined behaviour.
- *  This issue can be avoided by supplying an initial value type argument to \p exclusive_scan.
+ *  Results are not deterministic for pseudo-associative operators (e.g.,
+ *  addition of floating-point types). Results for pseudo-associative
+ *  operators may vary from run to run.
  *
  *  The algorithm's execution is parallelized as determined by \p exec.
  *
@@ -455,8 +458,9 @@ __host__ __device__
  *  operator but requires an initial value \p init.  When the input and
  *  output sequences are the same, the scan is performed in-place.
  *
- *  Note that currently mixing scan input and output types can cause undefined behaviour.
- *  This issue can be avoided by supplying an initial value type argument to \p exclusive_scan.
+ *  Results are not deterministic for pseudo-associative operators (e.g.,
+ *  addition of floating-point types). Results for pseudo-associative
+ *  operators may vary from run to run.
  *
  *  \param first The beginning of the input sequence.
  *  \param last The end of the input sequence.
@@ -506,8 +510,9 @@ template<typename InputIterator,
  *  operator and an initial value \p init.  When the input and output
  *  sequences are the same, the scan is performed in-place.
  *
- *  Note that currently mixing scan input and output types can cause undefined behaviour.
- *  This issue can be avoided by supplying an initial value type argument to \p exclusive_scan.
+ *  Results are not deterministic for pseudo-associative operators (e.g.,
+ *  addition of floating-point types). Results for pseudo-associative
+ *  operators may vary from run to run.
  *
  *  The algorithm's execution is parallelized as determined by \p exec.
  *
@@ -577,8 +582,9 @@ __host__ __device__
  *  operator and an initial value \p init.  When the input and output
  *  sequences are the same, the scan is performed in-place.
  *
- *  Note that currently mixing scan input and output types can cause undefined behaviour.
- *  This issue can be avoided by supplying an initial value type argument to \p exclusive_scan.
+ *  Results are not deterministic for pseudo-associative operators (e.g.,
+ *  addition of floating-point types). Results for pseudo-associative
+ *  operators may vary from run to run.
  *
  *  \param first The beginning of the input sequence.
  *  \param last The end of the input sequence.
@@ -652,6 +658,10 @@ template<typename InputIterator,
  *  operator used to perform the prefix sum. When the input and output sequences
  *  are the same, the scan is performed in-place.
  *
+ *  Results are not deterministic for pseudo-associative operators (e.g.,
+ *  addition of floating-point types). Results for pseudo-associative
+ *  operators may vary from run to run.
+ *
  *  The algorithm's execution is parallelized as determined by \p exec.
  *
  *  \param exec The execution policy to use for parallelization.
@@ -721,6 +731,10 @@ __host__ __device__
  *  operator used to perform the prefix sum. When the input and output sequences
  *  are the same, the scan is performed in-place.
  *
+ *  Results are not deterministic for pseudo-associative operators (e.g.,
+ *  addition of floating-point types). Results for pseudo-associative
+ *  operators may vary from run to run.
+ *
  *  \param first1 The beginning of the key sequence.
  *  \param last1 The end of the key sequence.
  *  \param first2 The beginning of the input value sequence.
@@ -780,7 +794,11 @@ template<typename InputIterator1,
  *  operator used to perform the prefix sum. When the input and output sequences
  *  are the same, the scan is performed in-place.
  *
- *  The algorithm's execution is parallelized as determined by \p exec.
+ *  Results are not deterministic for pseudo-associative operators (e.g.,
+ *  addition of floating-point types). Results for pseudo-associative
+ *  operators may vary from run to run.
+ *
+ *  The algorithm's execution is parallelized as determined by \p exec. 
  *
  *  \param exec The execution policy to use for parallelization.
  *  \param first1 The beginning of the key sequence.
@@ -856,6 +874,10 @@ __host__ __device__
  *  operator used to perform the prefix sum. When the input and output sequences
  *  are the same, the scan is performed in-place.
  *
+ *  Results are not deterministic for pseudo-associative operators (e.g.,
+ *  addition of floating-point types). Results for pseudo-associative
+ *  operators may vary from run to run.
+ *
  *  \param first1 The beginning of the key sequence.
  *  \param last1 The end of the key sequence.
  *  \param first2 The beginning of the input value sequence.
@@ -921,6 +943,10 @@ template<typename InputIterator1,
  *  This version of \p inclusive_scan_by_key uses the associative operator
  *  \c binary_op to perform the prefix sum. When the input and output sequences
  *  are the same, the scan is performed in-place.
+ *
+ *  Results are not deterministic for pseudo-associative operators (e.g.,
+ *  addition of floating-point types). Results for pseudo-associative
+ *  operators may vary from run to run.
  *
  *  The algorithm's execution is parallelized as determined by \p exec.
  *
@@ -1001,7 +1027,11 @@ __host__ __device__
  *  belong to the same segment if <tt>binary_pred(*i, *(i+1))</tt> is true, and belong to
  *  different segments otherwise.
  *
- *  This version of \p inclusive_scan_by_key uses the associative operator
+ *  Results are not deterministic for pseudo-associative operators (e.g.,
+ *  addition of floating-point types). Results for pseudo-associative
+ *  operators may vary from run to run.
+ *
+ *  This version of \p inclusive_scan_by_key uses the associative operator 
  *  \c binary_op to perform the prefix sum. When the input and output sequences
  *  are the same, the scan is performed in-place.
  *
@@ -1076,6 +1106,10 @@ template<typename InputIterator1,
  *  belong to the same segment if <tt>*i == *(i+1)</tt>, and belong to
  *  different segments otherwise.
  *
+ *  Results are not deterministic for pseudo-associative operators (e.g.,
+ *  addition of floating-point types). Results for pseudo-associative
+ *  operators may vary from run to run.
+ *
  *  Refer to the most general form of \p exclusive_scan_by_key for additional details.
  *
  *  The algorithm's execution is parallelized as determined by \p exec.
@@ -1135,6 +1169,10 @@ __host__ __device__
  *  belong to the same segment if <tt>*i == *(i+1)</tt>, and belong to
  *  different segments otherwise.
  *
+ *  Results are not deterministic for pseudo-associative operators (e.g.,
+ *  addition of floating-point types). Results for pseudo-associative
+ *  operators may vary from run to run.
+ *
  *  Refer to the most general form of \p exclusive_scan_by_key for additional details.
  *
  *  \param first1 The beginning of the key sequence.
@@ -1179,6 +1217,10 @@ template<typename InputIterator1,
  *
  *  This version of \p exclusive_scan_by_key uses the value \c init to
  *  initialize the exclusive scan operation.
+ *
+ *  Results are not deterministic for pseudo-associative operators (e.g.,
+ *  addition of floating-point types). Results for pseudo-associative
+ *  operators may vary from run to run.
  *
  *  The algorithm's execution is parallelized as determined by \p exec.
  *
@@ -1240,6 +1282,10 @@ __host__ __device__
  *  This version of \p exclusive_scan_by_key uses the value \c init to
  *  initialize the exclusive scan operation.
  *
+ *  Results are not deterministic for pseudo-associative operators (e.g.,
+ *  addition of floating-point types). Results for pseudo-associative
+ *  operators may vary from run to run.
+ *
  *  \param first1 The beginning of the key sequence.
  *  \param last1 The end of the key sequence.
  *  \param first2 The beginning of the input value sequence.
@@ -1295,6 +1341,10 @@ template<typename InputIterator1,
  *  to compare adjacent keys.  Specifically, consecutive iterators <tt>i</tt> and
  *  <tt>i+1</tt> in the range <tt>[first1, last1)</tt> belong to the same segment if
  *  <tt>binary_pred(*i, *(i+1))</tt> is true, and belong to different segments otherwise.
+ *
+ *  Results are not deterministic for pseudo-associative operators (e.g.,
+ *  addition of floating-point types). Results for pseudo-associative
+ *  operators may vary from run to run.
  *
  *  The algorithm's execution is parallelized as determined by \p exec.
  *
@@ -1366,6 +1416,10 @@ __host__ __device__
  *  <tt>i+1</tt> in the range <tt>[first1, last1)</tt> belong to the same segment if
  *  <tt>binary_pred(*i, *(i+1))</tt> is true, and belong to different segments otherwise.
  *
+ *  Results are not deterministic for pseudo-associative operators (e.g.,
+ *  addition of floating-point types). Results for pseudo-associative
+ *  operators may vary from run to run.
+ *
  *  \param first1 The beginning of the key sequence.
  *  \param last1 The end of the key sequence.
  *  \param first2 The beginning of the input value sequence.
@@ -1430,6 +1484,10 @@ template<typename InputIterator1,
  *  This version of \p exclusive_scan_by_key uses the associative operator
  *  \c binary_op to perform the prefix sum. When the input and output sequences
  *  are the same, the scan is performed in-place.
+ *
+ *  Results are not deterministic for pseudo-associative operators (e.g.,
+ *  addition of floating-point types). Results for pseudo-associative
+ *  operators may vary from run to run.
  *
  *  The algorithm's execution is parallelized as determined by \p exec.
  *
@@ -1520,6 +1578,10 @@ __host__ __device__
  *  This version of \p exclusive_scan_by_key uses the associative operator
  *  \c binary_op to perform the prefix sum. When the input and output sequences
  *  are the same, the scan is performed in-place.
+ *
+ *  Results are not deterministic for pseudo-associative operators (e.g.,
+ *  addition of floating-point types). Results for pseudo-associative
+ *  operators may vary from run to run.
  *
  *  \param first1 The beginning of the key sequence.
  *  \param last1 The end of the key sequence.

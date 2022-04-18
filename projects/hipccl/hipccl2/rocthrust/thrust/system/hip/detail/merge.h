@@ -125,7 +125,10 @@ namespace __merge
                                                    stream,
                                                    debug_sync),
                                     "merge failed on 2nd step");
-
+        hip_rocprim::throw_on_error(
+            hip_rocprim::synchronize_optional(policy),
+            "merge: failed to synchronize"
+        );
 
         ResultIt result_end = result + input1_size + input2_size;
         return result_end;
@@ -205,6 +208,10 @@ namespace __merge
                 stream,
                 debug_sync),
             "merge_by_key failed on 2nd step");
+        hip_rocprim::throw_on_error(
+            hip_rocprim::synchronize_optional(policy),
+            "merge: failed to synchronize"
+        );
 
         size_t count = input1_size + input2_size;
         return thrust::make_pair(keys_result + count, items_result + count);

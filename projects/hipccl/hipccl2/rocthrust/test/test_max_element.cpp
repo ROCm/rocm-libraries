@@ -26,6 +26,7 @@ TESTS_DEFINE(MaxElementPrimitiveTests, NumericalTestsParams);
 TYPED_TEST(MaxElementTests, TestMaxElementSimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -38,17 +39,18 @@ TYPED_TEST(MaxElementTests, TestMaxElementSimple)
     data[4] = 5;
     data[5] = 1;
 
-    ASSERT_EQ(*thrust::max_element(data.begin(), data.end()), 5);
-    ASSERT_EQ(thrust::max_element(data.begin(), data.end()) - data.begin(), 1);
+    ASSERT_EQ(*thrust::max_element(Policy{}, data.begin(), data.end()), 5);
+    ASSERT_EQ(thrust::max_element(Policy{}, data.begin(), data.end()) - data.begin(), 1);
 
-    ASSERT_EQ(*thrust::max_element(data.begin(), data.end(), thrust::greater<T>()), 1);
-    ASSERT_EQ(thrust::max_element(data.begin(), data.end(), thrust::greater<T>()) - data.begin(),
+    ASSERT_EQ(*thrust::max_element(Policy{}, data.begin(), data.end(), thrust::greater<T>()), 1);
+    ASSERT_EQ(thrust::max_element(Policy{}, data.begin(), data.end(), thrust::greater<T>()) - data.begin(),
               2);
 }
 
 TYPED_TEST(MaxElementTests, TestMaxElementWithTransform)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -66,11 +68,13 @@ TYPED_TEST(MaxElementTests, TestMaxElementWithTransform)
     data[5] = 1;
 
     ASSERT_EQ(
-        *thrust::max_element(thrust::make_transform_iterator(data.begin(), thrust::negate<T>()),
+        *thrust::max_element(Policy{},
+                             thrust::make_transform_iterator(data.begin(), thrust::negate<T>()),
                              thrust::make_transform_iterator(data.end(), thrust::negate<T>())),
         -1);
     ASSERT_EQ(
-        *thrust::max_element(thrust::make_transform_iterator(data.begin(), thrust::negate<T>()),
+        *thrust::max_element(Policy{},
+                             thrust::make_transform_iterator(data.begin(), thrust::negate<T>()),
                              thrust::make_transform_iterator(data.end(), thrust::negate<T>()),
                              thrust::greater<T>()),
         -5);

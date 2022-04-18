@@ -29,6 +29,7 @@ TESTS_DEFINE(AdjacentDifferenceVariableTests, NumericalTestsParams);
 TYPED_TEST(AdjacentDifferenceTests, TestAdjacentDifferenceSimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -39,7 +40,7 @@ TYPED_TEST(AdjacentDifferenceTests, TestAdjacentDifferenceSimple)
 
     typename Vector::iterator result;
 
-    result = thrust::adjacent_difference(input.begin(), input.end(), output.begin());
+    result = thrust::adjacent_difference(Policy{}, input.begin(), input.end(), output.begin());
 
     ASSERT_EQ(result - output.begin(), 3);
     ASSERT_EQ(output[0], T(1));
@@ -47,7 +48,7 @@ TYPED_TEST(AdjacentDifferenceTests, TestAdjacentDifferenceSimple)
     ASSERT_EQ(output[2], T(2));
 
     result = thrust::adjacent_difference(
-        input.begin(), input.end(), output.begin(), thrust::plus<T>());
+        Policy{}, input.begin(), input.end(), output.begin(), thrust::plus<T>());
 
     ASSERT_EQ(result - output.begin(), 3);
     ASSERT_EQ(output[0], T(1));
@@ -55,7 +56,7 @@ TYPED_TEST(AdjacentDifferenceTests, TestAdjacentDifferenceSimple)
     ASSERT_EQ(output[2], T(10));
 
     // test in-place operation, result and first are permitted to be the same
-    result = thrust::adjacent_difference(input.begin(), input.end(), input.begin());
+    result = thrust::adjacent_difference(Policy{}, input.begin(), input.end(), input.begin());
 
     ASSERT_EQ(result - input.begin(), 3);
     ASSERT_EQ(input[0], T(1));

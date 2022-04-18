@@ -169,6 +169,7 @@ void initialize_values(Vector& values)
 TYPED_TEST(UniqueByKeyTests, TestUniqueByKeySimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -182,7 +183,7 @@ TYPED_TEST(UniqueByKeyTests, TestUniqueByKeySimple)
     initialize_keys(keys);
     initialize_values(values);
 
-    new_last = thrust::unique_by_key(keys.begin(), keys.end(), values.begin());
+    new_last = thrust::unique_by_key(Policy{}, keys.begin(), keys.end(), values.begin());
 
     ASSERT_EQ(new_last.first - keys.begin(), 5);
     ASSERT_EQ(new_last.second - values.begin(), 5);
@@ -203,7 +204,7 @@ TYPED_TEST(UniqueByKeyTests, TestUniqueByKeySimple)
     initialize_values(values);
 
     new_last = thrust::unique_by_key(
-        keys.begin(), keys.end(), values.begin(), is_equal_div_10_unique<T>());
+        Policy{}, keys.begin(), keys.end(), values.begin(), is_equal_div_10_unique<T>());
 
     ASSERT_EQ(new_last.first - keys.begin(), 3);
     ASSERT_EQ(new_last.second - values.begin(), 3);
@@ -219,6 +220,7 @@ TYPED_TEST(UniqueByKeyTests, TestUniqueByKeySimple)
 TYPED_TEST(UniqueByKeyTests, TestUniqueCopyByKeySimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -236,7 +238,7 @@ TYPED_TEST(UniqueByKeyTests, TestUniqueCopyByKeySimple)
     Vector output_values(values.size());
 
     new_last = thrust::unique_by_key_copy(
-        keys.begin(), keys.end(), values.begin(), output_keys.begin(), output_values.begin());
+        Policy{}, keys.begin(), keys.end(), values.begin(), output_keys.begin(), output_values.begin());
 
     ASSERT_EQ(new_last.first - output_keys.begin(), 5);
     ASSERT_EQ(new_last.second - output_values.begin(), 5);
@@ -256,7 +258,8 @@ TYPED_TEST(UniqueByKeyTests, TestUniqueCopyByKeySimple)
     initialize_keys(keys);
     initialize_values(values);
 
-    new_last = thrust::unique_by_key_copy(keys.begin(),
+    new_last = thrust::unique_by_key_copy(Policy{},
+                                          keys.begin(),
                                           keys.end(),
                                           values.begin(),
                                           output_keys.begin(),

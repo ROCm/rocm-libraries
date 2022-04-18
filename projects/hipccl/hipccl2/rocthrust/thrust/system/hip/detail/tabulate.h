@@ -76,11 +76,6 @@ tabulate(execution_policy<Derived>& policy,
     hip_rocprim::parallel_for(policy,
                               functor_t(first, tabulate_op),
                               count);
-
-    hip_rocprim::throw_on_error(
-        hip_rocprim::synchronize(policy),
-        "tabulate: failed to synchronize"
-    );
 }
 
 } // namespace hip_rocprim

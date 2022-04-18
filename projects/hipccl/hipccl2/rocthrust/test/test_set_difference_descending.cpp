@@ -27,6 +27,7 @@ TESTS_DEFINE(SetDifferenceDescendingPrimitiveTests, NumericalTestsParams);
 TYPED_TEST(SetDifferenceDescendingTests, TestSetDifferenceDescendingSimple)
 {
     using Vector   = typename TestFixture::input_type;
+    using Policy   = typename TestFixture::execution_policy;
     using T        = typename Vector::value_type;
     using Iterator = typename Vector::iterator;
 
@@ -51,7 +52,7 @@ TYPED_TEST(SetDifferenceDescendingTests, TestSetDifferenceDescendingSimple)
     Vector result(2);
 
     Iterator end = thrust::set_difference(
-        a.begin(), a.end(), b.begin(), b.end(), result.begin(), thrust::greater<T>());
+        Policy{}, a.begin(), a.end(), b.begin(), b.end(), result.begin(), thrust::greater<T>());
 
     EXPECT_EQ(result.end(), end);
     ASSERT_EQ(ref, result);

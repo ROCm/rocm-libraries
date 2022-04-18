@@ -130,6 +130,7 @@ TYPED_TEST(TransformTests, BinaryTransform)
 TYPED_TEST(TransformVectorTests, TestTransformUnarySimple)
 {
     using Vector   = typename TestFixture::input_type;
+    using Policy   = typename TestFixture::execution_policy;
     using T        = typename Vector::value_type;
     using Iterator = typename Vector::iterator;
 
@@ -147,7 +148,7 @@ TYPED_TEST(TransformVectorTests, TestTransformUnarySimple)
     result[1] = T(2);
     result[2] = T(-3);
 
-    iter = thrust::transform(input.begin(), input.end(), output.begin(), thrust::negate<T>());
+    iter = thrust::transform(Policy{}, input.begin(), input.end(), output.begin(), thrust::negate<T>());
 
     ASSERT_EQ(iter - output.begin(), input.size());
     ASSERT_EQ(output, result);
@@ -198,6 +199,7 @@ TEST(TransformVectorTests, TestTransformUnaryDispatchImplicit)
 TYPED_TEST(TransformVectorTests, TestTransformIfUnaryNoStencilSimple)
 {
     using Vector   = typename TestFixture::input_type;
+    using Policy   = typename TestFixture::execution_policy;
     using T        = typename Vector::value_type;
     using Iterator = typename Vector::iterator;
 
@@ -220,7 +222,7 @@ TYPED_TEST(TransformVectorTests, TestTransformIfUnaryNoStencilSimple)
     result[2] = T(-3);
 
     iter = thrust::transform_if(
-        input.begin(), input.end(), output.begin(), thrust::negate<T>(), thrust::identity<T>());
+        Policy{}, input.begin(), input.end(), output.begin(), thrust::negate<T>(), thrust::identity<T>());
 
     ASSERT_EQ(iter - output.begin(), input.size());
     ASSERT_EQ(output, result);
@@ -282,6 +284,7 @@ TEST(TransformVectorTests, TestTransformIfUnaryNoStencilDispatchImplicit)
 TYPED_TEST(TransformVectorTests, TestTransformIfUnarySimple)
 {
     using Vector   = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T        = typename Vector::value_type;
     using Iterator = typename Vector::iterator;
 
@@ -307,7 +310,8 @@ TYPED_TEST(TransformVectorTests, TestTransformIfUnarySimple)
     result[1]  = T(2);
     result[2]  = T(-3);
 
-    iter = thrust::transform_if(input.begin(),
+    iter = thrust::transform_if(Policy{},
+                                input.begin(),
                                 input.end(),
                                 stencil.begin(),
                                 output.begin(),
@@ -376,6 +380,7 @@ TEST(TransformVectorTests, TestTransformIfUnaryDispatchImplicit)
 TYPED_TEST(TransformVectorTests, TestTransformBinarySimple)
 {
     using Vector   = typename TestFixture::input_type;
+    using Policy   = typename TestFixture::execution_policy;
     using T        = typename Vector::value_type;
     using Iterator = typename Vector::iterator;
 
@@ -398,7 +403,7 @@ TYPED_TEST(TransformVectorTests, TestTransformBinarySimple)
     result[2] = T(-3);
 
     iter = thrust::transform(
-        input1.begin(), input1.end(), input2.begin(), output.begin(), thrust::minus<T>());
+        Policy{}, input1.begin(), input1.end(), input2.begin(), output.begin(), thrust::minus<T>());
 
     ASSERT_EQ(iter - output.begin(), input1.size());
     ASSERT_EQ(output, result);
@@ -460,6 +465,7 @@ TEST(TransformVectorTests, TestTransformBinaryDispatchImplicit)
 TYPED_TEST(TransformVectorTests, TestTransformIfBinarySimple)
 {
     using Vector   = typename TestFixture::input_type;
+    using Policy   = typename TestFixture::execution_policy;
     using T        = typename Vector::value_type;
     using Iterator = typename Vector::iterator;
 
@@ -491,7 +497,8 @@ TYPED_TEST(TransformVectorTests, TestTransformIfBinarySimple)
 
     thrust::identity<T> identity;
 
-    iter = thrust::transform_if(input1.begin(),
+    iter = thrust::transform_if(Policy{},
+                                input1.begin(),
                                 input1.end(),
                                 input2.begin(),
                                 stencil.begin(),
@@ -1189,6 +1196,7 @@ struct plus_mod3
 TYPED_TEST(TransformVectorTests, TestTransformWithIndirection)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -1219,7 +1227,8 @@ TYPED_TEST(TransformVectorTests, TestTransformWithIndirection)
     table[4] = T(1);
     table[5] = T(2);
 
-    thrust::transform(input1.begin(),
+    thrust::transform(Policy{},
+                      input1.begin(),
                       input1.end(),
                       input2.begin(),
                       output.begin(),

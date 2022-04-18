@@ -103,6 +103,10 @@ namespace __scan_by_key
                                                                    debug_sync),
                                     "scan_by_key failed on 2nd step");
 
+        hip_rocprim::throw_on_error(
+            hip_rocprim::synchronize_optional(policy),
+            "inclusive_scan_by_key: failed to synchronize"
+        );
         return value_result + num_items;
     }
 
@@ -167,6 +171,10 @@ namespace __scan_by_key
                                                                    debug_sync),
                                     "scan_by_key failed on 2nd step");
 
+        hip_rocprim::throw_on_error(
+            hip_rocprim::synchronize_optional(policy),
+            "exclusive_scan_by_key: failed to synchronize"
+        );
         return value_result + num_items;
     }
 } // namspace scan_by_key

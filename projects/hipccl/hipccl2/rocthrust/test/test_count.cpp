@@ -30,6 +30,7 @@ TESTS_DEFINE(CountPrimitiveTests, NumericalTestsParams);
 TYPED_TEST(CountTests, TestCountSimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -41,9 +42,9 @@ TYPED_TEST(CountTests, TestCountSimple)
     data[3] = T(0);
     data[4] = T(1);
 
-    ASSERT_EQ(thrust::count(data.begin(), data.end(), T(0)), 2);
-    ASSERT_EQ(thrust::count(data.begin(), data.end(), T(1)), 3);
-    ASSERT_EQ(thrust::count(data.begin(), data.end(), T(2)), 0);
+    ASSERT_EQ(thrust::count(Policy{}, data.begin(), data.end(), T(0)), 2);
+    ASSERT_EQ(thrust::count(Policy{}, data.begin(), data.end(), T(1)), 3);
+    ASSERT_EQ(thrust::count(Policy{}, data.begin(), data.end(), T(2)), 0);
 }
 
 TYPED_TEST(CountPrimitiveTests, TestCount)
@@ -84,6 +85,7 @@ struct greater_than_five
 TYPED_TEST(CountTests, TestCountIfSimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -95,7 +97,7 @@ TYPED_TEST(CountTests, TestCountIfSimple)
     data[3] = 9;
     data[4] = 2;
 
-    ASSERT_EQ(thrust::count_if(data.begin(), data.end(), greater_than_five<T>()), 2);
+    ASSERT_EQ(thrust::count_if(Policy{}, data.begin(), data.end(), greater_than_five<T>()), 2);
 }
 
 TYPED_TEST(CountTests, TestCountIf)
@@ -129,6 +131,7 @@ TYPED_TEST(CountTests, TestCountIf)
 TYPED_TEST(CountTests, TestCountFromConstIteratorSimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -140,9 +143,9 @@ TYPED_TEST(CountTests, TestCountFromConstIteratorSimple)
     data[3] = T(0);
     data[4] = T(1);
 
-    ASSERT_EQ(thrust::count(data.cbegin(), data.cend(), T(0)), 2);
-    ASSERT_EQ(thrust::count(data.cbegin(), data.cend(), T(1)), 3);
-    ASSERT_EQ(thrust::count(data.cbegin(), data.cend(), T(2)), 0);
+    ASSERT_EQ(thrust::count(Policy{}, data.cbegin(), data.cend(), T(0)), 2);
+    ASSERT_EQ(thrust::count(Policy{}, data.cbegin(), data.cend(), T(1)), 3);
+    ASSERT_EQ(thrust::count(Policy{}, data.cbegin(), data.cend(), T(2)), 0);
 }
 
 template <typename InputIterator, typename EqualityComparable>

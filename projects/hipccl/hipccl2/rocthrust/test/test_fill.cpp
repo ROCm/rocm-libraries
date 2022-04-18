@@ -31,6 +31,7 @@ TESTS_DEFINE(FillPrimitiveTests, NumericalTestsParams);
 TYPED_TEST(FillTests, TestFillSimple)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -42,7 +43,7 @@ TYPED_TEST(FillTests, TestFillSimple)
     v[3] = T(3);
     v[4] = T(4);
 
-    thrust::fill(v.begin() + 1, v.begin() + 4, T(7));
+    thrust::fill(Policy{}, v.begin() + 1, v.begin() + 4, T(7));
 
     ASSERT_EQ(v[0], T(0));
     ASSERT_EQ(v[1], T(7));
@@ -50,7 +51,7 @@ TYPED_TEST(FillTests, TestFillSimple)
     ASSERT_EQ(v[3], T(7));
     ASSERT_EQ(v[4], T(4));
 
-    thrust::fill(v.begin() + 0, v.begin() + 3, T(8));
+    thrust::fill(Policy{}, v.begin() + 0, v.begin() + 3, T(8));
 
     ASSERT_EQ(v[0], T(8));
     ASSERT_EQ(v[1], T(8));
@@ -58,7 +59,7 @@ TYPED_TEST(FillTests, TestFillSimple)
     ASSERT_EQ(v[3], T(7));
     ASSERT_EQ(v[4], T(4));
 
-    thrust::fill(v.begin() + 2, v.end(), T(9));
+    thrust::fill(Policy{}, v.begin() + 2, v.end(), T(9));
 
     ASSERT_EQ(v[0], T(8));
     ASSERT_EQ(v[1], T(8));
@@ -66,7 +67,7 @@ TYPED_TEST(FillTests, TestFillSimple)
     ASSERT_EQ(v[3], T(9));
     ASSERT_EQ(v[4], T(9));
 
-    thrust::fill(v.begin(), v.end(), T(1));
+    thrust::fill(Policy{}, v.begin(), v.end(), T(1));
 
     ASSERT_EQ(v[0], T(1));
     ASSERT_EQ(v[1], T(1));
@@ -92,20 +93,21 @@ TEST(FillTests, TestFillDiscardIterator)
 TYPED_TEST(FillTests, TestFillMixedTypes)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     Vector v(4);
 
-    thrust::fill(v.begin(), v.end(), (long)10);
+    thrust::fill(Policy{}, v.begin(), v.end(), (long)10);
 
     ASSERT_EQ(v[0], T(10));
     ASSERT_EQ(v[1], T(10));
     ASSERT_EQ(v[2], T(10));
     ASSERT_EQ(v[3], T(10));
 
-    thrust::fill(v.begin(), v.end(), (float)20);
+    thrust::fill(Policy{}, v.begin(), v.end(), (float)20);
 
     ASSERT_EQ(v[0], T(20));
     ASSERT_EQ(v[1], T(20));
@@ -175,6 +177,7 @@ TYPED_TEST(FillPrimitiveTests, TestFill)
 TYPED_TEST(FillTests, TestFillNSimple)
 {
     using Vector   = typename TestFixture::input_type;
+    using Policy   = typename TestFixture::execution_policy;
     using T        = typename Vector::value_type;
     using Iterator = typename Vector::iterator;
 
@@ -187,7 +190,7 @@ TYPED_TEST(FillTests, TestFillNSimple)
     v[3] = T(3);
     v[4] = T(4);
 
-    Iterator iter = thrust::fill_n(v.begin() + 1, 3, T(7));
+    Iterator iter = thrust::fill_n(Policy{}, v.begin() + 1, 3, T(7));
 
     ASSERT_EQ(v[0], T(0));
     ASSERT_EQ(v[1], T(7));
@@ -196,7 +199,7 @@ TYPED_TEST(FillTests, TestFillNSimple)
     ASSERT_EQ(v[4], T(4));
     ASSERT_EQ_QUIET(v.begin() + 4, iter);
 
-    iter = thrust::fill_n(v.begin() + 0, 3, T(8));
+    iter = thrust::fill_n(Policy{}, v.begin() + 0, 3, T(8));
 
     ASSERT_EQ(v[0], T(8));
     ASSERT_EQ(v[1], T(8));
@@ -205,7 +208,7 @@ TYPED_TEST(FillTests, TestFillNSimple)
     ASSERT_EQ(v[4], T(4));
     ASSERT_EQ_QUIET(v.begin() + 3, iter);
 
-    iter = thrust::fill_n(v.begin() + 2, 3, T(9));
+    iter = thrust::fill_n(Policy{}, v.begin() + 2, 3, T(9));
 
     ASSERT_EQ(v[0], T(8));
     ASSERT_EQ(v[1], T(8));
@@ -214,7 +217,7 @@ TYPED_TEST(FillTests, TestFillNSimple)
     ASSERT_EQ(v[4], T(9));
     ASSERT_EQ_QUIET(v.end(), iter);
 
-    iter = thrust::fill_n(v.begin(), v.size(), T(1));
+    iter = thrust::fill_n(Policy{}, v.begin(), v.size(), T(1));
 
     ASSERT_EQ(v[0], T(1));
     ASSERT_EQ(v[1], T(1));
@@ -243,6 +246,7 @@ TEST(FillTests, TestFillNDiscardIterator)
 TYPED_TEST(FillTests, TestFillNMixedTypes)
 {
     using Vector   = typename TestFixture::input_type;
+    using Policy   = typename TestFixture::execution_policy;
     using T        = typename Vector::value_type;
     using Iterator = typename Vector::iterator;
 
@@ -250,7 +254,7 @@ TYPED_TEST(FillTests, TestFillNMixedTypes)
 
     Vector v(4);
 
-    Iterator iter = thrust::fill_n(v.begin(), v.size(), (long)10);
+    Iterator iter = thrust::fill_n(Policy{}, v.begin(), v.size(), (long)10);
 
     ASSERT_EQ(v[0], T(10));
     ASSERT_EQ(v[1], T(10));
@@ -258,7 +262,7 @@ TYPED_TEST(FillTests, TestFillNMixedTypes)
     ASSERT_EQ(v[3], T(10));
     ASSERT_EQ_QUIET(v.end(), iter);
 
-    iter = thrust::fill_n(v.begin(), v.size(), (float)20);
+    iter = thrust::fill_n(Policy{}, v.begin(), v.size(), (float)20);
 
     ASSERT_EQ(v[0], T(20));
     ASSERT_EQ(v[1], T(20));
@@ -327,6 +331,7 @@ TYPED_TEST(FillPrimitiveTests, TestFillN)
 TYPED_TEST(FillTests, TestFillZipIterator)
 {
     using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
 
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -335,7 +340,8 @@ TYPED_TEST(FillTests, TestFillZipIterator)
     Vector v2(3, T(0));
     Vector v3(3, T(0));
 
-    thrust::fill(thrust::make_zip_iterator(thrust::make_tuple(v1.begin(), v2.begin(), v3.begin())),
+    thrust::fill(Policy{},
+                 thrust::make_zip_iterator(thrust::make_tuple(v1.begin(), v2.begin(), v3.begin())),
                  thrust::make_zip_iterator(thrust::make_tuple(v1.end(), v2.end(), v3.end())),
                  thrust::tuple<T, T, T>(4, 7, 13));
 
