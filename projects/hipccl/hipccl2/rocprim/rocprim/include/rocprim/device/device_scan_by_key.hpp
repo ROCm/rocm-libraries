@@ -26,7 +26,7 @@
 #include "detail/ordered_block_id.hpp"
 
 #include "config_types.hpp"
-#include "device_scan_config.hpp"
+#include "device_scan_by_key_config.hpp"
 
 #include "../config.hpp"
 #include "../detail/various.hpp"
@@ -391,19 +391,20 @@ inline hipError_t inclusive_scan_by_key(void* const                temporary_sto
                                         const hipStream_t stream            = 0,
                                         const bool        debug_synchronous = false)
 {
-    using input_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
+    using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
+    using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
 
     // Get default config if Config is default_config
     using config = detail::default_or_custom_config<
         Config,
-        detail::default_scan_config<ROCPRIM_TARGET_ARCH, input_type>>;
+        detail::default_scan_by_key_config<ROCPRIM_TARGET_ARCH, key_type, value_type>>;
 
     return detail::scan_by_key_impl<false, config>(temporary_storage,
                                                    storage_size,
                                                    keys_input,
                                                    values_input,
                                                    values_output,
-                                                   input_type(),
+                                                   value_type(),
                                                    size,
                                                    scan_op,
                                                    key_compare_op,
@@ -527,12 +528,13 @@ inline hipError_t exclusive_scan_by_key(void* const                temporary_sto
                                         const hipStream_t stream            = 0,
                                         const bool        debug_synchronous = false)
 {
+    using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
     using real_init_value_type = detail::input_type_t<InitialValueType>;
 
     // Get default config if Config is default_config
     using config = detail::default_or_custom_config<
         Config,
-        detail::default_scan_config<ROCPRIM_TARGET_ARCH, real_init_value_type>
+        detail::default_scan_by_key_config<ROCPRIM_TARGET_ARCH, key_type, real_init_value_type>
     >;
 
     return detail::scan_by_key_impl<true, config>(temporary_storage,
