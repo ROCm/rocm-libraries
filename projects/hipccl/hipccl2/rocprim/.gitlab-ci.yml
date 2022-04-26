@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -67,13 +67,13 @@ variables:
     - cd $BUILD_DIR
     - cmake
       -G Ninja
-      -D CMAKE_CXX_COMPILER=hipcc
+      -D CMAKE_CXX_COMPILER="$AMDCLANG"
       -D CMAKE_CXX_FLAGS="-Wall -Wextra -Werror"
       -D CMAKE_BUILD_TYPE=Release
       -D BUILD_TEST=ON
       -D BUILD_EXAMPLE=ON
       -D BUILD_BENCHMARK=OFF
-      -D AMDGPU_TARGETS=$GPU_TARGETS
+      -D GPU_TARGETS=$GPU_TARGETS
       -D AMDGPU_TEST_TARGETS=$GPU_TARGETS
       -S $CI_PROJECT_DIR
       -B $BUILD_DIR
@@ -86,6 +86,7 @@ variables:
     - $BUILD_DIR/test/rocprim/CTestTestfile.cmake
     - $BUILD_DIR/gtest/
     - $BUILD_DIR/CMakeCache.txt
+    - $BUILD_DIR/.ninja_log
     - $BUILD_DIR/CTestTestfile.cmake
     expire_in: 2 weeks
 
@@ -108,12 +109,13 @@ build:package:
   stage: build
   extends:
     - .cmake-minimum
+    - .gpus:rocm-gpus
   script:
     - mkdir -p $PACKAGE_DIR
     - cd $PACKAGE_DIR
     - cmake
       -G Ninja
-      -D CMAKE_CXX_COMPILER=hipcc
+      -D CMAKE_CXX_COMPILER="$AMDCLANG"
       -D CMAKE_BUILD_TYPE=Release
       -B $PACKAGE_DIR
       $CI_PROJECT_DIR
@@ -124,8 +126,9 @@ build:package:
     - mkdir -p ../package_test && cd ../package_test
     - cmake
       -G Ninja
-      -D CMAKE_CXX_COMPILER=hipcc
+      -D CMAKE_CXX_COMPILER="$AMDCLANG"
       -D CMAKE_BUILD_TYPE=Release
+      -D GPU_TARGETS=$GPU_TARGETS
       $CI_PROJECT_DIR/test/extra
     - cmake --build .
     - ./test_rocprim_package
@@ -141,28 +144,23 @@ build:benchmark:
   extends:
     - .cmake-latest
     - .gpus:rocm-gpus
-  only:
-    - ci-benchmark-extend
-    - internal_benchmark
-    - develop_stream
-    - develop
-    - master
   script:
     - mkdir build
     - cd build
     - cmake
       -G Ninja
-      -D CMAKE_CXX_COMPILER=hipcc
+      -D CMAKE_CXX_COMPILER="$AMDCLANG"
       -D CMAKE_BUILD_TYPE=Release
       -D BUILD_TEST=OFF
       -D BUILD_EXAMPLE=OFF
       -D BUILD_BENCHMARK=ON
-      -D AMDGPU_TARGETS=$GPU_TARGETS
+      -D GPU_TARGETS=$GPU_TARGETS
       ..
     - cmake --build .
   artifacts:
     paths:
       - build/benchmark/*
+      - build/.ninja_log
       - build/googlebenchmark/
     expire_in: 2 weeks
 
@@ -192,13 +190,15 @@ test:deb:
     - build:package
   extends:
     - .cmake-minimum
+    - .gpus:rocm-gpus
   script:
     - $SUDO_CMD dpkg -i $PACKAGE_DIR/rocprim*.deb
     - mkdir -p package_test && cd package_test
     - cmake
       -G Ninja
-      -D CMAKE_CXX_COMPILER=hipcc
+      -D CMAKE_CXX_COMPILER="$AMDCLANG"
       -D CMAKE_BUILD_TYPE=Release
+      -D GPU_TARGETS=$GPU_TARGETS
       $CI_PROJECT_DIR/test/extra
     - cmake --build .
     - ctest --output-on-failure --repeat-until-fail 2
@@ -214,20 +214,17 @@ test:doc:
     - cd doc
     - doxygen Doxyfile
 
-benchmark_view:
+run_benchmark:
   stage: benchmark
   extends:
     - .cmake-latest
     - .gpus:rocm
   needs:
     - build:benchmark
-  when: manual
-  only:
-    - ci-benchmark-extend
-    - internal_benchmark
-    - develop_stream
-    - develop
-    - master
+  rules:
+    - if: '$CI_PIPELINE_SOURCE != "merge_request_event"'
+      when: manual
+      allow_failure: true
   script:
     - cmake
       -D BENCHMARK_BINARY_DIR=build/benchmark

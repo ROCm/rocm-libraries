@@ -377,7 +377,7 @@ void add_sort_keys_benchmarks(std::vector<benchmark::internal::Benchmark *> &ben
                               size_t min_size,
                               size_t target_size)
 {
-    const char* name = Traits<KeyT>::name;
+    std::string name = Traits<KeyT>::name();
     for(const auto segment_count : segment_counts)
     {
         for(const auto segment_length : segment_lengths)
@@ -405,8 +405,8 @@ void add_sort_pairs_benchmarks(std::vector<benchmark::internal::Benchmark *> &be
                                size_t min_size,
                                size_t target_size)
 {
-    const char* key_name = Traits<KeyT>::name;
-    const char* value_name = Traits<ValueT>::name;
+    std::string key_name = Traits<KeyT>::name();
+    std::string value_name = Traits<ValueT>::name();
     for(const auto segment_count : segment_counts)
     {
         for(const auto segment_length : segment_lengths)
@@ -441,11 +441,10 @@ int main(int argc, char *argv[])
 
     // HIP
     hipStream_t stream = 0; // default
-    hipDeviceProp_t devProp;
-    int device_id = 0;
-    HIP_CHECK(hipGetDevice(&device_id));
-    HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
-    std::cout << "[HIP] Device name: " << devProp.name << std::endl;
+
+    // Benchmark info
+    add_common_benchmark_info();
+    benchmark::AddCustomContext("size", std::to_string(size));
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks;

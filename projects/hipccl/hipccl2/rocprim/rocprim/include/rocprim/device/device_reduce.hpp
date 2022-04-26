@@ -223,6 +223,8 @@ hipError_t reduce_impl(void * temporary_storage,
 /// if \p temporary_storage in a null pointer.
 /// * Ranges specified by \p input must have at least \p size elements, while \p output
 /// only needs one element.
+/// * By default, the input type is used for accumulation. A custom type
+/// can be specified using <tt>rocprim::transform_iterator</tt>, see the example below.
 ///
 /// \tparam Config - [optional] configuration of the primitive. It can be \p reduce_config or
 /// a custom class with the same members.
@@ -294,6 +296,42 @@ hipError_t reduce_impl(void * temporary_storage,
 /// );
 /// // output: [1]
 /// \endcode
+///
+/// The same example as above, but now a custom accumulator type is specified.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// auto min_op =
+///     [] __device__ (int a, int b) -> int
+///     {
+///         return a < b ? a : b;
+///     };
+///
+/// size_t input_size;
+/// short * input;
+/// int * output;
+/// int start_value;
+///
+/// // Use a transform iterator to specifiy a custom accumulator type
+/// auto input_iterator = rocprim::make_transform_iterator(
+///     input, [] __device__ (T in) { return static_cast<int>(in); });
+///
+/// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
+/// // Use the transform iterator
+/// rocprim::reduce(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input_iterator, output, start_value, input_size, min_op
+/// );
+///
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
+///
+/// rocprim::reduce(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input_iterator, output, start_value, input_size, min_op
+/// );
+/// \endcode
 /// \endparblock
 template<
     class Config = default_config,
@@ -333,6 +371,8 @@ hipError_t reduce(void * temporary_storage,
 /// if \p temporary_storage in a null pointer.
 /// * Ranges specified by \p input must have at least \p size elements, while \p output
 /// only needs one element.
+/// * By default, the input type is used for accumulation. A custom type
+/// can be specified using <tt>rocprim::transform_iterator</tt>, see the example below.
 ///
 /// \tparam Config - [optional] configuration of the primitive. It can be \p reduce_config or
 /// a custom class with the same members.
@@ -393,6 +433,35 @@ hipError_t reduce(void * temporary_storage,
 ///     input, output, input_size, rocprim::plus<int>()
 /// );
 /// // output: [36]
+/// \endcode
+///
+/// The same example as above, but now a custom accumulator type is specified.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// size_t input_size;
+/// short * input;
+/// int * output;
+///
+/// // Use a transform iterator to specifiy a custom accumulator type
+/// auto input_iterator = rocprim::make_transform_iterator(
+///     input, [] __device__ (T in) { return static_cast<int>(in); });
+///
+/// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
+/// // Use the transform iterator
+/// rocprim::reduce(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input_iterator, output, start_value, input_size, rocprim::plus<int>()
+/// );
+///
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
+///
+/// rocprim::reduce(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input_iterator, output, start_value, input_size, rocprim::plus<int>()
+/// );
 /// \endcode
 /// \endparblock
 template<

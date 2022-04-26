@@ -28,6 +28,7 @@
 #include <rocprim/device/device_scan_by_key.hpp>
 #include <rocprim/iterator/constant_iterator.hpp>
 #include <rocprim/iterator/counting_iterator.hpp>
+#include <rocprim/iterator/transform_iterator.hpp>
 
 // required test headers
 #include "test_utils_types.hpp"
@@ -88,10 +89,10 @@ typedef ::testing::Types<
     // hip-clang does provide host comparison operators
     DeviceScanParams<rocprim::half, rocprim::half, test_utils::half_maximum>,
     // hip-clang does not allow to convert half to float
-    DeviceScanParams<rocprim::half, float>,
+    DeviceScanParams<rocprim::half, float, rocprim::plus<float>>,
 #endif
     DeviceScanParams<rocprim::bfloat16, rocprim::bfloat16, test_utils::bfloat16_maximum>,
-    DeviceScanParams<rocprim::bfloat16, float>,
+    DeviceScanParams<rocprim::bfloat16, float, rocprim::plus<float>>,
     // Large
     DeviceScanParams<int, double, rocprim::plus<int> >,
     DeviceScanParams<int, double, rocprim::plus<double> >,
@@ -146,6 +147,15 @@ struct size_limit_config<ROCPRIM_GRID_SIZE_LIMIT> {
 template <unsigned int SizeLimit>
 using size_limit_config_t = typename size_limit_config<SizeLimit>::type;
 
+// use float for accumulation of bfloat16 and half inputs on device-side if operator is plus
+template <typename input_type, typename input_op_type> struct accum_type {
+    static constexpr bool is_low_precision =
+        std::is_same<input_type, ::rocprim::half>::value ||
+        std::is_same<input_type, ::rocprim::bfloat16>::value;
+    static constexpr bool is_plus = test_utils::is_plus_operator<input_op_type>::value;
+    using type = typename std::conditional_t<is_low_precision && is_plus, float, input_type>;
+};
+
 TYPED_TEST_SUITE(RocprimDeviceScanTests, RocprimDeviceScanTestsParams);
 
 TYPED_TEST(RocprimDeviceScanTests, InclusiveScanEmptyInput)
@@ -153,12 +163,10 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanEmptyInput)
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
     using scan_op_type = typename TestFixture::scan_op_type;
+    // if scan_op_type is rocprim::plus and input_type is bfloat16 or half,
+    // use float as device-side accumulator and double as host-side accumulator
+    using acc_type = typename accum_type<T, scan_op_type>::type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
-    // Disable in case of bfloat16 and half due to low precision
-    if((std::is_same<T, ::rocprim::half>::value || std::is_same<T, ::rocprim::bfloat16>::value) && test_utils::is_plus_operator<scan_op_type>::value)
-    {
-        GTEST_SKIP();
-    }
 
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
@@ -176,6 +184,13 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanEmptyInput)
         0
     );
 
+    // scan function
+    scan_op_type scan_op;
+
+    auto input_iterator = rocprim::make_transform_iterator(
+        rocprim::make_constant_iterator<T>(T(345)),
+        [] (T in) { return static_cast<acc_type>(in); });
+
     // temp storage
     size_t temp_storage_size_bytes;
     void * d_temp_storage = nullptr;
@@ -183,9 +198,8 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanEmptyInput)
     HIP_CHECK(
         rocprim::inclusive_scan(
             d_temp_storage, temp_storage_size_bytes,
-            rocprim::make_constant_iterator<T>(T(345)),
-            d_checking_output,
-            0, scan_op_type(), stream, debug_synchronous
+            input_iterator, d_checking_output, 
+            0, scan_op, stream, debug_synchronous
         )
     );
 
@@ -196,9 +210,8 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanEmptyInput)
     HIP_CHECK(
         rocprim::inclusive_scan(
             d_temp_storage, temp_storage_size_bytes,
-            rocprim::make_constant_iterator<T>(T(345)),
-            d_checking_output,
-            0, scan_op_type(), stream, debug_synchronous
+            input_iterator, d_checking_output, 
+            0, scan_op, stream, debug_synchronous
         )
     );
     HIP_CHECK(hipGetLastError());
@@ -215,14 +228,12 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScan)
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
     using scan_op_type = typename TestFixture::scan_op_type;
+    // if scan_op_type is rocprim::plus and input_type is bfloat16 or half,
+    // use float as device-side accumulator and double as host-side accumulator
+    using acc_type = typename accum_type<T, scan_op_type>::type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
     using Config = size_limit_config_t<TestFixture::size_limit>;
-    // Disable in case of bfloat16 and half due to low precision
-    if((std::is_same<T, ::rocprim::half>::value || std::is_same<T, ::rocprim::bfloat16>::value) && test_utils::is_plus_operator<scan_op_type>::value)
-    {
-        GTEST_SKIP();
-    }
 
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
@@ -272,14 +283,16 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScan)
                 expected.begin(), scan_op
             );
 
+            auto input_iterator = rocprim::make_transform_iterator(
+                d_input, [] (T in) { return static_cast<acc_type>(in); });
+
             // temp storage
             size_t temp_storage_size_bytes;
             void * d_temp_storage = nullptr;
             // Get size of d_temp_storage
             HIP_CHECK(
                 rocprim::inclusive_scan<Config>(
-                    d_temp_storage, temp_storage_size_bytes,
-                    d_input,
+                    d_temp_storage, temp_storage_size_bytes, input_iterator,
                     test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
                     input.size(), scan_op, stream, debug_synchronous
                 )
@@ -295,8 +308,7 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScan)
             // Run
             HIP_CHECK(
                 rocprim::inclusive_scan<Config>(
-                    d_temp_storage, temp_storage_size_bytes,
-                    d_input,
+                    d_temp_storage, temp_storage_size_bytes, input_iterator,
                     test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
                     input.size(), scan_op, stream, debug_synchronous
                 )
@@ -330,17 +342,12 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScan)
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
     using scan_op_type = typename TestFixture::scan_op_type;
+    // if scan_op_type is rocprim::plus and input_type is bfloat16 or half,
+    // use float as device-side accumulator and double as host-side accumulator
+    using acc_type = typename accum_type<T, scan_op_type>::type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
     using Config = size_limit_config_t<TestFixture::size_limit>;
-
-    // use float for accumulation of bfloat16 and half inputs on device-side if operator is plus
-    static constexpr bool is_low_precision = std::is_same<T, ::rocprim::half>::value && std::is_same<T, ::rocprim::bfloat16>::value;
-    static constexpr bool is_plus = test_utils::is_plus_operator<scan_op_type>::value;
-
-    using acc_type = typename std::conditional<is_low_precision && is_plus, float, T>::type;
-    using scan_op_type_device = typename std::conditional<is_low_precision && is_plus, rocprim::plus<float>,scan_op_type>::type;
-    scan_op_type_device scan_op_device;
 
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
@@ -392,17 +399,18 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScan)
                 scan_op
             );
 
+            auto input_iterator = rocprim::make_transform_iterator(
+                d_input, [] (T in) { return static_cast<acc_type>(in); });
+
             // temp storage
             size_t temp_storage_size_bytes;
             void * d_temp_storage = nullptr;
             // Get size of d_temp_storage
             HIP_CHECK(
                 rocprim::exclusive_scan<Config>(
-                    d_temp_storage, temp_storage_size_bytes,
-                    d_input,
+                    d_temp_storage, temp_storage_size_bytes, input_iterator,
                     test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
-                    initial_value, input.size(), scan_op_device,
-                    stream, debug_synchronous
+                    initial_value, input.size(), scan_op, stream, debug_synchronous
                 )
             );
 
@@ -416,11 +424,9 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScan)
             // Run
             HIP_CHECK(
                 rocprim::exclusive_scan<Config>(
-                    d_temp_storage, temp_storage_size_bytes,
-                    d_input,
+                    d_temp_storage, temp_storage_size_bytes, input_iterator,
                     test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
-                    initial_value, input.size(), scan_op_device,
-                    stream, debug_synchronous
+                    initial_value, input.size(), scan_op, stream, debug_synchronous
                 )
             );
             HIP_CHECK(hipGetLastError());
@@ -454,13 +460,11 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanByKey)
     using K = unsigned int; // key type
     using U = typename TestFixture::output_type;
     using scan_op_type = typename TestFixture::scan_op_type;
+    // if scan_op_type is rocprim::plus and input_type is bfloat16 or half,
+    // use float as device-side accumulator and double as host-side accumulator
+    using acc_type = typename accum_type<T, scan_op_type>::type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
     using Config = size_limit_config_t<TestFixture::size_limit>;
-    // Disable in case of bfloat16 and half due to low precision
-    if((std::is_same<T, ::rocprim::half>::value || std::is_same<T, ::rocprim::bfloat16>::value) && test_utils::is_plus_operator<scan_op_type>::value)
-    {
-        GTEST_SKIP();
-    }
 
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
@@ -534,15 +538,17 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanByKey)
                 scan_op, keys_compare_op
             );
 
+            auto input_iterator = rocprim::make_transform_iterator(
+                d_input, [] (T in) { return static_cast<acc_type>(in); }); 
+
             // temp storage
             size_t temp_storage_size_bytes;
             void * d_temp_storage = nullptr;
             // Get size of d_temp_storage
             HIP_CHECK(
                 rocprim::inclusive_scan_by_key<Config>(
-                    d_temp_storage, temp_storage_size_bytes,
-                    d_keys, d_input, d_output, input.size(),
-                    scan_op, keys_compare_op, stream, debug_synchronous
+                    d_temp_storage, temp_storage_size_bytes, d_keys, input_iterator, 
+                    d_output, input.size(), scan_op, keys_compare_op, stream, debug_synchronous
                 )
             );
 
@@ -556,9 +562,8 @@ TYPED_TEST(RocprimDeviceScanTests, InclusiveScanByKey)
             // Run
             HIP_CHECK(
                 rocprim::inclusive_scan_by_key<Config>(
-                    d_temp_storage, temp_storage_size_bytes,
-                    d_keys, d_input, d_output, input.size(),
-                    scan_op, keys_compare_op, stream, debug_synchronous
+                    d_temp_storage, temp_storage_size_bytes, d_keys, input_iterator,
+                    d_output, input.size(), scan_op, keys_compare_op, stream, debug_synchronous
                 )
             );
             HIP_CHECK(hipGetLastError());
@@ -593,16 +598,11 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanByKey)
     using K = unsigned int; // key type
     using U = typename TestFixture::output_type;
     using scan_op_type = typename TestFixture::scan_op_type;
+    // if scan_op_type is rocprim::plus and input_type is bfloat16 or half,
+    // use float as device-side accumulator and double as host-side accumulator
+    using acc_type = typename accum_type<T, scan_op_type>::type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
     using Config = size_limit_config_t<TestFixture::size_limit>;
-
-    // use float for accumulation of bfloat16 and half inputs on device-side if operator is plus
-    static constexpr bool is_low_precision = std::is_same<T, ::rocprim::half>::value && std::is_same<T, ::rocprim::bfloat16>::value;
-    static constexpr bool is_plus = test_utils::is_plus_operator<scan_op_type>::value;
-
-    using acc_type = typename std::conditional<is_low_precision && is_plus, float, T>::type;
-    using scan_op_type_device = typename std::conditional<is_low_precision && is_plus, rocprim::plus<float>,scan_op_type>::type;
-    scan_op_type_device scan_op_device;
 
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
@@ -628,7 +628,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanByKey)
             const bool use_unique_keys = bool(test_utils::get_random_value<int>(0, 1, seed_value));
 
             // Generate data
-            acc_type initial_value = test_utils::get_random_value<T>(1, 100, seed_value);
+            acc_type initial_value = test_utils::get_random_value<acc_type>(1, 100, seed_value);
             std::vector<T> input = test_utils::get_random_data<T>(size, 0, 9, seed_value);
             std::vector<K> keys;
             if(use_unique_keys)
@@ -666,6 +666,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanByKey)
 
             // scan function
             scan_op_type scan_op;
+
             // key compare function
             rocprim::equal_to<K> keys_compare_op;
 
@@ -677,15 +678,17 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanByKey)
                 scan_op, keys_compare_op
             );
 
+            auto input_iterator = rocprim::make_transform_iterator(
+                d_input, [] (T in) { return static_cast<acc_type>(in); }); 
+
             // temp storage
             size_t temp_storage_size_bytes;
             void * d_temp_storage = nullptr;
             // Get size of d_temp_storage
             HIP_CHECK(
                 rocprim::exclusive_scan_by_key<Config>(
-                    d_temp_storage, temp_storage_size_bytes,
-                    d_keys, d_input, d_output, initial_value, input.size(),
-                    scan_op_device, keys_compare_op, stream, debug_synchronous
+                    d_temp_storage, temp_storage_size_bytes, d_keys, input_iterator,
+                    d_output, initial_value, input.size(), scan_op, keys_compare_op, stream, debug_synchronous
                 )
             );
 
@@ -699,9 +702,8 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanByKey)
             // Run
             HIP_CHECK(
                 rocprim::exclusive_scan_by_key<Config>(
-                    d_temp_storage, temp_storage_size_bytes,
-                    d_keys, d_input, d_output, initial_value, input.size(),
-                    scan_op_device, keys_compare_op, stream, debug_synchronous
+                    d_temp_storage, temp_storage_size_bytes, d_keys, input_iterator,
+                    d_output, initial_value, input.size(), scan_op, keys_compare_op, stream, debug_synchronous
                 )
             );
             HIP_CHECK(hipGetLastError());
@@ -1015,17 +1017,12 @@ TYPED_TEST(RocprimDeviceScanFutureTests, ExclusiveScan)
     using T                                     = typename TestFixture::input_type;
     using U                                     = typename TestFixture::output_type;
     using scan_op_type                          = typename TestFixture::scan_op_type;
+    // if scan_op_type is rocprim::plus and input_type is bfloat16 or half,
+    // use float as device-side accumulator and double as host-side accumulator
+    using acc_type                              = typename accum_type<T, scan_op_type>::type;
     const bool            debug_synchronous     = TestFixture::debug_synchronous;
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
     using Config                                = size_limit_config_t<TestFixture::size_limit>;
-
-    // use float for accumulation of bfloat16 and half inputs on device-side if operator is plus
-    static constexpr bool is_low_precision = std::is_same<T, ::rocprim::half>::value && std::is_same<T, ::rocprim::bfloat16>::value;
-    static constexpr bool is_plus = test_utils::is_plus_operator<scan_op_type>::value;
-
-    using acc_type = typename std::conditional<is_low_precision && is_plus, float, T>::type;
-    using scan_op_type_device = typename std::conditional<is_low_precision && is_plus, rocprim::plus<float>,scan_op_type>::type;
-    scan_op_type_device scan_op_device;
 
     const int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
@@ -1089,18 +1086,19 @@ TYPED_TEST(RocprimDeviceScanFutureTests, ExclusiveScan)
                 = rocprim::future_value<T, std::remove_const_t<decltype(future_iter)>> {
                     future_iter};
 
+            auto input_iterator = rocprim::make_transform_iterator(
+                d_input, [] (T in) { return static_cast<acc_type>(in); });
+
             // temp storage
             size_t temp_storage_size_bytes;
             char*  d_temp_storage = nullptr;
             // Get size of d_temp_storage
             HIP_CHECK(rocprim::exclusive_scan<Config>(
-                nullptr,
-                temp_storage_size_bytes,
-                d_input,
+                nullptr, temp_storage_size_bytes, input_iterator, 
                 test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
                 future_initial_value,
                 input.size(),
-                scan_op_device,
+                scan_op,
                 stream,
                 debug_synchronous));
 
@@ -1125,13 +1123,11 @@ TYPED_TEST(RocprimDeviceScanFutureTests, ExclusiveScan)
 
             // Run
             HIP_CHECK(rocprim::exclusive_scan<Config>(
-                d_temp_storage,
-                temp_storage_size_bytes,
-                d_input,
+                d_temp_storage, temp_storage_size_bytes, input_iterator,
                 test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_output),
                 future_initial_value,
                 input.size(),
-                scan_op_device,
+                scan_op,
                 stream,
                 debug_synchronous));
             HIP_CHECK(hipGetLastError());

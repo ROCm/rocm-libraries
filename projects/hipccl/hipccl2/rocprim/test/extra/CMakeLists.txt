@@ -43,7 +43,7 @@ endif()
 include(VerifyCompiler)
 
 # Find rocPRIM
-find_package(rocprim REQUIRED CONFIG HINTS ${rocprim_DIR} PATHS "/opt/rocm/rocprim")
+find_package(rocprim REQUIRED CONFIG PATHS "/opt/rocm/rocprim")
 
 # Build CXX flags
 set(CMAKE_CXX_STANDARD 14)
@@ -63,12 +63,6 @@ function(add_rocprim_test TEST_NAME TEST_SOURCES)
     PRIVATE
       ${rocprim_LIBRARIES} # roc::rocprim_hip
   )
-  foreach(amdgpu_target ${AMDGPU_TARGETS})
-    target_link_libraries(${TEST_TARGET}
-      PRIVATE
-        --amdgpu-target=${amdgpu_target}
-    )
-  endforeach()
   add_test(${TEST_NAME} ${TEST_TARGET})
 endfunction()
 

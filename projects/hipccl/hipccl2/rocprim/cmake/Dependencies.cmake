@@ -30,19 +30,6 @@
 # For downloading, building, and installing required dependencies
 include(cmake/DownloadProject.cmake)
 
-# Never update automatically from the remote repository
-if(CMAKE_VERSION VERSION_LESS 3.2)
-  set(UPDATE_DISCONNECTED_IF_AVAILABLE "")
-else()
-  set(UPDATE_DISCONNECTED_IF_AVAILABLE "UPDATE_DISCONNECTED TRUE")
-endif()
-
-# GIT
-find_package(Git REQUIRED)
-if (NOT Git_FOUND)
-  message(FATAL_ERROR "Please ensure Git is installed on the system")
-endif()
-
 if(USE_HIP_CPU)
   find_package(Threads REQUIRED)
 
@@ -156,7 +143,7 @@ if(BUILD_BENCHMARK)
       message(FATAL_ERROR "DownloadProject.cmake doesn't support multi-configuration generators.")
     endif()
     set(GOOGLEBENCHMARK_ROOT ${CMAKE_CURRENT_BINARY_DIR}/deps/googlebenchmark CACHE PATH "")
-    if(CMAKE_CXX_COMPILER MATCHES ".*/hipcc$")
+    if(NOT (CMAKE_CXX_COMPILER_ID STREQUAL "GNU"))
       # hip-clang cannot compile googlebenchmark for some reason
       set(COMPILER_OVERRIDE "-DCMAKE_CXX_COMPILER=g++")
     endif()
@@ -172,7 +159,7 @@ if(BUILD_BENCHMARK)
       LOG_BUILD      TRUE
       LOG_INSTALL    TRUE
       BUILD_PROJECT  TRUE
-      ${UPDATE_DISCONNECTED_IF_AVAILABLE}
+      UPDATE_DISCONNECTED TRUE
     )
   endif()
   find_package(benchmark REQUIRED CONFIG PATHS ${GOOGLEBENCHMARK_ROOT})

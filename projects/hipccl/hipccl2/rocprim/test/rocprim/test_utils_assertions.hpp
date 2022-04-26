@@ -54,7 +54,8 @@ void assert_eq(const std::vector<T>& result, const std::vector<T>& expected, con
     }
 }
 
-void assert_eq(const std::vector<rocprim::half>& result, const std::vector<rocprim::half>& expected, const size_t max_length = SIZE_MAX)
+template<>
+inline void assert_eq<rocprim::half>(const std::vector<rocprim::half>& result, const std::vector<rocprim::half>& expected, const size_t max_length)
 {
     if(max_length == SIZE_MAX || max_length > expected.size()) ASSERT_EQ(result.size(), expected.size());
     for(size_t i = 0; i < std::min(result.size(), max_length); i++)
@@ -64,7 +65,8 @@ void assert_eq(const std::vector<rocprim::half>& result, const std::vector<rocpr
     }
 }
 
-void assert_eq(const std::vector<rocprim::bfloat16>& result, const std::vector<rocprim::bfloat16>& expected, const size_t max_length = SIZE_MAX)
+template<>
+inline void assert_eq<rocprim::bfloat16>(const std::vector<rocprim::bfloat16>& result, const std::vector<rocprim::bfloat16>& expected, const size_t max_length)
 {
     if(max_length == SIZE_MAX || max_length > expected.size()) ASSERT_EQ(result.size(), expected.size());
     for(size_t i = 0; i < std::min(result.size(), max_length); i++)
@@ -81,13 +83,15 @@ void assert_eq(const T& result, const T& expected)
     ASSERT_EQ(result, expected);
 }
 
-void assert_eq(const rocprim::half& result, const rocprim::half& expected)
+template<>
+inline void assert_eq<rocprim::half>(const rocprim::half& result, const rocprim::half& expected)
 {
     if(bit_equal(result, expected)) return; // Check bitwise equality for +NaN, -NaN, +0.0, -0.0, +inf, -inf.
     ASSERT_EQ(half_to_native(result), half_to_native(expected));
 }
 
-void assert_eq(const rocprim::bfloat16& result, const rocprim::bfloat16& expected)
+template<>
+inline void assert_eq<rocprim::bfloat16>(const rocprim::bfloat16& result, const rocprim::bfloat16& expected)
 {
     if(bit_equal(result, expected)) return; // Check bitwise equality for +NaN, -NaN, +0.0, -0.0, +inf, -inf.
     ASSERT_EQ(bfloat16_to_native(result), bfloat16_to_native(expected));

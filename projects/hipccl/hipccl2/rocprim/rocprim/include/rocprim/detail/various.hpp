@@ -57,10 +57,10 @@ constexpr T next_power_of_two(const T x, const T acc = 1)
 template <
     typename T,
     typename U,
-    std::enable_if_t<::rocprim::is_integral<T>::value && ::rocprim::is_integral<U>::value, int> = 0>
+    std::enable_if_t<::rocprim::is_integral<T>::value && ::rocprim::is_unsigned<U>::value, int> = 0>
 ROCPRIM_HOST_DEVICE inline constexpr auto ceiling_div(const T a, const U b)
 {
-    return (a + b - 1) / b;
+    return a / b + (a % b > 0 ? 1 : 0);
 }
 
 ROCPRIM_HOST_DEVICE inline

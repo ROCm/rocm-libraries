@@ -65,7 +65,7 @@
 namespace test_common_utils
 {
 
-int obtain_device_from_ctest()
+inline int obtain_device_from_ctest()
 {
 #ifdef _MSC_VER
 #pragma warning( push )
@@ -92,7 +92,7 @@ int obtain_device_from_ctest()
 #endif
 }
 
-bool use_hmm()
+inline bool use_hmm()
 {
     if (getenv("ROCPRIM_USE_HMM") == nullptr)
     {

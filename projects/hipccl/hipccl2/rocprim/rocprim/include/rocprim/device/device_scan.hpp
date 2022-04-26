@@ -605,6 +605,8 @@ auto scan_impl(void * temporary_storage,
 /// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
 /// * Ranges specified by \p input and \p output must have at least \p size elements.
+/// * By default, the input type is used for accumulation. A custom type
+/// can be specified using <tt>rocprim::transform_iterator</tt>, see the example below.
 ///
 /// \tparam Config - [optional] configuration of the primitive. It can be \p scan_config or
 /// a custom class with the same members.
@@ -666,7 +668,37 @@ auto scan_impl(void * temporary_storage,
 /// );
 /// // output: [1, 3, 6, 10, 15, 21, 28, 36]
 /// \endcode
+///
+/// The same example as above, but now a custom accumulator type is specified.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// size_t input_size;
+/// short * input;
+/// int * output;
+///
+/// // Use a transform iterator to specifiy a custom accumulator type
+/// auto input_iterator = rocprim::make_transform_iterator(
+///     input, [] __device__ (T in) { return static_cast<int>(in); });
+///
+/// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
+/// // Use the transform iterator
+/// rocprim::inclusive_scan(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input_iterator, output, input_size, rocprim::plus<int>()
+/// );
+///
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
+///
+/// rocprim::inclusive_scan(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input_iterator, output, input_size, rocprim::plus<int>()
+/// );
+/// \endcode
 /// \endparblock
+
 template<
     class Config = default_config,
     class InputIterator,

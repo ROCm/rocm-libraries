@@ -26,11 +26,11 @@ cmake_policy(VERSION 3.16...3.21)
 # Install prefix
 set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix, prepended onto install directories")
 
-#Adding CMAKE_PREFIX_PATH
-list( APPEND CMAKE_PREFIX_PATH /opt/rocm/llvm /opt/rocm )
-
 # rocPRIM project
 project(rocprim LANGUAGES CXX)
+
+#Adding CMAKE_PREFIX_PATH
+list(APPEND CMAKE_PREFIX_PATH /opt/rocm)
 
 # Build options
 option(BUILD_TEST "Build tests (requires googletest)" OFF)
@@ -39,6 +39,7 @@ option(BUILD_EXAMPLE "Build examples" OFF)
 option(USE_HIP_CPU "Prefer HIP-CPU runtime instead of HW acceleration" OFF)
 # Disables building tests, benchmarks, examples
 option(ONLY_INSTALL "Only install" OFF)
+option(BUILD_CODE_COVERAGE "Build with code coverage enabled" OFF)
 
 # CMake modules
 list(APPEND CMAKE_MODULE_PATH
@@ -56,41 +57,23 @@ endif()
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Add paths to linker search and installed rpath")
 
 set(BUILD_SHARED_LIBS OFF) # don't build client dependencies as shared
+set(ROCM_SYMLINK_LIBS OFF)
 if(NOT USE_HIP_CPU)
   # Get dependencies (required here to get rocm-cmake)
   include(cmake/Dependencies.cmake)
-  # Set the AMDGPU_TARGETS with backward compatiblity
-  # Use target ID syntax if supported for AMDGPU_TARGETS
-  set(AMDGPU_TARGETS "all" CACHE STRING "Compile for which gpu architectures?")
-  if(COMMAND rocm_check_target_ids)
+  # Use target ID syntax if supported for GPU_TARGETS
+  if (NOT DEFINED AMDGPU_TARGETS)
+    set(GPU_TARGETS "all" CACHE STRING "GPU architectures to compile for")
+  else()
+    set(GPU_TARGETS "${AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for")
+  endif()
+  set_property(CACHE GPU_TARGETS PROPERTY STRINGS "all")
+
+  if(GPU_TARGETS STREQUAL "all")
     rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
       TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx1030"
     )
-  else()
-    # Detect compiler support for target ID
-    # This section is deprecated. Please use rocm_check_target_ids for future use.
-    if( CMAKE_CXX_COMPILER MATCHES ".*/hipcc$" )
-      execute_process(COMMAND ${CMAKE_CXX_COMPILER} "--help"
-        OUTPUT_VARIABLE CXX_OUTPUT
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        ERROR_STRIP_TRAILING_WHITESPACE)
-      string(REGEX MATCH ".mcode\-object\-version" TARGET_ID_SUPPORT ${CXX_OUTPUT})
-    endif()
-    if(TARGET_ID_SUPPORT)
-      set(DEFAULT_AMDGPU_TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx1030")
-    else()
-      set(DEFAULT_AMDGPU_TARGETS "gfx803;gfx900;gfx906;gfx908;gfx1030")
-    endif()
-  endif()
-  if (AMDGPU_TARGETS)
-    if( AMDGPU_TARGETS STREQUAL "all" )
-      set( gpus "${DEFAULT_AMDGPU_TARGETS}")
-    else()
-      set( gpus "${AMDGPU_TARGETS}")
-    endif()
-    # must FORCE set this AMDGPU_TARGETS before any find_package( hip ...), in this file
-    # to override CACHE var and set --offload-arch flags via hip-config.cmake hip::device dependency
-    set( AMDGPU_TARGETS "${gpus}" CACHE STRING "AMD GPU targets to compile for" FORCE )
+    set(GPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for" FORCE)
   endif()
 
   # Verify that hcc compiler is used on ROCM platform
@@ -101,13 +84,6 @@ if(NOT USE_HIP_CPU)
   list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH} ${ROCM_PATH}/hip ${ROCM_PATH}/llvm /opt/rocm/llvm /opt/rocm /opt/rocm/hip)
   find_package(hip REQUIRED CONFIG PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm)
 endif()
-# Build options
-option(BUILD_TEST "Build tests (requires googletest)" OFF)
-option(BUILD_BENCHMARK "Build benchmarks" OFF)
-option(BUILD_EXAMPLE "Build examples" OFF)
-# Disables building tests, benchmarks, examples
-option(ONLY_INSTALL "Only install" OFF)
-option(BUILD_CODE_COVERAGE "Build with code coverage enabled" OFF)
 
 # FOR HANDLING ENABLE/DISABLE OPTIONAL BACKWARD COMPATIBILITY for FILE/FOLDER REORG
 option(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY "Build with file/folder reorg with backward compatibility enabled" ON)

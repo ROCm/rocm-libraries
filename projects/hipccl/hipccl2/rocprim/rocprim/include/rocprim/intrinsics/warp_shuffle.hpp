@@ -132,6 +132,25 @@ T warp_move_dpp(const T& input)
     );
 }
 
+/// \brief Swizzle for any data type.
+///
+/// Each thread in warp obtains \p input from <tt>src_lane</tt>-th thread
+/// in warp, where <tt>src_lane</tt> is current lane with a <tt>mask</tt> applied.
+///
+/// \param input - input to pass to other threads
+template<class T, int mask>
+ROCPRIM_DEVICE ROCPRIM_INLINE
+T warp_swizzle(const T& input)
+{
+    return detail::warp_shuffle_op(
+        input,
+        [=](int v) -> int
+        {
+            return ::__builtin_amdgcn_ds_swizzle(v, mask);
+        }
+    );
+}
+
 } // end namespace detail
 
 /// \brief Shuffle for any data type.
