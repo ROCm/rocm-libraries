@@ -25,12 +25,15 @@
 #include <vector>
 #include <random>
 #include <type_traits>
+#include <string>
+#include <memory>
 
 #ifdef WIN32
 #include <numeric>
 #endif
 
 #include <rocprim/rocprim.hpp>
+#include "benchmark/benchmark.h"
 
 #define HIP_CHECK(condition)         \
   {                                  \
@@ -263,7 +266,7 @@ inline auto get_random_data(size_t size, T min, T max, size_t max_random_size = 
     return data;
 }
 
-bool is_warp_size_supported(const unsigned int required_warp_size)
+inline bool is_warp_size_supported(const unsigned int required_warp_size)
 {
     return ::rocprim::host_warp_size() >= required_warp_size;
 }
@@ -339,41 +342,162 @@ void static_for_each(Args... args)
     static_for_each_impl<typename Indices::value_type, Function>(Indices {}, args...);
 }
 
+struct config_autotune_interface
+{
+    virtual std::string name() const                               = 0;
+    virtual ~config_autotune_interface()                           = default;
+    virtual void run(benchmark::State&, size_t, hipStream_t) const = 0;
+};
+
+struct config_autotune_register
+{
+    static std::vector<std::unique_ptr<config_autotune_interface>>& vector() {
+        static std::vector<std::unique_ptr<config_autotune_interface>> storage;
+        return storage;
+    }
+
+    template <typename T>
+    static config_autotune_register create() {
+        vector().push_back(std::make_unique<T>());
+        return config_autotune_register();
+    }
+};
+
 template <typename T>
 struct Traits
 {
-    static const char* name;
+    //static inline method instead of static inline attribute because that's only supported from C++17 onwards
+    static inline const char* name(){
+        static_assert(sizeof(T) == 0, "Traits<T>::name() unknown");
+        return "unknown";
+    }
 };
-// Generic definition as a fall-back:
-template <typename T>
-const char* Traits<T>::name = "unknown";
 
 // Explicit definitions
 template <>
-const char* Traits<int>::name = "int";
+inline const char* Traits<int>::name() { return "int"; }
 template <>
-const char* Traits<short>::name = "short";
+inline const char* Traits<short>::name() { return "short"; }
 template <>
-const char* Traits<int8_t>::name = "int8_t";
+inline const char* Traits<int8_t>::name() { return "int8_t"; }
 template <>
-const char* Traits<uint8_t>::name = "uint8_t";
+inline const char* Traits<uint8_t>::name() { return "uint8_t"; }
 template <>
-const char* Traits<rocprim::half>::name = "rocprim::half";
+inline const char* Traits<rocprim::half>::name() { return "rocprim::half"; }
 template <>
-const char* Traits<long long>::name = "long long";
+inline const char* Traits<long long>::name() { return "long long"; }
 template <>
-const char* Traits<float>::name = "float";
+inline const char* Traits<int64_t>::name() { return "int64_t"; }
 template <>
-const char* Traits<double>::name = "double";
+inline const char* Traits<float>::name() { return "float"; }
 template <>
-const char* Traits<custom_type<int, int>>::name = "custom_int2";
+inline const char* Traits<double>::name() { return "double"; }
 template <>
-const char* Traits<custom_type<float, float>>::name = "custom_float2";
+inline const char* Traits<custom_type<int, int>>::name() { return "custom_int2"; }
 template <>
-const char* Traits<custom_type<double, double>>::name = "custom_double2";
+inline const char* Traits<custom_type<float, float>>::name() { return "custom_float2"; }
 template <>
-const char* Traits<custom_type<char, double>>::name = "custom_char_double";
+inline const char* Traits<custom_type<double, double>>::name() { return "custom_double2"; }
 template <>
-const char* Traits<custom_type<long long, double>>::name = "custom_longlong_double";
+inline const char* Traits<custom_type<char, double>>::name() { return "custom_char_double"; }
+template <>
+inline const char* Traits<custom_type<long long, double>>::name() { return "custom_longlong_double"; }
+
+inline void add_common_benchmark_info()
+{
+    hipDeviceProp_t   devProp;
+    int               device_id = 0;
+    HIP_CHECK(hipGetDevice(&device_id));
+    HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
+
+    auto str = [](const std::string& name, const std::string& val) {
+        benchmark::AddCustomContext(name, val);
+    };
+
+    auto num = [](const std::string& name, const auto& value) {
+        benchmark::AddCustomContext(name, std::to_string(value));
+    };
+
+    auto dim2 = [num](const std::string& name, const auto* values) {
+        num(name + "_x", values[0]);
+        num(name + "_y", values[1]);
+    };
+
+    auto dim3 = [num, dim2](const std::string& name, const auto* values) {
+        dim2(name, values);
+        num(name + "_z", values[2]);
+    };
+
+    str("hdp_name", devProp.name);
+    num("hdp_total_global_mem", devProp.totalGlobalMem);
+    num("hdp_shared_mem_per_block", devProp.sharedMemPerBlock);
+    num("hdp_regs_per_block", devProp.regsPerBlock);
+    num("hdp_warp_size", devProp.warpSize);
+    num("hdp_max_threads_per_block", devProp.maxThreadsPerBlock);
+    dim3("hdp_max_threads_dim", devProp.maxThreadsDim);
+    dim3("hdp_max_grid_size", devProp.maxGridSize);
+    num("hdp_clock_rate", devProp.clockRate);
+    num("hdp_memory_clock_rate", devProp.memoryClockRate);
+    num("hdp_memory_bus_width", devProp.memoryBusWidth);
+    num("hdp_total_const_mem", devProp.totalConstMem);
+    num("hdp_major", devProp.major);
+    num("hdp_minor", devProp.minor);
+    num("hdp_multi_processor_count", devProp.multiProcessorCount);
+    num("hdp_l2_cache_size", devProp.l2CacheSize);
+    num("hdp_max_threads_per_multiprocessor", devProp.maxThreadsPerMultiProcessor);
+    num("hdp_compute_mode", devProp.computeMode);
+    num("hdp_clock_instruction_rate", devProp.clockInstructionRate);
+    num("hdp_concurrent_kernels", devProp.concurrentKernels);
+    num("hdp_pci_domain_id", devProp.pciDomainID);
+    num("hdp_pci_bus_id", devProp.pciBusID);
+    num("hdp_pci_device_id", devProp.pciDeviceID);
+    num("hdp_max_shared_memory_per_multi_processor", devProp.maxSharedMemoryPerMultiProcessor);
+    num("hdp_is_multi_gpu_board", devProp.isMultiGpuBoard);
+    num("hdp_can_map_host_memory", devProp.canMapHostMemory);
+    str("hdp_gcn_arch_name", devProp.gcnArchName);
+    num("hdp_integrated", devProp.integrated);
+    num("hdp_cooperative_launch", devProp.cooperativeLaunch);
+    num("hdp_cooperative_multi_device_launch", devProp.cooperativeMultiDeviceLaunch);
+    num("hdp_max_texture_1d_linear", devProp.maxTexture1DLinear);
+    num("hdp_max_texture_1d", devProp.maxTexture1D);
+    dim2("hdp_max_texture_2d", devProp.maxTexture2D);
+    dim3("hdp_max_texture_3d", devProp.maxTexture3D);
+    num("hdp_mem_pitch", devProp.memPitch);
+    num("hdp_texture_alignment", devProp.textureAlignment);
+    num("hdp_texture_pitch_alignment", devProp.texturePitchAlignment);
+    num("hdp_kernel_exec_timeout_enabled", devProp.kernelExecTimeoutEnabled);
+    num("hdp_ecc_enabled", devProp.ECCEnabled);
+    num("hdp_tcc_driver", devProp.tccDriver);
+    num("hdp_cooperative_multi_device_unmatched_func", devProp.cooperativeMultiDeviceUnmatchedFunc);
+    num("hdp_cooperative_multi_device_unmatched_grid_dim", devProp.cooperativeMultiDeviceUnmatchedGridDim);
+    num("hdp_cooperative_multi_device_unmatched_block_dim", devProp.cooperativeMultiDeviceUnmatchedBlockDim);
+    num("hdp_cooperative_multi_device_unmatched_shared_mem", devProp.cooperativeMultiDeviceUnmatchedSharedMem);
+    num("hdp_is_large_bar", devProp.isLargeBar);
+    num("hdp_asic_revision", devProp.asicRevision);
+    num("hdp_managed_memory", devProp.managedMemory);
+    num("hdp_direct_managed_mem_access_from_host", devProp.directManagedMemAccessFromHost);
+    num("hdp_concurrent_managed_access", devProp.concurrentManagedAccess);
+    num("hdp_pageable_memory_access", devProp.pageableMemoryAccess);
+    num("hdp_pageable_memory_access_uses_host_page_tables", devProp.pageableMemoryAccessUsesHostPageTables);
+
+    const auto arch = devProp.arch;
+    num("hdp_arch_has_global_int32_atomics", arch.hasGlobalInt32Atomics);
+    num("hdp_arch_has_global_float_atomic_exch", arch.hasGlobalFloatAtomicExch);
+    num("hdp_arch_has_shared_int32_atomics", arch.hasSharedInt32Atomics);
+    num("hdp_arch_has_shared_float_atomic_exch", arch.hasSharedFloatAtomicExch);
+    num("hdp_arch_has_float_atomic_add", arch.hasFloatAtomicAdd);
+    num("hdp_arch_has_global_int64_atomics", arch.hasGlobalInt64Atomics);
+    num("hdp_arch_has_shared_int64_atomics", arch.hasSharedInt64Atomics);
+    num("hdp_arch_has_doubles", arch.hasDoubles);
+    num("hdp_arch_has_warp_vote", arch.hasWarpVote);
+    num("hdp_arch_has_warp_ballot", arch.hasWarpBallot);
+    num("hdp_arch_has_warp_shuffle", arch.hasWarpShuffle);
+    num("hdp_arch_has_funnel_shift", arch.hasFunnelShift);
+    num("hdp_arch_has_thread_fence_system", arch.hasThreadFenceSystem);
+    num("hdp_arch_has_sync_threads_ext", arch.hasSyncThreadsExt);
+    num("hdp_arch_has_surface_funcs", arch.hasSurfaceFuncs);
+    num("hdp_arch_has_3d_grid", arch.has3dGrid);
+    num("hdp_arch_has_dynamic_parallelism", arch.hasDynamicParallelism);
+}
 
 #endif // ROCPRIM_BENCHMARK_UTILS_HPP_

@@ -188,11 +188,10 @@ int main(int argc, char *argv[])
 
     // HIP
     hipStream_t stream = 0; // default
-    hipDeviceProp_t devProp;
-    int device_id = 0;
-    HIP_CHECK(hipGetDevice(&device_id));
-    HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
-    std::cout << "[HIP] Device name: " << devProp.name << std::endl;
+
+    // Benchmark info
+    add_common_benchmark_info();
+    benchmark::AddCustomContext("size", std::to_string(size));
 
     using custom_float2 = custom_type<float, float>;
     using custom_double2 = custom_type<double, double>;

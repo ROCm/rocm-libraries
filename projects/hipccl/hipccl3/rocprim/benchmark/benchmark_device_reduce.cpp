@@ -40,6 +40,7 @@
 // CmdParser
 #include "cmdparser.hpp"
 #include "benchmark_utils.hpp"
+#include "benchmark_device_reduce.parallel.hpp"
 
 #define HIP_CHECK(condition)         \
   {                                  \
@@ -54,100 +55,26 @@
 const size_t DEFAULT_N = 1024 * 1024 * 128;
 #endif
 
-const unsigned int batch_size = 10;
-const unsigned int warmup_size = 5;
-
-template<
-    class T,
-    class BinaryFunction
->
-void run_benchmark(benchmark::State& state,
-                   size_t size,
-                   const hipStream_t stream,
-                   BinaryFunction reduce_op)
-{
-    std::vector<T> input = get_random_data<T>(size, T(0), T(1000));
-
-    T * d_input;
-    T * d_output;
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_input), size * sizeof(T)));
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&d_output), sizeof(T)));
-    HIP_CHECK(
-        hipMemcpy(
-            d_input, input.data(),
-            size * sizeof(T),
-            hipMemcpyHostToDevice
-        )
-    );
-    HIP_CHECK(hipDeviceSynchronize());
-
-    // Allocate temporary storage memory
-    size_t temp_storage_size_bytes;
-    void * d_temp_storage = nullptr;
-    // Get size of d_temp_storage
-    HIP_CHECK(
-        rocprim::reduce(
-            d_temp_storage, temp_storage_size_bytes,
-            d_input, d_output, T(), size,
-            reduce_op, stream
-        )
-    );
-    HIP_CHECK(hipMalloc(&d_temp_storage,temp_storage_size_bytes));
-    HIP_CHECK(hipDeviceSynchronize());
-
-    // Warm-up
-    for(size_t i = 0; i < warmup_size; i++)
-    {
-        HIP_CHECK(
-            rocprim::reduce(
-                d_temp_storage, temp_storage_size_bytes,
-                d_input, d_output, T(), size,
-                reduce_op, stream
-            )
-        );
-    }
-    HIP_CHECK(hipDeviceSynchronize());
-
-    for(auto _ : state)
-    {
-        auto start = std::chrono::high_resolution_clock::now();
-
-        for(size_t i = 0; i < batch_size; i++)
-        {
-            HIP_CHECK(
-                rocprim::reduce(
-                    d_temp_storage, temp_storage_size_bytes,
-                    d_input, d_output, T(), size,
-                    reduce_op, stream
-                )
-            );
-        }
-        HIP_CHECK(hipStreamSynchronize(stream));
-
-        auto end = std::chrono::high_resolution_clock::now();
-        auto elapsed_seconds =
-            std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
-        state.SetIterationTime(elapsed_seconds.count());
-    }
-    state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(T));
-    state.SetItemsProcessed(state.iterations() * batch_size * size);
-
-    HIP_CHECK(hipFree(d_input));
-    HIP_CHECK(hipFree(d_output));
-    HIP_CHECK(hipFree(d_temp_storage));
+#define CREATE_BENCHMARK(T, REDUCE_OP)                                                          \
+{                                                                                               \
+    const device_reduce_benchmark<T, REDUCE_OP> instance;                                       \
+    benchmark::internal::Benchmark* benchmark = benchmark::RegisterBenchmark(                   \
+        instance.name().c_str(),                                                                \
+        [instance](benchmark::State& state, size_t size, const hipStream_t stream) {            \
+            instance.run(state, size, stream);                                                  \
+        },                                                                                      \
+        size,                                                                                   \
+        stream);                                                                                \
+    benchmarks.emplace_back(benchmark);                                                         \
 }
-
-#define CREATE_BENCHMARK(T, REDUCE_OP) \
-benchmark::RegisterBenchmark( \
-    ("reduce<" #T ", " #REDUCE_OP ">"), \
-    run_benchmark<T, REDUCE_OP>, size, stream, REDUCE_OP() \
-)
 
 int main(int argc, char *argv[])
 {
     cli::Parser parser(argc, argv);
     parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
     parser.set_optional<int>("trials", "trials", -1, "number of iterations");
+    parser.set_optional<int>("parallel_instance", "parallel_instance", 0, "parallel instance");
+    parser.set_optional<int>("parallel_instances", "parallel_instances", 1, "total parallel instances");
     parser.run_and_exit_if_error();
 
     // Parse argv
@@ -157,31 +84,55 @@ int main(int argc, char *argv[])
 
     // HIP
     hipStream_t stream = 0; // default
-    hipDeviceProp_t devProp;
-    int device_id = 0;
-    HIP_CHECK(hipGetDevice(&device_id));
-    HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
-    std::cout << "[HIP] Device name: " << devProp.name << std::endl;
 
+    // Benchmark info
+    add_common_benchmark_info();
+    benchmark::AddCustomContext("size", std::to_string(size));
+
+    std::vector<benchmark::internal::Benchmark*> benchmarks = {};
+#ifdef BENCHMARK_CONFIG_TUNING
+    const int parallel_instance = parser.get<int>("parallel_instance");
+    const int parallel_instances = parser.get<int>("parallel_instances");
+    std::vector<std::unique_ptr<config_autotune_interface>>& configs = config_autotune_register::vector();
+    // sorting to get a consistent order because order of initialization of static variables is undefined by the C++ standard.
+    std::sort(configs.begin(), configs.end(), [](const auto& l, const auto& r){
+        return l->name() < r->name();
+    });
+    size_t configs_per_instance = (configs.size() + parallel_instances - 1) / parallel_instances;
+    size_t start = std::min(parallel_instance * configs_per_instance, configs.size());
+    size_t end   = std::min((parallel_instance + 1) * configs_per_instance, configs.size());
+
+    for(size_t i = start; i < end; i++)
+    {
+        std::unique_ptr<config_autotune_interface>& uniq_ptr = configs.at(i);
+        config_autotune_interface* tuning_benchmark = uniq_ptr.get();
+        benchmark::internal::Benchmark* benchmark = benchmark::RegisterBenchmark(
+            tuning_benchmark->name().c_str(),
+            [tuning_benchmark](benchmark::State& state, size_t size, const hipStream_t stream) {
+                tuning_benchmark->run(state, size, stream);
+            },
+            size,
+            stream);
+        benchmarks.emplace_back(benchmark);
+    }
+    benchmark::AddCustomContext("autotune_config_pattern", R"---((?P<algo>\S*)_benchmark\<(?P<datatype>\S*),\s*reduce_config\<(?P<block_size>[0-9]+),\s*(?P<items_per_thread>[0-9]+)\>\>)---");
+#else
     using custom_float2 = custom_type<float, float>;
     using custom_double2 = custom_type<double, double>;
-
     // Add benchmarks
-    std::vector<benchmark::internal::Benchmark*> benchmarks =
-    {
-        CREATE_BENCHMARK(int, rocprim::plus<int>),
-        CREATE_BENCHMARK(long long, rocprim::plus<long long>),
+    CREATE_BENCHMARK(int, rocprim::plus<int>)
+    CREATE_BENCHMARK(long long, rocprim::plus<long long>)
 
-        CREATE_BENCHMARK(float, rocprim::plus<float>),
-        CREATE_BENCHMARK(double, rocprim::plus<double>),
+    CREATE_BENCHMARK(float, rocprim::plus<float>)
+    CREATE_BENCHMARK(double, rocprim::plus<double>)
 
-        CREATE_BENCHMARK(int8_t, rocprim::plus<int8_t>),
-        CREATE_BENCHMARK(uint8_t, rocprim::plus<uint8_t>),
-        CREATE_BENCHMARK(rocprim::half, rocprim::plus<rocprim::half>),
+    CREATE_BENCHMARK(int8_t, rocprim::plus<int8_t>)
+    CREATE_BENCHMARK(uint8_t, rocprim::plus<uint8_t>)
+    CREATE_BENCHMARK(rocprim::half, rocprim::plus<rocprim::half>)
 
-        CREATE_BENCHMARK(custom_float2, rocprim::plus<custom_float2>),
-        CREATE_BENCHMARK(custom_double2, rocprim::plus<custom_double2>),
-    };
+    CREATE_BENCHMARK(custom_float2, rocprim::plus<custom_float2>)
+    CREATE_BENCHMARK(custom_double2, rocprim::plus<custom_double2>)
+#endif
 
     // Use manual timing
     for(auto& b : benchmarks)

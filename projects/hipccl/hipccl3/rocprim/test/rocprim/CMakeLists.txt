@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -114,12 +114,23 @@ endfunction()
 # ****************************************************************************
 # Tests
 # ****************************************************************************
+set(BLOCK_ADJACENT_DIFFERENCE_SOURCES_LIST test_block_adjacent_difference.floating.cpp
+                                           test_block_adjacent_difference.integral.cpp)
+
+set(DEVICE_RADIX_SORT_SOURCES_LIST test_device_radix_sort.sortkeys.cpp
+                                           test_device_radix_sort.sortkeysdouble.cpp
+                                           test_device_radix_sort.sortpairs.cpp
+                                           test_device_radix_sort.sortpairsdouble.cpp
+                                           test_device_radix_sort.sortkeysover4g.cpp)
+
+set(DEVICE_SEGMENTED_RADIX_SORT_SOURCES_LIST test_device_segmented_radix_sort.sortkeys.cpp
+                                             test_device_segmented_radix_sort.sortpairs.cpp)
 
 # HIP basic test, which also checks if there are no linkage problems when there are multiple sources
 add_rocprim_test("rocprim.basic_test" "test_basic.cpp;detail/get_rocprim_version.cpp")
 
 add_rocprim_test("rocprim.arg_index_iterator" test_arg_index_iterator.cpp)
-add_rocprim_test("rocprim.block_adjacent_difference" test_block_adjacent_difference.cpp)
+add_rocprim_test("rocprim.block_adjacent_difference" "${BLOCK_ADJACENT_DIFFERENCE_SOURCES_LIST}")
 add_rocprim_test("rocprim.block_discontinuity" test_block_discontinuity.cpp)
 add_rocprim_test("rocprim.block_exchange" test_block_exchange.cpp)
 add_rocprim_test("rocprim.block_histogram" test_block_histogram.cpp)
@@ -137,12 +148,12 @@ add_rocprim_test("rocprim.device_histogram" test_device_histogram.cpp)
 add_rocprim_test("rocprim.device_merge" test_device_merge.cpp)
 add_rocprim_test("rocprim.device_merge_sort" test_device_merge_sort.cpp)
 add_rocprim_test("rocprim.device_partition" test_device_partition.cpp)
-add_rocprim_test("rocprim.device_radix_sort" test_device_radix_sort.cpp)
+add_rocprim_test("rocprim.device_radix_sort" "${DEVICE_RADIX_SORT_SOURCES_LIST}")
 add_rocprim_test("rocprim.device_reduce_by_key" test_device_reduce_by_key.cpp)
 add_rocprim_test("rocprim.device_reduce" test_device_reduce.cpp)
 add_rocprim_test("rocprim.device_run_length_encode" test_device_run_length_encode.cpp)
 add_rocprim_test("rocprim.device_scan" test_device_scan.cpp)
-add_rocprim_test("rocprim.device_segmented_radix_sort" test_device_segmented_radix_sort.cpp)
+add_rocprim_test("rocprim.device_segmented_radix_sort" "${DEVICE_SEGMENTED_RADIX_SORT_SOURCES_LIST}")
 add_rocprim_test("rocprim.device_segmented_reduce" test_device_segmented_reduce.cpp)
 add_rocprim_test("rocprim.device_segmented_scan" test_device_segmented_scan.cpp)
 add_rocprim_test("rocprim.device_select" test_device_select.cpp)

@@ -44,13 +44,15 @@ BEGIN_ROCPRIM_NAMESPACE
 /// \tparam ValueBlockLoadMethod - method for loading input values.
 /// \tparam FlagBlockLoadMethod - method for loading flag values.
 /// \tparam BlockScanMethod - algorithm for block scan.
+/// \tparam SizeLimit - limit on the number of items for a single select kernel launch.
 template<
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
     ::rocprim::block_load_method KeyBlockLoadMethod,
     ::rocprim::block_load_method ValueBlockLoadMethod,
     ::rocprim::block_load_method FlagBlockLoadMethod,
-    ::rocprim::block_scan_algorithm BlockScanMethod
+    ::rocprim::block_scan_algorithm BlockScanMethod,
+    unsigned int SizeLimit = ROCPRIM_GRID_SIZE_LIMIT
 >
 struct select_config
 {
@@ -66,6 +68,8 @@ struct select_config
     static constexpr block_load_method flag_block_load_method = FlagBlockLoadMethod;
     /// \brief Algorithm for block scan.
     static constexpr block_scan_algorithm block_scan_method = BlockScanMethod;
+    /// \brief Limit on the number of items for a single select kernel launch.
+    static constexpr unsigned int size_limit = SizeLimit;
 };
 
 namespace detail

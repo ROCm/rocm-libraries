@@ -404,7 +404,8 @@ auto partition_scatter(ValueType (&values)[ItemsPerThread],
                        const unsigned int flat_block_id,
                        const unsigned int flat_block_thread_id,
                        const bool is_last_block,
-                       const unsigned int valid_in_last_block)
+                       const unsigned int valid_in_last_block,
+                       size_t* /* prev_selected_count */)
     -> typename std::enable_if<!OnlySelected>::type
 {
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
@@ -465,7 +466,8 @@ auto partition_scatter(ValueType (&values)[ItemsPerThread],
                        const unsigned int flat_block_id,
                        const unsigned int flat_block_thread_id,
                        const bool is_last_block,
-                       const unsigned int valid_in_last_block)
+                       const unsigned int valid_in_last_block,
+                       size_t* prev_selected_count)
     -> typename std::enable_if<OnlySelected>::type
 {
     (void) size;
@@ -492,7 +494,7 @@ auto partition_scatter(ValueType (&values)[ItemsPerThread],
         // Coalesced write from shared memory to global memory
         for(unsigned int i = flat_block_thread_id; i < selected_in_block; i += BlockSize)
         {
-            output[selected_prefix + i] = scatter_storage[i];
+            output[prev_selected_count[0] + selected_prefix + i] = scatter_storage[i];
         }
     }
     else
@@ -504,7 +506,7 @@ auto partition_scatter(ValueType (&values)[ItemsPerThread],
             {
                 if(is_selected[i])
                 {
-                    output[output_indices[i]] = values[i];
+                    output[prev_selected_count[0] + output_indices[i]] = values[i];
                 }
             }
         }
@@ -532,7 +534,8 @@ void partition_scatter(ValueType (&values)[ItemsPerThread],
                        const unsigned int flat_block_id,
                        const unsigned int flat_block_thread_id,
                        const bool is_last_block,
-                       const unsigned int valid_in_last_block)
+                       const unsigned int valid_in_last_block,
+                       size_t* /* prev_selected_count */)
 {
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
     auto scatter_storage = storage.get();
@@ -623,27 +626,27 @@ void convert_selected_to_indices(uint2 (&output_indices)[items_per_thread],
 }
 
 template<
-    class SelectedCountOutputIterator,
     class OffsetT
 >
 ROCPRIM_DEVICE ROCPRIM_INLINE
-void store_selected_count(SelectedCountOutputIterator selected_count_output,
+void store_selected_count(size_t* selected_count,
+                          size_t* prev_selected_count,
                           const OffsetT selected_prefix,
                           const OffsetT selected_in_block)
 {
-    selected_count_output[0] = selected_prefix + selected_in_block;
+    selected_count[0] = prev_selected_count[0] + selected_prefix + selected_in_block;
 }
 
 template<
-    class SelectedCountOutputIterator
 >
 ROCPRIM_DEVICE ROCPRIM_INLINE
-void store_selected_count(SelectedCountOutputIterator selected_count_output,
+void store_selected_count(size_t* selected_count,
+                          size_t* prev_selected_count,
                           const uint2 selected_prefix,
                           const uint2 selected_in_block)
 {
-    selected_count_output[0] = selected_prefix.x + selected_in_block.x;
-    selected_count_output[1] = selected_prefix.y + selected_in_block.y;
+    selected_count[0] = prev_selected_count[0] + selected_prefix.x + selected_in_block.x;
+    selected_count[1] = prev_selected_count[1] + selected_prefix.y + selected_in_block.y;
 }
 
 template<
@@ -655,7 +658,6 @@ template<
     class FlagIterator,
     class OutputKeyIterator,
     class OutputValueIterator,
-    class SelectedCountOutputIterator,
     class InequalityOp,
     class OffsetLookbackScanState,
     class... UnaryPredicates
@@ -666,7 +668,8 @@ void partition_kernel_impl(KeyIterator keys_input,
                            FlagIterator flags,
                            OutputKeyIterator keys_output,
                            OutputValueIterator values_output,
-                           SelectedCountOutputIterator selected_count_output,
+                           size_t* selected_count,
+                           size_t* prev_selected_count,
                            const size_t size,
                            InequalityOp inequality_op,
                            OffsetLookbackScanState offset_scan_state,
@@ -840,7 +843,8 @@ void partition_kernel_impl(KeyIterator keys_input,
         keys, is_selected, output_indices, keys_output, size,
         selected_prefix, selected_in_block, storage.exchange_keys,
         flat_block_id, flat_block_thread_id,
-        is_last_block, valid_in_last_block
+        is_last_block, valid_in_last_block,
+        prev_selected_count
     );
 
     static constexpr bool with_values = !std::is_same<value_type, ::rocprim::empty_type>::value;
@@ -874,14 +878,15 @@ void partition_kernel_impl(KeyIterator keys_input,
             values, is_selected, output_indices, values_output, size,
             selected_prefix, selected_in_block, storage.exchange_values,
             flat_block_id, flat_block_thread_id,
-            is_last_block, valid_in_last_block
+            is_last_block, valid_in_last_block,
+            prev_selected_count
         );
     }
 
     // Last block in grid stores number of selected values
     if(is_last_block && flat_block_thread_id == 0)
     {
-        store_selected_count(selected_count_output, selected_prefix, selected_in_block);
+        store_selected_count(selected_count, prev_selected_count, selected_prefix, selected_in_block);
     }
 }
 
