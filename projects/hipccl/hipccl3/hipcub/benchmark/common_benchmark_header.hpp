@@ -44,7 +44,7 @@
 // benchmark_utils.hpp should only be included by this header.
 // The following definition is used as guard in benchmark_utils.hpp
 // Including benchmark_utils.hpp by itself will cause a compile error.
-#define BENCHMARK_UTILS_INCLUDE_GAURD
+#define BENCHMARK_UTILS_INCLUDE_GUARD
 #include "benchmark_utils.hpp"
 
 #define HIP_CHECK(condition)         \

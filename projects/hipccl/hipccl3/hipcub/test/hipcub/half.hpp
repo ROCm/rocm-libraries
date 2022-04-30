@@ -284,7 +284,7 @@ struct half_t
  ******************************************************************************/
 
 /// Insert formatted \p half_t into the output stream
-std::ostream& operator<<(std::ostream &out, const half_t &x)
+inline std::ostream& operator<<(std::ostream &out, const half_t &x)
 {
     out << (float)x;
     return out;

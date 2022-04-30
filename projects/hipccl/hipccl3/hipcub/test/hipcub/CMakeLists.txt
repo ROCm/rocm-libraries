@@ -1,5 +1,5 @@
 # MIT License #
-# Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -70,6 +70,25 @@ endfunction()
 # Tests
 # ****************************************************************************
 
+set(DEVICE_RADIX_SORT_SOURCES_LIST 
+    test_hipcub_device_radix_sort.sortkeys.cpp
+    test_hipcub_device_radix_sort.sortkeysbuffer.cpp
+    test_hipcub_device_radix_sort.sortpairs.cpp
+    test_hipcub_device_radix_sort.sortpairsbuffer.cpp
+    test_hipcub_device_radix_sort.sortkeysover4g.cpp)
+
+set(DEVICE_SEGMENTED_RADIX_SORT_SOURCES_LIST 
+    test_hipcub_device_segmented_radix_sort.sortkeys.cpp
+    test_hipcub_device_segmented_radix_sort.sortkeysbuffer.cpp
+    test_hipcub_device_segmented_radix_sort.sortpairs.cpp
+    test_hipcub_device_segmented_radix_sort.sortpairsbuffer.cpp)
+
+set(DEVICE_SEGMENTED_SORT_SOURCES_LIST 
+    test_hipcub_device_segmented_sort.sortkeys.cpp
+    test_hipcub_device_segmented_sort.sortkeysbuffer.cpp
+    test_hipcub_device_segmented_sort.sortpairs.cpp
+    test_hipcub_device_segmented_sort.sortpairsbuffer.cpp)
+
 # HIP basic test, which also checks if there are no linkage problems when there are multiple sources
 add_hipcub_test("hipcub.BasicTest" "test_hipcub_basic.cpp;detail/get_hipcub_version.cpp")
 
@@ -89,14 +108,14 @@ add_hipcub_test("hipcub.BlockShuffle" test_hipcub_block_shuffle.cpp)
 add_hipcub_test("hipcub.DeviceAdjacentDifference" test_hipcub_device_adjacent_difference.cpp)
 add_hipcub_test("hipcub.DeviceHistogram" test_hipcub_device_histogram.cpp)
 add_hipcub_test("hipcub.DeviceMergeSort" test_hipcub_device_merge_sort.cpp)
-add_hipcub_test("hipcub.DeviceRadixSort" test_hipcub_device_radix_sort.cpp)
+add_hipcub_test("hipcub.DeviceRadixSort" "${DEVICE_RADIX_SORT_SOURCES_LIST}")
 add_hipcub_test("hipcub.DeviceReduce" test_hipcub_device_reduce.cpp)
 add_hipcub_test("hipcub.DeviceRunLengthEncode" test_hipcub_device_run_length_encode.cpp)
 add_hipcub_test("hipcub.DeviceReduceByKey" test_hipcub_device_reduce_by_key.cpp)
 add_hipcub_test("hipcub.DeviceScan" test_hipcub_device_scan.cpp)
-add_hipcub_test("hipcub.DeviceSegmentedRadixSort" test_hipcub_device_segmented_radix_sort.cpp)
+add_hipcub_test("hipcub.DeviceSegmentedRadixSort" "${DEVICE_SEGMENTED_RADIX_SORT_SOURCES_LIST}")
 add_hipcub_test("hipcub.DeviceSegmentedReduce" test_hipcub_device_segmented_reduce.cpp)
-add_hipcub_test("hipcub.DeviceSegmentedSort" test_hipcub_device_segmented_sort.cpp)
+add_hipcub_test("hipcub.DeviceSegmentedSort" "${DEVICE_SEGMENTED_SORT_SOURCES_LIST}")
 add_hipcub_test("hipcub.DeviceSelect" test_hipcub_device_select.cpp)
 add_hipcub_test("hipcub.DevicePartition" test_hipcub_device_partition.cpp)
 add_hipcub_test("hipcub.Grid" test_hipcub_grid.cpp)

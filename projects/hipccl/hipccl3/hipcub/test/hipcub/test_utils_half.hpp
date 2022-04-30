@@ -34,7 +34,7 @@ using half = ::__half;
 using native_half = half_t;
 
 HIPCUB_HOST_DEVICE
-test_utils::half native_to_half(const test_utils::native_half& x)
+inline test_utils::half native_to_half(const test_utils::native_half& x)
 {
     return *reinterpret_cast<const test_utils::half *>(&x);
 }

@@ -35,19 +35,20 @@ const unsigned int warmup_size = 5;
 
 template<
     class T,
-    class BinaryFunction
+    class OutputT,
+    class ReduceKernel
 >
 void run_benchmark(benchmark::State& state,
                    size_t size,
                    const hipStream_t stream,
-                   BinaryFunction reduce_op)
+                   ReduceKernel reduce)
 {
     std::vector<T> input = benchmark_utils::get_random_data<T>(size, T(0), T(1000));
 
     T * d_input;
-    T * d_output;
+    OutputT * d_output;
     HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
-    HIP_CHECK(hipMalloc(&d_output, sizeof(T)));
+    HIP_CHECK(hipMalloc(&d_output, sizeof(OutputT)));
     HIP_CHECK(
         hipMemcpy(
             d_input, input.data(),
@@ -62,24 +63,21 @@ void run_benchmark(benchmark::State& state,
     void * d_temp_storage = nullptr;
     // Get size of d_temp_storage
     HIP_CHECK(
-        hipcub::DeviceReduce::Reduce(
+        reduce(
             d_temp_storage, temp_storage_size_bytes,
             d_input, d_output, size,
-            reduce_op, T(), 
-            stream
+            stream, false
         )
     );
     HIP_CHECK(hipMalloc(&d_temp_storage,temp_storage_size_bytes));
     HIP_CHECK(hipDeviceSynchronize());
-
-    // Warm-up
     for(size_t i = 0; i < warmup_size; i++)
     {
         HIP_CHECK(
-            hipcub::DeviceReduce::Reduce(
+            reduce(
                 d_temp_storage, temp_storage_size_bytes,
                 d_input, d_output, size,
-                reduce_op, T(), stream
+                stream, false
             )
         );
     }
@@ -92,10 +90,10 @@ void run_benchmark(benchmark::State& state,
         for(size_t i = 0; i < batch_size; i++)
         {
             HIP_CHECK(
-                hipcub::DeviceReduce::Reduce(
+                reduce(
                     d_temp_storage, temp_storage_size_bytes,
                     d_input, d_output, size,
-                    reduce_op, T(), stream
+                    stream, false
                 )
             );
         }
@@ -114,11 +112,49 @@ void run_benchmark(benchmark::State& state,
     HIP_CHECK(hipFree(d_temp_storage));
 }
 
+template<typename T, typename Op>
+struct Benchmark;
+
+template<typename T>
+struct Benchmark<T, hipcub::Sum> {
+    static void run(benchmark::State& state, size_t size, const hipStream_t stream)
+    {
+        run_benchmark<T, T>(state, size, stream, hipcub::DeviceReduce::Sum<T*, T*>);
+    }
+};
+
+template<typename T>
+struct Benchmark<T, hipcub::Min> {
+    static void run(benchmark::State& state, size_t size, const hipStream_t stream)
+    {
+        run_benchmark<T, T>(state, size, stream, hipcub::DeviceReduce::Min<T*, T*>);
+    }
+};
+
+template<typename T>
+struct Benchmark<T, hipcub::ArgMin> {
+    using Difference = int;
+    using Iterator = typename hipcub::ArgIndexInputIterator<T*, Difference>;
+    using KeyValue = typename Iterator::value_type;
+
+    static void run(benchmark::State& state, size_t size, const hipStream_t stream)
+    {
+        run_benchmark<T, KeyValue>(state, size, stream, hipcub::DeviceReduce::ArgMin<T*, KeyValue*>);
+    }
+};
+
 #define CREATE_BENCHMARK(T, REDUCE_OP) \
 benchmark::RegisterBenchmark( \
     ("reduce<" #T ", " #REDUCE_OP ">"), \
-    &run_benchmark<T, REDUCE_OP>, size, stream, REDUCE_OP() \
+    &Benchmark<T, REDUCE_OP>::run, size, stream \
 )
+
+#define CREATE_BENCHMARKS(REDUCE_OP) \
+    CREATE_BENCHMARK(int, REDUCE_OP), \
+    CREATE_BENCHMARK(long long, REDUCE_OP), \
+    CREATE_BENCHMARK(float, REDUCE_OP), \
+    CREATE_BENCHMARK(double, REDUCE_OP), \
+    CREATE_BENCHMARK(int8_t, REDUCE_OP)
 
 int main(int argc, char *argv[])
 {
@@ -140,23 +176,21 @@ int main(int argc, char *argv[])
     HIP_CHECK(hipGetDeviceProperties(&devProp, device_id));
     std::cout << "[HIP] Device name: " << devProp.name << std::endl;
 
-    using custom_float2 = benchmark_utils::custom_type<float, float>;
     using custom_double2 = benchmark_utils::custom_type<double, double>;
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks =
     {
-        CREATE_BENCHMARK(int, hipcub::Sum),
-        CREATE_BENCHMARK(long long, hipcub::Sum),
-
-        CREATE_BENCHMARK(float, hipcub::Sum),
-        CREATE_BENCHMARK(double, hipcub::Sum),
-
-        CREATE_BENCHMARK(int8_t, hipcub::Sum),
-        CREATE_BENCHMARK(uint8_t, hipcub::Sum),
-        
-        CREATE_BENCHMARK(custom_float2, hipcub::Sum),
+        CREATE_BENCHMARKS(hipcub::Sum),
         CREATE_BENCHMARK(custom_double2, hipcub::Sum),
+        CREATE_BENCHMARKS(hipcub::Min),
+        #ifdef HIPCUB_ROCPRIM_API
+        CREATE_BENCHMARK(custom_double2, hipcub::Min),
+        #endif
+        CREATE_BENCHMARKS(hipcub::ArgMin),
+        #ifdef HIPCUB_ROCPRIM_API
+        CREATE_BENCHMARK(custom_double2, hipcub::ArgMin),
+        #endif
     };
 
     // Use manual timing

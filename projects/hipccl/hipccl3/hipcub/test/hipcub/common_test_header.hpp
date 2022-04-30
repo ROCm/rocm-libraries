@@ -60,7 +60,7 @@
 namespace test_common_utils
 {
 
-bool use_hmm()
+inline bool use_hmm()
 {
     if (getenv("HIPCUB_USE_HMM") == nullptr)
     {

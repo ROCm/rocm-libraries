@@ -34,10 +34,15 @@ const size_t DEFAULT_N = 1024 * 1024 * 32;
 const unsigned int batch_size = 10;
 const unsigned int warmup_size = 5;
 
-template<class T>
-void run_benchmark(benchmark::State& state, size_t desired_segments, hipStream_t stream, size_t size)
+using OffsetType = int;
+
+template<class T, class OutputT, class SegmentedReduceKernel>
+void run_benchmark(benchmark::State& state,
+                   size_t desired_segments,
+                   hipStream_t stream,
+                   size_t size,
+                   SegmentedReduceKernel segmented_reduce)
 {
-    using offset_type = int;
     using value_type = T;
 
     // Generate data
@@ -47,7 +52,7 @@ void run_benchmark(benchmark::State& state, size_t desired_segments, hipStream_t
     const double avg_segment_length = static_cast<double>(size) / desired_segments;
     std::uniform_real_distribution<double> segment_length_dis(0, avg_segment_length * 2);
 
-    std::vector<offset_type> offsets;
+    std::vector<OffsetType> offsets;
     unsigned int segments_count = 0;
     size_t offset = 0;
     while(offset < size)
@@ -62,12 +67,12 @@ void run_benchmark(benchmark::State& state, size_t desired_segments, hipStream_t
     std::vector<value_type> values_input(size);
     std::iota(values_input.begin(), values_input.end(), 0);
 
-    offset_type * d_offsets;
-    HIP_CHECK(hipMalloc(&d_offsets, (segments_count + 1) * sizeof(offset_type)));
+    OffsetType * d_offsets;
+    HIP_CHECK(hipMalloc(&d_offsets, (segments_count + 1) * sizeof(OffsetType)));
     HIP_CHECK(
         hipMemcpy(
             d_offsets, offsets.data(),
-            (segments_count + 1) * sizeof(offset_type),
+            (segments_count + 1) * sizeof(OffsetType),
             hipMemcpyHostToDevice
         )
     );
@@ -82,23 +87,21 @@ void run_benchmark(benchmark::State& state, size_t desired_segments, hipStream_t
         )
     );
 
-    value_type * d_aggregates_output;
-    HIP_CHECK(hipMalloc(&d_aggregates_output, segments_count * sizeof(value_type)));
+    OutputT * d_aggregates_output;
+    HIP_CHECK(hipMalloc(&d_aggregates_output, segments_count * sizeof(OutputT)));
 
     hipcub::Sum reduce_op;
-    value_type init(0);
 
     void * d_temporary_storage = nullptr;
     size_t temporary_storage_bytes = 0;
 
     HIP_CHECK(
-        hipcub::DeviceSegmentedReduce::Reduce(
+        segmented_reduce(
             d_temporary_storage, temporary_storage_bytes,
             d_values_input, d_aggregates_output,
             segments_count,
             d_offsets, d_offsets + 1,
-            reduce_op, init,
-            stream
+            stream, false
         )
     );
 
@@ -109,13 +112,12 @@ void run_benchmark(benchmark::State& state, size_t desired_segments, hipStream_t
     for(size_t i = 0; i < warmup_size; i++)
     {
         HIP_CHECK(
-            hipcub::DeviceSegmentedReduce::Reduce(
+            segmented_reduce(
                 d_temporary_storage, temporary_storage_bytes,
                 d_values_input, d_aggregates_output,
                 segments_count,
                 d_offsets, d_offsets + 1,
-                reduce_op, init,
-                stream
+                stream, false
             )
         );
     }
@@ -128,13 +130,12 @@ void run_benchmark(benchmark::State& state, size_t desired_segments, hipStream_t
         for(size_t i = 0; i < batch_size; i++)
         {
             HIP_CHECK(
-                hipcub::DeviceSegmentedReduce::Reduce(
+                segmented_reduce(
                     d_temporary_storage, temporary_storage_bytes,
                     d_values_input, d_aggregates_output,
                     segments_count,
                     d_offsets, d_offsets + 1,
-                    reduce_op, init,
-                    stream
+                    stream, false
                 )
             );
         }
@@ -154,38 +155,75 @@ void run_benchmark(benchmark::State& state, size_t desired_segments, hipStream_t
     HIP_CHECK(hipFree(d_aggregates_output));
 }
 
-#define CREATE_BENCHMARK(T, SEGMENTS) \
+template<typename T, typename Op>
+struct Benchmark;
+
+template<typename T>
+struct Benchmark<T, hipcub::Sum> {
+    static void run(benchmark::State& state, size_t desired_segments, const hipStream_t stream, size_t size)
+    {
+        run_benchmark<T, T>(state, desired_segments, stream, size, hipcub::DeviceSegmentedReduce::Sum<T*, T*, OffsetType*>);
+    }
+};
+
+template<typename T>
+struct Benchmark<T, hipcub::Min> {
+    static void run(benchmark::State& state, size_t desired_segments, const hipStream_t stream, size_t size)
+    {
+        run_benchmark<T, T>(state, desired_segments, stream, size, hipcub::DeviceSegmentedReduce::Min<T*, T*, OffsetType*>);
+    }
+};
+
+template<typename T>
+struct Benchmark<T, hipcub::ArgMin> {
+    using Difference = OffsetType;
+    using Iterator = typename hipcub::ArgIndexInputIterator<T*, Difference>;
+    using KeyValue = typename Iterator::value_type;
+
+    static void run(benchmark::State& state, size_t desired_segments, const hipStream_t stream, size_t size)
+    {
+        run_benchmark<T, KeyValue>(state, desired_segments, stream, size, hipcub::DeviceSegmentedReduce::ArgMin<T*, KeyValue*, Difference*>);
+    }
+};
+
+#define CREATE_BENCHMARK(T, SEGMENTS, REDUCE_OP) \
 benchmark::RegisterBenchmark( \
-    (std::string("segmented_reduce") + "<" #T ">" + \
+    (std::string("segmented_reduce") + "<" #T ", " #REDUCE_OP ">" + \
         "(~" + std::to_string(SEGMENTS) + " segments)" \
     ).c_str(), \
-    &run_benchmark<T>, \
+    &Benchmark<T, REDUCE_OP>::run, \
     SEGMENTS, stream, size \
 )
 
-#define BENCHMARK_TYPE(type) \
-    CREATE_BENCHMARK(type, 1), \
-    CREATE_BENCHMARK(type, 10), \
-    CREATE_BENCHMARK(type, 100), \
-    CREATE_BENCHMARK(type, 1000), \
-    CREATE_BENCHMARK(type, 10000)
+#define BENCHMARK_TYPE(type, REDUCE_OP) \
+    CREATE_BENCHMARK(type, 1, REDUCE_OP), \
+    CREATE_BENCHMARK(type, 100, REDUCE_OP), \
+    CREATE_BENCHMARK(type, 10000, REDUCE_OP)
+
+#define CREATE_BENCHMARKS(REDUCE_OP) \
+    BENCHMARK_TYPE(float, REDUCE_OP), \
+    BENCHMARK_TYPE(double, REDUCE_OP), \
+    BENCHMARK_TYPE(int8_t, REDUCE_OP), \
+    BENCHMARK_TYPE(int, REDUCE_OP)
 
 void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
                     hipStream_t stream,
                     size_t size)
 {
-    using custom_float2 = benchmark_utils::custom_type<float, float>;
     using custom_double2 = benchmark_utils::custom_type<double, double>;
 
     std::vector<benchmark::internal::Benchmark*> bs =
     {
-        BENCHMARK_TYPE(float),
-        BENCHMARK_TYPE(double),
-        BENCHMARK_TYPE(int8_t),
-        BENCHMARK_TYPE(uint8_t),
-        BENCHMARK_TYPE(int),
-        BENCHMARK_TYPE(custom_float2),
-        BENCHMARK_TYPE(custom_double2),
+        CREATE_BENCHMARKS(hipcub::Sum),
+        BENCHMARK_TYPE(custom_double2, hipcub::Sum),
+        CREATE_BENCHMARKS(hipcub::Min),
+        #ifdef HIPCUB_ROCPRIM_API
+        BENCHMARK_TYPE(custom_double2, hipcub::Min),
+        #endif
+        CREATE_BENCHMARKS(hipcub::ArgMin),
+        #ifdef HIPCUB_ROCPRIM_API
+        BENCHMARK_TYPE(custom_double2, hipcub::ArgMin),
+        #endif
     };
 
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());

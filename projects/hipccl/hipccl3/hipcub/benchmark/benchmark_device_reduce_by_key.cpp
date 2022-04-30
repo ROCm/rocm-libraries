@@ -2,7 +2,7 @@
 //
 // Copyright (c) 2020 Advanced Micro Devices, Inc. All rights reserved.
 //
-// Permission is hereby granted, free of charge, to any person obtaining a copy
+    // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
 // in the Software without restriction, including without limitation the rights
 // to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
@@ -38,8 +38,8 @@ const size_t DEFAULT_N = 1024 * 1024 * 32;
 const unsigned int batch_size = 10;
 const unsigned int warmup_size = 5;
 
-template<class Key, class Value>
-void run_benchmark(benchmark::State& state, size_t max_length, hipStream_t stream, size_t size)
+template<class Key, class Value, class BinaryFunction>
+void run_benchmark(benchmark::State& state, size_t max_length, hipStream_t stream, size_t size, BinaryFunction reduce_op)
 {
     using key_type = Key;
     using value_type = Value;
@@ -95,8 +95,6 @@ void run_benchmark(benchmark::State& state, size_t max_length, hipStream_t strea
 
     void * d_temporary_storage = nullptr;
     size_t temporary_storage_bytes = 0;
-
-    hipcub::Sum reduce_op;
 
     HIP_CHECK(
         hipcub::DeviceReduce::ReduceByKey(
@@ -163,37 +161,38 @@ void run_benchmark(benchmark::State& state, size_t max_length, hipStream_t strea
     HIP_CHECK(hipFree(d_unique_count_output));
 }
 
-#define CREATE_BENCHMARK(Key, Value) \
+#define CREATE_BENCHMARK(Key, Value, REDUCE_OP) \
 benchmark::RegisterBenchmark( \
-    (std::string("reduce_by_key") + "<" #Key ", " #Value ">" + \
+    (std::string("reduce_by_key") + "<" #Key ", " #Value ", " #REDUCE_OP ">" + \
         "([1, " + std::to_string(max_length) + "])" \
     ).c_str(), \
-    &run_benchmark<Key, Value>, \
-    max_length, stream, size \
+    &run_benchmark<Key, Value, REDUCE_OP>, \
+    max_length, stream, size, REDUCE_OP() \
 )
+
+#define CREATE_BENCHMARKS(REDUCE_OP) \
+    CREATE_BENCHMARK(int, float, REDUCE_OP), \
+    CREATE_BENCHMARK(int, double, REDUCE_OP), \
+    CREATE_BENCHMARK(int, custom_double2, REDUCE_OP), \
+    CREATE_BENCHMARK(int8_t, int8_t, REDUCE_OP), \
+    CREATE_BENCHMARK(long long, float, REDUCE_OP), \
+    CREATE_BENCHMARK(long long, double, REDUCE_OP)
 
 void add_benchmarks(size_t max_length,
                     std::vector<benchmark::internal::Benchmark*>& benchmarks,
                     hipStream_t stream,
                     size_t size)
 {
-    using custom_float2 = benchmark_utils::custom_type<float, float>;
     using custom_double2 = benchmark_utils::custom_type<double, double>;
 
     std::vector<benchmark::internal::Benchmark*> bs =
     {
-        CREATE_BENCHMARK(int, float),
-        CREATE_BENCHMARK(int, double),
-        CREATE_BENCHMARK(int, custom_float2),
-        CREATE_BENCHMARK(int, custom_double2),
-
-        CREATE_BENCHMARK(int8_t, int8_t),
-        CREATE_BENCHMARK(uint8_t, uint8_t),
-
-        CREATE_BENCHMARK(long long, float),
-        CREATE_BENCHMARK(long long, double),
-        CREATE_BENCHMARK(long long, custom_float2),
-        CREATE_BENCHMARK(long long, custom_double2),
+        CREATE_BENCHMARKS(hipcub::Sum),
+        CREATE_BENCHMARK(long long, custom_double2, hipcub::Sum),
+        CREATE_BENCHMARKS(hipcub::Min),
+        #ifdef HIPCUB_ROCPRIM_API
+        CREATE_BENCHMARK(long long, custom_double2, hipcub::Min),
+        #endif
     };
 
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());

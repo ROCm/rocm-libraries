@@ -131,7 +131,9 @@ template <typename ValueT>
         hipError_t status;
         if(d_temp_storage == nullptr)
         {
-            temp_storage_bytes = 0;
+            // Make sure user won't try to allocate 0 bytes memory, because
+            // hipMalloc will return nullptr when size is zero.
+            temp_storage_bytes = 4;
             return hipError_t(0);
         }
         else

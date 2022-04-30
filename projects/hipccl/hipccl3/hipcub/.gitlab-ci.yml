@@ -53,7 +53,8 @@ stages:
     - git clone -b "$BRANCH_NAME" --depth 1 https://gitlab-ci-token:${CI_JOB_TOKEN}@${ROCPRIM_GIT_URL}
     - cmake
       -G Ninja
-      -D CMAKE_CXX_COMPILER=hipcc
+      -D CMAKE_CXX_COMPILER="$AMDCLANG"
+      -D CMAKE_CXX_FLAGS="-Wall -Wextra"
       -D CMAKE_BUILD_TYPE=Release
       -D BUILD_TEST=OFF
       -D BUILD_EXAMPLE=OFF
@@ -73,11 +74,13 @@ build:rocm:
   script:
     - cmake
       -G Ninja
-      -D CMAKE_CXX_COMPILER=hipcc
+      -D CMAKE_CXX_COMPILER="$AMDCLANG"
+      -D CMAKE_CXX_FLAGS="-Wall -Wextra"
       -D CMAKE_BUILD_TYPE=Release
       -D BUILD_TEST=ON
       -D BUILD_EXAMPLE=ON
-      -D AMDGPU_TARGETS="$GPU_TARGETS"
+      -D GPU_TARGETS="$GPU_TARGETS"
+      -D ROCM_SYMLINK_LIBS=OFF
       -B build
       -S ./
     - cmake --build build
@@ -93,31 +96,37 @@ build:rocm:
       - build/CTestTestfile.cmake
       - build/hipcub*.deb
       - build/hipcub*.zip
+      - build/.ninja_log
     expire_in: 2 weeks
+
+.main_or_manual:
+  rules:
+    - if: '$CI_COMMIT_REF_NAME == "develop_stream" || $CI_COMMIT_REF_NAME == "develop"
+           || $CI_COMMIT_REF_NAME == "master"'
+    - if: '$CI_PIPELINE_SOURCE != "merge_request_event"'
+      when: manual
+      allow_failure: true
 
 build:rocm-benchmark:
   extends:
     - .rocm
     - .gpus:rocm-gpus
   stage: build
-  only:
-    - develop_stream
-    - develop
-    - master
   script:
     - cmake
       -G Ninja
-      -D CMAKE_CXX_COMPILER=hipcc
+      -D CMAKE_CXX_COMPILER="$AMDCLANG"
+      -D CMAKE_CXX_FLAGS="-Wall -Wextra"
       -D CMAKE_BUILD_TYPE=Release
       -D BUILD_BENCHMARK=ON
-      -D AMDGPU_TARGETS="$GPU_TARGETS"
+      -D GPU_TARGETS="$GPU_TARGETS"
       -B build
       -S ./
     - cmake --build build
   artifacts:
     paths:
       - build/benchmark/*
-      - build/googlebenchmark/
+      - build/deps/googlebenchmark/
     expire_in: 2 weeks
 
 test:rocm:
@@ -133,39 +142,48 @@ test:rocm:
 
 .benchmark:
   stage: benchmark
-  when: manual
-  only:
-    - develop_stream
-    - develop
-    - master
   script:
-    - cmake
-      -D BENCHMARK_BINARY_DIR=build/benchmark
-      -P ${CI_PROJECT_DIR}/.gitlab/cmake-run-benchmarks.txt
+    - python3 ${CI_PROJECT_DIR}/.gitlab/run_and_upload_benchmarks.py
+        --api_endpoint ${BENCHMARK_API_ENDPOINT}
+        --api_base_folder_id ${BENCHMARK_API_FOLDER_ID}
+        --api_auth_token ${BENCHMARK_API_AUTH_TOKEN}
+        --benchmark_dir ${CI_PROJECT_DIR}/build/benchmark
+        --benchmark_datetime ${CI_PIPELINE_CREATED_AT}
+        --benchmark_version ${CI_COMMIT_REF_SLUG}_MR${CI_MERGE_REQUEST_IID}_${CI_COMMIT_SHORT_SHA}
+        --benchmark_gpu_name "${GPU}"
 
 benchmark:rocm:
   extends:
     - .rocm
     - .benchmark
     - .gpus:rocm
+    - .main_or_manual
   needs:
     - build:rocm-benchmark
 
 .test_package:
   script:
+    - |
+      if [[ -n $GPU_TARGETS ]]; then
+        GPU_TARGETS_ARG="-DGPU_TARGETS=$GPU_TARGETS"
+      else
+        GPU_TARGETS_ARG=""
+      fi
     - cmake
       -G Ninja
       -D rocprim_DIR="/opt/rocm/rocprim"
+      -D CMAKE_CXX_FLAGS="-Wall -Wextra -Werror"
+      "$GPU_TARGETS_ARG"
       -S test/extra
-      -B ../package_test
-    - cmake --build ../package_test
-    - cd ../package_test
+      -B build/package_test
+    - cmake --build build/package_test
+    - cd build/package_test
     - ctest --output-on-failure --repeat-until-fail 2
 
 .test:package:
   script:
     - cd build
-    - $SUDO_CMD dpkg -i hipcub*.deb
+    - $SUDO_CMD dpkg -i ${HIPCUB_DEV_PACKAGE_WILDCARD}
     - cd ..
     - export CXX
     - !reference [".test_package", script]
@@ -188,18 +206,21 @@ test:rocm_package:
   needs:
     - build:rocm
   variables:
-    CXX: hipcc
+    CXX: "$AMDCLANG"
+    HIPCUB_DEV_PACKAGE_WILDCARD: hipcub-dev*.deb
   extends:
     - .rocm
+    - .gpus:rocm-gpus
     - .test:package
 
 test:rocm_install:
   stage: test
   needs: []
   variables:
-    CXX: hipcc
+    CXX: "$AMDCLANG"
   extends:
    - .rocm
+   - .gpus:rocm-gpus
    - .test:install
 
 # hipCUB with CUB backend
@@ -218,10 +239,12 @@ build:nvcc:
   script:
     - cmake
       -G Ninja
+      -D CMAKE_CXX_FLAGS="-Wall -Wextra"
       -D CMAKE_BUILD_TYPE=Release
       -D BUILD_TEST=ON
       -D BUILD_EXAMPLE=ON
       -D NVGPU_TARGETS="$GPU_TARGETS"
+      -D ROCM_SYMLINK_LIBS=OFF
       -B build
       -S .
     - cmake --build build
@@ -237,18 +260,17 @@ build:nvcc:
       - build/CTestTestfile.cmake
       - build/hipcub*.deb
       - build/hipcub*.zip
+      - build/.ninja_log
     expire_in: 2 weeks
 
 build:nvcc-benchmark:
   stage: build
-  extends: .nvcc
-  only:
-    - develop_stream
-    - develop
-    - master
+  extends:
+    - .nvcc
   script:
     - cmake
       -G Ninja
+      -D CMAKE_CXX_FLAGS="-Wall -Wextra"
       -D CMAKE_BUILD_TYPE=Release
       -D BUILD_BENCHMARK=ON
       -D CMAKE_CXX_COMPILER=g++-8
@@ -260,7 +282,7 @@ build:nvcc-benchmark:
   artifacts:
     paths:
       - build/benchmark/*
-      - build/googlebenchmark/
+      - build/deps/googlebenchmark/
     expire_in: 2 weeks
 
 test:nvcc:
@@ -285,11 +307,14 @@ benchmark:nvcc:
   extends:
     - test:nvcc
     - .benchmark
+    - .main_or_manual
 
 test:nvcc_package:
   stage: test
   needs:
     - build:nvcc
+  variables:
+    HIPCUB_DEV_PACKAGE_WILDCARD: hipcub_nvcc-dev*.deb
   extends:
     - .nvcc
     - .test:package

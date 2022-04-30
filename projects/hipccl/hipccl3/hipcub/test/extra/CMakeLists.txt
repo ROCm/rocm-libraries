@@ -33,23 +33,7 @@ list(APPEND CMAKE_MODULE_PATH
   ${HIP_PATH}/cmake /opt/rocm/hip/cmake # FindHIP.cmake
 )
 
-# Detect compiler support for target ID
-if( CMAKE_CXX_COMPILER MATCHES ".*/hipcc$" )
-  execute_process(COMMAND ${CMAKE_CXX_COMPILER} "--help"
-    OUTPUT_VARIABLE CXX_OUTPUT
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_STRIP_TRAILING_WHITESPACE)
-  string(REGEX MATCH ".mcode\-object\-version" TARGET_ID_SUPPORT ${CXX_OUTPUT})
-endif()
-
-# Use target ID syntax if supported for AMDGPU_TARGETS
-if(TARGET_ID_SUPPORT)
-  set(AMDGPU_TARGETS gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack- CACHE STRING "List of specific machine types for library to target")
-else()
-  set(AMDGPU_TARGETS gfx803;gfx900;gfx906;gfx908 CACHE STRING "List of specific machine types for library to target")
-endif()
-
-# Verify that hcc compiler is used on ROCM platform
+# Verify that hip-clang is used on ROCM platform
 include(VerifyCompiler)
 
 # Download CUB
@@ -107,7 +91,7 @@ if(HIP_COMPILER STREQUAL "nvcc")
 endif()
 
 # Download rocPRIM (only for ROCm platform)
-if(HIP_COMPILER STREQUAL "hcc" OR HIP_COMPILER STREQUAL "clang")
+if(HIP_COMPILER STREQUAL "clang")
   if(NOT DEFINED rocprim_DIR)
     message(STATUS "Downloading and building rocPRIM.")
     set(rocprim_DIR "${CMAKE_CURRENT_BINARY_DIR}/rocprim" CACHE PATH "")
@@ -129,13 +113,12 @@ if(HIP_COMPILER STREQUAL "hcc" OR HIP_COMPILER STREQUAL "clang")
 endif()
 
 # Find hipCUB
-find_package(hipcub REQUIRED CONFIG HINTS ${hipcub_DIR} PATHS "/opt/rocm/hipcub")
+find_package(hipcub REQUIRED CONFIG HINTS ${hipcub_DIR} PATHS "/opt/rocm")
 
 # Build CXX flags
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Werror")
 
 # Enable testing (ctest)
 enable_testing()
@@ -157,7 +140,7 @@ function(add_hipcub_test TEST_NAME TEST_SOURCES)
         $<BUILD_INTERFACE:${CUB_INCLUDE_DIR}>
         $<BUILD_INTERFACE:${THRUST_INCLUDE_DIR}>
     )
-  elseif(HIP_COMPILER STREQUAL "hcc" OR HIP_COMPILER STREQUAL "clang")
+  elseif(HIP_COMPILER STREQUAL "clang")
     target_link_libraries(${TEST_TARGET}
       PRIVATE
         ${hipcub_LIBRARIES} # hip::hipcub
