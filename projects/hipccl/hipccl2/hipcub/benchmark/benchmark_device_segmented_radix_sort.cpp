@@ -33,13 +33,28 @@ const size_t DEFAULT_N = 1024 * 1024 * 32;
 const unsigned int batch_size = 4;
 const unsigned int warmup_size = 2;
 
+constexpr bool Ascending = false;
+constexpr bool Descending = true;
+
 template<class Key>
 void run_sort_keys_benchmark(benchmark::State& state,
                              size_t desired_segments,
-                             hipStream_t stream, size_t size)
+                             hipStream_t stream, 
+                             size_t size,
+                             bool descending = false)
 {
     using offset_type = int;
     using key_type = Key;
+    typedef hipError_t (*sort_func) (
+        void *, size_t&, const key_type *, key_type *, int, int,
+        offset_type *, offset_type *, int, int, hipStream_t, bool);
+
+    sort_func func_ascending  = &hipcub::DeviceSegmentedRadixSort::SortKeys
+        <key_type, offset_type *>;
+    sort_func func_descending = &hipcub::DeviceSegmentedRadixSort::SortKeysDescending
+        <key_type, offset_type *>;
+        
+    sort_func sorting = descending ? func_descending : func_ascending;
 
     // Generate data
     std::vector<offset_type> offsets;
@@ -65,7 +80,8 @@ void run_sort_keys_benchmark(benchmark::State& state,
     std::vector<key_type> keys_input;
     if(std::is_floating_point<key_type>::value)
     {
-        keys_input = benchmark_utils::get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000);
+        keys_input = benchmark_utils::get_random_data<key_type>(
+            size, (key_type)-1000, (key_type)+1000);
     }
     else
     {
@@ -101,7 +117,7 @@ void run_sort_keys_benchmark(benchmark::State& state,
     void * d_temporary_storage = nullptr;
     size_t temporary_storage_bytes = 0;
     HIP_CHECK(
-        hipcub::DeviceSegmentedRadixSort::SortKeys(
+        sorting(
             d_temporary_storage, temporary_storage_bytes,
             d_keys_input, d_keys_output, size,
             segments_count, d_offsets, d_offsets + 1,
@@ -117,7 +133,7 @@ void run_sort_keys_benchmark(benchmark::State& state,
     for(size_t i = 0; i < warmup_size; i++)
     {
         HIP_CHECK(
-            hipcub::DeviceSegmentedRadixSort::SortKeys(
+            sorting(
                 d_temporary_storage, temporary_storage_bytes,
                 d_keys_input, d_keys_output, size,
                 segments_count, d_offsets, d_offsets + 1,
@@ -135,7 +151,7 @@ void run_sort_keys_benchmark(benchmark::State& state,
         for(size_t i = 0; i < batch_size; i++)
         {
             HIP_CHECK(
-                hipcub::DeviceSegmentedRadixSort::SortKeys(
+                sorting(
                     d_temporary_storage, temporary_storage_bytes,
                     d_keys_input, d_keys_output, size,
                     segments_count, d_offsets, d_offsets + 1,
@@ -163,11 +179,24 @@ void run_sort_keys_benchmark(benchmark::State& state,
 template<class Key, class Value>
 void run_sort_pairs_benchmark(benchmark::State& state,
                               size_t desired_segments,
-                              hipStream_t stream, size_t size)
+                              hipStream_t stream,
+                              size_t size,
+                              bool descending = false)
 {
     using offset_type = int;
     using key_type = Key;
     using value_type = Value;
+    typedef hipError_t (*sort_func) (
+        void *, size_t&, const key_type *, key_type *,
+        const value_type *, value_type *, int, int,
+        offset_type *, offset_type *, int, int, hipStream_t, bool);
+
+    sort_func func_ascending  = &hipcub::DeviceSegmentedRadixSort::SortPairs
+        <key_type, value_type, offset_type *>;
+    sort_func func_descending = &hipcub::DeviceSegmentedRadixSort::SortPairsDescending
+        <key_type, value_type, offset_type *>;
+
+    sort_func sorting = descending ? func_descending : func_ascending;
 
     // Generate data
     std::vector<offset_type> offsets;
@@ -193,7 +222,8 @@ void run_sort_pairs_benchmark(benchmark::State& state,
     std::vector<key_type> keys_input;
     if(std::is_floating_point<key_type>::value)
     {
-        keys_input = benchmark_utils::get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000);
+        keys_input = benchmark_utils::get_random_data<key_type>(
+            size, (key_type)-1000, (key_type)+1000);
     }
     else
     {
@@ -244,10 +274,10 @@ void run_sort_pairs_benchmark(benchmark::State& state,
     void * d_temporary_storage = nullptr;
     size_t temporary_storage_bytes = 0;
     HIP_CHECK(
-        hipcub::DeviceSegmentedRadixSort::SortPairs(
+        sorting(
             d_temporary_storage, temporary_storage_bytes,
-            d_keys_input, d_keys_output, d_values_input, d_values_output, size,
-            segments_count, d_offsets, d_offsets + 1,
+            d_keys_input, d_keys_output, d_values_input, d_values_output,
+            size, segments_count, d_offsets, d_offsets + 1,
             0, sizeof(key_type) * 8,
             stream, false
         )
@@ -260,10 +290,10 @@ void run_sort_pairs_benchmark(benchmark::State& state,
     for(size_t i = 0; i < warmup_size; i++)
     {
         HIP_CHECK(
-            hipcub::DeviceSegmentedRadixSort::SortPairs(
+            sorting(
                 d_temporary_storage, temporary_storage_bytes,
-                d_keys_input, d_keys_output, d_values_input, d_values_output, size,
-                segments_count, d_offsets, d_offsets + 1,
+                d_keys_input, d_keys_output, d_values_input, d_values_output,
+                size, segments_count, d_offsets, d_offsets + 1,
                 0, sizeof(key_type) * 8,
                 stream, false
             )
@@ -278,7 +308,7 @@ void run_sort_pairs_benchmark(benchmark::State& state,
         for(size_t i = 0; i < batch_size; i++)
         {
             HIP_CHECK(
-                hipcub::DeviceSegmentedRadixSort::SortPairs(
+                sorting(
                     d_temporary_storage, temporary_storage_bytes,
                     d_keys_input, d_keys_output, d_values_input, d_values_output, size,
                     segments_count, d_offsets, d_offsets + 1,
@@ -312,7 +342,15 @@ benchmark::RegisterBenchmark( \
     (std::string("sort_keys") + "<" #Key ">" + \
         "(~" + std::to_string(SEGMENTS) + " segments)" \
     ).c_str(), \
-    [=](benchmark::State& state) { run_sort_keys_benchmark<Key>(state, SEGMENTS, stream, size); } \
+    [=](benchmark::State& state) { run_sort_keys_benchmark<Key>(state, SEGMENTS, stream, size, Ascending); } \
+)
+
+#define CREATE_SORT_KEYS_DESCENDING_BENCHMARK(Key, SEGMENTS) \
+benchmark::RegisterBenchmark( \
+    (std::string("sort_keys") + "<" #Key ">" + \
+        "(~" + std::to_string(SEGMENTS) + " segments), descending" \
+    ).c_str(), \
+    [=](benchmark::State& state) { run_sort_keys_benchmark<Key>(state, SEGMENTS, stream, size, Descending); } \
 )
 
 #define BENCHMARK_KEY_TYPE(type) \
@@ -320,7 +358,13 @@ benchmark::RegisterBenchmark( \
     CREATE_SORT_KEYS_BENCHMARK(type, 10), \
     CREATE_SORT_KEYS_BENCHMARK(type, 100), \
     CREATE_SORT_KEYS_BENCHMARK(type, 1000), \
-    CREATE_SORT_KEYS_BENCHMARK(type, 10000)
+    CREATE_SORT_KEYS_BENCHMARK(type, 10000), \
+    CREATE_SORT_KEYS_DESCENDING_BENCHMARK(type, 1), \
+    CREATE_SORT_KEYS_DESCENDING_BENCHMARK(type, 10), \
+    CREATE_SORT_KEYS_DESCENDING_BENCHMARK(type, 100), \
+    CREATE_SORT_KEYS_DESCENDING_BENCHMARK(type, 1000), \
+    CREATE_SORT_KEYS_DESCENDING_BENCHMARK(type, 10000)
+
 
 void add_sort_keys_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
                               hipStream_t stream,
@@ -342,7 +386,17 @@ benchmark::RegisterBenchmark( \
     (std::string("sort_pairs") + "<" #Key ", " #Value ">" + \
         "(~" + std::to_string(SEGMENTS) + " segments)" \
     ).c_str(), \
-    [=](benchmark::State& state) { run_sort_pairs_benchmark<Key, Value>(state, SEGMENTS, stream, size); } \
+    [=](benchmark::State& state) { \
+        run_sort_pairs_benchmark<Key, Value>(state, SEGMENTS, stream, size, Ascending); } \
+)
+
+#define CREATE_SORT_PAIRS_DESCENDING_BENCHMARK(Key, Value, SEGMENTS) \
+benchmark::RegisterBenchmark( \
+    (std::string("sort_pairs") + "<" #Key ", " #Value ">" + \
+        "(~" + std::to_string(SEGMENTS) + " segments), descending" \
+    ).c_str(), \
+    [=](benchmark::State& state) { \
+        run_sort_pairs_benchmark<Key, Value>(state, SEGMENTS, stream, size, Descending); } \
 )
 
 #define BENCHMARK_PAIR_TYPE(type, value) \
@@ -350,7 +404,12 @@ benchmark::RegisterBenchmark( \
     CREATE_SORT_PAIRS_BENCHMARK(type, value, 10), \
     CREATE_SORT_PAIRS_BENCHMARK(type, value, 100), \
     CREATE_SORT_PAIRS_BENCHMARK(type, value, 1000), \
-    CREATE_SORT_PAIRS_BENCHMARK(type, value, 10000)
+    CREATE_SORT_PAIRS_BENCHMARK(type, value, 10000), \
+    CREATE_SORT_PAIRS_DESCENDING_BENCHMARK(type, value, 1), \
+    CREATE_SORT_PAIRS_DESCENDING_BENCHMARK(type, value, 10), \
+    CREATE_SORT_PAIRS_DESCENDING_BENCHMARK(type, value, 100), \
+    CREATE_SORT_PAIRS_DESCENDING_BENCHMARK(type, value, 1000), \
+    CREATE_SORT_PAIRS_DESCENDING_BENCHMARK(type, value, 10000)
 
 void add_sort_pairs_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
                                hipStream_t stream,

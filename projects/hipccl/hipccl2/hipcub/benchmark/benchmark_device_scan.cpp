@@ -322,8 +322,25 @@ benchmark::RegisterBenchmark( \
     (std::string(EXCL ? "exclusive_scan_by_key" : "inclusive_scan_by_key") + \
     ("<" #T ", " #SCAN_OP ">")).c_str(), \
     &run_benchmark_by_key<EXCL, T, SCAN_OP>, size, stream, SCAN_OP() \
-),
+)
 
+#define CREATE_BENCHMARKS(SCAN_OP) \
+    CREATE_BENCHMARK(false, int, SCAN_OP), \
+    CREATE_BENCHMARK(true, int, SCAN_OP), \
+    CREATE_BENCHMARK(false, float, SCAN_OP), \
+    CREATE_BENCHMARK(true, float, SCAN_OP), \
+    CREATE_BENCHMARK(false, double, SCAN_OP), \
+    CREATE_BENCHMARK(true, double, SCAN_OP), \
+    CREATE_BENCHMARK(false, long long, SCAN_OP), \
+    CREATE_BENCHMARK(true, long long, SCAN_OP), \
+    CREATE_BENCHMARK(false, custom_float2, SCAN_OP), \
+    CREATE_BENCHMARK(true, custom_float2, SCAN_OP), \
+    CREATE_BENCHMARK(false, custom_double2, SCAN_OP), \
+    CREATE_BENCHMARK(true, custom_double2, SCAN_OP), \
+    CREATE_BENCHMARK(false, int8_t, SCAN_OP), \
+    CREATE_BENCHMARK(true, int8_t, SCAN_OP), \
+    CREATE_BENCHMARK(false, uint8_t, SCAN_OP), \
+    CREATE_BENCHMARK(true, uint8_t, SCAN_OP)
 
 int main(int argc, char *argv[])
 {
@@ -355,29 +372,8 @@ int main(int argc, char *argv[])
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks =
     {
-        CREATE_BENCHMARK(false, int, hipcub::Sum)
-        CREATE_BENCHMARK(true, int, hipcub::Sum)
-
-        CREATE_BENCHMARK(false, float, hipcub::Sum)
-        CREATE_BENCHMARK(true, float, hipcub::Sum)
-
-        CREATE_BENCHMARK(false, double, hipcub::Sum)
-        CREATE_BENCHMARK(true, double, hipcub::Sum)
-
-        CREATE_BENCHMARK(false, long long, hipcub::Sum)
-        CREATE_BENCHMARK(true, long long, hipcub::Sum)
-
-        CREATE_BENCHMARK(false, custom_float2, hipcub::Sum)
-        CREATE_BENCHMARK(true, custom_float2, hipcub::Sum)
-
-        CREATE_BENCHMARK(false, custom_double2, hipcub::Sum)
-        CREATE_BENCHMARK(true, custom_double2, hipcub::Sum)
-
-        CREATE_BENCHMARK(false, int8_t, hipcub::Sum)
-        CREATE_BENCHMARK(true, int8_t, hipcub::Sum)
-
-        CREATE_BENCHMARK(false, uint8_t, hipcub::Sum)
-        CREATE_BENCHMARK(true, uint8_t, hipcub::Sum)
+        CREATE_BENCHMARKS(hipcub::Sum),
+        CREATE_BENCHMARKS(hipcub::Min),
     };
 
     // Use manual timing

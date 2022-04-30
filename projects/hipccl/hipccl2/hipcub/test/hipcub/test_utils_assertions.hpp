@@ -45,7 +45,7 @@ bool inline bit_equal(const T a, const T b){
 /// \param expected
 /// \param max_length
 template<class T>
-void assert_eq(const std::vector<T>& result, const std::vector<T>& expected, const size_t max_length = SIZE_MAX)
+inline void assert_eq(const std::vector<T>& result, const std::vector<T>& expected, const size_t max_length = SIZE_MAX)
 {
     if(max_length == SIZE_MAX || max_length > expected.size()) ASSERT_EQ(result.size(), expected.size());
     for(size_t i = 0; i < std::min(result.size(), max_length); i++)
@@ -55,7 +55,7 @@ void assert_eq(const std::vector<T>& result, const std::vector<T>& expected, con
     }
 }
 
-void assert_eq(const std::vector<test_utils::half>& result, const std::vector<test_utils::half>& expected, const size_t max_length = SIZE_MAX)
+inline void assert_eq(const std::vector<test_utils::half>& result, const std::vector<test_utils::half>& expected, const size_t max_length = SIZE_MAX)
 {
     if(max_length == SIZE_MAX || max_length > expected.size()) ASSERT_EQ(result.size(), expected.size());
     for(size_t i = 0; i < std::min(result.size(), max_length); i++)
@@ -65,7 +65,7 @@ void assert_eq(const std::vector<test_utils::half>& result, const std::vector<te
     }
 }
 
-void assert_eq(const std::vector<test_utils::bfloat16>& result, const std::vector<test_utils::bfloat16>& expected, const size_t max_length = SIZE_MAX)
+inline void assert_eq(const std::vector<test_utils::bfloat16>& result, const std::vector<test_utils::bfloat16>& expected, const size_t max_length = SIZE_MAX)
 {
     if(max_length == SIZE_MAX || max_length > expected.size()) ASSERT_EQ(result.size(), expected.size());
     for(size_t i = 0; i < std::min(result.size(), max_length); i++)
@@ -76,19 +76,19 @@ void assert_eq(const std::vector<test_utils::bfloat16>& result, const std::vecto
 }
 
 template<class T>
-void assert_eq(const T& result, const T& expected)
+inline void assert_eq(const T& result, const T& expected)
 {
     if(bit_equal(result, expected)) return; // Check to also regard equality of NaN's, -NaN, +inf, -inf as correct.
     ASSERT_EQ(result, expected);
 }
 
-void assert_eq(const test_utils::half& result, const test_utils::half& expected)
+inline void assert_eq(const test_utils::half& result, const test_utils::half& expected)
 {
     if(bit_equal(result, expected)) return; // Check to also regard equality of NaN's, -NaN, +inf, -inf as correct.
     ASSERT_EQ(test_utils::native_half(result), test_utils::native_half(expected));
 }
 
-void assert_eq(const test_utils::bfloat16& result, const test_utils::bfloat16& expected)
+inline void assert_eq(const test_utils::bfloat16& result, const test_utils::bfloat16& expected)
 {
     if(bit_equal(result, expected)) return; // Check to also regard equality of NaN's, -NaN, +inf, -inf as correct.
     ASSERT_EQ(test_utils::native_bfloat16(result), test_utils::native_bfloat16(expected));
@@ -97,7 +97,7 @@ void assert_eq(const test_utils::bfloat16& result, const test_utils::bfloat16& e
 
 // begin assert_near
 template<class T>
-auto assert_near(const std::vector<T>& result, const std::vector<T>& expected, const float percent)
+inline auto assert_near(const std::vector<T>& result, const std::vector<T>& expected, const float percent)
     -> typename std::enable_if<std::is_floating_point<T>::value>::type
 {
     ASSERT_EQ(result.size(), expected.size());
@@ -110,7 +110,7 @@ auto assert_near(const std::vector<T>& result, const std::vector<T>& expected, c
 }
 
 template<class T>
-auto assert_near(const std::vector<T>& result, const std::vector<T>& expected, const float percent)
+inline auto assert_near(const std::vector<T>& result, const std::vector<T>& expected, const float percent)
     -> typename std::enable_if<std::is_integral<T>::value>::type
 {
     (void)percent;
@@ -123,7 +123,7 @@ auto assert_near(const std::vector<T>& result, const std::vector<T>& expected, c
 
 template<class T, std::enable_if_t<std::is_same<T, test_utils::bfloat16>::value ||
                                        std::is_same<T, test_utils::half>::value, bool> = true>
-void assert_near(const std::vector<T>& result, const std::vector<T>& expected, const float percent)
+inline void assert_near(const std::vector<T>& result, const std::vector<T>& expected, const float percent)
 {
     ASSERT_EQ(result.size(), expected.size());
     for(size_t i = 0; i < result.size(); i++)
@@ -135,7 +135,7 @@ void assert_near(const std::vector<T>& result, const std::vector<T>& expected, c
 }
 
 template<class T>
-auto assert_near(const std::vector<custom_test_type<T>>& result, const std::vector<custom_test_type<T>>& expected, const float percent)
+inline auto assert_near(const std::vector<custom_test_type<T>>& result, const std::vector<custom_test_type<T>>& expected, const float percent)
     -> typename std::enable_if<std::is_floating_point<T>::value>::type
 {
     ASSERT_EQ(result.size(), expected.size());
@@ -149,7 +149,7 @@ auto assert_near(const std::vector<custom_test_type<T>>& result, const std::vect
 }
 
 template<class T>
-auto assert_near(const std::vector<custom_test_type<T>>& result, const std::vector<custom_test_type<T>>& expected, const float)
+inline auto assert_near(const std::vector<custom_test_type<T>>& result, const std::vector<custom_test_type<T>>& expected, const float)
     -> typename std::enable_if<std::is_integral<T>::value>::type
 {
     ASSERT_EQ(result.size(), expected.size());
@@ -162,7 +162,7 @@ auto assert_near(const std::vector<custom_test_type<T>>& result, const std::vect
 
 template<class T, std::enable_if_t<std::is_same<T, test_utils::bfloat16>::value ||
                                        std::is_same<T, test_utils::half>::value, bool> = true>
-void assert_near(const std::vector<custom_test_type<T>>& result, const std::vector<custom_test_type<T>>& expected, const float percent)
+inline void assert_near(const std::vector<custom_test_type<T>>& result, const std::vector<custom_test_type<T>>& expected, const float percent)
 {
     ASSERT_EQ(result.size(), expected.size());
     for(size_t i = 0; i < result.size(); i++)
@@ -178,7 +178,7 @@ void assert_near(const std::vector<custom_test_type<T>>& result, const std::vect
 }
 
 template<class T>
-auto assert_near(const T& result, const T& expected, const float percent)
+inline auto assert_near(const T& result, const T& expected, const float percent)
     -> typename std::enable_if<std::is_floating_point<T>::value>::type
 {
     if(bit_equal(result, expected)) return; // Check to also regard equality of NaN's, -NaN, +inf, -inf as correct.
@@ -187,7 +187,7 @@ auto assert_near(const T& result, const T& expected, const float percent)
 }
 
 template<class T>
-auto assert_near(const T& result, const T& expected, const float)
+inline auto assert_near(const T& result, const T& expected, const float)
     -> typename std::enable_if<std::is_integral<T>::value>::type
 {
     ASSERT_EQ(result, expected);
@@ -195,7 +195,7 @@ auto assert_near(const T& result, const T& expected, const float)
 
 template<class T, std::enable_if_t<std::is_same<T, test_utils::bfloat16>::value ||
                                        std::is_same<T, test_utils::half>::value, bool> = true>
-void assert_near(const T& result, const T& expected, const float percent)
+inline void assert_near(const T& result, const T& expected, const float percent)
 {
     if(bit_equal(result, expected)) return; // Check to also regard equality of NaN's, -NaN, +inf, -inf as correct.
     auto diff = std::abs(percent * static_cast<float>(expected));
@@ -203,7 +203,7 @@ void assert_near(const T& result, const T& expected, const float percent)
 }
 
 template<class T>
-auto assert_near(const custom_test_type<T>& result, const custom_test_type<T>& expected, const float percent)
+inline auto assert_near(const custom_test_type<T>& result, const custom_test_type<T>& expected, const float percent)
     -> typename std::enable_if<std::is_floating_point<T>::value>::type
 {
     auto diff1 = std::abs(percent * expected.x);
@@ -213,7 +213,7 @@ auto assert_near(const custom_test_type<T>& result, const custom_test_type<T>& e
 }
 
 template<class T>
-auto assert_near(const custom_test_type<T>& result, const custom_test_type<T>& expected, const float)
+inline auto assert_near(const custom_test_type<T>& result, const custom_test_type<T>& expected, const float)
     -> typename std::enable_if<std::is_integral<T>::value>::type
 {
     ASSERT_EQ(result.x,expected.x);
@@ -223,7 +223,7 @@ auto assert_near(const custom_test_type<T>& result, const custom_test_type<T>& e
 // End assert_near
 
 template<class T>
-void assert_bit_eq(const std::vector<T>& result, const std::vector<T>& expected)
+inline void assert_bit_eq(const std::vector<T>& result, const std::vector<T>& expected)
 {
     ASSERT_EQ(result.size(), expected.size());
     for(size_t i = 0; i < result.size(); i++)

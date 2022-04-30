@@ -51,6 +51,198 @@ private:
 };
 }
 
+template <typename T, typename F>
+void run_flagged(benchmark::State& state,
+                 const hipStream_t stream,
+                 const T threshold,
+                 const size_t size)
+{
+    const auto select_op  = LessOp<T>{threshold};
+    const auto input =
+        benchmark_utils::get_random_data<T>(size, static_cast<T>(0), static_cast<T>(100));
+
+    std::vector<F> flags(size);
+    for(unsigned int i = 0; i < size; i++) {
+        flags[i] = static_cast<F>(select_op(input[i]));
+    }
+
+    T* d_input                          = nullptr;
+    F* d_flags                          = nullptr;
+    T* d_output                         = nullptr;
+    unsigned int* d_num_selected_output = nullptr;
+    HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
+    HIP_CHECK(hipMalloc(&d_flags, input.size() * sizeof(F)));
+    HIP_CHECK(hipMalloc(&d_output, input.size() * sizeof(T)));
+    HIP_CHECK(hipMalloc(&d_num_selected_output, sizeof(unsigned int)));
+
+    // Allocate temporary storage
+    void*  d_temp_storage     = nullptr;
+    size_t temp_storage_bytes = 0;
+    HIP_CHECK(
+        hipcub::DevicePartition::Flagged(
+            nullptr,
+            temp_storage_bytes,
+            d_input,
+            d_flags,
+            d_output,
+            d_num_selected_output,
+            static_cast<int>(input.size()),
+            stream
+        )
+    );
+    HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_bytes));
+
+    // Warm-up
+    HIP_CHECK(hipMemcpy(d_input, input.data(), input.size() * sizeof(T), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_flags, flags.data(), flags.size() * sizeof(F), hipMemcpyHostToDevice));
+    for(unsigned int i = 0; i < warmup_size; ++i) {
+        HIP_CHECK(
+            hipcub::DevicePartition::Flagged(
+                d_temp_storage,
+                temp_storage_bytes,
+                d_input,
+                d_flags,
+                d_output,
+                d_num_selected_output,
+                static_cast<int>(input.size()),
+                stream
+            )
+        );
+    }
+    HIP_CHECK(hipDeviceSynchronize());
+
+    // Run benchmark
+    for(auto _ : state) {
+        namespace chrono = std::chrono;
+        using clock  = chrono::high_resolution_clock;
+
+        const auto start = clock::now();
+        for (unsigned int i = 0; i < batch_size; ++i) {
+            HIP_CHECK(
+                hipcub::DevicePartition::Flagged(
+                    d_temp_storage,
+                    temp_storage_bytes,
+                    d_input,
+                    d_flags,
+                    d_output,
+                    d_num_selected_output,
+                    static_cast<int>(input.size()),
+                    stream
+                )
+            );
+        }
+        HIP_CHECK(hipDeviceSynchronize());
+
+        const auto end = clock::now();
+        using seconds_d = chrono::duration<double>;
+        const auto elapsed_seconds = chrono::duration_cast<seconds_d>(end - start);
+
+        state.SetIterationTime(elapsed_seconds.count());
+    }
+
+    state.SetItemsProcessed(state.iterations() * batch_size * input.size());
+    state.SetBytesProcessed(
+        static_cast<int64_t>(state.iterations() * batch_size * input.size() * sizeof(input[0])));
+
+    HIP_CHECK(hipFree(d_temp_storage));
+    HIP_CHECK(hipFree(d_num_selected_output));
+    HIP_CHECK(hipFree(d_output));
+    HIP_CHECK(hipFree(d_flags));
+    HIP_CHECK(hipFree(d_input));
+}
+
+template <typename T>
+void run_predicate(benchmark::State& state,
+                   const hipStream_t stream,
+                   const T threshold,
+                   const size_t size)
+{
+    const auto input =
+        benchmark_utils::get_random_data<T>(size, static_cast<T>(0), static_cast<T>(100));
+
+    T* d_input                          = nullptr;
+    T* d_output                         = nullptr;
+    unsigned int* d_num_selected_output = nullptr;
+    HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(T)));
+    HIP_CHECK(hipMalloc(&d_output, input.size() * sizeof(T)));
+    HIP_CHECK(hipMalloc(&d_num_selected_output, sizeof(unsigned int)));
+
+    const auto select_op  = LessOp<T>{threshold};
+
+    // Allocate temporary storage
+    void*  d_temp_storage     = nullptr;
+    size_t temp_storage_bytes = 0;
+    HIP_CHECK(
+        hipcub::DevicePartition::If(
+            nullptr,
+            temp_storage_bytes,
+            d_input,
+            d_output,
+            d_num_selected_output,
+            static_cast<int>(input.size()),
+            select_op,
+            stream
+        )
+    );
+    HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_bytes));
+
+    // Warm-up
+    HIP_CHECK(hipMemcpy(d_input, input.data(), input.size() * sizeof(T), hipMemcpyHostToDevice));
+    for(unsigned int i = 0; i < warmup_size; ++i) {
+        HIP_CHECK(
+            hipcub::DevicePartition::If(
+                d_temp_storage,
+                temp_storage_bytes,
+                d_input,
+                d_output,
+                d_num_selected_output,
+                static_cast<int>(input.size()),
+                select_op,
+                stream
+            )
+        );
+    }
+    HIP_CHECK(hipDeviceSynchronize());
+
+    // Run benchmark
+    for(auto _ : state) {
+        namespace chrono = std::chrono;
+        using clock  = chrono::high_resolution_clock;
+
+        const auto start = clock::now();
+        for (unsigned int i = 0; i < batch_size; ++i) {
+            HIP_CHECK(
+                hipcub::DevicePartition::If(
+                    d_temp_storage,
+                    temp_storage_bytes,
+                    d_input,
+                    d_output,
+                    d_num_selected_output,
+                    static_cast<int>(input.size()),
+                    select_op,
+                    stream
+                )
+            );
+        }
+        HIP_CHECK(hipDeviceSynchronize());
+
+        const auto end = clock::now();
+        using seconds_d = chrono::duration<double>;
+        const auto elapsed_seconds = chrono::duration_cast<seconds_d>(end - start);
+
+        state.SetIterationTime(elapsed_seconds.count());
+    }
+
+    state.SetItemsProcessed(state.iterations() * batch_size * input.size());
+    state.SetBytesProcessed(
+        static_cast<int64_t>(state.iterations() * batch_size * input.size() * sizeof(input[0])));
+
+    HIP_CHECK(hipFree(d_temp_storage));
+    HIP_CHECK(hipFree(d_input));
+    HIP_CHECK(hipFree(d_output));
+    HIP_CHECK(hipFree(d_num_selected_output));
+}
+
 template <typename T>
 void run_threeway(benchmark::State& state,
                   const hipStream_t stream,
@@ -152,6 +344,7 @@ void run_threeway(benchmark::State& state,
     state.SetBytesProcessed(
         static_cast<int64_t>(state.iterations() * batch_size * input.size() * sizeof(input[0])));
 
+    HIP_CHECK(hipFree(d_temp_storage));
     HIP_CHECK(hipFree(d_input));
     HIP_CHECK(hipFree(d_first_output));
     HIP_CHECK(hipFree(d_second_output));
@@ -159,36 +352,41 @@ void run_threeway(benchmark::State& state,
     HIP_CHECK(hipFree(d_num_selected_output));
 }
 
-#define CREATE_BENCHMARK(T, SMALL_T, LARGE_T)                                        \
+#define CREATE_BENCHMARK_FLAGGED(T, T_FLAG, SPLIT_T)               \
+benchmark::RegisterBenchmark(                                      \
+    "parition_flagged<" #T ", " #T_FLAG ">(" #SPLIT_T "%)",        \
+    &run_flagged<T, T_FLAG>, stream, static_cast<T>(SPLIT_T), size \
+)
+
+#define CREATE_BENCHMARK_PREDICATE(T, SPLIT_T)               \
+benchmark::RegisterBenchmark(                                \
+    "parition_predicate<" #T ">(" #SPLIT_T "%)",             \
+    &run_predicate<T>, stream, static_cast<T>(SPLIT_T), size \
+)
+
+#define CREATE_BENCHMARK_THREEWAY(T, SMALL_T, LARGE_T)                               \
 benchmark::RegisterBenchmark(                                                        \
     "parition_three_way<" #T ">(" #SMALL_T "%, " #LARGE_T "%)",                       \
     &run_threeway<T>, stream, static_cast<T>(SMALL_T), static_cast<T>(LARGE_T), size \
 )
 
-#define BENCHMARK_TYPE(type)        \
-    CREATE_BENCHMARK(type, 33, 66), \
-    CREATE_BENCHMARK(type, 10, 66), \
-    CREATE_BENCHMARK(type, 50, 60), \
-    CREATE_BENCHMARK(type, 50, 90)
+#define BENCHMARK_FLAGGED_TYPE(type, flag_type)    \
+    CREATE_BENCHMARK_FLAGGED(type, flag_type, 33), \
+    CREATE_BENCHMARK_FLAGGED(type, flag_type, 50), \
+    CREATE_BENCHMARK_FLAGGED(type, flag_type, 60), \
+    CREATE_BENCHMARK_FLAGGED(type, flag_type, 90)
 
-void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                    const hipStream_t                             stream,
-                    const size_t                                  size)
-{
-    using custom_float2 = benchmark_utils::custom_type<float, float>;
-    using custom_double2 = benchmark_utils::custom_type<double, double>;
+#define BENCHMARK_PREDICATE_TYPE(type)    \
+    CREATE_BENCHMARK_PREDICATE(type, 33), \
+    CREATE_BENCHMARK_PREDICATE(type, 50), \
+    CREATE_BENCHMARK_PREDICATE(type, 60), \
+    CREATE_BENCHMARK_PREDICATE(type, 90)
 
-    const auto add = {
-        BENCHMARK_TYPE(int8_t),
-        BENCHMARK_TYPE(int),
-        BENCHMARK_TYPE(float),
-        BENCHMARK_TYPE(long long),
-        BENCHMARK_TYPE(double),
-        BENCHMARK_TYPE(custom_float2),
-        BENCHMARK_TYPE(custom_double2)
-    };
-    benchmarks.insert(benchmarks.end(), add.begin(), add.end());
-}
+#define BENCHMARK_THREEWAY_TYPE(type)        \
+    CREATE_BENCHMARK_THREEWAY(type, 33, 66), \
+    CREATE_BENCHMARK_THREEWAY(type, 10, 66), \
+    CREATE_BENCHMARK_THREEWAY(type, 50, 60), \
+    CREATE_BENCHMARK_THREEWAY(type, 50, 90)
 
 int main(int argc, char *argv[])
 {
@@ -212,9 +410,36 @@ int main(int argc, char *argv[])
         std::cout << "[HIP] Device name: " << devProp.name << std::endl;
     }
 
+    using custom_float2 = benchmark_utils::custom_type<float, float>;
+    using custom_double2 = benchmark_utils::custom_type<double, double>;
+
     // Add benchmarks
-    std::vector<benchmark::internal::Benchmark*> benchmarks;
-    add_benchmarks(benchmarks, stream, size);
+    std::vector<benchmark::internal::Benchmark*> benchmarks = 
+    {
+        BENCHMARK_FLAGGED_TYPE(int8_t, unsigned char),
+        BENCHMARK_FLAGGED_TYPE(int, unsigned char),
+        BENCHMARK_FLAGGED_TYPE(float, unsigned char),
+        BENCHMARK_FLAGGED_TYPE(long long, uint8_t),
+        BENCHMARK_FLAGGED_TYPE(double, int8_t),
+        BENCHMARK_FLAGGED_TYPE(custom_float2, int8_t),
+        BENCHMARK_FLAGGED_TYPE(custom_double2, unsigned char),
+
+        BENCHMARK_PREDICATE_TYPE(int8_t),
+        BENCHMARK_PREDICATE_TYPE(int),
+        BENCHMARK_PREDICATE_TYPE(float),
+        BENCHMARK_PREDICATE_TYPE(long long),
+        BENCHMARK_PREDICATE_TYPE(double),
+        BENCHMARK_PREDICATE_TYPE(custom_float2),
+        BENCHMARK_PREDICATE_TYPE(custom_double2),
+
+        BENCHMARK_THREEWAY_TYPE(int8_t),
+        BENCHMARK_THREEWAY_TYPE(int),
+        BENCHMARK_THREEWAY_TYPE(float),
+        BENCHMARK_THREEWAY_TYPE(long long),
+        BENCHMARK_THREEWAY_TYPE(double),
+        BENCHMARK_THREEWAY_TYPE(custom_float2),
+        BENCHMARK_THREEWAY_TYPE(custom_double2),
+    };
 
     // Use manual timing
     for(auto& b : benchmarks)

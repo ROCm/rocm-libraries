@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,15 +20,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <memory>
 #include "common_benchmark_header.hpp"
 
 // HIP API
-#include "hipcub/device/device_radix_sort.hpp"
-
+#include "hipcub/hipcub.hpp"
+#include "hipcub/device/device_merge_sort.hpp"
 
 #ifndef DEFAULT_N
-const size_t DEFAULT_N = 1024 * 1024 * 32;
+const size_t DEFAULT_N = 32 << 20;
 #endif
 
 const unsigned int batch_size = 10;
@@ -41,7 +40,7 @@ std::vector<Key> generate_keys(size_t size)
 
     if(std::is_floating_point<key_type>::value)
     {
-        return benchmark_utils::get_random_data<key_type>(size, (key_type)-1000, (key_type)+1000, size);
+        return benchmark_utils::get_random_data<key_type>(size, static_cast<key_type>(-1000), static_cast<key_type>(1000), size);
     }
     else
     {
@@ -54,22 +53,15 @@ std::vector<Key> generate_keys(size_t size)
     }
 }
 
-template<class Key, bool Descending = false>
+template<class Key>
 void run_sort_keys_benchmark(benchmark::State& state,
                              hipStream_t stream,
-                             size_t size,
-                             std::shared_ptr<std::vector<Key>> keys_input)
+                             size_t size)
 {
     using key_type = Key;
-    typedef hipError_t (*sort_func) (
-        void *, size_t&, const key_type *, key_type *, size_t, int, int, hipStream_t, bool);
+    auto compare_function = [] __device__ (const key_type & a, const key_type & b) { return a < b; };
 
-    sort_func func_ascending  = &hipcub::DeviceRadixSort::SortKeys
-        <key_type, size_t>;
-    sort_func func_descending = &hipcub::DeviceRadixSort::SortKeysDescending
-        <key_type, size_t>;
-
-    sort_func sorting = Descending ? func_descending : func_ascending;
+    auto keys_input = generate_keys<Key>(size);
 
     key_type * d_keys_input;
     key_type * d_keys_output;
@@ -77,7 +69,7 @@ void run_sort_keys_benchmark(benchmark::State& state,
     HIP_CHECK(hipMalloc(&d_keys_output, size * sizeof(key_type)));
     HIP_CHECK(
         hipMemcpy(
-            d_keys_input, keys_input->data(),
+            d_keys_input, keys_input.data(),
             size * sizeof(key_type),
             hipMemcpyHostToDevice
         )
@@ -86,11 +78,10 @@ void run_sort_keys_benchmark(benchmark::State& state,
     void * d_temporary_storage = nullptr;
     size_t temporary_storage_bytes = 0;
     HIP_CHECK(
-        sorting(
+        hipcub::DeviceMergeSort::SortKeysCopy(
             d_temporary_storage, temporary_storage_bytes,
             d_keys_input, d_keys_output, size,
-            0, sizeof(key_type) * 8 ,
-            stream, false
+            compare_function, stream
         )
     );
 
@@ -101,11 +92,10 @@ void run_sort_keys_benchmark(benchmark::State& state,
     for(size_t i = 0; i < warmup_size; i++)
     {
         HIP_CHECK(
-            sorting(
+            hipcub::DeviceMergeSort::SortKeysCopy(
                 d_temporary_storage, temporary_storage_bytes,
                 d_keys_input, d_keys_output, size,
-                0, sizeof(key_type) * 8,
-                stream, false
+                compare_function, stream
             )
         );
     }
@@ -118,11 +108,10 @@ void run_sort_keys_benchmark(benchmark::State& state,
         for(size_t i = 0; i < batch_size; i++)
         {
             HIP_CHECK(
-                sorting(
+                hipcub::DeviceMergeSort::SortKeysCopy(
                     d_temporary_storage, temporary_storage_bytes,
                     d_keys_input, d_keys_output, size,
-                    0, sizeof(key_type) * 8,
-                    stream, false
+                    compare_function, stream
                 )
             );
         }
@@ -141,25 +130,16 @@ void run_sort_keys_benchmark(benchmark::State& state,
     HIP_CHECK(hipFree(d_keys_output));
 }
 
-template<class Key, class Value, bool Descending = false>
+template<class Key, class Value>
 void run_sort_pairs_benchmark(benchmark::State& state,
                               hipStream_t stream,
-                              size_t size,
-                              std::shared_ptr<std::vector<Key>> keys_input)
+                              size_t size)
 {
     using key_type = Key;
     using value_type = Value;
-    typedef hipError_t (*sort_func) (
-        void *, size_t&, const key_type *, key_type *, const value_type *, value_type *,
-        size_t, int, int, hipStream_t, bool);
+    auto compare_function = [] __device__ (const key_type & a, const key_type & b) { return a < b; };
 
-    sort_func func_ascending  = &hipcub::DeviceRadixSort::SortPairs
-        <key_type, value_type, size_t>;
-    sort_func func_descending = &hipcub::DeviceRadixSort::SortPairsDescending
-        <key_type, value_type, size_t>;
-
-    sort_func sorting = Descending ? func_descending : func_ascending;
-
+    auto keys_input = generate_keys<Key>(size);
     std::vector<value_type> values_input(size);
     for(size_t i = 0; i < size; i++)
     {
@@ -172,7 +152,7 @@ void run_sort_pairs_benchmark(benchmark::State& state,
     HIP_CHECK(hipMalloc(&d_keys_output, size * sizeof(key_type)));
     HIP_CHECK(
         hipMemcpy(
-            d_keys_input, keys_input->data(),
+            d_keys_input, keys_input.data(),
             size * sizeof(key_type),
             hipMemcpyHostToDevice
         )
@@ -193,11 +173,10 @@ void run_sort_pairs_benchmark(benchmark::State& state,
     void * d_temporary_storage = nullptr;
     size_t temporary_storage_bytes = 0;
     HIP_CHECK(
-        sorting(
+        hipcub::DeviceMergeSort::SortPairsCopy(
             d_temporary_storage, temporary_storage_bytes,
-            d_keys_input, d_keys_output, d_values_input, d_values_output, size,
-            0, sizeof(key_type) * 8,
-            stream, false
+            d_keys_input, d_values_input, d_keys_output, d_values_output, size,
+            compare_function, stream
         )
     );
 
@@ -208,11 +187,10 @@ void run_sort_pairs_benchmark(benchmark::State& state,
     for(size_t i = 0; i < warmup_size; i++)
     {
         HIP_CHECK(
-            sorting(
+            hipcub::DeviceMergeSort::SortPairsCopy(
                 d_temporary_storage, temporary_storage_bytes,
-                d_keys_input, d_keys_output, d_values_input, d_values_output, size,
-                0, sizeof(key_type) * 8,
-                stream, false
+                d_keys_input, d_values_input, d_keys_output, d_values_output, size,
+                compare_function, stream
             )
         );
     }
@@ -225,11 +203,10 @@ void run_sort_pairs_benchmark(benchmark::State& state,
         for(size_t i = 0; i < batch_size; i++)
         {
             HIP_CHECK(
-                sorting(
+                hipcub::DeviceMergeSort::SortPairsCopy(
                     d_temporary_storage, temporary_storage_bytes,
-                    d_keys_input, d_keys_output, d_values_input, d_values_output, size,
-                    0, sizeof(key_type) * 8,
-                    stream, false
+                    d_keys_input, d_values_input, d_keys_output, d_values_output, size,
+                    compare_function, stream
                 )
             );
         }
@@ -255,34 +232,20 @@ void run_sort_pairs_benchmark(benchmark::State& state,
 
 #define CREATE_SORT_KEYS_BENCHMARK(Key) \
     { \
-        auto keys_input = std::make_shared<std::vector<Key>>(generate_keys<Key>(size)); \
         benchmarks.push_back( \
             benchmark::RegisterBenchmark( \
                 (std::string("sort_keys") + "<" #Key ">").c_str(), \
-                [=](benchmark::State& state) { run_sort_keys_benchmark<Key>(state, stream, size, keys_input); } \
-            ) \
-        ); \
-        benchmarks.push_back( \
-            benchmark::RegisterBenchmark( \
-                (std::string("sort_keys") + "<" #Key ">, descending").c_str(), \
-                [=](benchmark::State& state) { run_sort_keys_benchmark<Key, true>(state, stream, size, keys_input); } \
+                [=](benchmark::State& state) { run_sort_keys_benchmark<Key>(state, stream, size); } \
             ) \
         ); \
     }
 
 #define CREATE_SORT_PAIRS_BENCHMARK(Key, Value) \
     { \
-        auto keys_input = std::make_shared<std::vector<Key>>(generate_keys<Key>(size)); \
         benchmarks.push_back( \
             benchmark::RegisterBenchmark( \
                 (std::string("sort_pairs") + "<" #Key ", " #Value">").c_str(), \
-                [=](benchmark::State& state) { run_sort_pairs_benchmark<Key, Value>(state, stream, size, keys_input); } \
-            ) \
-        ); \
-        benchmarks.push_back( \
-            benchmark::RegisterBenchmark( \
-                (std::string("sort_pairs") + "<" #Key ", " #Value">, descending").c_str(), \
-                [=](benchmark::State& state) { run_sort_pairs_benchmark<Key, Value, true>(state, stream, size, keys_input); } \
+                [=](benchmark::State& state) { run_sort_pairs_benchmark<Key, Value>(state, stream, size); } \
             ) \
         ); \
     }

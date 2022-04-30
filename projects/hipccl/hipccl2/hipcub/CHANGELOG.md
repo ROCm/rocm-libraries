@@ -2,20 +2,28 @@
 
 See README.md on how to build the hipCUB documentation using Doxygen.
 
-## (Unreleased) hipCUB-2.12.0 for ROCm 5.2.0
+## (Unreleased) hipCUB-2.12.0 for ROCm 5.3.0
 ### Added
 - UniqueByKey device algorithm
 - SubtractLeft, SubtractLeftPartialTile, SubtractRight, SubtractRightPartialTile overloads in BlockAdjacentDifference.
   - The old overloads (FlagHeads, FlagTails, FlagHeadsAndTails) are deprecated.
 - DeviceAdjacentDifference algorithm.
+- Extended benchmark suite of `DeviceHistogram`, `DeviceScan`, `DevicePartition`, `DeviceReduce`,
+`DeviceSegmentedReduce`, `DeviceSegmentedRadixSort`, `DeviceRadixSort`, `DeviceSpmv`, `DeviceMergeSort`,
+`DeviceSegmentedSort`
 ### Changed
 - Obsolated type traits defined in util_type.hpp. Use the standard library equivalents instead.
 - CUB backend references CUB and thrust version 1.16.0.
 - DeviceRadixSort's num_items parameter's type is now templated instead of being an int.
   - If an integral type with a size at most 4 bytes is passed (i.e. an int), the former logic applies.
   - Otherwise the algorithm uses a larger indexing type that makes it possible to sort input data over 2**32 elements.
+- Improved build parallelism of the test suite by splitting up large compilation units
 
-## (Released) hipCUB-2.11.0 for ROCm 5.1.0
+## (Unreleased) hipCUB-2.11.1 for ROCm 5.2.0
+### Added
+- Packages for tests and benchmark executable on all supported OSes using CPack.
+
+## hipCUB-2.11.0 for ROCm 5.1.0
 ### Added
 - Device segmented sort
 - Warp merge sort, WarpMask and thread sort from cub 1.15.0 supported in hipCUB

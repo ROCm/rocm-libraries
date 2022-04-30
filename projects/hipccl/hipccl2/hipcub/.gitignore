@@ -60,5 +60,6 @@ build
 
 ### VSCODE ###
 .vscode
+.devcontainer
 
 # End of https://www.gitignore.io/api/c++,cmake

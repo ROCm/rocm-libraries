@@ -295,7 +295,7 @@ void run_range_benchmark(benchmark::State& state, size_t bins, hipStream_t strea
     std::vector<T> input = benchmark_utils::get_random_data<T>(size, 0, bins);
 
     std::vector<T> levels(bins + 1);
-    std::iota(levels.begin(), levels.end(), 0);
+    std::iota(levels.begin(), levels.end(), static_cast<T>(0));
 
     T * d_input;
     T * d_levels;
@@ -381,6 +381,112 @@ void run_range_benchmark(benchmark::State& state, size_t bins, hipStream_t strea
     HIP_CHECK(hipFree(d_input));
     HIP_CHECK(hipFree(d_levels));
     HIP_CHECK(hipFree(d_histogram));
+}
+
+template<class T, unsigned int Channels, unsigned int ActiveChannels>
+void run_multi_range_benchmark(benchmark::State& state, size_t bins, hipStream_t stream, size_t size)
+{
+    using counter_type = unsigned int;
+
+    // Number of levels for a single channel
+    const int num_levels_channel = bins + 1;
+    int num_levels[ActiveChannels];
+    std::vector<T> levels[ActiveChannels];
+    for (unsigned int channel = 0; channel < ActiveChannels; channel++) 
+    {
+        levels[channel].reserve(num_levels_channel);
+        std::iota(levels[channel].begin(), levels[channel].end(), static_cast<T>(0));
+        num_levels[channel] = num_levels_channel;
+    }
+
+    // Generate data
+    std::vector<T> input = benchmark_utils::get_random_data<T>(size * Channels, 0, bins);
+
+    T * d_input;
+    T * d_levels[ActiveChannels];
+    counter_type * d_histogram[ActiveChannels];
+    HIP_CHECK(hipMalloc(&d_input, size * Channels * sizeof(T)));
+    for(unsigned int channel = 0; channel < ActiveChannels; channel++)
+    {
+        HIP_CHECK(hipMalloc(&d_levels[channel], num_levels_channel * sizeof(T)));
+        HIP_CHECK(hipMalloc(&d_histogram[channel], size * sizeof(counter_type)));
+    }
+
+    HIP_CHECK(
+        hipMemcpy(
+            d_input, input.data(),
+            size * Channels * sizeof(T),
+            hipMemcpyHostToDevice
+        )
+    );
+    for(unsigned int channel = 0; channel < ActiveChannels; channel++)
+    {
+        HIP_CHECK(
+            hipMemcpy(
+                d_levels[channel], levels[channel].data(),
+                num_levels_channel * sizeof(T),
+                hipMemcpyHostToDevice
+            )
+        );
+    }
+
+    void * d_temporary_storage = nullptr;
+    size_t temporary_storage_bytes = 0;
+    HIP_CHECK((
+        hipcub::DeviceHistogram::MultiHistogramRange<Channels, ActiveChannels>(
+            d_temporary_storage, temporary_storage_bytes,
+            d_input, d_histogram, num_levels, d_levels,
+            int(size), stream, false
+        )
+    ));
+
+    HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
+    HIP_CHECK(hipDeviceSynchronize());
+
+    // Warm-up
+    for(size_t i = 0; i < warmup_size; i++)
+    {
+        HIP_CHECK((
+            hipcub::DeviceHistogram::MultiHistogramRange<Channels, ActiveChannels>(
+                d_temporary_storage, temporary_storage_bytes,
+                d_input, d_histogram, num_levels, d_levels,
+                int(size), stream, false
+            )
+        ));
+    }
+    HIP_CHECK(hipDeviceSynchronize());
+
+    for (auto _ : state)
+    {
+        auto start = std::chrono::high_resolution_clock::now();
+
+        for(size_t i = 0; i < batch_size; i++)
+        {
+            HIP_CHECK((
+                hipcub::DeviceHistogram::MultiHistogramRange<Channels, ActiveChannels>(
+                    d_temporary_storage, temporary_storage_bytes,
+                    d_input, d_histogram, num_levels, d_levels,
+                    int(size), stream, false
+                )
+            ));
+        }
+        HIP_CHECK(hipDeviceSynchronize());
+
+        auto end = std::chrono::high_resolution_clock::now();
+        auto elapsed_seconds =
+            std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
+        state.SetIterationTime(elapsed_seconds.count());
+    }
+    state.SetBytesProcessed(state.iterations() * batch_size * size * Channels * sizeof(T));
+    state.SetItemsProcessed(state.iterations() * batch_size * size * Channels);
+
+    HIP_CHECK(hipFree(d_temporary_storage));
+    HIP_CHECK(hipFree(d_input));
+    for(unsigned int channel = 0; channel < ActiveChannels; channel++)
+    {
+        HIP_CHECK(hipFree(d_levels[channel]));
+        HIP_CHECK(hipFree(d_histogram[channel]));
+    }
 }
 
 #define CREATE_EVEN_BENCHMARK(T, BINS, SCALE) \
@@ -477,6 +583,34 @@ void add_range_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmar
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
 }
 
+#define CREATE_MULTI_RANGE_BENCHMARK(CHANNELS, ACTIVE_CHANNELS, T, BINS) \
+benchmark::RegisterBenchmark( \
+    (std::string("multi_histogram_range") + "<" #CHANNELS ", " #ACTIVE_CHANNELS ", " #T ">" + \
+        "(" + std::to_string(BINS) + " bins)" \
+    ).c_str(), \
+    [=](benchmark::State& state) { \
+        run_multi_range_benchmark<T, CHANNELS, ACTIVE_CHANNELS>( \
+            state, BINS, stream, size \
+        ); \
+    } \
+)
+
+void add_multi_range_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
+                                hipStream_t stream,
+                                size_t size)
+{
+    std::vector<benchmark::internal::Benchmark*> bs =
+    {
+        CREATE_MULTI_RANGE_BENCHMARK(4, 3, float, 10),
+        CREATE_MULTI_RANGE_BENCHMARK(4, 3, float, 100),
+        CREATE_MULTI_RANGE_BENCHMARK(4, 3, float, 1000),
+        CREATE_MULTI_RANGE_BENCHMARK(4, 3, float, 10000),
+        CREATE_MULTI_RANGE_BENCHMARK(4, 3, float, 100000),
+        CREATE_MULTI_RANGE_BENCHMARK(4, 3, float, 1000000),
+    };
+    benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
+}
+
 int main(int argc, char *argv[])
 {
     cli::Parser parser(argc, argv);
@@ -502,6 +636,7 @@ int main(int argc, char *argv[])
     add_even_benchmarks(benchmarks, stream, size);
     add_multi_even_benchmarks(benchmarks, stream, size);
     add_range_benchmarks(benchmarks, stream, size);
+    add_multi_range_benchmarks(benchmarks, stream, size);
 
     // Use manual timing
     for(auto& b : benchmarks)

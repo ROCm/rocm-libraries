@@ -23,7 +23,7 @@
 #ifndef HIPCUB_BENCHMARK_UTILS_HPP_
 #define HIPCUB_BENCHMARK_UTILS_HPP_
 
-#ifndef BENCHMARK_UTILS_INCLUDE_GAURD
+#ifndef BENCHMARK_UTILS_INCLUDE_GUARD
     #error benchmark_utils.hpp must ONLY be included by common_benchmark_header.hpp. Please include common_benchmark_header.hpp instead.
 #endif
 

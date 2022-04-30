@@ -32,6 +32,9 @@ list( APPEND CMAKE_PREFIX_PATH /opt/rocm/llvm /opt/rocm ${ROCM_PATH})
 # hipCUB project
 project(hipcub LANGUAGES CXX)
 
+#Adding CMAKE_PREFIX_PATH
+list(APPEND CMAKE_PREFIX_PATH /opt/rocm)
+
 # CMake modules
 list(APPEND CMAKE_MODULE_PATH
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake
@@ -61,40 +64,24 @@ include( ROCMHeaderWrapper )
 include( ROCMCheckTargetIds )
 include( ROCMClients )
 
-#Set the AMDGPU_TARGETS with backward compatiblity
-set(AMDGPU_TARGETS "all" CACHE STRING "Compile for which gpu architectures?")
-if(COMMAND rocm_check_target_ids)
-  rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
-    TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx1030"
-  )
-else()
-  # Detect compiler support for target ID
-  # This section is deprecated. Please use rocm_check_target_ids for future use.
-  if( CMAKE_CXX_COMPILER MATCHES ".*/hipcc$" )
-    execute_process(COMMAND ${CMAKE_CXX_COMPILER} "--help"
-      OUTPUT_VARIABLE CXX_OUTPUT
-      OUTPUT_STRIP_TRAILING_WHITESPACE
-      ERROR_STRIP_TRAILING_WHITESPACE)
-    string(REGEX MATCH ".mcode\-object\-version" TARGET_ID_SUPPORT ${CXX_OUTPUT})
-  endif()
-  if(TARGET_ID_SUPPORT)
-    set(DEFAULT_AMDGPU_TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx1030")
+# Setup GPU targets for rocm platform
+if(NOT (CMAKE_CXX_COMPILER MATCHES ".*nvcc$" OR "${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU"))
+  if (NOT DEFINED AMDGPU_TARGETS)
+      set(GPU_TARGETS "all" CACHE STRING "GPU architectures to compile for")
   else()
-    set(DEFAULT_AMDGPU_TARGETS "gfx803;gfx900;gfx906;gfx908;gfx1030")
+    set(GPU_TARGETS "${AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for")
   endif()
-endif()
-if (AMDGPU_TARGETS)
-  if( AMDGPU_TARGETS STREQUAL "all" )
-    set( gpus "${DEFAULT_AMDGPU_TARGETS}")
-  else()
-    set( gpus "${AMDGPU_TARGETS}")
+  set_property(CACHE GPU_TARGETS PROPERTY STRINGS "all")
+
+  if(GPU_TARGETS STREQUAL "all")
+    rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
+      TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx1030"
+    )
+    set(GPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for" FORCE)
   endif()
-  # must FORCE set this AMDGPU_TARGETS before any find_package( hip ...), in this file
-  # to override CACHE var and set --offload-arch flags via hip-config.cmake hip::device dependency
-  set( AMDGPU_TARGETS "${gpus}" CACHE STRING "AMD GPU targets to compile for" FORCE )
 endif()
 
-# Verify that hcc compiler is used on ROCM platform
+# Verify that hip-clang is used on ROCM platform
 if (NOT WIN32)
   include(cmake/VerifyCompiler.cmake)
 endif()
@@ -103,8 +90,6 @@ endif()
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra")
 
 # Build options
 option(BUILD_TEST "Build tests (requires googletest)" OFF)
@@ -187,7 +172,7 @@ set(CPACK_RPM_PACKAGE_LICENSE "BSD")
 
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}" "\${CPACK_PACKAGING_INSTALL_PREFIX}/include")
 
-if(HIP_COMPILER STREQUAL "hcc" OR HIP_COMPILER STREQUAL "clang")
+if(HIP_COMPILER STREQUAL "clang")
   rocm_create_package(
     NAME hipcub
     DESCRIPTION "hipCUB (rocPRIM backend)"
