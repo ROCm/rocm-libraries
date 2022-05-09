@@ -34,6 +34,7 @@ if (BUILD_FILE_REORG_BACKWARD_COMPATIBILITY)
     "rocprim_version.hpp"
     WRAPPER_LOCATIONS rocprim/include/rocprim
     OUTPUT_LOCATIONS rocprim/wrapper/include/rocprim
+    ORIGINAL_FILES ${CMAKE_CURRENT_BINARY_DIR}/include/rocprim/rocprim_version.hpp
   )
 endif( )
 
