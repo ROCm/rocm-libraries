@@ -35,6 +35,7 @@ if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY)
       "hipcub_version.hpp"
       WRAPPER_LOCATIONS cub/include/hipcub
       OUTPUT_LOCATIONS cub/wrapper/include/hipcub
+      ORIGINAL_FILES ${CMAKE_CURRENT_BINARY_DIR}/cub/include/hipcub/hipcub_version.hpp
   )
 endif()
 
