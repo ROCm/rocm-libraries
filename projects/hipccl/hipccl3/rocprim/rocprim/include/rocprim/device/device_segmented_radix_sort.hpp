@@ -224,7 +224,7 @@ hipError_t segmented_radix_sort_impl(void * temporary_storage,
         config::warp_sort_config::items_per_thread * config::warp_sort_config::logical_warp_size;
     static constexpr unsigned int small_segments_per_block =
         config::warp_sort_config::block_size / config::warp_sort_config::logical_warp_size;
-    const auto large_segment_selector = [=](const unsigned int segment_index) -> bool
+    const auto large_segment_selector = [=](const unsigned int segment_index) mutable -> bool
     {
         const unsigned int segment_length = end_offsets[segment_index] - begin_offsets[segment_index];
         return segment_length > max_small_segment_length;
