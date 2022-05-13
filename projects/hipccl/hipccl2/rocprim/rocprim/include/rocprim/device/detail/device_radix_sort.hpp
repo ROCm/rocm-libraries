@@ -929,7 +929,10 @@ struct radix_merge_compare<true, true, T, typename std::enable_if<rocprim::is_in
 };
 
 template<bool Descending, class T>
-struct radix_merge_compare<Descending, true, T, typename std::enable_if<rocprim::is_floating_point<T>::value>::type>
+struct radix_merge_compare<Descending,
+                           true,
+                           T,
+                           typename std::enable_if<!rocprim::is_integral<T>::value>::type>
 {
     // radix_merge_compare supports masks only for integrals.
     // even though masks are never used for floating point-types,
