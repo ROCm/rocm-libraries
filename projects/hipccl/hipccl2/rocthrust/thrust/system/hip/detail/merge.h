@@ -36,6 +36,7 @@
 #include <thrust/system/hip/detail/par_to_seq.h>
 #include <thrust/system/hip/detail/util.h>
 #include <thrust/detail/minmax.h>
+#include <thrust/extrema.h>
 #include <thrust/merge.h>
 #include <thrust/pair.h>
 #include <thrust/detail/mpl/math.h>
