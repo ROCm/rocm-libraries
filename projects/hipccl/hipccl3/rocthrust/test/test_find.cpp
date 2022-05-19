@@ -23,7 +23,8 @@
 
 #include "test_header.hpp"
 
-TESTS_DEFINE(FindTests, FullTestsParams);
+TESTS_DEFINE(FindTestsVector, FullTestsParams);
+TESTS_DEFINE(FindTests, NumericalTestsParams);
 
 template <typename T>
 struct equal_to_value_pred
@@ -73,7 +74,7 @@ struct less_than_value_pred
     }
 };
 
-TYPED_TEST(FindTests, TestFindSimple)
+TYPED_TEST(FindTestsVector, TestFindSimple)
 {
     using Vector = typename TestFixture::input_type;
     using Policy = typename TestFixture::execution_policy;
@@ -133,7 +134,7 @@ TEST(FindTests, TestFindDispatchImplicit)
     ASSERT_EQ(13, vec.front());
 }
 
-TYPED_TEST(FindTests, TestFindIfSimple)
+TYPED_TEST(FindTestsVector, TestFindIfSimple)
 {
     using Vector = typename TestFixture::input_type;
     using Policy = typename TestFixture::execution_policy;
@@ -195,7 +196,7 @@ TEST(FindTests, TestFindIfDispatchImplicit)
     ASSERT_EQ(13, vec.front());
 }
 
-TYPED_TEST(FindTests, TestFindIfNotSimple)
+TYPED_TEST(FindTestsVector, TestFindIfNotSimple)
 {
     using Vector = typename TestFixture::input_type;
     using Policy = typename TestFixture::execution_policy;
@@ -265,9 +266,7 @@ TEST(FindTests, TestFindIfNotDispatchImplicit)
 
 TYPED_TEST(FindTests, TestFind)
 {
-    using Vector = typename TestFixture::input_type;
-    using Policy = typename TestFixture::execution_policy;
-    using T      = typename Vector::value_type;
+    using T = typename TestFixture::input_type;
 
     using HostIterator   = typename thrust::host_vector<T>::iterator;
     using DeviceIterator = typename thrust::device_vector<T>::iterator;
@@ -290,14 +289,14 @@ TYPED_TEST(FindTests, TestFind)
             DeviceIterator d_iter;
 
             h_iter = thrust::find(h_data.begin(), h_data.end(), T(0));
-            d_iter = thrust::find(Policy{}, d_data.begin(), d_data.end(), T(0));
+            d_iter = thrust::find(d_data.begin(), d_data.end(), T(0));
             ASSERT_EQ(h_iter - h_data.begin(), d_iter - d_data.begin());
 
             for(size_t i = 1; i < size; i *= 2)
             {
                 T sample = h_data[i];
                 h_iter   = thrust::find(h_data.begin(), h_data.end(), sample);
-                d_iter   = thrust::find(Policy{}, d_data.begin(), d_data.end(), sample);
+                d_iter   = thrust::find(d_data.begin(), d_data.end(), sample);
                 ASSERT_EQ(h_iter - h_data.begin(), d_iter - d_data.begin());
             }
         }
@@ -307,9 +306,7 @@ TYPED_TEST(FindTests, TestFind)
 
 TYPED_TEST(FindTests, TestFindIf)
 {
-    using Vector = typename TestFixture::input_type;
-    using Policy = typename TestFixture::execution_policy;
-    using T      = typename Vector::value_type;
+    using T = typename TestFixture::input_type;
 
     using HostIterator   = typename thrust::host_vector<T>::iterator;
     using DeviceIterator = typename thrust::device_vector<T>::iterator;
@@ -332,7 +329,7 @@ TYPED_TEST(FindTests, TestFindIf)
             DeviceIterator d_iter;
 
             h_iter = thrust::find_if(h_data.begin(), h_data.end(), equal_to_value_pred<T>(0));
-            d_iter = thrust::find_if(Policy{}, d_data.begin(), d_data.end(), equal_to_value_pred<T>(0));
+            d_iter = thrust::find_if(d_data.begin(), d_data.end(), equal_to_value_pred<T>(0));
             ASSERT_EQ(h_iter - h_data.begin(), d_iter - d_data.begin());
 
             for(size_t i = 1; i < size; i *= 2)
@@ -341,7 +338,7 @@ TYPED_TEST(FindTests, TestFindIf)
                 h_iter
                     = thrust::find_if(h_data.begin(), h_data.end(), equal_to_value_pred<T>(sample));
                 d_iter
-                    = thrust::find_if(Policy{}, d_data.begin(), d_data.end(), equal_to_value_pred<T>(sample));
+                    = thrust::find_if(d_data.begin(), d_data.end(), equal_to_value_pred<T>(sample));
                 ASSERT_EQ(h_iter - h_data.begin(), d_iter - d_data.begin());
             }
         }
@@ -350,9 +347,7 @@ TYPED_TEST(FindTests, TestFindIf)
 
 TYPED_TEST(FindTests, TestFindIfNot)
 {
-    using Vector = typename TestFixture::input_type;
-    using Policy = typename TestFixture::execution_policy;
-    using T      = typename Vector::value_type;
+    using T = typename TestFixture::input_type;
 
     using HostIterator   = typename thrust::host_vector<T>::iterator;
     using DeviceIterator = typename thrust::device_vector<T>::iterator;
@@ -377,7 +372,7 @@ TYPED_TEST(FindTests, TestFindIfNot)
             h_iter
                 = thrust::find_if_not(h_data.begin(), h_data.end(), not_equal_to_value_pred<T>(0));
             d_iter
-                = thrust::find_if_not(Policy{}, d_data.begin(), d_data.end(), not_equal_to_value_pred<T>(0));
+                = thrust::find_if_not(d_data.begin(), d_data.end(), not_equal_to_value_pred<T>(0));
             ASSERT_EQ(h_iter - h_data.begin(), d_iter - d_data.begin());
 
             for(size_t i = 1; i < size; i *= 2)
@@ -386,7 +381,7 @@ TYPED_TEST(FindTests, TestFindIfNot)
                 h_iter   = thrust::find_if_not(
                     h_data.begin(), h_data.end(), not_equal_to_value_pred<T>(sample));
                 d_iter = thrust::find_if_not(
-                    Policy{}, d_data.begin(), d_data.end(), not_equal_to_value_pred<T>(sample));
+                    d_data.begin(), d_data.end(), not_equal_to_value_pred<T>(sample));
                 ASSERT_EQ(h_iter - h_data.begin(), d_iter - d_data.begin());
             }
         }
