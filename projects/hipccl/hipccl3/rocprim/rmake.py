@@ -152,7 +152,7 @@ def config_cmd():
         cmake_options.append( f"-DBUILD_TEST=ON -DBUILD_DIR={build_dir}" )
    
     if args.build_clients:
-        cmake_options.append( f"-DBUILD_TEST=ON -DBUILD_EXAMPLE=ON -DBUILD_DIR={build_dir}" )
+        cmake_options.append( f"-DBUILD_TEST=ON -DBUILD_EXAMPLE=ON -DBUILD_DIR={build_dir} -DBUILD_BENCHMARK=ON" )
 
     cmake_options.append( f"-DAMDGPU_TARGETS={args.gpu_architecture}" )
     
