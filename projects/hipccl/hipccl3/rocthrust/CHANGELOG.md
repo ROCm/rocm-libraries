@@ -2,7 +2,7 @@
 
 Full documentation for rocThrust is available at [https://rocthrust.readthedocs.io/en/latest/](https://rocthrust.readthedocs.io/en/latest/)
 
-## (Unreleased) rocThrust 2.15.0 for ROCm 5.2
+## (Released) rocThrust 2.15.0 for ROCm 5.2
 ### Added
 - Packages for tests and benchmark executable on all supported OSes using CPack.
 
