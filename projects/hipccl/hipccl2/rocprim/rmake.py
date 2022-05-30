@@ -32,13 +32,13 @@ def parse_args():
     parser.add_argument('-c', '--clients', required=False, default=False, dest='build_clients', action='store_true',
                         help='Generate all client builds (default: False)')
     parser.add_argument('-t', '--tests', required=False, default=False, dest='build_tests', action='store_true',
-                        help='Generate unit tests only (default: False)')                        
+                        help='Generate unit tests only (default: False)')
     parser.add_argument('-i', '--install', required=False, default=False, dest='install', action='store_true',
                         help='Install after build (default: False)')
     parser.add_argument(      '--cmake-darg', required=False, dest='cmake_dargs', action='append', default=[],
                         help='List of additional cmake defines for builds (e.g. CMAKE_CXX_COMPILER_LAUNCHER=ccache)')
     parser.add_argument('-a', '--architecture', dest='gpu_architecture', required=False, default="gfx906;gfx1030", #:sramecc+:xnack-" ) #gfx1030" ) #gfx906" ) # gfx1030" )
-                        help='Set GPU architectures, e.g. all, gfx000, gfx803, gfx906:xnack-;gfx1030 (optional, default: all)')                        
+                        help='Set GPU architectures, e.g. all, gfx000, gfx803, gfx906:xnack-;gfx1030 (optional, default: all)')
     parser.add_argument('-v', '--verbose', required=False, default=False, action='store_true',
                         help='Verbose build (default: False)')
     return parser.parse_args()
@@ -92,7 +92,7 @@ def config_cmd():
         toolchain = os.path.join( src_path, "toolchain-windows.cmake" )
         #set CPACK_PACKAGING_INSTALL_PREFIX= defined as blank as it is appended to end of path for archive creation
         cmake_platform_opts.append( f"-DWIN32=ON -DCPACK_PACKAGING_INSTALL_PREFIX=") #" -DCPACK_PACKAGING_INSTALL_PREFIX={rocm_path}"
-        cmake_platform_opts.append( f"-DCMAKE_INSTALL_PREFIX=\"C:/hipSDK\"" )        
+        cmake_platform_opts.append( f"-DCMAKE_INSTALL_PREFIX=\"C:/hipSDK\"" )
         generator = f"-G Ninja"
         # "-G \"Visual Studio 16 2019\" -A x64"  #  -G NMake ")  #
         cmake_options.append( generator )
@@ -150,12 +150,12 @@ def config_cmd():
 
     if args.build_tests:
         cmake_options.append( f"-DBUILD_TEST=ON -DBUILD_DIR={build_dir}" )
-   
+
     if args.build_clients:
-        cmake_options.append( f"-DBUILD_TEST=ON -DBUILD_EXAMPLE=ON -DBUILD_DIR={build_dir} -DBUILD_BENCHMARK=ON" )
+        cmake_options.append( f"-DBUILD_TEST=ON -DBUILD_EXAMPLE=ON -DBUILD_DIR={build_dir}" )
 
     cmake_options.append( f"-DAMDGPU_TARGETS={args.gpu_architecture}" )
-    
+
     if args.cmake_dargs:
         for i in args.cmake_dargs:
           cmake_options.append( f"-D{i}" )

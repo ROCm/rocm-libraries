@@ -30,20 +30,23 @@ def runTestCommand (platform, project)
     String centos = platform.jenkinsLabel.contains('centos') ? '3' : ''
 
     def testCommand = "ctest${centos} --output-on-failure "
+    def testCommandExclude = "--exclude-regex rocprim.warp_reduce"
+    def hmmExcludeRegex = /(rocprim.warp_reduce|rocprim.device_scan)/
+    def hmmTestCommandExclude = "--exclude-regex \"${hmmExcludeRegex}\""
     def hmmTestCommand = ''
     if (platform.jenkinsLabel.contains('gfx90a'))
     {
         hmmTestCommand = """
                             export HSA_XNACK=1
                             export ROCPRIM_USE_HMM=1
-                            ${testCommand}
+                            ${testCommand} ${hmmTestCommandExclude}
                          """
     }
     def command = """#!/usr/bin/env bash
                 set -x
                 cd ${project.paths.project_build_prefix}
                 cd ${project.testDirectory}
-                ${testCommand}
+                ${testCommand} ${testCommandExclude}
                 if (( \$? != 0 )); then
                     exit 1
                 fi
