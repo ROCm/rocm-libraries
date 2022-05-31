@@ -68,7 +68,7 @@ rocm_install(
   DIRECTORY
     "include/"
     "${PROJECT_BINARY_DIR}/rocprim/include/"
-  DESTINATION include/
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/
   FILES_MATCHING
   PATTERN "*.h"
   PATTERN "*.hpp"
