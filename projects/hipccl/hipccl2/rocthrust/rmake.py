@@ -147,7 +147,7 @@ def config_cmd():
         cmake_options.append( f"-DROCM_DISABLE_LDCONFIG=ON" )
 
     if args.build_clients:
-        cmake_options.append( f"-DBUILD_TEST=ON -DBUILD_DIR={build_dir}" )
+        cmake_options.append( f"-DBUILD_TEST=ON -DBUILD_BENCHMARKS=ON -DBUILD_DIR={build_dir}" )
 
     cmake_options.append( f"-DAMDGPU_TARGETS={args.gpu_architecture}" )
     

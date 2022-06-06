@@ -121,32 +121,39 @@ class cuda_timer
 
 #endif
 
-#if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC)
+#if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC || defined(WIN32))
 #include <windows.h>
 
 class steady_timer
 {
-    LARGE_INTEGER frequency_; // Cached to avoid system calls.
     LARGE_INTEGER start_;
     LARGE_INTEGER stop_;
+    LARGE_INTEGER frequency_; // Cached to avoid system calls.
 
  public:
     steady_timer() : start_(), stop_(), frequency_()
     {
         BOOL const r = QueryPerformanceFrequency(&frequency_);
         assert(0 != r);
+        (void)r; // Silence unused variable 'r' in Release builds, when
+                 // the assertion evaporates.
     }
 
     void start()
     {
         BOOL const r = QueryPerformanceCounter(&start_);
         assert(0 != r);
+        (void)r; // Silence unused variable 'r' in Release builds, when
+                 // the assertion evaporates.
     }
+	
 
     void stop()
     {
         BOOL const r = QueryPerformanceCounter(&stop_);
         assert(0 != r);
+        (void)r; // Silence unused variable 'r' in Release builds, when
+                 // the assertion evaporates.
     }
 
     double seconds_elapsed()
