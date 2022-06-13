@@ -33,7 +33,7 @@ configure_file(
 if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY)
   rocm_wrap_header_file(
       "hipcub_version.hpp"
-      WRAPPER_LOCATIONS cub/include/hipcub
+      WRAPPER_LOCATIONS cub/${CMAKE_INSTALL_INCLUDEDIR}/hipcub
       OUTPUT_LOCATIONS cub/wrapper/include/hipcub
       ORIGINAL_FILES ${CMAKE_CURRENT_BINARY_DIR}/cub/include/hipcub/hipcub_version.hpp
   )
@@ -46,7 +46,7 @@ target_include_directories(hipcub
     $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/cub/include>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/cub/include/hipcub>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include/>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/>
 )
 
 if(HIP_COMPILER STREQUAL "hcc" OR HIP_COMPILER STREQUAL "clang")
@@ -73,9 +73,6 @@ endif()
 
 # Installation
 
-include(GNUInstallDirs)
-set(INCLUDE_INSTALL_DIR ${CMAKE_INSTALL_INCLUDEDIR})
-
 # We need to install headers manually as rocm_install_targets
 # does not support header-only libraries (INTERFACE targets)
 rocm_install_targets(
@@ -86,7 +83,7 @@ rocm_install(
   "include/"
   "${PROJECT_BINARY_DIR}/hipcub/cub/include/"
   COMPONENT devel
-  DESTINATION include/
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/
   FILES_MATCHING
   PATTERN "*.h"
   PATTERN "*.hpp"
