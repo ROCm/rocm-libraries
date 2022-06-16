@@ -21,6 +21,7 @@
 #ifndef ROCPRIM_DEVICE_DEVICE_PARTITION_HPP_
 #define ROCPRIM_DEVICE_DEVICE_PARTITION_HPP_
 
+#include <algorithm>
 #include <type_traits>
 #include <iterator>
 
@@ -33,6 +34,7 @@
 #include "device_select_config.hpp"
 #include "detail/device_scan_common.hpp"
 #include "detail/device_partition.hpp"
+#include "device_transform.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -51,7 +53,6 @@ template<
     class FlagIterator,
     class OutputKeyIterator,
     class OutputValueIterator,
-    class SelectedCountOutputIterator,
     class InequalityOp,
     class OffsetLookbackScanState,
     class... UnaryPredicates
@@ -63,7 +64,8 @@ void partition_kernel(KeyIterator keys_input,
                       FlagIterator flags,
                       OutputKeyIterator keys_output,
                       OutputValueIterator values_output,
-                      SelectedCountOutputIterator selected_count_output,
+                      size_t* selected_count,
+                      size_t* prev_selected_count,
                       const size_t size,
                       InequalityOp inequality_op,
                       OffsetLookbackScanState offset_scan_state,
@@ -72,8 +74,8 @@ void partition_kernel(KeyIterator keys_input,
                       UnaryPredicates... predicates)
 {
     partition_kernel_impl<SelectMethod, OnlySelected, Config>(
-        keys_input, values_input, flags, keys_output, values_output, selected_count_output, size, inequality_op,
-        offset_scan_state, number_of_blocks, ordered_bid, predicates...
+        keys_input, values_input, flags, keys_output, values_output, selected_count, prev_selected_count, 
+        size, inequality_op, offset_scan_state, number_of_blocks, ordered_bid, predicates...
     );
 }
 
@@ -152,31 +154,37 @@ hipError_t partition_impl(void * temporary_storage,
     static constexpr unsigned int block_size = config::block_size;
     static constexpr unsigned int items_per_thread = config::items_per_thread;
     static constexpr auto items_per_block = block_size * items_per_thread;
-    const unsigned int number_of_blocks =
-        std::max(1u, static_cast<unsigned int>((size + items_per_block - 1)/items_per_block));
+
+    static constexpr bool is_three_way = sizeof...(UnaryPredicates) == 2;
+
+    static constexpr size_t size_limit = config::size_limit;
+    static constexpr size_t aligned_size_limit = ::rocprim::max<size_t>(size_limit - (size_limit % items_per_block), items_per_block);
+    const size_t limited_size = std::min<size_t>(size, aligned_size_limit);
+    const bool use_limited_size = limited_size == aligned_size_limit;
+
+    const unsigned int number_of_blocks = 
+        static_cast<unsigned int>(::rocprim::detail::ceiling_div(limited_size, items_per_block));
 
     // Calculate required temporary storage
     size_t offset_scan_state_bytes = ::rocprim::detail::align_size(
         // This is valid even with offset_scan_state_with_sleep_type
         offset_scan_state_type::get_storage_size(number_of_blocks)
     );
-    size_t ordered_block_id_bytes = ordered_block_id_type::get_storage_size();
+    size_t ordered_block_id_bytes = ::rocprim::detail::align_size(
+        ordered_block_id_type::get_storage_size(),
+        alignof(size_t)
+    );
+
     if(temporary_storage == nullptr)
     {
         // storage_size is never zero
-        storage_size = offset_scan_state_bytes + ordered_block_id_bytes;
+        storage_size = offset_scan_state_bytes + ordered_block_id_bytes + (sizeof(size_t) * 2 * (is_three_way ? 2 : 1));
+
         return hipSuccess;
     }
 
     // Start point for time measurements
     std::chrono::high_resolution_clock::time_point start;
-    if(debug_synchronous)
-    {
-        std::cout << "size " << size << '\n';
-        std::cout << "block_size " << block_size << '\n';
-        std::cout << "number of blocks " << number_of_blocks << '\n';
-        std::cout << "items_per_block " << items_per_block << '\n';
-    }
 
     // Create and initialize lookback_scan_state obj
     auto offset_scan_state = offset_scan_state_type::create(
@@ -191,8 +199,20 @@ hipError_t partition_impl(void * temporary_storage,
         reinterpret_cast<ordered_block_id_type::id_type*>(ptr + offset_scan_state_bytes)
     );
 
-    if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-    auto grid_size = (number_of_blocks + block_size - 1)/block_size;
+    size_t* selected_count = reinterpret_cast<size_t*>(ptr + offset_scan_state_bytes
+                                                       + ordered_block_id_bytes);
+    size_t* prev_selected_count
+        = reinterpret_cast<size_t*>(ptr + offset_scan_state_bytes + ordered_block_id_bytes
+                                    + (is_three_way ? 2 : 1) * sizeof(size_t));
+
+    hipError_t error;
+
+    // Memset selected_count and prev_selected_count at once
+    error = hipMemsetAsync(selected_count,
+                           0,
+                           sizeof(*selected_count) * 2 * (is_three_way ? 2 : 1),
+                           stream);
+    if (error != hipSuccess) return error;
 
     hipDeviceProp_t prop;
     int deviceId;
@@ -205,49 +225,90 @@ hipError_t partition_impl(void * temporary_storage,
     int asicRevision = 0;
 #endif
 
-    if (prop.gcnArch == 908 && asicRevision < 2)
+    const size_t number_of_launches = ::rocprim::detail::ceiling_div(size, aligned_size_limit);
+
+    if(debug_synchronous)
     {
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(init_lookback_scan_state_kernel<offset_scan_state_with_sleep_type>),
-            dim3(grid_size), dim3(block_size), 0, stream,
-            offset_scan_state_with_sleep, number_of_blocks, ordered_bid
-        );
-    } else
-    {
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(init_lookback_scan_state_kernel<offset_scan_state_type>),
-            dim3(grid_size), dim3(block_size), 0, stream,
-            offset_scan_state, number_of_blocks, ordered_bid
-        );
+        std::cout << "use_limited_size " << use_limited_size << '\n';
+        std::cout << "aligned_size_limit " << aligned_size_limit << '\n';
+        std::cout << "number_of_launches " << number_of_launches << '\n';
+        std::cout << "size " << size << '\n';
+        std::cout << "block_size " << block_size << '\n';
+        std::cout << "number of blocks " << number_of_blocks << '\n';
+        std::cout << "items_per_block " << items_per_block << '\n';
     }
 
-
-    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init_offset_scan_state_kernel", size, start)
-
-    if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-    grid_size = number_of_blocks;
-    if (prop.gcnArch == 908 && asicRevision < 2)
+    for (size_t i = 0, offset = 0; i < number_of_launches; i++, offset+=limited_size)
     {
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(partition_kernel<
-                SelectMethod, OnlySelected, config
-            >),
-            dim3(grid_size), dim3(block_size), 0, stream,
-            keys_input, values_input, flags, keys_output, values_output, selected_count_output,
-            size, inequality_op, offset_scan_state_with_sleep, number_of_blocks, ordered_bid, predicates...
-        );
-    } else
-    {
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(partition_kernel<
-                SelectMethod, OnlySelected, config
-            >),
-            dim3(grid_size), dim3(block_size), 0, stream,
-            keys_input, values_input, flags, keys_output, values_output, selected_count_output,
-            size, inequality_op, offset_scan_state, number_of_blocks, ordered_bid, predicates...
-        );
+        const unsigned int current_size = static_cast<unsigned int>(std::min<size_t>(size - offset, limited_size));
+
+        const unsigned int current_number_of_blocks = ::rocprim::detail::ceiling_div(current_size, items_per_block);
+
+        auto grid_size = ::rocprim::detail::ceiling_div(number_of_blocks, block_size);
+
+        if(debug_synchronous)
+        {
+            std::cout << "current size " << current_size << '\n';
+            std::cout << "current number of blocks " << current_number_of_blocks << '\n';
+
+            start = std::chrono::high_resolution_clock::now();
+        }
+
+        if (prop.gcnArch == 908 && asicRevision < 2)
+        {
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(init_lookback_scan_state_kernel<offset_scan_state_with_sleep_type>),
+                dim3(grid_size), dim3(block_size), 0, stream,
+                offset_scan_state_with_sleep, current_number_of_blocks, ordered_bid
+            );
+        } else
+        {
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(init_lookback_scan_state_kernel<offset_scan_state_type>),
+                dim3(grid_size), dim3(block_size), 0, stream,
+                offset_scan_state, current_number_of_blocks, ordered_bid
+            );
+        }
+
+        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init_offset_scan_state_kernel", current_number_of_blocks, start)
+
+        if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
+
+        grid_size = current_number_of_blocks;
+        
+        if (prop.gcnArch == 908 && asicRevision < 2)
+        {
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(partition_kernel<
+                    SelectMethod, OnlySelected, config
+                >),
+                dim3(grid_size), dim3(block_size), 0, stream,
+                keys_input + offset, values_input + offset, flags + offset, keys_output, values_output, selected_count, prev_selected_count,
+                current_size, inequality_op, offset_scan_state_with_sleep, current_number_of_blocks, ordered_bid, predicates...
+            );
+        } else
+        {
+            hipLaunchKernelGGL(
+                HIP_KERNEL_NAME(partition_kernel<
+                    SelectMethod, OnlySelected, config
+                >),
+                dim3(grid_size), dim3(block_size), 0, stream,
+                keys_input + offset, values_input + offset, flags + offset, keys_output, values_output, selected_count, prev_selected_count,
+                current_size, inequality_op, offset_scan_state, current_number_of_blocks, ordered_bid, predicates...
+            );
+        }
+
+        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("partition_kernel", size, start)
+
+        std::swap(selected_count, prev_selected_count);
     }
-    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("partition_kernel", size, start)
+
+    error = ::rocprim::transform(
+        prev_selected_count, selected_count_output, (is_three_way ? 2 : 1), 
+        ::rocprim::identity<>{},
+        stream, debug_synchronous
+    );
+    if (error != hipSuccess) return error;
 
     return hipSuccess;
 }

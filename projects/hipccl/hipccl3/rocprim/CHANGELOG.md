@@ -3,15 +3,21 @@
 Full documentation for rocPRIM is available at [https://codedocs.xyz/ROCmSoftwarePlatform/rocPRIM/](https://codedocs.xyz/ROCmSoftwarePlatform/rocPRIM/)
 
 ## [Unreleased rocPRIM-2.11.0 for ROCm 5.3.0]
+### Added
 - New functions `subtract_left` and `subtract_right` in `block_adjacent_difference` to apply functions
   on pairs of adjacent items distributed between threads in a block.
 - New device level `adjacent_difference` primitives.
 - Added experimental tooling for automatic kernel configuration tuning for various architectures
 - Benchmarks collect and output more detailed system information
+- CMake functionality to improve build parallelism of the test suite that splits compilation units by
+function or by parameters.
+- Reverse iterator.
 ## Changed
 - Improved the performance of warp primitives using the swizzle operation on Navi
 - Improved build parallelism of the test suite by splitting up large compilation units
 - `device_select` now supports problem sizes larger than 2^32 items
+- `device_segmented_radix_sort` now partitions segments to groups small, medium and large segments.
+  Each segment group can be sorted by specialized kernels to improve throughput.
 
 ## [Unreleased rocPRIM-2.10.14 for ROCm 5.2.0]
 ### Added

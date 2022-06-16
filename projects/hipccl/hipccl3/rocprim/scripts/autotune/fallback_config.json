@@ -1,0 +1,62 @@
+{
+    "fallback_cases": [
+        {
+            "based_on": {
+                "datatype":"double"
+            },
+            "sizeof": {
+                 "min_exclusive": 4
+            },
+            "floating_point": true
+        },
+        {
+            "based_on": {
+                "datatype":"float"
+            },
+            "sizeof": {
+                 "max_inclusive": 4,
+                 "min_exclusive": 2
+            },
+             "floating_point": true
+        },
+        {
+            "based_on": {
+                "datatype":"rocprim::half"
+            },
+            "sizeof": {
+                 "max_inclusive": 2,
+                 "min_exclusive": 0
+            },
+             "floating_point": true
+        },
+        {
+            "based_on": {
+                "datatype":"int64_t"
+            },
+            "sizeof": {
+                 "min_exclusive": 4
+            },
+            "floating_point": false
+        },
+        {
+            "based_on": {
+                "datatype":"int"
+            },
+            "sizeof": {
+                 "max_inclusive": 4,
+                 "min_exclusive": 2
+            },
+             "floating_point": false
+        },
+        {
+            "based_on": {
+                "datatype":"int8_t"
+            },
+            "sizeof": {
+                 "max_inclusive": 2,
+                 "min_exclusive": 0
+            },
+             "floating_point": false
+        }
+    ]
+}

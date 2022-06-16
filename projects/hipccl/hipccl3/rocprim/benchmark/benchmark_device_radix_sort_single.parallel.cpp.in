@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,26 +20,12 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "common_test_header.hpp"
+#include <cstdint>
 
-// required rocprim headers
-#include <rocprim/config.hpp>
-#include <rocprim/block/block_adjacent_difference.hpp>
-#include <rocprim/block/block_load.hpp>
-#include <rocprim/block/block_store.hpp>
+#include "benchmark_utils.hpp"
+#include "benchmark_device_radix_sort.parallel.hpp"
 
-// required test headers
-#include "test_utils_types.hpp"
-
-// kernel definitions
-#include "test_block_adjacent_difference.kernels.hpp"
-
-// Start stamping out tests
-struct RocprimBlockAdjacentDifference;
-
-struct Floating;
-#define suite_name RocprimBlockAdjacentDifference
-#define warp_params BlockDiscParamsFloating
-#define name_suffix Floating
-
-#include "test_block_adjacent_difference.hpp"
+namespace {
+    auto benchmarks = config_autotune_register::create_bulk(
+        device_radix_sort_single_benchmark_generator<@BlockSize@, @KeyType_ValueType@>::create);    
+}

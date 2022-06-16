@@ -60,8 +60,7 @@ namespace
 constexpr unsigned int warmup_size = 2;
 constexpr size_t min_size = 30000;
 constexpr std::array<size_t, 8> segment_counts{ 10, 100, 1000, 2500, 5000, 7500, 10000, 100000 };
-constexpr std::array<size_t, 4> segment_lengths{ 30, 300, 3000, 300000 };
-
+constexpr std::array<size_t, 4> segment_lengths{30, 256, 3000, 300000};
 }
 
 

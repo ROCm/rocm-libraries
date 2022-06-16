@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,13 +20,39 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <cstdint>
+#include "common_test_header.hpp"
 
-#include "benchmark_utils.hpp"
-#include "benchmark_device_reduce.parallel.hpp"
+// required rocprim headers
+#include <rocprim/block/block_adjacent_difference.hpp>
+#include <rocprim/block/block_load.hpp>
+#include <rocprim/block/block_store.hpp>
+#include <rocprim/config.hpp>
 
-namespace {
-    auto benchmark = config_autotune_register::create<device_reduce_benchmark<
-        @DataType@, rocprim::plus<@DataType@>, 
-        rocprim::reduce_config<@BlockSize@u, @ItemsPerThread@u, rocprim::block_reduce_algorithm::using_warp_reduce>>>();
-}
+// required test headers
+#include "test_utils_types.hpp"
+
+// kernel definitions
+#include "test_block_adjacent_difference.kernels.hpp"
+
+// Start stamping out tests
+struct RocprimBlockAdjacentDifference;
+
+#cmakedefine ROCPRIM_TEST_SLICE @ROCPRIM_TEST_SLICE@
+
+#if   ROCPRIM_TEST_SLICE == 0
+
+struct Integral;
+#define suite_name RocprimBlockAdjacentDifference
+#define warp_params BlockDiscParamsIntegral
+#define name_suffix Integral
+
+#elif ROCPRIM_TEST_SLICE == 1
+
+struct Floating;
+#define suite_name RocprimBlockAdjacentDifference
+#define warp_params BlockDiscParamsFloating
+#define name_suffix Floating
+
+#endif
+
+#include "test_block_adjacent_difference.hpp"

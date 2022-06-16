@@ -71,11 +71,10 @@ function(add_rocprim_benchmark BENCHMARK_SOURCE)
       message(STATUS "found ${BENCHMARK_TARGET}.parallel.cpp.in file, compiling in parallel.")
       read_config_autotune_settings(${BENCHMARK_TARGET} list_across_names list_across output_pattern_suffix)
       add_matrix(TARGET ${BENCHMARK_TARGET}
-              FILTER "reject_odd_blocksize"
               SHARDS 1
               CURRENT_SHARD 0
               INPUT "${BENCHMARK_TARGET}.parallel.cpp.in"
-              OUTPUT_PATTERN "${BENCHMARK_TARGET}_${output_pattern_suffix}.cpp"
+              OUTPUT_PATTERN "${BENCHMARK_TARGET}_${output_pattern_suffix}"
               NAMES ${list_across_names}
               LISTS ${list_across})
     endif()

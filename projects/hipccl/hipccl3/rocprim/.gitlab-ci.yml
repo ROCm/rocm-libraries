@@ -28,8 +28,10 @@ include:
       - /deps-cmake.yaml
       - /deps-rocm.yaml
       - /gpus-rocm.yaml
+      - /rules.yaml
 
 stages:
+  - lint
   - build
   - test
   - benchmark
@@ -37,11 +39,22 @@ stages:
 variables:
   PACKAGE_DIR: $BUILD_DIR/package
 
-.deps:doc:
-  stage: test:doc
-  before_script:
-    - $SUDO_CMD apt update -qq
-    - $SUDO_CMD apt install -y -qq doxygen
+clang-format:
+  extends:
+    - .deps:rocm
+  stage: lint
+  needs: []
+  tags:
+    - rocm-build
+  variables:
+    CLANG_FORMAT: "/opt/rocm/llvm/bin/clang-format"
+    GIT_CLANG_FORMAT: "/opt/rocm/llvm/bin/git-clang-format"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  script:
+    - cd $CI_PROJECT_DIR
+    - git config --global --add safe.directory $CI_PROJECT_DIR
+    - scripts/code-format/check-format.sh $CI_MERGE_REQUEST_DIFF_BASE_SHA --binary "$CLANG_FORMAT"
 
 .cmake-latest:
   extends:
@@ -61,7 +74,11 @@ variables:
 
 .build:common:
   stage: build
-  extends: .gpus:rocm-gpus
+  tags:
+    - rocm-build
+  extends:
+    - .gpus:rocm-gpus
+    - .rules:build
   script:
     - mkdir -p $BUILD_DIR
     - cd $BUILD_DIR
@@ -92,47 +109,37 @@ variables:
 
 build:cmake-latest:
   stage: build
+  needs: []
   extends:
     - .cmake-latest
     - .build:common
 
 build:cmake-minimum:
   stage: build
-  needs:
-    - job: build:cmake-latest
-      artifacts: false
+  needs: []
   extends:
     - .cmake-minimum
     - .build:common
 
 build:package:
   stage: build
+  needs: []
+  tags:
+    - rocm-build
   extends:
     - .cmake-minimum
     - .gpus:rocm-gpus
+    - .rules:build
   script:
     - mkdir -p $PACKAGE_DIR
-    - cd $PACKAGE_DIR
     - cmake
       -G Ninja
       -D CMAKE_CXX_COMPILER="$AMDCLANG"
       -D CMAKE_BUILD_TYPE=Release
       -B $PACKAGE_DIR
-      $CI_PROJECT_DIR
-    - $SUDO_CMD cmake
-      --build $PACKAGE_DIR
-      --target install
+      -S $CI_PROJECT_DIR
+    - cd $PACKAGE_DIR
     - cpack -G "DEB;ZIP"
-    - mkdir -p ../package_test && cd ../package_test
-    - cmake
-      -G Ninja
-      -D CMAKE_CXX_COMPILER="$AMDCLANG"
-      -D CMAKE_BUILD_TYPE=Release
-      -D GPU_TARGETS=$GPU_TARGETS
-      $CI_PROJECT_DIR/test/extra
-    - cmake --build .
-    - ./test_rocprim_package
-    - ctest --output-on-failure --repeat-until-fail 2
   artifacts:
     paths:
       - $PACKAGE_DIR/rocprim*.deb
@@ -141,9 +148,13 @@ build:package:
 
 build:benchmark:
   stage: build
+  needs: []
+  tags:
+    - rocm-build
   extends:
-    - .cmake-latest
+    - .cmake-minimum
     - .gpus:rocm-gpus
+    - .rules:build
   script:
     - mkdir build
     - cd build
@@ -167,10 +178,11 @@ build:benchmark:
 test:
   stage: test
   extends:
-    - .cmake-latest
+    - .cmake-minimum
+    - .rules:test
     - .gpus:rocm
   needs:
-    - build:cmake-latest
+    - build:cmake-minimum
   script:
     - cd $BUILD_DIR
     - cmake
@@ -184,28 +196,56 @@ test:
       --resource-spec-file ./resources.json
       --parallel $PARALLEL_JOBS
 
-test:deb:
-  stage: test
-  needs:
-    - build:package
-  extends:
-    - .cmake-minimum
-    - .gpus:rocm-gpus
+.test-package:
   script:
-    - $SUDO_CMD dpkg -i $PACKAGE_DIR/rocprim*.deb
-    - mkdir -p package_test && cd package_test
     - cmake
       -G Ninja
       -D CMAKE_CXX_COMPILER="$AMDCLANG"
       -D CMAKE_BUILD_TYPE=Release
       -D GPU_TARGETS=$GPU_TARGETS
-      $CI_PROJECT_DIR/test/extra
-    - cmake --build .
+      -S "$CI_PROJECT_DIR/test/extra"
+      -B "$CI_PROJECT_DIR/package_test"
+    - cmake --build "$CI_PROJECT_DIR/package_test"
+    - "$CI_PROJECT_DIR/package_test/test_rocprim_package"
+    - cd "$CI_PROJECT_DIR/package_test"
     - ctest --output-on-failure --repeat-until-fail 2
-    - $SUDO_CMD dpkg -r rocprim
+
+test:install:
+  stage: test
+  needs: []
+  tags:
+    - rocm
+  extends:
+    - .cmake-minimum
+    - .rules:test
+    - .gpus:rocm-gpus
+  script:
+    - cmake
+      -G Ninja
+      -D CMAKE_CXX_COMPILER="$AMDCLANG"
+      -D CMAKE_BUILD_TYPE=Release
+      -B build
+      -S $CI_PROJECT_DIR
+    - $SUDO_CMD cmake --build build --target install
+    - !reference [.test-package, script]
+
+test:deb:
+  stage: test
+  needs:
+    - build:package
+  tags:
+    - rocm
+  extends:
+    - .cmake-minimum
+    - .rules:test
+    - .gpus:rocm-gpus
+  script:
+    - $SUDO_CMD dpkg -i $PACKAGE_DIR/rocprim*.deb
+    - !reference [.test-package, script]
 
 test:doc:
   stage: test
+  extends: .rules:test
   needs: []
   before_script:
     - apt-get update -qq
@@ -218,15 +258,15 @@ run_benchmark:
   stage: benchmark
   extends:
     - .cmake-latest
+    - .rules:benchmark
     - .gpus:rocm
   needs:
     - build:benchmark
-  rules:
-    - if: '$CI_PIPELINE_SOURCE != "merge_request_event"'
-      when: manual
-      allow_failure: true
   script:
     - cmake
       -D BENCHMARK_BINARY_DIR=build/benchmark
       -D BENCHMARK_OUTPUT_DIR=.
       -P ${CI_PROJECT_DIR}/.gitlab/RunBenchmarks.cmake
+
+scheduled-check-changes:
+  extends: .rules:scheduled-check-changes

@@ -23,10 +23,9 @@
 #include <cstdint>
 
 #include "benchmark_utils.hpp"
-#include "benchmark_device_reduce.parallel.hpp"
+#include "benchmark_device_scan.parallel.hpp"
 
 namespace {
-    auto benchmark = config_autotune_register::create<device_reduce_benchmark<
-        @DataType@, rocprim::plus<@DataType@>, 
-        rocprim::reduce_config<@BlockSize@u, @ItemsPerThread@u, rocprim::block_reduce_algorithm::using_warp_reduce>>>();
+    auto benchmarks = config_autotune_register::create_bulk(
+        device_scan_benchmark_generator<@DataType@, @ByKey@, @Excl@>::create);
 }

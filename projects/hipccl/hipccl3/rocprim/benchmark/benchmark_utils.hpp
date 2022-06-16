@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -326,21 +326,29 @@ template <typename T, T Start, T End>
 using make_index_range =
     typename make_index_range_impl<T, Start, std::make_integer_sequence<T, End - Start + 1>>::type;
 
-template <typename T, template <T> class Function, T... I, typename... Args>
-void static_for_each_impl(std::integer_sequence<T, I...>, Args... args)
+template<typename T, template<T> class Function, T... I, typename... Args>
+void static_for_each_impl(std::integer_sequence<T, I...>, Args&&... args)
 {
-    int a[] = {(Function<I> {}(args...), 0)...};
+    int a[] = {(Function<I>{}(std::forward<Args>(args)...), 0)...};
     static_cast<void>(a);
 }
 
 // call the supplied template with all values of the std::integer_sequence Indices
-template <typename Indices,
-          template <typename Indices::value_type> class Function,
-          typename... Args>
-void static_for_each(Args... args)
+template<typename Indices, template<typename Indices::value_type> class Function, typename... Args>
+void static_for_each(Args&&... args)
 {
-    static_for_each_impl<typename Indices::value_type, Function>(Indices {}, args...);
+    static_for_each_impl<typename Indices::value_type, Function>(Indices{},
+                                                                 std::forward<Args>(args)...);
 }
+
+#define REGISTER_BENCHMARK(benchmarks, size, stream, instance)                     \
+    benchmark::internal::Benchmark* benchmark = benchmark::RegisterBenchmark(      \
+        instance.name().c_str(),                                                   \
+        [instance](benchmark::State& state, size_t size, const hipStream_t stream) \
+        { instance.run(state, size, stream); },                                    \
+        size,                                                                      \
+        stream);                                                                   \
+    benchmarks.emplace_back(benchmark)
 
 struct config_autotune_interface
 {
@@ -361,7 +369,55 @@ struct config_autotune_register
         vector().push_back(std::make_unique<T>());
         return config_autotune_register();
     }
+
+    template<typename BulkCreateFunction>
+    static config_autotune_register create_bulk(BulkCreateFunction&& f)
+    {
+        std::forward<BulkCreateFunction>(f)(vector());
+        return config_autotune_register();
+    }
+
+    // Register a subset of all created benchmarks for the current parallel instance and add to vector.
+    static void register_benchmark_subset(std::vector<benchmark::internal::Benchmark*>& benchmarks,
+                                          int               parallel_instance_index,
+                                          int               parallel_instance_count,
+                                          size_t            size,
+                                          const hipStream_t stream)
+    {
+        std::vector<std::unique_ptr<config_autotune_interface>>& configs = vector();
+        // sorting to get a consistent order because order of initialization of static variables is undefined by the C++ standard.
+        std::sort(configs.begin(),
+                  configs.end(),
+                  [](const auto& l, const auto& r) { return l->name() < r->name(); });
+        size_t configs_per_instance
+            = (configs.size() + parallel_instance_count - 1) / parallel_instance_count;
+        size_t start = std::min(parallel_instance_index * configs_per_instance, configs.size());
+        size_t end = std::min((parallel_instance_index + 1) * configs_per_instance, configs.size());
+        for(size_t i = start; i < end; i++)
+        {
+            std::unique_ptr<config_autotune_interface>& uniq_ptr         = configs.at(i);
+            config_autotune_interface*                  tuning_benchmark = uniq_ptr.get();
+            benchmark::internal::Benchmark*             benchmark = benchmark::RegisterBenchmark(
+                tuning_benchmark->name().c_str(),
+                [tuning_benchmark](benchmark::State& state, size_t size, const hipStream_t stream)
+                { tuning_benchmark->run(state, size, stream); },
+                size,
+                stream);
+            benchmarks.emplace_back(benchmark);
+        }
+    }
 };
+
+// Inserts spaces at beginning of string if string shorter than specified length.
+inline std::string pad_string(std::string str, const size_t len)
+{
+    if(len > str.size())
+    {
+        str.insert(str.begin(), len - str.size(), ' ');
+    }
+
+    return str;
+}
 
 template <typename T>
 struct Traits
@@ -400,8 +456,31 @@ template <>
 inline const char* Traits<custom_type<double, double>>::name() { return "custom_double2"; }
 template <>
 inline const char* Traits<custom_type<char, double>>::name() { return "custom_char_double"; }
-template <>
-inline const char* Traits<custom_type<long long, double>>::name() { return "custom_longlong_double"; }
+template<>
+inline const char* Traits<custom_type<long, double>>::name()
+{
+    return "custom_long_double";
+}
+template<>
+inline const char* Traits<custom_type<long long, double>>::name()
+{
+    return "custom_longlong_double";
+}
+template<>
+inline const char* Traits<rocprim::empty_type>::name()
+{
+    return "empty_type";
+}
+template<>
+inline const char* Traits<HIP_vector_type<float, 2>>::name()
+{
+    return "custom_float2";
+}
+template<>
+inline const char* Traits<HIP_vector_type<double, 2>>::name()
+{
+    return "custom_double2";
+}
 
 inline void add_common_benchmark_info()
 {
