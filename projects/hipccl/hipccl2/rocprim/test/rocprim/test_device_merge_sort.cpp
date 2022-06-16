@@ -62,6 +62,7 @@ typedef ::testing::Types<
     DeviceSortParams<int>,
     DeviceSortParams<test_utils::custom_test_type<int>>,
     DeviceSortParams<unsigned long>,
+    DeviceSortParams<long long>,
     DeviceSortParams<float, double>,
     DeviceSortParams<int8_t, int8_t>,
     DeviceSortParams<uint8_t, uint8_t>,

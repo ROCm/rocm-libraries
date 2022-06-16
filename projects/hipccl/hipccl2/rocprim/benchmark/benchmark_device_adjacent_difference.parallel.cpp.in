@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,40 +20,15 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "common_test_header.hpp"
+#include <cstdint>
 
-// required rocprim headers
-#include <rocprim/block/block_load.hpp>
-#include <rocprim/block/block_store.hpp>
-#include <rocprim/block/block_scan.hpp>
+#include "benchmark_utils.hpp"
+#include "benchmark_device_adjacent_difference.parallel.hpp"
 
-// required test headers
-#include "test_utils_types.hpp"
-
-// kernel definitions
-#include "test_block_scan.kernels.hpp"
-
-// Start stamping out tests
-struct RocprimBlockScanSingleValueTests;
-struct RocprimBlockScanInputArrayTests;
-
-struct Integral;
-#define suite_name_single RocprimBlockScanSingleValueTests
-#define suite_name_array RocprimBlockScanInputArrayTests
-#define block_params BlockParamsIntegral
-#define name_suffix Integral
-
-#include "test_block_scan.hpp"
-
-#undef suite_name_single
-#undef suite_name_array
-#undef block_params
-#undef name_suffix
-
-struct Floating;
-#define suite_name_single RocprimBlockScanSingleValueTests
-#define suite_name_array RocprimBlockScanInputArrayTests
-#define block_params BlockExchParamsFloating
-#define name_suffix Floating
-
-#include "test_block_scan.hpp"
+namespace {
+    auto benchmarks = config_autotune_register::create<device_adjacent_difference_benchmark<
+        @DataType@, 
+        @Left@, 
+        @InPlace@,
+        rocprim::adjacent_difference_config<@BlockSize@, @ItemsPerThread@>>>();
+}

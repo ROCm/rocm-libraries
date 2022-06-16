@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2022 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -57,6 +57,22 @@
     } \
 }
 #endif
+
+#define INSTANTIATE_TYPED_TEST_EXPANDED_1(line, test_suite_name, ...)         \
+    namespace Id##line                                                        \
+    {                                                                         \
+        using test_type = __VA_ARGS__;                                        \
+        INSTANTIATE_TYPED_TEST_SUITE_P(Id##line, test_suite_name, test_type); \
+    }
+
+#define INSTANTIATE_TYPED_TEST_EXPANDED(line, test_suite_name, ...) \
+    INSTANTIATE_TYPED_TEST_EXPANDED_1(line, test_suite_name, __VA_ARGS__)
+
+// Used in input file for rocprim_test_add_parallel.
+// Instantiate a typed test suite with a unique name based on line number.
+// Do not call this macro twice on the same line.
+#define INSTANTIATE_TYPED_TEST(test_suite_name, ...) \
+    INSTANTIATE_TYPED_TEST_EXPANDED(__LINE__, test_suite_name, __VA_ARGS__)
 
 #include <cstdlib>
 #include <string>

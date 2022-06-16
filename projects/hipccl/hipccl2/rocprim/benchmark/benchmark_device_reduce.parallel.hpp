@@ -23,16 +23,12 @@
 #ifndef ROCPRIM_BENCHMARK_DEVICE_REDUCE_PARALLEL_HPP_
 #define ROCPRIM_BENCHMARK_DEVICE_REDUCE_PARALLEL_HPP_
 
-#include <iostream>
-#include <chrono>
-#include <thread>
-#include <vector>
-#include <locale>
-#include <codecvt>
+#include <cstddef>
 #include <string>
+#include <vector>
 
 // Google Benchmark
-#include "benchmark/benchmark.h"
+#include <benchmark/benchmark.h>
 
 // HIP API
 #include <hip/hip_runtime.h>
@@ -40,8 +36,6 @@
 // rocPRIM HIP API
 #include <rocprim/rocprim.hpp>
 
-// CmdParser
-#include "cmdparser.hpp"
 #include "benchmark_utils.hpp"
 
 #define HIP_CHECK(condition)         \
@@ -53,21 +47,28 @@
     } \
   }
 
-template<
-    class T,
-    class BinaryFunction,
-    class Config = rocprim::detail::default_reduce_config<ROCPRIM_TARGET_ARCH, T>
->
+template<typename T              = int,
+         typename BinaryFunction = rocprim::plus<T>,
+         typename Config         = rocprim::detail::default_reduce_config<ROCPRIM_TARGET_ARCH, T>>
 struct device_reduce_benchmark : public config_autotune_interface
 {
+    static std::string get_name_pattern()
+    {
+        return R"---((?P<algo>\S*)\<)---"
+               R"---((?P<datatype>\S*),\s*reduce_config\<)---"
+               R"---(\s*(?P<block_size>[0-9]+),\s*(?P<items_per_thread>[0-9]+)\>\>)---";
+    }
+
     std::string name() const override
     {
-        return std::string("device_reduce_benchmark<"+std::string(Traits<T>::name())+", reduce_config<"+std::to_string(Config::block_size)
-                           +", "+std::to_string(Config::items_per_thread)+">>");
+        return std::string("device_reduce<" + std::string(Traits<T>::name()) + ", reduce_config<"
+                           + pad_string(std::to_string(Config::block_size), 3) + ", "
+                           + pad_string(std::to_string(Config::items_per_thread), 2) + ">>");
     }
 
     static constexpr unsigned int batch_size = 10;
     static constexpr unsigned int warmup_size = 5;
+
     void run(benchmark::State& state,
              size_t size,
              const hipStream_t stream) const override

@@ -36,10 +36,10 @@ function(add_configured_source)
   endforeach()
 
   string(CONFIGURE "${ARG_OUTPUT_PATTERN}" output @ONLY)
-  string(REPLACE ":" "_" output ${output})
-  configure_file("${ARG_INPUT}" "${ARG_TARGET}.parallel/${output}" @ONLY)
+  string(MAKE_C_IDENTIFIER ${output} output)
+  configure_file("${ARG_INPUT}" "${ARG_TARGET}.parallel/${output}.cpp" @ONLY)
   set_property(DIRECTORY APPEND PROPERTY ADDITIONAL_CLEAN_FILES "${ARG_TARGET}.parallel")
-  target_sources("${ARG_TARGET}" PRIVATE "${ARG_TARGET}.parallel/${output}")
+  target_sources("${ARG_TARGET}" PRIVATE "${ARG_TARGET}.parallel/${output}.cpp")
   target_include_directories("${ARG_TARGET}" PRIVATE "../benchmark")
 
   # Cmake configuration needs to be rerun if the input template changes
@@ -53,9 +53,6 @@ endfunction()
 
 function(add_matrix)
   set(single_value_args "TARGET" "INPUT" "OUTPUT_PATTERN" "SHARDS" "CURRENT_SHARD")
-  if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.18")
-    list(APPEND single_value_args "FILTER")
-  endif()
   cmake_parse_arguments(PARSE_ARGV 0 ARG "" "${single_value_args}" "NAMES;LISTS")
   list(LENGTH ARG_NAMES NAMES_LEN)
   list(LENGTH ARG_LISTS LISTS_LEN)
@@ -93,13 +90,6 @@ function(add_matrix)
       list(APPEND values "${curr_item}")
       math(EXPR index "${index} / ${curr_length}")
     endforeach()
-
-    if(DEFINED ARG_FILTER)
-      cmake_language(CALL "${ARG_FILTER}" keep ${values})
-      if(NOT keep)
-        continue()
-      endif()
-    endif()
 
     add_configured_source(TARGET "${ARG_TARGET}"
             INPUT "${ARG_INPUT}"

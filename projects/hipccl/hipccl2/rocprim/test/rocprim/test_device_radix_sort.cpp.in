@@ -1,0 +1,96 @@
+// MIT License
+//
+// Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+#include "test_device_radix_sort.hpp"
+
+#define SUITE RocprimDeviceRadixSort
+
+#define INSTANTIATE(...) INSTANTIATE_TYPED_TEST(SUITE, __VA_ARGS__);
+
+#cmakedefine ROCPRIM_TEST_SUITE_SLICE @ROCPRIM_TEST_SUITE_SLICE@
+#cmakedefine ROCPRIM_TEST_TYPE_SLICE  @ROCPRIM_TEST_TYPE_SLICE@
+#cmakedefine ROCPRIM_TEST_SLICE       @ROCPRIM_TEST_SLICE@
+
+#if   ROCPRIM_TEST_SUITE_SLICE == 0
+    TYPED_TEST_P(SUITE, SortKeys                ) { sort_keys<TestFixture>(); } 
+    REGISTER_TYPED_TEST_SUITE_P(SUITE, SortKeys);
+#elif ROCPRIM_TEST_SUITE_SLICE == 1
+    TYPED_TEST_P(SUITE, SortPairs               ) { sort_pairs<TestFixture>(); } 
+    REGISTER_TYPED_TEST_SUITE_P(SUITE, SortPairs);
+#elif ROCPRIM_TEST_SUITE_SLICE == 2
+    TYPED_TEST_P(SUITE, SortKeysDoubleBuffer    ) { sort_keys_double_buffer<TestFixture>(); } 
+    REGISTER_TYPED_TEST_SUITE_P(SUITE, SortKeysDoubleBuffer);
+#elif ROCPRIM_TEST_SUITE_SLICE == 3
+    TYPED_TEST_P(SUITE, SortPairsDoubleBuffer   ) { sort_pairs_double_buffer<TestFixture>(); } 
+    REGISTER_TYPED_TEST_SUITE_P(SUITE, SortPairsDoubleBuffer);
+#endif
+
+#if   ROCPRIM_TEST_SLICE == 0
+    TEST(SUITE, SortKeysOver4G) { sort_keys_over_4g(); }
+#endif
+
+#if   ROCPRIM_TEST_TYPE_SLICE == 0
+    INSTANTIATE(params<signed char,         double, true>)
+    INSTANTIATE(params<int,                 short>)
+    INSTANTIATE(params<short,               int,    true>)
+    INSTANTIATE(params<long long,           char>)
+    INSTANTIATE(params<double,              unsigned int>)
+    INSTANTIATE(params<double,              int, true>)
+    INSTANTIATE(params<float,               int>)
+    INSTANTIATE(params<rocprim::half,       long long>)
+    INSTANTIATE(params<rocprim::bfloat16,   long long>)
+    INSTANTIATE(params<int8_t,              int8_t>)
+    INSTANTIATE(params<uint8_t,             uint8_t>)
+    INSTANTIATE(params<rocprim::half,       rocprim::half>)
+    INSTANTIATE(params<rocprim::bfloat16,   rocprim::bfloat16>)
+    INSTANTIATE(params<int,                 test_utils::custom_test_type<float>>)
+
+    // start_bit and end_bit
+
+    INSTANTIATE(params<unsigned char,       int,                                    true,   0, 7>)
+    INSTANTIATE(params<unsigned short,      int,                                    true,   4, 10>)
+    INSTANTIATE(params<unsigned int,        short,                                  false,  3, 22>)
+#elif ROCPRIM_TEST_TYPE_SLICE == 1
+    INSTANTIATE(params<uint8_t,             int8_t,                                 true,   0, 7>)
+    INSTANTIATE(params<uint8_t,             uint8_t,                                true,   4, 10>)
+    INSTANTIATE(params<unsigned int,        double,                                 true,   4, 21>)
+    INSTANTIATE(params<unsigned int,        rocprim::half,                          true,   0, 15>)
+    INSTANTIATE(params<unsigned short,      rocprim::half,                          false,  3, 22>)
+    INSTANTIATE(params<unsigned int,        rocprim::bfloat16,                      true,   0, 12>)
+    INSTANTIATE(params<unsigned short,      rocprim::bfloat16,                      false,  3, 11>)
+    INSTANTIATE(params<unsigned long long,  char,                                   false,  8, 20>)
+    INSTANTIATE(params<unsigned short,      test_utils::custom_test_type<double>,   false,  8, 11>)
+
+    // some params used by PyTorch's Randperm()
+
+    INSTANTIATE(params<int64_t, int64_t,        false,  0, 34>)
+    INSTANTIATE(params<int64_t, float,          true,   0, 34>)
+    INSTANTIATE(params<int64_t, rocprim::half,  true,   0, 34>)
+    INSTANTIATE(params<int64_t, int64_t,        false,  0, 34, true>)
+
+    // large sizes to check correctness of more than 1 block per batch
+
+    INSTANTIATE(params<int,     char, false,    0, 32, true>)
+    INSTANTIATE(params<int,     char, true,     0, 32, true>)
+    INSTANTIATE(params<float,   char, false,    0, 32, true>)
+    INSTANTIATE(params<float,   char, true,     0, 32, true>)
+#endif
