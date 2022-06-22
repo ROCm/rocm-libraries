@@ -53,7 +53,7 @@ master_doc = 'index'
 
 # General information about the project.
 project = u'rocThrust'
-copyright = u'2008-2013, NVIDIA CORPORATION; Modifications Copyright 2019 Advanced Micro Devices'
+copyright = u'2008-2013, NVIDIA CORPORATION; Modifications Copyright 2022 Advanced Micro Devices'
 author = u'Advanced Micro Devices'
 
 # The version info for the project you're documenting, acts as replacement for
