@@ -87,33 +87,31 @@ namespace detail
         }
     }
 
-    template<
-        unsigned int BlockSize,
-        unsigned int ItemsPerThread,
-        class KeysInputIterator,
-        class KeysOutputIterator,
-        class ValuesInputIterator,
-        class ValuesOutputIterator,
-        class OffsetT,
-        class BinaryFunction
-    >
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    auto block_merge_process_tile(KeysInputIterator keys_input,
-                                  KeysOutputIterator keys_output,
-                                  ValuesInputIterator values_input,
-                                  ValuesOutputIterator values_output,
-                                  const OffsetT input_size,
-                                  const OffsetT sorted_block_size,
-                                  BinaryFunction compare_function,
-                                  const OffsetT* merge_partitions)
-        -> std::enable_if_t<
-            (!std::is_trivially_copyable<
-                 typename std::iterator_traits<ValuesInputIterator>::value_type>::value
-             || rocprim::is_floating_point<
-                 typename std::iterator_traits<ValuesInputIterator>::value_type>::value
-             || std::is_integral<
-                 typename std::iterator_traits<ValuesInputIterator>::value_type>::value),
-            void>
+    template<unsigned int BlockSize,
+             unsigned int ItemsPerThread,
+             class KeysInputIterator,
+             class KeysOutputIterator,
+             class ValuesInputIterator,
+             class ValuesOutputIterator,
+             class OffsetT,
+             class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
+        block_merge_process_tile(KeysInputIterator    keys_input,
+                                 KeysOutputIterator   keys_output,
+                                 ValuesInputIterator  values_input,
+                                 ValuesOutputIterator values_output,
+                                 const OffsetT        input_size,
+                                 const OffsetT        sorted_block_size,
+                                 BinaryFunction       compare_function,
+                                 const OffsetT*       merge_partitions)
+            -> std::enable_if_t<
+                (!std::is_trivially_copyable<
+                     typename std::iterator_traits<ValuesInputIterator>::value_type>::value
+                 || rocprim::is_floating_point<
+                     typename std::iterator_traits<ValuesInputIterator>::value_type>::value
+                 || std::is_integral<
+                     typename std::iterator_traits<ValuesInputIterator>::value_type>::value),
+                void>
     {
         using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
         using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
@@ -234,33 +232,31 @@ namespace detail
                             storage.store);
     }
 
-    template<
-        unsigned int BlockSize,
-        unsigned int ItemsPerThread,
-        class KeysInputIterator,
-        class KeysOutputIterator,
-        class ValuesInputIterator,
-        class ValuesOutputIterator,
-        class OffsetT,
-        class BinaryFunction
-    >
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    auto block_merge_process_tile(KeysInputIterator keys_input,
-                                 KeysOutputIterator keys_output,
-                                 ValuesInputIterator values_input,
+    template<unsigned int BlockSize,
+             unsigned int ItemsPerThread,
+             class KeysInputIterator,
+             class KeysOutputIterator,
+             class ValuesInputIterator,
+             class ValuesOutputIterator,
+             class OffsetT,
+             class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
+        block_merge_process_tile(KeysInputIterator    keys_input,
+                                 KeysOutputIterator   keys_output,
+                                 ValuesInputIterator  values_input,
                                  ValuesOutputIterator values_output,
-                                 const OffsetT input_size,
-                                 const OffsetT sorted_block_size,
-                                 BinaryFunction compare_function,
-                                 const OffsetT* merge_partitions)
-        -> std::enable_if_t<
-            (std::is_trivially_copyable<
-                 typename std::iterator_traits<ValuesInputIterator>::value_type>::value
-             && !rocprim::is_floating_point<
-                 typename std::iterator_traits<ValuesInputIterator>::value_type>::value
-             && !std::is_integral<
-                 typename std::iterator_traits<ValuesInputIterator>::value_type>::value),
-            void>
+                                 const OffsetT        input_size,
+                                 const OffsetT        sorted_block_size,
+                                 BinaryFunction       compare_function,
+                                 const OffsetT*       merge_partitions)
+            -> std::enable_if_t<
+                (std::is_trivially_copyable<
+                     typename std::iterator_traits<ValuesInputIterator>::value_type>::value
+                 && !rocprim::is_floating_point<
+                     typename std::iterator_traits<ValuesInputIterator>::value_type>::value
+                 && !std::is_integral<
+                     typename std::iterator_traits<ValuesInputIterator>::value_type>::value),
+                void>
     {
         using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
         using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
@@ -408,25 +404,23 @@ namespace detail
                            storage.store);
     }
 
-    template<
-        unsigned int BlockSize,
-        unsigned int ItemsPerThread,
-        class KeysInputIterator,
-        class KeysOutputIterator,
-        class ValuesInputIterator,
-        class ValuesOutputIterator,
-        class OffsetT,
-        class BinaryFunction
-    >
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    void block_merge_kernel_impl(KeysInputIterator keys_input,
-                                 KeysOutputIterator keys_output,
-                                 ValuesInputIterator values_input,
-                                 ValuesOutputIterator values_output,
-                                 const OffsetT input_size,
-                                 const OffsetT sorted_block_size,
-                                 BinaryFunction compare_function,
-                                 const OffsetT* merge_partitions)
+    template<unsigned int BlockSize,
+             unsigned int ItemsPerThread,
+             class KeysInputIterator,
+             class KeysOutputIterator,
+             class ValuesInputIterator,
+             class ValuesOutputIterator,
+             class OffsetT,
+             class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
+        block_merge_kernel_impl(KeysInputIterator    keys_input,
+                                KeysOutputIterator   keys_output,
+                                ValuesInputIterator  values_input,
+                                ValuesOutputIterator values_output,
+                                const OffsetT        input_size,
+                                const OffsetT        sorted_block_size,
+                                BinaryFunction       compare_function,
+                                const OffsetT*       merge_partitions)
     {
         block_merge_process_tile<BlockSize, ItemsPerThread>(keys_input,
                                                             keys_output,
