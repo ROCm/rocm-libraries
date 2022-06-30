@@ -16,7 +16,7 @@ if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY)
   rocm_wrap_header_file(
       "rocthrust_version.hpp"
       HEADER_LOCATION include/thrust
-      WRAPPER_LOCATIONS rocthrust/include/thrust
+      WRAPPER_LOCATIONS rocthrust/${CMAKE_INSTALL_INCLUDEDIR}/thrust
       OUTPUT_LOCATIONS rocthrust/wrapper/include/thrust
   )
 endif()
@@ -27,7 +27,7 @@ target_include_directories(rocthrust
   INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>
-    $<INSTALL_INTERFACE:include/>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/>
 )
 
 target_link_libraries(rocthrust
@@ -36,9 +36,6 @@ target_link_libraries(rocthrust
 )
 
 # Installation
-
-include(GNUInstallDirs)
-set(INCLUDE_INSTALL_DIR ${CMAKE_INSTALL_INCLUDEDIR})
 
 # We need to install headers manually as rocm_install_targets
 # does not support header-only libraries (INTERFACE targets)
@@ -55,7 +52,7 @@ rocm_install(
   DIRECTORY
     "./"
     "${PROJECT_BINARY_DIR}/thrust/include/"
-  DESTINATION include/thrust
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/thrust
   FILES_MATCHING
   PATTERN "*.h"
   PATTERN "*.cuh"
