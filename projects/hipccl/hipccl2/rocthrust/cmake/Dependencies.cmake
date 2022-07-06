@@ -12,12 +12,6 @@
 # For downloading, building, and installing required dependencies
 include(cmake/DownloadProject.cmake)
 
-# GIT
-find_package(Git REQUIRED)
-if (NOT Git_FOUND)
-  message(FATAL_ERROR "Please ensure Git is installed on the system")
-endif()
-
 # rocPRIM (https://github.com/ROCmSoftwarePlatform/rocPRIM)
 if(NOT DOWNLOAD_ROCPRIM)
   find_package(rocprim QUIET)
