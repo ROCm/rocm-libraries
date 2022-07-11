@@ -21,7 +21,12 @@
 #ifndef ROCPRIM_DEVICE_CONFIG_TYPES_HPP_
 #define ROCPRIM_DEVICE_CONFIG_TYPES_HPP_
 
+#include <algorithm>
+#include <atomic>
+#include <limits>
 #include <type_traits>
+
+#include <cassert>
 
 #include "../config.hpp"
 #include "../intrinsics/thread.hpp"
@@ -115,6 +120,210 @@ using default_or_custom_config =
         Default,
         Config
     >::type;
+
+enum class target_arch : unsigned int
+{
+    // This must be zero, to initialize the device -> architecture cache
+    invalid = 0,
+    gfx803  = 803,
+    gfx900  = 900,
+    gfx906  = 906,
+    gfx908  = 908,
+    gfx90a  = 910,
+    gfx1030 = 1030,
+    unknown = std::numeric_limits<unsigned int>::max(),
+};
+
+/**
+ * \brief Checks if the first `n` characters of `rhs` are equal to `lhs`
+ * 
+ * \param lhs the string to compare against
+ * \param rhs the string to compare with
+ * \param n length of the substring of `rhs` to chceck
+ * \return true if the `n` character long prefix of `rhs` is equal to `lhs`
+ */
+constexpr bool prefix_equals(const char* lhs, const char* rhs, std::size_t n)
+{
+    std::size_t i = 0;
+    for(; i < n; ++i)
+    {
+        if(*lhs != *rhs || *lhs == '\0')
+        {
+            break;
+        }
+        ++lhs;
+        ++rhs;
+    }
+
+    // All characters of the prefix of `rhs` was consumed and `lhs` "has run out"
+    return i == n && *lhs == '\0';
+}
+
+constexpr target_arch get_target_arch_from_name(const char* const arch_name, const std::size_t n)
+{
+    constexpr const char* target_names[]
+        = {"gfx803", "gfx900", "gfx906", "gfx908", "gfx90a", "gfx1030"};
+    constexpr target_arch target_architectures[] = {
+        target_arch::gfx803,
+        target_arch::gfx900,
+        target_arch::gfx906,
+        target_arch::gfx908,
+        target_arch::gfx90a,
+        target_arch::gfx1030,
+    };
+    static_assert(sizeof(target_names) / sizeof(target_names[0])
+                      == sizeof(target_architectures) / sizeof(target_architectures[0]),
+                  "target_names and target_architectures should have the same number of elements");
+    constexpr auto num_architectures = sizeof(target_names) / sizeof(target_names[0]);
+
+    for(unsigned int i = 0; i < num_architectures; ++i)
+    {
+        if(prefix_equals(target_names[i], arch_name, n))
+        {
+            return target_architectures[i];
+        }
+    }
+    return target_arch::unknown;
+}
+
+/**
+ * \brief Get the current architecture in device compilation.
+ * 
+ * This function will always return `unkown` when called from the host, host could should instead
+ * call host_target_arch to query the current device from the HIP API.
+ * 
+ * \return target_arch the architecture currently being compiled for on the device.
+ */
+constexpr target_arch device_target_arch()
+{
+#ifdef WIN32
+    return target_arch::unknown;
+#elif defined(__amdgcn_processor__)
+    // The terminating zero is not counted in the length of the string
+    return get_target_arch_from_name(__amdgcn_processor__,
+                                     sizeof(__amdgcn_processor__) - sizeof('\0'));
+#else
+    return target_arch::unknown;
+#endif
+}
+
+template<class Config>
+auto dispatch_target_arch(const target_arch target_arch)
+{
+    switch(target_arch)
+    {
+        case target_arch::unknown:
+            return Config::template architecture_config<target_arch::unknown>::params;
+        case target_arch::gfx803:
+            return Config::template architecture_config<target_arch::gfx803>::params;
+        case target_arch::gfx900:
+            return Config::template architecture_config<target_arch::gfx900>::params;
+        case target_arch::gfx906:
+            return Config::template architecture_config<target_arch::gfx906>::params;
+        case target_arch::gfx908:
+            return Config::template architecture_config<target_arch::gfx908>::params;
+        case target_arch::gfx90a:
+            return Config::template architecture_config<target_arch::gfx90a>::params;
+        case target_arch::gfx1030:
+            return Config::template architecture_config<target_arch::gfx1030>::params;
+        case target_arch::invalid:
+            assert(false && "Invalid target architecture selected at runtime.");
+    }
+    return Config::template architecture_config<target_arch::unknown>::params;
+}
+
+template<typename Config>
+constexpr auto device_params()
+{
+    return Config::template architecture_config<device_target_arch()>::params;
+}
+
+inline target_arch parse_gcn_arch(const char* arch_name)
+{
+    static constexpr auto length = sizeof(hipDeviceProp_t::gcnArchName);
+
+    const char* arch_end = std::find_if(arch_name,
+                                        arch_name + length,
+                                        [](const char& val) { return val == ':' || val == '\0'; });
+
+    return get_target_arch_from_name(arch_name, arch_end - arch_name);
+}
+
+inline hipError_t get_device_arch(int device_id, target_arch& arch)
+{
+    static constexpr unsigned int   device_arch_cache_size             = 512;
+    static std::atomic<target_arch> arch_cache[device_arch_cache_size] = {};
+
+    assert(device_id >= 0);
+    if(static_cast<unsigned int>(device_id) >= device_arch_cache_size)
+    {
+        // Device architecture cache is too small.
+        return hipErrorUnknown;
+    }
+
+    arch = arch_cache[device_id].load(std::memory_order_relaxed);
+    if(arch != target_arch::invalid)
+    {
+        return hipSuccess;
+    }
+
+    hipDeviceProp_t  device_props;
+    const hipError_t result = hipGetDeviceProperties(&device_props, device_id);
+    if(result != hipSuccess)
+    {
+        return result;
+    }
+
+    arch = parse_gcn_arch(device_props.gcnArchName);
+    arch_cache[device_id].exchange(arch, std::memory_order_relaxed);
+
+    return hipSuccess;
+}
+
+#ifndef WIN32
+inline hipError_t get_device_from_stream(const hipStream_t stream, int& device_id)
+{
+    static constexpr hipStream_t default_stream = 0;
+    if(stream == default_stream || stream == hipStreamPerThread)
+    {
+        const hipError_t result = hipGetDevice(&device_id);
+        if(result != hipSuccess)
+        {
+            return result;
+        }
+        return hipSuccess;
+    }
+
+#ifdef __HIP_PLATFORM_AMD__
+    device_id = hipGetStreamDeviceId(stream);
+    if(device_id < 0)
+    {
+        return hipErrorInvalidHandle;
+    }
+#else
+    #error("Getting the current device from a stream is not implemented for this platform");
+#endif
+    return hipSuccess;
+}
+#endif
+
+inline hipError_t host_target_arch(const hipStream_t stream, target_arch& arch)
+{
+#ifdef WIN32
+    (void)stream;
+    arch = target_arch::unknown;
+    return hipSuccess;
+#else
+    int              device_id;
+    const hipError_t result = get_device_from_stream(stream, device_id);
+    if(result != hipSuccess)
+    {
+        return result;
+    }
+
+    return get_device_arch(device_id, arch);
+#endif
+}
 
 } // end namespace detail
 

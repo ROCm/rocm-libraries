@@ -32,8 +32,7 @@ namespace test_utils
 {
 
 template<class T>
-constexpr auto is_floating_nan_host(const T& a)
-    -> typename std::enable_if<std::is_floating_point<T>::value, bool>::type
+constexpr bool is_floating_nan_host(const T& a)
 {
     return (a != a);
 }
@@ -56,8 +55,13 @@ struct key_comparator<Key, Descending, StartBit, EndBit, false, typename std::en
     }
 };
 
-template <class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
-struct key_comparator<Key, Descending, StartBit, EndBit, false, typename std::enable_if<std::is_floating_point<Key>::value>::type>
+template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
+struct key_comparator<Key,
+                      Descending,
+                      StartBit,
+                      EndBit,
+                      false,
+                      typename std::enable_if<!std::is_integral<Key>::value>::type>
 {
     // Floating-point types do not support StartBit and EndBit.
     bool operator()(const Key&, const Key&)
@@ -80,16 +84,22 @@ struct key_comparator<Key, Descending, StartBit, EndBit, true, typename std::ena
 {
     bool operator()(const Key& lhs, const Key& rhs)
     {
-        if(is_floating_nan_host(lhs) && is_floating_nan_host(rhs) && std::signbit(lhs) == std::signbit(rhs)){
+        using namespace std;
+        if(is_floating_nan_host(lhs) && is_floating_nan_host(rhs) && signbit(lhs) == signbit(rhs))
+        {
             return false;
         }
         if(Descending){
-            if(is_floating_nan_host(lhs)) return !std::signbit(lhs);
-            if(is_floating_nan_host(rhs)) return std::signbit(rhs);
+            if(is_floating_nan_host(lhs))
+                return !signbit(lhs);
+            if(is_floating_nan_host(rhs))
+                return signbit(rhs);
             return (rhs < lhs);
         }else{
-            if(is_floating_nan_host(lhs)) return std::signbit(lhs);
-            if(is_floating_nan_host(rhs)) return !std::signbit(rhs);
+            if(is_floating_nan_host(lhs))
+                return signbit(lhs);
+            if(is_floating_nan_host(rhs))
+                return !signbit(rhs);
             return (lhs < rhs);
         }
     }

@@ -26,6 +26,7 @@
 #include <rocprim/device/device_reduce_by_key.hpp>
 
 // required test headers
+#include "test_utils_custom_test_types.hpp"
 #include "test_utils_types.hpp"
 
 template<
@@ -80,6 +81,7 @@ struct custom_key_compare_op1
 using custom_int2 = test_utils::custom_test_type<int>;
 using custom_double2 = test_utils::custom_test_type<double>;
 
+// clang-format off
 typedef ::testing::Types<
     params<int, int, rocprim::plus<int>, 1, 1, int, rocprim::equal_to<int>, true>,
     params<double, int, rocprim::plus<int>, 3, 5, long long, custom_key_compare_op1<double>>,
@@ -100,8 +102,10 @@ typedef ::testing::Types<
     params<unsigned int, int, rocprim::plus<int>, 2048, 2048>,
     params<long long, short, rocprim::plus<long long>, 1000, 10000, long long>,
     params<unsigned int, double, rocprim::minimum<double>, 1000, 50000>,
-    params<unsigned long long, unsigned long long, rocprim::plus<unsigned long long>, 100000, 100000>
+    params<unsigned long long, unsigned long long, rocprim::plus<unsigned long long>, 100000, 100000>,
+    params<test_utils::custom_test_array_type<double, 8>, unsigned long, rocprim::plus<>, 69, 420>
 > Params;
+// clang-format on
 
 TYPED_TEST_SUITE(RocprimDeviceReduceByKey, Params);
 

@@ -36,7 +36,7 @@ BEGIN_ROCPRIM_NAMESPACE
 /// \brief Configuration of device-level run-length encoding operation.
 ///
 /// \tparam ReduceByKeyConfig - configuration of device-level reduce-by-key operation.
-/// Must be \p reduce_by_key_config or \p default_config.
+/// Must be \p reduce_by_key_config_v2 or \p default_config.
 /// \tparam SelectConfig - configuration of device-level select operation.
 /// Must be \p select_config or \p default_config.
 template<

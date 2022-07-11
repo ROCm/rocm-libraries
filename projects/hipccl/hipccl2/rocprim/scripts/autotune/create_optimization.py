@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 # Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -42,7 +44,7 @@ def translate_settings_to_cpp_metaprogramming(config_dict):
     """
     
     setting_list = []
-    begin = "std::enable_if<("
+    begin = "std::enable_if_t<("
     end = ")>"
     if "floating_point" in config_dict.keys():
         negation = "" if config_dict['floating_point'] else "!"

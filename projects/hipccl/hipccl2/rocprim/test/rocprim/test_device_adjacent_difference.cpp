@@ -367,7 +367,7 @@ using RocprimDeviceAdjacentDifferenceLargeTestsParams
     = ::testing::Types<DeviceAdjacentDifferenceLargeParams<true, false>,
                        DeviceAdjacentDifferenceLargeParams<true, true>,
                        DeviceAdjacentDifferenceLargeParams<false, false>,
-                       DeviceAdjacentDifferenceLargeParams<true, true>>;
+                       DeviceAdjacentDifferenceLargeParams<false, true>>;
 
 TYPED_TEST_SUITE(RocprimDeviceAdjacentDifferenceLargeTests,
                  RocprimDeviceAdjacentDifferenceLargeTestsParams);
@@ -490,6 +490,7 @@ TYPED_TEST(RocprimDeviceAdjacentDifferenceLargeTests, LargeIndices)
             ASSERT_EQ(flags[0], 1);
             ASSERT_EQ(flags[1], 1);
 
+            hipFree(d_temp_storage);
             hipFree(d_flags);
         }
     }

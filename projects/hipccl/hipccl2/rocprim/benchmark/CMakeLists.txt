@@ -24,10 +24,40 @@ option(BENCHMARK_CONFIG_TUNING "Benchmark device-level functions using various c
 include(../cmake/ConfigAutotune.cmake)
 include(ConfigAutotuneSettings.cmake)
 
+if(BENCHMARK_CONFIG_TUNING)
+  add_custom_target("benchmark_config_tuning")
+endif()
+
 function(add_rocprim_benchmark BENCHMARK_SOURCE)
   get_filename_component(BENCHMARK_TARGET ${BENCHMARK_SOURCE} NAME_WE)
 
-  add_executable(${BENCHMARK_TARGET} ${BENCHMARK_SOURCE})
+  if(BENCHMARK_CONFIG_TUNING)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${BENCHMARK_TARGET}.parallel.cpp.in")
+      message(STATUS "found ${BENCHMARK_TARGET}.parallel.cpp.in file, compiling in parallel.")
+      read_config_autotune_settings(${BENCHMARK_TARGET} list_across_names list_across output_pattern_suffix)
+      #make sure that variables are not empty, i.e. there actually is an entry for that benchmark in benchmark/ConfigAutotuneSettings.cmake
+      if(list_across_names)
+        add_executable(${BENCHMARK_TARGET} ${BENCHMARK_SOURCE})
+        target_compile_definitions(${BENCHMARK_TARGET} PRIVATE BENCHMARK_CONFIG_TUNING)
+        add_matrix(TARGET ${BENCHMARK_TARGET}
+                SHARDS 1
+                CURRENT_SHARD 0
+                INPUT "${BENCHMARK_TARGET}.parallel.cpp.in"
+                OUTPUT_PATTERN "${BENCHMARK_TARGET}_${output_pattern_suffix}"
+                NAMES ${list_across_names}
+                LISTS ${list_across})
+        add_dependencies(benchmark_config_tuning ${BENCHMARK_TARGET})
+      else()
+        message(WARNING "No config-tuning entry in benchmark/ConfigAutotuneSettings.cmake for ${BENCHMARK_TARGET}!")
+        return()
+      endif()
+    else()
+      #do nothing if BENCHMARK_CONFIG_TUNING is ON but no ${BENCHMARK_TARGET}.parallel.cpp.in exists
+      return()
+    endif()
+  else()
+    add_executable(${BENCHMARK_TARGET} ${BENCHMARK_SOURCE})
+  endif()
 
   target_link_libraries(${BENCHMARK_TARGET}
     PRIVATE
@@ -64,21 +94,7 @@ function(add_rocprim_benchmark BENCHMARK_SOURCE)
     PROPERTIES
       RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/benchmark"
   )
-  if(BENCHMARK_CONFIG_TUNING)
-    target_compile_definitions(${BENCHMARK_TARGET} PRIVATE BENCHMARK_CONFIG_TUNING)
 
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${BENCHMARK_TARGET}.parallel.cpp.in")
-      message(STATUS "found ${BENCHMARK_TARGET}.parallel.cpp.in file, compiling in parallel.")
-      read_config_autotune_settings(${BENCHMARK_TARGET} list_across_names list_across output_pattern_suffix)
-      add_matrix(TARGET ${BENCHMARK_TARGET}
-              SHARDS 1
-              CURRENT_SHARD 0
-              INPUT "${BENCHMARK_TARGET}.parallel.cpp.in"
-              OUTPUT_PATTERN "${BENCHMARK_TARGET}_${output_pattern_suffix}"
-              NAMES ${list_across_names}
-              LISTS ${list_across})
-    endif()
-  endif()
   rocm_install(TARGETS ${BENCHMARK_TARGET} COMPONENT benchmarks)
   if (WIN32 AND NOT DEFINED DLLS_COPIED)
     set(DLLS_COPIED "YES")
@@ -93,7 +109,7 @@ function(add_rocprim_benchmark BENCHMARK_SOURCE)
     foreach( file_i ${third_party_dlls})
       add_custom_command( TARGET ${BENCHMARK_TARGET} POST_BUILD COMMAND ${CMAKE_COMMAND} ARGS -E copy_if_different ${file_i} ${PROJECT_BINARY_DIR}/benchmark )
     endforeach( file_i )
-  endif()  
+  endif()
 endfunction()
 
 # ****************************************************************************
@@ -108,6 +124,7 @@ add_rocprim_benchmark(benchmark_block_radix_sort.cpp)
 add_rocprim_benchmark(benchmark_block_reduce.cpp)
 add_rocprim_benchmark(benchmark_block_scan.cpp)
 add_rocprim_benchmark(benchmark_block_sort.cpp)
+add_rocprim_benchmark(benchmark_config_dispatch.cpp)
 add_rocprim_benchmark(benchmark_device_adjacent_difference.cpp)
 add_rocprim_benchmark(benchmark_device_binary_search.cpp)
 add_rocprim_benchmark(benchmark_device_histogram.cpp)

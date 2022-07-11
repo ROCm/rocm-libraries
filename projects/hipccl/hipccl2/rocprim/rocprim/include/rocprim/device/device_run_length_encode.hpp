@@ -378,18 +378,13 @@ hipError_t run_length_encode_non_trivial_runs(void * temporary_storage,
 
     // Read count of all runs (including trivial runs)
     count_type all_runs_count;
-    // hipMemcpyWithStream is only supported on rocm 3.1 and above
-    #if HIP_VERSION_MAJOR >= 3
-    #if HIP_VERSION_MINOR >= 1 || HIP_VERSION_MAJOR >= 4
-    error = hipMemcpyWithStream(&all_runs_count, all_runs_count_tmp, sizeof(count_type), hipMemcpyDeviceToHost, stream);
-    if(error != hipSuccess) return error;
-    #else
-    error = hipMemcpyAsync(&all_runs_count, all_runs_count_tmp, sizeof(count_type), hipMemcpyDeviceToHost, stream);
-    if(error != hipSuccess) return error;
-    error = hipStreamSynchronize(stream);
-    #endif
-    #endif
-
+    error = detail::memcpy_and_sync(&all_runs_count,
+                                    all_runs_count_tmp,
+                                    sizeof(count_type),
+                                    hipMemcpyDeviceToHost,
+                                    stream);
+    if(error != hipSuccess)
+        return error;
 
     // Select non-trivial runs
     if(debug_synchronous) start = std::chrono::high_resolution_clock::now();

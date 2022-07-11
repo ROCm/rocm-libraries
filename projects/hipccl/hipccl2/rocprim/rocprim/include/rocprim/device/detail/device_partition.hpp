@@ -43,58 +43,6 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<class T, class LookbackScanState>
-class offset_lookback_scan_prefix_op : public lookback_scan_prefix_op<T, ::rocprim::plus<T>, LookbackScanState>
-{
-    using base_type = lookback_scan_prefix_op<T, ::rocprim::plus<T>, LookbackScanState>;
-    using binary_op_type = ::rocprim::plus<T>;
-public:
-
-    struct storage_type
-    {
-        T block_reduction;
-        T exclusive_prefix;
-    };
-
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    offset_lookback_scan_prefix_op(unsigned int block_id,
-                                   LookbackScanState &state,
-                                   storage_type& storage)
-        : base_type(block_id, binary_op_type(), state), storage_(storage)
-    {
-    }
-
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    ~offset_lookback_scan_prefix_op() = default;
-
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    T operator()(T reduction)
-    {
-        auto prefix = base_type::operator()(reduction);
-        if(::rocprim::lane_id() == 0)
-        {
-            storage_.block_reduction = reduction;
-            storage_.exclusive_prefix = prefix;
-        }
-        return prefix;
-    }
-
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    T get_reduction() const
-    {
-        return storage_.block_reduction;
-    }
-
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    T get_exclusive_prefix() const
-    {
-        return storage_.exclusive_prefix;
-    }
-
-private:
-    storage_type& storage_;
-};
-
 enum class select_method
 {
     flag = 0,
@@ -835,7 +783,7 @@ void partition_kernel_impl(KeyIterator keys_input,
         ::rocprim::syncthreads(); // sync threads to reuse shared memory
 
         selected_in_block = prefix_op.get_reduction();
-        selected_prefix = prefix_op.get_exclusive_prefix();
+        selected_prefix   = prefix_op.get_prefix();
     }
 
     // Scatter selected and rejected values

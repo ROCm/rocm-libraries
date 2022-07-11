@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -32,31 +32,12 @@
 #include "../../types.hpp"
 
 #include "../../block/block_store.hpp"
+#include "../../detail/merge_path.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
 namespace detail
 {
-
-struct range_t
-{
-    unsigned int begin1;
-    unsigned int end1;
-    unsigned int begin2;
-    unsigned int end2;
-
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    constexpr unsigned int count1() const
-    {
-        return end1 - begin1;
-    }
-
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    constexpr unsigned int count2() const
-    {
-        return end2 - begin2;
-    }
-};
 
 ROCPRIM_DEVICE ROCPRIM_INLINE
 range_t compute_range(const unsigned int id,
@@ -70,39 +51,6 @@ range_t compute_range(const unsigned int id,
     unsigned int diag2 = min(size1 + size2, diag1 + spacing);
 
     return range_t{p1, p2, diag1 - p1, diag2 - p2};
-}
-
-template <class KeysInputIterator, class OffsetT, class BinaryFunction>
-ROCPRIM_DEVICE ROCPRIM_INLINE
-OffsetT merge_path(KeysInputIterator keys_input1,
-                   KeysInputIterator keys_input2,
-                   const OffsetT input1_size,
-                   const OffsetT input2_size,
-                   const OffsetT diag,
-                   BinaryFunction compare_function)
-{
-    using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
-
-    OffsetT begin = diag < input2_size ? 0u : diag - input2_size;
-    OffsetT end = min(diag, input1_size);
-
-    while(begin < end)
-    {
-        OffsetT a = (begin + end) / 2;
-        OffsetT b = diag - 1 - a;
-        key_type input_a = keys_input1[a];
-        key_type input_b = keys_input2[b];
-        if(!compare_function(input_b, input_a))
-        {
-            begin = a + 1;
-        }
-        else
-        {
-            end = a;
-        }
-    }
-
-    return begin;
 }
 
 template<
@@ -171,42 +119,6 @@ void load(unsigned int flat_id,
         }
     }
 
-    ::rocprim::syncthreads();
-}
-
-template <class KeyType, unsigned int ItemsPerThread, class BinaryFunction>
-ROCPRIM_DEVICE ROCPRIM_INLINE
-void serial_merge(KeyType * keys_shared,
-                  KeyType (&inputs)[ItemsPerThread],
-                  unsigned int (&index)[ItemsPerThread],
-                  range_t range,
-                  BinaryFunction compare_function)
-{
-    KeyType a = keys_shared[range.begin1];
-    KeyType b = keys_shared[range.begin2];
-
-    ROCPRIM_UNROLL
-    for(unsigned int i = 0; i < ItemsPerThread; ++i)
-    {
-        bool compare = (range.begin2 >= range.end2) ||
-                       ((range.begin1 < range.end1) && !compare_function(b, a));
-        unsigned int x = compare ? range.begin1 : range.begin2;
-
-        inputs[i] = compare ? a : b;
-        index[i] = x;
-
-        KeyType c = keys_shared[++x];
-        if(compare)
-        {
-            a = c;
-            range.begin1 = x;
-        }
-        else
-        {
-            b = c;
-            range.begin2 = x;
-        }
-    }
     ::rocprim::syncthreads();
 }
 

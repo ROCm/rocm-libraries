@@ -341,7 +341,6 @@ void block_sort_kernel_impl(KeysInputIterator keys_input,
     const bool is_incomplete_block = flat_block_id == (input_size / items_per_block);
 
     key_type keys[ItemsPerThread];
-    value_type values[ItemsPerThread];
 
     using block_load_keys_impl = block_load_keys_impl<BlockSize, ItemsPerThread, key_type>;
     using block_sort_impl = block_sort_impl<BlockSize, ItemsPerThread, key_type>;
@@ -370,8 +369,9 @@ void block_sort_kernel_impl(KeysInputIterator keys_input,
     auto stable_compare_function = [compare_function](const stable_key_type& a, const stable_key_type& b) mutable -> bool
     {
         const bool ab = compare_function(rocprim::get<0>(a), rocprim::get<0>(b));
-        const bool ba = compare_function(rocprim::get<0>(b), rocprim::get<0>(a));
-        return ab || (!ba && (rocprim::get<1>(a) < rocprim::get<1>(b)));
+        return ab
+               || (!compare_function(rocprim::get<0>(b), rocprim::get<0>(a))
+                   && (rocprim::get<1>(a) < rocprim::get<1>(b)));
     };
 
     stable_key_type stable_keys[ItemsPerThread];
@@ -399,6 +399,7 @@ void block_sort_kernel_impl(KeysInputIterator keys_input,
         ranks[item] = rocprim::get<1>(stable_keys[item]);
     }
 
+    value_type values[ItemsPerThread];
     // Load the values with the already sorted indices
     block_load_values_impl().load(
         flat_id,

@@ -353,6 +353,10 @@ void static_for_each(Args&&... args)
 struct config_autotune_interface
 {
     virtual std::string name() const                               = 0;
+    virtual std::string sort_key() const
+    {
+        return name();
+    };
     virtual ~config_autotune_interface()                           = default;
     virtual void run(benchmark::State&, size_t, hipStream_t) const = 0;
 };
@@ -388,7 +392,7 @@ struct config_autotune_register
         // sorting to get a consistent order because order of initialization of static variables is undefined by the C++ standard.
         std::sort(configs.begin(),
                   configs.end(),
-                  [](const auto& l, const auto& r) { return l->name() < r->name(); });
+                  [](const auto& l, const auto& r) { return l->sort_key() < r->sort_key(); });
         size_t configs_per_instance
             = (configs.size() + parallel_instance_count - 1) / parallel_instance_count;
         size_t start = std::min(parallel_instance_index * configs_per_instance, configs.size());
@@ -438,8 +442,21 @@ template <>
 inline const char* Traits<int8_t>::name() { return "int8_t"; }
 template <>
 inline const char* Traits<uint8_t>::name() { return "uint8_t"; }
-template <>
-inline const char* Traits<rocprim::half>::name() { return "rocprim::half"; }
+template<>
+inline const char* Traits<uint16_t>::name()
+{
+    return "uint16_t";
+}
+template<>
+inline const char* Traits<uint32_t>::name()
+{
+    return "uint32_t";
+}
+template<>
+inline const char* Traits<rocprim::half>::name()
+{
+    return "rocprim::half";
+}
 template <>
 inline const char* Traits<long long>::name() { return "long long"; }
 template <>

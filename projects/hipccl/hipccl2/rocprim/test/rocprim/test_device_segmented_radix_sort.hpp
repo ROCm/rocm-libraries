@@ -29,6 +29,7 @@
 #include <rocprim/device/device_segmented_radix_sort.hpp>
 
 // required test headers
+#include "test_utils_custom_float_type.hpp"
 #include "test_utils_sort_comparator.hpp"
 #include "test_utils_types.hpp"
 

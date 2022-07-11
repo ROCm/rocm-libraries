@@ -59,6 +59,7 @@
 #elif ROCPRIM_TEST_TYPE_SLICE == 1
     INSTANTIATE(params<rocprim::bfloat16,   rocprim::bfloat16,                  false, 0, 16, 0, 1000>)
     INSTANTIATE(params<float,               int,                                false, 0, 32, 0, 1000>)
+    INSTANTIATE(params<test_utils::custom_float_type, int,                      true, 0, 16, 0, 8192>)
 
     // start_bit and end_bit
 
