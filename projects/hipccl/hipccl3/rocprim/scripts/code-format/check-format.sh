@@ -48,8 +48,8 @@ grep '^no modified files to format$\|^clang-format did not modify any files$' \
 # Dump formatting diff and signal failure
 printf \
 "\033[31m==== FORMATTING VIOLATIONS DETECTED ====\033[0m
-run '\033[33m%s --style=file %s %s'\033[0m to apply these formating changes\n\n" \
-"$GIT_CLANG_FORMAT" "$@" "$SOURCE_COMMIT"
+run '\033[33m%s --style=file %s %s\033[0m' to apply these formating changes\n\n" \
+"$GIT_CLANG_FORMAT" "$*" "$SOURCE_COMMIT"
 
 cat "$scratch"
 exit 1

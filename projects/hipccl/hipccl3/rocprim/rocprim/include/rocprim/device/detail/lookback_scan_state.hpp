@@ -23,15 +23,16 @@
 
 #include <type_traits>
 
+#include "../../functional.hpp"
 #include "../../intrinsics.hpp"
-#include "../../types.hpp"
 #include "../../type_traits.hpp"
+#include "../../types.hpp"
 
 #include "../../warp/detail/warp_reduce_crosslane.hpp"
 #include "../../warp/detail/warp_scan_crosslane.hpp"
 
-#include "../../detail/various.hpp"
 #include "../../detail/binary_op_wrappers.hpp"
+#include "../../detail/various.hpp"
 
 extern "C"
 {
@@ -225,7 +226,7 @@ struct lookback_scan_state<T, UseSleep, false>
 {
 
 public:
-    using flag_type = char;
+    using flag_type  = unsigned int;
     using value_type = T;
 
     // temp_storage must point to allocation of get_storage_size(number_of_blocks) bytes
@@ -276,9 +277,9 @@ public:
     {
         constexpr unsigned int padding = ::rocprim::device_warp_size();
 
-        store_volatile(&prefixes_partial_values[padding + block_id], value);
+        prefixes_partial_values[padding + block_id] = value;
         ::rocprim::detail::memory_fence_device();
-        store_volatile<flag_type>(&prefixes_flags[padding + block_id], PREFIX_PARTIAL);
+        ::rocprim::detail::atomic_exch(&prefixes_flags[padding + block_id], PREFIX_PARTIAL);
     }
 
     ROCPRIM_DEVICE ROCPRIM_INLINE
@@ -286,9 +287,9 @@ public:
     {
         constexpr unsigned int padding = ::rocprim::device_warp_size();
 
-        store_volatile(&prefixes_complete_values[padding + block_id], value);
+        prefixes_complete_values[padding + block_id] = value;
         ::rocprim::detail::memory_fence_device();
-        store_volatile<flag_type>(&prefixes_flags[padding + block_id], PREFIX_COMPLETE);
+        ::rocprim::detail::atomic_exch(&prefixes_flags[padding + block_id], PREFIX_COMPLETE);
     }
 
     // block_id must be > 0
@@ -300,7 +301,8 @@ public:
         const unsigned int SLEEP_MAX = 32;
         unsigned int times_through = 1;
 
-        flag = load_volatile(&prefixes_flags[padding + block_id]);
+        // atomic_add(..., 0) is used to load values atomically
+        flag = ::rocprim::detail::atomic_add(&prefixes_flags[padding + block_id], 0);
         ::rocprim::detail::memory_fence_device();
         while(flag == PREFIX_EMPTY)
         {
@@ -316,14 +318,14 @@ public:
                     times_through++;
             }
 
-            flag = load_volatile(&prefixes_flags[padding + block_id]);
+            flag = ::rocprim::detail::atomic_add(&prefixes_flags[padding + block_id], 0);
             ::rocprim::detail::memory_fence_device();
         }
 
         if(flag == PREFIX_PARTIAL)
-            value = load_volatile(&prefixes_partial_values[padding + block_id]);
+            value = prefixes_partial_values[padding + block_id];
         else
-            value = load_volatile(&prefixes_complete_values[padding + block_id]);
+            value = prefixes_complete_values[padding + block_id];
     }
 
 private:
@@ -454,6 +456,93 @@ inline hipError_t is_sleep_scan_state_used(bool& use_sleep)
     use_sleep = prop.gcnArch == 908 && asicRevision < 2;
     return hipSuccess;
 }
+
+template<typename T>
+class offset_lookback_scan_factory
+{
+private:
+    struct storage_type_
+    {
+        T block_reduction;
+        T prefix;
+    };
+
+public:
+    using storage_type = detail::raw_storage<storage_type_>;
+
+    template<typename PrefixOp>
+    static ROCPRIM_DEVICE auto create(PrefixOp& prefix_op, storage_type& storage)
+    {
+        return [&](T reduction) mutable
+        {
+            auto prefix = prefix_op(reduction);
+            if(::rocprim::lane_id() == 0)
+            {
+                storage.get().block_reduction = std::move(reduction);
+                storage.get().prefix          = prefix;
+            }
+            return prefix;
+        };
+    }
+
+    static ROCPRIM_DEVICE T get_reduction(const storage_type& storage)
+    {
+        return storage.get().block_reduction;
+    }
+
+    static ROCPRIM_DEVICE T get_prefix(const storage_type& storage)
+    {
+        return storage.get().prefix;
+    }
+};
+
+template<class T, class LookbackScanState, class BinaryOp = ::rocprim::plus<T>>
+class offset_lookback_scan_prefix_op
+    : public lookback_scan_prefix_op<T, BinaryOp, LookbackScanState>
+{
+private:
+    using base_type = lookback_scan_prefix_op<T, BinaryOp, LookbackScanState>;
+    using factory   = detail::offset_lookback_scan_factory<T>;
+
+    ROCPRIM_DEVICE ROCPRIM_INLINE base_type& base()
+    {
+        return *this;
+    }
+
+public:
+    using storage_type = typename factory::storage_type;
+
+    ROCPRIM_DEVICE ROCPRIM_INLINE offset_lookback_scan_prefix_op(unsigned int       block_id,
+                                                                 LookbackScanState& state,
+                                                                 storage_type&      storage,
+                                                                 BinaryOp binary_op = BinaryOp())
+        : base_type(block_id, BinaryOp(std::move(binary_op)), state), storage(storage)
+    {}
+
+    ROCPRIM_DEVICE ROCPRIM_INLINE T operator()(T reduction)
+    {
+        return factory::create(base(), storage)(reduction);
+    }
+
+    ROCPRIM_DEVICE ROCPRIM_INLINE T get_reduction() const
+    {
+        return factory::get_reduction(storage);
+    }
+
+    ROCPRIM_DEVICE ROCPRIM_INLINE T get_prefix() const
+    {
+        return factory::get_prefix(storage);
+    }
+
+    // rocThrust uses this implementation detail of rocPRIM, required for backwards compatibility
+    ROCPRIM_DEVICE ROCPRIM_INLINE T get_exclusive_prefix() const
+    {
+        return get_prefix();
+    }
+
+private:
+    storage_type& storage;
+};
 
 } // end of detail namespace
 

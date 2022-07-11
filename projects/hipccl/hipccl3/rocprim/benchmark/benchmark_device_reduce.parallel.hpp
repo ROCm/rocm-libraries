@@ -38,18 +38,22 @@
 
 #include "benchmark_utils.hpp"
 
-#define HIP_CHECK(condition)         \
-  {                                  \
-    hipError_t error = condition;    \
-    if(error != hipSuccess){         \
-        std::cout << "HIP error: " << error << " line: " << __LINE__ << std::endl; \
-        exit(error); \
-    } \
-  }
+template<typename Config>
+std::string config_name()
+{
+    return "reduce_config<" + pad_string(std::to_string(Config::block_size), 3) + ", "
+           + pad_string(std::to_string(Config::items_per_thread), 2) + ">";
+}
+
+template<>
+inline std::string config_name<rocprim::default_config>()
+{
+    return "default_config";
+}
 
 template<typename T              = int,
          typename BinaryFunction = rocprim::plus<T>,
-         typename Config         = rocprim::detail::default_reduce_config<ROCPRIM_TARGET_ARCH, T>>
+         typename Config         = rocprim::default_config>
 struct device_reduce_benchmark : public config_autotune_interface
 {
     static std::string get_name_pattern()
@@ -61,9 +65,8 @@ struct device_reduce_benchmark : public config_autotune_interface
 
     std::string name() const override
     {
-        return std::string("device_reduce<" + std::string(Traits<T>::name()) + ", reduce_config<"
-                           + pad_string(std::to_string(Config::block_size), 3) + ", "
-                           + pad_string(std::to_string(Config::items_per_thread), 2) + ">>");
+        return std::string("device_reduce_benchmark<" + std::string(Traits<T>::name()) + ", "
+                           + config_name<Config>() + ">");
     }
 
     static constexpr unsigned int batch_size = 10;

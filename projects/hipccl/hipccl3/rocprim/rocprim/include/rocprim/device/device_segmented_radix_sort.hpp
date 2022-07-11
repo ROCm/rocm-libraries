@@ -448,16 +448,11 @@ hipError_t segmented_radix_sort_impl(void * temporary_storage,
             return result;
         }
         segment_index_type segment_counts[segment_count_output_size]{};
-        result = hipMemcpyAsync(&segment_counts,
-                                segment_count_output,
-                                segment_count_output_bytes,
-                                hipMemcpyDeviceToHost,
-                                stream);
-        if(hipSuccess != result)
-        {
-            return result;
-        }
-        result = hipStreamSynchronize(stream);
+        result = detail::memcpy_and_sync(&segment_counts,
+                                         segment_count_output,
+                                         segment_count_output_bytes,
+                                         hipMemcpyDeviceToHost,
+                                         stream);
         if(hipSuccess != result)
         {
             return result;

@@ -39,15 +39,6 @@
 
 #include "benchmark_utils.hpp"
 
-#define HIP_CHECK(condition)         \
-  {                                  \
-    hipError_t error = condition;    \
-    if(error != hipSuccess){         \
-        std::cout << "HIP error: " << error << " line: " << __LINE__ << std::endl; \
-        exit(error); \
-    } \
-  }
-
 #ifndef DEFAULT_N
 const size_t DEFAULT_N = 1024 * 1024 * 32;
 #endif
@@ -60,7 +51,7 @@ __launch_bounds__(BlockSize)
 void warp_sort_kernel(K* input_keys, K* output_keys)
 {
     const unsigned int flat_tid = threadIdx.x;
-    const unsigned int items_per_block = BlockSize * ItemsPerThread; 
+    const unsigned int items_per_block = BlockSize * ItemsPerThread;
     const unsigned int block_offset = blockIdx.x * items_per_block;
 
     K keys[ItemsPerThread];
@@ -78,7 +69,7 @@ __launch_bounds__(BlockSize)
 void warp_sort_by_key_kernel(K* input_keys, V* input_values, K* output_keys, V* output_values)
 {
     const unsigned int flat_tid = threadIdx.x;
-    const unsigned int items_per_block = BlockSize * ItemsPerThread; 
+    const unsigned int items_per_block = BlockSize * ItemsPerThread;
     const unsigned int block_offset = blockIdx.x * items_per_block;
 
     K keys[ItemsPerThread];

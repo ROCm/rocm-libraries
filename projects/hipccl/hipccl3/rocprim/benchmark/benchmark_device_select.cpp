@@ -40,15 +40,6 @@
 
 #include <rocprim/rocprim.hpp>
 
-#define HIP_CHECK(condition)         \
-    {                                  \
-        hipError_t error = condition;    \
-        if(error != hipSuccess){         \
-            std::cout << "HIP error: " << error << " line: " << __LINE__ << std::endl; \
-            exit(error); \
-        } \
-    }
-
 #ifndef DEFAULT_N
 const size_t DEFAULT_N = 1024 * 1024 * 32;
 #endif
@@ -589,7 +580,7 @@ int main(int argc, char *argv[])
         BENCHMARK_UNIQUE_TYPE(int8_t),
         BENCHMARK_UNIQUE_TYPE(rocprim::half),
         BENCHMARK_UNIQUE_TYPE(custom_int_double),
-        
+
         BENCHMARK_UNIQUE_BY_KEY_TYPE(int, int),
         BENCHMARK_UNIQUE_BY_KEY_TYPE(float, double),
         BENCHMARK_UNIQUE_BY_KEY_TYPE(double, custom_double2),

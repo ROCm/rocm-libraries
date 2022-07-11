@@ -27,6 +27,8 @@
 #include "../types.hpp"
 #include "../type_traits.hpp"
 
+#include <hip/hip_runtime.h>
+
 // TODO: Refactor when it gets crowded
 
 BEGIN_ROCPRIM_NAMESPACE
@@ -241,6 +243,11 @@ struct raw_storage
     {
         return reinterpret_cast<T&>(*this);
     }
+
+    ROCPRIM_HOST_DEVICE const T& get() const
+    {
+        return reinterpret_cast<const T&>(*this);
+    }
 };
 
 // Checks if two iterators have the same type and value
@@ -311,6 +318,36 @@ using select_type = typename select_type_impl<Cases...>::type;
 
 template <bool Value>
 using bool_constant = std::integral_constant<bool, Value>;
+
+/**
+ * \brief Copy data from src to dest with stream ordering and synchronization
+ * 
+ * Equivalent to `hipStreamMemcpyAsync(...,stream)` followed by `hipStreamSynchronize(stream)`,
+ * but is potentially more performant.
+ *
+ * \param[out] dst Destination to copy
+ * \param[in] src Source of copy
+ * \param[in] size_bytes Number of bytes to copy
+ * \param[in] kind Memory copy type
+ * \param[in] stream Stream to perform the copy. The copy is performed after all prior operations
+ * on stream have been completed.
+ * \return hipError_t error code
+ */
+inline hipError_t memcpy_and_sync(
+    void* dst, const void* src, size_t size_bytes, hipMemcpyKind kind, hipStream_t stream)
+{
+    // hipMemcpyWithStream is only supported on rocm 3.1 and above
+#if(HIP_VERSION_MAJOR == 3 && HIP_VERSION_MINOR >= 1) || HIP_VERSION_MAJOR > 3
+    return hipMemcpyWithStream(dst, src, size_bytes, kind, stream);
+#else
+    const hipError_t result = hipMemcpyAsync(dst src, size_bytes, kind, stream);
+    if(hipSuccess != result)
+    {
+        return result;
+    }
+    return hipStreamSynchronize(stream);
+#endif
+}
 
 } // end namespace detail
 END_ROCPRIM_NAMESPACE

@@ -18,6 +18,7 @@ function or by parameters.
 - `device_select` now supports problem sizes larger than 2^32 items
 - `device_segmented_radix_sort` now partitions segments to groups small, medium and large segments.
   Each segment group can be sorted by specialized kernels to improve throughput.
+- Improved performance of histogram for the case of highly uneven sample distribution.
 
 ## [Unreleased rocPRIM-2.10.14 for ROCm 5.2.0]
 ### Added

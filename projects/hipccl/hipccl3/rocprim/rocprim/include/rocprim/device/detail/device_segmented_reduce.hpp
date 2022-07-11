@@ -32,6 +32,8 @@
 
 #include "../../block/block_load_func.hpp"
 #include "../../block/block_reduce.hpp"
+#include "rocprim/device/config_types.hpp"
+#include "rocprim/device/device_reduce_config.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -54,14 +56,13 @@ void segmented_reduce(InputIterator input,
                       BinaryFunction reduce_op,
                       ResultType initial_value)
 {
-    constexpr unsigned int block_size = Config::block_size;
-    constexpr unsigned int items_per_thread = Config::items_per_thread;
-    constexpr unsigned int items_per_block = block_size * items_per_thread;
+    static constexpr reduce_config_params params = device_params<Config>();
 
-    using reduce_type = ::rocprim::block_reduce<
-        ResultType, block_size,
-        Config::block_reduce_method
-    >;
+    constexpr unsigned int block_size       = params.block_size;
+    constexpr unsigned int items_per_thread = params.items_per_thread;
+    constexpr unsigned int items_per_block  = block_size * items_per_thread;
+
+    using reduce_type = ::rocprim::block_reduce<ResultType, block_size, params.block_reduce_method>;
 
     ROCPRIM_SHARED_MEMORY typename reduce_type::storage_type reduce_storage;
 

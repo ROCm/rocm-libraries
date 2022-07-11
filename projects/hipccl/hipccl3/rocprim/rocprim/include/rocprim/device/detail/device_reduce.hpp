@@ -26,6 +26,8 @@
 
 #include "../../config.hpp"
 #include "../../detail/various.hpp"
+#include "../config_types.hpp"
+#include "../device_reduce_config.hpp"
 
 #include "../../intrinsics.hpp"
 #include "../../functional.hpp"
@@ -87,15 +89,15 @@ void block_reduce_kernel_impl(InputIterator input,
                               InitValueType initial_value,
                               BinaryFunction reduce_op)
 {
-    constexpr unsigned int block_size = Config::block_size;
-    constexpr unsigned int items_per_thread = Config::items_per_thread;
+    static constexpr reduce_config_params params = device_params<Config>();
+
+    constexpr unsigned int block_size       = params.block_size;
+    constexpr unsigned int items_per_thread = params.items_per_thread;
 
     using result_type = ResultType;
 
-    using block_reduce_type = ::rocprim::block_reduce<
-        result_type, block_size,
-        Config::block_reduce_method
-    >;
+    using block_reduce_type
+        = ::rocprim::block_reduce<result_type, block_size, params.block_reduce_method>;
     constexpr unsigned int items_per_block = block_size * items_per_thread;
 
     const unsigned int flat_id = ::rocprim::detail::block_thread_id<0>();

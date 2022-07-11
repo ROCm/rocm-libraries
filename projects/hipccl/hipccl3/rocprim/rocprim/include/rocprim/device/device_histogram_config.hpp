@@ -40,11 +40,12 @@ BEGIN_ROCPRIM_NAMESPACE
 /// \tparam SharedImplMaxBins - maximum total number of bins for all active channels
 /// for the shared memory histogram implementation (samples -> shared memory bins -> global memory bins),
 /// when exceeded the global memory implementation is used (samples -> global memory bins).
-template<
-    class HistogramConfig,
-    unsigned int MaxGridSize = 1024,
-    unsigned int SharedImplMaxBins = 2048
->
+/// \tparam SharedImplHistograms - number of histograms in the shared memory to reduce bank conflicts
+/// for atomic operations with narrow sample distributions. Sweetspot for 9xx and 10xx is 3.
+template<class HistogramConfig,
+         unsigned int MaxGridSize          = 1024,
+         unsigned int SharedImplMaxBins    = 2048,
+         unsigned int SharedImplHistograms = 3>
 struct histogram_config
 {
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
@@ -52,22 +53,32 @@ struct histogram_config
 
     static constexpr unsigned int max_grid_size = MaxGridSize;
     static constexpr unsigned int shared_impl_max_bins = SharedImplMaxBins;
+    static constexpr unsigned int shared_impl_histograms = SharedImplHistograms;
 #endif
 };
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
-template<
-    class HistogramConfig,
-    unsigned int MaxGridSize,
-    unsigned int SharedImplMaxBins
-> constexpr unsigned int
-histogram_config<HistogramConfig, MaxGridSize, SharedImplMaxBins>::max_grid_size;
-template<
-    class HistogramConfig,
-    unsigned int MaxGridSize,
-    unsigned int SharedImplMaxBins
-> constexpr unsigned int
-histogram_config<HistogramConfig, MaxGridSize, SharedImplMaxBins>::shared_impl_max_bins;
+template<class HistogramConfig,
+         unsigned int MaxGridSize,
+         unsigned int SharedImplMaxBins,
+         unsigned int SharedImplHistograms>
+constexpr unsigned int
+    histogram_config<HistogramConfig, MaxGridSize, SharedImplMaxBins, SharedImplHistograms>::
+        max_grid_size;
+template<class HistogramConfig,
+         unsigned int MaxGridSize,
+         unsigned int SharedImplMaxBins,
+         unsigned int SharedImplHistograms>
+constexpr unsigned int
+    histogram_config<HistogramConfig, MaxGridSize, SharedImplMaxBins, SharedImplHistograms>::
+        shared_impl_max_bins;
+template<class HistogramConfig,
+         unsigned int MaxGridSize,
+         unsigned int SharedImplMaxBins,
+         unsigned int SharedImplHistograms>
+constexpr unsigned int
+    histogram_config<HistogramConfig, MaxGridSize, SharedImplMaxBins, SharedImplHistograms>::
+        shared_impl_histograms;
 #endif
 
 namespace detail

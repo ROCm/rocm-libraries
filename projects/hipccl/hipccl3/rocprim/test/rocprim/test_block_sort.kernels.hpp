@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,96 +23,127 @@
 #ifndef TEST_BLOCK_SORT_KERNELS_HPP_
 #define TEST_BLOCK_SORT_KERNELS_HPP_
 
+constexpr bool is_buildable(unsigned int                  BlockSize,
+                            unsigned int                  ItemsPerThread,
+                            rocprim::block_sort_algorithm algorithm)
+{
+    switch(algorithm)
+    {
+        case rocprim::block_sort_algorithm::merge_sort:
+            return (rocprim::detail::is_power_of_two(ItemsPerThread)
+                    && rocprim::detail::is_power_of_two(BlockSize));
+        case rocprim::block_sort_algorithm::bitonic_sort:
+            return ItemsPerThread == 1u
+                   || (ItemsPerThread > 1u && rocprim::detail::is_power_of_two(ItemsPerThread)
+                       && rocprim::detail::is_power_of_two(BlockSize));
+    }
+    return false;
+}
+
 template<
     unsigned int BlockSize,
-    class key_type
->
-__global__
-__launch_bounds__(BlockSize)
-void sort_key_kernel(key_type * device_key_output)
+    unsigned int ItemsPerThread,
+    class key_type,
+    rocprim::block_sort_algorithm algorithm,
+    class BinaryOp        = rocprim::less<key_type>,
+    std::enable_if_t<(ItemsPerThread == 1u && is_buildable(BlockSize, ItemsPerThread, algorithm)),
+                     int> = 0>
+__global__ __launch_bounds__(BlockSize) void sort_keys_kernel(key_type* device_key_output)
 {
     const unsigned int index = (blockIdx.x * BlockSize) + threadIdx.x;
-    key_type key = device_key_output[index];
-    rocprim::block_sort<key_type, BlockSize> bsort;
-    bsort.sort(key);
+    key_type           key   = device_key_output[index];
+    rocprim::block_sort<key_type, BlockSize, ItemsPerThread, rocprim::empty_type, algorithm> bsort;
+    bsort.sort(key, BinaryOp());
     device_key_output[index] = key;
 }
 
 template<
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
-    class key_type
->
-__global__
-__launch_bounds__(BlockSize)
-void sort_keys_kernel(key_type * device_key_output)
+    class key_type,
+    rocprim::block_sort_algorithm algorithm,
+    class BinaryOp        = rocprim::less<key_type>,
+    std::enable_if_t<(ItemsPerThread > 1u && is_buildable(BlockSize, ItemsPerThread, algorithm)),
+                     int> = 0>
+__global__ __launch_bounds__(BlockSize) void sort_keys_kernel(key_type* device_key_output)
 {
-    const unsigned int lid = threadIdx.x;
+    const unsigned int lid          = threadIdx.x;
     const unsigned int block_offset = blockIdx.x * ItemsPerThread * BlockSize;
 
     key_type keys[ItemsPerThread];
-    ::rocprim::block_load_direct_striped<BlockSize>(lid, device_key_output + block_offset, keys);
+    rocprim::block_load_direct_striped<BlockSize>(lid, device_key_output + block_offset, keys);
 
-    ::rocprim::block_sort<key_type, BlockSize, ItemsPerThread> sort;
-    sort.sort(keys);
+    rocprim::block_sort<key_type, BlockSize, ItemsPerThread, rocprim::empty_type, algorithm> bsort;
+    bsort.sort(keys, BinaryOp());
 
-    ::rocprim::block_store_direct_blocked(lid, device_key_output + block_offset, keys);
+    rocprim::block_store_direct_blocked(lid, device_key_output + block_offset, keys);
 }
 
-template<class Key, class Value>
-struct pair_comparator
-{
-    using less_key = typename test_utils::select_less_operator<Key>::type;
-    using eq_key = typename test_utils::select_equal_to_operator<Key>::type;
-    using less_value = typename test_utils::select_less_operator<Value>::type;
-
-    bool operator()(const std::pair<Key, Value>& lhs, const std::pair<Key, Value>& rhs)
-    {
-        return (less_key()(lhs.first, rhs.first) || (eq_key()(lhs.first, rhs.first) && less_value()(lhs.second, rhs.second)));
-    }
-};
+template<unsigned int BlockSize,
+         unsigned int ItemsPerThread,
+         class key_type,
+         rocprim::block_sort_algorithm algorithm,
+         class BinaryOp = rocprim::less<key_type>,
+         std::enable_if_t<!is_buildable(BlockSize, ItemsPerThread, algorithm), int> = 0>
+__global__ __launch_bounds__(BlockSize) void sort_keys_kernel(key_type* /*device_key_output*/)
+{}
 
 template<
     unsigned int BlockSize,
+    unsigned int ItemsPerThread,
     class key_type,
-    class value_type
->
-__global__
-__launch_bounds__(BlockSize)
-void sort_key_value_kernel(key_type * device_key_output, value_type * device_value_output)
+    class value_type,
+    rocprim::block_sort_algorithm algorithm,
+    class BinaryOp        = rocprim::less<key_type>,
+    std::enable_if_t<(ItemsPerThread == 1u && is_buildable(BlockSize, ItemsPerThread, algorithm)),
+                     int> = 0>
+__global__ __launch_bounds__(BlockSize) void sort_pairs_kernel(key_type*   device_key_output,
+                                                               value_type* device_value_output)
 {
     const unsigned int index = (blockIdx.x * BlockSize) + threadIdx.x;
-    key_type key = device_key_output[index];
-    value_type value = device_value_output[index];
-    rocprim::block_sort<key_type, BlockSize, 1, value_type> bsort;
-    bsort.sort(key, value);
-    device_key_output[index] = key;
+    key_type           key   = device_key_output[index];
+    value_type         value = device_value_output[index];
+    rocprim::block_sort<key_type, BlockSize, ItemsPerThread, value_type, algorithm> bsort;
+    bsort.sort(key, value, BinaryOp());
+    device_key_output[index]   = key;
     device_value_output[index] = value;
 }
 
 template<
     unsigned int BlockSize,
+    unsigned int ItemsPerThread,
     class key_type,
-    class value_type
->
-__global__
-__launch_bounds__(BlockSize)
-void custom_sort_key_value_kernel(key_type * device_key_output, value_type * device_value_output)
+    class value_type,
+    rocprim::block_sort_algorithm algorithm,
+    class BinaryOp        = rocprim::less<key_type>,
+    std::enable_if_t<(ItemsPerThread > 1u && is_buildable(BlockSize, ItemsPerThread, algorithm)),
+                     int> = 0>
+__global__ __launch_bounds__(BlockSize) void sort_pairs_kernel(key_type*   device_key_output,
+                                                               value_type* device_value_output)
 {
-    const unsigned int index = (blockIdx.x * BlockSize) + threadIdx.x;
-    key_type key = device_key_output[index];
-    value_type value = device_value_output[index];
-    rocprim::block_sort<key_type, BlockSize, 1, value_type> bsort;
-    bsort.sort(key, value, rocprim::greater<key_type>());
-    device_key_output[index] = key;
-    device_value_output[index] = value;
+    const unsigned int lid          = threadIdx.x;
+    const unsigned int block_offset = blockIdx.x * ItemsPerThread * BlockSize;
+
+    key_type keys[ItemsPerThread];
+    rocprim::block_load_direct_striped<BlockSize>(lid, device_key_output + block_offset, keys);
+    value_type values[ItemsPerThread];
+    rocprim::block_load_direct_striped<BlockSize>(lid, device_value_output + block_offset, values);
+    rocprim::block_sort<key_type, BlockSize, ItemsPerThread, value_type, algorithm> bsort;
+    bsort.sort(keys, values, BinaryOp());
+
+    rocprim::block_store_direct_blocked(lid, device_key_output + block_offset, keys);
+    rocprim::block_store_direct_blocked(lid, device_value_output + block_offset, values);
 }
 
-template<class T>
-inline constexpr bool is_power_of_two(const T x)
-{
-    static_assert(::rocprim::is_integral<T>::value, "T must be integer type");
-    return (x > 0) && ((x & (x - 1)) == 0);
-}
+template<unsigned int BlockSize,
+         unsigned int ItemsPerThread,
+         class key_type,
+         class value_type,
+         rocprim::block_sort_algorithm algorithm,
+         class BinaryOp = rocprim::less<key_type>,
+         std::enable_if_t<!is_buildable(BlockSize, ItemsPerThread, algorithm), int> = 0>
+__global__ __launch_bounds__(BlockSize) void sort_pairs_kernel(key_type* /*device_key_output*/,
+                                                               value_type* /*device_value_output*/)
+{}
 
 #endif // TEST_BLOCK_SORT_KERNELS_HPP_

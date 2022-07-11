@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -30,6 +30,7 @@
 #include "../functional.hpp"
 
 #include "detail/block_sort_bitonic.hpp"
+#include "detail/block_sort_merge.hpp"
 
 /// \addtogroup blockmodule
 /// @{
@@ -41,6 +42,8 @@ enum class block_sort_algorithm
 {
     /// \brief A bitonic sort based algorithm.
     bitonic_sort,
+    /// \brief A merge sort based algorithm.
+    merge_sort,
     /// \brief Default block_sort algorithm.
     default_algorithm = bitonic_sort,
 };
@@ -63,6 +66,18 @@ struct select_block_sort_impl<block_sort_algorithm::bitonic_sort>
               unsigned int ItemsPerThread,
               class Value>
     using type = block_sort_bitonic<Key, BlockSizeX, BlockSizeY, BlockSizeZ, ItemsPerThread, Value>;
+};
+
+template<>
+struct select_block_sort_impl<block_sort_algorithm::merge_sort>
+{
+    template<class Key,
+             unsigned int BlockSizeX,
+             unsigned int BlockSizeY,
+             unsigned int BlockSizeZ,
+             unsigned int ItemsPerThread,
+             class Value>
+    using type = block_sort_merge<Key, BlockSizeX, BlockSizeY, BlockSizeZ, ItemsPerThread, Value>;
 };
 
 } // end namespace detail

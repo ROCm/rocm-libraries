@@ -59,8 +59,9 @@ struct device_scan_benchmark : public config_autotune_interface
         {
             case rocprim::block_scan_algorithm::using_warp_scan: return "using_warp_scan";
             case rocprim::block_scan_algorithm::reduce_then_scan: return "reduce_then_scan";
-            default: return "unknown_algorithm";
+                // Not using `default: ...` because it kills effectiveness of -Wswitch
         }
+        return "unknown_algorithm";
     }
 
     std::string name() const override
