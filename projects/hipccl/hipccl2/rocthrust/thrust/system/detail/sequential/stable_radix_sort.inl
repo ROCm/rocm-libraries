@@ -561,11 +561,6 @@ void stable_radix_sort(sequential::execution_policy<DerivedPolicy> &exec,
 
   size_t N = last - first;
 
-  #ifdef __HIP_DEVICE_COMPILE__
-    THRUST_HIP_PRINTF("Abort: Stable Radix Sort is currently disabled for memory objects allocated on the device. HIP malloc does not support device side memory allocation.\n");
-    abort();
-  #endif
-
   thrust::detail::temporary_array<KeyType, DerivedPolicy> temp(exec, N);
 
   radix_sort_detail::radix_sort(exec, first, temp.begin(), N);
@@ -585,11 +580,6 @@ void stable_radix_sort_by_key(sequential::execution_policy<DerivedPolicy> &exec,
   typedef typename thrust::iterator_value<RandomAccessIterator2>::type ValueType;
 
   size_t N = last1 - first1;
-
-  #ifdef __HIP_DEVICE_COMPILE__
-    THRUST_HIP_PRINTF("Abort: Stable Radix Sort by Key is currently disabled for memory objects allocated on the device. HIP malloc does not support device side memory allocation.\n");
-    abort();
-  #endif
 
   thrust::detail::temporary_array<KeyType, DerivedPolicy>   temp1(exec, N);
   thrust::detail::temporary_array<ValueType, DerivedPolicy> temp2(exec, N);
