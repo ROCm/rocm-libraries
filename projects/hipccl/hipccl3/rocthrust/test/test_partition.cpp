@@ -1906,8 +1906,6 @@ TEST(PartitionTests,TestPartitionCopyDevice)
       }
 }
 
-//TODO: Tests fails with error message "Memory access fault by GPU node-1 (Agent handle: 0x1ade7d0) on address 0x7fac25a00000. Reason: Page not present or supervisor privilege."
-
 // __global__
 // THRUST_HIP_LAUNCH_BOUNDS_DEFAULT
 // void StablePartitionKernel(int const N, int* array)
