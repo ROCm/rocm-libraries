@@ -1,0 +1,469 @@
+/*******************************************************************************
+ *
+ * MIT License
+ *
+ * Copyright 2021-2022 Advanced Micro Devices, Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ *******************************************************************************/
+
+#include <memory>
+#include <stack>
+#include <typeinfo>
+#include <variant>
+
+#include "CodeGen/Arithmetic.hpp"
+#include "CodeGen/Instruction.hpp"
+#include "Expression.hpp"
+#include "InstructionValues/Register.hpp"
+#include "Operations/CommandArgument.hpp"
+#include "Utilities/Component.hpp"
+
+#include "libdivide.h"
+
+namespace rocRoller
+{
+    namespace Expression
+    {
+        /**
+         * Visitor for a specific Operation expression.  Performs that specific Operation (Add, subtract, etc).
+         * Does not walk the expression tree.
+         */
+        template <typename T>
+        struct OperationEvaluatorVisitor
+        {
+        };
+
+        /**
+         * Visitor for an Expression.  Walks the expression tree, calling the
+         * OperationEvaluatorVisitor to perform actual operations.
+         */
+        struct EvaluateVisitor;
+
+        /**
+         * Is satisfied if the binary operation associated with TheEvaluator can be
+         * applied to LHS and RHS.
+         * e.g. TheEvaluator == OperationEvaluatorVisitor<Add>, LHS -> int, RHS -> int
+         *
+         * Note that this depends on evaluate() not being defined for invalid pairs of
+         * types, thus the use of e.g. `CCanAdd` below.
+         *
+         * @tparam TheEvaluator Specialization of OperationEvaluatorVisitor class for a specific operation
+         * @tparam LHS
+         * @tparam RHS
+         */
+        template <typename TheEvaluator, typename LHS, typename RHS>
+        concept CCanEvaluateBinary = requires(TheEvaluator ev, LHS lhs, RHS rhs)
+        {
+            requires CCommandArgumentValue<LHS>;
+            requires CCommandArgumentValue<RHS>;
+
+            {
+                ev.evaluate(lhs, rhs)
+                } -> CCommandArgumentValue;
+        };
+
+        template <CBinary BinaryExpr>
+        struct BinaryEvaluatorVisitor
+        {
+            using TheEvaluator = OperationEvaluatorVisitor<BinaryExpr>;
+
+            template <CCommandArgumentValue T>
+            void assertNonNullPointer(T const& val) const
+            {
+                if constexpr(std::is_pointer<T>::value)
+                {
+                    AssertFatal(val, "Can't offset from nullptr!");
+                }
+            }
+
+            template <CCommandArgumentValue LHS, CCommandArgumentValue RHS>
+            requires CCanEvaluateBinary<TheEvaluator, LHS, RHS>
+                CommandArgumentValue operator()(LHS const& lhs, RHS const& rhs) const
+            {
+                auto evaluator = static_cast<TheEvaluator const*>(this);
+                return evaluator->evaluate(lhs, rhs);
+            }
+
+            template <CCommandArgumentValue LHS, CCommandArgumentValue RHS>
+            requires(!CCanEvaluateBinary<TheEvaluator, LHS, RHS>) CommandArgumentValue
+                operator()(LHS const& lhs, RHS const& rhs) const
+            {
+                // TODO: Better error message.
+                throw std::runtime_error(concatenate("Type mismatch! ",
+                                                     typeid(BinaryExpr).name(),
+                                                     "(",
+                                                     typeid(LHS).name(),
+                                                     ", ",
+                                                     typeid(RHS).name(),
+                                                     ")"));
+            }
+
+            CommandArgumentValue operator()(CommandArgumentValue const& lhs,
+                                            CommandArgumentValue const& rhs) const
+            {
+                return std::visit(*this, lhs, rhs);
+            }
+        };
+
+/**
+         * For example, CCanAdd which satisifes pairs of types that can be added.
+         */
+#define CAN_OPERATE_CONCEPT(name, op)               \
+    template <typename LHS, typename RHS>           \
+    concept CCan##name = requires(LHS lhs, RHS rhs) \
+    {                                               \
+        lhs op rhs;                                 \
+    }
+
+/**
+         * Declares a BinaryEvaluatorVisitor that can be defined solely by a single binary expression.
+         */
+#define BINARY_EVALUATOR_VISITOR(name, op)                                                \
+    template <>                                                                           \
+    struct OperationEvaluatorVisitor<name> : public BinaryEvaluatorVisitor<name>          \
+    {                                                                                     \
+        template <CCommandArgumentValue LHS, CCommandArgumentValue RHS>                   \
+        requires CCan##name<LHS, RHS> auto evaluate(LHS const& lhs, RHS const& rhs) const \
+        {                                                                                 \
+            return lhs op rhs;                                                            \
+        }                                                                                 \
+    }
+
+#define SIMPLE_BINARY_OP(name, op) \
+    CAN_OPERATE_CONCEPT(name, op); \
+    BINARY_EVALUATOR_VISITOR(name, op)
+
+        /**
+         * Is satisfied if the unary operation associated with TheEvaluator can be
+         * applied to ARG.
+         * e.g. TheEvaluator == OperationEvaluatorVisitor<Not>, Arg -> bool
+         *
+         *
+         * @tparam TheEvaluator Specialization of OperationEvaluatorVisitor class for a specific operation
+         * @tparam ARG
+         */
+        template <typename TheEvaluator, typename ARG>
+        concept CCanEvaluateUnary = requires(TheEvaluator ev, ARG arg)
+        {
+            requires CCommandArgumentValue<ARG>;
+
+            {
+                ev.evaluate(arg)
+                } -> CCommandArgumentValue;
+        };
+
+        template <CUnary UnaryExpr>
+        struct UnaryEvaluatorVisitor
+        {
+            using TheEvaluator = OperationEvaluatorVisitor<UnaryExpr>;
+
+            template <CCommandArgumentValue T>
+            void assertNonNullPointer(T const& val) const
+            {
+                if constexpr(std::is_pointer<T>::value)
+                {
+                    AssertFatal(val, "Can't offset from nullptr!");
+                }
+            }
+
+            template <CCommandArgumentValue ARG>
+            requires CCanEvaluateUnary<TheEvaluator, ARG>
+                CommandArgumentValue operator()(ARG const& arg) const
+            {
+                auto evaluator = static_cast<TheEvaluator const*>(this);
+                return evaluator->evaluate(arg);
+            }
+
+            template <CCommandArgumentValue ARG>
+            requires(!CCanEvaluateUnary<TheEvaluator, ARG>) CommandArgumentValue
+                operator()(ARG const& arg) const
+            {
+                // TODO: Better error message.
+                throw std::runtime_error(concatenate(
+                    "Type mismatch! ", typeid(UnaryExpr).name(), "(", typeid(ARG).name(), ")"));
+            }
+
+            CommandArgumentValue operator()(CommandArgumentValue const& arg) const
+            {
+                return std::visit(*this, arg);
+            }
+        };
+
+        CAN_OPERATE_CONCEPT(Add, +);
+        static_assert(CCanAdd<int, int>);
+        static_assert(CCanAdd<float*, int>);
+        static_assert(!CCanAdd<float, int*>);
+
+        /**
+         * Custom declared so that we can check for null pointers where appropriate.
+         */
+        template <>
+        struct OperationEvaluatorVisitor<Add> : public BinaryEvaluatorVisitor<Add>
+        {
+            template <CCommandArgumentValue LHS, CCommandArgumentValue RHS>
+            requires CCanAdd<LHS, RHS>
+            auto evaluate(LHS const& lhs, RHS const& rhs) const
+            {
+                assertNonNullPointer(lhs);
+                assertNonNullPointer(rhs);
+
+                return lhs + rhs;
+            }
+        };
+
+        CAN_OPERATE_CONCEPT(Subtract, -);
+
+        /**
+         * Custom declared so that we can check for null pointers where appropriate.
+         */
+        template <>
+        struct OperationEvaluatorVisitor<Subtract> : public BinaryEvaluatorVisitor<Subtract>
+        {
+            template <CCommandArgumentValue LHS, CCommandArgumentValue RHS>
+            requires CCanSubtract<LHS, RHS>
+            auto evaluate(LHS const& lhs, RHS const& rhs) const
+            {
+                assertNonNullPointer(lhs);
+                assertNonNullPointer(rhs);
+
+                return lhs - rhs;
+            }
+        };
+
+        SIMPLE_BINARY_OP(Multiply, *);
+        SIMPLE_BINARY_OP(Divide, /);
+        SIMPLE_BINARY_OP(Modulo, %);
+
+        SIMPLE_BINARY_OP(ShiftL, <<);
+        SIMPLE_BINARY_OP(SignedShiftR, >>);
+        SIMPLE_BINARY_OP(BitwiseAnd, &);
+        SIMPLE_BINARY_OP(BitwiseXor, ^);
+
+        SIMPLE_BINARY_OP(GreaterThan, >);
+        SIMPLE_BINARY_OP(GreaterThanEqual, >=);
+        SIMPLE_BINARY_OP(LessThan, <);
+        SIMPLE_BINARY_OP(LessThanEqual, <=);
+        SIMPLE_BINARY_OP(Equal, ==);
+
+        template <>
+        struct OperationEvaluatorVisitor<MultiplyHigh> : public BinaryEvaluatorVisitor<MultiplyHigh>
+        {
+            int evaluate(int const& lhs, int const& rhs) const
+            {
+                assertNonNullPointer(lhs);
+                assertNonNullPointer(rhs);
+
+                return (lhs * (int64_t)rhs) >> 32;
+            }
+
+            unsigned int evaluate(unsigned int const& lhs, unsigned int const& rhs) const
+            {
+                assertNonNullPointer(lhs);
+                assertNonNullPointer(rhs);
+
+                return (lhs * (uint64_t)rhs) >> 32;
+            }
+        };
+
+        template <>
+        struct OperationEvaluatorVisitor<ShiftR> : public BinaryEvaluatorVisitor<ShiftR>
+        {
+            template <typename T>
+            std::enable_if_t<std::is_integral_v<T> && !std::is_same_v<T, bool>, T>
+                evaluate(T const& lhs, T const& rhs) const
+            {
+                return static_cast<typename std::make_unsigned<T>::type>(lhs) >> rhs;
+            }
+        };
+
+        template <>
+        struct OperationEvaluatorVisitor<MagicMultiple>
+            : public UnaryEvaluatorVisitor<MagicMultiple>
+        {
+            int32_t evaluate(int32_t const& arg) const
+            {
+                assertNonNullPointer(arg);
+                auto magic = libdivide::libdivide_s32_branchfree_gen(arg);
+
+                return magic.magic;
+            }
+        };
+
+        template <>
+        struct OperationEvaluatorVisitor<MagicShifts> : public UnaryEvaluatorVisitor<MagicShifts>
+        {
+            int evaluate(int const& arg) const
+            {
+                assertNonNullPointer(arg);
+
+                auto magic = libdivide::libdivide_s32_branchfree_gen(arg);
+
+                return magic.more & libdivide::LIBDIVIDE_32_SHIFT_MASK;
+            }
+        };
+
+        template <>
+        struct OperationEvaluatorVisitor<MagicSign> : public UnaryEvaluatorVisitor<MagicSign>
+        {
+            int evaluate(int const& arg) const
+            {
+                assertNonNullPointer(arg);
+
+                auto magic = libdivide::libdivide_s32_branchfree_gen(arg);
+
+                return (int8_t)magic.more >> 7;
+            }
+        };
+
+        template <>
+        struct OperationEvaluatorVisitor<Negate> : public UnaryEvaluatorVisitor<Negate>
+        {
+            template <typename T>
+            std::enable_if_t<std::is_signed_v<T>, T> evaluate(T const& arg) const
+            {
+                return -arg;
+            }
+        };
+
+        struct EvaluateVisitor
+        {
+            RuntimeArguments args;
+
+            template <CTernary Expr>
+            CommandArgumentValue operator()(Expr const& expr)
+            {
+                Throw<FatalError>("Ternary evaluator not implemented yet.");
+            }
+
+            template <CBinary BinaryExp>
+            CommandArgumentValue operator()(BinaryExp const& expr)
+            {
+                // TODO: Short-circuit logic
+                auto lhs       = call(expr.lhs);
+                auto rhs       = call(expr.rhs);
+                auto evaluator = OperationEvaluatorVisitor<BinaryExp>();
+                return evaluator(lhs, rhs);
+            }
+
+            template <CUnary UnaryExp>
+            CommandArgumentValue operator()(UnaryExp const& expr)
+            {
+                auto arg       = call(expr.arg);
+                auto evaluator = OperationEvaluatorVisitor<UnaryExp>();
+                return evaluator(arg);
+            }
+
+            CommandArgumentValue operator()(MatrixMultiply const& expr)
+            {
+                throw std::runtime_error("Matrix multiply present in runtime expression.");
+            }
+
+            CommandArgumentValue operator()(Register::ValuePtr const& expr)
+            {
+                if(expr->regType() == Register::Type::Literal)
+                    return expr->getLiteralValue();
+
+                Throw<FatalError>("Register present in runtime expression", ShowValue(expr));
+            }
+
+            CommandArgumentValue operator()(CommandArgumentPtr const& expr)
+            {
+                return expr->getValue(args);
+            }
+
+            CommandArgumentValue operator()(CommandArgumentValue const& expr)
+            {
+                return expr;
+            }
+
+            CommandArgumentValue operator()(AssemblyKernelArgumentPtr const& expr)
+            {
+                Throw<FatalError>("Assembly kernel argument present in runtime expression",
+                                  ShowValue(expr));
+            }
+
+            CommandArgumentValue operator()(DataFlowTag const& expr)
+            {
+                Throw<FatalError>("Data flow tag present in runtime expression", ShowValue(expr));
+            }
+
+            CommandArgumentValue operator()(WaveTilePtr const& expr)
+            {
+                Throw<FatalError>("Wave tile present in runtime expression", ShowValue(expr));
+            }
+
+            CommandArgumentValue call(Expression const& expr)
+            {
+                return std::visit(*this, expr);
+            }
+
+            CommandArgumentValue call(ExpressionPtr const& expr)
+            {
+                return call(*expr);
+            }
+
+            CommandArgumentValue call(ExpressionPtr const&    expr,
+                                      RuntimeArguments const& runtimeArgs)
+            {
+                args = runtimeArgs;
+                return call(expr);
+            }
+
+            CommandArgumentValue call(Expression const& expr, RuntimeArguments const& runtimeArgs)
+            {
+                args = runtimeArgs;
+                return call(expr);
+            }
+        };
+
+        CommandArgumentValue evaluate(ExpressionPtr const& expr, RuntimeArguments const& args)
+        {
+            return EvaluateVisitor().call(expr, args);
+        }
+
+        CommandArgumentValue evaluate(Expression const& expr, RuntimeArguments const& args)
+        {
+            return EvaluateVisitor().call(expr, args);
+        }
+
+        CommandArgumentValue evaluate(ExpressionPtr const& expr)
+        {
+            return EvaluateVisitor().call(expr);
+        }
+
+        CommandArgumentValue evaluate(Expression const& expr)
+        {
+            return EvaluateVisitor().call(expr);
+        }
+
+        static_assert(CCanEvaluateBinary<OperationEvaluatorVisitor<Add>, double, double>);
+        static_assert(!CCanEvaluateBinary<OperationEvaluatorVisitor<Add>, double, int*>);
+        static_assert(CCanEvaluateBinary<OperationEvaluatorVisitor<Add>, float*, int>);
+
+        static_assert(CCanEvaluateBinary<OperationEvaluatorVisitor<Subtract>, double, double>);
+        static_assert(!CCanEvaluateBinary<OperationEvaluatorVisitor<Subtract>, double, int*>);
+        static_assert(CCanEvaluateBinary<OperationEvaluatorVisitor<Subtract>, float*, int>);
+
+        static_assert(CCanEvaluateBinary<OperationEvaluatorVisitor<Multiply>, double, double>);
+        static_assert(!CCanEvaluateBinary<OperationEvaluatorVisitor<Multiply>, double, int*>);
+        static_assert(!CCanEvaluateBinary<OperationEvaluatorVisitor<Multiply>, float*, int>);
+    }
+}

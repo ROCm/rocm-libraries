@@ -1,0 +1,139 @@
+#pragma once
+
+#include <memory>
+
+#include "AssemblyKernel.hpp"
+#include "ExecutableKernel_fwd.hpp"
+#include "KernelArguments.hpp"
+#include "KernelGraph/CoordinateTransform/Dimension.hpp"
+#include "Operations/Command_fwd.hpp"
+
+namespace rocRoller
+{
+    KernelArguments  getKernelArguments(std::shared_ptr<AssemblyKernel> kernel,
+                                        RuntimeArguments const&         args);
+    KernelInvocation getKernelInvocation(std::shared_ptr<AssemblyKernel> kernel,
+                                         RuntimeArguments const&         args);
+
+    /**
+     * CommandParameters - tunable command parameters.
+     */
+    class CommandParameters
+    {
+    public:
+        /**
+         * Set (reset) a dimensions properties.
+         */
+        void setDimensionInfo(KernelGraph::CoordinateTransform::Dimension dim);
+        std::vector<KernelGraph::CoordinateTransform::Dimension> getDimensionInfo() const;
+
+        /**
+         * Manually override kernel launch dimensions.
+         *
+         * TODO remove this.
+         */
+        void setManualKernelDimension(int dim);
+        int  getManualKernelDimension() const;
+
+        /**
+         * Manually overrite workgroup sizes.
+         *
+         * TODO remove this.
+         */
+        void setManualWorkgroupSize(std::array<unsigned int, 3> const&);
+        std::optional<std::array<unsigned int, 3>> getManualWorkgroupSize() const;
+
+        /**
+         * Manually override work item counts.
+         *
+         * TODO remove this.
+         */
+        void setManualWorkitemCount(std::array<Expression::ExpressionPtr, 3> const&);
+        std::optional<std::array<Expression::ExpressionPtr, 3>> getManualWorkitemCount() const;
+
+    private:
+        std::vector<KernelGraph::CoordinateTransform::Dimension> m_dimInfo;
+        std::optional<std::array<unsigned int, 3>>               m_workgroupSize;
+        std::optional<std::array<Expression::ExpressionPtr, 3>>  m_workitemCount;
+
+        int m_kernelDimension = 0;
+    };
+
+    class CommandKernel
+    {
+    public:
+        /**
+         * Initialize a CommandKernel with a Context. When this is done, instructions
+         * should have already been scheduled within the context. This is probably
+         * only useful for creating unit tests.
+         */
+        CommandKernel(std::shared_ptr<Context>);
+
+        /**
+         * Create a CommandKernel based on a Command object. This will generate
+         * a kernel and allow the launchKernel method to be called.
+         */
+        CommandKernel(std::shared_ptr<Command>           command,
+                      std::string                        name,
+                      std::shared_ptr<CommandParameters> params = nullptr);
+
+        CommandKernel(std::shared_ptr<Command>        command,
+                      std::shared_ptr<Context>        ctx,
+                      KernelGraph::KernelGraph const& kernelGraph);
+
+        void addPredicate(Expression::ExpressionPtr expression);
+        bool matchesPredicates(/* args */) const;
+
+        /**
+         * Load (and compile) a kernel from the assembly source file `fileName`.
+         */
+        void loadKernelFromAssembly(std::string const& fileName, std::string const& kernelName);
+
+        /**
+         * Determines launch bounds and arguments, and launches the kernel.
+         */
+        void launchKernel(RuntimeArguments const& args);
+
+        KernelGraph::KernelGraph getKernelGraph() const;
+
+    private:
+        std::shared_ptr<Command> m_command;
+
+        std::vector<Expression::ExpressionPtr> m_predicates;
+
+        KernelGraph::KernelGraph           m_kernelGraph;
+        std::shared_ptr<Context>           m_context;
+        std::shared_ptr<ExecutableKernel>  m_executableKernel;
+        std::shared_ptr<CommandParameters> m_parameters;
+
+        KernelArguments  getKernelArguments(RuntimeArguments const& args);
+        KernelInvocation getKernelInvocation(RuntimeArguments const& args);
+
+        Generator<Instruction> commandComments();
+
+        /**
+         * Generates the whole kernel, assembles it, and records the
+         * info needed to launch the kernel, given command arguments.
+         */
+        void generateKernel(std::string);
+
+        void generateKernelGraph(std::string name);
+        void generateKernelSource();
+        void assembleKernel();
+    };
+
+    class CommandSolution
+    {
+    public:
+        CommandSolution(std::shared_ptr<Command> command);
+
+        void appendKernel(std::shared_ptr<CommandKernel> kernel);
+        std::vector<std::shared_ptr<CommandKernel>> const& kernels() const;
+
+        void generateKernels();
+
+        void launchKernels();
+    };
+}
+
+#include "CommandSolution_impl.hpp"

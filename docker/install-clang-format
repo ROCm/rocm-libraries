@@ -1,0 +1,11 @@
+#!/bin/bash -ex
+
+workspace=$(mktemp -d)
+cd -- "$workspace"
+wget --no-verbose https://repo.radeon.com/rocm/apt/4.3.1/pool/main/l/llvm-amdgpu4.3.1/llvm-amdgpu4.3.1_13.0.0.21313.40301_amd64.deb
+ar x llvm-amdgpu4.3.1_13.0.0.21313.40301_amd64.deb data.tar.xz
+tar xJf data.tar.xz --strip-components=5 ./opt/rocm-4.3.1/llvm/bin/clang-format
+mkdir -p /opt/clang-format/bin
+mv clang-format /opt/clang-format/bin
+cd /
+rm -r -- "$workspace"
