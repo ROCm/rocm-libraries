@@ -42,6 +42,14 @@ def runTestCommand (platform, project)
                             ${testCommand} ${hmmTestCommandExclude}
                          """
     }
+    echo(env.JOB_NAME)
+    if (env.JOB_NAME.contains('bleeding-edge'))
+    {
+        testCommand = ''
+        testCommandExclude = ''
+        hmmTestCommand = ''
+        echo("TESTS DISABLED")
+    }
     def command = """#!/usr/bin/env bash
                 set -x
                 cd ${project.paths.project_build_prefix}
