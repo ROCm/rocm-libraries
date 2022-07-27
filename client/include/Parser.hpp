@@ -1,3 +1,6 @@
+
+#include <regex>
+
 #include <rocRoller/Utilities/Error.hpp>
 
 class Arg

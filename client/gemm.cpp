@@ -2,27 +2,13 @@
 #include <hip/hip_ext.h>
 #include <hip/hip_runtime.h>
 
-#include <map>
-#include <random>
-#include <regex>
-
-#include <rocRoller/AssemblyKernel.hpp>
-#include <rocRoller/CodeGen/ArgumentLoader.hpp>
-#include <rocRoller/CodeGen/Arithmetic.hpp>
-#include <rocRoller/CodeGen/Arithmetic/Double.hpp>
-#include <rocRoller/CodeGen/Arithmetic/Float.hpp>
-#include <rocRoller/CodeGen/Arithmetic/Int32.hpp>
-#include <rocRoller/CodeGen/Arithmetic/Int64.hpp>
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Expression.hpp>
-#include <rocRoller/ExpressionTransformations.hpp>
-#include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/HIPTimer.hpp>
 #include <rocRoller/Utilities/Timer.hpp>
 
 #include "../../test/unit/Utilities.hpp"
-#include "DataTypes/DataTypes.hpp"
-#include "Utilities/Error.hpp"
 
 #include "include/Parser.hpp"
 
@@ -44,7 +30,11 @@ void GEMM(
     int wave_k = 2;
     int wave_b = 1;
 
-    uint workgroup_size_x = 256;
+    AssertFatal(mac_m % wave_m == 0, "WaveTile size mismatch (M)");
+    AssertFatal(mac_n % wave_n == 0, "WaveTile size mismatch (N)");
+
+    uint wavefront_size   = 64;
+    uint workgroup_size_x = wavefront_size * (mac_m * mac_n / wave_m / wave_n);
     uint workgroup_size_y = 1;
 
     // one macro tile per workgroup
@@ -179,25 +169,22 @@ void GEMM(
     params->setDimensionInfo(mac_tile_7);
     params->setDimensionInfo(mac_tile_8);
 
-    auto four = Expression::literal(4u);
-    auto two  = Expression::literal(2u);
-    auto one  = Expression::literal(1u);
-    params->setDimensionInfo(
-        KernelGraph::CoordinateTransform::Wavefront(0, -1, four, nullptr)); // A Load
-    params->setDimensionInfo(KernelGraph::CoordinateTransform::Wavefront(0, 0, two, nullptr));
-    params->setDimensionInfo(KernelGraph::CoordinateTransform::Wavefront(0, 1, two, nullptr));
-    params->setDimensionInfo(
-        KernelGraph::CoordinateTransform::Wavefront(1, -1, four, nullptr)); // B Load
-    params->setDimensionInfo(KernelGraph::CoordinateTransform::Wavefront(1, 0, two, nullptr));
-    params->setDimensionInfo(KernelGraph::CoordinateTransform::Wavefront(1, 1, two, nullptr));
-    params->setDimensionInfo(
-        KernelGraph::CoordinateTransform::Wavefront(2, -1, four, nullptr)); // C Load
-    params->setDimensionInfo(KernelGraph::CoordinateTransform::Wavefront(2, 0, two, nullptr));
-    params->setDimensionInfo(KernelGraph::CoordinateTransform::Wavefront(2, 1, two, nullptr));
-    params->setDimensionInfo(
-        KernelGraph::CoordinateTransform::Wavefront(8, -1, four, one, true)); // D
-    params->setDimensionInfo(KernelGraph::CoordinateTransform::Wavefront(8, 0, two, nullptr, true));
-    params->setDimensionInfo(KernelGraph::CoordinateTransform::Wavefront(8, 1, two, nullptr, true));
+    auto one          = Expression::literal(1u);
+    auto wavefront_n  = Expression::literal(static_cast<uint>(mac_m * mac_n / wave_m / wave_n));
+    auto wavefront_nx = Expression::literal(static_cast<uint>(mac_m / wave_m));
+    auto wavefront_ny = Expression::literal(static_cast<uint>(mac_n / wave_n));
+
+    std::vector<int> ctags_with_wavefronts = {0, 1, 2, 8};
+    for(auto ctag : ctags_with_wavefronts)
+    {
+        bool output = ctag == 8;
+        params->setDimensionInfo(
+            KernelGraph::CoordinateTransform::Wavefront(ctag, -1, wavefront_n, one, output));
+        params->setDimensionInfo(
+            KernelGraph::CoordinateTransform::Wavefront(ctag, 0, wavefront_nx, one, output));
+        params->setDimensionInfo(
+            KernelGraph::CoordinateTransform::Wavefront(ctag, 1, wavefront_ny, one, output));
+    }
 
     params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
     params->setManualWorkitemCount({NX, NY, NZ});
