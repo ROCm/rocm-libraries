@@ -18,8 +18,9 @@ namespace rocRoller
 {
     namespace Expression
     {
-        // To string visitor (for debugging)
-        //
+        /*
+         * to string
+         */
 
         struct ExpressionToStringVisitor
         {
@@ -105,6 +106,10 @@ namespace rocRoller
             auto visitor = ExpressionToStringVisitor();
             return visitor.call(expr);
         }
+
+        /*
+         * result type
+         */
 
         struct ExpressionResultTypeVisitor
         {
@@ -249,6 +254,84 @@ namespace rocRoller
             ExpressionResultTypeVisitor v;
             return v.call(expr);
         }
+
+        /*
+         * identical
+         */
+
+        struct ExpressionIdenticalVisitor
+        {
+            template <CTernary T>
+            bool operator()(T const& a, T const& b)
+            {
+                return std::visit(*this, *a.lhs, *b.lhs) && std::visit(*this, *a.r1hs, *b.r1hs)
+                       && std::visit(*this, *a.r2hs, *b.r2hs);
+            }
+
+            template <CBinary T>
+            bool operator()(T const& a, T const& b)
+            {
+                return std::visit(*this, *a.lhs, *b.lhs) && std::visit(*this, *a.rhs, *b.rhs);
+            }
+
+            template <CUnary T>
+            bool operator()(T const& a, T const& b)
+            {
+                return std::visit(*this, *a.arg, *b.arg);
+            }
+
+            bool operator()(CommandArgumentValue const& a, CommandArgumentValue const& b)
+            {
+                return a == b;
+            }
+
+            bool operator()(CommandArgumentPtr const& a, CommandArgumentPtr const& b)
+            {
+                return (*a) == (*b);
+            }
+
+            bool operator()(AssemblyKernelArgumentPtr const& a, AssemblyKernelArgumentPtr const& b)
+            {
+                return (*a) == (*b);
+            }
+
+            bool operator()(Register::ValuePtr const& a, Register::ValuePtr const& b)
+            {
+                return a->toString() == b->toString();
+            }
+
+            bool operator()(DataFlowTag const& a, DataFlowTag const& b)
+            {
+                return a == b;
+            }
+
+            bool operator()(WaveTilePtr const& a, WaveTilePtr const& b)
+            {
+                return a->getTag() == b->getTag();
+            }
+
+            // a & b are different operator/value classes
+            template <class T, class U>
+            bool operator()(T const& a, U const& b)
+            {
+                return false;
+            }
+
+            bool operator()(ExpressionPtr const& a, ExpressionPtr const& b)
+            {
+                return std::visit(*this, *a, *b);
+            }
+        };
+
+        bool identical(ExpressionPtr const& a, ExpressionPtr const& b)
+        {
+            auto visitor = ExpressionIdenticalVisitor();
+            return visitor(a, b);
+        }
+
+        /*
+         * stream operators
+         */
 
         std::ostream& operator<<(std::ostream& stream, ResultType const& obj)
         {

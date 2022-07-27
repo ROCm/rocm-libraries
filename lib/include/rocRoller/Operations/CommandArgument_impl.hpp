@@ -122,6 +122,13 @@ namespace rocRoller
         return std::make_shared<Expression::Expression>(shared_from_this());
     }
 
+    inline bool CommandArgument::operator==(const CommandArgument& rhs) const
+    {
+        return m_size == rhs.m_size && m_offset == rhs.m_offset
+               && m_variableType == rhs.m_variableType && m_direction == rhs.m_direction
+               && m_name == rhs.m_name;
+    }
+
     inline unsigned int getUnsignedInt(CommandArgumentValue val)
     {
         return visit(

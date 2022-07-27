@@ -281,6 +281,8 @@ namespace rocRoller
 
             Register::Type regType;
             VariableType   varType;
+
+            bool operator==(DataFlowTag const&) const = default;
         };
 
         ExpressionPtr operator+(ExpressionPtr a, ExpressionPtr b);
@@ -438,6 +440,11 @@ namespace rocRoller
         ResultType    resultType(ExpressionPtr const& expr);
         ResultType    resultType(Expression const& expr);
         std::ostream& operator<<(std::ostream&, ResultType const&);
+
+        /**
+         * True when two expressions are identical.
+         */
+        bool identical(ExpressionPtr const&, ExpressionPtr const&);
 
         /**
          * Evaluate an expression whose evaluationTime is Translate.  Will throw an exception otherwise.

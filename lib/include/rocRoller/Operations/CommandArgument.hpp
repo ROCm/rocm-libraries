@@ -59,6 +59,8 @@ namespace rocRoller
         requires(!std::is_pointer_v<T>) CommandArgumentValue getValue(RuntimeArguments const& args)
         const;
 
+        bool operator==(CommandArgument const& rhs) const;
+
     private:
         std::weak_ptr<Command> m_command;
 

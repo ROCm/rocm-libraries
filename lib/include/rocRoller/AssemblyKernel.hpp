@@ -27,6 +27,8 @@ namespace rocRoller
 
         int offset = -1;
         int size   = -1;
+
+        bool operator==(AssemblyKernelArgument const&) const = default;
     };
 
     class AssemblyKernel

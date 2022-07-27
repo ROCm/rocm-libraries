@@ -91,6 +91,80 @@ namespace ExpressionTest
         EXPECT_EQ(expectedTimes, Expression::evaluationTimes(expr10));
     }
 
+    TEST_F(ExpressionTest, IdenticalTest)
+    {
+        auto a    = Expression::literal(1u);
+        auto ap   = Expression::literal(1);
+        auto b    = Expression::literal(2u);
+        auto zero = Expression::literal(0u);
+
+        auto rc = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Int32, 1);
+        rc->allocateNow();
+
+        auto rd = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Float, 1);
+        rd->allocateNow();
+
+        auto c = rc->expression();
+        auto d = rd->expression();
+
+        auto cve = std::make_shared<CommandArgument>(nullptr, DataType::Float, 0);
+        auto cvf = std::make_shared<CommandArgument>(nullptr, DataType::Float, 8);
+
+        auto e = std::make_shared<Expression::Expression>(cve);
+        auto f = std::make_shared<Expression::Expression>(cvf);
+
+        auto expr1 = a + b;
+        auto expr2 = a + b;
+
+        auto expr3 = a - b;
+
+        EXPECT_TRUE(identical(expr1, expr2));
+        EXPECT_FALSE(identical(expr1, expr3));
+        EXPECT_FALSE(identical(ap + b, expr3));
+
+        auto expr4 = c + d;
+        auto expr5 = c + d + zero;
+
+        EXPECT_FALSE(identical(expr1, expr4));
+
+        EXPECT_FALSE(identical(expr4, expr5));
+        EXPECT_TRUE(identical(expr4, simplify(expr5)));
+
+        auto expr6 = e / f % d;
+        auto expr7 = a + f;
+
+        EXPECT_FALSE(identical(expr6, expr7));
+        EXPECT_FALSE(identical(e, f));
+
+        auto A_tile = std::make_shared<KernelGraph::CoordinateTransform::WaveTile>(0);
+        auto B_tile = std::make_shared<KernelGraph::CoordinateTransform::WaveTile>(1);
+
+        int M = 32;
+        int N = 32;
+        int K = 2;
+
+        A_tile->sizes = {M, K};
+        A_tile->vgpr  = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Float, M * K / 64);
+        A_tile->vgpr->allocateNow();
+
+        B_tile->sizes = {K, N};
+        B_tile->vgpr  = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Float, K * N / 64);
+        B_tile->vgpr->allocateNow();
+
+        auto A = std::make_shared<Expression::Expression>(A_tile);
+        auto B = std::make_shared<Expression::Expression>(B_tile);
+
+        auto expr8 = A * B;
+        auto expr9 = a * b;
+
+        EXPECT_FALSE(identical(expr8, expr9));
+        EXPECT_TRUE(identical(A * B, expr8));
+    }
+
     TEST_F(ExpressionTest, BasicInstructions)
     {
         auto ra = std::make_shared<Register::Value>(
