@@ -106,14 +106,13 @@ namespace rocRoller
             requires(!CCanEvaluateBinary<TheEvaluator, LHS, RHS>) CommandArgumentValue
                 operator()(LHS const& lhs, RHS const& rhs) const
             {
-                // TODO: Better error message.
-                throw std::runtime_error(concatenate("Type mismatch! ",
-                                                     typeid(BinaryExpr).name(),
-                                                     "(",
-                                                     typeid(LHS).name(),
-                                                     ", ",
-                                                     typeid(RHS).name(),
-                                                     ")"));
+                Throw<FatalError>("Type mismatch for expression: ",
+                                  typeid(BinaryExpr).name(),
+                                  ". Argument ",
+                                  ShowValue(LHS()),
+                                  " incompatible with ",
+                                  ShowValue(RHS()),
+                                  ").");
             }
 
             CommandArgumentValue operator()(CommandArgumentValue const& lhs,
@@ -196,9 +195,10 @@ namespace rocRoller
             requires(!CCanEvaluateUnary<TheEvaluator, ARG>) CommandArgumentValue
                 operator()(ARG const& arg) const
             {
-                // TODO: Better error message.
-                throw std::runtime_error(concatenate(
-                    "Type mismatch! ", typeid(UnaryExpr).name(), "(", typeid(ARG).name(), ")"));
+                Throw<FatalError>("Incompatible type ",
+                                  ShowValue(ARG()),
+                                  " for expression ",
+                                  typeid(UnaryExpr).name());
             }
 
             CommandArgumentValue operator()(CommandArgumentValue const& arg) const
