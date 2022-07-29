@@ -71,7 +71,7 @@ namespace rocRoller
 
         dwords.clear();
         dwords.reserve(count);
-        for(int i = 0; i < count; i++)
+        for(size_t i = 0; i < count; i++)
         {
             dwords.push_back(input->subset({i}));
         }

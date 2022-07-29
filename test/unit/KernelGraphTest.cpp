@@ -547,7 +547,7 @@ namespace KernelGraphTest
                                                              KernelGraph::ControlGraph::Body{});
 
             EXPECT_EQ(outputs3.size(), outputTags3.size());
-            for(int i = 0; i < outputs3.size(); i++)
+            for(size_t i = 0; i < outputs3.size(); i++)
             {
                 EXPECT_EQ(getTag(outputs3[i]), outputTags3[i]);
             }
@@ -569,7 +569,7 @@ namespace KernelGraphTest
                                                            KernelGraph::ControlGraph::Body{});
 
             EXPECT_EQ(inputs2.size(), inputTags2.size());
-            for(int i = 0; i < inputs2.size(); i++)
+            for(size_t i = 0; i < inputs2.size(); i++)
             {
                 EXPECT_EQ(getTag(inputs2[i]), inputTags2[i]);
             }
@@ -637,7 +637,7 @@ namespace KernelGraphTest
         TOC(t_hip);
 
         // reference solution
-        for(int i = 0; i < nx; ++i)
+        for(size_t i = 0; i < nx; ++i)
             x[i] = a[i] * (a[i] + b[i]);
 
         double rnorm = relativeNorm(r, x);
@@ -742,7 +742,7 @@ namespace KernelGraphTest
                     HasHipSuccess(0));
 
         // reference solution
-        for(int i = 0; i < nx; ++i)
+        for(size_t i = 0; i < nx; ++i)
             x[i] = alpha * a[i] + beta * b[i];
 
         double rnorm = relativeNorm(r, x);
@@ -811,7 +811,7 @@ namespace KernelGraphTest
                     HasHipSuccess(0));
 
         // reference solution
-        for(int i = 0; i < nx; ++i)
+        for(size_t i = 0; i < nx; ++i)
             x[i] = a[i];
 
         double rnorm = relativeNorm(r, x);
@@ -831,7 +831,8 @@ namespace KernelGraphTest
         unsigned int workgroup_size_x = 4;
         unsigned int workgroup_size_y = 2;
 
-        AssertFatal(m * n == t_m * t_n * workgroup_size_x * workgroup_size_y,
+        AssertFatal(m > 0 && n > 0 && t_m > 0 && t_n > 0
+                        && (size_t)m * n == t_m * t_n * workgroup_size_x * workgroup_size_y,
                     "MacroTile size mismatch");
 
         // each workgroup will get one tile; since workgroup_size matches m * n
@@ -889,7 +890,7 @@ namespace KernelGraphTest
                     HasHipSuccess(0));
 
         // reference solution
-        for(int i = 0; i < nx * ny; ++i)
+        for(size_t i = 0; i < nx * ny; ++i)
         {
             x[i] = a[i];
         }
@@ -911,7 +912,8 @@ namespace KernelGraphTest
         unsigned int workgroup_size_x = 4;
         unsigned int workgroup_size_y = 2;
 
-        AssertFatal(m * n == t_m * t_n * workgroup_size_x * workgroup_size_y,
+        AssertFatal(m > 0 && n > 0 && t_m > 0 && t_n > 0
+                        && (size_t)m * n == t_m * t_n * workgroup_size_x * workgroup_size_y,
                     "MacroTile size mismatch");
 
         // each workgroup will get one tile; since workgroup_size matches m * n
@@ -969,7 +971,7 @@ namespace KernelGraphTest
                     HasHipSuccess(0));
 
         // reference solution
-        for(int i = 0; i < nx * ny; ++i)
+        for(size_t i = 0; i < nx * ny; ++i)
         {
             x[i] = a[i];
         }
@@ -991,7 +993,8 @@ namespace KernelGraphTest
         uint workgroup_size_x = 4;
         uint workgroup_size_y = 8;
 
-        AssertFatal(m * n == t_m * t_n * workgroup_size_x * workgroup_size_y,
+        AssertFatal(m > 0 && n > 0 && t_m > 0 && t_n > 0
+                        && (size_t)m * n == t_m * t_n * workgroup_size_x * workgroup_size_y,
                     "MacroTile size mismatch");
 
         // each workgroup will get one tile; since workgroup_size matches m * n
@@ -1081,7 +1084,7 @@ namespace KernelGraphTest
                     HasHipSuccess(0));
 
         // reference solution
-        for(int i = 0; i < nx * ny; ++i)
+        for(size_t i = 0; i < nx * ny; ++i)
         {
             x[i] = a[i] + a[i] + b[i] + b[i];
         }
@@ -1205,7 +1208,7 @@ namespace KernelGraphTest
                     HasHipSuccess(0));
 
         std::vector<float> c_D(M * N, 0.f);
-        for(int i = 0; i < c_D.size(); ++i)
+        for(size_t i = 0; i < c_D.size(); ++i)
             c_D[i] = B[0] * A[i];
 
         double rnorm = relativeNorm(D, c_D);

@@ -178,7 +178,9 @@ namespace rocRoller
              */
             template <std::ranges::forward_range T>
             std::shared_ptr<Value> subset(T const& indices);
-            std::shared_ptr<Value> subset(std::initializer_list<int> indices);
+
+            template <std::integral T>
+            std::shared_ptr<Value> subset(std::initializer_list<T> indices);
 
             bool intersects(std::shared_ptr<Register::Value>) const;
 

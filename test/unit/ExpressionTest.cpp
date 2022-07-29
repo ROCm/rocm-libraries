@@ -193,11 +193,11 @@ namespace ExpressionTest
 
         m_context->schedule(Expression::generate(dest2, dest->expression(), m_context));
         auto regIndexAfter = Generated(dest2->registerIndices())[0];
-        EXPECT_EQ(regIndexAfter, regIndexAfter);
+        EXPECT_EQ(regIndexBefore, regIndexAfter);
 
         m_context->schedule(Expression::generate(dest2, expr2, m_context));
         regIndexAfter = Generated(dest2->registerIndices())[0];
-        EXPECT_EQ(regIndexAfter, regIndexAfter);
+        EXPECT_EQ(regIndexBefore, regIndexAfter);
 
         std::string expected = R"(
             v_add_u32 v2, v0, v1

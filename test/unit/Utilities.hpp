@@ -82,7 +82,7 @@ double relativeNorm(std::vector<T> a, std::vector<T> b)
 {
     double d = 0.0;
     double r = 0.0;
-    for(int i = 0; i < a.size(); ++i)
+    for(size_t i = 0; i < a.size(); ++i)
     {
         d += double(a[i] - b[i]) * (a[i] - b[i]);
         r += b[i] * b[i];

@@ -225,8 +225,7 @@ amdhsa.kernels:
             std::shared_ptr<rocRoller::ExecutableKernel> executableKernel
                 = m_context->instructions()->getExecutableKernel();
 
-            auto  ptr = make_shared_device<float>();
-            float val;
+            auto ptr = make_shared_device<float>();
 
             ASSERT_THAT(hipMemset(ptr.get(), 0, sizeof(float)), HasHipSuccess(0));
 

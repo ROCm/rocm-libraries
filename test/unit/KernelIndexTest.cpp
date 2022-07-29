@@ -50,10 +50,14 @@ namespace rocRollerTest
         ASSERT_LT(params.indexDimension, params.dimensions);
 
         if(params.dimensions < 3)
+        {
             ASSERT_EQ(params.arraySize[2], 1);
+        }
 
         if(params.dimensions < 2)
+        {
             ASSERT_EQ(params.arraySize[1], 1);
+        }
 
         unsigned int arrayElements
             = params.arraySize[0] * params.arraySize[1] * params.arraySize[2];
@@ -195,11 +199,11 @@ namespace rocRollerTest
         if(HasFailure())
         {
             std::ostringstream msg;
-            for(int i = 0; i < params.arraySize[2]; i++)
+            for(unsigned int i = 0; i < params.arraySize[2]; i++)
             {
-                for(int j = 0; j < params.arraySize[1]; j++)
+                for(unsigned int j = 0; j < params.arraySize[1]; j++)
                 {
-                    for(int k = 0; k < params.arraySize[0]; k++)
+                    for(unsigned int k = 0; k < params.arraySize[0]; k++)
                     {
                         auto idx = k + (j * params.arraySize[0])
                                    + (i * params.arraySize[0] * params.arraySize[1]);
@@ -220,10 +224,14 @@ namespace rocRollerTest
         ASSERT_LT(params.indexDimension, params.dimensions);
 
         if(params.dimensions < 3)
+        {
             ASSERT_EQ(params.arraySize[2], 1);
+        }
 
         if(params.dimensions < 2)
+        {
             ASSERT_EQ(params.arraySize[1], 1);
+        }
 
         unsigned int arrayElements
             = params.arraySize[0] * params.arraySize[1] * params.arraySize[2];
@@ -273,7 +281,7 @@ namespace rocRollerTest
             co_yield m_context->argLoader()->getValue("val", s_value);
 
             std::array<Register::ValuePtr, 3> workgroupIndex = k->workgroupIndex();
-            for(int i = 0; i < params.dimensions; i++)
+            for(unsigned int i = 0; i < params.dimensions; i++)
             {
                 auto vgpr = Register::Value::Placeholder(
                     m_context, Register::Type::Vector, DataType::UInt32, 1);
@@ -288,11 +296,11 @@ namespace rocRollerTest
 
             {
                 std::array<Expression::ExpressionPtr, 3> index;
-                for(int i = 0; i < params.dimensions; i++)
+                for(unsigned int i = 0; i < params.dimensions; i++)
                     index[i] = workgroupIndex[i]->expression();
 
                 std::array<Expression::ExpressionPtr, 3> sizes;
-                for(int i = 0; i < params.dimensions; i++)
+                for(unsigned int i = 0; i < params.dimensions; i++)
                     sizes[i] = Expression::literal(params.arraySize[i]);
 
                 auto elementSize = Expression::literal<int32_t>(sizeof(unsigned int));
@@ -369,11 +377,11 @@ namespace rocRollerTest
         if(HasFailure())
         {
             std::ostringstream msg;
-            for(int i = 0; i < params.arraySize[2]; i++)
+            for(unsigned int i = 0; i < params.arraySize[2]; i++)
             {
-                for(int j = 0; j < params.arraySize[1]; j++)
+                for(unsigned int j = 0; j < params.arraySize[1]; j++)
                 {
-                    for(int k = 0; k < params.arraySize[0]; k++)
+                    for(unsigned int k = 0; k < params.arraySize[0]; k++)
                     {
                         auto idx = k + (j * params.arraySize[0])
                                    + (i * params.arraySize[0] * params.arraySize[1]);
@@ -394,17 +402,21 @@ namespace rocRollerTest
         ASSERT_LT(params.indexDimension, params.dimensions);
 
         if(params.dimensions < 3)
+        {
             ASSERT_EQ(params.arraySize[2], 1);
+        }
 
         if(params.dimensions < 2)
+        {
             ASSERT_EQ(params.arraySize[1], 1);
+        }
 
         unsigned int arrayElements
             = params.arraySize[0] * params.arraySize[1] * params.arraySize[2];
         unsigned int allocSize = RoundUpToMultiple(arrayElements, 256u);
 
         std::array<unsigned int, 3> workgroupSize{1, 1, 1};
-        for(int i = 0; i < params.dimensions; i++)
+        for(unsigned int i = 0; i < params.dimensions; i++)
             workgroupSize[i] = std::max(RoundUpToMultiple(params.arraySize[i] / 8u, 8u), 1u);
 
         auto command = std::make_shared<Command>();
@@ -451,7 +463,7 @@ namespace rocRollerTest
             co_yield m_context->argLoader()->getValue("val", s_value);
 
             auto workgroupIndex = k->workgroupIndex();
-            for(int i = 0; i < params.dimensions; i++)
+            for(unsigned int i = 0; i < params.dimensions; i++)
             {
                 auto vgpr = Register::Value::Placeholder(
                     m_context, Register::Type::Vector, DataType::UInt32, 1);
@@ -463,7 +475,7 @@ namespace rocRollerTest
 
             std::array<Register::ValuePtr, 3> arrayIndex;
 
-            for(int i = 0; i < params.dimensions; i++)
+            for(unsigned int i = 0; i < params.dimensions; i++)
             {
                 auto dimExp
                     = workgroupIndex[i]->expression() * Expression::literal(workgroupSize[i])
@@ -479,11 +491,11 @@ namespace rocRollerTest
 
             {
                 std::array<Expression::ExpressionPtr, 3> index;
-                for(int i = 0; i < params.dimensions; i++)
+                for(unsigned int i = 0; i < params.dimensions; i++)
                     index[i] = arrayIndex[i]->expression();
 
                 std::array<Expression::ExpressionPtr, 3> sizes;
-                for(int i = 0; i < params.dimensions; i++)
+                for(unsigned int i = 0; i < params.dimensions; i++)
                     sizes[i] = Expression::literal(params.arraySize[i]);
 
                 auto elementSize = Expression::literal<int32_t>(sizeof(unsigned int));
@@ -560,11 +572,11 @@ namespace rocRollerTest
         if(HasFailure())
         {
             std::ostringstream msg;
-            for(int i = 0; i < params.arraySize[2]; i++)
+            for(unsigned int i = 0; i < params.arraySize[2]; i++)
             {
-                for(int j = 0; j < params.arraySize[1]; j++)
+                for(unsigned int j = 0; j < params.arraySize[1]; j++)
                 {
-                    for(int k = 0; k < params.arraySize[0]; k++)
+                    for(unsigned int k = 0; k < params.arraySize[0]; k++)
                     {
                         auto idx = k + (j * params.arraySize[0])
                                    + (i * params.arraySize[0] * params.arraySize[1]);

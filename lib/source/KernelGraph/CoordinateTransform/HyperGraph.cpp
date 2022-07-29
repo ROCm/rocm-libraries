@@ -44,7 +44,7 @@ namespace rocRoller
 
                 auto input = indexes[0] / getStride(srcs[0]);
 
-                for(int i = 1; i < dsts.size(); i++)
+                for(size_t i = 1; i < dsts.size(); i++)
                 {
                     rv[i - 1] = input / getSize(dsts[i]);
                     input     = input % getSize(dsts[i]);
@@ -160,7 +160,7 @@ namespace rocRoller
                 ss << " { ";
                 auto stags = edge.stags;
                 std::sort(stags.begin(), stags.end());
-                for(int i = 0; i < stags.size() - 1; ++i)
+                for(size_t i = 0; i < stags.size() - 1; ++i)
                 {
                     ss << "\"" + CoordinateTransform::toString(m_nodes.at(stags[i])) + "\", ";
                 }
@@ -168,7 +168,7 @@ namespace rocRoller
                 ss << " } -> { ";
                 auto dtags = edge.dtags;
                 std::sort(dtags.begin(), dtags.end());
-                for(int i = 0; i < dtags.size() - 1; ++i)
+                for(size_t i = 0; i < dtags.size() - 1; ++i)
                 {
                     ss << "\"" + CoordinateTransform::toString(m_nodes.at(dtags[i])) + "\", ";
                 }

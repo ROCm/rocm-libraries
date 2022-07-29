@@ -134,7 +134,7 @@ namespace rocRoller
              **/
             inline void applyWaitToQueue(int waitCnt, GPUWaitQueue queue)
             {
-                if(waitCnt != -1 && instruction_queues[queue].size() > waitCnt)
+                if(waitCnt >= 0 && instruction_queues[queue].size() > (size_t)waitCnt)
                 {
                     if(!(needs_wait_zero[queue]
                          && waitCnt

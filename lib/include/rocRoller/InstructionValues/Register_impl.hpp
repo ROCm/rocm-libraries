@@ -633,7 +633,7 @@ namespace rocRoller
             std::vector<int> coords;
             for(auto i : indices)
             {
-                AssertFatal(i < m_allocationCoord.size(),
+                AssertFatal(i >= 0 && (size_t)i < m_allocationCoord.size(),
                             "Register subset out of bounds.",
                             ShowValue(m_allocationCoord.size()),
                             ShowValue(i));
@@ -642,9 +642,10 @@ namespace rocRoller
             return std::make_shared<Value>(allocation(), regType(), DataType::Raw32, coords);
         }
 
-        inline std::shared_ptr<Value> Value::subset(std::initializer_list<int> indices)
+        template <std::integral T>
+        inline std::shared_ptr<Value> Value::subset(std::initializer_list<T> indices)
         {
-            return subset<std::initializer_list<int>>(indices);
+            return subset<std::initializer_list<T>>(indices);
         }
 
         inline bool Value::intersects(std::shared_ptr<Register::Value> input) const
@@ -680,7 +681,7 @@ namespace rocRoller
 
             std::vector<int> coords;
             for(auto i : indices)
-                for(int j = 0; j < elementsPerRegister; ++j)
+                for(size_t j = 0; j < elementsPerRegister; ++j)
                     coords.push_back(m_allocationCoord.at(i * elementsPerRegister + j));
             return std::make_shared<Value>(m_allocation, m_regType, m_varType, coords);
         }

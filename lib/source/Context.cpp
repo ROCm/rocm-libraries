@@ -54,7 +54,7 @@ namespace rocRoller
         rv->m_hipDeviceIdx = deviceIdx;
         rv->m_targetArch   = arch;
 
-        for(int i = 0; i < rv->m_allocators.size(); i++)
+        for(size_t i = 0; i < rv->m_allocators.size(); i++)
         {
             auto regType        = static_cast<Register::Type>(i);
             rv->m_allocators[i] = std::make_shared<Register::Allocator>(regType, 256);

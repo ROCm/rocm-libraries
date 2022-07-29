@@ -18,7 +18,7 @@ using namespace rocRoller;
  */
 bool startsWith(std::string const& fragment, auto begin, auto end)
 {
-    if((end < begin) || ((end - begin) < fragment.size()))
+    if((end < begin) || ((size_t)(end - begin) < fragment.size()))
         return false;
 
     auto fiter = fragment.begin();
@@ -198,7 +198,6 @@ inline Generator<std::string> NormalizedSourceLines(std::string input, bool incl
         {
             // Consume until we see '*/'.
             pos += 2;
-            bool star = false;
             for(; pos != input.end() && !startsWith("*/", pos, input.end()); pos++)
             {
             }

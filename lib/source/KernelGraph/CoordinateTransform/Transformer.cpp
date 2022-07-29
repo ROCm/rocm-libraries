@@ -57,10 +57,10 @@ namespace rocRoller
                     index = index * getSize(srcs[d]) + indexes[d];
 
                 std::vector<ExpressionPtr> coeffs(srcs.size());
-                for(int d = 0; d < srcs.size(); ++d)
+                for(size_t d = 0; d < srcs.size(); ++d)
                 {
                     coeffs[d] = literal(1);
-                    for(int j = 0; j < srcs.size() - d - 1; ++j)
+                    for(size_t j = 0; j < srcs.size() - d - 1; ++j)
                     {
                         coeffs[d] = coeffs[d] * getSize(srcs[j]);
                     }
@@ -217,7 +217,9 @@ namespace rocRoller
                 if(std::holds_alternative<Workgroup>(dimension))
                 {
                     auto dimensionWorkgroup = std::get<Workgroup>(dimension);
-                    AssertFatal(kernelWorkgroupIndexes.size() > dimensionWorkgroup.dim,
+                    AssertFatal(dimensionWorkgroup.dim >= 0
+                                    && kernelWorkgroupIndexes.size()
+                                           > (size_t)dimensionWorkgroup.dim,
                                 "Unable to get workgroup size (kernel dimension mismatch).",
                                 ShowValue(toString(dimension)),
                                 ShowValue(dimensionWorkgroup.dim),
@@ -228,7 +230,8 @@ namespace rocRoller
                 if(std::holds_alternative<Workitem>(dimension))
                 {
                     auto dimensionWorkitem = std::get<Workitem>(dimension);
-                    AssertFatal(kernelWorkitemIndexes.size() > dimensionWorkitem.dim,
+                    AssertFatal(dimensionWorkitem.dim >= 0
+                                    && kernelWorkitemIndexes.size() > (size_t)dimensionWorkitem.dim,
                                 "Unable to get workitem size (kernel dimension mismatch).",
                                 ShowValue(toString(dimension)),
                                 ShowValue(dimensionWorkitem.dim),

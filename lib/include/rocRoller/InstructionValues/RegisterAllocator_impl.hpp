@@ -67,6 +67,7 @@ namespace rocRoller
         inline std::vector<int> Allocator::findFree(int                        count,
                                                     Allocation::Options const& options) const
         {
+            AssertFatal(count >= 0, "Negative count");
             if(options.contiguous)
             {
                 auto loc = findContiguousRange(0, count, options);
@@ -79,7 +80,9 @@ namespace rocRoller
                     return rv;
                 }
                 else
+                {
                     return {};
+                }
             }
 
             std::vector<int> rv;
@@ -106,6 +109,7 @@ namespace rocRoller
                                                   int                        count,
                                                   Allocation::Options const& options) const
         {
+            AssertFatal(start >= 0 && count >= 0, "Negative arguments");
             if(options.alignment > 1)
                 start = Align(start, options);
 
@@ -145,7 +149,7 @@ namespace rocRoller
             return start;
         }
 
-        inline int Allocator::size() const
+        inline size_t Allocator::size() const
         {
             return m_registers.size();
         }

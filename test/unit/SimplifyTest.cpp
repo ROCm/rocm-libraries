@@ -15,13 +15,6 @@ using namespace rocRoller;
 
 TEST_F(SimplifyTest, Simplify)
 {
-    auto ExpectCommutative = [&](std::shared_ptr<Expression::Expression> lhs,
-                                 std::shared_ptr<Expression::Expression> rhs,
-                                 std::string                             result) {
-        EXPECT_EQ(Expression::toString(fastMultiplication(lhs * rhs)), result);
-        EXPECT_EQ(Expression::toString(fastMultiplication(rhs * lhs)), result);
-    };
-
     auto r = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Int32, 1);
     r->allocateNow();
     auto v = r->expression();

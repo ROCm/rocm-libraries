@@ -57,7 +57,7 @@ namespace rocRoller
          * inclusive
          */
         template <std::integral T>
-        bool isSupportedConstantValue(T value) const;
+        requires(!std::same_as<bool, T>) bool isSupportedConstantValue(T value) const;
 
         /**
          * Returns true iff `value` can be represented as an fconst value in an

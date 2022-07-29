@@ -19,7 +19,7 @@ namespace rocRoller
          * Fusions:
          * - Add followed by shiftL -> addShiftL
          * - shiftL followed by add -> shiftAddL
-         * TODO fused multiply add 
+         * TODO fused multiply add
          */
 
         template <typename T>
@@ -56,9 +56,6 @@ namespace rocRoller
             {
                 auto lhs = (*this)(expr.lhs);
                 auto rhs = (*this)(expr.rhs);
-
-                bool eval_lhs = evaluationTimes(lhs)[EvaluationTime::Translate];
-                bool eval_rhs = evaluationTimes(rhs)[EvaluationTime::Translate];
 
                 if(std::holds_alternative<ShiftL>(*lhs))
                 {

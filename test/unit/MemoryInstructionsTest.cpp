@@ -514,7 +514,7 @@ namespace MemoryInstructionsTest
         ASSERT_THAT(hipMemcpy(result.data(), d_result.get(), sizeof(int) * N, hipMemcpyDefault),
                     HasHipSuccess(0));
 
-        for(int i = 0; i < N; i++)
+        for(unsigned int i = 0; i < N; i++)
         {
             EXPECT_EQ(result[i], 5 + ((i + 1) % N)) << i;
         }

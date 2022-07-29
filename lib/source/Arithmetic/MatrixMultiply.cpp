@@ -31,7 +31,7 @@ namespace rocRoller
             MatrixMultiply_Float_Float::zero(std::shared_ptr<Register::Value> dest)
         {
             co_yield Register::AllocateIfNeeded(dest);
-            for(int i = 0; i < dest->valueCount(); ++i)
+            for(size_t i = 0; i < dest->valueCount(); ++i)
                 co_yield_(Instruction("v_accvgpr_write",
                                       {dest->subset({i})},
                                       {Register::Value::Special("0x0")},
@@ -53,8 +53,14 @@ namespace rocRoller
 
             auto const lanesPerWavefront = m_context->targetArchitecture().GetCapability(
                 GPUCapability::DefaultWavefrontSize);
-
-            AssertFatal(lhs->valueCount() == M * K * B / lanesPerWavefront,
+            AssertFatal(M > 0 && N > 0 && K > 0 && B > 0 && lanesPerWavefront > 0,
+                        "Invalid inputs",
+                        ShowValue(M),
+                        ShowValue(N),
+                        ShowValue(K),
+                        ShowValue(B),
+                        ShowValue(lanesPerWavefront));
+            AssertFatal(lhs->valueCount() == (size_t)M * K * B / lanesPerWavefront,
                         "A matrix size mismatch",
                         ShowValue(M),
                         ShowValue(K),
@@ -62,7 +68,7 @@ namespace rocRoller
                         ShowValue(lanesPerWavefront),
                         ShowValue(M * K * B / lanesPerWavefront),
                         ShowValue(lhs->valueCount()));
-            AssertFatal(rhs->valueCount() == K * N * B / lanesPerWavefront,
+            AssertFatal(rhs->valueCount() == (size_t)K * N * B / lanesPerWavefront,
                         "B matrix size mismatch",
                         ShowValue(K),
                         ShowValue(N),
@@ -70,7 +76,7 @@ namespace rocRoller
                         ShowValue(lanesPerWavefront),
                         ShowValue(K * N * B / lanesPerWavefront),
                         ShowValue(rhs->valueCount()));
-            AssertFatal(dest->valueCount() == M * N * B / lanesPerWavefront,
+            AssertFatal(dest->valueCount() == (size_t)M * N * B / lanesPerWavefront,
                         "D matrix size mismatch",
                         ShowValue(M),
                         ShowValue(N),

@@ -24,7 +24,6 @@ namespace rocRoller
 
     std::shared_ptr<LDSAllocation> LDSAllocator::allocate(unsigned int size, unsigned int alignment)
     {
-        unsigned int                   newOffset;
         unsigned int                   alignedSize = RoundUpToMultiple(size, alignment);
         std::shared_ptr<LDSAllocation> result;
 

@@ -58,7 +58,7 @@ namespace rocRoller
     inline void GPUArchitectureTarget::parseString(std::string input)
     {
         int         start = 3; //Skip gfx
-        int         end   = input.find(":");
+        size_t      end   = input.find(":");
         std::string arch  = input.substr(start, end - start);
 
         if(arch.length() == 4)

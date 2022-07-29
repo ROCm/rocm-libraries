@@ -41,7 +41,7 @@ namespace rocRoller
         else if(dest->regType() == Register::Type::Scalar
                 && src->regType() == Register::Type::Scalar)
         {
-            for(int i = 0; i < src->registerCount(); ++i)
+            for(size_t i = 0; i < src->registerCount(); ++i)
             {
                 co_yield_(Instruction(
                     "s_cmov_b32", {dest->subset({i})}, {src->subset({i})}, {}, comment));
@@ -74,7 +74,7 @@ namespace rocRoller
         if(src->regType() == Register::Type::Literal && dest->regType() == Register::Type::Vector)
         {
             // TODO this assumes 32bit
-            for(int k = 0; k < dest->registerCount(); ++k)
+            for(size_t k = 0; k < dest->registerCount(); ++k)
             {
                 co_yield_(Instruction("v_mov_b32", {dest->subset({k})}, {src}, {}, comment));
             }
@@ -83,7 +83,7 @@ namespace rocRoller
                 && dest->regType() == Register::Type::Scalar)
         {
             // TODO this assumes 32bit
-            for(int k = 0; k < dest->registerCount(); ++k)
+            for(size_t k = 0; k < dest->registerCount(); ++k)
             {
                 co_yield_(Instruction("s_mov_b32", {dest->subset({k})}, {src}, {}, comment));
             }
@@ -91,7 +91,7 @@ namespace rocRoller
         else if(src->regType() == Register::Type::Literal
                 && dest->regType() == Register::Type::Accumulator)
         {
-            for(int k = 0; k < dest->valueCount(); ++k)
+            for(size_t k = 0; k < dest->valueCount(); ++k)
             {
                 co_yield_(Instruction("v_accvgpr_write", {dest->element({k})}, {src}, {}, comment));
             }
@@ -110,7 +110,7 @@ namespace rocRoller
             // Scalar/Vector -> Vector
             if(src->regType() == Register::Type::Scalar || src->regType() == Register::Type::Vector)
             {
-                for(int i = 0; i < src->registerCount(); ++i)
+                for(size_t i = 0; i < src->registerCount(); ++i)
                 {
                     co_yield_(Instruction(
                         "v_mov_b32", {dest->subset({i})}, {src->subset({i})}, {}, comment));
@@ -119,7 +119,7 @@ namespace rocRoller
             // ACCVGPR -> Vector
             else
             {
-                for(int i = 0; i < src->registerCount(); ++i)
+                for(size_t i = 0; i < src->registerCount(); ++i)
                 {
                     co_yield_(Instruction(
                         "v_accvgpr_read", {dest->subset({i})}, {src->subset({i})}, {}, comment));
@@ -136,7 +136,7 @@ namespace rocRoller
             }
             else
             {
-                for(int i = 0; i < src->registerCount(); ++i)
+                for(size_t i = 0; i < src->registerCount(); ++i)
                 {
                     co_yield_(Instruction(
                         "s_mov_b32", {dest->subset({i})}, {src->subset({i})}, {}, comment));
@@ -149,7 +149,7 @@ namespace rocRoller
             // Vector -> ACCVGPR
             if(src->regType() == Register::Type::Vector)
             {
-                for(int i = 0; i < src->registerCount(); ++i)
+                for(size_t i = 0; i < src->registerCount(); ++i)
                 {
                     co_yield_(Instruction(
                         "v_accvgpr_write", {dest->subset({i})}, {src->subset({i})}, {}, comment));
@@ -158,7 +158,7 @@ namespace rocRoller
             // ACCVGPR -> ACCVGPR
             else
             {
-                for(int i = 0; i < src->registerCount(); ++i)
+                for(size_t i = 0; i < src->registerCount(); ++i)
                 {
                     co_yield_(Instruction(
                         "v_accvgpr_mov_b32", {dest->subset({i})}, {src->subset({i})}, {}, comment));
@@ -167,8 +167,8 @@ namespace rocRoller
         }
         // Scalar -> VCC
         else if((dest->isVCC()) && src->regType() == Register::Type::Scalar
-                && (src->registerCount() == 2 && context->kernel()->wavefront_size() == 64
-                    || src->registerCount() == 1 && context->kernel()->wavefront_size() == 32))
+                && ((src->registerCount() == 2 && context->kernel()->wavefront_size() == 64)
+                    || (src->registerCount() == 1 && context->kernel()->wavefront_size() == 32)))
         {
             if(context->kernel()->wavefront_size() == 64)
             {
@@ -205,7 +205,7 @@ namespace rocRoller
                     "Invalid destination register type");
 
         co_yield Register::AllocateIfNeeded(dest);
-        for(int i = 0; i < dest->valueCount(); ++i)
+        for(size_t i = 0; i < dest->valueCount(); ++i)
             co_yield copy(dest->element({i}), src, comment);
     }
 

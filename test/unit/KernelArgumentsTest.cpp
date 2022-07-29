@@ -90,7 +90,7 @@ TEST(KernelArguments, Simple)
     memcpy(result.data(), args.data(), args.size());
 
     EXPECT_EQ(result.size(), reference.size());
-    for(int i = 0; i < std::min(result.size(), reference.size()); i++)
+    for(size_t i = 0; i < std::min(result.size(), reference.size()); i++)
     {
         EXPECT_EQ(static_cast<uint32_t>(result[i]), static_cast<uint32_t>(reference[i]))
             << "(" << i << ")";
@@ -163,7 +163,7 @@ TEST(KernelArguments, Binding)
     memcpy(result.data(), args.data(), args.size());
 
     EXPECT_EQ(result.size(), reference.size());
-    for(int i = 0; i < std::min(result.size(), reference.size()); i++)
+    for(size_t i = 0; i < std::min(result.size(), reference.size()); i++)
     {
         EXPECT_EQ(static_cast<uint32_t>(result[i]), static_cast<uint32_t>(reference[i]))
             << "(" << i << ")";
@@ -274,5 +274,5 @@ TEST(KernelArguments, Iterator)
     // Test throws
     testIt.reset();
     EXPECT_EQ(testIt, args.begin());
-    EXPECT_THROW(auto a = static_cast<char>(testIt), std::bad_cast);
+    EXPECT_THROW(static_cast<char>(testIt), std::bad_cast);
 }

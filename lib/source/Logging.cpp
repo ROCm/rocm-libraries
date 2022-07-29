@@ -26,6 +26,7 @@
 
 #include <iostream>
 
+#include "rocRoller/Utilities/Error.hpp"
 #include "rocRoller/Utilities/Logging.hpp"
 
 #include <spdlog/cfg/helpers.h>
@@ -76,8 +77,10 @@ namespace rocRoller
 
         std::shared_ptr<spdlog::logger> getLogger()
         {
-            static auto doneInit   = initLogger();
-            static auto defaultLog = spdlog::get("rocRollerLog");
+            bool doneInit = initLogger();
+            AssertFatal(doneInit, "Logger failed to initialize");
+
+            auto defaultLog = spdlog::get("rocRollerLog");
             return defaultLog;
         }
     }

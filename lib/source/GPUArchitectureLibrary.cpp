@@ -3,6 +3,7 @@
 
 #ifdef ROCROLLER_USE_HIP
 #include <hip/hip_runtime.h>
+#include <rocRoller/Utilities/HipUtils.hpp>
 #endif
 
 namespace rocRoller
@@ -27,11 +28,7 @@ namespace rocRoller
         {
             hipDeviceProp_t deviceProps;
 
-            error = hipGetDeviceProperties(&deviceProps, i);
-            if(error != hipSuccess)
-            {
-                throw new std::runtime_error(hipGetErrorString(error));
-            }
+            HIP_CHECK(hipGetDeviceProperties(&deviceProps, i));
 
             retval.push_back(GPUArchitectureLibrary::GPUArchitectures.at(
                 GPUArchitectureTarget(deviceProps.gcnArchName)));
@@ -39,15 +36,11 @@ namespace rocRoller
 
         if(count > 0)
         {
-            error = hipGetDevice(&default_device);
-            if(error != hipSuccess)
-            {
-                throw new std::runtime_error(hipGetErrorString(error));
-            }
+            HIP_CHECK(hipGetDevice(&default_device));
         }
 #else
         //TODO: Add a way to get specific GPUs. Maybe through env vars.
-        throw new std::runtime_error("Non-HIP Path Not Implemented");
+        AssertFatal(false, "Non-HIP Path Not Implemented");
 #endif
     }
 
@@ -55,10 +48,8 @@ namespace rocRoller
     {
         auto iter = GPUArchitectures.find(target);
 
-        if(iter == GPUArchitectures.end())
-        {
-            throw std::runtime_error(concatenate("Could not find info for GPU target ", target));
-        }
+        AssertFatal(iter != GPUArchitectures.end(),
+                    concatenate("Could not find info for GPU target ", target));
 
         return iter->second;
     }
@@ -74,20 +65,14 @@ namespace rocRoller
     {
         hipDeviceProp_t deviceProps;
 
-        hipError_t error = hipGetDeviceProperties(&deviceProps, deviceIdx);
-
-        if(error != hipSuccess)
-        {
-            throw new std::runtime_error(hipGetErrorString(error));
-        }
+        HIP_CHECK(hipGetDeviceProperties(&deviceProps, deviceIdx));
 
         return GetArch(deviceProps.gcnArchName);
     }
 
     GPUArchitecture GPUArchitectureLibrary::GetDefaultHipDeviceArch(int& deviceIdx)
     {
-        hipError_t error = hipGetDevice(&deviceIdx);
-
+        HIP_CHECK(hipGetDevice(&deviceIdx));
         return GetHipDeviceArch(deviceIdx);
     }
 

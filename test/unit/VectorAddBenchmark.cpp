@@ -128,7 +128,7 @@ namespace VectorAddBenchmark
                     HasHipSuccess(0));
 
         // reference solution
-        for(int i = 0; i < nx; ++i)
+        for(size_t i = 0; i < nx; ++i)
             x[i] = alpha * (a[i] + b[i]);
 
         double rnorm = relativeNorm(r, x);

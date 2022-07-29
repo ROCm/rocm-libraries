@@ -264,7 +264,7 @@ namespace rocRoller
 
                 auto arith = Arithmetic::Get(dst);
 
-                for(int i = 0; i < dst->valueCount(); ++i)
+                for(size_t i = 0; i < dst->valueCount(); ++i)
                     co_yield arith->add(dst->element({i}), lhs->element({i}), rhs->element({i}));
             }
 
@@ -304,7 +304,7 @@ namespace rocRoller
 
                 if(lhs->valueCount() == rhs->valueCount())
                 {
-                    for(int k = 0; k < lhs->valueCount(); ++k)
+                    for(size_t k = 0; k < lhs->valueCount(); ++k)
                     {
                         co_yield arith->mul(
                             dst->element({k}), lhs->element({k}), rhs->element({k}));
@@ -312,14 +312,14 @@ namespace rocRoller
                 }
                 else if(lhs->valueCount() == 1)
                 {
-                    for(int k = 0; k < rhs->valueCount(); ++k)
+                    for(size_t k = 0; k < rhs->valueCount(); ++k)
                     {
                         co_yield arith->mul(dst->element({k}), lhs, rhs->element({k}));
                     }
                 }
                 else if(rhs->valueCount() == 1)
                 {
-                    for(int k = 0; k < lhs->valueCount(); ++k)
+                    for(size_t k = 0; k < lhs->valueCount(); ++k)
                     {
                         co_yield arith->mul(dst->element({k}), lhs->element({k}), rhs);
                     }
@@ -503,6 +503,8 @@ namespace rocRoller
                 auto const m = tiled.subTileSizes[0];
                 auto const n = tiled.subTileSizes[1];
 
+                AssertFatal(m > 0 && n > 0, "Invalid/unknown subtile size dimensions");
+
                 auto rowIndex = ThreadTileIndex(tiled.tag, 0);
                 auto colIndex = ThreadTileIndex(tiled.tag, 1);
 
@@ -540,17 +542,16 @@ namespace rocRoller
                 }
 
                 // TODO multi dimensional tiles
-                for(uint i = 0; i < m; ++i)
+                for(int i = 0; i < m; ++i)
                 {
                     co_yield copy(offset, rowOffset);
-                    for(uint j = 0; j < n; ++j)
+                    for(int j = 0; j < n; ++j)
                     {
-                        co_yield m_context->mem()->load(
-                            MemoryInstructions::MemoryKind::Flat,
-                            vgpr->element({static_cast<int>(i * n + j)}),
-                            v_ptr,
-                            offset,
-                            numBytes);
+                        co_yield m_context->mem()->load(MemoryInstructions::MemoryKind::Flat,
+                                                        vgpr->element({i * n + j}),
+                                                        v_ptr,
+                                                        offset,
+                                                        numBytes);
 
                         if(j < n - 1)
                             co_yield generate(offset, offsetExpr + colStrideExpr);

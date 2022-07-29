@@ -72,7 +72,7 @@ namespace rocRoller
                 auto total_size_expr = std::make_shared<Expression::Expression>(sizes[0]);
 
                 std::vector<CoordinateTransform::Dimension> dims;
-                for(int i = 0; i < sizes.size(); ++i)
+                for(size_t i = 0; i < sizes.size(); ++i)
                 {
                     auto size_expr   = std::make_shared<Expression::Expression>(sizes[i]);
                     auto stride_expr = std::make_shared<Expression::Expression>(strides[i]);
@@ -151,7 +151,7 @@ namespace rocRoller
                 auto const strides = load.strides();
 
                 std::vector<CoordinateTransform::Dimension> dims;
-                for(int i = 0; i < sizes.size(); ++i)
+                for(size_t i = 0; i < sizes.size(); ++i)
                 {
                     auto size_expr   = std::make_shared<Expression::Expression>(sizes[i]);
                     auto stride_expr = std::make_shared<Expression::Expression>(strides[i]);
@@ -192,7 +192,7 @@ namespace rocRoller
                 auto strides = store.strides();
 
                 std::vector<CoordinateTransform::Dimension> dims;
-                for(int i = 0; i < strides.size(); ++i)
+                for(size_t i = 0; i < strides.size(); ++i)
                 {
                     auto stride_expr = std::make_shared<Expression::Expression>(strides[i]);
                     auto dim         = CoordinateTransform::SubDimension(
@@ -232,7 +232,7 @@ namespace rocRoller
                 auto strides = store.strides();
 
                 std::vector<CoordinateTransform::Dimension> dims;
-                for(int i = 0; i < strides.size(); ++i)
+                for(size_t i = 0; i < strides.size(); ++i)
                 {
                     auto stride_expr = std::make_shared<Expression::Expression>(strides[i]);
                     auto dim         = CoordinateTransform::SubDimension(

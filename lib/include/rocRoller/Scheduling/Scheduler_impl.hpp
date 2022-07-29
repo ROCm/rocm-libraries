@@ -87,7 +87,7 @@ namespace rocRoller
             {
                 yield_seq = false;
 
-                for(int i = 0; i < n; ++i)
+                for(size_t i = 0; i < n; ++i)
                 {
                     if(iterators[i] != seqs[i].end())
                     {

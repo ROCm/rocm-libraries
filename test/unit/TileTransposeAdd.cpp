@@ -51,13 +51,15 @@ namespace TileTransposeAddTest
                           int       t_m, // thread tile size x
                           int       t_n) // thread tile size y
     {
+        AssertFatal(m > 0 && n > 0 && t_m > 0 && t_n > 0, "Invalid Test Dimensions");
+
         unsigned int workgroup_size_x = m / t_m;
         unsigned int workgroup_size_y = n / t_n;
 
         AssertFatal(nx == ny || (transpose.a == transpose.b && transpose.a == transpose.c),
                     "Invalid Test Dimensions");
 
-        AssertFatal(m * n == t_m * t_n * workgroup_size_x * workgroup_size_y,
+        AssertFatal((size_t)m * n == t_m * t_n * workgroup_size_x * workgroup_size_y,
                     "MacroTile size mismatch");
 
         // TODO: Handle when thread tiles include out of range indices
@@ -150,9 +152,9 @@ namespace TileTransposeAddTest
                     HasHipSuccess(0));
 
         // reference solution
-        for(int i = 0; i < nx; ++i)
+        for(size_t i = 0; i < nx; ++i)
         {
-            for(int j = 0; j < ny; ++j)
+            for(size_t j = 0; j < ny; ++j)
             {
                 auto idx = [i, j, nx, ny](bool t) { return t ? (j * nx + i) : (i * ny) + j; };
                 x[idx(transpose.c)] = a[idx(transpose.a)] + a[idx(transpose.a)]

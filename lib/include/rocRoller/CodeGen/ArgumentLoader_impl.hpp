@@ -27,13 +27,12 @@ namespace rocRoller
     inline int PickInstructionWidthBytes(int offset, int endOffset, Iter beginReg, End endReg)
     {
         if(offset >= endOffset)
+        {
             return 0;
+        }
 
-        if(beginReg >= endReg)
-            throw std::runtime_error("Inconsistent register bounds");
-
-        if(offset % 4 != 0)
-            throw std::runtime_error("Must be 4-byte aligned.");
+        AssertFatal(beginReg < endReg, "Inconsistent register bounds");
+        AssertFatal(offset % 4 == 0, "Must be 4-byte aligned.");
 
         static const std::vector<int> widths{16, 8, 4, 2, 1};
 
@@ -48,14 +47,14 @@ namespace rocRoller
             }
         }
 
-        throw std::runtime_error("Should be impossible to get here!");
+        Throw<FatalError>("Should be impossible to get here!");
     }
 
     inline Generator<Instruction>
         ArgumentLoader::loadRange(int offset, int endOffset, Register::ValuePtr& value) const
     {
-        if(offset >= endOffset)
-            throw std::runtime_error("Attempt to load 0 bytes.");
+        AssertFatal(offset >= 0 && endOffset >= 0, "Negative offset");
+        AssertFatal(offset < endOffset, "Attempt to load 0 bytes.");
 
         int sizeBytes      = endOffset - offset;
         int totalRegisters = CeilDivide(sizeBytes, 4);

@@ -97,7 +97,6 @@ namespace rocRoller
                     auto m = mac_tile.subTileSizes[0];
                     auto n = mac_tile.subTileSizes[1];
                     auto k = mac_tile.subTileSizes[2];
-                    auto b = mac_tile.subTileSizes[3];
 
                     std::vector<int> tileSize;
                     if(mac_tile.layoutType == LayoutType::MATRIX_A)
@@ -267,7 +266,8 @@ namespace rocRoller
                     SubDimension(store.tag, 1, true),
                 };
 
-                AssertRecoverable(sdims.size() == mac_tile.rank, "Tensor size mismatch.");
+                AssertRecoverable(mac_tile.rank >= 0 && sdims.size() == (size_t)mac_tile.rank,
+                                  "Tensor size mismatch.");
                 AssertRecoverable(mac_tile.rank == 2, "Rank /= 2 not implementd yet.");
 
                 auto wavefront_size = wavefrontSize();

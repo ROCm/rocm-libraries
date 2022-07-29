@@ -530,15 +530,25 @@ namespace ArithmeticTest
                         EXPECT_EQ(result[17], (a + b) << shift);
                         EXPECT_EQ(result[18], (a << shift) + b);
                         if(a >= 2)
+                        {
                             EXPECT_EQ(result[19], (a << 1u) + b);
+                        }
                         if(a >= 4)
+                        {
                             EXPECT_EQ(result[20], (a << 2u) + b);
+                        }
                         if(a >= 8)
+                        {
                             EXPECT_EQ(result[21], (a << 3u) + b);
+                        }
                         if(a >= 16)
+                        {
                             EXPECT_EQ(result[22], (a << 4u) + b);
+                        }
                         if(a >= 32)
+                        {
                             EXPECT_EQ(result[23], (a << 5u) + b);
+                        }
                     }
                 }
             }

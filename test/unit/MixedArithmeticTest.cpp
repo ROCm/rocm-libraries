@@ -57,7 +57,7 @@ namespace MixedArithmeticTest
         {
             KernelArguments args;
 
-            for(int i = 0; i < values.size(); i++)
+            for(size_t i = 0; i < values.size(); i++)
             {
                 args.append(concatenate("a", i), values[i]);
             }
@@ -297,7 +297,7 @@ namespace MixedArithmeticTest
 
                 Register::ValuePtr lhs, rhs;
 
-                for(int lhsIdx = 0; lhsIdx < param.lhsValues.size(); lhsIdx++)
+                for(size_t lhsIdx = 0; lhsIdx < param.lhsValues.size(); lhsIdx++)
                 {
                     co_yield Instruction::Comment(concatenate("Loading lhs value ",
                                                               lhsIdx,
@@ -311,7 +311,7 @@ namespace MixedArithmeticTest
                                          lhsPtr,
                                          lhsIdx);
 
-                    for(int rhsIdx = 0; rhsIdx < param.rhsValues.size(); rhsIdx++)
+                    for(size_t rhsIdx = 0; rhsIdx < param.rhsValues.size(); rhsIdx++)
                     {
                         co_yield Instruction::Comment(concatenate("Loading rhs value ",
                                                                   rhsIdx,
@@ -554,7 +554,7 @@ namespace MixedArithmeticTest
     {
         std::vector<CommandArgumentValue> rv(input.size());
 
-        for(int i = 0; i < input.size(); i++)
+        for(size_t i = 0; i < input.size(); i++)
         {
             rv[i] = input[i];
         }

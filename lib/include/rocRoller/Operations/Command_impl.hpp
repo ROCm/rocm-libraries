@@ -129,7 +129,7 @@ namespace rocRoller
                       [&](auto op) {},
                       [&](Operations::T_Load_Linear const& op) {
                           auto sizes = op.sizes();
-                          for(int i = 0; i < sizes.size() && i < 3; i++)
+                          for(size_t i = 0; i < sizes.size() && i < 3; i++)
                           {
                               result[i] = std::make_shared<Expression::Expression>(sizes[i]);
                           }

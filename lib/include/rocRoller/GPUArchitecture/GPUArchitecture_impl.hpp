@@ -122,7 +122,7 @@ namespace rocRoller
     }
 
     template <std::integral T>
-    bool GPUArchitecture::isSupportedConstantValue(T value) const
+    requires(!std::same_as<bool, T>) bool GPUArchitecture::isSupportedConstantValue(T value) const
     {
         if constexpr(std::signed_integral<T>)
             return value >= -16 && value <= 64;

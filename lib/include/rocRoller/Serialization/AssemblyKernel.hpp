@@ -132,9 +132,8 @@ namespace rocRoller
             {
                 for(int i = 0; i < static_cast<int>(DataDirection::Count); i++)
                 {
-                    auto        dir  = static_cast<DataDirection>(i);
-                    auto        str  = ToString(dir);
-                    auto const& info = DataTypeInfo::Get(i);
+                    auto dir = static_cast<DataDirection>(i);
+                    auto str = ToString(dir);
                     iot::enumCase(io, value, str.c_str(), dir);
                 }
             }

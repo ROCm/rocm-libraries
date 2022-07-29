@@ -22,7 +22,16 @@ namespace rocRoller
         ~HIPData()
         {
             if(m_hip_module)
-                hipError_t e = hipModuleUnload(m_hip_module);
+            {
+                hipError_t error = hipModuleUnload(m_hip_module);
+                if(error != hipSuccess)
+                {
+                    std::ostringstream msg;
+                    msg << "HIP failure at hipModuleUnload (~HIPData()): "
+                        << hipGetErrorString(error) << std::endl;
+                    Log::error(msg.str());
+                }
+            }
         }
     };
 

@@ -83,7 +83,7 @@ namespace rocRoller
         return std::visit(
             [this](auto val) -> bool {
                 using T = std::decay_t<decltype(val)>;
-                if constexpr(std::is_pointer<T>::value)
+                if constexpr(std::is_pointer<T>::value || std::is_same<bool, T>::value)
                 {
                     return false;
                 }

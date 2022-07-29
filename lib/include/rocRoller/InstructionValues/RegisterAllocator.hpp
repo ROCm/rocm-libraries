@@ -14,9 +14,9 @@ namespace rocRoller
 
             Type regType() const;
 
-            int size() const;
-            int maxUsed() const;
-            int useCount() const;
+            size_t size() const;
+            int    maxUsed() const;
+            int    useCount() const;
 
             void allocate(std::shared_ptr<Allocation> alloc);
 
