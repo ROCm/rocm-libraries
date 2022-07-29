@@ -9,12 +9,6 @@
 #include <chrono>
 #include <thread>
 
-template <typename T>
-T abs(T x)
-{
-    return x > 0 ? x : -x;
-}
-
 using namespace rocRoller;
 
 class TimerTest : public GenericContextFixture
@@ -44,7 +38,8 @@ TEST_F(TimerTest, Base01)
     auto t1 = TimerPool::milliseconds("rocRoller::timed_sleep");
     auto t2 = TimerPool::milliseconds("rocRoller");
 
-    EXPECT_TRUE(abs(t.milliseconds() - 20) < 2);
-    EXPECT_TRUE(abs(t1 - 10) < 2);
-    EXPECT_TRUE(abs(t2 - 20) < 2);
+    EXPECT_EQ(t.milliseconds(), t2);
+    EXPECT_GT(t2, t1);
+    EXPECT_GE(t1, 10);
+    EXPECT_GE(t2, 20);
 }
