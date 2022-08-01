@@ -35,6 +35,7 @@ if (ROCROLLER_ENABLE_TIMERS)
 endif()
 
 if(CODE_COVERAGE)
+  add_definitions(-DROCROLLER_CODE_COVERAGE)
   set(EXTRA_COMPILE_OPTIONS -fprofile-instr-generate -fcoverage-mapping ${EXTRA_COMPILE_OPTIONS})
   set(EXTRA_LINK_OPTIONS -fprofile-instr-generate -fcoverage-mapping ${EXTRA_LINK_OPTIONS})
 endif()
@@ -399,6 +400,8 @@ if (NOT ROCROLLER_TESTS_SKIP_GUIDEPOSTS)
     test/unit/GemmGuidePost/GemmGuidePost.cpp
     test/unit/GemmGuidePost/GemmGuidePost_Minimal.cpp
     test/unit/GemmGuidePost/GemmGuidePost_Optimized.cpp
+    test/unit/GemmGuidePost/HGemmGuidePost_Minimal.cpp
+    test/unit/GemmGuidePost/HGemmGuidePost_Optimized.cpp
   )
 endif()
 
@@ -407,6 +410,7 @@ add_executable(
   ${rocRollerTests_SOURCES}
 )
 
+find_package(OpenMP)
 target_compile_options(rocRollerTests PUBLIC ${EXTRA_COMPILE_OPTIONS})
 target_include_directories(rocRollerTests PUBLIC
                            lib/include
@@ -419,6 +423,7 @@ target_link_libraries(
   gtest_main
   gmock
   openblas
+  OpenMP::OpenMP_CXX
 )
 if(ROCROLLER_TESTS_USE_YAML_CPP)
   target_compile_definitions(rocRollerTests PUBLIC ROCROLLER_TESTS_USE_YAML_CPP)

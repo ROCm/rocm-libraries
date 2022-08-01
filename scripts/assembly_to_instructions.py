@@ -3,6 +3,7 @@
 import argparse
 import itertools
 import re
+import utils
 
 """
 This script converts a file containing AMD GPU machine code to C++ code using the
@@ -74,7 +75,7 @@ def find_labels(my_lines, cli_args):
     counter = 0
     labels = dict()
     found_name = False
-    for my_line in clean_lines(my_lines, False):
+    for my_line in utils.clean_lines(my_lines, False):
         # If line is a label, add it to the labels dictionary
         if my_line[-1] == ':':
             if cli_args.remove_name_label and not found_name:
@@ -99,46 +100,12 @@ def convert_arg(arg, registers, labels):
     else:
         return "Register::Value::Special(\"" + arg + "\")"
 
-# Remove the text between the first occurance of start and the first occurrence of stop, after start.
-def remove_between(text, start, stop):
-    if start in text:
-        start_index = text.find(start)
-        stop_index = text.find(stop, start_index)
-        text = text[0:start_index] + text[stop_index + len(stop):]
-    return text
-
-# Get the text between the first occurance of start and the first occurrence of stop, after start.
-def get_between(text, start, stop):
-    if start in text and stop in text:
-        start_index = text.find(start)
-        stop_index = text.find(stop, start_index)
-        return text[start_index + len(start) : stop_index]
-    return ""
-
-# Clean up all of the lines by removing comments and whitespace
-def clean_lines(my_lines, leave_comments):
-    result = []
-    full_text = "\n".join(my_lines)
-    if not leave_comments:
-        full_text = remove_between(full_text, "/*", "*/")
-    full_text = remove_between(full_text, ".amdgpu_metadata", ".end_amdgpu_metadata")
-    my_lines = full_text.split("\n")
-    for my_line in my_lines:
-        #my_line = ''.join(itertools.takewhile(lambda x: x != ';', my_line))
-        if not leave_comments and "//" in my_line:
-            my_line = my_line[0:my_line.find("//")]
-        my_line = my_line.strip()
-        my_line = my_line.replace("\\", "\\\\")
-        if my_line:
-            result += [my_line]
-    return result
-
 # Take a file containing AMD GPU machine code and print out C++ code using the
 # Instruction class.
 def machineCodeToInstructions(inputFile, cli_args):
     with open(inputFile) as f:
         my_lines = f.readlines()
-        my_lines = clean_lines(my_lines, cli_args.leave_comments)
+        my_lines = utils.clean_lines(my_lines, cli_args.leave_comments)
         result = ""
 
         if cli_args.instruction_list:
@@ -196,8 +163,8 @@ inline std::vector<Instruction> {name}(std::shared_ptr<rocRoller::Context> m_con
                     code = my_line[0:my_line.find("//")].strip()
                     comment = my_line[my_line.find("//") + 2:]
                 elif "/*" in my_line:
-                    code = remove_between(my_line, "/*", "*/").strip()
-                    comment = get_between(my_line, "/*", "*/")
+                    code = utils.remove_between(my_line, "/*", "*/").strip()
+                    comment = utils.get_between(my_line, "/*", "*/")
                 else:
                     code = my_line
                     comment = ""

@@ -10,4 +10,8 @@ namespace rocRollerTest
         SGEMM_Minimal_Program(rocRoller::ContextPtr context);
     rocRoller::Generator<rocRoller::Instruction>
         SGEMM_Optimized_Program(rocRoller::ContextPtr context);
+    rocRoller::Generator<rocRoller::Instruction>
+        HGEMM_Minimal_Program(rocRoller::ContextPtr context);
+    rocRoller::Generator<rocRoller::Instruction>
+        HGEMM_Optimized_Program(rocRoller::ContextPtr context);
 }

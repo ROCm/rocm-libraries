@@ -36,4 +36,59 @@ namespace rocRoller
                     M);
     }
 
+    void CPUMM(std::vector<__half>&       D,
+               const std::vector<__half>& C,
+               const std::vector<__half>& A,
+               const std::vector<__half>& B,
+               int                        M,
+               int                        N,
+               int                        K,
+               float                      alpha,
+               float                      beta,
+               bool                       transposeB)
+    {
+        std::vector<float> floatA(A.size());
+        std::vector<float> floatB(B.size());
+        std::vector<float> floatD(C.size());
+
+#pragma omp parallel for
+        for(std::size_t i = 0; i != A.size(); ++i)
+        {
+            floatA[i] = __half2float(A[i]);
+        }
+
+#pragma omp parallel for
+        for(std::size_t i = 0; i != B.size(); ++i)
+        {
+            floatB[i] = __half2float(B[i]);
+        }
+
+#pragma omp parallel for
+        for(std::size_t i = 0; i != C.size(); ++i)
+        {
+            floatD[i] = __half2float(C[i]);
+        }
+
+        cblas_sgemm(CblasColMajor,
+                    CblasNoTrans,
+                    transposeB ? CblasTrans : CblasNoTrans,
+                    M,
+                    N,
+                    K,
+                    alpha,
+                    floatA.data(),
+                    M,
+                    floatB.data(),
+                    transposeB ? N : K,
+                    beta,
+                    floatD.data(),
+                    M);
+
+#pragma omp parallel for
+        for(std::size_t i = 0; i != floatD.size(); ++i)
+        {
+            D[i] = __float2half(floatD[i]);
+        }
+    }
+
 }

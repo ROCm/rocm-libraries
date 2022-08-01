@@ -9,6 +9,7 @@
 
 #include <cmath>
 #include <cstdlib>
+#include <hip/amd_detail/amd_hip_fp16.h>
 #include <hip/hip_runtime.h>
 #include <memory>
 #include <random>
@@ -16,7 +17,7 @@
 #include <rocRoller/Utilities/Logging.hpp>
 
 template <typename T>
-std::shared_ptr<T> make_shared_device(std::size_t n = 1, T init = 0)
+std::shared_ptr<T> make_shared_device(std::size_t n = 1, T init = 0.0)
 {
     std::size_t size   = n * sizeof(T);
     T*          ptr    = nullptr;
@@ -70,9 +71,11 @@ template <typename T>
 double norm(std::vector<T> a)
 {
     double r = 0.0;
+
+#pragma omp parallel for reduction(+ : r)
     for(int i = 0; i < a.size(); ++i)
     {
-        r += a[i] * a[i];
+        r = r + a[i] * a[i];
     }
     return std::sqrt(r);
 }
@@ -82,12 +85,41 @@ double relativeNorm(std::vector<T> a, std::vector<T> b)
 {
     double d = 0.0;
     double r = 0.0;
+
+#pragma omp parallel for reduction(+ : d, r)
     for(size_t i = 0; i < a.size(); ++i)
     {
-        d += double(a[i] - b[i]) * (a[i] - b[i]);
-        r += b[i] * b[i];
+        d = d + double(a[i] - b[i]) * (a[i] - b[i]);
+        r = r + b[i] * b[i];
     }
+
     return std::sqrt(d / r);
+}
+
+template <typename T>
+bool checkEqual(std::vector<T> a, std::vector<T> b, T tolerance = 0)
+{
+    bool equal = true;
+#pragma omp parallel for reduction(&& : equal)
+    for(int i = 0; i < a.size(); ++i)
+    {
+        equal = equal && (abs(a[i] - b[i]) <= tolerance);
+    }
+
+    return equal;
+}
+
+template <typename T>
+size_t countUnEqual(std::vector<T> a, std::vector<T> b, T tolerance = 0)
+{
+    size_t count = 0;
+#pragma omp parallel for reduction(+ : count)
+    for(int i = 0; i < a.size(); ++i)
+    {
+        count = count + ((abs(a[i] - b[i]) <= tolerance) ? 0 : 1);
+    }
+
+    return count;
 }
 
 /*
@@ -106,6 +138,17 @@ namespace rocRoller
                float                     alpha,
                float                     beta,
                bool                      transposeB = true);
+
+    void CPUMM(std::vector<__half>&       D,
+               const std::vector<__half>& C,
+               const std::vector<__half>& A,
+               const std::vector<__half>& B,
+               int                        M,
+               int                        N,
+               int                        K,
+               float                      alpha,
+               float                      beta,
+               bool                       transposeB = true);
 }
 
 /*
@@ -171,4 +214,32 @@ namespace rocRoller
     private:
         std::mt19937 m_gen;
     };
+
+    template <typename T>
+    void GenerateRandomInput(std::mt19937::result_type seed,
+                             std::vector<T>&           A,
+                             size_t                    sizeA,
+                             std::vector<T>&           B,
+                             size_t                    sizeB,
+                             std::vector<T>&           C,
+                             size_t                    sizeC)
+    {
+#pragma omp parallel sections
+        {
+#pragma omp section
+            {
+                A = RandomGenerator(seed + 1).vector<T>(sizeA, -1.f, 1.f);
+            }
+
+#pragma omp section
+            {
+                B = RandomGenerator(seed + 2).vector<T>(sizeB, -1.f, 1.f);
+            }
+
+#pragma omp section
+            {
+                C = RandomGenerator(seed + 3).vector<T>(sizeC, -1.f, 1.f);
+            }
+        }
+    }
 }
