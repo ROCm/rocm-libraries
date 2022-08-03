@@ -45,7 +45,7 @@ target_include_directories(rocprim
     $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include/rocprim>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include/>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/>
 )
 
 # This target links against HIP library
@@ -54,9 +54,6 @@ target_link_libraries(rocprim_hip INTERFACE rocprim hip::device)
 
 
 # Installation
-
-include(GNUInstallDirs)
-set(INCLUDE_INSTALL_DIR ${CMAKE_INSTALL_INCLUDEDIR})
 
 # We need to install headers manually as rocm_install_targets
 # does not support header-only libraries (INTERFACE targets)
