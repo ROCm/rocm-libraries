@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,8 +22,9 @@
 #define ROCPRIM_DEVICE_DEVICE_TRANSFORM_HPP_
 
 #include <algorithm>
-#include <type_traits>
+#include <iostream>
 #include <iterator>
+#include <type_traits>
 
 #include "../config.hpp"
 #include "../detail/various.hpp"

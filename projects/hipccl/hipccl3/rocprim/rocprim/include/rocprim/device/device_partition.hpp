@@ -22,8 +22,9 @@
 #define ROCPRIM_DEVICE_DEVICE_PARTITION_HPP_
 
 #include <algorithm>
-#include <type_traits>
+#include <iostream>
 #include <iterator>
+#include <type_traits>
 
 #include "../config.hpp"
 #include "../functional.hpp"

@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2019 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2018-2022 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -40,20 +40,6 @@ BEGIN_ROCPRIM_NAMESPACE
 
 namespace detail
 {
-
-#define ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(name, size, start) \
-    { \
-        if(error != hipSuccess) return error; \
-        if(debug_synchronous) \
-        { \
-            std::cout << name << "(" << size << ")"; \
-            auto error = hipStreamSynchronize(stream); \
-            if(error != hipSuccess) return error; \
-            auto end = std::chrono::high_resolution_clock::now(); \
-            auto d = std::chrono::duration_cast<std::chrono::duration<double>>(end - start); \
-            std::cout << " " << d.count() * 1000 << " ms" << '\n'; \
-        } \
-    }
 
 } // end detail namespace
 
@@ -479,8 +465,6 @@ inline hipError_t unique_by_key(void*                           temporary_storag
         debug_synchronous,
         no_predicate);
 }
-
-#undef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
 
 /// @}
 // end of group devicemodule

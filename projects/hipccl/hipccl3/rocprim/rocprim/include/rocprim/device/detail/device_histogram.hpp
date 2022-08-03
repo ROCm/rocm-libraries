@@ -27,9 +27,9 @@
 
 #include "../../config.hpp"
 #include "../../detail/various.hpp"
-
 #include "../../functional.hpp"
 #include "../../intrinsics.hpp"
+#include "../../type_traits.hpp"
 
 #include "../../block/block_load.hpp"
 
@@ -135,7 +135,7 @@ struct sample_to_bin_even<
 // This specialization uses multiplication by inv divisor for floats
 template<class Level>
 struct sample_to_bin_even<Level,
-                          typename std::enable_if<std::is_floating_point<Level>::value>::type>
+                          typename std::enable_if<rocprim::is_floating_point<Level>::value>::type>
 {
     unsigned int bins;
     Level        lower_level;
@@ -150,48 +150,13 @@ struct sample_to_bin_even<Level,
         : bins(bins)
         , lower_level(lower_level)
         , upper_level(upper_level)
-        , inv_scale(bins / (upper_level - lower_level))
+        , inv_scale(static_cast<Level>(bins) / (upper_level - lower_level))
     {}
 
     template<class Sample>
     ROCPRIM_HOST_DEVICE inline bool operator()(Sample sample, unsigned int& bin) const
     {
         const Level s = static_cast<Level>(sample);
-        if(s >= lower_level && s < upper_level)
-        {
-            bin = static_cast<unsigned int>((s - lower_level) * inv_scale);
-            return true;
-        }
-        return false;
-    }
-};
-
-// This specialization avoids problems in arithmetics for halves
-template<>
-struct sample_to_bin_even<rocprim::half>
-{
-    using half = rocprim::half;
-
-    unsigned int bins;
-    half         lower_level;
-    half         upper_level;
-    half         inv_scale;
-
-    ROCPRIM_HOST_DEVICE inline sample_to_bin_even() = default;
-
-    ROCPRIM_HOST_DEVICE inline sample_to_bin_even(unsigned int bins,
-                                                  half         lower_level,
-                                                  half         upper_level)
-        : bins(bins)
-        , lower_level(lower_level)
-        , upper_level(upper_level)
-        , inv_scale(bins / (float)(upper_level - lower_level))
-    {}
-
-    template<class Sample>
-    ROCPRIM_HOST_DEVICE inline bool operator()(Sample sample, unsigned int& bin) const
-    {
-        const half s(sample);
         if(s >= lower_level && s < upper_level)
         {
             bin = static_cast<unsigned int>((s - lower_level) * inv_scale);

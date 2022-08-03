@@ -21,12 +21,19 @@
 #ifndef ROCPRIM_DEVICE_DEVICE_SCAN_BY_KEY_CONFIG_HPP_
 #define ROCPRIM_DEVICE_DEVICE_SCAN_BY_KEY_CONFIG_HPP_
 
+#include <iostream>
 #include <type_traits>
+
+#include "../block/block_load.hpp"
+#include "../block/block_scan.hpp"
+#include "../block/block_store.hpp"
 
 #include "../config.hpp"
 #include "../detail/various.hpp"
+#include "../functional.hpp"
 
 #include "config_types.hpp"
+#include "device_scan_config.hpp"
 
 /// \addtogroup primitivesmodule_deviceconfigs
 /// @{

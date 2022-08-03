@@ -22,6 +22,7 @@
 #define ROCPRIM_DEVICE_DEVICE_HISTOGRAM_HPP_
 
 #include <cmath>
+#include <iostream>
 #include <iterator>
 #include <type_traits>
 
