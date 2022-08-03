@@ -21,8 +21,9 @@
 #ifndef ROCPRIM_DEVICE_DEVICE_SCAN_HPP_
 #define ROCPRIM_DEVICE_DEVICE_SCAN_HPP_
 
-#include <type_traits>
+#include <iostream>
 #include <iterator>
+#include <type_traits>
 
 #include "../config.hpp"
 #include "../functional.hpp"

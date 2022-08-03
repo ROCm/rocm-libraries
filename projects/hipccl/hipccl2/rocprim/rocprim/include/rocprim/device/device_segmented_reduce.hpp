@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,8 +21,9 @@
 #ifndef ROCPRIM_DEVICE_DEVICE_SEGMENTED_REDUCE_HPP_
 #define ROCPRIM_DEVICE_DEVICE_SEGMENTED_REDUCE_HPP_
 
-#include <type_traits>
+#include <iostream>
 #include <iterator>
+#include <type_traits>
 
 #include "device_reduce_config.hpp"
 

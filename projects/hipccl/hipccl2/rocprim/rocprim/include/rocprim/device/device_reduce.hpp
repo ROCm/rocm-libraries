@@ -21,9 +21,10 @@
 #ifndef ROCPRIM_DEVICE_DEVICE_REDUCE_HPP_
 #define ROCPRIM_DEVICE_DEVICE_REDUCE_HPP_
 
-#include <type_traits>
-#include <iterator>
 #include <algorithm>
+#include <iostream>
+#include <iterator>
+#include <type_traits>
 
 #include "config_types.hpp"
 
