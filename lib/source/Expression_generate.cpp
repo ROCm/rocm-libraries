@@ -291,7 +291,18 @@ namespace rocRoller
 
             Generator<Instruction> call(Register::ValuePtr& dest, ExpressionPtr const& expr)
             {
+                std::string comment = getComment(expr);
+                if(comment.length() > 0)
+                {
+                    co_yield Instruction::Comment(concatenate("BEGIN: ", comment));
+                }
+
                 co_yield call(dest, *expr);
+
+                if(comment.length() > 0)
+                {
+                    co_yield Instruction::Comment(concatenate("END: ", comment));
+                }
             }
         };
 

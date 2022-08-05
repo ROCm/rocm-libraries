@@ -602,6 +602,7 @@ namespace rocRoller
                     auto user_indexes = coords.reverse({user});
                     auto user_index
                         = fastDivision(fastMultiplication(simplify(user_indexes[0])), m_context);
+                    setComment(user_index, "User Index Expression");
                     co_yield generateOffset(offset, user_index, vgpr->variableType().dataType);
 
                     co_yield m_context->mem()->load(MemoryInstructions::MemoryKind::Flat,

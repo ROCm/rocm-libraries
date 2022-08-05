@@ -83,6 +83,12 @@ namespace rocRoller
 
             std::string call(Expression const& expr) const
             {
+                std::string comment = getComment(expr);
+                if(comment.length() > 0)
+                {
+                    return concatenate("{", comment, ": ", std::visit(*this, expr), "}");
+                }
+
                 return std::visit(*this, expr);
             }
 
@@ -327,6 +333,99 @@ namespace rocRoller
         {
             auto visitor = ExpressionIdenticalVisitor();
             return visitor(a, b);
+        }
+
+        /*
+         * comments
+         */
+
+        struct ExpressionSetCommentVisitor
+        {
+            std::string comment;
+
+            ExpressionSetCommentVisitor(std::string input)
+                : comment(input)
+            {
+            }
+
+            template <typename Expr>
+            requires(CUnary<Expr> || CBinary<Expr> || CTernary<Expr>) void operator()(Expr& expr)
+            {
+                expr.comment = comment;
+            }
+
+            void operator()(auto& expr)
+            {
+                Throw<FatalError>("Cannot set a comment for a base expression.");
+            }
+
+            void call(Expression& expr)
+            {
+                return std::visit(*this, expr);
+            }
+        };
+
+        void setComment(Expression& expr, std::string comment)
+        {
+            auto visitor = ExpressionSetCommentVisitor(comment);
+            return visitor.call(expr);
+        }
+
+        void setComment(ExpressionPtr& expr, std::string comment)
+        {
+            if(expr)
+            {
+                setComment(*expr, comment);
+            }
+            else
+            {
+                Throw<FatalError>("Cannot set the comment for a null expression pointer.");
+            }
+        }
+
+        struct ExpressionGetCommentVisitor
+        {
+            template <typename Expr>
+            requires(CUnary<Expr> || CBinary<Expr> || CTernary<Expr>) std::string
+                operator()(Expr const& expr) const
+            {
+                return expr.comment;
+            }
+
+            std::string operator()(auto const& expr) const
+            {
+                return "";
+            }
+
+            std::string call(Expression const& expr) const
+            {
+                return std::visit(*this, expr);
+            }
+        };
+
+        std::string getComment(Expression const& expr)
+        {
+            auto visitor = ExpressionGetCommentVisitor();
+            return visitor.call(expr);
+        }
+
+        std::string getComment(ExpressionPtr const& expr)
+        {
+            if(!expr)
+            {
+                return "";
+            }
+            return getComment(*expr);
+        }
+
+        void appendComment(Expression& expr, std::string comment)
+        {
+            setComment(expr, getComment(expr) + comment);
+        }
+
+        void appendComment(ExpressionPtr& expr, std::string comment)
+        {
+            setComment(expr, getComment(expr) + comment);
         }
 
         /*

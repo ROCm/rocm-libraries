@@ -70,6 +70,7 @@ namespace rocRoller
         struct Binary
         {
             ExpressionPtr lhs, rhs;
+            std::string   comment = "";
         };
 
         template <typename T>
@@ -207,6 +208,7 @@ namespace rocRoller
         struct Ternary
         {
             ExpressionPtr lhs, r1hs, r2hs;
+            std::string   comment = "";
         };
 
         template <typename T>
@@ -240,6 +242,7 @@ namespace rocRoller
         struct Unary
         {
             ExpressionPtr arg;
+            std::string   comment = "";
         };
 
         template <typename T>
@@ -445,6 +448,18 @@ namespace rocRoller
          * True when two expressions are identical.
          */
         bool identical(ExpressionPtr const&, ExpressionPtr const&);
+
+        /**
+         * Comment accessors.
+         */
+        void setComment(ExpressionPtr& expr, std::string comment);
+        void setComment(Expression& expr, std::string comment);
+
+        std::string getComment(ExpressionPtr const& expr);
+        std::string getComment(Expression const& expr);
+
+        void appendComment(ExpressionPtr& expr, std::string comment);
+        void appendComment(Expression& expr, std::string comment);
 
         /**
          * Evaluate an expression whose evaluationTime is Translate.  Will throw an exception otherwise.

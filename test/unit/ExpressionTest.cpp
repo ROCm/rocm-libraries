@@ -214,6 +214,63 @@ namespace ExpressionTest
         EXPECT_EQ(NormalizedSource(output()), NormalizedSource(expected));
     }
 
+    TEST_F(ExpressionTest, ExpressionCommentsBasic)
+    {
+        auto ra = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Int32, 1);
+        ra->allocateNow();
+
+        auto rb = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Int32, 1);
+        rb->allocateNow();
+
+        auto a = ra->expression();
+        auto b = rb->expression();
+
+        auto expr1 = a + b;
+        auto expr2 = b * expr1;
+
+        setComment(expr1, "The Addition");
+        appendComment(expr1, " extra comment");
+        setComment(expr2, "The Multiplication");
+
+        Register::ValuePtr dest;
+        m_context->schedule(Expression::generate(dest, expr2, m_context));
+
+        std::string expected = R"(
+            // {The Multiplication: Multiply(v1:I, {The Addition extra comment: Add(v0:I, v1:I)})}
+            // BEGIN: The Multiplication
+            // BEGIN: The Addition extra comment
+            // Allocated : 1 VGPR (Value: Int32): v2
+            v_add_u32 v2, v0, v1
+            // END: The Addition extra comment
+            // Allocated : 1 VGPR (Value: Int32): v3
+            v_mul_lo_u32 v3, v1, v2
+            // Freeing : 1 VGPR (Value: Int32): v2
+            // END: The Multiplication
+        )";
+
+        EXPECT_EQ(NormalizedSource(output(), true), NormalizedSource(expected, true));
+    }
+
+    TEST_F(ExpressionTest, ExpressionCommentsErrors)
+    {
+        auto ra = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Int32, 1);
+        ra->setName("ra");
+        ra->allocateNow();
+
+        auto a = ra->expression();
+        EXPECT_THROW(setComment(a, "The a input"), FatalError);
+        EXPECT_THROW(appendComment(a, "extra comment"), FatalError);
+        EXPECT_EQ(getComment(a), "");
+
+        Expression::ExpressionPtr expr1;
+        EXPECT_THROW(setComment(expr1, "The first expression"), FatalError);
+        EXPECT_THROW(appendComment(expr1, "extra"), FatalError);
+        EXPECT_EQ(getComment(expr1), "");
+    }
+
     TEST_F(ExpressionTest, GenerateInvalid)
     {
         Register::ValuePtr result;
