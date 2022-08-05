@@ -14,7 +14,6 @@
 #include <unordered_map>
 #include <vector>
 
-#include <msgpack.hpp>
 #include <rocRoller/Serialization/GPUArchitecture_fwd.hpp>
 
 namespace rocRoller
@@ -84,8 +83,6 @@ namespace rocRoller
 
         template <typename T1, typename T2>
         friend struct rocRoller::Serialization::EnumTraits;
-
-        MSGPACK_DEFINE(m_value);
 
     private:
         Value                                               m_value;
@@ -195,8 +192,6 @@ namespace rocRoller
         template <typename T1, typename T2, typename T3>
         friend struct rocRoller::Serialization::MappingTraits;
 
-        MSGPACK_DEFINE(m_instruction, m_waitCount, m_waitQueues, m_latency);
-
     private:
         std::string                   m_instruction;
         int                           m_waitCount;
@@ -206,7 +201,5 @@ namespace rocRoller
 
     std::string ToString(GPUWaitQueueType);
 }
-
-MSGPACK_ADD_ENUM(rocRoller::GPUWaitQueueType::Value);
 
 #include "GPUInstructionInfo_impl.hpp"

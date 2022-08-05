@@ -15,6 +15,8 @@
 #include <rocRoller/Serialization/yaml-cpp/YAML.hpp>
 #endif
 
+#include <rocRoller/Serialization/msgpack/Msgpack.hpp>
+
 #include <rocRoller/Serialization/GPUArchitecture.hpp>
 
 namespace rocRoller

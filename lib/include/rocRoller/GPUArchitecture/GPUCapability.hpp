@@ -13,7 +13,6 @@
 #include <unordered_map>
 #include <vector>
 
-#include <msgpack.hpp>
 #include <rocRoller/Serialization/GPUArchitecture_fwd.hpp>
 
 namespace rocRoller
@@ -106,6 +105,10 @@ namespace rocRoller
         {
             return m_value == a.m_value;
         }
+        constexpr bool operator==(Value a) const
+        {
+            return m_value == a;
+        }
         constexpr bool operator!=(GPUCapability a) const
         {
             return m_value != a.m_value;
@@ -113,6 +116,11 @@ namespace rocRoller
         constexpr bool operator<(GPUCapability a) const
         {
             return m_value < a.m_value;
+        }
+
+        operator uint8_t() const
+        {
+            return static_cast<uint8_t>(m_value);
         }
 
         std::string ToString() const;
@@ -130,14 +138,10 @@ namespace rocRoller
         template <typename T1, typename T2, typename T3>
         friend struct rocRoller::Serialization::MappingTraits;
 
-        MSGPACK_DEFINE(m_value);
-
     private:
         Value                                               m_value;
         static const std::unordered_map<std::string, Value> m_stringMap;
     };
 }
-
-MSGPACK_ADD_ENUM(rocRoller::GPUCapability::Value);
 
 #include "GPUCapability_impl.hpp"

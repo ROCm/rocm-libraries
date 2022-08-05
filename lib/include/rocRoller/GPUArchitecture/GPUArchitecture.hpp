@@ -17,13 +17,17 @@
 #include "../InstructionValues/Register_fwd.hpp"
 #include "../Serialization/GPUArchitecture_fwd.hpp"
 
-#include <msgpack.hpp>
-
 namespace rocRoller
 {
     class GPUArchitecture
     {
     public:
+        GPUArchitecture();
+        GPUArchitecture(GPUArchitectureTarget);
+        GPUArchitecture(GPUArchitectureTarget const&,
+                        std::map<GPUCapability, int> const&,
+                        std::map<std::string, GPUInstructionInfo> const&);
+
         void                          AddCapability(GPUCapability, int);
         void                          AddInstructionInfo(GPUInstructionInfo);
         bool                          HasCapability(GPUCapability) const;
@@ -31,12 +35,6 @@ namespace rocRoller
         bool                          HasCapability(std::string) const;
         int                           GetCapability(std::string) const;
         rocRoller::GPUInstructionInfo GetInstructionInfo(std::string) const;
-
-        GPUArchitecture();
-        GPUArchitecture(GPUArchitectureTarget);
-        GPUArchitecture(GPUArchitectureTarget const&,
-                        std::map<GPUCapability, int> const&,
-                        std::map<std::string, GPUInstructionInfo> const&);
 
         friend std::ostream& operator<<(std::ostream& os, const GPUArchitecture& d);
 
@@ -80,7 +78,8 @@ namespace rocRoller
         static std::string writeMsgpack(std::map<GPUArchitectureTarget, GPUArchitecture> const&);
         static std::map<GPUArchitectureTarget, GPUArchitecture> readMsgpack(std::string const&);
 
-        MSGPACK_DEFINE(m_isaVersion, m_instruction_infos, m_capabilities);
+        std::map<GPUCapability, int> const&              getAllCapabilities() const;
+        std::map<std::string, GPUInstructionInfo> const& getAllIntructionInfo() const;
 
     private:
         GPUArchitectureTarget                     m_isaVersion;

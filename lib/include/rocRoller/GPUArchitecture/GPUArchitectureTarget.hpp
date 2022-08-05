@@ -15,8 +15,6 @@
 
 #include <rocRoller/Serialization/GPUArchitecture_fwd.hpp>
 
-#include <msgpack.hpp>
-
 namespace rocRoller
 {
     class GPUArchitectureTarget
@@ -93,15 +91,6 @@ namespace rocRoller
 
         template <typename T1, typename T2, typename T3>
         friend struct rocRoller::Serialization::MappingTraits;
-
-        MSGPACK_DEFINE(m_majorVersion,
-                       m_minorVersion,
-                       m_pointVersion,
-                       m_sramecc,
-                       m_xnack,
-                       m_string_rep,
-                       m_version_rep,
-                       m_llvm_features_rep);
 
     private:
         int m_majorVersion;

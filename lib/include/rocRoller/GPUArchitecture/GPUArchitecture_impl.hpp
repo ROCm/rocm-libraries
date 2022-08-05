@@ -154,4 +154,14 @@ namespace rocRoller
         return supportedValues.find(value) != supportedValues.end();
     }
 
+    inline std::map<GPUCapability, int> const& GPUArchitecture::getAllCapabilities() const
+    {
+        return m_capabilities;
+    }
+
+    inline std::map<std::string, GPUInstructionInfo> const&
+        GPUArchitecture::getAllIntructionInfo() const
+    {
+        return m_instruction_infos;
+    }
 }
