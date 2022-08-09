@@ -8,7 +8,6 @@ Thrust is a parallel algorithm library. This library has been ported to [HIP](ht
 
 ### Software
 
-* Git
 * CMake (3.5.1 or later)
 * AMD [ROCm](https://rocm.github.io/install.html) platform (1.8.0 or later)
   * Including [HipCC](https://github.com/ROCm-Developer-Tools/HIP) compiler, which must be
