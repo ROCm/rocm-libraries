@@ -56,15 +56,22 @@ public:
         storage_type_& storage_ = storage.get();
 
         T me = input;
-        store_volatile(&storage_.threads[lid], me);
+        storage_.threads[lid] = me;
+        ::rocprim::wave_barrier();
         for(unsigned int i = 1; i < WarpSize; i *= 2)
         {
-            if(lid >= i)
+            const bool do_op = lid >= i;
+            if(do_op)
             {
-                T other = load_volatile(&storage_.threads[lid - i]);
-                me = scan_op(other, me);
-                store_volatile(&storage_.threads[lid], me);
+                T other = storage_.threads[lid - i];
+                me      = scan_op(other, me);
             }
+            ::rocprim::wave_barrier();
+            if(do_op)
+            {
+                storage_.threads[lid] = me;
+            }
+            ::rocprim::wave_barrier();
         }
         output = me;
     }
@@ -76,7 +83,7 @@ public:
     {
         storage_type_& storage_ = storage.get();
         inclusive_scan(input, output, storage, scan_op);
-        reduction = load_volatile(&storage_.threads[WarpSize - 1]);
+        reduction = storage_.threads[WarpSize - 1];
     }
 
     template<class BinaryFunction>
@@ -104,7 +111,7 @@ public:
     {
         storage_type_& storage_ = storage.get();
         inclusive_scan(input, output, storage, scan_op);
-        reduction = load_volatile(&storage_.threads[WarpSize - 1]);
+        reduction = storage_.threads[WarpSize - 1];
         to_exclusive(output, init, storage, scan_op);
     }
 
@@ -133,7 +140,8 @@ public:
     {
         storage_type_& storage_ = storage.get();
         inclusive_scan(input, inclusive_output, storage, scan_op);
-        reduction = load_volatile(&storage_.threads[WarpSize - 1]);
+        reduction = storage_.threads[WarpSize - 1];
+        ::rocprim::wave_barrier();
         to_exclusive(exclusive_output, init, storage, scan_op);
     }
 
@@ -143,9 +151,10 @@ public:
         storage_type_& storage_ = storage.get();
         if(src_lane == detail::logical_lane_id<WarpSize>())
         {
-            store_volatile(&storage_.threads[src_lane], input);
+            storage_.threads[src_lane] = input;
         }
-        return load_volatile(&storage_.threads[src_lane]);
+        ::rocprim::wave_barrier();
+        return storage_.threads[src_lane];
     }
 
 protected:
@@ -168,7 +177,7 @@ private:
         exclusive_output = init;
         if(lid != 0)
         {
-            exclusive_output = scan_op(init, load_volatile(&storage_.threads[lid-1]));
+            exclusive_output = scan_op(init, storage_.threads[lid - 1]);
         }
     }
 
@@ -179,7 +188,7 @@ private:
         storage_type_& storage_ = storage.get();
         if(lid != 0)
         {
-            exclusive_output = load_volatile(&storage_.threads[lid-1]);
+            exclusive_output = storage_.threads[lid - 1];
         }
     }
 };
