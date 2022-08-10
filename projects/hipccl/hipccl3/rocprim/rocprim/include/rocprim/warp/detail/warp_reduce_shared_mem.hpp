@@ -59,17 +59,24 @@ public:
         storage_type_& storage_ = storage.get();
 
         output = input;
-        store_volatile(&storage_.values[lid], output);
+        storage_.values[lid] = output;
+        ::rocprim::wave_barrier();
         ROCPRIM_UNROLL
         for(unsigned int i = ceiling >> 1; i > 0; i >>= 1)
         {
-            if (lid + i < WarpSize && lid < i)
+            const bool do_op = lid + i < WarpSize && lid < i;
+            if(do_op)
             {
-                output = load_volatile(&storage_.values[lid]);
-                T other = load_volatile(&storage_.values[lid + i]);
-                output = reduce_op(output, other);
-                store_volatile(&storage_.values[lid], output);
+                output  = storage_.values[lid];
+                T other = storage_.values[lid + i];
+                output  = reduce_op(output, other);
             }
+            ::rocprim::wave_barrier();
+            if(do_op)
+            {
+                storage_.values[lid] = output;
+            }
+            ::rocprim::wave_barrier();
         }
         set_output<UseAllReduce>(output, storage);
     }
@@ -84,17 +91,24 @@ public:
         storage_type_& storage_ = storage.get();
 
         output = input;
-        store_volatile(&storage_.values[lid], output);
+        storage_.values[lid] = output;
+        ::rocprim::wave_barrier();
         ROCPRIM_UNROLL
         for(unsigned int i = ceiling >> 1; i > 0; i >>= 1)
         {
-            if((lid + i) < WarpSize && lid < i && (lid + i) < valid_items)
+            const bool do_op = (lid + i) < WarpSize && lid < i && (lid + i) < valid_items;
+            if(do_op)
             {
-                output = load_volatile(&storage_.values[lid]);
-                T other = load_volatile(&storage_.values[lid + i]);
-                output = reduce_op(output, other);
-                store_volatile(&storage_.values[lid], output);
+                output  = storage_.values[lid];
+                T other = storage_.values[lid + i];
+                output  = reduce_op(output, other);
             }
+            ::rocprim::wave_barrier();
+            if(do_op)
+            {
+                storage_.values[lid] = output;
+            }
+            ::rocprim::wave_barrier();
         }
         set_output<UseAllReduce>(output, storage);
     }
@@ -131,12 +145,14 @@ private:
         ROCPRIM_UNROLL
         for(unsigned int i = 1; i < ceiling; i *= 2)
         {
-            store_volatile(&storage_.values[lid], output);
+            storage_.values[lid] = output;
+            ::rocprim::wave_barrier();
             if((lid + i) <= last)
             {
-                T other = load_volatile(&storage_.values[lid + i]);
+                T other = storage_.values[lid + i];
                 output = reduce_op(output, other);
             }
+            ::rocprim::wave_barrier();
         }
     }
 
@@ -156,7 +172,7 @@ private:
     set_output(T& output, storage_type& storage)
     {
         storage_type_& storage_ = storage.get();
-        output = load_volatile(&storage_.values[0]);
+        output                  = storage_.values[0];
     }
 };
 
