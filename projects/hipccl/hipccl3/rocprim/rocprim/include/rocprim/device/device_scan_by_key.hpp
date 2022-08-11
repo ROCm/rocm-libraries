@@ -132,14 +132,15 @@ namespace detail
 
         constexpr unsigned int block_size       = config::block_size;
         constexpr unsigned int items_per_thread = config::items_per_thread;
-        constexpr auto         items_per_block  = block_size * items_per_thread;
+        constexpr unsigned int items_per_block  = block_size * items_per_thread;
 
-        static constexpr size_t size_limit = config::size_limit;
-        static constexpr size_t aligned_size_limit
-            = ::rocprim::max<size_t>(size_limit - size_limit % items_per_block, items_per_block);
+        static constexpr unsigned int size_limit = config::size_limit;
+        static constexpr unsigned int aligned_size_limit
+            = std::max(size_limit - size_limit % items_per_block, items_per_block);
 
-        const size_t limited_size     = std::min<size_t>(size, aligned_size_limit);
-        const bool   use_limited_size = limited_size == aligned_size_limit;
+        const unsigned int limited_size
+            = static_cast<unsigned int>(std::min<size_t>(size, aligned_size_limit));
+        const bool use_limited_size = limited_size == aligned_size_limit;
 
         // Number of blocks in a single launch (or the only launch if it fits)
         const unsigned int number_of_blocks = ceiling_div(limited_size, items_per_block);
@@ -216,9 +217,13 @@ namespace detail
 
         for(size_t i = 0, offset = 0; i < number_of_launch; i++, offset += limited_size)
         {
-            const size_t current_size = std::min<size_t>(size - offset, limited_size);
-            const auto   scan_blocks  = ceiling_div(current_size, items_per_block);
-            const auto init_grid_size = ceiling_div(scan_blocks, block_size);
+            // limited_size is of type unsigned int, so current_size also fits in an unsigned int
+            // size_t is necessary as type of std::min because 'size - offset' can exceed the
+            // upper limit of unsigned int and converting it can lead to wrong results
+            const unsigned int current_size
+                = static_cast<unsigned int>(std::min<size_t>(size - offset, limited_size));
+            const unsigned int scan_blocks    = ceiling_div(current_size, items_per_block);
+            const unsigned int init_grid_size = ceiling_div(scan_blocks, block_size);
 
             // Start point for time measurements
             std::chrono::high_resolution_clock::time_point start;
@@ -250,25 +255,28 @@ namespace detail
             {
                 start = std::chrono::high_resolution_clock::now();
             }
-            with_scan_state([&](auto& scan_state) {
-                hipLaunchKernelGGL(HIP_KERNEL_NAME(device_scan_by_key_kernel<Exclusive, config>),
-                                   dim3(scan_blocks),
-                                   dim3(block_size),
-                                   0,
-                                   stream,
-                                   keys + offset,
-                                   input + offset,
-                                   output + offset,
-                                   initial_value,
-                                   compare,
-                                   scan_op,
-                                   scan_state,
-                                   size,
-                                   i * number_of_blocks,
-                                   total_number_of_blocks,
-                                   ordered_bid,
-                                   i > 0 ? previous_last_value : nullptr);
-            });
+            with_scan_state(
+                [&](auto& scan_state)
+                {
+                    hipLaunchKernelGGL(
+                        HIP_KERNEL_NAME(device_scan_by_key_kernel<Exclusive, config>),
+                        dim3(scan_blocks),
+                        dim3(block_size),
+                        0,
+                        stream,
+                        keys + offset,
+                        input + offset,
+                        output + offset,
+                        initial_value,
+                        compare,
+                        scan_op,
+                        scan_state,
+                        size,
+                        i * number_of_blocks,
+                        total_number_of_blocks,
+                        ordered_bid,
+                        i > 0 ? as_const_ptr(previous_last_value) : nullptr);
+                });
             ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(
                 "device_scan_by_key_kernel", current_size, start);
         }
