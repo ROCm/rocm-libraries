@@ -231,6 +231,11 @@ private:
             const bool local_dir = ((base & group_size) > 0) != dir;
 
             ROCPRIM_UNROLL
+// Workaround to prevent the compiler thinking this is a 'Parallel Loop' on clang 15
+// because it leads to invalid code generation with `T` = `char` and `ItemsPerthread` = 4
+#if defined(__clang_major__) && __clang_major__ >= 15
+    #pragma clang loop vectorize(disable)
+#endif
             for(unsigned i = 0; i < offset; ++i) {
                 thread_swap(kv..., base + i, base + i + offset, local_dir, compare_function);
             }
