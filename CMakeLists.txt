@@ -365,6 +365,7 @@ set(
   test/unit/GPUInstructionInfoTest.cpp
   test/unit/GEMMTest.cpp
   test/unit/GeneratorTest.cpp
+  test/unit/HypergraphTest.cpp
   test/unit/InstructionTest.cpp
   test/unit/KernelArgumentsTest.cpp
   test/unit/KernelGraphTest.cpp

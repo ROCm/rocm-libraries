@@ -51,6 +51,7 @@ def parseArgs():
     parser.add_argument('--skip_base_build', action='store_true', help='Whether to skip the base image build.')
     parser.add_argument('--skip_user_build', action='store_true', help='Whether to skip the user image build.')
     parser.add_argument('--skip_container_run', action='store_true', help='Whether to skip launching the container.')
+    parser.add_argument('--pull', dest="base_build_extra_args", action='append_const', const="--pull", help='Whether to try to pull newer base images')
     parser.add_argument('command', nargs=argparse.REMAINDER)
 
     return parser.parse_args()

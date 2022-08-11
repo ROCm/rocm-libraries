@@ -222,4 +222,24 @@ namespace rocRollerTest
         EXPECT_THROW(func(), std::runtime_error);
     }
 
+    TEST(GeneratorTest, ToContainer)
+    {
+        auto g = range(0, 5, 1);
+
+        auto r = g.to<std::vector>();
+
+        std::vector<int> v = {0, 1, 2, 3, 4};
+
+        auto s = range(0, 5, 1).to<std::set>();
+
+        EXPECT_EQ(r, v);
+        EXPECT_EQ(s, std::set<int>(v.begin(), v.end()));
+
+        auto fibs  = fibonacci<int>();
+        auto fibs1 = Take(5, std::move(fibs)).to<std::vector>();
+
+        std::vector<int> fibsE1 = {1, 1, 2, 3, 5};
+        EXPECT_EQ(fibs1, fibsE1);
+    }
+
 }

@@ -149,7 +149,13 @@ namespace rocRoller
         iterator begin();
         iterator end();
 
-        void setDest(Register::Value& lhs);
+        /**
+         * Returns a `Container<T>` constructed with `begin()` and `end()` as arguments.
+         * Useful for storing the output of a Generator into e.g. a std::vector or std::set.
+         * Be careful that the Generator will exit and will not yield an infinite sequence.
+         */
+        template <template <typename...> typename Container>
+        Container<T> to();
 
     private:
         Handle m_coroutine;

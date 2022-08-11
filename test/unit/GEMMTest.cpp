@@ -34,6 +34,8 @@ namespace GEMMDriverTest
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMM)
     {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
+
         // D (MxN) = alpha * A (MxK) X B (KxN) + beta * C (MxN)
         int   M     = 512;
         int   N     = 512;

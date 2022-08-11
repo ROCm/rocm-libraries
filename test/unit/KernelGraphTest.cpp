@@ -82,6 +82,8 @@ namespace KernelGraphTest
             command->addOperation(std::make_shared<Operations::Operation>(std::move(store_C)));
             return command;
         }
+
+        void GPU_Translate04(bool reload);
     };
 
     class KernelGraphTest : public GenericContextFixture
@@ -656,7 +658,7 @@ namespace KernelGraphTest
         std::cout << TimerPool::CSV() << std::endl;
     }
 
-    void KernelGraphTestGPU_GPU_Translate04(std::shared_ptr<Context> context, bool reload)
+    void KernelGraphTestGPU::GPU_Translate04(bool reload)
     {
         RandomGenerator random(1263u);
 
@@ -701,7 +703,7 @@ namespace KernelGraphTest
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
             rocRoller::Operations::T_Store_Linear(1, 6)));
 
-        CommandKernel commandKernel(command, "Translate04");
+        CommandKernel commandKernel(command, testKernelName());
 
         KernelArguments runtimeArgs;
 
@@ -726,13 +728,11 @@ namespace KernelGraphTest
         commandKernel.launchKernel(runtimeArgs.runtimeArguments());
 
         // launch again, using saved assembly
-        auto assemblyFileName
-            = "Translate04_" + context->targetArchitecture().target().ToString() + ".s";
-        std::replace(assemblyFileName.begin(), assemblyFileName.end(), ':', '-');
+        auto assemblyFileName = m_context->assemblyFileName();
 
         if(reload)
         {
-            commandKernel.loadKernelFromAssembly(assemblyFileName, "Translate04");
+            commandKernel.loadKernelFromAssembly(assemblyFileName, testKernelName());
             commandKernel.launchKernel(runtimeArgs.runtimeArguments());
         }
 
@@ -757,7 +757,7 @@ namespace KernelGraphTest
 
             // load, using non-existant file
             EXPECT_THROW(
-                commandKernel.loadKernelFromAssembly(assemblyFileName + "_bad", "Translate04"),
+                commandKernel.loadKernelFromAssembly(assemblyFileName + "_bad", testKernelName()),
                 FatalError);
 
             std::filesystem::remove(assemblyFileName);
@@ -766,12 +766,12 @@ namespace KernelGraphTest
 
     TEST_F(KernelGraphTestGPU, GPU_Translate04)
     {
-        KernelGraphTestGPU_GPU_Translate04(m_context, false);
+        GPU_Translate04(false);
     }
 
     TEST_F(KernelGraphTestGPU, GPU_Translate04LoadAssembly)
     {
-        KernelGraphTestGPU_GPU_Translate04(m_context, true);
+        GPU_Translate04(true);
     }
 
     TEST_F(KernelGraphTestGPU, GPU_Translate05)

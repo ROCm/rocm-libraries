@@ -268,8 +268,12 @@ namespace rocRoller
     }
 
     template <std::movable T>
-    auto Generator<T>::setDest(Register::Value& lhs) -> void
+    template <template <typename...> typename Container>
+    Container<T> Generator<T>::to()
     {
-        throw std::runtime_error("Not implemented!");
+        auto b = begin();
+        auto e = end();
+        return Container<T>(b, e);
     }
+
 }
