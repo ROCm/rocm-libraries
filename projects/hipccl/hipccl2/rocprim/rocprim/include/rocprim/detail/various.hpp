@@ -29,6 +29,20 @@
 
 #include <hip/hip_runtime.h>
 
+// Check for c++ standard library features, in a backwards compatible manner
+#ifndef __has_include
+    #define __has_include(x) 0
+#endif
+
+#if __has_include(<version>) // version is only mandated in c++20
+    #include <version>
+    #if __cpp_lib_as_const >= 201510L
+        #include <utility>
+    #endif
+#else
+    #include <utility>
+#endif
+
 // TODO: Refactor when it gets crowded
 
 BEGIN_ROCPRIM_NAMESPACE
@@ -280,6 +294,30 @@ inline hipError_t memcpy_and_sync(
     }
     return hipStreamSynchronize(stream);
 #endif
+}
+
+#if __cpp_lib_as_const >= 201510L
+using ::std::as_const;
+#else
+template<typename T>
+constexpr std::add_const_t<T>& as_const(T& t) noexcept
+{
+    return t;
+}
+template<typename T>
+void as_const(const T&& t) = delete;
+#endif
+
+/// \brief Add `const` to the top level pointed to object type.
+///
+/// \tparam T type of the pointed object
+/// \param ptr the pointer to make constant
+/// \return ptr
+///
+template<typename T>
+constexpr std::add_const_t<T>* as_const_ptr(T* ptr)
+{
+    return ptr;
 }
 
 } // end namespace detail
