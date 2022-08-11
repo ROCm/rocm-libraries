@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -433,6 +433,11 @@ private:
         for(unsigned base = 0; base < ItemsPerThread; base += 2 * offset)
         {
             ROCPRIM_UNROLL
+// Workaround to prevent the compiler thinking this is a 'Parallel Loop' on clang 15
+// because it leads to invalid code generation with `T` = `char` and `ItemsPerthread` = 4
+#if defined(__clang_major__) && __clang_major__ >= 15
+    #pragma clang loop vectorize(disable)
+#endif
             for(unsigned i = 0; i < offset; ++i)
             {
                 thread_swap(kv..., dir, base + i, base + i + offset, compare_function);
