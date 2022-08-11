@@ -938,42 +938,6 @@ namespace rocRoller
         {
             m_name = std::move(name);
         }
-
-#if 0
-        Generator<Instruction> operator+(Value & a, Value & b)
-        {
-            using rocRoller::DataType;
-
-            auto type = a.dataType();
-            if(type == None) type = b.dataType();
-
-            switch(a.dataType())
-            {
-            case Float: co_yield Intructions::Add<Float>(a, b); break;
-            case Double: co_yield Intructions::Add<Double>(a, b); break;
-            case Double: co_yield Intructions::Add<Double>(a, b); break;
-            }
-        }
-
-        /// TODO: concept to restrict to acceptable types
-        template <std::
-        Generator<Instruction> operator+(Value & a, auto b)
-        {
-            auto bReg = Value::Literal(b);
-
-            co_yield a + bReg;
-        }
-
-        Generator<Instruction> operator+(auto a, Value & b)
-        {
-            auto aReg = Value::Literal(a);
-
-            co_yield aReg + b;
-
-            // alternate impl: co_yield b + a;
-        }
-#endif
-
     }
 
 }

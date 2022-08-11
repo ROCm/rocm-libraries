@@ -119,16 +119,5 @@ int main(int argc, const char* argv[])
     for(int i = 0; i < 4; i++)
         std::cout << foo.fdsa[i] << std::endl;
 
-#if 0
-    std::array<int, 4> x = {2};
-
-    for(int i = 0; i < 4; i++)
-        std::cout << x[i] << std::endl;
-
-    x = {1, 4, 5, 6, 7};
-
-    for(int i = 0; i < 4; i++)
-        std::cout << x[i] << std::endl;
-#endif
     return 0;
 }

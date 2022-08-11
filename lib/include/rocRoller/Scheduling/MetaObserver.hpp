@@ -44,26 +44,6 @@ namespace rocRoller
             virtual InstructionStatus observe(Instruction const& inst) override;
 
         private:
-#if 0
-            template <size_t Index> requires CanIndexTup
-            InstructionStatus peek_at(Instruction const& inst);
-
-            template <size_t Index> requires (Index < Size)
-            void modify_at(Instruction & inst);
-
-            template <size_t Index> requires (Index < Size)
-            InstructionStatus observe_at(Instruction const& inst);
-
-            template <size_t Index> requires (Index < Size)
-            InstructionStatus peek_above(Instruction const& inst);
-
-            template <size_t Index> requires (Index < (Size-1))
-            void modify_above(Instruction & inst);
-
-            template <size_t Index> requires (Index < (Size-1))
-            InstructionStatus observe_above(Instruction const& inst);
-#endif
-
             Tup m_tuple;
         };
 

@@ -9,20 +9,6 @@
 
 namespace rocRoller
 {
-
-#if 0
-    namespace Instructions
-    {
-
-        template <DataType D>
-        InstructionGenerator Add(std::shared_ptr<Register::Value> & a, std::shared_ptr<Register::Value> & b)
-        {
-            co_yield Instruction("v_add_u32", a.placeholder(), {a, b}, {});
-        }
-
-    }
-#endif
-
     namespace Scheduling
     {
 
