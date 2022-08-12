@@ -5,7 +5,7 @@ import itertools
 import re
 import utils
 
-"""
+DESCRIPTION = """
 This script converts a file containing AMD GPU machine code to C++ code using the
 Instruction class. It accepts a file name as an argument. This file should
 contain AMD GPU machine code. The generated C++ code will be printed to
@@ -21,18 +21,71 @@ special_registers = {"vcc" : "m_context->getVCC()",
                      "exec" : "m_context->getExec()"}
 
 # Generate C++ code for initializing all Registers that will be used
-def initialize_register(register):
-    (name, index, register_type, children) = register
-    if index is not None:
-        return ""
-    result = "auto " + name +  " = std::make_shared<Register::Value>(m_context, Register::Type::" + register_type + ", DataType::Int32, " + str(children) + ");\n"
-    if children > 1:
-        result += "co_yield " + name + "->allocate();\n"
-    return result
+def initialize_registers(registers):
+    retval = ""
+    for register in registers.values():
+        (name, index, register_type, children) = register
+        if index is not None:
+            continue
+        retval += "auto " + name +  " = std::make_shared<Register::Value>(m_context, Register::Type::" + register_type + ", DataType::Int32, " + str(children) + ");\n"
+        if children > 1:
+            retval += "co_yield " + name + "->allocate();\n"
+    return retval
+
+# Generate C++ code for declaring all Registers that will be used
+def declare_registers(registers):
+    retval = ""
+    for register in registers.values():
+        (name, index, register_type, children) = register
+        if index is not None:
+            continue
+        retval += "Register::ValuePtr {};\n".format(name)
+    return retval
+
+# Generate C++ code for defining all Registers that will be used
+def define_registers(registers):
+    retval = ""
+    for register in registers.values():
+        (name, index, register_type, children) = register
+        if index is not None:
+            continue
+        retval += "{} = std::make_shared<Register::Value>(m_context, Register::Type::{}, DataType::Int32, {});\n".format(name, register_type, str(children))
+    return retval
+
+# Generate C++ code for allocating all Registers that need to be allocated
+def allocate_registers(struct_name, registers):
+    retval = ""
+    for register in registers.values():
+        (name, index, register_type, children) = register
+        if index is not None:
+            continue
+        if children > 1:
+            retval += "co_yield {}.{}->allocate();\n".format(struct_name, name)
+    return retval
 
 # Generate C++ code for initializing all Labels that will be used
-def initialize_label(label, value):
-    return "auto " + value + " = m_context->labelAllocator()->label(\"" + label + "\");\n"
+def initialize_labels(labels):
+    retval = ""
+    for label in labels:
+        value = labels[label]
+        retval += "auto {} = m_context->labelAllocator()->label(\"{}\");\n".format(value, label)
+    return retval
+
+# Generate C++ code for declaring all Labels that will be used
+def declare_labels(labels):
+    retval = ""
+    for label in labels:
+        value = labels[label]
+        retval += "Register::ValuePtr  {};\n".format(value)
+    return retval
+
+# Generate C++ code defining all Labels that will be used
+def define_labels(labels):
+    retval = ""
+    for label in labels:
+        value = labels[label]
+        retval += "{}  = m_context->labelAllocator()->label(\"{}\");\n".format(value, label)
+    return retval
 
 # Find all of the registers and labels within a file and create
 # dictionaries to map between registers and labels within machine code
@@ -70,7 +123,6 @@ def find_registers(my_lines):
                         registers[arg] = (complete_register, None, register_type, 1)
                     counter += 1
     return registers
-
 def find_labels(my_lines, cli_args):
     counter = 0
     labels = dict()
@@ -84,6 +136,7 @@ def find_labels(my_lines, cli_args):
                 labels[my_line[:-1]] = "label_" + str(counter)
                 counter += 1
     return labels
+
 # Convert an argument from a machine code instruction to a Register::Value
 def convert_arg(arg, registers, labels):
     arg = arg.strip()
@@ -100,6 +153,161 @@ def convert_arg(arg, registers, labels):
     else:
         return "Register::Value::Special(\"" + arg + "\")"
 
+# Generate a CPP file with struct definition to generate the input machine code.
+def machineCodeToInstructionList(lines, cli_args, registers, labels):
+    result = """
+#include <string>
+
+#pragma GCC optimize("O0")
+
+#include <rocRoller/CodeGen/ArgumentLoader.hpp>
+#include <rocRoller/CodeGen/Arithmetic/MatrixMultiply.hpp>
+#include <rocRoller/CodeGen/BranchGenerator.hpp>
+#include <rocRoller/CodeGen/Instruction.hpp>
+#include <rocRoller/Context.hpp>
+#include <rocRoller/InstructionValues/LabelAllocator.hpp>
+#include <rocRoller/InstructionValues/Register.hpp>
+
+#include "GemmGuidePostKernels.hpp"
+
+using namespace rocRoller;
+
+namespace rocRollerTest
+{{
+    struct {name}
+    {{
+        ContextPtr m_context;
+""".format(name = cli_args.function_name)
+
+    result += declare_labels(labels)
+    result += declare_registers(registers)
+
+    result += """
+
+        {name}(ContextPtr context)
+            : m_context(context)
+        {{
+""".format(name = cli_args.function_name)
+
+    result += define_labels(labels)
+    result += define_registers(registers)
+
+    block_count = 0
+    result += """
+        }}
+
+        std::vector<Instruction> block{}()
+        {{
+
+            // clang-format off
+return {{
+""".format(block_count)
+
+    line_count = 0
+    in_macro = False
+    for line in lines:
+        in_macro, new_instruction = handleLine(in_macro, line, registers, labels)
+        if new_instruction:
+            result += new_instruction + ",\n"
+            line_count += 1
+        if line_count >= 100:
+            block_count += 1
+            line_count = 0
+            result += """
+}};
+            // clang-format on
+        }}
+
+        std::vector<Instruction> block{}()
+        {{
+            // clang-format off
+return {{
+""".format(block_count)
+
+
+    result += """
+}};
+            // clang-format on
+        }}
+    }};
+
+    Generator<Instruction> {name}_Program(ContextPtr context)
+    {{
+        {name} gen(context);
+""".format(name = cli_args.function_name)
+
+    result += allocate_registers(cli_args.function_name, registers)
+
+    for i in range(block_count):
+        result += "        for(auto const& inst : gen.block{}()) co_yield inst;\n".format(i)
+
+    result += """
+    }
+}
+"""
+    return result
+
+# Convert machine code to a sequence of co_yield statements.
+def machineCodeToCoYields(lines, cli_args, registers, labels):
+    result = ""
+    result += initialize_labels(labels)
+    result += initialize_registers(registers)
+    in_macro = False
+    for my_line in lines:
+        in_macro, new_instruction = handleLine(in_macro, my_line, registers, labels)
+        result += "co_yield_(" + new_instruction + ");\n"
+    return result
+
+# Convert a single line of machine code to an instruction.
+def handleLine(in_macro, my_line, registers, labels):
+    if in_macro or my_line.startswith(".macro"):
+        in_macro = True
+        new_instruction = "Instruction(\"" + my_line + "\", {}, {}, {}, \"\")"
+        if my_line == ".endm":
+            in_macro = False
+    elif my_line.startswith(".set"):
+        new_instruction = "Instruction(\"" + my_line + "\", {}, {}, {}, \"\")"
+    elif not my_line or my_line.startswith('.'):
+        return in_macro, ""
+    else:
+        if "//" in my_line:
+            code = my_line[0:my_line.find("//")].strip()
+            comment = my_line[my_line.find("//") + 2:]
+        elif "/*" in my_line:
+            code = utils.remove_between(my_line, "/*", "*/").strip()
+            comment = utils.get_between(my_line, "/*", "*/")
+        else:
+            code = my_line
+            comment = ""
+        if len(code) == 0:
+            if comment:
+                new_instruction = "Instruction::Comment(\"" + comment + "\")"
+            else:
+                return in_macro, ""
+        elif code[-1] == ":":
+            if code[:-1] in labels:
+                new_instruction = "Instruction::Label(" + labels[code[:-1]] + ")"
+            else:
+                new_instruction = "Instruction::Comment(\"" + code + comment + "\")"
+        else:
+            line_split = code.split(" ", 1)
+            instruction = line_split[0]
+            new_instruction = "Instruction(\"" + instruction + "\", "
+            if len(line_split) > 1:
+                args = line_split[1]
+                split_args = args.split(",")
+                converted_args = [convert_arg(arg, registers, labels) for arg in split_args]
+                converted_modifiers = ["\"{}\"".format(arg) for arg in split_args]
+                # If a label is the first argument, there will be no "destination" argument
+                if converted_args[0] in labels.values():
+                    new_instruction += "{{}}, {{{}}}, {{{}}}, ".format(", ".join(converted_args[0:4]), ", ".join(converted_modifiers[4:]))
+                else:
+                    new_instruction += "{{{}}}, {{{}}}, {{{}}}, ".format(converted_args[0], ", ".join(converted_args[1:5]), ", ".join(converted_modifiers[5:]))
+            else:
+                new_instruction += "{}, {}, {}, "
+            new_instruction += "\"" + comment + "\")"
+    return in_macro, new_instruction
+
 # Take a file containing AMD GPU machine code and print out C++ code using the
 # Instruction class.
 def machineCodeToInstructions(inputFile, cli_args):
@@ -108,111 +316,23 @@ def machineCodeToInstructions(inputFile, cli_args):
         my_lines = utils.clean_lines(my_lines, cli_args.leave_comments)
         result = ""
 
-        if cli_args.instruction_list:
-            result += """
-#pragma once
-
-#include <string>
-
-#include <rocRoller/Context.hpp>
-#include <rocRoller/LabelAllocator.hpp>
-#include <rocRoller/Instruction.hpp>
-#include <rocRoller/Register.hpp>
-
-using namespace rocRoller;
-
-inline std::vector<Instruction> {name}(std::shared_ptr<rocRoller::Context> m_context){{
-""".format(name = cli_args.function_name)
-
         labels = dict()
         if not cli_args.ignore_labels:
             labels = find_labels(my_lines, cli_args)
-
-            for label in labels:
-               result += initialize_label(label, labels[label])
-            result += "\n"
 
         registers = dict()
         if not cli_args.ignore_registers:
             registers = find_registers(my_lines)
 
-            for register in registers.values():
-               result += initialize_register(register)
-            result += "\n"
-
         if cli_args.instruction_list:
-            result += "// clang-format off\n"
-            result += "std::vector<Instruction> rv = {\n"
-
-        in_macro = False
-
-        for my_line in my_lines:
-            if in_macro or my_line.startswith(".macro"):
-                in_macro = True
-                new_instruction = "Instruction(\"" + my_line + "\", {}, {}, {}, \"\")"
-                if my_line == ".endm":
-                    in_macro = False
-            elif my_line.startswith(".set"):
-                new_instruction = "Instruction(\"" + my_line + "\", {}, {}, {}, \"\")"
-            elif not my_line or my_line.startswith('.'):
-                continue
-            #elif cli_args.direct_translate:
-            #    new_instruction = "Instruction(\"" + my_line + "\", {}, {}, {}, \"\")"
-            else:
-                if "//" in my_line:
-                    code = my_line[0:my_line.find("//")].strip()
-                    comment = my_line[my_line.find("//") + 2:]
-                elif "/*" in my_line:
-                    code = utils.remove_between(my_line, "/*", "*/").strip()
-                    comment = utils.get_between(my_line, "/*", "*/")
-                else:
-                    code = my_line
-                    comment = ""
-                if len(code) == 0:
-                    if comment:
-                        new_instruction = "Instruction::Comment(\"" + comment + "\")"
-                    else:
-                        continue
-                elif code[-1] == ":":
-                    if code[:-1] in labels:
-                        new_instruction = "Instruction::Label(" + labels[code[:-1]] + ")"
-                    else:
-                        new_instruction = "Instruction::Comment(\"" + code + comment + "\")"
-                else:
-                    line_split = code.split(" ", 1)
-                    instruction = line_split[0]
-                    new_instruction = "Instruction(\"" + instruction + "\", "
-                    if len(line_split) > 1:
-                        args = line_split[1]
-                        converted_args = [convert_arg(arg, registers, labels) for arg in args.split(",")]
-                        # If a label is the first argument, there will be no "destination" argument
-                        if converted_args[0] in labels.values():
-                            new_instruction += "{}, {"
-                            new_instruction += ", ".join(converted_args)
-                            new_instruction += "}, "
-                        else:
-                            new_instruction += "{" + converted_args[0] + "}, {"
-                            if len(converted_args) > 1:
-                                new_instruction += ", ".join(converted_args[1:])
-                            new_instruction += "}, "
-                    else:
-                        new_instruction += "{}, {}, "
-                    new_instruction += "{}, \"" + comment + "\")"
-            if cli_args.instruction_list:
-                result += new_instruction + ",\n"
-            else:
-                result += "co_yield_(" + new_instruction + ");\n"
-
-        if cli_args.instruction_list:
-            result += "};\n"
-            result += "// clang-format on\n"
-            result += "return rv;\n"
-            result += "}\n"
+            result += machineCodeToInstructionList(my_lines, cli_args, registers, labels)
+        else:
+            result += machineCodeToCoYields(my_lines, cli_args, registers, labels)
 
         print(result)
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Convert AMD GPU machine code to C++ code using the Instruction class')
+    parser = argparse.ArgumentParser(description=DESCRIPTION)
     parser.add_argument('input_file', type=str, default='a.s', help='File with AMD GPU machine code')
     parser.add_argument('--ignore_labels', action="store_true", help='Skip label detection.')
     parser.add_argument('--ignore_registers', action="store_true", help='Skip register detection.')
