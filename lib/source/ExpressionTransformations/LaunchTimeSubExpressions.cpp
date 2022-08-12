@@ -25,7 +25,7 @@ namespace rocRoller
          * TODO: Apply this to every expression by working backward from the kernel argument.
          *
          * Challenge: Applying this to the same expression twice will add two kernel arguments.  This is inefficient.
-         * TODO: Identify expressions that already have kernel arguments and reuse them.
+         * We identify expressions that already have kernel arguments and reuse them.
          */
 
         struct LaunchTimeExpressionVisitor
@@ -38,15 +38,24 @@ namespace rocRoller
             template <typename T>
             ExpressionPtr launchEval(T const& expr)
             {
-                auto k = m_context->kernel();
+                ExpressionPtr exPtr  = std::make_shared<Expression>(expr);
+                auto          kernel = m_context->kernel();
+                for(auto const& arg : kernel->arguments())
+                {
+                    if(identical(arg.expression, exPtr))
+                    {
+                        return std::make_shared<Expression>(
+                            std::make_shared<AssemblyKernelArgument>(arg));
+                    }
+                }
 
-                auto argName = concatenate("LAUNCH_", k->arguments().size());
-                auto resType = resultType(expr);
-                auto exPtr   = std::make_shared<Expression>(expr);
-                k->addArgument({argName, resType.second, DataDirection::ReadOnly, exPtr});
+                // If no existing expressions matches:
+                std::string argName = concatenate("LAUNCH_", kernel->arguments().size());
+                auto        resType = resultType(expr);
+                kernel->addArgument({argName, resType.second, DataDirection::ReadOnly, exPtr});
 
                 return std::make_shared<Expression>(
-                    std::make_shared<AssemblyKernelArgument>(k->findArgument(argName)));
+                    std::make_shared<AssemblyKernelArgument>(kernel->findArgument(argName)));
             }
 
             template <CTernary Expr>

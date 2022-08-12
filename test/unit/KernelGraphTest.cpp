@@ -61,7 +61,7 @@ namespace KernelGraphTest
             CurrentGPUContextFixture::TearDown();
         }
 
-        static std::shared_ptr<Command> commonCommmand()
+        static std::shared_ptr<Command> commonCommand()
         {
             auto command = std::make_shared<rocRoller::Command>();
 
@@ -91,9 +91,9 @@ namespace KernelGraphTest
     public:
         Expression::FastArithmetic fastArith{m_context};
 
-        static std::shared_ptr<Command> commonCommmand()
+        static std::shared_ptr<Command> commonCommand()
         {
-            return KernelGraphTestGPU::commonCommmand();
+            return KernelGraphTestGPU::commonCommand();
         }
     };
 
@@ -102,9 +102,41 @@ namespace KernelGraphTest
     {
     };
 
+    TEST_P(KernelGraphTestGPULoopSize, MissingWorkitemCount)
+    {
+        auto command = commonCommand();
+
+        m_context->kernel()->addCommandArguments(command->getArguments());
+
+        int workGroupSize = 64;
+        m_context->kernel()->setKernelDimensions(1);
+        m_context->kernel()->setWorkgroupSize({64, 1, 1});
+
+        int  loopSize     = GetParam();
+        auto loopSizeExpr = Expression::literal(loopSize);
+
+        auto one          = Expression::literal(1u);
+        auto extent       = std::make_shared<Expression::Expression>(command->getArguments()[1]);
+        auto numWorkitems = extent / loopSizeExpr;
+
+        ASSERT_THROW(
+            {
+                auto kgraph = KernelGraph::translate(command);
+
+                kgraph = KernelGraph::lowerLinear(kgraph, m_context);
+
+                kgraph = KernelGraph::lowerLinearLoop(kgraph, loopSizeExpr, m_context);
+
+                kgraph = KernelGraph::cleanArguments(kgraph, m_context->kernel());
+
+                m_context->kernel()->setWorkitemCount({numWorkitems, one, one});
+            },
+            FatalError);
+    }
+
     TEST_P(KernelGraphTestGPULoopSize, TestForLoop)
     {
-        auto command = commonCommmand();
+        auto command = commonCommand();
 
         m_context->kernel()->addCommandArguments(command->getArguments());
 
@@ -121,6 +153,8 @@ namespace KernelGraphTest
 
         m_context->kernel()->setWorkitemCount({numWorkitems, one, one});
 
+        size_t origArgSize = m_context->kernel()->arguments().size();
+
         auto kgraph = KernelGraph::translate(command);
 
         kgraph = KernelGraph::lowerLinear(kgraph, m_context);
@@ -128,6 +162,9 @@ namespace KernelGraphTest
         kgraph = KernelGraph::lowerLinearLoop(kgraph, loopSizeExpr, m_context);
 
         kgraph = KernelGraph::cleanArguments(kgraph, m_context->kernel());
+
+        EXPECT_EQ(m_context->kernel()->arguments().size(), origArgSize + 1);
+        ASSERT_NO_THROW(m_context->kernel()->findArgument("LAUNCH_WORKGROUPCOUNT_0"));
 
         CommandKernel commandKernel(command, m_context, kgraph);
 
@@ -189,7 +226,7 @@ namespace KernelGraphTest
 
     TEST_F(KernelGraphTestGPU, TestKernelUnroll)
     {
-        auto command = commonCommmand();
+        auto command = commonCommand();
 
         m_context->kernel()->addCommandArguments(command->getArguments());
 
@@ -265,7 +302,7 @@ namespace KernelGraphTest
 
     TEST_F(KernelGraphTestGPU, TestKernelUnrollAndLoop)
     {
-        auto command = commonCommmand();
+        auto command = commonCommand();
 
         m_context->kernel()->addCommandArguments(command->getArguments());
 
@@ -343,7 +380,7 @@ namespace KernelGraphTest
 
     TEST_F(KernelGraphTest, Translate01)
     {
-        auto command = commonCommmand();
+        auto command = commonCommand();
 
         auto kgraph0 = KernelGraph::translate(command);
 
@@ -396,19 +433,19 @@ namespace KernelGraphTest
           digraph {
            { "User{0, NA, i}" } -> { "SubDimension{0, 0, CommandArgument(Load_Linear_0_size_0), i}" } [color=blue label="Split"]
            { "SubDimension{0, 0, CommandArgument(Load_Linear_0_size_0), i}" } -> { "Linear{0, CommandArgument(Load_Linear_0_size_0), i}" } [color=blue label="Flatten"]
-           { "Linear{0, CommandArgument(Load_Linear_0_size_0), i}" } -> { "Workgroup{0, 0, LAUNCH_0, i}", "Workitem{0, 0, 32j, i}" } [color=blue label="Tile"]
-           { "Workgroup{0, 0, LAUNCH_0, i}", "Workitem{0, 0, 32j, i}" } -> { "VGPR{0, NA, i}" } [color=blue label="Forget"]
+           { "Linear{0, CommandArgument(Load_Linear_0_size_0), i}" } -> { "Workgroup{0, 0, LAUNCH_WORKGROUPCOUNT_0, i}", "Workitem{0, 0, 32j, i}" } [color=blue label="Tile"]
+           { "Workgroup{0, 0, LAUNCH_WORKGROUPCOUNT_0, i}", "Workitem{0, 0, 32j, i}" } -> { "VGPR{0, NA, i}" } [color=blue label="Forget"]
            { "User{0, NA, i}" } -> { "VGPR{0, NA, i}" } [color=red label="DataFlow"]
            { "User{2, NA, i}" } -> { "SubDimension{2, 0, CommandArgument(Load_Linear_2_size_0), i}" } [color=blue label="Split"]
            { "SubDimension{2, 0, CommandArgument(Load_Linear_2_size_0), i}" } -> { "Linear{2, CommandArgument(Load_Linear_2_size_0), i}" } [color=blue label="Flatten"]
-           { "Linear{2, CommandArgument(Load_Linear_2_size_0), i}" } -> { "Workgroup{2, 0, LAUNCH_1, i}", "Workitem{2, 0, 32j, i}" } [color=blue label="Tile"]
-           { "Workgroup{2, 0, LAUNCH_1, i}", "Workitem{2, 0, 32j, i}" } -> { "VGPR{2, NA, i}" } [color=blue label="Forget"]
+           { "Linear{2, CommandArgument(Load_Linear_2_size_0), i}" } -> { "Workgroup{2, 0, LAUNCH_WORKGROUPCOUNT_0, i}", "Workitem{2, 0, 32j, i}" } [color=blue label="Tile"]
+           { "Workgroup{2, 0, LAUNCH_WORKGROUPCOUNT_0, i}", "Workitem{2, 0, 32j, i}" } -> { "VGPR{2, NA, i}" } [color=blue label="Forget"]
            { "User{2, NA, i}" } -> { "VGPR{2, NA, i}" } [color=red label="DataFlow"]
            { "VGPR{0, NA, i}", "VGPR{2, NA, i}" } -> { "VGPR{3, NA, i}" } [color=red label="DataFlow"]
            { "VGPR{3, NA, i}" } -> { "VGPR{4, NA, i}" } [color=red label="DataFlow"]
            { "VGPR{3, NA, i}", "VGPR{4, NA, i}" } -> { "VGPR{5, NA, i}" } [color=red label="DataFlow"]
-           { "VGPR{5, NA, i}" } -> { "Workgroup{5, 0, LAUNCH_2, o}", "Workitem{5, 0, 32j, o}" } [color=blue label="Inherit"]
-           { "Workgroup{5, 0, LAUNCH_2, o}", "Workitem{5, 0, 32j, o}" } -> { "Linear{5, NA, o}" } [color=blue label="Flatten"]
+           { "VGPR{5, NA, i}" } -> { "Workgroup{5, 0, LAUNCH_WORKGROUPCOUNT_0, o}", "Workitem{5, 0, 32j, o}" } [color=blue label="Inherit"]
+           { "Workgroup{5, 0, LAUNCH_WORKGROUPCOUNT_0, o}", "Workitem{5, 0, 32j, o}" } -> { "Linear{5, NA, o}" } [color=blue label="Flatten"]
            { "Linear{5, NA, o}" } -> { "SubDimension{5, 0, NA, o}" } [color=blue label="Split"]
            { "SubDimension{5, 0, NA, o}" } -> { "User{5, NA, o}" } [color=blue label="Join"]
            { "VGPR{5, NA, i}" } -> { "User{5, NA, o}" } [color=red label="DataFlow"]
@@ -476,7 +513,7 @@ namespace KernelGraphTest
 
     TEST_F(KernelGraphTest, Translate02)
     {
-        auto command = commonCommmand();
+        auto command = commonCommand();
 
         auto one = Expression::literal(1);
         m_context->kernel()->setWorkgroupSize({64, 1, 1});

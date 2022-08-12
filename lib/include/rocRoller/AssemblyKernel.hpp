@@ -136,7 +136,7 @@ namespace rocRoller
         size_t argumentSize() const;
 
         std::array<unsigned int, 3> const&              workgroupSize() const;
-        std::array<Expression::ExpressionPtr, 3>        workgroupCount() const;
+        Expression::ExpressionPtr                       workgroupCount(size_t index);
         std::array<Expression::ExpressionPtr, 3> const& workitemCount() const;
         Expression::ExpressionPtr const&                dynamicSharedMemBytes() const;
 
@@ -169,6 +169,7 @@ namespace rocRoller
 
         std::array<unsigned int, 3>              m_workgroupSize = {1, 1, 1};
         std::array<Expression::ExpressionPtr, 3> m_workitemCount;
+        std::array<Expression::ExpressionPtr, 3> m_workgroupCount;
         Expression::ExpressionPtr                m_dynamicSharedMemBytes;
 
         Register::ValuePtr                m_argumentPointer;

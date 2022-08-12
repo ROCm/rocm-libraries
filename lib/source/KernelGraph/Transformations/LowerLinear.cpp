@@ -73,7 +73,7 @@ namespace rocRoller
 
                 auto wg   = CoordinateTransform::Workgroup(load.linear.tag);
                 wg.stride = workgroupSize()[0];
-                wg.size   = launchTimeSubExpressions(workgroupCount()[0], m_context);
+                wg.size   = workgroupCountX();
 
                 auto wi = CoordinateTransform::Workitem(load.linear.tag, 0, wavefront_size);
 
@@ -99,7 +99,7 @@ namespace rocRoller
 
                 auto wg   = CoordinateTransform::Workgroup(linear.tag, 0, true);
                 wg.stride = workgroupSize()[0];
-                wg.size   = launchTimeSubExpressions(workgroupCount()[0], m_context);
+                wg.size   = workgroupCountX();
 
                 auto wi = CoordinateTransform::Workitem(linear.tag, 0, wavefront_size, true);
 

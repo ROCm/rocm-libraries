@@ -97,9 +97,19 @@ namespace rocRoller
                 };
             }
 
-            std::array<Expression::ExpressionPtr, 3> workgroupCount() const
+            Expression::ExpressionPtr workgroupCountX() const
             {
-                return m_context->kernel()->workgroupCount();
+                return m_context->kernel()->workgroupCount(0);
+            }
+
+            Expression::ExpressionPtr workgroupCountY() const
+            {
+                return m_context->kernel()->workgroupCount(1);
+            }
+
+            Expression::ExpressionPtr workgroupCountZ() const
+            {
+                return m_context->kernel()->workgroupCount(2);
             }
 
             MAKE_EDGE_VISITOR(ConstructMacroTile);

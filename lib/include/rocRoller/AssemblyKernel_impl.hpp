@@ -170,10 +170,8 @@ namespace rocRoller
 
     inline void AssemblyKernel::addArgument(AssemblyKernelArgument arg)
     {
-        if(m_argumentNames.find(arg.name) != m_argumentNames.end())
-        {
-            throw std::runtime_error("Error: Two arguments with the same name: " + arg.name);
-        }
+        AssertFatal(m_argumentNames.find(arg.name) == m_argumentNames.end(),
+                    "Error: Two arguments with the same name: " + arg.name);
 
         auto const& typeInfo = DataTypeInfo::Get(arg.variableType);
 
@@ -206,8 +204,7 @@ namespace rocRoller
     inline AssemblyKernelArgument const& AssemblyKernel::findArgument(std::string const& name) const
     {
         auto iter = m_argumentNames.find(name);
-        if(iter == m_argumentNames.end())
-            throw std::runtime_error("Could not find argument with name " + name);
+        AssertFatal(iter != m_argumentNames.end(), "Could not find argument with name " + name);
 
         return m_arguments.at(iter->second);
     }
@@ -217,14 +214,23 @@ namespace rocRoller
         return m_workgroupSize;
     }
 
-    inline std::array<Expression::ExpressionPtr, 3> AssemblyKernel::workgroupCount() const
+    inline Expression::ExpressionPtr AssemblyKernel::workgroupCount(size_t index)
     {
-        std::array<Expression::ExpressionPtr, 3> result = {
-            m_workitemCount[0] / Expression::literal(m_workgroupSize[0]),
-            m_workitemCount[1] / Expression::literal(m_workgroupSize[1]),
-            m_workitemCount[2] / Expression::literal(m_workgroupSize[2]),
-        };
-        return result;
+        if(m_workgroupCount.at(index) == nullptr)
+        {
+            AssertFatal(m_workitemCount[index] != nullptr, "Workitem Count does not exist");
+
+            Expression::ExpressionPtr exPtr
+                = m_workitemCount[index] / Expression::literal(m_workgroupSize[index]);
+
+            std::string argName = concatenate("LAUNCH_WORKGROUPCOUNT_", index);
+            auto        resType = Expression::resultType(exPtr);
+            addArgument({argName, resType.second, DataDirection::ReadOnly, exPtr});
+
+            m_workgroupCount[index] = std::make_shared<Expression::Expression>(
+                std::make_shared<AssemblyKernelArgument>(findArgument(argName)));
+        }
+        return m_workgroupCount[index];
     }
 
     inline std::array<Expression::ExpressionPtr, 3> const& AssemblyKernel::workitemCount() const
@@ -240,7 +246,9 @@ namespace rocRoller
     inline void AssemblyKernel::setWorkgroupSize(std::array<unsigned int, 3> const& val)
     {
         for(auto const& v : val)
+        {
             AssertFatal(v != 0);
+        }
         m_workgroupSize = val;
     }
 
