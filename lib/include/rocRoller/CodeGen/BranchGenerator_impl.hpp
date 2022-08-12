@@ -28,6 +28,12 @@ namespace rocRoller
     {
         AssertFatal(destLabel->regType() == Register::Type::Label,
                     "Branch target must be a label.");
+
+        auto ctx = m_context.lock();
+        if(ctx->kernelOptions().alwaysWaitBeforeBranch)
+            co_yield Instruction::Wait(
+                WaitCount::Zero("DEBUG: Wait before Branch", ctx->targetArchitecture()));
+
         co_yield_(Instruction("s_branch", {}, {destLabel}, {}, comment));
     }
 
@@ -70,6 +76,9 @@ namespace rocRoller
             conditionType     = zero ? "0" : "1";
             conditionLocation = "scc";
         }
+        if(context->kernelOptions().alwaysWaitBeforeBranch)
+            co_yield Instruction::Wait(
+                WaitCount::Zero("DEBUG: Wait before Branch", context->targetArchitecture()));
         co_yield_(Instruction(concatenate("s_cbranch_", conditionLocation, conditionType),
                               {},
                               {destLabel},

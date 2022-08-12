@@ -11,6 +11,7 @@ namespace rocRoller
         LogLevel logLevel;
         bool     alwaysWaitAfterLoad;
         bool     alwaysWaitAfterStore;
+        bool     alwaysWaitBeforeBranch;
         bool     preloadKernelArguments;
 
         std::string          toString() const;

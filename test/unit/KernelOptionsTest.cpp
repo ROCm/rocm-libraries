@@ -20,4 +20,5 @@ TEST_F(KernelOptionsTest, ToString)
     EXPECT_THAT(output, testing::HasSubstr("Kernel Options:"));
     EXPECT_THAT(output, testing::HasSubstr("  logLevel:"));
     EXPECT_THAT(output, testing::HasSubstr("  alwaysWaitAfterLoad:"));
+    EXPECT_THAT(output, testing::HasSubstr("  alwaysWaitBeforeBranch:"));
 }

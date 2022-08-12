@@ -8,6 +8,7 @@ namespace rocRoller
         : logLevel(LogLevel::Verbose)
         , alwaysWaitAfterLoad(false)
         , alwaysWaitAfterStore(false)
+        , alwaysWaitBeforeBranch(true)
         , preloadKernelArguments(true)
     {
     }
@@ -18,6 +19,7 @@ namespace rocRoller
         os << "  logLevel:\t\t" << input.logLevel << std::endl;
         os << "  alwaysWaitAfterLoad:\t" << input.alwaysWaitAfterLoad << std::endl;
         os << "  alwaysWaitAfterStore:\t" << input.alwaysWaitAfterStore << std::endl;
+        os << "  alwaysWaitBeforeBranch:\t" << input.alwaysWaitBeforeBranch << std::endl;
         os << "  preloadKernelArguments:\t" << input.preloadKernelArguments << std::endl;
         return os;
     }

@@ -13,6 +13,7 @@
 #include <rocRoller/InstructionValues/LabelAllocator.hpp>
 #include <rocRoller/KernelArguments.hpp>
 #include <rocRoller/Operations/Command.hpp>
+#include <rocRoller/Scheduling/Scheduler.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Generator.hpp>
 
@@ -95,6 +96,60 @@ namespace rocRollerTest
 
         std::vector<char> assembledKernel = m_context->instructions()->assemble();
         EXPECT_GT(assembledKernel.size(), 0);
+    }
+
+    TEST_P(ARCH_BranchGeneratorTest, Wait)
+    {
+        auto k = m_context->kernel();
+
+        m_context->schedule(k->preamble());
+        m_context->schedule(k->prolog());
+
+        auto kb = [&]() -> Generator<Instruction> {
+            auto l0 = m_context->labelAllocator()->label("l0");
+            co_yield_(Instruction::Label(l0));
+            co_yield m_context->brancher()->branch(l0);
+        };
+
+        std::string expected = std::string("s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0)")
+                               + std::string("\n") + std::string("s_branch");
+
+        auto scheduler = Component::Get<Scheduling::Scheduler>(
+            Scheduling::SchedulerProcedure::Sequential, m_context);
+        std::vector<Generator<Instruction>> generators;
+        generators.push_back(kb());
+        m_context->schedule((*scheduler)(generators));
+        if(m_context->targetArchitecture().target().getMajorVersion() != 9)
+            GTEST_SKIP() << "Skipping BranchGeneratorWait tests for " << GetParam();
+        auto found = NormalizedSource(output()).find(expected) != std::string::npos;
+        EXPECT_EQ(found, true);
+    }
+
+    TEST_P(ARCH_BranchGeneratorTest, NoWait)
+    {
+        auto k = m_context->kernel();
+
+        m_context->schedule(k->preamble());
+        m_context->schedule(k->prolog());
+        m_context->kernelOptions().alwaysWaitBeforeBranch = false;
+        auto kb                                           = [&]() -> Generator<Instruction> {
+            auto l0 = m_context->labelAllocator()->label("l0");
+            co_yield_(Instruction::Label(l0));
+            co_yield m_context->brancher()->branch(l0);
+        };
+
+        std::string expected = std::string("s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0)")
+                               + std::string("\n") + std::string("s_branch");
+
+        auto scheduler = Component::Get<Scheduling::Scheduler>(
+            Scheduling::SchedulerProcedure::Sequential, m_context);
+        std::vector<Generator<Instruction>> generators;
+        generators.push_back(kb());
+        m_context->schedule((*scheduler)(generators));
+        if(m_context->targetArchitecture().target().getMajorVersion() != 9)
+            GTEST_SKIP() << "Skipping BranchGeneratorWait tests for " << GetParam();
+        auto found = NormalizedSource(output()).find(expected) != std::string::npos;
+        EXPECT_EQ(found, false);
     }
 
     INSTANTIATE_TEST_SUITE_P(
