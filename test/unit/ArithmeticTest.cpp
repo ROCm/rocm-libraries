@@ -5,6 +5,7 @@
 #include <memory>
 
 #include <rocRoller/CodeGen/Arithmetic.hpp>
+#include <rocRoller/CodeGen/Arithmetic/ArithmeticGenerator.hpp>
 #include <rocRoller/CodeGen/Arithmetic/Double.hpp>
 #include <rocRoller/CodeGen/Arithmetic/Float.hpp>
 #include <rocRoller/CodeGen/Arithmetic/Int32.hpp>
@@ -111,7 +112,7 @@ namespace ArithmeticTest
             co_yield m_context->copier()->copy(v_b, s_b, "Move value");
             co_yield m_context->copier()->copy(v_shift, s_shift, "Move value");
 
-            co_yield arith->add(v_c, v_a, v_b);
+            co_yield generateOp<Expression::Add>(v_c, v_a, v_b);
             co_yield m_context->mem()->storeFlat(v_result, v_c, "0", 4);
 
             co_yield arith->sub(v_c, v_a, v_b);
@@ -138,7 +139,7 @@ namespace ArithmeticTest
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(24), 4);
 
-            co_yield arith->signedShiftR(v_c, v_a, v_b);
+            co_yield generateOp<Expression::SignedShiftR>(v_c, v_a, v_b);
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(28), 4);
 
@@ -343,7 +344,7 @@ namespace ArithmeticTest
 
             co_yield m_context->copier()->copy(v_result, s_result, "Move pointer");
 
-            co_yield arith->add(s_c, s_a, s_b);
+            co_yield generateOp<Expression::Add>(s_c, s_a, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->storeFlat(v_result, v_c, "", 4);
 
@@ -377,7 +378,7 @@ namespace ArithmeticTest
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(24), 4);
 
-            co_yield arith->signedShiftR(s_c, s_a, s_b);
+            co_yield generateOp<Expression::SignedShiftR>(s_c, s_a, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(28), 4);
@@ -635,7 +636,7 @@ namespace ArithmeticTest
 
             co_yield m_context->copier()->copy(v_shift, s_sh, "Move value");
 
-            co_yield arith->add(v_c, v_a, v_b);
+            co_yield generateOp<Expression::Add>(v_c, v_a, v_b);
             co_yield m_context->mem()->storeFlat(v_result, v_c, "", 8);
 
             co_yield arith->sub(v_c, v_a, v_b);
@@ -711,6 +712,10 @@ namespace ArithmeticTest
             co_yield arith->shiftLAdd(v_c, v_a, v_shift, v_b);
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(128), 8);
+
+            co_yield generateOp<Expression::SignedShiftR>(v_c, v_a, v_b);
+            co_yield m_context->mem()->store(
+                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(136), 8);
         };
 
         m_context->schedule(kb());
@@ -736,7 +741,7 @@ namespace ArithmeticTest
                 {
                     for(uint64_t shift : TestValues::shiftValues)
                     {
-                        std::vector<int64_t> result(17);
+                        std::vector<int64_t> result(18);
                         auto                 d_result = make_shared_device<int64_t>(result.size());
 
                         KernelArguments runtimeArgs;
@@ -778,6 +783,10 @@ namespace ArithmeticTest
                             << "a: " << a << ", b: " << b << ", shift: " << shift;
                         EXPECT_EQ(result[16], (a << shift) + b)
                             << "a: " << a << ", shift: " << shift << ", b: " << b;
+                        if(b < 64 && b >= 0)
+                        {
+                            EXPECT_EQ(result[17], a >> b) << "a: " << a << ", b: " << b;
+                        }
                     }
                 }
             }
@@ -852,7 +861,7 @@ namespace ArithmeticTest
 
             co_yield m_context->copier()->copy(v_result, s_result, "Move pointer");
 
-            co_yield arith->add(s_c, s_a, s_b);
+            co_yield generateOp<Expression::Add>(s_c, s_a, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->storeFlat(v_result, v_c, "", 8);
 
@@ -935,6 +944,11 @@ namespace ArithmeticTest
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(128), 8);
+
+            co_yield generateOp<Expression::SignedShiftR>(s_c, s_a, s_b);
+            co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
+            co_yield m_context->mem()->store(
+                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(136), 8);
         };
 
         m_context->schedule(kb());
@@ -950,7 +964,7 @@ namespace ArithmeticTest
         {
             CommandKernel commandKernel(m_context);
 
-            auto d_result = make_shared_device<int64_t>(17);
+            auto d_result = make_shared_device<int64_t>(18);
             static_assert(sizeof(int64_t) == 8);
 
             for(int64_t a : TestValues::int64Values)
@@ -967,7 +981,7 @@ namespace ArithmeticTest
 
                         commandKernel.launchKernel(runtimeArgs.runtimeArguments());
 
-                        std::vector<int64_t> result(17);
+                        std::vector<int64_t> result(18);
                         ASSERT_THAT(hipMemcpy(result.data(),
                                               d_result.get(),
                                               result.size() * sizeof(int64_t),
@@ -999,6 +1013,10 @@ namespace ArithmeticTest
                             << "a: " << a << ", b: " << b << ", shift: " << shift;
                         EXPECT_EQ(result[16], (a << shift) + b)
                             << "a: " << a << ", shift: " << shift << ", b: " << b;
+                        if(b < 64 && b >= 0)
+                        {
+                            EXPECT_EQ(result[17], a >> b) << "a: " << a << ", b: " << b;
+                        }
                     }
                 }
             }
@@ -1090,7 +1108,7 @@ namespace ArithmeticTest
             co_yield m_context->copier()->copy(v_a, s_a, "Move value");
             co_yield m_context->copier()->copy(v_b, s_b, "Move value");
 
-            co_yield arith->add(v_c, v_a, v_b);
+            co_yield generateOp<Expression::Add>(v_c, v_a, v_b);
             co_yield m_context->mem()->storeFlat(v_result, v_c, "", 4);
 
             co_yield arith->sub(v_c, v_a, v_b);
@@ -1276,7 +1294,7 @@ namespace ArithmeticTest
             co_yield m_context->copier()->copy(v_a, s_a, "Move value");
             co_yield m_context->copier()->copy(v_b, s_b, "Move value");
 
-            co_yield arith->add(v_c, v_a, v_b);
+            co_yield generateOp<Expression::Add>(v_c, v_a, v_b);
             co_yield m_context->mem()->storeFlat(v_result, v_c, "", 8);
 
             co_yield arith->sub(v_c, v_a, v_b);

@@ -67,11 +67,6 @@ namespace rocRoller
                    std::shared_ptr<Register::Value> shiftAmount) final override;
 
         virtual Generator<Instruction>
-            signedShiftR(std::shared_ptr<Register::Value> dest,
-                         std::shared_ptr<Register::Value> value,
-                         std::shared_ptr<Register::Value> shiftAmount) final override;
-
-        virtual Generator<Instruction>
             addShiftL(std::shared_ptr<Register::Value> dest,
                       std::shared_ptr<Register::Value> lhs,
                       std::shared_ptr<Register::Value> rhs,
@@ -174,11 +169,6 @@ namespace rocRoller
             shiftR(std::shared_ptr<Register::Value> dest,
                    std::shared_ptr<Register::Value> value,
                    std::shared_ptr<Register::Value> shiftAmount) final override;
-
-        virtual Generator<Instruction>
-            signedShiftR(std::shared_ptr<Register::Value> dest,
-                         std::shared_ptr<Register::Value> value,
-                         std::shared_ptr<Register::Value> shiftAmount) final override;
 
         virtual Generator<Instruction>
             addShiftL(std::shared_ptr<Register::Value> dest,

@@ -28,7 +28,10 @@ namespace rocRoller
             Generator<Instruction> callArithmeticBinary(ArithmeticPtr const&      arith,
                                                         Register::ValuePtr const& dest,
                                                         Register::ValuePtr const& lhs,
-                                                        Register::ValuePtr const& rhs);
+                                                        Register::ValuePtr const& rhs)
+            {
+                Throw<FatalError>("Unsupported callArithmeticBinaryOperation");
+            }
 
             template <typename Operation>
             Generator<Instruction> callArithmeticTernary(ArithmeticPtr const&      arith,
@@ -78,6 +81,13 @@ namespace rocRoller
                     if constexpr(std::same_as<MultiplyHigh, Operation>)
                         dest = Register::Value::Placeholder(
                             m_context, dest->regType(), DataType::Int32, dest->valueCount());
+                }
+
+                auto generator = GetGenerator<Operation>(dest, lhsResult, rhsResult);
+                if(generator)
+                {
+                    co_yield generator->generate(dest, lhsResult, rhsResult);
+                    co_return;
                 }
 
                 ArithmeticPtr arith;
@@ -335,7 +345,6 @@ namespace rocRoller
     {                                                                      \
         co_yield arith->call(dest, lhs, rhs);                              \
     }
-        DEFINE_BINARY_CALL(Add, add);
         DEFINE_BINARY_CALL(Subtract, sub);
         DEFINE_BINARY_CALL(Multiply, mul);
         DEFINE_BINARY_CALL(MultiplyHigh, mulHi);
@@ -343,7 +352,6 @@ namespace rocRoller
         DEFINE_BINARY_CALL(Modulo, mod);
         DEFINE_BINARY_CALL(ShiftL, shiftL);
         DEFINE_BINARY_CALL(ShiftR, shiftR);
-        DEFINE_BINARY_CALL(SignedShiftR, signedShiftR);
         DEFINE_BINARY_CALL(BitwiseAnd, bitwiseAnd);
         DEFINE_BINARY_CALL(BitwiseXor, bitwiseXor);
         DEFINE_BINARY_CALL(GreaterThan, gt);

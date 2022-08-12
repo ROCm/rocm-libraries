@@ -233,17 +233,6 @@ namespace rocRoller
     }
 
     Generator<Instruction>
-        Arithmetic_Vector_Int32::signedShiftR(std::shared_ptr<Register::Value> dest,
-                                              std::shared_ptr<Register::Value> value,
-                                              std::shared_ptr<Register::Value> shiftAmount)
-    {
-        AssertFatal(value != nullptr);
-        AssertFatal(shiftAmount != nullptr);
-
-        co_yield_(Instruction("v_ashrrev_i32", {dest}, {shiftAmount, value}, {}, ""));
-    }
-
-    Generator<Instruction>
         Arithmetic_Vector_Int32::addShiftL(std::shared_ptr<Register::Value> dest,
                                            std::shared_ptr<Register::Value> lhs,
                                            std::shared_ptr<Register::Value> rhs,
@@ -584,17 +573,6 @@ namespace rocRoller
         AssertFatal(shiftAmount != nullptr);
 
         co_yield_(Instruction("s_lshr_b32", {dest}, {value, shiftAmount}, {}, ""));
-    }
-
-    Generator<Instruction>
-        Arithmetic_Scalar_Int32::signedShiftR(std::shared_ptr<Register::Value> dest,
-                                              std::shared_ptr<Register::Value> value,
-                                              std::shared_ptr<Register::Value> shiftAmount)
-    {
-        AssertFatal(value != nullptr);
-        AssertFatal(shiftAmount != nullptr);
-
-        co_yield_(Instruction("s_ashr_i32", {dest}, {value, shiftAmount}, {}, ""));
     }
 
     Generator<Instruction>

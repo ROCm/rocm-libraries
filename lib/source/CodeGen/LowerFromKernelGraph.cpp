@@ -2,6 +2,7 @@
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
 #include <rocRoller/CodeGen/Arithmetic.hpp>
+#include <rocRoller/CodeGen/Arithmetic/ArithmeticGenerator.hpp>
 #include <rocRoller/CodeGen/Arithmetic/MatrixMultiply.hpp>
 #include <rocRoller/CodeGen/BranchGenerator.hpp>
 #include <rocRoller/CodeGen/CopyGenerator.hpp>
@@ -262,10 +263,10 @@ namespace rocRoller
                     xop.dest, regType, varType, valueCount);
                 co_yield Register::AllocateIfNeeded(dst);
 
-                auto arith = Arithmetic::Get(dst);
+                auto add = GetGenerator<Expression::Add>(dst, lhs, rhs);
 
                 for(size_t i = 0; i < dst->valueCount(); ++i)
-                    co_yield arith->add(dst->element({i}), lhs->element({i}), rhs->element({i}));
+                    co_yield add->generate(dst->element({i}), lhs->element({i}), rhs->element({i}));
             }
 
             Generator<Instruction> operator()(Operations::E_Sub const& xop)

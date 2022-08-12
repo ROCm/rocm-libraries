@@ -7,6 +7,7 @@
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
 #include <rocRoller/CodeGen/Arithmetic.hpp>
+#include <rocRoller/CodeGen/Arithmetic/ArithmeticGenerator.hpp>
 #include <rocRoller/CodeGen/Arithmetic/Double.hpp>
 #include <rocRoller/CodeGen/Arithmetic/Float.hpp>
 #include <rocRoller/CodeGen/Arithmetic/Int32.hpp>
@@ -345,7 +346,7 @@ namespace MixedArithmeticTest
                         co_yield m_context->mem()->storeFlat(
                             resultPtr, v_result, "0", param.resultVarType.getElementSize());
 
-                        co_yield arithVector64->add(
+                        co_yield generateOp<Expression::Add>(
                             resultPtr,
                             Register::Value::Literal(param.resultVarType.getElementSize()),
                             resultPtr);
@@ -416,7 +417,7 @@ namespace MixedArithmeticTest
                                       Register::ValuePtr dest,
                                       Register::ValuePtr lhs,
                                       Register::ValuePtr rhs) -> Generator<Instruction> {
-            co_yield arith->add(dest, lhs, rhs);
+            co_yield generateOp<Expression::Add>(dest, lhs, rhs);
         };
 
         CreateExpression expr = [](Expression::ExpressionPtr lhs, Expression::ExpressionPtr rhs) {

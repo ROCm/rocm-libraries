@@ -6,6 +6,7 @@
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
+#include <rocRoller/CodeGen/Arithmetic/ArithmeticGenerator.hpp>
 #include <rocRoller/CodeGen/CopyGenerator.hpp>
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
 #include <rocRoller/CommandSolution.hpp>
@@ -471,23 +472,26 @@ namespace MemoryInstructionsTest
                 = Component::Get<Arithmetic>(m_context, Register::Type::Vector, DataType::Int32);
 
             // Load 5 + workitemIndex.x into lds3[workitemIndex.x]
-            co_yield arith->add(lds3_current, lds3_offset, workitemIndex[0]);
-            co_yield arith->add(v_a, workitemIndex[0], Register::Value::Literal(5));
+            co_yield generateOp<Expression::Add>(lds3_current, lds3_offset, workitemIndex[0]);
+            co_yield generateOp<Expression::Add>(
+                v_a, workitemIndex[0], Register::Value::Literal(5));
             co_yield arith->shiftL(lds3_current, lds3_current, Register::Value::Literal(2));
             co_yield m_context->mem()->storeLocal(lds3_current, v_a, "0", 4);
 
             co_yield m_context->mem()->barrier();
 
             // Store the contents of lds3[workitemIndex.x + 1 % workItemCount] into v_result[workitemIndex.x]
-            co_yield arith->add(lds3_current, workitemIndex[0], Register::Value::Literal(1));
+            co_yield generateOp<Expression::Add>(
+                lds3_current, workitemIndex[0], Register::Value::Literal(1));
             co_yield m_context->copier()->copy(literal,
                                                Register::Value::Literal(workItemCount - 1));
             co_yield arith->bitwiseAnd(lds3_current, lds3_current, literal);
-            co_yield arith->add(lds3_current, lds3_offset, lds3_current);
+            co_yield generateOp<Expression::Add>(lds3_current, lds3_offset, lds3_current);
             co_yield arith->shiftL(lds3_current, lds3_current, Register::Value::Literal(2));
             co_yield m_context->mem()->loadLocal(v_a, lds3_current, "0", 4);
             co_yield arith->shiftL(lds3_current, workitemIndex[0], Register::Value::Literal(2));
-            co_yield arith->add(v_result->subset({0}), v_result->subset({0}), lds3_current);
+            co_yield generateOp<Expression::Add>(
+                v_result->subset({0}), v_result->subset({0}), lds3_current);
             co_yield m_context->mem()->storeFlat(v_result, v_a, "0", 4);
         };
 

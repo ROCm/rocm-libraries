@@ -204,14 +204,14 @@ namespace ExpressionTest
         EXPECT_EQ(regIndexBefore, regIndexAfter);
 
         std::string expected = R"(
-            v_add_u32 v2, v0, v1
+            v_add_i32 v2, v0, v1
             v_mul_lo_u32 v3, v1, v2
 
             // Note that v2 is reused
             v_mov_b32 v2, v3
 
             // Still storing into v2
-            v_add_u32 v4, v0, v1
+            v_add_i32 v4, v0, v1
             v_mul_lo_u32 v2, v1, v4
         )";
 
@@ -246,7 +246,7 @@ namespace ExpressionTest
             // BEGIN: The Multiplication
             // BEGIN: The Addition extra comment
             // Allocated : 1 VGPR (Value: Int32): v2
-            v_add_u32 v2, v0, v1
+            v_add_i32 v2, v0, v1
             // END: The Addition extra comment
             // Allocated : 1 VGPR (Value: Int32): v3
             v_mul_lo_u32 v3, v1, v2
@@ -707,8 +707,8 @@ namespace ExpressionTest
         m_context->schedule(Expression::generate(destReg, expr3, m_context));
 
         auto result = R"(
-            v_add_u32 v2, v0, v1
-            v_add_u32 v3, v0, v1
+            v_add_i32 v2, v0, v1
+            v_add_i32 v3, v0, v1
             v_mul_lo_u32 v4, v1, v3
             v_cmp_eq_i32 s[0:1], v2, v4
         )";

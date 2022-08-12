@@ -2,6 +2,8 @@
  * @copyright Copyright 2022 Advanced Micro Devices, Inc.
  */
 
+#include "Arithmetic/ArithmeticGenerator.hpp"
+
 namespace rocRoller
 {
     inline MemoryInstructions::MemoryInstructions(std::shared_ptr<Context> context)
@@ -32,9 +34,8 @@ namespace rocRoller
             {
                 newAddr
                     = Register::Value::Placeholder(context, addr->regType(), DataType::Int64, 1);
-                auto arith = Component::Get<Arithmetic>(context, addr->regType(), DataType::Int64);
                 co_yield newAddr->allocate();
-                co_yield arith->add(newAddr, addr, offset);
+                co_yield generateOp<Expression::Add>(newAddr, addr, offset);
             }
 
             co_yield loadFlat(dest, newAddr, offset_str, numBytes);
@@ -47,9 +48,8 @@ namespace rocRoller
             {
                 newAddr
                     = Register::Value::Placeholder(context, addr->regType(), DataType::Int32, 1);
-                auto arith = Component::Get<Arithmetic>(context, addr->regType(), DataType::Int32);
                 co_yield newAddr->allocate();
-                co_yield arith->add(newAddr, addr, offset);
+                co_yield generateOp<Expression::Add>(newAddr, addr, offset);
             }
 
             co_yield loadLocal(dest, newAddr, offset_str, numBytes, comment);
@@ -87,9 +87,8 @@ namespace rocRoller
             {
                 newAddr
                     = Register::Value::Placeholder(context, addr->regType(), DataType::Int64, 1);
-                auto arith = Component::Get<Arithmetic>(context, addr->regType(), DataType::Int64);
                 co_yield newAddr->allocate();
-                co_yield arith->add(newAddr, addr, offset);
+                co_yield generateOp<Expression::Add>(newAddr, addr, offset);
             }
 
             co_yield storeFlat(newAddr, data, offset_str, numBytes);
@@ -102,9 +101,8 @@ namespace rocRoller
             {
                 newAddr
                     = Register::Value::Placeholder(context, addr->regType(), DataType::Int32, 1);
-                auto arith = Component::Get<Arithmetic>(context, addr->regType(), DataType::Int32);
                 co_yield newAddr->allocate();
-                co_yield arith->add(newAddr, addr, offset);
+                co_yield generateOp<Expression::Add>(newAddr, addr, offset);
             }
 
             co_yield storeLocal(newAddr, data, offset_str, numBytes, comment);

@@ -133,13 +133,6 @@ namespace rocRoller
             throw std::runtime_error("ShiftR unsupported for this datatype");
         }
 
-        virtual Generator<Instruction> signedShiftR(std::shared_ptr<Register::Value> dest,
-                                                    std::shared_ptr<Register::Value> value,
-                                                    std::shared_ptr<Register::Value> shiftAmount)
-        {
-            throw std::runtime_error("SignedShiftR unsupported for this datatype");
-        }
-
         virtual Generator<Instruction> addShiftL(std::shared_ptr<Register::Value> dest,
                                                  std::shared_ptr<Register::Value> lhs,
                                                  std::shared_ptr<Register::Value> rhs,

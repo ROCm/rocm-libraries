@@ -217,6 +217,9 @@ set(rocroller_src
  lib/source/Arithmetic/MatrixMultiply.cpp
 
  lib/source/CodeGen/LowerFromKernelGraph.cpp
+ lib/source/CodeGen/Arithmetic/Add.cpp
+ lib/source/CodeGen/Arithmetic/ArithmeticGenerator.cpp
+ lib/source/CodeGen/Arithmetic/SignedShiftR.cpp
 
  lib/source/KernelGraph/ControlGraph/ControlEdge.cpp
  lib/source/KernelGraph/ControlGraph/ControlGraph.cpp
