@@ -163,6 +163,10 @@ namespace ExpressionTest
 
         EXPECT_FALSE(identical(expr8, expr9));
         EXPECT_TRUE(identical(A * B, expr8));
+
+        EXPECT_TRUE(Expression::identical(nullptr, nullptr));
+        EXPECT_FALSE(identical(nullptr, a));
+        EXPECT_FALSE(identical(a, nullptr));
     }
 
     TEST_F(ExpressionTest, BasicInstructions)

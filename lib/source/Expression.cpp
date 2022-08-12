@@ -325,6 +325,14 @@ namespace rocRoller
 
             bool operator()(ExpressionPtr const& a, ExpressionPtr const& b)
             {
+                if(a == nullptr)
+                {
+                    return b == nullptr;
+                }
+                else if(b == nullptr)
+                {
+                    return false;
+                }
                 return std::visit(*this, *a, *b);
             }
         };
