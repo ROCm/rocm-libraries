@@ -9,7 +9,7 @@
 
 #include <rocRoller/Graph/Hypergraph.hpp>
 
-namespace TranslatorTests
+namespace rocRollerTest
 {
     using namespace rocRoller;
 
