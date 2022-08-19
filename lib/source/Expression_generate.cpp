@@ -76,11 +76,6 @@ namespace rocRoller
                 if(dest == nullptr)
                 {
                     dest = resultPlaceholder(resultType(expr));
-
-                    // TODO: Delete once FastDivision uses only libdivide.
-                    if constexpr(std::same_as<MultiplyHigh, Operation>)
-                        dest = Register::Value::Placeholder(
-                            m_context, dest->regType(), DataType::Int32, dest->valueCount());
                 }
 
                 auto generator = GetGenerator<Operation>(dest, lhsResult, rhsResult);
@@ -92,19 +87,11 @@ namespace rocRoller
 
                 ArithmeticPtr arith;
 
-                // TODO: Delete once FastDivision uses only libdivide.
-                if constexpr(std::same_as<MultiplyHigh, Operation>)
-                {
-                    arith = Component::Get<Arithmetic>(m_context, dest->regType(), DataType::Int32);
-                }
+                // This portion should remain after FastDivision fix.
+                if constexpr(CArithmetic<Operation>)
+                    arith = Arithmetic::Get(dest, lhsResult, rhsResult);
                 else
-                {
-                    // This portion should remain after FastDivision fix.
-                    if constexpr(CArithmetic<Operation>)
-                        arith = Arithmetic::Get(dest, lhsResult, rhsResult);
-                    else
-                        arith = Arithmetic::GetComparison(dest, lhsResult, rhsResult);
-                }
+                    arith = Arithmetic::GetComparison(dest, lhsResult, rhsResult);
 
                 co_yield callArithmeticBinary<Operation>(arith, dest, lhsResult, rhsResult);
             }
@@ -345,11 +332,6 @@ namespace rocRoller
     {                                                                      \
         co_yield arith->call(dest, lhs, rhs);                              \
     }
-        DEFINE_BINARY_CALL(Subtract, sub);
-        DEFINE_BINARY_CALL(Multiply, mul);
-        DEFINE_BINARY_CALL(MultiplyHigh, mulHi);
-        DEFINE_BINARY_CALL(Divide, div);
-        DEFINE_BINARY_CALL(Modulo, mod);
         DEFINE_BINARY_CALL(ShiftL, shiftL);
         DEFINE_BINARY_CALL(ShiftR, shiftR);
         DEFINE_BINARY_CALL(BitwiseAnd, bitwiseAnd);

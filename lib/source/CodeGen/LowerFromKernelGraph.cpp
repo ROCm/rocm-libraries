@@ -278,9 +278,7 @@ namespace rocRoller
                 auto dst
                     = m_context->registerTagManager()->getRegister(xop.dest, lhs->placeholder());
 
-                auto arith = Arithmetic::Get(dst);
-
-                co_yield arith->sub(dst, lhs, rhs);
+                co_yield generateOp<Expression::Subtract>(dst, lhs, rhs);
             }
 
             Generator<Instruction> operator()(Operations::E_Mul const& xop)
@@ -301,13 +299,13 @@ namespace rocRoller
                     xop.dest, regType, varType, valueCount);
                 co_yield Register::AllocateIfNeeded(dst);
 
-                auto arith = Arithmetic::Get(dst);
+                auto mul = GetGenerator<Expression::Multiply>(dst, lhs, rhs);
 
                 if(lhs->valueCount() == rhs->valueCount())
                 {
                     for(size_t k = 0; k < lhs->valueCount(); ++k)
                     {
-                        co_yield arith->mul(
+                        co_yield mul->generate(
                             dst->element({k}), lhs->element({k}), rhs->element({k}));
                     }
                 }
@@ -315,14 +313,14 @@ namespace rocRoller
                 {
                     for(size_t k = 0; k < rhs->valueCount(); ++k)
                     {
-                        co_yield arith->mul(dst->element({k}), lhs, rhs->element({k}));
+                        co_yield mul->generate(dst->element({k}), lhs, rhs->element({k}));
                     }
                 }
                 else if(rhs->valueCount() == 1)
                 {
                     for(size_t k = 0; k < lhs->valueCount(); ++k)
                     {
-                        co_yield arith->mul(dst->element({k}), lhs->element({k}), rhs);
+                        co_yield mul->generate(dst->element({k}), lhs->element({k}), rhs);
                     }
                 }
                 else
@@ -340,9 +338,7 @@ namespace rocRoller
                 auto dst
                     = m_context->registerTagManager()->getRegister(xop.dest, lhs->placeholder());
 
-                auto arith = Arithmetic::Get(dst);
-
-                co_yield arith->div(dst, lhs, rhs);
+                co_yield generateOp<Expression::Divide>(dst, lhs, rhs);
             }
 
             Generator<Instruction> operator()(Operations::E_And const& xop)

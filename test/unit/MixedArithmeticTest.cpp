@@ -231,11 +231,9 @@ namespace MixedArithmeticTest
          * Generate an expression to calculate the reference value.  Can return
          * nullptr for an invalid combination of inputs (e.g. dividing by zero)
          */
-        using CreateExpression = std::function<Expression::ExpressionPtr(
-            Expression::ExpressionPtr, Expression::ExpressionPtr)>;
 
-        void testBody(GenerateArithmetic const& genArithmetic,
-                      CreateExpression const&   createExpression)
+        template <Expression::CBinary Operation>
+        void testBody()
         {
             auto const& param = GetParam();
             std::string paramStr;
@@ -289,13 +287,6 @@ namespace MixedArithmeticTest
                 }
                 co_yield getArgReg(resultPtr, "dest", Register::Type::Vector);
 
-                auto arith = Component::Get<Arithmetic>(
-                    m_context, param.resultRegType, param.resultVarType);
-
-                VariableType int64(DataType::Int64);
-                auto         arithVector64
-                    = Component::Get<Arithmetic>(m_context, Register::Type::Vector, int64);
-
                 Register::ValuePtr lhs, rhs;
 
                 for(size_t lhsIdx = 0; lhsIdx < param.lhsValues.size(); lhsIdx++)
@@ -329,7 +320,7 @@ namespace MixedArithmeticTest
                         auto result = Register::Value::Placeholder(
                             m_context, param.resultRegType, param.resultVarType, 1);
 
-                        co_yield genArithmetic(arith, result, lhs, rhs);
+                        co_yield generateOp<Operation>(result, lhs, rhs);
 
                         auto v_result = result;
 
@@ -392,12 +383,25 @@ namespace MixedArithmeticTest
             {
                 for(auto rhsVal : param.rhsValues)
                 {
+                    if constexpr(std::is_same_v<
+                                     Operation,
+                                     Expression::
+                                         Divide> || std::is_same_v<Operation, Expression::Modulo>)
+                    {
+                        if(std::get<int64_t>(Expression::evaluate(rhsVal)) == 0)
+                        {
+                            idx++;
+                            continue;
+                        }
+                    }
+
                     auto lhs_rt  = castToResult(lhsVal, param.resultVarType);
                     auto rhs_rt  = castToResult(rhsVal, param.resultVarType);
                     auto lhs_exp = std::make_shared<Expression::Expression>(lhs_rt);
                     auto rhs_exp = std::make_shared<Expression::Expression>(rhs_rt);
 
-                    auto expr = createExpression(lhs_exp, rhs_exp);
+                    auto expr
+                        = std::make_shared<Expression::Expression>(Operation{lhs_exp, rhs_exp});
 
                     if(expr)
                     {
@@ -413,34 +417,13 @@ namespace MixedArithmeticTest
 
     TEST_P(GPU_MixedArithmeticTest, Add)
     {
-        GenerateArithmetic arith = [](ArithmeticPtr      arith,
-                                      Register::ValuePtr dest,
-                                      Register::ValuePtr lhs,
-                                      Register::ValuePtr rhs) -> Generator<Instruction> {
-            co_yield generateOp<Expression::Add>(dest, lhs, rhs);
-        };
 
-        CreateExpression expr = [](Expression::ExpressionPtr lhs, Expression::ExpressionPtr rhs) {
-            return lhs + rhs;
-        };
-
-        testBody(arith, expr);
+        testBody<Expression::Add>();
     }
 
     TEST_P(GPU_MixedArithmeticTest, Multiply)
     {
-        GenerateArithmetic arith = [](ArithmeticPtr      arith,
-                                      Register::ValuePtr dest,
-                                      Register::ValuePtr lhs,
-                                      Register::ValuePtr rhs) -> Generator<Instruction> {
-            co_yield arith->mul(dest, lhs, rhs);
-        };
-
-        CreateExpression expr = [](Expression::ExpressionPtr lhs, Expression::ExpressionPtr rhs) {
-            return lhs * rhs;
-        };
-
-        testBody(arith, expr);
+        testBody<Expression::Multiply>();
     }
 
     TEST_P(GPU_MixedArithmeticTest, Subtract)
@@ -454,18 +437,7 @@ namespace MixedArithmeticTest
             GTEST_SKIP() << "Subtract not yet supported for mixed register types.";
         }
 
-        GenerateArithmetic arith = [](ArithmeticPtr      arith,
-                                      Register::ValuePtr dest,
-                                      Register::ValuePtr lhs,
-                                      Register::ValuePtr rhs) -> Generator<Instruction> {
-            co_yield arith->sub(dest, lhs, rhs);
-        };
-
-        CreateExpression expr = [](Expression::ExpressionPtr lhs, Expression::ExpressionPtr rhs) {
-            return lhs - rhs;
-        };
-
-        testBody(arith, expr);
+        testBody<Expression::Subtract>();
     }
 
     TEST_P(GPU_MixedArithmeticTest, Divide)
@@ -490,22 +462,7 @@ namespace MixedArithmeticTest
             GTEST_SKIP() << "64-bit divide not yet supported for literal inputs.";
         }
 
-        GenerateArithmetic arith = [](ArithmeticPtr      arith,
-                                      Register::ValuePtr dest,
-                                      Register::ValuePtr lhs,
-                                      Register::ValuePtr rhs) -> Generator<Instruction> {
-            co_yield arith->div(dest, lhs, rhs);
-        };
-
-        CreateExpression expr = [](Expression::ExpressionPtr lhs,
-                                   Expression::ExpressionPtr rhs) -> Expression::ExpressionPtr {
-            if(std::get<int64_t>(Expression::evaluate(rhs)) != 0)
-                return lhs / rhs;
-
-            return nullptr;
-        };
-
-        testBody(arith, expr);
+        testBody<Expression::Divide>();
     }
 
     TEST_P(GPU_MixedArithmeticTest, Modulus)
@@ -530,24 +487,7 @@ namespace MixedArithmeticTest
             GTEST_SKIP() << "64-bit modulus not yet supported for literal inputs.";
         }
 
-        GenerateArithmetic arith = [](ArithmeticPtr      arith,
-                                      Register::ValuePtr dest,
-                                      Register::ValuePtr lhs,
-                                      Register::ValuePtr rhs) -> Generator<Instruction> {
-            co_yield arith->mod(dest, lhs, rhs);
-        };
-
-        CreateExpression expr = [](Expression::ExpressionPtr lhs,
-                                   Expression::ExpressionPtr rhs) -> Expression::ExpressionPtr {
-            if(std::get<int64_t>(Expression::evaluate(rhs)) != 0)
-            {
-                return lhs % rhs;
-            }
-
-            return nullptr;
-        };
-
-        testBody(arith, expr);
+        testBody<Expression::Modulo>();
     }
 
     template <typename T>

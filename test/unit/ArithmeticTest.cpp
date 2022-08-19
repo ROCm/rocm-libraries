@@ -115,19 +115,19 @@ namespace ArithmeticTest
             co_yield generateOp<Expression::Add>(v_c, v_a, v_b);
             co_yield m_context->mem()->storeFlat(v_result, v_c, "0", 4);
 
-            co_yield arith->sub(v_c, v_a, v_b);
+            co_yield generateOp<Expression::Subtract>(v_c, v_a, v_b);
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(4), 4);
 
-            co_yield arith->mul(v_c, v_a, v_b);
+            co_yield generateOp<Expression::Multiply>(v_c, v_a, v_b);
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(8), 4);
 
-            co_yield arith->div(v_c, v_a, v_b);
+            co_yield generateOp<Expression::Divide>(v_c, v_a, v_b);
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(12), 4);
 
-            co_yield arith->mod(v_c, v_a, v_b);
+            co_yield generateOp<Expression::Modulo>(v_c, v_a, v_b);
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(16), 4);
 
@@ -192,7 +192,7 @@ namespace ArithmeticTest
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(52), 4);
 
-            co_yield arith->mulHi(v_c, v_a, v_b);
+            co_yield generateOp<Expression::MultiplyHigh>(v_c, v_a, v_b);
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(56), 4);
 
@@ -348,22 +348,22 @@ namespace ArithmeticTest
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->storeFlat(v_result, v_c, "", 4);
 
-            co_yield arith->sub(s_c, s_a, s_b);
+            co_yield generateOp<Expression::Subtract>(s_c, s_a, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(4), 4);
 
-            co_yield arith->mul(s_c, s_a, s_b);
+            co_yield generateOp<Expression::Multiply>(s_c, s_a, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(8), 4);
 
-            co_yield arith->div(s_c, s_a, s_b);
+            co_yield generateOp<Expression::Divide>(s_c, s_a, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(12), 4);
 
-            co_yield arith->mod(s_c, s_a, s_b);
+            co_yield generateOp<Expression::Modulo>(s_c, s_a, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(16), 4);
@@ -413,7 +413,7 @@ namespace ArithmeticTest
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(52), 4);
 
-            co_yield arith->mulHi(s_c, s_a, s_b);
+            co_yield generateOp<Expression::MultiplyHigh>(s_c, s_a, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(56), 4);
@@ -639,19 +639,19 @@ namespace ArithmeticTest
             co_yield generateOp<Expression::Add>(v_c, v_a, v_b);
             co_yield m_context->mem()->storeFlat(v_result, v_c, "", 8);
 
-            co_yield arith->sub(v_c, v_a, v_b);
+            co_yield generateOp<Expression::Subtract>(v_c, v_a, v_b);
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(8), 8);
 
-            co_yield arith->mul(v_c, v_a, v_b);
+            co_yield generateOp<Expression::Multiply>(v_c, v_a, v_b);
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(16), 8);
 
-            co_yield arith->div(v_c, v_a, v_b);
+            co_yield generateOp<Expression::Divide>(v_c, v_a, v_b);
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(24), 8);
 
-            co_yield arith->mod(v_c, v_a, v_b);
+            co_yield generateOp<Expression::Modulo>(v_c, v_a, v_b);
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(32), 8);
 
@@ -865,22 +865,22 @@ namespace ArithmeticTest
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->storeFlat(v_result, v_c, "", 8);
 
-            co_yield arith->sub(s_c, s_a, s_b);
+            co_yield generateOp<Expression::Subtract>(s_c, s_a, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(8), 8);
 
-            co_yield arith->mul(s_c, s_a, s_b);
+            co_yield generateOp<Expression::Multiply>(s_c, s_a, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(16), 8);
 
-            co_yield arith->div(s_c, s_a, s_b);
+            co_yield generateOp<Expression::Divide>(s_c, s_a, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(24), 8);
 
-            co_yield arith->mod(s_c, s_a, s_b);
+            co_yield generateOp<Expression::Modulo>(s_c, s_a, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(32), 8);
@@ -1111,11 +1111,11 @@ namespace ArithmeticTest
             co_yield generateOp<Expression::Add>(v_c, v_a, v_b);
             co_yield m_context->mem()->storeFlat(v_result, v_c, "", 4);
 
-            co_yield arith->sub(v_c, v_a, v_b);
+            co_yield generateOp<Expression::Subtract>(v_c, v_a, v_b);
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(4), 4);
 
-            co_yield arith->mul(v_c, v_a, v_b);
+            co_yield generateOp<Expression::Multiply>(v_c, v_a, v_b);
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(8), 4);
 
@@ -1297,11 +1297,11 @@ namespace ArithmeticTest
             co_yield generateOp<Expression::Add>(v_c, v_a, v_b);
             co_yield m_context->mem()->storeFlat(v_result, v_c, "", 8);
 
-            co_yield arith->sub(v_c, v_a, v_b);
+            co_yield generateOp<Expression::Subtract>(v_c, v_a, v_b);
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(8), 8);
 
-            co_yield arith->mul(v_c, v_a, v_b);
+            co_yield generateOp<Expression::Multiply>(v_c, v_a, v_b);
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(16), 8);
 

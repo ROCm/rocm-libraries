@@ -62,16 +62,6 @@ namespace rocRoller
         co_yield_(Instruction("v_add_f64", {dest}, {lhs, nrhs}, {}, ""));
     }
 
-    Generator<Instruction> Arithmetic_Vector_Double::mul(std::shared_ptr<Register::Value> dest,
-                                                         std::shared_ptr<Register::Value> lhs,
-                                                         std::shared_ptr<Register::Value> rhs)
-    {
-        AssertFatal(lhs != nullptr);
-        AssertFatal(rhs != nullptr);
-
-        co_yield_(Instruction("v_mul_f64", {dest}, {lhs, rhs}, {}, ""));
-    }
-
     Generator<Instruction> Arithmetic_Vector_Double::gt(std::shared_ptr<Register::Value> dest,
                                                         std::shared_ptr<Register::Value> lhs,
                                                         std::shared_ptr<Register::Value> rhs)

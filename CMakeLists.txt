@@ -220,7 +220,12 @@ set(rocroller_src
  lib/source/CodeGen/LowerFromKernelGraph.cpp
  lib/source/CodeGen/Arithmetic/Add.cpp
  lib/source/CodeGen/Arithmetic/ArithmeticGenerator.cpp
+ lib/source/CodeGen/Arithmetic/Divide.cpp
+ lib/source/CodeGen/Arithmetic/Modulo.cpp
+ lib/source/CodeGen/Arithmetic/Multiply.cpp
+ lib/source/CodeGen/Arithmetic/MultiplyHigh.cpp
  lib/source/CodeGen/Arithmetic/SignedShiftR.cpp
+ lib/source/CodeGen/Arithmetic/Subtract.cpp
 
  lib/source/KernelGraph/ControlGraph/ControlEdge.cpp
  lib/source/KernelGraph/ControlGraph/ControlGraph.cpp

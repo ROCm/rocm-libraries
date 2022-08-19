@@ -37,10 +37,6 @@ namespace rocRoller
                                            std::shared_ptr<Register::Value> lhs,
                                            std::shared_ptr<Register::Value> rhs) final override;
 
-        virtual Generator<Instruction> mul(std::shared_ptr<Register::Value> dest,
-                                           std::shared_ptr<Register::Value> lhs,
-                                           std::shared_ptr<Register::Value> rhs) final override;
-
         virtual Generator<Instruction> gt(std::shared_ptr<Register::Value> dest,
                                           std::shared_ptr<Register::Value> lhs,
                                           std::shared_ptr<Register::Value> rhs) final override;

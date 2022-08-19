@@ -91,34 +91,6 @@ namespace rocRoller
                                            std::shared_ptr<Register::Value> rhs)
             = 0;
 
-        virtual Generator<Instruction> mul(std::shared_ptr<Register::Value> dest,
-                                           std::shared_ptr<Register::Value> lhs,
-                                           std::shared_ptr<Register::Value> rhs)
-            = 0;
-
-        virtual Generator<Instruction> mulHi(std::shared_ptr<Register::Value> dest,
-                                             std::shared_ptr<Register::Value> lhs,
-                                             std::shared_ptr<Register::Value> rhs)
-        {
-            Throw<FatalError>("MulHi unsupported for this datatype",
-                              ShowValue(registerType()),
-                              ShowValue(dataType()));
-        }
-
-        virtual Generator<Instruction> div(std::shared_ptr<Register::Value> dest,
-                                           std::shared_ptr<Register::Value> lhs,
-                                           std::shared_ptr<Register::Value> rhs)
-        {
-            throw std::runtime_error("Divide unsupported for this datatype");
-        }
-
-        virtual Generator<Instruction> mod(std::shared_ptr<Register::Value> dest,
-                                           std::shared_ptr<Register::Value> lhs,
-                                           std::shared_ptr<Register::Value> rhs)
-        {
-            throw std::runtime_error("Modulo unsupported for this datatype");
-        }
-
         virtual Generator<Instruction> shiftL(std::shared_ptr<Register::Value> dest,
                                               std::shared_ptr<Register::Value> value,
                                               std::shared_ptr<Register::Value> shiftAmount)

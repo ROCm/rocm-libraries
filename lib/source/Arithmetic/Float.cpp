@@ -66,16 +66,6 @@ namespace rocRoller
         co_yield_(Instruction("v_sub_f32", {dest}, {lhs, rhs}, {}, ""));
     }
 
-    Generator<Instruction> Arithmetic_Vector_Float::mul(std::shared_ptr<Register::Value> dest,
-                                                        std::shared_ptr<Register::Value> lhs,
-                                                        std::shared_ptr<Register::Value> rhs)
-    {
-        AssertFatal(lhs != nullptr);
-        AssertFatal(rhs != nullptr);
-
-        co_yield_(Instruction("v_mul_f32", {dest}, {lhs, rhs}, {}, ""));
-    }
-
     Generator<Instruction> Arithmetic_Vector_Float::gt(std::shared_ptr<Register::Value> dest,
                                                        std::shared_ptr<Register::Value> lhs,
                                                        std::shared_ptr<Register::Value> rhs)

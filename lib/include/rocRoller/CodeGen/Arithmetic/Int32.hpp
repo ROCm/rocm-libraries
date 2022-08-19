@@ -40,22 +40,6 @@ namespace rocRoller
                                            std::shared_ptr<Register::Value> lhs,
                                            std::shared_ptr<Register::Value> rhs) final override;
 
-        virtual Generator<Instruction> mul(std::shared_ptr<Register::Value> dest,
-                                           std::shared_ptr<Register::Value> lhs,
-                                           std::shared_ptr<Register::Value> rhs) final override;
-
-        virtual Generator<Instruction> mulHi(std::shared_ptr<Register::Value> dest,
-                                             std::shared_ptr<Register::Value> lhs,
-                                             std::shared_ptr<Register::Value> rhs) final override;
-
-        virtual Generator<Instruction> div(std::shared_ptr<Register::Value> dest,
-                                           std::shared_ptr<Register::Value> lhs,
-                                           std::shared_ptr<Register::Value> rhs) final override;
-
-        virtual Generator<Instruction> mod(std::shared_ptr<Register::Value> dest,
-                                           std::shared_ptr<Register::Value> lhs,
-                                           std::shared_ptr<Register::Value> rhs) final override;
-
         virtual Generator<Instruction>
             shiftL(std::shared_ptr<Register::Value> dest,
                    std::shared_ptr<Register::Value> value,
@@ -141,22 +125,6 @@ namespace rocRoller
                                            std::shared_ptr<Register::Value> rhs) final override;
 
         virtual Generator<Instruction> sub(std::shared_ptr<Register::Value> dest,
-                                           std::shared_ptr<Register::Value> lhs,
-                                           std::shared_ptr<Register::Value> rhs) final override;
-
-        virtual Generator<Instruction> mul(std::shared_ptr<Register::Value> dest,
-                                           std::shared_ptr<Register::Value> lhs,
-                                           std::shared_ptr<Register::Value> rhs) final override;
-
-        virtual Generator<Instruction> mulHi(std::shared_ptr<Register::Value> dest,
-                                             std::shared_ptr<Register::Value> lhs,
-                                             std::shared_ptr<Register::Value> rhs) final override;
-
-        virtual Generator<Instruction> div(std::shared_ptr<Register::Value> dest,
-                                           std::shared_ptr<Register::Value> lhs,
-                                           std::shared_ptr<Register::Value> rhs) final override;
-
-        virtual Generator<Instruction> mod(std::shared_ptr<Register::Value> dest,
                                            std::shared_ptr<Register::Value> lhs,
                                            std::shared_ptr<Register::Value> rhs) final override;
 
