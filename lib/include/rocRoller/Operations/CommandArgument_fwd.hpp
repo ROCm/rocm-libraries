@@ -4,6 +4,8 @@
 #include <span>
 #include <variant>
 
+#include "DataTypes/DataTypes.hpp"
+
 namespace rocRoller
 {
     class CommandArgument;
@@ -18,6 +20,7 @@ namespace rocRoller
         uint64_t,
         float,
         double,
+        Half,
         bool,
         // int16_t*,
         int32_t*,
@@ -26,7 +29,8 @@ namespace rocRoller
         uint32_t*,
         uint64_t*,
         float*,
-        double*>;
+        double*,
+        Half*>;
 
     template <typename T>
     concept CCommandArgumentValue = requires(T& val)

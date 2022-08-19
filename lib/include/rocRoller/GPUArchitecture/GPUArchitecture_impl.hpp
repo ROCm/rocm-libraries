@@ -133,8 +133,8 @@ namespace rocRoller
     template <std::floating_point T>
     std::unordered_set<T> supportedConstantValues()
     {
-        static_assert(std::same_as<T, float> || std::same_as<T, double>,
-                      "Fill in fp16 version of this value");
+        static_assert(std::same_as<T, float> || std::same_as<T, double> || std::same_as<T, Half>,
+                      "Unsupported floating point type");
 
         T one_over_two_pi;
 
@@ -142,6 +142,8 @@ namespace rocRoller
             one_over_two_pi = 0.15915494f;
         else if constexpr(std::same_as<T, double>)
             one_over_two_pi = 0.15915494309189532;
+        else if constexpr(std::same_as<T, Half>)
+            one_over_two_pi = 0.1592f;
 
         return {0.0, 0.5, 1.0, 2.0, 4.0, -0.5, -1.0, -2.0, -4.0, one_over_two_pi};
     };

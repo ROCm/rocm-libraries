@@ -91,8 +91,8 @@ namespace rocRoller
         //     return getValue<std::complex<float>>(args);
         // case DataType::ComplexDouble:
         //     return getValue<std::complex<double>>(args);
-        // case DataType::Half:
-        //     return getValue<Half>(args);
+        case DataType::Half:
+            return getValue<Half>(args);
         // case DataType::Int8x4:
         //     return getValue<Int8x4>(args);
         case DataType::Int32:

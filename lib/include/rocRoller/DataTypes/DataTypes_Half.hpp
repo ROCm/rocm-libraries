@@ -26,20 +26,21 @@
 
 #pragma once
 
-#ifdef ROCROLLER_USE_HIP_COMPILER
-#include <hip/hip_runtime.h>
+#ifdef ROCROLLER_USE_HIP
+#include <hip/amd_detail/amd_hip_fp16.h>
 #endif
 
 #include "DistinctType.hpp"
+#include <functional>
 
 namespace rocRoller
 {
-//TODO: If ROCROLLER_USE_HIP_COMPILER is defined, invoke and use the HIP compiler
-#if defined(ROCROLLER_USE_HIP_COMPILER) || defined(ROCROLLER_USE_FLOAT16_BUILTIN)
+//TODO: If ROCROLLER_USE_HIP is defined, invoke and use the HIP compiler
+#if defined(ROCROLLER_USE_HIP) || defined(ROCROLLER_USE_FLOAT16_BUILTIN)
     /**
  * \ingroup DataTypes
  */
-    using Half = _Float16;
+    using Half = __half;
 #define ROCROLLER_USE_HALF
 #else
     /**
@@ -57,4 +58,24 @@ namespace std
     {
         return stream << static_cast<float>(val);
     }
+
+    template <>
+    struct hash<rocRoller::Half>
+    {
+        inline size_t operator()(rocRoller::Half const& h) const noexcept
+        {
+            hash<float> float_hash;
+            return float_hash(static_cast<float>(h));
+        }
+    };
+
+    template <>
+    struct is_floating_point<rocRoller::Half> : std::true_type
+    {
+    };
+
+    template <>
+    struct is_signed<rocRoller::Half> : std::true_type
+    {
+    };
 } // namespace std

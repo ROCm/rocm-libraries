@@ -185,7 +185,8 @@ target_include_directories(GPUArchitectureGenerator SYSTEM PUBLIC
                            ${LLD_INCLUDE_DIRS})
 
 if(ROCROLLER_USE_HIP)
-#Placeholder: Currently the GPUArchitectureGenerator never needs HIP enabled.
+  target_include_directories(GPUArchitectureGenerator SYSTEM PUBLIC ${HIP_ROOT_DIR}/include)
+  target_compile_definitions(GPUArchitectureGenerator PUBLIC ROCROLLER_USE_HIP __HIP_PLATFORM_AMD__)
 endif()
 
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/source/rocRoller)
@@ -368,6 +369,7 @@ set(
   test/unit/GPUInstructionInfoTest.cpp
   test/unit/GEMMTest.cpp
   test/unit/GeneratorTest.cpp
+  test/unit/HalfPrecisionTest.cpp
   test/unit/HypergraphTest.cpp
   test/unit/InstructionTest.cpp
   test/unit/KernelArgumentsTest.cpp
@@ -453,6 +455,11 @@ target_include_directories(ArchGenTests PUBLIC
 target_include_directories(ArchGenTests SYSTEM PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/spdlog/include/
                            ${LLVM_INCLUDE_DIRS}
                            ${LLD_INCLUDE_DIRS})
+
+if(ROCROLLER_USE_HIP)
+  target_include_directories(ArchGenTests SYSTEM PUBLIC ${HIP_ROOT_DIR}/include)
+  target_compile_definitions(ArchGenTests PUBLIC ROCROLLER_USE_HIP __HIP_PLATFORM_AMD__)
+endif()
 
 target_link_libraries(
   ArchGenTests PUBLIC

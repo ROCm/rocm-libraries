@@ -14,6 +14,7 @@
 #include "GPUCapability.hpp"
 #include "GPUInstructionInfo.hpp"
 
+#include "../DataTypes/DataTypes.hpp"
 #include "../InstructionValues/Register_fwd.hpp"
 #include "../Serialization/GPUArchitecture_fwd.hpp"
 
