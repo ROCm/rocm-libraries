@@ -224,6 +224,10 @@ set(rocroller_src
  lib/source/CodeGen/Arithmetic/Modulo.cpp
  lib/source/CodeGen/Arithmetic/Multiply.cpp
  lib/source/CodeGen/Arithmetic/MultiplyHigh.cpp
+ lib/source/CodeGen/Arithmetic/BitwiseAnd.cpp
+ lib/source/CodeGen/Arithmetic/BitwiseXor.cpp
+ lib/source/CodeGen/Arithmetic/ShiftL.cpp
+ lib/source/CodeGen/Arithmetic/ShiftR.cpp
  lib/source/CodeGen/Arithmetic/SignedShiftR.cpp
  lib/source/CodeGen/Arithmetic/Subtract.cpp
 

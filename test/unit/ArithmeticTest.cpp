@@ -131,11 +131,11 @@ namespace ArithmeticTest
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(16), 4);
 
-            co_yield arith->shiftL(v_c, v_a, v_b);
+            co_yield generateOp<Expression::ShiftL>(v_c, v_a, v_b);
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(20), 4);
 
-            co_yield arith->shiftR(v_c, v_a, v_b);
+            co_yield generateOp<Expression::ShiftR>(v_c, v_a, v_b);
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(24), 4);
 
@@ -188,7 +188,7 @@ namespace ArithmeticTest
                                              Register::Value::Literal(48),
                                              4);
 
-            co_yield arith->bitwiseAnd(v_c, v_a, v_b);
+            co_yield generateOp<Expression::BitwiseAnd>(v_c, v_a, v_b);
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(52), 4);
 
@@ -200,7 +200,7 @@ namespace ArithmeticTest
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(60), 4);
 
-            co_yield arith->bitwiseXor(v_c, v_a, v_b);
+            co_yield generateOp<Expression::BitwiseXor>(v_c, v_a, v_b);
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(64), 4);
 
@@ -368,12 +368,12 @@ namespace ArithmeticTest
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(16), 4);
 
-            co_yield arith->shiftL(s_c, s_a, s_b);
+            co_yield generateOp<Expression::ShiftL>(s_c, s_a, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(20), 4);
 
-            co_yield arith->shiftR(s_c, s_a, s_b);
+            co_yield generateOp<Expression::ShiftR>(s_c, s_a, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(24), 4);
@@ -408,7 +408,7 @@ namespace ArithmeticTest
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(48), 4);
 
-            co_yield arith->bitwiseAnd(s_c, s_a, s_b);
+            co_yield generateOp<Expression::BitwiseAnd>(s_c, s_a, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(52), 4);
@@ -423,7 +423,7 @@ namespace ArithmeticTest
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(60), 4);
 
-            co_yield arith->bitwiseXor(s_c, s_a, s_b);
+            co_yield generateOp<Expression::BitwiseXor>(s_c, s_a, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(64), 4);
@@ -655,11 +655,11 @@ namespace ArithmeticTest
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(32), 8);
 
-            co_yield arith->shiftL(v_c, v_a, v_b);
+            co_yield generateOp<Expression::ShiftL>(v_c, v_a, v_b);
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(40), 8);
 
-            co_yield arith->shiftR(v_c, v_a, v_b);
+            co_yield generateOp<Expression::ShiftR>(v_c, v_a, v_b);
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(48), 8);
 
@@ -693,7 +693,7 @@ namespace ArithmeticTest
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(88), 8);
 
-            co_yield arith->bitwiseAnd(v_c, v_a, v_b);
+            co_yield generateOp<Expression::BitwiseAnd>(v_c, v_a, v_b);
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(96), 8);
 
@@ -701,7 +701,7 @@ namespace ArithmeticTest
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(104), 8);
 
-            co_yield arith->bitwiseXor(v_c, v_a, v_b);
+            co_yield generateOp<Expression::BitwiseXor>(v_c, v_a, v_b);
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(112), 8);
 
@@ -885,12 +885,12 @@ namespace ArithmeticTest
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(32), 8);
 
-            co_yield arith->shiftL(s_c, s_a, s_b);
+            co_yield generateOp<Expression::ShiftL>(s_c, s_a, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(40), 8);
 
-            co_yield arith->shiftR(s_c, s_a, s_b);
+            co_yield generateOp<Expression::ShiftR>(s_c, s_a, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(48), 8);
@@ -920,7 +920,7 @@ namespace ArithmeticTest
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(88), 8);
 
-            co_yield arith->bitwiseAnd(s_c, s_a, s_b);
+            co_yield generateOp<Expression::BitwiseAnd>(s_c, s_a, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(96), 8);
@@ -930,7 +930,7 @@ namespace ArithmeticTest
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(104), 8);
 
-            co_yield arith->bitwiseXor(s_c, s_a, s_b);
+            co_yield generateOp<Expression::BitwiseXor>(s_c, s_a, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(112), 8);

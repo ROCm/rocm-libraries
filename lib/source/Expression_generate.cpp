@@ -332,10 +332,6 @@ namespace rocRoller
     {                                                                      \
         co_yield arith->call(dest, lhs, rhs);                              \
     }
-        DEFINE_BINARY_CALL(ShiftL, shiftL);
-        DEFINE_BINARY_CALL(ShiftR, shiftR);
-        DEFINE_BINARY_CALL(BitwiseAnd, bitwiseAnd);
-        DEFINE_BINARY_CALL(BitwiseXor, bitwiseXor);
         DEFINE_BINARY_CALL(GreaterThan, gt);
         DEFINE_BINARY_CALL(GreaterThanEqual, ge);
         DEFINE_BINARY_CALL(LessThan, lt);

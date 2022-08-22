@@ -121,9 +121,13 @@ namespace rocRoller
 }
 
 #include "Add.hpp"
+#include "BitwiseAnd.hpp"
+#include "BitwiseXor.hpp"
 #include "Divide.hpp"
 #include "Modulo.hpp"
 #include "Multiply.hpp"
 #include "MultiplyHigh.hpp"
+#include "ShiftL.hpp"
+#include "ShiftR.hpp"
 #include "SignedShiftR.hpp"
 #include "Subtract.hpp"

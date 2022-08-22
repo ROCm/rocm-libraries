@@ -245,17 +245,6 @@ namespace rocRoller
     }
 
     Generator<Instruction>
-        Arithmetic_Vector_Int64::shiftR(std::shared_ptr<Register::Value> dest,
-                                        std::shared_ptr<Register::Value> value,
-                                        std::shared_ptr<Register::Value> shiftAmount)
-    {
-        AssertFatal(value != nullptr);
-        AssertFatal(shiftAmount != nullptr);
-
-        co_yield_(Instruction("v_ashrrev_i64", {dest}, {shiftAmount->subset({0}), value}, {}, ""));
-    }
-
-    Generator<Instruction>
         Arithmetic_Vector_Int64::addShiftL(std::shared_ptr<Register::Value> dest,
                                            std::shared_ptr<Register::Value> lhs,
                                            std::shared_ptr<Register::Value> rhs,
@@ -281,34 +270,6 @@ namespace rocRoller
 
         co_yield Arithmetic_Vector_Int64::shiftL(dest, lhs, shiftAmount);
         co_yield Arithmetic_Vector_Int64::add(dest, dest, rhs);
-    }
-
-    Generator<Instruction>
-        Arithmetic_Vector_Int64::bitwiseAnd(std::shared_ptr<Register::Value> dest,
-                                            std::shared_ptr<Register::Value> lhs,
-                                            std::shared_ptr<Register::Value> rhs)
-    {
-        AssertFatal(lhs != nullptr);
-        AssertFatal(rhs != nullptr);
-
-        co_yield_(Instruction(
-            "v_and_b32", {dest->subset({0})}, {lhs->subset({0}), rhs->subset({0})}, {}, ""));
-        co_yield_(Instruction(
-            "v_and_b32", {dest->subset({1})}, {lhs->subset({1}), rhs->subset({1})}, {}, ""));
-    }
-
-    Generator<Instruction>
-        Arithmetic_Vector_Int64::bitwiseXor(std::shared_ptr<Register::Value> dest,
-                                            std::shared_ptr<Register::Value> lhs,
-                                            std::shared_ptr<Register::Value> rhs)
-    {
-        AssertFatal(lhs != nullptr);
-        AssertFatal(rhs != nullptr);
-
-        co_yield_(Instruction(
-            "v_xor_b32", {dest->subset({0})}, {lhs->subset({0}), rhs->subset({0})}, {}, ""));
-        co_yield_(Instruction(
-            "v_xor_b32", {dest->subset({1})}, {lhs->subset({1}), rhs->subset({1})}, {}, ""));
     }
 
     Generator<Instruction> Arithmetic_Vector_Int64::gt(std::shared_ptr<Register::Value> dest,
@@ -527,17 +488,6 @@ namespace rocRoller
     }
 
     Generator<Instruction>
-        Arithmetic_Scalar_Int64::shiftR(std::shared_ptr<Register::Value> dest,
-                                        std::shared_ptr<Register::Value> value,
-                                        std::shared_ptr<Register::Value> shiftAmount)
-    {
-        AssertFatal(value != nullptr);
-        AssertFatal(shiftAmount != nullptr);
-
-        co_yield_(Instruction("s_ashr_i64", {dest}, {value, shiftAmount->subset({0})}, {}, ""));
-    }
-
-    Generator<Instruction>
         Arithmetic_Scalar_Int64::addShiftL(std::shared_ptr<Register::Value> dest,
                                            std::shared_ptr<Register::Value> lhs,
                                            std::shared_ptr<Register::Value> rhs,
@@ -563,28 +513,6 @@ namespace rocRoller
 
         co_yield Arithmetic_Scalar_Int64::shiftL(dest, lhs, shiftAmount);
         co_yield Arithmetic_Scalar_Int64::add(dest, dest, rhs);
-    }
-
-    Generator<Instruction>
-        Arithmetic_Scalar_Int64::bitwiseAnd(std::shared_ptr<Register::Value> dest,
-                                            std::shared_ptr<Register::Value> lhs,
-                                            std::shared_ptr<Register::Value> rhs)
-    {
-        AssertFatal(lhs != nullptr);
-        AssertFatal(rhs != nullptr);
-
-        co_yield_(Instruction("s_and_b64", {dest}, {lhs, rhs}, {}, ""));
-    }
-
-    Generator<Instruction>
-        Arithmetic_Scalar_Int64::bitwiseXor(std::shared_ptr<Register::Value> dest,
-                                            std::shared_ptr<Register::Value> lhs,
-                                            std::shared_ptr<Register::Value> rhs)
-    {
-        AssertFatal(lhs != nullptr);
-        AssertFatal(rhs != nullptr);
-
-        co_yield_(Instruction("s_xor_b64", {dest}, {lhs, rhs}, {}, ""));
     }
 
     Generator<Instruction> Arithmetic_Scalar_Int64::gt(std::shared_ptr<Register::Value> dest,

@@ -71,28 +71,6 @@ namespace rocRoller
     }
 
     Generator<Instruction>
-        Arithmetic_Vector_Int32::shiftL(std::shared_ptr<Register::Value> dest,
-                                        std::shared_ptr<Register::Value> value,
-                                        std::shared_ptr<Register::Value> shiftAmount)
-    {
-        AssertFatal(value != nullptr);
-        AssertFatal(shiftAmount != nullptr);
-
-        co_yield_(Instruction("v_lshlrev_b32", {dest}, {shiftAmount, value}, {}, ""));
-    }
-
-    Generator<Instruction>
-        Arithmetic_Vector_Int32::shiftR(std::shared_ptr<Register::Value> dest,
-                                        std::shared_ptr<Register::Value> value,
-                                        std::shared_ptr<Register::Value> shiftAmount)
-    {
-        AssertFatal(value != nullptr);
-        AssertFatal(shiftAmount != nullptr);
-
-        co_yield_(Instruction("v_lshrrev_b32", {dest}, {shiftAmount, value}, {}, ""));
-    }
-
-    Generator<Instruction>
         Arithmetic_Vector_Int32::addShiftL(std::shared_ptr<Register::Value> dest,
                                            std::shared_ptr<Register::Value> lhs,
                                            std::shared_ptr<Register::Value> rhs,
@@ -116,28 +94,6 @@ namespace rocRoller
         AssertFatal(shiftAmount != nullptr);
 
         co_yield_(Instruction("v_lshl_add_u32", {dest}, {lhs, shiftAmount, rhs}, {}, ""));
-    }
-
-    Generator<Instruction>
-        Arithmetic_Vector_Int32::bitwiseAnd(std::shared_ptr<Register::Value> dest,
-                                            std::shared_ptr<Register::Value> lhs,
-                                            std::shared_ptr<Register::Value> rhs)
-    {
-        AssertFatal(lhs != nullptr);
-        AssertFatal(rhs != nullptr);
-
-        co_yield_(Instruction("v_and_b32", {dest}, {lhs, rhs}, {}, ""));
-    }
-
-    Generator<Instruction>
-        Arithmetic_Vector_Int32::bitwiseXor(std::shared_ptr<Register::Value> dest,
-                                            std::shared_ptr<Register::Value> lhs,
-                                            std::shared_ptr<Register::Value> rhs)
-    {
-        AssertFatal(lhs != nullptr);
-        AssertFatal(rhs != nullptr);
-
-        co_yield_(Instruction("v_xor_b32", {dest}, {lhs, rhs}, {}, ""));
     }
 
     Generator<Instruction> Arithmetic_Vector_Int32::gt(std::shared_ptr<Register::Value> dest,
@@ -265,28 +221,6 @@ namespace rocRoller
     }
 
     Generator<Instruction>
-        Arithmetic_Scalar_Int32::shiftL(std::shared_ptr<Register::Value> dest,
-                                        std::shared_ptr<Register::Value> value,
-                                        std::shared_ptr<Register::Value> shiftAmount)
-    {
-        AssertFatal(value != nullptr);
-        AssertFatal(shiftAmount != nullptr);
-
-        co_yield_(Instruction("s_lshl_b32", {dest}, {value, shiftAmount}, {}, ""));
-    }
-
-    Generator<Instruction>
-        Arithmetic_Scalar_Int32::shiftR(std::shared_ptr<Register::Value> dest,
-                                        std::shared_ptr<Register::Value> value,
-                                        std::shared_ptr<Register::Value> shiftAmount)
-    {
-        AssertFatal(value != nullptr);
-        AssertFatal(shiftAmount != nullptr);
-
-        co_yield_(Instruction("s_lshr_b32", {dest}, {value, shiftAmount}, {}, ""));
-    }
-
-    Generator<Instruction>
         Arithmetic_Scalar_Int32::shiftLAdd(std::shared_ptr<Register::Value> dest,
                                            std::shared_ptr<Register::Value> lhs,
                                            std::shared_ptr<Register::Value> shiftAmount,
@@ -317,28 +251,6 @@ namespace rocRoller
             co_yield_(Instruction("s_lshl_b32", {dest}, {lhs, shiftAmount}, {}, ""));
             co_yield_(Instruction("s_add_u32", {dest}, {dest, rhs}, {}, ""));
         }
-    }
-
-    Generator<Instruction>
-        Arithmetic_Scalar_Int32::bitwiseAnd(std::shared_ptr<Register::Value> dest,
-                                            std::shared_ptr<Register::Value> lhs,
-                                            std::shared_ptr<Register::Value> rhs)
-    {
-        AssertFatal(lhs != nullptr);
-        AssertFatal(rhs != nullptr);
-
-        co_yield_(Instruction("s_and_b32", {dest}, {lhs, rhs}, {}, ""));
-    }
-
-    Generator<Instruction>
-        Arithmetic_Scalar_Int32::bitwiseXor(std::shared_ptr<Register::Value> dest,
-                                            std::shared_ptr<Register::Value> lhs,
-                                            std::shared_ptr<Register::Value> rhs)
-    {
-        AssertFatal(lhs != nullptr);
-        AssertFatal(rhs != nullptr);
-
-        co_yield_(Instruction("s_xor_b32", {dest}, {lhs, rhs}, {}, ""));
     }
 
     Generator<Instruction> Arithmetic_Scalar_Int32::gt(std::shared_ptr<Register::Value> dest,

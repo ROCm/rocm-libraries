@@ -170,13 +170,13 @@ co_yield Instruction::Comment("****************************************\n"
                               "****************************************\n");
 co_yield_(Instruction("s_mov_b32", {Register::Value::Special("m0")}, {Register::Value::Literal(4096)}, {}, " LDS clamp at 4096 bytes"));
 //co_yield Instruction::Wait(WaitCount::LGKMCnt(0, "wait for 148 bytes of kern args"));
-co_yield sarith32->shiftL(OffsetD, OffsetD, Register::Value::Literal(2));
+co_yield generateOp<Expression::ShiftL>(OffsetD, OffsetD, Register::Value::Literal(2));
 co_yield generateOp<Expression::Add>(D, D, OffsetD);
-co_yield sarith32->shiftL(OffsetC, OffsetC, Register::Value::Literal(2));
+co_yield generateOp<Expression::ShiftL>(OffsetC, OffsetC, Register::Value::Literal(2));
 co_yield generateOp<Expression::Add>(C, C, OffsetC);
-co_yield sarith32->shiftL(OffsetA, OffsetA, Register::Value::Literal(2));
+co_yield generateOp<Expression::ShiftL>(OffsetA, OffsetA, Register::Value::Literal(2));
 co_yield generateOp<Expression::Add>(A, A, OffsetA);
-co_yield sarith32->shiftL(OffsetB, OffsetB, Register::Value::Literal(2));
+co_yield generateOp<Expression::ShiftL>(OffsetB, OffsetB, Register::Value::Literal(2));
 co_yield generateOp<Expression::Add>(B, B, OffsetB);
 co_yield generateOp<Expression::Subtract>(A, A, Register::Value::Literal(4)); //pre-pad to make room for possible pointer shift
 co_yield generateOp<Expression::Subtract>(B, B, Register::Value::Literal(4)); //pre-pad to make room for possible pointer shift
@@ -194,26 +194,26 @@ auto LRAddresses = [&](Register::ValuePtr     macroTile,
     auto vtemp3 = std::make_shared<Register::Value>(m_context, Register::Type::Vector, DataType::Int32, 1);
     auto lro = std::make_shared<Register::Value>(m_context, Register::Type::Vector, DataType::Int32, 1);
     co_yield Instruction::Comment(" local read addresses: tile assignments");
-    co_yield varith32->bitwiseAnd(vtemp3, Register::Value::Literal(63), vgprSerial); //" 0. thread id in wave: wtid = tid % wavelength(64)"
-    co_yield varith32->bitwiseAnd(lro, Register::Value::Literal(31), vtemp3); //" 1. N offset: nIdx = wtid % MI_N(32)"
+    co_yield generateOp<Expression::BitwiseAnd>(vtemp3, Register::Value::Literal(63), vgprSerial); //" 0. thread id in wave: wtid = tid % wavelength(64)"
+    co_yield generateOp<Expression::BitwiseAnd>(lro, Register::Value::Literal(31), vtemp3); //" 1. N offset: nIdx = wtid % MI_N(32)"
     co_yield Instruction::Comment(" 1. N offset: nOffset = nIdx * nStride(1) (multiplier is 1, do nothing)");
-    co_yield varith32->shiftR(vtemp2, vtemp3, Register::Value::Literal(5)); //" 2. block offset: bnIdx = wtid / dividedForBlkId(32)"
-    co_yield varith32->bitwiseAnd(vtemp2, Register::Value::Literal(0), vtemp2); //" 2. block offset: bnIdx = bnIdx % num1DBlocks(1)"
+    co_yield generateOp<Expression::ShiftR>(vtemp2, vtemp3, Register::Value::Literal(5)); //" 2. block offset: bnIdx = wtid / dividedForBlkId(32)"
+    co_yield generateOp<Expression::BitwiseAnd>(vtemp2, Register::Value::Literal(0), vtemp2); //" 2. block offset: bnIdx = bnIdx % num1DBlocks(1)"
     //" 2. block offset: bnOffset = bnIdx * strideBlock(32)"
     //" 3. add N and block offset: bnOffset = block and N offset"
     co_yield varith32->shiftLAdd(lro, vtemp2, Register::Value::Literal(5), lro);
     co_yield Instruction::Comment(" 3. apply VectorWidth: bnOffset = bnOffset * vw(1) (multiplier is 1, do nothing)");
-    co_yield varith32->shiftR(vtemp3, vtemp3, Register::Value::Literal(5)); //" 4. K offset: kIdx = wtid / (MIN(32) * MIBB(1))"
+    co_yield generateOp<Expression::ShiftR>(vtemp3, vtemp3, Register::Value::Literal(5)); //" 4. K offset: kIdx = wtid / (MIN(32) * MIBB(1))"
     //" 4. K offset: lrKOffset = kIdx * mStride(64)"
     //" 5. offset in wave: lrOffset = bnOffset + lrKOffset"
     co_yield varith32->shiftLAdd(lro, vtemp3, Register::Value::Literal(6), lro);
-    co_yield varith32->shiftR(vtemp2, vgprSerial, Register::Value::Literal(dividedForWaveId)); //" 6. wave offset in N dimen: wtid = tid / dividedForWaveId(64)"
-    co_yield varith32->bitwiseAnd(vtemp2, Register::Value::Literal(1), vtemp2); //" 6. wave offset in M dimen: wtid0 = wtid / num1DWaves(2)"
+    co_yield generateOp<Expression::ShiftR>(vtemp2, vgprSerial, Register::Value::Literal(dividedForWaveId)); //" 6. wave offset in N dimen: wtid = tid / dividedForWaveId(64)"
+    co_yield generateOp<Expression::BitwiseAnd>(vtemp2, Register::Value::Literal(1), vtemp2); //" 6. wave offset in M dimen: wtid0 = wtid / num1DWaves(2)"
     //" 6. wave offset in M dimen: wOffset = wtid0 * W0Stride(32)"
     //" 7. final local read offset: flrOffset = lrOffset + WOffset"
     co_yield varith32->shiftLAdd(lro, vtemp2, Register::Value::Literal(5), lro);
     co_yield Instruction::Comment(" local read addresses: final offsets");
-    co_yield varith32->shiftR(vtemp, vgprSerial, Register::Value::Literal(8)); //" LSU offset: sgid = Serial / subGroup(256)"
+    co_yield generateOp<Expression::ShiftR>(vtemp, vgprSerial, Register::Value::Literal(8)); //" LSU offset: sgid = Serial / subGroup(256)"
     co_yield m_context->copier()->copy(stemp, macroTile, " LSU offset: stride = MT(64) + PAD(0)");
     co_yield generateOp<Expression::Multiply>(vtemp, stemp, vtemp); //" LSU offset: lsuoffset = sgid*(MT+PAD)"
     co_yield_(Instruction("v_add_lshl_u32", {vgprLocalReadAddr}, {vtemp, lro, Register::Value::Literal(2)}, {}, " Final Offset: offset = (lro*VW+lsuoffset)*bpe"));
@@ -251,8 +251,8 @@ auto GlobalOffset = [&](Register::ValuePtr     vgprAddr,
                                 " LVCB = 64 \n"
                                 " v2 = (local)groB-tile = serial%LVCB (note (wgB*MTB) will be added to SRD) \n"
                                 " v3 = groB-unroll = serial/LVCB \n");
-    co_yield varith32->shiftR(vgprOffsetL, vgprSerial, Register::Value::Literal(6)); //" vgprOffsetL = v[vgprSerial] / 64"
-    co_yield varith32->bitwiseAnd(vgprOffset, Register::Value::Literal(63), vgprSerial); //" vgprOffset = v[vgprSerial] % 64"
+    co_yield generateOp<Expression::ShiftR>(vgprOffsetL, vgprSerial, Register::Value::Literal(6)); //" vgprOffsetL = v[vgprSerial] / 64"
+    co_yield generateOp<Expression::BitwiseAnd>(vgprOffset, Register::Value::Literal(63), vgprSerial); //" vgprOffset = v[vgprSerial] % 64"
     co_yield Instruction::Comment(" global read addresses: final offsets");
     co_yield generateOp<Expression::Multiply>(vgprTmp, sgpr, vgprOffsetL); //"mul d1 lower"
     co_yield_(Instruction("v_add_co_u32", {vgprAddr}, {m_context->getVCC(), vgprOffset, vgprTmp}, {}, "accumulate K lower"));
@@ -272,13 +272,13 @@ auto GlobalReadAddresses = [&](Register::ValuePtr     val,
     co_yield Instruction::Comment(" max read offset = size[n] * stride[n-1] ");
     co_yield generateOp<Expression::Multiply>(tileStart, sgprWorkGroup, macroTile0); //" WorkGroup[01] * MT"
     co_yield generateOp<Expression::Subtract>(sgprShadowLimit, size, tileStart); //" sub tileStart"
-    co_yield sarith64->shiftL(sgprShadowLimit, sgprShadowLimit, Register::Value::Literal(2)); //" Set limit to use bytes"
+    co_yield generateOp<Expression::ShiftL>(sgprShadowLimit, sgprShadowLimit, Register::Value::Literal(2)); //" Set limit to use bytes"
     co_yield generateOp<Expression::Add>(sgprShadowLimit, sgprShadowLimit, Register::Value::Literal(4)); //" extend limit for pre-pad"
     co_yield sarith32->eq(nullptr, sgprShadowLimit->subset({1}), Register::Value::Literal(0)); //" are we within 2^32?"
     co_yield_(Instruction("s_cselect_b32", {sgprSrd->subset({2})}, {sgprShadowLimit->subset({0}), BufferLimit}, {}, " Move shadow to real if we are within 2^32"));
     co_yield generateOp<Expression::Multiply>(stemp, sgprStride, sgprWorkGroup2); //" Stride*WG"
     co_yield generateOp<Expression::Add>(tileStart, tileStart, stemp); //" accum wg term to tilestart"
-    co_yield sarith64->shiftL(tileStart, tileStart, Register::Value::Literal(2)); //" tileStart *= BPE"
+    co_yield generateOp<Expression::ShiftL>(tileStart, tileStart, Register::Value::Literal(2)); //" tileStart *= BPE"
     co_yield generateOp<Expression::Add>(sgprSrd, val, tileStart); //" SRD base = Address+ tileStart0"
     co_yield m_context->copier()->copy(sgprSrd->subset({3}), Srd127_96, " Set bits 127_96 in SRD");
 };
@@ -314,7 +314,7 @@ co_yield_(Instruction("v_add_lshl_u32", {vgprLocalWriteAddrB}, {vgprOffsetB, vgp
 co_yield_(Instruction("v_add_co_u32", {vgprLocalWriteAddrB, m_context->getVCC()}, {Register::Value::Literal(1024), vgprLocalWriteAddrB}, {}, " lwFOB = lwB1J + lwBL*MT1J + LDS_OFFSET_B=256*4"));
 }
 co_yield Instruction::Comment(" declare loop num iterations ");
-co_yield sarith32->shiftR(sgprLoopCounterL, sgprSizesSum, Register::Value::Literal(2)); //" s[sgprLoopCounterL] = s[sgprSizesSum+0] / 4"
+co_yield generateOp<Expression::ShiftR>(sgprLoopCounterL, sgprSizesSum, Register::Value::Literal(2)); //" s[sgprLoopCounterL] = s[sgprSizesSum+0] / 4"
 co_yield Instruction::Comment(" local read addresses: init pointers a \n"
                               " localReadInitPointers \n"
                               " local read addresses: init pointers b \n"
@@ -354,16 +354,16 @@ auto stempProd = std::make_shared<Register::Value>(m_context, Register::Type::Sc
 auto stemp = std::make_shared<Register::Value>(m_context, Register::Type::Scalar, DataType::Int64, 1);
 co_yield generateOp<Expression::Multiply>(stempProd, macroTile1, sgprWorkGroup1); //" wg1*MT1"
 co_yield generateOp<Expression::Multiply>(stemp, stempProd, sgprStrideC1J); //" CScale s62 by Stride"
-co_yield sarith64->shiftL(stemp, stemp, Register::Value::Literal(2)); //" scale by bpe"
+co_yield generateOp<Expression::ShiftL>(stemp, stemp, Register::Value::Literal(2)); //" scale by bpe"
 co_yield generateOp<Expression::Add>(sgprSrdC, C, stemp);
 co_yield generateOp<Expression::Multiply>(stemp, stempProd, sgprStrideD1J); //" CScale s62 by Stride"
-co_yield sarith64->shiftL(stemp, stemp, Register::Value::Literal(2)); //" scale by bpe"
+co_yield generateOp<Expression::ShiftL>(stemp, stemp, Register::Value::Literal(2)); //" scale by bpe"
 co_yield generateOp<Expression::Add>(sgprSrdD, D, stemp);
 co_yield generateOp<Expression::Multiply>(stemp, sgprWorkGroup2, sgprStrideCK); //"CScale s[sgprWorkGroup2] by Stride"
-co_yield sarith64->shiftL(stemp, stemp, Register::Value::Literal(2)); //" scale by bpe"
+co_yield generateOp<Expression::ShiftL>(stemp, stemp, Register::Value::Literal(2)); //" scale by bpe"
 co_yield generateOp<Expression::Add>(sgprSrdC, sgprSrdC, stemp);
 co_yield generateOp<Expression::Multiply>(stemp, sgprWorkGroup2, sgprStrideDK); //"CScale s[sgprWorkGroup2] by Stride"
-co_yield sarith64->shiftL(stemp, stemp, Register::Value::Literal(2)); //" scale by bpe"
+co_yield generateOp<Expression::ShiftL>(stemp, stemp, Register::Value::Literal(2)); //" scale by bpe"
 co_yield generateOp<Expression::Add>(sgprSrdD, sgprSrdD, stemp);
 }
 co_yield Instruction::Comment(" initC: remove C-tile 0-0 from pool ");
@@ -380,9 +380,9 @@ co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Local, vgprLoca
 co_yield Instruction::Comment(" local write b ");
 co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Local, vgprLocalWriteAddrB, vgprG2LB, Register::Value::Literal(0), 4, " lwoB_0_0_0_0 = (0*LSCB) + (0*LSPB)(*MT1J+PAD) = 0");
 co_yield Instruction::Comment(" local write swap a ");
-co_yield varith32->bitwiseXor(vgprLocalWriteAddrA, Register::Value::Literal(2048), vgprLocalWriteAddrA); //" swap Red Blk"
+co_yield generateOp<Expression::BitwiseXor>(vgprLocalWriteAddrA, Register::Value::Literal(2048), vgprLocalWriteAddrA); //" swap Red Blk"
 co_yield Instruction::Comment(" local write swap b ");
-co_yield varith32->bitwiseXor(vgprLocalWriteAddrB, Register::Value::Literal(2048), vgprLocalWriteAddrB); //" swap Red Blk"
+co_yield generateOp<Expression::BitwiseXor>(vgprLocalWriteAddrB, Register::Value::Literal(2048), vgprLocalWriteAddrB); //" swap Red Blk"
 co_yield Instruction::Comment("****************************************\n"
                               " Unrolled Loop(s) - Begin               \n"
                               "****************************************\n");
@@ -438,13 +438,13 @@ co_yield Instruction::Comment(" sched write - iter 1 writesPerItem=1 ");
 //co_yield Instruction("s_waitcnt", {Register::Value::Special("vmcnt(0)")}, {}, {}, " lgkmcnt=-1 vmcnt=0wait for global read before writing to local");
 co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Local, vgprLocalWriteAddrB, vgprG2LB, Register::Value::Literal(0), 4, " lwoB_0_0_0_0 = (0*LSCB) + (0*LSPB)(*MT1J+PAD) = 0");
 co_yield Instruction::Comment(" local write swap offsets a ");
-co_yield varith32->bitwiseXor(vgprLocalWriteAddrA, Register::Value::Literal(2048), vgprLocalWriteAddrA); //" swap Red Blk"
+co_yield generateOp<Expression::BitwiseXor>(vgprLocalWriteAddrA, Register::Value::Literal(2048), vgprLocalWriteAddrA); //" swap Red Blk"
 co_yield Instruction::Comment(" local write swap offsets b ");
-co_yield varith32->bitwiseXor(vgprLocalWriteAddrB, Register::Value::Literal(2048), vgprLocalWriteAddrB); //" swap Red Blk"
+co_yield generateOp<Expression::BitwiseXor>(vgprLocalWriteAddrB, Register::Value::Literal(2048), vgprLocalWriteAddrB); //" swap Red Blk"
 co_yield Instruction::Comment(" local read swap offsets a ");
-co_yield varith32->bitwiseXor(vgprLocalReadAddrA, Register::Value::Literal(2048), vgprLocalReadAddrA); //" swap Red Blk"
+co_yield generateOp<Expression::BitwiseXor>(vgprLocalReadAddrA, Register::Value::Literal(2048), vgprLocalReadAddrA); //" swap Red Blk"
 co_yield Instruction::Comment(" local read swap offsets b ");
-co_yield varith32->bitwiseXor(vgprLocalReadAddrB, Register::Value::Literal(2048), vgprLocalReadAddrB); //" swap Red Blk"
+co_yield generateOp<Expression::BitwiseXor>(vgprLocalReadAddrB, Register::Value::Literal(2048), vgprLocalReadAddrB); //" swap Red Blk"
 co_yield Instruction::Comment(" local read init pointers a ");
 co_yield Instruction::Comment(" localReadInitPointers ");
 co_yield Instruction::Comment(" local read init pointers b ");
@@ -479,17 +479,17 @@ auto vtemp5 = std::make_shared<Register::Value>(m_context, Register::Type::Vecto
 auto vtemp6 = std::make_shared<Register::Value>(m_context, Register::Type::Vector, DataType::Int32, 1);
 auto vDestination = std::make_shared<Register::Value>(m_context, Register::Type::Vector, DataType::Int32, 16);
 co_yield Instruction::Comment(" computeStoreVgprs ");
-co_yield varith32->shiftR(vtemp1, vgprSerial, Register::Value::Literal(6)); //" vtemp1 = v[vgprSerial] / 64"
-co_yield varith32->shiftR(vtemp6, vtemp1, Register::Value::Literal(1)); //" vtemp6 = vtemp1 / 2"
+co_yield generateOp<Expression::ShiftR>(vtemp1, vgprSerial, Register::Value::Literal(6)); //" vtemp1 = v[vgprSerial] / 64"
+co_yield generateOp<Expression::ShiftR>(vtemp6, vtemp1, Register::Value::Literal(1)); //" vtemp6 = vtemp1 / 2"
 co_yield generateOp<Expression::Multiply>(vtemp6, Register::Value::Literal(32), vtemp6); //" wave coordination offset 1"
-co_yield varith32->bitwiseAnd(vtemp2, Register::Value::Literal(31), vgprSerial); //" vtemp2 = v[vgprSerial] % 32"
+co_yield generateOp<Expression::BitwiseAnd>(vtemp2, Register::Value::Literal(31), vgprSerial); //" vtemp2 = v[vgprSerial] % 32"
 co_yield generateOp<Expression::Add>(vtemp6, vtemp2, vtemp6); //" coordination 1 = wave_id1 + tid1"
 //TODO: MISTAKE? co_yield Instruction("v_mul_lo_u32", {v2}, {vtemp6, sgprStrideC1J}, {}, "  offset 1");
 co_yield generateOp<Expression::Multiply>(vtemp5, vtemp6, sgprStrideD1J); //"  offset 1"
-co_yield varith32->bitwiseAnd(vtemp2, Register::Value::Literal(1), vtemp1); //" vtemp2 = vtemp1 % 2"
+co_yield generateOp<Expression::BitwiseAnd>(vtemp2, Register::Value::Literal(1), vtemp1); //" vtemp2 = vtemp1 % 2"
 co_yield generateOp<Expression::Multiply>(vtemp2, Register::Value::Literal(32), vtemp2); //" wave coordination offset 0"
-co_yield varith32->bitwiseAnd(vtemp4, Register::Value::Literal(63), vgprSerial); //" vtemp4 = v[vgprSerial] % 64"
-co_yield varith32->shiftR(vtemp4, vtemp4, Register::Value::Literal(5)); //" vtemp4 = vtemp4 / 32"
+co_yield generateOp<Expression::BitwiseAnd>(vtemp4, Register::Value::Literal(63), vgprSerial); //" vtemp4 = v[vgprSerial] % 64"
+co_yield generateOp<Expression::ShiftR>(vtemp4, vtemp4, Register::Value::Literal(5)); //" vtemp4 = vtemp4 / 32"
 //" thread0 * continuous_output"
 //" coordination 0 = wave_id0 + tid0"
 co_yield varith32->shiftLAdd(vtemp4, vtemp4, Register::Value::Literal(2), vtemp2);

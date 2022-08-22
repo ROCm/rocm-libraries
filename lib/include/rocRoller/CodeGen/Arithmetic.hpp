@@ -121,20 +121,6 @@ namespace rocRoller
             throw std::runtime_error("shiftAddL unsupported for this datatype");
         }
 
-        virtual Generator<Instruction> bitwiseAnd(std::shared_ptr<Register::Value> dest,
-                                                  std::shared_ptr<Register::Value> lhs,
-                                                  std::shared_ptr<Register::Value> rhs)
-        {
-            throw std::runtime_error("BitwiseAnd unsupported for this datatype");
-        }
-
-        virtual Generator<Instruction> bitwiseXor(std::shared_ptr<Register::Value> dest,
-                                                  std::shared_ptr<Register::Value> lhs,
-                                                  std::shared_ptr<Register::Value> rhs)
-        {
-            throw std::runtime_error("BitwiseXor unsupported for this datatype");
-        }
-
         virtual Generator<Instruction> gt(std::shared_ptr<Register::Value> dest,
                                           std::shared_ptr<Register::Value> lhs,
                                           std::shared_ptr<Register::Value> rhs)

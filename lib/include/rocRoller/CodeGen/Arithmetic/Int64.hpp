@@ -62,11 +62,6 @@ namespace rocRoller
                    std::shared_ptr<Register::Value> shiftAmount) final override;
 
         virtual Generator<Instruction>
-            shiftR(std::shared_ptr<Register::Value> dest,
-                   std::shared_ptr<Register::Value> value,
-                   std::shared_ptr<Register::Value> shiftAmount) final override;
-
-        virtual Generator<Instruction>
             addShiftL(std::shared_ptr<Register::Value> dest,
                       std::shared_ptr<Register::Value> lhs,
                       std::shared_ptr<Register::Value> rhs,
@@ -77,16 +72,6 @@ namespace rocRoller
                       std::shared_ptr<Register::Value> lhs,
                       std::shared_ptr<Register::Value> shiftAmount,
                       std::shared_ptr<Register::Value> rhs) final override;
-
-        virtual Generator<Instruction>
-            bitwiseAnd(std::shared_ptr<Register::Value> dest,
-                       std::shared_ptr<Register::Value> lhs,
-                       std::shared_ptr<Register::Value> rhs) final override;
-
-        virtual Generator<Instruction>
-            bitwiseXor(std::shared_ptr<Register::Value> dest,
-                       std::shared_ptr<Register::Value> lhs,
-                       std::shared_ptr<Register::Value> rhs) final override;
 
         virtual Generator<Instruction> gt(std::shared_ptr<Register::Value> dest,
                                           std::shared_ptr<Register::Value> lhs,
@@ -166,11 +151,6 @@ namespace rocRoller
                    std::shared_ptr<Register::Value> shiftAmount) final override;
 
         virtual Generator<Instruction>
-            shiftR(std::shared_ptr<Register::Value> dest,
-                   std::shared_ptr<Register::Value> value,
-                   std::shared_ptr<Register::Value> shiftAmount) final override;
-
-        virtual Generator<Instruction>
             addShiftL(std::shared_ptr<Register::Value> dest,
                       std::shared_ptr<Register::Value> lhs,
                       std::shared_ptr<Register::Value> rhs,
@@ -181,16 +161,6 @@ namespace rocRoller
                       std::shared_ptr<Register::Value> lhs,
                       std::shared_ptr<Register::Value> shiftAmount,
                       std::shared_ptr<Register::Value> rhs) final override;
-
-        virtual Generator<Instruction>
-            bitwiseAnd(std::shared_ptr<Register::Value> dest,
-                       std::shared_ptr<Register::Value> lhs,
-                       std::shared_ptr<Register::Value> rhs) final override;
-
-        virtual Generator<Instruction>
-            bitwiseXor(std::shared_ptr<Register::Value> dest,
-                       std::shared_ptr<Register::Value> lhs,
-                       std::shared_ptr<Register::Value> rhs) final override;
 
         virtual Generator<Instruction> gt(std::shared_ptr<Register::Value> dest,
                                           std::shared_ptr<Register::Value> lhs,
