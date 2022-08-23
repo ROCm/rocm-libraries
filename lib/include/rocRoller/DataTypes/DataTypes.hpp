@@ -76,6 +76,7 @@ namespace rocRoller
         ComplexFloat,
         ComplexDouble,
         Half,
+        Halfx2,
         Int8x4,
         Int32,
         Int64,
@@ -416,6 +417,16 @@ namespace rocRoller
     template <>
     struct TypeInfo<Half>
         : public BaseTypeInfo<Half, DataType::Half, PointerType::Value, 1, false, false, true>
+    {
+    };
+
+    struct Halfx2 : public DistinctType<uint32_t, Halfx2>
+    {
+    };
+
+    template <>
+    struct TypeInfo<Halfx2>
+        : public BaseTypeInfo<Halfx2, DataType::Halfx2, PointerType::Value, 2, false, false, true>
     {
     };
 

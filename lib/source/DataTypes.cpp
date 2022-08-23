@@ -75,6 +75,8 @@ namespace rocRoller
             return "ComplexDouble";
         case DataType::Half:
             return "Half";
+        case DataType::Halfx2:
+            return "Halfx2";
         case DataType::Int8x4:
             return "Int8x4";
         case DataType::Int32:
@@ -115,6 +117,8 @@ namespace rocRoller
             return "Z";
         case DataType::Half:
             return "H";
+        case DataType::Halfx2:
+            return "2xH";
         case DataType::Int8x4:
             return "4xi8";
         case DataType::Int32:
@@ -294,6 +298,7 @@ namespace rocRoller
     {
         registerTypeInfo<BFloat16>();
         registerTypeInfo<Half>();
+        registerTypeInfo<Halfx2>();
         registerTypeInfo<double>();
         registerTypeInfo<float>();
         registerTypeInfo<std::complex<double>>();

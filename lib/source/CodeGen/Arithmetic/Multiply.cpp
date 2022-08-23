@@ -10,6 +10,7 @@ namespace rocRoller
     RegisterComponentTemplateSpec(MultiplyGenerator, Register::Type::Vector, DataType::Int32);
     RegisterComponentTemplateSpec(MultiplyGenerator, Register::Type::Scalar, DataType::Int64);
     RegisterComponentTemplateSpec(MultiplyGenerator, Register::Type::Vector, DataType::Int64);
+    RegisterComponentTemplateSpec(MultiplyGenerator, Register::Type::Vector, DataType::Halfx2);
     RegisterComponentTemplateSpec(MultiplyGenerator, Register::Type::Vector, DataType::Float);
     RegisterComponentTemplateSpec(MultiplyGenerator, Register::Type::Vector, DataType::Double);
 
@@ -239,6 +240,16 @@ namespace rocRoller
             Throw<FatalError>(
                 concatenate("Shouldn't get here: numHighComponents = ", numHighComponents));
         }
+    }
+
+    template <>
+    Generator<Instruction> MultiplyGenerator<Register::Type::Vector, DataType::Halfx2>::generate(
+        Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
+    {
+        AssertFatal(lhs != nullptr);
+        AssertFatal(rhs != nullptr);
+
+        co_yield_(Instruction("v_pk_mul_f16", {dest}, {lhs, rhs}, {}, ""));
     }
 
     template <>
