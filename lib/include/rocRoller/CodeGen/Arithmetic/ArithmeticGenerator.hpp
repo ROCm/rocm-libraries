@@ -122,6 +122,7 @@ namespace rocRoller
 
 #include "Add.hpp"
 #include "BitwiseAnd.hpp"
+#include "BitwiseOr.hpp"
 #include "BitwiseXor.hpp"
 #include "Divide.hpp"
 #include "Modulo.hpp"

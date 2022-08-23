@@ -255,6 +255,7 @@ namespace rocRoller
         SIMPLE_BINARY_OP(ShiftL, <<);
         SIMPLE_BINARY_OP(SignedShiftR, >>);
         SIMPLE_BINARY_OP(BitwiseAnd, &);
+        SIMPLE_BINARY_OP(BitwiseOr, |);
         SIMPLE_BINARY_OP(BitwiseXor, ^);
 
         SIMPLE_BINARY_OP(GreaterThan, >);

@@ -29,6 +29,7 @@ namespace rocRoller
         struct ShiftR;
         struct SignedShiftR;
         struct BitwiseAnd;
+        struct BitwiseOr;
         struct BitwiseXor;
         struct GreaterThan;
         struct GreaterThanEqual;
@@ -60,6 +61,7 @@ namespace rocRoller
             ShiftR,
             SignedShiftR,
             BitwiseAnd,
+            BitwiseOr,
             BitwiseXor,
             GreaterThan,
             GreaterThanEqual,

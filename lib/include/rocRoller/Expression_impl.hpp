@@ -91,6 +91,11 @@ namespace rocRoller
             return std::make_shared<Expression>(BitwiseAnd{a, b});
         }
 
+        inline ExpressionPtr operator|(ExpressionPtr a, ExpressionPtr b)
+        {
+            return std::make_shared<Expression>(BitwiseOr{a, b});
+        }
+
         inline ExpressionPtr operator^(ExpressionPtr a, ExpressionPtr b)
         {
             return std::make_shared<Expression>(BitwiseXor{a, b});
@@ -186,6 +191,7 @@ namespace rocRoller
         EXPRESSION_INFO(ShiftR);
         EXPRESSION_INFO(SignedShiftR);
         EXPRESSION_INFO(BitwiseAnd);
+        EXPRESSION_INFO(BitwiseOr);
         EXPRESSION_INFO(BitwiseXor);
 
         EXPRESSION_INFO(FusedShiftAdd);

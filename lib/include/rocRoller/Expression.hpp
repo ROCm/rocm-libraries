@@ -169,6 +169,12 @@ namespace rocRoller
             constexpr static inline auto EvalTimes = EvaluationTimes::All();
         };
 
+        struct BitwiseOr : Binary
+        {
+            constexpr static inline auto Type      = Category::Arithmetic;
+            constexpr static inline auto EvalTimes = EvaluationTimes::All();
+        };
+
         struct BitwiseXor : Binary
         {
             constexpr static inline auto Type      = Category::Arithmetic;
