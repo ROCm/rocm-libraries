@@ -17,8 +17,6 @@ namespace rocRollerTest
     class FileWritingObserverTest : public GenericContextFixture
     {
     protected:
-        char* saveAssembly;
-
         std::string targetArchitecture()
         {
             return "gfx90a";
@@ -26,24 +24,9 @@ namespace rocRollerTest
 
         void SetUp()
         {
-            // Save environment variable state
-            saveAssembly = getenv(rocRoller::ENV_SAVE_ASSEMBLY.c_str());
-
-            // Set the SAVE_ASSEMBLY environment variable
-            setenv(rocRoller::ENV_SAVE_ASSEMBLY.c_str(), "1", 1);
+            Settings::getInstance()->set(Settings::SaveAssembly, true);
 
             GenericContextFixture::SetUp();
-        }
-
-        void TearDown()
-        {
-            // Reset environment variable
-            if(!saveAssembly)
-                unsetenv(rocRoller::ENV_SAVE_ASSEMBLY.c_str());
-            else
-                setenv(rocRoller::ENV_SAVE_ASSEMBLY.c_str(), saveAssembly, 1);
-
-            GenericContextFixture::TearDown();
         }
     };
 

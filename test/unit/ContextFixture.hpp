@@ -6,6 +6,7 @@
 #include <sstream>
 
 #include <rocRoller/Context_fwd.hpp>
+#include <rocRoller/Utilities/Settings.hpp>
 
 class ContextFixture : public ::testing::Test
 {

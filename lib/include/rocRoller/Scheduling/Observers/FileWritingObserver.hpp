@@ -7,12 +7,11 @@
 #include <vector>
 
 #include "../../Utilities/Error.hpp"
+#include "../../Utilities/Settings.hpp"
 #include "../../Utilities/Utils.hpp"
 
 namespace rocRoller
 {
-    const std::string ENV_SAVE_ASSEMBLY = "ROCROLLER_SAVE_ASSEMBLY";
-
     namespace Scheduling
     {
         class FileWritingObserver
@@ -22,8 +21,7 @@ namespace rocRoller
                 : m_context(context)
                 , m_assemblyFile()
             {
-                char* saveAssembly = getenv(ENV_SAVE_ASSEMBLY.c_str());
-                m_writing          = saveAssembly && std::string(saveAssembly) == "1";
+                m_writing = Settings::getInstance()->get(Settings::SaveAssembly);
             }
 
             FileWritingObserver(const FileWritingObserver& input)

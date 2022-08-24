@@ -11,8 +11,6 @@
 
 namespace rocRoller
 {
-    const std::string ENV_BREAK_ON_THROW = "ROCROLLER_BREAK_ON_THROW";
-
     struct Error : public std::runtime_error
     {
         using std::runtime_error::runtime_error;

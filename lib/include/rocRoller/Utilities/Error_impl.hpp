@@ -2,6 +2,7 @@
 #pragma once
 
 #include "Error.hpp"
+#include "Settings.hpp"
 #include "Utils.hpp"
 
 namespace rocRoller
@@ -15,8 +16,8 @@ namespace rocRoller
     template <typename T_Exception, typename... Ts>
     [[noreturn]] void Throw(Ts const&... message)
     {
-        auto var = getenv(ENV_BREAK_ON_THROW.c_str());
-        if(var && std::string(var) == "1")
+        bool var = Settings::getInstance()->get(Settings::BreakOnThrow);
+        if(var)
         {
             std::cerr << concatenate(message...) << std::endl;
             Crash();

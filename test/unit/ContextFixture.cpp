@@ -24,6 +24,7 @@ void ContextFixture::SetUp()
 void ContextFixture::TearDown()
 {
     m_context.reset();
+    rocRoller::Settings::reset();
     rocRoller::Component::ComponentFactoryBase::ClearAllCaches();
 }
 

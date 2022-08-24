@@ -69,11 +69,14 @@ namespace rocRoller
 
         rv->m_labelAllocator = std::make_shared<LabelAllocator>(kernelName);
 
-        rv->m_assemblyFileName = kernelName.size() ? kernelName : "a";
-        rv->m_assemblyFileName += "_" + arch.target().ToString();
-        std::replace(rv->m_assemblyFileName.begin(), rv->m_assemblyFileName.end(), ':', '-');
-        rv->m_assemblyFileName += ".s";
-
+        rv->m_assemblyFileName = Settings::getInstance()->get(Settings::AssemblyFile);
+        if(rv->m_assemblyFileName.empty())
+        {
+            rv->m_assemblyFileName = kernelName.size() ? kernelName : "a";
+            rv->m_assemblyFileName += "_" + arch.target().ToString();
+            std::replace(rv->m_assemblyFileName.begin(), rv->m_assemblyFileName.end(), ':', '-');
+            rv->m_assemblyFileName += ".s";
+        }
         rv->m_ldsAllocator = std::make_shared<LDSAllocator>(
             rv->targetArchitecture().GetCapability(GPUCapability::MaxLdsSize));
 

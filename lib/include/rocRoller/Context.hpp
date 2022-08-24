@@ -27,6 +27,7 @@
 #include "GPUArchitecture/GPUArchitecture.hpp"
 #include "KernelGraph/RegisterTagManager_fwd.hpp"
 #include "KernelOptions.hpp"
+#include "Utilities/Settings.hpp"
 
 namespace rocRoller
 {

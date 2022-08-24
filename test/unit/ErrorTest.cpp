@@ -2,7 +2,9 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <rocRoller/Context.hpp>
 #include <rocRoller/Utilities/Error.hpp>
+#include <rocRoller/Utilities/Settings.hpp>
 
 #include "GenericContextFixture.hpp"
 #include "SourceMatcher.hpp"
@@ -11,6 +13,9 @@ using namespace rocRoller;
 
 namespace rocRollerTest
 {
+    class ErrorFixtureTest : public GenericContextFixture
+    {
+    };
 
     TEST(ErrorTest, BaseErrorTest)
     {
@@ -37,7 +42,7 @@ namespace rocRollerTest
         EXPECT_THROW({ AssertFatal(IntA < IntB, ShowValue(IntB), message); }, FatalError);
 
         std::string expected = R"(
-            test/unit/ErrorTest.cpp:46: FatalError(IntA < IntB)
+            test/unit/ErrorTest.cpp:51: FatalError(IntA < IntB)
                 IntA = 5
             FatalError Test)";
 
@@ -68,7 +73,7 @@ namespace rocRollerTest
                      RecoverableError);
 
         std::string expected = R"(
-            test/unit/ErrorTest.cpp:78: RecoverableError(StrA == StrB)
+            test/unit/ErrorTest.cpp:83: RecoverableError(StrA == StrB)
                 StrA = StrA
                 StrB = StrB
             RecoverableError Test)";
@@ -89,75 +94,30 @@ namespace rocRollerTest
         }
     }
 
-    TEST(ErrorTest, DontBreakOnThrow)
+    TEST_F(ErrorFixtureTest, DontBreakOnThrow)
     {
         (void)(::testing::GTEST_FLAG(death_test_style) = "threadsafe");
-        char*       oldEnv = getenv(rocRoller::ENV_BREAK_ON_THROW.c_str());
-        std::string oldValue;
-        if(oldEnv != nullptr)
-        {
-            oldValue = oldEnv;
-        }
 
-        setenv(rocRoller::ENV_BREAK_ON_THROW.c_str(), "0", 1);
+        Settings::getInstance()->set(Settings::BreakOnThrow, false);
 
         EXPECT_ANY_THROW({ Throw<FatalError>("Error"); });
-
-        if(oldEnv == nullptr)
-        {
-            unsetenv(rocRoller::ENV_BREAK_ON_THROW.c_str());
-        }
-        else
-        {
-            setenv(rocRoller::ENV_BREAK_ON_THROW.c_str(), oldValue.c_str(), 1);
-        }
     }
 
-    TEST(ErrorDeathTest, BreakOnAssertFatal)
+    TEST_F(ErrorFixtureTest, BreakOnAssertFatal)
     {
         (void)(::testing::GTEST_FLAG(death_test_style) = "threadsafe");
-        char*       oldEnv = getenv(rocRoller::ENV_BREAK_ON_THROW.c_str());
-        std::string oldValue;
-        if(oldEnv != nullptr)
-        {
-            oldValue = oldEnv;
-        }
 
-        setenv(rocRoller::ENV_BREAK_ON_THROW.c_str(), "1", 1);
+        Settings::getInstance()->set(Settings::BreakOnThrow, true);
 
         EXPECT_DEATH({ AssertFatal(0 == 1); }, "");
-
-        if(oldEnv == nullptr)
-        {
-            unsetenv(rocRoller::ENV_BREAK_ON_THROW.c_str());
-        }
-        else
-        {
-            setenv(rocRoller::ENV_BREAK_ON_THROW.c_str(), oldValue.c_str(), 1);
-        }
     }
 
-    TEST(ErrorDeathTest, BreakOnThrow)
+    TEST_F(ErrorFixtureTest, BreakOnThrow)
     {
         (void)(::testing::GTEST_FLAG(death_test_style) = "threadsafe");
-        char*       oldEnv = getenv(rocRoller::ENV_BREAK_ON_THROW.c_str());
-        std::string oldValue;
-        if(oldEnv != nullptr)
-        {
-            oldValue = oldEnv;
-        }
 
-        setenv(rocRoller::ENV_BREAK_ON_THROW.c_str(), "1", 1);
+        Settings::getInstance()->set(Settings::BreakOnThrow, true);
 
         EXPECT_DEATH({ Throw<FatalError>("Error"); }, "");
-
-        if(oldEnv == nullptr)
-        {
-            unsetenv(rocRoller::ENV_BREAK_ON_THROW.c_str());
-        }
-        else
-        {
-            setenv(rocRoller::ENV_BREAK_ON_THROW.c_str(), oldValue.c_str(), 1);
-        }
     }
 }

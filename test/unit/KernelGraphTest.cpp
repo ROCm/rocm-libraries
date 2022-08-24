@@ -19,6 +19,7 @@
 #include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/RegisterTagManager.hpp>
+#include <rocRoller/Utilities/Settings.hpp>
 #include <rocRoller/Utilities/Timer.hpp>
 
 #include "DataTypes/DataTypes.hpp"
@@ -37,28 +38,11 @@ namespace KernelGraphTest
     public:
         Expression::FastArithmetic fastArith{m_context};
 
-        char* saveAssembly;
-
         void SetUp()
         {
-            // Save environment variable state
-            saveAssembly = getenv(rocRoller::ENV_SAVE_ASSEMBLY.c_str());
-
-            // Set the SAVE_ASSEMBLY environment variable
-            setenv(rocRoller::ENV_SAVE_ASSEMBLY.c_str(), "1", 1);
+            Settings::getInstance()->set(Settings::SaveAssembly, true);
 
             CurrentGPUContextFixture::SetUp();
-        }
-
-        void TearDown()
-        {
-            // Reset environment variable
-            if(!saveAssembly)
-                unsetenv(rocRoller::ENV_SAVE_ASSEMBLY.c_str());
-            else
-                setenv(rocRoller::ENV_SAVE_ASSEMBLY.c_str(), saveAssembly, 1);
-
-            CurrentGPUContextFixture::TearDown();
         }
 
         static std::shared_ptr<Command> commonCommand()

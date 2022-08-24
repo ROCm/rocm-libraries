@@ -397,6 +397,7 @@ set(
   test/unit/RegisterAllocatorTest.cpp
   test/unit/RegisterTest.cpp
   test/unit/SchedulerTest.cpp
+  test/unit/SettingsTest.cpp
   test/unit/SimplifyTest.cpp
   test/unit/SourceMatcherTest.cpp
   test/unit/TileTransposeAdd.cpp
