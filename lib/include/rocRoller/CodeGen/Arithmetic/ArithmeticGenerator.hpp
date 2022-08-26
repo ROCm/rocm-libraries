@@ -89,7 +89,9 @@ namespace rocRoller
     Generator<Instruction>
         generateOp(Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs)
     {
-        co_yield GetGenerator<Operation>(dst, lhs, rhs)->generate(dst, lhs, rhs);
+        auto gen = GetGenerator<Operation>(dst, lhs, rhs);
+        AssertFatal(gen != nullptr, "No generator");
+        co_yield gen->generate(dst, lhs, rhs);
     }
 
     // --------------------------------------------------
@@ -106,17 +108,21 @@ namespace rocRoller
     // Return the context from a list of register values.
     inline std::shared_ptr<Context> getContextFromValues(Register::ValuePtr r)
     {
+        AssertFatal(r != nullptr, "No context");
         return r->context();
     }
 
     template <typename... Args>
     inline std::shared_ptr<Context> getContextFromValues(Register::ValuePtr arg, Args... args)
     {
-        auto result = arg->context();
-        if(result)
-            return result;
+        if(arg && arg->context())
+        {
+            return arg->context();
+        }
         else
+        {
             return getContextFromValues(args...);
+        }
     }
 }
 

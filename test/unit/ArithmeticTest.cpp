@@ -1437,6 +1437,46 @@ namespace ArithmeticTest
         }
     }
 
+    TEST_P(ArithmeticTest, NullChecks)
+    {
+        (void)(::testing::GTEST_FLAG(death_test_style) = "threadsafe");
+
+        auto kb_null = [&]() -> Generator<Instruction> {
+            co_yield generateOp<Expression::Subtract>(nullptr, nullptr, nullptr);
+        };
+        ASSERT_THROW(m_context->schedule(kb_null()), FatalError);
+
+        auto kb32 = [&]() -> Generator<Instruction> {
+            auto v_c = Register::Value::Placeholder(
+                m_context, Register::Type::Vector, DataType::Int32, 1);
+
+            co_yield v_c->allocate();
+            co_yield generateOp<Expression::Subtract>(v_c, nullptr, nullptr);
+        };
+        ASSERT_THROW(m_context->schedule(kb32()), FatalError);
+
+        auto kb64 = [&]() -> Generator<Instruction> {
+            auto v_c = Register::Value::Placeholder(
+                m_context, Register::Type::Vector, DataType::Int64, 1);
+
+            co_yield v_c->allocate();
+            co_yield generateOp<Expression::Subtract>(v_c, nullptr, nullptr);
+        };
+        ASSERT_THROW(m_context->schedule(kb64()), FatalError);
+
+        auto kb_dst = [&]() -> Generator<Instruction> {
+            auto v_a = Register::Value::Placeholder(
+                m_context, Register::Type::Vector, DataType::Int64, 1);
+            auto v_b = Register::Value::Placeholder(
+                m_context, Register::Type::Vector, DataType::Int64, 1);
+
+            co_yield v_a->allocate();
+            co_yield v_b->allocate();
+            co_yield generateOp<Expression::Subtract>(nullptr, v_a, v_b);
+        };
+        ASSERT_THROW(m_context->schedule(kb_dst()), FatalError);
+    }
+
     INSTANTIATE_TEST_SUITE_P(
         ArithmeticTests,
         ArithmeticTest,

@@ -178,6 +178,10 @@ namespace rocRoller
 
     DataType promoteDataType(Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs)
     {
+        AssertFatal(lhs != nullptr, "Null argument");
+        AssertFatal(rhs != nullptr, "Null argument");
+        AssertFatal(dst != nullptr, "Null destination");
+
         auto lhsVarType = lhs->variableType() == DataType::Raw32 && lhs->registerCount() == 2
                               ? DataType::UInt64
                               : lhs->variableType();
@@ -208,6 +212,9 @@ namespace rocRoller
     {
         if(dst)
             return dst->regType();
+
+        AssertFatal(lhs != nullptr, "Null argument");
+        AssertFatal(rhs != nullptr, "Null argument");
 
         auto regType = Register::PromoteType(lhs->regType(), rhs->regType());
 
