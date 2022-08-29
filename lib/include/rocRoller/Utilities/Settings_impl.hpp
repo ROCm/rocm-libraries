@@ -88,6 +88,40 @@ namespace rocRoller
         return var;
     }
 
+    template <>
+    inline Settings::LogLevel
+        Settings::getTypeValue<Settings::LogLevel>(std::string const& var) const
+    {
+        if(var == "None")
+        {
+            return Settings::LogLevel::None;
+        }
+        else if(var == "Error")
+        {
+            return Settings::LogLevel::Error;
+        }
+        else if(var == "Warning")
+        {
+            return Settings::LogLevel::Warning;
+        }
+        else if(var == "Terse")
+        {
+            return Settings::LogLevel::Terse;
+        }
+        else if(var == "Verbose")
+        {
+            return Settings::LogLevel::Verbose;
+        }
+        else if(var == "Debug")
+        {
+            return Settings::LogLevel::Debug;
+        }
+        else
+        {
+            Throw<FatalError>("Trying to get invalid LogLevel.");
+        }
+    }
+
     template <typename Option>
     inline typename Option::Type Settings::extractBitValue(Option const& opt)
     {
@@ -134,6 +168,55 @@ namespace rocRoller
             Throw<FatalError>("Trying to set " + opt.name
                               + " with incorrect type. Not setting value.");
         }
+    }
+
+    template <typename T>
+    inline std::string Settings::toString(T const& var) const
+    {
+        Throw<FatalError>("Unsupported type for Settings::toString()");
+    }
+
+    template <>
+    inline std::string Settings::toString(Settings::LogLevel const& logLevel) const
+    {
+        std::string rv = "";
+
+        switch(logLevel)
+        {
+        case Settings::LogLevel::None:
+            rv = "None";
+            break;
+        case Settings::LogLevel::Error:
+            rv = "Error";
+            break;
+        case Settings::LogLevel::Warning:
+            rv = "Warning";
+            break;
+        case Settings::LogLevel::Terse:
+            rv = "Terse";
+            break;
+        case Settings::LogLevel::Verbose:
+            rv = "Verbose";
+            break;
+        case Settings::LogLevel::Debug:
+            rv = "Debug";
+            break;
+        case Settings::LogLevel::Count:
+            rv = "LogLevel Count (";
+            rv += std::to_string(static_cast<int>(Settings::LogLevel::Count));
+            rv += ")";
+            break;
+        default:
+            Throw<FatalError>("Unsupported LogLevel for Settings::toString().");
+        }
+
+        return rv;
+    }
+
+    inline std::ostream& operator<<(std::ostream& os, const Settings::LogLevel& input)
+    {
+        os << Settings::getInstance()->toString(input);
+        return os;
     }
 
     inline Settings::Settings() {}

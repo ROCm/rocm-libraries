@@ -280,47 +280,6 @@ namespace rocRoller
         }
     };
 
-    enum class LogLevel
-    {
-        None = 0,
-        Error,
-        Warning,
-        Terse,
-        Verbose,
-        Debug,
-
-        Count
-    };
-
-    inline std::ostream& operator<<(std::ostream& os, const LogLevel& input)
-    {
-        switch(input)
-        {
-        case LogLevel::None:
-            os << "None";
-            break;
-        case LogLevel::Error:
-            os << "Error";
-            break;
-        case LogLevel::Warning:
-            os << "Warning";
-            break;
-        case LogLevel::Terse:
-            os << "Terse";
-            break;
-        case LogLevel::Verbose:
-            os << "Verbose";
-            break;
-        case LogLevel::Debug:
-            os << "Debug";
-            break;
-        case LogLevel::Count:
-            os << "LogLevel Count (" << static_cast<int>(LogLevel::Count) << ")";
-            break;
-        }
-        return os;
-    }
-
     template <std::integral T>
     Generator<T> iota(T begin, T end, T inc)
     {

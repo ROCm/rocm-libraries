@@ -15,6 +15,7 @@
 #include <random>
 
 #include <rocRoller/Utilities/Logging.hpp>
+#include <rocRoller/Utilities/Settings.hpp>
 
 template <typename T>
 std::shared_ptr<T> make_shared_device(std::size_t n = 1, T init = 0.0)
@@ -157,13 +158,11 @@ namespace rocRoller
 
 namespace rocRoller
 {
-    const std::string ENV_RANDOM_SEED = "ROCROLLER_RANDOM_SEED";
-
     /**
      * Random vector generator.
      *
      * A seed must be passed to the constructor.  If the environment
-     * variable specified by `ENV_RANDOM_SEED` is present, it
+     * variable specified by `ROCROLLER_RANDOM_SEED` is present, it
      * supercedes the seed passed to the constructor.
      *
      * A seed may be set programmatically (at any time) by calling
@@ -172,16 +171,20 @@ namespace rocRoller
     class RandomGenerator
     {
     public:
-        RandomGenerator() = delete;
-        RandomGenerator(std::mt19937::result_type seed)
+        RandomGenerator()
         {
-            auto envSeed = getenv(ENV_RANDOM_SEED.c_str());
-            if(envSeed)
-            {
-                seed = static_cast<std::mt19937::result_type>(atoi(envSeed));
-            }
+            int seedNumber                 = Settings::getInstance()->get(Settings::RandomSeed);
+            std::mt19937::result_type seed = static_cast<std::mt19937::result_type>(seedNumber);
 
-            rocRoller::Log::debug("Using random seed: {}; from env: {}", seed, bool(envSeed));
+            rocRoller::Log::debug(
+                "Using random seed: {}; using Settings::RandomSeed.defaultValue: {}",
+                seed,
+                seedNumber == Settings::RandomSeed.defaultValue);
+            m_gen.seed(seed);
+        }
+        RandomGenerator(int seedNumber)
+        {
+            std::mt19937::result_type seed = static_cast<std::mt19937::result_type>(seedNumber);
             m_gen.seed(seed);
         }
 

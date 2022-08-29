@@ -28,6 +28,7 @@
 
 #include "rocRoller/Utilities/Error.hpp"
 #include "rocRoller/Utilities/Logging.hpp"
+#include "rocRoller/Utilities/Settings.hpp"
 
 #include <spdlog/cfg/helpers.h>
 #include <spdlog/sinks/rotating_file_sink.h>
@@ -37,28 +38,23 @@ namespace rocRoller
 {
     namespace Log
     {
-        const std::string ENV_LOG_CONSOLE = "ROCROLLER_LOG_CONSOLE";
-        const std::string ENV_LOG_FILE    = "ROCROLLER_LOG_FILE";
-        const std::string ENV_LOG_LEVEL   = "ROCROLLER_LOG_LEVEL";
-
         bool initLogger()
         {
-            char* envLogConsole = getenv(ENV_LOG_CONSOLE.c_str());
-            char* envLogFile    = getenv(ENV_LOG_FILE.c_str());
-            char* envLogLevel   = getenv(ENV_LOG_LEVEL.c_str());
+            auto settings = Settings::getInstance();
 
             std::vector<spdlog::sink_ptr> sinks;
 
-            if(!envLogConsole || std::string(envLogConsole) != "0")
+            if(settings->get(Settings::LogConsole))
             {
                 auto consoleSink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
                 sinks.push_back(consoleSink);
             }
 
-            if(envLogFile)
+            std::string logFile = settings->get(Settings::LogFile);
+            if(!logFile.empty())
             {
                 auto fileSink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
-                    envLogFile, 5 * 1024 * 1024, 5);
+                    logFile, 5 * 1024 * 1024, 5);
                 sinks.push_back(fileSink);
             }
 
@@ -67,9 +63,11 @@ namespace rocRoller
 
             spdlog::set_default_logger(defaultLog);
 
-            if(envLogLevel)
+            Settings::LogLevel logLevel   = settings->get(Settings::LogLvl);
+            std::string        s_logLevel = settings->toString(logLevel);
+            if(s_logLevel != "None")
             {
-                spdlog::cfg::helpers::load_levels(envLogLevel);
+                spdlog::cfg::helpers::load_levels(s_logLevel);
             }
 
             return true;

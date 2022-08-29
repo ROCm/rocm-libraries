@@ -27,7 +27,7 @@ namespace rocRoller
         using bitFieldType = std::bitset<32>;
 
         static inline SettingsOption<bool> LogConsole{
-            "ROCROLLER_LOG_CONSOLE", "Log debug info to stdout/stderr", false, 0};
+            "ROCROLLER_LOG_CONSOLE", "Log debug info to stdout/stderr", true, 0};
 
         static inline SettingsOption<bool> SaveAssembly{
             "ROCROLLER_SAVE_ASSEMBLY",
@@ -43,10 +43,22 @@ namespace rocRoller
             "ROCROLLER_ASSEMBLY_FILE", "File name to write assembly", "", -1};
 
         static inline SettingsOption<std::string> LogFile{
-            "ROCROLLER_LOG_FILE", "Log file name", "log.txt", -1};
+            "ROCROLLER_LOG_FILE", "Log file name", "", -1};
 
-        static inline SettingsOption<std::string> LogLvl{
-            "ROCROLLER_LOG_LEVEL", "Log level", "debug", -1};
+        enum class LogLevel
+        {
+            None = 0,
+            Error,
+            Warning,
+            Terse,
+            Verbose,
+            Debug,
+
+            Count
+        };
+
+        static inline SettingsOption<LogLevel> LogLvl{
+            "ROCROLLER_LOG_LEVEL", "Log level", LogLevel::None, -1};
 
         static inline SettingsOption<int> RandomSeed{
             "ROCROLLER_RANDOM_SEED", "Seed used with RandomGenerator class", 1729, -1};
@@ -101,6 +113,16 @@ namespace rocRoller
          */
         template <typename Option, typename T>
         void set(Option const& opt, T const& val);
+
+        /**
+         * @brief Stringify Settings variables
+         * 
+         * @tparam T Settings variable type to stringify. Supported: LogLevel.
+         * @param var The Settings varaible being stringified.
+         * @return std::string The string conversion of var.
+         */
+        template <typename T>
+        std::string toString(T const& var) const;
 
     private:
         friend rocRoller::LazySingleton<Settings>;

@@ -133,9 +133,10 @@ namespace rocRoller
         return rv;
     }
 
-    inline void WaitCount::toStream(std::ostream& os, LogLevel level) const
+    inline void WaitCount::toStream(std::ostream& os, Settings::LogLevel level) const
     {
-        auto commentIter = level > LogLevel::Terse ? m_comments.begin() : m_comments.end();
+        auto commentIter
+            = level > Settings::LogLevel::Terse ? m_comments.begin() : m_comments.end();
 
         if(m_vmcnt >= 0 || m_lgkmcnt >= 0 || m_expcnt >= 0)
         {
@@ -184,7 +185,7 @@ namespace rocRoller
         }
     }
 
-    inline std::string WaitCount::toString(LogLevel level) const
+    inline std::string WaitCount::toString(Settings::LogLevel level) const
     {
         std::ostringstream oss;
         toStream(oss, level);

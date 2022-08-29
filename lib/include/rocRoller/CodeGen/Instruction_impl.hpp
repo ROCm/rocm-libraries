@@ -266,23 +266,23 @@ namespace rocRoller
         return false;
     }
 
-    inline void Instruction::toStream(std::ostream& os, LogLevel level) const
+    inline void Instruction::toStream(std::ostream& os, Settings::LogLevel level) const
     {
         preambleString(os, level);
         functionalString(os, level);
         codaString(os, level);
     }
 
-    inline std::string Instruction::toString(LogLevel level) const
+    inline std::string Instruction::toString(Settings::LogLevel level) const
     {
         std::ostringstream oss;
         toStream(oss, level);
         return oss.str();
     }
 
-    inline void Instruction::preambleString(std::ostream& os, LogLevel level) const
+    inline void Instruction::preambleString(std::ostream& os, Settings::LogLevel level) const
     {
-        if(level >= LogLevel::Warning)
+        if(level >= Settings::LogLevel::Warning)
         {
             for(auto const& w : m_warnings)
             {
@@ -296,12 +296,12 @@ namespace rocRoller
         allocationString(os, level);
     }
 
-    inline void Instruction::directiveString(std::ostream& os, LogLevel level) const
+    inline void Instruction::directiveString(std::ostream& os, Settings::LogLevel level) const
     {
         os << m_directive;
     }
 
-    inline void Instruction::functionalString(std::ostream& os, LogLevel level) const
+    inline void Instruction::functionalString(std::ostream& os, Settings::LogLevel level) const
     {
         auto pos = os.tellp();
 
@@ -318,9 +318,9 @@ namespace rocRoller
             os << "s_nop " << m_nopCount << "\n";
         }
 
-        coreInstructionString(os, level);
+        coreInstructionString(os);
 
-        if(level > LogLevel::Terse && !m_comments.empty())
+        if(level > Settings::LogLevel::Terse && !m_comments.empty())
         {
             for(auto commentsIter = m_comments.begin(); commentsIter != m_comments.end();
                 commentsIter++)
@@ -342,9 +342,9 @@ namespace rocRoller
         }
     }
 
-    inline void Instruction::codaString(std::ostream& os, LogLevel level) const
+    inline void Instruction::codaString(std::ostream& os, Settings::LogLevel level) const
     {
-        if(level >= LogLevel::Terse && m_comments.size() > 1)
+        if(level >= Settings::LogLevel::Terse && m_comments.size() > 1)
         {
             for(auto const& c : m_comments)
             {
@@ -357,9 +357,9 @@ namespace rocRoller
         }
     }
 
-    inline void Instruction::allocationString(std::ostream& os, LogLevel level) const
+    inline void Instruction::allocationString(std::ostream& os, Settings::LogLevel level) const
     {
-        if(level > LogLevel::Terse)
+        if(level > Settings::LogLevel::Terse)
         {
             for(auto const& alloc : m_allocations)
             {
@@ -379,7 +379,7 @@ namespace rocRoller
         return m_opcode;
     }
 
-    inline void Instruction::coreInstructionString(std::ostream& os, LogLevel level) const
+    inline void Instruction::coreInstructionString(std::ostream& os) const
     {
         if(m_opcode.empty())
         {

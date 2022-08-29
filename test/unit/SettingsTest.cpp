@@ -5,6 +5,7 @@
 #include <any>
 #include <bitset>
 #include <map>
+#include <sstream>
 #include <stdlib.h>
 
 #include <rocRoller/Context.hpp>
@@ -13,7 +14,6 @@
 
 #include "GenericContextFixture.hpp"
 #include "SourceMatcher.hpp"
-#include "Utilities.hpp"
 
 using namespace rocRoller;
 
@@ -82,6 +82,42 @@ namespace rocRollerTest
         EXPECT_EQ(settings->get(Settings::RandomSeed), Settings::RandomSeed.defaultValue);
     }
 
+    TEST_F(GenericSettings, LogLevelTest)
+    {
+        auto settings = Settings::getInstance();
+
+        std::ostringstream out;
+        out << Settings::LogLevel::None << std::endl;
+        out << Settings::LogLevel::Error << std::endl;
+        out << Settings::LogLevel::Warning << std::endl;
+        out << Settings::LogLevel::Terse << std::endl;
+        out << Settings::LogLevel::Verbose << std::endl;
+        out << Settings::LogLevel::Debug << std::endl;
+        out << Settings::LogLevel::Count;
+
+        std::string stringify = "";
+        stringify += settings->toString(Settings::LogLevel::None) + '\n';
+        stringify += settings->toString(Settings::LogLevel::Error) + '\n';
+        stringify += settings->toString(Settings::LogLevel::Warning) + '\n';
+        stringify += settings->toString(Settings::LogLevel::Terse) + '\n';
+        stringify += settings->toString(Settings::LogLevel::Verbose) + '\n';
+        stringify += settings->toString(Settings::LogLevel::Debug) + '\n';
+        stringify += settings->toString(Settings::LogLevel::Count) + '\n';
+
+        std::string expected = R"(
+            None
+            Error
+            Warning
+            Terse
+            Verbose
+            Debug
+            LogLevel Count (6)
+            )";
+
+        EXPECT_EQ(NormalizedSource(expected), NormalizedSource(out.str()));
+        EXPECT_EQ(NormalizedSource(expected), NormalizedSource(stringify));
+    }
+
     TEST_F(GenericSettings, InvalidValueTest)
     {
         auto settings = Settings::getInstance();
@@ -129,13 +165,13 @@ namespace rocRollerTest
 
         EXPECT_EQ(settings->get(Settings::SettingsBitField),
                   Settings::SettingsBitField.defaultValue);
-        EXPECT_EQ(settings->get(Settings::LogConsole), Settings::LogConsole.defaultValue);
         EXPECT_EQ(settings->get(Settings::SaveAssembly), Settings::SaveAssembly.defaultValue);
         EXPECT_EQ(settings->get(Settings::BreakOnThrow), Settings::BreakOnThrow.defaultValue);
         EXPECT_EQ(settings->get(Settings::LogFile), Settings::LogFile.defaultValue);
         EXPECT_EQ(settings->get(Settings::LogLvl), Settings::LogLvl.defaultValue);
 
         // Environment variables persist after reset, unless explicitly overwritten with set()
+        EXPECT_EQ(settings->get(Settings::LogConsole), false);
         EXPECT_EQ(settings->get(Settings::AssemblyFile), "assemblyFileTest.s");
         EXPECT_EQ(settings->get(Settings::RandomSeed), 31415);
 

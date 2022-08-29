@@ -11,7 +11,7 @@
 
 #include "../GPUArchitecture/GPUArchitecture.hpp"
 #include "../GPUArchitecture/GPUInstructionInfo.hpp"
-#include "../Utilities/Utils.hpp"
+#include "../Utilities/Settings.hpp"
 
 namespace rocRoller
 {
@@ -58,8 +58,8 @@ namespace rocRoller
         static WaitCount Zero(GPUArchitecture const&);
         static WaitCount Zero(std::string const& message, GPUArchitecture const&);
 
-        std::string toString(LogLevel level) const;
-        void        toStream(std::ostream& os, LogLevel level) const;
+        std::string toString(Settings::LogLevel level) const;
+        void        toStream(std::ostream& os, Settings::LogLevel level) const;
 
         static inline int CombineValues(int lhs, int rhs);
 

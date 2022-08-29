@@ -5,6 +5,7 @@
 #include <rocRoller/CodeGen/Instruction.hpp>
 #include <rocRoller/Context.hpp>
 #include <rocRoller/InstructionValues/Register.hpp>
+#include <rocRoller/Utilities/Settings.hpp>
 
 #include "GenericContextFixture.hpp"
 
@@ -32,7 +33,7 @@ TEST_F(InstructionTest, Basic)
 
     auto inst = Instruction("v_add_f32", {dst}, {src1, src2}, {}, "C = A + 5");
 
-    EXPECT_EQ("v_add_f32 v0, v1, 5 // C = A + 5\n", inst.toString(LogLevel::Verbose));
+    EXPECT_EQ("v_add_f32 v0, v1, 5 // C = A + 5\n", inst.toString(Settings::LogLevel::Verbose));
 }
 
 TEST_F(InstructionTest, ImplicitAllocation)
@@ -107,7 +108,7 @@ TEST_F(InstructionTest, Comment)
     m_context->schedule(inst);
 
     EXPECT_THAT(output(), testing::HasSubstr("// Hello, World!\n// Hello again!\n"));
-    EXPECT_THAT(inst.toString(LogLevel::Terse), "// Hello, World!\n// Hello again!\n");
+    EXPECT_THAT(inst.toString(Settings::LogLevel::Terse), "// Hello, World!\n// Hello again!\n");
 }
 
 TEST_F(InstructionTest, Warning)
@@ -118,7 +119,8 @@ TEST_F(InstructionTest, Warning)
 
     EXPECT_THAT(output(), testing::HasSubstr("There is a problem!"));
     EXPECT_THAT(output(), testing::HasSubstr("Another problem!"));
-    EXPECT_THAT(inst.toString(LogLevel::Warning), "// There is a problem!\n// Another problem!\n");
+    EXPECT_THAT(inst.toString(Settings::LogLevel::Warning),
+                "// There is a problem!\n// Another problem!\n");
 }
 
 TEST_F(InstructionTest, Nop)
@@ -206,9 +208,10 @@ TEST_F(InstructionTest, WaitOnRegularInstruction)
 TEST_F(InstructionTest, Directive)
 {
     EXPECT_EQ(".amdgcn_target \"some-target\"\n",
-              Instruction::Directive(".amdgcn_target \"some-target\"").toString(LogLevel::Verbose));
+              Instruction::Directive(".amdgcn_target \"some-target\"")
+                  .toString(Settings::LogLevel::Verbose));
 
     EXPECT_EQ(".set .amdgcn.next_free_vgpr, 0 // Comment\n",
               Instruction::Directive(".set .amdgcn.next_free_vgpr, 0", "Comment")
-                  .toString(LogLevel::Verbose));
+                  .toString(Settings::LogLevel::Verbose));
 }

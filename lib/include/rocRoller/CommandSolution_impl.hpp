@@ -9,6 +9,7 @@
 #include "AssemblyKernel.hpp"
 #include "KernelArguments.hpp"
 #include "Operations/Command.hpp"
+#include "Utilities/Settings.hpp"
 #include "Utilities/Timer.hpp"
 
 namespace rocRoller
@@ -61,7 +62,7 @@ namespace rocRoller
     {
         TIMER(t, "CommandKernel::getKernelArguments");
 
-        bool            log = m_context->kernelOptions().logLevel >= LogLevel::Debug;
+        bool            log = m_context->kernelOptions().logLevel >= Settings::LogLevel::Debug;
         KernelArguments rv(log);
 
         auto const& argStructs = m_context->kernel()->arguments();

@@ -5,44 +5,27 @@
 #include "GenericContextFixture.hpp"
 #include "Utilities.hpp"
 #include <rocRoller/Utilities/Logging.hpp>
+#include <rocRoller/Utilities/Settings.hpp>
 
 class RandomTest : public GenericContextFixture
 {
-    char* randomSeed;
-
-    void SetUp()
-    {
-        // Save environment variable state
-        randomSeed = getenv(rocRoller::ENV_RANDOM_SEED.c_str());
-        if(randomSeed)
-            unsetenv(rocRoller::ENV_RANDOM_SEED.c_str());
-
-        GenericContextFixture::SetUp();
-    }
-
-    void TearDown()
-    {
-        // Reset environment variable
-        if(!randomSeed)
-            unsetenv(rocRoller::ENV_RANDOM_SEED.c_str());
-        else
-            setenv(rocRoller::ENV_RANDOM_SEED.c_str(), randomSeed, 1);
-
-        GenericContextFixture::TearDown();
-    }
 };
 
 using namespace rocRoller;
 
 TEST_F(RandomTest, Seed)
 {
-    auto seed = 12867u;
-    auto size = 64;
-    auto min  = -10;
-    auto max  = 10;
+    auto settings = Settings::getInstance();
+
+    auto seed1 = 12867;
+    auto size  = 64;
+    auto min   = -10;
+    auto max   = 10;
+
+    settings->set(Settings::RandomSeed, seed1);
 
     // Deterministic seed
-    auto random1 = RandomGenerator(seed);
+    auto random1 = RandomGenerator();
     auto x       = random1.vector<int>(size, min, max);
 
     EXPECT_EQ(x[0], 0);
@@ -54,7 +37,7 @@ TEST_F(RandomTest, Seed)
     EXPECT_NE(x, x2);
 
     // Re-seeding gives the same vector
-    auto random2 = RandomGenerator(seed);
+    auto random2 = RandomGenerator();
     auto y       = random2.vector<int>(size, min, max);
 
     EXPECT_EQ(x, y);
@@ -64,10 +47,9 @@ TEST_F(RandomTest, Seed)
 
     EXPECT_EQ(x2, y2);
 
-    // Setting the environment variable supercedes the constructor
-    setenv(rocRoller::ENV_RANDOM_SEED.c_str(), "1123", 1);
-
-    auto random3 = RandomGenerator(seed);
+    // Test explicit constructor that does not use Settings class
+    auto seed2   = 1123;
+    auto random3 = RandomGenerator(seed2);
     auto z       = random3.vector<int>(29, -10, 10);
 
     std::vector<int> Z{8, -7, -3, -3, -2, 3,  1, 6, 6, -2, 3,  -1, 1, 2, -1,
@@ -76,7 +58,7 @@ TEST_F(RandomTest, Seed)
     EXPECT_EQ(z, Z);
 
     // Re-seeding works again
-    random3.seed(seed);
+    random3.seed(seed1);
     auto w = random3.vector<int>(size, min, max);
 
     EXPECT_EQ(x, w);

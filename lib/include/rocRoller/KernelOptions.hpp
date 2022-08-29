@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Utilities/Utils.hpp"
+#include "Utilities/Settings.hpp"
 
 namespace rocRoller
 {
@@ -8,11 +8,11 @@ namespace rocRoller
     {
         KernelOptions();
 
-        LogLevel logLevel;
-        bool     alwaysWaitAfterLoad;
-        bool     alwaysWaitAfterStore;
-        bool     alwaysWaitBeforeBranch;
-        bool     preloadKernelArguments;
+        Settings::LogLevel logLevel;
+        bool               alwaysWaitAfterLoad;
+        bool               alwaysWaitAfterStore;
+        bool               alwaysWaitBeforeBranch;
+        bool               preloadKernelArguments;
 
         std::string          toString() const;
         friend std::ostream& operator<<(std::ostream&, const KernelOptions&);

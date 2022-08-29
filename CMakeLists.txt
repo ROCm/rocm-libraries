@@ -161,6 +161,7 @@ ExternalProject_Add(spdlog
 add_executable(
   GPUArchitectureGenerator
   GPUArchitectureGenerator/source/GPUArchitectureGenerator.cpp
+  lib/source/Error.cpp
   lib/source/GPUArchitecture.cpp
 )
 add_dependencies(GPUArchitectureGenerator spdlog)

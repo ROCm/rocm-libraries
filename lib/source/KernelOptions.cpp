@@ -5,7 +5,7 @@
 namespace rocRoller
 {
     KernelOptions::KernelOptions()
-        : logLevel(LogLevel::Verbose)
+        : logLevel(Settings::LogLevel::Verbose)
         , alwaysWaitAfterLoad(false)
         , alwaysWaitAfterStore(false)
         , alwaysWaitBeforeBranch(true)
@@ -26,7 +26,7 @@ namespace rocRoller
 
     std::string KernelOptions::toString() const
     {
-        if(logLevel >= LogLevel::Warning)
+        if(logLevel >= Settings::LogLevel::Warning)
         {
             std::stringstream ss;
             ss << *this;
