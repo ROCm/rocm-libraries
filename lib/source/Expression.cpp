@@ -11,7 +11,6 @@
 #include <rocRoller/CodeGen/Instruction.hpp>
 #include <rocRoller/Context.hpp>
 #include <rocRoller/Expression.hpp>
-#include <rocRoller/KernelGraph/CoordinateTransform/HyperGraph.hpp>
 #include <rocRoller/Utilities/Timer.hpp>
 
 namespace rocRoller

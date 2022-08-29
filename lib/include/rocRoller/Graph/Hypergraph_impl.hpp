@@ -203,6 +203,8 @@ namespace rocRoller
         template <typename Node, typename Edge, bool Hyper>
         auto Hypergraph<Node, Edge, Hyper>::getElement(int index) const -> Element const&
         {
+            AssertFatal(
+                index >= 0 && index < m_elements.size(), "Element not found ", ShowValue(index));
             return m_elements.at(index);
         }
 
@@ -275,6 +277,62 @@ namespace rocRoller
                 auto iter  = lookup.lower_bound(std::make_tuple(index, 0));
                 if(iter == lookup.end() || iter->src != index)
                     co_yield index;
+            }
+        }
+
+        template <typename Node, typename Edge, bool Hyper>
+        Generator<int> Hypergraph<Node, Edge, Hyper>::childNodes(int parent) const
+        {
+            // TODO: getLocation is an expensive operation, replace with streamlined code
+            // FIXME: If the hypergraph has parallel edges, we'll get duplicate output nodes.
+
+            Location loc = getLocation(parent);
+            if(getElementType(parent) == ElementType::Node)
+            {
+                for(auto const& edgeIndex : loc.outgoing)
+                {
+                    // Get edge location
+                    Location edgeLoc = getLocation(edgeIndex);
+                    for(auto const& nodeIndex : edgeLoc.outgoing)
+                    {
+                        co_yield nodeIndex;
+                    }
+                }
+            }
+            else
+            {
+                for(auto const& nodeIndex : loc.outgoing)
+                {
+                    co_yield nodeIndex;
+                }
+            }
+        }
+
+        template <typename Node, typename Edge, bool Hyper>
+        Generator<int> Hypergraph<Node, Edge, Hyper>::parentNodes(int child) const
+        {
+            // TODO: getLocation is an expensive operation, replace with streamlined code
+            // FIXME: If the hypergraph has parallel edges, we'll get duplicate output nodes.
+
+            Location loc = getLocation(child);
+            if(getElementType(child) == ElementType::Node)
+            {
+                for(auto const& edgeIndex : loc.incoming)
+                {
+                    // Get edge location
+                    Location edgeLoc = getLocation(edgeIndex);
+                    for(auto const& nodeIndex : edgeLoc.incoming)
+                    {
+                        co_yield nodeIndex;
+                    }
+                }
+            }
+            else
+            {
+                for(auto const& nodeIndex : loc.incoming)
+                {
+                    co_yield nodeIndex;
+                }
             }
         }
 

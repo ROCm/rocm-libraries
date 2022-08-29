@@ -135,6 +135,16 @@ namespace rocRoller
             Generator<int> leaves() const;
 
             /**
+            * Yields element indices that are the child nodes of a given element
+            */
+            Generator<int> childNodes(int parent) const;
+
+            /**
+            * Yields element indices that are the parent nodes of a given element
+            */
+            Generator<int> parentNodes(int child) const;
+
+            /**
              * Yields node indices connected in the specified direction to start, in depth-first order
              */
             Generator<int> depthFirstVisit(int start, Direction dir = Direction::Downstream) const;

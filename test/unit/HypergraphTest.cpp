@@ -140,6 +140,15 @@ namespace rocRollerTest
             EXPECT_EQ(myHypergraph::Element{Transform{Split{}}}, loc.element);
             EXPECT_EQ(std::vector<int>{u0}, loc.incoming);
             EXPECT_EQ((std::vector<int>{sd0, sd1}), loc.outgoing);
+
+            EXPECT_EQ(std::vector<int>{u0}, g.parentNodes(sd0).to<std::vector>());
+            EXPECT_EQ((std::vector<int>{sd0, sd1}), g.childNodes(u0).to<std::vector>());
+
+            EXPECT_EQ(std::vector<int>{u0}, g.parentNodes(split0).to<std::vector>());
+            EXPECT_EQ((std::vector<int>{sd0, sd1}), g.childNodes(split0).to<std::vector>());
+
+            EXPECT_EQ((std::vector<int>{sd0, sd1}), g.parentNodes(vgpr0).to<std::vector>());
+            EXPECT_EQ((std::vector<int>{vgpr0, vgpr1}), g.childNodes(sd1).to<std::vector>());
         }
 
         {
@@ -240,6 +249,12 @@ namespace rocRollerTest
             )";
 
             EXPECT_EQ(NormalizedSource(expected), NormalizedSource(g.toDOT()));
+        }
+
+        {
+            EXPECT_EQ(std::get<User>(std::get<Dimension>(g.getElement(u0))), User{});
+
+            EXPECT_THROW(g.getElement(-1), FatalError);
         }
     }
 

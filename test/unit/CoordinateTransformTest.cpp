@@ -296,6 +296,8 @@ TEST_F(CoordinateTransformTest, Basic1D03)
     ct.addEdge({i}, {wg, wf}, CoordinateTransform::Tile());
     ct.addEdge({wf}, {thread, unroll}, CoordinateTransform::Tile());
 
+    EXPECT_EQ(ct.getDimensions().size(), 6);
+
     auto block_index  = Expression::literal(2);
     auto thread_index = Expression::literal(33);
     auto unroll_index = Expression::literal(2);
