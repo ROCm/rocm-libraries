@@ -16,7 +16,8 @@ namespace rocRoller
                                                            std::shared_ptr<Register::Value> addr,
                                                            std::shared_ptr<Register::Value> offset,
                                                            int         numBytes,
-                                                           std::string comment)
+                                                           std::string comment,
+                                                           bool        high)
     {
         auto                             context    = m_context.lock();
         std::string                      offset_str = "";
@@ -38,7 +39,7 @@ namespace rocRoller
                 co_yield generateOp<Expression::Add>(newAddr, addr, offset);
             }
 
-            co_yield loadFlat(dest, newAddr, offset_str, numBytes);
+            co_yield loadFlat(dest, newAddr, offset_str, numBytes, high);
             break;
 
         case Local:
@@ -52,7 +53,7 @@ namespace rocRoller
                 co_yield generateOp<Expression::Add>(newAddr, addr, offset);
             }
 
-            co_yield loadLocal(dest, newAddr, offset_str, numBytes, comment);
+            co_yield loadLocal(dest, newAddr, offset_str, numBytes, comment, high);
             break;
 
         case Scalar:
@@ -126,10 +127,15 @@ namespace rocRoller
         MemoryInstructions::loadFlat(std::shared_ptr<Register::Value> dest,
                                      std::shared_ptr<Register::Value> addr,
                                      std::string                      offset,
-                                     int                              numBytes)
+                                     int                              numBytes,
+                                     bool                             high)
     {
         AssertFatal(dest != nullptr);
         AssertFatal(addr != nullptr);
+
+        AssertFatal(!high || (high && numBytes == 2),
+                    "Operation doesn't support hi argument for sizes of "
+                        + std::to_string(numBytes));
 
         auto offset_modifier = genOffsetModifier(offset);
 
@@ -140,8 +146,12 @@ namespace rocRoller
                 Instruction("flat_load_ubyte", {dest}, {addr}, {offset_modifier}, "Load value"));
             break;
         case 2:
-            co_yield_(
-                Instruction("flat_load_ushort", {dest}, {addr}, {offset_modifier}, "Load value"));
+            if(high)
+                co_yield_(Instruction(
+                    "flat_load_short_d16_hi", {dest}, {addr}, {offset_modifier}, "Load value"));
+            else
+                co_yield_(Instruction(
+                    "flat_load_ushort", {dest}, {addr}, {offset_modifier}, "Load value"));
             break;
         case 4:
             co_yield_(
@@ -260,7 +270,8 @@ namespace rocRoller
                                       std::shared_ptr<Register::Value> addr,
                                       std::string                      offset,
                                       int                              numBytes,
-                                      std::string                      comment)
+                                      std::string                      comment,
+                                      bool                             high)
     {
         AssertFatal(dest != nullptr);
         AssertFatal(addr != nullptr);
@@ -274,8 +285,14 @@ namespace rocRoller
         AssertFatal(contains({1, 2, 4, 8, 12, 16}, numBytes),
                     "Unsupported number of bytes for load.: " + std::to_string(numBytes));
 
-        std::string instruction_string
-            = concatenate("ds_read_", (numBytes <= 2 ? "u" : "b"), std::to_string(numBytes * 8));
+        AssertFatal(!high || (high && numBytes == 2),
+                    "Operation doesn't support hi argument for sizes of "
+                        + std::to_string(numBytes));
+
+        std::string instruction_string = concatenate("ds_read_",
+                                                     (numBytes <= 2 ? "u" : "b"),
+                                                     std::to_string(numBytes * 8),
+                                                     (high ? "_d16_hi" : ""));
 
         co_yield_(Instruction(instruction_string,
                               {dest},

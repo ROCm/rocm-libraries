@@ -228,4 +228,20 @@ namespace rocRoller
         }
         co_yield copy(dest, src);
     }
+
+    inline Generator<Instruction> CopyGenerator::pack(Register::ValuePtr dest,
+                                                      Register::ValuePtr loVal,
+                                                      Register::ValuePtr hiVal,
+                                                      std::string        comment) const
+    {
+        AssertFatal((dest && dest->regType() == Register::Type::Vector
+                     && dest->variableType().dataType == DataType::Halfx2)
+                        && (loVal && loVal->regType() == Register::Type::Vector
+                            && loVal->variableType().dataType == DataType::Half)
+                        && (hiVal && hiVal->regType() == Register::Type::Vector
+                            && hiVal->variableType().dataType == DataType::Half),
+                    "pack arguments must be vector registers of type Half");
+
+        co_yield_(Instruction("v_pack_B32_F16", {dest}, {loVal, hiVal}, {}, ""));
+    }
 }

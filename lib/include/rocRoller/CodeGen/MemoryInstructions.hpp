@@ -36,15 +36,18 @@ namespace rocRoller
          * @param kind The kind of memory operation to perform.
          * @param dest The register to store the loaded data in.
          * @param addr  The register containing the address to load the data from.
-         * @param offset String containing an offset to be added to addr.
+         * @param offset Register containing an offset to be added to addr.
          * @param numBytes The number of bytes to load.
+         * @param comment Comment that will be generated along with the instructions. (Default = "")
+         * @param high Whether the value will be loaded into the high bits of the register. (Default=false)
          */
         Generator<Instruction> load(MemoryKind                       kind,
                                     std::shared_ptr<Register::Value> dest,
                                     std::shared_ptr<Register::Value> addr,
                                     std::shared_ptr<Register::Value> offset,
                                     int                              numBytes,
-                                    std::string                      comment = "");
+                                    std::string                      comment = "",
+                                    bool                             high    = false);
 
         /**
          * @brief Generate the instructions required to perform a store.
@@ -53,8 +56,9 @@ namespace rocRoller
          * @param kind The kind of memory operation to perform.
          * @param addr The register containing the address to store the data.
          * @param data  The register containing the data to store.
-         * @param offset String containing an offset to be added to addr.
+         * @param offset Register containing an offset to be added to addr.
          * @param numBytes The number of bytes to load.
+         * @param comment Comment that will be generated along with the instructions. (Default = "")
          */
         Generator<Instruction> store(MemoryKind                       kind,
                                      std::shared_ptr<Register::Value> addr,
@@ -64,6 +68,44 @@ namespace rocRoller
                                      std::string                      comment = "");
 
         /**
+         * @brief Generate instructions that will load two 16bit values and pack them into
+         *        a single register.
+         *
+         * @param kind The kind of memory operation to perform.
+         * @param dest The register to store the loaded data in.
+         * @param addr1 The register containing the address of the first 16bit value to laod the data from.
+         * @param offset1 Register containing an offset to be added to addr1.
+         * @param addr2 The register containing the address of the second 16bit value to laod the data from.
+         * @param offset2 Register containing an offset to be added to addr2.
+         * @param comment Comment that will be generated along with the instructions. (Default = "")
+         */
+        Generator<Instruction> loadAndPack(MemoryKind                       kind,
+                                           std::shared_ptr<Register::Value> dest,
+                                           std::shared_ptr<Register::Value> addr1,
+                                           std::shared_ptr<Register::Value> offset1,
+                                           std::shared_ptr<Register::Value> addr2,
+                                           std::shared_ptr<Register::Value> offset2,
+                                           std::string                      comment = "");
+
+        /**
+         * @brief Generate instructions that will pack 2 16bit values into a single 32bit register and store the value
+         *        to memmory.
+         *
+         * @param kind The kind of memory operation to perform.
+         * @param addr The register containing the address to store the data.
+         * @param data1 The register containing the first 16bit value to store.
+         * @param data2 The register containing the second 16bit value to store.
+         * @param offset Register containing an offset to be added to addr.
+         * @param comment Comment that will be generated along with the instructions. (Default = "")
+         */
+        Generator<Instruction> packAndStore(MemoryKind                       kind,
+                                            std::shared_ptr<Register::Value> addr,
+                                            std::shared_ptr<Register::Value> data1,
+                                            std::shared_ptr<Register::Value> data2,
+                                            std::shared_ptr<Register::Value> offset,
+                                            std::string                      comment = "");
+
+        /**
          * @brief Generate the instructions required to perform a flat load.
          *
          *
@@ -71,11 +113,13 @@ namespace rocRoller
          * @param addr  The register containing the address to load the data from.
          * @param offset String containing an offset to be added to addr.
          * @param numBytes The number of bytes to load.
+         * @param high Whether the value will be loaded into the high bits of the register. (Default=false)
          */
         Generator<Instruction> loadFlat(std::shared_ptr<Register::Value> dest,
                                         std::shared_ptr<Register::Value> addr,
                                         std::string                      offset,
-                                        int                              numBytes);
+                                        int                              numBytes,
+                                        bool                             high = false);
 
         /**
          * @brief Generate the instructions required to perform a flat store.
@@ -113,12 +157,15 @@ namespace rocRoller
          * @param addr  The register containing the address to load the data from.
          * @param offset Offset to be added to addr.
          * @param numBytes The number of bytes to load.
+         * @param comment Comment that will be generated along with the instructions. (Default = "")
+         * @param high Whether the value will be loaded into the high bits of the register. (Default=false)
          */
         Generator<Instruction> loadLocal(std::shared_ptr<Register::Value> dest,
                                          std::shared_ptr<Register::Value> addr,
                                          std::string                      offset,
                                          int                              numBytes,
-                                         std::string                      comment = "");
+                                         std::string                      comment = "",
+                                         bool                             high    = false);
 
         /**
          * @brief Generate the instructions required to perform an LDS store.
@@ -128,6 +175,7 @@ namespace rocRoller
          * @param data  The register containing the data to store.
          * @param offset Offset to be added to addr.
          * @param numBytes The number of bytes to load.
+         * @param comment Comment that will be generated along with the instructions. (Default = "")
          */
         Generator<Instruction> storeLocal(std::shared_ptr<Register::Value> addr,
                                           std::shared_ptr<Register::Value> data,

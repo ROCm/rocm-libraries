@@ -23,50 +23,48 @@ namespace rocRoller
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
 
-        auto dataType = promoteDataType(dest, lhs, rhs);
+        auto elementSize = std::max({DataTypeInfo::Get(dest->variableType()).elementSize,
+                                     DataTypeInfo::Get(lhs->variableType()).elementSize,
+                                     DataTypeInfo::Get(rhs->variableType()).elementSize});
 
         if(dest->regType() == Register::Type::Scalar)
         {
-            switch(dataType)
+            if(elementSize <= 4)
             {
-            case DataType::Int32:
-            case DataType::UInt32:
-            case DataType::Raw32:
                 co_yield_(Instruction("s_or_b32", {dest}, {lhs, rhs}, {}, ""));
-                break;
-            case DataType::Int64:
-            case DataType::UInt64:
+            }
+            else if(elementSize == 8)
+            {
                 co_yield_(Instruction("s_or_b64", {dest}, {lhs, rhs}, {}, ""));
-                break;
-            default:
-                Throw<FatalError>("Unsupported datatype for bitwise or operation: ",
-                                  ShowValue(dataType));
+            }
+            else
+            {
+                Throw<FatalError>("Unsupported element size for bitwiseOr operation:: ",
+                                  ShowValue(elementSize * 8));
             }
         }
         else if(dest->regType() == Register::Type::Vector)
         {
-            switch(dataType)
+            if(elementSize <= 4)
             {
-            case DataType::Int32:
-            case DataType::UInt32:
-            case DataType::Raw32:
                 co_yield_(Instruction("v_or_b32", {dest}, {lhs, rhs}, {}, ""));
-                break;
-            case DataType::Int64:
-            case DataType::UInt64:
+            }
+            else if(elementSize == 8)
+            {
                 co_yield_(Instruction(
                     "v_or_b32", {dest->subset({0})}, {lhs->subset({0}), rhs->subset({0})}, {}, ""));
                 co_yield_(Instruction(
                     "v_or_b32", {dest->subset({1})}, {lhs->subset({1}), rhs->subset({1})}, {}, ""));
-                break;
-            default:
-                Throw<FatalError>("Unsupported datatype for arithmetic shift right operation: ",
-                                  ShowValue(dataType));
+            }
+            else
+            {
+                Throw<FatalError>("Unsupported element size for bitwiseOr operation:: ",
+                                  ShowValue(elementSize * 8));
             }
         }
         else
         {
-            Throw<FatalError>("Unsupported register type for bitwise operation: ",
+            Throw<FatalError>("Unsupported register type for bitwiseOr operation: ",
                               ShowValue(dest->regType()));
         }
     }

@@ -52,6 +52,20 @@ namespace rocRoller
         Generator<Instruction>
             fill(Register::ValuePtr dest, Register::ValuePtr src, std::string comment = "") const;
 
+        /**
+         * @brief Pack two 16bit values into a single 32bit register
+         *
+         * @param dest The register that will hold the value
+         * @param loVal The register containing the value that will be stored in the low part
+         * @param hiVal The register containing the value that will be stored in the high part
+         * @param comment Comment that will be generated along with the instructions. (Default = "")
+         * @return Generator<Instruction>
+         */
+        Generator<Instruction> pack(Register::ValuePtr dest,
+                                    Register::ValuePtr loVal,
+                                    Register::ValuePtr hiVal,
+                                    std::string        comment = "") const;
+
     private:
         std::weak_ptr<Context> m_context;
     };

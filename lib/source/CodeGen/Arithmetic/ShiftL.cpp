@@ -21,49 +21,48 @@ namespace rocRoller
         AssertFatal(value != nullptr);
         AssertFatal(shiftAmount != nullptr);
 
-        auto dataType = promoteDataType(dest, value, value);
-
         auto toShift = shiftAmount->regType() == Register::Type::Literal ? shiftAmount
                                                                          : shiftAmount->subset({0});
 
+        auto elementSize = std::max({DataTypeInfo::Get(dest->variableType()).elementSize,
+                                     DataTypeInfo::Get(value->variableType()).elementSize});
+
         if(dest->regType() == Register::Type::Scalar)
         {
-            switch(dataType)
+            if(elementSize <= 4)
             {
-            case DataType::Int32:
-            case DataType::UInt32:
                 co_yield_(Instruction("s_lshl_b32", {dest}, {value, toShift}, {}, ""));
-                break;
-            case DataType::Int64:
-            case DataType::UInt64:
+            }
+            else if(elementSize == 8)
+            {
                 co_yield_(Instruction("s_lshl_b64", {dest}, {value, toShift}, {}, ""));
-                break;
-            default:
-                Throw<FatalError>("Unsupported datatype for arithmetic shift right operation: ",
-                                  ShowValue(dataType));
+            }
+            else
+            {
+                Throw<FatalError>("Unsupported element size for shift left operation:: ",
+                                  ShowValue(elementSize * 8));
             }
         }
         else if(dest->regType() == Register::Type::Vector)
         {
-            switch(dataType)
+            if(elementSize <= 4)
             {
-            case DataType::Int32:
-            case DataType::UInt32:
                 co_yield_(Instruction("v_lshlrev_b32", {dest}, {toShift, value}, {}, ""));
-                break;
-            case DataType::Int64:
-            case DataType::UInt64:
+            }
+            else if(elementSize == 8)
+            {
                 co_yield_(
                     Instruction("v_lshlrev_b64", {dest}, {toShift->subset({0}), value}, {}, ""));
-                break;
-            default:
-                Throw<FatalError>("Unsupported datatype for arithmetic shift left operation: ",
-                                  ShowValue(dataType));
+            }
+            else
+            {
+                Throw<FatalError>("Unsupported element size for shift left operation:: ",
+                                  ShowValue(elementSize * 8));
             }
         }
         else
         {
-            Throw<FatalError>("Unsupported register type for arithmetic shift left operation: ",
+            Throw<FatalError>("Unsupported register type for shift left operation: ",
                               ShowValue(dest->regType()));
         }
     }
