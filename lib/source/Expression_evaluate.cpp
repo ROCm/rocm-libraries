@@ -309,6 +309,30 @@ namespace rocRoller
         };
 
         template <>
+        struct OperationEvaluatorVisitor<Convert<DataType::Float>>
+            : public UnaryEvaluatorVisitor<Convert<DataType::Float>>
+        {
+            template <std::floating_point T>
+            float evaluate(T const& arg) const
+            {
+                assertNonNullPointer(arg);
+                return static_cast<float>(arg);
+            }
+        };
+
+        template <>
+        struct OperationEvaluatorVisitor<Convert<DataType::Half>>
+            : public UnaryEvaluatorVisitor<Convert<DataType::Half>>
+        {
+            template <std::floating_point T>
+            Half evaluate(T const& arg) const
+            {
+                assertNonNullPointer(arg);
+                return static_cast<Half>(arg);
+            }
+        };
+
+        template <>
         struct OperationEvaluatorVisitor<MagicShifts> : public UnaryEvaluatorVisitor<MagicShifts>
         {
             int evaluate(int const& arg) const

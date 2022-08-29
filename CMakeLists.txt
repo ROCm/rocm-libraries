@@ -222,6 +222,7 @@ set(rocroller_src
  lib/source/CodeGen/Arithmetic/Add.cpp
  lib/source/CodeGen/Arithmetic/ArithmeticGenerator.cpp
  lib/source/CodeGen/Arithmetic/BitwiseOr.cpp
+ lib/source/CodeGen/Arithmetic/Convert.cpp
  lib/source/CodeGen/Arithmetic/Divide.cpp
  lib/source/CodeGen/Arithmetic/Modulo.cpp
  lib/source/CodeGen/Arithmetic/Multiply.cpp

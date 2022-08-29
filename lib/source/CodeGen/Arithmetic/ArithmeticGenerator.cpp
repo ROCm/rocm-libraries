@@ -176,6 +176,21 @@ namespace rocRoller
     // -----------------------------
     // Helper Functions
 
+    DataType getArithDataType(Register::ValuePtr reg)
+    {
+        AssertFatal(reg != nullptr, "Null argument");
+
+        auto variableType = reg->variableType();
+
+        if(variableType.isPointer()
+           || (variableType == DataType::Raw32 && reg->registerCount() == 2))
+        {
+            return DataType::UInt64;
+        }
+
+        return variableType.dataType;
+    }
+
     DataType promoteDataType(Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs)
     {
         AssertFatal(lhs != nullptr, "Null argument");

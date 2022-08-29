@@ -161,6 +161,13 @@ namespace rocRoller
                 return argVal;
             }
 
+            template <DataType DATATYPE>
+            Result operator()(Convert<DATATYPE> const& expr) const
+            {
+                auto argVal = call(expr.arg);
+                return {argVal.first, DATATYPE};
+            }
+
             template <typename T>
             requires(CBinary<T>&& CComparison<T>) Result operator()(T const& expr) const
             {

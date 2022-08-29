@@ -45,6 +45,9 @@ namespace rocRoller
         struct FusedAddShift;
         struct FusedShiftAdd;
 
+        template <DataType DATATYPE>
+        struct Convert;
+
         struct DataFlowTag;
         using WaveTilePtr = std::shared_ptr<KernelGraph::CoordinateTransform::WaveTile>;
 
@@ -78,6 +81,10 @@ namespace rocRoller
             // --- Ternary Operations ---
             FusedAddShift,
             FusedShiftAdd,
+
+            // --- Convert Operations ---
+            Convert<DataType::Half>,
+            Convert<DataType::Float>,
 
             // --- Values ---
             // Literal: Always available

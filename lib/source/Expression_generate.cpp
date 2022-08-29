@@ -22,7 +22,10 @@ namespace rocRoller
             template <typename Operation>
             Generator<Instruction> callArithmeticUnary(ArithmeticPtr const&      arith,
                                                        Register::ValuePtr const& dest,
-                                                       Register::ValuePtr const& arg);
+                                                       Register::ValuePtr const& arg)
+            {
+                Throw<FatalError>("Unsupported callArithmeticUnaryOperation");
+            }
 
             template <typename Operation>
             Generator<Instruction> callArithmeticBinary(ArithmeticPtr const&      arith,
@@ -204,6 +207,13 @@ namespace rocRoller
                 if(dest == nullptr)
                 {
                     dest = resultPlaceholder(resultType(expr));
+                }
+
+                auto generator = GetGenerator<Operation>(dest, argResult);
+                if(generator)
+                {
+                    co_yield generator->generate(dest, argResult);
+                    co_return;
                 }
 
                 auto arith = Arithmetic::Get(dest, argResult);

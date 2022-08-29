@@ -886,6 +886,43 @@ namespace ExpressionTest
         }
     }
 
+    TEST_F(ExpressionTest, EvaluateConvertExpressions)
+    {
+        using namespace Expression;
+
+        float  a = 1.25f;
+        Half   b = 1.1111;
+        double c = 5.2619;
+
+        auto a_exp = literal(a);
+        auto b_exp = literal(b);
+        auto c_exp = literal(c);
+
+        auto exp1 = convert<DataType::Half>(a_exp);
+        auto exp2 = convert<DataType::Half>(b_exp);
+        auto exp3 = convert<DataType::Half>(c_exp);
+
+        EXPECT_EQ(resultVariableType(exp1).dataType, DataType::Half);
+        EXPECT_EQ(resultVariableType(exp2).dataType, DataType::Half);
+        EXPECT_EQ(resultVariableType(exp3).dataType, DataType::Half);
+
+        EXPECT_EQ(std::get<Half>(evaluate(exp1)), static_cast<Half>(a));
+        EXPECT_EQ(std::get<Half>(evaluate(exp2)), b);
+        EXPECT_EQ(std::get<Half>(evaluate(exp3)), static_cast<Half>(c));
+
+        auto exp4 = convert<DataType::Float>(a_exp);
+        auto exp5 = convert<DataType::Float>(b_exp);
+        auto exp6 = convert<DataType::Float>(c_exp);
+
+        EXPECT_EQ(resultVariableType(exp4).dataType, DataType::Float);
+        EXPECT_EQ(resultVariableType(exp5).dataType, DataType::Float);
+        EXPECT_EQ(resultVariableType(exp6).dataType, DataType::Float);
+
+        EXPECT_EQ(std::get<float>(evaluate(exp4)), a);
+        EXPECT_EQ(std::get<float>(evaluate(exp5)), static_cast<float>(b));
+        EXPECT_EQ(std::get<float>(evaluate(exp6)), static_cast<float>(c));
+    }
+
     TEST_F(ExpressionTest, VariantTest)
     {
         int32_t  x1          = 3;

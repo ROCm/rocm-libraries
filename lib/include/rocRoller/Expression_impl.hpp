@@ -151,6 +151,12 @@ namespace rocRoller
             return std::make_shared<Expression>(MagicSign{a});
         }
 
+        template <DataType DATATYPE>
+        inline ExpressionPtr convert(ExpressionPtr a)
+        {
+            return std::make_shared<Expression>(Convert<DATATYPE>{a});
+        }
+
         template <CCommandArgumentValue T>
         inline ExpressionPtr literal(T value)
         {
@@ -208,6 +214,9 @@ namespace rocRoller
         EXPRESSION_INFO(MagicSign);
 
         EXPRESSION_INFO(Negate);
+
+        EXPRESSION_INFO(Convert<DataType::Float>);
+        EXPRESSION_INFO(Convert<DataType::Half>);
 
         EXPRESSION_INFO_CUSTOM(Register::ValuePtr, "Register Value");
         EXPRESSION_INFO_CUSTOM(CommandArgumentPtr, "Command Argument");

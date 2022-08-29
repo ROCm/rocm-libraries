@@ -42,6 +42,36 @@ namespace rocRoller
         virtual std::string name() const = 0;
     };
 
+    // Unary Arithmetic Generator. Most unary generators should be derived from
+    // this class.
+    template <Expression::CUnary Operation>
+    class UnaryArithmeticGenerator : public ArithmeticGenerator
+    {
+    public:
+        UnaryArithmeticGenerator(std::shared_ptr<Context> context)
+            : ArithmeticGenerator(context)
+        {
+        }
+
+        virtual Generator<Instruction> generate(Register::ValuePtr dst, Register::ValuePtr arg)
+        {
+            Throw<FatalError>(concatenate("Generate function not implemented for ", Name));
+        }
+
+        using Argument = std::tuple<std::shared_ptr<Context>, Register::Type, DataType>;
+        using Base     = UnaryArithmeticGenerator<Operation>;
+        static const std::string Name;
+
+        std::string name() const override
+        {
+            return Expression::ExpressionInfo<Operation>::name();
+        }
+    };
+
+    template <Expression::CUnary Operation>
+    const std::string UnaryArithmeticGenerator<Operation>::Name
+        = concatenate(Expression::ExpressionInfo<Operation>::name(), "Generator");
+
     // Binary Arithmetic Generator. Most binary generators should be derived from
     // this class.
     template <Expression::CBinary Operation>
@@ -78,6 +108,21 @@ namespace rocRoller
     // These functions are used to pick the proper Generator class for the provided
     // Expression and arguments.
 
+    template <Expression::CUnary Operation>
+    std::shared_ptr<UnaryArithmeticGenerator<Operation>> GetGenerator(Register::ValuePtr dst,
+                                                                      Register::ValuePtr arg)
+    {
+        return nullptr;
+    }
+
+    template <Expression::CUnary Operation>
+    Generator<Instruction> generateOp(Register::ValuePtr dst, Register::ValuePtr arg)
+    {
+        auto gen = GetGenerator<Operation>(dst, arg);
+        AssertFatal(gen != nullptr, "No generator");
+        co_yield gen->generate(dst, arg);
+    }
+
     template <Expression::CBinary Operation>
     std::shared_ptr<BinaryArithmeticGenerator<Operation>>
         GetGenerator(Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs)
@@ -105,6 +150,18 @@ namespace rocRoller
     Register::Type
         promoteRegisterType(Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs);
 
+    // Return the data of a register that will be used for arithmetic calculations.
+    // If the register contains a pointer, the DataType that is returned is UInt64.
+    /**
+     * @brief Return the data of a register that will be used for arithmetic calculations.
+     *
+     * If the register contains a pointer, the DataType that is returned is UInt64.
+     *
+     * @param reg
+     * @return DataType
+     */
+    DataType getArithDataType(Register::ValuePtr reg);
+
     // Return the context from a list of register values.
     inline std::shared_ptr<Context> getContextFromValues(Register::ValuePtr r)
     {
@@ -130,6 +187,7 @@ namespace rocRoller
 #include "BitwiseAnd.hpp"
 #include "BitwiseOr.hpp"
 #include "BitwiseXor.hpp"
+#include "Convert.hpp"
 #include "Divide.hpp"
 #include "Modulo.hpp"
 #include "Multiply.hpp"

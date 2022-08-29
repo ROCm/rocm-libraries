@@ -60,6 +60,7 @@ namespace rocRoller
             Arithmetic = 0,
             Comparison,
             Logical,
+            Conversion,
             Value,
             Count
         };
@@ -284,6 +285,13 @@ namespace rocRoller
             constexpr static inline auto EvalTimes = EvaluationTimes::All();
         };
 
+        template <DataType DATATYPE>
+        struct Convert : Unary
+        {
+            constexpr static inline auto Type      = Category::Conversion;
+            constexpr static inline auto EvalTimes = EvaluationTimes::All();
+        };
+
         struct DataFlowTag
         {
             int tag;
@@ -316,6 +324,9 @@ namespace rocRoller
         ExpressionPtr magicMultiple(ExpressionPtr a);
         ExpressionPtr magicShifts(ExpressionPtr a);
         ExpressionPtr magicSign(ExpressionPtr a);
+
+        template <DataType DATATYPE>
+        ExpressionPtr convert(ExpressionPtr a);
 
         template <CCommandArgumentValue T>
         ExpressionPtr literal(T value);
