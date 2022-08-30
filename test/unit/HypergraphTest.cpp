@@ -13,67 +13,67 @@ namespace rocRollerTest
 {
     using namespace rocRoller;
 
-    struct ForLoop
+    struct TestForLoop
     {
     };
 
-    struct SubDimension
+    struct TestSubDimension
     {
     };
-    struct User
+    struct TestUser
     {
     };
-    struct VGPR
+    struct TestVGPR
     {
     };
 
-    using Dimension = std::variant<ForLoop, SubDimension, User, VGPR>;
+    using TestDimension = std::variant<TestForLoop, TestSubDimension, TestUser, TestVGPR>;
 
     template <typename T>
-    requires(
-        !std::same_as<Dimension, std::decay_t<T>> && std::constructible_from<Dimension, T>) bool
+    requires(!std::same_as<TestDimension,
+                           std::decay_t<T>> && std::constructible_from<TestDimension, T>) bool
         operator==(T const& lhs, T const& rhs)
     {
         // Since none of these have any members, if the types are the same, they are equal.
         return true;
     }
 
-    struct Forget
+    struct TestForget
     {
     };
-    struct Split
+    struct TestSplit
     {
     };
 
-    using Transform = std::variant<Forget, Split>;
+    using TestTransform = std::variant<TestForget, TestSplit>;
 
     template <typename T>
-    requires(
-        !std::same_as<Transform, std::decay_t<T>> && std::constructible_from<Transform, T>) bool
+    requires(!std::same_as<TestTransform,
+                           std::decay_t<T>> && std::constructible_from<TestTransform, T>) bool
         operator==(T const& lhs, T const& rhs)
     {
         // Since none of these have any members, if the types are the same, they are equal.
         return true;
     }
 
-    using myHypergraph = Graph::Hypergraph<Dimension, Transform>;
+    using myHypergraph = Graph::Hypergraph<TestDimension, TestTransform>;
 
     TEST(HypergraphTest, Basic)
     {
 
         myHypergraph g;
 
-        auto u0  = g.addElement(User{});
-        auto sd0 = g.addElement(SubDimension{});
-        auto sd1 = g.addElement(SubDimension{});
+        auto u0  = g.addElement(TestUser{});
+        auto sd0 = g.addElement(TestSubDimension{});
+        auto sd1 = g.addElement(TestSubDimension{});
 
-        auto split0 = g.addElement(Split{}, {u0}, {sd0, sd1});
+        auto TestSplit0 = g.addElement(TestSplit{}, {u0}, {sd0, sd1});
 
-        auto vgpr0   = g.addElement(VGPR{});
-        auto forget0 = g.addElement(Forget{}, {sd0, sd1}, {vgpr0});
+        auto TestVGPR0   = g.addElement(TestVGPR{});
+        auto TestForget0 = g.addElement(TestForget{}, {sd0, sd1}, {TestVGPR0});
 
-        auto vgpr1   = g.addElement(VGPR{});
-        auto forget1 = g.addElement(Forget{}, {sd0, sd1}, {vgpr1});
+        auto TestVGPR1   = g.addElement(TestVGPR{});
+        auto TestForget1 = g.addElement(TestForget{}, {sd0, sd1}, {TestVGPR1});
 
         {
             std::string expected = R"(
@@ -118,43 +118,46 @@ namespace rocRollerTest
 
         {
             auto             nodes = g.depthFirstVisit(u0).to<std::vector>();
-            std::vector<int> expectedNodes{u0, split0, sd0, forget0, vgpr0, forget1, vgpr1, sd1};
+            std::vector<int> expectedNodes{
+                u0, TestSplit0, sd0, TestForget0, TestVGPR0, TestForget1, TestVGPR1, sd1};
             EXPECT_EQ(expectedNodes, nodes);
 
             auto loc = g.getLocation(nodes[0]);
             EXPECT_EQ(u0, loc.index);
-            EXPECT_TRUE(std::holds_alternative<Dimension>(loc.element));
-            EXPECT_TRUE(std::holds_alternative<User>(std::get<Dimension>(loc.element)));
+            EXPECT_TRUE(std::holds_alternative<TestDimension>(loc.element));
+            EXPECT_TRUE(std::holds_alternative<TestUser>(std::get<TestDimension>(loc.element)));
             EXPECT_EQ(0, loc.incoming.size());
-            EXPECT_EQ(std::vector<int>{split0}, loc.outgoing);
+            EXPECT_EQ(std::vector<int>{TestSplit0}, loc.outgoing);
 
             auto loc2 = g.getLocation(u0);
             EXPECT_EQ(loc, loc2);
 
             loc = g.getLocation(nodes[1]);
-            myHypergraph::Location expected{split0, {u0}, {sd0, sd1}, Transform{Split{}}};
+            myHypergraph::Location expected{
+                TestSplit0, {u0}, {sd0, sd1}, TestTransform{TestSplit{}}};
             EXPECT_TRUE(expected == loc);
 
-            EXPECT_EQ(split0, loc.index);
+            EXPECT_EQ(TestSplit0, loc.index);
 
-            EXPECT_EQ(myHypergraph::Element{Transform{Split{}}}, loc.element);
+            EXPECT_EQ(myHypergraph::Element{TestTransform{TestSplit{}}}, loc.element);
             EXPECT_EQ(std::vector<int>{u0}, loc.incoming);
             EXPECT_EQ((std::vector<int>{sd0, sd1}), loc.outgoing);
 
             EXPECT_EQ(std::vector<int>{u0}, g.parentNodes(sd0).to<std::vector>());
             EXPECT_EQ((std::vector<int>{sd0, sd1}), g.childNodes(u0).to<std::vector>());
 
-            EXPECT_EQ(std::vector<int>{u0}, g.parentNodes(split0).to<std::vector>());
-            EXPECT_EQ((std::vector<int>{sd0, sd1}), g.childNodes(split0).to<std::vector>());
+            EXPECT_EQ(std::vector<int>{u0}, g.parentNodes(TestSplit0).to<std::vector>());
+            EXPECT_EQ((std::vector<int>{sd0, sd1}), g.childNodes(TestSplit0).to<std::vector>());
 
-            EXPECT_EQ((std::vector<int>{sd0, sd1}), g.parentNodes(vgpr0).to<std::vector>());
-            EXPECT_EQ((std::vector<int>{vgpr0, vgpr1}), g.childNodes(sd1).to<std::vector>());
+            EXPECT_EQ((std::vector<int>{sd0, sd1}), g.parentNodes(TestVGPR0).to<std::vector>());
+            EXPECT_EQ((std::vector<int>{TestVGPR0, TestVGPR1}),
+                      g.childNodes(sd1).to<std::vector>());
         }
 
         {
             // Since there are multiple leaf nodes, we don't expect this to visit the entire graph.
-            auto nodes = g.depthFirstVisit(vgpr0, Graph::Direction::Upstream).to<std::vector>();
-            std::vector<int> expectedNodes{vgpr0, forget0, sd0, split0, u0, sd1};
+            auto nodes = g.depthFirstVisit(TestVGPR0, Graph::Direction::Upstream).to<std::vector>();
+            std::vector<int> expectedNodes{TestVGPR0, TestForget0, sd0, TestSplit0, u0, sd1};
             EXPECT_EQ(expectedNodes, nodes);
         }
 
@@ -163,13 +166,15 @@ namespace rocRollerTest
             // TODO: "Make generators less lazy" once the generator semantics have been made less lazy, this can be collapsed into the next line and we can avoid converting the 'leaves' generator into a vector.
             auto leaves = g.leaves().to<std::vector>();
             auto nodes  = g.depthFirstVisit(leaves, Graph::Direction::Upstream).to<std::vector>();
-            std::vector<int> expectedNodes{vgpr0, forget0, sd0, split0, u0, sd1, vgpr1, forget1};
+            std::vector<int> expectedNodes{
+                TestVGPR0, TestForget0, sd0, TestSplit0, u0, sd1, TestVGPR1, TestForget1};
             EXPECT_EQ(expectedNodes, nodes);
         }
 
         {
             auto             nodes = g.breadthFirstVisit(u0).to<std::vector>();
-            std::vector<int> expectedNodes{u0, split0, sd0, sd1, forget0, forget1, vgpr0, vgpr1};
+            std::vector<int> expectedNodes{
+                u0, TestSplit0, sd0, sd1, TestForget0, TestForget1, TestVGPR0, TestVGPR1};
             EXPECT_EQ(expectedNodes, nodes);
         }
 
@@ -181,21 +186,21 @@ namespace rocRollerTest
 
         {
             auto             nodes         = g.leaves().to<std::vector>();
-            std::vector<int> expectedNodes = {vgpr0, vgpr1};
+            std::vector<int> expectedNodes = {TestVGPR0, TestVGPR1};
             EXPECT_EQ(expectedNodes, nodes);
         }
 
         // Add a for loop.
-        auto loop = g.addElement(ForLoop{}, {split0}, {forget0});
+        auto loop = g.addElement(TestForLoop{}, {TestSplit0}, {TestForget0});
 
         {
-            auto             loc           = g.getLocation(split0);
+            auto             loc           = g.getLocation(TestSplit0);
             std::vector<int> expectedNodes = {sd0, sd1, loop};
             EXPECT_EQ(expectedNodes, loc.outgoing);
         }
 
         {
-            auto             loc           = g.getLocation(forget0);
+            auto             loc           = g.getLocation(TestForget0);
             std::vector<int> expectedNodes = {sd0, sd1, loop};
             EXPECT_EQ(expectedNodes, loc.incoming);
         }
@@ -203,7 +208,7 @@ namespace rocRollerTest
         {
             auto             nodes = g.depthFirstVisit(u0).to<std::vector>();
             std::vector<int> expectedNodes{
-                u0, split0, sd0, forget0, vgpr0, forget1, vgpr1, sd1, loop};
+                u0, TestSplit0, sd0, TestForget0, TestVGPR0, TestForget1, TestVGPR1, sd1, loop};
             EXPECT_EQ(expectedNodes, nodes);
         }
 
@@ -252,7 +257,7 @@ namespace rocRollerTest
         }
 
         {
-            EXPECT_EQ(std::get<User>(std::get<Dimension>(g.getElement(u0))), User{});
+            EXPECT_EQ(std::get<TestUser>(std::get<TestDimension>(g.getElement(u0))), TestUser{});
 
             EXPECT_THROW(g.getElement(-1), FatalError);
         }
