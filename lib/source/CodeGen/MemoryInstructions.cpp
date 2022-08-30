@@ -15,8 +15,11 @@ namespace rocRoller
                         && dest->variableType() == DataType::Halfx2,
                     "loadAndPack destination must be a vector register of type Halfx2");
 
-        auto val1 = Register::Value::Placeholder(
-            m_context.lock(), Register::Type::Vector, DataType::Half, 1);
+        co_yield Register::AllocateIfNeeded(dest);
+
+        // Use the same register for the destination and the temporary val1
+        auto val1 = std::make_shared<Register::Value>(
+            dest->allocation(), Register::Type::Vector, DataType::Half, 1);
         auto val2 = Register::Value::Placeholder(
             m_context.lock(), Register::Type::Vector, DataType::Half, 1);
 
