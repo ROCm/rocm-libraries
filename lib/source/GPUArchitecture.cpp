@@ -6,6 +6,7 @@
 #include <hip/hip_runtime.h>
 #endif
 
+#include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
 
 #ifdef ROCROLLER_USE_LLVM
@@ -36,7 +37,7 @@ namespace rocRoller
         YAML::Emitter                emitter;
         Serialization::EmitterOutput yout(&emitter);
         yout.outputDoc(tmp);
-        rv       = emitter.c_str();
+        rv = emitter.c_str();
 #endif
         return rv;
     }
@@ -44,15 +45,22 @@ namespace rocRoller
     std::map<GPUArchitectureTarget, GPUArchitecture>
         GPUArchitecture::readYaml(std::string const& input)
     {
-        GPUArchitecturesStruct rv;
+        try
+        {
+            GPUArchitecturesStruct rv;
 #ifdef ROCROLLER_USE_LLVM
-        auto              reader = llvm::MemoryBuffer::getFile(input);
-        llvm::yaml::Input yin(**reader);
+            auto              reader = llvm::MemoryBuffer::getFile(input);
+            llvm::yaml::Input yin(**reader);
 #elif ROCROLLER_USE_YAML_CPP
-        auto yin = YAML::LoadFile(input);
+            auto yin = YAML::LoadFile(input);
 #endif
-        yin >> rv;
-        return rv.architectures;
+            yin >> rv;
+            return rv.architectures;
+        }
+        catch(const std::exception& e)
+        {
+            Throw<FatalError>("GPUArchitecture::readYAML failed: ", e.what());
+        }
     }
 
     std::string
@@ -67,14 +75,22 @@ namespace rocRoller
     std::map<GPUArchitectureTarget, GPUArchitecture>
         GPUArchitecture::readMsgpack(std::string const& input)
     {
-        std::ifstream ifs(input);
-        std::string buffer((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+        try
+        {
+            std::ifstream ifs(input);
+            std::string   buffer((std::istreambuf_iterator<char>(ifs)),
+                               std::istreambuf_iterator<char>());
 
-        msgpack::object_handle oh  = msgpack::unpack(buffer.data(), buffer.size());
-        msgpack::object const& obj = oh.get();
+            msgpack::object_handle oh  = msgpack::unpack(buffer.data(), buffer.size());
+            msgpack::object const& obj = oh.get();
 
-        auto rv = obj.as<std::map<GPUArchitectureTarget, GPUArchitecture>>();
-        return rv;
+            auto rv = obj.as<std::map<GPUArchitectureTarget, GPUArchitecture>>();
+            return rv;
+        }
+        catch(const std::exception& e)
+        {
+            Throw<FatalError>("GPUArchitecture::readMsgpack failed: ", e.what());
+        }
     }
 
     bool GPUArchitecture::isSupportedConstantValue(Register::ValuePtr value) const

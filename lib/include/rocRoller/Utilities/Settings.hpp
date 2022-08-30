@@ -39,6 +39,12 @@ namespace rocRoller
         static inline SettingsOption<bool> BreakOnThrow{
             "ROCROLLER_BREAK_ON_THROW", "Cause exceptions thrown to cause a segfault", false, 2};
 
+        static inline SettingsOption<std::string> ArchitectureFile{
+            "ROCROLLER_ARCHITECTURE_FILE",
+            "GPU Architecture file",
+            "source/rocRoller/GPUArchitecture_def.msgpack",
+            -1};
+
         static inline SettingsOption<std::string> AssemblyFile{
             "ROCROLLER_ASSEMBLY_FILE", "File name to write assembly", "", -1};
 

@@ -1,12 +1,15 @@
 #pragma once
 #include <array>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <map>
 #include <memory>
 #include <stdexcept>
 #include <string>
+
+#include <rocRoller/Utilities/Settings.hpp>
 
 namespace rocRoller
 {
@@ -99,31 +102,21 @@ namespace rocRoller
     {
         TIMER(t, "GPUArchitectureLibrary::LoadLibrary");
 
-        char* yaml_file = getenv(ENV_ARCHITECTURE_YAML_FILE.c_str());
-        if(yaml_file)
+        std::string archFile = Settings::getInstance()->get(Settings::ArchitectureFile);
+
+        // TODO: Support non-Linux OS
+        std::filesystem::path archPath
+            = std::filesystem::read_symlink("/proc/self/exe").parent_path();
+        archPath /= archFile;
+
+        if(archFile.find(".yaml") != std::string::npos
+           || archFile.find(".yml") != std::string::npos)
         {
-            try
-            {
-                return GPUArchitecture::readYaml(yaml_file);
-            }
-            catch(const std::exception& e)
-            {
-                throw std::runtime_error(
-                    "Could not read GPU Architecture Library file specified in env var "
-                    + ENV_ARCHITECTURE_YAML_FILE + ": " + std::string(yaml_file));
-            }
+            return GPUArchitecture::readYaml(archPath.string());
         }
         else
         {
-            try
-            {
-                return GPUArchitecture::readMsgpack(ARCHITECTURE_MSGPACK_FILE);
-            }
-            catch(const std::exception& e)
-            {
-                throw std::runtime_error("Could not read default GPU Architecture Library file: "
-                                         + ARCHITECTURE_MSGPACK_FILE);
-            }
+            return GPUArchitecture::readMsgpack(archPath.string());
         }
     }
 }

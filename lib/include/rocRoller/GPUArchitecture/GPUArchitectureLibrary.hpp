@@ -20,10 +20,6 @@
 
 namespace rocRoller
 {
-    const std::string ARCHITECTURE_YAML_FILE     = "source/rocRoller/GPUArchitecture_def.yaml";
-    const std::string ARCHITECTURE_MSGPACK_FILE  = "source/rocRoller/GPUArchitecture_def.msgpack";
-    const std::string ENV_ARCHITECTURE_YAML_FILE = "ROCROLLER_ARCHITECTURE_YAML_FILE";
-
     class GPUArchitectureLibrary
     {
     public:

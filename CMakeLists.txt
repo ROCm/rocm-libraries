@@ -456,6 +456,7 @@ endif()
 add_executable(
   ArchGenTests
   test/unit/GPUArchitectureGeneratorTest.cpp
+  lib/source/Error.cpp
   lib/source/GPUArchitecture.cpp
 )
 add_dependencies(ArchGenTests spdlog)
