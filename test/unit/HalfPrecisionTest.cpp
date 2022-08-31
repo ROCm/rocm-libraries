@@ -435,4 +435,41 @@ namespace rocRollerTest
     {
         executeHalfPrecisionPack(m_context, 8);
     }
+
+    TEST_F(HalfPrecisionTest, HalfPrecisionAsserts)
+    {
+
+        auto vf32
+            = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Float, 1);
+
+        auto vh16_1
+            = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Half, 1);
+        auto vh16_2
+            = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Half, 1);
+        auto vh16x2
+            = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Halfx2, 1);
+
+        auto addr
+            = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Int64, 1);
+
+        // copy
+        EXPECT_THROW(m_context->schedule(m_context->copier()->pack(vf32, vh16_1, vh16_2)),
+                     FatalError);
+
+        EXPECT_THROW(m_context->schedule(m_context->copier()->pack(vh16x2, vf32, vf32)),
+                     FatalError);
+
+        // memory instructions
+        EXPECT_THROW(m_context->schedule(m_context->mem()->loadFlat(vh16x2, addr, "0", 4, true)),
+                     FatalError);
+
+        EXPECT_THROW(
+            m_context->schedule(m_context->mem()->loadLocal(vh16x2, addr, "0", 4, "", true)),
+            FatalError);
+
+        EXPECT_THROW(m_context->schedule(m_context->mem()->loadAndPack(
+                         MemoryInstructions::MemoryKind::Flat, vf32, addr, addr, addr, addr, "")),
+                     FatalError);
+    }
+
 }

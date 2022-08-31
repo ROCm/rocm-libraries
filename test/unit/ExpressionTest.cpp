@@ -819,7 +819,8 @@ namespace ExpressionTest
 
         auto vals_and = a & b;
 
-        auto expr_or = (a + b) | b;
+        auto expr_and = (a + b) & b;
+        auto expr_or  = (a + b) | b;
 
         for(auto aVal : TestValues::int32Values)
         {
@@ -831,7 +832,8 @@ namespace ExpressionTest
                 auto args = runtimeArgs.runtimeArguments();
 
                 EXPECT_EQ(aVal & bVal, std::get<int>(Expression::evaluate(vals_and, args)));
-
+                EXPECT_EQ((aVal + bVal) & bVal,
+                          std::get<int>(Expression::evaluate(expr_and, args)));
                 EXPECT_EQ((aVal + bVal) | bVal, std::get<int>(Expression::evaluate(expr_or, args)));
             }
         }
