@@ -35,6 +35,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, InclusiveScan)
     using binary_op_type_host = typename test_utils::select_plus_operator_host<T>::type;
     binary_op_type_host binary_op_host;
     using acc_type = typename test_utils::select_plus_operator_host<T>::acc_type;
+    using cast_type = typename test_utils::select_plus_operator_host<T>::cast_type;
 
     // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
     static constexpr size_t logical_warp_size = TestFixture::params::warp_size;
@@ -88,7 +89,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, InclusiveScan)
             {
                 auto idx = i * logical_warp_size + j;
                 accumulator = binary_op_host(input[idx], accumulator);
-                expected[idx] = static_cast<T>(accumulator);
+                expected[idx] = static_cast<cast_type>(accumulator);
             }
         }
 
@@ -156,6 +157,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, InclusiveScanReduce)
     using binary_op_type_host = typename test_utils::select_plus_operator_host<T>::type;
     binary_op_type_host binary_op_host;
     using acc_type = typename test_utils::select_plus_operator_host<T>::acc_type;
+    using cast_type = typename test_utils::select_plus_operator_host<T>::cast_type;
 
     // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
     static constexpr size_t logical_warp_size = TestFixture::params::warp_size;
@@ -211,7 +213,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, InclusiveScanReduce)
             {
                 auto idx = i * logical_warp_size + j;
                 accumulator = binary_op_host(input[idx],accumulator);
-                expected[idx] = static_cast<T>(accumulator);
+                expected[idx] = static_cast<cast_type>(accumulator);
             }
             expected_reductions[i] = expected[(i+1) * logical_warp_size - 1];
         }
@@ -297,6 +299,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, ExclusiveScan)
     using binary_op_type_host = typename test_utils::select_plus_operator_host<T>::type;
     binary_op_type_host binary_op_host;
     using acc_type = typename test_utils::select_plus_operator_host<T>::acc_type;
+    using cast_type = typename test_utils::select_plus_operator_host<T>::cast_type;
 
     // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
     static constexpr size_t logical_warp_size = TestFixture::params::warp_size;
@@ -352,7 +355,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, ExclusiveScan)
             {
                 auto idx = i * logical_warp_size + j;
                 accumulator = binary_op_host(input[idx-1], accumulator);
-                expected[idx] = static_cast<T>(accumulator);
+                expected[idx] = static_cast<cast_type>(accumulator);
             }
         }
 
@@ -421,6 +424,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, ExclusiveReduceScan)
     using binary_op_type_host = typename test_utils::select_plus_operator_host<T>::type;
     binary_op_type_host binary_op_host;
     using acc_type = typename test_utils::select_plus_operator_host<T>::acc_type;
+    using cast_type = typename test_utils::select_plus_operator_host<T>::cast_type;
 
     // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
     static constexpr size_t logical_warp_size = TestFixture::params::warp_size;
@@ -478,7 +482,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, ExclusiveReduceScan)
             {
                 auto idx = i * logical_warp_size + j;
                 accumulator = binary_op_host(input[idx-1], accumulator);
-                expected[idx] = static_cast<T>(accumulator);
+                expected[idx] = static_cast<cast_type>(accumulator);
             }
 
             acc_type accumulator_reductions(0);
@@ -486,7 +490,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, ExclusiveReduceScan)
             {
                 auto idx = i * logical_warp_size + j;
                 accumulator_reductions = binary_op_host(input[idx], accumulator_reductions);
-                expected_reductions[i] = static_cast<T>(accumulator_reductions);
+                expected_reductions[i] = static_cast<cast_type>(accumulator_reductions);
             }
         }
 
@@ -570,6 +574,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, Scan)
     using binary_op_type_host = typename test_utils::select_plus_operator_host<T>::type;
     binary_op_type_host binary_op_host;
     using acc_type = typename test_utils::select_plus_operator_host<T>::acc_type;
+    using cast_type = typename test_utils::select_plus_operator_host<T>::cast_type;
 
     // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
     static constexpr size_t logical_warp_size = TestFixture::params::warp_size;
@@ -628,11 +633,11 @@ typed_test_def(RocprimWarpScanTests, name_suffix, Scan)
             {
                 auto idx = i * logical_warp_size + j;
                 accumulator_inclusive = binary_op_host(input[idx], accumulator_inclusive);
-                expected_inclusive[idx] = static_cast<T>(accumulator_inclusive);
+                expected_inclusive[idx] = static_cast<cast_type>(accumulator_inclusive);
                 if(j > 0)
                 {
                     accumulator_exclusive = binary_op_host(input[idx-1], accumulator_exclusive);
-                    expected_exclusive[idx] = static_cast<T>(accumulator_exclusive);
+                    expected_exclusive[idx] = static_cast<cast_type>(accumulator_exclusive);
                 }
             }
         }
@@ -723,6 +728,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, ScanReduce)
     using binary_op_type_host = typename test_utils::select_plus_operator_host<T>::type;
     binary_op_type_host binary_op_host;
     using acc_type = typename test_utils::select_plus_operator_host<T>::acc_type;
+    using cast_type = typename test_utils::select_plus_operator_host<T>::cast_type;
 
     // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
     static constexpr size_t logical_warp_size = TestFixture::params::warp_size;
@@ -783,11 +789,11 @@ typed_test_def(RocprimWarpScanTests, name_suffix, ScanReduce)
             {
                 auto idx = i * logical_warp_size + j;
                 accumulator_inclusive = binary_op_host(input[idx], accumulator_inclusive);
-                expected_inclusive[idx] = static_cast<T>(accumulator_inclusive);
+                expected_inclusive[idx] = static_cast<cast_type>(accumulator_inclusive);
                 if(j > 0)
                 {
                     accumulator_exclusive = binary_op_host(input[idx-1], accumulator_exclusive);
-                    expected_exclusive[idx] = static_cast<T>(accumulator_exclusive);
+                    expected_exclusive[idx] = static_cast<cast_type>(accumulator_exclusive);
                 }
             }
             expected_reductions[i] = expected_inclusive[(i+1) * logical_warp_size - 1];
@@ -895,6 +901,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, InclusiveScanCustomType)
     using base_type = typename TestFixture::params::type;
     using T = test_utils::custom_test_type<base_type>;
     using acc_type = typename test_utils::select_plus_operator_host<base_type>::acc_type;
+    using cast_type = typename test_utils::select_plus_operator_host<base_type>::cast_type;
 
     // logical warp side for warp primitive, execution warp size is always rocprim::warp_size()
     static constexpr size_t logical_warp_size = TestFixture::params::warp_size;
@@ -958,7 +965,7 @@ typed_test_def(RocprimWarpScanTests, name_suffix, InclusiveScanCustomType)
             {
                 auto idx = i * logical_warp_size + j;
                 accumulator = static_cast<test_utils::custom_test_type<acc_type>>(input[idx]) + accumulator;
-                expected[idx] = static_cast<T>(accumulator);
+                expected[idx] = static_cast<test_utils::custom_test_type<cast_type>>(accumulator);
             }
         }
 
