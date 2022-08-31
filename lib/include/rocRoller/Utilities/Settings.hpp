@@ -60,8 +60,7 @@ namespace rocRoller
             Terse,
             Verbose,
             Debug,
-
-            Count
+            Count //Count is a special Enum entry acting as the "size" of enum LogLevel
         };
 
         static inline SettingsOption<LogLevel> LogLvl{
