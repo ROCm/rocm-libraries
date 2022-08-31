@@ -15,17 +15,13 @@ using namespace rocRoller;
 
 TEST_F(RandomTest, Seed)
 {
-    auto settings = Settings::getInstance();
-
     auto seed1 = 12867;
     auto size  = 64;
     auto min   = -10;
     auto max   = 10;
 
-    settings->set(Settings::RandomSeed, seed1);
-
     // Deterministic seed
-    auto random1 = RandomGenerator();
+    auto random1 = RandomGenerator(seed1);
     auto x       = random1.vector<int>(size, min, max);
 
     EXPECT_EQ(x[0], 0);
@@ -37,7 +33,7 @@ TEST_F(RandomTest, Seed)
     EXPECT_NE(x, x2);
 
     // Re-seeding gives the same vector
-    auto random2 = RandomGenerator();
+    auto random2 = RandomGenerator(seed1);
     auto y       = random2.vector<int>(size, min, max);
 
     EXPECT_EQ(x, y);
@@ -77,4 +73,43 @@ TEST_F(RandomTest, Seed)
         auto b = random2.vector<int>(size, min, max);
         EXPECT_NE(a, b);
     }
+}
+
+TEST_F(RandomTest, SettingsOverride)
+{
+    auto size = 8;
+    auto min  = -10;
+    auto max  = 10;
+
+    int seed         = 8888;
+    int settingsSeed = 999999;
+
+    std::vector<int> a, b, c, d;
+
+    {
+        auto random_a = RandomGenerator(seed);
+        a             = random_a.vector<int>(size, min, max);
+    }
+    {
+        auto random_b = RandomGenerator(settingsSeed);
+        b             = random_b.vector<int>(size, min, max);
+    }
+
+    Settings::getInstance()->set(Settings::RandomSeed, (int)settingsSeed);
+
+    {
+        auto random_c = RandomGenerator(seed); // Arg ignored, settings take priority
+        c             = random_c.vector<int>(size, min, max);
+    }
+    {
+        auto random_d = RandomGenerator(1234); // Arg ignored, settings take priority
+        d             = random_d.vector<int>(size, min, max);
+    }
+    EXPECT_NE(a, b);
+    EXPECT_NE(a, c);
+    EXPECT_NE(a, d);
+    EXPECT_EQ(b, c);
+    EXPECT_EQ(b, d);
+
+    Settings::getInstance()->reset();
 }

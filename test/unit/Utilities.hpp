@@ -171,28 +171,25 @@ namespace rocRoller
     class RandomGenerator
     {
     public:
-        RandomGenerator()
-        {
-            int seedNumber                 = Settings::getInstance()->get(Settings::RandomSeed);
-            std::mt19937::result_type seed = static_cast<std::mt19937::result_type>(seedNumber);
-
-            rocRoller::Log::debug(
-                "Using random seed: {}; using Settings::RandomSeed.defaultValue: {}",
-                seed,
-                seedNumber == Settings::RandomSeed.defaultValue);
-            m_gen.seed(seed);
-        }
         RandomGenerator(int seedNumber)
         {
             std::mt19937::result_type seed = static_cast<std::mt19937::result_type>(seedNumber);
+
+            // if set
+            int settingsSeed = Settings::getInstance()->get(Settings::RandomSeed);
+            if(settingsSeed != Settings::RandomSeed.defaultValue)
+            {
+                seed = static_cast<std::mt19937::result_type>(settingsSeed);
+            }
             m_gen.seed(seed);
         }
 
         /**
          * Set a new seed.
          */
-        void seed(std::mt19937::result_type seed)
+        void seed(int seedNumber)
         {
+            std::mt19937::result_type seed = static_cast<std::mt19937::result_type>(seedNumber);
             m_gen.seed(seed);
         }
 
