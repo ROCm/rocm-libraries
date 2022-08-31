@@ -224,21 +224,25 @@ namespace rocRoller
                              std::vector<T>&           C,
                              size_t                    sizeC)
     {
+        auto rngA = RandomGenerator(seed + 1);
+        auto rngB = RandomGenerator(seed + 2);
+        auto rngC = RandomGenerator(seed + 3);
+
 #pragma omp parallel sections
         {
 #pragma omp section
             {
-                A = RandomGenerator(seed + 1).vector<T>(sizeA, -1.f, 1.f);
+                A = rngA.vector<T>(sizeA, -1.f, 1.f);
             }
 
 #pragma omp section
             {
-                B = RandomGenerator(seed + 2).vector<T>(sizeB, -1.f, 1.f);
+                B = rngB.vector<T>(sizeB, -1.f, 1.f);
             }
 
 #pragma omp section
             {
-                C = RandomGenerator(seed + 3).vector<T>(sizeC, -1.f, 1.f);
+                C = rngC.vector<T>(sizeC, -1.f, 1.f);
             }
         }
     }

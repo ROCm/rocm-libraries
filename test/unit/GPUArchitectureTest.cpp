@@ -153,7 +153,7 @@ TEST(GPUArchitectureTest, Validate90aInstructions)
               2);
 }
 
-TEST(GPUArchitectureTest, CheckYaml)
+TEST(GPUArchitectureTest, CheckDefFile)
 {
     EXPECT_EQ(
         GPUArchitectureLibrary::GetDevice("gfx90a").HasCapability(GPUCapability::SupportedISA),
