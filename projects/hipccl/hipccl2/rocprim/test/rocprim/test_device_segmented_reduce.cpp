@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -67,7 +67,8 @@ typedef ::testing::Types<
     params<uint8_t, uint8_t, rocprim::plus<uint8_t>, 10, 1000, 10000>,
     params<uint8_t, uint8_t, rocprim::maximum<uint8_t>, 50, 2, 10>,
     params<rocprim::half, rocprim::half, test_utils::half_maximum, 0, 1000, 2000>,
-    params<rocprim::half, rocprim::half, test_utils::half_plus, 50, 2, 10>,
+    // #156 temporarily disable half test due to known issue with converting from double to half
+    // params<rocprim::half, rocprim::half, test_utils::half_plus, 50, 2, 10>,
     params<rocprim::bfloat16, rocprim::bfloat16, test_utils::bfloat16_maximum, 0, 1000, 2000>,
     params<rocprim::bfloat16, rocprim::bfloat16, test_utils::bfloat16_plus, 50, 2, 10>,
     params<custom_short2, custom_int2, rocprim::plus<custom_int2>, 10, 1000, 10000>,
@@ -80,8 +81,8 @@ typedef ::testing::Types<
 #endif
     params<rocprim::bfloat16, float, rocprim::plus<float>, 0, 10, 300>,
     params<rocprim::half, rocprim::half, test_utils::half_minimum, 0, 1000, 30000>,
-    params<rocprim::bfloat16, rocprim::bfloat16, test_utils::bfloat16_minimum, 0, 1000, 30000>
-> Params;
+    params<rocprim::bfloat16, rocprim::bfloat16, test_utils::bfloat16_minimum, 0, 1000, 30000>>
+    Params;
 
 TYPED_TEST_SUITE(RocprimDeviceSegmentedReduce, Params);
 

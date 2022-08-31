@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -38,6 +38,7 @@ typed_test_def(suite_name_single, name_suffix, Reduce)
     using binary_op_type_host = typename test_utils::select_plus_operator_host<T>::type;
     binary_op_type_host binary_op_host;
     using acc_type = typename test_utils::select_plus_operator_host<T>::acc_type;
+    using cast_type = typename test_utils::select_plus_operator_host<T>::cast_type;
 
     constexpr size_t block_size = TestFixture::block_size;
 
@@ -69,7 +70,7 @@ typed_test_def(suite_name_single, name_suffix, Reduce)
                 auto idx = i * block_size + j;
                 value = binary_op_host(value, output[idx]);
             }
-            expected_reductions[i] = static_cast<T>(value);
+            expected_reductions[i] = static_cast<cast_type>(value);
         }
 
         // Preparing device
@@ -182,6 +183,7 @@ typed_test_def(suite_name_single, name_suffix, ReduceValid)
     using binary_op_type_host = typename test_utils::select_plus_operator_host<T>::type;
     binary_op_type_host binary_op_host;
     using acc_type = typename test_utils::select_plus_operator_host<T>::acc_type;
+    using cast_type = typename test_utils::select_plus_operator_host<T>::cast_type;
 
     constexpr size_t block_size = TestFixture::block_size;
 
@@ -214,7 +216,7 @@ typed_test_def(suite_name_single, name_suffix, ReduceValid)
                 auto idx = i * block_size + j;
                 value = binary_op_host(value, output[idx]);
             }
-            expected_reductions[i] = static_cast<T>(value);
+            expected_reductions[i] = static_cast<cast_type>(value);
         }
 
         // Preparing device
