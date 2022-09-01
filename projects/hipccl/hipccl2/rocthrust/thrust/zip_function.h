@@ -172,8 +172,7 @@ class zip_function
     __host__ __device__
     auto operator()(Tuple&& args) const
     noexcept(noexcept(detail::zip_detail::apply(std::declval<Function>(), THRUST_FWD(args))))
-    -> decltype(detail::zip_detail::apply(std::declval<Function>(), THRUST_FWD(args)))
-
+    THRUST_TRAILING_RETURN(decltype(detail::zip_detail::apply(std::declval<Function>(), THRUST_FWD(args))))
     {
         return detail::zip_detail::apply(func, THRUST_FWD(args));
     }
@@ -193,7 +192,8 @@ class zip_function
  */
 template <typename Function>
 __host__ __device__
-auto make_zip_function(Function&& fun) -> zip_function<typename std::decay<Function>::type>
+zip_function<typename std::decay<Function>::type>
+make_zip_function(Function&& fun)
 {
     using func_t = typename std::decay<Function>::type;
     return zip_function<func_t>(THRUST_FWD(fun));

@@ -14,6 +14,8 @@
  *  limitations under the License.
  */
 
+#pragma once
+
 #include <thrust/detail/config.h>
 #include <thrust/system/detail/generic/count.h>
 #include <thrust/transform_reduce.h>

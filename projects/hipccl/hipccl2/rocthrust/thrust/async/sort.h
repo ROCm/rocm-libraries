@@ -1,5 +1,5 @@
 /*
- *  Copyright 2008-2018 NVIDIA Corporation
+ *  Copyright 2008-2021 NVIDIA Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -14,8 +14,8 @@
  *  limitations under the License.
  */
 
-/*! \file async/sort.h
- *  \brief Functions for asynchronously sorting a range.
+/*! \file
+ *  \brief Algorithms for asynchronously sorting a range.
  */
 
 #pragma once
@@ -38,6 +38,9 @@ THRUST_NAMESPACE_BEGIN
 
 namespace async
 {
+
+/*! \cond
+ */
 
 namespace unimplemented
 {
@@ -265,6 +268,9 @@ struct sort_fn final
 } // namespace sort_detail
 
 THRUST_INLINE_CONSTANT sort_detail::sort_fn sort{};
+
+/*! \endcond
+ */
 
 } // namespace async
 
