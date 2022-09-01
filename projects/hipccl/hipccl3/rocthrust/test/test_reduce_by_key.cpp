@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2022 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -427,6 +427,106 @@ TEST(ReduceByKeyTests, TestReduceByKeyDevice)
             ASSERT_EQ(h_keys_result,d_keys_result);
             ASSERT_EQ(h_values_result,d_values_result);
 
+        }
+    }
+}
+
+// Maps indices to key ids
+class div_op : public thrust::unary_function<std::int64_t, std::int64_t>
+{
+    std::int64_t m_divisor;
+
+public:
+    __host__ div_op(std::int64_t divisor) : m_divisor(divisor)
+    {}
+
+    __host__ __device__
+    std::int64_t operator()(std::int64_t x) const
+    {
+        return x / m_divisor;
+    }
+};
+
+// Produces unique sequence for key
+class mod_op : public thrust::unary_function<std::int64_t, std::int64_t>
+{
+    std::int64_t m_divisor;
+
+public:
+    __host__ mod_op(std::int64_t divisor) : m_divisor(divisor)
+    {}
+
+    __host__ __device__
+    std::int64_t operator()(std::int64_t x) const
+    {
+        // div: 2          
+        // idx: 0 1   2 3   4 5 
+        // key: 0 0 | 1 1 | 2 2 
+        // mod: 0 1 | 0 1 | 0 1
+        // ret: 0 1   1 2   2 3
+        return (x % m_divisor) + (x / m_divisor);
+    }
+};
+
+TEST(ReduceByKeyTests, TestReduceByKeyWithBigIndexes)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    std::vector<size_t> magnitudes = {
+        30, 31, 32, 33
+    };
+
+    for(auto magnitude : magnitudes)
+    {
+        const std::int64_t num_items = 1ll << magnitude;
+
+        SCOPED_TRACE(testing::Message() << "with size= " << num_items);
+
+        const std::int64_t key_size_magnitude = 8;
+        ASSERT_TRUE(key_size_magnitude < magnitude);
+
+        const std::int64_t num_unique_keys = 1ll << key_size_magnitude;
+
+        // Size of each key group
+        const std::int64_t key_size = num_items / num_unique_keys;
+
+        using counting_it      = thrust::counting_iterator<std::int64_t>;
+        using transform_key_it = thrust::transform_iterator<div_op, counting_it>;
+        using transform_val_it = thrust::transform_iterator<mod_op, counting_it>;
+
+        counting_it count_begin(0ll);
+        counting_it count_end = count_begin + num_items;
+        ASSERT_EQ(static_cast<std::int64_t>(thrust::distance(count_begin, count_end)), num_items);
+
+        transform_key_it keys_begin(count_begin, div_op{key_size});
+        transform_key_it keys_end(count_end, div_op{key_size});
+
+        transform_val_it values_begin(count_begin, mod_op{key_size});
+
+        thrust::device_vector<std::int64_t> output_keys(num_unique_keys);
+        thrust::device_vector<std::int64_t> output_values(num_unique_keys);
+
+        // example:
+        //  items:        6
+        //  unique_keys:  2
+        //  key_size:     3
+        //  keys:         0 0 0 | 1 1 1 
+        //  values:       0 1 2 | 1 2 3
+        //  result:       3       6     = sum(range(key_size)) + key_size * key_id
+        thrust::reduce_by_key(keys_begin,
+                              keys_end,
+                              values_begin,
+                              output_keys.begin(),
+                              output_values.begin());
+
+        ASSERT_TRUE(thrust::equal(output_keys.begin(), output_keys.end(), count_begin));
+
+        thrust::host_vector<std::int64_t> result = output_values;
+
+        const std::int64_t sum = (key_size - 1) * key_size / 2;
+        for (std::int64_t key_id = 0; key_id < num_unique_keys; key_id++)
+        {
+            ASSERT_EQ(result[key_id], sum + key_id * key_size);
         }
     }
 }

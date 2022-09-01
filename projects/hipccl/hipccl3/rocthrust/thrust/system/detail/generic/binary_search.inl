@@ -14,11 +14,6 @@
  *  limitations under the License.
  */
 
-
-/*! \file binary_search.inl
- *  \brief Inline file for binary_search.h
- */
-
 #pragma once
 
 #include <thrust/detail/config.h>

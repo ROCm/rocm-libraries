@@ -239,6 +239,35 @@ InputIt THRUST_HIP_FUNCTION unique(execution_policy<Derived>& policy,
     return hip_rocprim::unique(policy, first, last, equal_to<input_type>());
 }
 
+template <typename BinaryPred>
+struct zip_adj_not_predicate {
+  template <typename TupleType>
+  bool __host__ __device__ operator()(TupleType&& tuple) {
+      return !binary_pred(thrust::get<0>(tuple), thrust::get<1>(tuple));
+  }
+  
+  BinaryPred binary_pred;
+};
+
+__thrust_exec_check_disable__
+template <class Derived,
+          class ForwardIt,
+          class BinaryPred>
+typename thrust::iterator_traits<ForwardIt>::difference_type
+THRUST_HIP_FUNCTION
+unique_count(execution_policy<Derived> &policy,
+       ForwardIt                  first,
+       ForwardIt                  last,
+       BinaryPred                 binary_pred)
+{
+  if (first == last) {
+    return 0;
+  }
+  auto size = thrust::distance(first, last);
+  auto it = thrust::make_zip_iterator(thrust::make_tuple(first, thrust::next(first)));
+  return 1 + thrust::count_if(policy, it, thrust::next(it, size - 1), zip_adj_not_predicate<BinaryPred>{binary_pred});
+}
+
 } // namespace hip_rocprim
 THRUST_NAMESPACE_END
 

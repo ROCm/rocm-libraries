@@ -305,6 +305,59 @@ TYPED_TEST(UniqueIntegralTests, TestUniqueCopyToDiscardIterator)
     }
 }
 
+TYPED_TEST(UniqueTests, TestUniqueCountSimple)
+{
+    using Vector = typename TestFixture::input_type;
+    using Policy = typename TestFixture::execution_policy;
+    using T      = typename Vector::value_type;
+
+    Vector data(10);
+    data[0] = 11;
+    data[1] = 11;
+    data[2] = 12;
+    data[3] = 20;
+    data[4] = 29;
+    data[5] = 21;
+    data[6] = 21;
+    data[7] = 31;
+    data[8] = 31;
+    data[9] = 37;
+
+    int count = thrust::unique_count(Policy{}, data.begin(), data.end());
+
+    ASSERT_EQ(count, 7);
+
+    int div_10_count
+        = thrust::unique_count(Policy {}, data.begin(), data.end(), is_equal_div_10_unique<T>());
+
+    ASSERT_EQ(div_10_count, 3);
+}
+
+TYPED_TEST(UniqueIntegralTests, TestUniqueCount)
+{
+    using T = typename TestFixture::input_type;
+
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    for(auto size : get_sizes())
+    {
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+        for(auto seed : get_seeds())
+        {
+            thrust::host_vector<T> h_data = get_random_data<bool>(size, false, true, seed);
+            thrust::device_vector<T> d_data = h_data;
+
+            int h_count{};
+            int d_count{};
+
+            h_count = thrust::unique_count(h_data.begin(), h_data.end());
+            d_count = thrust::unique_count(d_data.begin(), d_data.end());
+
+            ASSERT_EQ(h_count, d_count);
+        }
+    }
+};
 
 __global__
 THRUST_HIP_LAUNCH_BOUNDS_DEFAULT

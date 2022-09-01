@@ -1,5 +1,5 @@
 /*
- *  Copyright 2008-2013 NVIDIA Corporation
+ *  Copyright 2008-2021 NVIDIA Corporation
  *  Copyright 2013 Filipe RNC Maia
  *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved. 
  *
@@ -77,7 +77,7 @@ complex<float> clogf(const complex<float>& z){
   float ax, ay;
   float x0, y0, x1, y1, x2, y2, t, hm1;
   float val[12];
-  int i, sorted;	
+  int i, sorted;
   const float e = 2.7182818284590452354f;
 
   x = z.real();
@@ -123,7 +123,7 @@ complex<float> clogf(const complex<float>& z){
     return (complex<float>(log(hypotf(x, y)), atan2(y, x)));
   }
 
-  /* 
+  /*
    * From this point on, we don't need to worry about underflow or
    * overflow in calculating ax*ax or ay*ay.
    */
@@ -198,4 +198,4 @@ inline complex<float> log(const complex<float>& z){
 }
 
 THRUST_NAMESPACE_END
-    
+

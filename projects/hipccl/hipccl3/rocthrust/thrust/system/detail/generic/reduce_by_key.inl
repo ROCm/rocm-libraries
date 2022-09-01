@@ -14,11 +14,6 @@
  *  limitations under the License.
  */
 
-
-/*! \file reduce_by_key.inl
- *  \brief Inline file for reduce_by_key.h.
- */
-
 #pragma once
 
 #include <thrust/detail/config.h>

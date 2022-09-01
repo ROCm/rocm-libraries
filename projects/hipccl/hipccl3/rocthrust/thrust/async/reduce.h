@@ -1,5 +1,5 @@
 /*
- *  Copyright 2008-2018 NVIDIA Corporation
+ *  Copyright 2008-2021 NVIDIA Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -14,8 +14,8 @@
  *  limitations under the License.
  */
 
-/*! \file async/reduce.h
- *  \brief Functions for asynchronously reducing a range to a single value.
+/*! \file
+ *  \brief Algorithms for asynchronously reducing a range to a single value.
  */
 
 #pragma once
@@ -38,6 +38,9 @@ THRUST_NAMESPACE_BEGIN
 
 namespace async
 {
+
+/*! \cond
+ */
 
 namespace unimplemented
 {
@@ -431,6 +434,9 @@ struct reduce_into_fn final
 } // namespace reduce_into_detail
 
 THRUST_INLINE_CONSTANT reduce_into_detail::reduce_into_fn reduce_into{};
+
+/*! \endcond
+ */
 
 } // namespace async
 
