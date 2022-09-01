@@ -115,6 +115,10 @@ std::vector<T> generate_segments(const size_t size,
 
 TYPED_TEST(HipcubDeviceScanTests, InclusiveScan)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
     using scan_op_type = typename TestFixture::scan_op_type;
@@ -241,6 +245,10 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScan)
 
 TYPED_TEST(HipcubDeviceScanTests, InclusiveScanByKey)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
     using K = typename TestFixture::key_type;
@@ -383,6 +391,10 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScanByKey)
 
 TYPED_TEST(HipcubDeviceScanTests, ExclusiveScan)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
     using scan_op_type = typename TestFixture::scan_op_type;
@@ -514,6 +526,10 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScan)
 
 TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanByKey)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
     using K = typename TestFixture::key_type;
@@ -909,6 +925,10 @@ static __global__ void fill_initial_value(T* ptr, const T initial_value)
 
 TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanFuture)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
     using scan_op_type = typename TestFixture::scan_op_type;

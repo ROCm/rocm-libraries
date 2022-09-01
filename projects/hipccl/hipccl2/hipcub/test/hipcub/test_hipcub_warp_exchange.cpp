@@ -245,6 +245,10 @@ std::vector<T> stripe_vector(
 
 TYPED_TEST(HipcubWarpExchangeTest, WarpExchangeStripedToBlocked)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::params::type;
     constexpr unsigned warp_size = TestFixture::params::warp_size;
     constexpr unsigned items_per_thread = 4;
@@ -290,6 +294,10 @@ TYPED_TEST(HipcubWarpExchangeTest, WarpExchangeStripedToBlocked)
 
 TYPED_TEST(HipcubWarpExchangeTest, WarpExchangeBlockedToStriped)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::params::type;
     constexpr unsigned warp_size = TestFixture::params::warp_size;
     constexpr unsigned items_per_thread = 4;
@@ -338,6 +346,10 @@ TYPED_TEST(HipcubWarpExchangeTest, WarpExchangeBlockedToStriped)
 
 TYPED_TEST(HipcubWarpExchangeTest, WarpExchangeScatterToStriped)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::params::type;
     using OffsetT = int;
     constexpr unsigned warp_size = TestFixture::params::warp_size;

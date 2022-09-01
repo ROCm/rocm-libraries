@@ -29,15 +29,6 @@
 // hipCUB API
 #include <hipcub/hipcub.hpp>
 
-#define HIP_CHECK(condition)         \
-{                                  \
-    hipError_t error = condition;    \
-    if(error != hipSuccess){         \
-        std::cout << "HIP error: " << error << " line: " << __LINE__ << std::endl; \
-        exit(error); \
-    } \
-}
-
 unsigned int get_hipcub_version_on_device();
 
 #endif // HIPCUB_TEST_DETAIL_GET_HIPCUB_VERSION_HPP_

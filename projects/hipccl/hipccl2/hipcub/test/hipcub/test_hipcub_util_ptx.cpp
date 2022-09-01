@@ -123,6 +123,10 @@ void shuffle_up_kernel(T* data, unsigned int src_offset)
 
 TYPED_TEST(HipcubUtilPtxTests, ShuffleUp)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::type;
     constexpr unsigned int logical_warp_size = TestFixture::logical_warp_size;
     const unsigned int current_device_warp_size = HIPCUB_HOST_WARP_THREADS;
@@ -231,6 +235,10 @@ void shuffle_down_kernel(T* data, unsigned int src_offset)
 
 TYPED_TEST(HipcubUtilPtxTests, ShuffleDown)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::type;
     constexpr unsigned int logical_warp_size = TestFixture::logical_warp_size;
     const unsigned int current_device_warp_size = HIPCUB_HOST_WARP_THREADS;
@@ -337,6 +345,10 @@ void shuffle_index_kernel(T* data, int* src_offsets)
 
 TYPED_TEST(HipcubUtilPtxTests, ShuffleIndex)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::type;
     constexpr unsigned int logical_warp_size = TestFixture::logical_warp_size;
     const unsigned int current_device_warp_size = HIPCUB_HOST_WARP_THREADS;

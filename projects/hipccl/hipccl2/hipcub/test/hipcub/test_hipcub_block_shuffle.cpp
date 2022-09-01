@@ -93,6 +93,10 @@ void shuffle_offset_kernel(T* device_input, T* device_output, int distance)
 
 TYPED_TEST(HipcubBlockShuffleTests, BlockOffset)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using type = typename TestFixture::type;
     const size_t block_size = TestFixture::block_size;
     const size_t size = block_size * 1134;
@@ -174,6 +178,10 @@ void shuffle_rotate_kernel(T* device_input, T* device_output, int distance)
 
 TYPED_TEST(HipcubBlockShuffleTests, BlockRotate)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using type = typename TestFixture::type;
     const size_t block_size = TestFixture::block_size;
     const size_t size = block_size * 1134;
@@ -253,6 +261,10 @@ void shuffle_up_kernel(T (*device_input), T (*device_output))
 
 TYPED_TEST(HipcubBlockShuffleTests, BlockUp)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using type = typename TestFixture::type;
     const size_t block_size = TestFixture::block_size;
     const size_t size = block_size * 1134;
@@ -343,6 +355,10 @@ void shuffle_down_kernel(T (*device_input), T (*device_output))
 
 TYPED_TEST(HipcubBlockShuffleTests, BlockDown)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using type = typename TestFixture::type;
     const size_t block_size = TestFixture::block_size;
     const size_t size = block_size * 1134;

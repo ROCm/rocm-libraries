@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -368,8 +368,23 @@ void subtract_left_partial_tile_kernel(const T* input, int* tile_sizes, StorageT
     Output thread_output[ItemsPerThread];
 
     int tile_size = tile_sizes[blockIdx.x];
-    
-    adjacent_difference.SubtractLeftPartialTile(thread_items, thread_output, BinaryFunction{}, tile_size);
+
+    if(blockIdx.x % 2 == 1)
+    {
+        const T tile_predecessor_item = input[block_offset - 1];
+        adjacent_difference.SubtractLeftPartialTile(thread_items,
+                                                    thread_output,
+                                                    BinaryFunction{},
+                                                    tile_size,
+                                                    tile_predecessor_item);
+    }
+    else
+    {
+        adjacent_difference.SubtractLeftPartialTile(thread_items,
+                                                    thread_output,
+                                                    BinaryFunction{},
+                                                    tile_size);
+    }
 
     hipcub::StoreDirectBlocked(lid, output + block_offset, thread_output);
 }
@@ -442,20 +457,23 @@ void subtract_right_partial_tile_kernel(const T* input, int* tile_sizes, Storage
 
 TYPED_TEST(HipcubBlockAdjacentDifference, FlagHeads)
 {
-  using type = typename TestFixture::params::type;
-  // std::vector<bool> is a special case that will cause an error in hipMemcpy
-  using stored_flag_type = typename std::conditional<
-                             std::is_same<bool, typename TestFixture::params::flag_type>::value,
-                             int,
-                             typename TestFixture::params::flag_type
-                         >::type;
-  using flag_type = typename TestFixture::params::flag_type;
-  using flag_op_type = typename TestFixture::params::flag_op_type;
-  constexpr size_t block_size = TestFixture::params::block_size;
-  constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
-  constexpr size_t items_per_block = block_size * items_per_thread;
-  const size_t size = items_per_block * 2048;
-  constexpr size_t grid_size = size / items_per_block;
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using type = typename TestFixture::params::type;
+    // std::vector<bool> is a special case that will cause an error in hipMemcpy
+    using stored_flag_type = typename std::conditional<
+        std::is_same<bool, typename TestFixture::params::flag_type>::value,
+        int,
+        typename TestFixture::params::flag_type>::type;
+    using flag_type                   = typename TestFixture::params::flag_type;
+    using flag_op_type                = typename TestFixture::params::flag_op_type;
+    constexpr size_t block_size       = TestFixture::params::block_size;
+    constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
+    constexpr size_t items_per_block  = block_size * items_per_thread;
+    const size_t     size             = items_per_block * 2048;
+    constexpr size_t grid_size        = size / items_per_block;
 
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
@@ -544,20 +562,23 @@ TYPED_TEST(HipcubBlockAdjacentDifference, FlagHeads)
 
 TYPED_TEST(HipcubBlockAdjacentDifference, FlagTails)
 {
-  using type = typename TestFixture::params::type;
-  // std::vector<bool> is a special case that will cause an error in hipMemcpy
-  using stored_flag_type = typename std::conditional<
-                             std::is_same<bool, typename TestFixture::params::flag_type>::value,
-                             int,
-                             typename TestFixture::params::flag_type
-                         >::type;
-  using flag_type = typename TestFixture::params::flag_type;
-  using flag_op_type = typename TestFixture::params::flag_op_type;
-  constexpr size_t block_size = TestFixture::params::block_size;
-  constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
-  constexpr size_t items_per_block = block_size * items_per_thread;
-  const size_t size = items_per_block * 2048;
-  constexpr size_t grid_size = size / items_per_block;
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using type = typename TestFixture::params::type;
+    // std::vector<bool> is a special case that will cause an error in hipMemcpy
+    using stored_flag_type = typename std::conditional<
+        std::is_same<bool, typename TestFixture::params::flag_type>::value,
+        int,
+        typename TestFixture::params::flag_type>::type;
+    using flag_type                   = typename TestFixture::params::flag_type;
+    using flag_op_type                = typename TestFixture::params::flag_op_type;
+    constexpr size_t block_size       = TestFixture::params::block_size;
+    constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
+    constexpr size_t items_per_block  = block_size * items_per_thread;
+    const size_t     size             = items_per_block * 2048;
+    constexpr size_t grid_size        = size / items_per_block;
 
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
@@ -646,20 +667,23 @@ TYPED_TEST(HipcubBlockAdjacentDifference, FlagTails)
 
 TYPED_TEST(HipcubBlockAdjacentDifference, FlagHeadsAndTails)
 {
-  using type = typename TestFixture::params::type;
-  // std::vector<bool> is a special case that will cause an error in hipMemcpy
-  using stored_flag_type = typename std::conditional<
-                             std::is_same<bool, typename TestFixture::params::flag_type>::value,
-                             int,
-                             typename TestFixture::params::flag_type
-                         >::type;
-  using flag_type = typename TestFixture::params::flag_type;
-  using flag_op_type = typename TestFixture::params::flag_op_type;
-  constexpr size_t block_size = TestFixture::params::block_size;
-  constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
-  constexpr size_t items_per_block = block_size * items_per_thread;
-  const size_t size = items_per_block * 2048;
-  constexpr size_t grid_size = size / items_per_block;
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using type = typename TestFixture::params::type;
+    // std::vector<bool> is a special case that will cause an error in hipMemcpy
+    using stored_flag_type = typename std::conditional<
+        std::is_same<bool, typename TestFixture::params::flag_type>::value,
+        int,
+        typename TestFixture::params::flag_type>::type;
+    using flag_type                   = typename TestFixture::params::flag_type;
+    using flag_op_type                = typename TestFixture::params::flag_op_type;
+    constexpr size_t block_size       = TestFixture::params::block_size;
+    constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
+    constexpr size_t items_per_block  = block_size * items_per_thread;
+    const size_t     size             = items_per_block * 2048;
+    constexpr size_t grid_size        = size / items_per_block;
 
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
@@ -772,6 +796,10 @@ TYPED_TEST(HipcubBlockAdjacentDifference, FlagHeadsAndTails)
 
 TYPED_TEST(HipcubBlockAdjacentDifferenceSubtract, SubtractLeft)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using type = typename TestFixture::params_subtract::type;
     using binary_function = typename TestFixture::params_subtract::binary_function;
 
@@ -867,6 +895,10 @@ TYPED_TEST(HipcubBlockAdjacentDifferenceSubtract, SubtractLeft)
 
 TYPED_TEST(HipcubBlockAdjacentDifferenceSubtract, SubtractLeftPartialTile)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using type = typename TestFixture::params_subtract::type;
     using binary_function = typename TestFixture::params_subtract::binary_function;
 
@@ -912,7 +944,8 @@ TYPED_TEST(HipcubBlockAdjacentDifferenceSubtract, SubtractLeftPartialTile)
                 {
                     if(item == 0) 
                     {
-                        expected[i] = static_cast<output_type>(input[i]);
+                        expected[i] = static_cast<output_type>(
+                            block_index % 2 == 1 ? op(input[i], input[i - 1]) : input[i]);
                     } 
                     else 
                     {
@@ -981,6 +1014,10 @@ TYPED_TEST(HipcubBlockAdjacentDifferenceSubtract, SubtractLeftPartialTile)
 
 TYPED_TEST(HipcubBlockAdjacentDifferenceSubtract, SubtractRight)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using type = typename TestFixture::params_subtract::type;
     using binary_function = typename TestFixture::params_subtract::binary_function;
 
@@ -1076,6 +1113,10 @@ TYPED_TEST(HipcubBlockAdjacentDifferenceSubtract, SubtractRight)
 
 TYPED_TEST(HipcubBlockAdjacentDifferenceSubtract, SubtractRightPartialTile)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using type = typename TestFixture::params_subtract::type;
     using binary_function = typename TestFixture::params_subtract::binary_function;
 

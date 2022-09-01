@@ -101,6 +101,10 @@ void sort_key_kernel(
 
 TYPED_TEST(HipcubBlockMergeSort, SortKeys)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using key_type = typename TestFixture::params::key_type;
     constexpr size_t block_size = TestFixture::params::block_size;
     constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
@@ -207,6 +211,10 @@ __global__
 
 TYPED_TEST(HipcubBlockMergeSort, SortKeysValues)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using key_type = typename TestFixture::params::key_type;
     using value_type = typename TestFixture::params::value_type;
     constexpr size_t block_size = TestFixture::params::block_size;

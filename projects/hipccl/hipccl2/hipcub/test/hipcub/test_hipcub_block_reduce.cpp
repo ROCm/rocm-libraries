@@ -136,6 +136,10 @@ void reduce_kernel(T* device_output, T* device_output_reductions)
 
 TYPED_TEST(HipcubBlockReduceSingleValueTests, Reduce)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::type;
     constexpr auto algorithm = TestFixture::algorithm;
     constexpr size_t block_size = TestFixture::block_size;
@@ -236,6 +240,10 @@ void reduce_valid_kernel(T* device_output, T* device_output_reductions, const un
 
 TYPED_TEST(HipcubBlockReduceSingleValueTests, ReduceValid)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::type;
     constexpr auto algorithm = TestFixture::algorithm;
 
@@ -395,6 +403,10 @@ void reduce_array_kernel(T* device_output, T* device_output_reductions)
 
 TYPED_TEST(HipcubBlockReduceInputArrayTests, Reduce)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::type;
     constexpr auto algorithm = TestFixture::algorithm;
     constexpr size_t block_size = TestFixture::block_size;

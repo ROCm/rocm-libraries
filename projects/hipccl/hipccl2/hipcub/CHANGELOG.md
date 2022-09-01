@@ -2,6 +2,16 @@
 
 See README.md on how to build the hipCUB documentation using Doxygen.
 
+## (Unreleased) hipCUB-2.13.0 for ROCm 5.4.0
+### Added
+- CMake functionality to improve build parallelism of the test suite that splits compilation units by
+function or by parameters.
+- New overload for `BlockAdjacentDifference::SubtractLeftPartialTile` that takes a predecessor item.
+### Changed
+- Improved build parallelism of the test suite by splitting up large compilation units for `DeviceRadixSort`, 
+`DeviceSegmentedRadixSort` and `DeviceSegmentedSort`.
+- CUB backend references CUB and thrust version 1.17.1.
+
 ## (Unreleased) hipCUB-2.12.0 for ROCm 5.3.0
 ### Added
 - UniqueByKey device algorithm
@@ -17,9 +27,8 @@ See README.md on how to build the hipCUB documentation using Doxygen.
 - DeviceRadixSort's num_items parameter's type is now templated instead of being an int.
   - If an integral type with a size at most 4 bytes is passed (i.e. an int), the former logic applies.
   - Otherwise the algorithm uses a larger indexing type that makes it possible to sort input data over 2**32 elements.
-- Improved build parallelism of the test suite by splitting up large compilation units
 
-## (Unreleased) hipCUB-2.11.1 for ROCm 5.2.0
+## hipCUB-2.11.1 for ROCm 5.2.0
 ### Added
 - Packages for tests and benchmark executable on all supported OSes using CPack.
 

@@ -65,33 +65,6 @@ public:
     using params = Params;
 };
 
-using Params = ::testing::Types<
-    params<int, int, SortMethod::SortAscending, 0, 100>,
-    params<int, int, SortMethod::SortDescending, 0, 100>,
-    params<int, int, SortMethod::StableSortAscending, 0, 100>,
-    params<int, int, SortMethod::StableSortDescending, 0, 100>,
-
-    params<unsigned, int, SortMethod::SortAscending, 10, 312>,
-    params<unsigned, int, SortMethod::SortDescending, 10, 312>,
-    params<unsigned, int, SortMethod::StableSortAscending, 10, 312>,
-    params<unsigned, int, SortMethod::StableSortDescending, 10, 312>,
-
-    params<char, int, SortMethod::SortAscending, 1, 1239>,
-    params<char, int, SortMethod::SortDescending, 1, 1239>,
-    params<char, int, SortMethod::StableSortAscending, 1, 1239>,
-    params<char, int, SortMethod::StableSortDescending, 1, 1239>,
-
-    params<float, int, SortMethod::SortAscending, 0, 322>,
-    params<float, int, SortMethod::SortDescending, 0, 322>,
-    params<float, int, SortMethod::StableSortAscending, 0, 322>,
-    params<float, int, SortMethod::StableSortDescending, 0, 322>,
-
-    params<double, int, SortMethod::SortAscending, 321, 555>,
-    params<double, int, SortMethod::SortDescending, 321, 555>,
-    params<double, int, SortMethod::StableSortAscending, 321, 555>,
-    params<double, int, SortMethod::StableSortDescending, 321, 555>
->;
-
 template<typename ... Args>
 inline void dispatch_sort_keys(const SortMethod method, Args&& ... args)
 {
@@ -137,7 +110,7 @@ inline std::vector<size_t> get_sizes(const int seed_value)
 }
 
 template<typename key_type, typename offset_type>
-void generate_input_data(std::vector<key_type> &keys_input,
+inline void generate_input_data(std::vector<key_type> &keys_input,
                          std::vector<offset_type> &offsets,
                          const size_t size,
                          const int seed_value,
@@ -183,7 +156,7 @@ void generate_input_data(std::vector<key_type> &keys_input,
 }
 
 template<typename T>
-T * hipMallocAndCopy(const std::vector<T> &data)
+inline T * hipMallocAndCopy(const std::vector<T> &data)
 {
     T * d_ptr{};
     HIP_CHECK(test_common_utils::hipMallocHelper(&d_ptr, data.size() * sizeof(T)));
@@ -198,7 +171,7 @@ T * hipMallocAndCopy(const std::vector<T> &data)
 }
 
 template<typename key_type, typename offset_type>
-std::vector<key_type> generate_expected_data(const std::vector<key_type> &keys_input,
+inline std::vector<key_type> generate_expected_data(const std::vector<key_type> &keys_input,
                                              const std::vector<offset_type> &offsets,
                                              const bool descending)
 {
@@ -223,7 +196,7 @@ std::vector<key_type> generate_expected_data(const std::vector<key_type> &keys_i
 
 template<bool descending, typename key_type, typename value_type, typename offset_type>
 std::vector<std::pair<key_type, value_type>>
-generate_expected_data(const std::vector<key_type> &keys_input,
+inline generate_expected_data(const std::vector<key_type> &keys_input,
                        const std::vector<value_type> &values_input,
                        const std::vector<offset_type> &offsets)
 {
@@ -246,7 +219,7 @@ generate_expected_data(const std::vector<key_type> &keys_input,
 }
 
 template<typename T>
-std::vector<T> download(const T * const d_ptr, const size_t size)
+inline std::vector<T> download(const T * const d_ptr, const size_t size)
 {
     std::vector<T> data(size);
     HIP_CHECK(
@@ -259,7 +232,151 @@ std::vector<T> download(const T * const d_ptr, const size_t size)
     return data;
 }
 
-TYPED_TEST_SUITE(HipcubDeviceSegmentedSort, Params);
+TYPED_TEST_SUITE_P(HipcubDeviceSegmentedSort);
+
+template<typename TestFixture>
+inline void sort_keys()
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using key_type = typename TestFixture::params::key_type;
+    using offset_type = unsigned int;
+    constexpr SortMethod method = TestFixture::params::method;
+    constexpr bool descending = TestFixture::params::descending;
+    constexpr unsigned int min_segment_length = TestFixture::params::min_segment_length;
+    constexpr unsigned int max_segment_length = TestFixture::params::max_segment_length;
+    constexpr hipStream_t stream = 0;
+    constexpr bool debug_synchronous = false;
+
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; ++seed_index)
+    {
+        const int seed_value = seed_index < random_seeds_count ? seeds[seed_index] : rand();
+        for (const size_t size : get_sizes(seed_value))
+        {
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+            std::vector<key_type> keys_input;
+            std::vector<offset_type> offsets;
+            generate_input_data(
+                keys_input, offsets,
+                size, seed_value,
+                min_segment_length, max_segment_length
+            );
+            const size_t segments_count = offsets.size() - 1;
+
+            key_type * d_keys_input = hipMallocAndCopy(keys_input);
+            offset_type * d_offsets = hipMallocAndCopy(offsets);
+            key_type * d_keys_output{};
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_output, size * sizeof(key_type)));
+
+            const std::vector<key_type> expected = generate_expected_data(keys_input, offsets, descending);
+
+            size_t temporary_storage_bytes{};
+            dispatch_sort_keys(
+                method, static_cast<void *>(nullptr), temporary_storage_bytes,
+                d_keys_input, d_keys_output, size,
+                segments_count, d_offsets, d_offsets + 1
+            );
+
+            ASSERT_GT(temporary_storage_bytes, 0U);
+
+            void * d_temporary_storage{};
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
+
+            dispatch_sort_keys(
+                method, d_temporary_storage, temporary_storage_bytes,
+                d_keys_input, d_keys_output, size,
+                segments_count, d_offsets, d_offsets + 1,
+                stream, debug_synchronous
+            );
+
+            const std::vector<key_type> keys_output = download(d_keys_output, size);
+
+            HIP_CHECK(hipFree(d_temporary_storage));
+            HIP_CHECK(hipFree(d_keys_input));
+            HIP_CHECK(hipFree(d_keys_output));
+            HIP_CHECK(hipFree(d_offsets));
+
+            ASSERT_EQ(keys_output, expected);
+        }
+    }
+}
+
+template<typename TestFixture>
+inline void sort_keys_double_buffer()
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using key_type = typename TestFixture::params::key_type;
+    using offset_type = unsigned int;
+    constexpr SortMethod method = TestFixture::params::method;
+    constexpr bool descending = TestFixture::params::descending;
+    constexpr unsigned int min_segment_length = TestFixture::params::min_segment_length;
+    constexpr unsigned int max_segment_length = TestFixture::params::max_segment_length;
+    constexpr hipStream_t stream = 0;
+    constexpr bool debug_synchronous = false;
+
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; ++seed_index)
+    {
+        const int seed_value = seed_index < random_seeds_count ? seeds[seed_index] : rand();
+        for (const size_t size : get_sizes(seed_value))
+        {
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+            std::vector<key_type> keys_input;
+            std::vector<offset_type> offsets;
+            generate_input_data(
+                keys_input, offsets,
+                size, seed_value,
+                min_segment_length, max_segment_length
+            );
+            const size_t segments_count = offsets.size() - 1;
+
+            key_type * d_keys_input = hipMallocAndCopy(keys_input);
+            offset_type * d_offsets = hipMallocAndCopy(offsets);
+            key_type * d_keys_output{};
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_output, size * sizeof(key_type)));
+
+            std::vector<key_type> expected = generate_expected_data(keys_input, offsets, descending);
+
+            hipcub::DoubleBuffer<key_type> d_keys(d_keys_input, d_keys_output);
+
+            size_t temporary_storage_bytes{};
+            dispatch_sort_keys(
+                method, static_cast<void *>(nullptr), temporary_storage_bytes,
+                d_keys, size,
+                segments_count, d_offsets, d_offsets + 1
+            );
+
+            ASSERT_GT(temporary_storage_bytes, 0U);
+
+            void * d_temporary_storage{};
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
+
+            dispatch_sort_keys(
+                method, d_temporary_storage, temporary_storage_bytes,
+                d_keys, size,
+                segments_count, d_offsets, d_offsets + 1,
+                stream, debug_synchronous
+            );
+
+            const std::vector<key_type> keys_output = download(d_keys.Current(), size);
+
+            HIP_CHECK(hipFree(d_temporary_storage));
+            HIP_CHECK(hipFree(d_keys_input));
+            HIP_CHECK(hipFree(d_keys_output));
+            HIP_CHECK(hipFree(d_offsets));
+
+            ASSERT_EQ(keys_output, expected);
+        }
+    }
+}
 
 template<typename ... Args>
 void dispatch_sort_pairs(const SortMethod method, Args&& ... args)
@@ -290,5 +407,184 @@ void dispatch_sort_pairs(const SortMethod method, Args&& ... args)
             FAIL();
     }
 }
+
+template<typename TestFixture>
+inline void sort_pairs()
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using key_type = typename TestFixture::params::key_type;
+    using value_type = typename TestFixture::params::value_type;
+    using offset_type = unsigned int;
+    constexpr SortMethod method = TestFixture::params::method;
+    constexpr bool descending = TestFixture::params::descending;
+    constexpr unsigned int min_segment_length = TestFixture::params::min_segment_length;
+    constexpr unsigned int max_segment_length = TestFixture::params::max_segment_length;
+    constexpr hipStream_t stream = 0;
+    constexpr bool debug_synchronous = false;
+
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; ++seed_index)
+    {
+        const int seed_value = seed_index < random_seeds_count ? seeds[seed_index] : rand();
+        for (const size_t size : get_sizes(seed_value))
+        {
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+            std::vector<key_type> keys_input;
+            std::vector<offset_type> offsets;
+            generate_input_data(
+                keys_input, offsets,
+                size, seed_value,
+                min_segment_length, max_segment_length
+            );
+            const size_t segments_count = offsets.size() - 1;
+
+            std::vector<value_type> values_input(size);
+            std::iota(values_input.begin(), values_input.end(), 0);
+
+            key_type * d_keys_input = hipMallocAndCopy(keys_input);
+            value_type * d_values_input = hipMallocAndCopy(values_input);
+            offset_type * d_offsets = hipMallocAndCopy(offsets);
+            key_type * d_keys_output{};
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_output, size * sizeof(key_type)));
+            value_type * d_values_output{};
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_values_output, size * sizeof(value_type)));
+
+            const std::vector<std::pair<key_type, value_type>> expected = generate_expected_data<descending>(keys_input, values_input, offsets);
+
+            size_t temporary_storage_bytes{};
+            dispatch_sort_pairs(
+                method, static_cast<void *>(nullptr), temporary_storage_bytes,
+                d_keys_input, d_keys_output,
+                d_values_input, d_values_output,
+                size, segments_count,
+                d_offsets, d_offsets + 1
+            );
+            ASSERT_GT(temporary_storage_bytes, 0U);
+
+            void * d_temporary_storage{};
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
+
+            dispatch_sort_pairs(
+                method, d_temporary_storage, temporary_storage_bytes,
+                d_keys_input, d_keys_output,
+                d_values_input, d_values_output,
+                size, segments_count,
+                d_offsets, d_offsets + 1,
+                stream, debug_synchronous
+            );
+
+            const std::vector<key_type> keys_output = download(d_keys_output, size);
+            const std::vector<value_type> values_output = download(d_values_output, size);
+
+            HIP_CHECK(hipFree(d_temporary_storage));
+            HIP_CHECK(hipFree(d_keys_input));
+            HIP_CHECK(hipFree(d_values_input));
+            HIP_CHECK(hipFree(d_keys_output));
+            HIP_CHECK(hipFree(d_values_output));
+            HIP_CHECK(hipFree(d_offsets));
+
+            for (size_t i = 0; i < size; ++i)
+            {
+                ASSERT_EQ(keys_output[i], expected[i].first);
+                ASSERT_EQ(values_output[i], expected[i].second);
+            }
+        }
+    }
+}
+
+template<typename TestFixture>
+inline void sort_pairs_double_buffer()
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using key_type = typename TestFixture::params::key_type;
+    using value_type = typename TestFixture::params::value_type;
+    using offset_type = unsigned int;
+    constexpr SortMethod method = TestFixture::params::method;
+    constexpr bool descending = TestFixture::params::descending;
+    constexpr unsigned int min_segment_length = TestFixture::params::min_segment_length;
+    constexpr unsigned int max_segment_length = TestFixture::params::max_segment_length;
+    constexpr hipStream_t stream = 0;
+    constexpr bool debug_synchronous = false;
+
+    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; ++seed_index)
+    {
+        const int seed_value = seed_index < random_seeds_count ? seeds[seed_index] : rand();
+        for (const size_t size : get_sizes(seed_value))
+        {
+            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+            std::vector<key_type> keys_input;          
+            std::vector<offset_type> offsets;
+            generate_input_data(
+                keys_input, offsets,
+                size, seed_value,
+                min_segment_length, max_segment_length
+            );
+            const size_t segments_count = offsets.size() - 1;
+
+            std::vector<value_type> values_input(size);
+            std::iota(values_input.begin(), values_input.end(), 0);
+
+            key_type * d_keys_input = hipMallocAndCopy(keys_input);
+            value_type * d_values_input = hipMallocAndCopy(values_input);
+            offset_type * d_offsets = hipMallocAndCopy(offsets);
+            key_type * d_keys_output{};
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_output, size * sizeof(key_type)));
+            value_type * d_values_output{};
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_values_output, size * sizeof(value_type)));
+
+            const std::vector<std::pair<key_type, value_type>> expected = generate_expected_data<descending>(keys_input, values_input, offsets);
+
+            hipcub::DoubleBuffer<key_type> d_keys(d_keys_input, d_keys_output);
+            hipcub::DoubleBuffer<value_type> d_values(d_values_input, d_values_output);
+
+            size_t temporary_storage_bytes{};
+            dispatch_sort_pairs(
+                method, static_cast<void *>(nullptr), temporary_storage_bytes,
+                d_keys, d_values,
+                size, segments_count,
+                d_offsets, d_offsets + 1
+            );
+            ASSERT_GT(temporary_storage_bytes, 0U);
+
+            void * d_temporary_storage{};
+            HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
+
+            dispatch_sort_pairs(
+                method, d_temporary_storage, temporary_storage_bytes,
+                d_keys, d_values,
+                size, segments_count,
+                d_offsets, d_offsets + 1,
+                stream, debug_synchronous
+            );
+            
+            const std::vector<key_type> keys_output = download(d_keys.Current(), size);
+            const std::vector<value_type> values_output = download(d_values.Current(), size);
+
+            HIP_CHECK(hipFree(d_temporary_storage));
+            HIP_CHECK(hipFree(d_keys_input));
+            HIP_CHECK(hipFree(d_values_input));
+            HIP_CHECK(hipFree(d_keys_output));
+            HIP_CHECK(hipFree(d_values_output));
+            HIP_CHECK(hipFree(d_offsets));
+
+            for (size_t i = 0; i < size; ++i)
+            {
+                ASSERT_EQ(keys_output[i], expected[i].first);
+                ASSERT_EQ(values_output[i], expected[i].second);
+            }
+        }
+    }
+}
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(HipcubDeviceSegmentedSort);
 
 #endif // HIPCUB_TEST_HIPCUB_DEVICE_SEGMENTED_SORT_HPP_

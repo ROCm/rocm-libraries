@@ -111,6 +111,10 @@ void warp_reduce_kernel(T* device_input, T* device_output)
 
 TYPED_TEST(HipcubWarpReduceTests, Reduce)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::type;
     // logical warp side for warp primitive, execution warp size
     constexpr size_t logical_warp_size = TestFixture::warp_size;
@@ -253,6 +257,10 @@ void warp_reduce_valid_kernel(T* device_input, T* device_output, const int valid
 
 TYPED_TEST(HipcubWarpReduceTests, ReduceValid)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::type;
     // logical warp side for warp primitive, execution warp size
     constexpr size_t logical_warp_size = TestFixture::warp_size;
@@ -393,6 +401,10 @@ void head_segmented_warp_reduce_kernel(T* input, Flag* flags, T* output)
 
 TYPED_TEST(HipcubWarpReduceTests, HeadSegmentedReduceSum)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::type;
     using flag_type = unsigned char;
     // logical warp side for warp primitive, execution warp size
@@ -582,6 +594,10 @@ void tail_segmented_warp_reduce_kernel(T* input, Flag* flags, T* output)
 
 TYPED_TEST(HipcubWarpReduceTests, TailSegmentedReduceSum)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::type;
     using flag_type = unsigned char;
     // logical warp side for warp primitive, execution warp size

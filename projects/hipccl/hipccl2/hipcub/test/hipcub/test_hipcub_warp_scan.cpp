@@ -114,6 +114,10 @@ void warp_inclusive_scan_kernel(T* device_input, T* device_output)
 
 TYPED_TEST(HipcubWarpScanTests, InclusiveScan)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::type;
     // logical warp side for warp primitive, execution warp size
     constexpr size_t logical_warp_size = TestFixture::warp_size;
@@ -276,6 +280,10 @@ void warp_inclusive_scan_reduce_kernel(
 
 TYPED_TEST(HipcubWarpScanTests, InclusiveScanReduce)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::type;
     // logical warp side for warp primitive
     constexpr size_t logical_warp_size = TestFixture::warp_size;
@@ -453,6 +461,10 @@ void warp_exclusive_scan_kernel(T* device_input, T* device_output, T init)
 
 TYPED_TEST(HipcubWarpScanTests, ExclusiveScan)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::type;
     // logical warp side for warp primitive
     constexpr size_t logical_warp_size = TestFixture::warp_size;
@@ -611,6 +623,10 @@ void warp_exclusive_scan_reduce_kernel(
 
 TYPED_TEST(HipcubWarpScanTests, ExclusiveReduceScan)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::type;
     // logical warp side for warp primitive
     constexpr size_t logical_warp_size = TestFixture::warp_size;
@@ -802,6 +818,10 @@ void warp_scan_kernel(
 
 TYPED_TEST(HipcubWarpScanTests, Scan)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::type;
     // logical warp side for warp primitive
     constexpr size_t logical_warp_size = TestFixture::warp_size;
@@ -959,6 +979,10 @@ TYPED_TEST(HipcubWarpScanTests, Scan)
 
 TYPED_TEST(HipcubWarpScanTests, InclusiveScanCustomType)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using base_type = typename TestFixture::type;
     using T = test_utils::custom_test_type<base_type>;
     // logical warp side for warp primitive

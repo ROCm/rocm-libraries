@@ -119,6 +119,10 @@ void blocked_to_striped_kernel(Type* device_input, OutputType* device_output)
 
 TYPED_TEST(HipcubBlockExchangeTests, BlockedToStriped)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using type = typename TestFixture::params::type;
     using output_type = typename TestFixture::params::output_type;
     constexpr size_t block_size = TestFixture::params::block_size;
@@ -222,6 +226,10 @@ void striped_to_blocked_kernel(Type* device_input, OutputType* device_output)
 
 TYPED_TEST(HipcubBlockExchangeTests, StripedToBlocked)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using type = typename TestFixture::params::type;
     using output_type = typename TestFixture::params::output_type;
     constexpr size_t block_size = TestFixture::params::block_size;
@@ -325,6 +333,10 @@ void blocked_to_warp_striped_kernel(Type* device_input, OutputType* device_outpu
 
 TYPED_TEST(HipcubBlockExchangeTests, BlockedToWarpStriped)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using type = typename TestFixture::params::type;
     using output_type = typename TestFixture::params::output_type;
     constexpr size_t block_size = TestFixture::params::block_size;
@@ -458,6 +470,10 @@ void warp_striped_to_blocked_kernel(Type* device_input, OutputType* device_outpu
 
 TYPED_TEST(HipcubBlockExchangeTests, WarpStripedToBlocked)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using type = typename TestFixture::params::type;
     using output_type = typename TestFixture::params::output_type;
     constexpr size_t block_size = TestFixture::params::block_size;
@@ -591,6 +607,10 @@ void scatter_to_blocked_kernel(Type* device_input, OutputType* device_output, un
 
 TYPED_TEST(HipcubBlockExchangeTests, ScatterToBlocked)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using type = typename TestFixture::params::type;
     using output_type = typename TestFixture::params::output_type;
     constexpr size_t block_size = TestFixture::params::block_size;
@@ -714,6 +734,10 @@ void scatter_to_striped_kernel(Type* device_input, OutputType* device_output, un
 
 TYPED_TEST(HipcubBlockExchangeTests, ScatterToStriped)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using type = typename TestFixture::params::type;
     using output_type = typename TestFixture::params::output_type;
     constexpr size_t block_size = TestFixture::params::block_size;

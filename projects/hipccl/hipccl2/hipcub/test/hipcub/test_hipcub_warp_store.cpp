@@ -157,6 +157,10 @@ TYPED_TEST_SUITE(HipcubWarpStoreTest, HipcubWarpStoreTestParams);
 
 TYPED_TEST(HipcubWarpStoreTest, WarpStore)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::params::type;
     constexpr unsigned warp_size = TestFixture::params::warp_size;
     constexpr ::hipcub::WarpStoreAlgorithm algorithm = TestFixture::params::algorithm;
@@ -208,6 +212,10 @@ TYPED_TEST(HipcubWarpStoreTest, WarpStore)
 
 TYPED_TEST(HipcubWarpStoreTest, WarpStoreGuarded)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::params::type;
     constexpr unsigned warp_size = TestFixture::params::warp_size;
     constexpr ::hipcub::WarpStoreAlgorithm algorithm = TestFixture::params::algorithm;

@@ -22,6 +22,16 @@
 
 #include "get_hipcub_version.hpp"
 
+#define HIP_CHECK(condition)                                                           \
+    {                                                                                  \
+        hipError_t error = condition;                                                  \
+        if(error != hipSuccess)                                                        \
+        {                                                                              \
+            std::cout << "HIP error: " << error << " line: " << __LINE__ << std::endl; \
+            exit(error);                                                               \
+        }                                                                              \
+    }
+
 __global__
 void get_version_kernel(unsigned int * version)
 {

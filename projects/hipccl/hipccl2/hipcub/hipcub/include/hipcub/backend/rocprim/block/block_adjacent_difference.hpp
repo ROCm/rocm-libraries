@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2020, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2022, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -231,6 +231,21 @@ public:
         base_type::subtract_left_partial(
             input, output, difference_op, valid_items, temp_storage_
         );
+    }
+
+    template<int ITEMS_PER_THREAD, typename OutputType, typename DifferenceOpT>
+    HIPCUB_DEVICE inline void SubtractLeftPartialTile(T (&input)[ITEMS_PER_THREAD],
+                                                      OutputType (&output)[ITEMS_PER_THREAD],
+                                                      DifferenceOpT difference_op,
+                                                      int           valid_items,
+                                                      T             tile_predecessor_item)
+    {
+        base_type::subtract_left_partial(input,
+                                         output,
+                                         difference_op,
+                                         tile_predecessor_item,
+                                         valid_items,
+                                         temp_storage_);
     }
 
     template <int ITEMS_PER_THREAD, typename OutputT, typename DifferenceOpT>

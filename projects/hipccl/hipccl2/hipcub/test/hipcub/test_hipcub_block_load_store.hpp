@@ -26,6 +26,10 @@ typed_test_suite_def(HipcubBlockLoadStoreTests, name_suffix, load_store_params);
 
 typed_test_def(HipcubBlockLoadStoreTests, name_suffix, LoadStoreClass)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using Type                                             = typename TestFixture::params::type;
     constexpr size_t                      block_size       = TestFixture::params::block_size;
     constexpr hipcub::BlockLoadAlgorithm  load_method      = TestFixture::params::load_method;
@@ -106,6 +110,10 @@ typed_test_def(HipcubBlockLoadStoreTests, name_suffix, LoadStoreClass)
 
 typed_test_def(HipcubBlockLoadStoreTests, name_suffix, LoadStoreClassValid)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using Type                                             = typename TestFixture::params::type;
     constexpr size_t                      block_size       = TestFixture::params::block_size;
     constexpr hipcub::BlockLoadAlgorithm  load_method      = TestFixture::params::load_method;
@@ -199,6 +207,10 @@ typed_test_def(HipcubBlockLoadStoreTests, name_suffix, LoadStoreClassValid)
 
 typed_test_def(HipcubBlockLoadStoreTests, name_suffix, LoadStoreClassDefault)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using Type                                             = typename TestFixture::params::type;
     constexpr size_t                      block_size       = TestFixture::params::block_size;
     constexpr hipcub::BlockLoadAlgorithm  load_method      = TestFixture::params::load_method;
@@ -288,6 +300,10 @@ typed_test_def(HipcubBlockLoadStoreTests, name_suffix, LoadStoreClassDefault)
 
 typed_test_def(HipcubBlockLoadStoreTests, name_suffix, LoadStoreDiscardIterator)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using Type                                             = typename TestFixture::params::type;
     constexpr size_t                      block_size       = TestFixture::params::block_size;
     constexpr hipcub::BlockLoadAlgorithm  load_method      = TestFixture::params::load_method;

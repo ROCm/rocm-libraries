@@ -158,6 +158,10 @@ TYPED_TEST_SUITE(HipcubDeviceReduceTests, HipcubDeviceReduceTestsParams);
 
 TYPED_TEST(HipcubDeviceReduceTests, ReduceSum)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
@@ -257,6 +261,10 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceSum)
 
 TYPED_TEST(HipcubDeviceReduceTests, ReduceMinimum)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
@@ -349,6 +357,10 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceMinimum)
 
 TYPED_TEST(HipcubDeviceReduceTests, ReduceArgMinimum)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::input_type;
     using Iterator = typename hipcub::ArgIndexInputIterator<T*, int>;
     using key_value = typename Iterator::value_type;
@@ -441,6 +453,10 @@ TYPED_TEST(HipcubDeviceReduceTests, ReduceArgMinimum)
 
 TYPED_TEST(HipcubDeviceReduceTests, ReduceArgMaximum)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::input_type;
     using Iterator = typename hipcub::ArgIndexInputIterator<T*, int>;
     using key_value = typename Iterator::value_type;

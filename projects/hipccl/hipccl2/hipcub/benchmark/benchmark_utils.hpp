@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2022 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -253,7 +253,9 @@ struct custom_type
     HIPCUB_HOST_DEVICE inline
     bool operator<(const custom_type& rhs) const
     {
-        return (x < rhs.x || (x == rhs.x && y < rhs.y));
+        // intentionally suboptimal choice for short-circuting,
+        // required to generate more performant device code
+        return ((x == rhs.x && y < rhs.y) || x < rhs.x);
     }
 
     HIPCUB_HOST_DEVICE inline

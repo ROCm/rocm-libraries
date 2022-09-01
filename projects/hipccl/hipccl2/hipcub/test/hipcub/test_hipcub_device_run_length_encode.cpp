@@ -84,6 +84,10 @@ std::vector<size_t> get_sizes()
 
 TYPED_TEST(HipcubDeviceRunLengthEncode, Encode)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using key_type = typename TestFixture::params::key_type;
     using count_type = typename TestFixture::params::count_type;
     using key_distribution_type = typename std::conditional<
@@ -237,6 +241,10 @@ TYPED_TEST(HipcubDeviceRunLengthEncode, Encode)
 
 TYPED_TEST(HipcubDeviceRunLengthEncode, NonTrivialRuns)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using key_type = typename TestFixture::params::key_type;
     using count_type = typename TestFixture::params::count_type;
     using offset_type = typename TestFixture::params::count_type;

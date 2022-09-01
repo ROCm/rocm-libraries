@@ -144,6 +144,10 @@ TYPED_TEST_SUITE(HipcubDeviceHistogramEven, Params1);
 
 TYPED_TEST(HipcubDeviceHistogramEven, Even)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using sample_type = typename TestFixture::params::sample_type;
     using counter_type = typename TestFixture::params::counter_type;
     using level_type = typename TestFixture::params::level_type;
@@ -329,6 +333,10 @@ TYPED_TEST_SUITE(HipcubDeviceHistogramRange, Params2);
 
 TYPED_TEST(HipcubDeviceHistogramRange, Range)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using sample_type = typename TestFixture::params::sample_type;
     using counter_type = typename TestFixture::params::counter_type;
     using level_type = typename TestFixture::params::level_type;
@@ -543,6 +551,10 @@ TYPED_TEST_SUITE(HipcubDeviceHistogramMultiEven, Params3);
 
 TYPED_TEST(HipcubDeviceHistogramMultiEven, MultiEven)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using sample_type = typename TestFixture::params::sample_type;
     using counter_type = typename TestFixture::params::counter_type;
     using level_type = typename TestFixture::params::level_type;
@@ -812,6 +824,10 @@ TYPED_TEST_SUITE(HipcubDeviceHistogramMultiRange, Params4);
 
 TYPED_TEST(HipcubDeviceHistogramMultiRange, MultiRange)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using sample_type = typename TestFixture::params::sample_type;
     using counter_type = typename TestFixture::params::counter_type;
     using level_type = typename TestFixture::params::level_type;

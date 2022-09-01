@@ -24,6 +24,8 @@
 
 // hipcub API
 #include "hipcub/device/device_select.hpp"
+#include "hipcub/iterator/counting_input_iterator.hpp"
+#include "hipcub/iterator/discard_output_iterator.hpp"
 
 // Params for tests
 template<
@@ -71,6 +73,10 @@ TYPED_TEST_SUITE(HipcubDeviceSelectTests, HipcubDeviceSelectTestsParams);
 
 TYPED_TEST(HipcubDeviceSelectTests, Flagged)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
     using F = typename TestFixture::flag_type;
@@ -209,6 +215,100 @@ TYPED_TEST(HipcubDeviceSelectTests, Flagged)
     }
 }
 
+TEST(HipcubDeviceSelectTests, FlagNormalization)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using T                      = int;
+    using U                      = long;
+    using F                      = unsigned int;
+    const bool debug_synchronous = false;
+
+    hipStream_t stream = 0; // default stream
+
+    const std::vector<size_t> sizes = get_sizes();
+    for(auto size : sizes)
+    {
+        SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+        hipcub::CountingInputIterator<T> d_input(0);
+        hipcub::CountingInputIterator<F> d_flags(1);
+        U*                               d_output;
+        unsigned int*                    d_selected_count_output;
+
+        HIP_CHECK(test_common_utils::hipMallocHelper(&d_output, size * sizeof(*d_output)));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&d_selected_count_output,
+                                                     sizeof(*d_selected_count_output)));
+
+        // Calculate expected results on host
+        std::vector<U> expected;
+        expected.reserve(size);
+        for(size_t i = 0; i < size; i++)
+        {
+            if(d_flags[i] != 0)
+            {
+                expected.push_back(static_cast<U>(i));
+            }
+        }
+
+        // temp storage
+        size_t temp_storage_size_bytes = 0;
+        // Get size of d_temp_storage
+        HIP_CHECK(hipcub::DeviceSelect::Flagged(nullptr,
+                                                temp_storage_size_bytes,
+                                                d_input,
+                                                d_flags,
+                                                d_output,
+                                                d_selected_count_output,
+                                                size,
+                                                stream,
+                                                debug_synchronous));
+
+        // temp_storage_size_bytes must be >0
+        ASSERT_GT(temp_storage_size_bytes, 0U);
+
+        // allocate temporary storage
+        void* d_temp_storage = nullptr;
+        HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
+
+        // Run
+        HIP_CHECK(hipcub::DeviceSelect::Flagged(d_temp_storage,
+                                                temp_storage_size_bytes,
+                                                d_input,
+                                                d_flags,
+                                                d_output,
+                                                d_selected_count_output,
+                                                size,
+                                                stream,
+                                                debug_synchronous));
+
+        // Check if number of selected value is as expected
+        unsigned int selected_count_output = 0;
+        HIP_CHECK(hipMemcpy(&selected_count_output,
+                            d_selected_count_output,
+                            sizeof(selected_count_output),
+                            hipMemcpyDeviceToHost));
+
+        ASSERT_EQ(selected_count_output, size);
+
+        // Check if output values are as expected
+        std::vector<U> output(size);
+        HIP_CHECK(
+            hipMemcpy(output.data(), d_output, size * sizeof(*d_output), hipMemcpyDeviceToHost));
+
+        for(size_t i = 0; i < size; i++)
+        {
+            ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
+        }
+
+        HIP_CHECK(hipFree(d_output));
+        HIP_CHECK(hipFree(d_selected_count_output));
+        HIP_CHECK(hipFree(d_temp_storage));
+    }
+}
+
 struct TestSelectOp
 {
     template<class T>
@@ -222,6 +322,10 @@ struct TestSelectOp
 
 TYPED_TEST(HipcubDeviceSelectTests, SelectOp)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
@@ -355,6 +459,10 @@ std::vector<float> get_discontinuity_probabilities()
 
 TYPED_TEST(HipcubDeviceSelectTests, Unique)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
@@ -487,6 +595,70 @@ TYPED_TEST(HipcubDeviceSelectTests, Unique)
     }
 }
 
+TEST(HipcubDeviceSelectTests, UniqueDiscardOutputIterator)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    const bool debug_synchronous = false;
+
+    hipStream_t stream = 0; //default stream
+
+    const auto sizes = get_sizes();
+    for(auto size : sizes)
+    {
+        SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+        hipcub::CountingInputIterator<unsigned int> d_input(0);
+        hipcub::DiscardOutputIterator<>             d_output;
+        size_t*                                     d_selected_count_output;
+
+        HIP_CHECK(test_common_utils::hipMallocHelper((&d_selected_count_output), sizeof(size_t)));
+
+        // temp storage
+        size_t temp_storage_size_bytes = 0;
+        // Get size of d_temp_storage
+        HIP_CHECK(hipcub::DeviceSelect::Unique(nullptr,
+                                               temp_storage_size_bytes,
+                                               d_input,
+                                               d_output,
+                                               d_selected_count_output,
+                                               size,
+                                               stream,
+                                               debug_synchronous));
+
+        // temp_storage_size_bytes must be >0
+        ASSERT_GT(temp_storage_size_bytes, 0U);
+
+        // allocate temporary storage
+        void* d_temp_storage = nullptr;
+        HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
+
+        // Run
+        HIP_CHECK(hipcub::DeviceSelect::Unique(d_temp_storage,
+                                               temp_storage_size_bytes,
+                                               d_input,
+                                               d_output,
+                                               d_selected_count_output,
+                                               size,
+                                               stream,
+                                               debug_synchronous));
+
+        // Check if number of selected value is as expected
+        size_t selected_count_output = 0;
+        HIP_CHECK(hipMemcpy(&selected_count_output,
+                            d_selected_count_output,
+                            sizeof(size_t),
+                            hipMemcpyDeviceToHost));
+
+        ASSERT_EQ(selected_count_output, size);
+
+        HIP_CHECK(hipFree(d_temp_storage));
+        HIP_CHECK(hipFree(d_selected_count_output));
+    }
+}
+
 template<
     typename KeyType,
     typename ValueType,
@@ -523,6 +695,10 @@ TYPED_TEST_SUITE(HipcubDeviceUniqueByKeyTests, HipcubDeviceUniqueByKeyTestsParam
 
 TYPED_TEST(HipcubDeviceUniqueByKeyTests, UniqueByKey)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using key_type = typename TestFixture::key_type;
     using value_type = typename TestFixture::value_type;
     using output_key_type = typename TestFixture::output_key_type;

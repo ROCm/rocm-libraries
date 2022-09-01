@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -30,11 +30,30 @@ include:
         - /deps-nvcc.yaml
         - /gpus-rocm.yaml
         - /gpus-nvcc.yaml
+        - /rules.yaml
 
 stages:
+  - lint
   - build
   - test
   - benchmark
+
+clang-format:
+  extends:
+    - .deps:rocm
+  stage: lint
+  needs: []
+  tags:
+    - rocm-build
+  variables:
+    CLANG_FORMAT: "/opt/rocm/llvm/bin/clang-format"
+    GIT_CLANG_FORMAT: "/opt/rocm/llvm/bin/git-clang-format"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  script:
+    - cd $CI_PROJECT_DIR
+    - git config --global --add safe.directory $CI_PROJECT_DIR
+    - scripts/code-format/check-format.sh $CI_MERGE_REQUEST_DIFF_BASE_SHA --binary "$CLANG_FORMAT"
 
 # hipCUB with rocPRIM backend
 .rocm:
@@ -50,7 +69,7 @@ stages:
     - BRANCH_NAME="$ROCPRIM_GIT_BRANCH"
     - if [ "$CI_COMMIT_BRANCH" = develop -o "$CI_COMMIT_BRANCH" = master ]; then BRANCH_NAME="$CI_COMMIT_BRANCH"
     - fi;
-    - git clone -b "$BRANCH_NAME" --depth 1 https://gitlab-ci-token:${CI_JOB_TOKEN}@${ROCPRIM_GIT_URL}
+    - git clone -b "$BRANCH_NAME" --depth 1 https://gitlab-ci-token:${CI_JOB_TOKEN}@${ROCPRIM_GIT_URL} $CI_PROJECT_DIR/rocPRIM
     - cmake
       -G Ninja
       -D CMAKE_CXX_COMPILER="$AMDCLANG"
@@ -59,18 +78,21 @@ stages:
       -D BUILD_TEST=OFF
       -D BUILD_EXAMPLE=OFF
       -D ROCM_DEP_ROCMCORE=OFF
-      -B rocPRIM/build
-      -S rocPRIM
-    - cd rocPRIM/build
+      -B $CI_PROJECT_DIR/rocPRIM/build
+      -S $CI_PROJECT_DIR/rocPRIM
+    - cd $CI_PROJECT_DIR/rocPRIM/build
     - cpack -G "DEB"
     - $SUDO_CMD dpkg -i rocprim*.deb
-    - cd ../..
 
 build:rocm:
   extends:
     - .rocm
     - .gpus:rocm-gpus
+    - .rules:build
   stage: build
+  tags:
+    - rocm-build
+  needs: []
   script:
     - cmake
       -G Ninja
@@ -80,38 +102,35 @@ build:rocm:
       -D BUILD_TEST=ON
       -D BUILD_EXAMPLE=ON
       -D GPU_TARGETS="$GPU_TARGETS"
+      -D GPU_TEST_TARGETS="$GPU_TARGETS"
       -D ROCM_SYMLINK_LIBS=OFF
-      -B build
-      -S ./
-    - cmake --build build
-    - cd build
+      -B $CI_PROJECT_DIR/build
+      -S $CI_PROJECT_DIR
+    - cmake --build $CI_PROJECT_DIR/build
+    - cd $CI_PROJECT_DIR/build
     - cpack -G "DEB;ZIP"
   artifacts:
     paths:
-      - build/test/hipcub/test_*
-      - build/test/CTestTestfile.cmake
-      - build/test/hipcub/CTestTestfile.cmake
-      - build/gtest/
-      - build/CMakeCache.txt
-      - build/CTestTestfile.cmake
-      - build/hipcub*.deb
-      - build/hipcub*.zip
-      - build/.ninja_log
+      - $CI_PROJECT_DIR/build/test/hipcub/test_*
+      - $CI_PROJECT_DIR/build/test/CTestTestfile.cmake
+      - $CI_PROJECT_DIR/build/test/hipcub/CTestTestfile.cmake
+      - $CI_PROJECT_DIR/build/gtest/
+      - $CI_PROJECT_DIR/build/CMakeCache.txt
+      - $CI_PROJECT_DIR/build/CTestTestfile.cmake
+      - $CI_PROJECT_DIR/build/hipcub*.deb
+      - $CI_PROJECT_DIR/build/hipcub*.zip
+      - $CI_PROJECT_DIR/build/.ninja_log
     expire_in: 2 weeks
-
-.main_or_manual:
-  rules:
-    - if: '$CI_COMMIT_REF_NAME == "develop_stream" || $CI_COMMIT_REF_NAME == "develop"
-           || $CI_COMMIT_REF_NAME == "master"'
-    - if: '$CI_PIPELINE_SOURCE != "merge_request_event"'
-      when: manual
-      allow_failure: true
 
 build:rocm-benchmark:
   extends:
     - .rocm
     - .gpus:rocm-gpus
+    - .rules:build
   stage: build
+  tags:
+    - rocm-build
+  needs: []
   script:
     - cmake
       -G Ninja
@@ -120,13 +139,15 @@ build:rocm-benchmark:
       -D CMAKE_BUILD_TYPE=Release
       -D BUILD_BENCHMARK=ON
       -D GPU_TARGETS="$GPU_TARGETS"
-      -B build
-      -S ./
-    - cmake --build build
+      -B $CI_PROJECT_DIR/build
+      -S $CI_PROJECT_DIR
+    - cmake --build $CI_PROJECT_DIR/build
   artifacts:
     paths:
-      - build/benchmark/*
-      - build/deps/googlebenchmark/
+      - $CI_PROJECT_DIR/build/benchmark/*
+      - $CI_PROJECT_DIR/build/deps/googlebenchmark/
+      - $CI_PROJECT_DIR/build/.ninja_log
+      - $CI_PROJECT_DIR/build/CMakeCache.txt
     expire_in: 2 weeks
 
 test:rocm:
@@ -136,28 +157,43 @@ test:rocm:
   extends:
     - .rocm
     - .gpus:rocm
+    - .rules:test
   script:
-    - cd build
-    - ctest --output-on-failure --repeat-until-fail 2
+    - cd $CI_PROJECT_DIR/build
+    - cmake
+      -D CMAKE_PREFIX_PATH=/opt/rocm
+      -P $CI_PROJECT_DIR/cmake/GenerateResourceSpec.cmake
+    - cat ./resources.json
+    - ctest
+      --output-on-failure
+      --repeat-until-fail 2
+      --tests-regex "$GPU_TARGET"
+      --resource-spec-file ./resources.json
+      --parallel $PARALLEL_JOBS
 
 .benchmark:
   stage: benchmark
+  variables:
+    BENCHMARK_FILENAME_REGEX: ^benchmark
+    BENCHMARK_FILTER_REGEX: ""
   script:
     - python3 ${CI_PROJECT_DIR}/.gitlab/run_and_upload_benchmarks.py
-        --api_endpoint ${BENCHMARK_API_ENDPOINT}
-        --api_base_folder_id ${BENCHMARK_API_FOLDER_ID}
-        --api_auth_token ${BENCHMARK_API_AUTH_TOKEN}
-        --benchmark_dir ${CI_PROJECT_DIR}/build/benchmark
-        --benchmark_datetime ${CI_PIPELINE_CREATED_AT}
-        --benchmark_version ${CI_COMMIT_REF_SLUG}_MR${CI_MERGE_REQUEST_IID}_${CI_COMMIT_SHORT_SHA}
-        --benchmark_gpu_name "${GPU}"
+      --api_endpoint ${BENCHMARK_API_ENDPOINT}
+      --api_base_folder_id ${BENCHMARK_API_FOLDER_ID}
+      --api_auth_token ${BENCHMARK_API_AUTH_TOKEN}
+      --benchmark_dir ${CI_PROJECT_DIR}/build/benchmark
+      --benchmark_datetime ${CI_PIPELINE_CREATED_AT}
+      --benchmark_version ${CI_COMMIT_REF_SLUG}_MR${CI_MERGE_REQUEST_IID}_${CI_COMMIT_SHORT_SHA}
+      --benchmark_gpu_name "${GPU}"
+      --benchmark_filename_regex "${BENCHMARK_FILENAME_REGEX}"
+      --benchmark_filter_regex "${BENCHMARK_FILTER_REGEX}"
 
 benchmark:rocm:
   extends:
     - .rocm
     - .benchmark
     - .gpus:rocm
-    - .main_or_manual
+    - .rules:benchmark
   needs:
     - build:rocm-benchmark
 
@@ -174,17 +210,16 @@ benchmark:rocm:
       -D rocprim_DIR="/opt/rocm/rocprim"
       -D CMAKE_CXX_FLAGS="-Wall -Wextra -Werror"
       "$GPU_TARGETS_ARG"
-      -S test/extra
-      -B build/package_test
-    - cmake --build build/package_test
-    - cd build/package_test
+      -S $CI_PROJECT_DIR/test/extra
+      -B $CI_PROJECT_DIR/build/package_test
+    - cmake --build $CI_PROJECT_DIR/build/package_test
+    - cd $CI_PROJECT_DIR/build/package_test
     - ctest --output-on-failure --repeat-until-fail 2
 
 .test:package:
   script:
-    - cd build
+    - cd $CI_PROJECT_DIR/build
     - $SUDO_CMD dpkg -i ${HIPCUB_DEV_PACKAGE_WILDCARD}
-    - cd ..
     - export CXX
     - !reference [".test_package", script]
     - $SUDO_CMD dpkg -r rocprim-dev hipcub-dev
@@ -195,10 +230,10 @@ benchmark:rocm:
     - cmake
       -G Ninja
       -D BUILD_TEST=OFF
-      -S .
-      -B build_only_install
+      -S $CI_PROJECT_DIR
+      -B $CI_PROJECT_DIR/build_only_install
     # Preserve $PATH when sudoing
-    - $SUDO_CMD env PATH="$PATH" cmake --install build_only_install
+    - $SUDO_CMD env PATH="$PATH" cmake --install $CI_PROJECT_DIR/build_only_install
     - !reference [".test_package", script]
 
 test:rocm_package:
@@ -208,20 +243,27 @@ test:rocm_package:
   variables:
     CXX: "$AMDCLANG"
     HIPCUB_DEV_PACKAGE_WILDCARD: hipcub-dev*.deb
+  tags:
+    - rocm
   extends:
     - .rocm
     - .gpus:rocm-gpus
     - .test:package
+    - .rules:test
 
 test:rocm_install:
   stage: test
   needs: []
   variables:
     CXX: "$AMDCLANG"
+  tags:
+    - rocm
   extends:
-   - .rocm
-   - .gpus:rocm-gpus
-   - .test:install
+    - .rocm
+    - .gpus:rocm-gpus
+    - .test:install
+    - .rules:test
+
 
 # hipCUB with CUB backend
 .nvcc:
@@ -235,7 +277,12 @@ test:rocm_install:
 
 build:nvcc:
   stage: build
-  extends: .nvcc
+  extends:
+    - .nvcc
+    - .rules:build
+  tags:
+    - nvcc-build
+  needs: []
   script:
     - cmake
       -G Ninja
@@ -245,28 +292,32 @@ build:nvcc:
       -D BUILD_EXAMPLE=ON
       -D NVGPU_TARGETS="$GPU_TARGETS"
       -D ROCM_SYMLINK_LIBS=OFF
-      -B build
-      -S .
-    - cmake --build build
-    - cd build
+      -B $CI_PROJECT_DIR/build
+      -S $CI_PROJECT_DIR
+    - cmake --build $CI_PROJECT_DIR/build
+    - cd $CI_PROJECT_DIR/build
     - cpack -G "DEB;ZIP"
   artifacts:
     paths:
-      - build/test/hipcub/test_*
-      - build/test/CTestTestfile.cmake
-      - build/test/hipcub/CTestTestfile.cmake
-      - build/gtest/
-      - build/CMakeCache.txt
-      - build/CTestTestfile.cmake
-      - build/hipcub*.deb
-      - build/hipcub*.zip
-      - build/.ninja_log
+      - $CI_PROJECT_DIR/build/test/hipcub/test_*
+      - $CI_PROJECT_DIR/build/test/CTestTestfile.cmake
+      - $CI_PROJECT_DIR/build/test/hipcub/CTestTestfile.cmake
+      - $CI_PROJECT_DIR/build/gtest/
+      - $CI_PROJECT_DIR/build/CMakeCache.txt
+      - $CI_PROJECT_DIR/build/CTestTestfile.cmake
+      - $CI_PROJECT_DIR/build/hipcub*.deb
+      - $CI_PROJECT_DIR/build/hipcub*.zip
+      - $CI_PROJECT_DIR/build/.ninja_log
     expire_in: 2 weeks
 
 build:nvcc-benchmark:
   stage: build
   extends:
     - .nvcc
+    - .rules:build
+  tags:
+    - nvcc-build
+  needs: []
   script:
     - cmake
       -G Ninja
@@ -276,13 +327,15 @@ build:nvcc-benchmark:
       -D CMAKE_CXX_COMPILER=g++-8
       -D CMAKE_C_COMPILER=gcc-8
       -D NVGPU_TARGETS="$GPU_TARGETS"
-      -B build
-      -S .
-    - cmake --build build
+      -B $CI_PROJECT_DIR/build
+      -S $CI_PROJECT_DIR
+    - cmake --build $CI_PROJECT_DIR/build
   artifacts:
     paths:
-      - build/benchmark/*
-      - build/deps/googlebenchmark/
+      - $CI_PROJECT_DIR/build/benchmark/*
+      - $CI_PROJECT_DIR/build/deps/googlebenchmark/
+      - $CI_PROJECT_DIR/build/.ninja_log
+      - $CI_PROJECT_DIR/build/CMakeCache.txt
     expire_in: 2 weeks
 
 test:nvcc:
@@ -292,22 +345,25 @@ test:nvcc:
   extends:
     - .nvcc
     - .gpus:nvcc
+    - .rules:test
   before_script:
-    # Must duplicate before_script of .nvcc to add the before_script of .gpus:nvcc
-    - !reference [".deps:nvcc", before_script]
-    - !reference [".deps:cmake-minimum", before_script]
-    - !reference [".gpus:nvcc", before_script]
+    # This is only needed because of the legacy before_script in .gpus:nvcc would otherwise overwrite before_script
+    - !reference [.nvcc, before_script]
   script:
-    - cd build
+    - cd $CI_PROJECT_DIR/build
     - ctest --output-on-failure --repeat-until-fail 2
 
 benchmark:nvcc:
   needs:
     - build:nvcc-benchmark
   extends:
-    - test:nvcc
+    - .nvcc
+    - .gpus:nvcc
     - .benchmark
-    - .main_or_manual
+    - .rules:benchmark
+  before_script:
+    # This is only needed because of the legacy before_script in .gpus:nvcc would otherwise overwrite before_script
+    - !reference [.nvcc, before_script]
 
 test:nvcc_package:
   stage: test
@@ -315,24 +371,35 @@ test:nvcc_package:
     - build:nvcc
   variables:
     HIPCUB_DEV_PACKAGE_WILDCARD: hipcub_nvcc-dev*.deb
+  tags:
+    - nvcc
   extends:
     - .nvcc
     - .test:package
+    - .rules:test
 
 test:nvcc_install:
   stage: test
   needs: []
+  tags:
+    - nvcc
   extends:
     - .nvcc
     - .test:install
+    - .rules:test
 
 test:doc:
   stage: test
   image: sphinxdoc/sphinx-latexpdf
+  extends:
+    - .rules:test
   needs: []
   before_script:
     - apt-get update
     - apt-get install -y -qq doxygen
     - pip3 install sphinx_rtd_theme breathe exhale
   script:
-    - ./docs/run_doc.sh
+    - $CI_PROJECT_DIR/docs/run_doc.sh
+
+scheduled-check-changes:
+  extends: .rules:scheduled-check-changes
