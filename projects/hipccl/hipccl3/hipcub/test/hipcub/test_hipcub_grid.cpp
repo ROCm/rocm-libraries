@@ -48,6 +48,10 @@ __global__ void KernelGridBarrier(
 
 TEST(HipcubGridTests, GridBarrier)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     constexpr int32_t block_size = 256;
     // NOTE increasing iterations will cause huge latency for tests
     constexpr int32_t iterations = 3;
@@ -56,9 +60,6 @@ TEST(HipcubGridTests, GridBarrier)
     int32_t sm_count;
     int32_t max_block_threads;
     int32_t max_sm_occupancy;
-
-    int32_t device_id;
-    HIP_CHECK(hipGetDevice(&device_id));
 
     HIP_CHECK(hipDeviceGetAttribute(&sm_count, hipDeviceAttributeMultiprocessorCount, device_id));
     HIP_CHECK(hipDeviceGetAttribute(&max_block_threads, hipDeviceAttributeMaxThreadsPerBlock, device_id));
@@ -118,6 +119,10 @@ __global__ void KernelGridEvenShare(
 
 TEST(HipcubGridTests, GridEvenShare)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using OffsetT = int32_t;
     using T = uint32_t;
     constexpr size_t block_size = 256;
@@ -235,6 +240,10 @@ __global__ void KernelGridQueue(
 
 TEST(HipcubGridTests, GridQueue)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using OffsetT = int32_t;
     using T = uint32_t;
     constexpr size_t block_size = 256;

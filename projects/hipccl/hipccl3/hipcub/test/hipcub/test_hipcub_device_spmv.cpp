@@ -133,6 +133,10 @@ TYPED_TEST_SUITE(HipcubDeviceSpmvTests, HipcubDeviceSpmvTestsParams);
 
 TYPED_TEST(HipcubDeviceSpmvTests, Spmv)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::value_type;
     using OffsetType = int32_t;
     constexpr int32_t grid_2d = TestFixture::grid_2d;

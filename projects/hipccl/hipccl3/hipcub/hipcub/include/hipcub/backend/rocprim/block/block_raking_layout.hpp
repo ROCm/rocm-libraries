@@ -59,12 +59,9 @@ BEGIN_HIPCUB_NAMESPACE
  * \tparam BLOCK_THREADS            The thread block size in threads.
  * \tparam PTX_ARCH                 <b>[optional]</b> \ptxversion
  */
-template <
-    typename    T,
-    int         BLOCK_THREADS,
-    int ARCH = HIPCUB_ARCH /* ignored */
->
-struct block_raking_layout
+template<typename T, int BLOCK_THREADS, int ARCH = HIPCUB_ARCH /* ignored */
+         >
+struct BlockRakingLayout
 {
     //---------------------------------------------------------------------
     // Constants and type definitions
@@ -76,7 +73,8 @@ struct block_raking_layout
         SHARED_ELEMENTS = BLOCK_THREADS,
 
         /// Maximum number of warp-synchronous raking threads
-        MAX_RAKING_THREADS = ::rocprim::detail::get_min_warp_size(BLOCK_THREADS, HIPCUB_DEVICE_WARP_THREADS),
+        MAX_RAKING_THREADS = ::rocprim::detail::get_min_warp_size(
+            static_cast<unsigned int>(BLOCK_THREADS), HIPCUB_DEVICE_WARP_THREADS),
 
         /// Number of raking elements per warp-synchronous raking thread (rounded up)
         SEGMENT_LENGTH = (SHARED_ELEMENTS + MAX_RAKING_THREADS - 1) / MAX_RAKING_THREADS,
@@ -93,7 +91,6 @@ struct block_raking_layout
         /// Whether or not we need bounds checking during raking (the number of reduction elements is not a multiple of the number of raking threads)
         UNGUARDED = (SHARED_ELEMENTS % RAKING_THREADS == 0),
     };
-
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS    // Do not document
     /**

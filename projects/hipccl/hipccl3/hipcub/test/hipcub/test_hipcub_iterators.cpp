@@ -188,6 +188,10 @@ TYPED_TEST_SUITE(HipcubIteratorTests, HipcubIteratorTestsParams);
 
 TYPED_TEST(HipcubIteratorTests, TestCacheModifiedInput)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::input_type;
     using IteratorType = hipcub::CacheModifiedInputIterator<hipcub::LOAD_CG, T>;
 
@@ -223,6 +227,10 @@ TYPED_TEST(HipcubIteratorTests, TestCacheModifiedInput)
 
 TYPED_TEST(HipcubIteratorTests, TestConstant)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::input_type;
     using IteratorType = hipcub::ConstantInputIterator<T>;
 
@@ -247,6 +255,10 @@ TYPED_TEST(HipcubIteratorTests, TestConstant)
 
 TYPED_TEST(HipcubIteratorTests, TestCounting)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::input_type;
     using IteratorType = hipcub::CountingInputIterator<T>;
 
@@ -275,6 +287,10 @@ TYPED_TEST(HipcubIteratorTests, TestCounting)
 
 TYPED_TEST(HipcubIteratorTests, TestTransform)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::input_type;
     using CastT = typename TestFixture::input_type;
     using IteratorType = hipcub::TransformInputIterator<T, TransformOp<T>, CastT*>;
@@ -322,6 +338,10 @@ TYPED_TEST(HipcubIteratorTests, TestTransform)
 
 TYPED_TEST(HipcubIteratorTests, TestTexObj)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::input_type;
     using CastT = typename TestFixture::input_type;
     using IteratorType = hipcub::TexObjInputIterator<T>;
@@ -376,6 +396,10 @@ TYPED_TEST(HipcubIteratorTests, TestTexObj)
 
 TYPED_TEST(HipcubIteratorTests, TestTexRef)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::input_type;
     using CastT = typename TestFixture::input_type;
     using IteratorType = hipcub::TexRefInputIterator<T, __LINE__>;
@@ -434,6 +458,10 @@ TYPED_TEST(HipcubIteratorTests, TestTexRef)
 
 TYPED_TEST(HipcubIteratorTests, TestTexTransform)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::input_type;
     using CastT = typename TestFixture::input_type;
     using TextureIteratorType = hipcub::TexRefInputIterator<T, __LINE__>;

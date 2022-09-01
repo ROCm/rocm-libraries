@@ -111,6 +111,10 @@ void inclusive_scan_kernel(T* device_output)
 
 TYPED_TEST(HipcubBlockScanSingleValueTests, InclusiveScan)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::type;
     constexpr auto algorithm = TestFixture::algorithm;
     constexpr size_t block_size = TestFixture::block_size;
@@ -208,6 +212,10 @@ void inclusive_scan_reduce_kernel(T* device_output, T* device_output_reductions)
 
 TYPED_TEST(HipcubBlockScanSingleValueTests, InclusiveScanReduce)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::type;
     constexpr auto algorithm = TestFixture::algorithm;
     constexpr size_t block_size = TestFixture::block_size;
@@ -344,6 +352,10 @@ void inclusive_scan_prefix_callback_kernel(T* device_output, T* device_output_bp
 
 TYPED_TEST(HipcubBlockScanSingleValueTests, InclusiveScanPrefixCallback)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::type;
     constexpr auto algorithm = TestFixture::algorithm;
     constexpr size_t block_size = TestFixture::block_size;
@@ -466,6 +478,10 @@ void exclusive_scan_kernel(T* device_output, T init)
 
 TYPED_TEST(HipcubBlockScanSingleValueTests, ExclusiveScan)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::type;
     constexpr auto algorithm = TestFixture::algorithm;
     constexpr size_t block_size = TestFixture::block_size;
@@ -569,6 +585,10 @@ void exclusive_scan_reduce_kernel(T* device_output, T* device_output_reductions,
 
 TYPED_TEST(HipcubBlockScanSingleValueTests, ExclusiveScanReduce)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::type;
     constexpr auto algorithm = TestFixture::algorithm;
     constexpr size_t block_size = TestFixture::block_size;
@@ -718,6 +738,10 @@ void exclusive_scan_prefix_callback_kernel(T* device_output, T* device_output_bp
 
 TYPED_TEST(HipcubBlockScanSingleValueTests, ExclusiveScanPrefixCallback)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::type;
     constexpr auto algorithm = TestFixture::algorithm;
     constexpr size_t block_size = TestFixture::block_size;
@@ -829,6 +853,10 @@ TYPED_TEST(HipcubBlockScanSingleValueTests, ExclusiveScanPrefixCallback)
 
 TYPED_TEST(HipcubBlockScanSingleValueTests, CustomStruct)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using base_type = typename TestFixture::type;
     using T = test_utils::custom_test_type<base_type>;
     constexpr auto algorithm = TestFixture::algorithm;
@@ -986,6 +1014,10 @@ void inclusive_scan_array_kernel(T* device_output)
 
 TYPED_TEST(HipcubBlockScanInputArrayTests, InclusiveScan)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::type;
     constexpr auto algorithm = TestFixture::algorithm;
     constexpr size_t block_size = TestFixture::block_size;
@@ -1102,6 +1134,10 @@ void inclusive_scan_reduce_array_kernel(T* device_output, T* device_output_reduc
 
 TYPED_TEST(HipcubBlockScanInputArrayTests, InclusiveScanReduce)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::type;
     constexpr auto algorithm = TestFixture::algorithm;
     constexpr size_t block_size = TestFixture::block_size;
@@ -1259,6 +1295,10 @@ void inclusive_scan_array_prefix_callback_kernel(T* device_output, T* device_out
 
 TYPED_TEST(HipcubBlockScanInputArrayTests, InclusiveScanPrefixCallback)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::type;
     constexpr auto algorithm = TestFixture::algorithm;
     constexpr size_t block_size = TestFixture::block_size;
@@ -1411,6 +1451,10 @@ void exclusive_scan_array_kernel(T* device_output, T init)
 
 TYPED_TEST(HipcubBlockScanInputArrayTests, ExclusiveScan)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::type;
     constexpr auto algorithm = TestFixture::algorithm;
     constexpr size_t block_size = TestFixture::block_size;
@@ -1532,6 +1576,10 @@ void exclusive_scan_reduce_array_kernel(T* device_output, T* device_output_reduc
 
 TYPED_TEST(HipcubBlockScanInputArrayTests, ExclusiveScanReduce)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::type;
     constexpr auto algorithm = TestFixture::algorithm;
     constexpr size_t block_size = TestFixture::block_size;
@@ -1701,6 +1749,10 @@ void exclusive_scan_prefix_callback_array_kernel(
 
 TYPED_TEST(HipcubBlockScanInputArrayTests, ExclusiveScanPrefixCallback)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::type;
     constexpr auto algorithm = TestFixture::algorithm;
     constexpr size_t block_size = TestFixture::block_size;

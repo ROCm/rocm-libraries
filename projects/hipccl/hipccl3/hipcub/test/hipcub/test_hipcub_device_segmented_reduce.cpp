@@ -77,6 +77,10 @@ TYPED_TEST_SUITE(HipcubDeviceSegmentedReduceOp, Params1);
 
 TYPED_TEST(HipcubDeviceSegmentedReduceOp, Reduce)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using input_type = typename TestFixture::params::input_type;
     using output_type = typename TestFixture::params::output_type;
     using reduce_op_type = typename TestFixture::params::reduce_op_type;
@@ -256,6 +260,10 @@ TYPED_TEST_SUITE(HipcubDeviceSegmentedReduce, Params2);
 
 TYPED_TEST(HipcubDeviceSegmentedReduce, Sum)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using input_type = typename TestFixture::params::input_type;
     using output_type = typename TestFixture::params::output_type;
     using reduce_op_type = typename hipcub::Sum;
@@ -402,6 +410,10 @@ TYPED_TEST(HipcubDeviceSegmentedReduce, Sum)
 
 TYPED_TEST(HipcubDeviceSegmentedReduce, Min)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using input_type = typename TestFixture::params::input_type;
     using output_type = typename TestFixture::params::output_type;
     using reduce_op_type = typename hipcub::Min;

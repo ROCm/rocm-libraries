@@ -37,18 +37,18 @@ BEGIN_HIPCUB_NAMESPACE
 
 struct DeviceAdjacentDifference
 {
-    template <typename InputIteratorT,
-              typename OutputIteratorT,
-              typename DifferenceOpT = ::cub::Difference>
-    static HIPCUB_RUNTIME_FUNCTION hipError_t
-    SubtractLeftCopy(void *d_temp_storage,
-                     std::size_t &temp_storage_bytes,
-                     InputIteratorT d_input,
-                     OutputIteratorT d_output,
-                     std::size_t num_items,
-                     DifferenceOpT difference_op = {},
-                     hipStream_t stream = 0,
-                     bool debug_synchronous = false)
+    template<typename InputIteratorT,
+             typename OutputIteratorT,
+             typename DifferenceOpT = ::cub::Difference,
+             typename NumItemsT     = std::uint32_t>
+    static HIPCUB_RUNTIME_FUNCTION hipError_t SubtractLeftCopy(void*           d_temp_storage,
+                                                               std::size_t&    temp_storage_bytes,
+                                                               InputIteratorT  d_input,
+                                                               OutputIteratorT d_output,
+                                                               NumItemsT       num_items,
+                                                               DifferenceOpT   difference_op = {},
+                                                               hipStream_t     stream        = 0,
+                                                               bool debug_synchronous = false)
     {
         return hipCUDAErrorTohipError(
             ::cub::DeviceAdjacentDifference::SubtractLeftCopy(
@@ -58,16 +58,16 @@ struct DeviceAdjacentDifference
         );
     }
 
-    template <typename RandomAccessIteratorT,
-              typename DifferenceOpT = ::cub::Difference>
-    static HIPCUB_RUNTIME_FUNCTION hipError_t
-    SubtractLeft(void *d_temp_storage,
-                 std::size_t &temp_storage_bytes,
-                 RandomAccessIteratorT d_input,
-                 std::size_t num_items,
-                 DifferenceOpT difference_op = {},
-                 hipStream_t stream = 0,
-                 bool debug_synchronous = false)
+    template<typename RandomAccessIteratorT,
+             typename DifferenceOpT = ::cub::Difference,
+             typename NumItemsT     = std::uint32_t>
+    static HIPCUB_RUNTIME_FUNCTION hipError_t SubtractLeft(void*                 d_temp_storage,
+                                                           std::size_t&          temp_storage_bytes,
+                                                           RandomAccessIteratorT d_input,
+                                                           NumItemsT             num_items,
+                                                           DifferenceOpT         difference_op = {},
+                                                           hipStream_t           stream        = 0,
+                                                           bool debug_synchronous = false)
     {
         return hipCUDAErrorTohipError(
             ::cub::DeviceAdjacentDifference::SubtractLeft(
@@ -77,18 +77,18 @@ struct DeviceAdjacentDifference
         );
     }
 
-    template <typename InputIteratorT,
-              typename OutputIteratorT,
-              typename DifferenceOpT = ::cub::Difference>
-    static HIPCUB_RUNTIME_FUNCTION hipError_t
-    SubtractRightCopy(void *d_temp_storage,
-                      std::size_t &temp_storage_bytes,
-                      InputIteratorT d_input,
-                      OutputIteratorT d_output,
-                      std::size_t num_items,
-                      DifferenceOpT difference_op = {},
-                      hipStream_t stream = 0,
-                      bool debug_synchronous = false)
+    template<typename InputIteratorT,
+             typename OutputIteratorT,
+             typename DifferenceOpT = ::cub::Difference,
+             typename NumItemsT     = std::uint32_t>
+    static HIPCUB_RUNTIME_FUNCTION hipError_t SubtractRightCopy(void*           d_temp_storage,
+                                                                std::size_t&    temp_storage_bytes,
+                                                                InputIteratorT  d_input,
+                                                                OutputIteratorT d_output,
+                                                                NumItemsT       num_items,
+                                                                DifferenceOpT   difference_op = {},
+                                                                hipStream_t     stream        = 0,
+                                                                bool debug_synchronous = false)
     {
         return hipCUDAErrorTohipError(
             ::cub::DeviceAdjacentDifference::SubtractRightCopy(
@@ -98,16 +98,16 @@ struct DeviceAdjacentDifference
         );
     }
 
-    template <typename RandomAccessIteratorT,
-              typename DifferenceOpT = ::cub::Difference>
-    static HIPCUB_RUNTIME_FUNCTION hipError_t
-    SubtractRight(void *d_temp_storage,
-                  std::size_t &temp_storage_bytes,
-                  RandomAccessIteratorT d_input,
-                  std::size_t num_items,
-                  DifferenceOpT difference_op = {},
-                  hipStream_t stream = 0,
-                  bool debug_synchronous = false)
+    template<typename RandomAccessIteratorT,
+             typename DifferenceOpT = ::cub::Difference,
+             typename NumItemsT     = std::uint32_t>
+    static HIPCUB_RUNTIME_FUNCTION hipError_t SubtractRight(void*        d_temp_storage,
+                                                            std::size_t& temp_storage_bytes,
+                                                            RandomAccessIteratorT d_input,
+                                                            NumItemsT             num_items,
+                                                            DifferenceOpT difference_op     = {},
+                                                            hipStream_t   stream            = 0,
+                                                            bool          debug_synchronous = false)
     {
         return hipCUDAErrorTohipError(
             ::cub::DeviceAdjacentDifference::SubtractRight(

@@ -83,6 +83,10 @@ TYPED_TEST_SUITE(HipcubDevicePartitionTests, HipcubDevicePartitionTestsParams);
 
 TYPED_TEST(HipcubDevicePartitionTests, Flagged)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
     using F = typename TestFixture::flag_type;
@@ -245,6 +249,10 @@ struct TestSelectOp
 
 TYPED_TEST(HipcubDevicePartitionTests, If)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
@@ -408,6 +416,10 @@ private:
 
 TYPED_TEST(HipcubDevicePartitionTests, IfThreeWay)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;

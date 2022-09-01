@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2022 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -116,8 +116,19 @@ struct subtract_left_partial_tile
         for(unsigned int trial = 0; trial < trials; trial++)
         {
             T output[ItemsPerThread];
-            
-            adjacent_difference.SubtractLeftPartialTile(input, output, minus<T>{}, tile_size);
+
+            if(WithTile)
+            {
+                adjacent_difference.SubtractLeftPartialTile(input,
+                                                            output,
+                                                            minus<T>{},
+                                                            tile_size,
+                                                            T(123));
+            }
+            else
+            {
+                adjacent_difference.SubtractLeftPartialTile(input, output, minus<T>{}, tile_size);
+            }
 
             for(unsigned int i = 0; i < ItemsPerThread; ++i)
             {
@@ -357,8 +368,8 @@ void add_benchmarks(const std::string& name,
         BENCHMARK_TYPE(double, 256, false)
     };
 
-    if(!std::is_same<Benchmark, subtract_right_partial_tile>::value
-        && !std::is_same<Benchmark, subtract_left_partial_tile>::value) {
+    if(!std::is_same<Benchmark, subtract_right_partial_tile>::value)
+    {
         bs.insert(bs.end(), {
             BENCHMARK_TYPE(int, 256, true),
             BENCHMARK_TYPE(float, 256, true),

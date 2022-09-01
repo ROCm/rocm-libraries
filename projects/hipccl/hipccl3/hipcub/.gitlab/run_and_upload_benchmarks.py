@@ -3,19 +3,20 @@ from collections import namedtuple
 from datetime import datetime
 import json
 import os
+import re
 import stat
 import subprocess
 from urllib.parse import urljoin
 import urllib.request
 
 
-BenchmarkContext = namedtuple('BenchmarkContext', ['run_datetime', 'version', 'gpu_name', 'benchmark_dir'])
+BenchmarkContext = namedtuple('BenchmarkContext', ['run_datetime', 'version', 'gpu_name', 'benchmark_dir', 'benchmark_filename_regex', 'benchmark_filter_regex'])
 ApiContext = namedtuple('ApiContext', ['endpoint', 'folder_id', 'auth_token'])
 
 
-def run_benchmarks(benchmark_context, benchmark_search_prefix='benchmark'):
+def run_benchmarks(benchmark_context):
     def is_benchmark_executable(filename):
-        if not filename.startswith(benchmark_search_prefix):
+        if not re.match(benchmark_context.benchmark_filename_regex, filename):
             return False
         path = os.path.join(benchmark_context.benchmark_dir, filename)
         st_mode = os.stat(path).st_mode
@@ -32,7 +33,12 @@ def run_benchmarks(benchmark_context, benchmark_search_prefix='benchmark'):
 
         benchmark_path = os.path.join(benchmark_context.benchmark_dir, benchmark_name)
         results_json_path = os.path.join(benchmark_context.benchmark_dir, results_json_name)
-        args = [benchmark_path, '--benchmark_out_format=json', f'--benchmark_out={results_json_path}']
+        args = [
+            benchmark_path,
+            '--benchmark_out_format=json',
+            f'--benchmark_out={results_json_path}',
+            f'--benchmark_filter={benchmark_context.benchmark_filter_regex}'
+        ]
         try:
             subprocess.call(args)
             json_paths.append(results_json_path)
@@ -46,11 +52,10 @@ def write_system_info():
     def try_running_info(executable_name):
         out_filename = f'{executable_name}.txt'
         try:
-            process = subprocess.Popen(executable_name, stdout=subprocess.PIPE, env=os.environ)
-            output, _ = process.communicate()
-            if output:
+            run_result = subprocess.run(executable_name, stdout=subprocess.PIPE)
+            if run_result.returncode == 0:
                 with open(out_filename, 'wb') as file:
-                    file.write(output)
+                    file.write(run_result.stdout)
                 return out_filename
         except OSError:
             # Expected, when the executable is not available on the system
@@ -140,6 +145,14 @@ def main():
     parser.add_argument('--benchmark_gpu_name',
         help='The name of the currently enabled GPU',
         required=True)
+    parser.add_argument('--benchmark_filename_regex',
+        help='Regular expression that controls the list of benchmark executables to run',
+        default=r'^benchmark',
+        required=False)
+    parser.add_argument('--benchmark_filter_regex',
+        help='Regular expression that controls the list of benchmarks to run in each benchmark executable',
+        default='',
+        required=False)
 
     args = parser.parse_args()
 
@@ -148,7 +161,9 @@ def main():
         parse_date(args.benchmark_datetime),
         args.benchmark_version,
         args.benchmark_gpu_name,
-        args.benchmark_dir)
+        args.benchmark_dir,
+        args.benchmark_filename_regex,
+        args.benchmark_filter_regex)
 
     benchmark_run_successful, to_upload_paths = run_benchmarks(benchmark_context)
     sysinfo_path = write_system_info()

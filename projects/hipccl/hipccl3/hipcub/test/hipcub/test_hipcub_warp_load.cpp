@@ -159,6 +159,10 @@ TYPED_TEST_SUITE(HipcubWarpLoadTest, HipcubWarpLoadTestParams);
 
 TYPED_TEST(HipcubWarpLoadTest, WarpLoad)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::params::type;
     constexpr unsigned warp_size = TestFixture::params::warp_size;
     constexpr ::hipcub::WarpLoadAlgorithm algorithm = TestFixture::params::algorithm;
@@ -210,6 +214,10 @@ TYPED_TEST(HipcubWarpLoadTest, WarpLoad)
 
 TYPED_TEST(HipcubWarpLoadTest, WarpLoadGuarded)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::params::type;
     constexpr unsigned warp_size = TestFixture::params::warp_size;
     constexpr ::hipcub::WarpLoadAlgorithm algorithm = TestFixture::params::algorithm;

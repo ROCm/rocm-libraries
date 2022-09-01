@@ -264,6 +264,10 @@ void sort_keys_values_segmented(Key* keys, Value* values, const unsigned int* se
 
 TYPED_TEST(HipcubWarpMergeSort, SortKeysSegmented)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using params = typename TestFixture::params;
     using key_type = typename params::key_type;
 
@@ -365,6 +369,10 @@ TYPED_TEST(HipcubWarpMergeSort, SortKeysSegmented)
 
 TYPED_TEST(HipcubWarpMergeSort, SortKeysValuesSegmented)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using params = typename TestFixture::params;
     using key_type = typename params::key_type;
     using value_type = typename params::value_type;
@@ -502,6 +510,10 @@ TYPED_TEST(HipcubWarpMergeSort, SortKeysValuesSegmented)
 
 TYPED_TEST(HipcubWarpMergeSort, SortKeys)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using params = typename TestFixture::params;
     using key_type = typename params::key_type;
 
@@ -591,6 +603,10 @@ TYPED_TEST(HipcubWarpMergeSort, SortKeys)
 
 TYPED_TEST(HipcubWarpMergeSort, SortKeysValues)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using params = typename TestFixture::params;
     using key_type = typename params::key_type;
     using value_type = typename params::value_type;

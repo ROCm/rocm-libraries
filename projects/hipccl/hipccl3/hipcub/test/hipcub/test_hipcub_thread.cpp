@@ -94,6 +94,10 @@ void thread_load_kernel(Type* volatile const device_input, Type* device_output)
 
 TYPED_TEST(HipcubThreadOperationTests, Load)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::type;
     constexpr hipcub::CacheLoadModifier Modifier = TestFixture::load_modifier;
 
@@ -159,6 +163,10 @@ void thread_store_kernel(Type* const device_input, Type* device_output)
 
 TYPED_TEST(HipcubThreadOperationTests, Store)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::type;
     constexpr hipcub::CacheStoreModifier Modifier = TestFixture::store_modifier;
     constexpr uint32_t block_size = 256;
@@ -234,6 +242,10 @@ void thread_reduce_kernel(Type* const device_input, Type* device_output)
 
 TYPED_TEST(HipcubThreadOperationTests, Reduction)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::type;
     constexpr uint32_t length = 4;
     constexpr uint32_t block_size = 128 / length;
@@ -318,6 +330,10 @@ void thread_scan_kernel(Type* const device_input, Type* device_output)
 
 TYPED_TEST(HipcubThreadOperationTests, Scan)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::type;
     constexpr uint32_t length = 4;
     constexpr uint32_t block_size = 128 / length;
@@ -409,6 +425,10 @@ void thread_search_kernel(
 
 TYPED_TEST(HipcubThreadOperationTests, Bounds)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using T = typename TestFixture::type;
     using OffsetT = uint32_t;
     constexpr uint32_t block_size = 256;

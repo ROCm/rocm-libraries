@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2020, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2022, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -32,10 +32,43 @@
 
 #include "../../config.hpp"
 
-#include "util_allocator.hpp"
-#include "util_type.hpp"
-#include "util_ptx.hpp"
-#include "thread/thread_operators.hpp"
+// Block
+#include "block/block_adjacent_difference.hpp"
+#include "block/block_discontinuity.hpp"
+#include "block/block_exchange.hpp"
+#include "block/block_histogram.hpp"
+#include "block/block_load.hpp"
+#include "block/block_merge_sort.hpp"
+#include "block/block_radix_rank.hpp"
+#include "block/block_radix_sort.hpp"
+#include "block/block_raking_layout.hpp"
+#include "block/block_reduce.hpp"
+#include "block/block_run_length_decode.hpp"
+#include "block/block_scan.hpp"
+#include "block/block_shuffle.hpp"
+#include "block/block_store.hpp"
+#include "block/radix_rank_sort_operations.hpp"
+
+// Device
+#include "device/device_adjacent_difference.hpp"
+#include "device/device_histogram.hpp"
+#include "device/device_merge_sort.hpp"
+#include "device/device_partition.hpp"
+#include "device/device_radix_sort.hpp"
+#include "device/device_reduce.hpp"
+#include "device/device_run_length_encode.hpp"
+#include "device/device_scan.hpp"
+#include "device/device_segmented_radix_sort.hpp"
+#include "device/device_segmented_reduce.hpp"
+#include "device/device_segmented_sort.hpp"
+#include "device/device_select.hpp"
+#include "device/device_spmv.hpp"
+
+// Grid
+#include "grid/grid_barrier.hpp"
+#include "grid/grid_even_share.hpp"
+#include "grid/grid_mapping.hpp"
+#include "grid/grid_queue.hpp"
 
 // Iterator
 #include "iterator/arg_index_input_iterator.hpp"
@@ -48,14 +81,6 @@
 #include "iterator/tex_ref_input_iterator.hpp"
 #include "iterator/transform_input_iterator.hpp"
 
-// Warp
-#include "warp/warp_exchange.hpp"
-#include "warp/warp_load.hpp"
-#include "warp/warp_merge_sort.hpp"
-#include "warp/warp_reduce.hpp"
-#include "warp/warp_scan.hpp"
-#include "warp/warp_store.hpp"
-
 // Thread
 #include "thread/thread_load.hpp"
 #include "thread/thread_operators.hpp"
@@ -65,26 +90,17 @@
 #include "thread/thread_sort.hpp"
 #include "thread/thread_store.hpp"
 
-// Block
-#include "block/block_discontinuity.hpp"
-#include "block/block_exchange.hpp"
-#include "block/block_histogram.hpp"
-#include "block/block_load.hpp"
-#include "block/block_radix_sort.hpp"
-#include "block/block_reduce.hpp"
-#include "block/block_scan.hpp"
-#include "block/block_store.hpp"
+// Warp
+#include "warp/warp_exchange.hpp"
+#include "warp/warp_load.hpp"
+#include "warp/warp_merge_sort.hpp"
+#include "warp/warp_reduce.hpp"
+#include "warp/warp_scan.hpp"
+#include "warp/warp_store.hpp"
 
-// Device
-#include "device/device_adjacent_difference.hpp"
-#include "device/device_histogram.hpp"
-#include "device/device_radix_sort.hpp"
-#include "device/device_reduce.hpp"
-#include "device/device_run_length_encode.hpp"
-#include "device/device_scan.hpp"
-#include "device/device_segmented_radix_sort.hpp"
-#include "device/device_segmented_reduce.hpp"
-#include "device/device_segmented_sort.hpp"
-#include "device/device_select.hpp"
+// Util
+#include "util_allocator.hpp"
+#include "util_ptx.hpp"
+#include "util_type.hpp"
 
 #endif // HIPCUB_ROCPRIM_HIPCUB_HPP_

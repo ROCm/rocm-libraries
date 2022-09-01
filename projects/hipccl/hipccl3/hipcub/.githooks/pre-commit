@@ -1,0 +1,12 @@
+#!/bin/sh
+
+# Redirect output to stderr.
+exec 1>&2
+
+# Do the code format check
+if ! "$(git rev-parse --show-toplevel)/scripts/code-format/check-format.sh" HEAD --cached 1>&2; then
+    printf "
+Pre-commit check failed, please fix the reported errors.
+Note: Use '\033[33mgit commit --no-verify\033[0m' to bypass checks.\n"
+    exit 1
+fi

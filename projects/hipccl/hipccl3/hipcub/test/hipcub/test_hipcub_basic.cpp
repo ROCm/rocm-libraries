@@ -31,11 +31,17 @@
 
 #include "detail/get_hipcub_version.hpp"
 
+#include "common_test_header.hpp"
+
 // get_hipcub_version_on_device is compiled in a separate source,
 // that way we can be sure that all hipCUB functions are inline
 // and there won't be any multiple definitions error
 TEST(HipcubBasicTests, GetVersionOnDevice)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     int version = get_hipcub_version_on_device();
     ASSERT_EQ(version, HIPCUB_VERSION);
 }

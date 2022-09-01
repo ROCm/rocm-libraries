@@ -142,6 +142,10 @@ void flag_heads_kernel(Type* device_input, long long* device_heads)
 
 TYPED_TEST(HipcubBlockDiscontinuity, FlagHeads)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using type = typename TestFixture::params::type;
     // std::vector<bool> is a special case that will cause an error in hipMemcpy
     using stored_flag_type = typename std::conditional<
@@ -278,6 +282,10 @@ void flag_tails_kernel(Type* device_input, long long* device_tails)
 
 TYPED_TEST(HipcubBlockDiscontinuity, FlagTails)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using type = typename TestFixture::params::type;
     // std::vector<bool> is a special case that will cause an error in hipMemcpy
     using stored_flag_type = typename std::conditional<
@@ -426,6 +434,10 @@ void flag_heads_and_tails_kernel(Type* device_input, long long* device_heads, lo
 
 TYPED_TEST(HipcubBlockDiscontinuity, FlagHeadsAndTails)
 {
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
     using type = typename TestFixture::params::type;
     // std::vector<bool> is a special case that will cause an error in hipMemcpy
     using stored_flag_type = typename std::conditional<
