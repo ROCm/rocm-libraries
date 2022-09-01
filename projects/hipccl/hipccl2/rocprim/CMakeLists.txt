@@ -57,7 +57,6 @@ endif()
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Add paths to linker search and installed rpath")
 
 set(BUILD_SHARED_LIBS OFF) # don't build client dependencies as shared
-set(ROCM_SYMLINK_LIBS OFF)
 if(NOT USE_HIP_CPU)
   # Get dependencies (required here to get rocm-cmake)
   include(cmake/Dependencies.cmake)

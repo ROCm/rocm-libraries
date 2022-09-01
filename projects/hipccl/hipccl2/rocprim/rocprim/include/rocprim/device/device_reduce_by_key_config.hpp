@@ -45,13 +45,15 @@ BEGIN_ROCPRIM_NAMESPACE
  * \tparam LoadValuesMethod method of loading values
  * \tparam ScanAlgorithm block level scan algorithm to use
  * \tparam TilesPerBlock number of tiles (`BlockSize` * `ItemsPerThread` items) to process per block
+ * \tparam SizeLimit limit on the number of items for a single reduce_by_key kernel launch.
  */
 template<unsigned int         BlockSize,
          unsigned int         ItemsPerThread,
          block_load_method    LoadKeysMethod   = block_load_method::block_load_transpose,
          block_load_method    LoadValuesMethod = block_load_method::block_load_transpose,
          block_scan_algorithm ScanAlgorithm    = block_scan_algorithm::using_warp_scan,
-         unsigned int         TilesPerBlock    = 1>
+         unsigned int         TilesPerBlock    = 1,
+         unsigned int         SizeLimit        = ROCPRIM_GRID_SIZE_LIMIT>
 struct reduce_by_key_config_v2
 {
     static constexpr unsigned int         block_size         = BlockSize;
@@ -60,6 +62,7 @@ struct reduce_by_key_config_v2
     static constexpr block_load_method    load_keys_method   = LoadKeysMethod;
     static constexpr block_load_method    load_values_method = LoadValuesMethod;
     static constexpr block_scan_algorithm scan_algorithm     = ScanAlgorithm;
+    static constexpr unsigned int         size_limit         = SizeLimit;
 };
 
 /// \brief Legacy configuration of device-level reduce-by-key operation.

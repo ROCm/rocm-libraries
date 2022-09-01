@@ -47,18 +47,10 @@ void TestSortKeyValue()
     static constexpr const size_t       size            = items_per_block * grid_size;
     hipStream_t                         stream          = 0; // default
 
-    // Merge sort doesn't support block_sizes that are not a power of two
-    if(!rocprim::detail::is_power_of_two(block_size)
-       && algo == rocprim::block_sort_algorithm::merge_sort)
+    if(!is_buildable(block_size, items_per_thread, algo))
     {
         GTEST_SKIP();
     }
-    // Only power of two items_per_threads are supported or items_per_thread==1
-    // items_per_thread is only supported if blocksize is a power of two
-    if((!rocprim::detail::is_power_of_two(items_per_thread)
-        || !rocprim::detail::is_power_of_two(block_size))
-       && items_per_thread != 1u)
-        GTEST_SKIP();
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -182,18 +174,10 @@ void TestSortKey(std::vector<size_t> sizes)
     static constexpr const unsigned int items_per_block = block_size * items_per_thread;
     hipStream_t                         stream          = 0; // default
 
-    // Merge sort doesn't support block_sizes that are not a power of two
-    if(!rocprim::detail::is_power_of_two(block_size)
-       && algo == rocprim::block_sort_algorithm::merge_sort)
+    if(!is_buildable(block_size, items_per_thread, algo))
     {
         GTEST_SKIP();
     }
-    // Only power of two items_per_threads are supported or items_per_thread==1
-    // items_per_thread is only supported if blocksize is a power of two
-    if((!rocprim::detail::is_power_of_two(items_per_thread)
-        || !rocprim::detail::is_power_of_two(block_size))
-       && items_per_thread != 1u)
-        GTEST_SKIP();
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -216,10 +200,10 @@ void TestSortKey(std::vector<size_t> sizes)
             // Calculate expected results on host
             std::vector<key_type> expected(output);
             binary_op_type        binary_op;
-            for(size_t i = 0; i < output.size() / items_per_block; i++)
+            for(size_t i = 0; i < rocprim::detail::ceiling_div(output.size(), items_per_block); i++)
             {
                 std::sort(expected.begin() + (i * items_per_block),
-                          expected.begin() + ((i + 1) * items_per_block),
+                          expected.begin() + std::min(size, ((i + 1) * items_per_block)),
                           binary_op);
             }
 
@@ -241,7 +225,8 @@ void TestSortKey(std::vector<size_t> sizes)
                 dim3(block_size),
                 0,
                 stream,
-                device_key_output);
+                device_key_output,
+                size);
 
             // Reading results back
             HIP_CHECK(hipMemcpy(output.data(),
@@ -305,6 +290,23 @@ typed_test_def(suite_name, name_suffix, SortKeyValueMultipleItemsPerThread)
     static constexpr const unsigned int                  block_size       = TestFixture::block_size;
     static constexpr const unsigned int                  items_per_thread = 4;
     TestSortKeyValue<block_size, items_per_thread, key_type, value_type, algo, binary_op_type>();
+}
+
+typed_test_def(suite_name, name_suffix, SortKeyInputSizeNotMultipleOfBlockSize)
+{
+    using key_type       = typename TestFixture::key_type;
+    using value_type     = typename TestFixture::value_type;
+    using binary_op_type = typename test_utils::select_less_operator<key_type>::type;
+    static constexpr const rocprim::block_sort_algorithm algo       = TEST_BLOCK_SORT_ALGORITHM;
+    static constexpr const unsigned int                  block_size = TestFixture::block_size;
+    static constexpr const unsigned int                  items_per_thread = 1;
+    if(algo != rocprim::block_sort_algorithm::bitonic_sort || items_per_thread != 1u)
+    {
+        GTEST_SKIP();
+    }
+    std::vector<size_t> sizes
+        = {0, 53, 512, 5000, 34567, (1 << 17) - 1220, 1134 * 256, (1 << 20) - 123};
+    TestSortKey<block_size, items_per_thread, key_type, value_type, algo, binary_op_type>(sizes);
 }
 
 typed_test_def(suite_name, name_suffix, SortKeyValueDesc)

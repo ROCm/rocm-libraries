@@ -335,6 +335,8 @@ public:
     /// \tparam BinaryFunction - type of binary function used for sort. Default type
     /// is rocprim::less<T>.
     ///
+    /// \remark Not implemented for \p block_sort_algorithm::merge_sort
+    ///
     /// \param [in, out] thread_key - reference to a key provided by a thread.
     /// \param [in] storage - reference to a temporary storage object of type storage_type.
     /// \param [in] size - custom size of block to be sorted.
@@ -351,32 +353,6 @@ public:
               BinaryFunction compare_function = BinaryFunction())
     {
         base_type::sort(thread_key, storage, size, compare_function);
-    }
-
-    /// \brief Block sort by key for any data type. If \p size is
-    /// greater than \p BlockSize, this function does nothing.
-    ///
-    /// \tparam BinaryFunction - type of binary function used for sort. Default type
-    /// is rocprim::less<T>.
-    ///
-    /// \param [in, out] thread_key - reference to a key provided by a thread.
-    /// \param [in, out] thread_value - reference to a value provided by a thread.
-    /// \param [in] storage - reference to a temporary storage object of type storage_type.
-    /// \param [in] size - custom size of block to be sorted.
-    /// \param [in] compare_function - comparison function object which returns true if the
-    /// first argument is is ordered before the second.
-    /// The signature of the function should be equivalent to the following:
-    /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
-    /// <tt>const &</tt>, but function object must not modify the objects passed to it.
-    template<class BinaryFunction = ::rocprim::less<Key>>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    void sort(Key& thread_key,
-              Value& thread_value,
-              storage_type& storage,
-              const unsigned int size,
-              BinaryFunction compare_function = BinaryFunction())
-    {
-        base_type::sort(thread_key, thread_value, storage, size, compare_function);
     }
 };
 

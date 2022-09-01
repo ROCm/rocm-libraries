@@ -49,10 +49,20 @@
         },
         {
             "based_on": {
+                "datatype": "short"
+            },
+            "sizeof": {
+                "max_inclusive": 2,
+                "min_exclusive": 1
+            },
+            "floating_point": false
+        },
+        {
+            "based_on": {
                 "datatype": "int8_t"
             },
             "sizeof": {
-                "max_inclusive": 2
+                "max_inclusive": 1
             },
             "floating_point": false
         }

@@ -48,17 +48,19 @@ struct device_scan_benchmark : public config_autotune_interface
 {
     static std::string get_name_pattern()
     {
-        return R"---((?P<algo>\S*)\<)---"
-               R"---((?P<datatype>\S*),\s*(?:(?P<max_segment_len>\S*),\s*)?scan_config\<)---"
-               R"---(\s*(?P<block_size>[0-9]+),\s*(?P<items_per_thread>[0-9]+),\s*(?P<block_scan_algo>\S*)\>\>)---";
+        return R"regex((?P<algo>\S*?)<)regex"
+               R"regex((?P<value_type>\S*),\s*(?:(?P<key_type>\S*),\s*)?(?P<exclusive_type>(exclusive)|(inclusive)),\s*(?:(?P<max_segment_len>[0-9]+),\s*)?scan_config<)regex"
+               R"regex(\s*(?P<block_size>[0-9]+),\s*(?P<items_per_thread>[0-9]+),\s*(?P<block_scan_algo>\S*)>>)regex";
     }
 
     static const char* get_block_scan_method_name(rocprim::block_scan_algorithm alg)
     {
         switch(alg)
         {
-            case rocprim::block_scan_algorithm::using_warp_scan: return "using_warp_scan";
-            case rocprim::block_scan_algorithm::reduce_then_scan: return "reduce_then_scan";
+            case rocprim::block_scan_algorithm::using_warp_scan:
+                return "block_scan_algorithm::using_warp_scan";
+            case rocprim::block_scan_algorithm::reduce_then_scan:
+                return "block_scan_algorithm::reduce_then_scan";
                 // Not using `default: ...` because it kills effectiveness of -Wswitch
         }
         return "unknown_algorithm";
@@ -68,8 +70,9 @@ struct device_scan_benchmark : public config_autotune_interface
     {
         using namespace std::string_literals;
         return std::string(
-            "device_scan_" + (ByKey ? "by_key_"s : ""s) + (Exclusive ? "exclusive"s : "inclusive"s)
-            + "<" + std::string(Traits<T>::name()) + ", "
+            "device_scan" + (ByKey ? "_by_key"s : ""s) + "<" + std::string(Traits<T>::name()) + ", "
+            + (ByKey ? (std::string(Traits<T>::name()) + ", ") : ""s)
+            + (Exclusive ? "exclusive"s : "inclusive"s) + ", "
             + (ByKey ? (pad_string(std::to_string(MaxSegmentLength), 5) + ", ") : ""s)
             + "scan_config<" + pad_string(std::to_string(Config::block_size), 3) + ", "
             + pad_string(std::to_string(Config::items_per_thread), 2) + ", "

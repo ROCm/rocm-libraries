@@ -45,16 +45,37 @@ template<
     unsigned int ItemsPerThread,
     class key_type,
     rocprim::block_sort_algorithm algorithm,
-    class BinaryOp        = rocprim::less<key_type>,
+    class BinaryOp = rocprim::less<key_type>,
+    class OffsetT,
     std::enable_if_t<(ItemsPerThread == 1u && is_buildable(BlockSize, ItemsPerThread, algorithm)),
                      int> = 0>
-__global__ __launch_bounds__(BlockSize) void sort_keys_kernel(key_type* device_key_output)
+__global__ __launch_bounds__(BlockSize) void sort_keys_kernel(key_type* device_key_output,
+                                                              OffsetT   size)
 {
-    const unsigned int index = (blockIdx.x * BlockSize) + threadIdx.x;
-    key_type           key   = device_key_output[index];
-    rocprim::block_sort<key_type, BlockSize, ItemsPerThread, rocprim::empty_type, algorithm> bsort;
-    bsort.sort(key, BinaryOp());
-    device_key_output[index] = key;
+    static constexpr const unsigned int ItemsPerBlock = ItemsPerThread * BlockSize;
+    const unsigned int                  block_offset  = blockIdx.x * ItemsPerBlock;
+    const unsigned int                  index         = block_offset + threadIdx.x;
+    if(size % ItemsPerBlock == 0)
+    {
+        key_type key = device_key_output[index];
+        rocprim::block_sort<key_type, BlockSize, ItemsPerThread, rocprim::empty_type, algorithm>
+            bsort;
+        bsort.sort(key, BinaryOp());
+        device_key_output[index] = key;
+    }
+    else
+    {
+        key_type key  = device_key_output[index];
+        using st_type = typename rocprim::
+            block_sort<key_type, BlockSize, ItemsPerThread, rocprim::empty_type>::storage_type;
+        ROCPRIM_SHARED_MEMORY st_type                                                 storage;
+        rocprim::block_sort<key_type, BlockSize, ItemsPerThread, rocprim::empty_type> bsort;
+        bsort.sort(key,
+                   storage,
+                   std::min(static_cast<size_t>(ItemsPerBlock), size - block_offset),
+                   BinaryOp());
+        device_key_output[index] = key;
+    }
 }
 
 template<
@@ -62,13 +83,16 @@ template<
     unsigned int ItemsPerThread,
     class key_type,
     rocprim::block_sort_algorithm algorithm,
-    class BinaryOp        = rocprim::less<key_type>,
+    class BinaryOp = rocprim::less<key_type>,
+    class OffsetT,
     std::enable_if_t<(ItemsPerThread > 1u && is_buildable(BlockSize, ItemsPerThread, algorithm)),
                      int> = 0>
-__global__ __launch_bounds__(BlockSize) void sort_keys_kernel(key_type* device_key_output)
+__global__ __launch_bounds__(BlockSize) void sort_keys_kernel(key_type* device_key_output,
+                                                              OffsetT /*size*/)
 {
-    const unsigned int lid          = threadIdx.x;
-    const unsigned int block_offset = blockIdx.x * ItemsPerThread * BlockSize;
+    static constexpr const unsigned int ItemsPerBlock = ItemsPerThread * BlockSize;
+    const unsigned int                  lid           = threadIdx.x;
+    const unsigned int                  block_offset  = blockIdx.x * ItemsPerBlock;
 
     key_type keys[ItemsPerThread];
     rocprim::block_load_direct_striped<BlockSize>(lid, device_key_output + block_offset, keys);
@@ -84,8 +108,10 @@ template<unsigned int BlockSize,
          class key_type,
          rocprim::block_sort_algorithm algorithm,
          class BinaryOp = rocprim::less<key_type>,
+         class OffsetT,
          std::enable_if_t<!is_buildable(BlockSize, ItemsPerThread, algorithm), int> = 0>
-__global__ __launch_bounds__(BlockSize) void sort_keys_kernel(key_type* /*device_key_output*/)
+__global__ __launch_bounds__(BlockSize) void sort_keys_kernel(key_type* /*device_key_output*/,
+                                                              OffsetT /*size*/)
 {}
 
 template<

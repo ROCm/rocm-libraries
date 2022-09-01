@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -206,12 +206,29 @@ void syncthreads()
     __syncthreads();
 }
 
-/// \brief All lanes in a wave come to convergence point simultaneously
-/// with SIMT, thus no special instruction is needed in the ISA
+/// \brief Synchronize all threads in the wavefront.
+///
+/// Wait for all threads in the wavefront before continuing execution.
+/// Memory ordering is guaranteed by this function between threads in the same wavefront.
+/// Threads can communicate by storing to global / shared memory, executing wave_barrier()
+/// then reading values stored by other  threads in the same wavefront.
+///
+/// wave_barrier() should be executed by all threads in the wavefront in convergence, this means
+/// that if the function is executed in a conditional statement all threads in the wave must enter
+/// the conditional statement.
+///
+/// \note On SIMT architectures all lanes come to a convergence point simultaneously, thus no
+/// special instruction is needed in the ISA.
 ROCPRIM_DEVICE ROCPRIM_INLINE
 void wave_barrier()
 {
+    __atomic_work_item_fence(__CLK_LOCAL_MEM_FENCE,
+                             __memory_order_release,
+                             __memory_scope_sub_group);
     __builtin_amdgcn_wave_barrier();
+    __atomic_work_item_fence(__CLK_LOCAL_MEM_FENCE,
+                             __memory_order_acquire,
+                             __memory_scope_sub_group);
 }
 
 namespace detail

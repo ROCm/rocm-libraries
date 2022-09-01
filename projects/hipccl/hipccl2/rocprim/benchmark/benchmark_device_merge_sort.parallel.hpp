@@ -48,18 +48,16 @@ struct device_merge_sort_benchmark : public config_autotune_interface
 {
     static std::string get_name_pattern()
     {
-        return R"---((?P<algo>\S*)\<)---"
-               R"---((?P<key_type>\S*),(?:\s*(?P<value_type>\S*),)?\s*merge_sort_config\<\s*)---"
-               R"---((?P<sort_block_size>[0-9]+),\s*(?P<sort_items_per_thread>[0-9]+),\s*(?P<merge_block_size>[0-9]+)\>\>)---";
+        return R"regex((?P<algo>\S*?)<)regex"
+               R"regex((?P<key_type>\S*),(?:\s*(?P<value_type>\S*),)?\s*merge_sort_config<\s*)regex"
+               R"regex((?P<sort_block_size>[0-9]+),\s*(?P<sort_items_per_thread>[0-9]+),\s*(?P<merge_block_size>[0-9]+)>>)regex";
     }
 
     std::string name() const override
     {
         using namespace std::string_literals;
         return std::string(
-            "device_merge_sort_"
-            + (std::is_same<Value, rocprim::empty_type>::value ? "keys"s : "pairs"s) + "<"
-            + std::string(Traits<Key>::name()) + ", "
+            "device_merge_sort<" + std::string(Traits<Key>::name()) + ", "
             + (std::is_same<Value, rocprim::empty_type>::value
                    ? ""s
                    : std::string(Traits<Value>::name()) + ", ")

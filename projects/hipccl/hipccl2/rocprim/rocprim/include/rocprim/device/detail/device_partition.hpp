@@ -50,32 +50,30 @@ enum class select_method
     unique = 2
 };
 
-template<
-    select_method SelectMethod,
-    unsigned int BlockSize,
-    class BlockLoadFlagsType,
-    class BlockDiscontinuityType,
-    class InputIterator,
-    class FlagIterator,
-    class ValueType,
-    unsigned int ItemsPerThread,
-    class UnaryPredicate,
-    class InequalityOp,
-    class StorageType
->
-ROCPRIM_DEVICE ROCPRIM_INLINE
-auto partition_block_load_flags(InputIterator /* block_predecessor */,
-                                FlagIterator block_flags,
-                                ValueType (&/* values */)[ItemsPerThread],
-                                bool (&is_selected)[ItemsPerThread],
-                                UnaryPredicate /* predicate */,
-                                InequalityOp /* inequality_op */,
-                                StorageType& storage,
-                                const unsigned int /* block_id */,
-                                const unsigned int /* block_thread_id */,
-                                const bool is_last_block,
-                                const unsigned int valid_in_last_block)
-    -> typename std::enable_if<SelectMethod == select_method::flag>::type
+template<select_method SelectMethod,
+         unsigned int  BlockSize,
+         class BlockLoadFlagsType,
+         class BlockDiscontinuityType,
+         class InputIterator,
+         class FlagIterator,
+         class ValueType,
+         unsigned int ItemsPerThread,
+         class UnaryPredicate,
+         class InequalityOp,
+         class StorageType>
+ROCPRIM_DEVICE ROCPRIM_INLINE auto
+    partition_block_load_flags(InputIterator /* block_predecessor */,
+                               FlagIterator block_flags,
+                               ValueType (&/* values */)[ItemsPerThread],
+                               bool (&is_selected)[ItemsPerThread],
+                               UnaryPredicate /* predicate */,
+                               InequalityOp /* inequality_op */,
+                               StorageType& storage,
+                               const bool /* is_first_block */,
+                               const unsigned int /* block_thread_id */,
+                               const bool         is_last_block,
+                               const unsigned int valid_in_last_block) ->
+    typename std::enable_if<SelectMethod == select_method::flag>::type
 {
     if(is_last_block) // last block
     {
@@ -100,32 +98,30 @@ auto partition_block_load_flags(InputIterator /* block_predecessor */,
     ::rocprim::syncthreads(); // sync threads to reuse shared memory
 }
 
-template<
-    select_method SelectMethod,
-    unsigned int BlockSize,
-    class BlockLoadFlagsType,
-    class BlockDiscontinuityType,
-    class InputIterator,
-    class FlagIterator,
-    class ValueType,
-    unsigned int ItemsPerThread,
-    class UnaryPredicate,
-    class InequalityOp,
-    class StorageType
->
-ROCPRIM_DEVICE ROCPRIM_INLINE
-auto partition_block_load_flags(InputIterator /* block_predecessor */,
-                                FlagIterator /* block_flags */,
-                                ValueType (&values)[ItemsPerThread],
-                                bool (&is_selected)[ItemsPerThread],
-                                UnaryPredicate predicate,
-                                InequalityOp /* inequality_op */,
-                                StorageType& /* storage */,
-                                const unsigned int /* block_id */,
-                                const unsigned int block_thread_id,
-                                const bool is_last_block,
-                                const unsigned int valid_in_last_block)
-    -> typename std::enable_if<SelectMethod == select_method::predicate>::type
+template<select_method SelectMethod,
+         unsigned int  BlockSize,
+         class BlockLoadFlagsType,
+         class BlockDiscontinuityType,
+         class InputIterator,
+         class FlagIterator,
+         class ValueType,
+         unsigned int ItemsPerThread,
+         class UnaryPredicate,
+         class InequalityOp,
+         class StorageType>
+ROCPRIM_DEVICE ROCPRIM_INLINE auto
+    partition_block_load_flags(InputIterator /* block_predecessor */,
+                               FlagIterator /* block_flags */,
+                               ValueType (&values)[ItemsPerThread],
+                               bool (&is_selected)[ItemsPerThread],
+                               UnaryPredicate predicate,
+                               InequalityOp /* inequality_op */,
+                               StorageType& /* storage */,
+                               const bool /* is_first_block */,
+                               const unsigned int block_thread_id,
+                               const bool         is_last_block,
+                               const unsigned int valid_in_last_block) ->
+    typename std::enable_if<SelectMethod == select_method::predicate>::type
 {
     if(is_last_block) // last block
     {
@@ -174,86 +170,68 @@ struct guarded_inequality_op
     }
 };
 
-template<
-    select_method SelectMethod,
-    unsigned int BlockSize,
-    class BlockLoadFlagsType,
-    class BlockDiscontinuityType,
-    class InputIterator,
-    class FlagIterator,
-    class ValueType,
-    unsigned int ItemsPerThread,
-    class UnaryPredicate,
-    class InequalityOp,
-    class StorageType
->
-ROCPRIM_DEVICE ROCPRIM_INLINE
-auto partition_block_load_flags(InputIterator block_predecessor,
-                                FlagIterator /* block_flags */,
-                                ValueType (&values)[ItemsPerThread],
-                                bool (&is_selected)[ItemsPerThread],
-                                UnaryPredicate /* predicate */,
-                                InequalityOp inequality_op,
-                                StorageType& storage,
-                                const unsigned int block_id,
-                                const unsigned int block_thread_id,
-                                const bool is_last_block,
-                                const unsigned int valid_in_last_block)
-    -> typename std::enable_if<SelectMethod == select_method::unique>::type
+template<select_method SelectMethod,
+         unsigned int  BlockSize,
+         class BlockLoadFlagsType,
+         class BlockDiscontinuityType,
+         class InputIterator,
+         class FlagIterator,
+         class ValueType,
+         unsigned int ItemsPerThread,
+         class UnaryPredicate,
+         class InequalityOp,
+         class StorageType>
+ROCPRIM_DEVICE ROCPRIM_INLINE auto
+    partition_block_load_flags(InputIterator block_predecessor,
+                               FlagIterator /* block_flags */,
+                               ValueType (&values)[ItemsPerThread],
+                               bool (&is_selected)[ItemsPerThread],
+                               UnaryPredicate /* predicate */,
+                               InequalityOp       inequality_op,
+                               StorageType&       storage,
+                               const bool         is_first_block,
+                               const unsigned int block_thread_id,
+                               const bool         is_last_block,
+                               const unsigned int valid_in_last_block) ->
+    typename std::enable_if<SelectMethod == select_method::unique>::type
 {
-    if(block_id > 0)
+    if(is_first_block)
     {
-        const ValueType predecessor = *block_predecessor;
         if(is_last_block)
         {
-            BlockDiscontinuityType()
-                .flag_heads(
-                    is_selected,
-                    predecessor,
-                    values,
-                    guarded_inequality_op<InequalityOp>(
-                        inequality_op,
-                        valid_in_last_block
-                    ),
-                    storage.discontinuity_values
-                );
+            BlockDiscontinuityType().flag_heads(
+                is_selected,
+                values,
+                guarded_inequality_op<InequalityOp>(inequality_op, valid_in_last_block),
+                storage.discontinuity_values);
         }
         else
         {
-            BlockDiscontinuityType()
-                .flag_heads(
-                    is_selected,
-                    predecessor,
-                    values,
-                    inequality_op,
-                    storage.discontinuity_values
-                );
+            BlockDiscontinuityType().flag_heads(is_selected,
+                                                values,
+                                                inequality_op,
+                                                storage.discontinuity_values);
         }
     }
     else
     {
+        const ValueType predecessor = block_predecessor[0];
         if(is_last_block)
         {
-            BlockDiscontinuityType()
-            .flag_heads(
+            BlockDiscontinuityType().flag_heads(
                 is_selected,
+                predecessor,
                 values,
-                guarded_inequality_op<InequalityOp>(
-                    inequality_op,
-                    valid_in_last_block
-                ),
-                storage.discontinuity_values
-            );
+                guarded_inequality_op<InequalityOp>(inequality_op, valid_in_last_block),
+                storage.discontinuity_values);
         }
         else
         {
-            BlockDiscontinuityType()
-            .flag_heads(
-                is_selected,
-                values,
-                inequality_op,
-                storage.discontinuity_values
-            );
+            BlockDiscontinuityType().flag_heads(is_selected,
+                                                predecessor,
+                                                values,
+                                                inequality_op,
+                                                storage.discontinuity_values);
         }
     }
 
@@ -331,30 +309,28 @@ void partition_block_load_flags(InputIterator /*block_predecessor*/,
     }
 }
 
-template<
-    bool OnlySelected,
-    unsigned int BlockSize,
-    class ValueType,
-    unsigned int ItemsPerThread,
-    class OffsetType,
-    class OutputIterator,
-    class ScatterStorageType
->
-ROCPRIM_DEVICE ROCPRIM_INLINE
-auto partition_scatter(ValueType (&values)[ItemsPerThread],
-                       bool (&is_selected)[ItemsPerThread],
-                       OffsetType (&output_indices)[ItemsPerThread],
-                       OutputIterator output,
-                       const size_t size,
-                       const OffsetType selected_prefix,
-                       const OffsetType selected_in_block,
-                       ScatterStorageType& storage,
-                       const unsigned int flat_block_id,
-                       const unsigned int flat_block_thread_id,
-                       const bool is_last_block,
-                       const unsigned int valid_in_last_block,
-                       size_t* /* prev_selected_count */)
-    -> typename std::enable_if<!OnlySelected>::type
+template<bool         OnlySelected,
+         unsigned int BlockSize,
+         class ValueType,
+         unsigned int ItemsPerThread,
+         class OffsetType,
+         class OutputIterator,
+         class ScatterStorageType>
+ROCPRIM_DEVICE ROCPRIM_INLINE auto partition_scatter(ValueType (&values)[ItemsPerThread],
+                                                     bool (&is_selected)[ItemsPerThread],
+                                                     OffsetType (&output_indices)[ItemsPerThread],
+                                                     OutputIterator      output,
+                                                     const size_t        total_size,
+                                                     const OffsetType    selected_prefix,
+                                                     const OffsetType    selected_in_block,
+                                                     ScatterStorageType& storage,
+                                                     const unsigned int  flat_block_id,
+                                                     const unsigned int  flat_block_thread_id,
+                                                     const bool          is_last_block,
+                                                     const unsigned int  valid_in_last_block,
+                                                     size_t (&prev_selected_count_values)[1],
+                                                     size_t prev_processed) ->
+    typename std::enable_if<!OnlySelected>::type
 {
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
 
@@ -372,58 +348,66 @@ auto partition_scatter(ValueType (&values)[ItemsPerThread],
     }
     ::rocprim::syncthreads(); // sync threads to reuse shared memory
 
-    ROCPRIM_UNROLL
+    ValueType reloaded_values[ItemsPerThread];
     for(unsigned int i = 0; i < ItemsPerThread; i++)
     {
-        unsigned int item_index = (i * BlockSize) + flat_block_thread_id;
-        unsigned int selected_item_index = item_index;
-        unsigned int rejected_item_index = item_index - selected_in_block;
-        // number of values rejected in previous blocks
-        unsigned int rejected_prefix = (flat_block_id * items_per_block) - selected_prefix;
-        // destination index of item scatter_storage[item_index] in output
-        OffsetType scatter_index = item_index < selected_in_block
-            ? selected_prefix + selected_item_index
-            : size - (rejected_prefix + rejected_item_index + 1);
+        const unsigned int item_index = i * BlockSize + flat_block_thread_id;
+        reloaded_values[i]            = scatter_storage[item_index];
+    }
 
-        // last block can store only valid_in_last_block items
-        if(!is_last_block || item_index < valid_in_last_block)
+    const auto calculate_scatter_index = [=](const unsigned int item_index) -> size_t
+    {
+        const size_t selected_output_index
+            = prev_selected_count_values[0] + selected_prefix + item_index;
+        const size_t rejected_output_index = total_size + selected_output_index - prev_processed
+                                             - flat_block_id * items_per_block - 2 * item_index
+                                             + selected_in_block - 1;
+        return item_index < selected_in_block ? selected_output_index : rejected_output_index;
+    };
+    if(is_last_block)
+    {
+        for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            output[scatter_index] = scatter_storage[item_index];
+            const unsigned int item_index = i * BlockSize + flat_block_thread_id;
+            if(item_index < valid_in_last_block)
+            {
+                output[calculate_scatter_index(item_index)] = reloaded_values[i];
+            }
+        }
+    }
+    else
+    {
+        for(unsigned int i = 0; i < ItemsPerThread; i++)
+        {
+            const unsigned int item_index               = i * BlockSize + flat_block_thread_id;
+            output[calculate_scatter_index(item_index)] = reloaded_values[i];
         }
     }
 }
 
-template<
-    bool OnlySelected,
-    unsigned int BlockSize,
-    class ValueType,
-    unsigned int ItemsPerThread,
-    class OffsetType,
-    class OutputIterator,
-    class ScatterStorageType
->
-ROCPRIM_DEVICE ROCPRIM_INLINE
-auto partition_scatter(ValueType (&values)[ItemsPerThread],
-                       bool (&is_selected)[ItemsPerThread],
-                       OffsetType (&output_indices)[ItemsPerThread],
-                       OutputIterator output,
-                       const size_t size,
-                       const OffsetType selected_prefix,
-                       const OffsetType selected_in_block,
-                       ScatterStorageType& storage,
-                       const unsigned int flat_block_id,
-                       const unsigned int flat_block_thread_id,
-                       const bool is_last_block,
-                       const unsigned int valid_in_last_block,
-                       size_t* prev_selected_count)
-    -> typename std::enable_if<OnlySelected>::type
+template<bool         OnlySelected,
+         unsigned int BlockSize,
+         class ValueType,
+         unsigned int ItemsPerThread,
+         class OffsetType,
+         class OutputIterator,
+         class ScatterStorageType>
+ROCPRIM_DEVICE ROCPRIM_INLINE auto partition_scatter(ValueType (&values)[ItemsPerThread],
+                                                     bool (&is_selected)[ItemsPerThread],
+                                                     OffsetType (&output_indices)[ItemsPerThread],
+                                                     OutputIterator output,
+                                                     const size_t /*total_size*/,
+                                                     const OffsetType    selected_prefix,
+                                                     const OffsetType    selected_in_block,
+                                                     ScatterStorageType& storage,
+                                                     const unsigned int /*flat_block_id*/,
+                                                     const unsigned int flat_block_thread_id,
+                                                     const bool         is_last_block,
+                                                     const unsigned int /*valid_in_last_block*/,
+                                                     size_t (&prev_selected_count_values)[1],
+                                                     size_t /*prev_processed*/) ->
+    typename std::enable_if<OnlySelected>::type
 {
-    (void) size;
-    (void) storage;
-    (void) flat_block_id;
-    (void) flat_block_thread_id;
-    (void) valid_in_last_block;
-
     if(selected_in_block > BlockSize)
     {
         // Scatter selected values to shared memory
@@ -442,7 +426,7 @@ auto partition_scatter(ValueType (&values)[ItemsPerThread],
         // Coalesced write from shared memory to global memory
         for(unsigned int i = flat_block_thread_id; i < selected_in_block; i += BlockSize)
         {
-            output[prev_selected_count[0] + selected_prefix + i] = scatter_storage[i];
+            output[prev_selected_count_values[0] + selected_prefix + i] = scatter_storage[i];
         }
     }
     else
@@ -454,39 +438,43 @@ auto partition_scatter(ValueType (&values)[ItemsPerThread],
             {
                 if(is_selected[i])
                 {
-                    output[prev_selected_count[0] + output_indices[i]] = values[i];
+                    output[prev_selected_count_values[0] + output_indices[i]] = values[i];
                 }
             }
         }
     }
 }
 
-template<
-    bool OnlySelected,
-    unsigned int BlockSize,
-    class ValueType,
-    unsigned int ItemsPerThread,
-    class OffsetType,
-    class OutputType,
-    class ScatterStorageType
->
-ROCPRIM_DEVICE ROCPRIM_INLINE
-void partition_scatter(ValueType (&values)[ItemsPerThread],
-                       bool (&is_selected)[2][ItemsPerThread],
-                       OffsetType (&output_indices)[ItemsPerThread],
-                       OutputType output,
-                       const size_t /*size*/,
-                       const OffsetType selected_prefix,
-                       const OffsetType selected_in_block,
-                       ScatterStorageType& storage,
-                       const unsigned int flat_block_id,
-                       const unsigned int flat_block_thread_id,
-                       const bool is_last_block,
-                       const unsigned int valid_in_last_block,
-                       size_t* /* prev_selected_count */)
+template<bool         OnlySelected,
+         unsigned int BlockSize,
+         class ValueType,
+         unsigned int ItemsPerThread,
+         class OffsetType,
+         class OutputType,
+         class ScatterStorageType>
+ROCPRIM_DEVICE ROCPRIM_INLINE void partition_scatter(ValueType (&values)[ItemsPerThread],
+                                                     bool (&is_selected)[2][ItemsPerThread],
+                                                     OffsetType (&output_indices)[ItemsPerThread],
+                                                     OutputType output,
+                                                     const size_t /*total_size*/,
+                                                     const OffsetType    selected_prefix,
+                                                     const OffsetType    selected_in_block,
+                                                     ScatterStorageType& storage,
+                                                     const unsigned int  flat_block_id,
+                                                     const unsigned int  flat_block_thread_id,
+                                                     const bool          is_last_block,
+                                                     const unsigned int  valid_in_last_block,
+                                                     size_t (&prev_selected_count_values)[2],
+                                                     size_t prev_processed)
 {
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
-    auto scatter_storage = storage.get();
+    auto                   scatter_storage = storage.get();
+    const size_t first_selected_prefix     = prev_selected_count_values[0] + selected_prefix.x;
+    const size_t second_selected_prefix
+        = prev_selected_count_values[1] - selected_in_block.x + selected_prefix.y;
+    const size_t unselected_prefix = prev_processed - first_selected_prefix - second_selected_prefix
+                                     + items_per_block * flat_block_id - 2 * selected_in_block.x
+                                     - selected_in_block.y;
 
     ROCPRIM_UNROLL
     for(unsigned int i = 0; i < ItemsPerThread; i++)
@@ -515,30 +503,42 @@ void partition_scatter(ValueType (&values)[ItemsPerThread],
     }
     ::rocprim::syncthreads();
 
-    ROCPRIM_UNROLL
-    for(unsigned int i = 0; i < ItemsPerThread; i++)
+    auto save_to_output = [=](const unsigned int item_index) mutable
     {
-        const unsigned int item_index = (i * BlockSize) + flat_block_thread_id;
-        if (!is_last_block || item_index < valid_in_last_block)
+        if(item_index < selected_in_block.x)
         {
-            if(item_index < selected_in_block.x)
+            const size_t first_selected_index    = first_selected_prefix + item_index;
+            get<0>(output)[first_selected_index] = scatter_storage[item_index];
+        }
+        else if(item_index < selected_in_block.x + selected_in_block.y)
+        {
+            const size_t second_selected_index    = second_selected_prefix + item_index;
+            get<1>(output)[second_selected_index] = scatter_storage[item_index];
+        }
+        else
+        {
+            const size_t unselected_index    = unselected_prefix + item_index;
+            get<2>(output)[unselected_index] = scatter_storage[item_index];
+        }
+    };
+
+    if(is_last_block)
+    {
+        for(unsigned int i = 0; i < ItemsPerThread; i++)
+        {
+            const unsigned int item_index = (i * BlockSize) + flat_block_thread_id;
+            if(item_index < valid_in_last_block)
             {
-                get<0>(output)[item_index + selected_prefix.x] = scatter_storage[item_index];
+                save_to_output(item_index);
             }
-            else if(item_index < selected_in_block.x + selected_in_block.y)
-            {
-                get<1>(output)[item_index - selected_in_block.x + selected_prefix.y]
-                    = scatter_storage[item_index];
-            }
-            else
-            {
-                const unsigned int all_items_in_previous_blocks = items_per_block * flat_block_id;
-                const unsigned int unselected_items_in_previous_blocks = all_items_in_previous_blocks
-                    - selected_prefix.x - selected_prefix.y;
-                const unsigned int output_index = item_index + unselected_items_in_previous_blocks
-                    - selected_in_block.x - selected_in_block.y;
-                get<2>(output)[output_index] = scatter_storage[item_index];
-            }
+        }
+    }
+    else
+    {
+        for(unsigned int i = 0; i < ItemsPerThread; i++)
+        {
+            const unsigned int item_index = (i * BlockSize) + flat_block_thread_id;
+            save_to_output(item_index);
         }
     }
 }
@@ -573,57 +573,60 @@ void convert_selected_to_indices(uint2 (&output_indices)[items_per_thread],
     }
 }
 
-template<
-    class OffsetT
->
-ROCPRIM_DEVICE ROCPRIM_INLINE
-void store_selected_count(size_t* selected_count,
-                          size_t* prev_selected_count,
-                          const OffsetT selected_prefix,
-                          const OffsetT selected_in_block)
+template<class OffsetT>
+ROCPRIM_DEVICE ROCPRIM_INLINE void store_selected_count(size_t* selected_count,
+                                                        size_t (&prev_selected_count_values)[1],
+                                                        const OffsetT selected_prefix,
+                                                        const OffsetT selected_in_block)
 {
-    selected_count[0] = prev_selected_count[0] + selected_prefix + selected_in_block;
+    selected_count[0] = prev_selected_count_values[0] + selected_prefix + selected_in_block;
 }
 
-template<
->
-ROCPRIM_DEVICE ROCPRIM_INLINE
-void store_selected_count(size_t* selected_count,
-                          size_t* prev_selected_count,
-                          const uint2 selected_prefix,
-                          const uint2 selected_in_block)
+ROCPRIM_DEVICE ROCPRIM_INLINE void store_selected_count(size_t* selected_count,
+                                                        size_t (&prev_selected_count_values)[2],
+                                                        const uint2 selected_prefix,
+                                                        const uint2 selected_in_block)
 {
-    selected_count[0] = prev_selected_count[0] + selected_prefix.x + selected_in_block.x;
-    selected_count[1] = prev_selected_count[1] + selected_prefix.y + selected_in_block.y;
+    selected_count[0] = prev_selected_count_values[0] + selected_prefix.x + selected_in_block.x;
+    selected_count[1] = prev_selected_count_values[1] + selected_prefix.y + selected_in_block.y;
 }
 
-template<
-    select_method SelectMethod,
-    bool OnlySelected,
-    class Config,
-    class KeyIterator,
-    class ValueIterator, // Can be rocprim::empty_type* if key only
-    class FlagIterator,
-    class OutputKeyIterator,
-    class OutputValueIterator,
-    class InequalityOp,
-    class OffsetLookbackScanState,
-    class... UnaryPredicates
->
-ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
-void partition_kernel_impl(KeyIterator keys_input,
-                           ValueIterator values_input,
-                           FlagIterator flags,
-                           OutputKeyIterator keys_output,
-                           OutputValueIterator values_output,
-                           size_t* selected_count,
-                           size_t* prev_selected_count,
-                           const size_t size,
-                           InequalityOp inequality_op,
-                           OffsetLookbackScanState offset_scan_state,
-                           const unsigned int number_of_blocks,
-                           ordered_block_id<unsigned int> ordered_bid,
-                           UnaryPredicates... predicates)
+template<unsigned int Size>
+ROCPRIM_DEVICE void load_selected_count(const size_t* const prev_selected_count,
+                                        size_t (&loaded_values)[Size])
+{
+    for(unsigned int i = 0; i < Size; ++i)
+    {
+        loaded_values[i] = prev_selected_count[i];
+    }
+}
+
+template<select_method SelectMethod,
+         bool          OnlySelected,
+         class Config,
+         class KeyIterator,
+         class ValueIterator, // Can be rocprim::empty_type* if key only
+         class FlagIterator,
+         class OutputKeyIterator,
+         class OutputValueIterator,
+         class InequalityOp,
+         class OffsetLookbackScanState,
+         class... UnaryPredicates>
+ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
+    partition_kernel_impl(KeyIterator                    keys_input,
+                          ValueIterator                  values_input,
+                          FlagIterator                   flags,
+                          OutputKeyIterator              keys_output,
+                          OutputValueIterator            values_output,
+                          size_t*                        selected_count,
+                          size_t*                        prev_selected_count,
+                          size_t                         prev_processed,
+                          const size_t                   total_size,
+                          InequalityOp                   inequality_op,
+                          OffsetLookbackScanState        offset_scan_state,
+                          const unsigned int             number_of_blocks,
+                          ordered_block_id<unsigned int> ordered_bid,
+                          UnaryPredicates... predicates)
 {
     constexpr auto block_size = Config::block_size;
     constexpr auto items_per_thread = Config::items_per_thread;
@@ -686,14 +689,24 @@ void partition_kernel_impl(KeyIterator keys_input,
         };
     } storage;
 
+    // For better performance this must stay before the `ordered_block_id.get` (and other writes).
+    // `ordered_block_id.get` includes an atomic write and syncthreads (a memory fence) that the
+    // compiler thinks could alias with the read of `prev_selected_count`.
+    // This makes the load a vector load instead of scalar because (quoting llvm's amdgpu backend)
+    // "Scalar memory operations are only used to access memory that is proven to not change during
+    // the execution of the kernel dispatch".
+    size_t prev_selected_count_values[sizeof...(UnaryPredicates)]{};
+    load_selected_count(prev_selected_count, prev_selected_count_values);
+
     const auto flat_block_thread_id = ::rocprim::detail::block_thread_id<0>();
     const auto flat_block_id = ordered_bid.get(flat_block_thread_id, storage.ordered_bid);
-    const unsigned int block_offset = flat_block_id * items_per_block;
-    const auto valid_in_last_block = size - items_per_block * (number_of_blocks - 1);
+    const auto block_offset         = flat_block_id * items_per_block;
+    const auto valid_in_last_block
+        = total_size - prev_processed - items_per_block * (number_of_blocks - 1);
 
-    key_type keys[items_per_thread];
+    key_type         keys[items_per_thread];
     is_selected_type is_selected;
-    offset_type output_indices[items_per_thread];
+    offset_type      output_indices[items_per_thread];
 
     // Load input values into values
     const bool is_last_block = flat_block_id == (number_of_blocks - 1);
@@ -721,22 +734,21 @@ void partition_kernel_impl(KeyIterator keys_input,
     // Load selection flags into is_selected, generate them using
     // input value and selection predicate, or generate them using
     // block_discontinuity primitive
-    partition_block_load_flags<
-        SelectMethod, block_size,
-        block_load_flag_type, block_discontinuity_key_type
-    >(
-        keys_input + block_offset - 1,
-        flags + block_offset,
-        keys,
-        is_selected,
-        predicates ...,
-        inequality_op,
-        storage,
-        flat_block_id,
-        flat_block_thread_id,
-        is_last_block,
-        valid_in_last_block
-    );
+    const bool is_first_block = flat_block_id == 0 && prev_processed == 0;
+    partition_block_load_flags<SelectMethod,
+                               block_size,
+                               block_load_flag_type,
+                               block_discontinuity_key_type>(keys_input + block_offset - 1,
+                                                             flags + block_offset,
+                                                             keys,
+                                                             is_selected,
+                                                             predicates...,
+                                                             inequality_op,
+                                                             storage,
+                                                             is_first_block,
+                                                             flat_block_thread_id,
+                                                             is_last_block,
+                                                             valid_in_last_block);
 
     // Convert true/false is_selected flags to 0s and 1s
     convert_selected_to_indices(output_indices, is_selected);
@@ -787,13 +799,20 @@ void partition_kernel_impl(KeyIterator keys_input,
     }
 
     // Scatter selected and rejected values
-    partition_scatter<OnlySelected, block_size>(
-        keys, is_selected, output_indices, keys_output, size,
-        selected_prefix, selected_in_block, storage.exchange_keys,
-        flat_block_id, flat_block_thread_id,
-        is_last_block, valid_in_last_block,
-        prev_selected_count
-    );
+    partition_scatter<OnlySelected, block_size>(keys,
+                                                is_selected,
+                                                output_indices,
+                                                keys_output,
+                                                total_size,
+                                                selected_prefix,
+                                                selected_in_block,
+                                                storage.exchange_keys,
+                                                flat_block_id,
+                                                flat_block_thread_id,
+                                                is_last_block,
+                                                valid_in_last_block,
+                                                prev_selected_count_values,
+                                                prev_processed);
 
     static constexpr bool with_values = !std::is_same<value_type, ::rocprim::empty_type>::value;
 
@@ -822,19 +841,29 @@ void partition_kernel_impl(KeyIterator keys_input,
         }
         ::rocprim::syncthreads(); // sync threads to reuse shared memory
 
-        partition_scatter<OnlySelected, block_size>(
-            values, is_selected, output_indices, values_output, size,
-            selected_prefix, selected_in_block, storage.exchange_values,
-            flat_block_id, flat_block_thread_id,
-            is_last_block, valid_in_last_block,
-            prev_selected_count
-        );
+        partition_scatter<OnlySelected, block_size>(values,
+                                                    is_selected,
+                                                    output_indices,
+                                                    values_output,
+                                                    total_size,
+                                                    selected_prefix,
+                                                    selected_in_block,
+                                                    storage.exchange_values,
+                                                    flat_block_id,
+                                                    flat_block_thread_id,
+                                                    is_last_block,
+                                                    valid_in_last_block,
+                                                    prev_selected_count_values,
+                                                    prev_processed);
     }
 
     // Last block in grid stores number of selected values
     if(is_last_block && flat_block_thread_id == 0)
     {
-        store_selected_count(selected_count, prev_selected_count, selected_prefix, selected_in_block);
+        store_selected_count(selected_count,
+                             prev_selected_count_values,
+                             selected_prefix,
+                             selected_in_block);
     }
 }
 

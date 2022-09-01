@@ -48,37 +48,35 @@ struct device_radix_sort_benchmark : public config_autotune_interface
 {
     static std::string get_name_pattern()
     {
-        return R"---((?P<algo>\S*)\<)---"
-               R"---((?P<key_type>\S*),(?:\s*(?P<value_type>\S*),)?\s*radix_sort_config\<)---"
-               R"---((?P<long_radix_bits>[0-9]+),\s*(?P<short_radix_bits>[0-9]+),\s*)---"
-               R"---(kernel_config\<(?P<block_size_0>[0-9]+),\s*(?P<items_per_thread_0>[0-9]+)\>\s*)---"
-               R"---((?:,\s*kernel_config\<(?P<block_size_1>[0-9]+),\s*(?P<items_per_thread_1>[0-9]+)\>)?\>\>)---";
+        return R"regex((?P<algo>\S*?)<)regex"
+               R"regex((?P<key_type>\S*),(?:\s*(?P<value_type>\S*),)?\s*radix_sort_config<)regex"
+               R"regex((?P<long_radix_bits>[0-9]+),\s*(?P<short_radix_bits>[0-9]+),\s*)regex"
+               R"regex(kernel_config<\s*(?P<scan_block_size>[0-9]+),\s*(?P<scan_items_per_thread>[0-9]+)>,\s*)regex"
+               R"regex(kernel_config<\s*(?P<sort_block_size>[0-9]+),\s*(?P<sort_items_per_thread>[0-9]+)>,\s*)regex"
+               R"regex(kernel_config<\s*(?P<sort_single_block_size>[0-9]+),\s*(?P<sort_single_items_per_thread>[0-9]+)>,\s*)regex"
+               R"regex(kernel_config<\s*(?P<sort_merge_block_size>[0-9]+),\s*(?P<sort_merge_items_per_thread>[0-9]+)>,\s*)regex"
+               R"regex((?P<force_single_kernel_config>[0-9]+)>>)regex";
     }
 
     std::string name() const override
     {
         using namespace std::string_literals;
         return std::string(
-            "device_radix_sort_"
-            + (std::is_same<Value, rocprim::empty_type>::value ? "keys"s : "pairs"s)
-            + (Config::force_single_kernel_config ? "_single"s : ""s) + "<"
-            + std::string(Traits<Key>::name()) + ", "
+            "device_radix_sort<" + std::string(Traits<Key>::name()) + ", "
             + (std::is_same<Value, rocprim::empty_type>::value
                    ? ""s
                    : std::string(Traits<Value>::name()) + ", ")
             + "radix_sort_config<" + std::to_string(Config::long_radix_bits) + ", "
-            + std::to_string(Config::short_radix_bits) + ", "
-            + (Config::force_single_kernel_config
-                   ? "kernel_config<"
-                         + pad_string(std::to_string(Config::sort_single::block_size), 4) + ", "
-                         + pad_string(std::to_string(Config::sort_single::items_per_thread), 2)
-                         + ">"
-                   : "kernel_config<" + pad_string(std::to_string(Config::scan::block_size), 4)
-                         + ", " + pad_string(std::to_string(Config::scan::items_per_thread), 2)
-                         + ">, " + "kernel_config<"
-                         + pad_string(std::to_string(Config::sort::block_size), 4) + ", "
-                         + pad_string(std::to_string(Config::sort::items_per_thread), 2) + ">")
-            + ">>");
+            + std::to_string(Config::short_radix_bits) + ", " + "kernel_config<"
+            + pad_string(std::to_string(Config::scan::block_size), 4) + ", "
+            + pad_string(std::to_string(Config::scan::items_per_thread), 2) + ">, "
+            + "kernel_config<" + pad_string(std::to_string(Config::sort::block_size), 4) + ", "
+            + pad_string(std::to_string(Config::sort::items_per_thread), 2) + ">, "
+            + "kernel_config<" + pad_string(std::to_string(Config::sort_single::block_size), 4)
+            + ", " + pad_string(std::to_string(Config::sort_single::items_per_thread), 2) + ">, "
+            + "kernel_config<" + pad_string(std::to_string(Config::sort_merge::block_size), 4)
+            + ", " + pad_string(std::to_string(Config::sort_merge::items_per_thread), 2) + ">, "
+            + std::to_string(Config::force_single_kernel_config) + ">>");
     }
 
     static constexpr unsigned int batch_size  = 10;
