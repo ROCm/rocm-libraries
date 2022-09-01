@@ -210,7 +210,9 @@ struct custom_type
     ROCPRIM_HOST_DEVICE inline
     bool operator<(const custom_type& rhs) const
     {
-        return (x < rhs.x || (x == rhs.x && y < rhs.y));
+        // intentionally suboptimal choice for short-circuting,
+        // required to generate more performant device code
+        return ((x == rhs.x && y < rhs.y) || x < rhs.x);
     }
 
     ROCPRIM_HOST_DEVICE inline
@@ -457,31 +459,46 @@ inline const char* Traits<rocprim::half>::name()
 {
     return "rocprim::half";
 }
-template <>
-inline const char* Traits<long long>::name() { return "long long"; }
+template<>
+inline const char* Traits<long long>::name()
+{
+    return "int64_t";
+}
 template <>
 inline const char* Traits<int64_t>::name() { return "int64_t"; }
 template <>
 inline const char* Traits<float>::name() { return "float"; }
 template <>
 inline const char* Traits<double>::name() { return "double"; }
-template <>
-inline const char* Traits<custom_type<int, int>>::name() { return "custom_int2"; }
-template <>
-inline const char* Traits<custom_type<float, float>>::name() { return "custom_float2"; }
-template <>
-inline const char* Traits<custom_type<double, double>>::name() { return "custom_double2"; }
-template <>
-inline const char* Traits<custom_type<char, double>>::name() { return "custom_char_double"; }
+template<>
+inline const char* Traits<custom_type<int, int>>::name()
+{
+    return "custom_type<int,int>";
+}
+template<>
+inline const char* Traits<custom_type<float, float>>::name()
+{
+    return "custom_type<float,float>";
+}
+template<>
+inline const char* Traits<custom_type<double, double>>::name()
+{
+    return "custom_type<double,double>";
+}
+template<>
+inline const char* Traits<custom_type<char, double>>::name()
+{
+    return "custom_type<char,double>";
+}
 template<>
 inline const char* Traits<custom_type<long, double>>::name()
 {
-    return "custom_long_double";
+    return "custom_type<long,double>";
 }
 template<>
 inline const char* Traits<custom_type<long long, double>>::name()
 {
-    return "custom_longlong_double";
+    return "custom_type<int64_t,double>";
 }
 template<>
 inline const char* Traits<rocprim::empty_type>::name()
@@ -491,12 +508,12 @@ inline const char* Traits<rocprim::empty_type>::name()
 template<>
 inline const char* Traits<HIP_vector_type<float, 2>>::name()
 {
-    return "custom_float2";
+    return "float2";
 }
 template<>
 inline const char* Traits<HIP_vector_type<double, 2>>::name()
 {
-    return "custom_double2";
+    return "double2";
 }
 
 inline void add_common_benchmark_info()

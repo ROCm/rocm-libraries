@@ -28,56 +28,12 @@
 #include "../functional.hpp"
 
 #include "config_types.hpp"
+#include "detail/device_config_helper.hpp"
 
 /// \addtogroup primitivesmodule_deviceconfigs
 /// @{
 
 BEGIN_ROCPRIM_NAMESPACE
-
-/// \brief Configuration of device-level radix sort operation.
-///
-/// Radix sort is excecuted in a single tile (at size < BlocksPerItem) or
-/// few iterations (passes) depending on total number of bits to be sorted
-/// (\p begin_bit and \p end_bit), each iteration sorts either \p LongRadixBits or \p ShortRadixBits bits
-/// choosen to cover whole bit range in optimal way.
-///
-/// For example, if \p LongRadixBits is 7, \p ShortRadixBits is 6, \p begin_bit is 0 and \p end_bit is 32
-/// there will be 5 iterations: 7 + 7 + 6 + 6 + 6 = 32 bits.
-///
-/// \tparam LongRadixBits - number of bits in long iterations.
-/// \tparam ShortRadixBits - number of bits in short iterations, must be equal to or less than \p LongRadixBits.
-/// \tparam ScanConfig - configuration of digits scan kernel. Must be \p kernel_config.
-/// \tparam SortConfig - configuration of radix sort kernel. Must be \p kernel_config.
-template<
-    unsigned int LongRadixBits,
-    unsigned int ShortRadixBits,
-    class ScanConfig,
-    class SortConfig,
-    class SortSingleConfig = kernel_config<256, 10>,
-    class SortMergeConfig = kernel_config<1024, 1>,
-    unsigned int MergeSizeLimitBlocks = 1024U,
-    bool ForceSingleKernelConfig = false
->
-struct radix_sort_config
-{
-    /// \brief Number of bits in long iterations.
-    static constexpr unsigned int long_radix_bits = LongRadixBits;
-    /// \brief Number of bits in short iterations.
-    static constexpr unsigned int short_radix_bits = ShortRadixBits;
-    /// \brief Limit number of blocks to use merge kernel.
-    static constexpr unsigned int merge_size_limit_blocks = MergeSizeLimitBlocks;
-
-    /// \brief Configuration of digits scan kernel.
-    using scan = ScanConfig;
-    /// \brief Configuration of radix sort kernel.
-    using sort = SortConfig;
-    /// \brief Configuration of radix sort single kernel.
-    using sort_single = SortSingleConfig;
-    /// \brief Configuration of radix sort merge kernel.
-    using sort_merge = SortMergeConfig;
-    /// \brief Force use radix sort single kernel configuration.
-    static constexpr bool force_single_kernel_config = ForceSingleKernelConfig;
-};
 
 namespace detail
 {

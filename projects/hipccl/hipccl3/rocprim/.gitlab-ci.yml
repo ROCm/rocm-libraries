@@ -35,6 +35,7 @@ stages:
   - build
   - test
   - benchmark
+  - autotune_config
 
 variables:
   PACKAGE_DIR: $BUILD_DIR/package
@@ -156,9 +157,11 @@ build:benchmark:
     - .gpus:rocm-gpus
     - .rules:build
   script:
-    - mkdir build
-    - cd build
+    - mkdir -p $BUILD_DIR
+    - cd $BUILD_DIR
     - cmake
+      -B $BUILD_DIR
+      -S $CI_PROJECT_DIR
       -G Ninja
       -D CMAKE_CXX_COMPILER="$AMDCLANG"
       -D CMAKE_BUILD_TYPE=Release
@@ -166,14 +169,47 @@ build:benchmark:
       -D BUILD_EXAMPLE=OFF
       -D BUILD_BENCHMARK=ON
       -D GPU_TARGETS=$GPU_TARGETS
-      ..
     - cmake --build .
   artifacts:
     paths:
-      - build/benchmark/*
-      - build/.ninja_log
-      - build/googlebenchmark/
+      - $BUILD_DIR/benchmark/*
+      - $BUILD_DIR/.ninja_log
+      - $BUILD_DIR/deps/googlebenchmark/
     expire_in: 2 weeks
+
+build:autotune:
+  stage: build
+  needs: []
+  tags:
+    - rocm-build
+  extends:
+    - .cmake-minimum
+    - .gpus:rocm-gpus
+    - .rules:manual
+  variables:
+    BENCHMARK_TARGETS: benchmark_config_tuning
+  script:
+    - mkdir -p $BUILD_DIR
+    - cd $BUILD_DIR
+    - 'printf "Building benchmark targets: %s\n" "$BENCHMARK_TARGETS"'
+    - cmake
+      -B $BUILD_DIR
+      -S $CI_PROJECT_DIR
+      -G Ninja
+      -D CMAKE_CXX_COMPILER="$AMDCLANG"
+      -D CMAKE_BUILD_TYPE=Release
+      -D BUILD_TEST=OFF
+      -D BUILD_EXAMPLE=OFF
+      -D BUILD_BENCHMARK=ON
+      -D BENCHMARK_CONFIG_TUNING=ON
+      -D GPU_TARGETS=$GPU_TARGETS
+    - cmake --build . --target $BENCHMARK_TARGETS
+  artifacts:
+    paths:
+      - $BUILD_DIR/benchmark/benchmark*
+      - $BUILD_DIR/.ninja_log
+      - $BUILD_DIR/deps/googlebenchmark/
+    expire_in: 1 week
 
 test:
   stage: test
@@ -254,19 +290,74 @@ test:doc:
     - cd doc
     - doxygen Doxyfile
 
-run_benchmark:
+.benchmark_run:
   stage: benchmark
   extends:
-    - .cmake-latest
-    - .rules:benchmark
-    - .gpus:rocm
+  - .cmake-minimum
+  - .gpus:rocm
+  variables:
+    BENCHMARK_RESULT_DIR: ${CI_PROJECT_DIR}/benchmark_results/
+    BENCHMARK_FILENAME_REGEX: ^benchmark
+    BENCHMARK_ALGORITHM_REGEX: ""
+  before_script:
+    - 'printf "CI Variables used in benchmarks:\nBENCHMARK_RESULT_DIR: %s\nBENCHMARK_FILENAME_REGEX: %s\nBENCHMARK_ALGORITHM_REGEX: %s \n" "$BENCHMARK_RESULT_DIR" "$BENCHMARK_FILENAME_REGEX" "$BENCHMARK_ALGORITHM_REGEX"'
+    - cd "${CI_PROJECT_DIR}"
+    - mkdir -p "${BENCHMARK_RESULT_DIR}"
+
+
+run_benchmark:
   needs:
     - build:benchmark
+  extends:
+    - .benchmark_run
+    - .rules:benchmark
   script:
-    - cmake
-      -D BENCHMARK_BINARY_DIR=build/benchmark
-      -D BENCHMARK_OUTPUT_DIR=.
-      -P ${CI_PROJECT_DIR}/.gitlab/RunBenchmarks.cmake
+    - python3
+      .gitlab/run_benchmarks.py
+      --benchmark_dir "${BUILD_DIR}/benchmark"
+      --benchmark_gpu_architecture "${GPU_TARGET}"
+      --benchmark_output_dir "${BENCHMARK_RESULT_DIR}"
+      --benchmark_filename_regex "${BENCHMARK_FILENAME_REGEX}"
+      --benchmark_filter_regex "${BENCHMARK_ALGORITHM_REGEX}"
+
+run_autotune:
+  needs:
+    - build:autotune
+  extends:
+    - .benchmark_run
+    - .rules:benchmark
+  timeout: 8h
+  artifacts:
+    paths:
+    - ${BENCHMARK_RESULT_DIR}/*.json
+  script:
+    - python3
+      .gitlab/run_benchmarks.py
+      --benchmark_dir "${BUILD_DIR}/benchmark"
+      --benchmark_gpu_architecture "${GPU_TARGET}"
+      --benchmark_output_dir "${BENCHMARK_RESULT_DIR}"
+      --benchmark_filename_regex "${BENCHMARK_FILENAME_REGEX}"
+      --benchmark_filter_regex "${BENCHMARK_ALGORITHM_REGEX}" > /dev/null
+
+run_autotune_config:
+  stage: autotune_config
+  image: python:3.10.5-buster
+  extends:
+    - .rules:benchmark
+  needs:
+    - run_autotune
+  variables:
+    AUTOTUNE_CONFIG_DIR: ${CI_PROJECT_DIR}/autotune_config
+  script:
+    - cd "${CI_PROJECT_DIR}"
+    - mkdir -p "${AUTOTUNE_CONFIG_DIR}"
+    - python3
+      scripts/autotune/create_optimization.py
+      --benchmark_files "${CI_PROJECT_DIR}/benchmark_results/*.json"
+      --out_basedir "${AUTOTUNE_CONFIG_DIR}"
+  artifacts:
+    paths:
+    - ${AUTOTUNE_CONFIG_DIR}
 
 scheduled-check-changes:
   extends: .rules:scheduled-check-changes

@@ -45,39 +45,47 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<
-    select_method SelectMethod,
-    bool OnlySelected,
-    class Config,
-    class KeyIterator,
-    class ValueIterator,
-    class FlagIterator,
-    class OutputKeyIterator,
-    class OutputValueIterator,
-    class InequalityOp,
-    class OffsetLookbackScanState,
-    class... UnaryPredicates
->
-ROCPRIM_KERNEL
-__launch_bounds__(Config::block_size)
-void partition_kernel(KeyIterator keys_input,
-                      ValueIterator values_input,
-                      FlagIterator flags,
-                      OutputKeyIterator keys_output,
-                      OutputValueIterator values_output,
-                      size_t* selected_count,
-                      size_t* prev_selected_count,
-                      const size_t size,
-                      InequalityOp inequality_op,
-                      OffsetLookbackScanState offset_scan_state,
-                      const unsigned int number_of_blocks,
-                      ordered_block_id<unsigned int> ordered_bid,
-                      UnaryPredicates... predicates)
+template<select_method SelectMethod,
+         bool          OnlySelected,
+         class Config,
+         class KeyIterator,
+         class ValueIterator,
+         class FlagIterator,
+         class OutputKeyIterator,
+         class OutputValueIterator,
+         class InequalityOp,
+         class OffsetLookbackScanState,
+         class... UnaryPredicates>
+ROCPRIM_KERNEL __launch_bounds__(Config::block_size) void partition_kernel(
+    KeyIterator                    keys_input,
+    ValueIterator                  values_input,
+    FlagIterator                   flags,
+    OutputKeyIterator              keys_output,
+    OutputValueIterator            values_output,
+    size_t*                        selected_count,
+    size_t*                        prev_selected_count,
+    size_t                         prev_processed,
+    const size_t                   total_size,
+    InequalityOp                   inequality_op,
+    OffsetLookbackScanState        offset_scan_state,
+    const unsigned int             number_of_blocks,
+    ordered_block_id<unsigned int> ordered_bid,
+    UnaryPredicates... predicates)
 {
-    partition_kernel_impl<SelectMethod, OnlySelected, Config>(
-        keys_input, values_input, flags, keys_output, values_output, selected_count, prev_selected_count, 
-        size, inequality_op, offset_scan_state, number_of_blocks, ordered_bid, predicates...
-    );
+    partition_kernel_impl<SelectMethod, OnlySelected, Config>(keys_input,
+                                                              values_input,
+                                                              flags,
+                                                              keys_output,
+                                                              values_output,
+                                                              selected_count,
+                                                              prev_selected_count,
+                                                              prev_processed,
+                                                              total_size,
+                                                              inequality_op,
+                                                              offset_scan_state,
+                                                              number_of_blocks,
+                                                              ordered_bid,
+                                                              predicates...);
 }
 
 #define ROCPRIM_DETAIL_HIP_SYNC(name, size, start) \
@@ -239,9 +247,11 @@ hipError_t partition_impl(void * temporary_storage,
         std::cout << "items_per_block " << items_per_block << '\n';
     }
 
-    for (size_t i = 0, offset = 0; i < number_of_launches; i++, offset+=limited_size)
+    for(size_t i = 0, prev_processed = 0; i < number_of_launches;
+        i++, prev_processed += limited_size)
     {
-        const unsigned int current_size = static_cast<unsigned int>(std::min<size_t>(size - offset, limited_size));
+        const unsigned int current_size
+            = static_cast<unsigned int>(std::min<size_t>(size - prev_processed, limited_size));
 
         const unsigned int current_number_of_blocks = ::rocprim::detail::ceiling_div(current_size, items_per_block);
 
@@ -280,23 +290,47 @@ hipError_t partition_impl(void * temporary_storage,
         if (prop.gcnArch == 908 && asicRevision < 2)
         {
             hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(partition_kernel<
-                    SelectMethod, OnlySelected, config
-                >),
-                dim3(grid_size), dim3(block_size), 0, stream,
-                keys_input + offset, values_input + offset, flags + offset, keys_output, values_output, selected_count, prev_selected_count,
-                current_size, inequality_op, offset_scan_state_with_sleep, current_number_of_blocks, ordered_bid, predicates...
-            );
+                HIP_KERNEL_NAME(partition_kernel<SelectMethod, OnlySelected, config>),
+                dim3(grid_size),
+                dim3(block_size),
+                0,
+                stream,
+                keys_input + prev_processed,
+                values_input + prev_processed,
+                flags + prev_processed,
+                keys_output,
+                values_output,
+                selected_count,
+                prev_selected_count,
+                prev_processed,
+                size,
+                inequality_op,
+                offset_scan_state_with_sleep,
+                current_number_of_blocks,
+                ordered_bid,
+                predicates...);
         } else
         {
             hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(partition_kernel<
-                    SelectMethod, OnlySelected, config
-                >),
-                dim3(grid_size), dim3(block_size), 0, stream,
-                keys_input + offset, values_input + offset, flags + offset, keys_output, values_output, selected_count, prev_selected_count,
-                current_size, inequality_op, offset_scan_state, current_number_of_blocks, ordered_bid, predicates...
-            );
+                HIP_KERNEL_NAME(partition_kernel<SelectMethod, OnlySelected, config>),
+                dim3(grid_size),
+                dim3(block_size),
+                0,
+                stream,
+                keys_input + prev_processed,
+                values_input + prev_processed,
+                flags + prev_processed,
+                keys_output,
+                values_output,
+                selected_count,
+                prev_selected_count,
+                prev_processed,
+                size,
+                inequality_op,
+                offset_scan_state,
+                current_number_of_blocks,
+                ordered_bid,
+                predicates...);
         }
 
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("partition_kernel", size, start)

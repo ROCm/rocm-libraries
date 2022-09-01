@@ -42,57 +42,54 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
-    class KeysInputIterator,
-    class KeysOutputIterator,
-    class ValuesInputIterator,
-    class ValuesOutputIterator,
-    class OffsetT,
-    class BinaryFunction
->
+template<unsigned int BlockSize,
+         unsigned int ItemsPerThread,
+         class KeysInputIterator,
+         class KeysOutputIterator,
+         class ValuesInputIterator,
+         class ValuesOutputIterator,
+         class OffsetT,
+         class BinaryFunction>
 ROCPRIM_KERNEL
-__launch_bounds__(BlockSize)
-void block_sort_kernel(KeysInputIterator keys_input,
-                       KeysOutputIterator keys_output,
-                       ValuesInputIterator values_input,
-                       ValuesOutputIterator values_output,
-                       const OffsetT size,
-                       BinaryFunction compare_function)
+    __launch_bounds__(BlockSize) void block_sort_kernel(KeysInputIterator    keys_input,
+                                                        KeysOutputIterator   keys_output,
+                                                        ValuesInputIterator  values_input,
+                                                        ValuesOutputIterator values_output,
+                                                        const OffsetT        sorted_block_size,
+                                                        BinaryFunction       compare_function)
 {
-    block_sort_kernel_impl<BlockSize, ItemsPerThread>(
-        keys_input, keys_output, values_input, values_output,
-        size, compare_function
-    );
+    block_sort_kernel_impl<BlockSize, ItemsPerThread>(keys_input,
+                                                      keys_output,
+                                                      values_input,
+                                                      values_output,
+                                                      sorted_block_size,
+                                                      compare_function);
 }
 
-template<
-    unsigned int BlockSize,
-    class KeysInputIterator,
-    class KeysOutputIterator,
-    class ValuesInputIterator,
-    class ValuesOutputIterator,
-    class OffsetT,
-    class BinaryFunction
->
+template<unsigned int BlockSize,
+         unsigned int ItemsPerThread,
+         class KeysInputIterator,
+         class KeysOutputIterator,
+         class ValuesInputIterator,
+         class ValuesOutputIterator,
+         class OffsetT,
+         class BinaryFunction>
 ROCPRIM_KERNEL
-__launch_bounds__(BlockSize)
-void block_merge_kernel(KeysInputIterator keys_input,
-                        KeysOutputIterator keys_output,
-                        ValuesInputIterator values_input,
-                        ValuesOutputIterator values_output,
-                        const OffsetT input_size,
-                        const OffsetT sorted_block_size,
-                        BinaryFunction compare_function)
+    __launch_bounds__(BlockSize) void block_merge_kernel(KeysInputIterator    keys_input,
+                                                         KeysOutputIterator   keys_output,
+                                                         ValuesInputIterator  values_input,
+                                                         ValuesOutputIterator values_output,
+                                                         const OffsetT        input_size,
+                                                         const OffsetT        sorted_block_size,
+                                                         BinaryFunction       compare_function)
 {
-    block_merge_kernel_impl<BlockSize>(keys_input,
-                                       keys_output,
-                                       values_input,
-                                       values_output,
-                                       input_size,
-                                       sorted_block_size,
-                                       compare_function);
+    block_merge_kernel_impl<BlockSize, ItemsPerThread>(keys_input,
+                                                       keys_output,
+                                                       values_input,
+                                                       values_output,
+                                                       input_size,
+                                                       sorted_block_size,
+                                                       compare_function);
 }
 
 template<
@@ -342,11 +339,19 @@ hipError_t merge_sort_impl(void * temporary_storage,
             {
                 if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
                 hipLaunchKernelGGL(
-                    HIP_KERNEL_NAME(block_merge_kernel<merge_impl1_block_size>),
-                    dim3(merge_impl1_number_of_blocks), dim3(merge_impl1_block_size), 0, stream,
-                    keys_input_, keys_output_, values_input_, values_output_,
-                    size, block, compare_function
-                );
+                    HIP_KERNEL_NAME(
+                        block_merge_kernel<merge_impl1_block_size, merge_impl1_items_per_thread>),
+                    dim3(merge_impl1_number_of_blocks),
+                    dim3(merge_impl1_block_size),
+                    0,
+                    stream,
+                    keys_input_,
+                    keys_output_,
+                    values_input_,
+                    values_output_,
+                    size,
+                    block,
+                    compare_function);
                 ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("block_merge_kernel", size, start)
             }
             return hipSuccess;

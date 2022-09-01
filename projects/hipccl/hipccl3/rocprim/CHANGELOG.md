@@ -2,6 +2,15 @@
 
 Full documentation for rocPRIM is available at [https://codedocs.xyz/ROCmSoftwarePlatform/rocPRIM/](https://codedocs.xyz/ROCmSoftwarePlatform/rocPRIM/)
 
+## [Unreleased rocPRIM-2.12.0 for ROCm 5.4.0]
+## Changed
+- `device_partition`, `device_unique`, and `device_reduce_by_key` now support problem 
+  sizes larger than 2^32 items.
+### Removed
+- `block_sort::sort()` overload for keys and values with a dynamic size. This overload was documented but the
+  implementation is missing. To avoid further confusion the documentation is removed until a decision is made on
+  implementing the function.
+  
 ## [Unreleased rocPRIM-2.11.0 for ROCm 5.3.0]
 ### Added
 - New functions `subtract_left` and `subtract_right` in `block_adjacent_difference` to apply functions
@@ -15,12 +24,12 @@ function or by parameters.
 ## Changed
 - Improved the performance of warp primitives using the swizzle operation on Navi
 - Improved build parallelism of the test suite by splitting up large compilation units
-- `device_select` now supports problem sizes larger than 2^32 items
+- `device_select` now supports problem sizes larger than 2^32 items.
 - `device_segmented_radix_sort` now partitions segments to groups small, medium and large segments.
   Each segment group can be sorted by specialized kernels to improve throughput.
 - Improved performance of histogram for the case of highly uneven sample distribution.
 
-## [Unreleased rocPRIM-2.10.14 for ROCm 5.2.0]
+## [rocPRIM-2.10.14 for ROCm 5.2.0]
 ### Added
 - Packages for tests and benchmark executable on all supported OSes using CPack.
 - Added File/Folder Reorg Changes and Enabled Backward compatibility support using wrapper headers.

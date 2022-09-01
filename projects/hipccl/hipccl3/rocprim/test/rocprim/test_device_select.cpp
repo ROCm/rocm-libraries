@@ -1147,3 +1147,82 @@ TEST_P(RocprimDeviceSelectLargeInputTests, LargeInputFlagged)
         hipFree(d_temp_storage);
     }
 }
+
+TEST_P(RocprimDeviceSelectLargeInputTests, LargeInputUnique)
+{
+    static constexpr bool        debug_synchronous = false;
+    static constexpr hipStream_t stream            = 0;
+
+    const int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    const unsigned int segment_length = GetParam();
+    const auto         sizes          = get_large_sizes();
+
+    for(const auto size : sizes)
+    {
+        SCOPED_TRACE(testing::Message() << "with size = " << size);
+
+        auto input_it = rocprim::make_transform_iterator(rocprim::make_counting_iterator(size_t(0)),
+                                                         [segment_length](size_t i)
+                                                         { return i / segment_length; });
+
+        const size_t expected_output_size = rocprim::detail::ceiling_div(size, segment_length);
+        std::vector<size_t> expected_output(expected_output_size);
+        std::iota(expected_output.begin(), expected_output.end(), 0);
+
+        size_t* d_output{};
+        size_t* d_unique_count_output{};
+        HIP_CHECK(test_common_utils::hipMallocHelper(&d_output,
+                                                     sizeof(*d_output) * expected_output_size));
+        HIP_CHECK(test_common_utils::hipMallocHelper(&d_unique_count_output,
+                                                     sizeof(*d_unique_count_output)));
+
+        size_t temp_storage_size_bytes{};
+        void*  d_temp_storage{};
+        HIP_CHECK(rocprim::unique(d_temp_storage,
+                                  temp_storage_size_bytes,
+                                  input_it,
+                                  d_output,
+                                  d_unique_count_output,
+                                  size,
+                                  rocprim::equal_to<size_t>{},
+                                  stream,
+                                  debug_synchronous));
+        ASSERT_GT(temp_storage_size_bytes, 0);
+        HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
+
+        HIP_CHECK(rocprim::unique(d_temp_storage,
+                                  temp_storage_size_bytes,
+                                  input_it,
+                                  d_output,
+                                  d_unique_count_output,
+                                  size,
+                                  rocprim::equal_to<size_t>{},
+                                  stream,
+                                  debug_synchronous));
+
+        size_t unique_count_output{};
+        HIP_CHECK(hipMemcpyWithStream(&unique_count_output,
+                                      d_unique_count_output,
+                                      sizeof(unique_count_output),
+                                      hipMemcpyDeviceToHost,
+                                      stream));
+        ASSERT_EQ(unique_count_output, expected_output_size);
+
+        std::vector<size_t> output(expected_output_size);
+        HIP_CHECK(hipMemcpyWithStream(output.data(),
+                                      d_output,
+                                      sizeof(output[0]) * expected_output_size,
+                                      hipMemcpyDeviceToHost,
+                                      stream));
+
+        ASSERT_NO_FATAL_FAILURE(
+            test_utils::assert_eq(output, expected_output, expected_output.size()));
+
+        HIP_CHECK(hipFree(d_output));
+        HIP_CHECK(hipFree(d_unique_count_output));
+        HIP_CHECK(hipFree(d_temp_storage));
+    }
+}

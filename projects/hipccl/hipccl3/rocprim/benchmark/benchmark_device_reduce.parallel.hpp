@@ -58,14 +58,14 @@ struct device_reduce_benchmark : public config_autotune_interface
 {
     static std::string get_name_pattern()
     {
-        return R"---((?P<algo>\S*)\<)---"
-               R"---((?P<datatype>\S*),\s*reduce_config\<)---"
-               R"---(\s*(?P<block_size>[0-9]+),\s*(?P<items_per_thread>[0-9]+)\>\>)---";
+        return R"regex((?P<algo>\S*?)<)regex"
+               R"regex((?P<datatype>\S*),\s*reduce_config<)regex"
+               R"regex(\s*(?P<block_size>[0-9]+),\s*(?P<items_per_thread>[0-9]+)>>)regex";
     }
 
     std::string name() const override
     {
-        return std::string("device_reduce_benchmark<" + std::string(Traits<T>::name()) + ", "
+        return std::string("device_reduce<" + std::string(Traits<T>::name()) + ", "
                            + config_name<Config>() + ">");
     }
 

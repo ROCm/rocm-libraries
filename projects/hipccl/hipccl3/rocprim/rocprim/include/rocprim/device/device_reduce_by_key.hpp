@@ -50,7 +50,50 @@ namespace detail
 namespace reduce_by_key
 {
 
+template<typename LookBackScanState, typename AccumulatorType>
+ROCPRIM_KERNEL __launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE) void init_kernel(
+    LookBackScanState              lookback_scan_state,
+    const unsigned int             number_of_tiles,
+    ordered_block_id<unsigned int> ordered_bid,
+    const bool                     is_first_launch,
+    const unsigned int             tile_save_idx,
+    std::size_t* const             global_head_count,
+    AccumulatorType* const         previous_accumulated)
+{
+    const unsigned int block_id        = ::rocprim::detail::block_id<0>();
+    const unsigned int block_size      = ::rocprim::detail::block_size<0>();
+    const unsigned int block_thread_id = ::rocprim::detail::block_thread_id<0>();
+    const unsigned int flat_thread_id  = (block_id * block_size) + block_thread_id;
+
+    if(is_first_launch)
+    {
+        if(global_head_count != nullptr && flat_thread_id == 0)
+        {
+            // If there are subsequent launches, initialize the accumulated head flags
+            // over previous launches to zero.
+            *global_head_count = 0;
+        }
+    }
+    else
+    {
+        // Use the reduction of the last launch to update the across-launch variables.
+        const auto update_func = [&](typename LookBackScanState::value_type value)
+        {
+            *global_head_count += ::rocprim::get<0>(value);
+            *previous_accumulated = ::rocprim::get<1>(value);
+        };
+        access_indexed_lookback_value(lookback_scan_state,
+                                      number_of_tiles,
+                                      tile_save_idx,
+                                      flat_thread_id,
+                                      update_func);
+    }
+
+    init_lookback_scan_state(lookback_scan_state, number_of_tiles, ordered_bid, flat_thread_id);
+}
+
 template<typename Config,
+         typename AccumulatorType,
          typename KeyIterator,
          typename ValueIterator,
          typename UniqueIterator,
@@ -69,8 +112,12 @@ ROCPRIM_KERNEL __launch_bounds__(Config::block_size) void kernel(
     const CompareFunction                compare,
     const LookbackScanState              scan_state,
     const ordered_block_id<unsigned int> ordered_tile_id,
-    const std::size_t                    number_of_tiles,
-    const std::size_t                    size)
+    const std::size_t                    starting_tile,
+    const std::size_t                    total_number_of_tiles,
+    const std::size_t                    size,
+    const std::size_t* const             global_head_count,
+    const AccumulatorType* const         previous_accumulated,
+    const std::size_t                    number_of_tiles_launch)
 {
     reduce_by_key::kernel_impl<Config>(keys_input,
                                        values_input,
@@ -81,8 +128,12 @@ ROCPRIM_KERNEL __launch_bounds__(Config::block_size) void kernel(
                                        compare,
                                        scan_state,
                                        ordered_tile_id,
-                                       number_of_tiles,
-                                       size);
+                                       starting_tile,
+                                       total_number_of_tiles,
+                                       size,
+                                       global_head_count,
+                                       previous_accumulated,
+                                       number_of_tiles_launch);
 }
 
 #define ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(name, size, start)                           \
@@ -116,7 +167,7 @@ hipError_t reduce_by_key_impl(void*                     temporary_storage,
                               size_t&                   storage_size,
                               KeysInputIterator         keys_input,
                               ValuesInputIterator       values_input,
-                              const unsigned int        size,
+                              const size_t              size,
                               UniqueOutputIterator      unique_output,
                               AggregatesOutputIterator  aggregates_output,
                               UniqueCountOutputIterator unique_count_output,
@@ -132,10 +183,6 @@ hipError_t reduce_by_key_impl(void*                     temporary_storage,
         Config,
         reduce_by_key::default_config<ROCPRIM_TARGET_ARCH, key_type, accumulator_type>>;
 
-    constexpr unsigned int block_size      = config::block_size;
-    constexpr unsigned int tiles_per_block = config::tiles_per_block;
-    constexpr unsigned int items_per_tile  = block_size * config::items_per_thread;
-
     using scan_state_type
         = reduce_by_key::lookback_scan_state_t<accumulator_type, /*UseSleep=*/false>;
     using scan_state_with_sleep_type
@@ -143,19 +190,46 @@ hipError_t reduce_by_key_impl(void*                     temporary_storage,
 
     using ordered_tile_id_type = detail::ordered_block_id<unsigned int>;
 
-    const std::size_t  number_of_tiles  = detail::ceiling_div(size, items_per_tile);
-    const unsigned int number_of_blocks = static_cast<unsigned int>(
-        detail::ceiling_div<std::size_t>(number_of_tiles, tiles_per_block));
+    constexpr unsigned int block_size      = config::block_size;
+    constexpr unsigned int tiles_per_block = config::tiles_per_block;
+    constexpr unsigned int items_per_tile  = block_size * config::items_per_thread;
+    constexpr unsigned int items_per_block = items_per_tile * tiles_per_block;
+
+    static constexpr size_t size_limit = config::size_limit;
+    static constexpr size_t aligned_size_limit
+        = ::rocprim::max<size_t>(size_limit - size_limit % items_per_block, items_per_block);
+
+    const size_t limited_size     = std::min<size_t>(size, aligned_size_limit);
+    const bool   use_limited_size = limited_size == aligned_size_limit;
+
+    // Number of tiles in a single launch (or the only launch if it fits)
+    const std::size_t number_of_tiles  = detail::ceiling_div(limited_size, items_per_tile);
+    const std::size_t number_of_blocks = detail::ceiling_div(number_of_tiles, tiles_per_block);
 
     // Calculate required temporary storage
-    // This is valid even with scan_state_with_sleep_type
-    const std::size_t scan_state_bytes
-        = detail::align_size(scan_state_type::get_storage_size(number_of_tiles));
+    // scan_state_bytes is valid even with scan_state_with_sleep_type
+    const std::size_t scan_state_bytes       = scan_state_type::get_storage_size(number_of_tiles);
+    const std::size_t block_id_bytes         = ordered_tile_id_type::get_storage_size();
+    const std::size_t head_count_bytes       = sizeof(size_t);
+    const std::size_t prev_accumulated_bytes = sizeof(accumulator_type);
+
+    const std::size_t block_id_offset = align_size(scan_state_bytes, alignof(std::size_t));
+    const std::size_t head_count_offset
+        = align_size(block_id_offset + block_id_bytes, alignof(ordered_tile_id_type));
+    const std::size_t prev_accumulated_offset
+        = align_size(head_count_offset + head_count_bytes, alignof(accumulator_type));
+
     if(temporary_storage == nullptr)
     {
-        const std::size_t ordered_block_id_bytes = ordered_tile_id_type::get_storage_size();
         // storage_size is never zero
-        storage_size = scan_state_bytes + ordered_block_id_bytes;
+        if(use_limited_size)
+        {
+            storage_size = block_id_offset + block_id_bytes;
+        }
+        else
+        {
+            storage_size = prev_accumulated_offset + prev_accumulated_bytes;
+        }
 
         return hipSuccess;
     }
@@ -185,18 +259,17 @@ hipError_t reduce_by_key_impl(void*                     temporary_storage,
 
     auto* temp_storage_ptr = static_cast<char*>(temporary_storage);
     auto  ordered_bid      = ordered_tile_id_type::create(
-        reinterpret_cast<ordered_tile_id_type::id_type*>(temp_storage_ptr + scan_state_bytes));
+        reinterpret_cast<ordered_tile_id_type::id_type*>(temp_storage_ptr + block_id_offset));
 
-    std::chrono::high_resolution_clock::time_point start;
-    if(debug_synchronous)
+    // The number of segment heads in previous launches.
+    std::size_t* d_global_head_count = nullptr;
+    // The running accumulation across the launch boundary.
+    accumulator_type* d_previous_accumulated = nullptr;
+    if(use_limited_size)
     {
-        std::cout << "size:             " << size << '\n';
-        std::cout << "block_size:       " << block_size << '\n';
-        std::cout << "tiles_per_block:  " << tiles_per_block << '\n';
-        std::cout << "number_of_tiles:  " << number_of_tiles << '\n';
-        std::cout << "number_of_blocks: " << number_of_blocks << '\n';
-        std::cout << "items_per_tile:   " << items_per_tile << '\n';
-        start = std::chrono::high_resolution_clock::now();
+        d_global_head_count = reinterpret_cast<std::size_t*>(temp_storage_ptr + head_count_offset);
+        d_previous_accumulated
+            = reinterpret_cast<accumulator_type*>(temp_storage_ptr + prev_accumulated_offset);
     }
 
     if(size == 0)
@@ -210,45 +283,89 @@ hipError_t reduce_by_key_impl(void*                     temporary_storage,
                                   debug_synchronous);
     }
 
-    // TODO: Large indices support
-    const unsigned int init_grid_size = detail::ceiling_div(number_of_tiles, block_size);
-    with_scan_state(
-        [&](const auto scan_state)
-        {
-            hipLaunchKernelGGL(init_lookback_scan_state_kernel,
-                               dim3(init_grid_size),
-                               dim3(block_size),
-                               0,
-                               stream,
-                               scan_state,
-                               number_of_tiles,
-                               ordered_bid);
-        });
-    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init_lookback_scan_state_kernel",
-                                                number_of_tiles,
-                                                start);
+    // Total number of tiles in all launches
+    const std::size_t total_number_of_tiles = ceiling_div(size, items_per_tile);
+    const std::size_t number_of_launch      = ceiling_div(size, limited_size);
 
-    with_scan_state(
-        [&](const auto scan_state)
+    if(debug_synchronous)
+    {
+        std::cout << "size:               " << size << '\n';
+        std::cout << "aligned_size_limit: " << aligned_size_limit << '\n';
+        std::cout << "use_limited_size:   " << std::boolalpha << use_limited_size << '\n';
+        std::cout << "number_of_launch:   " << number_of_launch << '\n';
+        std::cout << "block_size:         " << block_size << '\n';
+        std::cout << "tiles_per_block:    " << tiles_per_block << '\n';
+        std::cout << "number_of_tiles:    " << number_of_tiles << '\n';
+        std::cout << "number_of_blocks:   " << number_of_blocks << '\n';
+        std::cout << "items_per_tile:     " << items_per_tile << '\n';
+    }
+
+    for(size_t i = 0, offset = 0; i < number_of_launch; i++, offset += limited_size)
+    {
+        const std::size_t current_size = std::min<std::size_t>(size - offset, limited_size);
+        const std::size_t number_of_tiles_launch = ceiling_div(current_size, items_per_tile);
+        const std::size_t number_of_blocks_launch
+            = ceiling_div(number_of_tiles_launch, tiles_per_block);
+        const std::size_t init_grid_size = detail::ceiling_div(number_of_tiles_launch, block_size);
+
+        // Start point for time measurements
+        std::chrono::high_resolution_clock::time_point start;
+        if(debug_synchronous)
         {
-            hipLaunchKernelGGL(reduce_by_key::kernel<config>,
-                               dim3(number_of_blocks),
-                               dim3(block_size),
-                               0,
-                               stream,
-                               keys_input,
-                               values_input,
-                               unique_output,
-                               aggregates_output,
-                               unique_count_output,
-                               reduce_op,
-                               key_compare_op,
-                               scan_state,
-                               ordered_bid,
-                               number_of_tiles,
-                               size);
-        });
-    ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("reduce_by_key_kernel", size, start);
+            std::cout << "index:            " << i << '\n';
+            std::cout << "current_size:     " << current_size << '\n';
+            std::cout << "number of tiles:  " << number_of_tiles_launch << '\n';
+            std::cout << "number of blocks: " << number_of_blocks_launch << '\n';
+
+            start = std::chrono::high_resolution_clock::now();
+        }
+
+        with_scan_state(
+            [&](const auto scan_state)
+            {
+                hipLaunchKernelGGL(init_kernel,
+                                   dim3(init_grid_size),
+                                   dim3(block_size),
+                                   0,
+                                   stream,
+                                   scan_state,
+                                   number_of_tiles_launch,
+                                   ordered_bid,
+                                   i == 0,
+                                   number_of_tiles - 1,
+                                   d_global_head_count,
+                                   d_previous_accumulated);
+            });
+        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init_lookback_scan_state_kernel",
+                                                    number_of_tiles_launch,
+                                                    start);
+
+        with_scan_state(
+            [&](const auto scan_state)
+            {
+                hipLaunchKernelGGL(reduce_by_key::kernel<config>,
+                                   dim3(number_of_blocks_launch),
+                                   dim3(block_size),
+                                   0,
+                                   stream,
+                                   keys_input + offset,
+                                   values_input + offset,
+                                   unique_output,
+                                   aggregates_output,
+                                   unique_count_output,
+                                   reduce_op,
+                                   key_compare_op,
+                                   scan_state,
+                                   ordered_bid,
+                                   i * number_of_tiles,
+                                   total_number_of_tiles,
+                                   size,
+                                   i > 0 ? d_global_head_count : nullptr,
+                                   i > 0 ? d_previous_accumulated : nullptr,
+                                   number_of_tiles_launch);
+            });
+        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("reduce_by_key_kernel", current_size, start);
+    }
 
     return hipSuccess;
 }
@@ -360,29 +477,28 @@ hipError_t reduce_by_key_impl(void*                     temporary_storage,
 /// // unique_count_output: [4]
 /// \endcode
 /// \endparblock
-template<
-    class Config = default_config,
-    class KeysInputIterator,
-    class ValuesInputIterator,
-    class UniqueOutputIterator,
-    class AggregatesOutputIterator,
-    class UniqueCountOutputIterator,
-    class BinaryFunction = ::rocprim::plus<typename std::iterator_traits<ValuesInputIterator>::value_type>,
-    class KeyCompareFunction = ::rocprim::equal_to<typename std::iterator_traits<KeysInputIterator>::value_type>
->
-inline
-hipError_t reduce_by_key(void * temporary_storage,
-                         size_t& storage_size,
-                         KeysInputIterator keys_input,
-                         ValuesInputIterator values_input,
-                         unsigned int size,
-                         UniqueOutputIterator unique_output,
-                         AggregatesOutputIterator aggregates_output,
-                         UniqueCountOutputIterator unique_count_output,
-                         BinaryFunction reduce_op = BinaryFunction(),
-                         KeyCompareFunction key_compare_op = KeyCompareFunction(),
-                         hipStream_t stream = 0,
-                         bool debug_synchronous = false)
+template<class Config = default_config,
+         class KeysInputIterator,
+         class ValuesInputIterator,
+         class UniqueOutputIterator,
+         class AggregatesOutputIterator,
+         class UniqueCountOutputIterator,
+         class BinaryFunction
+         = ::rocprim::plus<typename std::iterator_traits<ValuesInputIterator>::value_type>,
+         class KeyCompareFunction
+         = ::rocprim::equal_to<typename std::iterator_traits<KeysInputIterator>::value_type>>
+inline hipError_t reduce_by_key(void*                     temporary_storage,
+                                size_t&                   storage_size,
+                                KeysInputIterator         keys_input,
+                                ValuesInputIterator       values_input,
+                                const size_t              size,
+                                UniqueOutputIterator      unique_output,
+                                AggregatesOutputIterator  aggregates_output,
+                                UniqueCountOutputIterator unique_count_output,
+                                BinaryFunction            reduce_op         = BinaryFunction(),
+                                KeyCompareFunction        key_compare_op    = KeyCompareFunction(),
+                                hipStream_t               stream            = 0,
+                                bool                      debug_synchronous = false)
 {
     return detail::reduce_by_key::reduce_by_key_impl<Config>(temporary_storage,
                                                              storage_size,

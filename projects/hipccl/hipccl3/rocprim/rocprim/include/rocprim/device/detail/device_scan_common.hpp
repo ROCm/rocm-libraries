@@ -33,40 +33,71 @@ BEGIN_ROCPRIM_NAMESPACE
 
 namespace detail
 {
-    template <typename LookBackScanState>
-    ROCPRIM_KERNEL
-        __launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE) void init_lookback_scan_state_kernel(
-            LookBackScanState                             lookback_scan_state,
-            const unsigned int                            number_of_blocks,
-            ordered_block_id<unsigned int>                ordered_bid,
-            unsigned int                                  save_index = 0,
-            typename LookBackScanState::value_type* const save_dest  = nullptr)
+
+template<typename LookBackScanState, typename AccessFunction>
+ROCPRIM_DEVICE ROCPRIM_INLINE void
+    access_indexed_lookback_value(LookBackScanState  lookback_scan_state,
+                                  const unsigned int number_of_blocks,
+                                  unsigned int       save_index,
+                                  unsigned int       flat_thread_id,
+                                  AccessFunction     access_function)
+{
+    // If the thread that resets the reduction of save_index in init_lookback_scan_state is
+    // participating, this thread saves the value. Otherwise, the first thread saves it
+    // (it will not be reset by any thread in init_lookback_scan_state).
+    if((number_of_blocks <= save_index && flat_thread_id == 0) || flat_thread_id == save_index)
     {
-        const unsigned int block_id        = ::rocprim::detail::block_id<0>();
-        const unsigned int block_size      = ::rocprim::detail::block_size<0>();
-        const unsigned int block_thread_id = ::rocprim::detail::block_thread_id<0>();
-        const unsigned int id              = (block_id * block_size) + block_thread_id;
-
-        // Reset ordered_block_id
-        if(id == 0)
-        {
-            ordered_bid.reset();
-        }
-        // Save the reduction (i.e. the last prefix) from the previous user of lookback_scan_state
-        // If the thread that should reset it is participating then it saves the value before
-        // reseting, otherwise the first thread saves it (it won't be reset by any thread).
-        if(save_dest != nullptr
-           && ((number_of_blocks <= save_index && id == 0) || id == save_index))
-        {
-            typename LookBackScanState::value_type value;
-            typename LookBackScanState::flag_type  dummy_flag;
-            lookback_scan_state.get(save_index, dummy_flag, value);
-
-            *save_dest = value;
-        }
-        // Initialize lookback scan status
-        lookback_scan_state.initialize_prefix(id, number_of_blocks);
+        typename LookBackScanState::value_type value;
+        typename LookBackScanState::flag_type  dummy_flag;
+        lookback_scan_state.get(save_index, dummy_flag, value);
+        access_function(value);
     }
+}
+
+template<typename LookBackScanState>
+ROCPRIM_DEVICE ROCPRIM_INLINE void
+    init_lookback_scan_state(LookBackScanState              lookback_scan_state,
+                             const unsigned int             number_of_blocks,
+                             ordered_block_id<unsigned int> ordered_bid,
+                             unsigned int                   flat_thread_id)
+{
+    // Reset ordered_block_id.
+    if(flat_thread_id == 0)
+    {
+        ordered_bid.reset();
+    }
+
+    // Initialize lookback scan status.
+    lookback_scan_state.initialize_prefix(flat_thread_id, number_of_blocks);
+}
+
+template<typename LookBackScanState>
+ROCPRIM_KERNEL
+    __launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE) void init_lookback_scan_state_kernel(
+        LookBackScanState                             lookback_scan_state,
+        const unsigned int                            number_of_blocks,
+        ordered_block_id<unsigned int>                ordered_bid,
+        unsigned int                                  save_index = 0,
+        typename LookBackScanState::value_type* const save_dest  = nullptr)
+{
+    const unsigned int block_id        = ::rocprim::detail::block_id<0>();
+    const unsigned int block_size      = ::rocprim::detail::block_size<0>();
+    const unsigned int block_thread_id = ::rocprim::detail::block_thread_id<0>();
+    const unsigned int flat_thread_id  = (block_id * block_size) + block_thread_id;
+
+    // Save the reduction (i.e. the last prefix) from the previous user of lookback_scan_state.
+    if(save_dest != nullptr)
+    {
+        access_indexed_lookback_value(lookback_scan_state,
+                                      number_of_blocks,
+                                      save_index,
+                                      flat_thread_id,
+                                      [&](typename LookBackScanState::value_type value)
+                                      { *save_dest = value; });
+    }
+
+    init_lookback_scan_state(lookback_scan_state, number_of_blocks, ordered_bid, flat_thread_id);
+}
 
     template <bool Exclusive,
               class BlockScan,

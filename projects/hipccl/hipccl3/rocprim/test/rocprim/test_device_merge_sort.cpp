@@ -27,6 +27,7 @@
 #include <rocprim/device/device_merge_sort.hpp>
 
 // required test headers
+#include "test_utils_custom_float_type.hpp"
 #include "test_utils_types.hpp"
 
 // Params for tests
@@ -56,7 +57,7 @@ public:
     const bool debug_synchronous = false;
 };
 
-typedef ::testing::Types<
+using RocprimDeviceSortTestsParams = ::testing::Types<
     DeviceSortParams<unsigned short, int>,
     DeviceSortParams<signed char, test_utils::custom_test_type<float>>,
     DeviceSortParams<int>,
@@ -71,8 +72,11 @@ typedef ::testing::Types<
     DeviceSortParams<int, float, ::rocprim::greater<int>>,
     DeviceSortParams<short, test_utils::custom_test_type<int>>,
     DeviceSortParams<double, test_utils::custom_test_type<double>>,
-    DeviceSortParams<test_utils::custom_test_type<float>, test_utils::custom_test_type<double>>
-> RocprimDeviceSortTestsParams;
+    DeviceSortParams<test_utils::custom_test_type<float>, test_utils::custom_test_type<double>>,
+    DeviceSortParams<int, test_utils::custom_float_type>>;
+
+static_assert(std::is_trivially_copyable<test_utils::custom_float_type>::value,
+              "Type must be trivially copyable to cover merge sort specialized kernel");
 
 std::vector<size_t> get_sizes(int seed_value)
 {

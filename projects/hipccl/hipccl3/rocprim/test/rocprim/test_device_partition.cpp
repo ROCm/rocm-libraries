@@ -25,6 +25,8 @@
 // required rocprim headers
 #include <rocprim/device/device_partition.hpp>
 #include <rocprim/iterator/constant_iterator.hpp>
+#include <rocprim/iterator/counting_iterator.hpp>
+#include <rocprim/iterator/discard_iterator.hpp>
 
 // required test headers
 #include "test_utils_types.hpp"
@@ -672,5 +674,400 @@ TYPED_TEST(RocprimDevicePartitionTests, PredicateThreeWay)
                 hipFree(d_temp_storage);
             }
         }
+    }
+}
+
+namespace
+{
+
+std::vector<size_t> get_large_sizes()
+{
+    std::vector<size_t> sizes = {(size_t{1} << 30),
+                                 (size_t{1} << 31) - 1,
+                                 size_t{1} << 31,
+                                 size_t{1} << 32,
+                                 (size_t{1} << 35) - 1};
+
+    const auto random_sizes = test_utils::get_random_data<size_t>(1,
+                                                                  (size_t{1} << 30) + 1,
+                                                                  (size_t{1} << 35) - 2,
+                                                                  std::random_device{}());
+    sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
+    std::sort(sizes.begin(), sizes.end());
+    return sizes;
+}
+
+/// \brief An output iterator which checks the values written to it.
+/// The expected output values should be partitioned with regards to the \p modulo parameter.
+/// The check algorithm depends on \p CheckValue.
+template<class CheckValue>
+class check_modulo_iterator
+{
+public:
+    using value_type        = CheckValue;
+    using reference         = CheckValue;
+    using pointer           = CheckValue*;
+    using iterator_category = std::random_access_iterator_tag;
+    using difference_type   = std::ptrdiff_t;
+
+    ROCPRIM_HOST_DEVICE
+    check_modulo_iterator(const size_t        modulo,
+                          const size_t        size,
+                          unsigned int* const incorrect_flag)
+        : current_index_(0), modulo_(modulo), size_(size), incorrect_flag_(incorrect_flag)
+    {}
+
+    ROCPRIM_HOST_DEVICE bool operator==(const check_modulo_iterator& rhs)
+    {
+        return current_index_ == rhs.current_index_;
+    }
+    ROCPRIM_HOST_DEVICE bool operator!=(const check_modulo_iterator& rhs)
+    {
+        return !(*this == rhs);
+    }
+    ROCPRIM_HOST_DEVICE reference operator*()
+    {
+        return value_type(current_index_, modulo_, size_, incorrect_flag_);
+    }
+    ROCPRIM_HOST_DEVICE reference operator[](const difference_type distance)
+    {
+        return *(*this + distance);
+    }
+    ROCPRIM_HOST_DEVICE check_modulo_iterator& operator+=(const difference_type rhs)
+    {
+        current_index_ += rhs;
+        return *this;
+    }
+    ROCPRIM_HOST_DEVICE check_modulo_iterator& operator-=(const difference_type rhs)
+    {
+        current_index_ -= rhs;
+        return *this;
+    }
+    ROCPRIM_HOST_DEVICE difference_type operator-(const check_modulo_iterator& rhs) const
+    {
+        return current_index_ - rhs.current_index_;
+    }
+    ROCPRIM_HOST_DEVICE check_modulo_iterator operator+(const difference_type rhs) const
+    {
+        return check_modulo_iterator(*this) += rhs;
+    }
+    ROCPRIM_HOST_DEVICE check_modulo_iterator operator-(const difference_type rhs) const
+    {
+        return check_modulo_iterator(*this) -= rhs;
+    }
+    ROCPRIM_HOST_DEVICE check_modulo_iterator& operator++()
+    {
+        ++current_index_;
+        return *this;
+    }
+    ROCPRIM_HOST_DEVICE check_modulo_iterator& operator--()
+    {
+        --current_index_;
+        return *this;
+    }
+    ROCPRIM_HOST_DEVICE check_modulo_iterator operator++(int)
+    {
+        return ++check_modulo_iterator{*this};
+    }
+    ROCPRIM_HOST_DEVICE check_modulo_iterator operator--(int)
+    {
+        return --check_modulo_iterator{*this};
+    }
+
+private:
+    size_t        current_index_;
+    size_t        modulo_;
+    size_t        size_;
+    unsigned int* incorrect_flag_;
+};
+
+/// \brief Checks if the selected values (multiples of \p modulo ) are written to the beginning of the
+/// range and unselected values are written to the end of range in reverse order.
+/// For example, in case of \p modulo 3, and a \p size of 10, the following output is expected:
+/// [0, 3, 6, 9, 8, 7, 5, 4, 2, 1]
+/// If an unexpected value is set, \p *incorrect_flag is atomically set to 1.
+class check_two_way_modulo
+{
+public:
+    ROCPRIM_HOST_DEVICE
+    check_two_way_modulo(const size_t        current_index,
+                         const size_t        modulo,
+                         const size_t        size,
+                         unsigned int* const incorrect_flag)
+        : current_index_(current_index)
+        , modulo_(modulo)
+        , size_(size)
+        , incorrect_flag_(incorrect_flag)
+    {}
+
+    ROCPRIM_DEVICE
+    check_two_way_modulo& operator=(const size_t value)
+    {
+        const bool   is_mod         = (value % modulo_) == 0;
+        const size_t expected_index = is_mod ? value / modulo_ : size_ - value + value / modulo_;
+        if(current_index_ != expected_index)
+        {
+            rocprim::detail::atomic_exch(incorrect_flag_, 1);
+        }
+        return *this;
+    }
+
+private:
+    size_t        current_index_;
+    size_t        modulo_;
+    size_t        size_;
+    unsigned int* incorrect_flag_;
+};
+
+/// \brief Checks if multiples of \p modulo are written to the iterator.
+/// If an unexpected value is set, \p *incorrect_flag is atomically set to 1.
+class check_modulo
+{
+public:
+    ROCPRIM_HOST_DEVICE
+    check_modulo(size_t current_index, size_t modulo, size_t /*size*/, unsigned int* incorrect_flag)
+        : current_index_(current_index), modulo_(modulo), incorrect_flag_(incorrect_flag)
+    {}
+
+    ROCPRIM_DEVICE
+    check_modulo& operator=(size_t value)
+    {
+        const bool   is_mod         = (value % modulo_) == 0;
+        const size_t expected_index = value / modulo_;
+        if(!is_mod || current_index_ != expected_index)
+        {
+            rocprim::detail::atomic_exch(incorrect_flag_, 1);
+        }
+        return *this;
+    }
+
+private:
+    size_t        current_index_;
+    size_t        modulo_;
+    unsigned int* incorrect_flag_;
+};
+
+/// \brief Checks if multiples of \p modulo are not written to the iterator,
+/// but multiples of \p modulo-1 are written.
+/// If an unexpected value is set, \p *incorrect_flag is atomically set to 1.
+class check_modulo_exclude
+{
+public:
+    ROCPRIM_HOST_DEVICE
+    check_modulo_exclude(const size_t current_index,
+                         const size_t modulo,
+                         const size_t /*size*/,
+                         unsigned int* const incorrect_flag)
+        : current_index_(current_index)
+        , modulo_(modulo)
+        , modulo_exclude_(modulo_ - 1)
+        , incorrect_flag_(incorrect_flag)
+    {}
+
+    ROCPRIM_DEVICE
+    check_modulo_exclude& operator=(const size_t value)
+    {
+        const bool   is_mod         = value % modulo_ == 0 && value % modulo_exclude_ != 0;
+        const size_t expected_index = value / modulo_ - value / (modulo_exclude_ * modulo_) - 1;
+        if(!is_mod || current_index_ != expected_index)
+        {
+            rocprim::detail::atomic_exch(incorrect_flag_, 1);
+        }
+        return *this;
+    }
+
+private:
+    size_t        current_index_;
+    size_t        modulo_;
+    size_t        modulo_exclude_;
+    unsigned int* incorrect_flag_;
+};
+
+struct modulo_predicate
+{
+    size_t modulo_;
+
+    ROCPRIM_DEVICE
+    bool operator()(const size_t value) const
+    {
+        return value % modulo_ == 0;
+    }
+};
+
+} // namespace
+
+struct RocprimDevicePartitionLargeInputTests : public ::testing::TestWithParam<size_t>
+{};
+
+INSTANTIATE_TEST_SUITE_P(RocprimDevicePartitionLargeInputTest,
+                         RocprimDevicePartitionLargeInputTests,
+                         ::testing::Values(2, 2048, 38713));
+
+TEST_P(RocprimDevicePartitionLargeInputTests, LargeInputPartition)
+{
+    static constexpr bool        debug_synchronous = false;
+    static constexpr hipStream_t stream            = 0;
+
+    const int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    const auto modulo = GetParam();
+    const auto sizes  = get_large_sizes();
+
+    for(const auto size : sizes)
+    {
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        const auto input_iterator = rocprim::make_counting_iterator(static_cast<size_t>(0));
+        const modulo_predicate predicate{modulo};
+
+        unsigned int* d_incorrect_flag{};
+        HIP_CHECK(test_common_utils::hipMallocHelper(&d_incorrect_flag, sizeof(*d_incorrect_flag)));
+        HIP_CHECK(hipMemsetAsync(d_incorrect_flag, 0, sizeof(*d_incorrect_flag), stream));
+        const auto output_checker_it
+            = check_modulo_iterator<check_two_way_modulo>(modulo, size, d_incorrect_flag);
+
+        size_t* d_count_output{};
+        HIP_CHECK(test_common_utils::hipMallocHelper(&d_count_output, sizeof(*d_count_output)));
+
+        void*  d_temporary_storage{};
+        size_t temporary_storage_size{};
+        HIP_CHECK(rocprim::partition(d_temporary_storage,
+                                     temporary_storage_size,
+                                     input_iterator,
+                                     output_checker_it,
+                                     d_count_output,
+                                     size,
+                                     predicate,
+                                     stream,
+                                     debug_synchronous));
+
+        ASSERT_NE(0, temporary_storage_size);
+        HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_size));
+
+        HIP_CHECK(rocprim::partition(d_temporary_storage,
+                                     temporary_storage_size,
+                                     input_iterator,
+                                     output_checker_it,
+                                     d_count_output,
+                                     size,
+                                     predicate,
+                                     stream,
+                                     debug_synchronous));
+
+        size_t count_output{};
+        HIP_CHECK(hipMemcpyWithStream(&count_output,
+                                      d_count_output,
+                                      sizeof(count_output),
+                                      hipMemcpyDeviceToHost,
+                                      stream));
+
+        const size_t expected_output = rocprim::detail::ceiling_div(size, modulo);
+        ASSERT_EQ(count_output, expected_output);
+
+        unsigned int incorrect_flag{};
+        HIP_CHECK(hipMemcpyWithStream(&incorrect_flag,
+                                      d_incorrect_flag,
+                                      sizeof(incorrect_flag),
+                                      hipMemcpyDeviceToHost,
+                                      stream));
+
+        ASSERT_EQ(incorrect_flag, 0);
+
+        HIP_CHECK(hipFree(d_temporary_storage));
+        HIP_CHECK(hipFree(d_count_output));
+        HIP_CHECK(hipFree(d_incorrect_flag));
+    }
+}
+
+TEST_P(RocprimDevicePartitionLargeInputTests, LargeInputPartitionThreeWay)
+{
+    static constexpr bool        debug_synchronous = false;
+    static constexpr hipStream_t stream            = 0;
+
+    const int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    const auto modulo_a = GetParam();
+    const auto modulo_b = modulo_a + 1;
+    const auto sizes    = get_large_sizes();
+
+    for(const auto size : sizes)
+    {
+        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        const auto input_iterator = rocprim::make_counting_iterator(static_cast<size_t>(0));
+        const auto predicate_a    = modulo_predicate{modulo_a};
+        const auto predicate_b    = modulo_predicate{modulo_b};
+
+        unsigned int* d_incorrect_flag{};
+        HIP_CHECK(test_common_utils::hipMallocHelper(&d_incorrect_flag, sizeof(*d_incorrect_flag)));
+        HIP_CHECK(hipMemsetAsync(d_incorrect_flag, 0, sizeof(*d_incorrect_flag), stream));
+        const auto output_checker_a
+            = check_modulo_iterator<check_modulo>(modulo_a, size, d_incorrect_flag);
+        const auto output_checker_b
+            = check_modulo_iterator<check_modulo_exclude>(modulo_b, size, d_incorrect_flag);
+        const auto unselected_output = rocprim::make_discard_iterator();
+
+        size_t* d_count_output{};
+        HIP_CHECK(test_common_utils::hipMallocHelper(&d_count_output, 2 * sizeof(*d_count_output)));
+
+        void*  d_temporary_storage{};
+        size_t temporary_storage_size{};
+        HIP_CHECK(rocprim::partition_three_way(d_temporary_storage,
+                                               temporary_storage_size,
+                                               input_iterator,
+                                               output_checker_a,
+                                               output_checker_b,
+                                               unselected_output,
+                                               d_count_output,
+                                               size,
+                                               predicate_a,
+                                               predicate_b,
+                                               stream,
+                                               debug_synchronous));
+
+        ASSERT_NE(0, temporary_storage_size);
+        HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_size));
+
+        HIP_CHECK(rocprim::partition_three_way(d_temporary_storage,
+                                               temporary_storage_size,
+                                               input_iterator,
+                                               output_checker_a,
+                                               output_checker_b,
+                                               unselected_output,
+                                               d_count_output,
+                                               size,
+                                               predicate_a,
+                                               predicate_b,
+                                               stream,
+                                               debug_synchronous));
+
+        size_t count_output[2]{};
+        HIP_CHECK(hipMemcpyWithStream(&count_output,
+                                      d_count_output,
+                                      sizeof(count_output),
+                                      hipMemcpyDeviceToHost,
+                                      stream));
+
+        const size_t expected_output_a = rocprim::detail::ceiling_div(size, modulo_a);
+        // Beware: this only works when modulo_a and modulo_b are coprimes (e.g. when the difference is 1)
+        const size_t expected_output_b = rocprim::detail::ceiling_div(size, modulo_b)
+                                         - rocprim::detail::ceiling_div(size, modulo_a * modulo_b);
+        ASSERT_EQ(count_output[0], expected_output_a);
+        ASSERT_EQ(count_output[1], expected_output_b);
+
+        unsigned int incorrect_flag{};
+        HIP_CHECK(hipMemcpyWithStream(&incorrect_flag,
+                                      d_incorrect_flag,
+                                      sizeof(incorrect_flag),
+                                      hipMemcpyDeviceToHost,
+                                      stream));
+
+        ASSERT_EQ(incorrect_flag, 0);
+
+        HIP_CHECK(hipFree(d_temporary_storage));
+        HIP_CHECK(hipFree(d_count_output));
+        HIP_CHECK(hipFree(d_incorrect_flag));
     }
 }

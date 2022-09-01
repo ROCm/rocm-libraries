@@ -48,9 +48,9 @@ struct device_adjacent_difference_benchmark : public config_autotune_interface
 {
     static std::string get_name_pattern()
     {
-        return R"---((?P<algo>\S*)\<)---"
-               R"---((?P<datatype>\S*),\s*adjacent_difference_config\<\s*)---"
-               R"---((?P<block_size>[0-9]+),\s*(?P<items_per_thread>[0-9]+)\>\>)---";
+        return R"regex((?P<algo>\S*?)<)regex"
+               R"regex((?P<datatype>\S*),\s*adjacent_difference_config<\s*)regex"
+               R"regex((?P<block_size>[0-9]+),\s*(?P<items_per_thread>[0-9]+)>>)regex";
     }
 
     std::string name() const override
