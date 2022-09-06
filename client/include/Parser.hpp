@@ -79,7 +79,8 @@ void ParseOptions::parse_args(int argc, const char* argv[])
     }
 
     // regex for: "-f=val", "-f val", "--flag=val", and "--flag val"
-    std::regex cmd_regex("(--?)(\\w+)[=\\s](\\w+)");
+
+    std::regex cmd_regex("(--?)(\\w+)[=\\s](\\S+)");
 
     // Iterate over command line args
     for(int i = 1; i < argc; ++i)
@@ -114,17 +115,6 @@ void ParseOptions::parse_args(int argc, const char* argv[])
         std::string dash  = match[1];
         std::string flag  = match[2];
         std::string value = match[3];
-
-        if(dash == "--" && flag.size() == 1)
-        {
-            std::cout << "Must use verbose flag with \"--\"" << std::endl;
-            exit(EXIT_FAILURE);
-        }
-        if(dash == "-" && flag.size() != 1)
-        {
-            std::cout << "Must use single letter flag with \"-\"" << std::endl;
-            exit(EXIT_FAILURE);
-        }
 
         m_parsed_args.insert({flag, value});
     }
@@ -162,18 +152,23 @@ void ParseOptions::addArg(std::string name, Arg const& arg)
 }
 
 template <>
+std::string ParseOptions::get<std::string>(std::string name, std::string const defaultVal)
+{
+    auto flags = m_valid_args.at(name).flags();
+    for(auto flag : flags)
+    {
+        if(m_parsed_args.find(flag) != m_parsed_args.end())
+        {
+            return m_parsed_args.at(flag);
+        }
+    }
+    return defaultVal;
+}
+
+template <>
 int ParseOptions::get<int>(std::string name, int const defaultVal)
 {
-    std::vector<std::string> flags;
-    try
-    {
-        flags = m_valid_args.at(name).flags();
-    }
-    catch(const std::out_of_range& err)
-    {
-        std::cout << "Out of range error: " << err.what() << std::endl;
-    }
-
+    auto flags = m_valid_args.at(name).flags();
     for(auto flag : flags)
     {
         if(m_parsed_args.find(flag) != m_parsed_args.end())
@@ -181,23 +176,13 @@ int ParseOptions::get<int>(std::string name, int const defaultVal)
             return std::stoi(m_parsed_args.at(flag));
         }
     }
-
     return defaultVal;
 }
 
 template <>
 float ParseOptions::get<float>(std::string name, float const defaultVal)
 {
-    std::vector<std::string> flags;
-    try
-    {
-        flags = m_valid_args.at(name).flags();
-    }
-    catch(const std::out_of_range& err)
-    {
-        std::cout << "Out of range error: " << err.what() << std::endl;
-    }
-
+    auto flags = m_valid_args.at(name).flags();
     for(auto flag : flags)
     {
         if(m_parsed_args.find(flag) != m_parsed_args.end())
@@ -205,7 +190,6 @@ float ParseOptions::get<float>(std::string name, float const defaultVal)
             return std::stof(m_parsed_args.at(flag));
         }
     }
-
     return defaultVal;
 }
 

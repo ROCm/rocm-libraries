@@ -6,11 +6,12 @@
 
 #ifdef ROCROLLER_USE_HIP
 
-#include <atomic>
 #include <chrono>
 #include <map>
 #include <memory>
 #include <string>
+
+#include <rocRoller/Utilities/Timer.hpp>
 
 #include <hip/hip_runtime.h>
 
@@ -21,23 +22,23 @@
 
 namespace rocRoller
 {
-    class HIPTimer
+    class HIPTimer : public Timer
     {
     public:
         HIPTimer() = delete;
         HIPTimer(std::string name);
         HIPTimer(std::string name, hipStream_t stream);
-        ~HIPTimer();
+        virtual ~HIPTimer();
 
         /**
          * Start the timer.
          */
-        void tic();
+        void tic() override;
 
         /**
          * Stop the timer.
          */
-        void toc();
+        void toc() override;
 
         /**
          * Accumulate the total elapsed time.
@@ -45,10 +46,8 @@ namespace rocRoller
         void sync();
 
     private:
-        std::string                         m_name;
-        hipEvent_t                          m_start, m_stop;
-        hipStream_t                         m_stream;
-        std::chrono::steady_clock::duration m_elapsed;
+        hipEvent_t  m_hip_start, m_hip_stop;
+        hipStream_t m_hip_stream;
     };
 }
 

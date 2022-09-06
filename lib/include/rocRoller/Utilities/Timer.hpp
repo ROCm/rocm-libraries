@@ -82,18 +82,17 @@ namespace rocRoller
     public:
         Timer() = delete;
         Timer(std::string name);
-        //Timer(std::string name, float elapsed);
-        ~Timer();
+        virtual ~Timer();
 
         /**
          * Start the timer.
          */
-        void tic();
+        virtual void tic();
 
         /**
          * Stop the timer and accumulate the total elapsed time.
          */
-        void toc();
+        virtual void toc();
 
         /**
          * Get the elapsed time of this timer.
@@ -110,7 +109,7 @@ namespace rocRoller
          */
         size_t milliseconds() const;
 
-    private:
+    protected:
         std::string                           m_name;
         std::chrono::steady_clock::time_point m_start;
         std::chrono::steady_clock::duration   m_elapsed;

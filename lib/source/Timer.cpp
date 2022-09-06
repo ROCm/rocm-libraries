@@ -39,12 +39,16 @@ namespace rocRoller
 
     size_t TimerPool::nanoseconds(std::string const& name)
     {
+        if(getInstance().m_elapsed.count(name) <= 0)
+            return 0;
         auto elapsed = getInstance().m_elapsed.at(name).load();
         return std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed).count();
     }
 
     size_t TimerPool::milliseconds(std::string const& name)
     {
+        if(getInstance().m_elapsed.count(name) <= 0)
+            return 0;
         auto elapsed = getInstance().m_elapsed.at(name).load();
         return std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
     }
@@ -59,12 +63,12 @@ namespace rocRoller
         : m_name(name)
         , m_elapsed(0)
     {
-        tic();
+        Timer::tic();
     }
 
     Timer::~Timer()
     {
-        toc();
+        Timer::toc();
     }
 
     void Timer::tic()
