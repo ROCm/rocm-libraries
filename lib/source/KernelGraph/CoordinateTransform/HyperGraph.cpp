@@ -289,6 +289,27 @@ namespace rocRoller
             return getDimensions(std::move(tags));
         }
 
+        std::vector<Dimension> HyperGraph::getInputs(TagType tag, EdgeType edgeType) const
+        {
+            std::set<TagType> itags;
+
+            for(auto const& pair : m_edges)
+            {
+                if(edgeType == EdgeType::Any || pair.first.type == edgeType)
+                {
+                    if(std::find(pair.first.dtags.begin(), pair.first.dtags.end(), tag)
+                       != pair.first.dtags.end())
+                    {
+                        itags.insert(pair.first.stags.begin(), pair.first.stags.end());
+                    }
+                }
+            }
+
+            std::vector<TagType> tags(itags.begin(), itags.end());
+
+            return getDimensions(std::move(tags));
+        }
+
         std::vector<Dimension> HyperGraph::getLinearDimensions(std::unordered_set<int> ndtags) const
         {
             std::vector<Dimension> result;

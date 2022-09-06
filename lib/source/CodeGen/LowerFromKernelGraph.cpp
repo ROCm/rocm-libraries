@@ -616,16 +616,19 @@ namespace rocRoller
                 rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::LoadTiled()");
                 co_yield_(Instruction::Comment("GEN: LoadTiled"));
 
-                switch(load.tile.memoryType)
+                auto user = m_graph.coordinates.getDimension(User(load.tag));
+                auto tile = m_graph.coordinates.getDimension(MacroTile(load.tag));
+
+                switch(tile.memoryType)
                 {
                 case MemoryType::VGPR:
                 case MemoryType::LDS:
-                    co_yield loadMacroTileVGPR(load, load.user, load.tile, coords);
+                    co_yield loadMacroTileVGPR(load, user, tile, coords);
                     break;
                 case MemoryType::WAVE:
                 {
                     auto waveTile = m_graph.coordinates.getDimension(WaveTile(load.tag));
-                    co_yield loadMacroTileWAVE(load, load.user, waveTile, coords);
+                    co_yield loadMacroTileWAVE(load, user, waveTile, coords);
                 }
                 break;
                 default:
@@ -644,23 +647,29 @@ namespace rocRoller
                 rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::LoadLDSTile()");
                 co_yield_(Instruction::Comment("GEN: LoadLDSTile"));
 
+                auto user    = m_graph.coordinates.getDimension(User(load.tag));
+                auto tile    = m_graph.coordinates.getDimension(MacroTile(load.tag));
+                auto outputs = m_graph.coordinates.getOutputs(getTag(tile), EdgeType::DataFlow);
+                AssertFatal(outputs.size() == 1, "Invalid LoadLDSTile MacroTile to LDS edge.");
+
+                auto lds = std::get<LDS>(outputs[0]);
+
                 // Find the LDS allocation that contains the tile and store
                 // the offset of the beginning of the allocation into lds_offset.
-                auto ldsAllocation
-                    = m_context->registerTagManager()->getRegister(getTag(load.lds).ctag);
+                auto ldsAllocation = m_context->registerTagManager()->getRegister(getTag(lds).ctag);
 
                 auto vtype = ldsAllocation->variableType();
 
                 auto lds_offset = Register::Value::Placeholder(
                     m_context, Register::Type::Vector, DataType::Int32, 1);
 
-                coords.setCoordinate(Workitem(load.lds.tag, 0, nullptr, true), m_workitem[0]);
-                coords.setCoordinate(Workitem(load.lds.tag, 1, nullptr, true), m_workitem[1]);
+                coords.setCoordinate(Workitem(lds.tag, 0, nullptr, true), m_workitem[0]);
+                coords.setCoordinate(Workitem(lds.tag, 1, nullptr, true), m_workitem[1]);
 
                 auto lds_offset_expr
                     = (Expression::literal(ldsAllocation->getLDSAllocation()->offset())
-                       + coords.forward({load.lds})[0])
-                      * Expression::literal(product(load.tile.subTileSizes));
+                       + coords.forward({lds})[0])
+                      * Expression::literal(product(tile.subTileSizes));
 
                 auto numBytes = DataTypeInfo::Get(vtype).elementSize;
 
@@ -668,10 +677,10 @@ namespace rocRoller
                                   Expression::simplify(Expression::fuse(
                                       m_fastArith(lds_offset_expr * L(numBytes)))));
 
-                auto vgpr = m_context->registerTagManager()->getRegister(getTag(load.tile).ctag);
+                auto vgpr = m_context->registerTagManager()->getRegister(getTag(tile).ctag);
 
-                auto const m = load.tile.subTileSizes[0];
-                auto const n = load.tile.subTileSizes[1];
+                auto const m = tile.subTileSizes[0];
+                auto const n = tile.subTileSizes[1];
 
                 // TODO multi dimensional tiles
                 for(int i = 0; i < m; ++i)
@@ -696,8 +705,8 @@ namespace rocRoller
             {
                 rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::LoadVGPR()");
                 co_yield_(Instruction::Comment("GEN: LoadVGPR"));
-                auto user = load.user;
-                auto vgpr = VGPR(user.tag);
+                auto user = m_graph.coordinates.getDimension(User(load.tag));
+                auto vgpr = m_graph.coordinates.getDimension(VGPR(load.tag));
                 auto dst  = m_context->registerTagManager()->getRegister(
                     user.tag,
                     Register::Type::Vector,
@@ -985,15 +994,18 @@ namespace rocRoller
                 rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::StoreTiled()");
                 co_yield_(Instruction::Comment("GEN: StoreTiled"));
 
-                switch(store.tile.memoryType)
+                auto user = m_graph.coordinates.getDimension(User(store.tag, true));
+                auto tile = m_graph.coordinates.getDimension(MacroTile(store.tag, 0, true));
+
+                switch(tile.memoryType)
                 {
                 case MemoryType::VGPR:
-                    co_yield storeMacroTileVGPR(store, store.user, store.tile, coords);
+                    co_yield storeMacroTileVGPR(store, user, tile, coords);
                     break;
                 case MemoryType::WAVE:
                 {
                     auto waveTile = m_graph.coordinates.getDimension(WaveTile(store.tag, 2, true));
-                    co_yield storeMacroTileWAVE(store, store.user, waveTile, coords);
+                    co_yield storeMacroTileWAVE(store, user, waveTile, coords);
                 }
                 break;
                 default:
@@ -1006,25 +1018,31 @@ namespace rocRoller
             {
                 co_yield_(Instruction::Comment("GEN: StoreLDSTile"));
 
-                auto vtype = Operations::VariableTypeVisitor()(*m_command->findTag(store.tile.tag));
+                auto lds    = m_graph.coordinates.getDimension(LDS(store.tag));
+                auto inputs = m_graph.coordinates.getInputs(getTag(lds), EdgeType::DataFlow);
+                AssertFatal(inputs.size() == 1, "Invalid StoreLDSTile MacroTile to LDS edge.");
+
+                auto tile = std::get<MacroTile>(inputs[0]);
+
+                auto vtype = Operations::VariableTypeVisitor()(*m_command->findTag(tile.tag));
 
                 // Allocate LDS memory, and store the offset of the beginning of the allocation
                 // into lds_offset.
                 auto ldsAllocation = Register::Value::AllocateLDS(
-                    m_context, vtype, product(store.tile.subTileSizes) * product(m_workgroupSize));
+                    m_context, vtype, product(tile.subTileSizes) * product(m_workgroupSize));
 
-                m_context->registerTagManager()->addRegister(getTag(store.lds).ctag, ldsAllocation);
+                m_context->registerTagManager()->addRegister(getTag(lds).ctag, ldsAllocation);
 
                 auto lds_offset = Register::Value::Placeholder(
                     m_context, Register::Type::Vector, DataType::Int32, 1);
 
-                coords.setCoordinate(Workitem(store.lds.tag, 0, nullptr, true), m_workitem[0]);
-                coords.setCoordinate(Workitem(store.lds.tag, 1, nullptr, true), m_workitem[1]);
+                coords.setCoordinate(Workitem(lds.tag, 0, nullptr, true), m_workitem[0]);
+                coords.setCoordinate(Workitem(lds.tag, 1, nullptr, true), m_workitem[1]);
 
                 auto lds_offset_expr
                     = (Expression::literal(ldsAllocation->getLDSAllocation()->offset())
-                       + coords.forward({store.lds})[0])
-                      * Expression::literal(product(store.tile.subTileSizes));
+                       + coords.forward({lds})[0])
+                      * Expression::literal(product(tile.subTileSizes));
 
                 auto numBytes = DataTypeInfo::Get(vtype).elementSize;
                 co_yield generate(lds_offset,
@@ -1033,10 +1051,10 @@ namespace rocRoller
 
                 // Temporary register that is used to copy the data from global memory to
                 // local memory.
-                auto vgpr = m_context->registerTagManager()->getRegister(getTag(store.tile).ctag);
+                auto vgpr = m_context->registerTagManager()->getRegister(getTag(tile).ctag);
 
-                auto const m = store.tile.subTileSizes[0];
-                auto const n = store.tile.subTileSizes[1];
+                auto const m = tile.subTileSizes[0];
+                auto const n = tile.subTileSizes[1];
 
                 // TODO multi dimensional tiles
                 for(int i = 0; i < m; ++i)
@@ -1067,13 +1085,14 @@ namespace rocRoller
 
                 coords.setCoordinate(Workitem(store.tag, 0, nullptr, true), m_workitem[0]);
 
-                auto indexes = coords.forward({store.user});
+                auto user    = m_graph.coordinates.getDimension(User(store.tag, true));
+                auto indexes = coords.forward({user});
 
                 co_yield offset->allocate();
                 co_yield generateOffset(offset, indexes[0], src->variableType().dataType);
 
                 Register::ValuePtr s_ptr;
-                co_yield m_context->argLoader()->getValue(store.user.argumentName(), s_ptr);
+                co_yield m_context->argLoader()->getValue(user.argumentName(), s_ptr);
 
                 auto v_ptr = Register::Value::Placeholder(
                     m_context, Register::Type::Vector, src->variableType().getPointer(), 1);

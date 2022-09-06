@@ -153,16 +153,7 @@ namespace rocRoller
          */
         struct LoadLinear : public BaseOperation
         {
-            LoadLinear() = delete;
-            LoadLinear(int tag, CoordinateTransform::User user, CoordinateTransform::Linear linear)
-                : BaseOperation(tag)
-                , user(user)
-                , linear(linear)
-            {
-            }
-
-            CoordinateTransform::User   user;
-            CoordinateTransform::Linear linear;
+            using BaseOperation::BaseOperation;
 
             virtual std::string toString() const override
             {
@@ -183,20 +174,11 @@ namespace rocRoller
          */
         struct LoadTiled : public BaseOperation
         {
-            LoadTiled() = delete;
-            LoadTiled(int tag, CoordinateTransform::User user, CoordinateTransform::MacroTile tile)
-                : BaseOperation(tag)
-                , user(user)
-                , tile(tile)
-            {
-            }
-
-            CoordinateTransform::User      user;
-            CoordinateTransform::MacroTile tile;
+            using BaseOperation::BaseOperation;
 
             virtual std::string toString() const override
             {
-                return concatenate("LoadTiled(", tag, ", ", user, ", ", tile, ")");
+                return concatenate("LoadTiled(", tag, ")");
             }
         };
 
@@ -205,14 +187,7 @@ namespace rocRoller
          */
         struct LoadVGPR : public BaseOperation
         {
-            LoadVGPR() = delete;
-            LoadVGPR(int tag, CoordinateTransform::User user)
-                : BaseOperation(tag)
-                , user(user)
-            {
-            }
-
-            CoordinateTransform::User user;
+            using BaseOperation::BaseOperation;
 
             virtual std::string toString() const override
             {
@@ -223,19 +198,9 @@ namespace rocRoller
         /**
          * LoadLDSTile - loads a tile from LDS
          */
-        struct LoadLDSTile
+        struct LoadLDSTile : BaseOperation
         {
-            int                            tag;
-            CoordinateTransform::MacroTile tile;
-            CoordinateTransform::LDS       lds;
-
-            LoadLDSTile() = delete;
-            LoadLDSTile(int tag, CoordinateTransform::MacroTile tile, CoordinateTransform::LDS lds)
-                : tag(tag)
-                , tile(tile)
-                , lds(lds)
-            {
-            }
+            using BaseOperation::BaseOperation;
 
             virtual std::string toString() const
             {
@@ -269,16 +234,7 @@ namespace rocRoller
          */
         struct StoreLinear : public BaseOperation
         {
-            StoreLinear() = delete;
-            StoreLinear(int tag, CoordinateTransform::Linear linear, CoordinateTransform::User user)
-                : BaseOperation(tag)
-                , linear(linear)
-                , user(user)
-            {
-            }
-
-            CoordinateTransform::User   user;
-            CoordinateTransform::Linear linear;
+            using BaseOperation::BaseOperation;
 
             virtual std::string toString() const override
             {
@@ -294,16 +250,7 @@ namespace rocRoller
          */
         struct StoreTiled : public BaseOperation
         {
-            StoreTiled() = delete;
-            StoreTiled(int tag, CoordinateTransform::MacroTile tile, CoordinateTransform::User user)
-                : BaseOperation(tag)
-                , user(user)
-                , tile(tile)
-            {
-            }
-
-            CoordinateTransform::User      user;
-            CoordinateTransform::MacroTile tile;
+            using BaseOperation::BaseOperation;
 
             virtual std::string toString() const override
             {
@@ -316,14 +263,7 @@ namespace rocRoller
          */
         struct StoreVGPR : public BaseOperation
         {
-            StoreVGPR() = delete;
-            StoreVGPR(int tag, CoordinateTransform::User user)
-                : BaseOperation(tag)
-                , user(user)
-            {
-            }
-
-            CoordinateTransform::User user;
+            using BaseOperation::BaseOperation;
 
             virtual std::string toString() const override
             {
@@ -334,19 +274,9 @@ namespace rocRoller
         /**
          * StoreLDSTile - store a tile into LDS
          */
-        struct StoreLDSTile
+        struct StoreLDSTile : public BaseOperation
         {
-            int                            tag;
-            CoordinateTransform::MacroTile tile;
-            CoordinateTransform::LDS       lds;
-
-            StoreLDSTile() = delete;
-            StoreLDSTile(int tag, CoordinateTransform::LDS lds, CoordinateTransform::MacroTile tile)
-                : tag(tag)
-                , lds(lds)
-                , tile(tile)
-            {
-            }
+            using BaseOperation::BaseOperation;
 
             virtual std::string toString() const
             {

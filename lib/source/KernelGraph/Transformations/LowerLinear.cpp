@@ -1,3 +1,4 @@
+#include "KernelGraph/CoordinateTransform/Dimension.hpp"
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Visitors.hpp>
@@ -39,12 +40,33 @@ namespace rocRoller
                 // NOP; don't need MakeOutput edges anymore
             }
 
-            virtual void visitEdge(HyperGraph&,
+            virtual void visitEdge(HyperGraph& coordGraph,
                                    ControlGraph::ControlGraph&,
-                                   Location const&,
-                                   DataFlow const&) override
+                                   Location const& loc,
+                                   DataFlow const& df) override
             {
-                // NOP; don't need DataFlow edges anymore
+                // Don't need DataFlow edges to/from Linear anymore
+                bool drop = false;
+                for(auto const& d : loc.srcDims)
+                {
+                    if(std::holds_alternative<Linear>(d))
+                    {
+                        drop = true;
+                        break;
+                    }
+                }
+                for(auto const& d : loc.dstDims)
+                {
+                    if(std::holds_alternative<Linear>(d))
+                    {
+                        drop = true;
+                        break;
+                    }
+                }
+                if(!drop)
+                {
+                    coordGraph.addEdge(loc.srcDims, loc.dstDims, df);
+                }
             }
 
             virtual void visitOperation(HyperGraph&                    coordGraph,
@@ -71,20 +93,23 @@ namespace rocRoller
             {
                 auto wavefront_size = wavefrontSize();
 
-                auto wg   = CoordinateTransform::Workgroup(load.linear.tag);
+                auto user   = loc.coordGraph.getDimension(User(load.tag));
+                auto linear = loc.coordGraph.getDimension(Linear(load.tag));
+
+                auto wg   = CoordinateTransform::Workgroup(linear.tag);
                 wg.stride = workgroupSize()[0];
                 wg.size   = workgroupCountX();
 
-                auto wi = CoordinateTransform::Workitem(load.linear.tag, 0, wavefront_size);
+                auto wi = CoordinateTransform::Workitem(linear.tag, 0, wavefront_size);
 
-                auto vgpr = CoordinateTransform::VGPR(load.linear.tag);
+                auto vgpr = CoordinateTransform::VGPR(linear.tag);
 
-                coordGraph.addEdge({load.linear}, {wg, wi}, CoordinateTransform::Tile());
+                coordGraph.addEdge({linear}, {wg, wi}, CoordinateTransform::Tile());
                 coordGraph.addEdge({wg, wi}, {vgpr}, CoordinateTransform::Forget());
 
-                coordGraph.addEdge({load.user}, {vgpr}, CoordinateTransform::DataFlow());
+                coordGraph.addEdge({user}, {vgpr}, CoordinateTransform::DataFlow());
                 controlGraph.addEdge(
-                    loc.srcs, {ControlGraph::LoadVGPR(load.tag, load.user)}, ControlGraph::Body());
+                    loc.srcs, {ControlGraph::LoadVGPR(load.tag)}, ControlGraph::Body());
             }
 
             virtual void visitOperation(HyperGraph&                      coordGraph,
@@ -92,10 +117,10 @@ namespace rocRoller
                                         Location const&                  loc,
                                         ControlGraph::StoreLinear const& store) override
             {
-                auto linear = store.linear;
-                auto vgpr   = CoordinateTransform::VGPR(linear.tag);
-
                 auto wavefront_size = wavefrontSize();
+
+                auto linear = loc.coordGraph.getDimension(Linear(store.tag));
+                auto user   = loc.coordGraph.getDimension(User(store.tag, true));
 
                 auto wg   = CoordinateTransform::Workgroup(linear.tag, 0, true);
                 wg.stride = workgroupSize()[0];
@@ -103,14 +128,15 @@ namespace rocRoller
 
                 auto wi = CoordinateTransform::Workitem(linear.tag, 0, wavefront_size, true);
 
+                auto vgpr = CoordinateTransform::VGPR(linear.tag);
+
                 linear.output = true;
 
                 coordGraph.addEdge({vgpr}, {wg, wi}, CoordinateTransform::Inherit());
                 coordGraph.addEdge({wg, wi}, {linear}, CoordinateTransform::Flatten());
 
-                coordGraph.addEdge({vgpr}, {store.user}, CoordinateTransform::DataFlow());
-                controlGraph.addEdge({store.user},
-                                     {ControlGraph::StoreVGPR(store.tag, store.user)});
+                coordGraph.addEdge({vgpr}, {user}, CoordinateTransform::DataFlow());
+                controlGraph.addEdge({user}, {ControlGraph::StoreVGPR(store.tag)});
             }
         };
 

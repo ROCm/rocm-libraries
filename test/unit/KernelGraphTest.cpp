@@ -477,18 +477,20 @@ namespace KernelGraphTest
           digraph {
            { "User{0, NA, i}" } -> { "SubDimension{0, 0, CommandArgument(Load_Tiled_0_size_0), i}", "SubDimension{0, 1, CommandArgument(Load_Tiled_0_size_1), i}" } [color=blue label="Split"]
            { "SubDimension{0, 0, CommandArgument(Load_Tiled_0_size_0), i}", "SubDimension{0, 1, CommandArgument(Load_Tiled_0_size_1), i}" } -> { "MacroTile{0, NA, i}" } [color=blue label="ConstructTensorTile"]
+           { "User{0, NA, i}" } -> { "MacroTile{0, NA, i}" } [color=red label="DataFlow"]
            { "User{1, NA, i}" } -> { "SubDimension{1, 0, CommandArgument(Load_Tiled_1_size_0), i}", "SubDimension{1, 1, CommandArgument(Load_Tiled_1_size_1), i}" } [color=blue label="Split"]
            { "SubDimension{1, 0, CommandArgument(Load_Tiled_1_size_0), i}", "SubDimension{1, 1, CommandArgument(Load_Tiled_1_size_1), i}" } -> { "MacroTile{1, NA, i}" } [color=blue label="ConstructTensorTile"]
+           { "User{1, NA, i}" } -> { "MacroTile{1, NA, i}" } [color=red label="DataFlow"]
            { "MacroTile{0, NA, i}", "MacroTile{1, NA, i}" } -> { "MacroTile{2, NA, i}" } [color=red label="DataFlow"]
 
           subgraph clusterCF {"krnKernel"[label="Kernel"];
-          "krnLoadTiled(0, User{0, NA, i}, MacroTile{0, NA, i})"[label="LoadTiled(0, User{0, NA, i}, MacroTile{0, NA, i})"];
-          "krnLoadTiled(1, User{1, NA, i}, MacroTile{1, NA, i})"[label="LoadTiled(1, User{1, NA, i}, MacroTile{1, NA, i})"];
+          "krnLoadTiled(0)"[label="LoadTiled(0)"];
+          "krnLoadTiled(1)"[label="LoadTiled(1)"];
           "krnTensorContraction(2, 0, 1)"[label="TensorContraction(2, 0, 1)"];
-          "krnKernel" -> "krnLoadTiled(0, User{0, NA, i}, MacroTile{0, NA, i})"[label="Body"];
-          "krnKernel" -> "krnLoadTiled(1, User{1, NA, i}, MacroTile{1, NA, i})"[label="Body"];
-          "krnLoadTiled(0, User{0, NA, i}, MacroTile{0, NA, i})" -> "krnTensorContraction(2, 0, 1)"[label="Sequence"];
-          "krnLoadTiled(1, User{1, NA, i}, MacroTile{1, NA, i})" -> "krnTensorContraction(2, 0, 1)"[label="Sequence"];
+          "krnKernel" -> "krnLoadTiled(0)"[label="Body"];
+          "krnKernel" -> "krnLoadTiled(1)"[label="Body"];
+          "krnLoadTiled(0)" -> "krnTensorContraction(2, 0, 1)"[label="Sequence"];
+          "krnLoadTiled(1)" -> "krnTensorContraction(2, 0, 1)"[label="Sequence"];
           } }
         ).";
 

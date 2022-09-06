@@ -162,6 +162,8 @@ namespace rocRoller
 
             std::vector<Dimension> getOutputs(TagType tag, EdgeType edgeType) const;
 
+            std::vector<Dimension> getInputs(TagType tag, EdgeType edgeType) const;
+
             /**
              * Return vector of all dimensions.
              */

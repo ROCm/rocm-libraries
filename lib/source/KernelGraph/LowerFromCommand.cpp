@@ -95,7 +95,7 @@ namespace rocRoller
                 m_kgraph.coordinates.addEdge({user}, {linear}, CoordinateTransform::DataFlow());
 
                 m_kgraph.control.addEdge({ControlGraph::Kernel()},
-                                         {ControlGraph::LoadLinear(load.getTag(), user, linear)},
+                                         {ControlGraph::LoadLinear(load.getTag())},
                                          ControlGraph::Body());
             }
 
@@ -109,10 +109,11 @@ namespace rocRoller
             {
                 auto user = CoordinateTransform::User(load.getTag(), load.data()->name());
                 auto vgpr = CoordinateTransform::VGPR(load.getTag());
+
                 m_kgraph.coordinates.addEdge({user}, {vgpr}, CoordinateTransform::DataFlow());
 
                 m_kgraph.control.addEdge({ControlGraph::Kernel()},
-                                         {ControlGraph::LoadVGPR(load.getTag(), user)},
+                                         {ControlGraph::LoadVGPR(load.getTag())},
                                          ControlGraph::Body());
             }
 
@@ -166,10 +167,10 @@ namespace rocRoller
                 m_kgraph.coordinates.addEdge({user}, dims, CoordinateTransform::Split());
                 m_kgraph.coordinates.addEdge(
                     dims, {tiled}, CoordinateTransform::ConstructMacroTile());
+                m_kgraph.coordinates.addEdge({user}, {tiled}, CoordinateTransform::DataFlow());
 
-                m_kgraph.control.addEdge({ControlGraph::Kernel()},
-                                         {ControlGraph::LoadTiled(tag, user, tiled)},
-                                         ControlGraph::Body());
+                m_kgraph.control.addEdge(
+                    {ControlGraph::Kernel()}, {ControlGraph::LoadTiled(tag)}, ControlGraph::Body());
             }
 
             /* T_Store_Linear becomes:
@@ -202,17 +203,15 @@ namespace rocRoller
 
                 auto inLinear  = CoordinateTransform::Linear(store.getTag());
                 auto outLinear = CoordinateTransform::Linear(store.getTag(), true);
+                auto user = CoordinateTransform::User(store.getTag(), store.data()->name(), true);
 
                 m_kgraph.coordinates.addEdge(
                     {inLinear}, {outLinear}, CoordinateTransform::MakeOutput());
                 m_kgraph.coordinates.addEdge({outLinear}, dims, CoordinateTransform::Split());
-
-                auto user = CoordinateTransform::User(store.getTag(), store.data()->name(), true);
                 m_kgraph.coordinates.addEdge(dims, {user}, CoordinateTransform::Join());
                 m_kgraph.coordinates.addEdge({inLinear}, {user}, CoordinateTransform::DataFlow());
 
-                m_kgraph.control.addEdge(
-                    {user}, {ControlGraph::StoreLinear(store.getTag(), inLinear, user)});
+                m_kgraph.control.addEdge({user}, {ControlGraph::StoreLinear(store.getTag())});
             }
 
             /* T_Store_Tiled becomes:
@@ -242,17 +241,16 @@ namespace rocRoller
 
                 auto inTile  = CoordinateTransform::MacroTile(store.getTag(), dims.size());
                 auto outTile = CoordinateTransform::MacroTile(store.getTag(), dims.size(), true);
+                auto user = CoordinateTransform::User(store.getTag(), store.data()->name(), true);
 
                 m_kgraph.coordinates.addEdge(
                     {inTile}, {outTile}, CoordinateTransform::MakeOutput());
                 m_kgraph.coordinates.addEdge(
                     {outTile}, dims, CoordinateTransform::DestructMacroTile());
-
-                auto user = CoordinateTransform::User(store.getTag(), store.data()->name(), true);
                 m_kgraph.coordinates.addEdge(dims, {user}, CoordinateTransform::Join());
+                m_kgraph.coordinates.addEdge({outTile}, {user}, CoordinateTransform::DataFlow());
 
-                m_kgraph.control.addEdge({user},
-                                         {ControlGraph::StoreTiled(store.getTag(), outTile, user)});
+                m_kgraph.control.addEdge({user}, {ControlGraph::StoreTiled(store.getTag())});
             }
 
             /*
@@ -308,8 +306,8 @@ namespace rocRoller
                 // contraction dims are {1} and {0}, which is matrix multiplication
                 auto TC = ControlGraph::TensorContraction(mul.getTag(), A, B, {1}, {0});
 
-                auto loadA = ControlGraph::LoadTiled(A.tag, CoordinateTransform::User(A.tag), A);
-                auto loadB = ControlGraph::LoadTiled(B.tag, CoordinateTransform::User(B.tag), B);
+                auto loadA = ControlGraph::LoadTiled(A.tag);
+                auto loadB = ControlGraph::LoadTiled(B.tag);
 
                 m_kgraph.control.addEdge({loadA, loadB}, {TC}, ControlGraph::Sequence());
 #ifndef NDEBUG

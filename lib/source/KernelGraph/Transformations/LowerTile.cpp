@@ -1,3 +1,5 @@
+#include "KernelGraph/CoordinateTransform/Dimension.hpp"
+#include "KernelGraph/CoordinateTransform/HyperGraph.hpp"
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
@@ -28,6 +30,35 @@ namespace rocRoller
                 : BaseGraphVisitor(context)
                 , m_kernel(context->kernel())
             {
+            }
+
+            virtual void visitEdge(HyperGraph& coordGraph,
+                                   ControlGraph::ControlGraph&,
+                                   Location const& loc,
+                                   DataFlow const& df) override
+            {
+                // Don't need DataFlow edges to/from MacroTile anymore
+                bool drop = false;
+                for(auto const& d : loc.srcDims)
+                {
+                    if(std::holds_alternative<MacroTile>(d))
+                    {
+                        drop = true;
+                        break;
+                    }
+                }
+                for(auto const& d : loc.dstDims)
+                {
+                    if(std::holds_alternative<MacroTile>(d))
+                    {
+                        drop = true;
+                        break;
+                    }
+                }
+                if(!drop)
+                {
+                    coordGraph.addEdge(loc.srcDims, loc.dstDims, df);
+                }
             }
 
             void loadMacroTile(HyperGraph&                    coordGraph,
@@ -87,6 +118,14 @@ namespace rocRoller
 
                     coordGraph.addEdge({n_thr_x}, {workitem_x}, PassThrough());
                     coordGraph.addEdge({n_thr_y}, {workitem_y}, PassThrough());
+
+                    if(mac_tile.memoryType == MemoryType::VGPR)
+                    {
+                        auto vgpr = VGPR(mac_tile.tag);
+                        coordGraph.addEdge({user}, {vgpr}, DataFlow());
+                    }
+
+                    // User -> DataFlow() -> LDS gets added in addLDSOps
                 }
                 break;
 
@@ -243,7 +282,10 @@ namespace rocRoller
                     }
                 }
 
-                loadMacroTile(coordGraph, controlGraph, loc, load, load.user, load.tile);
+                auto user = loc.coordGraph.getDimension(User(load.tag));
+                auto tile = loc.coordGraph.getDimension(MacroTile(load.tag));
+
+                loadMacroTile(coordGraph, controlGraph, loc, load, user, tile);
 
                 if(connect)
                     BaseGraphVisitor::visitOperation(coordGraph, controlGraph, loc, load);
@@ -418,7 +460,9 @@ namespace rocRoller
                                         ControlGraph::StoreTiled const& store) override
             {
                 rocRoller::Log::getLogger()->debug("KernelGraph::LowerTileVisitor::StoreTiled()");
-                storeMacroTile(coordGraph, controlGraph, loc, store, store.user, store.tile);
+                auto user = loc.coordGraph.getDimension(User(store.tag, true));
+                auto tile = loc.coordGraph.getDimension(MacroTile(store.tag, 2, true));
+                storeMacroTile(coordGraph, controlGraph, loc, store, user, tile);
             }
 
         private:
@@ -432,18 +476,17 @@ namespace rocRoller
                        std::shared_ptr<Context>       context,
                        const ControlGraph::LoadTiled& load)
         {
-            if(load.tile.memoryType == MemoryType::LDS)
-            {
-                auto resultTag    = controlGraph.allocateTag();
-                auto ldsTag       = controlGraph.allocateTag();
-                auto barrierTag   = controlGraph.allocateTag();
-                auto lds          = LDS(ldsTag);
-                auto newMacroTile = load.tile;
+            auto user = coordGraph.getDimension(User(load.tag));
+            auto tile = coordGraph.getDimension(MacroTile(load.tag));
 
-                auto newLoad  = ControlGraph::LoadTiled(resultTag, load.user, newMacroTile);
-                auto storeLDS = ControlGraph::StoreLDSTile(ldsTag, lds, newMacroTile);
-                auto barrier  = ControlGraph::Barrier(barrierTag);
-                auto loadLDS  = ControlGraph::LoadLDSTile(load.tag, newMacroTile, lds);
+            if(tile.memoryType == MemoryType::LDS)
+            {
+                auto ldsTag = controlGraph.allocateTag();
+                auto lds    = LDS(ldsTag);
+
+                auto storeLDS = ControlGraph::StoreLDSTile(ldsTag);
+                auto barrier  = ControlGraph::Barrier(ldsTag);
+                auto loadLDS  = ControlGraph::LoadLDSTile(load.tag);
 
                 // Add an edge to the coordinate graph to index into the LDS allocation.
                 auto workgroupSizes = context->kernel()->workgroupSize();
@@ -451,28 +494,19 @@ namespace rocRoller
                 auto workitem_x = Workitem(ldsTag, 0, literal(workgroupSizes.at(0)), true);
                 auto workitem_y = Workitem(ldsTag, 1, literal(workgroupSizes.at(1)), true);
 
+                coordGraph.addEdge({user}, {tile}, DataFlow());
+                coordGraph.addEdge({tile}, {lds}, DataFlow());
                 coordGraph.addEdge({workitem_x, workitem_y}, {lds}, Flatten());
 
-                auto loadParents  = controlGraph.getInputs(getTag(load));
+                // Find all edges leaving from load. Those should be changed to leave from loadLDS.
                 auto loadChildren = controlGraph.getOutputs(getTag(load));
-
-                // Find all edges going to load. Those should be changed to go to newLoad.
-                for(auto op : loadParents)
-                {
-                    auto removed = controlGraph.removeEdge(op, load);
-                    controlGraph.addEdge({op}, {newLoad}, removed.second);
-                }
-
-                // Find all edges leaving from load. Those should be changed to leave from newLoad.
                 for(auto op : loadChildren)
                 {
                     auto removed = controlGraph.removeEdge(load, op);
                     controlGraph.addEdge({loadLDS}, {op}, removed.second);
                 }
 
-                controlGraph.removeOperation(getTag(load));
-
-                controlGraph.addEdge({newLoad}, {storeLDS}, ControlGraph::Sequence());
+                controlGraph.addEdge({load}, {storeLDS}, ControlGraph::Sequence());
                 controlGraph.addEdge({storeLDS}, {barrier}, ControlGraph::Sequence());
                 controlGraph.addEdge({barrier}, {loadLDS}, ControlGraph::Sequence());
             }
@@ -490,10 +524,8 @@ namespace rocRoller
         {
             rocRoller::Log::getLogger()->debug("KernelGraph::matrixMultiply() {}", d.tag);
 
-            auto loadA = graph.control.getOperation(
-                getTag(ControlGraph::LoadTiled(a.tag, User(a.tag), MacroTile(a.tag))));
-            auto loadB = graph.control.getOperation(
-                getTag(ControlGraph::LoadTiled(b.tag, User(b.tag), MacroTile(b.tag))));
+            auto loadA = graph.control.getOperation(getTag(ControlGraph::LoadTiled(a.tag)));
+            auto loadB = graph.control.getOperation(getTag(ControlGraph::LoadTiled(b.tag)));
 
             // TODO: The size of the K dimension should be loaded from the command arguments
             //

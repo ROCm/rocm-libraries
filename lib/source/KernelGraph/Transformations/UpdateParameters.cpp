@@ -36,34 +36,22 @@ namespace rocRoller
                 return dim;
             }
 
-            ControlGraph::Operation visitOperation(ControlGraph::LoadTiled const& op)
-            {
-                auto user = std::get<User>(visitDimension(op.user));
-                auto tile = std::get<MacroTile>(visitDimension(op.tile));
-                return ControlGraph::LoadTiled(op.tag, user, tile);
-            }
-
-            ControlGraph::Operation visitOperation(ControlGraph::StoreTiled const& op)
-            {
-                auto user = std::get<User>(visitDimension(op.user));
-                auto tile = std::get<MacroTile>(visitDimension(op.tile));
-                return ControlGraph::StoreTiled(op.tag, tile, user);
-            }
-
-            MAKE_OPERATION_VISITOR(Kernel);
-            MAKE_OPERATION_VISITOR(ForLoopOp);
             MAKE_OPERATION_VISITOR(Assign);
-            MAKE_OPERATION_VISITOR(UnrollOp);
             MAKE_OPERATION_VISITOR(Barrier);
             MAKE_OPERATION_VISITOR(ElementOp);
+            MAKE_OPERATION_VISITOR(ForLoopOp);
+            MAKE_OPERATION_VISITOR(Kernel);
             MAKE_OPERATION_VISITOR(LoadLDSTile);
             MAKE_OPERATION_VISITOR(LoadLinear);
+            MAKE_OPERATION_VISITOR(LoadTiled);
             MAKE_OPERATION_VISITOR(LoadVGPR);
             MAKE_OPERATION_VISITOR(Multiply);
-            MAKE_OPERATION_VISITOR(TensorContraction);
             MAKE_OPERATION_VISITOR(StoreLDSTile);
             MAKE_OPERATION_VISITOR(StoreLinear);
+            MAKE_OPERATION_VISITOR(StoreTiled);
             MAKE_OPERATION_VISITOR(StoreVGPR);
+            MAKE_OPERATION_VISITOR(TensorContraction);
+            MAKE_OPERATION_VISITOR(UnrollOp);
 
         private:
             std::map<TagType, Dimension> m_new_dimensions;
