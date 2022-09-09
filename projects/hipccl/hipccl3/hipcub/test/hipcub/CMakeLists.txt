@@ -37,11 +37,12 @@ function(add_hipcub_test_internal TEST_NAME TEST_SOURCES TEST_TARGET)
   add_executable(${TEST_TARGET} ${TEST_SOURCES})
   target_include_directories(${TEST_TARGET} SYSTEM BEFORE
     PUBLIC
-      $<BUILD_INTERFACE:${GTEST_INCLUDE_DIRS}>
+      GoogleTest>
   )
   target_link_libraries(${TEST_TARGET}
     PRIVATE
-      ${GTEST_BOTH_LIBRARIES}
+      GTest::gtest
+      GTest::gtest_main
       hipcub
   )
 
@@ -103,9 +104,9 @@ endfunction()
 # Replacement for add_hipcub_test that splits up test cases allowing them to be compiled in parallel.
 # A single .cpp.in file is provided containing valid C++ code with the addition of slice definitions.
 # The slice definitions HIPCUB_TEST_SLICE, HIPCUB_TEST_SUITE_SLICE, and HIPCUB_TEST_TYPE_SLICE demarkate
-# slices of non-typed tests, typed test suites, and test types respectively. The slice cases must be 
-# marked with an "(el)if" statement (no "else") that has a unique value to ensure that the correct slice 
-# gets enabled. This function will generate a separate .cpp file for all non-typed test slices and the 
+# slices of non-typed tests, typed test suites, and test types respectively. The slice cases must be
+# marked with an "(el)if" statement (no "else") that has a unique value to ensure that the correct slice
+# gets enabled. This function will generate a separate .cpp file for all non-typed test slices and the
 # product of the typed test suites and test types.
 #
 # This example will generate five files:
@@ -118,18 +119,18 @@ endfunction()
 #   DEFINE_NAMED_TEST(TestSuiteName, NonTypedTest)
 # #endif
 # #if   HIPCUB_TEST_SUITE_SLICE == 0
-#   REGISTER_TYPED_TEST(TestSuiteName, TestZero, test_zero) 
+#   REGISTER_TYPED_TEST(TestSuiteName, TestZero, test_zero)
 #   REGISTER_TYPED_TEST_SUITE(TestSuiteName, TestZero)
 # #elif HIPCUB_TEST_SUITE_SLICE == 1
-#   REGISTER_TYPED_TEST(TestSuiteName, TestOne, test_one) 
-#   REGISTER_TYPED_TEST(TestSuiteName, TestTwo, test_two) 
+#   REGISTER_TYPED_TEST(TestSuiteName, TestOne, test_one)
+#   REGISTER_TYPED_TEST(TestSuiteName, TestTwo, test_two)
 #   REGISTER_TYPED_TEST_SUITE(TestSuiteName, TestOne, TestTwo)
 # #endif
 # #if   HIPCUB_TEST_TYPE_SLICE == 0
 #   INSTANTIATE_TYPED_TEST(TestSuiteName, double)
 # #elif HIPCUB_TEST_TYPE_SLICE == 1
-#   INSTANTIATE_TYPED_TEST(TestSuiteName, float) 
-#   INSTANTIATE_TYPED_TEST(TestSuiteName, int) 
+#   INSTANTIATE_TYPED_TEST(TestSuiteName, float)
+#   INSTANTIATE_TYPED_TEST(TestSuiteName, int)
 # #endif
 function(add_hipcub_test_parallel TEST_NAME TEST_SOURCE)
   get_hipcub_test_target(${TEST_SOURCE} TEST_TARGET)

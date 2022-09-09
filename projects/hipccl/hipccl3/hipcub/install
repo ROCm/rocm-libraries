@@ -12,8 +12,7 @@ function display_help()
     echo "    [-i|--install] install after build"
     echo "    [-p|--package build package"
     echo "    [-r]--relocatable] create a package to support relocatable ROCm"
-    #Not implemented yet
-    #    echo "    [-d|--dependencies] install build dependencies"
+    echo "    [-d|--dependencies] install build dependencies"
     echo "    [-c|--clients] build library clients too (combines with -i & -d)"
     echo "    [-g|--debug] -DCMAKE_BUILD_TYPE=Debug (default is =Release)"
     echo "    [--hip-clang] build library for amdgpu backend using hip-clang"
@@ -33,6 +32,7 @@ build_hip_clang=false
 run_tests=false
 rocm_path=/opt/rocm
 build_relocatable=false
+install_dependencies=false
 build_address_sanitizer=false
 build_freorg_bkwdcomp=true
 
@@ -43,7 +43,7 @@ build_freorg_bkwdcomp=true
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ $? -eq 4 ]]; then
-    GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,debug,hip-clang,test,package,relocatable,address-sanitizer,rm-legacy-include-dir --options hicdtpr -- "$@")
+    GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,debug,hip-clang,test,package,relocatable,dependencies,address-sanitizer,rm-legacy-include-dir --options hicdtpr -- "$@")
 else
     echo "Need a new version of getopt"
     exit 1
@@ -65,41 +65,44 @@ check_exit_code( )
 
 while true; do
     case "${1}" in
-	-h|--help)
-	    display_help
-	    exit 0
-	    ;;
-	-i|--install)
-	    install_package=true
-	    shift ;;
-	-p|--package)
-	    build_package=true
-	    shift ;;
-	-c|--clients)
-	    build_clients=true
-	    shift ;;
-	-r|--relocatable)
-	    build_relocatable=true
-	    shift ;;
-	-g|--debug)
-	    build_release=false
-	    shift ;;
-	-t|--test)
-	    run_tests=true
-	    shift ;;
-	--hip-clang)
-	    build_hip_clang=true
-	    shift ;;
+        -h|--help)
+            display_help
+            exit 0
+            ;;
+        -i|--install)
+            install_package=true
+            shift ;;
+        -p|--package)
+            build_package=true
+            shift ;;
+        -c|--clients)
+            build_clients=true
+            shift ;;
+        -r|--relocatable)
+            build_relocatable=true
+            shift ;;
+        -g|--debug)
+            build_release=false
+            shift ;;
+        -t|--test)
+            run_tests=true
+            shift ;;
+        -d|--dependencies)
+            install_dependencies=true
+            shift ;;
+        --hip-clang)
+            build_hip_clang=true
+            shift ;;
         --address-sanitizer)
             build_address_sanitizer=true
             shift ;;
-	--rm-legacy-include-dir)
+        --rm-legacy-include-dir)
             build_freorg_bkwdcomp=false
             shift ;;
-	--) shift ; break ;;
-	*)  echo "Unexpected command line parameter received; aborting";
-	    exit 1
-	    ;;
+        --) shift ; break ;;
+        *)  echo "Unexpected command line parameter received; aborting";
+            exit 1
+            ;;
     esac
     done
 
@@ -149,11 +152,8 @@ if [[ "${build_address_sanitizer}" == true ]]; then
     cmake_common_options="$cmake_common_options -DBUILD_ADDRESS_SANITIZER=ON"
 fi
 
-#Enable backward compatibility wrappers
-if [[ "${build_freorg_bkwdcomp}" == true ]]; then
-    cmake_common_options="${cmake_common_options} -DBUILD_FILE_REORG_BACKWARD_COMPATIBILITY=ON"
-else
-    cmake_common_options="${cmake_common_options} -DBUILD_FILE_REORG_BACKWARD_COMPATIBILITY=OFF"
+if ($install_dependencies); then
+    cmake_common_options="${cmake_common_options} -DDEPENDENCIES_FORCE_DOWNLOAD=ON"
 fi
 
 if [[ "${build_relocatable}" == true ]]; then

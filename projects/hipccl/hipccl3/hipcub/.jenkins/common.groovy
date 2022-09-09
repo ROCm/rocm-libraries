@@ -4,7 +4,7 @@
 def runCompileCommand(platform, project, jobName, boolean debug=false, boolean sameOrg=true)
 {
     project.paths.construct_build_prefix()
-        
+
     String buildTypeArg = debug ? '-DCMAKE_BUILD_TYPE=Debug' : '-DCMAKE_BUILD_TYPE=Release'
     String buildTypeDir = debug ? 'debug' : 'release'
     String cmake = platform.jenkinsLabel.contains('centos') ? 'cmake3' : 'cmake'
@@ -22,7 +22,7 @@ def runCompileCommand(platform, project, jobName, boolean debug=false, boolean s
                 ${cmake} -DCMAKE_CXX_COMPILER=/opt/rocm/bin/hipcc ${buildTypeArg} ${amdgpuTargets} -DBUILD_TEST=ON -DBUILD_BENCHMARK=ON ../..
                 make -j\$(nproc)
                 """
-    
+
     platform.runCommand(this, command)
 }
 
@@ -30,9 +30,8 @@ def runCompileCommand(platform, project, jobName, boolean debug=false, boolean s
 def runTestCommand (platform, project)
 {
     String sudo = auxiliary.sudo(platform.jenkinsLabel)
-    String centos = platform.jenkinsLabel.contains('centos') ? '3' : ''
 
-    def testCommand = "ctest${centos} --output-on-failure"
+    def testCommand = "ctest --output-on-failure"
     def command = """#!/usr/bin/env bash
                 set -x
                 cd ${project.paths.project_build_prefix}
