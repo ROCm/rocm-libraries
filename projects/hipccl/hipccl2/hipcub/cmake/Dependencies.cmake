@@ -118,15 +118,14 @@ endif()
 if(BUILD_TEST)
   if(NOT DEPENDENCIES_FORCE_DOWNLOAD)
     # Google Test (https://github.com/google/googletest)
-    find_package(GTest QUIET)
+    find_package(GTest 1.11.0 CONFIG)
   endif()
 
-  if(NOT TARGET GTest::GTest AND NOT TARGET GTest::gtest)
+  if(NOT GTest_FOUND)
     message(STATUS "GTest not found or force download GTest on. Downloading and building GTest.")
     # Google Test (https://github.com/google/googletest)
-    if(NOT (CMAKE_CXX_COMPILER_ID STREQUAL "GNU"))
-      # hip-clang cannot compile googletest for some reason
-      set(COMPILER_OVERRIDE "-DCMAKE_CXX_COMPILER=g++")
+    if(WIN32)
+      set(COMPILER_OVERRIDE "-DCMAKE_CXX_COMPILER=cl")
     endif()
     set(GTEST_ROOT ${CMAKE_CURRENT_BINARY_DIR}/gtest CACHE PATH "")
     download_project(
@@ -143,7 +142,7 @@ if(BUILD_TEST)
       BUILD_PROJECT       TRUE
       UPDATE_DISCONNECTED TRUE # Never update automatically from the remote repository
     )
-    find_package(GTest REQUIRED)
+    find_package(GTest 1.11.0 EXACT REQUIRED MODULE)
   endif()
 endif()
 
