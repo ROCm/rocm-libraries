@@ -151,7 +151,10 @@ namespace rocRoller
 
     inline int AssemblyKernel::total_vgprs() const
     {
-        return accum_offset() + agpr_count();
+        if(m_context.lock()->targetArchitecture().HasCapability(
+               rocRoller::GPUCapability::ArchAccUnifiedRegs))
+            return accum_offset() + agpr_count();
+        return std::max(vgpr_count(), agpr_count());
     }
 
     inline int AssemblyKernel::max_flat_workgroup_size() const

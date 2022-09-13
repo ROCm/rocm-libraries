@@ -98,29 +98,32 @@ double relativeNorm(std::vector<T> a, std::vector<T> b)
 }
 
 template <typename T>
-bool checkEqual(std::vector<T> a, std::vector<T> b, T tolerance = 0)
+double normInf(std::vector<T> a)
 {
-    bool equal = true;
-#pragma omp parallel for reduction(&& : equal)
+    double r = 0.0;
+
+#pragma omp parallel for reduction(+ : r)
     for(int i = 0; i < a.size(); ++i)
     {
-        equal = equal && (abs(a[i] - b[i]) <= tolerance);
+        r = r + fabs(double(a[i]));
     }
-
-    return equal;
+    return r;
 }
 
 template <typename T>
-size_t countUnEqual(std::vector<T> a, std::vector<T> b, T tolerance = 0)
+double relativeNormInf(std::vector<T> a, std::vector<T> b)
 {
-    size_t count = 0;
-#pragma omp parallel for reduction(+ : count)
-    for(int i = 0; i < a.size(); ++i)
+    double d = 0.0;
+    double r = 0.0;
+
+#pragma omp parallel for reduction(+ : d, r)
+    for(size_t i = 0; i < a.size(); ++i)
     {
-        count = count + ((abs(a[i] - b[i]) <= tolerance) ? 0 : 1);
+        d = d + fabs(double(a[i] - b[i]));
+        r = r + fabs(double(b[i]));
     }
 
-    return count;
+    return d / r;
 }
 
 /*

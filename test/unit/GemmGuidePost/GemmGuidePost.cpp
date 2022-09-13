@@ -1045,6 +1045,10 @@ namespace rocRollerTest
                            unsigned int                        OffsetA,
                            unsigned int                        OffsetB,
                            unsigned int                        padding,
+                           unsigned int                        numVGPR,
+                           unsigned int                        numACCGPR,
+                           unsigned int                        numSGPR,
+                           unsigned int                        sizeLDS,
                            bool                                hasBeta = true)
     {
         KernelOptions options;
@@ -1267,12 +1271,12 @@ namespace rocRollerTest
         m_context->schedule(k->prolog());
 
         auto placeholderV = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Raw32, 93);
+            m_context, Register::Type::Vector, DataType::Raw32, numVGPR);
         auto placeholderA = std::make_shared<Register::Value>(
-            m_context, Register::Type::Accumulator, DataType::Raw32, 96);
+            m_context, Register::Type::Accumulator, DataType::Raw32, numACCGPR);
         auto placeholderS = std::make_shared<Register::Value>(
-            m_context, Register::Type::Scalar, DataType::Raw32, 64);
-        auto placeholderLDS = Register::Value::AllocateLDS(m_context, DataType::Raw32, 14336);
+            m_context, Register::Type::Scalar, DataType::Raw32, numSGPR);
+        auto placeholderLDS = Register::Value::AllocateLDS(m_context, DataType::Raw32, sizeLDS / 4);
         auto kb             = [&]() -> Generator<Instruction> {
             co_yield placeholderV->allocate();
             co_yield placeholderA->allocate();
@@ -1374,8 +1378,6 @@ namespace rocRollerTest
 
     TEST_F(GPU_GemmGuidePostTest, HGEMM_ManualKernel_Minimal)
     {
-        GTEST_SKIP() << "HGEMM Not working on 90a";
-
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         ASSERT_EQ(true, isLocalDevice());
 
@@ -1430,24 +1432,20 @@ namespace rocRollerTest
                           OffsetA,
                           OffsetB,
                           padding,
+                          96,
+                          32,
+                          65,
+                          14336,
                           false);
 
         std::vector<__half> cpuD(sizeC);
         CPUMM(cpuD, hostC, hostA, hostB, strideA0, strideB0, strideB0, alpha, beta);
 
-        double rnorm = relativeNorm(hostD, cpuD);
-        EXPECT_LT(rnorm, 1.e-4);
-        /*
-        for(int i = 0; i < sizeC; i++)
-        {
-            if(abs(hostD[i] - cpuD[i]) > __float2half(1.e-1))
-            {
-                std::cout << i << ":\t" << __half2float(cpuD[i]) << ", " << __half2float(hostD[i]) << std::endl;
-            }
-        }
-        */
-        EXPECT_EQ(true, checkEqual(hostD, cpuD, __float2half(1.0)));
-        EXPECT_EQ(2, countUnEqual(hostD, cpuD, __float2half(1.e-1)));
+        double rnorm2 = relativeNorm(hostD, cpuD);
+        EXPECT_LT(rnorm2, 1.e-4);
+
+        double rnormInf = relativeNormInf(hostD, cpuD);
+        EXPECT_LT(rnormInf, 1.e-4);
     }
 
     void doMM_HGEMM(std::shared_ptr<rocRoller::Context> m_context,
@@ -1481,6 +1479,10 @@ namespace rocRollerTest
                     unsigned int                        OffsetA,
                     unsigned int                        OffsetB,
                     unsigned int                        padding,
+                    unsigned int                        numVGPR,
+                    unsigned int                        numACCGPR,
+                    unsigned int                        numSGPR,
+                    unsigned int                        sizeLDS,
                     bool                                hasBeta = true)
     {
         KernelOptions options;
@@ -1703,12 +1705,12 @@ namespace rocRollerTest
         m_context->schedule(k->prolog());
 
         auto placeholderV = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Raw32, 125);
+            m_context, Register::Type::Vector, DataType::Raw32, numVGPR);
         auto placeholderA = std::make_shared<Register::Value>(
-            m_context, Register::Type::Accumulator, DataType::Raw32, 32);
+            m_context, Register::Type::Accumulator, DataType::Raw32, numACCGPR);
         auto placeholderS = std::make_shared<Register::Value>(
-            m_context, Register::Type::Scalar, DataType::Raw32, 59);
-        auto placeholderLDS = Register::Value::AllocateLDS(m_context, DataType::Raw32, 7168);
+            m_context, Register::Type::Scalar, DataType::Raw32, numSGPR);
+        auto placeholderLDS = Register::Value::AllocateLDS(m_context, DataType::Raw32, sizeLDS / 4);
         auto kb             = [&]() -> Generator<Instruction> {
             co_yield placeholderV->allocate();
             co_yield placeholderA->allocate();
@@ -1810,8 +1812,6 @@ namespace rocRollerTest
 
     TEST_F(GPU_GemmGuidePostTest, HGEMM_ManualKernel_Optimized)
     {
-        GTEST_SKIP() << "HGEMM Not working on 90a";
-
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         ASSERT_EQ(true, isLocalDevice());
 
@@ -1866,24 +1866,20 @@ namespace rocRollerTest
                    OffsetA,
                    OffsetB,
                    padding,
+                   128,
+                   128,
+                   65,
+                   28672,
                    false);
 
         std::vector<__half> cpuD(sizeC);
         CPUMM(cpuD, hostC, hostA, hostB, strideA0, strideB0, strideB0, alpha, beta);
 
-        double rnorm = relativeNorm(hostD, cpuD);
-        EXPECT_LT(rnorm, 1.e-4);
-        /*
-        for(int i = 0; i < sizeC; i++)
-        {
-            if(abs(hostD[i] - cpuD[i]) > __float2half(1.e-1))
-            {
-                std::cout << i << ":\t" << __half2float(cpuD[i]) << ", " << __half2float(hostD[i]) << std::endl;
-            }
-        }
-        */
-        EXPECT_EQ(true, checkEqual(hostD, cpuD, __float2half(1.0)));
-        EXPECT_EQ(1, countUnEqual(hostD, cpuD, __float2half(1.e-1)));
+        double rnorm2 = relativeNorm(hostD, cpuD);
+        EXPECT_LT(rnorm2, 1.e-4);
+
+        double rnormInf = relativeNormInf(hostD, cpuD);
+        EXPECT_LT(rnormInf, 1.e-4);
     }
 }
 #endif

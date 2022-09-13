@@ -111,7 +111,9 @@ namespace GPUArchitectureGenerator
              rocRoller::GPUArchitectureTarget("gfx90a")}},
 
            {rocRoller::GPUCapability::HasAccCD, {rocRoller::GPUArchitectureTarget("gfx90a")}},
-
+           {rocRoller::GPUCapability::ArchAccUnifiedRegs,
+            {rocRoller::GPUArchitectureTarget("gfx90a"),
+             rocRoller::GPUArchitectureTarget("gfx90a:sramecc+")}},
            {rocRoller::GPUCapability::HasEccHalf, {rocRoller::GPUArchitectureTarget("gfx90a")}},
 
            {rocRoller::GPUCapability::HasWave64, SupportedISAs}};
