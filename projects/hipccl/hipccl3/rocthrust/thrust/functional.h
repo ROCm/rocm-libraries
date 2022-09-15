@@ -147,7 +147,7 @@ struct binary_function
     template <typename T>                                                      \
     __host__ __device__                                                        \
     constexpr auto operator()(T&& x) const                                     \
-      noexcept(noexcept(impl)) -> decltype(impl)                               \
+      noexcept(noexcept(impl)) THRUST_TRAILING_RETURN(decltype(impl))          \
     {                                                                          \
       return impl;                                                             \
     }                                                                          \
@@ -162,7 +162,7 @@ struct binary_function
     template <typename T1, typename T2>                                        \
     __host__ __device__                                                        \
     constexpr auto operator()(T1&& t1, T2&& t2) const                          \
-      noexcept(noexcept(impl)) -> decltype(impl)                               \
+      noexcept(noexcept(impl)) THRUST_TRAILING_RETURN(decltype(impl))          \
     {                                                                          \
       return impl;                                                             \
     }                                                                          \
@@ -1409,7 +1409,8 @@ struct project1st<void, void>
   template <typename T1, typename T2>
   __host__ __device__
   constexpr auto operator()(T1&& t1, T2&&) const
-    noexcept(noexcept(THRUST_FWD(t1))) -> decltype(THRUST_FWD(t1))
+    noexcept(noexcept(THRUST_FWD(t1)))
+    THRUST_TRAILING_RETURN(decltype(THRUST_FWD(t1)))
   {
     return THRUST_FWD(t1);
   }
@@ -1468,7 +1469,8 @@ struct project2nd<void, void>
   template <typename T1, typename T2>
   __host__ __device__
   constexpr auto operator()(T1&&, T2&& t2) const
-  noexcept(noexcept(THRUST_FWD(t2))) -> decltype(THRUST_FWD(t2))
+  noexcept(noexcept(THRUST_FWD(t2)))
+  THRUST_TRAILING_RETURN(decltype(THRUST_FWD(t2)))
   {
     return THRUST_FWD(t2);
   }

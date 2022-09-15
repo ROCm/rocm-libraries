@@ -1,9 +1,9 @@
 /*
- *  Copyright 2008-2018 NVIDIA Corporation
+ *  Copyright 2008-2021 NVIDIA Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
- *  You may obtain a for_each of the License at
+ *  You may obtain a copy of the License at
  *
  *      http://www.apache.org/licenses/LICENSE-2.0
  *
@@ -14,8 +14,8 @@
  *  limitations under the License.
  */
 
-/*! \file async/for_each.h
- *  \brief Functions for asynchronously iterating over the elements of a range.
+/*! \file
+ *  \brief Algorithms for asynchronously iterating over the elements of a range.
  */
 
 #pragma once
@@ -36,6 +36,9 @@ THRUST_NAMESPACE_BEGIN
 
 namespace async
 {
+
+/*! \cond
+ */
 
 namespace unimplemented
 {
@@ -109,6 +112,9 @@ struct for_each_fn final
 } // namespace for_each_detail
 
 THRUST_INLINE_CONSTANT for_each_detail::for_each_fn for_each{};
+
+/*! \endcond
+ */
 
 } // namespace async
 

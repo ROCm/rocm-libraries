@@ -1,5 +1,5 @@
 /*
- *  Copyright 2008-2013 NVIDIA Corporation
+ *  Copyright 2008-2021 NVIDIA Corporation
  *  Copyright 2013 Filipe RNC Maia
  *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved. 
  *
@@ -21,9 +21,9 @@
 #include <thrust/detail/config.h>
 
 #include <thrust/complex.h>
+#include <thrust/detail/complex/c99math.h>
 #include <cfloat>
 #include <cmath>
-#include <thrust/detail/complex/c99math.h>
 
 THRUST_NAMESPACE_BEGIN
 

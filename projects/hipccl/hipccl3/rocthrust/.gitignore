@@ -57,11 +57,8 @@ compile_commands.json
 CTestTestfile.cmake
 thrust/system/cuda/detail/.gitignore
 *.bash
-*.log
-.p4config
 run
 build*
-doc/html
 discrete_voronoi.pgm
 
 # End of https://www.gitignore.io/api/c++,cmake

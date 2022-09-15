@@ -1,5 +1,5 @@
 /*
- *  Copyright 2008-2013 NVIDIA Corporation
+ *  Copyright 2008-2021 NVIDIA Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -14,9 +14,9 @@
  *  limitations under the License.
  */
 
-#include <thrust/detail/config.h>
+#pragma once
 
-#include <limits>
+#include <thrust/detail/config.h>
 
 #include <thrust/copy.h>
 #include <thrust/functional.h>
@@ -26,6 +26,8 @@
 #include <thrust/detail/temporary_array.h>
 #include <thrust/detail/cstdint.h>
 #include <thrust/scatter.h>
+
+#include <limits>
 
 THRUST_NAMESPACE_BEGIN
 namespace system

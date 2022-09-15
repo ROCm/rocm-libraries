@@ -63,6 +63,9 @@ THRUST_NAMESPACE_BEGIN
  *  \{
  */
 
+/*! \cond
+ */
+
 namespace detail
 {
 
@@ -137,14 +140,17 @@ struct complex_storage;
 
 } // end namespace detail
 
-  /*! \p complex is the Thrust equivalent to <tt>std::complex</tt>. It is
-   *  functionally identical to it, but can also be used in device code which
-   *  <tt>std::complex</tt> currently cannot.
-   *
-   *  \tparam T The type used to hold the real and imaginary parts. Should be
-   *  <tt>float</tt> or <tt>double</tt>. Others types are not supported.
-   *
-   */
+/*! \endcond
+ */
+
+/*! \p complex is the Thrust equivalent to <tt>std::complex</tt>. It is
+ *  functionally identical to it, but can also be used in device code which
+ *  <tt>std::complex</tt> currently cannot.
+ *
+ *  \tparam T The type used to hold the real and imaginary parts. Should be
+ *  <tt>float</tt> or <tt>double</tt>. Others types are not supported.
+ *
+ */
 template <typename T>
 struct complex
 {
