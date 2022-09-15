@@ -14,11 +14,13 @@
  *  limitations under the License.
  */
 
- #include <thrust/detail/config.h>
- #include <thrust/functional.h>
- #include <thrust/system/detail/generic/replace.h>
- #include <thrust/transform.h>
- #include <thrust/replace.h>
+#pragma once
+
+#include <thrust/detail/config.h>
+#include <thrust/functional.h>
+#include <thrust/system/detail/generic/replace.h>
+#include <thrust/transform.h>
+#include <thrust/replace.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace system

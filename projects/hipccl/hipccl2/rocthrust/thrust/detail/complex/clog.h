@@ -1,5 +1,5 @@
 /*
- *  Copyright 2008-2013 NVIDIA Corporation
+ *  Copyright 2008-2021 NVIDIA Corporation
  *  Copyright 2013 Filipe RNC Maia
  *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved. 
  *
@@ -211,4 +211,4 @@ inline complex<ValueType> log10(const complex<ValueType>& z){
 }
 
 THRUST_NAMESPACE_END
-    
+
