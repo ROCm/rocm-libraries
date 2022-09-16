@@ -28,15 +28,6 @@ namespace rocRoller
             }
 
             template <typename Operation>
-            Generator<Instruction> callArithmeticBinary(ArithmeticPtr const&      arith,
-                                                        Register::ValuePtr const& dest,
-                                                        Register::ValuePtr const& lhs,
-                                                        Register::ValuePtr const& rhs)
-            {
-                Throw<FatalError>("Unsupported callArithmeticBinaryOperation");
-            }
-
-            template <typename Operation>
             Generator<Instruction> callArithmeticTernary(ArithmeticPtr const&      arith,
                                                          Register::ValuePtr const& dest,
                                                          Register::ValuePtr const& lhs,
@@ -87,16 +78,6 @@ namespace rocRoller
                     co_yield generator->generate(dest, lhsResult, rhsResult);
                     co_return;
                 }
-
-                ArithmeticPtr arith;
-
-                // This portion should remain after FastDivision fix.
-                if constexpr(CArithmetic<Operation>)
-                    arith = Arithmetic::Get(dest, lhsResult, rhsResult);
-                else
-                    arith = Arithmetic::GetComparison(dest, lhsResult, rhsResult);
-
-                co_yield callArithmeticBinary<Operation>(arith, dest, lhsResult, rhsResult);
             }
 
             template <CTernary Operation>
@@ -331,23 +312,6 @@ namespace rocRoller
         DEFINE_UNARY_CALL(Negate, negate);
 
 #undef DEFINE_UNARY_CALL
-
-#define DEFINE_BINARY_CALL(Op, call)                                       \
-    template <>                                                            \
-    Generator<Instruction> CodeGeneratorVisitor::callArithmeticBinary<Op>( \
-        ArithmeticPtr const&      arith,                                   \
-        Register::ValuePtr const& dest,                                    \
-        Register::ValuePtr const& lhs,                                     \
-        Register::ValuePtr const& rhs)                                     \
-    {                                                                      \
-        co_yield arith->call(dest, lhs, rhs);                              \
-    }
-        DEFINE_BINARY_CALL(GreaterThan, gt);
-        DEFINE_BINARY_CALL(GreaterThanEqual, ge);
-        DEFINE_BINARY_CALL(LessThan, lt);
-        DEFINE_BINARY_CALL(LessThanEqual, le);
-        DEFINE_BINARY_CALL(Equal, eq);
-#undef DEFINE_BINARY_CALL
 
 #define DEFINE_TERNARY_CALL(Op, call)                                       \
     template <>                                                             \

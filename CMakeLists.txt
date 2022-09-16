@@ -224,6 +224,11 @@ set(rocroller_src
  lib/source/CodeGen/Arithmetic/BitwiseOr.cpp
  lib/source/CodeGen/Arithmetic/Convert.cpp
  lib/source/CodeGen/Arithmetic/Divide.cpp
+ lib/source/CodeGen/Arithmetic/Equal.cpp
+ lib/source/CodeGen/Arithmetic/GreaterThan.cpp
+ lib/source/CodeGen/Arithmetic/GreaterThanEqual.cpp
+ lib/source/CodeGen/Arithmetic/LessThan.cpp
+ lib/source/CodeGen/Arithmetic/LessThanEqual.cpp
  lib/source/CodeGen/Arithmetic/Modulo.cpp
  lib/source/CodeGen/Arithmetic/Multiply.cpp
  lib/source/CodeGen/Arithmetic/MultiplyHigh.cpp

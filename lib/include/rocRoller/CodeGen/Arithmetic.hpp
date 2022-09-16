@@ -121,31 +121,6 @@ namespace rocRoller
             throw std::runtime_error("shiftAddL unsupported for this datatype");
         }
 
-        virtual Generator<Instruction> gt(std::shared_ptr<Register::Value> dest,
-                                          std::shared_ptr<Register::Value> lhs,
-                                          std::shared_ptr<Register::Value> rhs)
-            = 0;
-
-        virtual Generator<Instruction> ge(std::shared_ptr<Register::Value> dest,
-                                          std::shared_ptr<Register::Value> lhs,
-                                          std::shared_ptr<Register::Value> rhs)
-            = 0;
-
-        virtual Generator<Instruction> lt(std::shared_ptr<Register::Value> dest,
-                                          std::shared_ptr<Register::Value> lhs,
-                                          std::shared_ptr<Register::Value> rhs)
-            = 0;
-
-        virtual Generator<Instruction> le(std::shared_ptr<Register::Value> dest,
-                                          std::shared_ptr<Register::Value> lhs,
-                                          std::shared_ptr<Register::Value> rhs)
-            = 0;
-
-        virtual Generator<Instruction> eq(std::shared_ptr<Register::Value> dest,
-                                          std::shared_ptr<Register::Value> lhs,
-                                          std::shared_ptr<Register::Value> rhs)
-            = 0;
-
     protected:
         std::shared_ptr<Context> m_context;
     };

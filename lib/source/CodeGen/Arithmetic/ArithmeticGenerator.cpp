@@ -195,7 +195,6 @@ namespace rocRoller
     {
         AssertFatal(lhs != nullptr, "Null argument");
         AssertFatal(rhs != nullptr, "Null argument");
-        AssertFatal(dst != nullptr, "Null destination");
 
         auto lhsVarType = lhs->variableType() == DataType::Raw32 && lhs->registerCount() == 2
                               ? DataType::UInt64
@@ -205,18 +204,21 @@ namespace rocRoller
                               : rhs->variableType();
         auto varType    = VariableType::Promote(lhsVarType, rhsVarType);
 
-        auto dstVarType = dst->variableType();
-        if(varType != dstVarType && dstVarType.dataType != DataType::Raw32)
+        if(dst)
         {
-            auto const& varTypeInfo    = DataTypeInfo::Get(varType);
-            auto const& dstVarTypeInfo = DataTypeInfo::Get(dstVarType);
+            auto dstVarType = dst->variableType();
+            if(varType != dstVarType && dstVarType.dataType != DataType::Raw32)
+            {
+                auto const& varTypeInfo    = DataTypeInfo::Get(varType);
+                auto const& dstVarTypeInfo = DataTypeInfo::Get(dstVarType);
 
-            AssertFatal(varTypeInfo.elementSize <= dstVarTypeInfo.elementSize
-                            && varTypeInfo.isIntegral == dstVarTypeInfo.isIntegral,
-                        ShowValue(varType),
-                        ShowValue(dstVarType));
+                AssertFatal(varTypeInfo.elementSize <= dstVarTypeInfo.elementSize
+                                && varTypeInfo.isIntegral == dstVarTypeInfo.isIntegral,
+                            ShowValue(varType),
+                            ShowValue(dstVarType));
 
-            varType = dstVarType;
+                varType = dstVarType;
+            }
         }
 
         return varType.isPointer() ? DataType::UInt64 : varType.dataType;

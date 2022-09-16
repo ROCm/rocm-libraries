@@ -143,7 +143,7 @@ namespace ArithmeticTest
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(28), 4);
 
-            co_yield arith->gt(s_c, v_a, v_b);
+            co_yield generateOp<Expression::GreaterThan>(s_c, v_a, v_b);
             co_yield m_context->copier()->copy(
                 v_c, s_c->subset({0}), "Move result to vgpr to store.");
             co_yield m_context->mem()->store(MemoryInstructions::Flat,
@@ -152,7 +152,7 @@ namespace ArithmeticTest
                                              Register::Value::Literal(32),
                                              4);
 
-            co_yield arith->ge(s_c, v_a, v_b);
+            co_yield generateOp<Expression::GreaterThanEqual>(s_c, v_a, v_b);
             co_yield m_context->copier()->copy(
                 v_c, s_c->subset({0}), "Move result to vgpr to store.");
             co_yield m_context->mem()->store(MemoryInstructions::Flat,
@@ -161,7 +161,7 @@ namespace ArithmeticTest
                                              Register::Value::Literal(36),
                                              4);
 
-            co_yield arith->lt(s_c, v_a, v_b);
+            co_yield generateOp<Expression::LessThan>(s_c, v_a, v_b);
             co_yield m_context->copier()->copy(
                 v_c, s_c->subset({0}), "Move result to vgpr to store.");
             co_yield m_context->mem()->store(MemoryInstructions::Flat,
@@ -170,7 +170,7 @@ namespace ArithmeticTest
                                              Register::Value::Literal(40),
                                              4);
 
-            co_yield arith->le(s_c, v_a, v_b);
+            co_yield generateOp<Expression::LessThanEqual>(s_c, v_a, v_b);
             co_yield m_context->copier()->copy(
                 v_c, s_c->subset({0}), "Move result to vgpr to store.");
             co_yield m_context->mem()->store(MemoryInstructions::Flat,
@@ -179,7 +179,7 @@ namespace ArithmeticTest
                                              Register::Value::Literal(44),
                                              4);
 
-            co_yield arith->eq(s_c, v_a, v_b);
+            co_yield generateOp<Expression::Equal>(s_c, v_a, v_b);
             co_yield m_context->copier()->copy(
                 v_c, s_c->subset({0}), "Move result to vgpr to store.");
             co_yield m_context->mem()->store(MemoryInstructions::Flat,
@@ -388,27 +388,27 @@ namespace ArithmeticTest
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(28), 4);
 
-            co_yield arith->gt(s_c, s_a, s_b);
+            co_yield generateOp<Expression::GreaterThan>(s_c, s_a, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(32), 4);
 
-            co_yield arith->ge(s_c, s_a, s_b);
+            co_yield generateOp<Expression::GreaterThanEqual>(s_c, s_a, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(36), 4);
 
-            co_yield arith->lt(s_c, s_a, s_b);
+            co_yield generateOp<Expression::LessThan>(s_c, s_a, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(40), 4);
 
-            co_yield arith->le(s_c, s_a, s_b);
+            co_yield generateOp<Expression::LessThanEqual>(s_c, s_a, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(44), 4);
 
-            co_yield arith->eq(s_c, s_a, s_b);
+            co_yield generateOp<Expression::Equal>(s_c, s_a, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(48), 4);
@@ -674,31 +674,31 @@ namespace ArithmeticTest
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(48), 8);
 
-            co_yield arith->gt(s_c, v_a, v_b);
+            co_yield generateOp<Expression::GreaterThan>(s_c, v_a, v_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
 
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(56), 8);
 
-            co_yield arith->ge(s_c, v_a, v_b);
+            co_yield generateOp<Expression::GreaterThanEqual>(s_c, v_a, v_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
 
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(64), 8);
 
-            co_yield arith->lt(s_c, v_a, v_b);
+            co_yield generateOp<Expression::LessThan>(s_c, v_a, v_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
 
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(72), 8);
 
-            co_yield arith->le(s_c, v_a, v_b);
+            co_yield generateOp<Expression::LessThanEqual>(s_c, v_a, v_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
 
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(80), 8);
 
-            co_yield arith->eq(s_c, v_a, v_b);
+            co_yield generateOp<Expression::Equal>(s_c, v_a, v_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
 
             co_yield m_context->mem()->store(
@@ -911,27 +911,27 @@ namespace ArithmeticTest
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(48), 8);
 
-            co_yield arith->gt(s_c, s_a, s_b);
+            co_yield generateOp<Expression::GreaterThan>(s_c, s_a, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(56), 8);
 
-            co_yield arith->ge(s_c, s_a, s_b);
+            co_yield generateOp<Expression::GreaterThanEqual>(s_c, s_a, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(64), 8);
 
-            co_yield arith->lt(s_c, s_a, s_b);
+            co_yield generateOp<Expression::LessThan>(s_c, s_a, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(72), 8);
 
-            co_yield arith->le(s_c, s_a, s_b);
+            co_yield generateOp<Expression::LessThanEqual>(s_c, s_a, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(80), 8);
 
-            co_yield arith->eq(s_c, s_a, s_b);
+            co_yield generateOp<Expression::Equal>(s_c, s_a, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(88), 8);
@@ -1145,27 +1145,27 @@ namespace ArithmeticTest
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(12), 4);
 
-            co_yield arith->gt(s_c, v_a, v_b);
+            co_yield generateOp<Expression::GreaterThan>(s_c, v_a, v_b);
             co_yield m_context->copier()->copy(
                 v_c, s_c->subset({0}), "Move result to vgpr to store.");
             co_yield m_context->mem()->storeFlat(v_cond_result, v_c->subset({0}), "", 4);
 
-            co_yield arith->ge(s_c, v_a, v_b);
+            co_yield generateOp<Expression::GreaterThanEqual>(s_c, v_a, v_b);
             co_yield m_context->copier()->copy(
                 v_c, s_c->subset({0}), "Move result to vgpr to store.");
             co_yield m_context->mem()->storeFlat(v_cond_result, v_c->subset({0}), "4", 4);
 
-            co_yield arith->lt(s_c, v_a, v_b);
+            co_yield generateOp<Expression::LessThan>(s_c, v_a, v_b);
             co_yield m_context->copier()->copy(
                 v_c, s_c->subset({0}), "Move result to vgpr to store.");
             co_yield m_context->mem()->storeFlat(v_cond_result, v_c->subset({0}), "8", 4);
 
-            co_yield arith->le(s_c, v_a, v_b);
+            co_yield generateOp<Expression::LessThanEqual>(s_c, v_a, v_b);
             co_yield m_context->copier()->copy(
                 v_c, s_c->subset({0}), "Move result to vgpr to store.");
             co_yield m_context->mem()->storeFlat(v_cond_result, v_c->subset({0}), "12", 4);
 
-            co_yield arith->eq(s_c, v_a, v_b);
+            co_yield generateOp<Expression::Equal>(s_c, v_a, v_b);
             co_yield m_context->copier()->copy(
                 v_c, s_c->subset({0}), "Move result to vgpr to store.");
             co_yield m_context->mem()->storeFlat(v_cond_result, v_c->subset({0}), "16", 4);
@@ -1331,7 +1331,7 @@ namespace ArithmeticTest
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(24), 8);
 
-            co_yield arith->gt(s_c, v_a, v_b);
+            co_yield generateOp<Expression::GreaterThan>(s_c, v_a, v_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
 
             co_yield m_context->mem()->store(MemoryInstructions::Flat,
@@ -1340,7 +1340,7 @@ namespace ArithmeticTest
                                              Register::Value::Literal(0),
                                              4);
 
-            co_yield arith->ge(s_c, v_a, v_b);
+            co_yield generateOp<Expression::GreaterThanEqual>(s_c, v_a, v_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
 
             co_yield m_context->mem()->store(MemoryInstructions::Flat,
@@ -1349,7 +1349,7 @@ namespace ArithmeticTest
                                              Register::Value::Literal(4),
                                              4);
 
-            co_yield arith->lt(s_c, v_a, v_b);
+            co_yield generateOp<Expression::LessThan>(s_c, v_a, v_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(MemoryInstructions::Flat,
                                              v_cond_result,
@@ -1357,7 +1357,7 @@ namespace ArithmeticTest
                                              Register::Value::Literal(8),
                                              4);
 
-            co_yield arith->le(s_c, v_a, v_b);
+            co_yield generateOp<Expression::LessThanEqual>(s_c, v_a, v_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(MemoryInstructions::Flat,
                                              v_cond_result,
@@ -1365,7 +1365,7 @@ namespace ArithmeticTest
                                              Register::Value::Literal(12),
                                              4);
 
-            co_yield arith->eq(s_c, v_a, v_b);
+            co_yield generateOp<Expression::Equal>(s_c, v_a, v_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(MemoryInstructions::Flat,
                                              v_cond_result,

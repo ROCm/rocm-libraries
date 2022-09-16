@@ -20,6 +20,7 @@ namespace rocRoller
                                            Register::ValuePtr lhs,
                                            Register::ValuePtr rhs)
     {
+        AssertFatal(dst != nullptr, "Null destination");
         // Choose the proper generator, based on the context, register type
         // and datatype.
         return Component::Get<BinaryArithmeticGenerator<Expression::Subtract>>(

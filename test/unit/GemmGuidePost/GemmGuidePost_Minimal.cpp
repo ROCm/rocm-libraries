@@ -274,7 +274,7 @@ auto GlobalReadAddresses = [&](Register::ValuePtr     val,
     co_yield generateOp<Expression::Subtract>(sgprShadowLimit, size, tileStart); //" sub tileStart"
     co_yield generateOp<Expression::ShiftL>(sgprShadowLimit, sgprShadowLimit, Register::Value::Literal(2)); //" Set limit to use bytes"
     co_yield generateOp<Expression::Add>(sgprShadowLimit, sgprShadowLimit, Register::Value::Literal(4)); //" extend limit for pre-pad"
-    co_yield sarith32->eq(nullptr, sgprShadowLimit->subset({1}), Register::Value::Literal(0)); //" are we within 2^32?"
+    co_yield generateOp<Expression::Equal>(nullptr, sgprShadowLimit->subset({1}), Register::Value::Literal(0)); //" are we within 2^32?"
     co_yield_(Instruction("s_cselect_b32", {sgprSrd->subset({2})}, {sgprShadowLimit->subset({0}), BufferLimit}, {}, " Move shadow to real if we are within 2^32"));
     co_yield generateOp<Expression::Multiply>(stemp, sgprStride, sgprWorkGroup2); //" Stride*WG"
     co_yield generateOp<Expression::Add>(tileStart, tileStart, stemp); //" accum wg term to tilestart"
@@ -320,7 +320,7 @@ co_yield Instruction::Comment(" local read addresses: init pointers a \n"
                               " local read addresses: init pointers b \n"
                               " localReadInitPointers \n"
                               " prefetch: global -> local \n");
-co_yield sarith32->eq(nullptr, sgprLoopCounterL, Register::Value::Literal(0));// " at last iteration?"
+co_yield generateOp<Expression::Equal>(nullptr, sgprLoopCounterL, Register::Value::Literal(0));// " at last iteration?"
 co_yield m_context->brancher()->branchIfNonZero(label_0, m_context->getSCC(), " skip to ShadowInitStart iter b/c numIter==0");
 co_yield_(Instruction("buffer_load_dword", {vgprG2LA}, {vgprGlobalReadOffsetA, sgprSrdA, Register::Value::Literal(0)}, {"offen", "offset:0"}, " G -> Reg 0_0_0_0"));
 co_yield_(Instruction("buffer_load_dword", {vgprG2LB}, {vgprGlobalReadOffsetB, sgprSrdB, Register::Value::Literal(0)}, {"offen", "offset:0"}, " G -> Reg 0_0_0_0"));
@@ -330,7 +330,7 @@ auto GlobalReadInc = [&](Register::ValuePtr     sgprSrd,
 {
     co_yield generateOp<Expression::Add>(sgprSrd->subset({0, 1}), sgprSrd->subset({0, 1}), sgprGlobalReadIncs); //" gra SRD += inc"
     co_yield generateOp<Expression::Subtract>(sgprShadowLimit, sgprShadowLimit, sgprGlobalReadIncs); //" limit -= inc"
-    co_yield sarith32->eq(nullptr, sgprShadowLimit->subset({1}), Register::Value::Literal(0)); //" are we within 2^32?"
+    co_yield generateOp<Expression::Equal>(nullptr, sgprShadowLimit->subset({1}), Register::Value::Literal(0)); //" are we within 2^32?"
     co_yield m_context->copier()->conditionalCopy(sgprSrd->subset({2}), sgprShadowLimit->subset({0}), " Move shadow to real if we are within 2^32");
 };
 co_yield Instruction::Comment(" global read inc A loopL ");
@@ -369,7 +369,7 @@ co_yield generateOp<Expression::Add>(sgprSrdD, sgprSrdD, stemp);
 co_yield Instruction::Comment(" initC: remove C-tile 0-0 from pool ");
 co_yield Instruction::Comment(" initC: remove AB-tile 0-4 from pool ");
 co_yield fmm->zero(accDestination);
-co_yield sarith32->eq(nullptr, sgprLoopCounterL, Register::Value::Literal(0));// " at last iteration?"
+co_yield generateOp<Expression::Equal>(nullptr, sgprLoopCounterL, Register::Value::Literal(0));// " at last iteration?"
 co_yield Instruction::Comment(" after InitC, skip to end of prefetch last iter if numIter==0 ");
 co_yield m_context->brancher()->branchIfZero(label_1, m_context->getSCC(), " Only branch on scc1");
 co_yield m_context->brancher()->branch(label_5, " branch to LoopEndL_2");
@@ -387,7 +387,7 @@ co_yield Instruction::Comment("****************************************\n"
                               " Unrolled Loop(s) - Begin               \n"
                               "****************************************\n");
 co_yield Instruction::Label(label_2);
-co_yield sarith32->le(nullptr, sgprLoopCounterL, Register::Value::Literal(0));// " LoopCounterL < EndCounter"
+co_yield generateOp<Expression::LessThanEqual>(nullptr, sgprLoopCounterL, Register::Value::Literal(0));// " LoopCounterL < EndCounter"
 co_yield m_context->brancher()->branchIfNonZero(label_5, m_context->getSCC(), " do not enter LoopL");
 co_yield Instruction::Label(label_3);
 co_yield Instruction::Comment("****************************************\n"
@@ -395,7 +395,7 @@ co_yield Instruction::Comment("****************************************\n"
                               "****************************************\n");
 co_yield Instruction::Label(label_4);
 co_yield Instruction::Comment(" Begin Each Unroll: Check VGPR.checkin for INT8 LW ");
-co_yield sarith32->eq(nullptr, sgprLoopCounterL, Register::Value::Literal(1));// " is this the last iteration"
+co_yield generateOp<Expression::Equal>(nullptr, sgprLoopCounterL, Register::Value::Literal(1));// " is this the last iteration"
 co_yield m_context->copier()->conditionalCopy(sgprSrdA->subset({2}), Register::Value::Literal(0), " Set limit to 0 for last iteration");
 co_yield m_context->copier()->conditionalCopy(sgprSrdB->subset({2}), Register::Value::Literal(0), " Set limit to 0 for last iteration");
 co_yield Instruction::Comment(" iter 0 ");
@@ -460,7 +460,7 @@ co_yield Instruction::Comment("****************************************\n"
                               "****************************************\n"
                               " closeLoop loopL finalLoop=1 tailLoop=0 \n");
 co_yield generateOp<Expression::Subtract>(sgprLoopCounterL, sgprLoopCounterL, Register::Value::Literal(1)); //" dec counterL"
-co_yield sarith32->eq(nullptr, sgprLoopCounterL, Register::Value::Literal(0)); //" counterL==0"
+co_yield generateOp<Expression::Equal>(nullptr, sgprLoopCounterL, Register::Value::Literal(0)); //" counterL==0"
 co_yield m_context->brancher()->branchIfZero(label_3, m_context->getSCC(), " restart LoopL");
 co_yield Instruction::Label(label_5);
 co_yield Instruction::Comment(" Before NLL: Check VGPR.checkin for INT8 LW ");

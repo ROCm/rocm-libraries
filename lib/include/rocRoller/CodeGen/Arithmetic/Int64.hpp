@@ -72,26 +72,6 @@ namespace rocRoller
                       std::shared_ptr<Register::Value> lhs,
                       std::shared_ptr<Register::Value> shiftAmount,
                       std::shared_ptr<Register::Value> rhs) final override;
-
-        virtual Generator<Instruction> gt(std::shared_ptr<Register::Value> dest,
-                                          std::shared_ptr<Register::Value> lhs,
-                                          std::shared_ptr<Register::Value> rhs) final override;
-
-        virtual Generator<Instruction> ge(std::shared_ptr<Register::Value> dest,
-                                          std::shared_ptr<Register::Value> lhs,
-                                          std::shared_ptr<Register::Value> rhs) final override;
-
-        virtual Generator<Instruction> lt(std::shared_ptr<Register::Value> dest,
-                                          std::shared_ptr<Register::Value> lhs,
-                                          std::shared_ptr<Register::Value> rhs) final override;
-
-        virtual Generator<Instruction> le(std::shared_ptr<Register::Value> dest,
-                                          std::shared_ptr<Register::Value> lhs,
-                                          std::shared_ptr<Register::Value> rhs) final override;
-
-        virtual Generator<Instruction> eq(std::shared_ptr<Register::Value> dest,
-                                          std::shared_ptr<Register::Value> lhs,
-                                          std::shared_ptr<Register::Value> rhs) final override;
     };
 
     static_assert(Component::Component<Arithmetic_Vector_Int64>);
@@ -161,26 +141,6 @@ namespace rocRoller
                       std::shared_ptr<Register::Value> lhs,
                       std::shared_ptr<Register::Value> shiftAmount,
                       std::shared_ptr<Register::Value> rhs) final override;
-
-        virtual Generator<Instruction> gt(std::shared_ptr<Register::Value> dest,
-                                          std::shared_ptr<Register::Value> lhs,
-                                          std::shared_ptr<Register::Value> rhs) final override;
-
-        virtual Generator<Instruction> ge(std::shared_ptr<Register::Value> dest,
-                                          std::shared_ptr<Register::Value> lhs,
-                                          std::shared_ptr<Register::Value> rhs) final override;
-
-        virtual Generator<Instruction> lt(std::shared_ptr<Register::Value> dest,
-                                          std::shared_ptr<Register::Value> lhs,
-                                          std::shared_ptr<Register::Value> rhs) final override;
-
-        virtual Generator<Instruction> le(std::shared_ptr<Register::Value> dest,
-                                          std::shared_ptr<Register::Value> lhs,
-                                          std::shared_ptr<Register::Value> rhs) final override;
-
-        virtual Generator<Instruction> eq(std::shared_ptr<Register::Value> dest,
-                                          std::shared_ptr<Register::Value> lhs,
-                                          std::shared_ptr<Register::Value> rhs) final override;
     };
 
     static_assert(Component::Component<Arithmetic_Scalar_Int64>);

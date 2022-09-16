@@ -96,56 +96,6 @@ namespace rocRoller
         co_yield_(Instruction("v_lshl_add_u32", {dest}, {lhs, shiftAmount, rhs}, {}, ""));
     }
 
-    Generator<Instruction> Arithmetic_Vector_Int32::gt(std::shared_ptr<Register::Value> dest,
-                                                       std::shared_ptr<Register::Value> lhs,
-                                                       std::shared_ptr<Register::Value> rhs)
-    {
-        AssertFatal(lhs != nullptr);
-        AssertFatal(rhs != nullptr);
-
-        co_yield_(Instruction("v_cmp_gt_i32", {dest}, {lhs, rhs}, {}, ""));
-    }
-
-    Generator<Instruction> Arithmetic_Vector_Int32::ge(std::shared_ptr<Register::Value> dest,
-                                                       std::shared_ptr<Register::Value> lhs,
-                                                       std::shared_ptr<Register::Value> rhs)
-    {
-        AssertFatal(lhs != nullptr);
-        AssertFatal(rhs != nullptr);
-
-        co_yield_(Instruction("v_cmp_ge_i32", {dest}, {lhs, rhs}, {}, ""));
-    }
-
-    Generator<Instruction> Arithmetic_Vector_Int32::lt(std::shared_ptr<Register::Value> dest,
-                                                       std::shared_ptr<Register::Value> lhs,
-                                                       std::shared_ptr<Register::Value> rhs)
-    {
-        AssertFatal(lhs != nullptr);
-        AssertFatal(rhs != nullptr);
-
-        co_yield_(Instruction("v_cmp_lt_i32", {dest}, {lhs, rhs}, {}, ""));
-    }
-
-    Generator<Instruction> Arithmetic_Vector_Int32::le(std::shared_ptr<Register::Value> dest,
-                                                       std::shared_ptr<Register::Value> lhs,
-                                                       std::shared_ptr<Register::Value> rhs)
-    {
-        AssertFatal(lhs != nullptr);
-        AssertFatal(rhs != nullptr);
-
-        co_yield_(Instruction("v_cmp_le_i32", {dest}, {lhs, rhs}, {}, ""));
-    }
-
-    Generator<Instruction> Arithmetic_Vector_Int32::eq(std::shared_ptr<Register::Value> dest,
-                                                       std::shared_ptr<Register::Value> lhs,
-                                                       std::shared_ptr<Register::Value> rhs)
-    {
-        AssertFatal(lhs != nullptr);
-        AssertFatal(rhs != nullptr);
-
-        co_yield_(Instruction("v_cmp_eq_i32", {dest}, {lhs, rhs}, {}, ""));
-    }
-
     // -------------------------------------------------------------------
     // Scalar Arithmetic
     // ...................................................................
@@ -250,81 +200,6 @@ namespace rocRoller
         {
             co_yield_(Instruction("s_lshl_b32", {dest}, {lhs, shiftAmount}, {}, ""));
             co_yield_(Instruction("s_add_u32", {dest}, {dest, rhs}, {}, ""));
-        }
-    }
-
-    Generator<Instruction> Arithmetic_Scalar_Int32::gt(std::shared_ptr<Register::Value> dest,
-                                                       std::shared_ptr<Register::Value> lhs,
-                                                       std::shared_ptr<Register::Value> rhs)
-    {
-        AssertFatal(lhs != nullptr);
-        AssertFatal(rhs != nullptr);
-
-        co_yield_(Instruction("s_cmp_gt_i32", {}, {lhs, rhs}, {}, ""));
-
-        if(dest != nullptr && !dest->isSCC())
-        {
-            co_yield m_context->copier()->copy(dest, m_context->getSCC(), "");
-        }
-    }
-
-    Generator<Instruction> Arithmetic_Scalar_Int32::ge(std::shared_ptr<Register::Value> dest,
-                                                       std::shared_ptr<Register::Value> lhs,
-                                                       std::shared_ptr<Register::Value> rhs)
-    {
-        AssertFatal(lhs != nullptr);
-        AssertFatal(rhs != nullptr);
-
-        co_yield_(Instruction("s_cmp_ge_i32", {}, {lhs, rhs}, {}, ""));
-
-        if(dest != nullptr && !dest->isSCC())
-        {
-            co_yield m_context->copier()->copy(dest, m_context->getSCC(), "");
-        }
-    }
-
-    Generator<Instruction> Arithmetic_Scalar_Int32::lt(std::shared_ptr<Register::Value> dest,
-                                                       std::shared_ptr<Register::Value> lhs,
-                                                       std::shared_ptr<Register::Value> rhs)
-    {
-        AssertFatal(lhs != nullptr);
-        AssertFatal(rhs != nullptr);
-
-        co_yield_(Instruction("s_cmp_lt_i32", {}, {lhs, rhs}, {}, ""));
-
-        if(dest != nullptr && !dest->isSCC())
-        {
-            co_yield m_context->copier()->copy(dest, m_context->getSCC(), "");
-        }
-    }
-
-    Generator<Instruction> Arithmetic_Scalar_Int32::le(std::shared_ptr<Register::Value> dest,
-                                                       std::shared_ptr<Register::Value> lhs,
-                                                       std::shared_ptr<Register::Value> rhs)
-    {
-        AssertFatal(lhs != nullptr);
-        AssertFatal(rhs != nullptr);
-
-        co_yield_(Instruction("s_cmp_le_i32", {}, {lhs, rhs}, {}, ""));
-
-        if(dest != nullptr && !dest->isSCC())
-        {
-            co_yield m_context->copier()->copy(dest, m_context->getSCC(), "");
-        }
-    }
-
-    Generator<Instruction> Arithmetic_Scalar_Int32::eq(std::shared_ptr<Register::Value> dest,
-                                                       std::shared_ptr<Register::Value> lhs,
-                                                       std::shared_ptr<Register::Value> rhs)
-    {
-        AssertFatal(lhs != nullptr);
-        AssertFatal(rhs != nullptr);
-
-        co_yield_(Instruction("s_cmp_eq_i32", {}, {lhs, rhs}, {}, ""));
-
-        if(dest != nullptr && !dest->isSCC())
-        {
-            co_yield m_context->copier()->copy(dest, m_context->getSCC(), "");
         }
     }
 }
