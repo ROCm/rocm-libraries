@@ -96,14 +96,14 @@ namespace detail
              class OffsetT,
              class BinaryFunction,
              class ValueType = typename std::iterator_traits<ValuesInputIterator>::value_type>
-    ROCPRIM_DEVICE ROCPRIM_INLINE auto block_merge_process_tile(KeysInputIterator    keys_input,
-                                                                KeysOutputIterator   keys_output,
-                                                                ValuesInputIterator  values_input,
-                                                                ValuesOutputIterator values_output,
-                                                                const OffsetT        input_size,
-                                                                const OffsetT  sorted_block_size,
-                                                                BinaryFunction compare_function,
-                                                                const OffsetT* merge_partitions)
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto block_merge_process_tile(KeysInputIterator    keys_input,
+                                                                      KeysOutputIterator   keys_output,
+                                                                      ValuesInputIterator  values_input,
+                                                                      ValuesOutputIterator values_output,
+                                                                      const OffsetT        input_size,
+                                                                      const OffsetT  sorted_block_size,
+                                                                      BinaryFunction compare_function,
+                                                                      const OffsetT* merge_partitions)
         -> std::enable_if_t<(!std::is_trivially_copyable<ValueType>::value
                              || rocprim::is_floating_point<ValueType>::value
                              || std::is_integral<ValueType>::value),
@@ -241,14 +241,14 @@ namespace detail
              class OffsetT,
              class BinaryFunction,
              class ValueType = typename std::iterator_traits<ValuesInputIterator>::value_type>
-    ROCPRIM_DEVICE ROCPRIM_INLINE auto block_merge_process_tile(KeysInputIterator    keys_input,
-                                                                KeysOutputIterator   keys_output,
-                                                                ValuesInputIterator  values_input,
-                                                                ValuesOutputIterator values_output,
-                                                                const OffsetT        input_size,
-                                                                const OffsetT  sorted_block_size,
-                                                                BinaryFunction compare_function,
-                                                                const OffsetT* merge_partitions)
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto block_merge_process_tile(KeysInputIterator    keys_input,
+                                                                      KeysOutputIterator   keys_output,
+                                                                      ValuesInputIterator  values_input,
+                                                                      ValuesOutputIterator values_output,
+                                                                      const OffsetT        input_size,
+                                                                      const OffsetT  sorted_block_size,
+                                                                      BinaryFunction compare_function,
+                                                                      const OffsetT* merge_partitions)
         -> std::enable_if_t<(std::is_trivially_copyable<ValueType>::value
                              && !rocprim::is_floating_point<ValueType>::value
                              && !std::is_integral<ValueType>::value),
