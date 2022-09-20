@@ -503,19 +503,19 @@ void run_unique_by_key_benchmark(benchmark::State& state,
 
 #define CREATE_SELECT_FLAGGED_BENCHMARK(T, F, p) \
 benchmark::RegisterBenchmark( \
-    ("select_flagged<" #T "," #F ", "#T", unsigned int>(p = " #p")"), \
+    ("select_flagged<Datatype:" #T ",Flag Type:" #F ",Output Datatype:"#T",Selected Output Datatype:unsigned int>(Probability:" #p")"), \
     &run_flagged_benchmark<T, F>, size, stream, p \
 )
 
 #define CREATE_SELECT_IF_BENCHMARK(T, p) \
 benchmark::RegisterBenchmark( \
-    ("select_if<" #T ", "#T", unsigned int>(p = " #p")"), \
+    ("select_if<Datatype:" #T ",Output Datatype:"#T",Selected Output Datatype:unsigned int>(Probability:" #p")"), \
     &run_selectop_benchmark<T>, size, stream, p \
 )
 
 #define CREATE_UNIQUE_BENCHMARK(T, p) \
 benchmark::RegisterBenchmark( \
-    ("unique<" #T ", "#T", unsigned int>(p = " #p")"), \
+    ("unique<Datatype:" #T ",Output Datatype:"#T",Selected Output Datatype:unsigned int>(Probability:" #p")"), \
     &run_unique_benchmark<T>, size, stream, p \
 )
 
@@ -560,6 +560,8 @@ int main(int argc, char *argv[])
     benchmark::Initialize(&argc, argv);
     const size_t size = parser.get<size_t>("size");
     const int trials = parser.get<int>("trials");
+
+    std::cout << "benchmark_device_select" << std::endl;
 
     // HIP
     hipStream_t stream = 0; // default

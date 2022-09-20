@@ -315,12 +315,12 @@ void run_benchmark_by_key(benchmark::State& state,
 #define CREATE_BENCHMARK(EXCL, T, SCAN_OP) \
 benchmark::RegisterBenchmark( \
     (std::string(EXCL ? "exclusive_scan" : "inclusive_scan") + \
-    ("<" #T ", " #SCAN_OP ">")).c_str(), \
+    ("<Datatype:" #T ",Op:" #SCAN_OP ">")).c_str(), \
     &run_benchmark<EXCL, T, SCAN_OP>, size, stream, SCAN_OP() \
 ), \
 benchmark::RegisterBenchmark( \
     (std::string(EXCL ? "exclusive_scan_by_key" : "inclusive_scan_by_key") + \
-    ("<" #T ", " #SCAN_OP ">")).c_str(), \
+    ("<Datatype:" #T ",Op:" #SCAN_OP ">")).c_str(), \
     &run_benchmark_by_key<EXCL, T, SCAN_OP>, size, stream, SCAN_OP() \
 )
 
@@ -353,6 +353,8 @@ int main(int argc, char *argv[])
     benchmark::Initialize(&argc, argv);
     const size_t size = parser.get<size_t>("size");
     const int trials = parser.get<int>("trials");
+
+    std::cout << "benchmark_device_scan" << std::endl;
 
     // HIP
     hipStream_t stream = 0; // default

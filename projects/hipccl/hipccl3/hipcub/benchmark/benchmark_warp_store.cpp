@@ -47,7 +47,7 @@ void warp_store_kernel(T* d_output)
     {
         thread_data[i] = static_cast<T>(i);
     }
-    
+
     using WarpStoreT = ::hipcub::WarpStore<
         T,
         ItemsPerThread,
@@ -82,9 +82,9 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
     for (auto _ : state)
     {
         auto start = std::chrono::high_resolution_clock::now();
-        
+
         for (size_t i = 0; i < Trials; ++i)
-        {       
+        {
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(warp_store_kernel<
                     T,
@@ -111,7 +111,7 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
 
 #define CREATE_BENCHMARK(T, BS, IT, WS, ALG) \
 benchmark::RegisterBenchmark( \
-    "warp_store<" #T ", " #BS ", " #IT ", " #WS ", " #ALG ">.", \
+    "warp_store<Datatype:" #T ",Block Size:" #BS ",Items Per Thread:" #IT ",Warp Size:" #WS ",Store Algorithm:" #ALG ">.", \
     &run_benchmark<T, BS, IT, WS, ALG>, \
     stream, size \
 )
@@ -127,6 +127,8 @@ int main(int argc, char *argv[])
     benchmark::Initialize(&argc, argv);
     const size_t size = parser.get<size_t>("size");
     const int trials = parser.get<int>("trials");
+
+    std::cout << "benchmark_warp_store" << std::endl;
 
     // HIP
     hipStream_t stream = 0; // default
@@ -180,7 +182,7 @@ int main(int argc, char *argv[])
         // WARP_STORE_TRANSPOSE removed because of shared memory limit
         // CREATE_BENCHMARK(double, 256, 64, 32, ::hipcub::WARP_STORE_TRANSPOSE)
     };
-        
+
     if (::benchmark_utils::is_warp_size_supported(64))
     {
         std::vector<benchmark::internal::Benchmark*> additional_benchmarks{
