@@ -295,7 +295,7 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
 
 #define CREATE_BENCHMARK(T, BS, IPT) \
 benchmark::RegisterBenchmark( \
-    (std::string("block_exchange<" #T ", " #BS ", " #IPT ">.") + name).c_str(), \
+    (std::string("block_exchange<Datatype:" #T ",Block Size:" #BS ",Items Per Thread:" #IPT ">.SubAlgorithm Name:") + name).c_str(), \
     &run_benchmark<Benchmark, T, BS, IPT>, \
     stream, size \
 )
@@ -340,6 +340,8 @@ int main(int argc, char *argv[])
     benchmark::Initialize(&argc, argv);
     const size_t size = parser.get<size_t>("size");
     const int trials = parser.get<int>("trials");
+
+    std::cout << "benchmark_block_exchange" << std::endl;
 
     // HIP
     hipStream_t stream = 0; // default

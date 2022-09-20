@@ -258,7 +258,7 @@ void run_sort_pairs_benchmark(benchmark::State& state,
         auto keys_input = std::make_shared<std::vector<Key>>(generate_keys<Key>(size)); \
         benchmarks.push_back( \
             benchmark::RegisterBenchmark( \
-                (std::string("sort_keys") + "<" #Key ">").c_str(), \
+                (std::string("sort_keys") + "<Key Type:" #Key ">").c_str(), \
                 [=](benchmark::State& state) { run_sort_keys_benchmark<Key>(state, stream, size, keys_input); } \
             ) \
         ); \
@@ -275,7 +275,7 @@ void run_sort_pairs_benchmark(benchmark::State& state,
         auto keys_input = std::make_shared<std::vector<Key>>(generate_keys<Key>(size)); \
         benchmarks.push_back( \
             benchmark::RegisterBenchmark( \
-                (std::string("sort_pairs") + "<" #Key ", " #Value">").c_str(), \
+                (std::string("sort_pairs") + "<Key Type:" #Key ",Value Type:" #Value">").c_str(), \
                 [=](benchmark::State& state) { run_sort_pairs_benchmark<Key, Value>(state, stream, size, keys_input); } \
             ) \
         ); \
@@ -337,6 +337,8 @@ int main(int argc, char *argv[])
     benchmark::Initialize(&argc, argv);
     const size_t size = parser.get<size_t>("size");
     const int trials = parser.get<int>("trials");
+
+    std::cout << "benchmark_device_radix_sort" << std::endl;
 
     // HIP
     hipStream_t stream = 0; // default

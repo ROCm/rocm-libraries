@@ -365,7 +365,7 @@ void run_segmented_benchmark(benchmark::State& state, const benchmark_kinds benc
 #define CREATE_BENCHMARK(T, BS, WS, IPT)                                                           \
 do {                                                                                               \
     const auto benchmark_name =                                                                    \
-        std::string{"warp_merge_sort<" #T ", " #BS ", " #WS ", " #IPT ">."} + name;                \
+        std::string{"warp_merge_sort<Datatype:" #T ",Block Size:" #BS ",Warp Size:" #WS ",Items Per Thread:" #IPT ">.SubAlgorithm Name:"} + name;                \
     if(WS <= device_warp_size) {                                                                   \
         benchmarks.push_back(benchmark::RegisterBenchmark(benchmark_name.c_str(),                  \
             segmented ? &run_benchmark<T, BS, WS, IPT> : &run_segmented_benchmark<T, BS, WS, IPT>, \
@@ -409,6 +409,8 @@ int main(int argc, char *argv[])
     benchmark::Initialize(&argc, argv);
     const size_t size = parser.get<size_t>("size");
     const int trials = parser.get<int>("trials");
+
+    std::cout << "benchmark_warp_merge_sort" << std::endl;
 
     // HIP
     hipStream_t stream = 0; // default
