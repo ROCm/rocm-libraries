@@ -151,6 +151,21 @@ namespace rocRoller
             return std::make_shared<Expression>(MagicSign{a});
         }
 
+        inline ExpressionPtr convert(DataType dt, ExpressionPtr a)
+        {
+            switch(dt)
+            {
+            case DataType::Half:
+                return convert<DataType::Half>(a);
+                break;
+            case DataType::Float:
+                return convert<DataType::Float>(a);
+                break;
+            default:
+                Throw<FatalError>("Unsupported datatype conversion");
+            }
+        }
+
         template <DataType DATATYPE>
         inline ExpressionPtr convert(ExpressionPtr a)
         {

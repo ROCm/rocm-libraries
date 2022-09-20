@@ -38,7 +38,13 @@ namespace MatrixMultiplyTest
         Expression::FastArithmetic fastArith{m_context};
     };
 
-    TEST_F(MatrixMultiplyTestGPU, GPU_MatrixMultiplyMacroTile)
+    template <typename T>
+    void matrixMultiplyMacroTile(std::shared_ptr<Context> m_context,
+                                 int                      wave_m,
+                                 int                      wave_n,
+                                 int                      wave_k,
+                                 int                      wave_b,
+                                 double                   acceptableError)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
 
@@ -55,12 +61,6 @@ namespace MatrixMultiplyTest
         AssertFatal(M % mac_m == 0, "MacroTile size mismatch (M)");
         AssertFatal(N % mac_n == 0, "MacroTile size mismatch (N)");
 
-        // wave tile sizes
-        int wave_m = 32;
-        int wave_n = 32;
-        int wave_k = 2;
-        int wave_b = 1;
-
         AssertFatal(mac_m == wave_m, "Single MacroTile.");
         AssertFatal(mac_n == wave_n, "Single MacroTile.");
 
@@ -73,25 +73,26 @@ namespace MatrixMultiplyTest
 
         RandomGenerator random(98761u);
 
-        auto A = random.vector<float>(M * K, -1.f, 1.f);
-        auto B = random.vector<float>(K * N, -1.f, 1.f);
+        auto A = random.vector<T>(M * K, -1.f, 1.f);
+        auto B = random.vector<T>(K * N, -1.f, 1.f);
 
         auto d_A = make_shared_device(A);
         auto d_B = make_shared_device(B);
-        auto d_D = make_shared_device<float>(M * N);
+        auto d_D = make_shared_device<T>(M * N);
 
-        auto command = std::make_shared<Command>();
+        auto command  = std::make_shared<Command>();
+        auto dataType = TypeInfo<T>::Var.dataType;
 
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(DataType::Float, 2, 0))); // A
+            rocRoller::Operations::T_Load_Tiled(dataType, 2, 0))); // A
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(DataType::Float, 2, 1))); // B
+            rocRoller::Operations::T_Load_Tiled(dataType, 2, 1))); // B
 
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
             rocRoller::Operations::T_Mul(2, 0, 1))); // D = A * B
 
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Store_Tiled(2, 2))); // D
+            rocRoller::Operations::T_Store_Tiled(dataType, 2, 2))); // D
 
         KernelArguments runtimeArgs;
 
@@ -161,19 +162,35 @@ namespace MatrixMultiplyTest
         CommandKernel commandKernel(command, "GEMM01", params);
         commandKernel.launchKernel(runtimeArgs.runtimeArguments());
 
-        std::vector<float> D(M * N);
-        ASSERT_THAT(hipMemcpy(D.data(), d_D.get(), M * N * sizeof(float), hipMemcpyDefault),
+        std::vector<T> D(M * N);
+        ASSERT_THAT(hipMemcpy(D.data(), d_D.get(), M * N * sizeof(T), hipMemcpyDefault),
                     HasHipSuccess(0));
 
-        std::vector<float> c_D(M * N, 0.f);
-        std::vector<float> c_C(M * N, 0.f);
+        std::vector<T> c_D(M * N, 0.f);
+        std::vector<T> c_C(M * N, 0.f);
         CPUMM(c_D, c_C, A, B, M, N, K, 1.0, 0.0, false);
 
         double rnorm = relativeNorm(D, c_D);
-        ASSERT_LT(rnorm, 2.e-6);
+        ASSERT_LT(rnorm, acceptableError);
     }
 
-    TEST_F(MatrixMultiplyTestGPU, GPU_MatrixMultiplyAB)
+    TEST_F(MatrixMultiplyTestGPU, GPU_MatrixMultiplyMacroTile)
+    {
+        matrixMultiplyMacroTile<float>(m_context, 32, 32, 2, 1, 2.e-6);
+    }
+
+    TEST_F(MatrixMultiplyTestGPU, GPU_MatrixMultiplyMacroTileFP16)
+    {
+        matrixMultiplyMacroTile<Half>(m_context, 32, 32, 8, 1, 2.e-6);
+    }
+
+    template <typename T>
+    void matrixMultiplyAB(std::shared_ptr<Context> m_context,
+                          int                      wave_m,
+                          int                      wave_n,
+                          int                      wave_k,
+                          int                      wave_b,
+                          double                   acceptableError)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         // matrix size: A is MxK; B is KxN; D is MxN
@@ -189,12 +206,6 @@ namespace MatrixMultiplyTest
         AssertFatal(M % mac_m == 0, "MacroTile size mismatch (M)");
         AssertFatal(N % mac_n == 0, "MacroTile size mismatch (N)");
 
-        // wave tile sizes
-        int wave_m = 32;
-        int wave_n = 32;
-        int wave_k = 2;
-        int wave_b = 1;
-
         uint workgroup_size_x = 256;
         uint workgroup_size_y = 1;
 
@@ -208,25 +219,26 @@ namespace MatrixMultiplyTest
 
         RandomGenerator random(61u);
 
-        auto A = random.vector<float>(M * K, -1.f, 1.f);
-        auto B = random.vector<float>(K * N, -1.f, 1.f);
+        auto A = random.vector<T>(M * K, -1.f, 1.f);
+        auto B = random.vector<T>(K * N, -1.f, 1.f);
 
         auto d_A = make_shared_device(A);
         auto d_B = make_shared_device(B);
-        auto d_D = make_shared_device<float>(M * N);
+        auto d_D = make_shared_device<T>(M * N);
 
-        auto command = std::make_shared<Command>();
+        auto command  = std::make_shared<Command>();
+        auto dataType = TypeInfo<T>::Var.dataType;
 
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(DataType::Float, 2, 0))); // A
+            rocRoller::Operations::T_Load_Tiled(dataType, 2, 0))); // A
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(DataType::Float, 2, 1))); // B
+            rocRoller::Operations::T_Load_Tiled(dataType, 2, 1))); // B
 
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
             rocRoller::Operations::T_Mul(2, 0, 1))); // D = A * B
 
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Store_Tiled(2, 2))); // D
+            rocRoller::Operations::T_Store_Tiled(dataType, 2, 2))); // D
 
         KernelArguments runtimeArgs;
 
@@ -296,16 +308,26 @@ namespace MatrixMultiplyTest
         CommandKernel commandKernel(command, "AB", params);
         commandKernel.launchKernel(runtimeArgs.runtimeArguments());
 
-        std::vector<float> D(M * N, 0.f);
-        ASSERT_THAT(hipMemcpy(D.data(), d_D.get(), M * N * sizeof(float), hipMemcpyDefault),
+        std::vector<T> D(M * N, 0.f);
+        ASSERT_THAT(hipMemcpy(D.data(), d_D.get(), M * N * sizeof(T), hipMemcpyDefault),
                     HasHipSuccess(0));
 
-        std::vector<float> c_D(M * N, 0.f);
-        std::vector<float> c_C(M * N, 0.f);
+        std::vector<T> c_D(M * N, 0.f);
+        std::vector<T> c_C(M * N, 0.f);
         CPUMM(c_D, c_C, A, B, M, N, K, 1.0, 0.0, false);
 
         double rnorm = relativeNorm(D, c_D);
-        ASSERT_LT(rnorm, 2.e-6);
+        ASSERT_LT(rnorm, acceptableError);
+    }
+
+    TEST_F(MatrixMultiplyTestGPU, GPU_MatrixMultiplyAB)
+    {
+        matrixMultiplyAB<float>(m_context, 32, 32, 2, 1, 2.e-6);
+    }
+
+    TEST_F(MatrixMultiplyTestGPU, GPU_MatrixMultiplyABFP16)
+    {
+        matrixMultiplyAB<Half>(m_context, 32, 32, 8, 1, 2.e-5);
     }
 
     TEST_F(MatrixMultiplyTestGPU, GPU_MatrixMultiplyABC)
@@ -371,7 +393,7 @@ namespace MatrixMultiplyTest
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(execute));
 
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Store_Tiled(2, 4))); // D
+            rocRoller::Operations::T_Store_Tiled(DataType::Float, 2, 4))); // D
 
         KernelArguments runtimeArgs;
 

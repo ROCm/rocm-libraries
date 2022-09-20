@@ -99,7 +99,7 @@ namespace TileTransposeAddTest
 
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(execute));
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Store_Tiled(2, 4))); // c
+            rocRoller::Operations::T_Store_Tiled(DataType::Int32, 2, 4))); // c
 
         KernelArguments runtimeArgs;
 

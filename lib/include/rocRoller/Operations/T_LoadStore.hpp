@@ -125,7 +125,7 @@ namespace rocRoller
         {
         public:
             T_Store_Tiled();
-            T_Store_Tiled(int dims, int dest);
+            T_Store_Tiled(DataType dataType, int dims, int dest);
             T_Store_Tiled(const std::initializer_list<unsigned>&,
                           void* const,
                           const unsigned,

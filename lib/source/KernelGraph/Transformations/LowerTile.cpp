@@ -169,22 +169,39 @@ namespace rocRoller
                     coordGraph.addEdge({wave_x, wave_y}, {wave}, Flatten());
                     coordGraph.addEdge({wave, lane}, {workitem}, Flatten());
 
+                    auto block_number = Adhoc(
+                        "BlockNumber", mac_tile.tag, literal(static_cast<uint>(wfs / m)), nullptr);
+                    auto block_index
+                        = Adhoc("BlockIndex", mac_tile.tag, literal(static_cast<uint>(m)), nullptr);
+
+                    coordGraph.addEdge({block_number, block_index}, {lane}, Flatten());
+
                     switch(wave_tile.layout)
                     {
                     case LayoutType::MATRIX_A:
                     {
-                        coordGraph.addEdge({i_wave_y, i_wave_x}, {wave_tile}, Flatten());
+                        coordGraph.addEdge(
+                            {i_wave_y, i_wave_x},
+                            {wave_tile},
+                            Flatten()); // TODO: not necessary here, but used for lookup in generator
+                        coordGraph.addEdge({i_wave_y}, {block_number, vgpr}, Tile());
+                        coordGraph.addEdge({i_wave_x}, {block_index}, PassThrough());
+
                         // TODO: Should this be set here?  Or deferred?
                         coordGraph.addEdge({n_wave_x}, {wave_x}, PassThrough());
-                        coordGraph.addEdge({wave_tile}, {lane, vgpr}, Tile());
                     }
                     break;
                     case LayoutType::MATRIX_B:
                     {
-                        coordGraph.addEdge({i_wave_x, i_wave_y}, {wave_tile}, Flatten());
+                        coordGraph.addEdge(
+                            {i_wave_x, i_wave_y},
+                            {wave_tile},
+                            Flatten()); // TODO: not necessary here, but used for lookup in generator
+                        coordGraph.addEdge({i_wave_x}, {block_number, vgpr}, Tile());
+                        coordGraph.addEdge({i_wave_y}, {block_index}, PassThrough());
+
                         // TODO: Should this be set here?  Or deferred?
                         coordGraph.addEdge({n_wave_y}, {wave_y}, PassThrough());
-                        coordGraph.addEdge({wave_tile}, {lane, vgpr}, Tile());
                     }
                     break;
                     case LayoutType::MATRIX_ACCUMULATOR:

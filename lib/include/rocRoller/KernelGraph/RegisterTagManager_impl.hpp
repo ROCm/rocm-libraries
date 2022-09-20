@@ -31,6 +31,8 @@ namespace rocRoller
         {
             auto reg = m_registers.at(tag);
             AssertFatal(reg->variableType() == varType);
+            AssertFatal(reg->registerCount() == valueCount);
+            AssertFatal(reg->regType() == regType);
             return reg;
         }
         auto r = Register::Value::Placeholder(m_context.lock(), regType, varType, valueCount);

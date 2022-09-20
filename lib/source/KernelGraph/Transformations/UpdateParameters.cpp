@@ -36,6 +36,11 @@ namespace rocRoller
                 return dim;
             }
 
+            ControlGraph::Operation visitOperation(ControlGraph::StoreTiled const& op)
+            {
+                return ControlGraph::StoreTiled(op.tag, op.dataType);
+            }
+
             MAKE_OPERATION_VISITOR(Assign);
             MAKE_OPERATION_VISITOR(Barrier);
             MAKE_OPERATION_VISITOR(ElementOp);
@@ -48,7 +53,6 @@ namespace rocRoller
             MAKE_OPERATION_VISITOR(Multiply);
             MAKE_OPERATION_VISITOR(StoreLDSTile);
             MAKE_OPERATION_VISITOR(StoreLinear);
-            MAKE_OPERATION_VISITOR(StoreTiled);
             MAKE_OPERATION_VISITOR(StoreVGPR);
             MAKE_OPERATION_VISITOR(TensorContraction);
             MAKE_OPERATION_VISITOR(UnrollOp);

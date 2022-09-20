@@ -18,6 +18,7 @@
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/RegisterTagManager.hpp>
 #include <rocRoller/Operations/Command.hpp>
+#include <rocRoller/Operations/CommandArgument.hpp>
 #include <rocRoller/Operations/Operations.hpp>
 #include <rocRoller/Scheduling/Scheduler.hpp>
 #include <rocRoller/Utilities/Error.hpp>
@@ -568,45 +569,89 @@ namespace rocRoller
                     "KernelGraph::CodeGenerator::loadMacroTileWAVE()");
                 co_yield_(Instruction::Comment("GEN: loadMacroTileWAVE"));
 
+                // Move the argument pointer into v_ptr
+                Register::ValuePtr s_ptr;
+                co_yield m_context->argLoader()->getValue(user.argumentName(), s_ptr);
+                auto v_ptr = s_ptr->placeholder(Register::Type::Vector);
+                co_yield m_context->copier()->copy(v_ptr, s_ptr);
+
+                // Register Value used to contain the offset
+                auto offset = Register::Value::Placeholder(
+                    m_context, Register::Type::Vector, DataType::Int64, 1);
+                co_yield offset->allocate();
+
                 uint num_elements = tiled.sizes[0] * tiled.sizes[1];
                 uint wfs          = m_context->kernel()->wavefront_size();
                 uint num_vgpr     = num_elements / wfs;
 
                 auto vtype = Operations::VariableTypeVisitor()(*m_command->findTag(tiled.tag));
-                auto tmpl  = Register::Value::Placeholder(
-                    m_context, Register::Type::Vector, vtype, num_vgpr);
 
-                auto vgpr = m_context->registerTagManager()->getRegister(getTag(tiled).ctag, tmpl);
-                co_yield Register::AllocateIfNeeded(vgpr);
-
-                Register::ValuePtr s_ptr;
-                co_yield m_context->argLoader()->getValue(user.argumentName(), s_ptr);
-
-                auto v_ptr = s_ptr->placeholder(Register::Type::Vector);
-
-                co_yield m_context->copier()->copy(v_ptr, s_ptr);
-
-                auto offset = Register::Value::Placeholder(
-                    m_context, Register::Type::Vector, DataType::Int64, 1);
-                co_yield offset->allocate();
-
-                auto numBytes = (uint)DataTypeInfo::Get(vgpr->variableType()).elementSize;
-
-                for(uint a = 0; a < num_vgpr; ++a)
+                if(vtype == DataType::Half)
                 {
-                    coords.setCoordinate(VGPR(tiled.tag), literal(a));
+                    auto tmpl = Register::Value::Placeholder(
+                        m_context, Register::Type::Vector, DataType::Halfx2, num_vgpr / 2);
 
-                    auto user_indexes = coords.reverse({user});
-                    auto user_index
-                        = fastDivision(fastMultiplication(simplify(user_indexes[0])), m_context);
-                    setComment(user_index, "User Index Expression");
-                    co_yield generateOffset(offset, user_index, vgpr->variableType().dataType);
+                    auto vgpr
+                        = m_context->registerTagManager()->getRegister(getTag(tiled).ctag, tmpl);
+                    co_yield Register::AllocateIfNeeded(vgpr);
 
-                    co_yield m_context->mem()->load(MemoryInstructions::MemoryKind::Flat,
-                                                    vgpr->element({static_cast<int>(a)}),
-                                                    v_ptr,
-                                                    offset,
-                                                    numBytes);
+                    auto offset2 = Register::Value::Placeholder(
+                        m_context, Register::Type::Vector, DataType::Int64, 1);
+
+                    for(uint a = 0; a < num_vgpr; a += 2)
+                    {
+                        coords.setCoordinate(VGPR(tiled.tag), literal(a));
+
+                        auto user_indexes = coords.reverse({user});
+                        auto user_index   = fastDivision(
+                            fastMultiplication(simplify(user_indexes[0])), m_context);
+                        setComment(user_index, "User Index Expression");
+                        co_yield generateOffset(offset, user_index, vtype.dataType);
+
+                        coords.setCoordinate(VGPR(tiled.tag), literal(a + 1));
+
+                        auto user_indexes2 = coords.reverse({user});
+                        auto user_index2   = fastDivision(
+                            fastMultiplication(simplify(user_indexes2[0])), m_context);
+                        setComment(user_index2, "User Index Expression");
+                        co_yield generateOffset(offset2, user_index2, vtype.dataType);
+
+                        co_yield m_context->mem()->loadAndPack(
+                            MemoryInstructions::MemoryKind::Flat,
+                            vgpr->element({static_cast<int>(a / 2)}),
+                            v_ptr,
+                            offset,
+                            v_ptr,
+                            offset2);
+                    }
+                }
+                else
+                {
+                    auto tmpl = Register::Value::Placeholder(
+                        m_context, Register::Type::Vector, vtype, num_vgpr);
+
+                    auto vgpr
+                        = m_context->registerTagManager()->getRegister(getTag(tiled).ctag, tmpl);
+                    co_yield Register::AllocateIfNeeded(vgpr);
+
+                    auto numBytes = (uint)DataTypeInfo::Get(vgpr->variableType()).elementSize;
+
+                    for(uint a = 0; a < num_vgpr; ++a)
+                    {
+                        coords.setCoordinate(VGPR(tiled.tag), literal(a));
+
+                        auto user_indexes = coords.reverse({user});
+                        auto user_index   = fastDivision(
+                            fastMultiplication(simplify(user_indexes[0])), m_context);
+                        setComment(user_index, "User Index Expression");
+                        co_yield generateOffset(offset, user_index, vgpr->variableType().dataType);
+
+                        co_yield m_context->mem()->load(MemoryInstructions::MemoryKind::Flat,
+                                                        vgpr->element({static_cast<int>(a)}),
+                                                        v_ptr,
+                                                        offset,
+                                                        numBytes);
+                    }
                 }
             }
 
@@ -799,27 +844,12 @@ namespace rocRoller
 
                 AssertFatal(macA.sizes[1] == macB.sizes[0], "MacroTile size mismatch.");
 
-                waveA.vgpr = m_context->registerTagManager()->getRegister(
-                    waveA.tag, Register::Type::Vector, DataType::Float, 1);
-                waveB.vgpr = m_context->registerTagManager()->getRegister(
-                    waveB.tag, Register::Type::Vector, DataType::Float, 1);
-
                 uint num_elements = waveA.sizes[0] * waveB.sizes[1];
                 uint wfs          = m_context->kernel()->wavefront_size();
                 uint num_agpr     = num_elements / wfs;
 
-                auto A
-                    = std::make_shared<Expression::Expression>(std::make_shared<WaveTile>(waveA));
-                auto B
-                    = std::make_shared<Expression::Expression>(std::make_shared<WaveTile>(waveB));
                 auto D = m_context->registerTagManager()->getRegister(
                     mult.tag, Register::Type::Accumulator, DataType::Float, num_agpr);
-
-                auto mfma = Component::Get<rocRoller::InstructionGenerators::MatrixMultiply>(
-                    rocRoller::InstructionGenerators::MatrixMultiply::Argument{
-                        m_context,
-                        D->variableType().dataType,
-                        waveA.vgpr->variableType().dataType});
 
                 auto completed = m_completedControlNodes;
 
@@ -836,6 +866,19 @@ namespace rocRoller
                     coords.setCoordinate(waveB.tileNumber(0), literal(k));
 
                     co_yield generate(loadAB, coords);
+
+                    waveA.vgpr = m_context->registerTagManager()->getRegister(waveA.tag);
+                    waveB.vgpr = m_context->registerTagManager()->getRegister(waveB.tag);
+
+                    auto mfma = Component::Get<rocRoller::InstructionGenerators::MatrixMultiply>(
+                        rocRoller::InstructionGenerators::MatrixMultiply::Argument{
+                            m_context,
+                            D->variableType().dataType,
+                            waveA.vgpr->variableType().dataType});
+
+                    // TODO: Remove this once MFMA Observer is working properly
+                    co_yield Instruction::Wait(WaitCount::Zero("DEBUG: Wait before MFMA call",
+                                                               m_context->targetArchitecture()));
                     co_yield mfma->mul(D,
                                        waveA.vgpr,
                                        waveB.vgpr,
@@ -955,6 +998,8 @@ namespace rocRoller
 
                 auto agpr = m_context->registerTagManager()->getRegister(getTag(tile).ctag);
 
+                AssertFatal(agpr->registerCount() == num_vgpr);
+
                 Register::ValuePtr s_ptr;
                 co_yield m_context->argLoader()->getValue(user.argumentName(), s_ptr);
 
@@ -971,7 +1016,12 @@ namespace rocRoller
                     m_context, Register::Type::Vector, agpr->variableType(), 1);
                 co_yield value->allocate();
 
-                auto numBytes = DataTypeInfo::Get(agpr->variableType()).elementSize;
+                auto dataType = store.dataType;
+                auto converted
+                    = Register::Value::Placeholder(m_context, Register::Type::Vector, dataType, 1);
+                co_yield converted->allocate();
+
+                auto numBytes = DataTypeInfo::Get(dataType).elementSize;
 
                 for(uint a = 0; a < num_vgpr; ++a)
                 {
@@ -980,11 +1030,24 @@ namespace rocRoller
                     auto user_indexes = coords.forward({user});
                     auto user_index
                         = fastDivision(fastMultiplication(simplify(user_indexes[0])), m_context);
-                    co_yield generateOffset(offset, user_index, agpr->variableType().dataType);
-                    co_yield m_context->copier()->copy(value, agpr->element({static_cast<int>(a)}));
+                    co_yield generateOffset(offset, user_index, dataType);
+                    if(value->variableType() != dataType)
+                    {
+                        co_yield m_context->copier()->copy(value,
+                                                           agpr->element({static_cast<int>(a)}));
+                        co_yield Expression::generate(
+                            converted,
+                            convert(dataType, std::make_shared<Expression::Expression>(value)),
+                            m_context);
+                    }
+                    else
+                    {
+                        co_yield m_context->copier()->copy(converted,
+                                                           agpr->element({static_cast<int>(a)}));
+                    }
 
                     co_yield m_context->mem()->store(
-                        MemoryInstructions::MemoryKind::Flat, v_ptr, value, offset, numBytes);
+                        MemoryInstructions::MemoryKind::Flat, v_ptr, converted, offset, numBytes);
                 }
             }
 

@@ -13,7 +13,7 @@ namespace rocRoller
 {
     /**
      * @brief Options are represented by the SettingsOption struct.
-     * 
+     *
      * @tparam T type of underlying option.
      */
     template <typename T>
@@ -28,10 +28,10 @@ namespace rocRoller
     };
 
     /**
-     * @brief Settings class is derived from lazy singleton class and handles options 
+     * @brief Settings class is derived from lazy singleton class and handles options
      * that are defined through environment variables or developer defined options.
-     * 
-     * Getting a value requires a call to get(SettingsOption opt). When get() is called, 
+     *
+     * Getting a value requires a call to get(SettingsOption opt). When get() is called,
      * we probe m_values which maps an option name to its corresponding value. If opt does
      * not exist in m_values then we assign the value based on the following precedence order:
      *     1. set(opt, val) will always set, or overwrite, the value of opt in m_values. Otherwise

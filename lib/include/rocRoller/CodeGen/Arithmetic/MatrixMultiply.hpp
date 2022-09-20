@@ -47,6 +47,7 @@ namespace rocRoller
              * Context, accumulation type, input type.
              */
             using Argument = std::tuple<std::shared_ptr<Context>, DataType, DataType>;
+            using Base     = MatrixMultiply;
 
             static const std::string Name;
 
@@ -73,20 +74,31 @@ namespace rocRoller
                 = 0;
         };
 
-        struct MatrixMultiply_Float_Float : public MatrixMultiply
+        template <DataType ACC, DataType INPUT>
+        struct MatrixMultiplyGenerator : public MatrixMultiply
         {
             using Base = MatrixMultiply;
 
-            MatrixMultiply_Float_Float(std::shared_ptr<Context> context)
+            MatrixMultiplyGenerator<ACC, INPUT>(std::shared_ptr<Context> context)
                 : m_context(context){};
 
             static const std::string Name;
             static const std::string Basename;
 
-            virtual ~MatrixMultiply_Float_Float() = default;
+            virtual ~MatrixMultiplyGenerator<ACC, INPUT>() = default;
 
-            static bool                            Match(Argument const& arg);
-            static std::shared_ptr<MatrixMultiply> Build(Argument const& arg);
+            static bool Match(Argument const& arg)
+            {
+                auto atype = std::get<1>(arg);
+                auto vtype = std::get<2>(arg);
+                return atype == ACC && vtype == INPUT;
+            }
+
+            static std::shared_ptr<MatrixMultiply> Build(Argument const& arg)
+            {
+                auto context = std::get<0>(arg);
+                return std::make_shared<MatrixMultiplyGenerator<ACC, INPUT>>(context);
+            }
 
             virtual Generator<Instruction> zero(std::shared_ptr<Register::Value> dest) override;
 

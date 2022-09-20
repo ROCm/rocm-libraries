@@ -250,7 +250,8 @@ namespace rocRoller
                 m_kgraph.coordinates.addEdge(dims, {user}, CoordinateTransform::Join());
                 m_kgraph.coordinates.addEdge({outTile}, {user}, CoordinateTransform::DataFlow());
 
-                m_kgraph.control.addEdge({user}, {ControlGraph::StoreTiled(store.getTag())});
+                m_kgraph.control.addEdge(
+                    {user}, {ControlGraph::StoreTiled(store.getTag(), store.dataType())});
             }
 
             /*

@@ -140,7 +140,7 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult)
     command->addOperation(std::make_shared<rocRoller::Operations::Operation>(execute));
 
     command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-        rocRoller::Operations::T_Store_Tiled(2, 8))); // D
+        rocRoller::Operations::T_Store_Tiled(DataType::Float, 2, 8))); // D
 
     KernelArguments runtimeArgs;
 

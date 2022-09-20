@@ -325,6 +325,8 @@ namespace rocRoller
         ExpressionPtr magicShifts(ExpressionPtr a);
         ExpressionPtr magicSign(ExpressionPtr a);
 
+        ExpressionPtr convert(DataType dt, ExpressionPtr a);
+
         template <DataType DATATYPE>
         ExpressionPtr convert(ExpressionPtr a);
 

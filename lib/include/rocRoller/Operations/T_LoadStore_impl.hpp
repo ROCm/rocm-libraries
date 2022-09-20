@@ -266,8 +266,8 @@ namespace rocRoller
         {
         }
 
-        inline T_Store_Tiled::T_Store_Tiled(int dims, int dest)
-            : Load_Store_Operation(DataType::None, dims, dest)
+        inline T_Store_Tiled::T_Store_Tiled(DataType dataType, int dims, int dest)
+            : Load_Store_Operation(dataType, dims, dest)
         {
         }
 

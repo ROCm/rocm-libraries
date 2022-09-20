@@ -250,7 +250,14 @@ namespace rocRoller
          */
         struct StoreTiled : public BaseOperation
         {
-            using BaseOperation::BaseOperation;
+            StoreTiled() = delete;
+            StoreTiled(int tag, DataType dtype)
+                : BaseOperation(tag)
+                , dataType(dtype)
+            {
+            }
+
+            DataType dataType;
 
             virtual std::string toString() const override
             {
