@@ -33,7 +33,14 @@ def runTestCommand (platform, project)
 
     def testCommand = "ctest${centos} --output-on-failure"
     def hmmTestCommand = ''
-
+    def excludeRegex = 'reduce_by_key.hip'
+    
+    if (platform.jenkinsLabel.contains('gfx11'))
+    {
+        excludeRegex = /(reduce_by_key.hip|partition.hip|sort.hip|sort_by_key.hip|stable_sort_by_key.hip|stable_sort.hip|async_copy.hip|async_reduce.hip|async_scan.hip|async_sort.hip|async_transform.hip)/
+    }
+    testCommandExclude = "--exclude-regex \"${excludeRegex}\""
+    
     if (platform.jenkinsLabel.contains('gfx90a'))
     {
         hmmTestCommand = ""
@@ -41,7 +48,7 @@ def runTestCommand (platform, project)
                         //  """
                         //     export HSA_XNACK=1
                         //     export ROCTHRUST_USE_HMM=1
-                        //     ${testCommand} -R device_ptr.hip
+                        //     ${testCommand} ${testCommandExclude}
                         //  """
     }
 
@@ -50,7 +57,7 @@ def runTestCommand (platform, project)
                     set -x
                     cd ${project.paths.project_build_prefix}
                     cd ${project.testDirectory}
-                    ${testCommand}
+                    ${testCommand} ${testCommandExclude}
                     ${hmmTestCommand}
                   """
 
