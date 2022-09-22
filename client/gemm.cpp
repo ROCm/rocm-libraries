@@ -62,6 +62,9 @@ struct rocRoller::Serialization::
         iot::mapRequired(io, "numWarmUp", result.numWarmUp);
         iot::mapRequired(io, "numOuter", result.numOuter);
         iot::mapRequired(io, "numInner", result.numInner);
+        iot::mapRequired(io, "mac_m", result.mac_m);
+        iot::mapRequired(io, "mac_n", result.mac_n);
+        iot::mapRequired(io, "mac_k", result.mac_k);
         iot::mapRequired(io, "kernelGenerate", result.kernelGenerate);
         iot::mapRequired(io, "kernelAssemble", result.kernelAssemble);
         iot::mapRequired(io, "kernelExecute", result.kernelExecute);
