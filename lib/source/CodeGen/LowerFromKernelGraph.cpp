@@ -193,6 +193,70 @@ namespace rocRoller
                 }
             }
 
+            template <Expression::CBinary Operation>
+            Generator<Instruction> generateCommutativeBinaryOp(int dest, int a, int b)
+            {
+                auto lhs = m_context->registerTagManager()->getRegister(a);
+                auto rhs = m_context->registerTagManager()->getRegister(b);
+
+                auto const lhsInfo = DataTypeInfo::Get(lhs->variableType());
+                auto const rhsInfo = DataTypeInfo::Get(rhs->variableType());
+
+                AssertFatal(lhs->valueCount() * lhsInfo.packing
+                                    == rhs->valueCount() * rhsInfo.packing
+                                || lhs->valueCount() * lhsInfo.packing == 1
+                                || rhs->valueCount() * rhsInfo.packing == 1,
+                            "Commutative binary operation size mismatch.");
+
+                auto regType    = Register::Type::Vector;
+                auto varType    = VariableType::Promote(lhs->variableType(), rhs->variableType());
+                auto valueCount = std::max(lhs->valueCount() * lhsInfo.packing,
+                                           rhs->valueCount() * rhsInfo.packing);
+
+                co_yield m_context->copier()->ensureType(lhs, lhs, regType);
+                co_yield m_context->copier()->ensureType(rhs, rhs, regType);
+
+                auto dst = m_context->registerTagManager()->getRegister(
+                    dest, regType, varType, valueCount);
+                co_yield Register::AllocateIfNeeded(dst);
+
+                auto op = GetGenerator<Operation>(dst, lhs, rhs);
+
+                if(lhsInfo.packing != rhsInfo.packing)
+                {
+                    // If the packing values of the datatypes are different, we need to
+                    // convert the more packed value into the less packed value type.
+                    // We can then perform the operation.
+                    int packingRatio = std::max(lhsInfo.packing, rhsInfo.packing)
+                                       / std::min(lhsInfo.packing, rhsInfo.packing);
+
+                    if(rhsInfo.packing < lhsInfo.packing)
+                        std::swap(lhs, rhs);
+
+                    for(size_t i = 0; i < dst->valueCount(); i += packingRatio)
+                    {
+                        auto result = dst->element({i, i + packingRatio - 1});
+                        co_yield generateConvertOp(
+                            varType.dataType, result, rhs->element({i / packingRatio}));
+                        for(size_t j = 0; j < packingRatio; j++)
+                        {
+                            auto lhsVal = lhs->valueCount() == 1 ? lhs : lhs->element({i + j});
+                            co_yield op->generate(
+                                result->element({j}), lhsVal, result->element({j}));
+                        }
+                    }
+                }
+                else
+                {
+                    for(size_t k = 0; k < valueCount; ++k)
+                    {
+                        auto lhsVal = lhs->valueCount() == 1 ? lhs : lhs->element({k});
+                        auto rhsVal = rhs->valueCount() == 1 ? rhs : rhs->element({k});
+                        co_yield op->generate(dst->element({k}), lhsVal, rhsVal);
+                    }
+                }
+            }
+
             Generator<Instruction> generate(std::vector<TagType> const& candidates,
                                             Transformer const&          coords)
             {
@@ -248,26 +312,7 @@ namespace rocRoller
             {
                 co_yield_(Instruction::Comment("GEN: E_Add"));
 
-                auto lhs = m_context->registerTagManager()->getRegister(xop.a);
-                auto rhs = m_context->registerTagManager()->getRegister(xop.b);
-
-                AssertFatal(lhs->valueCount() == rhs->valueCount(), "E_Add size mismatch.");
-
-                auto regType    = Register::Type::Vector;
-                auto varType    = VariableType::Promote(lhs->variableType(), rhs->variableType());
-                auto valueCount = lhs->valueCount();
-
-                co_yield m_context->copier()->ensureType(lhs, lhs, regType);
-                co_yield m_context->copier()->ensureType(rhs, rhs, regType);
-
-                auto dst = m_context->registerTagManager()->getRegister(
-                    xop.dest, regType, varType, valueCount);
-                co_yield Register::AllocateIfNeeded(dst);
-
-                auto add = GetGenerator<Expression::Add>(dst, lhs, rhs);
-
-                for(size_t i = 0; i < dst->valueCount(); ++i)
-                    co_yield add->generate(dst->element({i}), lhs->element({i}), rhs->element({i}));
+                co_yield generateCommutativeBinaryOp<Expression::Add>(xop.dest, xop.a, xop.b);
             }
 
             Generator<Instruction> operator()(Operations::E_Sub const& xop)
@@ -286,48 +331,7 @@ namespace rocRoller
             {
                 co_yield_(Instruction::Comment("GEN: E_Mul"));
 
-                auto lhs = m_context->registerTagManager()->getRegister(xop.a);
-                auto rhs = m_context->registerTagManager()->getRegister(xop.b);
-
-                auto regType    = Register::Type::Vector;
-                auto varType    = VariableType::Promote(lhs->variableType(), rhs->variableType());
-                auto valueCount = std::max(lhs->valueCount(), rhs->valueCount());
-
-                co_yield m_context->copier()->ensureType(lhs, lhs, regType);
-                co_yield m_context->copier()->ensureType(rhs, rhs, regType);
-
-                auto dst = m_context->registerTagManager()->getRegister(
-                    xop.dest, regType, varType, valueCount);
-                co_yield Register::AllocateIfNeeded(dst);
-
-                auto mul = GetGenerator<Expression::Multiply>(dst, lhs, rhs);
-
-                if(lhs->valueCount() == rhs->valueCount())
-                {
-                    for(size_t k = 0; k < lhs->valueCount(); ++k)
-                    {
-                        co_yield mul->generate(
-                            dst->element({k}), lhs->element({k}), rhs->element({k}));
-                    }
-                }
-                else if(lhs->valueCount() == 1)
-                {
-                    for(size_t k = 0; k < rhs->valueCount(); ++k)
-                    {
-                        co_yield mul->generate(dst->element({k}), lhs, rhs->element({k}));
-                    }
-                }
-                else if(rhs->valueCount() == 1)
-                {
-                    for(size_t k = 0; k < lhs->valueCount(); ++k)
-                    {
-                        co_yield mul->generate(dst->element({k}), lhs->element({k}), rhs);
-                    }
-                }
-                else
-                {
-                    Throw<FatalError>("Multiplication must be scalar or element-wise.");
-                }
+                co_yield generateCommutativeBinaryOp<Expression::Multiply>(xop.dest, xop.a, xop.b);
             }
 
             Generator<Instruction> operator()(Operations::E_Div const& xop)

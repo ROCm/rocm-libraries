@@ -32,7 +32,13 @@ namespace GEMMDriverTest
     {
     };
 
-    TEST_F(GEMMTestGPU, GPU_BasicGEMM)
+    template <typename T>
+    void basicGEMM(std::shared_ptr<Context> m_context,
+                   int                      wave_m,
+                   int                      wave_n,
+                   int                      wave_k,
+                   int                      wave_b,
+                   double                   acceptableError)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
 
@@ -51,12 +57,6 @@ namespace GEMMDriverTest
         AssertFatal(M % mac_m == 0, "MacroTile size mismatch (M)");
         AssertFatal(N % mac_n == 0, "MacroTile size mismatch (N)");
 
-        // wave tile sizes
-        int wave_m = 32;
-        int wave_n = 32;
-        int wave_k = 2;
-        int wave_b = 1;
-
         uint workgroup_size_x = 256;
         uint workgroup_size_y = 1;
 
@@ -69,25 +69,26 @@ namespace GEMMDriverTest
         auto NZ = std::make_shared<Expression::Expression>(1u);
 
         // Host data
-        RandomGenerator    random(31415u);
-        std::vector<float> h_A = random.vector<float>(M * K, -100, 100);
-        std::vector<float> h_B = random.vector<float>(K * N, -100, 100);
-        std::vector<float> h_C = random.vector<float>(M * N, -100, 100);
+        RandomGenerator random(31415u);
+        std::vector<T>  h_A = random.vector<T>(M * K, -1.0, 1.0);
+        std::vector<T>  h_B = random.vector<T>(K * N, -1.0, 1.0);
+        std::vector<T>  h_C = random.vector<T>(M * N, -1.0, 1.0);
 
         // Device data
-        std::shared_ptr<float> d_A = make_shared_device(h_A);
-        std::shared_ptr<float> d_B = make_shared_device(h_B);
-        std::shared_ptr<float> d_C = make_shared_device(h_C);
-        std::shared_ptr<float> d_D = make_shared_device<float>(M * N, 0);
+        std::shared_ptr<T> d_A = make_shared_device(h_A);
+        std::shared_ptr<T> d_B = make_shared_device(h_B);
+        std::shared_ptr<T> d_C = make_shared_device(h_C);
+        std::shared_ptr<T> d_D = make_shared_device<T>(M * N, 0.0);
 
-        auto command = std::make_shared<Command>();
+        auto command  = std::make_shared<Command>();
+        auto dataType = TypeInfo<T>::Var.dataType;
 
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(DataType::Float, 2, 0))); // A
+            rocRoller::Operations::T_Load_Tiled(dataType, 2, 0))); // A
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(DataType::Float, 2, 1))); // B
+            rocRoller::Operations::T_Load_Tiled(dataType, 2, 1))); // B
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(DataType::Float, 2, 2))); // C
+            rocRoller::Operations::T_Load_Tiled(dataType, 2, 2))); // C
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
             rocRoller::Operations::T_Load_Scalar(DataType::Float, 3))); // alpha
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
@@ -106,7 +107,7 @@ namespace GEMMDriverTest
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(execute));
 
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Store_Tiled(DataType::Float, 2, 8))); // D
+            rocRoller::Operations::T_Store_Tiled(dataType, 2, 8))); // D
 
         KernelArguments runtimeArgs;
 
@@ -222,17 +223,26 @@ namespace GEMMDriverTest
         commandKernel.launchKernel(runtimeArgs.runtimeArguments());
 
         // Device result
-        std::vector<float> d_result(M * N, 0);
-        ASSERT_THAT(
-            hipMemcpy(d_result.data(), d_D.get(), M * N * sizeof(float), hipMemcpyDeviceToHost),
-            HasHipSuccess(0));
+        std::vector<T> d_result(M * N, 0.0);
+        ASSERT_THAT(hipMemcpy(d_result.data(), d_D.get(), M * N * sizeof(T), hipMemcpyDeviceToHost),
+                    HasHipSuccess(0));
 
         // Host result
-        std::vector<float> h_result(M * N, 0);
+        std::vector<T> h_result(M * N, 0.0);
         rocRoller::CPUMM(h_result, h_C, h_A, h_B, M, N, K, alpha, beta, false);
 
         double rnorm = relativeNorm(d_result, h_result);
 
-        ASSERT_LT(rnorm, 1.e-6);
+        ASSERT_LT(rnorm, acceptableError);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMM)
+    {
+        basicGEMM<float>(m_context, 32, 32, 2, 1, 1.e-6);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16)
+    {
+        basicGEMM<Half>(m_context, 32, 32, 8, 1, 2.e-5);
     }
 }

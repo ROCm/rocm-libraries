@@ -16,6 +16,17 @@ namespace rocRoller
         GetGenerator<Expression::Convert<DataType::Half>>(Register::ValuePtr dst,
                                                           Register::ValuePtr arg);
 
+    /**
+     * @brief Generates instructions to convert register value to a new datatype.
+     *
+     * @param dataType The new datatype
+     * @param dest The destination register
+     * @param arg The value to be converted
+     * @return Generator<Instruction>
+     */
+    Generator<Instruction>
+        generateConvertOp(DataType dataType, Register::ValuePtr dest, Register::ValuePtr arg);
+
     // Templated Generator class based on the return type.
     template <DataType DATATYPE>
     class ConvertGenerator : public UnaryArithmeticGenerator<Expression::Convert<DATATYPE>>

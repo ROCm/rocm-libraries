@@ -25,11 +25,28 @@ namespace rocRoller
             getContextFromValues(dst, arg), dst->regType(), dst->variableType().dataType);
     }
 
+    Generator<Instruction>
+        generateConvertOp(DataType dataType, Register::ValuePtr dest, Register::ValuePtr arg)
+    {
+        switch(dataType)
+        {
+        case DataType::Float:
+            co_yield generateOp<Expression::Convert<DataType::Float>>(dest, arg);
+            break;
+        case DataType::Half:
+            co_yield generateOp<Expression::Convert<DataType::Half>>(dest, arg);
+            break;
+        default:
+            Throw<FatalError>("Unsupported datatype conversion");
+        }
+    }
+
     template <>
     Generator<Instruction> ConvertGenerator<DataType::Float>::generate(Register::ValuePtr dest,
                                                                        Register::ValuePtr arg)
     {
         AssertFatal(arg != nullptr);
+        AssertFatal(dest != nullptr);
 
         auto dataType = getArithDataType(arg);
 
@@ -37,6 +54,13 @@ namespace rocRoller
         {
         case DataType::Half:
             co_yield_(Instruction("v_cvt_f32_f16", {dest}, {arg}, {}, ""));
+            break;
+        case DataType::Halfx2:
+            co_yield_(Instruction("v_cvt_f32_f16", {dest->element({0})}, {arg}, {}, ""));
+            co_yield generateOp<Expression::ShiftR>(
+                dest->element({1}), arg, Register::Value::Literal(16u));
+            co_yield_(
+                Instruction("v_cvt_f32_f16", {dest->element({1})}, {dest->element({1})}, {}, ""));
             break;
         default:
             Throw<FatalError>("Unsupported datatype for convert to float: ", ShowValue(dataType));

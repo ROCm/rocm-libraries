@@ -265,6 +265,12 @@ namespace rocRoller
         if(lhsInfo.elementSize < rhsInfo.elementSize)
             return rhs;
 
+        if(lhsInfo.packing < rhsInfo.packing)
+            return lhs;
+
+        if(lhsInfo.packing > rhsInfo.packing)
+            return rhs;
+
         if(rhsInfo.isSigned)
             return rhs;
 
