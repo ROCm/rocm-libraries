@@ -34,5 +34,117 @@ namespace rocRoller
                 dsts    = _dsts;
             }
         };
+
+        struct ForwardEdgeVisitor : public BaseEdgeVisitor
+        {
+            std::vector<Expression::ExpressionPtr> operator()(Flatten const& e)
+            {
+                auto result = indexes[0];
+                for(uint d = 1; d < srcs.size(); ++d)
+                    result = result * getSize(srcs[d]) + indexes[d];
+                return {result};
+            }
+
+            std::vector<Expression::ExpressionPtr> operator()(Join const& e)
+            {
+                AssertFatal(dsts.size() == 1, ShowValue(dsts.size()));
+                auto result = indexes[0] * getStride(srcs[0]);
+                for(uint d = 1; d < srcs.size(); ++d)
+                    result = result + indexes[d] * getStride(srcs[d]);
+                return {result};
+            }
+
+            std::vector<Expression::ExpressionPtr> operator()(Tile const& e)
+            {
+                std::vector<Expression::ExpressionPtr> rv(dsts.size());
+
+                auto input = indexes[0] / getStride(srcs[0]);
+
+                for(size_t i = 1; i < dsts.size(); i++)
+                {
+                    rv[i - 1] = input / getSize(dsts[i]);
+                    input     = input % getSize(dsts[i]);
+                }
+                rv.back() = input;
+
+                return rv;
+            }
+
+            template <CTUndefinedEdge T>
+            std::vector<Expression::ExpressionPtr> operator()(T const& e)
+            {
+                Throw<FatalError>("Edge transform not defined.");
+            }
+
+            template <CTEdgePassthrough T>
+            std::vector<Expression::ExpressionPtr> operator()(T const& e)
+            {
+                return std::visit(*this, e);
+            }
+
+            template <typename T>
+            std::vector<Expression::ExpressionPtr> operator()(T const& e)
+            {
+                return indexes;
+            }
+        };
+
+        struct ReverseEdgeVisitor : public BaseEdgeVisitor
+        {
+            std::vector<Expression::ExpressionPtr> operator()(Flatten const& e)
+            {
+                AssertFatal(dsts.size() == 1, ShowValue(dsts.size()));
+                if(srcs.size() == 1)
+                    return indexes;
+
+                std::vector<Expression::ExpressionPtr> rv(srcs.size());
+
+                auto input = indexes[0];
+
+                for(int i = srcs.size() - 1; i >= 0; i--)
+                {
+                    auto mysrc = srcs[i];
+                    auto size  = getSize(mysrc);
+                    rv[i]      = input % size;
+                    input      = input / size;
+                }
+                return rv;
+            }
+
+            std::vector<Expression::ExpressionPtr> operator()(Split const& e)
+            {
+                AssertFatal(srcs.size() == 1, ShowValue(srcs.size()));
+                auto result = indexes[0] * getStride(dsts[0]);
+                for(uint d = 1; d < dsts.size(); ++d)
+                    result = result + indexes[d] * getStride(dsts[d]);
+                return {result};
+            }
+
+            std::vector<Expression::ExpressionPtr> operator()(Tile const& e)
+            {
+                auto result = indexes[0];
+                for(uint d = 1; d < dsts.size(); ++d)
+                    result = result * getSize(dsts[d]) + indexes[d];
+                return {result};
+            }
+
+            template <CTUndefinedEdge T>
+            std::vector<Expression::ExpressionPtr> operator()(T const& e)
+            {
+                Throw<FatalError>("Edge transform not defined.");
+            }
+
+            template <CTEdgePassthrough T>
+            std::vector<Expression::ExpressionPtr> operator()(T const& e)
+            {
+                return std::visit(*this, e);
+            }
+
+            template <typename T>
+            std::vector<Expression::ExpressionPtr> operator()(T const& e)
+            {
+                return indexes;
+            }
+        };
     }
 }

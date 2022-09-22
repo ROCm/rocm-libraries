@@ -2,13 +2,6 @@
 
 #include "Hypergraph.hpp"
 
-#include <boost/multi_index_container.hpp>
-
-#include <boost/multi_index/identity.hpp>
-#include <boost/multi_index/key.hpp>
-#include <boost/multi_index/member.hpp>
-#include <boost/multi_index/ordered_index.hpp>
-
 #include <algorithm>
 #include <compare>
 #include <map>
@@ -203,8 +196,7 @@ namespace rocRoller
         template <typename Node, typename Edge, bool Hyper>
         auto Hypergraph<Node, Edge, Hyper>::getElement(int index) const -> Element const&
         {
-            AssertFatal(
-                index >= 0 && index < m_elements.size(), "Element not found ", ShowValue(index));
+            AssertFatal(index >= 0 && index < m_nextIndex, "Element not found ", ShowValue(index));
             return m_elements.at(index);
         }
 
@@ -283,56 +275,36 @@ namespace rocRoller
         template <typename Node, typename Edge, bool Hyper>
         Generator<int> Hypergraph<Node, Edge, Hyper>::childNodes(int parent) const
         {
-            // TODO: getLocation is an expensive operation, replace with streamlined code
             // FIXME: If the hypergraph has parallel edges, we'll get duplicate output nodes.
 
-            Location loc = getLocation(parent);
             if(getElementType(parent) == ElementType::Node)
             {
-                for(auto const& edgeIndex : loc.outgoing)
+                for(auto const& edgeIndex : getNeighbours<Direction::Downstream>(parent))
                 {
-                    // Get edge location
-                    Location edgeLoc = getLocation(edgeIndex);
-                    for(auto const& nodeIndex : edgeLoc.outgoing)
-                    {
-                        co_yield nodeIndex;
-                    }
+                    co_yield getNeighbours<Direction::Downstream>(edgeIndex);
                 }
             }
             else
             {
-                for(auto const& nodeIndex : loc.outgoing)
-                {
-                    co_yield nodeIndex;
-                }
+                co_yield getNeighbours<Direction::Downstream>(parent);
             }
         }
 
         template <typename Node, typename Edge, bool Hyper>
         Generator<int> Hypergraph<Node, Edge, Hyper>::parentNodes(int child) const
         {
-            // TODO: getLocation is an expensive operation, replace with streamlined code
             // FIXME: If the hypergraph has parallel edges, we'll get duplicate output nodes.
 
-            Location loc = getLocation(child);
             if(getElementType(child) == ElementType::Node)
             {
-                for(auto const& edgeIndex : loc.incoming)
+                for(auto const& edgeIndex : getNeighbours<Direction::Upstream>(child))
                 {
-                    // Get edge location
-                    Location edgeLoc = getLocation(edgeIndex);
-                    for(auto const& nodeIndex : edgeLoc.incoming)
-                    {
-                        co_yield nodeIndex;
-                    }
+                    co_yield getNeighbours<Direction::Upstream>(edgeIndex);
                 }
             }
             else
             {
-                for(auto const& nodeIndex : loc.incoming)
-                {
-                    co_yield nodeIndex;
-                }
+                co_yield getNeighbours<Direction::Upstream>(child);
             }
         }
 
@@ -414,26 +386,111 @@ namespace rocRoller
 
             co_yield start;
 
-            if constexpr(Dir == Direction::Upstream)
+            for(auto const element : getNeighbours<Dir>(start))
             {
-                auto const& lookup = m_incidence.template get<ByDst>();
+                co_yield depthFirstVisit<Dir>(element, visitedNodes);
+            }
+        }
 
-                for(auto iter = lookup.lower_bound(std::make_tuple(start, 0));
-                    iter != lookup.end() && iter->dst == start;
+        template <typename Node, typename Edge, bool Hyper>
+        template <Direction Dir>
+        Generator<int>
+            Hypergraph<Node, Edge, Hyper>::path(std::vector<int> const   starts,
+                                                std::vector<int> const   ends,
+                                                std::map<int, bool>&     visitedElements,
+                                                std::function<bool(int)> edgeSelector) const
+        {
+            Direction const reverseDir
+                = (Dir == Direction::Downstream) ? Direction::Upstream : Direction::Downstream;
+
+            for(auto const end : ends)
+            {
+                if(visitedElements.contains(end))
+                {
+                    continue;
+                }
+
+                if(std::count(starts.begin(), starts.end(), end) > 0)
+                {
+                    visitedElements[end] = true;
+                    co_yield end;
+                    continue;
+                }
+
+                visitedElements[end] = false;
+
+                std::vector<int> results;
+                for(auto const nextElement : getNeighbours<reverseDir>(end))
+                {
+                    if(getElementType(nextElement) == ElementType::Edge
+                       && !edgeSelector(nextElement))
+                    {
+                        continue;
+                    }
+
+                    std::vector<int> branchResults
+                        = path<Dir>(starts, {nextElement}, visitedElements, edgeSelector)
+                              .template to<std::vector>();
+                    results.insert(results.end(), branchResults.begin(), branchResults.end());
+
+                    bool satisfied = (getElementType(end) != ElementType::Edge
+                                      || edgeSatisfied<reverseDir>(end, visitedElements));
+
+                    visitedElements[end] |= visitedElements[nextElement];
+                    visitedElements[end] &= satisfied;
+                }
+
+                if(visitedElements.at(end))
+                {
+                    for(int const result : results)
+                    {
+                        co_yield result;
+                    }
+                    co_yield end;
+                }
+            }
+        }
+
+        template <typename Node, typename Edge, bool Hyper>
+        template <Direction Dir>
+        bool Hypergraph<Node, Edge, Hyper>::edgeSatisfied(
+            int const edge, std::map<int, bool> const& visitedElements) const
+        {
+            for(auto const element : getNeighbours<Dir>(edge))
+            {
+                if(!visitedElements.contains(element))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        template <typename Node, typename Edge, bool Hyper>
+        template <Direction Dir>
+        Generator<int> Hypergraph<Node, Edge, Hyper>::getNeighbours(int const element) const
+        {
+            if constexpr(Dir == Direction::Downstream)
+            {
+                auto const& lookup = m_incidence.template get<BySrc>();
+
+                for(auto iter = lookup.lower_bound(std::make_tuple(element, 0));
+                    iter != lookup.end() && iter->src == element;
                     iter++)
                 {
-                    co_yield depthFirstVisit<Dir>(iter->src, visitedNodes);
+                    co_yield iter->dst;
                 }
             }
             else
             {
-                auto const& lookup = m_incidence.template get<BySrc>();
+                auto const& lookup = m_incidence.template get<ByDst>();
 
-                for(auto iter = lookup.lower_bound(std::make_tuple(start, 0));
-                    iter != lookup.end() && iter->src == start;
+                for(auto iter = lookup.lower_bound(std::make_tuple(element, 0));
+                    iter != lookup.end() && iter->dst == element;
                     iter++)
                 {
-                    co_yield depthFirstVisit<Dir>(iter->dst, visitedNodes);
+                    co_yield iter->src;
                 }
             }
         }

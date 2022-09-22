@@ -241,10 +241,7 @@ namespace rocRoller
          */
         struct Workitem : public SubDimension
         {
-            Workitem(int                       tag,
-                     int                       dim    = 0,
-                     Expression::ExpressionPtr size   = nullptr,
-                     bool                      output = false)
+            Workitem(int dim = 0, Expression::ExpressionPtr size = nullptr, bool output = false)
                 : SubDimension(dim, size, Expression::literal(1u), output)
             {
             }
@@ -296,9 +293,7 @@ namespace rocRoller
 
         struct Unroll : public BaseDimension
         {
-            Unroll() = delete;
-
-            Unroll(int tag)
+            Unroll()
                 : BaseDimension(false)
             {
             }
@@ -362,12 +357,10 @@ namespace rocRoller
 
             std::vector<int> sizes;
 
-            MacroTile() = delete;
-
             /**
              * Construct MacroTile dimension with deferred rank etc.
              */
-            MacroTile(int tag)
+            MacroTile()
                 : BaseDimension(false)
                 , rank(0)
                 , memoryType(MemoryType::None)
@@ -391,8 +384,7 @@ namespace rocRoller
              * Construct MacroTile dimension with fully specified sizes
              * and memory type (ie, LDS vs VGPR).
              */
-            MacroTile(int              tag,
-                      std::vector<int> sizes,
+            MacroTile(std::vector<int> sizes,
                       MemoryType       memoryType,
                       std::vector<int> subTileSizes = {},
                       bool             output       = false)
@@ -411,8 +403,7 @@ namespace rocRoller
              *
              * Memory type is WAVE.
              */
-            MacroTile(int              tag,
-                      std::vector<int> sizes,
+            MacroTile(std::vector<int> sizes,
                       LayoutType       layoutType,
                       std::vector<int> subTileSizes = {},
                       bool             output       = false)
@@ -559,12 +550,10 @@ namespace rocRoller
             LayoutType         layout;
             Register::ValuePtr vgpr; // TODO: Does this belong here?  Move to "getVGPR"?
 
-            WaveTile() = delete;
-
             /**
              * Construct WaveTile dimension with deferred rank and size.
              */
-            WaveTile(int tag)
+            WaveTile()
                 : BaseDimension(false)
                 , rank(0)
                 , layout(LayoutType::None)
@@ -626,7 +615,7 @@ namespace rocRoller
         template <typename T>
         inline Expression::ExpressionPtr getSize(const T& x)
         {
-            auto rv = std::visit([](const auto a) { return a.size; }, x);
+            Expression::ExpressionPtr rv = std::visit([](auto const& a) { return a.size; }, x);
             AssertFatal(rv, "Unable to get valid size for dimension: ", toString(x));
             return rv;
         }

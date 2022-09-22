@@ -2,16 +2,24 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include "GenericContextFixture.hpp"
+
 #include <rocRoller/KernelGraph/CoordGraph/CoordinateHypergraph.hpp>
 #include <rocRoller/KernelGraph/CoordGraph/Dimension.hpp>
 
 using namespace rocRoller;
+using namespace KernelGraph;
 using namespace KernelGraph::CoordGraph;
 
 namespace rocRollerTest
 {
+    class CoordinateHypergraphTest : public GenericContextFixture
+    {
+    public:
+        Expression::FastArithmetic fastArith{m_context};
+    };
 
-    TEST(CoordinateHypergraphTest, Basic)
+    TEST_F(CoordinateHypergraphTest, EdgeType)
     {
         auto ct = CoordinateHypergraph();
 
@@ -26,40 +34,63 @@ namespace rocRollerTest
 
         auto flatten_id = ct.addElement(Flatten{}, {x, y}, {m});
 
-        // TODO: uncomment and fix when forward and reverse traversal are implemented
-
-        // auto exprs = ct.forward({x_index, y_index}, {x, y}, {m}, fastArith);
-        // auto sexpr = Expression::toString(exprs[0]);
-
-        // EXPECT_EQ(sexpr, "Add(Multiply(5j, 64j), 3j)");
-        // //EXPECT_EQ(sexpr, "Add(ShiftL(5, 6), 3)");
-
-        // // Trivial
-        // auto zero = std::make_shared<Expression::Expression>(0u);
-        // exprs     = ct.forward({zero, zero}, {x, y}, {m}, fastArith);
-        // EXPECT_EQ(1, exprs.size());
-        // sexpr = Expression::toString(exprs[0]);
-        // EXPECT_EQ(sexpr, "Add(Multiply(0j, 64j), 0j)");
-        // auto result = std::get<unsigned int>(Expression::evaluate(exprs[0]));
-        // EXPECT_EQ(result, 0);
-
-        // auto m_index = std::make_shared<Expression::Expression>(67u);
-        // exprs        = ct.reverse({m_index}, {x}, {m},
-        //                    fastArith); // note 'y' isn't necessary in reverse
-        // result       = std::get<unsigned int>(Expression::evaluate(exprs[0]));
-        // EXPECT_EQ(result, 1);
-
-        // exprs  = ct.reverse({m_index}, {y}, {m}, fastArith); // note 'x' isn't necessary in reverse
-        // result = std::get<unsigned int>(Expression::evaluate(exprs[0]));
-        // EXPECT_EQ(result, 3);
-
-        // exprs = ct.reverse({zero}, {y}, {m}, fastArith); // note 'x' isn't necessary in reverse
-        // EXPECT_EQ(1, exprs.size());
-        // result = std::get<unsigned int>(Expression::evaluate(exprs[0]));
-        // EXPECT_EQ(result, 0);
+        EXPECT_EQ(EdgeType::CoordinateTransform, ct.getEdgeType(flatten_id));
+        EXPECT_EQ(EdgeType::None, ct.getEdgeType(x));
     }
 
-    TEST(CoordinateHypergraphTest, Basic3D)
+    TEST_F(CoordinateHypergraphTest, Basic)
+    {
+        auto ct = CoordinateHypergraph();
+
+        auto size    = std::make_shared<Expression::Expression>(64u);
+        auto unit    = std::make_shared<Expression::Expression>(1u);
+        auto x_index = std::make_shared<Expression::Expression>(5u);
+        auto y_index = std::make_shared<Expression::Expression>(3u);
+
+        auto x = ct.addElement(SubDimension(0, size, unit));
+        auto y = ct.addElement(SubDimension(0, size, unit));
+        auto m = ct.addElement(SubDimension(0, size * size, unit));
+
+        auto flatten_id = ct.addElement(Flatten{}, {x, y}, {m});
+
+        auto exprs = ct.forward({x_index, y_index}, {x, y}, {m}, fastArith);
+        auto sexpr = Expression::toString(exprs[0]);
+
+        EXPECT_EQ(sexpr, "Add(Multiply(5j, 64j), 3j)");
+        //EXPECT_EQ(sexpr, "Add(ShiftL(5, 6), 3)");
+
+        // Trivial
+        auto zero = std::make_shared<Expression::Expression>(0u);
+        exprs     = ct.forward({zero, zero}, {x, y}, {m}, fastArith);
+        EXPECT_EQ(1, exprs.size());
+        sexpr = Expression::toString(exprs[0]);
+        EXPECT_EQ(sexpr, "Add(Multiply(0j, 64j), 0j)");
+        auto result = std::get<unsigned int>(Expression::evaluate(exprs[0]));
+        EXPECT_EQ(result, 0);
+
+        {
+            std::map<int, bool> visited;
+            EXPECT_NE(std::vector<int>(),
+                      ct.path<Graph::Direction::Upstream>({m}, {x}, visited).to<std::vector>());
+        }
+
+        auto m_index = std::make_shared<Expression::Expression>(67u);
+        exprs        = ct.reverse({m_index}, {x}, {m},
+                           fastArith); // note 'y' isn't necessary in reverse
+        result       = std::get<unsigned int>(Expression::evaluate(exprs[0]));
+        EXPECT_EQ(result, 1);
+
+        exprs  = ct.reverse({m_index}, {y}, {m}, fastArith); // note 'x' isn't necessary in reverse
+        result = std::get<unsigned int>(Expression::evaluate(exprs[0]));
+        EXPECT_EQ(result, 3);
+
+        exprs = ct.reverse({zero}, {y}, {m}, fastArith); // note 'x' isn't necessary in reverse
+        EXPECT_EQ(1, exprs.size());
+        result = std::get<unsigned int>(Expression::evaluate(exprs[0]));
+        EXPECT_EQ(result, 0);
+    }
+
+    TEST_F(CoordinateHypergraphTest, Basic3D)
     {
         auto ct = CoordinateHypergraph();
 
@@ -78,49 +109,50 @@ namespace rocRollerTest
         auto y_index = std::make_shared<Expression::Expression>(y_index_value);
         auto z_index = std::make_shared<Expression::Expression>(z_index_value);
 
-        auto x = ct.addElement(SubDimension(0, size_x, stride_x));
-        auto y = ct.addElement(SubDimension(0, size_y, stride_y));
-        auto z = ct.addElement(SubDimension(0, size_z, stride_z));
-        auto m = ct.addElement(SubDimension(0));
+        int x = ct.addElement(SubDimension(0, size_x, stride_x));
+        int y = ct.addElement(SubDimension(0, size_y, stride_y));
+        int z = ct.addElement(SubDimension(0, size_z, stride_z));
+        int m = ct.addElement(SubDimension(0));
 
-        ct.addElement(Flatten(), {x, y, z}, {m});
+        auto flat = ct.addElement(Flatten(), {x, y, z}, {m});
 
-        // TODO: uncomment and fix when forward and reverse traversal are implemented
+        auto exprs = ct.forward({x_index, y_index, z_index}, {x, y, z}, {m}, fastArith);
+        auto sexpr = Expression::toString(exprs[0]);
+        EXPECT_EQ(1, exprs.size());
 
-        // auto exprs = ct.forward({x_index, y_index, z_index}, {x, y, z}, {m}, fastArith);
-        // auto sexpr = Expression::toString(exprs[0]);
-        // EXPECT_EQ(1, exprs.size());
+        EXPECT_EQ(sexpr, "Add(Multiply(Add(Multiply(5j, 32j), 3j), 16j), 7j)");
+        //EXPECT_EQ(sexpr, "Add(ShiftL(Add(ShiftL(5, 5), 3), 4), 7)");
 
-        // EXPECT_EQ(sexpr, "Add(Multiply(Add(Multiply(5j, 32j), 3j), 16j), 7j)");
-        // //EXPECT_EQ(sexpr, "Add(ShiftL(Add(ShiftL(5, 5), 3), 4), 7)");
+        auto result = std::get<unsigned int>(Expression::evaluate(exprs[0]));
+        EXPECT_EQ(2615, result);
 
-        // auto result = std::get<unsigned int>(Expression::evaluate(exprs[0]));
-        // EXPECT_EQ(2615, result);
+        {
+            auto rev_index     = std::make_shared<Expression::Expression>(5);
+            auto exprs_reverse = ct.reverse({rev_index}, {x, y, z}, {m}, fastArith);
+            EXPECT_EQ(3, exprs_reverse.size());
 
-        // {
-        //     auto rev_index     = std::make_shared<Expression::Expression>(5);
-        //     auto exprs_reverse = ct.reverse({rev_index}, {x, y, z}, {m}, fastArith);
-        //     EXPECT_EQ(3, exprs_reverse.size());
+            EXPECT_EQ(Expression::toString(exprs_reverse[2]), "BitwiseAnd(5i, 15j)");
+            EXPECT_EQ(Expression::toString(exprs_reverse[1]), "BitwiseAnd(ShiftR(5i, 4j), 31j)");
+            EXPECT_EQ(Expression::toString(exprs_reverse[0]),
+                      "BitwiseAnd(ShiftR(ShiftR(5i, 4j), 5j), 63j)");
+        }
 
-        //     EXPECT_EQ(Expression::toString(exprs_reverse[2]), "BitwiseAnd(5i, 15j)");
-        //     EXPECT_EQ(Expression::toString(exprs_reverse[1]), "BitwiseAnd(ShiftR(5i, 4j), 31j)");
-        //     EXPECT_EQ(Expression::toString(exprs_reverse[0]),
-        //               "BitwiseAnd(ShiftR(ShiftR(5i, 4j), 5j), 63j)");
-        // }
+        {
+            // Should be able to get back the indivitual coordinate values.
+            auto rev_index     = std::make_shared<Expression::Expression>(result);
+            auto exprs_reverse = ct.reverse({rev_index}, {x, y, z}, {m}, fastArith);
+            EXPECT_EQ(3, exprs_reverse.size());
 
-        // {
-        //     // Should be able to get back the indivitual coordinate values.
-        //     auto rev_index     = std::make_shared<Expression::Expression>(result);
-        //     auto exprs_reverse = ct.reverse({rev_index}, {x, y, z}, {m}, fastArith);
-        //     EXPECT_EQ(3, exprs_reverse.size());
-
-        //     EXPECT_EQ(x_index_value, std::get<unsigned int>(Expression::evaluate(exprs_reverse[0])));
-        //     EXPECT_EQ(y_index_value, std::get<unsigned int>(Expression::evaluate(exprs_reverse[1])));
-        //     EXPECT_EQ(z_index_value, std::get<unsigned int>(Expression::evaluate(exprs_reverse[2])));
-        // }
+            EXPECT_EQ(x_index_value,
+                      std::get<unsigned int>(Expression::evaluate(exprs_reverse[0])));
+            EXPECT_EQ(y_index_value,
+                      std::get<unsigned int>(Expression::evaluate(exprs_reverse[1])));
+            EXPECT_EQ(z_index_value,
+                      std::get<unsigned int>(Expression::evaluate(exprs_reverse[2])));
+        }
     }
 
-    TEST(CoordinateHypergraphTest, Basic1D01)
+    TEST_F(CoordinateHypergraphTest, Basic1D01)
     {
         auto ct = CoordinateHypergraph();
 
@@ -130,7 +162,7 @@ namespace rocRollerTest
         auto size   = Expression::literal(1024u);
         auto stride = Expression::literal(2u);
 
-        auto u  = ct.addElement(User(1));
+        auto u  = ct.addElement(User());
         auto i  = ct.addElement(SubDimension(0, size, stride));
         auto wg = ct.addElement(Workgroup(2));
         auto wf = ct.addElement(Wavefront(0, wavefront_size, unit));
@@ -139,7 +171,7 @@ namespace rocRollerTest
         ct.addElement(Split(), {u}, {i});
         ct.addElement(Tile(), {i}, {wg, wf});
 
-        // TODO: uncomment and fix when forward and reverse traversal are implemented
+        // TODO: uncomment and fix when Transformers are in place
 
         // auto uOut = ct.getOutputs(getTag(u), EdgeType::CoordinateTransform);
         // ASSERT_EQ(1, uOut.size());
@@ -151,7 +183,7 @@ namespace rocRollerTest
         // auto thread_index = Expression::literal(33);
 
         // // given indexes for the workgroup and wavefront, compute "i"
-        // auto exprs = ct.reverse({block_index, thread_index}, {u}, {wg, wf}, fastArith);
+        // auto exprs = ct.reverse({block_index, thread_index}, {u}, {wg, wf}, fastArith).to<std::vector>();
         // auto sexpr = Expression::toString(exprs[0]);
 
         // EXPECT_EQ(sexpr, "Multiply(Add(Multiply(2i, 64j), 33i), 2j)");
@@ -162,7 +194,7 @@ namespace rocRollerTest
         // thread_index_register->allocateNow();
 
         // exprs
-        //     = ct.reverse({block_index, thread_index_register->expression()}, {u}, {wg, wf}, fastArith);
+        //     = ct.reverse({block_index, thread_index_register->expression()}, {u}, {wg, wf}, fastArith).to<std::vector>();
         // sexpr = Expression::toString(exprs[0]);
 
         // EXPECT_EQ(sexpr, "Multiply(Add(Multiply(2i, 64j), v0:I), 2j)");
@@ -181,7 +213,7 @@ namespace rocRollerTest
         // EXPECT_EQ(currentEdges[0], savedEdge);
     }
 
-    TEST(CoordinateHypergraphTest, Basic1D01Eval)
+    TEST_F(CoordinateHypergraphTest, Basic1D01Eval)
     {
         auto ct = CoordinateHypergraph();
 
@@ -193,7 +225,7 @@ namespace rocRollerTest
 
         auto workgroup_size = std::make_shared<Expression::Expression>(256) / wavefront_size;
 
-        auto u  = ct.addElement(User(1));
+        auto u  = ct.addElement(User());
         auto i  = ct.addElement(SubDimension(0, size, stride));
         auto wg = ct.addElement(Workgroup(2));
         auto wf = ct.addElement(Wavefront(0, wavefront_size, unit));
@@ -205,27 +237,25 @@ namespace rocRollerTest
         auto block_index  = std::make_shared<Expression::Expression>(2);
         auto thread_index = std::make_shared<Expression::Expression>(33);
 
-        // TODO: uncomment and fix when forward and reverse traversal are implemented
+        // given indexes for the workgroup and wavefront, compute "i"
+        auto exprs = ct.reverse({block_index, thread_index}, {u}, {wg, wf}, fastArith);
+        auto sexpr = Expression::toString(exprs[0]);
 
-        // // given indexes for the workgroup and wavefront, compute "i"
-        // auto exprs = ct.reverse({block_index, thread_index}, {u}, {wg, wf}, fastArith);
-        // auto sexpr = Expression::toString(exprs[0]);
+        auto iVal = std::get<int>(Expression::evaluate(exprs[0]));
 
-        // auto iVal = std::get<int>(Expression::evaluate(exprs[0]));
+        EXPECT_EQ(322, iVal) << toString(exprs[0]);
 
-        // EXPECT_EQ(322, iVal) << toString(exprs[0]);
+        auto iValExpr = std::make_shared<Expression::Expression>(iVal);
 
-        // auto iValExpr = std::make_shared<Expression::Expression>(iVal);
+        // given "i", compute workgroup and wavefront
+        auto fwdExprs = ct.forward({iValExpr}, {u}, {wg, wf}, fastArith);
 
-        // // given "i", compute workgroup and wavefront
-        // auto fwdExprs = ct.forward({iValExpr}, {u}, {wg, wf}, fastArith);
-
-        // EXPECT_EQ(2, fwdExprs.size());
-        // EXPECT_EQ(2, std::get<int>(evaluate(fwdExprs[0]))) << toString(fwdExprs[0]);
-        // EXPECT_EQ(33, std::get<int>(evaluate(fwdExprs[1]))) << toString(fwdExprs[1]);
+        EXPECT_EQ(2, fwdExprs.size());
+        EXPECT_EQ(2, std::get<int>(evaluate(fwdExprs[0]))) << toString(fwdExprs[0]);
+        EXPECT_EQ(33, std::get<int>(evaluate(fwdExprs[1]))) << toString(fwdExprs[1]);
     }
 
-    TEST(CoordinateHypergraphTest, Basic1D02)
+    TEST_F(CoordinateHypergraphTest, Basic1D02)
     {
         auto ct = CoordinateHypergraph();
 
@@ -235,7 +265,7 @@ namespace rocRollerTest
         auto size   = Expression::literal(1024);
         auto stride = Expression::literal(2);
 
-        auto u      = ct.addElement(User(1));
+        auto u      = ct.addElement(User());
         auto i      = ct.addElement(SubDimension(0, size, stride));
         auto wg     = ct.addElement(Workgroup(2));
         auto wf     = ct.addElement(Wavefront(0, wavefront_size, unit));
@@ -250,31 +280,29 @@ namespace rocRollerTest
         auto thread_index = Expression::literal(33);
         auto unroll_index = Expression::literal(2);
 
-        // TODO: uncomment and fix when forward and reverse traversal are implemented
+        // given indexes for the workgroup and wavefront, compute "i"
+        auto exprs = ct.reverse(
+            {block_index, thread_index, unroll_index}, {u}, {wg, wf, unroll}, fastArith);
+        auto sexpr = Expression::toString(exprs[0]);
 
-        // // given indexes for the workgroup and wavefront, compute "i"
-        // auto exprs
-        //     = ct.reverse({block_index, thread_index, unroll_index}, {u}, {wg, wf, unroll}, fastArith);
-        // auto sexpr = Expression::toString(exprs[0]);
+        EXPECT_EQ(sexpr, "Multiply(Add(Multiply(Add(Multiply(2i, 64i), 33i), 4j), 2i), 2i)");
+        //EXPECT_EQ(sexpr, "ShiftL(Add(ShiftL(Add(ShiftL(2, 6), 33), 2), 2), 1)");
 
-        // EXPECT_EQ(sexpr, "Multiply(Add(Multiply(Add(Multiply(2i, 64i), 33i), 4j), 2i), 2i)");
-        // //EXPECT_EQ(sexpr, "ShiftL(Add(ShiftL(Add(ShiftL(2, 6), 33), 2), 2), 1)");
+        auto thread_index_register = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Int32, 1);
+        thread_index_register->allocateNow();
 
-        // auto thread_index_register
-        //     = std::make_shared<Register::Value>(m_context, Register::Type::Vector, DataType::Int32, 1);
-        // thread_index_register->allocateNow();
+        exprs = ct.reverse({block_index, thread_index_register->expression(), unroll_index},
+                           {u},
+                           {wg, wf, unroll},
+                           fastArith);
+        sexpr = Expression::toString(exprs[0]);
 
-        // exprs = ct.reverse({block_index, thread_index_register->expression(), unroll_index},
-        //                    {u},
-        //                    {wg, wf, unroll},
-        //                    fastArith);
-        // sexpr = Expression::toString(exprs[0]);
-
-        // EXPECT_EQ(sexpr, "Multiply(Add(Multiply(Add(Multiply(2i, 64i), v0:I), 4j), 2i), 2i)");
-        // //EXPECT_EQ(sexpr, "ShiftL(Add(ShiftL(Add(ShiftL(2, 6), v0), 2), 2), 1)");
+        EXPECT_EQ(sexpr, "Multiply(Add(Multiply(Add(Multiply(2i, 64i), v0:I), 4j), 2i), 2i)");
+        //EXPECT_EQ(sexpr, "ShiftL(Add(ShiftL(Add(ShiftL(2, 6), v0), 2), 2), 1)");
     }
 
-    TEST(CoordinateHypergraphTest, Basic1D03)
+    TEST_F(CoordinateHypergraphTest, Basic1D03)
     {
         auto ct = CoordinateHypergraph();
 
@@ -284,7 +312,7 @@ namespace rocRollerTest
         auto size   = Expression::literal(1024);
         auto stride = Expression::literal(2);
 
-        auto u      = ct.addElement(User(1));
+        auto u      = ct.addElement(User());
         auto i      = ct.addElement(SubDimension(0, size, stride));
         auto wg     = ct.addElement(Workgroup(2));
         auto wf     = ct.addElement(Wavefront(0, Expression::literal(4 * 64), unit));
@@ -296,35 +324,33 @@ namespace rocRollerTest
         ct.addElement(Tile(), {i}, {wg, wf});
         ct.addElement(Tile(), {wf}, {thread, unroll});
 
-        // TODO: uncomment and fix when forward and reverse traversal are implemented
+        auto block_index  = Expression::literal(2);
+        auto thread_index = Expression::literal(33);
+        auto unroll_index = Expression::literal(2);
 
-        // auto block_index  = Expression::literal(2);
-        // auto thread_index = Expression::literal(33);
-        // auto unroll_index = Expression::literal(2);
+        // given indexes for the workgroup and wavefront, compute "i"
+        auto exprs = ct.reverse(
+            {block_index, thread_index, unroll_index}, {u}, {wg, thread, unroll}, fastArith);
+        auto sexpr = Expression::toString(exprs[0]);
 
-        // // given indexes for the workgroup and wavefront, compute "i"
-        // auto exprs = ct.reverse(
-        //     {block_index, thread_index, unroll_index}, {u}, {wg, thread, unroll}, fastArith);
-        // auto sexpr = Expression::toString(exprs[0]);
+        EXPECT_EQ(sexpr, "Multiply(Add(Multiply(2i, 256i), Add(Multiply(33i, 4j), 2i)), 2i)");
+        //EXPECT_EQ(sexpr, "ShiftL(Add(ShiftL(2, 8), Add(ShiftL(33, 2), 2)), 1)");
 
-        // EXPECT_EQ(sexpr, "Multiply(Add(Multiply(2i, 256i), Add(Multiply(33i, 4j), 2i)), 2i)");
-        // //EXPECT_EQ(sexpr, "ShiftL(Add(ShiftL(2, 8), Add(ShiftL(33, 2), 2)), 1)");
+        auto thread_index_register = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Int32, 1);
+        thread_index_register->allocateNow();
 
-        // auto thread_index_register
-        //     = std::make_shared<Register::Value>(m_context, Register::Type::Vector, DataType::Int32, 1);
-        // thread_index_register->allocateNow();
+        exprs = ct.reverse({block_index, thread_index_register->expression(), unroll_index},
+                           {u},
+                           {wg, thread, unroll},
+                           fastArith);
+        sexpr = Expression::toString(exprs[0]);
 
-        // exprs = ct.reverse({block_index, thread_index_register->expression(), unroll_index},
-        //                    {u},
-        //                    {wg, thread, unroll},
-        //                    fastArith);
-        // sexpr = Expression::toString(exprs[0]);
-
-        // EXPECT_EQ(sexpr, "Multiply(Add(Multiply(2i, 256i), Add(Multiply(v0:I, 4j), 2i)), 2i)");
-        // //EXPECT_EQ(sexpr, "ShiftL(Add(ShiftL(2, 8), Add(ShiftL(v0, 2), 2)), 1)");
+        EXPECT_EQ(sexpr, "Multiply(Add(Multiply(2i, 256i), Add(Multiply(v0:I, 4j), 2i)), 2i)");
+        //EXPECT_EQ(sexpr, "ShiftL(Add(ShiftL(2, 8), Add(ShiftL(v0, 2), 2)), 1)");
     }
 
-    TEST(CoordinateHypergraphTest, TensorTile2DLoadStore01)
+    TEST_F(CoordinateHypergraphTest, TensorTile2DLoadStore01)
     {
         // one tile per wavefront
 
@@ -345,27 +371,27 @@ namespace rocRollerTest
         int n = 16;
 
         // A matrix; tag 1; M x K; C-ordering
-        auto A  = ct.addElement(User(1));
+        auto A  = ct.addElement(User());
         auto Ai = ct.addElement(SubDimension(0, M, K));
         auto Aj = ct.addElement(SubDimension(1, K, unit));
         ct.addElement(Split(), {A}, {Ai, Aj});
 
         // B matrix; tag 2; K x N; C-ordering
-        auto B  = ct.addElement(User(2));
+        auto B  = ct.addElement(User());
         auto Bi = ct.addElement(SubDimension(0, K, N));
         auto Bj = ct.addElement(SubDimension(1, N, unit));
         ct.addElement(Split(), {B}, {Bi, Bj});
 
         // T tile; tag 3; m x n
-        auto T    = MacroTile(3, {m, n}, MemoryType::VGPR);
+        auto T    = MacroTile({m, n}, MemoryType::VGPR);
         auto T_id = ct.addElement(T);
         auto i    = ct.addElement(T.tileIndex(0));
         auto j    = ct.addElement(T.tileIndex(1));
         ct.addElement(Join(), {i, j}, {T_id});
 
         // tile each dimension of A matrix; each workgroup gets one tile
-        auto tile_x = ct.addElement(Workgroup(1, 0));
-        auto tile_y = ct.addElement(Workgroup(1, 1));
+        auto tile_x = ct.addElement(Workgroup(0));
+        auto tile_y = ct.addElement(Workgroup(1));
         ct.addElement(Tile(), {Ai}, {tile_x, i});
         ct.addElement(Tile(), {Aj}, {tile_y, j});
 
@@ -374,30 +400,37 @@ namespace rocRollerTest
         auto i_index      = Expression::literal(33);
         auto j_index      = Expression::literal(2);
 
-        // TODO: uncomment and fix when forward and reverse traversal are implemented
+        std::vector<Expression::ExpressionPtr> exprs;
+        std::string                            sexpr;
 
-        // std::vector<Expression::ExpressionPtr> exprs;
-        // std::string                            sexpr;
+        {
+            EXPECT_THROW(ct.reverse({tile_x_index, i_index}, {A}, {tile_x, i}, fastArith),
+                         RecoverableError);
+            EXPECT_THROW(ct.reverse({tile_x_index, i_index}, {Aj}, {tile_x, i}, fastArith),
+                         RecoverableError);
+            EXPECT_THROW(ct.reverse({tile_x_index, i_index}, {Ai, Aj}, {tile_x, i}, fastArith),
+                         RecoverableError);
+        }
 
-        // EXPECT_THROW(ct.reverse({tile_x_index, i_index}, {Ai, Aj}, {tile_x, i}, fastArith),
-        //              RecoverableError);
+        exprs = ct.reverse({tile_x_index, tile_y_index, i_index, j_index},
+                           {Ai},
+                           {tile_x, tile_y, i, j},
+                           fastArith);
+        sexpr = Expression::toString(exprs[0]);
+        EXPECT_EQ(sexpr, "Add(Multiply(4i, 16j), 33i)");
+        //EXPECT_EQ(sexpr, "Add(ShiftL(4, 4), 33)");
 
-        // exprs = ct.reverse(
-        //     {tile_x_index, tile_y_index, i_index, j_index}, {Ai}, {tile_x, tile_y, i, j}, fastArith);
-        // sexpr = Expression::toString(exprs[0]);
-        // EXPECT_EQ(sexpr, "Add(Multiply(4i, 16j), 33i)");
-        // //EXPECT_EQ(sexpr, "Add(ShiftL(4, 4), 33)");
-
-        // exprs = ct.reverse(
-        //     {tile_x_index, tile_y_index, i_index, j_index}, {A}, {tile_x, tile_y, i, j}, fastArith);
-        // sexpr = Expression::toString(exprs[0]);
-        // EXPECT_EQ(sexpr,
-        //           "Add(Multiply(Add(Multiply(4i, 16j), 33i), 300i), Multiply(Add(Multiply(5i, 16j), "
-        //           "2i), 1i))");
-        // //EXPECT_EQ(sexpr, "Add(Multiply(Add(ShiftL(4, 4), 33), 300), Add(ShiftL(5, 4), 2))");
+        exprs = ct.reverse(
+            {tile_x_index, tile_y_index, i_index, j_index}, {A}, {tile_x, tile_y, i, j}, fastArith);
+        sexpr = Expression::toString(exprs[0]);
+        EXPECT_EQ(
+            sexpr,
+            "Add(Multiply(Add(Multiply(4i, 16j), 33i), 300i), Multiply(Add(Multiply(5i, 16j), "
+            "2i), 1i))");
+        //EXPECT_EQ(sexpr, "Add(Multiply(Add(ShiftL(4, 4), 33), 300), Add(ShiftL(5, 4), 2))");
     }
 
-    TEST(CoordinateHypergraphTest, TensorTile2DLoadStore02)
+    TEST_F(CoordinateHypergraphTest, TensorTile2DLoadStore02)
     {
         // one tile per wavefront
 
@@ -414,25 +447,25 @@ namespace rocRollerTest
         int n = 16;
 
         // A matrix; tag 1; M x K; C-ordering
-        auto A  = ct.addElement(User(1));
+        auto A  = ct.addElement(User());
         auto Ai = ct.addElement(SubDimension(0, M, K));
         auto Aj = ct.addElement(SubDimension(1, K, unit));
         ct.addElement(Split(), {A}, {Ai, Aj});
 
         // T tile; tag 3; m x n
-        auto T    = MacroTile(3, {m, n}, MemoryType::VGPR);
+        auto T    = MacroTile({m, n}, MemoryType::VGPR);
         auto T_id = ct.addElement(T);
         auto i    = ct.addElement(T.tileIndex(0));
         auto j    = ct.addElement(T.tileIndex(1));
         ct.addElement(Join(), {i, j}, {T_id});
 
         // tile each dimension of A matrix; each workgroup gets one tile
-        auto tile_x = ct.addElement(Workgroup(1, 0));
-        auto tile_y = ct.addElement(Workgroup(1, 1));
+        auto tile_x = ct.addElement(Workgroup(0));
+        auto tile_y = ct.addElement(Workgroup(1));
         ct.addElement(Tile(), {Ai}, {tile_x, i});
         ct.addElement(Tile(), {Aj}, {tile_y, j});
 
-        // TODO: uncomment and fix when forward and reverse traversal and transformer are implemented
+        // TODO: uncomment and fix when Transformers are in place
 
         // auto coords
         //     = Transformer(std::make_shared<HyperGraph>(ct));
@@ -492,7 +525,7 @@ namespace rocRollerTest
         // EXPECT_EQ(sexpr, "Modulo(Divide(17i, 300i), 16j)");
     }
 
-    TEST(CoordinateHypergraphTest, TensorTile2DLoadStore03)
+    TEST_F(CoordinateHypergraphTest, TensorTile2DLoadStore03)
     {
         auto ct = CoordinateHypergraph();
 
@@ -504,25 +537,25 @@ namespace rocRollerTest
         int n = 16;
 
         // A matrix; tag 1; M x K; C-ordering
-        auto A  = ct.addElement(User(1));
+        auto A  = ct.addElement(User());
         auto Ai = ct.addElement(SubDimension(0, M, K));
         auto Aj = ct.addElement(SubDimension(1, K, unit));
         ct.addElement(Split(), {A}, {Ai, Aj});
 
         // T tile; tag 3; m x n
-        auto T    = MacroTile(3, {m, n}, MemoryType::VGPR);
+        auto T    = MacroTile({m, n}, MemoryType::VGPR);
         auto T_id = ct.addElement(T);
         auto i    = ct.addElement(T.tileIndex(0));
         auto j    = ct.addElement(T.tileIndex(1));
         ct.addElement(Join(), {i, j}, {T_id});
 
         // tile each dimension of A matrix; each workgroup gets one tile
-        auto tile_x = ct.addElement(Workgroup(1, 0));
-        auto tile_y = ct.addElement(Workgroup(1, 1));
+        auto tile_x = ct.addElement(Workgroup(0));
+        auto tile_y = ct.addElement(Workgroup(1));
         ct.addElement(Tile(), {Ai}, {tile_x, i});
         ct.addElement(Tile(), {Aj}, {tile_y, j});
 
-        // TODO: uncomment and fix when forward and reverse traversal and transformer are implemented
+        // TODO: uncomment and fix when Transformers are in place
 
         // auto coords = Transformer(
         //     std::make_shared<HyperGraph>(ct), nullptr);
@@ -549,7 +582,7 @@ namespace rocRollerTest
         // EXPECT_EQ(sexpr, "32j");
     }
 
-    TEST(CoordinateHypergraphTest, WaveTileBasic)
+    TEST_F(CoordinateHypergraphTest, WaveTileBasic)
     {
         // one tile per wavefront
         auto ct = CoordinateHypergraph();

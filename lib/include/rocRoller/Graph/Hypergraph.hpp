@@ -9,6 +9,7 @@
 #include <boost/multi_index/member.hpp>
 #include <boost/multi_index/ordered_index.hpp>
 
+#include <functional>
 #include <map>
 #include <ranges>
 #include <unordered_set>
@@ -171,6 +172,19 @@ namespace rocRoller
              */
             Generator<int> breadthFirstVisit(int start) const;
 
+            /**
+            * Yields node indices that form the paths from the starts to the ends
+            */
+            template <Direction Dir>
+            Generator<int> path(
+                std::vector<int> const   starts,
+                std::vector<int> const   ends,
+                std::map<int, bool>&     visitedElements,
+                std::function<bool(int)> edgeSelector = [](int edge) { return true; }) const;
+
+            template <Direction Dir>
+            Generator<int> getNeighbours(int const element) const;
+
             std::string toDOT() const;
 
         private:
@@ -203,6 +217,9 @@ namespace rocRoller
                                        mi::key<&Incident::src, &Incident::dst>>>>;
 
             Incidence m_incidence;
+
+            template <Direction Dir>
+            bool edgeSatisfied(int const edge, std::map<int, bool> const& visitedElements) const;
         };
 
     }

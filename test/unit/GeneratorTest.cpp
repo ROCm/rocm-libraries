@@ -242,4 +242,66 @@ namespace rocRollerTest
         EXPECT_EQ(fibs1, fibsE1);
     }
 
+    Generator<int> testWithRef(std::vector<int> const& v)
+    {
+        for(int i = 0; i < v.size(); i++)
+        {
+            co_yield v[i];
+        }
+    }
+
+    Generator<int> testWithoutRef(std::vector<int> const v)
+    {
+        for(int i = 0; i < v.size(); i++)
+        {
+            co_yield v[i];
+        }
+    }
+
+    TEST(GeneratorTest, TestVectorParams)
+    {
+        std::vector<int> a = {0, 1, 2};
+        // Vectors as separate values
+        {
+
+            for(int i : testWithRef(a))
+            {
+                EXPECT_EQ(i, a.at(i));
+            }
+
+            for(int i : testWithoutRef(a))
+            {
+                EXPECT_EQ(i, a.at(i));
+            }
+        }
+
+        // Vectors constructed in place
+        {
+            // FAILS on GCC
+            // for(int i : testWithRef(std::vector<int>{0, 1, 2}))
+            // {
+            //     EXPECT_EQ(i, a.at(i));
+            // }
+
+            for(int i : testWithoutRef(std::vector<int>{0, 1, 2}))
+            {
+                EXPECT_EQ(i, a.at(i));
+            }
+        }
+
+        // Initializer lists
+        {
+            // FAILS on GCC
+            // for(int i : testWithRef({0, 1, 2}))
+            // {
+            //     EXPECT_EQ(i, a.at(i));
+            // }
+
+            for(int i : testWithoutRef({0, 1, 2}))
+            {
+                EXPECT_EQ(i, a.at(i));
+            }
+        }
+    }
+
 }

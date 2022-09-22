@@ -117,6 +117,12 @@ namespace rocRollerTest
         }
 
         {
+            EXPECT_NO_THROW(std::get<TestUser>(std::get<TestDimension>(g.getElement(u0))));
+            EXPECT_NO_THROW(
+                std::get<TestForget>(std::get<TestTransform>(g.getElement(TestForget1))));
+        }
+
+        {
             auto             nodes = g.depthFirstVisit(u0).to<std::vector>();
             std::vector<int> expectedNodes{
                 u0, TestSplit0, sd0, TestForget0, TestVGPR0, TestForget1, TestVGPR1, sd1};
@@ -188,6 +194,17 @@ namespace rocRollerTest
             auto             nodes         = g.leaves().to<std::vector>();
             std::vector<int> expectedNodes = {TestVGPR0, TestVGPR1};
             EXPECT_EQ(expectedNodes, nodes);
+        }
+
+        {
+            EXPECT_EQ((std::vector<int>{u0}),
+                      g.getNeighbours<Graph::Direction::Upstream>(TestSplit0).to<std::vector>());
+            EXPECT_EQ((std::vector<int>{TestSplit0}),
+                      g.getNeighbours<Graph::Direction::Upstream>(sd0).to<std::vector>());
+            EXPECT_EQ((std::vector<int>{TestSplit0}),
+                      g.getNeighbours<Graph::Direction::Upstream>(sd1).to<std::vector>());
+            EXPECT_EQ((std::vector<int>{sd0, sd1}),
+                      g.getNeighbours<Graph::Direction::Downstream>(TestSplit0).to<std::vector>());
         }
 
         // Add a for loop.
@@ -263,4 +280,60 @@ namespace rocRollerTest
         }
     }
 
+    TEST(HypergraphTest, Path)
+    {
+
+        myHypergraph g;
+
+        auto u1  = g.addElement(TestUser{});
+        auto sd2 = g.addElement(TestSubDimension{});
+        auto sd3 = g.addElement(TestSubDimension{});
+
+        auto TestSplit4 = g.addElement(TestSplit{}, {u1}, {sd2, sd3});
+
+        auto sd5 = g.addElement(TestSubDimension{});
+        auto sd6 = g.addElement(TestSubDimension{});
+        auto sd7 = g.addElement(TestSubDimension{});
+        auto sd8 = g.addElement(TestSubDimension{});
+
+        auto TestSplit9  = g.addElement(TestSplit{}, {sd2}, {sd8});
+        auto TestSplit10 = g.addElement(TestSplit{}, {sd3, sd8}, {sd6});
+        auto TestSplit11 = g.addElement(TestSplit{}, {sd3}, {sd7});
+
+        std::map<int, bool> visited;
+        EXPECT_EQ((std::vector<int>{u1, TestSplit4, sd2}),
+                  g.path<Graph::Direction::Downstream>(
+                       std::vector<int>{u1}, std::vector<int>{sd2}, visited)
+                      .to<std::vector>());
+
+        visited.clear();
+        EXPECT_EQ((std::vector<int>{sd2, sd3, TestSplit4, u1}),
+                  g.path<Graph::Direction::Upstream>(
+                       std::vector<int>{sd2, sd3}, std::vector<int>{u1}, visited)
+                      .to<std::vector>());
+
+        visited.clear();
+        EXPECT_EQ(
+            (std::vector<int>{}),
+            g.path<Graph::Direction::Upstream>(std::vector<int>{sd2}, std::vector<int>{u1}, visited)
+                .to<std::vector>());
+
+        visited.clear();
+        EXPECT_EQ(
+            (std::vector<int>{sd6, TestSplit10, sd8, TestSplit9, sd2, sd3, TestSplit4, u1}),
+            g.path<Graph::Direction::Upstream>(std::vector<int>{sd6}, std::vector<int>{u1}, visited)
+                .to<std::vector>());
+
+        visited.clear();
+        EXPECT_EQ((std::vector<int>{u1, TestSplit4, sd3, TestSplit11, sd7}),
+                  g.path<Graph::Direction::Downstream>(
+                       std::vector<int>{u1}, std::vector<int>{sd7}, visited)
+                      .to<std::vector>());
+
+        visited.clear();
+        EXPECT_EQ((std::vector<int>{u1, TestSplit4, sd3, sd2, TestSplit9, sd8, TestSplit10, sd6}),
+                  g.path<Graph::Direction::Downstream>(
+                       std::vector<int>{u1}, std::vector<int>{sd6}, visited)
+                      .to<std::vector>());
+    }
 }

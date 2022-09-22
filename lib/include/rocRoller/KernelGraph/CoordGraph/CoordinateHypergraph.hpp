@@ -85,7 +85,29 @@ namespace rocRoller
             {
             }
 
+            std::vector<Expression::ExpressionPtr>
+                forward(std::vector<Expression::ExpressionPtr> sdims,
+                        std::vector<int> const&                srcs,
+                        std::vector<int> const&                dsts,
+                        Expression::ExpressionTransducer       transducer = nullptr);
+
+            std::vector<Expression::ExpressionPtr>
+                reverse(std::vector<Expression::ExpressionPtr> sdims,
+                        std::vector<int> const&                srcs,
+                        std::vector<int> const&                dsts,
+                        Expression::ExpressionTransducer       transducer = nullptr);
+
+            EdgeType getEdgeType(int index);
+
         private:
+            template <Graph::Direction Dir>
+            std::vector<Expression::ExpressionPtr>
+                traverse(std::vector<Expression::ExpressionPtr> sdims,
+                         std::vector<int> const&                srcs,
+                         std::vector<int> const&                dsts,
+                         Expression::ExpressionTransducer       transducer);
         };
     }
 }
+
+#include "CoordinateHypergraph_impl.hpp"
