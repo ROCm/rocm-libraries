@@ -880,9 +880,10 @@ namespace rocRoller
                             D->variableType().dataType,
                             waveA.vgpr->variableType().dataType});
 
-                    // TODO: Remove this once MFMA Observer is working properly
-                    co_yield Instruction::Wait(WaitCount::Zero("DEBUG: Wait before MFMA call",
-                                                               m_context->targetArchitecture()));
+                    co_yield_(
+                        Instruction::
+                            Nop()); // TODO there is an "or" for half precision packing that appears to cause a hazard
+
                     co_yield mfma->mul(D,
                                        waveA.vgpr,
                                        waveB.vgpr,
