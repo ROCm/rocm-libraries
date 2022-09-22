@@ -1,0 +1,11 @@
+#!/usr/bin/env python3
+
+import pathlib
+import sys
+
+rr = pathlib.Path(__file__).resolve().parent.parent
+sys.path.append(str(rr / "scripts" / "lib"))
+
+import rrperf.cli
+
+rrperf.cli.main()

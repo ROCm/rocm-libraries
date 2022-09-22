@@ -524,3 +524,8 @@ add_subdirectory(docs)
 
 # Add client directory
 add_subdirectory(client)
+
+# Add rrperf unit tests
+add_test(NAME RRPerfPYTest
+         COMMAND pytest-3 scripts
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
