@@ -19,14 +19,19 @@ struct GEMMProblem
 {
     std::string name;
 
-    int   M;
-    int   N;
-    int   K;
-    int   mac_m;
-    int   mac_n;
-    int   mac_k;
-    float alpha;
-    float beta;
+    int         M;
+    int         N;
+    int         K;
+    int         mac_m;
+    int         mac_n;
+    int         mac_k;
+    float       alpha;
+    float       beta;
+    std::string type_A;
+    std::string type_B;
+    std::string type_C;
+    std::string type_D;
+    std::string type_acc;
 
     int numWarmUp;
     int numOuter;
@@ -62,6 +67,11 @@ struct rocRoller::Serialization::
         iot::mapRequired(io, "numWarmUp", result.numWarmUp);
         iot::mapRequired(io, "numOuter", result.numOuter);
         iot::mapRequired(io, "numInner", result.numInner);
+        iot::mapRequired(io, "type_A", result.type_A);
+        iot::mapRequired(io, "type_B", result.type_B);
+        iot::mapRequired(io, "type_C", result.type_C);
+        iot::mapRequired(io, "type_D", result.type_D);
+        iot::mapRequired(io, "type_acc", result.type_acc);
         iot::mapRequired(io, "mac_m", result.mac_m);
         iot::mapRequired(io, "mac_n", result.mac_n);
         iot::mapRequired(io, "mac_k", result.mac_k);
@@ -77,6 +87,7 @@ struct rocRoller::Serialization::
 };
 
 // D (MxN) = alpha * A (MxK) X B (KxN) + beta * C (MxN)
+template <typename A, typename B, typename C, typename D>
 GEMMResult GEMM(GEMMProblem prob, bool checkResult)
 {
     GEMMResult result(prob);
@@ -84,11 +95,28 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult)
     AssertFatal(result.M % result.mac_m == 0, "MacroTile size mismatch (M)");
     AssertFatal(result.N % result.mac_n == 0, "MacroTile size mismatch (N)");
 
-    // wave tile sizes
-    int wave_m = 32;
-    int wave_n = 32;
-    int wave_k = 2;
-    int wave_b = 1;
+    int wave_m, wave_n, wave_k, wave_b = 0;
+
+    if constexpr(std::is_same_v<A, float> && std::is_same_v<B, float>)
+    {
+        // wave tile sizes
+        wave_m = 32;
+        wave_n = 32;
+        wave_k = 2;
+        wave_b = 1;
+    }
+    else if constexpr(std::is_same_v<A, Half> && std::is_same_v<B, Half>)
+    {
+        // wave tile sizes
+        wave_m = 32;
+        wave_n = 32;
+        wave_k = 8;
+        wave_b = 1;
+    }
+    else
+    {
+        Throw<FatalError>("Unsupported datatype combination in client");
+    }
 
     AssertFatal(result.mac_m % wave_m == 0, "WaveTile size mismatch (M)");
     AssertFatal(result.mac_n % wave_n == 0, "WaveTile size mismatch (N)");
@@ -106,25 +134,25 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult)
     auto NZ = std::make_shared<Expression::Expression>(1u);
 
     // Host data
-    RandomGenerator    random(31415u);
-    std::vector<float> h_A = random.vector<float>(result.M * result.K, -100, 100);
-    std::vector<float> h_B = random.vector<float>(result.K * result.N, -100, 100);
-    std::vector<float> h_C = random.vector<float>(result.M * result.N, -100, 100);
+    RandomGenerator random(31415u);
+    std::vector<A>  h_A = random.vector<A>(result.M * result.K, -1.0, 1.0);
+    std::vector<B>  h_B = random.vector<B>(result.K * result.N, -1.0, 1.0);
+    std::vector<C>  h_C = random.vector<C>(result.M * result.N, -1.0, 1.0);
 
     // Device data
-    std::shared_ptr<float> d_A = make_shared_device(h_A);
-    std::shared_ptr<float> d_B = make_shared_device(h_B);
-    std::shared_ptr<float> d_C = make_shared_device(h_C);
-    std::shared_ptr<float> d_D = make_shared_device<float>(result.M * result.N, 0);
+    std::shared_ptr<A> d_A = make_shared_device(h_A);
+    std::shared_ptr<B> d_B = make_shared_device(h_B);
+    std::shared_ptr<C> d_C = make_shared_device(h_C);
+    std::shared_ptr<D> d_D = make_shared_device<D>(result.M * result.N, 0.0);
 
     auto command = std::make_shared<Command>();
 
     command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-        rocRoller::Operations::T_Load_Tiled(DataType::Float, 2, 0))); // A
+        rocRoller::Operations::T_Load_Tiled(TypeInfo<A>::Var.dataType, 2, 0))); // A
     command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-        rocRoller::Operations::T_Load_Tiled(DataType::Float, 2, 1))); // B
+        rocRoller::Operations::T_Load_Tiled(TypeInfo<B>::Var.dataType, 2, 1))); // B
     command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-        rocRoller::Operations::T_Load_Tiled(DataType::Float, 2, 2))); // C
+        rocRoller::Operations::T_Load_Tiled(TypeInfo<C>::Var.dataType, 2, 2))); // C
     command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
         rocRoller::Operations::T_Load_Scalar(DataType::Float, 3))); // alpha
     command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
@@ -143,7 +171,7 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult)
     command->addOperation(std::make_shared<rocRoller::Operations::Operation>(execute));
 
     command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-        rocRoller::Operations::T_Store_Tiled(DataType::Float, 2, 8))); // D
+        rocRoller::Operations::T_Store_Tiled(TypeInfo<D>::Var.dataType, 2, 8))); // D
 
     KernelArguments runtimeArgs;
 
@@ -276,14 +304,13 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult)
     if(checkResult)
     {
         // Device result
-        std::vector<float> h_D(result.M * result.N, 0);
+        std::vector<D> h_D(result.M * result.N, 0.0);
         AssertFatal(
-            hipMemcpy(
-                h_D.data(), d_D.get(), result.M * result.N * sizeof(float), hipMemcpyDeviceToHost)
+            hipMemcpy(h_D.data(), d_D.get(), result.M * result.N * sizeof(D), hipMemcpyDeviceToHost)
             == HIP_SUCCESS);
 
         // Host result
-        std::vector<float> h_result(result.M * result.N, 0);
+        std::vector<D> h_result(result.M * result.N, 0.0);
         rocRoller::CPUMM(h_result,
                          h_C,
                          h_A,
@@ -297,7 +324,7 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult)
 
         double rnorm = relativeNorm(h_D, h_result);
 
-        std::string result = rnorm > 1e-5 ? "Incorrect" : "Correct";
+        std::string result = rnorm > 3e-5 ? "Incorrect" : "Correct";
         std::cout << "Result : " << result << std::endl;
     }
 
@@ -328,6 +355,11 @@ int main(int argc, const char* argv[])
     po.addArg("alpha", Arg({"a", "alpha"}, "Alpha scalar"));
     po.addArg("beta", Arg({"b", "beta"}, "Beta scalar"));
     po.addArg("yaml", Arg({"o", "yaml"}, "Results"));
+    po.addArg("type_A", Arg({"type_A"}, "Datatype of A Matrix [float | half]"));
+    po.addArg("type_B", Arg({"type_B"}, "Datatype of B Matrix [float | half]"));
+    po.addArg("type_C", Arg({"type_C"}, "Datatype of C Matrix [float | half]"));
+    po.addArg("type_D", Arg({"type_D"}, "Datatype of D Matrix [float | half]"));
+    po.addArg("type_acc", Arg({"type_acc"}, "Datatype of accumulation [float]"));
     po.addArg("num_warmup", Arg({"num_warmup"}, "Number of warm-up runs."));
     po.addArg("num_outer", Arg({"num_outer"}, "Number of outer runs."));
     po.addArg("num_inner", Arg({"num_inner"}, "Number of innter runs."));
@@ -336,20 +368,42 @@ int main(int argc, const char* argv[])
 
     GEMMProblem prob;
 
-    prob.M     = po.get("M", 3072);
-    prob.N     = po.get("N", 4096);
-    prob.K     = po.get("K", 4096);
-    prob.mac_m = po.get("mac_m", 64);
-    prob.mac_n = po.get("mac_n", 64);
-    prob.mac_k = po.get("mac_k", 64);
-    prob.alpha = po.get("alpha", 2.0f);
-    prob.beta  = po.get("beta", 0.5f);
+    prob.M        = po.get("M", 3072);
+    prob.N        = po.get("N", 4096);
+    prob.K        = po.get("K", 4096);
+    prob.mac_m    = po.get("mac_m", 64);
+    prob.mac_n    = po.get("mac_n", 64);
+    prob.mac_k    = po.get("mac_k", 64);
+    prob.alpha    = po.get("alpha", 2.0f);
+    prob.beta     = po.get("beta", 0.5f);
+    prob.type_A   = po.get("type_A", std::string("float"));
+    prob.type_B   = po.get("type_B", std::string("float"));
+    prob.type_C   = po.get("type_C", std::string("float"));
+    prob.type_D   = po.get("type_D", std::string("float"));
+    prob.type_acc = po.get("type_acc", std::string("float"));
 
     prob.numWarmUp = po.get("num_warmup", 3);
     prob.numOuter  = po.get("num_outer", 5);
     prob.numInner  = po.get("num_inner", 2);
 
-    auto result = GEMM(prob, true);
+    AssertFatal(prob.type_acc == "float");
+
+    GEMMResult result(prob);
+
+    if(prob.type_A == "float" && prob.type_B == "float" && prob.type_C == "float"
+       && prob.type_D == "float")
+    {
+        result = GEMM<float, float, float, float>(prob, true);
+    }
+    else if(prob.type_A == "half" && prob.type_B == "half" && prob.type_C == "half"
+            && prob.type_D == "half")
+    {
+        result = GEMM<Half, Half, Half, Half>(prob, true);
+    }
+    else
+    {
+        Throw<FatalError>("Unsupported combination of datatypes for GEMM");
+    }
 
     std::string filename = po.get("yaml", std::string());
     if(!filename.empty())

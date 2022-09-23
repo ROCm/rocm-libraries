@@ -45,6 +45,12 @@ class GEMM:
     alpha: float = 2.0
     beta: float = 0.5
 
+    type_A : str = "float"
+    type_B : str = "float"
+    type_C : str = "float"
+    type_D : str = "float"
+    type_acc : str = "float"
+
     numWarmUp: int = 2
     numOuter: int = 10
     numInner: int = 1
@@ -78,6 +84,11 @@ class GEMMRun(GEMM):
             "--mac_k=" + str(self.mac_k),
             "--alpha=" + str(self.alpha),
             "--beta=" + str(self.beta),
+            "--type_A=" + str(self.type_A),
+            "--type_B=" + str(self.type_B),
+            "--type_C=" + str(self.type_C),
+            "--type_D=" + str(self.type_D),
+            "--type_acc=" + str(self.type_acc),
             "--yaml=" + str(self.output),
             "--num_warmup=" + str(self.numWarmUp),
             "--num_outer=" + str(self.numOuter),
