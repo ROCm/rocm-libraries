@@ -171,7 +171,7 @@ namespace rocRollerTest
         ct.addElement(Split(), {u}, {i});
         ct.addElement(Tile(), {i}, {wg, wf});
 
-        // TODO: uncomment and fix when Transformers are in place
+        // TODO: uncomment and fix when appropriate methods are in place
 
         // auto uOut = ct.getOutputs(getTag(u), EdgeType::CoordinateTransform);
         // ASSERT_EQ(1, uOut.size());
@@ -179,26 +179,26 @@ namespace rocRollerTest
 
         // ASSERT_EQ(0, ct.getOutputs(getTag(u), EdgeType::DataFlow).size());
 
-        // auto block_index  = Expression::literal(2);
-        // auto thread_index = Expression::literal(33);
+        auto block_index  = Expression::literal(2);
+        auto thread_index = Expression::literal(33);
 
-        // // given indexes for the workgroup and wavefront, compute "i"
-        // auto exprs = ct.reverse({block_index, thread_index}, {u}, {wg, wf}, fastArith).to<std::vector>();
-        // auto sexpr = Expression::toString(exprs[0]);
+        // given indexes for the workgroup and wavefront, compute "i"
+        auto exprs = ct.reverse({block_index, thread_index}, {u}, {wg, wf}, fastArith);
+        auto sexpr = Expression::toString(exprs[0]);
 
-        // EXPECT_EQ(sexpr, "Multiply(Add(Multiply(2i, 64j), 33i), 2j)");
-        // //EXPECT_EQ(sexpr, "ShiftL(Add(ShiftL(2, 6), 33), 1)");
+        EXPECT_EQ(sexpr, "Multiply(Add(Multiply(2i, 64j), 33i), 2j)");
+        //EXPECT_EQ(sexpr, "ShiftL(Add(ShiftL(2, 6), 33), 1)");
 
-        // auto thread_index_register
-        //     = std::make_shared<Register::Value>(m_context, Register::Type::Vector, DataType::Int32, 1);
-        // thread_index_register->allocateNow();
+        auto thread_index_register = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Int32, 1);
+        thread_index_register->allocateNow();
 
-        // exprs
-        //     = ct.reverse({block_index, thread_index_register->expression()}, {u}, {wg, wf}, fastArith).to<std::vector>();
-        // sexpr = Expression::toString(exprs[0]);
+        exprs = ct.reverse(
+            {block_index, thread_index_register->expression()}, {u}, {wg, wf}, fastArith);
+        sexpr = Expression::toString(exprs[0]);
 
-        // EXPECT_EQ(sexpr, "Multiply(Add(Multiply(2i, 64j), v0:I), 2j)");
-        // //EXPECT_EQ(sexpr, "ShiftL(Add(ShiftL(2, 6), v0), 1)");
+        EXPECT_EQ(sexpr, "Multiply(Add(Multiply(2i, 64j), v0:I), 2j)");
+        //EXPECT_EQ(sexpr, "ShiftL(Add(ShiftL(2, 6), v0), 1)");
 
         // auto currentEdges = ct.getEdges();
 
