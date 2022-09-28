@@ -35,11 +35,12 @@ def runTestCommand (platform, project)
     def hmmTestCommand = ''
     if (platform.jenkinsLabel.contains('gfx90a'))
     {
-        hmmTestCommand = """
+        echo("HMM TESTS DISABLED")
+        /*hmmTestCommand = """
                             export HSA_XNACK=1
                             export ROCPRIM_USE_HMM=1
                             ${testCommand} ${hmmTestCommandExclude}
-                         """
+                         """*/
     }
     echo(env.JOB_NAME)
     if (env.JOB_NAME.contains('bleeding-edge'))
