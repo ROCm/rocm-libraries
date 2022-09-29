@@ -34,12 +34,12 @@ namespace rocRoller
             /**
              * Set the index expression for the dimension.
              */
-            void setCoordinate(Dimension const&, Expression::ExpressionPtr);
+            void setCoordinate(int, Expression::ExpressionPtr);
 
             /**
              * Remove the index expression for the dimension.
              */
-            void removeCoordinate(Dimension const&);
+            void removeCoordinate(int);
 
             /**
              * Forward (bottom-up) coordinate transform.
@@ -47,28 +47,28 @@ namespace rocRoller
              * Given current location (see set()), traverse the graph
              * until the `dsts` dimensions are reached.
              */
-            std::vector<Expression::ExpressionPtr> forward(std::vector<Dimension> const&) const;
+            std::vector<Expression::ExpressionPtr> forward(std::vector<int> const&) const;
 
             /**
              * Reverse (top-down) coordinate transform.
              */
-            std::vector<Expression::ExpressionPtr> reverse(std::vector<Dimension> const&) const;
+            std::vector<Expression::ExpressionPtr> reverse(std::vector<int> const&) const;
 
             /**
              * Forward incremental coordinate transform.
              */
-            std::vector<Expression::ExpressionPtr> forwardStride(Dimension const&,
+            std::vector<Expression::ExpressionPtr> forwardStride(int,
                                                                  Expression::ExpressionPtr,
-                                                                 std::vector<Dimension> const&,
+                                                                 std::vector<int> const&,
                                                                  Expression::ExpressionTransducer
                                                                  = nullptr) const;
 
             /**
              * Reverse incremental coordinate transform.
              */
-            std::vector<Expression::ExpressionPtr> reverseStride(Dimension const&,
+            std::vector<Expression::ExpressionPtr> reverseStride(int,
                                                                  Expression::ExpressionPtr,
-                                                                 std::vector<Dimension> const&,
+                                                                 std::vector<int> const&,
                                                                  Expression::ExpressionTransducer
                                                                  = nullptr) const;
 
@@ -79,16 +79,15 @@ namespace rocRoller
 
         private:
             template <typename Visitor>
-            std::vector<Expression::ExpressionPtr> stride(std::vector<Dimension> const&,
+            std::vector<Expression::ExpressionPtr> stride(std::vector<int> const&,
                                                           bool     forward,
                                                           Visitor& visitor,
                                                           Expression::ExpressionTransducer) const;
 
-            std::map<TagType, Dimension>                 m_dimensions;
-            std::map<TagType, Expression::ExpressionPtr> m_indexes;
-            std::shared_ptr<CoordinateHypergraph>        m_graph;
-            std::shared_ptr<Context>                     m_context;
-            Expression::ExpressionTransducer             m_transducer;
+            std::map<int, Expression::ExpressionPtr> m_indexes;
+            std::shared_ptr<CoordinateHypergraph>    m_graph;
+            std::shared_ptr<Context>                 m_context;
+            Expression::ExpressionTransducer         m_transducer;
         };
     }
 }

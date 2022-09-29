@@ -9,31 +9,34 @@ namespace rocRoller
     namespace KernelGraph::CoordGraph
     {
 
-        std::vector<Expression::ExpressionPtr>
+        inline std::vector<Expression::ExpressionPtr>
             CoordinateHypergraph::forward(std::vector<Expression::ExpressionPtr> sdims,
                                           std::vector<int> const&                srcs,
                                           std::vector<int> const&                dsts,
                                           Expression::ExpressionTransducer       transducer)
         {
             AssertFatal(sdims.size() == srcs.size(), ShowValue(sdims));
-            return traverse<Graph::Direction::Downstream>(sdims, srcs, dsts, transducer);
+            auto visitor = ForwardEdgeVisitor();
+            return traverse<Graph::Direction::Downstream>(sdims, srcs, dsts, visitor, transducer);
         }
 
-        std::vector<Expression::ExpressionPtr>
+        inline std::vector<Expression::ExpressionPtr>
             CoordinateHypergraph::reverse(std::vector<Expression::ExpressionPtr> sdims,
                                           std::vector<int> const&                srcs,
                                           std::vector<int> const&                dsts,
                                           Expression::ExpressionTransducer       transducer)
         {
             AssertFatal(sdims.size() == dsts.size(), ShowValue(sdims));
-            return traverse<Graph::Direction::Upstream>(sdims, srcs, dsts, transducer);
+            auto visitor = ReverseEdgeVisitor();
+            return traverse<Graph::Direction::Upstream>(sdims, srcs, dsts, visitor, transducer);
         }
 
-        template <Graph::Direction Dir>
-        std::vector<Expression::ExpressionPtr>
+        template <Graph::Direction Dir, typename Visitor>
+        inline std::vector<Expression::ExpressionPtr>
             CoordinateHypergraph::traverse(std::vector<Expression::ExpressionPtr> sdims,
                                            std::vector<int> const&                srcs,
                                            std::vector<int> const&                dsts,
+                                           Visitor&                               visitor,
                                            Expression::ExpressionTransducer       transducer)
         {
             bool const forward = Dir == Graph::Direction::Downstream;
@@ -61,7 +64,7 @@ namespace rocRoller
                     Edge const& edge = std::get<CoordinateTransformEdge>(std::get<Edge>(element));
 
                     std::vector<Expression::ExpressionPtr> einds;
-                    std::vector<int>                       keys;
+                    std::vector<int>                       keys, localSrcTags, localDstTags;
                     std::vector<Dimension>                 localSrcs, localDsts;
 
                     for(auto const& tag : getNeighbours<Graph::Direction::Upstream>(elemId))
@@ -75,6 +78,7 @@ namespace rocRoller
                             keys.push_back(tag);
                         }
                         localSrcs.emplace_back(std::get<Dimension>(getElement(tag)));
+                        localSrcTags.emplace_back(tag);
                     }
                     for(auto const& tag : getNeighbours<Graph::Direction::Downstream>(elemId))
                     {
@@ -87,18 +91,19 @@ namespace rocRoller
                             keys.push_back(tag);
                         }
                         localDsts.emplace_back(std::get<Dimension>(getElement(tag)));
+                        localDstTags.emplace_back(tag);
                     }
 
                     if(forward)
                     {
-                        auto visitor = ForwardEdgeVisitor();
-                        visitor.setLocation(einds, localSrcs, localDsts);
+                        visitor.setLocation(
+                            einds, localSrcs, localDsts, localSrcTags, localDstTags);
                         visitedExprs = visitor(edge);
                     }
                     else
                     {
-                        auto visitor = ReverseEdgeVisitor();
-                        visitor.setLocation(einds, localSrcs, localDsts);
+                        visitor.setLocation(
+                            einds, localSrcs, localDsts, localSrcTags, localDstTags);
                         visitedExprs = visitor(edge);
                     }
 
@@ -121,7 +126,7 @@ namespace rocRoller
             return results;
         }
 
-        EdgeType CoordinateHypergraph::getEdgeType(int index)
+        inline EdgeType CoordinateHypergraph::getEdgeType(int index)
         {
             Element const& elem = getElement(index);
             if(std::holds_alternative<Edge>(elem))
@@ -137,6 +142,23 @@ namespace rocRoller
                 }
             }
             return EdgeType::None;
+        }
+
+        inline std::set<int> CoordinateHypergraph::getDimensionTags() const
+        {
+            std::set<int> rv;
+            for(auto const& root : roots())
+            {
+                for(auto const& index : depthFirstVisit(root))
+                {
+                    auto const& elem = getElement(index);
+                    if(std::holds_alternative<Dimension>(elem))
+                    {
+                        rv.insert(index);
+                    }
+                }
+            }
+            return rv;
         }
 
     }

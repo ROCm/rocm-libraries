@@ -243,6 +243,7 @@ set(rocroller_src
  lib/source/KernelGraph/ControlGraph/ControlEdge.cpp
  lib/source/KernelGraph/ControlGraph/ControlGraph.cpp
  lib/source/KernelGraph/CoordGraph/Dimension.cpp
+ lib/source/KernelGraph/CoordGraph/Transformer.cpp
  lib/source/KernelGraph/CoordinateTransform/Dimension.cpp
  lib/source/KernelGraph/CoordinateTransform/HyperGraph.cpp
  lib/source/KernelGraph/CoordinateTransform/Transformer.cpp

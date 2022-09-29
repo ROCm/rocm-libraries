@@ -85,6 +85,8 @@ namespace rocRoller
             {
             }
 
+            std::set<int> getDimensionTags() const;
+
             std::vector<Expression::ExpressionPtr>
                 forward(std::vector<Expression::ExpressionPtr> sdims,
                         std::vector<int> const&                srcs,
@@ -99,13 +101,13 @@ namespace rocRoller
 
             EdgeType getEdgeType(int index);
 
-        private:
-            template <Graph::Direction Dir>
+            template <Graph::Direction Dir, typename Visitor>
             std::vector<Expression::ExpressionPtr>
                 traverse(std::vector<Expression::ExpressionPtr> sdims,
                          std::vector<int> const&                srcs,
                          std::vector<int> const&                dsts,
-                         Expression::ExpressionTransducer       transducer);
+                         Visitor&                               visitor,
+                         Expression::ExpressionTransducer       transducer = nullptr);
         };
     }
 }

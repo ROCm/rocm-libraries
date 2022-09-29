@@ -22,16 +22,20 @@ namespace rocRoller
         struct BaseEdgeVisitor
         {
             std::vector<Expression::ExpressionPtr> indexes;
-            std::vector<Dimension>                 srcs;
-            std::vector<Dimension>                 dsts;
+            std::vector<Dimension>                 srcs, dsts;
+            std::vector<int>                       srcTags, dstTags;
 
             inline void setLocation(std::vector<Expression::ExpressionPtr> _indexes,
-                                    std::vector<Dimension>                 _srcs,
-                                    std::vector<Dimension>                 _dsts)
+                                    std::vector<Dimension> const&          _srcs,
+                                    std::vector<Dimension> const&          _dsts,
+                                    std::vector<int> const&                _srcTags,
+                                    std::vector<int> const&                _dstTags)
             {
                 indexes = _indexes;
                 srcs    = _srcs;
                 dsts    = _dsts;
+                srcTags = _srcTags;
+                dstTags = _dstTags;
             }
         };
 

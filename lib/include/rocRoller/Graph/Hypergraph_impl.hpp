@@ -458,7 +458,7 @@ namespace rocRoller
         {
             for(auto const element : getNeighbours<Dir>(edge))
             {
-                if(!visitedElements.contains(element))
+                if(!visitedElements.contains(element) || !visitedElements.at(element))
                 {
                     return false;
                 }

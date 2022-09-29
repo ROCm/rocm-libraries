@@ -2,10 +2,13 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include "GPUContextFixture.hpp"
 #include "GenericContextFixture.hpp"
 
+#include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/KernelGraph/CoordGraph/CoordinateHypergraph.hpp>
 #include <rocRoller/KernelGraph/CoordGraph/Dimension.hpp>
+#include <rocRoller/KernelGraph/CoordGraph/Transformer.hpp>
 
 using namespace rocRoller;
 using namespace KernelGraph;
@@ -36,6 +39,7 @@ namespace rocRollerTest
 
         EXPECT_EQ(EdgeType::CoordinateTransform, ct.getEdgeType(flatten_id));
         EXPECT_EQ(EdgeType::None, ct.getEdgeType(x));
+        EXPECT_EQ(ct.getDimensionTags(), std::set<int>({x, y, m}));
     }
 
     TEST_F(CoordinateHypergraphTest, Basic)
@@ -52,6 +56,8 @@ namespace rocRollerTest
         auto m = ct.addElement(SubDimension(0, size * size, unit));
 
         auto flatten_id = ct.addElement(Flatten{}, {x, y}, {m});
+
+        EXPECT_EQ(ct.getDimensionTags(), std::set<int>({x, y, m}));
 
         auto exprs = ct.forward({x_index, y_index}, {x, y}, {m}, fastArith);
         auto sexpr = Expression::toString(exprs[0]);
@@ -113,6 +119,8 @@ namespace rocRollerTest
         int y = ct.addElement(SubDimension(0, size_y, stride_y));
         int z = ct.addElement(SubDimension(0, size_z, stride_z));
         int m = ct.addElement(SubDimension(0));
+
+        EXPECT_EQ(ct.getDimensionTags(), std::set<int>({x, y, z, m}));
 
         auto flat = ct.addElement(Flatten(), {x, y, z}, {m});
 
@@ -200,6 +208,8 @@ namespace rocRollerTest
         EXPECT_EQ(sexpr, "Multiply(Add(Multiply(2i, 64j), v0:I), 2j)");
         //EXPECT_EQ(sexpr, "ShiftL(Add(ShiftL(2, 6), v0), 1)");
 
+        EXPECT_EQ(ct.getDimensionTags(), std::set<int>({u, i, wg, wf}));
+
         // auto currentEdges = ct.getEdges();
 
         // EXPECT_EQ(currentEdges.size(), 2);
@@ -233,6 +243,8 @@ namespace rocRollerTest
         // dimension "i" gets tiled into workgroups and wavefronts
         ct.addElement(Split(), {u}, {i});
         ct.addElement(Tile(), {i}, {wg, wf});
+
+        EXPECT_EQ(ct.getDimensionTags(), std::set<int>({u, i, wg, wf}));
 
         auto block_index  = std::make_shared<Expression::Expression>(2);
         auto thread_index = std::make_shared<Expression::Expression>(33);
@@ -275,6 +287,8 @@ namespace rocRollerTest
         // each thread in a wavefront operates on 4 elements (unroll)
         ct.addElement(Split(), {u}, {i});
         ct.addElement(Tile(), {i}, {wg, wf, unroll});
+
+        EXPECT_EQ(ct.getDimensionTags(), std::set<int>({u, i, wg, wf, unroll}));
 
         auto block_index  = Expression::literal(2);
         auto thread_index = Expression::literal(33);
@@ -323,6 +337,8 @@ namespace rocRollerTest
         ct.addElement(Split(), {u}, {i});
         ct.addElement(Tile(), {i}, {wg, wf});
         ct.addElement(Tile(), {wf}, {thread, unroll});
+
+        EXPECT_EQ(ct.getDimensionTags(), std::set<int>({u, i, wg, wf, thread, unroll}));
 
         auto block_index  = Expression::literal(2);
         auto thread_index = Expression::literal(33);
@@ -395,6 +411,9 @@ namespace rocRollerTest
         ct.addElement(Tile(), {Ai}, {tile_x, i});
         ct.addElement(Tile(), {Aj}, {tile_y, j});
 
+        EXPECT_EQ(ct.getDimensionTags(),
+                  std::set<int>({A, Ai, Aj, B, Bi, Bj, T_id, i, j, tile_x, tile_y}));
+
         auto tile_x_index = Expression::literal(4);
         auto tile_y_index = Expression::literal(5);
         auto i_index      = Expression::literal(33);
@@ -465,121 +484,136 @@ namespace rocRollerTest
         ct.addElement(Tile(), {Ai}, {tile_x, i});
         ct.addElement(Tile(), {Aj}, {tile_y, j});
 
-        // TODO: uncomment and fix when Transformers are in place
+        EXPECT_EQ(ct.getDimensionTags(), std::set<int>({A, Ai, Aj, T_id, i, j, tile_x, tile_y}));
 
-        // auto coords
-        //     = Transformer(std::make_shared<HyperGraph>(ct));
+        auto coords = Transformer(std::make_shared<CoordinateHypergraph>(ct));
 
-        // auto identity_transducer = [&](auto expr) { return expr; };
-        // auto transducer          = [&](auto expr) { return Expression::fastMultiplication(expr); };
+        auto identity_transducer = [&](auto expr) { return expr; };
+        auto transducer          = [&](auto expr) { return Expression::fastMultiplication(expr); };
 
-        // std::vector<Expression::ExpressionPtr> exprs;
-        // std::string                            sexpr;
+        std::vector<Expression::ExpressionPtr> exprs;
+        std::string                            sexpr;
 
-        // // set location to thread tile
-        // coords.setCoordinate(tile_x, Expression::literal(4));
-        // coords.setCoordinate(tile_y, Expression::literal(5));
-        // coords.setCoordinate(i, Expression::literal(33));
-        // coords.setCoordinate(j, Expression::literal(2));
+        // set location to thread tile
+        coords.setCoordinate(tile_x, Expression::literal(4));
+        coords.setCoordinate(tile_y, Expression::literal(5));
+        coords.setCoordinate(i, Expression::literal(33));
+        coords.setCoordinate(j, Expression::literal(2));
 
-        // // from thread tile to macro tile row
-        // exprs = coords.reverse({Ai});
-        // sexpr = Expression::toString(exprs[0]);
-        // EXPECT_EQ(sexpr, "Add(Multiply(4i, 16j), 33i)");
+        // from thread tile to macro tile row
+        exprs = coords.reverse({Ai});
+        sexpr = Expression::toString(exprs[0]);
+        EXPECT_EQ(sexpr, "Add(Multiply(4i, 16j), 33i)");
 
-        // // from thread tile to user tensor
-        // exprs = coords.reverse({A});
-        // sexpr = Expression::toString(exprs[0]);
-        // EXPECT_EQ(sexpr,
-        //           "Add(Multiply(Add(Multiply(4i, 16j), 33i), 300i), Multiply(Add(Multiply(5i, 16j), "
-        //           "2i), 1i))");
+        // from thread tile to user tensor
+        exprs = coords.reverse({A});
+        sexpr = Expression::toString(exprs[0]);
+        EXPECT_EQ(
+            sexpr,
+            "Add(Multiply(Add(Multiply(4i, 16j), 33i), 300i), Multiply(Add(Multiply(5i, 16j), "
+            "2i), 1i))");
 
-        // // check edge case where expression are unchanged
-        // coords.setTransducer(identity_transducer);
-        // exprs = coords.reverse({A});
-        // sexpr = Expression::toString(exprs[0]);
-        // EXPECT_EQ(sexpr,
-        //           "Add(Multiply(Add(Multiply(4i, 16j), 33i), 300i), Multiply(Add(Multiply(5i, 16j), "
-        //           "2i), 1i))");
-        // coords.setTransducer(nullptr);
+        // check edge case where expression are unchanged
+        coords.setTransducer(identity_transducer);
+        exprs = coords.reverse({A});
+        sexpr = Expression::toString(exprs[0]);
+        EXPECT_EQ(
+            sexpr,
+            "Add(Multiply(Add(Multiply(4i, 16j), 33i), 300i), Multiply(Add(Multiply(5i, 16j), "
+            "2i), 1i))");
+        coords.setTransducer(nullptr);
 
-        // // as above, with fast multiplication
-        // coords.setTransducer(transducer);
-        // exprs = coords.reverse({A});
-        // sexpr = Expression::toString(exprs[0]);
-        // EXPECT_EQ(sexpr, "Add(Multiply(Add(ShiftL(4i, 4j), 33i), 300i), Add(ShiftL(5i, 4j), 2i))");
-        // coords.setTransducer(nullptr);
+        // as above, with fast multiplication
+        coords.setTransducer(transducer);
+        exprs = coords.reverse({A});
+        sexpr = Expression::toString(exprs[0]);
+        EXPECT_EQ(sexpr, "Add(Multiply(Add(ShiftL(4i, 4j), 33i), 300i), Add(ShiftL(5i, 4j), 2i))");
+        coords.setTransducer(nullptr);
 
-        // // remove i, try again: should fail
-        // coords.removeCoordinate(i);
-        // EXPECT_THROW(coords.reverse({A}), RecoverableError);
+        // remove i, try again: should fail
+        coords.removeCoordinate(i);
+        EXPECT_THROW(coords.reverse({A}), RecoverableError);
 
-        // // remove i and j, so only know workgroup and workitem
-        // coords.removeCoordinate(i);
-        // coords.removeCoordinate(j);
+        // remove i and j, so only know workgroup and workitem
+        coords.removeCoordinate(i);
+        coords.removeCoordinate(j);
 
-        // // from user tensor row to thread tile row
-        // coords.setCoordinate(Ai, Expression::literal(17));
-        // exprs = coords.forward({i});
-        // sexpr = Expression::toString(exprs[0]);
-        // EXPECT_EQ(sexpr, "Modulo(Divide(17i, 300i), 16j)");
+        // from user tensor row to thread tile row
+        coords.setCoordinate(Ai, Expression::literal(17));
+        exprs = coords.forward({i});
+        sexpr = Expression::toString(exprs[0]);
+        EXPECT_EQ(sexpr, "Modulo(Divide(17i, 300i), 16j)");
     }
 
     TEST_F(CoordinateHypergraphTest, TensorTile2DLoadStore03)
     {
         auto ct = CoordinateHypergraph();
 
-        auto unit = Expression::literal(1u);
-        auto M    = Expression::literal(100u);
-        auto K    = Expression::literal(300u);
+        uint m = 16;
+        uint n = 16;
 
-        int m = 16;
-        int n = 16;
+        auto unit = Expression::literal(1u);
+        auto M    = Expression::literal(100u * m);
+        auto N    = Expression::literal(300u * n);
 
         // A matrix; tag 1; M x K; C-ordering
         auto A  = ct.addElement(User());
-        auto Ai = ct.addElement(SubDimension(0, M, K));
-        auto Aj = ct.addElement(SubDimension(1, K, unit));
+        auto Ai = ct.addElement(SubDimension(0, M, N));
+        auto Aj = ct.addElement(SubDimension(1, N, unit));
         ct.addElement(Split(), {A}, {Ai, Aj});
 
         // T tile; tag 3; m x n
-        auto T    = MacroTile({m, n}, MemoryType::VGPR);
+        auto T    = MacroTile({(int)m, (int)n}, MemoryType::VGPR);
         auto T_id = ct.addElement(T);
         auto i    = ct.addElement(T.tileIndex(0));
         auto j    = ct.addElement(T.tileIndex(1));
         ct.addElement(Join(), {i, j}, {T_id});
 
         // tile each dimension of A matrix; each workgroup gets one tile
-        auto tile_x = ct.addElement(Workgroup(0));
-        auto tile_y = ct.addElement(Workgroup(1));
+        auto tile_x
+            = ct.addElement(SubDimension(0, Expression::literal(100u), Expression::literal(m)));
+        auto tile_y
+            = ct.addElement(SubDimension(1, Expression::literal(300u), Expression::literal(n)));
         ct.addElement(Tile(), {Ai}, {tile_x, i});
         ct.addElement(Tile(), {Aj}, {tile_y, j});
 
-        // TODO: uncomment and fix when Transformers are in place
+        auto D  = ct.addElement(User());
+        auto Di = ct.addElement(SubDimension(0, M, N));
+        auto Dj = ct.addElement(SubDimension(1, N, unit));
+        ct.addElement(Flatten(), {tile_x, i}, {Di});
+        ct.addElement(Flatten(), {tile_y, j}, {Dj});
+        ct.addElement(Join(), {Di, Dj}, {D});
 
-        // auto coords = Transformer(
-        //     std::make_shared<HyperGraph>(ct), nullptr);
+        EXPECT_EQ(ct.getDimensionTags(),
+                  std::set<int>({A, Ai, Aj, T_id, i, j, tile_x, tile_y, D, Di, Dj}));
 
-        // coords.setCoordinate(tile_x, Expression::literal(4u));
-        // coords.setCoordinate(tile_y, Expression::literal(5u));
-        // coords.setCoordinate(i, Expression::literal(33u));
-        // coords.setCoordinate(j, Expression::literal(2u));
+        auto coords = Transformer(std::make_shared<CoordinateHypergraph>(ct), nullptr);
 
-        // auto exprs = coords.reverseStride(tile_x, Expression::literal(1u), {A}, Expression::simplify);
-        // auto sexpr = Expression::toString(exprs[0]);
-        // EXPECT_EQ(sexpr, "4800j");
+        coords.setCoordinate(tile_x, Expression::literal(4u));
+        coords.setCoordinate(tile_y, Expression::literal(5u));
+        coords.setCoordinate(i, Expression::literal(33u));
+        coords.setCoordinate(j, Expression::literal(2u));
 
-        // exprs = coords.reverseStride(i, Expression::literal(2u), {A}, Expression::simplify);
-        // sexpr = Expression::toString(exprs[0]);
-        // EXPECT_EQ(sexpr, "600j");
+        auto exprs
+            = coords.reverseStride(tile_x, Expression::literal(1u), {A}, Expression::simplify);
+        auto sexpr = Expression::toString(exprs[0]);
+        EXPECT_EQ(sexpr, "76800j");
 
-        // exprs = coords.reverseStride(j, Expression::literal(1u), {A}, Expression::simplify);
-        // sexpr = Expression::toString(exprs[0]);
-        // EXPECT_EQ(sexpr, "1j");
+        exprs = coords.reverseStride(i, Expression::literal(2u), {A}, Expression::simplify);
+        sexpr = Expression::toString(exprs[0]);
+        EXPECT_EQ(sexpr, "9600j");
 
-        // exprs = coords.reverseStride(tile_y, Expression::literal(2u), {A}, Expression::simplify);
-        // sexpr = Expression::toString(exprs[0]);
-        // EXPECT_EQ(sexpr, "32j");
+        exprs = coords.reverseStride(j, Expression::literal(1u), {A}, Expression::simplify);
+        sexpr = Expression::toString(exprs[0]);
+        EXPECT_EQ(sexpr, "1j");
+
+        exprs = coords.reverseStride(tile_y, Expression::literal(2u), {A}, Expression::simplify);
+        sexpr = Expression::toString(exprs[0]);
+        EXPECT_EQ(sexpr, "32j");
+
+        exprs = coords.forwardStride(tile_y, Expression::literal(2u), {D}, Expression::simplify);
+        sexpr = Expression::toString(exprs[0]);
+        EXPECT_EQ(sexpr, "600j");
     }
 
     TEST_F(CoordinateHypergraphTest, WaveTileBasic)
@@ -607,4 +641,67 @@ namespace rocRollerTest
         EXPECT_EQ(std::get<int>(Expression::evaluate(WaveAi.stride)), 2);
         EXPECT_EQ(std::get<int>(Expression::evaluate(WaveAj.stride)), 1);
     }
+
+    class ARCH_CoordinateHypergraphTest : public GPUContextFixture
+    {
+    };
+
+    TEST_P(ARCH_CoordinateHypergraphTest, TensorTile2DLoadStore04)
+    {
+        auto ct = CoordinateHypergraph();
+
+        auto wavefront_size = Expression::literal(64);
+        auto unit           = Expression::literal(1);
+
+        auto M = Expression::literal(100);
+        auto N = Expression::literal(200);
+        auto K = Expression::literal(300);
+
+        int m = 16;
+        int n = 16;
+
+        // A matrix; tag 1; M x K; C-ordering
+        auto A  = ct.addElement(User());
+        auto Ai = ct.addElement(SubDimension(0, M, K));
+        auto Aj = ct.addElement(SubDimension(1, K, unit));
+        ct.addElement(Split(), {A}, {Ai, Aj});
+
+        // T tile; tag 3; m x n
+        auto T    = MacroTile({m, n}, MemoryType::VGPR);
+        auto T_id = ct.addElement(T);
+        auto i    = ct.addElement(T.tileIndex(0));
+        auto j    = ct.addElement(T.tileIndex(1));
+        ct.addElement(Join(), {i, j}, {T_id});
+
+        // tile each dimension of A matrix; each workgroup gets one tile
+        auto tile_x = ct.addElement(Workgroup(0));
+        auto tile_y = ct.addElement(Workgroup(1));
+        ct.addElement(Tile(), {Ai}, {tile_x, i});
+        ct.addElement(Tile(), {Aj}, {tile_y, j});
+
+        EXPECT_EQ(ct.getDimensionTags(), std::set<int>({A, Ai, Aj, T_id, i, j, tile_x, tile_y}));
+
+        // need preamble so work coords are initialised
+        auto k = m_context->kernel();
+        k->setKernelName("TensorTile2DLoadStore04");
+        k->setKernelDimensions(2);
+        m_context->schedule(k->preamble());
+
+        auto coords = Transformer(std::make_shared<CoordinateHypergraph>(ct), m_context);
+
+        coords.setCoordinate(i, Expression::literal(33u));
+        coords.setCoordinate(j, Expression::literal(2u));
+
+        auto exprs = coords.reverse({A});
+        auto sexpr = Expression::toString(exprs[0]);
+        EXPECT_EQ(sexpr,
+                  "Add(Multiply(Add(Multiply(s2:U32, 16j), 33j), 300i), "
+                  "Multiply(Add(Multiply(s3:U32, 16j), 2j), 1i))");
+    }
+
+    INSTANTIATE_TEST_SUITE_P(
+        ARCH_CoordinateHypergraphTests,
+        ARCH_CoordinateHypergraphTest,
+        ::testing::ValuesIn(rocRoller::GPUArchitectureLibrary::getAllSupportedISAs()));
+
 }
