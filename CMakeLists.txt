@@ -238,6 +238,7 @@ set(rocroller_src
  lib/source/CodeGen/Arithmetic/ShiftR.cpp
  lib/source/CodeGen/Arithmetic/SignedShiftR.cpp
  lib/source/CodeGen/Arithmetic/Subtract.cpp
+ lib/source/CodeGen/Buffer.cpp
  lib/source/CodeGen/MemoryInstructions.cpp
 
  lib/source/KernelGraph/ControlGraph/ControlEdge.cpp

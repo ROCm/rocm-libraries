@@ -7,6 +7,7 @@
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
 #include <rocRoller/CodeGen/Arithmetic/ArithmeticGenerator.hpp>
+#include <rocRoller/CodeGen/Buffer.hpp>
 #include <rocRoller/CodeGen/CopyGenerator.hpp>
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
 #include <rocRoller/CommandSolution.hpp>
@@ -31,6 +32,75 @@ namespace MemoryInstructionsTest
     class MemoryInstructionsExecuter : public CurrentGPUContextFixture
     {
     };
+
+    void genBufDescTest(std::shared_ptr<rocRoller::Context> m_context)
+    {
+        auto k = m_context->kernel();
+
+        k->setKernelName("BufferDescriptorTest");
+        k->setKernelDimensions(1);
+
+        k->addArgument(
+            {"result", {DataType::Int32, PointerType::PointerGlobal}, DataDirection::WriteOnly});
+
+        m_context->schedule(k->preamble());
+        m_context->schedule(k->prolog());
+
+        auto kb = [&]() -> Generator<Instruction> {
+            Register::ValuePtr s_result;
+            co_yield m_context->argLoader()->getValue("result", s_result);
+
+            auto v_result = Register::Value::Placeholder(
+                m_context, Register::Type::Vector, DataType::Raw32, 2);
+
+            auto v_a = Register::Value::Placeholder(
+                m_context, Register::Type::Vector, DataType::UInt32, 4);
+
+            co_yield v_a->allocate();
+            co_yield v_result->allocate();
+            co_yield m_context->copier()->copy(v_result, s_result, "Move pointer.");
+
+            auto bufDesc = rocRoller::BufferDescriptor(m_context);
+
+            co_yield bufDesc.setup();
+            co_yield bufDesc.setBasePointer(Register::Value::Literal(0x00000000));
+            co_yield bufDesc.setSize(Register::Value::Literal(0x00000001));
+            co_yield bufDesc.setOptions(Register::Value::Literal(131072)); //0x00020000
+            co_yield bufDesc.incrementBasePointer(Register::Value::Literal(0x00000001));
+
+            auto sRD = bufDesc.allRegisters();
+            co_yield m_context->copier()->copy(v_a, sRD, "Move Value");
+            co_yield m_context->mem()->storeFlat(v_result, v_a, "0", 16);
+
+            auto bPnS = bufDesc.basePointerAndStride();
+            co_yield m_context->copier()->copy(v_a->subset({0, 1}), bPnS, "Move Value");
+            co_yield m_context->mem()->store(MemoryInstructions::Flat,
+                                             v_result,
+                                             v_a->subset({0, 1}),
+                                             Register::Value::Literal(16),
+                                             8);
+
+            auto size = bufDesc.size();
+            co_yield m_context->copier()->copy(v_a->subset({2}), size, "Move Value");
+            co_yield m_context->mem()->store(MemoryInstructions::Flat,
+                                             v_result,
+                                             v_a->subset({2}),
+                                             Register::Value::Literal(24),
+                                             4);
+
+            auto dOpt = bufDesc.descriptorOptions();
+            co_yield m_context->copier()->copy(v_a->subset({3}), dOpt, "Move Value");
+            co_yield m_context->mem()->store(MemoryInstructions::Flat,
+                                             v_result,
+                                             v_a->subset({3}),
+                                             Register::Value::Literal(28),
+                                             4);
+        };
+
+        m_context->schedule(kb());
+        m_context->schedule(k->postamble());
+        m_context->schedule(k->amdgpu_metadata());
+    }
 
     void genFlatTest(std::shared_ptr<rocRoller::Context> m_context, int N)
     {
@@ -115,6 +185,19 @@ namespace MemoryInstructionsTest
         EXPECT_GT(assembledKernel.size(), 0);
     }
 
+    void assembleBufDescTest(std::shared_ptr<rocRoller::Context> m_context)
+    {
+        genBufDescTest(m_context);
+
+        if(m_context->targetArchitecture().target().getMajorVersion() != 9)
+        {
+            GTEST_SKIP() << "Skipping GPU buffer tests for " << GPUContextFixture::GetParam();
+        }
+
+        std::vector<char> assembledKernel = m_context->instructions()->assemble();
+        EXPECT_GT(assembledKernel.size(), 0);
+    }
+
     TEST_F(MemoryInstructionsExecuter, GPU_ExecuteFlatTest1Byte)
     {
         executeFlatTest(m_context, 1);
@@ -143,6 +226,50 @@ namespace MemoryInstructionsTest
     TEST_F(MemoryInstructionsExecuter, GPU_ExecuteFlatTest16Bytes)
     {
         executeFlatTest(m_context, 16);
+    }
+
+    TEST_F(MemoryInstructionsExecuter, GPU_ExecuteBufDescriptor)
+    {
+        genBufDescTest(m_context);
+
+        if(m_context->targetArchitecture().target().getMajorVersion() != 9)
+        {
+            GTEST_SKIP() << "Skipping GPU buffer tests for " << GPUContextFixture::GetParam();
+        }
+
+        if(isLocalDevice())
+        {
+            std::shared_ptr<rocRoller::ExecutableKernel> executableKernel
+                = m_context->instructions()->getExecutableKernel();
+
+            auto d_result = make_shared_device<unsigned int>(8); //Srd twice
+
+            KernelArguments kargs;
+            kargs.append<void*>("result", d_result.get());
+            KernelInvocation invocation;
+
+            executableKernel->executeKernel(kargs, invocation);
+
+            std::vector<unsigned int> result(8);
+            ASSERT_THAT(
+                hipMemcpy(
+                    result.data(), d_result.get(), sizeof(unsigned int) * 8, hipMemcpyDefault),
+                HasHipSuccess(0));
+
+            EXPECT_EQ(result[0], 0x00000001);
+            EXPECT_EQ(result[1], 0x00000000);
+            EXPECT_EQ(result[2], 0x00000001);
+            EXPECT_EQ(result[3], 131072);
+            EXPECT_EQ(result[4], 0x00000001);
+            EXPECT_EQ(result[5], 0x00000000);
+            EXPECT_EQ(result[6], 0x00000001);
+            EXPECT_EQ(result[7], 131072);
+        }
+    }
+
+    TEST_P(MemoryInstructionsTest, AssembleBufDescriptor)
+    {
+        assembleBufDescTest(m_context);
     }
 
     TEST_P(MemoryInstructionsTest, AssembleFlatTest1Byte)
