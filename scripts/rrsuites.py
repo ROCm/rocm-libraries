@@ -40,3 +40,4 @@ def hgemm():
 
 def all():
     yield from sgemm()
+    yield from hgemm()

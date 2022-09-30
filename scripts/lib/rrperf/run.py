@@ -30,13 +30,16 @@ def load_suite(suite):
     return ns[suite]()
 
 
-def work_directory():
+def work_directory(working_dir=None):
     """Return a new work directory path."""
 
     commit = rrperf.git.short_hash(".")
     date = datetime.date.today().strftime("%Y-%m-%d")
-    serial = len(list(pathlib.Path(".").glob(f"{date}-{commit}-*")))
-    return pathlib.Path(f"{date}-{commit}-{serial:03d}")
+    root = "."
+    if working_dir:
+        root = working_dir
+    serial = len(list(pathlib.Path(root).glob(f"{date}-{commit}-*")))
+    return pathlib.Path(root)/pathlib.Path(f"{date}-{commit}-{serial:03d}")
 
 
 def submit_directory(suite: str, wrkdir: pathlib.Path, ptsdir: pathlib.Path):
@@ -58,7 +61,7 @@ def from_token(token: str):
     yield rrperf.problems.upcast_to_run(eval(token, rrperf.problems.__dict__))
 
 
-def run(token=None, suite=None, submit=False, filter=None, **kwargs):
+def run(token=None, suite=None, submit=False, filter=None, working_dir=None, **kwargs):
     """Run benchmarks!
 
     Implements the CLI 'run' subcommand.
@@ -80,8 +83,8 @@ def run(token=None, suite=None, submit=False, filter=None, **kwargs):
         arch = top / "build" / "source" / "rocRoller" / "GPUArchitecture_def.msgpack"
         env["ROCROLLER_ARCHITECTURE_FILE"] = arch
 
-    wrkdir = work_directory()
-    wrkdir.mkdir(parents=True)
+    wrkdir = work_directory(working_dir)
+    wrkdir.mkdir(parents=True, exist_ok=True)
 
     # pts.create_git_info(str(wrkdir / "git-commit.txt"))
     git_commit = wrkdir / "git-commit.txt"

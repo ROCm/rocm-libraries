@@ -59,6 +59,7 @@ struct rocRoller::Serialization::
 
     static void mapping(IO& io, GEMMResult& result)
     {
+        iot::mapRequired(io, "client", result.name);
         iot::mapRequired(io, "M", result.M);
         iot::mapRequired(io, "N", result.N);
         iot::mapRequired(io, "K", result.K);
@@ -367,7 +368,7 @@ int main(int argc, const char* argv[])
     po.parse_args(argc, argv);
 
     GEMMProblem prob;
-
+    prob.name     = "GEMMv00";
     prob.M        = po.get("M", 3072);
     prob.N        = po.get("N", 4096);
     prob.K        = po.get("K", 4096);

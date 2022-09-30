@@ -119,7 +119,7 @@ _base_to_run_class = {
 def load_results(path: pathlib.Path):
     """Load results from a YAML file `path` and return an array of RESULT objects."""
     rv = []
-    for r in yaml.load(path.read_text(), Loader=yaml.FullLoader):
+    for r in yaml.load_all(path.read_text(), Loader=yaml.FullLoader):
         ResultClass = _client_to_result_class[r["client"]]
         rv.append(ResultClass(path=path, **r))
     return rv
