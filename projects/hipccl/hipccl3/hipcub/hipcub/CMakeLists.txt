@@ -30,7 +30,7 @@ configure_file(
 )
 
 # Create wrapper for generated version file
-if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY)
+if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY AND NOT WIN32)
   rocm_wrap_header_file(
       "hipcub_version.hpp"
       WRAPPER_LOCATIONS cub/${CMAKE_INSTALL_INCLUDEDIR}/hipcub
@@ -92,7 +92,7 @@ rocm_install(
 
 # Install the wrapper to hipcub folder. 
 # Wrappers would be in /opt/rocm-xxx/hipcub/include/hipcub
-if (BUILD_FILE_REORG_BACKWARD_COMPATIBILITY)
+if (BUILD_FILE_REORG_BACKWARD_COMPATIBILITY AND NOT WIN32)
   rocm_install(
     DIRECTORY
     "${PROJECT_BINARY_DIR}/cub/wrapper/"

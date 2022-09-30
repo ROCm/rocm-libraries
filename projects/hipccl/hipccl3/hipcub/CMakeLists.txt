@@ -144,7 +144,7 @@ if(BUILD_BENCHMARK AND NOT ONLY_INSTALL)
 endif()
 
 # Create header wrapper for backward compatibility
-if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY)
+if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY AND NOT WIN32)
   rocm_wrap_header_dir(
             ${PROJECT_SOURCE_DIR}/hipcub/include/hipcub/
 	    PATTERNS "*.h"
