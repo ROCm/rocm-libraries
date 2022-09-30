@@ -29,7 +29,7 @@ configure_file(
   @ONLY
 )
 
-if (BUILD_FILE_REORG_BACKWARD_COMPATIBILITY)
+if (BUILD_FILE_REORG_BACKWARD_COMPATIBILITY AND NOT WIN32)
   rocm_wrap_header_file(
     "rocprim_version.hpp"
     WRAPPER_LOCATIONS rocprim/include/rocprim
@@ -73,7 +73,7 @@ rocm_install(
 )
 
 
-if (BUILD_FILE_REORG_BACKWARD_COMPATIBILITY)
+if (BUILD_FILE_REORG_BACKWARD_COMPATIBILITY AND NOT WIN32)
 rocm_install(
     DIRECTORY
        "${PROJECT_BINARY_DIR}/rocprim/wrapper/"
