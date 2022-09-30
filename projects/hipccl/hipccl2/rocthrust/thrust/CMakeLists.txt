@@ -12,7 +12,7 @@ configure_file(
 )
 
 #Creat wrapper for generated version file
-if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY)
+if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY AND NOT WIN32)
   rocm_wrap_header_file(
       "rocthrust_version.hpp"
       HEADER_LOCATION include/thrust
@@ -65,7 +65,7 @@ rocm_install(
 
 #Install the wrapper to rocthrust folder. 
 #So wrapper would be in /opt/rocm-xxx/rocthrust/include/thrust
-if (BUILD_FILE_REORG_BACKWARD_COMPATIBILITY)
+if (BUILD_FILE_REORG_BACKWARD_COMPATIBILITY AND NOT WIN32)
   rocm_install(
     DIRECTORY
     "${PROJECT_BINARY_DIR}/rocthrust/wrapper/"
