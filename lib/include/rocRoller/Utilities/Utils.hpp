@@ -357,6 +357,27 @@ namespace rocRoller
     overloaded(Ts...) -> overloaded<Ts...>;
 
     /**
+     * Matches enumerations that are scoped, that have a Count member, and that can be converted to string with
+     * ToString().
+     */
+    template <typename T>
+    concept CCountedEnum = requires()
+    {
+        requires std::regular<T>;
+
+        // clang-format off
+
+        { T::Count } -> std::convertible_to<T>;
+
+        {
+            static_cast<std::underlying_type_t<T>>(T::Count)
+        } -> std::convertible_to<std::underlying_type_t<T>>;
+
+        { ToString(T::Count) } -> std::convertible_to<std::string>;
+
+        // clang-format on
+    };
+    /**
      * @}
      */
 } // namespace rocRoller

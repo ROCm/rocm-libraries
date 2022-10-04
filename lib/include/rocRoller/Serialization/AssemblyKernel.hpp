@@ -9,6 +9,8 @@
 
 #include "Base.hpp"
 #include "Containers.hpp"
+#include "Enum.hpp"
+#include "Expression.hpp"
 
 namespace rocRoller
 {
@@ -40,6 +42,9 @@ namespace rocRoller
                 }
 
                 iot::mapRequired(io, ".value_kind", valueKind);
+
+                if(arg.expression != nullptr || !iot::outputting(io))
+                    iot::mapOptional(io, ".expression", arg.expression);
             }
 
             static void mapping(IO& io, AssemblyKernelArgument& arg, EmptyContext& ctx)
@@ -108,100 +113,7 @@ namespace rocRoller
             }
         };
 
-        template <typename IO>
-        struct EnumTraits<DataType, IO>
-        {
-            using iot = IOTraits<IO>;
-
-            static void enumeration(IO& io, DataType& value)
-            {
-                for(int i = 0; i < static_cast<int>(DataType::Count); i++)
-                {
-                    auto const& info = DataTypeInfo::Get(i);
-                    iot::enumCase(io, value, info.name.c_str(), info.variableType.dataType);
-                }
-            }
-        };
-
-        template <typename IO>
-        struct EnumTraits<DataDirection, IO>
-        {
-            using iot = IOTraits<IO>;
-
-            static void enumeration(IO& io, DataDirection& value)
-            {
-                for(int i = 0; i < static_cast<int>(DataDirection::Count); i++)
-                {
-                    auto dir = static_cast<DataDirection>(i);
-                    auto str = ToString(dir);
-                    iot::enumCase(io, value, str.c_str(), dir);
-                }
-            }
-        };
-
         ROCROLLER_SERIALIZE_VECTOR(false, AssemblyKernelArgument);
         ROCROLLER_SERIALIZE_VECTOR(false, AssemblyKernel);
     }
 }
-
-#ifdef ROCROLLER_USE_LLVM
-namespace llvm
-{
-    namespace yaml
-    {
-        template <rocRoller::Serialization::MappedType<IO> T>
-        struct MappingTraits<T>
-        {
-            using obj        = T;
-            using TheMapping = rocRoller::Serialization::MappingTraits<obj, IO>;
-
-            static void mapping(IO& io, obj& o)
-            {
-                mapping(io, o, nullptr);
-            }
-
-            static void mapping(IO& io, obj& o, void*)
-            {
-                rocRoller::Serialization::EmptyContext ctx;
-                TheMapping::mapping(io, o, ctx);
-            }
-        };
-
-        template <rocRoller::Serialization::MappedType<IO> T>
-        struct MappingTraits<Hide<T>>
-        {
-            using obj        = Hide<T>;
-            using TheMapping = rocRoller::Serialization::MappingTraits<T, IO>;
-
-            static void mapping(IO& io, obj& o)
-            {
-                mapping(io, o, nullptr);
-            }
-
-            static void mapping(IO& io, obj& o, void*)
-            {
-                rocRoller::Serialization::EmptyContext ctx;
-                TheMapping::mapping(io, *o, ctx);
-            }
-        };
-
-        template <rocRoller::Serialization::SequenceType<IO> T>
-        struct SequenceTraits<Hide<T>>
-        {
-            using obj         = Hide<T>;
-            using TheSequence = rocRoller::Serialization::SequenceTraits<T, IO>;
-
-            static size_t size(IO& io, obj& list)
-            {
-                return TheSequence::size(io, *list);
-            }
-            static auto& element(IO& io, obj& list, size_t index)
-            {
-                return TheSequence::element(io, *list, index);
-            }
-        };
-    }
-}
-static_assert(rocRoller::Serialization::MappedType<rocRoller::AssemblyKernels, llvm::yaml::IO>);
-static_assert(!llvm::yaml::has_FlowTraits<rocRoller::AssemblyKernels>::value);
-#endif

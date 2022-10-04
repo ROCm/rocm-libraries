@@ -138,6 +138,9 @@ namespace rocRoller
         None = Count
     };
 
+    std::string   ToString(LayoutType d);
+    std::ostream& operator<<(std::ostream& stream, LayoutType v);
+
     /**
      * VariableType
      */

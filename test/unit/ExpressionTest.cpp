@@ -32,13 +32,15 @@ using namespace rocRoller;
 namespace ExpressionTest
 {
 
-    class ExpressionTest : public GenericContextFixture
+    struct ExpressionTest : public GenericContextFixture
     {
         virtual std::string targetArchitecture() override
         {
             // MFMA, 64 lanes per wavefront
             return "gfx90a";
         }
+
+        void testSerialization(Expression::ExpressionPtr expr);
     };
 
     TEST_F(ExpressionTest, Basic)
@@ -89,6 +91,59 @@ namespace ExpressionTest
         Expression::EvaluationTimes expectedTimes{Expression::EvaluationTime::KernelExecute};
         EXPECT_EQ(expectedTimes, Expression::evaluationTimes(expr8));
         EXPECT_EQ(expectedTimes, Expression::evaluationTimes(expr10));
+    }
+
+    void ExpressionTest::testSerialization(Expression::ExpressionPtr expr)
+    {
+        auto yamlText = Expression::toYAML(expr);
+
+        EXPECT_NE("", yamlText) << toString(expr);
+
+        auto deserialized = Expression::fromYAML(yamlText);
+        ASSERT_NE(nullptr, deserialized.get()) << yamlText << toString(expr);
+        std::cout << yamlText << std::endl;
+
+        EXPECT_EQ(Expression::toString(deserialized), Expression::toString(expr));
+        EXPECT_EQ(true, Expression::identical(deserialized, expr));
+    }
+
+    TEST_F(ExpressionTest, Serialization)
+    {
+        auto a = Expression::literal(1);
+        auto b = Expression::literal(2);
+
+        auto c = Register::Value::Literal(4.2f);
+        auto d = Register::Value::Literal(Half(4.2f));
+
+        auto expr1  = a + b;
+        auto expr2  = b * expr1;
+        auto expr3  = b * expr1 - c->expression();
+        auto expr4  = expr1 > (expr2 + d->expression());
+        auto expr5  = expr3 < expr4;
+        auto expr6  = expr4 >= expr5;
+        auto expr7  = expr5 <= expr6;
+        auto expr8  = expr6 == expr7;
+        auto expr9  = -expr2;
+        auto expr10 = Expression::fuse(expr1 << b);
+        auto expr11 = Expression::fuse((a << b) + b);
+
+        testSerialization(expr1);
+        testSerialization(expr2);
+        testSerialization(expr3);
+        testSerialization(expr4);
+        testSerialization(expr5);
+        testSerialization(expr6);
+        testSerialization(expr7);
+        testSerialization(expr8);
+        testSerialization(expr9);
+        testSerialization(expr10);
+        testSerialization(expr11);
+
+        auto reg = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Int32, 1);
+        reg->allocateNow();
+
+        EXPECT_ANY_THROW(testSerialization(reg->expression()));
     }
 
     TEST_F(ExpressionTest, IdenticalTest)

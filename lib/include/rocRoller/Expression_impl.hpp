@@ -251,15 +251,25 @@ namespace rocRoller
                 return ExpressionInfo<Expr>::name();
             }
 
-            std::string operator()(ExpressionPtr const& expr) const
+            std::string call(Expression const& expr) const
             {
-                return std::visit(*this, *expr);
+                return std::visit(*this, expr);
+            }
+
+            std::string call(ExpressionPtr const& expr) const
+            {
+                return call(*expr);
             }
         };
 
-        inline std::string name(ExpressionPtr expr)
+        inline std::string name(ExpressionPtr const& expr)
         {
-            return ExpressionNameVisitor()(expr);
+            return ExpressionNameVisitor().call(expr);
+        }
+
+        inline std::string name(Expression const& expr)
+        {
+            return ExpressionNameVisitor().call(expr);
         }
 
         struct ExpressionEvaluationTimesVisitor

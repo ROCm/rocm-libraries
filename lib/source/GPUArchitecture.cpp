@@ -9,58 +9,26 @@
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
 
-#ifdef ROCROLLER_USE_LLVM
-#include <rocRoller/Serialization/llvm/YAML.hpp>
-#endif
-#ifdef ROCROLLER_USE_YAML_CPP
-#include <rocRoller/Serialization/yaml-cpp/YAML.hpp>
-#endif
-
-#include <rocRoller/Serialization/msgpack/Msgpack.hpp>
-
 #include <rocRoller/Serialization/GPUArchitecture.hpp>
+#include <rocRoller/Serialization/YAML.hpp>
+#include <rocRoller/Serialization/msgpack/Msgpack.hpp>
 
 namespace rocRoller
 {
-
     std::string
         GPUArchitecture::writeYaml(std::map<GPUArchitectureTarget, GPUArchitecture> const& input)
     {
         rocRoller::GPUArchitecturesStruct tmp;
         tmp.architectures = input;
-        std::string rv;
-#ifdef ROCROLLER_USE_LLVM
-        llvm::raw_string_ostream sout(rv);
-        llvm::yaml::Output       yout(sout);
-        yout << tmp;
-#elif ROCROLLER_USE_YAML_CPP
-        YAML::Emitter                emitter;
-        Serialization::EmitterOutput yout(&emitter);
-        yout.outputDoc(tmp);
-        rv = emitter.c_str();
-#endif
-        return rv;
+
+        return Serialization::toYAML(tmp);
     }
 
     std::map<GPUArchitectureTarget, GPUArchitecture>
         GPUArchitecture::readYaml(std::string const& input)
     {
-        try
-        {
-            GPUArchitecturesStruct rv;
-#ifdef ROCROLLER_USE_LLVM
-            auto              reader = llvm::MemoryBuffer::getFile(input);
-            llvm::yaml::Input yin(**reader);
-#elif ROCROLLER_USE_YAML_CPP
-            auto yin = YAML::LoadFile(input);
-#endif
-            yin >> rv;
-            return rv.architectures;
-        }
-        catch(const std::exception& e)
-        {
-            Throw<FatalError>("GPUArchitecture::readYAML failed: ", e.what());
-        }
+        auto archStruct = Serialization::readYAMLFile<GPUArchitecturesStruct>(input);
+        return archStruct.architectures;
     }
 
     std::string
@@ -112,5 +80,4 @@ namespace rocRoller
             },
             value->getLiteralValue());
     }
-
 }

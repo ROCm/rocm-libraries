@@ -145,6 +145,28 @@ namespace rocRoller
         return "Invalid";
     }
 
+    std::string ToString(LayoutType l)
+    {
+        switch(l)
+        {
+
+        case LayoutType::MATRIX_A:
+            return "MATRIX_A";
+        case LayoutType::MATRIX_B:
+            return "MATRIX_B";
+        case LayoutType::MATRIX_ACCUMULATOR:
+            return "MATRIX_ACCUMULATOR";
+
+        case LayoutType::Count:;
+        }
+        return "Invalid";
+    }
+
+    std::ostream& operator<<(std::ostream& stream, LayoutType l)
+    {
+        return stream << ToString(l);
+    }
+
     std::string ToString(PointerType const& p)
     {
         switch(p)
@@ -396,5 +418,7 @@ namespace rocRoller
 
         return stream;
     }
+
+    static_assert(CCountedEnum<LayoutType>);
 
 } // namespace rocRoller

@@ -269,6 +269,7 @@ set(rocroller_src
  lib/source/Expression.cpp
  lib/source/Expression_evaluate.cpp
  lib/source/Expression_generate.cpp
+ lib/source/Expression_serialization.cpp
  lib/source/ExpressionTransformations/FastArithmetic.cpp
  lib/source/ExpressionTransformations/FastDivision.cpp
  lib/source/ExpressionTransformations/FastMultiplication.cpp
@@ -531,3 +532,5 @@ add_subdirectory(client)
 add_test(NAME RRPerfPYTest
          COMMAND pytest-3 scripts
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+set_tests_properties(RRPerfPYTest
+                     PROPERTIES ENVIRONMENT "ROCROLLER_BUILD_DIR=${CMAKE_BINARY_DIR}")

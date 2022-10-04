@@ -60,6 +60,15 @@ def submit_directory(suite: str, wrkdir: pathlib.Path, ptsdir: pathlib.Path):
 def from_token(token: str):
     yield rrperf.problems.upcast_to_run(eval(token, rrperf.problems.__dict__))
 
+def build_directory():
+    varname = 'ROCROLLER_BUILD_DIR'
+    if varname in os.environ:
+        return pathlib.Path(os.environ[varname])
+    default = rrperf.git.top() / "build"
+    if default.is_dir():
+        return default
+
+    raise RuntimeError(f"Build directory not found.  Set {varname} to override.")
 
 def run(token=None, suite=None, submit=False, filter=None, working_dir=None, **kwargs):
     """Run benchmarks!
@@ -77,10 +86,11 @@ def run(token=None, suite=None, submit=False, filter=None, working_dir=None, **k
         generator = chain(generator, from_token(token))
 
     top = rrperf.git.top()
+    builddir = build_directory()
 
     env = dict(os.environ)
     if "ROCROLLER_ARCHITECTURE_FILE" not in env:
-        arch = top / "build" / "source" / "rocRoller" / "GPUArchitecture_def.msgpack"
+        arch = builddir / "source" / "rocRoller" / "GPUArchitecture_def.msgpack"
         env["ROCROLLER_ARCHITECTURE_FILE"] = arch
 
     wrkdir = work_directory(working_dir)
@@ -118,7 +128,7 @@ def run(token=None, suite=None, submit=False, filter=None, working_dir=None, **k
             print(f"  command: {scmd}")
             print(f"  log:     {log.resolve()}")
             print(f"  token:   {problem.token}", flush=True)
-            p = subprocess.run(cmd, stdout=f, cwd="build", env=env, check=False)
+            p = subprocess.run(cmd, stdout=f, cwd=builddir, env=env, check=False)
             result &= p.returncode == 0
             if p.returncode == 0:
                 print("  status:  ok", flush=True)

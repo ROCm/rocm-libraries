@@ -16,7 +16,7 @@
 
 #include "../DataTypes/DataTypes.hpp"
 #include "../InstructionValues/Register_fwd.hpp"
-#include "../Serialization/GPUArchitecture_fwd.hpp"
+#include "../Serialization/Base_fwd.hpp"
 
 namespace rocRoller
 {

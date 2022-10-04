@@ -166,6 +166,8 @@ namespace rocRoller
         template <typename T, size_t N, typename IO>
         struct SequenceTraits<std::array<T, N>, IO>
         {
+            static const bool flow = true;
+
             using Value = T;
             static size_t size(IO& io, std::array<T, N>& v)
             {

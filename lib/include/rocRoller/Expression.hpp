@@ -97,7 +97,7 @@ namespace rocRoller
          *
          * LHS is M x K, with B batches.  RHS is K x N, with B batches.
          *
-         * DEST is initilised to zero before computing the product.
+         * DEST is initialised to zero before computing the product.
          *
          * If LHS and RHS are registers, the dimensions (M, N, K, and
          * B) must be explicitly set.  If A and B are WaveTiles, the
@@ -105,7 +105,7 @@ namespace rocRoller
          */
         struct MatrixMultiply : Binary
         {
-            MatrixMultiply() = delete;
+            MatrixMultiply() = default;
             MatrixMultiply(ExpressionPtr lhs, ExpressionPtr rhs, int M, int N, int K, int B)
                 : Binary{lhs, rhs}
                 , M(M)
@@ -114,7 +114,7 @@ namespace rocRoller
                 , B(B)
             {
             }
-            int M, N, K, B;
+            int M = 0, N = 0, K = 0, B = 0;
 
             DataType accumulationPrecision = DataType::Float;
 
@@ -449,6 +449,7 @@ namespace rocRoller
         std::ostream& operator<<(std::ostream&, std::vector<ExpressionPtr> const&);
 
         std::string name(ExpressionPtr const& expr);
+        std::string name(Expression const& expr);
 
         // EvaluationTime max(EvaluationTime lhs, EvaluationTime rhs);
 
@@ -494,6 +495,10 @@ namespace rocRoller
 
         Generator<Instruction>
             generate(Register::ValuePtr& dest, ExpressionPtr expr, ContextPtr context);
+
+        std::string   toYAML(ExpressionPtr const& expr);
+        ExpressionPtr fromYAML(std::string const& str);
+
     } // namespace Expression
 } // namespace rocRoller
 

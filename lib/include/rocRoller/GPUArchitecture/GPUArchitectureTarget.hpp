@@ -13,7 +13,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include <rocRoller/Serialization/GPUArchitecture_fwd.hpp>
+#include <rocRoller/Serialization/Base_fwd.hpp>
 
 namespace rocRoller
 {

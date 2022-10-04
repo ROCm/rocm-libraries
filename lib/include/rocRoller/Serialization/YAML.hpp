@@ -1,33 +1,43 @@
 
-#ifdef ROCROLLER_USE_LLVM
-#include <rocRoller/Serialization/llvm/YAML.hpp>
-#endif
-#ifdef ROCROLLER_USE_YAML_CPP
-#include <rocRoller/Serialization/yaml-cpp/YAML.hpp>
-#endif
+#pragma once
 
-#ifdef ROCROLLER_USE_LLVM
-namespace llvm
+#include <istream>
+#include <string>
+
+namespace rocRoller
 {
-    namespace yaml
+    namespace Serialization
     {
-        template <rocRoller::Serialization::MappedType<IO> T>
-        struct MappingTraits<T>
-        {
-            using obj        = T;
-            using TheMapping = rocRoller::Serialization::MappingTraits<obj, IO>;
+        /**
+         * Note that the functions declared here will assume that you have included the serialization headers for any
+         * type(s) you want to serialize.
+         */
 
-            static void mapping(IO& io, obj& o)
-            {
-                mapping(io, o, nullptr);
-            }
+        /**
+         * Returns T converted to YAML as a string.
+         */
+        template <typename T>
+        std::string toYAML(T obj);
 
-            static void mapping(IO& io, obj& o, void*)
-            {
-                rocRoller::Serialization::EmptyContext ctx;
-                TheMapping::mapping(io, o, ctx);
-            }
-        };
+        /**
+         * Parses YAML as a string into a T.
+         */
+        template <typename T>
+        T fromYAML(std::string const& yaml);
+
+        /**
+         * Writes T to stream as YAML
+         */
+        template <typename T>
+        void writeYAML(std::ostream& stream, T obj);
+
+        /**
+         * Reads the file `filename` and returns a T parsed from the YAML data it contains.
+         */
+        template <typename T>
+        T readYAMLFile(std::string const& filename);
+
     }
 }
-#endif
+
+#include "YAML_impl.hpp"

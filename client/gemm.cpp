@@ -308,7 +308,7 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult)
         std::vector<D> h_D(result.M * result.N, 0.0);
         AssertFatal(
             hipMemcpy(h_D.data(), d_D.get(), result.M * result.N * sizeof(D), hipMemcpyDeviceToHost)
-            == HIP_SUCCESS);
+            == (hipError_t)HIP_SUCCESS);
 
         // Host result
         std::vector<D> h_result(result.M * result.N, 0.0);
@@ -409,21 +409,8 @@ int main(int argc, const char* argv[])
     std::string filename = po.get("yaml", std::string());
     if(!filename.empty())
     {
-        std::string rv;
-#ifdef ROCROLLER_USE_LLVM
-        llvm::raw_string_ostream sout(rv);
-        llvm::yaml::Output       yout(sout);
-        yout << result;
-#elif ROCROLLER_USE_YAML_CPP
-        YAML::Emitter                emitter;
-        Serialization::EmitterOutput yout(&emitter);
-        yout.outputDoc(result);
-        rv = emitter.c_str();
-#endif
-        std::ofstream yaml;
-        yaml.open(filename);
-        yaml << rv;
-        yaml.close();
+        std::ofstream file(filename);
+        Serialization::writeYAML(file, result);
     }
 
     return 0;

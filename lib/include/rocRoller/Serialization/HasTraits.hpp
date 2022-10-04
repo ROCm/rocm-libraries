@@ -38,22 +38,22 @@ namespace rocRoller
         struct SameType;
 
         template <typename T, typename IO, typename Context = EmptyContext>
-        class has_MappingTraits
+        concept CMappedType = requires(T& obj, IO& io, Context& ctx)
         {
-            using mapping = void (*)(IO&, T&, Context&);
-
-            template <typename U>
-            static uint8_t test(SameType<mapping, &U::mapping>*);
-
-            template <typename U>
-            static uint32_t test(...);
-
-        public:
-            static const bool value = sizeof(test<MappingTraits<T, IO, Context>>(nullptr)) == 1;
+            {MappingTraits<T, IO, Context>::mapping(io, obj, ctx)};
         };
 
         template <typename T, typename IO, typename Context = EmptyContext>
-        concept MappedType = has_MappingTraits<T, IO, Context>::value;
+        concept CEmptyMappedType = requires(T& obj, IO& io)
+        {
+            {MappingTraits<T, IO, Context>::mapping(io, obj)};
+        };
+
+        template <typename T, typename IO, typename Context = EmptyContext>
+        struct has_MappingTraits
+        {
+            static const bool value = CMappedType<T, IO, Context>;
+        };
 
         template <typename T, typename IO, typename Context = EmptyContext>
         class has_EmptyMappingTraits

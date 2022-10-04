@@ -39,7 +39,138 @@ namespace llvm
 {
     namespace yaml
     {
+        /**
+         * Map the `rocRoller::Serialization` traits classes into `llvm::yaml` traits classes.
+         */
+
         namespace sn = rocRoller::Serialization;
+
+        /**
+         * The LLVM documentation tells you to put a member:
+         *
+         * static const bool flow = true;
+         *
+         * in order to designate a type to be serialized with the flow style (i.e. to use brackets instead of whitespace)
+         *
+         * What it doesn't clarify is that the value of the bool is not important, so:
+         *
+         * static const bool flow = false;
+         *
+         * will *also* mark a type as using the flow style.  The only way to not use flow style is to not have a
+         * member named `flow`.  This presents a challenge when trying to specify a traits class that may or may not
+         * use flow style based on a template parameter.
+         *
+         * In the rocRoller::Serialization traits classes, having a `flow` member with a value of `false` will work to
+         * specify the non-flow style.
+         *
+         * The following series of concepts and classes culminate in `FlowBase` which can be used as a base class for
+         * `llvm::yaml` traits classes and contains a flow member only for types that evaluate to `true`.
+         */
+
+        template <typename T>
+        concept CHasFlowMember = requires
+        {
+            {
+                T::flow
+                } -> std::convertible_to<bool>;
+        };
+
+        template <typename T>
+        struct HasFlowValue
+        {
+            static const bool flow = false;
+        };
+
+        template <CHasFlowMember T>
+        struct HasFlowValue<T>
+        {
+            static const bool flow = T::flow;
+        };
+
+        template <typename T>
+        concept CHasFlow = HasFlowValue<T>::flow;
+
+        template <typename T>
+        struct FlowBase
+        {
+        };
+
+        template <CHasFlow T>
+        struct FlowBase<T>
+        {
+            static const bool flow = true;
+        };
+
+        template <typename T>
+        requires(sn::has_SequenceTraits<T, IO>::value) struct SequenceTraits<T>
+            : public FlowBase<sn::SequenceTraits<T, IO>>
+        {
+            static size_t size(IO& io, T& seq)
+            {
+                return sn::SequenceTraits<T, IO>::size(io, seq);
+            }
+
+            static auto& element(IO& io, T& seq, size_t index)
+            {
+                return sn::SequenceTraits<T, IO>::element(io, seq, index);
+            }
+        };
+
+        template <typename T>
+        requires(sn::has_EnumTraits<T, IO>::value) struct ScalarEnumerationTraits<T>
+        {
+            static void enumeration(IO& io, T& value)
+            {
+                sn::EnumTraits<T, IO>::enumeration(io, value);
+            }
+        };
+
+        template <typename T, typename Context>
+        requires(sn::has_MappingTraits<T, IO>::value) struct MappingContextTraits<T, Context>
+        {
+            static void mapping(IO& io, T& obj, Context& ctx)
+            {
+                sn::MappingTraits<T, IO, Context>::mapping(io, obj, ctx);
+            }
+        };
+
+        template <typename T, typename Context>
+        concept HasContextMappingTraits = requires(IO& io, T& obj, Context& ctx)
+        {
+            {MappingContextTraits<T, Context>::mapping(io, obj, ctx)};
+        };
+
+        template <typename T>
+        requires(sn::has_EmptyMappingTraits<T, IO>::value) struct MappingTraits<T>
+            : public FlowBase<sn::MappingTraits<T, IO, EmptyContext>>
+        {
+            static void mapping(IO& io, T& obj)
+            {
+                sn::MappingTraits<T, IO, EmptyContext>::mapping(io, obj);
+            }
+        };
+
+        template <typename T>
+        concept HasEmptyMappingTraits = requires(IO& io, T& obj)
+        {
+            {MappingTraits<T>::mapping(io, obj)};
+        };
+
+        template <typename T>
+        requires(sn::has_CustomMappingTraits<T, IO>::value) struct CustomMappingTraits<T>
+        {
+            using Impl = sn::CustomMappingTraits<T, IO>;
+
+            static void inputOne(IO& io, StringRef key, T& value)
+            {
+                Impl::inputOne(io, key.str(), value);
+            }
+
+            static void output(IO& io, T& value)
+            {
+                Impl::output(io, value);
+            }
+        };
 
         template <typename T>
         struct Hide
@@ -56,61 +187,6 @@ namespace llvm
                 return _value;
             }
         };
-
-        template <typename T>
-        struct has_SequenceTraits<Hide<T>>
-        {
-            const static bool value = sn::has_SequenceTraits<T, IO>::value;
-        };
-
-        template <typename T>
-        struct has_ScalarEnumerationTraits<Hide<T>>
-        {
-            const static bool value = sn::has_EnumTraits<T, IO>::value;
-        };
-
-        template <typename T>
-        struct has_MappingTraits<Hide<T>, EmptyContext>
-        {
-            const static bool value = sn::has_EmptyMappingTraits<T, IO>::value;
-        };
-
-        template <typename T>
-        struct has_CustomMappingTraits<Hide<T>>
-        {
-            const static bool value = sn::has_CustomMappingTraits<T, IO>::value;
-        };
-
-        template <typename T>
-        struct missingTraits<T, EmptyContext>
-            : public std::integral_constant<
-                  bool,
-                  !has_ScalarEnumerationTraits<T>::value && !has_ScalarBitSetTraits<T>::value
-                      && !has_ScalarTraits<T>::value && !has_BlockScalarTraits<T>::value
-                      && !has_MappingTraits<T, EmptyContext>::value && !has_SequenceTraits<T>::value
-                      && !has_CustomMappingTraits<T>::value && !has_DocumentListTraits<T>::value
-                      && !sn::has_SerializationTraits<T, IO>::value>
-        {
-        };
-
-        template <typename T>
-        typename std::enable_if<sn::has_SerializationTraits<T, IO>::value, void>::type
-            yamlize(IO& io, T& Val, bool b, EmptyContext& ctx)
-        {
-            Hide<T> hide(Val);
-
-            yamlize(io, hide, b, ctx);
-        }
-
-        //template <typename T>
-        //typename std::enable_if<sn::has_SerializationTraits<T, IO>::value, Input&>::type
-        //    operator>>(Input& input, T& Val)
-        //{
-        //    Hide<T> hide(Val);
-
-        //    return input >> hide;
-        //}
-
     } // namespace yaml
 } // namespace llvm
 
@@ -268,6 +344,35 @@ namespace llvm
             static void output(IO& io, Hide<T>& value)
             {
                 Impl::output(io, *value);
+            }
+        };
+
+        /**
+         * Add serialization for fp16 type. Defer to built-in fp32 serialization with conversion.
+         */
+        template <>
+        struct ScalarTraits<rocRoller::Half>
+        {
+            static void output(const rocRoller::Half& value, void* ctx, llvm::raw_ostream& out)
+            {
+                float floatVal = value;
+                ScalarTraits<float>::output(value, ctx, out);
+            }
+
+            static StringRef input(StringRef scalar, void* ctx, rocRoller::Half& value)
+            {
+                float floatVal = 0.0f;
+
+                auto rv = ScalarTraits<float>::input(scalar, ctx, floatVal);
+
+                value = floatVal;
+
+                return rv;
+            }
+
+            static QuotingType mustQuote(StringRef ref)
+            {
+                return ScalarTraits<float>::mustQuote(ref);
             }
         };
 

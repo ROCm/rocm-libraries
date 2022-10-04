@@ -27,19 +27,36 @@
 #pragma once
 
 #include <algorithm>
+#include <concepts>
 #include <cstddef>
 #include <functional>
 #include <memory>
 #include <unordered_map>
 #include <vector>
 
+#include "../DataTypes/DataTypes.hpp"
+
+#ifdef ROCROLLER_USE_LLVM
+namespace llvm
+{
+    namespace yaml
+    {
+        struct EmptyContext;
+    }
+}
+#endif
+
 namespace rocRoller
 {
     namespace Serialization
     {
+#ifdef ROCROLLER_USE_LLVM
+        using EmptyContext = llvm::yaml::EmptyContext;
+#else
         struct EmptyContext
         {
         };
+#endif
 
         template <typename IO>
         struct IOTraits
@@ -161,12 +178,18 @@ namespace rocRoller
         template <typename Subclass, typename IO, typename Context = EmptyContext>
         struct PointerMappingTraits;
 
-        template <typename Subclass, typename IO, typename Context>
+        /**
+         * Used by AutoMappingTraits to serialize an object via a std::shared_ptr<Base> where the object is of a type derived from Base.
+         */
+        template <typename SubclassPtr, typename IO, typename Context>
         struct PointerMappingTraits
         {
-            using iot = IOTraits<IO>;
+            using Subclass = typename SubclassPtr::element_type;
+            using iot      = IOTraits<IO>;
+
             template <typename Base>
-            static bool mapping(IO& io, std::shared_ptr<Base>& p, Context& ctx)
+            requires(std::derived_from<Subclass, Base>) static bool mapping(
+                IO& io, std::shared_ptr<Base>& p, Context& ctx)
             {
                 std::shared_ptr<Subclass> sc;
 
@@ -184,30 +207,46 @@ namespace rocRoller
 
                 return true;
             }
+
+            template <typename Base>
+            requires(
+                std::same_as<
+                    EmptyContext,
+                    Context> && (std::derived_from<Subclass, Base>)) static bool mapping(IO& io,
+                                                                                         std::shared_ptr<
+                                                                                             Base>&
+                                                                                             p)
+            {
+                Context ctx;
+                return mapping(io, p, ctx);
+            }
         };
 
-        template <typename Subclass, typename IO>
-        struct PointerMappingTraits<Subclass, IO, EmptyContext>
+        /**
+         * Used to non-polymorphically serialize an object via std::shared_ptr.
+         */
+        template <typename SharedPtr, typename IO, typename Context>
+        struct SharedPointerMappingTraits
         {
-            using iot = IOTraits<IO>;
-            template <typename Base>
-            static bool mapping(IO& io, std::shared_ptr<Base>& p)
+            using Element = typename SharedPtr::element_type;
+            using iot     = IOTraits<IO>;
+
+            static void mapping(IO& io, SharedPtr& p, Context& ctx)
             {
-                std::shared_ptr<Subclass> sc;
-
-                if(iot::outputting(io))
+                if(!iot::outputting(io))
                 {
-                    sc = std::dynamic_pointer_cast<Subclass>(p);
-                }
-                else
-                {
-                    sc = std::make_shared<Subclass>();
-                    p  = sc;
+                    p = std::make_shared<Element>();
                 }
 
-                MappingTraits<Subclass, IO>::mapping(io, *sc);
+                MappingTraits<Element, IO, Context>::mapping(io, *p, ctx);
+            }
 
-                return true;
+            static std::enable_if_t<std::same_as<Context, EmptyContext>> mapping(IO&        io,
+                                                                                 SharedPtr& p)
+            {
+                EmptyContext ctx;
+
+                mapping(io, p, ctx);
             }
         };
 

@@ -10,6 +10,7 @@
 
 #include "Base.hpp"
 #include "Containers.hpp"
+#include "Enum.hpp"
 
 namespace rocRoller
 {
@@ -32,6 +33,10 @@ namespace rocRoller
         const std::string KeyCapabilities     = "Capabilities";
         const std::string KeyArchitectures    = "Architectures";
 
+        /**
+         * GPUWaitQueueType is actually a class that look like an enum, so it is not handled by the
+         * generic enum serialization.
+         */
         template <typename IO>
         struct EnumTraits<GPUWaitQueueType, IO>
         {
@@ -91,7 +96,7 @@ namespace rocRoller
         template <typename IO>
         struct MappingTraits<GPUInstructionInfo, IO, EmptyContext>
         {
-            static const bool flow = false;
+            static const bool flow = true;
             using iot              = IOTraits<IO>;
 
             static void mapping(IO& io, GPUInstructionInfo& info)
@@ -168,143 +173,6 @@ namespace rocRoller
         {
         };
 
-        ROCROLLER_SERIALIZE_VECTOR(false, GPUWaitQueueType);
+        ROCROLLER_SERIALIZE_VECTOR(true, GPUWaitQueueType);
     }
 }
-
-#ifdef ROCROLLER_USE_LLVM
-namespace llvm
-{
-    namespace yaml
-    {
-        template <rocRoller::Serialization::MappedType<IO> T>
-        struct MappingTraits<T>
-        {
-            using obj        = T;
-            using TheMapping = rocRoller::Serialization::MappingTraits<obj, IO>;
-
-            static void mapping(IO& io, obj& o)
-            {
-                mapping(io, o, nullptr);
-            }
-
-            static void mapping(IO& io, obj& o, void*)
-            {
-                rocRoller::Serialization::EmptyContext ctx;
-                TheMapping::mapping(io, o, ctx);
-            }
-        };
-
-        template <rocRoller::Serialization::MappedType<IO> T>
-        struct MappingTraits<Hide<T>>
-        {
-            using obj        = Hide<T>;
-            using TheMapping = rocRoller::Serialization::MappingTraits<T, IO>;
-
-            static void mapping(IO& io, obj& o)
-            {
-                mapping(io, o, nullptr);
-            }
-
-            static void mapping(IO& io, obj& o, void*)
-            {
-                rocRoller::Serialization::EmptyContext ctx;
-                TheMapping::mapping(io, *o, ctx);
-            }
-        };
-    }
-}
-static_assert(rocRoller::Serialization::CustomMappingType<
-              std::map<rocRoller::GPUArchitectureTarget, rocRoller::GPUArchitecture>,
-              llvm::yaml::IO>);
-static_assert(rocRoller::Serialization::CustomMappingType<std::map<rocRoller::GPUCapability, int>,
-                                                          llvm::yaml::IO>);
-static_assert(rocRoller::Serialization::MappedType<rocRoller::GPUArchitecture, llvm::yaml::IO>);
-static_assert(!llvm::yaml::has_FlowTraits<rocRoller::GPUCapability>::value);
-#endif
-
-#ifdef ROCROLLER_USE_YAML_CPP
-
-namespace rocRoller
-{
-    void operator>>(const YAML::Node& node, GPUWaitQueueType& result)
-    {
-        GPUWaitQueueType rv(node.as<std::string>());
-        result = std::move(rv);
-    }
-
-    void operator>>(const YAML::Node& node, std::vector<GPUWaitQueueType>& result)
-    {
-        for(unsigned i = 0; i < node.size(); i++)
-        {
-            GPUWaitQueueType element;
-            node[i] >> element;
-            result.push_back(element);
-        }
-    }
-
-    void operator>>(const YAML::Node& node, GPUInstructionInfo& result)
-    {
-        std::string instruction = node[Serialization::KeyInstruction].as<std::string>();
-        int         waitCount   = node[Serialization::KeyWaitCount].as<int>();
-        std::vector<GPUWaitQueueType> waitQueueTypes;
-        node[Serialization::KeyWaitQueues] >> waitQueueTypes;
-        int                latency = node[Serialization::KeyLatency].as<int>();
-        GPUInstructionInfo rv(instruction, waitCount, waitQueueTypes, latency);
-        result = std::move(rv);
-    }
-
-    void operator>>(const YAML::Node& node, GPUArchitectureTarget& result)
-    {
-        GPUArchitectureTarget rv(node[Serialization::KeyStringRep].as<std::string>());
-        result = std::move(rv);
-    }
-
-    void operator>>(const YAML::Node& node, std::map<GPUCapability, int>& result)
-    {
-        for(YAML::const_iterator it = node.begin(); it != node.end(); ++it)
-        {
-            GPUCapability key(it->first.as<std::string>());
-            result[key] = it->second.as<int>();
-        }
-    }
-
-    void operator>>(const YAML::Node& node, std::map<std::string, GPUInstructionInfo>& result)
-    {
-        for(YAML::const_iterator it = node.begin(); it != node.end(); ++it)
-        {
-            it->second >> result[it->first.as<std::string>()];
-        }
-    }
-
-    void operator>>(const YAML::Node& node, GPUArchitecture& result)
-    {
-        GPUArchitectureTarget isaVersion;
-        node[Serialization::KeyISAVersion] >> isaVersion;
-        std::map<GPUCapability, int> capabilities;
-        node[Serialization::KeyCapabilities] >> capabilities;
-        std::map<std::string, GPUInstructionInfo> instructionInfos;
-        node[Serialization::KeyInstructionInfos] >> instructionInfos;
-        GPUArchitecture rv(isaVersion, capabilities, instructionInfos);
-        result = std::move(rv);
-    }
-
-    void operator>>(const YAML::Node&                                 node,
-                    std::map<GPUArchitectureTarget, GPUArchitecture>& result)
-    {
-        for(YAML::const_iterator it = node.begin(); it != node.end(); ++it)
-        {
-            GPUArchitectureTarget key(it->first.as<std::string>());
-            GPUArchitecture       value;
-            it->second >> value;
-            result[key] = value;
-        }
-    }
-
-    void operator>>(const YAML::Node& node, GPUArchitecturesStruct& result)
-    {
-        node[Serialization::KeyArchitectures] >> result.architectures;
-    }
-}
-
-#endif
