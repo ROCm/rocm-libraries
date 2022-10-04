@@ -859,11 +859,13 @@ namespace rocRoller
 
             auto iter = m_registerIndices.begin();
             if(iter != m_registerIndices.end())
+            {
                 msg << ": " << typePrefix << *iter;
-            iter++;
+                iter++;
 
-            for(; iter != m_registerIndices.end(); iter++)
-                msg << ", " << typePrefix << *iter;
+                for(; iter != m_registerIndices.end(); iter++)
+                    msg << ", " << typePrefix << *iter;
+            }
 
             msg << std::endl;
 
