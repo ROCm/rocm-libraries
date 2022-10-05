@@ -379,6 +379,7 @@ set(
   test/unit/BranchGeneratorTest.cpp
   test/unit/CommandTest.cpp
   test/unit/ComponentTest.cpp
+  test/unit/ControlHypergraphTest.cpp
   test/unit/CoordinateTransformTest.cpp
   test/unit/CoordinateHypergraphTest.cpp
   test/unit/CopyGeneratorTest.cpp

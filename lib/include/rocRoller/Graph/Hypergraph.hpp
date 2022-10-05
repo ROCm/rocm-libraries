@@ -187,6 +187,35 @@ namespace rocRoller
 
             std::string toDOT() const;
 
+            /**
+             * Return all Nodes of class T.
+             */
+            template <typename T>
+            requires(std::constructible_from<Node, T>) Generator<int> findNodes()
+            const;
+
+            /**
+             * Return indices that immediately preceed `dst` and are of type T.
+             */
+            template <typename T>
+            requires(std::constructible_from<Edge, T>) Generator<int> getInputIndices(
+                int const& dst)
+            const;
+
+            /**
+             * Return indices that immediately follow `src` and are of type T.
+             */
+            template <typename T>
+            requires(std::constructible_from<Edge, T>) Generator<int> getOutputIndices(
+                int const& src)
+            const;
+
+            template <typename T>
+            inline std::string toString(Element const& elem) const
+            {
+                return std::visit([](const auto& a) { return a.toString(); }, std::get<T>(elem));
+            }
+
         private:
             int m_nextIndex = 1;
 
@@ -221,7 +250,6 @@ namespace rocRoller
             template <Direction Dir>
             bool edgeSatisfied(int const edge, std::map<int, bool> const& visitedElements) const;
         };
-
     }
 }
 

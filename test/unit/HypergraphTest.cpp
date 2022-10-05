@@ -15,16 +15,32 @@ namespace rocRollerTest
 
     struct TestForLoop
     {
+        std::string toString() const
+        {
+            return "TestForLoop";
+        }
     };
 
     struct TestSubDimension
     {
+        std::string toString() const
+        {
+            return "TestSubDimension";
+        }
     };
     struct TestUser
     {
+        std::string toString() const
+        {
+            return "TestUser";
+        }
     };
     struct TestVGPR
     {
+        std::string toString() const
+        {
+            return "TestVGPR";
+        }
     };
 
     using TestDimension = std::variant<TestForLoop, TestSubDimension, TestUser, TestVGPR>;
@@ -40,9 +56,17 @@ namespace rocRollerTest
 
     struct TestForget
     {
+        std::string toString() const
+        {
+            return "TestForget";
+        }
     };
     struct TestSplit
     {
+        std::string toString() const
+        {
+            return "TestSplit";
+        }
     };
 
     using TestTransform = std::variant<TestForget, TestSplit>;
@@ -76,16 +100,16 @@ namespace rocRollerTest
         auto TestForget1 = g.addElement(TestForget{}, {sd0, sd1}, {TestVGPR1});
 
         {
-            std::string expected = R"(
-                digraph {
-                    "1"
-                    "2"
-                    "3"
-                    "4"[shape=box]
-                    "5"
-                    "6"[shape=box]
-                    "7"
-                    "8"[shape=box]
+            std::string expected = R".(
+	        digraph {
+                    "1"[label="TestUser(1)"];
+	            "2"[label="TestSubDimension(2)"];
+	            "3"[label="TestSubDimension(3)"];
+                    "4"[label="TestSplit(4)",shape=box];
+                    "5"[label="TestVGPR(5)"];
+                    "6"[label="TestForget(6)",shape=box];
+                    "7"[label="TestVGPR(7)"];
+                    "8"[label="TestForget(8)",shape=box];
                     "1" -> "4"
                     "2" -> "6"
                     "2" -> "8"
@@ -111,7 +135,7 @@ namespace rocRollerTest
                         rankdir=LR
                     }
                 }
-            )";
+            ).";
 
             EXPECT_EQ(NormalizedSource(expected), NormalizedSource(g.toDOT()));
         }
@@ -230,17 +254,17 @@ namespace rocRollerTest
         }
 
         {
-            std::string expected = R"(
+            std::string expected = R".(
                 digraph {
-                    "1"
-                    "2"
-                    "3"
-                    "4"[shape=box]
-                    "5"
-                    "6"[shape=box]
-                    "7"
-                    "8"[shape=box]
-                    "9"
+                    "1"[label="TestUser(1)"];
+                    "2"[label="TestSubDimension(2)"];
+                    "3"[label="TestSubDimension(3)"];
+                    "4"[label="TestSplit(4)",shape=box];
+                    "5"[label="TestVGPR(5)"];
+                    "6"[label="TestForget(6)",shape=box];
+                    "7"[label="TestVGPR(7)"];
+                    "8"[label="TestForget(8)",shape=box];
+                    "9"[label="TestForLoop(9)"];
                     "1" -> "4"
                     "2" -> "6"
                     "2" -> "8"
@@ -268,7 +292,7 @@ namespace rocRollerTest
                         rankdir=LR
                     }
                 }
-            )";
+            ).";
 
             EXPECT_EQ(NormalizedSource(expected), NormalizedSource(g.toDOT()));
         }

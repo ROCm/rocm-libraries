@@ -504,10 +504,12 @@ namespace rocRoller
 
             for(auto const& pair : m_elements)
             {
-                msg << '"' << pair.first << '"';
-                if(std::holds_alternative<Edge>(pair.second))
-                    msg << "[shape=box]";
-                msg << std::endl;
+                msg << '"' << pair.first << '"' << "[label=\"";
+                if(getElementType(pair.second) == ElementType::Node)
+                    msg << toString<Node>(pair.second) << "(" << pair.first << ")\"";
+                else
+                    msg << toString<Edge>(pair.second) << "(" << pair.first << ")\",shape=box";
+                msg << "];" << std::endl;
             }
 
             auto const& container = m_incidence.template get<BySrc>();
@@ -556,6 +558,70 @@ namespace rocRoller
             msg << "}" << std::endl;
 
             return msg.str();
+        }
+
+        template <typename Node, typename Edge, bool Hyper>
+        template <typename T>
+        requires(std::constructible_from<Node, T>)
+            Generator<int> Hypergraph<Node, Edge, Hyper>::findNodes()
+        const
+        {
+            // elements
+            for(auto const& elem : m_elements)
+            {
+                // nodes
+                if(getElementType(elem.second) == ElementType::Node)
+                {
+                    auto const& op = std::get<Node>(elem.second);
+                    if(std::holds_alternative<T>(op))
+                        co_yield std::get<T>(op);
+                }
+            }
+        }
+
+        template <typename Node, typename Edge, bool Hyper>
+        template <typename T>
+        requires(std::constructible_from<Edge, T>)
+            Generator<int> Hypergraph<Node, Edge, Hyper>::getInputIndices(int const& dst)
+        const
+        {
+
+            // elements
+            for(auto const& elem : m_elements)
+            {
+                // edges
+                if(getElementType(elem.second) == ElementType::Edge)
+                {
+                    auto const& e = std::get<Edge>(elem.second);
+                    for(auto const& dst_index : getNeighbours<Direction::Downstream>(elem.first))
+                    {
+                        if(dst_index == dst && std::holds_alternative<T>(e))
+                            co_yield getNeighbours<Direction::Upstream>(elem.first);
+                    }
+                }
+            }
+        }
+
+        template <typename Node, typename Edge, bool Hyper>
+        template <typename T>
+        requires(std::constructible_from<Edge, T>)
+            Generator<int> Hypergraph<Node, Edge, Hyper>::getOutputIndices(int const& src)
+        const
+        {
+            // elements
+            for(auto const& elem : m_elements)
+            {
+                // edges
+                if(getElementType(elem.second) == ElementType::Edge)
+                {
+                    auto const& e = std::get<Edge>(elem.second);
+                    for(auto const& src_index : getNeighbours<Direction::Upstream>(elem.first))
+                    {
+                        if(src_index == src && std::holds_alternative<T>(e))
+                            co_yield getNeighbours<Direction::Downstream>(elem.first);
+                    }
+                }
+            }
         }
     }
 }
