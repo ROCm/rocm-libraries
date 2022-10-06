@@ -315,7 +315,15 @@ namespace rocRoller
 
         if(m_nopCount > 0)
         {
-            os << "s_nop " << m_nopCount << "\n";
+            int count = m_nopCount;
+            while(count > 16)
+            {
+                // s_nop can only handle values from 0 to 0xf
+                os << "s_nop 0xf\n";
+                count -= 16;
+            }
+            // Note: "s_nop 0" is 1 nop, "s_nop 0xf" is 16 nops
+            os << "s_nop " << (count - 1) << "\n";
         }
 
         coreInstructionString(os);
@@ -374,7 +382,7 @@ namespace rocRoller
         }
     }
 
-    inline std::string Instruction::opCode() const
+    inline std::string Instruction::getOpCode() const
     {
         return m_opcode;
     }

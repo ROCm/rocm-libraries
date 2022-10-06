@@ -18,6 +18,7 @@ namespace rocRoller
 {
     struct Instruction
     {
+    public:
         Instruction();
         Instruction(std::string const&                                      opcode,
                     std::initializer_list<std::shared_ptr<Register::Value>> dst,
@@ -70,12 +71,6 @@ namespace rocRoller
         //{
 
         template <typename T>
-        static Instruction Normal(T&&, std::string const& comment, int = 0)
-        {
-            return Comment(comment);
-        }
-
-        template <typename T>
         static Instruction Allocate(T&&, std::string const& comment, int = 0)
         {
             return Comment("Allocate " + comment);
@@ -86,7 +81,12 @@ namespace rocRoller
             return 0;
         }
 
-        std::string opCode() const;
+        std::string getOpCode() const;
+
+        int getNopCount() const
+        {
+            return m_nopCount;
+        }
 
         void addAllocation(std::shared_ptr<Register::Allocation> alloc);
         void addWaitCount(WaitCount const& wait);

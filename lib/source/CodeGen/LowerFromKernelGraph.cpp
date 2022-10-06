@@ -880,10 +880,6 @@ namespace rocRoller
                             D->variableType().dataType,
                             waveA.vgpr->variableType().dataType});
 
-                    co_yield_(
-                        Instruction::
-                            Nop()); // TODO there is an "or" for half precision packing that appears to cause a hazard
-
                     co_yield mfma->mul(D,
                                        waveA.vgpr,
                                        waveB.vgpr,

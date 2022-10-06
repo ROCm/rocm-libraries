@@ -11,17 +11,10 @@ namespace rocRoller
 {
     namespace Scheduling
     {
-        inline InstructionStatus InstructionStatus::StallCycles(unsigned int value)
+        inline InstructionStatus InstructionStatus::StallCycles(unsigned int const value)
         {
             InstructionStatus rv;
             rv.stallCycles = value;
-            return rv;
-        }
-
-        inline InstructionStatus InstructionStatus::UnscheduledDependencies(unsigned int value)
-        {
-            InstructionStatus rv;
-            rv.unscheduledDependencies = value;
             return rv;
         }
 
@@ -29,6 +22,13 @@ namespace rocRoller
         {
             InstructionStatus rv;
             rv.waitCount = value;
+            return rv;
+        }
+
+        inline InstructionStatus InstructionStatus::Nops(unsigned int const value)
+        {
+            InstructionStatus rv;
+            rv.nops = value;
             return rv;
         }
 
@@ -43,7 +43,7 @@ namespace rocRoller
         {
             stallCycles = std::max(stallCycles, other.stallCycles);
 
-            unscheduledDependencies += other.unscheduledDependencies;
+            nops += other.nops;
             waitCount.combine(other.waitCount);
 
             errors.insert(errors.end(), other.errors.begin(), other.errors.end());

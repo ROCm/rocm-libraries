@@ -48,19 +48,6 @@ namespace rocRoller
         {
         }
 
-        constexpr bool operator==(GPUWaitQueueType a) const
-        {
-            return m_value == a.m_value;
-        }
-        constexpr bool operator==(Value a) const
-        {
-            return m_value == a;
-        }
-        constexpr bool operator!=(GPUWaitQueueType a) const
-        {
-            return m_value != a.m_value;
-        }
-
         operator uint8_t() const
         {
             return static_cast<uint8_t>(m_value);
@@ -136,19 +123,6 @@ namespace rocRoller
             default:
                 m_value = Value::None;
             }
-        }
-
-        constexpr bool operator==(GPUWaitQueue a) const
-        {
-            return m_value == a.m_value;
-        }
-        constexpr bool operator==(Value a) const
-        {
-            return m_value == a;
-        }
-        constexpr bool operator!=(GPUWaitQueue a) const
-        {
-            return m_value != a.m_value;
         }
 
         operator uint8_t() const

@@ -106,6 +106,7 @@ namespace rocRoller
 
             bool isSCC() const;
             bool isVCC() const;
+            bool isExec() const;
 
             /**
              * Returns a new unallocated RegisterValue with the same characteristics (register type,

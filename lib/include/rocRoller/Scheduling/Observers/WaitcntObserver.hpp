@@ -38,7 +38,10 @@ namespace rocRoller
 
             InstructionStatus peek(Instruction const& inst) const
             {
-                return InstructionStatus::Wait(computeWaitCount(inst));
+                auto        context      = m_context.lock();
+                const auto& architecture = context->targetArchitecture();
+                return InstructionStatus::Wait(
+                    computeWaitCount(inst).getAsSaturatedWaitCount(architecture));
             };
 
             void modify(Instruction& inst) const
@@ -60,7 +63,7 @@ namespace rocRoller
             {
                 auto               context      = m_context.lock();
                 const auto&        architecture = context->targetArchitecture();
-                GPUInstructionInfo info         = architecture.GetInstructionInfo(inst.opCode());
+                GPUInstructionInfo info         = architecture.GetInstructionInfo(inst.getOpCode());
 
                 auto registers      = inst.getRegisters();
                 auto instWaitQueues = info.getWaitQueues();
@@ -163,12 +166,12 @@ namespace rocRoller
                 auto        context      = m_context.lock();
                 const auto& architecture = context->targetArchitecture();
 
-                if(inst.opCode() == "s_barrier")
+                if(inst.getOpCode() == "s_barrier")
                 {
                     return WaitCount::Zero(architecture);
                 }
 
-                if(inst.opCode().size() > 0 && inst.hasRegisters())
+                if(inst.getOpCode().size() > 0 && inst.hasRegisters())
                 {
                     for(uint8_t i = 0; i < static_cast<uint8_t>(GPUWaitQueue::Count); i++)
                     {

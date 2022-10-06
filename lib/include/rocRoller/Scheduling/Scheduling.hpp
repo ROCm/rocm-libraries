@@ -14,14 +14,14 @@ namespace rocRoller
 
         struct InstructionStatus
         {
-            unsigned int             stallCycles             = 0;
-            unsigned int             unscheduledDependencies = 0;
+            unsigned int             stallCycles = 0;
             WaitCount                waitCount;
+            unsigned int             nops = 0;
             std::vector<std::string> errors;
 
-            static InstructionStatus StallCycles(unsigned int value);
-            static InstructionStatus UnscheduledDependencies(unsigned int value);
+            static InstructionStatus StallCycles(unsigned int const value);
             static InstructionStatus Wait(WaitCount const& value);
+            static InstructionStatus Nops(unsigned int const value);
             static InstructionStatus Error(std::string const& msg);
 
             void combine(InstructionStatus const& other);

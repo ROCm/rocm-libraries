@@ -383,6 +383,11 @@ namespace rocRoller
             return m_regType == Type::Special && m_specialName == "scc";
         }
 
+        inline bool Value::isExec() const
+        {
+            return m_regType == Type::Special && m_specialName == "exec";
+        }
+
         inline std::shared_ptr<Value> Value::placeholder() const
         {
             return Placeholder(m_context.lock(), m_regType, m_varType, valueCount());

@@ -406,6 +406,7 @@ set(
   test/unit/MemoryInstructionsTest.cpp
   test/unit/MatrixMultiplyTest.cpp
   test/unit/MetaObserverTest.cpp
+  test/unit/MFMAObserverTest.cpp
   test/unit/MixedArithmeticTest.cpp
   test/unit/RandomTest.cpp
   test/unit/RegisterAllocatorTest.cpp

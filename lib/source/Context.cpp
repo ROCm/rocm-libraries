@@ -13,6 +13,7 @@
 #include <rocRoller/Scheduling/MetaObserver.hpp>
 #include <rocRoller/Scheduling/Observers/AllocatingObserver.hpp>
 #include <rocRoller/Scheduling/Observers/FileWritingObserver.hpp>
+#include <rocRoller/Scheduling/Observers/MFMA90aObserver.hpp>
 #include <rocRoller/Scheduling/Observers/WaitcntObserver.hpp>
 
 namespace rocRoller
@@ -82,14 +83,17 @@ namespace rocRoller
 
         std::tuple<Scheduling::AllocatingObserver,
                    Scheduling::WaitcntObserver,
-                   Scheduling::FileWritingObserver>
+                   Scheduling::FileWritingObserver,
+                   Scheduling::MFMA90aObserver>
             constructedObservers = {Scheduling::AllocatingObserver(rv),
                                     Scheduling::WaitcntObserver(rv),
-                                    Scheduling::FileWritingObserver(rv)};
+                                    Scheduling::FileWritingObserver(rv),
+                                    Scheduling::MFMA90aObserver(rv)};
 
         using MyObserver = Scheduling::MetaObserver<Scheduling::AllocatingObserver,
                                                     Scheduling::WaitcntObserver,
-                                                    Scheduling::FileWritingObserver>;
+                                                    Scheduling::FileWritingObserver,
+                                                    Scheduling::MFMA90aObserver>;
         rv->m_observer   = std::make_shared<MyObserver>(constructedObservers);
 
         rv->m_registerTagMan = std::make_shared<RegisterTagManager>(rv);

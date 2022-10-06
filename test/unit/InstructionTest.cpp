@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <rocRoller/CodeGen/Instruction.hpp>
+#include <rocRoller/CodeGen/InstructionReference.hpp>
 #include <rocRoller/Context.hpp>
 #include <rocRoller/InstructionValues/Register.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
@@ -133,7 +134,14 @@ TEST_F(InstructionTest, Nop)
     inst.addNop(3);
     m_context->schedule(inst);
 
-    EXPECT_EQ("s_nop 1\n\ns_nop 9\n\n", output());
+    EXPECT_EQ("s_nop 0\n\ns_nop 8\n\n", output());
+
+    clearOutput();
+
+    inst = Instruction::Nop(17);
+    m_context->schedule(inst);
+
+    EXPECT_EQ("s_nop 0xf\ns_nop 0\n\n", output());
 }
 
 TEST_F(InstructionTest, NopOnRegularInstruction)
@@ -150,7 +158,7 @@ TEST_F(InstructionTest, NopOnRegularInstruction)
 
     m_context->schedule(inst);
 
-    EXPECT_THAT(output(), testing::HasSubstr("s_nop 3"));
+    EXPECT_THAT(output(), testing::HasSubstr("s_nop 2"));
 }
 
 TEST_F(InstructionTest, Label)
@@ -214,4 +222,18 @@ TEST_F(InstructionTest, Directive)
     EXPECT_EQ(".set .amdgcn.next_free_vgpr, 0 // Comment\n",
               Instruction::Directive(".set .amdgcn.next_free_vgpr, 0", "Comment")
                   .toString(Settings::LogLevel::Verbose));
+}
+
+TEST_F(InstructionTest, Classifications)
+{
+    auto dst
+        = std::make_shared<Register::Value>(m_context, Register::Type::Vector, DataType::Float, 1);
+    auto src
+        = std::make_shared<Register::Value>(m_context, Register::Type::Vector, DataType::Float, 1);
+    dst->allocateNow();
+    src->allocateNow();
+
+    auto                 inst = Instruction("s_cmov_b32", {dst}, {src}, {}, "Not VALU");
+    InstructionReference ref(inst);
+    EXPECT_FALSE(ref.isVALU());
 }
