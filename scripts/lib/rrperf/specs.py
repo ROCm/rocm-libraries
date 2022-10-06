@@ -24,6 +24,7 @@ import socket
 import subprocess
 import os
 import shutil
+import yaml
 
 from dataclasses import dataclass
 from pathlib import Path as path
@@ -31,7 +32,9 @@ from textwrap import dedent
 
 
 @dataclass
-class MachineSpecs:
+class MachineSpecs(yaml.YAMLObject):
+    yaml_tag = '!rrperfMachineSpecs'
+
     hostname: str
     cpu: str
     kernel: str
@@ -46,7 +49,50 @@ class MachineSpecs:
     mclk: str
     sclk: str
 
+    def __init__(self, hostname="", cpu="", kernel="", ram="", distro="", rocmversion="", vbios="", gpuid="", deviceinfo="", vram="", perflevel="", mclk="", sclk=""):
+        self.hostname = hostname
+        self.cpu = cpu
+        self.kernel = kernel
+        self.ram = ram
+        self.distro = distro
+        self.rocmversion = rocmversion
+        self.vbios = vbios
+        self.gpuid = gpuid
+        self.deviceinfo = deviceinfo
+        self.vram = vram
+        self.perflevel = perflevel
+        self.mclk = mclk
+        self.sclk = sclk
+
     def __str__(self):
+        return yaml.dump(self)
+    
+    def __hash__(self):
+        return hash(str(self))
+    
+    def __lt__(self, other):
+        return str(self) < str(other)
+
+    @classmethod
+    def from_yaml(cls, loader, node):
+        values = loader.construct_mapping(node, deep=True)
+        return cls(
+            values.get("hostname", ""), 
+            values.get("cpu", ""), 
+            values.get("kernel", ""), 
+            values.get("ram", ""), 
+            values.get("distro", ""), 
+            values.get("rocmversion", ""), 
+            values.get("vbios", ""), 
+            values.get("gpuid", ""), 
+            values.get("deviceinfo", ""), 
+            values.get("vram", ""), 
+            values.get("perflevel", ""), 
+            values.get("mclk", ""), 
+            values.get("sclk", ""), 
+        )
+    
+    def pretty_string(self):
         return dedent(
             f"""\
         Host info:
@@ -77,6 +123,13 @@ def search(pattern, string):
     if m is not None:
         return m.group(1)
     return None
+
+def load_machine_specs(path):
+    contents = path.read_text()
+    if contents.startswith(MachineSpecs.yaml_tag):
+        return yaml.load(contents, Loader=yaml.Loader)
+    else:
+        return MachineSpecs()
 
 
 def get_machine_specs(devicenum):
@@ -111,7 +164,10 @@ def get_machine_specs(devicenum):
 
     device = rf"^GPU\[{devicenum}\]\s*: "
 
-    hostname = socket.gethostname()
+    # Use the NODE_NAME env var in CI.
+    hostname = os.environ.get("NODE_NAME")
+    if not hostname:
+        hostname = socket.gethostname()
     cpu = search(r"^model name\s*: (.*?)$", cpuinfo)
     kernel = search(r"version (\S*)", version)
     ram = search(r"MemTotal:\s*(\S*)", meminfo)

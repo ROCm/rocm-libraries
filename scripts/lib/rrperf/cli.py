@@ -25,6 +25,7 @@ def main():
     compare_cmd.add_argument(
         "directories", nargs="*", help="Output directories to compare."
     )
+    compare_cmd.add_argument("--format", choices=["md", "html", "email_html"], default="md", help="Output format.")
 
     args = parser.parse_args()
     command = {"run": rrperf.run.run, "compare": rrperf.compare.compare}[args.command]

@@ -103,6 +103,9 @@ def run(token=None, suite=None, submit=False, filter=None, working_dir=None, **k
     machine_specs = wrkdir / "machine-specs.txt"
     machine_specs.write_text(str(rrperf.specs.get_machine_specs(0)) + "\n")
 
+    timestamp = wrkdir / "timestamp.txt"
+    timestamp.write_text(str(datetime.datetime.now().timestamp()) + "\n")
+
     print(f"rrperf: {' '.join(sys.argv)}")
     print(f"work directory: {wrkdir.resolve()}")
 
