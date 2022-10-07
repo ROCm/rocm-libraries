@@ -15,6 +15,8 @@ from typing import Any, List
 
 import rrperf
 
+from rrperf.specs import MachineSpecs
+
 
 @dataclass
 class ComparisonResult:
@@ -25,39 +27,96 @@ class ComparisonResult:
     results: List[Any] = field(repr=False)
 
 
-def summary_statistics(results_by_directory):
+class PerformanceRun:
+    timestamp: float
+    directory: str
+    machine_spec: MachineSpecs
+    results: OrderedDict
+
+    def __init__(self, timestamp, directory, machine_spec, results):
+        self.timestamp = timestamp
+        self.directory = directory
+        self.machine_spec = machine_spec
+        self.results = results
+
+    def __lt__(self, other):
+        if self.timestamp == other.timestamp:
+            return self.directory < other.directory
+        return self.timestamp < other.timestamp
+
+    def name(self):
+        return os.path.basename(self.directory)
+
+    def get_comparable_tokens(ref, runs):
+        # compute intersection
+        common = set(ref.results.keys())
+        for run in runs:
+            common = common.intersection(set(run.results.keys()))
+
+        common = list(common)
+        common.sort()
+
+        return common
+
+    def get_all_tokens(runs):
+        tests = list({token for run in runs for token in run.results})
+        tests.sort()
+        return tests
+
+    def get_all_specs(runs):
+        configs = list({run.machine_spec for run in runs})
+        configs.sort()
+        return configs
+
+    def get_timestamp(wrkdir):
+        try:
+            return datetime.datetime.fromtimestamp(
+                float((wrkdir / "timestamp.txt").read_text().strip())
+            )
+        except:
+            try:
+                return datetime.datetime.strptime(wrkdir.stem[0:10], "%Y-%m-%d")
+            except:
+                return datetime.datetime.fromtimestamp(0)
+
+    def load_perf_runs(directories):
+        perf_runs = list()
+        for directory in directories:
+            wrkdir = pathlib.Path(directory)
+            results = OrderedDict()
+            for path in wrkdir.glob("*.yaml"):
+                try:
+                    result = rrperf.problems.load_results(path)
+                except Exception as e:
+                    print('Error loading results in "{}": {}'.format(path, e))
+                results[result[0].token] = result[0]
+            spec = rrperf.specs.load_machine_specs(wrkdir / "machine-specs.txt")
+            timestamp = PerformanceRun.get_timestamp(wrkdir)
+            perf_runs.append(PerformanceRun(timestamp, directory, spec, results))
+
+        return perf_runs
+
+
+def summary_statistics(perf_runs):
     """Compare results in `results_by_directory` and compute summary statistics.
 
     The first run is the reference run.
     """
 
-    # build lookup
-    results = defaultdict(dict)
-    for run in results_by_directory.keys():
-        for result in results_by_directory[run]:
-            results[run][result.token] = result
-
     # first directory is reference, remaining are runs
-    ref, *runs = results_by_directory.keys()
-
-    # compute intersection
-    common = {x for x in results[ref].keys()}
-    for run in runs:
-        common = common.intersection({x for x in results[run].keys()})
-
-    common = list(common)
-    common.sort()
-
+    ref = perf_runs[0]
+    runs = perf_runs[1:]
+    common = PerformanceRun.get_comparable_tokens(ref, runs)
     # compute comparison statistics
     stats = defaultdict(dict)
-    for result in common:
-        A = results[ref][result]
+    for token in common:
+        A = ref.results[token]
         ka = np.asarray(A.kernelExecute)
         ka_median = statistics.median(ka)
         ka_mean = statistics.mean(ka)
 
         for run in runs:
-            B = results[run][result]
+            B = run.results[token]
             kb = np.asarray(B.kernelExecute)
 
             kb_median = statistics.median(kb)
@@ -65,7 +124,7 @@ def summary_statistics(results_by_directory):
 
             _, p, _, _ = scipy.stats.median_test(ka, kb)
 
-            stats[run][result] = A.token, ComparisonResult(
+            stats[run][token] = A.token, ComparisonResult(
                 mean=[ka_mean, kb_mean],
                 median=[ka_median, kb_median],
                 moods_pval=p,
@@ -75,8 +134,10 @@ def summary_statistics(results_by_directory):
     return stats
 
 
-def markdown_summary(md, summary, specs_by_directory):
+def markdown_summary(md, perf_runs):
     """Create Markdown report of summary statistics."""
+
+    summary = summary_statistics(perf_runs)
 
     header = [
         "Problem",
@@ -100,13 +161,12 @@ def markdown_summary(md, summary, specs_by_directory):
                 file=md,
             )
 
-    runs = list(specs_by_directory.keys())
-    runs.sort()
+    perf_runs.sort()
 
     print("\n\n## Machines\n", file=md)
-    for run in runs:
-        print("### Machine for {}:\n".format(os.path.basename(run)), file=md)
-        print(specs_by_directory[run].pretty_string(), file=md)
+    for run in perf_runs:
+        print("### Machine for {}:\n".format(run.name()), file=md)
+        print(run.machine_spec.pretty_string(), file=md)
         print("\n")
 
 
@@ -140,60 +200,43 @@ def html_overview_table(html_file, summary):
     print("</table>", file=html_file)
 
 
-def email_html_summary(html_file, summary, specs_by_directory):
+def email_html_summary(html_file, perf_runs):
     """Create HTML email report of summary statistics."""
+
+    summary = summary_statistics(perf_runs)
 
     print("<h2>Results</h2>", file=html_file)
 
     html_overview_table(html_file, summary)
 
-    runs = list(specs_by_directory.keys())
-    runs.sort()
-
+    perf_runs.sort()
     print("<h2>Machines</h2>", file=html_file)
-    for run in runs:
-        print("<h3>Machine for {}:</h3>".format(os.path.basename(run)), file=html_file)
+    for run in perf_runs:
+        print("<h3>Machine for {}:</h3>".format(run.name()), file=html_file)
         print(
             "<blockquote>{}</blockquote>".format(
-                specs_by_directory[run].pretty_string().replace("\n", "<br>")
+                run.machine_spec.pretty_string().replace("\n", "<br>")
             ),
             file=html_file,
         )
 
 
-def html_summary(
-    html_file, summary, results_by_directory, specs_by_directory, timestamp_by_directory
-):
+def html_summary(html_file, perf_runs):
     """Create HTML report of summary statistics."""
 
     from plotly import graph_objs as go
     from plotly.subplots import make_subplots
 
+    perf_runs.sort()
+    summary = summary_statistics(perf_runs[-2:])
+
     plots = []
 
-    # build lookup
-    results = defaultdict(dict)
-    for run in results_by_directory.keys():
-        for result in results_by_directory[run]:
-            results[run][result.token] = result
-
-    # Order directories by timestamp so they are plotted in order.
-    timestamps = list(timestamp_by_directory.values())
-    timestamps.sort()
-    directories = [
-        dir
-        for timestamp in timestamps
-        for dir in timestamp_by_directory
-        if timestamp_by_directory[dir] == timestamp
-    ]
-
     # Get all unique test tokens and sort them for consistent results.
-    tests = list({x for y in results.keys() for x in results[y].keys()})
-    tests.sort()
+    tests = PerformanceRun.get_all_tokens(perf_runs)
 
     # Get all unique machine specs and sort them for consistent results.
-    configs = list(set(specs_by_directory.values()))
-    configs.sort()
+    configs = PerformanceRun.get_all_specs(perf_runs)
 
     for token in tests:
         plot = make_subplots(
@@ -207,14 +250,14 @@ def html_summary(
         xs = []
         runs = []
         names = []
-        for run in directories:
-            if token in results[run]:
+        for run in perf_runs:
+            if token in run.results:
                 name = (
-                    os.path.basename(str(run))
+                    run.name()
                     + " <br> Machine ID: "
-                    + str(configs.index(specs_by_directory[run]))
+                    + str(configs.index(run.machine_spec))
                 )
-                A = results[run][token]
+                A = run.results[token]
                 ka = np.asarray(A.kernelExecute)
                 runs.append(ka)
                 plot.add_trace(go.Box(x0=name, y=ka, name=name), row=1, col=1)
@@ -314,79 +357,23 @@ def html_summary(
     )
 
 
-def get_timestamp(wrkdir):
-    try:
-        return datetime.datetime.fromtimestamp(
-            float((wrkdir / "timestamp.txt").read_text().strip())
-        )
-    except:
-        try:
-            return datetime.datetime.strptime(wrkdir.stem[0:10], "%Y-%m-%d")
-        except:
-            return datetime.datetime.fromtimestamp(0)
-
-
 def compare(directories=None, format="md", **kwargs):
     """Compare multiple run directories.
 
     Implements the CLI 'compare' subcommand.
     """
 
-    # mapping from directory to list of results
-    results_by_directory = OrderedDict()
-    # mapping from directory to machine info
-    specs_by_directory = OrderedDict()
-    # mapping from directory to timestamp
-    timestamp_by_directory = OrderedDict()
-
-    for directory in directories:
-        wrkdir = pathlib.Path(directory)
-        results = []
-        for path in wrkdir.glob("*.yaml"):
-            try:
-                results.extend(rrperf.problems.load_results(path))
-            except Exception as e:
-                print('Error loading results in "{}": {}'.format(path, e))
-        results_by_directory[directory] = results
-
-        specs_by_directory[directory] = rrperf.specs.load_machine_specs(
-            wrkdir / "machine-specs.txt"
-        )
-
-        timestamp_by_directory[directory] = get_timestamp(wrkdir)
-
-    summary = summary_statistics(results_by_directory)
+    perf_runs = PerformanceRun.load_perf_runs(directories)
 
     output = io.StringIO()
     if format == "html":
-        # Order directories by timestamp so they are plotted in order.
-        timestamps = sorted(list(timestamp_by_directory.values()))
-        directories = [
-            dir
-            for timestamp in timestamps
-            for dir in timestamp_by_directory
-            if timestamp_by_directory[dir] == timestamp
-        ]
-        latest_results_by_directory = OrderedDict()
-        latest_results_by_directory[directories[-1]] = results_by_directory[
-            directories[-1]
-        ]
-        latest_results_by_directory[directories[-2]] = results_by_directory[
-            directories[-2]
-        ]
-
-        last_two_summary = summary_statistics(latest_results_by_directory)
-
         html_summary(
             output,
-            last_two_summary,
-            results_by_directory,
-            specs_by_directory,
-            timestamp_by_directory,
+            perf_runs,
         )
 
     elif format == "email_html":
-        email_html_summary(output, summary, specs_by_directory)
+        email_html_summary(output, perf_runs)
     else:
-        markdown_summary(output, summary, specs_by_directory)
+        markdown_summary(output, perf_runs)
     print(output.getvalue())
