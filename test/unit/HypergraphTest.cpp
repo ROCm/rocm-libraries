@@ -101,10 +101,10 @@ namespace rocRollerTest
 
         {
             std::string expected = R".(
-	        digraph {
+            digraph {
                     "1"[label="TestUser(1)"];
-	            "2"[label="TestSubDimension(2)"];
-	            "3"[label="TestSubDimension(3)"];
+                    "2"[label="TestSubDimension(2)"];
+                    "3"[label="TestSubDimension(3)"];
                     "4"[label="TestSplit(4)",shape=box];
                     "5"[label="TestVGPR(5)"];
                     "6"[label="TestForget(6)",shape=box];
@@ -144,6 +144,26 @@ namespace rocRollerTest
             EXPECT_NO_THROW(std::get<TestUser>(std::get<TestDimension>(g.getElement(u0))));
             EXPECT_NO_THROW(
                 std::get<TestForget>(std::get<TestTransform>(g.getElement(TestForget1))));
+        }
+
+        {
+            auto subDimensions = g.findNodes<TestSubDimension>().to<std::vector>();
+            EXPECT_EQ(subDimensions.size(), 2);
+            EXPECT_EQ(std::count(subDimensions.begin(), subDimensions.end(), sd0), 1);
+            EXPECT_EQ(std::count(subDimensions.begin(), subDimensions.end(), sd1), 1);
+        }
+
+        {
+            auto inputNodes = g.getInputNodeIndices<TestSplit>(sd0).to<std::vector>();
+            EXPECT_EQ(inputNodes.size(), 1);
+            EXPECT_EQ(inputNodes.at(0), u0);
+        }
+
+        {
+            auto outputNodes = g.getOutputNodeIndices<TestForget>(sd0).to<std::vector>();
+            EXPECT_EQ(outputNodes.size(), 2);
+            EXPECT_EQ(std::count(outputNodes.begin(), outputNodes.end(), TestVGPR0), 1);
+            EXPECT_EQ(std::count(outputNodes.begin(), outputNodes.end(), TestVGPR1), 1);
         }
 
         {
@@ -359,5 +379,31 @@ namespace rocRollerTest
                   g.path<Graph::Direction::Downstream>(
                        std::vector<int>{u1}, std::vector<int>{sd6}, visited)
                       .to<std::vector>());
+    }
+
+    TEST(HypergraphTest, BadGraph)
+    {
+        myHypergraph g;
+
+        auto u0  = g.addElement(TestUser{});
+        auto sd0 = g.addElement(TestSubDimension{});
+        auto sd1 = g.addElement(TestSubDimension{});
+
+        auto TestSplit0 = g.addElement(TestSplit{}, {u0}, {sd0, sd1});
+
+        auto TestVGPR0   = g.addElement(TestVGPR{});
+        auto TestForget0 = g.addElement(TestForget{}, {sd0, sd1}, {TestVGPR0});
+
+        auto TestVGPR1   = g.addElement(TestVGPR{});
+        auto TestForget1 = g.addElement(TestForget{}, {sd0, sd1}, {TestVGPR1});
+
+        // Edges to Edges
+        EXPECT_THROW({ auto TestForget4 = g.addElement(TestForget{}, {u0}, {TestSplit0}); },
+                     FatalError);
+        EXPECT_THROW({ auto TestForget5 = g.addElement(TestForget{}, {}, {TestSplit0}); },
+                     FatalError);
+
+        // Nodes to nodes
+        EXPECT_THROW({ auto sd2 = g.addElement(TestSubDimension{}, {u0}, {}); }, FatalError);
     }
 }

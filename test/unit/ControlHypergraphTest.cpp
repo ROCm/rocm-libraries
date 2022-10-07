@@ -38,10 +38,10 @@ namespace rocRollerTest
         EXPECT_EQ(1, root.size());
         EXPECT_EQ(root[0], kernel_index);
 
-        auto outputs = control.getOutputIndices<Body>(kernel_index).to<std::vector>();
+        auto outputs = control.getOutputNodeIndices<Body>(kernel_index).to<std::vector>();
         EXPECT_EQ(2, outputs.size());
 
-        auto outputs2 = control.getOutputIndices<Sequence>(kernel_index).to<std::vector>();
+        auto outputs2 = control.getOutputNodeIndices<Sequence>(kernel_index).to<std::vector>();
         EXPECT_EQ(0, outputs2.size());
 
         std::vector<int> nodes1 = control.childNodes(root[0]).to<std::vector>();
@@ -67,16 +67,17 @@ namespace rocRollerTest
         EXPECT_EQ(1, nodes4.size());
         EXPECT_EQ(nodes4[0], root[0]);
 
-        auto inputs = control.getInputIndices<Body>(loadA_index).to<std::vector>();
-        ASSERT_EQ(1, inputs.size());
+        auto inputs = control.getInputNodeIndices<Body>(loadA_index).to<std::vector>();
+        EXPECT_EQ(1, inputs.size());
+        EXPECT_EQ(inputs.at(0), kernel_index);
 
-        auto inputs2 = control.getInputIndices<Sequence>(loadA_index).to<std::vector>();
+        auto inputs2 = control.getInputNodeIndices<Sequence>(loadA_index).to<std::vector>();
         EXPECT_EQ(0, inputs2.size());
 
-        auto inputs3 = control.getInputIndices<Initialize>(loadA_index).to<std::vector>();
+        auto inputs3 = control.getInputNodeIndices<Initialize>(loadA_index).to<std::vector>();
         EXPECT_EQ(0, inputs3.size());
 
-        auto inputs4 = control.getInputIndices<ForLoopIncrement>(loadA_index).to<std::vector>();
+        auto inputs4 = control.getInputNodeIndices<ForLoopIncrement>(loadA_index).to<std::vector>();
         EXPECT_EQ(0, inputs4.size());
 
         std::vector<int> edges2

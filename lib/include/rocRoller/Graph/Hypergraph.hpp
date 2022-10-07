@@ -30,7 +30,7 @@ namespace rocRoller
         };
 
         /**
-         * Returns the complementary type to `t`.
+         * @brief Returns the complementary type to `t`.
          */
         ElementType getConnectingType(ElementType t);
 
@@ -72,12 +72,12 @@ namespace rocRoller
 
         public:
             /**
-             * Returns whether `index` points to a node or an edge.
+             * @brief Returns whether `index` points to a node or an edge.
              */
             ElementType getElementType(int index) const;
 
             /**
-             * Returns whether `e` is a node or an edge.
+             * @brief Returns whether `e` is a node or an edge.
              */
             ElementType getElementType(Element const& e) const;
 
@@ -121,37 +121,37 @@ namespace rocRoller
             Element const& getElement(int index) const;
 
             /**
-             * Returns a Location info object detailing connections to the element `index`.
+             * @brief Returns a Location info object detailing connections to the element `index`.
              */
             Location getLocation(int index) const;
 
             /**
-             * Yields element indices without any incoming connections.
+             * @brief Yields element indices without any incoming connections.
              */
             Generator<int> roots() const;
 
             /**
-             * Yields element indices without any outgoing connections.
+             * @brief Yields element indices without any outgoing connections.
              */
             Generator<int> leaves() const;
 
             /**
-            * Yields element indices that are the child nodes of a given element
+            * @brief Yields element indices that are the child nodes of a given element
             */
             Generator<int> childNodes(int parent) const;
 
             /**
-            * Yields element indices that are the parent nodes of a given element
+            * @brief Yields element indices that are the parent nodes of a given element
             */
             Generator<int> parentNodes(int child) const;
 
             /**
-             * Yields node indices connected in the specified direction to start, in depth-first order
+             * @brief Yields node indices connected in the specified direction to start, in depth-first order
              */
             Generator<int> depthFirstVisit(int start, Direction dir = Direction::Downstream) const;
 
             /**
-             * Yields node indices connected in the specified direction to starts, in depth-first order
+             * @brief Yields node indices connected in the specified direction to starts, in depth-first order
              */
             template <std::ranges::forward_range Range>
             requires(std::convertible_to<std::ranges::range_value_t<Range>, int>)
@@ -159,7 +159,7 @@ namespace rocRoller
             const;
 
             /**
-             * Yields node indices connected in the specified direction to start, in depth-first order.
+             * @brief Yields node indices connected in the specified direction to start, in depth-first order.
              *
              * Will not yield any nodes in `visitedNodes`, and will insert nodes `visitedNodes` to track already
              * visited nodes.
@@ -168,12 +168,12 @@ namespace rocRoller
             Generator<int> depthFirstVisit(int start, std::unordered_set<int>& visitedNodes) const;
 
             /**
-             * Yields node indices connected downstream of start, in breadth-first order.
+             * @brief Yields node indices connected downstream of start, in breadth-first order.
              */
             Generator<int> breadthFirstVisit(int start) const;
 
             /**
-            * Yields node indices that form the paths from the starts to the ends
+            * @brief Yields node indices that form the paths from the starts to the ends
             */
             template <Direction Dir>
             Generator<int> path(
@@ -188,26 +188,26 @@ namespace rocRoller
             std::string toDOT() const;
 
             /**
-             * Return all Nodes of class T.
+             * @brief Yields indices of all Nodes of class T.
              */
             template <typename T>
             requires(std::constructible_from<Node, T>) Generator<int> findNodes()
             const;
 
             /**
-             * Return indices that immediately preceed `dst` and are of type T.
+             * @brief Yields indices of nodes that immediately preceed `dst` where the Edges are of type T.
              */
             template <typename T>
-            requires(std::constructible_from<Edge, T>) Generator<int> getInputIndices(
-                int const& dst)
+            requires(std::constructible_from<Edge, T>) Generator<int> getInputNodeIndices(
+                int const dst)
             const;
 
             /**
-             * Return indices that immediately follow `src` and are of type T.
+             * @brief Yields indices of nodes that immediately follow `src` where the Edges are of type T.
              */
             template <typename T>
-            requires(std::constructible_from<Edge, T>) Generator<int> getOutputIndices(
-                int const& src)
+            requires(std::constructible_from<Edge, T>) Generator<int> getOutputNodeIndices(
+                int const src)
             const;
 
             template <typename T>

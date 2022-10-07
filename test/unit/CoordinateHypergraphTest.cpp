@@ -11,7 +11,6 @@
 #include <rocRoller/KernelGraph/CoordGraph/Transformer.hpp>
 
 using namespace rocRoller;
-using namespace KernelGraph;
 using namespace KernelGraph::CoordGraph;
 
 namespace rocRollerTest

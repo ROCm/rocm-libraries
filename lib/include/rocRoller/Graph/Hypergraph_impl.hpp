@@ -574,29 +574,8 @@ namespace rocRoller
                 {
                     auto const& op = std::get<Node>(elem.second);
                     if(std::holds_alternative<T>(op))
-                        co_yield std::get<T>(op);
-                }
-            }
-        }
-
-        template <typename Node, typename Edge, bool Hyper>
-        template <typename T>
-        requires(std::constructible_from<Edge, T>)
-            Generator<int> Hypergraph<Node, Edge, Hyper>::getInputIndices(int const& dst)
-        const
-        {
-
-            // elements
-            for(auto const& elem : m_elements)
-            {
-                // edges
-                if(getElementType(elem.second) == ElementType::Edge)
-                {
-                    auto const& e = std::get<Edge>(elem.second);
-                    for(auto const& dst_index : getNeighbours<Direction::Downstream>(elem.first))
                     {
-                        if(dst_index == dst && std::holds_alternative<T>(e))
-                            co_yield getNeighbours<Direction::Upstream>(elem.first);
+                        co_yield elem.first;
                     }
                 }
             }
@@ -605,21 +584,33 @@ namespace rocRoller
         template <typename Node, typename Edge, bool Hyper>
         template <typename T>
         requires(std::constructible_from<Edge, T>)
-            Generator<int> Hypergraph<Node, Edge, Hyper>::getOutputIndices(int const& src)
+            Generator<int> Hypergraph<Node, Edge, Hyper>::getInputNodeIndices(int const dst)
         const
         {
-            // elements
-            for(auto const& elem : m_elements)
+            AssertRecoverable(getElementType(dst) == ElementType::Node, "Require a node handle");
+
+            for(int const elem : getNeighbours<Direction::Upstream>(dst))
             {
-                // edges
-                if(getElementType(elem.second) == ElementType::Edge)
+                if(std::holds_alternative<T>(std::get<Edge>(getElement(elem))))
                 {
-                    auto const& e = std::get<Edge>(elem.second);
-                    for(auto const& src_index : getNeighbours<Direction::Upstream>(elem.first))
-                    {
-                        if(src_index == src && std::holds_alternative<T>(e))
-                            co_yield getNeighbours<Direction::Downstream>(elem.first);
-                    }
+                    co_yield getNeighbours<Direction::Upstream>(elem);
+                }
+            }
+        }
+
+        template <typename Node, typename Edge, bool Hyper>
+        template <typename T>
+        requires(std::constructible_from<Edge, T>)
+            Generator<int> Hypergraph<Node, Edge, Hyper>::getOutputNodeIndices(int const src)
+        const
+        {
+            AssertRecoverable(getElementType(src) == ElementType::Node, "Require a node handle");
+
+            for(int const elem : getNeighbours<Direction::Downstream>(src))
+            {
+                if(std::holds_alternative<T>(std::get<Edge>(getElement(elem))))
+                {
+                    co_yield getNeighbours<Direction::Downstream>(elem);
                 }
             }
         }
