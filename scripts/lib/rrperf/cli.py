@@ -16,7 +16,9 @@ def main():
         "--submit", help="Submit results to SOMEWHERE.", action="store_true", default=False
     )
     run_cmd.add_argument(
-        "--working_dir", help="Location to run tests and store performance results.", default=None
+        "--working_dir",
+        help="Location to run tests and store performance results.",
+        default=None,
     )
     run_cmd.add_argument("--token", help="Benchmark token to run.")
     run_cmd.add_argument("--filter", help="Filter benchmarks...")
@@ -25,7 +27,12 @@ def main():
     compare_cmd.add_argument(
         "directories", nargs="*", help="Output directories to compare."
     )
-    compare_cmd.add_argument("--format", choices=["md", "html", "email_html"], default="md", help="Output format.")
+    compare_cmd.add_argument(
+        "--format",
+        choices=["md", "html", "email_html"],
+        default="md",
+        help="Output format.",
+    )
 
     args = parser.parse_args()
     command = {"run": rrperf.run.run, "compare": rrperf.compare.compare}[args.command]

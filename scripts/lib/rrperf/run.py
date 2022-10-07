@@ -39,7 +39,7 @@ def work_directory(working_dir=None):
     if working_dir:
         root = working_dir
     serial = len(list(pathlib.Path(root).glob(f"{date}-{commit}-*")))
-    return pathlib.Path(root)/pathlib.Path(f"{date}-{commit}-{serial:03d}")
+    return pathlib.Path(root) / pathlib.Path(f"{date}-{commit}-{serial:03d}")
 
 
 def submit_directory(suite: str, wrkdir: pathlib.Path, ptsdir: pathlib.Path):
@@ -60,8 +60,9 @@ def submit_directory(suite: str, wrkdir: pathlib.Path, ptsdir: pathlib.Path):
 def from_token(token: str):
     yield rrperf.problems.upcast_to_run(eval(token, rrperf.problems.__dict__))
 
+
 def build_directory():
-    varname = 'ROCROLLER_BUILD_DIR'
+    varname = "ROCROLLER_BUILD_DIR"
     if varname in os.environ:
         return pathlib.Path(os.environ[varname])
     default = rrperf.git.top() / "build"
@@ -69,6 +70,7 @@ def build_directory():
         return default
 
     raise RuntimeError(f"Build directory not found.  Set {varname} to override.")
+
 
 def run(token=None, suite=None, submit=False, filter=None, working_dir=None, **kwargs):
     """Run benchmarks!

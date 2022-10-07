@@ -110,10 +110,8 @@ def markdown_summary(md, summary, specs_by_directory):
         print("\n")
 
 
-def email_html_summary(html_file, summary, specs_by_directory):
-    """Create Markdown report of summary statistics."""
-
-    print("<h2>Results</h2>", file=html_file)
+def html_overview_table(html_file, summary):
+    """Create HTML table with summary statistics."""
 
     print("<table><tr><td>", file=html_file)
 
@@ -127,19 +125,27 @@ def email_html_summary(html_file, summary, specs_by_directory):
         "Median B",
         "Moods p-val",
     ]
-    print(" </td><td> ".join(header), file=html_file)
+    print("</td><td> ".join(header), file=html_file)
     print("</td></tr>", file=html_file)
 
     for run in summary:
-        for result in summary[run]:
+        for i, result in enumerate(summary[run]):
             token, comparison = summary[run][result]
             A, B = comparison.results
             print(
-                f"<tr><td> {token} </td><td> {A.path.parent.stem} </td><td> {B.path.parent.stem} </td><td> {comparison.mean[0]} </td><td> {comparison.mean[1]} </td><td> {comparison.median[0]} </td><td> {comparison.median[1]} </td><td> {comparison.moods_pval:0.4e}</td><tr>",
+                f'<tr><td><a href="#plot{i}"> {token} </a></td><td> {A.path.parent.stem} </td><td> {B.path.parent.stem} </td><td> {comparison.mean[0]} </td><td> {comparison.mean[1]} </td><td> {comparison.median[0]} </td><td> {comparison.median[1]} </td><td> {comparison.moods_pval:0.4e}</td><tr>',
                 file=html_file,
             )
-    
+
     print("</table>", file=html_file)
+
+
+def email_html_summary(html_file, summary, specs_by_directory):
+    """Create HTML email report of summary statistics."""
+
+    print("<h2>Results</h2>", file=html_file)
+
+    html_overview_table(html_file, summary)
 
     runs = list(specs_by_directory.keys())
     runs.sort()
@@ -147,11 +153,16 @@ def email_html_summary(html_file, summary, specs_by_directory):
     print("<h2>Machines</h2>", file=html_file)
     for run in runs:
         print("<h3>Machine for {}:</h3>".format(os.path.basename(run)), file=html_file)
-        print("<blockquote>{}</blockquote>".format(specs_by_directory[run].pretty_string().replace("\n", "<br>")), file=html_file)
+        print(
+            "<blockquote>{}</blockquote>".format(
+                specs_by_directory[run].pretty_string().replace("\n", "<br>")
+            ),
+            file=html_file,
+        )
 
 
 def html_summary(
-    html_file, results_by_directory, specs_by_directory, timestamp_by_directory
+    html_file, summary, results_by_directory, specs_by_directory, timestamp_by_directory
 ):
     """Create HTML report of summary statistics."""
 
@@ -169,7 +180,12 @@ def html_summary(
     # Order directories by timestamp so they are plotted in order.
     timestamps = list(timestamp_by_directory.values())
     timestamps.sort()
-    directories = [dir for timestamp in timestamps for dir in timestamp_by_directory if timestamp_by_directory[dir] == timestamp]
+    directories = [
+        dir
+        for timestamp in timestamps
+        for dir in timestamp_by_directory
+        if timestamp_by_directory[dir] == timestamp
+    ]
 
     # Get all unique test tokens and sort them for consistent results.
     tests = list({x for y in results.keys() for x in results[y].keys()})
@@ -229,6 +245,7 @@ def html_summary(
             showlegend=False,
             title_text=str(token),
         )
+        plot.update_yaxes(title={"text": "Time (ns)"}, row=1, col=1)
         plots.append(plot)
 
     # Make a table of machines for lookup.
@@ -267,6 +284,11 @@ def html_summary(
         file=html_file,
     )
 
+    print("<h1>rocRoller performance</h1>", file=html_file)
+    print("<h2>Overview</h2>", file=html_file)
+    html_overview_table(html_file, summary)
+
+    print("<h2>Results</h2>", file=html_file)
     print('<table width="100%">', file=html_file)
 
     print("<tr><td>", file=html_file)
@@ -275,9 +297,12 @@ def html_summary(
 
     for i in range(len(plots)):
         print("<tr><td>", file=html_file)
-
-        print(plots[i].to_html(full_html=False, include_plotlyjs=False), file=html_file)
-
+        print(
+            plots[i].to_html(
+                full_html=False, include_plotlyjs=False, div_id=f"plot{i}"
+            ),
+            file=html_file,
+        )
         print("</td></tr>", file=html_file)
     print(
         """
@@ -291,7 +316,9 @@ def html_summary(
 
 def get_timestamp(wrkdir):
     try:
-        return datetime.datetime.fromtimestamp(float((wrkdir / "timestamp.txt").read_text().strip()))
+        return datetime.datetime.fromtimestamp(
+            float((wrkdir / "timestamp.txt").read_text().strip())
+        )
     except:
         try:
             return datetime.datetime.strptime(wrkdir.stem[0:10], "%Y-%m-%d")
@@ -332,9 +359,32 @@ def compare(directories=None, format="md", **kwargs):
 
     output = io.StringIO()
     if format == "html":
+        # Order directories by timestamp so they are plotted in order.
+        timestamps = sorted(list(timestamp_by_directory.values()))
+        directories = [
+            dir
+            for timestamp in timestamps
+            for dir in timestamp_by_directory
+            if timestamp_by_directory[dir] == timestamp
+        ]
+        latest_results_by_directory = OrderedDict()
+        latest_results_by_directory[directories[-1]] = results_by_directory[
+            directories[-1]
+        ]
+        latest_results_by_directory[directories[-2]] = results_by_directory[
+            directories[-2]
+        ]
+
+        last_two_summary = summary_statistics(latest_results_by_directory)
+
         html_summary(
-            output, results_by_directory, specs_by_directory, timestamp_by_directory
+            output,
+            last_two_summary,
+            results_by_directory,
+            specs_by_directory,
+            timestamp_by_directory,
         )
+
     elif format == "email_html":
         email_html_summary(output, summary, specs_by_directory)
     else:

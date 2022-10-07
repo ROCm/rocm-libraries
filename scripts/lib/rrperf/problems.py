@@ -45,11 +45,11 @@ class GEMM:
     alpha: float = 2.0
     beta: float = 0.5
 
-    type_A : str = "float"
-    type_B : str = "float"
-    type_C : str = "float"
-    type_D : str = "float"
-    type_acc : str = "float"
+    type_A: str = "float"
+    type_B: str = "float"
+    type_C: str = "float"
+    type_D: str = "float"
+    type_acc: str = "float"
 
     numWarmUp: int = 2
     numOuter: int = 10

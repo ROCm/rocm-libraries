@@ -33,7 +33,7 @@ from textwrap import dedent
 
 @dataclass
 class MachineSpecs(yaml.YAMLObject):
-    yaml_tag = '!rrperfMachineSpecs'
+    yaml_tag = "!rrperfMachineSpecs"
 
     hostname: str
     cpu: str
@@ -49,7 +49,22 @@ class MachineSpecs(yaml.YAMLObject):
     mclk: str
     sclk: str
 
-    def __init__(self, hostname="", cpu="", kernel="", ram="", distro="", rocmversion="", vbios="", gpuid="", deviceinfo="", vram="", perflevel="", mclk="", sclk=""):
+    def __init__(
+        self,
+        hostname="",
+        cpu="",
+        kernel="",
+        ram="",
+        distro="",
+        rocmversion="",
+        vbios="",
+        gpuid="",
+        deviceinfo="",
+        vram="",
+        perflevel="",
+        mclk="",
+        sclk="",
+    ):
         self.hostname = hostname
         self.cpu = cpu
         self.kernel = kernel
@@ -66,10 +81,10 @@ class MachineSpecs(yaml.YAMLObject):
 
     def __str__(self):
         return yaml.dump(self)
-    
+
     def __hash__(self):
         return hash(str(self))
-    
+
     def __lt__(self, other):
         return str(self) < str(other)
 
@@ -77,21 +92,21 @@ class MachineSpecs(yaml.YAMLObject):
     def from_yaml(cls, loader, node):
         values = loader.construct_mapping(node, deep=True)
         return cls(
-            values.get("hostname", ""), 
-            values.get("cpu", ""), 
-            values.get("kernel", ""), 
-            values.get("ram", ""), 
-            values.get("distro", ""), 
-            values.get("rocmversion", ""), 
-            values.get("vbios", ""), 
-            values.get("gpuid", ""), 
-            values.get("deviceinfo", ""), 
-            values.get("vram", ""), 
-            values.get("perflevel", ""), 
-            values.get("mclk", ""), 
-            values.get("sclk", ""), 
+            values.get("hostname", ""),
+            values.get("cpu", ""),
+            values.get("kernel", ""),
+            values.get("ram", ""),
+            values.get("distro", ""),
+            values.get("rocmversion", ""),
+            values.get("vbios", ""),
+            values.get("gpuid", ""),
+            values.get("deviceinfo", ""),
+            values.get("vram", ""),
+            values.get("perflevel", ""),
+            values.get("mclk", ""),
+            values.get("sclk", ""),
         )
-    
+
     def pretty_string(self):
         return dedent(
             f"""\
@@ -123,6 +138,7 @@ def search(pattern, string):
     if m is not None:
         return m.group(1)
     return None
+
 
 def load_machine_specs(path):
     contents = path.read_text()
