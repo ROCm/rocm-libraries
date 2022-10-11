@@ -384,6 +384,7 @@ set(
   test/unit/CoordinateHypergraphTest.cpp
   test/unit/CopyGeneratorTest.cpp
   test/unit/DataTypesTest.cpp
+  test/unit/DependencyTest.cpp
   test/unit/ErrorTest.cpp
   test/unit/ExpressionTest.cpp
   test/unit/FastDivisionTest.cpp
