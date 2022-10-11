@@ -8,6 +8,7 @@
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
 #include <rocRoller/CodeGen/Arithmetic/ArithmeticGenerator.hpp>
 #include <rocRoller/CodeGen/Buffer.hpp>
+#include <rocRoller/CodeGen/BufferInstructionOptions.hpp>
 #include <rocRoller/CodeGen/CopyGenerator.hpp>
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
 #include <rocRoller/CommandSolution.hpp>
@@ -270,6 +271,25 @@ namespace MemoryInstructionsTest
     TEST_P(MemoryInstructionsTest, AssembleBufDescriptor)
     {
         assembleBufDescTest(m_context);
+    }
+
+    TEST_P(MemoryInstructionsTest, BufOptionsTest)
+    {
+        auto bufOpt = rocRoller::BufferInstructionOptions();
+        EXPECT_EQ(bufOpt.getOffen(), false);
+        EXPECT_EQ(bufOpt.getGlc(), false);
+        EXPECT_EQ(bufOpt.getSlc(), false);
+        EXPECT_EQ(bufOpt.getLds(), false);
+
+        bufOpt.setOffen(true);
+        bufOpt.setGlc(true);
+        bufOpt.setSlc(true);
+        bufOpt.setLds(true);
+
+        EXPECT_EQ(bufOpt.getOffen(), true);
+        EXPECT_EQ(bufOpt.getGlc(), true);
+        EXPECT_EQ(bufOpt.getSlc(), true);
+        EXPECT_EQ(bufOpt.getLds(), true);
     }
 
     TEST_P(MemoryInstructionsTest, AssembleFlatTest1Byte)
