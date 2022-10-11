@@ -147,7 +147,7 @@ namespace rocRollerTest
         }
 
         {
-            auto subDimensions = g.findNodes<TestSubDimension>().to<std::vector>();
+            auto subDimensions = g.getNodes<TestSubDimension>().to<std::vector>();
             EXPECT_EQ(subDimensions.size(), 2);
             EXPECT_EQ(std::count(subDimensions.begin(), subDimensions.end(), sd0), 1);
             EXPECT_EQ(std::count(subDimensions.begin(), subDimensions.end(), sd1), 1);
@@ -316,6 +316,13 @@ namespace rocRollerTest
 
             EXPECT_EQ(NormalizedSource(expected), NormalizedSource(g.toDOT()));
         }
+
+        EXPECT_EQ(std::set({u0, sd0, sd1, TestVGPR0, TestVGPR1, loop}),
+                  g.getNodes().to<std::set>());
+        EXPECT_EQ(std::set({TestSplit0, TestForget0, TestForget1}), g.getEdges().to<std::set>());
+
+        EXPECT_EQ(std::set({TestVGPR0, TestVGPR1}), g.getNodes<TestVGPR>().to<std::set>());
+        EXPECT_EQ(std::set({TestForget0, TestForget1}), g.getElements<TestForget>().to<std::set>());
 
         {
             EXPECT_EQ(std::get<TestUser>(std::get<TestDimension>(g.getElement(u0))), TestUser{});

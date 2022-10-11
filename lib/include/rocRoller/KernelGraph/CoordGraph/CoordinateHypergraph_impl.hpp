@@ -143,23 +143,5 @@ namespace rocRoller
             }
             return EdgeType::None;
         }
-
-        inline std::set<int> CoordinateHypergraph::getDimensionTags() const
-        {
-            std::set<int> rv;
-            for(auto const& root : roots())
-            {
-                for(auto const& index : depthFirstVisit(root))
-                {
-                    auto const& elem = getElement(index);
-                    if(std::holds_alternative<Dimension>(elem))
-                    {
-                        rv.insert(index);
-                    }
-                }
-            }
-            return rv;
-        }
-
     }
 }

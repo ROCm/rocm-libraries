@@ -458,10 +458,9 @@ namespace rocRoller
         {
             for(auto const element : getNeighbours<Dir>(edge))
             {
-                if(!visitedElements.contains(element) || !visitedElements.at(element))
-                {
+                auto iter = visitedElements.find(element);
+                if(iter == visitedElements.end() || !iter->second)
                     return false;
-                }
             }
 
             return true;
@@ -562,23 +561,54 @@ namespace rocRoller
 
         template <typename Node, typename Edge, bool Hyper>
         template <typename T>
-        requires(std::constructible_from<Node, T>)
-            Generator<int> Hypergraph<Node, Edge, Hyper>::findNodes()
+        requires(std::constructible_from<Node, T> || std::constructible_from<Edge, T>)
+            Generator<int> Hypergraph<Node, Edge, Hyper>::getElements()
         const
         {
-            // elements
             for(auto const& elem : m_elements)
             {
-                // nodes
-                if(getElementType(elem.second) == ElementType::Node)
+                if constexpr(std::same_as<T, Node> || std::same_as<T, Edge>)
                 {
-                    auto const& op = std::get<Node>(elem.second);
-                    if(std::holds_alternative<T>(op))
-                    {
+                    if(std::holds_alternative<T>(elem.second))
                         co_yield elem.first;
+                }
+                else if constexpr(std::constructible_from<Node, T>)
+                {
+                    if(std::holds_alternative<Node>(elem.second))
+                    {
+                        auto const& node = std::get<Node>(elem.second);
+                        if(std::holds_alternative<T>(node))
+                            co_yield elem.first;
+                    }
+                }
+                else if constexpr(std::constructible_from<Edge, T>)
+                {
+                    if(std::holds_alternative<Edge>(elem.second))
+                    {
+                        auto const& edge = std::get<Edge>(elem.second);
+                        if(std::holds_alternative<T>(edge))
+                            co_yield elem.first;
                     }
                 }
             }
+        }
+
+        template <typename Node, typename Edge, bool Hyper>
+        template <typename T>
+        requires(std::constructible_from<Node, T>)
+            Generator<int> Hypergraph<Node, Edge, Hyper>::getNodes()
+        const
+        {
+            co_yield getElements<T>();
+        }
+
+        template <typename Node, typename Edge, bool Hyper>
+        template <typename T>
+        requires(std::constructible_from<Edge, T>)
+            Generator<int> Hypergraph<Node, Edge, Hyper>::getEdges()
+        const
+        {
+            co_yield getElements<T>();
         }
 
         template <typename Node, typename Edge, bool Hyper>

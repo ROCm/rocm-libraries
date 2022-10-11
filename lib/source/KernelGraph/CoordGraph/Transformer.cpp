@@ -212,7 +212,7 @@ namespace rocRoller
         {
             auto const& kernelWorkgroupIndexes = m_context->kernel()->workgroupIndex();
             auto const& kernelWorkitemIndexes  = m_context->kernel()->workitemIndex();
-            for(auto const& tag : m_graph->getDimensionTags())
+            for(auto const& tag : m_graph->getNodes())
             {
                 auto dimension = std::get<Dimension>(m_graph->getElement(tag));
                 if(std::holds_alternative<Workgroup>(dimension))

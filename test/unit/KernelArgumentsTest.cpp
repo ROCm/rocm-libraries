@@ -274,5 +274,6 @@ TEST(KernelArguments, Iterator)
     // Test throws
     testIt.reset();
     EXPECT_EQ(testIt, args.begin());
-    EXPECT_THROW(static_cast<char>(testIt), std::bad_cast);
+    char result;
+    EXPECT_THROW(result = static_cast<char>(testIt), std::bad_cast);
 }

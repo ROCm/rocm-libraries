@@ -187,11 +187,23 @@ namespace rocRoller
 
             std::string toDOT() const;
 
+            template <typename T>
+            requires(std::constructible_from<Node, T> || std::constructible_from<Edge, T>)
+                Generator<int> getElements()
+            const;
+
             /**
              * @brief Yields indices of all Nodes of class T.
              */
-            template <typename T>
-            requires(std::constructible_from<Node, T>) Generator<int> findNodes()
+            template <typename T = Node>
+            requires(std::constructible_from<Node, T>) Generator<int> getNodes()
+            const;
+
+            /**
+             * Return all Edges of class T.
+             */
+            template <typename T = Edge>
+            requires(std::constructible_from<Edge, T>) Generator<int> getEdges()
             const;
 
             /**

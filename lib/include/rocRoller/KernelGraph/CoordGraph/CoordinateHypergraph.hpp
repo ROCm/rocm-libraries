@@ -85,8 +85,6 @@ namespace rocRoller
             {
             }
 
-            std::set<int> getDimensionTags() const;
-
             std::vector<Expression::ExpressionPtr>
                 forward(std::vector<Expression::ExpressionPtr> sdims,
                         std::vector<int> const&                srcs,

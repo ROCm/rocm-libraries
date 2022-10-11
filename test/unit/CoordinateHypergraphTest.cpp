@@ -38,7 +38,7 @@ namespace rocRollerTest
 
         EXPECT_EQ(EdgeType::CoordinateTransform, ct.getEdgeType(flatten_id));
         EXPECT_EQ(EdgeType::None, ct.getEdgeType(x));
-        EXPECT_EQ(ct.getDimensionTags(), std::set<int>({x, y, m}));
+        EXPECT_EQ(ct.getNodes().to<std::set>(), std::set<int>({x, y, m}));
     }
 
     TEST_F(CoordinateHypergraphTest, Basic)
@@ -56,7 +56,7 @@ namespace rocRollerTest
 
         auto flatten_id = ct.addElement(Flatten{}, {x, y}, {m});
 
-        EXPECT_EQ(ct.getDimensionTags(), std::set<int>({x, y, m}));
+        EXPECT_EQ(ct.getNodes().to<std::set>(), std::set<int>({x, y, m}));
 
         auto exprs = ct.forward({x_index, y_index}, {x, y}, {m}, fastArith);
         auto sexpr = Expression::toString(exprs[0]);
@@ -119,7 +119,7 @@ namespace rocRollerTest
         int z = ct.addElement(SubDimension(0, size_z, stride_z));
         int m = ct.addElement(SubDimension(0));
 
-        EXPECT_EQ(ct.getDimensionTags(), std::set<int>({x, y, z, m}));
+        EXPECT_EQ(ct.getNodes().to<std::set>(), std::set<int>({x, y, z, m}));
 
         auto flat = ct.addElement(Flatten(), {x, y, z}, {m});
 
@@ -207,7 +207,7 @@ namespace rocRollerTest
         EXPECT_EQ(sexpr, "Multiply(Add(Multiply(2i, 64j), v0:I), 2j)");
         //EXPECT_EQ(sexpr, "ShiftL(Add(ShiftL(2, 6), v0), 1)");
 
-        EXPECT_EQ(ct.getDimensionTags(), std::set<int>({u, i, wg, wf}));
+        EXPECT_EQ(ct.getNodes().to<std::set>(), std::set<int>({u, i, wg, wf}));
 
         // auto currentEdges = ct.getEdges();
 
@@ -243,7 +243,7 @@ namespace rocRollerTest
         ct.addElement(Split(), {u}, {i});
         ct.addElement(Tile(), {i}, {wg, wf});
 
-        EXPECT_EQ(ct.getDimensionTags(), std::set<int>({u, i, wg, wf}));
+        EXPECT_EQ(ct.getNodes().to<std::set>(), std::set<int>({u, i, wg, wf}));
 
         auto block_index  = std::make_shared<Expression::Expression>(2);
         auto thread_index = std::make_shared<Expression::Expression>(33);
@@ -287,7 +287,7 @@ namespace rocRollerTest
         ct.addElement(Split(), {u}, {i});
         ct.addElement(Tile(), {i}, {wg, wf, unroll});
 
-        EXPECT_EQ(ct.getDimensionTags(), std::set<int>({u, i, wg, wf, unroll}));
+        EXPECT_EQ(ct.getNodes().to<std::set>(), std::set<int>({u, i, wg, wf, unroll}));
 
         auto block_index  = Expression::literal(2);
         auto thread_index = Expression::literal(33);
@@ -337,7 +337,7 @@ namespace rocRollerTest
         ct.addElement(Tile(), {i}, {wg, wf});
         ct.addElement(Tile(), {wf}, {thread, unroll});
 
-        EXPECT_EQ(ct.getDimensionTags(), std::set<int>({u, i, wg, wf, thread, unroll}));
+        EXPECT_EQ(ct.getNodes().to<std::set>(), std::set<int>({u, i, wg, wf, thread, unroll}));
 
         auto block_index  = Expression::literal(2);
         auto thread_index = Expression::literal(33);
@@ -386,32 +386,34 @@ namespace rocRollerTest
         int n = 16;
 
         // A matrix; tag 1; M x K; C-ordering
-        auto A  = ct.addElement(User());
-        auto Ai = ct.addElement(SubDimension(0, M, K));
-        auto Aj = ct.addElement(SubDimension(1, K, unit));
-        ct.addElement(Split(), {A}, {Ai, Aj});
+        auto A   = ct.addElement(User());
+        auto Ai  = ct.addElement(SubDimension(0, M, K));
+        auto Aj  = ct.addElement(SubDimension(1, K, unit));
+        auto sp0 = ct.addElement(Split(), {A}, {Ai, Aj});
 
         // B matrix; tag 2; K x N; C-ordering
-        auto B  = ct.addElement(User());
-        auto Bi = ct.addElement(SubDimension(0, K, N));
-        auto Bj = ct.addElement(SubDimension(1, N, unit));
-        ct.addElement(Split(), {B}, {Bi, Bj});
+        auto B   = ct.addElement(User());
+        auto Bi  = ct.addElement(SubDimension(0, K, N));
+        auto Bj  = ct.addElement(SubDimension(1, N, unit));
+        auto sp1 = ct.addElement(Split(), {B}, {Bi, Bj});
 
         // T tile; tag 3; m x n
         auto T    = MacroTile({m, n}, MemoryType::VGPR);
         auto T_id = ct.addElement(T);
         auto i    = ct.addElement(T.tileIndex(0));
         auto j    = ct.addElement(T.tileIndex(1));
-        ct.addElement(Join(), {i, j}, {T_id});
+        auto join = ct.addElement(Join(), {i, j}, {T_id});
 
         // tile each dimension of A matrix; each workgroup gets one tile
         auto tile_x = ct.addElement(Workgroup(0));
         auto tile_y = ct.addElement(Workgroup(1));
-        ct.addElement(Tile(), {Ai}, {tile_x, i});
-        ct.addElement(Tile(), {Aj}, {tile_y, j});
+        auto t0     = ct.addElement(Tile(), {Ai}, {tile_x, i});
+        auto t1     = ct.addElement(Tile(), {Aj}, {tile_y, j});
 
-        EXPECT_EQ(ct.getDimensionTags(),
+        EXPECT_EQ(ct.getNodes().to<std::set>(),
                   std::set<int>({A, Ai, Aj, B, Bi, Bj, T_id, i, j, tile_x, tile_y}));
+
+        EXPECT_EQ(ct.getEdges().to<std::set>(), std::set<int>({sp0, sp1, join, t0, t1}));
 
         auto tile_x_index = Expression::literal(4);
         auto tile_y_index = Expression::literal(5);
@@ -465,25 +467,35 @@ namespace rocRollerTest
         int n = 16;
 
         // A matrix; tag 1; M x K; C-ordering
-        auto A  = ct.addElement(User());
-        auto Ai = ct.addElement(SubDimension(0, M, K));
-        auto Aj = ct.addElement(SubDimension(1, K, unit));
-        ct.addElement(Split(), {A}, {Ai, Aj});
+        auto A   = ct.addElement(User());
+        auto Ai  = ct.addElement(SubDimension(0, M, K));
+        auto Aj  = ct.addElement(SubDimension(1, K, unit));
+        auto sp0 = ct.addElement(Split(), {A}, {Ai, Aj});
 
         // T tile; tag 3; m x n
         auto T    = MacroTile({m, n}, MemoryType::VGPR);
         auto T_id = ct.addElement(T);
         auto i    = ct.addElement(T.tileIndex(0));
         auto j    = ct.addElement(T.tileIndex(1));
-        ct.addElement(Join(), {i, j}, {T_id});
+        auto join = ct.addElement(Join(), {i, j}, {T_id});
 
         // tile each dimension of A matrix; each workgroup gets one tile
         auto tile_x = ct.addElement(Workgroup(0));
         auto tile_y = ct.addElement(Workgroup(1));
-        ct.addElement(Tile(), {Ai}, {tile_x, i});
-        ct.addElement(Tile(), {Aj}, {tile_y, j});
+        auto t0     = ct.addElement(Tile(), {Ai}, {tile_x, i});
+        auto t1     = ct.addElement(Tile(), {Aj}, {tile_y, j});
 
-        EXPECT_EQ(ct.getDimensionTags(), std::set<int>({A, Ai, Aj, T_id, i, j, tile_x, tile_y}));
+        EXPECT_EQ(ct.getNodes().to<std::set>(), std::set({A, Ai, Aj, T_id, i, j, tile_x, tile_y}));
+
+        EXPECT_EQ(ct.getNodes().to<std::set>(), ct.getElements<Dimension>().to<std::set>());
+
+        EXPECT_EQ(ct.getEdges().to<std::set>(), std::set({sp0, join, t0, t1}));
+
+        // getElements only works on Node, Edge, and direct members of the
+        // Node and Edge variants, not on any sub-variants of Edge. We can't
+        // unfortunately (yet?) filter only Tile edges for example.
+        EXPECT_EQ(ct.getElements<CoordinateTransformEdge>().to<std::set>(),
+                  std::set({sp0, join, t0, t1}));
 
         auto coords = Transformer(std::make_shared<CoordinateHypergraph>(ct));
 
@@ -583,7 +595,7 @@ namespace rocRollerTest
         ct.addElement(Flatten(), {tile_y, j}, {Dj});
         ct.addElement(Join(), {Di, Dj}, {D});
 
-        EXPECT_EQ(ct.getDimensionTags(),
+        EXPECT_EQ(ct.getNodes().to<std::set>(),
                   std::set<int>({A, Ai, Aj, T_id, i, j, tile_x, tile_y, D, Di, Dj}));
 
         auto coords = Transformer(std::make_shared<CoordinateHypergraph>(ct), nullptr);
@@ -678,7 +690,8 @@ namespace rocRollerTest
         ct.addElement(Tile(), {Ai}, {tile_x, i});
         ct.addElement(Tile(), {Aj}, {tile_y, j});
 
-        EXPECT_EQ(ct.getDimensionTags(), std::set<int>({A, Ai, Aj, T_id, i, j, tile_x, tile_y}));
+        EXPECT_EQ(ct.getNodes().to<std::set>(),
+                  std::set<int>({A, Ai, Aj, T_id, i, j, tile_x, tile_y}));
 
         // need preamble so work coords are initialised
         auto k = m_context->kernel();
