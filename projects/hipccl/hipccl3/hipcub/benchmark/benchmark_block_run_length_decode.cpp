@@ -59,7 +59,7 @@ void block_run_length_decode_kernel(
     const unsigned global_thread_idx = BlockSize * hipBlockIdx_x + hipThreadIdx_x;
     hipcub::LoadDirectBlocked(global_thread_idx, d_run_items, run_items);
     hipcub::LoadDirectBlocked(global_thread_idx, d_run_offsets, run_offsets);
-    
+
     BlockRunLengthDecodeT block_run_length_decode(
         run_items,
         run_offsets
@@ -186,7 +186,7 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
 
 #define CREATE_BENCHMARK(IT, OT, MINRL, MAXRL, BS, RPT, DIPT) \
     benchmark::RegisterBenchmark( \
-        "block_run_length_decode<"#IT", "#OT", "#MINRL", "#MAXRL", "#BS", "#RPT", "#DIPT">", \
+        "block_run_length_decode<Item Type:"#IT",Offset Type:"#OT",Min RunLength:"#MINRL",Max RunLength:"#MAXRL",BlockSize: "#BS",Runs Per Thread:"#RPT",Decoded Items Per Thread:"#DIPT">", \
         &run_benchmark<IT, OT, MINRL, MAXRL, BS, RPT, DIPT>, \
         stream, size \
     )
@@ -202,6 +202,8 @@ int main(int argc, char *argv[])
     benchmark::Initialize(&argc, argv);
     const size_t size = parser.get<size_t>("size");
     const int trials = parser.get<int>("trials");
+
+    std::cout << "benchmark_block_run_length_decode" << std::endl;
 
     // HIP
     hipStream_t stream = 0; // default

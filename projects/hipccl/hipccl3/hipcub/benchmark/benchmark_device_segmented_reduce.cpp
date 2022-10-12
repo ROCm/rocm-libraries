@@ -188,8 +188,8 @@ struct Benchmark<T, hipcub::ArgMin> {
 
 #define CREATE_BENCHMARK(T, SEGMENTS, REDUCE_OP) \
 benchmark::RegisterBenchmark( \
-    (std::string("segmented_reduce") + "<" #T ", " #REDUCE_OP ">" + \
-        "(~" + std::to_string(SEGMENTS) + " segments)" \
+    (std::string("segmented_reduce") + "<Datatype:" #T ", ReduceOp:" #REDUCE_OP ">" + \
+        "(Number of segments:~" + std::to_string(SEGMENTS) + " segments)" \
     ).c_str(), \
     &Benchmark<T, REDUCE_OP>::run, \
     SEGMENTS, stream, size \
@@ -240,6 +240,8 @@ int main(int argc, char *argv[])
     benchmark::Initialize(&argc, argv);
     const size_t size = parser.get<size_t>("size");
     const int trials = parser.get<int>("trials");
+
+    std::cout << "benchmark_device_segmented_reduce" << std::endl;
 
     // HIP
     hipStream_t stream = 0; // default
