@@ -240,7 +240,7 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
 
 #define CREATE_BENCHMARK(T, BS, IPT, WITH_TILE) \
 benchmark::RegisterBenchmark( \
-    (std::string("block_discontinuity<" #T ", " #BS ">.") + name + ("<" #IPT ", " #WITH_TILE ">")).c_str(), \
+    (std::string("block_discontinuity<Datatype:" #T ",Block Size:" #BS ">.SubAlgorithm Name:") + name + ("<Items Per Thread:" #IPT ",With Tile:" #WITH_TILE ">")).c_str(), \
     &run_benchmark<Benchmark, T, BS, IPT, WITH_TILE>, \
     stream, size \
 )
@@ -285,6 +285,8 @@ int main(int argc, char *argv[])
     benchmark::Initialize(&argc, argv);
     const size_t size = parser.get<size_t>("size");
     const int trials = parser.get<int>("trials");
+
+    std::cout << "benchmark_block_discontinuity" << std::endl;
 
     // HIP
     hipStream_t stream = 0; // default

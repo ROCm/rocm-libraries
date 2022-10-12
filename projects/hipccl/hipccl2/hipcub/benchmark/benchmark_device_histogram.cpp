@@ -394,7 +394,7 @@ void run_multi_range_benchmark(benchmark::State& state, size_t bins, hipStream_t
     const int num_levels_channel = bins + 1;
     int num_levels[ActiveChannels];
     std::vector<T> levels[ActiveChannels];
-    for (unsigned int channel = 0; channel < ActiveChannels; channel++) 
+    for (unsigned int channel = 0; channel < ActiveChannels; channel++)
     {
         levels[channel].resize(num_levels_channel);
         std::iota(levels[channel].begin(), levels[channel].end(), static_cast<T>(0));
@@ -513,8 +513,8 @@ struct num_limits<__half>
     if(num_limits<T>::max() > BINS * SCALE)                                                    \
     {                                                                                          \
         VECTOR.push_back(benchmark::RegisterBenchmark(                                         \
-            (std::string("histogram_even") + "<" #T ">" + "("                                  \
-             + std::to_string(get_entropy_percents(entropy_reduction)) + "% entropy, "         \
+            (std::string("histogram_even") + "<Datatype:" #T ">" + "(Entropy Percent:"         \
+             + std::to_string(get_entropy_percents(entropy_reduction)) + "%,Bin Count:"        \
              + std::to_string(BINS) + " bins)")                                                \
                 .c_str(),                                                                      \
             [=](benchmark::State& state)                                                       \
@@ -550,8 +550,8 @@ void add_even_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmark
 
 #define CREATE_MULTI_EVEN_BENCHMARK(CHANNELS, ACTIVE_CHANNELS, T, BINS, SCALE) \
 benchmark::RegisterBenchmark( \
-    (std::string("multi_histogram_even") + "<" #CHANNELS ", " #ACTIVE_CHANNELS ", " #T ">" + \
-        "(" + std::to_string(get_entropy_percents(entropy_reduction)) + "% entropy, " + \
+    (std::string("multi_histogram_even") + "<Channels:" #CHANNELS ",Active Channels:" #ACTIVE_CHANNELS ",Datatype:" #T ">" + \
+        "(Entropy Percent:" + std::to_string(get_entropy_percents(entropy_reduction)) + "%,Bin Count:" + \
         std::to_string(BINS) + " bins)" \
     ).c_str(), \
     [=](benchmark::State& state) { \
@@ -585,8 +585,8 @@ void add_multi_even_benchmarks(std::vector<benchmark::internal::Benchmark*>& ben
 
 #define CREATE_RANGE_BENCHMARK(T, BINS) \
 benchmark::RegisterBenchmark( \
-    (std::string("histogram_range") + "<" #T ">" + \
-        "(" + std::to_string(BINS) + " bins)" \
+    (std::string("histogram_range") + "<Datatype:" #T ">" + \
+        "(Bin Count:" + std::to_string(BINS) + " bins)" \
     ).c_str(), \
     [=](benchmark::State& state) { run_range_benchmark<T>(state, BINS, stream, size); } \
 )
@@ -644,6 +644,8 @@ int main(int argc, char *argv[])
     benchmark::Initialize(&argc, argv);
     const size_t size = parser.get<size_t>("size");
     const int trials = parser.get<int>("trials");
+
+    std::cout << "benchmark_device_histogram" << std::endl;
 
     // HIP
     hipStream_t stream = 0; // default

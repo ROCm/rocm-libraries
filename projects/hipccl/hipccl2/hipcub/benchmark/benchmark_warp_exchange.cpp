@@ -63,7 +63,7 @@ void warp_exchange_kernel(T* d_output)
         ItemsPerThread,
         ::benchmark_utils::DeviceSelectWarpSize<LogicalWarpSize>::value
     >{}(warp_exchange, thread_data);
-    
+
     #pragma unroll
     for (unsigned i = 0; i < ItemsPerThread; ++i)
     {
@@ -101,7 +101,7 @@ void warp_exchange_scatter_to_striped_kernel(T* d_output)
     >;
     constexpr unsigned warps_in_block = BlockSize / LogicalWarpSize;
     __shared__ typename WarpExchangeT::TempStorage temp_storage[warps_in_block];
-    
+
     WarpExchangeT(temp_storage[warp_id]).ScatterToStriped(thread_data, thread_ranks);
 
     #pragma unroll
@@ -132,7 +132,7 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
     for (auto _ : state)
     {
         auto start = std::chrono::high_resolution_clock::now();
-        
+
         for (size_t i = 0; i < trials; ++i)
         {
             hipLaunchKernelGGL(
@@ -147,7 +147,7 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
                 dim3(size / items_per_block), dim3(BlockSize), 0, stream, d_output
             );
         }
-        
+
         HIP_CHECK(hipPeekAtLastError())
         HIP_CHECK(hipDeviceSynchronize());
         auto end = std::chrono::high_resolution_clock::now();
@@ -180,7 +180,7 @@ void run_benchmark_scatter_to_striped(benchmark::State& state, hipStream_t strea
     for (auto _ : state)
     {
         auto start = std::chrono::high_resolution_clock::now();
-        
+
         for (size_t i = 0; i < trials; ++i)
         {
             hipLaunchKernelGGL(
@@ -193,9 +193,9 @@ void run_benchmark_scatter_to_striped(benchmark::State& state, hipStream_t strea
                     >
                 ),
                 dim3(size / items_per_block), dim3(BlockSize), 0, stream, d_output
-            );   
+            );
         }
-        
+
         HIP_CHECK(hipPeekAtLastError())
         HIP_CHECK(hipDeviceSynchronize());
         auto end = std::chrono::high_resolution_clock::now();
@@ -243,14 +243,14 @@ struct BlockedToStripedOp
 
 #define CREATE_BENCHMARK_STRIPED_TO_BLOCKED(T, BS, IT, WS) \
 benchmark::RegisterBenchmark( \
-    "warp_exchange_striped_to_blocked<" #T ", " #BS ", " #IT ", " #WS ">.", \
+    "warp_exchange_striped_to_blocked<Datatype:" #T ",Block Size:" #BS ",Items Per Thread:" #IT ",Warp Size:" #WS ">.", \
     &run_benchmark<T, BS, IT, WS, StripedToBlockedOp>, \
     stream, size \
 )
 
 #define CREATE_BENCHMARK_BLOCKED_TO_STRIPED(T, BS, IT, WS) \
 benchmark::RegisterBenchmark( \
-    "warp_exchange_blocked_to_striped<" #T ", " #BS ", " #IT ", " #WS ">.", \
+    "warp_exchange_blocked_to_striped<Datatype:" #T ",Block Size:" #BS ",Items Per Thread:" #IT ",Warp Size:" #WS ">.", \
     &run_benchmark<T, BS, IT, WS, BlockedToStripedOp>, \
     stream, size \
 )
@@ -258,7 +258,7 @@ benchmark::RegisterBenchmark( \
 
 #define CREATE_BENCHMARK_SCATTER_TO_STRIPED(T, OFFSET_T, BS, IT, WS) \
 benchmark::RegisterBenchmark( \
-    "warp_exchange_scatter_to_striped<" #T ", " #OFFSET_T ", " #BS ", " #IT ", " #WS ">.", \
+    "warp_exchange_scatter_to_striped<Datatype:" #T ",Offset Type:" #OFFSET_T ",Block Size:" #BS ",Items Per Thread:" #IT ",Warp Size:" #WS ">.", \
     &run_benchmark_scatter_to_striped<T, OFFSET_T, BS, IT, WS>, \
     stream, size \
 )
@@ -274,6 +274,8 @@ int main(int argc, char *argv[])
     benchmark::Initialize(&argc, argv);
     const size_t size = parser.get<size_t>("size");
     const int trials = parser.get<int>("trials");
+
+    std::cout << "benchmark_warp_exchange" << std::endl;
 
     // HIP
     hipStream_t stream = 0; // default

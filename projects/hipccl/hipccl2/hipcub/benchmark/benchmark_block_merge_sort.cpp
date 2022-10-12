@@ -179,7 +179,7 @@ void run_benchmark(benchmark::State& state, benchmark_kinds benchmark_kind, hipS
 
 #define CREATE_BENCHMARK(T, BS, IPT) \
 benchmark::RegisterBenchmark( \
-    (std::string("block_merge_sort<" #T ", " #BS ", " #IPT ">.") + name).c_str(), \
+    (std::string("block_merge_sort<Datatype:" #T ",Block Size:" #BS ",Items Per Thread:" #IPT ">.SubAlgorithm Name:") + name).c_str(), \
     &run_benchmark<T, BS, IPT>, \
     benchmark_kind, stream, size \
 )
@@ -234,6 +234,8 @@ int main(int argc, char *argv[])
     benchmark::Initialize(&argc, argv);
     const size_t size = parser.get<size_t>("size");
     const int trials = parser.get<int>("trials");
+
+    std::cout << "benchmark_block_merge_sort" << std::endl;
 
     // HIP
     hipStream_t stream = 0; // default
