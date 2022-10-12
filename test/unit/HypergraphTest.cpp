@@ -19,6 +19,10 @@ namespace rocRollerTest
         {
             return "TestForLoop";
         }
+        friend std::ostream& operator<<(std::ostream& os, const TestForLoop& tfl)
+        {
+            return os << tfl.toString();
+        }
     };
 
     struct TestSubDimension
@@ -27,12 +31,20 @@ namespace rocRollerTest
         {
             return "TestSubDimension";
         }
+        friend std::ostream& operator<<(std::ostream& os, const TestSubDimension& tsd)
+        {
+            return os << tsd.toString();
+        }
     };
     struct TestUser
     {
         std::string toString() const
         {
             return "TestUser";
+        }
+        friend std::ostream& operator<<(std::ostream& os, const TestUser& tu)
+        {
+            return os << tu.toString();
         }
     };
     struct TestVGPR
@@ -41,9 +53,18 @@ namespace rocRollerTest
         {
             return "TestVGPR";
         }
+        friend std::ostream& operator<<(std::ostream& os, const TestVGPR& tv)
+        {
+            return os << tv.toString();
+        }
     };
 
     using TestDimension = std::variant<TestForLoop, TestSubDimension, TestUser, TestVGPR>;
+
+    std::string toString(TestDimension const& t)
+    {
+        return std::visit([](const auto& a) { return a.toString(); }, t);
+    }
 
     template <typename T>
     requires(!std::same_as<TestDimension,
@@ -60,6 +81,10 @@ namespace rocRollerTest
         {
             return "TestForget";
         }
+        friend std::ostream& operator<<(std::ostream& os, const TestForget& tf)
+        {
+            return os << tf.toString();
+        }
     };
     struct TestSplit
     {
@@ -67,9 +92,18 @@ namespace rocRollerTest
         {
             return "TestSplit";
         }
+        friend std::ostream& operator<<(std::ostream& os, const TestSplit& ts)
+        {
+            return os << ts.toString();
+        }
     };
 
     using TestTransform = std::variant<TestForget, TestSplit>;
+
+    std::string toString(TestTransform const& t)
+    {
+        return std::visit([](const auto& a) { return a.toString(); }, t);
+    }
 
     template <typename T>
     requires(!std::same_as<TestTransform,

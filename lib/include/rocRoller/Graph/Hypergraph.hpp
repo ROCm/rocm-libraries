@@ -185,7 +185,7 @@ namespace rocRoller
             template <Direction Dir>
             Generator<int> getNeighbours(int const element) const;
 
-            std::string toDOT() const;
+            std::string toDOT(std::string prefix = "", bool standalone = true) const;
 
             template <typename T>
             requires(std::constructible_from<Node, T> || std::constructible_from<Edge, T>)
@@ -221,12 +221,6 @@ namespace rocRoller
             requires(std::constructible_from<Edge, T>) Generator<int> getOutputNodeIndices(
                 int const src)
             const;
-
-            template <typename T>
-            inline std::string toString(Element const& elem) const
-            {
-                return std::visit([](const auto& a) { return a.toString(); }, std::get<T>(elem));
-            }
 
         private:
             int m_nextIndex = 1;

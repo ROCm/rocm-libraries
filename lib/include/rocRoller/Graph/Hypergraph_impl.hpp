@@ -495,26 +495,34 @@ namespace rocRoller
         }
 
         template <typename Node, typename Edge, bool Hyper>
-        std::string Hypergraph<Node, Edge, Hyper>::toDOT() const
+        std::string Hypergraph<Node, Edge, Hyper>::toDOT(std::string prefix, bool standalone) const
         {
             std::ostringstream msg;
 
-            msg << "digraph {" << std::endl;
+            if(standalone)
+                msg << "digraph {" << std::endl;
 
             for(auto const& pair : m_elements)
             {
-                msg << '"' << pair.first << '"' << "[label=\"";
+                msg << '"' << prefix << pair.first << '"' << "[label=\"";
                 if(getElementType(pair.second) == ElementType::Node)
-                    msg << toString<Node>(pair.second) << "(" << pair.first << ")\"";
+                {
+                    auto x = std::get<Node>(pair.second);
+                    msg << toString(x) << "(" << pair.first << ")\"";
+                }
                 else
-                    msg << toString<Edge>(pair.second) << "(" << pair.first << ")\",shape=box";
+                {
+                    auto x = std::get<Edge>(pair.second);
+                    msg << toString(x) << "(" << pair.first << ")\",shape=box";
+                }
                 msg << "];" << std::endl;
             }
 
             auto const& container = m_incidence.template get<BySrc>();
             for(auto const& incident : container)
             {
-                msg << '"' << incident.src << "\" -> \"" << incident.dst << '"' << std::endl;
+                msg << '"' << prefix << incident.src << "\" -> \"" << prefix << incident.dst << '"'
+                    << std::endl;
             }
 
             // Enforce left-to-right ordering for elements connected to an edge.
@@ -533,7 +541,7 @@ namespace rocRoller
                     {
                         if(!first)
                             msg << "->";
-                        msg << '"' << idx << '"';
+                        msg << '"' << prefix << idx << '"';
                         first = false;
                     }
                     msg << "[style=invis]\nrankdir=LR\n}\n";
@@ -554,7 +562,8 @@ namespace rocRoller
                 }
             }
 
-            msg << "}" << std::endl;
+            if(standalone)
+                msg << "}" << std::endl;
 
             return msg.str();
         }

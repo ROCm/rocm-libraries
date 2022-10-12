@@ -255,6 +255,7 @@ set(rocroller_src
  lib/source/KernelGraph/Transformations/LowerTile.cpp
  lib/source/KernelGraph/Transformations/UpdateParameters.cpp
  lib/source/KernelGraph/KernelGraph.cpp
+ lib/source/KernelGraph/KernelHypergraph.cpp
  lib/source/KernelGraph/LowerFromCommand.cpp
  lib/source/KernelGraph/TagType.cpp
  lib/source/KernelGraph/Utils.cpp
@@ -399,6 +400,7 @@ set(
   test/unit/InstructionTest.cpp
   test/unit/KernelArgumentsTest.cpp
   test/unit/KernelGraphTest.cpp
+  test/unit/KernelHypergraphTest.cpp
   test/unit/KernelIndexTest.cpp
   test/unit/KernelOptionsTest.cpp
   test/unit/KernelTest.cpp
