@@ -148,7 +148,7 @@ def load_machine_specs(path):
         return MachineSpecs()
 
 
-def get_machine_specs(devicenum):
+def get_machine_specs(devicenum, rocm_smi_path="rocm-smi"):
 
     cpuinfo = path("/proc/cpuinfo").read_text()
     meminfo = path("/proc/meminfo").read_text()
@@ -161,11 +161,11 @@ def get_machine_specs(devicenum):
     else:
         rocm_info = "rocm info not available"
 
-    rocm_smi_found = shutil.which("rocm-smi") != None
+    rocm_smi_found = shutil.which(rocm_smi_path) != None
     if rocm_smi_found:
         rocm_smi = run(
             [
-                "rocm-smi",
+                rocm_smi_path,
                 "--showvbios",
                 "--showid",
                 "--showproductname",

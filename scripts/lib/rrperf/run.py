@@ -72,11 +72,14 @@ def build_directory():
     raise RuntimeError(f"Build directory not found.  Set {varname} to override.")
 
 
-def run(token=None, suite=None, submit=False, filter=None, working_dir=None, **kwargs):
+def run(token=None, suite=None, submit=False, filter=None, working_dir=None, rocm_smi="rocm-smi", pin_clocks=False, **kwargs):
     """Run benchmarks!
 
     Implements the CLI 'run' subcommand.
     """
+
+    if pin_clocks:
+        rrperf.rocm_control.pin_clocks(rocm_smi)
 
     if suite is None and token is None:
         suite = "all"
@@ -103,7 +106,7 @@ def run(token=None, suite=None, submit=False, filter=None, working_dir=None, **k
     git_commit.write_text(rrperf.git.full_hash(top) + "\n")
     # pts.create_specs_info(str(wrkdir / "machine-specs.txt"))
     machine_specs = wrkdir / "machine-specs.txt"
-    machine_specs.write_text(str(rrperf.specs.get_machine_specs(0)) + "\n")
+    machine_specs.write_text(str(rrperf.specs.get_machine_specs(0, rocm_smi)) + "\n")
 
     timestamp = wrkdir / "timestamp.txt"
     timestamp.write_text(str(datetime.datetime.now().timestamp()) + "\n")

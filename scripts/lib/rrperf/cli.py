@@ -22,6 +22,8 @@ def main():
     )
     run_cmd.add_argument("--token", help="Benchmark token to run.")
     run_cmd.add_argument("--filter", help="Filter benchmarks...")
+    run_cmd.add_argument("--rocm_smi", default="rocm-smi", help="Location of rocm-smi.")
+    run_cmd.add_argument("--pin_clocks", action="store_true", help="Pin clocks before launching benchmark clients.")
 
     compare_cmd = subparsers.add_parser("compare")
     compare_cmd.add_argument(

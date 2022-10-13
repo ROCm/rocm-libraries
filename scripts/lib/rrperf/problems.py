@@ -74,7 +74,7 @@ class GEMMRun(GEMM):
         self.output = path
 
     def command(self):
-        return [
+        retval = [
             "client/gemm",
             "--M=" + str(self.M),
             "--N=" + str(self.N),
@@ -94,6 +94,8 @@ class GEMMRun(GEMM):
             "--num_outer=" + str(self.numOuter),
             "--num_inner=" + str(self.numInner),
         ]
+        print(" ".join(retval))
+        return retval
 
 
 @dataclass(frozen=True)

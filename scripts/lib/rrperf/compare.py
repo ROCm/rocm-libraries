@@ -89,7 +89,12 @@ class PerformanceRun:
                     result = rrperf.problems.load_results(path)
                 except Exception as e:
                     print('Error loading results in "{}": {}'.format(path, e))
-                results[result[0].token] = result[0]
+                for element in result:
+                    if element.token in results:
+                        #TODO: Handle result files that have multiple results in a single yaml file.
+                        results[element.token] = element
+                    else:
+                        results[element.token] = element
             spec = rrperf.specs.load_machine_specs(wrkdir / "machine-specs.txt")
             timestamp = PerformanceRun.get_timestamp(wrkdir)
             perf_runs.append(PerformanceRun(timestamp, directory, spec, results))
@@ -134,12 +139,7 @@ def summary_statistics(perf_runs):
     return stats
 
 
-def markdown_summary(md, perf_runs):
-    """Create Markdown report of summary statistics."""
-
-    summary = summary_statistics(perf_runs)
-
-    header = [
+header = [
         "Problem",
         "Run A (ref)",
         "Run B",
@@ -149,6 +149,12 @@ def markdown_summary(md, perf_runs):
         "Median B",
         "Moods p-val",
     ]
+
+def markdown_summary(md, perf_runs):
+    """Create Markdown report of summary statistics."""
+
+    summary = summary_statistics(perf_runs)
+
     print(" | ".join(header), file=md)
     print(" | ".join(["---"] * len(header)), file=md)
 
@@ -175,16 +181,6 @@ def html_overview_table(html_file, summary):
 
     print("<table><tr><td>", file=html_file)
 
-    header = [
-        "Problem",
-        "Run A (ref)",
-        "Run B",
-        "Mean A",
-        "Mean B",
-        "Median A",
-        "Median B",
-        "Moods p-val",
-    ]
     print("</td><td> ".join(header), file=html_file)
     print("</td></tr>", file=html_file)
 
@@ -226,6 +222,7 @@ def html_summary(html_file, perf_runs):
 
     from plotly import graph_objs as go
     from plotly.subplots import make_subplots
+    from scipy import stats
 
     perf_runs.sort()
     summary = summary_statistics(perf_runs[-2:])
@@ -246,7 +243,7 @@ def html_summary(html_file, perf_runs):
             vertical_spacing=0.06,
             specs=[[{"type": "box"}], [{"type": "table"}]],
         )
-        means = []
+        medians = []
         xs = []
         runs = []
         names = []
@@ -258,14 +255,20 @@ def html_summary(html_file, perf_runs):
                     + str(configs.index(run.machine_spec))
                 )
                 A = run.results[token]
-                ka = np.asarray(A.kernelExecute)
+                ka = np.asarray(A.kernelExecute) / A.numInner
                 runs.append(ka)
-                plot.add_trace(go.Box(x0=name, y=ka, name=name), row=1, col=1)
+                median = statistics.median(ka)
+                no_outliers = ka
+                count = 1
+                while no_outliers.size != count:
+                    count = no_outliers.size
+                    no_outliers = no_outliers[(np.abs(stats.zscore(no_outliers)) < 2)]
+                plot.add_trace(go.Box(x0=name, y=no_outliers, name=name, boxpoints=False), row=1, col=1)
                 xs.append(name)
-                means.append(statistics.mean(ka))
+                medians.append(median)
                 names.append(name)
 
-        plot.add_trace(go.Scatter(x=xs, y=means, name="Mean"))
+        plot.add_trace(go.Scatter(x=xs, y=medians, name="Median"))
 
         table = go.Table(
             header=dict(
