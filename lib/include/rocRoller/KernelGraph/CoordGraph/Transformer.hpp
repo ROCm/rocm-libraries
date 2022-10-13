@@ -57,20 +57,14 @@ namespace rocRoller
             /**
              * Forward incremental coordinate transform.
              */
-            std::vector<Expression::ExpressionPtr> forwardStride(int,
-                                                                 Expression::ExpressionPtr,
-                                                                 std::vector<int> const&,
-                                                                 Expression::ExpressionTransducer
-                                                                 = nullptr) const;
+            std::vector<Expression::ExpressionPtr>
+                forwardStride(int, Expression::ExpressionPtr, std::vector<int> const&) const;
 
             /**
              * Reverse incremental coordinate transform.
              */
-            std::vector<Expression::ExpressionPtr> reverseStride(int,
-                                                                 Expression::ExpressionPtr,
-                                                                 std::vector<int> const&,
-                                                                 Expression::ExpressionTransducer
-                                                                 = nullptr) const;
+            std::vector<Expression::ExpressionPtr>
+                reverseStride(int, Expression::ExpressionPtr, std::vector<int> const&) const;
 
             /**
              * Implicitly set indexes for all Workgroup and Workitem dimensions in the graph.
@@ -79,10 +73,8 @@ namespace rocRoller
 
         private:
             template <typename Visitor>
-            std::vector<Expression::ExpressionPtr> stride(std::vector<int> const&,
-                                                          bool     forward,
-                                                          Visitor& visitor,
-                                                          Expression::ExpressionTransducer) const;
+            std::vector<Expression::ExpressionPtr>
+                stride(std::vector<int> const&, bool forward, Visitor& visitor) const;
 
             std::map<int, Expression::ExpressionPtr> m_indexes;
             std::shared_ptr<CoordinateHypergraph>    m_graph;

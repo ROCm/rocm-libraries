@@ -45,8 +45,8 @@ namespace rocRoller
 
         // Method to generate instructions
         Generator<Instruction> generate(std::shared_ptr<Register::Value> dest,
-                                        std::shared_ptr<Register::Value> value,
-                                        std::shared_ptr<Register::Value> shiftAmount);
+                                        std::shared_ptr<Register::Value> lhs,
+                                        std::shared_ptr<Register::Value> rhs);
 
         static const std::string Name;
         static const std::string Basename;

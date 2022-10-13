@@ -29,6 +29,7 @@ namespace rocRoller
 
     Expression::ExpressionPtr Register::Value::expression()
     {
+        AssertFatal(this, "Null expression accessed");
         return std::make_shared<Expression::Expression>(shared_from_this());
     }
 }

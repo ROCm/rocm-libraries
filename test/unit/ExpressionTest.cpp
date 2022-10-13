@@ -101,7 +101,6 @@ namespace ExpressionTest
 
         auto deserialized = Expression::fromYAML(yamlText);
         ASSERT_NE(nullptr, deserialized.get()) << yamlText << toString(expr);
-        std::cout << yamlText << std::endl;
 
         EXPECT_EQ(Expression::toString(deserialized), Expression::toString(expr));
         EXPECT_EQ(true, Expression::identical(deserialized, expr));

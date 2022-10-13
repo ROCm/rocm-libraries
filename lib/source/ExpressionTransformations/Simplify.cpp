@@ -77,6 +77,111 @@ namespace rocRoller
             }
         };
 
+        struct SimplifyShiftLByConstant
+        {
+            ExpressionPtr m_lhs;
+
+            template <typename LHS, typename RHS>
+            requires(CIntegral<LHS>&& CIntegral<RHS>) ExpressionPtr operator()(LHS lhs, RHS rhs)
+            {
+                return literal(lhs << rhs);
+            }
+
+            template <typename LHS, typename RHS>
+            requires(CIntegral<LHS> && !CIntegral<RHS>) ExpressionPtr operator()(LHS lhs, RHS rhs)
+            {
+                return nullptr;
+            }
+
+            template <typename LHS, typename RHS>
+            requires(!CIntegral<LHS> && CIntegral<RHS>) ExpressionPtr operator()(LHS lhs, RHS rhs)
+            {
+                if(rhs == 0)
+                    return literal(lhs);
+                return nullptr;
+            }
+
+            template <typename LHS, typename RHS>
+            requires(!CIntegral<LHS> && !CIntegral<RHS>) ExpressionPtr operator()(LHS lhs, RHS rhs)
+            {
+                return nullptr;
+            }
+
+            template <typename RHS>
+            requires(CIntegral<RHS>) ExpressionPtr operator()(RHS rhs)
+            {
+                if(rhs == 0)
+                    return m_lhs;
+                return nullptr;
+            }
+
+            template <typename RHS>
+            requires(!CIntegral<RHS>) ExpressionPtr operator()(RHS rhs)
+            {
+                return nullptr;
+            }
+
+            ExpressionPtr operator()(ExpressionPtr lhs, CommandArgumentValue rhs)
+            {
+                m_lhs = lhs;
+                return visit(*this, rhs);
+            }
+        };
+
+        struct SimplifyBitwiseAnd
+        {
+            ExpressionPtr m_lhs;
+
+            template <typename LHS, typename RHS>
+            requires(CIntegral<LHS>&& CIntegral<RHS>) ExpressionPtr operator()(LHS lhs, RHS rhs)
+            {
+                return literal(lhs & rhs);
+            }
+
+            template <typename LHS, typename RHS>
+            requires(CIntegral<LHS> && !CIntegral<RHS> && !CBinary<RHS>) ExpressionPtr
+                operator()(LHS lhs, RHS rhs)
+            {
+                if(lhs == 0)
+                {
+                    return literal(0);
+                }
+                return nullptr;
+            }
+
+            template <typename LHS, typename RHS>
+            requires(!CIntegral<LHS> && CIntegral<RHS>) ExpressionPtr operator()(LHS lhs, RHS rhs)
+            {
+                return (*this)(rhs, lhs);
+            }
+
+            template <typename LHS, typename RHS>
+            requires(!CIntegral<LHS> && !CIntegral<RHS>) ExpressionPtr operator()(LHS lhs, RHS rhs)
+            {
+                return nullptr;
+            }
+
+            template <typename RHS>
+            requires(CIntegral<RHS>) ExpressionPtr operator()(RHS rhs)
+            {
+                if(rhs == 0)
+                    return literal(0);
+                return nullptr;
+            }
+
+            template <typename RHS>
+            requires(!CIntegral<RHS>) ExpressionPtr operator()(RHS rhs)
+            {
+                return nullptr;
+            }
+
+            ExpressionPtr operator()(ExpressionPtr lhs, CommandArgumentValue rhs)
+            {
+                m_lhs = lhs;
+                return visit(*this, rhs);
+            }
+        };
+
         struct SimplifyMultiplicationByConstant
         {
             ExpressionPtr m_lhs;
@@ -238,6 +343,27 @@ namespace rocRoller
                 return std::make_shared<Expression>(Add({lhs, rhs}));
             }
 
+            ExpressionPtr operator()(ShiftL const& expr) const
+            {
+                auto lhs = (*this)(expr.lhs);
+                auto rhs = (*this)(expr.rhs);
+
+                bool eval_lhs = evaluationTimes(lhs)[EvaluationTime::Translate];
+                bool eval_rhs = evaluationTimes(rhs)[EvaluationTime::Translate];
+
+                auto simplifier = SimplifyShiftLByConstant();
+
+                ExpressionPtr rv;
+                if(eval_lhs && eval_rhs)
+                    rv = std::visit(simplifier, evaluate(lhs), evaluate(rhs));
+                else if(eval_rhs)
+                    rv = simplifier(lhs, evaluate(rhs));
+                if(rv != nullptr)
+                    return rv;
+
+                return std::make_shared<Expression>(ShiftL({lhs, rhs}));
+            }
+
             ExpressionPtr operator()(Multiply const& expr) const
             {
                 auto lhs = (*this)(expr.lhs);
@@ -302,6 +428,29 @@ namespace rocRoller
             ExpressionPtr operator()(MatrixMultiply const& expr) const
             {
                 return std::make_shared<Expression>(MatrixMultiply(expr));
+            }
+
+            ExpressionPtr operator()(BitwiseAnd const& expr) const
+            {
+                auto lhs = (*this)(expr.lhs);
+                auto rhs = (*this)(expr.rhs);
+
+                bool eval_lhs = evaluationTimes(lhs)[EvaluationTime::Translate];
+                bool eval_rhs = evaluationTimes(rhs)[EvaluationTime::Translate];
+
+                auto simplifier = SimplifyBitwiseAnd();
+
+                ExpressionPtr rv;
+                if(eval_lhs && eval_rhs)
+                    rv = std::visit(simplifier, evaluate(lhs), evaluate(rhs));
+                else if(eval_lhs)
+                    rv = simplifier(rhs, evaluate(lhs));
+                else if(eval_rhs)
+                    rv = simplifier(lhs, evaluate(rhs));
+                if(rv != nullptr)
+                    return rv;
+
+                return std::make_shared<Expression>(BitwiseAnd({lhs, rhs}));
             }
 
             template <CValue Value>

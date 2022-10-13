@@ -212,7 +212,7 @@ namespace rocRoller
                 forward(std::vector<Expression::ExpressionPtr> const& indexes,
                         std::vector<Dimension> const&                 srcs,
                         std::vector<Dimension> const&                 dsts,
-                        Expression::ExpressionTransducer              transducer = nullptr) const;
+                        Expression::ExpressionTransducer              transducer) const;
 
             /**
              * Reverse (top-down) coordinate transform.
@@ -225,7 +225,7 @@ namespace rocRoller
                 reverse(std::vector<Expression::ExpressionPtr> const& indexes,
                         std::vector<Dimension> const&                 srcs,
                         std::vector<Dimension> const&                 dsts,
-                        Expression::ExpressionTransducer              transducer = nullptr) const;
+                        Expression::ExpressionTransducer              transducer) const;
 
             template <typename Visitor>
             std::vector<Expression::ExpressionPtr>
@@ -234,7 +234,7 @@ namespace rocRoller
                          std::vector<Dimension> const&                 dsts,
                          bool                                          forward,
                          Visitor&                                      visitor,
-                         Expression::ExpressionTransducer              transducer = nullptr) const;
+                         Expression::ExpressionTransducer              transducer) const;
             /**
              * Return string representation of graph.
              *

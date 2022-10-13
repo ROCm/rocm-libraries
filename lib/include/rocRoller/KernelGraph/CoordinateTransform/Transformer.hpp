@@ -57,20 +57,14 @@ namespace rocRoller
             /**
              * Forward incremental coordinate transform.
              */
-            std::vector<Expression::ExpressionPtr> forwardStride(Dimension const&,
-                                                                 Expression::ExpressionPtr,
-                                                                 std::vector<Dimension> const&,
-                                                                 Expression::ExpressionTransducer
-                                                                 = nullptr) const;
+            std::vector<Expression::ExpressionPtr> forwardStride(
+                Dimension const&, Expression::ExpressionPtr, std::vector<Dimension> const&) const;
 
             /**
              * Reverse incremental coordinate transform.
              */
-            std::vector<Expression::ExpressionPtr> reverseStride(Dimension const&,
-                                                                 Expression::ExpressionPtr,
-                                                                 std::vector<Dimension> const&,
-                                                                 Expression::ExpressionTransducer
-                                                                 = nullptr) const;
+            std::vector<Expression::ExpressionPtr> reverseStride(
+                Dimension const&, Expression::ExpressionPtr, std::vector<Dimension> const&) const;
 
             /**
              * Implicitly set indexes for all Workgroup and Workitem dimensions in the graph.
@@ -79,10 +73,8 @@ namespace rocRoller
 
         private:
             template <typename Visitor>
-            std::vector<Expression::ExpressionPtr> stride(std::vector<Dimension> const&,
-                                                          bool     forward,
-                                                          Visitor& visitor,
-                                                          Expression::ExpressionTransducer) const;
+            std::vector<Expression::ExpressionPtr>
+                stride(std::vector<Dimension> const&, bool forward, Visitor& visitor) const;
 
             std::map<TagType, Dimension>                 m_dimensions;
             std::map<TagType, Expression::ExpressionPtr> m_indexes;

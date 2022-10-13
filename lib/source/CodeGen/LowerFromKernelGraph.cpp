@@ -528,7 +528,7 @@ namespace rocRoller
                 auto rowStrideExpr = rowStride->expression();
                 {
                     auto sgpr = MkSGPR(DataType::Int64);
-                    auto expr = coords.reverseStride(rowIndex, L(1), {user}, simplify)[0];
+                    auto expr = coords.reverseStride(rowIndex, L(1), {user})[0];
                     co_yield generate(sgpr, expr * L(numBytes));
                     co_yield copy(rowStride, sgpr);
                 }
@@ -538,7 +538,7 @@ namespace rocRoller
                 auto colStrideExpr = colStride->expression();
                 {
                     auto sgpr = MkSGPR(DataType::Int64);
-                    auto expr = coords.reverseStride(colIndex, L(1), {user}, simplify)[0];
+                    auto expr = coords.reverseStride(colIndex, L(1), {user})[0];
                     co_yield generate(sgpr, expr * L(numBytes));
                     co_yield copy(colStride, sgpr);
                 }
@@ -606,17 +606,13 @@ namespace rocRoller
                     {
                         coords.setCoordinate(VGPR(tiled.tag), literal(a));
 
-                        auto user_indexes = coords.reverse({user});
-                        auto user_index   = fastDivision(
-                            fastMultiplication(simplify(user_indexes[0])), m_context);
+                        auto user_index = coords.reverse({user})[0];
                         setComment(user_index, "User Index Expression");
                         co_yield generateOffset(offset, user_index, vtype.dataType);
 
                         coords.setCoordinate(VGPR(tiled.tag), literal(a + 1));
 
-                        auto user_indexes2 = coords.reverse({user});
-                        auto user_index2   = fastDivision(
-                            fastMultiplication(simplify(user_indexes2[0])), m_context);
+                        auto user_index2 = coords.reverse({user})[0];
                         setComment(user_index2, "User Index Expression");
                         co_yield generateOffset(offset2, user_index2, vtype.dataType);
 
@@ -644,9 +640,7 @@ namespace rocRoller
                     {
                         coords.setCoordinate(VGPR(tiled.tag), literal(a));
 
-                        auto user_indexes = coords.reverse({user});
-                        auto user_index   = fastDivision(
-                            fastMultiplication(simplify(user_indexes[0])), m_context);
+                        auto user_index = coords.reverse({user})[0];
                         setComment(user_index, "User Index Expression");
                         co_yield generateOffset(offset, user_index, vgpr->variableType().dataType);
 
@@ -723,8 +717,7 @@ namespace rocRoller
                 auto numBytes = DataTypeInfo::Get(vtype).elementSize;
 
                 co_yield generate(lds_offset,
-                                  Expression::simplify(Expression::fuse(
-                                      m_fastArith(lds_offset_expr * L(numBytes)))));
+                                  coords.getTransducer()(lds_offset_expr * L(numBytes)));
 
                 auto vgpr = m_context->registerTagManager()->getRegister(getTag(tile).ctag);
 
@@ -948,7 +941,7 @@ namespace rocRoller
                 auto rowStrideExpr = rowStride->expression();
                 {
                     auto sgpr = MkSGPR(DataType::Int64);
-                    auto expr = coords.forwardStride(rowIndex, L(1), {user}, simplify)[0];
+                    auto expr = coords.forwardStride(rowIndex, L(1), {user})[0];
                     co_yield generate(sgpr, expr * L(numBytes));
                     co_yield copy(rowStride, sgpr);
                 }
@@ -958,7 +951,7 @@ namespace rocRoller
                 auto colStrideExpr = colStride->expression();
                 {
                     auto sgpr = MkSGPR(DataType::Int64);
-                    auto expr = coords.forwardStride(colIndex, L(1), {user}, simplify)[0];
+                    auto expr = coords.forwardStride(colIndex, L(1), {user})[0];
                     co_yield generate(sgpr, expr * L(numBytes));
                     co_yield copy(colStride, sgpr);
                 }
@@ -1028,9 +1021,7 @@ namespace rocRoller
                 {
                     coords.setCoordinate(VGPR(tile.tag, true), literal(a));
 
-                    auto user_indexes = coords.forward({user});
-                    auto user_index
-                        = fastDivision(fastMultiplication(simplify(user_indexes[0])), m_context);
+                    auto user_index = coords.forward({user})[0];
                     co_yield generateOffset(offset, user_index, dataType);
                     if(value->variableType() != dataType)
                     {
@@ -1110,8 +1101,7 @@ namespace rocRoller
 
                 auto numBytes = DataTypeInfo::Get(vtype).elementSize;
                 co_yield generate(lds_offset,
-                                  Expression::simplify(Expression::fuse(
-                                      m_fastArith(lds_offset_expr * L(numBytes)))));
+                                  coords.getTransducer()(lds_offset_expr * L(numBytes)));
 
                 // Temporary register that is used to copy the data from global memory to
                 // local memory.

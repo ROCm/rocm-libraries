@@ -43,6 +43,8 @@ namespace KernelGraphTest
             Settings::getInstance()->set(Settings::SaveAssembly, true);
 
             CurrentGPUContextFixture::SetUp();
+
+            fastArith = Expression::FastArithmetic(m_context);
         }
 
         static std::shared_ptr<Command> commonCommand()
@@ -74,6 +76,12 @@ namespace KernelGraphTest
     {
     public:
         Expression::FastArithmetic fastArith{m_context};
+
+        void SetUp()
+        {
+            GenericContextFixture::SetUp();
+            fastArith = Expression::FastArithmetic(m_context);
+        }
 
         static std::shared_ptr<Command> commonCommand()
         {
@@ -517,11 +525,15 @@ namespace KernelGraphTest
         auto thread_id = Expression::literal(33);
 
         auto exprs = kgraph1.coordinates.reverse(
-            {block_id, thread_id}, {user0}, {block0, thread0}, fastArith);
+            {block_id, thread_id}, {user0}, {block0, thread0}, nullptr);
         auto sexpr = Expression::toString(exprs[0]);
         EXPECT_EQ(sexpr,
                   "Multiply(Add(Multiply(2i, 32j), 33i), CommandArgument(Load_Linear_0_stride_0))");
-        //EXPECT_EQ(sexpr, "Multiply(Add(ShiftL(2, 5), 33), CommandArgument())");
+
+        exprs = kgraph1.coordinates.reverse(
+            {block_id, thread_id}, {user0}, {block0, thread0}, fastArith);
+        sexpr = Expression::toString(exprs[0]);
+        EXPECT_EQ(sexpr, "Multiply(97j, CommandArgument(Load_Linear_0_stride_0))");
     }
 
     TEST_F(KernelGraphTestGPU, GPU_Translate03)

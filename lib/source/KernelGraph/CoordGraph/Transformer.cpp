@@ -290,10 +290,8 @@ namespace rocRoller
         }
 
         template <typename Visitor>
-        std::vector<ExpressionPtr> Transformer::stride(std::vector<int> const& dsts,
-                                                       bool                    forward,
-                                                       Visitor&                visitor,
-                                                       ExpressionTransducer    transducer) const
+        std::vector<ExpressionPtr>
+            Transformer::stride(std::vector<int> const& dsts, bool forward, Visitor& visitor) const
 
         {
             std::vector<ExpressionPtr> indexes;
@@ -305,39 +303,35 @@ namespace rocRoller
             }
 
             if(forward)
-                m_graph->traverse<Graph::Direction::Downstream>(indexes, srcs, dsts, visitor);
+                m_graph->traverse<Graph::Direction::Downstream>(
+                    indexes, srcs, dsts, visitor, m_transducer);
             else
-                m_graph->traverse<Graph::Direction::Upstream>(indexes, dsts, srcs, visitor);
+                m_graph->traverse<Graph::Direction::Upstream>(
+                    indexes, dsts, srcs, visitor, m_transducer);
 
             std::vector<ExpressionPtr> deltas;
             for(auto const& dst : dsts)
             {
                 auto delta = visitor.deltas.at(dst);
-                deltas.push_back(transducer ? transducer(delta) : delta);
+                deltas.push_back(m_transducer ? m_transducer(delta) : delta);
             }
             return deltas;
         }
 
-        std::vector<ExpressionPtr> Transformer::forwardStride(int                     x,
-                                                              ExpressionPtr           dx,
-                                                              std::vector<int> const& dsts,
-                                                              ExpressionTransducer transducer) const
-
+        std::vector<ExpressionPtr>
+            Transformer::forwardStride(int x, ExpressionPtr dx, std::vector<int> const& dsts) const
         {
             AssertFatal(dx);
             auto visitor = ForwardEdgeDiffVisitor(x, dx);
-            return stride(dsts, true, visitor, transducer);
+            return stride(dsts, true, visitor);
         }
 
-        std::vector<ExpressionPtr> Transformer::reverseStride(int                     x,
-                                                              ExpressionPtr           dx,
-                                                              std::vector<int> const& dsts,
-                                                              ExpressionTransducer transducer) const
-
+        std::vector<ExpressionPtr>
+            Transformer::reverseStride(int x, ExpressionPtr dx, std::vector<int> const& dsts) const
         {
             AssertFatal(dx);
             auto visitor = ReverseEdgeDiffVisitor(x, dx);
-            return stride(dsts, false, visitor, transducer);
+            return stride(dsts, false, visitor);
         }
 
     }

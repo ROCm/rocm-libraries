@@ -504,7 +504,7 @@ namespace rocRollerTest
     /**
      * loop computes input^(power-1). double_branch contains an if_loop than
      * can be evaluated to be false always since we are checking against a
-     * const value. This is used to see how we treat conditonal branches that 
+     * const value. This is used to see how we treat conditonal branches that
      * can be treated as branches or always fall through. The double_branch
      * alters a value within the loop while the iterations have not ended if
      * interleaved together. math is used to interleave instructions that have

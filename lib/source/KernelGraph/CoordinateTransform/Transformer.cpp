@@ -224,7 +224,12 @@ namespace rocRoller
                                 ShowValue(toString(dimension)),
                                 ShowValue(dimensionWorkgroup.dim),
                                 ShowValue(kernelWorkgroupIndexes.size()));
-                    auto expr = kernelWorkgroupIndexes.at(dimensionWorkgroup.dim)->expression();
+                    auto& val = kernelWorkgroupIndexes.at(dimensionWorkgroup.dim);
+                    AssertFatal(val,
+                                "Null workgroup index",
+                                ShowValue(dimensionWorkgroup.dim),
+                                ShowValue(kernelWorkgroupIndexes.size()));
+                    auto expr = val->expression();
                     setCoordinate(dimension, expr);
                 }
                 if(std::holds_alternative<Workitem>(dimension))
@@ -293,8 +298,7 @@ namespace rocRoller
         template <typename Visitor>
         std::vector<ExpressionPtr> Transformer::stride(std::vector<Dimension> const& dsts,
                                                        bool                          forward,
-                                                       Visitor&                      visitor,
-                                                       ExpressionTransducer transducer) const
+                                                       Visitor&                      visitor) const
 
         {
             std::vector<ExpressionPtr> indexes;
@@ -306,39 +310,35 @@ namespace rocRoller
             }
 
             if(forward)
-                m_graph->traverse(indexes, srcs, dsts, forward, visitor);
+                m_graph->traverse(indexes, srcs, dsts, forward, visitor, m_transducer);
             else
-                m_graph->traverse(indexes, dsts, srcs, forward, visitor);
+                m_graph->traverse(indexes, dsts, srcs, forward, visitor, m_transducer);
 
             std::vector<ExpressionPtr> deltas;
             for(auto const& dst : dsts)
             {
                 auto delta = visitor.deltas.at(getTag(dst));
-                deltas.push_back(transducer ? transducer(delta) : delta);
+                deltas.push_back(m_transducer ? m_transducer(delta) : delta);
             }
             return deltas;
         }
 
-        std::vector<ExpressionPtr> Transformer::forwardStride(Dimension const&              x,
-                                                              ExpressionPtr                 dx,
-                                                              std::vector<Dimension> const& dsts,
-                                                              ExpressionTransducer transducer) const
+        std::vector<ExpressionPtr> Transformer::forwardStride(
+            Dimension const& x, ExpressionPtr dx, std::vector<Dimension> const& dsts) const
 
         {
             AssertFatal(dx);
             auto visitor = ForwardEdgeDiffVisitor(x, dx);
-            return stride(dsts, true, visitor, transducer);
+            return stride(dsts, true, visitor);
         }
 
-        std::vector<ExpressionPtr> Transformer::reverseStride(Dimension const&              x,
-                                                              ExpressionPtr                 dx,
-                                                              std::vector<Dimension> const& dsts,
-                                                              ExpressionTransducer transducer) const
+        std::vector<ExpressionPtr> Transformer::reverseStride(
+            Dimension const& x, ExpressionPtr dx, std::vector<Dimension> const& dsts) const
 
         {
             AssertFatal(dx);
             auto visitor = ReverseEdgeDiffVisitor(x, dx);
-            return stride(dsts, false, visitor, transducer);
+            return stride(dsts, false, visitor);
         }
 
     }

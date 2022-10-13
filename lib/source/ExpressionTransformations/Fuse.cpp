@@ -57,10 +57,19 @@ namespace rocRoller
                 auto lhs = (*this)(expr.lhs);
                 auto rhs = (*this)(expr.rhs);
 
-                if(std::holds_alternative<ShiftL>(*lhs))
+                bool eval_lhs = evaluationTimes(lhs)[EvaluationTime::Translate];
+                bool eval_rhs = evaluationTimes(rhs)[EvaluationTime::Translate];
+
+                ExpressionPtr rv;
+                if(eval_lhs && eval_rhs && std::holds_alternative<ShiftL>(*lhs))
                 {
                     auto shift = std::get<ShiftL>(*lhs);
                     return std::make_shared<Expression>(FusedShiftAdd({shift.lhs, shift.rhs, rhs}));
+                }
+
+                if(rv != nullptr)
+                {
+                    return rv;
                 }
 
                 return std::make_shared<Expression>(Add({lhs, rhs}));
@@ -71,13 +80,18 @@ namespace rocRoller
                 auto lhs = (*this)(expr.lhs);
                 auto rhs = (*this)(expr.rhs);
 
-                if(std::holds_alternative<Add>(*lhs))
+                bool eval_lhs = evaluationTimes(lhs)[EvaluationTime::Translate];
+                bool eval_rhs = evaluationTimes(rhs)[EvaluationTime::Translate];
+
+                if(eval_lhs && eval_rhs && std::holds_alternative<Add>(*lhs))
                 {
                     auto add = std::get<Add>(*lhs);
                     return std::make_shared<Expression>(FusedAddShift({add.lhs, add.rhs, rhs}));
                 }
                 else
+                {
                     return std::make_shared<Expression>(expr);
+                }
             }
 
             template <CValue Value>

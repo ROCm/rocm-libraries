@@ -89,13 +89,13 @@ namespace rocRoller
                 forward(std::vector<Expression::ExpressionPtr> sdims,
                         std::vector<int> const&                srcs,
                         std::vector<int> const&                dsts,
-                        Expression::ExpressionTransducer       transducer = nullptr);
+                        Expression::ExpressionTransducer       transducer);
 
             std::vector<Expression::ExpressionPtr>
                 reverse(std::vector<Expression::ExpressionPtr> sdims,
                         std::vector<int> const&                srcs,
                         std::vector<int> const&                dsts,
-                        Expression::ExpressionTransducer       transducer = nullptr);
+                        Expression::ExpressionTransducer       transducer);
 
             EdgeType getEdgeType(int index);
 
@@ -105,7 +105,7 @@ namespace rocRoller
                          std::vector<int> const&                srcs,
                          std::vector<int> const&                dsts,
                          Visitor&                               visitor,
-                         Expression::ExpressionTransducer       transducer = nullptr);
+                         Expression::ExpressionTransducer       transducer);
         };
     }
 }

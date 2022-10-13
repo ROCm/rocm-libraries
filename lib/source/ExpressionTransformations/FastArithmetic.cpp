@@ -13,22 +13,13 @@ namespace rocRoller
 
         ExpressionPtr FastArithmetic::operator()(ExpressionPtr x)
         {
-            // TODO: add launchTimeSubExpressions and fix all the tests that are broken by it.
-            // x = launchTimeSubExpressions(x, m_context);
-
+            x = simplify(x);
             x = fastDivision(x, m_context);
-
-            // TODO: add fastMultiplication when all signed/unsigned arith working
-            // x = fastMultiplication(x, m_context);
+            x = fastMultiplication(x);
+            // x = fuse(x); // TODO: Add fuse
+            // x = launchTimeSubExpressions(x, m_context); // TODO: Add launchTimeSubExpressions
 
             return x;
-
-            // // TODO: add fastMultiplication when all signed/unsigned arith working
-            // // auto x1 = fastMultiplication(x, m_context);
-            // // auto x2 = fastDivision(x1, m_context);
-            // // return x2;
-            // auto x2 = fastDivision(x, m_context);
-            // return x2;
         }
     }
 }
