@@ -192,6 +192,33 @@ namespace rocRoller
         return rv;
     }
 
+    inline Instruction Instruction::Lock(Scheduling::Dependency const& dependency,
+                                         std::string                   comment = "")
+    {
+        AssertFatal(dependency != Scheduling::Dependency::Unlock
+                        && dependency != Scheduling::Dependency::Count,
+                    "Can not create lock instruction with Unlock or Count dependency");
+
+        Instruction rv;
+        rv.m_dependency = dependency;
+        if(!comment.empty())
+        {
+            rv.m_comments.push_back(comment);
+        }
+        return rv;
+    }
+
+    inline Instruction Instruction::Unlock(std::string comment = "")
+    {
+        Instruction rv;
+        rv.m_dependency = Scheduling::Dependency::Unlock;
+        if(!comment.empty())
+        {
+            rv.m_comments.push_back(comment);
+        }
+        return rv;
+    }
+
     inline std::tuple<std::vector<std::shared_ptr<Register::Value>>,
                       std::vector<std::shared_ptr<Register::Value>>>
         Instruction::getRegisters() const
@@ -454,6 +481,52 @@ namespace rocRoller
         }
 
         throw std::runtime_error("Too many allocations!");
+    }
+
+    inline Instruction Instruction::lock(Scheduling::Dependency const& dependency,
+                                         std::string                   comment = "")
+    {
+        AssertFatal(dependency != Scheduling::Dependency::Unlock
+                        && dependency != Scheduling::Dependency::Count,
+                    "Can not create lock instruction with Unlock or Count dependency");
+
+        m_dependency = dependency;
+        if(!comment.empty())
+        {
+            m_comments.push_back(comment);
+        }
+        return *this;
+    }
+
+    inline Instruction Instruction::unlock(std::string comment = "")
+    {
+        m_dependency = Scheduling::Dependency::Unlock;
+        if(!comment.empty())
+        {
+            m_comments.push_back(comment);
+        }
+        return *this;
+    }
+
+    inline int Instruction::getLockValue() const
+    {
+        if(m_dependency == Scheduling::Dependency::Unlock)
+        {
+            return -1;
+        }
+        else if(m_dependency == Scheduling::Dependency::None)
+        {
+            return 0;
+        }
+        else
+        {
+            return 1;
+        }
+    }
+
+    inline Scheduling::Dependency Instruction::getDependency() const
+    {
+        return m_dependency;
     }
 
     inline void Instruction::addWaitCount(WaitCount const& wait)

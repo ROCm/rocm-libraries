@@ -12,6 +12,7 @@
 
 #include "../Context_fwd.hpp"
 #include "../InstructionValues/Register_fwd.hpp"
+#include "../Scheduling/Scheduler_fwd.hpp"
 #include "../Utilities/Settings.hpp"
 
 namespace rocRoller
@@ -53,6 +54,9 @@ namespace rocRoller
         static Instruction Wait(WaitCount const& wait);
         static Instruction Wait(WaitCount&& wait);
 
+        static Instruction Lock(Scheduling::Dependency const& dependency, std::string comment);
+        static Instruction Unlock(std::string comment);
+
         std::tuple<std::vector<std::shared_ptr<Register::Value>>,
                    std::vector<std::shared_ptr<Register::Value>>>
                   getRegisters() const;
@@ -64,6 +68,9 @@ namespace rocRoller
 
         void        toStream(std::ostream&, Settings::LogLevel level) const;
         std::string toString(Settings::LogLevel level) const;
+
+        int                    getLockValue() const;
+        Scheduling::Dependency getDependency() const;
 
         // Temporary functions to stub out testing. These were added as part
         // of a proof of concept, and aren't intended to be functional.
@@ -88,13 +95,15 @@ namespace rocRoller
             return m_nopCount;
         }
 
-        void addAllocation(std::shared_ptr<Register::Allocation> alloc);
-        void addWaitCount(WaitCount const& wait);
-        void addComment(std::string const& comment);
-        void addWarning(std::string const& warning);
-        void addNop();
-        void addNop(int count);
-        void setNopMin(int count);
+        Instruction lock(Scheduling::Dependency const& depedency, std::string comment);
+        Instruction unlock(std::string comment);
+        void        addAllocation(std::shared_ptr<Register::Allocation> alloc);
+        void        addWaitCount(WaitCount const& wait);
+        void        addComment(std::string const& comment);
+        void        addWarning(std::string const& warning);
+        void        addNop();
+        void        addNop(int count);
+        void        setNopMin(int count);
 
         void allocateNow();
 
@@ -147,6 +156,8 @@ namespace rocRoller
         WaitCount m_waitCount;
 
         std::string m_opcode;
+
+        Scheduling::Dependency m_dependency = Scheduling::Dependency::None;
 
         std::array<std::shared_ptr<Register::Value>, MaxDstRegisters> m_dst;
         std::array<std::shared_ptr<Register::Value>, MaxSrcRegisters> m_src;

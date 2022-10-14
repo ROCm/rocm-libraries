@@ -122,14 +122,18 @@ namespace rocRoller
 
         co_yield Register::AllocateIfNeeded(dest);
 
-        co_yield_(Instruction(
-            "v_add_co_u32", {dest->subset({0}), carry}, {l0, r0}, {}, "least significant half"));
+        // LOCK: Carry Register needed
+        co_yield_(
+            Instruction(
+                "v_add_co_u32", {dest->subset({0}), carry}, {l0, r0}, {}, "least significant half")
+                .lock(Scheduling::Dependency::VCC));
 
         co_yield_(Instruction("v_addc_co_u32",
                               {dest->subset({1}), carry},
                               {l1, r1, carry},
                               {},
-                              "most significant half"));
+                              "most significant half")
+                      .unlock());
     }
 
     template <>

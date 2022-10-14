@@ -8,6 +8,7 @@
 #include <rocRoller/CodeGen/CopyGenerator.hpp>
 #include <rocRoller/InstructionValues/LabelAllocator.hpp>
 #include <rocRoller/InstructionValues/RegisterUtils.hpp>
+#include <rocRoller/Scheduling/Scheduler_fwd.hpp>
 
 namespace rocRoller
 {

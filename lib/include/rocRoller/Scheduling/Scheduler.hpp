@@ -16,19 +16,43 @@ namespace rocRoller
 {
     namespace Scheduling
     {
+        class LockState
+        {
+        public:
+            LockState();
+            LockState(Dependency dependency);
+
+            void add(Instruction const& instr);
+            bool isLocked() const;
+            void isValid(bool locked = false) const;
+
+            Dependency getDependency() const;
+            int        getLockDepth() const;
+
+        private:
+            int        m_lockdepth;
+            Dependency m_dependency;
+        };
+
         /**
          * A `Scheduler` is a base class for the different types of schedulers
          *
          * - This class should be able to be made into `ComponentBase` class
          */
-        struct Scheduler
+        class Scheduler
         {
+        public:
             using Argument = std::tuple<SchedulerProcedure, std::shared_ptr<rocRoller::Context>>;
 
             static const std::string Name;
 
             virtual std::string            name()                                           = 0;
             virtual Generator<Instruction> operator()(std::vector<Generator<Instruction>>&) = 0;
+
+            LockState getLockState() const;
+
+        protected:
+            LockState m_lockstate;
         };
 
         /**
@@ -36,8 +60,9 @@ namespace rocRoller
          *
          * - This class should be able to be made into `Component` class
          */
-        struct SequentialScheduler : public Scheduler
+        class SequentialScheduler : public Scheduler
         {
+        public:
             SequentialScheduler(std::shared_ptr<Context>);
 
             using Base = Scheduler;
@@ -45,22 +70,22 @@ namespace rocRoller
             static const std::string Basename;
             static const std::string Name;
 
-            /*
+            /**
              * Returns true if `SchedulerProcedure` is Sequential
              */
             static bool Match(Argument arg);
 
-            /*
+            /**
              * Return shared pointer of `SequentialScheduler` built from context
              */
             static std::shared_ptr<Scheduler> Build(Argument arg);
 
-            /*
+            /**
              * Return Name of `SequentialScheduler`, used for debugging purposes currently
              */
             virtual std::string name() override;
 
-            /*
+            /**
              * Call operator schedules instructions based on Sequential priority
              */
             virtual Generator<Instruction>
@@ -75,8 +100,9 @@ namespace rocRoller
          *
          * - This class should be able to be made into `Component` class
          */
-        struct RoundRobinScheduler : public Scheduler
+        class RoundRobinScheduler : public Scheduler
         {
+        public:
             RoundRobinScheduler(std::shared_ptr<Context>);
 
             using Base = Scheduler;
@@ -85,23 +111,23 @@ namespace rocRoller
             static const std::string Name;
 
             /*
-             * Returns true if `SchedulerProcedure` is RoundRobin
-             */
+                * Returns true if `SchedulerProcedure` is RoundRobin
+                */
             static bool Match(Argument arg);
 
             /*
-             * Return shared pointer of `RoundRobinScheduler` built from context
-             */
+                * Return shared pointer of `RoundRobinScheduler` built from context
+                */
             static std::shared_ptr<Scheduler> Build(Argument arg);
 
             /*
-             * Return Name of `RoundRobinScheduler`, used for debugging purposes currently
-             */
+                * Return Name of `RoundRobinScheduler`, used for debugging purposes currently
+                */
             virtual std::string name() override;
 
             /*
-             * Call operator schedules instructions based on the round robin priority
-             */
+                * Call operator schedules instructions based on the round robin priority
+                */
             virtual Generator<Instruction>
                 operator()(std::vector<Generator<Instruction>>& seqs) override;
 

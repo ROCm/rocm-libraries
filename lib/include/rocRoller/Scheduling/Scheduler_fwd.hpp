@@ -14,6 +14,16 @@ namespace rocRoller
             Count
         };
 
+        enum Dependency
+        {
+            None = 0,
+            SCC,
+            VCC,
+            Branch,
+            Unlock,
+            Count
+        };
+
         class Scheduler;
 
         class SequentialScheduler;

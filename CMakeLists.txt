@@ -406,6 +406,7 @@ set(
   test/unit/KernelTest.cpp
   test/unit/LabelTest.cpp
   test/unit/LDSTest.cpp
+  test/unit/LockTest.cpp
   test/unit/MemoryInstructionsTest.cpp
   test/unit/MatrixMultiplyTest.cpp
   test/unit/MetaObserverTest.cpp

@@ -335,6 +335,114 @@ namespace rocRollerTest
         }
     }
 
+    TEST_P(DependencyTest, VCCCarry)
+    {
+        auto arith = Component::Get<Arithmetic>(m_context, Register::Type::Vector, DataType::Int64);
+
+        auto k = m_context->kernel();
+
+        k->setKernelDimensions(1);
+
+        auto command = std::make_shared<Command>();
+
+        VariableType Int64Value(DataType::Int64, PointerType::Value);
+        VariableType UInt64Value(DataType::UInt64, PointerType::Value);
+        VariableType Int64Pointer(DataType::Int64, PointerType::PointerGlobal);
+
+        auto result_exp = command->allocateArgument(Int64Pointer)->expression();
+        auto a_exp      = command->allocateArgument(Int64Value)->expression();
+        auto b_exp      = command->allocateArgument(Int64Value)->expression();
+
+        auto one  = std::make_shared<Expression::Expression>(1u);
+        auto zero = std::make_shared<Expression::Expression>(0u);
+
+        k->addArgument({"result", Int64Pointer, DataDirection::WriteOnly, result_exp});
+        k->addArgument({"a", DataType::Int64, DataDirection::ReadOnly, a_exp});
+        k->addArgument({"b", DataType::Int64, DataDirection::ReadOnly, b_exp});
+
+        k->setWorkgroupSize({1, 1, 1});
+        k->setWorkitemCount({one, one, one});
+        k->setDynamicSharedMemBytes(zero);
+
+        m_context->schedule(k->preamble());
+        m_context->schedule(k->prolog());
+
+        Register::ValuePtr s_result, s_a, s_b;
+        auto               v_result
+            = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Raw32, 2);
+        auto v_a
+            = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Int64, 1);
+        auto v_b
+            = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Int64, 1);
+        auto v_c
+            = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Int64, 1);
+
+        auto setup = [&]() -> Generator<Instruction> {
+            co_yield(Instruction::Lock(Scheduling::Dependency::SCC, "Setting up Registers"));
+
+            co_yield m_context->argLoader()->getValue("result", s_result);
+            co_yield m_context->argLoader()->getValue("a", s_a);
+            co_yield m_context->argLoader()->getValue("b", s_b);
+
+            co_yield v_a->allocate();
+            co_yield v_b->allocate();
+            co_yield v_c->allocate();
+            co_yield v_result->allocate();
+
+            co_yield m_context->copier()->copy(v_result, s_result, "Move pointer");
+
+            co_yield m_context->copier()->copy(v_a, s_a, "Move value");
+
+            co_yield m_context->copier()->copy(v_b, s_b, "Move value");
+
+            co_yield(Instruction::Unlock("Done Setting Up"));
+        };
+
+        auto int64_addc = [&]() -> Generator<Instruction> {
+            co_yield generateOp<Expression::Add>(v_c, v_a, v_b);
+            co_yield m_context->mem()->storeFlat(v_result, v_c, "", 8);
+        };
+
+        // With consume comments, padding comments no longer needed to interleave VCC overwrite
+        auto set_vcc_to_zero = [&]() -> Generator<Instruction> {
+            Register::ValuePtr vcc;
+            vcc = m_context->getVCC();
+            co_yield(Instruction::Comment("Padding Comment"));
+            co_yield(Instruction::Comment("Padding Comment"));
+            co_yield Expression::generate(vcc, v_b->expression() > v_a->expression(), m_context);
+        };
+
+        std::vector<Generator<Instruction>> sequences;
+        sequences.push_back(setup());
+        sequences.push_back(int64_addc());
+        sequences.push_back(set_vcc_to_zero());
+
+        std::shared_ptr<Scheduling::Scheduler> scheduler
+            = Component::Get<Scheduling::Scheduler>(GetParam(), m_context);
+
+        m_context->schedule((*scheduler)(sequences));
+        m_context->schedule(k->postamble());
+        m_context->schedule(k->amdgpu_metadata());
+
+        int64_t result   = 0;
+        auto    d_result = make_shared_device<int64_t>();
+
+        CommandKernel commandKernel(m_context);
+
+        KernelArguments runtimeArgs;
+        runtimeArgs.append("result", d_result.get());
+        runtimeArgs.append("a", 0x11111111FFFFFFFF);
+        runtimeArgs.append("b", 0x1111111111111111);
+
+        commandKernel.launchKernel(runtimeArgs.runtimeArguments());
+
+        ASSERT_THAT(hipMemcpy(&result, d_result.get(), sizeof(int64_t), hipMemcpyDefault),
+                    HasHipSuccess(0));
+
+        // 0x2222222211111110 (when carry overwritten), (correct) 0x2222222311111110 = 2459565876208275728
+        EXPECT_EQ(result, 2459565880503243024);
+    }
+
     /**
      * VCC test that interleaves two streams that both set vcc to different values.
      * Output of the kernel is dependent on vcc value.
