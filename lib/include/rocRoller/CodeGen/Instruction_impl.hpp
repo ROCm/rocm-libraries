@@ -247,6 +247,24 @@ namespace rocRoller
         return (m_src[0] || m_dst[0]);
     }
 
+    inline bool Instruction::isCommentOnly() const
+    {
+        // clang-format off
+        return m_nopCount == 0
+            && m_allocations[0] == nullptr
+            && m_directive.empty()
+            && m_label.empty()
+            && m_waitCount == WaitCount()
+            && m_opcode.empty()
+            && m_dependency == Scheduling::Dependency::None;
+        // clang-format on
+    }
+
+    inline int Instruction::nopCount() const
+    {
+        return m_nopCount;
+    }
+
     inline WaitCount Instruction::getWaitCount() const
     {
         return m_waitCount;

@@ -16,9 +16,172 @@ using namespace rocRoller;
 
 namespace rocRollerTest
 {
-    class SchedulerTest : public GenericContextFixture
+    struct SchedulerTest : public GenericContextFixture
     {
+        Generator<Instruction> testGeneratorWithComments();
     };
+
+    Generator<Instruction> SchedulerTest::testGeneratorWithComments()
+    {
+        co_yield_(Instruction("s_sub_u32", {}, {}, {}, "Comment on an instruction"));
+        co_yield Instruction::Comment("Pure comment 1");
+        co_yield Instruction::Comment("Pure comment 2");
+
+        co_yield_(Instruction("s_add_u32", {}, {}, {}, "Comment on an instruction"));
+        co_yield Instruction::Comment("Pure comment 3");
+        co_yield Instruction::Nop("Nop Comment");
+
+        co_yield Instruction::Lock(Scheduling::Dependency::SCC, "Lock instruction");
+        co_yield Instruction::Unlock("Unlock instruction");
+
+        co_yield Instruction::Comment("Pure comment 4");
+        co_yield Instruction::Comment("Pure comment 5");
+
+        auto reg = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Float, 1);
+        co_yield reg->allocate();
+
+        co_yield Instruction::Comment("Pure comment 6");
+        co_yield Instruction::Directive(".set .amdgcn.next_free_vgpr, 0");
+
+        co_yield Instruction::Label("FooLabel");
+
+        co_yield Instruction::Comment("Pure comment 7");
+        co_yield Instruction::Wait(WaitCount::Zero(m_context->targetArchitecture()));
+
+        co_yield Instruction::Comment("Pure comment 8");
+    }
+
+    template <typename Begin, typename End>
+    Instruction next(Begin& begin, End const& end)
+    {
+        AssertFatal(begin != end);
+        auto inst = *begin;
+        ++begin;
+        return std::move(inst);
+    }
+
+    TEST_F(SchedulerTest, ConsumeCommentsTest)
+    {
+        using namespace rocRoller::Scheduling;
+
+        auto gen   = testGeneratorWithComments();
+        auto begin = gen.begin();
+        auto end   = gen.end();
+
+        auto inst = next(begin, end);
+        EXPECT_EQ("s_sub_u32", inst.getOpCode());
+
+        EXPECT_TRUE(begin->isCommentOnly());
+
+        {
+            m_context->schedule(consumeComments(begin, end));
+            std::string expected = R"(// Pure comment 1
+                                      // Pure comment 2)";
+
+            EXPECT_EQ(NormalizedSource(expected, true), NormalizedSource(output(), true));
+
+            auto inst = next(begin, end);
+            EXPECT_EQ(inst.getOpCode(), "s_add_u32");
+        }
+
+        EXPECT_TRUE(begin != end);
+
+        {
+            clearOutput();
+            m_context->schedule(consumeComments(begin, end));
+            std::string expected = "// Pure comment 3\n";
+
+            EXPECT_EQ(NormalizedSource(expected, true), NormalizedSource(output(), true));
+
+            auto inst = next(begin, end);
+            EXPECT_EQ(inst.nopCount(), 1);
+            EXPECT_EQ(inst.toString(Settings::LogLevel::Debug), "s_nop 0\n // Nop Comment\n");
+        }
+
+        {
+            // Next is a lock, so there should be no comments consumed.
+            clearOutput();
+            m_context->schedule(consumeComments(begin, end));
+            std::string expected = "";
+
+            EXPECT_EQ(NormalizedSource(expected, true), NormalizedSource(output(), true));
+
+            auto inst = next(begin, end);
+            EXPECT_EQ(inst.toString(Settings::LogLevel::Debug), " // Lock instruction\n");
+        }
+
+        {
+            // Next is an unlock, so there should be no comments consumed.
+            clearOutput();
+            m_context->schedule(consumeComments(begin, end));
+            std::string expected = "";
+
+            EXPECT_EQ(NormalizedSource(expected, true), NormalizedSource(output(), true));
+
+            auto inst = next(begin, end);
+            EXPECT_EQ(inst.toString(Settings::LogLevel::Debug), " // Unlock instruction\n");
+        }
+
+        {
+            clearOutput();
+            m_context->schedule(consumeComments(begin, end));
+            std::string expected = "// Pure comment 4\n// Pure comment 5\n";
+
+            EXPECT_EQ(NormalizedSource(expected, true), NormalizedSource(output(), true));
+
+            auto inst = next(begin, end);
+            EXPECT_EQ(inst.toString(Settings::LogLevel::Debug),
+                      "// Allocated : 1 VGPR (Value: Float)\n");
+        }
+
+        {
+            clearOutput();
+            m_context->schedule(consumeComments(begin, end));
+            std::string expected = "// Pure comment 6\n";
+
+            EXPECT_EQ(NormalizedSource(expected, true), NormalizedSource(output(), true));
+
+            auto inst = next(begin, end);
+            EXPECT_EQ(inst.toString(Settings::LogLevel::Debug), ".set .amdgcn.next_free_vgpr, 0\n");
+        }
+
+        {
+            // Next is a label, so there should be no comments consumed.
+            clearOutput();
+            m_context->schedule(consumeComments(begin, end));
+            std::string expected = "";
+
+            EXPECT_EQ(NormalizedSource(expected, true), NormalizedSource(output(), true));
+
+            auto inst = next(begin, end);
+            EXPECT_EQ(inst.toString(Settings::LogLevel::Debug), "FooLabel:\n\n");
+        }
+
+        {
+            clearOutput();
+            m_context->schedule(consumeComments(begin, end));
+            std::string expected = "// Pure comment 7\n";
+
+            EXPECT_EQ(NormalizedSource(expected, true), NormalizedSource(output(), true));
+
+            auto inst       = next(begin, end);
+            auto instString = R"(s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0)
+                                 s_waitcnt_vscnt 0)";
+            EXPECT_EQ(NormalizedSource(inst.toString(Settings::LogLevel::Debug)),
+                      NormalizedSource(instString));
+        }
+
+        {
+            clearOutput();
+            m_context->schedule(consumeComments(begin, end));
+            std::string expected = "// Pure comment 8\n";
+
+            EXPECT_EQ(NormalizedSource(expected, true), NormalizedSource(output(), true));
+
+            EXPECT_EQ(begin, end);
+        }
+    }
 
     TEST_F(SchedulerTest, SequentialSchedulerTest)
     {

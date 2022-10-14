@@ -11,6 +11,16 @@ namespace rocRoller
         static_assert(Component::Component<SequentialScheduler>);
         static_assert(Component::Component<RoundRobinScheduler>);
 
+        template <typename Begin, typename End>
+        Generator<Instruction> consumeComments(Begin& begin, End const& end)
+        {
+            while(begin != end && begin->isCommentOnly())
+            {
+                co_yield *begin;
+                ++begin;
+            }
+        }
+
         inline LockState::LockState()
             : m_dependency(Dependency::None)
             , m_lockdepth(0)

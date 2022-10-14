@@ -35,6 +35,12 @@ namespace rocRoller
         };
 
         /**
+         * Yields from the beginning of the range [begin, end) any comment-only instruction(s).
+         */
+        template <typename Begin, typename End>
+        Generator<Instruction> consumeComments(Begin& begin, End const& end);
+
+        /**
          * A `Scheduler` is a base class for the different types of schedulers
          *
          * - This class should be able to be made into `ComponentBase` class

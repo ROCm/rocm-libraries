@@ -19,13 +19,13 @@ namespace rocRoller
 {
     struct Instruction
     {
-    public:
-        Instruction();
         Instruction(std::string const&                                      opcode,
                     std::initializer_list<std::shared_ptr<Register::Value>> dst,
                     std::initializer_list<std::shared_ptr<Register::Value>> src,
                     std::initializer_list<std::string>                      modifiers,
                     std::string const&                                      comment);
+
+        Instruction();
 
         static Generator<std::string> EscapeComment(std::string comment, int indent = 0);
 
@@ -97,13 +97,18 @@ namespace rocRoller
 
         Instruction lock(Scheduling::Dependency const& depedency, std::string comment);
         Instruction unlock(std::string comment);
-        void        addAllocation(std::shared_ptr<Register::Allocation> alloc);
-        void        addWaitCount(WaitCount const& wait);
-        void        addComment(std::string const& comment);
-        void        addWarning(std::string const& warning);
-        void        addNop();
-        void        addNop(int count);
-        void        setNopMin(int count);
+
+        void addAllocation(std::shared_ptr<Register::Allocation> alloc);
+        void addWaitCount(WaitCount const& wait);
+        void addComment(std::string const& comment);
+        void addWarning(std::string const& warning);
+        void addNop();
+        void addNop(int count);
+        void setNopMin(int count);
+
+        int nopCount() const;
+
+        bool isCommentOnly() const;
 
         void allocateNow();
 
