@@ -114,6 +114,20 @@ namespace ExpressionTest
         auto c = Register::Value::Literal(4.2f);
         auto d = Register::Value::Literal(Half(4.2f));
 
+        auto kernelArg                   = std::make_shared<AssemblyKernelArgument>();
+        kernelArg->name                  = "KernelArg1";
+        kernelArg->variableType.dataType = DataType::Int32;
+        kernelArg->expression            = Expression::literal(10);
+        kernelArg->offset                = 1;
+        kernelArg->size                  = 5;
+
+        Expression::DataFlowTag dataFlow;
+        dataFlow.tag              = 50;
+        dataFlow.regType          = Register::Type::Vector;
+        dataFlow.varType.dataType = DataType::Float;
+
+        auto waveTile = std::make_shared<KernelGraph::CoordinateTransform::WaveTile>(5);
+
         auto expr1  = a + b;
         auto expr2  = b * expr1;
         auto expr3  = b * expr1 - c->expression();
@@ -125,6 +139,9 @@ namespace ExpressionTest
         auto expr9  = -expr2;
         auto expr10 = Expression::fuse(expr1 << b);
         auto expr11 = Expression::fuse((a << b) + b);
+        auto expr12 = b >> std::make_shared<Expression::Expression>(kernelArg);
+        auto expr13 = std::make_shared<Expression::Expression>(dataFlow) / a;
+        auto expr14 = std::make_shared<Expression::Expression>(waveTile) + b;
 
         testSerialization(expr1);
         testSerialization(expr2);
@@ -137,6 +154,11 @@ namespace ExpressionTest
         testSerialization(expr9);
         testSerialization(expr10);
         testSerialization(expr11);
+        // TODO: Enable test when KernelArgumentPtr can be serialized
+        //testSerialization(expr12);
+        testSerialization(expr13);
+        // TODO: Enable test when WaveTilePtr can be serialized
+        //testSerialization(expr14);
 
         auto reg = std::make_shared<Register::Value>(
             m_context, Register::Type::Vector, DataType::Int32, 1);
