@@ -50,7 +50,6 @@ namespace rocRoller
                                     std::initializer_list<std::string> modifiers,
                                     std::string const&                 comment)
         : m_opcode(opcode)
-        , m_comments({comment})
     {
         AssertFatal(dst.size() <= m_dst.size(), ShowValue(dst.size()), ShowValue(m_dst.size()));
         AssertFatal(src.size() <= m_src.size(), ShowValue(src.size()), ShowValue(m_src.size()));
@@ -69,6 +68,7 @@ namespace rocRoller
                 dst->allocate(*this);
             }
         }
+        addComment(comment);
     }
 
     inline Instruction Instruction::Allocate(std::shared_ptr<Register::Value> reg)
@@ -109,25 +109,20 @@ namespace rocRoller
     {
         Instruction rv;
         rv.m_directive = directive;
-        if(!comment.empty())
-        {
-            rv.m_comments = {comment};
-        }
+        rv.addComment(comment);
         return rv;
     }
 
     inline Instruction Instruction::Comment(std::string const& comment)
     {
         Instruction rv;
-
-        rv.m_comments = {comment};
+        rv.addComment(comment);
         return rv;
     }
 
     inline Instruction Instruction::Warning(std::string const& warning)
     {
         Instruction rv;
-
         rv.m_warnings = {warning};
         return rv;
     }
@@ -151,11 +146,7 @@ namespace rocRoller
     {
         Instruction rv;
         rv.addNop(nopCount);
-        if(!comment.empty())
-        {
-            rv.addComment(comment);
-        }
-
+        rv.addComment(comment);
         return rv;
     }
 
@@ -201,10 +192,7 @@ namespace rocRoller
 
         Instruction rv;
         rv.m_dependency = dependency;
-        if(!comment.empty())
-        {
-            rv.m_comments.push_back(comment);
-        }
+        rv.addComment(comment);
         return rv;
     }
 
@@ -212,10 +200,7 @@ namespace rocRoller
     {
         Instruction rv;
         rv.m_dependency = Scheduling::Dependency::Unlock;
-        if(!comment.empty())
-        {
-            rv.m_comments.push_back(comment);
-        }
+        rv.addComment(comment);
         return rv;
     }
 
@@ -375,17 +360,10 @@ namespace rocRoller
 
         if(level > Settings::LogLevel::Terse && !m_comments.empty())
         {
-            for(auto commentsIter = m_comments.begin(); commentsIter != m_comments.end();
-                commentsIter++)
+            // Only include the first comment in the functional string.
+            for(auto const& s : EscapeComment(m_comments[0], 1))
             {
-                if(commentsIter != m_comments.begin())
-                {
-                    os << "\n";
-                }
-                for(auto const& s : EscapeComment(*commentsIter, 1))
-                {
-                    os << s;
-                }
+                os << s;
             }
         }
 
@@ -399,9 +377,10 @@ namespace rocRoller
     {
         if(level >= Settings::LogLevel::Terse && m_comments.size() > 1)
         {
-            for(auto const& c : m_comments)
+            // Only include everything but the first comment in the code string.
+            for(int i = 1; i < m_comments.size(); i++)
             {
-                for(auto const& line : EscapeComment(c))
+                for(auto const& line : EscapeComment(m_comments[i]))
                 {
                     os << line;
                 }
@@ -509,20 +488,14 @@ namespace rocRoller
                     "Can not create lock instruction with Unlock or Count dependency");
 
         m_dependency = dependency;
-        if(!comment.empty())
-        {
-            m_comments.push_back(comment);
-        }
+        addComment(comment);
         return *this;
     }
 
     inline Instruction Instruction::unlock(std::string comment = "")
     {
         m_dependency = Scheduling::Dependency::Unlock;
-        if(!comment.empty())
-        {
-            m_comments.push_back(comment);
-        }
+        addComment(comment);
         return *this;
     }
 
@@ -554,7 +527,10 @@ namespace rocRoller
 
     inline void Instruction::addComment(std::string const& comment)
     {
-        m_comments.push_back(comment);
+        if(!comment.empty())
+        {
+            m_comments.push_back(comment);
+        }
     }
 
     inline void Instruction::addWarning(std::string const& warning)

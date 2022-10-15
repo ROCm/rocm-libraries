@@ -418,7 +418,7 @@ namespace rocRollerTest
             co_yield(Inst("+++ Scheduler A Lock Depth: "
                           + std::to_string(schedulerA->getLockState().getLockDepth())));
             co_yield((*schedulerB)(b_sequences));
-            co_yield(Inst("(A) For Loop End").unlock("(A) Scheduler A Unlock)"));
+            co_yield(Inst("(A) For Loop End").unlock("(A) Scheduler A Unlock"));
             co_yield(Inst("+++ Scheduler A Lock Depth: "
                           + std::to_string(schedulerA->getLockState().getLockDepth())));
 
@@ -432,42 +432,30 @@ namespace rocRollerTest
 
         // TODO: Fix when m_comments.push_back() issue is fixed
         std::string expected = R"( (A) Op A Begin
-                                    (A) For Loop Begin
-                                    // (A) Scheduler A Lock
-                                    // (A) Scheduler A Lock
+                                    (A) For Loop Begin // (A) Scheduler A Lock
                                     +++ Scheduler A Lock Depth: 1
-                                    (B) Unroll 0 Begin
-                                    // (B) Scheduler B Lock
-                                    // (B) Scheduler B Lock
+                                    (B) Unroll 0 Begin // (B) Scheduler B Lock
                                     +++ Scheduler A Lock Depth: 2
                                     +++ Scheduler B Lock Depth: 1
                                     (C) Op B Begin
-                                    (C) If Begin
-                                    // (C) Scheduler C Lock
-                                    // (C) Scheduler C Lock
+                                    (C) If Begin // (C) Scheduler C Lock
                                     +++ Scheduler A Lock Depth: 3
                                     +++ Scheduler B Lock Depth: 2
                                     +++ Scheduler C Lock Depth: 1
                                     (C) If Instruction
-                                    (C) If End
-                                    // (C) Scheduler C Unlock
-                                    // (C) Scheduler C Unlock
+                                    (C) If End // (C) Scheduler C Unlock
                                     (C) Op B Instruction
                                     +++ Scheduler A Lock Depth: 2
                                     (C) Op B End
                                     +++ Scheduler B Lock Depth: 1
                                     +++ Scheduler C Lock Depth: 0
-                                    (B) Unroll 0 End
-                                    // (B) Scheduler B Unlock
-                                    // (B) Scheduler B Unlock
+                                    (B) Unroll 0 End // (B) Scheduler B Unlock
                                     (B) Unroll 1 Begin
                                     +++ Scheduler A Lock Depth: 1
                                     (B) Unroll 1 Instruction
                                     +++ Scheduler B Lock Depth: 0
                                     (B) Unroll 1 End
-                                    (A) For Loop End
-                                    // (A) Scheduler A Unlock)
-                                    // (A) Scheduler A Unlock)
+                                    (A) For Loop End // (A) Scheduler A Unlock
                                     (A) Op A Instruction
                                     +++ Scheduler A Lock Depth: 0
                                     (A) Op A End

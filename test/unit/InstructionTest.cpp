@@ -108,8 +108,8 @@ TEST_F(InstructionTest, Comment)
     inst.addComment("Hello again!");
     m_context->schedule(inst);
 
-    EXPECT_THAT(output(), testing::HasSubstr("// Hello, World!\n// Hello again!\n"));
-    EXPECT_THAT(inst.toString(Settings::LogLevel::Terse), "// Hello, World!\n// Hello again!\n");
+    EXPECT_EQ(output(), " // Hello, World!\n// Hello again!\n");
+    EXPECT_EQ(inst.toString(Settings::LogLevel::Verbose), " // Hello, World!\n// Hello again!\n");
 }
 
 TEST_F(InstructionTest, Warning)
