@@ -7,7 +7,7 @@
 #include "BufferInstructionOptions.hpp"
 namespace rocRoller
 {
-    BufferInstructionOptions::BufferInstructionOptions()
+    inline BufferInstructionOptions::BufferInstructionOptions()
     {
         m_offen = false;
         m_glc   = false;
@@ -15,42 +15,42 @@ namespace rocRoller
         m_lds   = false;
     }
 
-    void BufferInstructionOptions::setOffen(bool on)
+    inline void BufferInstructionOptions::setOffen(bool on)
     {
         m_offen = on;
     }
 
-    void BufferInstructionOptions::setGlc(bool glc)
+    inline void BufferInstructionOptions::setGlc(bool glc)
     {
         m_glc = glc;
     }
 
-    void BufferInstructionOptions::setSlc(bool slc)
+    inline void BufferInstructionOptions::setSlc(bool slc)
     {
         m_slc = slc;
     }
 
-    void BufferInstructionOptions::setLds(bool lds)
+    inline void BufferInstructionOptions::setLds(bool lds)
     {
         m_lds = lds;
     }
 
-    bool BufferInstructionOptions::getOffen()
+    inline bool BufferInstructionOptions::getOffen()
     {
         return m_offen;
     }
 
-    bool BufferInstructionOptions::getGlc()
+    inline bool BufferInstructionOptions::getGlc()
     {
         return m_glc;
     }
 
-    bool BufferInstructionOptions::getSlc()
+    inline bool BufferInstructionOptions::getSlc()
     {
         return m_slc;
     }
 
-    bool BufferInstructionOptions::getLds()
+    inline bool BufferInstructionOptions::getLds()
     {
         return m_lds;
     }

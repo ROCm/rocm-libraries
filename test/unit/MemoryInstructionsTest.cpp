@@ -199,6 +199,98 @@ namespace MemoryInstructionsTest
         EXPECT_GT(assembledKernel.size(), 0);
     }
 
+    void genBufferTest(std::shared_ptr<rocRoller::Context> m_context, int N)
+    {
+        auto k = m_context->kernel();
+
+        k->setKernelName("BufferTest");
+        k->setKernelDimensions(1);
+
+        k->addArgument(
+            {"result", {DataType::Int32, PointerType::PointerGlobal}, DataDirection::WriteOnly});
+        k->addArgument(
+            {"a", {DataType::Int32, PointerType::PointerGlobal}, DataDirection::ReadOnly});
+
+        m_context->schedule(k->preamble());
+        m_context->schedule(k->prolog());
+        auto varith32
+            = Component::Get<Arithmetic>(m_context, Register::Type::Vector, DataType::Int32);
+        auto kb = [&]() -> Generator<Instruction> {
+            Register::ValuePtr s_result, s_a;
+            co_yield m_context->argLoader()->getValue("result", s_result);
+            co_yield m_context->argLoader()->getValue("a", s_a);
+
+            auto vgprSerial = m_context->kernel()->workitemIndex()[0];
+            auto v_a        = Register::Value::Placeholder(
+                m_context, Register::Type::Vector, DataType::Int32, N > 4 ? N / 4 : 1);
+
+            co_yield v_a->allocate();
+
+            auto bufDesc = rocRoller::BufferDescriptor(m_context);
+            co_yield bufDesc.setup();
+            co_yield bufDesc.setBasePointer(s_a);
+            co_yield bufDesc.setSize(Register::Value::Literal(N));
+            co_yield bufDesc.setOptions(Register::Value::Literal(131072)); //0x00020000
+
+            auto bufInstOpts = rocRoller::BufferInstructionOptions();
+
+            co_yield m_context->mem()->loadBuffer(v_a, vgprSerial, "0", bufDesc, bufInstOpts, N);
+            co_yield bufDesc.setBasePointer(s_result);
+            co_yield m_context->mem()->storeBuffer(v_a, vgprSerial, "0", bufDesc, bufInstOpts, N);
+        };
+
+        m_context->schedule(kb());
+        m_context->schedule(k->postamble());
+        m_context->schedule(k->amdgpu_metadata());
+    }
+
+    void executeBufferTest(std::shared_ptr<rocRoller::Context> m_context, int N)
+    {
+        genBufferTest(m_context, N);
+
+        if(m_context->targetArchitecture().target().getMajorVersion() != 9)
+        {
+            GTEST_SKIP() << "Skipping GPU buffer tests for " << GPUContextFixture::GetParam();
+        }
+
+        std::shared_ptr<rocRoller::ExecutableKernel> executableKernel
+            = m_context->instructions()->getExecutableKernel();
+
+        std::vector<char> a(N);
+        for(int i = 0; i < N; i++)
+            a[i] = i + 10;
+
+        auto d_a      = make_shared_device(a);
+        auto d_result = make_shared_device<char>(N);
+
+        KernelArguments kargs;
+        kargs.append<void*>("result", d_result.get());
+        kargs.append<void*>("a", d_a.get());
+        KernelInvocation invocation;
+
+        executableKernel->executeKernel(kargs, invocation);
+
+        std::vector<char> result(N);
+        ASSERT_THAT(hipMemcpy(result.data(), d_result.get(), sizeof(char) * N, hipMemcpyDefault),
+                    HasHipSuccess(0));
+
+        for(int i = 0; i < N; i++)
+            EXPECT_EQ(result[i], a[i]);
+    }
+
+    void assembleBufferTest(std::shared_ptr<rocRoller::Context> m_context, int N)
+    {
+        genBufferTest(m_context, N);
+
+        if(m_context->targetArchitecture().target().getMajorVersion() != 9)
+        {
+            GTEST_SKIP() << "Skipping GPU buffer tests for " << GPUContextFixture::GetParam();
+        }
+
+        std::vector<char> assembledKernel = m_context->instructions()->assemble();
+        EXPECT_GT(assembledKernel.size(), 0);
+    }
+
     TEST_F(MemoryInstructionsExecuter, GPU_ExecuteFlatTest1Byte)
     {
         executeFlatTest(m_context, 1);
@@ -320,6 +412,66 @@ namespace MemoryInstructionsTest
     TEST_P(MemoryInstructionsTest, AssembleFlatTest16Bytes)
     {
         assembleFlatTest(m_context, 16);
+    }
+
+    TEST_F(MemoryInstructionsExecuter, GPU_ExecuteBufferTest1Byte)
+    {
+        executeBufferTest(m_context, 1);
+    }
+
+    TEST_F(MemoryInstructionsExecuter, GPU_ExecuteBufferTest2Bytes)
+    {
+        executeBufferTest(m_context, 2);
+    }
+
+    TEST_F(MemoryInstructionsExecuter, GPU_ExecuteBufferTest4Bytes)
+    {
+        executeBufferTest(m_context, 4);
+    }
+
+    TEST_F(MemoryInstructionsExecuter, GPU_ExecuteBufferTest8Bytes)
+    {
+        executeBufferTest(m_context, 8);
+    }
+
+    TEST_F(MemoryInstructionsExecuter, GPU_ExecuteBufferTest12Bytes)
+    {
+        executeBufferTest(m_context, 12);
+    }
+
+    TEST_F(MemoryInstructionsExecuter, GPU_ExecuteBufferTest16Bytes)
+    {
+        executeBufferTest(m_context, 16);
+    }
+
+    TEST_P(MemoryInstructionsTest, AssembleBufferTest1Byte)
+    {
+        assembleBufferTest(m_context, 1);
+    }
+
+    TEST_P(MemoryInstructionsTest, AssembleBufferTest2Bytes)
+    {
+        assembleBufferTest(m_context, 2);
+    }
+
+    TEST_P(MemoryInstructionsTest, AssembleBufferTest4Bytes)
+    {
+        assembleBufferTest(m_context, 4);
+    }
+
+    TEST_P(MemoryInstructionsTest, AssembleBufferTest8Bytes)
+    {
+        assembleBufferTest(m_context, 8);
+    }
+
+    TEST_P(MemoryInstructionsTest, AssembleBufferTest12Bytes)
+    {
+        assembleBufferTest(m_context, 12);
+    }
+
+    TEST_P(MemoryInstructionsTest, AssembleBufferTest16Bytes)
+    {
+        assembleBufferTest(m_context, 16);
     }
 
     TEST_F(MemoryInstructionsExecuter, GPU_FlatTestOffset)

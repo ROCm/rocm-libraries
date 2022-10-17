@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include "Buffer.hpp"
+#include "BufferInstructionOptions.hpp"
 #include "CopyGenerator.hpp"
 #include "Instruction.hpp"
 
@@ -26,7 +28,7 @@ namespace rocRoller
         {
             Flat,
             Scalar,
-            Local
+            Local,
         };
 
         /**
@@ -182,6 +184,40 @@ namespace rocRoller
                                           std::string                      offset,
                                           int                              numBytes,
                                           std::string                      comment = "");
+
+        /**
+         * @brief Generate the instructions required to perform a buffer load.
+         *
+         *
+         * @param dest The register to store the loaded data in.
+         * @param addr  The register containing the address to load the data from.
+         * @param offset String containing an offset to be added to addr.
+         * @param numBytes The number of bytes to load.
+         * @param high Whether the value will be loaded into the high bits of the register. (Default=false)
+         */
+        Generator<Instruction> loadBuffer(std::shared_ptr<Register::Value> dest,
+                                          std::shared_ptr<Register::Value> addr,
+                                          std::string                      offset,
+                                          BufferDescriptor                 buffDesc,
+                                          BufferInstructionOptions         buffOpts,
+                                          int                              numBytes,
+                                          bool                             high = false);
+
+        /**
+         * @brief Generate the instructions required to perform a buffer store.
+         *
+         *
+         * @param addr The register containing the address to store the data.
+         * @param data  The register containing the data to store.
+         * @param offset String containing an offset to be added to addr.
+         * @param numBytes The number of bytes to load.
+         */
+        Generator<Instruction> storeBuffer(std::shared_ptr<Register::Value> addr,
+                                           std::shared_ptr<Register::Value> data,
+                                           std::string                      offset,
+                                           BufferDescriptor                 buffDesc,
+                                           BufferInstructionOptions         buffOpts,
+                                           int                              numBytes);
 
         /**
          * @brief Generate the instructions required to add a memory barrier.

@@ -338,6 +338,154 @@ namespace rocRoller
                 WaitCount::Zero("DEBUG: Wait after store", ctx->targetArchitecture()));
     }
 
+    inline Generator<Instruction>
+        MemoryInstructions::loadBuffer(std::shared_ptr<Register::Value> dest,
+                                       std::shared_ptr<Register::Value> addr,
+                                       std::string                      offset,
+                                       BufferDescriptor                 buffDesc,
+                                       BufferInstructionOptions         buffOpts,
+                                       int                              numBytes,
+                                       bool                             high)
+    {
+        AssertFatal(dest != nullptr);
+        AssertFatal(addr != nullptr);
+
+        AssertFatal(!high || (high && numBytes == 2),
+                    "Operation doesn't support hi argument for sizes of "
+                        + std::to_string(numBytes));
+
+        std::string offset_modifier = "", glc = "", slc = "", lds = "";
+        if(buffOpts.getOffen())
+        {
+            offset_modifier += "offset: 0";
+        }
+        else
+        {
+            offset_modifier += genOffsetModifier(offset);
+        }
+        if(buffOpts.getGlc())
+        {
+            glc += "glc";
+        }
+        if(buffOpts.getSlc())
+        {
+            slc += "slc";
+        }
+        if(buffOpts.getLds())
+        {
+            lds += "lds";
+        }
+        auto        sgprSrd = buffDesc.allRegisters();
+        std::string opEnd   = "";
+        switch(numBytes)
+        {
+        case 1:
+            opEnd += "ubyte";
+            break;
+        case 2:
+            if(high)
+                opEnd += "short_d16_hi";
+            else
+                opEnd += "ushort";
+            break;
+        case 4:
+            opEnd += "dword";
+            break;
+        case 8:
+            opEnd += "dwordx2";
+            break;
+        case 12:
+            opEnd += "dwordx3";
+            break;
+        case 16:
+            opEnd += "dwordx4";
+            break;
+        default:
+            throw std::runtime_error("Unsupported number of bytes for load.");
+        }
+
+        co_yield_(Instruction("buffer_load_" + opEnd,
+                              {dest},
+                              {addr, sgprSrd, Register::Value::Literal(0)},
+                              {"offen", offset_modifier, glc, slc, lds},
+                              "Load value"));
+
+        auto ctx = m_context.lock();
+        if(ctx->kernelOptions().alwaysWaitAfterLoad)
+            co_yield Instruction::Wait(
+                WaitCount::Zero("DEBUG: Wait after load", ctx->targetArchitecture()));
+    }
+
+    inline Generator<Instruction>
+        MemoryInstructions::storeBuffer(std::shared_ptr<Register::Value> addr,
+                                        std::shared_ptr<Register::Value> data,
+                                        std::string                      offset,
+                                        BufferDescriptor                 buffDesc,
+                                        BufferInstructionOptions         buffOpts,
+                                        int                              numBytes)
+    {
+        AssertFatal(addr != nullptr);
+        AssertFatal(data != nullptr);
+
+        std::string offset_modifier = "", glc = "", slc = "", lds = "";
+        if(buffOpts.getOffen())
+        {
+            offset_modifier += "offset: 0";
+        }
+        else
+        {
+            offset_modifier += genOffsetModifier(offset);
+        }
+        if(buffOpts.getGlc())
+        {
+            glc += "glc";
+        }
+        if(buffOpts.getSlc())
+        {
+            slc += "slc";
+        }
+        if(buffOpts.getLds())
+        {
+            lds += "lds";
+        }
+        auto sgprSrd = buffDesc.allRegisters();
+
+        std::string opEnd = "";
+        switch(numBytes)
+        {
+        case 1:
+            opEnd += "byte";
+            break;
+        case 2:
+            opEnd += "short";
+            break;
+        case 4:
+            opEnd += "dword";
+            break;
+        case 8:
+            opEnd += "dwordx2";
+            break;
+        case 12:
+            opEnd += "dwordx3";
+            break;
+        case 16:
+            opEnd += "dwordx4";
+            break;
+        default:
+            throw std::runtime_error("Unsupported number of bytes for store.");
+        }
+
+        co_yield_(Instruction("buffer_store_" + opEnd,
+                              {addr},
+                              {data, sgprSrd, Register::Value::Literal(0)},
+                              {"offen", offset_modifier, glc, slc, lds},
+                              "Store value"));
+        auto ctx = m_context.lock();
+        if(ctx->kernelOptions().alwaysWaitAfterStore)
+            co_yield Instruction::Wait(
+                WaitCount::Zero("DEBUG: Wait after store", ctx->targetArchitecture()));
+    }
+
     inline Generator<Instruction> MemoryInstructions::barrier()
     {
         co_yield Instruction("s_barrier", {}, {}, {}, "Memory barrier");
