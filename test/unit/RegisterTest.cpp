@@ -221,3 +221,18 @@ TEST_F(RegisterTest, SubsetOutOfBounds)
     r->allocateNow();
     EXPECT_THROW(r->subset({5}), FatalError);
 }
+
+TEST_F(RegisterTest, RegisterReuse)
+{
+    auto r
+        = std::make_shared<Register::Value>(m_context, Register::Type::Vector, DataType::Float, 8);
+    r->allocateNow();
+    EXPECT_EQ(r->allocationState(), Register::AllocationState::Allocated);
+
+    auto val1 = r->subset({3, 4});
+
+    auto val2 = std::make_shared<Register::Value>(
+        r->allocation(), Register::Type::Vector, DataType::Half, val1->allocationCoord());
+
+    EXPECT_EQ(val1->toString(), val2->toString());
+}

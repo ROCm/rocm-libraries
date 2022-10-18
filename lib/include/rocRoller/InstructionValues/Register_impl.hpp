@@ -319,6 +319,11 @@ namespace rocRoller
             return m_allocation;
         }
 
+        inline std::vector<int> Value::allocationCoord() const
+        {
+            return m_allocationCoord;
+        }
+
         inline Instruction Value::allocate()
         {
             if(allocationState() != AllocationState::Unallocated)

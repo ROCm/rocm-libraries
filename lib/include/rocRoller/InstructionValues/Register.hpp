@@ -93,6 +93,8 @@ namespace rocRoller
 
             std::shared_ptr<Allocation> allocation() const;
 
+            std::vector<int> allocationCoord() const;
+
             //> Returns a new instruction that only allocates registers for this value.
             Instruction allocate();
             void        allocate(Instruction& inst);
