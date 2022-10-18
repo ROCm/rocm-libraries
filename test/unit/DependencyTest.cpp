@@ -112,7 +112,8 @@ namespace rocRollerTest
                 v_target, Register::Value::Literal(check_val), "Move value");
 
             auto loop_start = Register::Value::Label("main_loop_" + std::to_string(n));
-            co_yield Instruction::Label(loop_start);
+            co_yield_(
+                Instruction::Label(loop_start).lock(Scheduling::Dependency::Branch, "Loop Start"));
 
             Register::ValuePtr s_condition;
             s_condition = m_context->getVCC();
@@ -126,6 +127,8 @@ namespace rocRollerTest
 
             co_yield m_context->brancher()->branchIfNonZero(
                 loop_start, s_condition, "// Conditionally branching to the label register.");
+
+            co_yield_(Instruction::Unlock("Loop end"));
 
             co_yield m_context->mem()->storeFlat(v_ptr, v_value, "", 4);
         };
@@ -182,16 +185,8 @@ namespace rocRollerTest
         ASSERT_THAT(hipMemcpy(&resultValue2, ptr2.get(), sizeof(float), hipMemcpyDefault),
                     HasHipSuccess(0));
 
-        if(GetParam() == Scheduling::SchedulerProcedure::Sequential)
-        {
-            EXPECT_GT(resultValue1, 100.0f);
-            EXPECT_GT(resultValue2, 1000.0f);
-        }
-        else
-        {
-            EXPECT_GT(resultValue1, 100.0f);
-            EXPECT_LT(resultValue2, 1000.0f);
-        }
+        EXPECT_GT(resultValue1, 100.0f);
+        EXPECT_GT(resultValue2, 1000.0f);
     }
 
     /**
@@ -264,6 +259,7 @@ namespace rocRollerTest
 
             co_yield m_context->copier()->fill(s_lhs, Register::Value::Literal(0x7FEFFFFF));
             co_yield m_context->copier()->fill(s_rhs, Register::Value::Literal(0x6DCBFFFF));
+            co_yield_(Instruction::Lock(Scheduling::Dependency::SCC));
             co_yield generateOp<Expression::Add>(s_res, s_lhs, s_rhs);
 
             auto scc_zero = Register::Value::Label("scc_zero");
@@ -274,7 +270,7 @@ namespace rocRollerTest
             co_yield m_context->brancher()->branch(end);
             co_yield_(Instruction::Label(scc_zero));
             co_yield m_context->copier()->copy(r_value, Register::Value::Literal(3014));
-            co_yield_(Instruction::Label(end));
+            co_yield_(Instruction::Label(end).unlock());
             co_yield m_context->mem()->storeFlat(r_ptr, r_value, "", 4);
         };
 
@@ -325,14 +321,7 @@ namespace rocRollerTest
         ASSERT_THAT(hipMemcpy(&resultValue, h_ptr.get(), sizeof(int), hipMemcpyDefault),
                     HasHipSuccess(0));
 
-        if(GetParam() == Scheduling::SchedulerProcedure::Sequential)
-        {
-            EXPECT_EQ(resultValue, 3014);
-        }
-        else
-        {
-            EXPECT_EQ(resultValue, 1729);
-        }
+        EXPECT_EQ(resultValue, 3014);
     }
 
     TEST_P(DependencyTest, VCCCarry)
@@ -515,6 +504,7 @@ namespace rocRollerTest
             Register::ValuePtr vcc;
             vcc = m_context->getVCC();
 
+            co_yield_(Instruction::Lock(Scheduling::Dependency::VCC));
             co_yield Expression::generate(
                 vcc, v_rhs->expression() > v_lhs->expression(), m_context);
 
@@ -535,7 +525,7 @@ namespace rocRollerTest
             co_yield m_context->brancher()->branch(end);
             co_yield Instruction::Label(label);
             co_yield m_context->copier()->copy(v_value, Register::Value::Literal(10));
-            co_yield Instruction::Label(end);
+            co_yield Instruction::Label(end).unlock();
 
             co_yield m_context->mem()->storeFlat(v_ptr, v_value, "", 4);
         };
@@ -599,189 +589,7 @@ namespace rocRollerTest
         ASSERT_THAT(hipMemcpy(&resultValue, h_ptr.get(), sizeof(int), hipMemcpyDefault),
                     HasHipSuccess(0));
 
-        if(GetParam() == Scheduling::SchedulerProcedure::Sequential)
-        {
-            EXPECT_EQ(resultValue, 10);
-        }
-        else
-        {
-            EXPECT_EQ(resultValue, 20);
-        }
-    }
-
-    /**
-     * loop computes input^(power-1). double_branch contains an if_loop than
-     * can be evaluated to be false always since we are checking against a
-     * const value. This is used to see how we treat conditonal branches that
-     * can be treated as branches or always fall through. The double_branch
-     * alters a value within the loop while the iterations have not ended if
-     * interleaved together. math is used to interleave instructions that have
-     * no dependencies.
-     **/
-    TEST_P(DependencyTest, Branching)
-    {
-        auto command = std::make_shared<Command>();
-
-        VariableType floatPtr{DataType::Float, PointerType::PointerGlobal};
-        VariableType floatVal{DataType::Float, PointerType::Value};
-        VariableType uintVal{DataType::UInt32, PointerType::Value};
-
-        auto ptr_arg  = command->allocateArgument(floatPtr);
-        auto val_arg  = command->allocateArgument(floatVal);
-        auto size_arg = command->allocateArgument(uintVal);
-
-        auto ptr_exp  = std::make_shared<Expression::Expression>(ptr_arg);
-        auto val_exp  = std::make_shared<Expression::Expression>(val_arg);
-        auto size_exp = std::make_shared<Expression::Expression>(size_arg);
-
-        auto one  = std::make_shared<Expression::Expression>(1u);
-        auto onef = std::make_shared<Expression::Expression>(1.f);
-        auto zero = std::make_shared<Expression::Expression>(0u);
-
-        auto k = m_context->kernel();
-
-        k->setKernelDimensions(1);
-
-        k->addArgument({"ptr",
-                        {DataType::Float, PointerType::PointerGlobal},
-                        DataDirection::WriteOnly,
-                        ptr_exp});
-        k->addArgument({"val", {DataType::Float}, DataDirection::ReadOnly, val_exp});
-
-        k->setWorkgroupSize({1, 1, 1});
-        k->setWorkitemCount({size_exp, one, one});
-        k->setDynamicSharedMemBytes(zero);
-
-        m_context->schedule(k->preamble());
-        m_context->schedule(k->prolog());
-
-        std::vector<Generator<Instruction>> sequences;
-
-        auto v_value
-            = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Float, 1);
-        auto v_ptr
-            = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Raw32, 2);
-
-        auto loop = [&](float power) -> Generator<Instruction> {
-            Register::ValuePtr s_ptr, s_value;
-            co_yield m_context->argLoader()->getValue("ptr", s_ptr);
-            co_yield m_context->argLoader()->getValue("val", s_value);
-
-            auto v_target = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Float, 1);
-
-            co_yield v_ptr->allocate();
-            co_yield m_context->copier()->copy(v_ptr, s_ptr, "Move pointer");
-            co_yield v_value->allocate();
-            co_yield m_context->copier()->copy(v_value, s_value, "Move value");
-
-            // v_target is val we check against
-            co_yield m_context->copier()->copy(
-                v_target, Register::Value::Literal(power), "Move value");
-
-            auto loop_start = Register::Value::Label("loop");
-            co_yield Instruction::Label(loop_start);
-
-            Register::ValuePtr s_condition;
-            s_condition = Register::Value::Placeholder(
-                m_context, Register::Type::Scalar, DataType::Raw32, 2);
-
-            // Double the input value.
-            co_yield Expression::generate(
-                v_value, v_value->expression() * v_value->expression(), m_context);
-
-            co_yield generateOp<Expression::Subtract>(
-                v_target, v_target, Register::Value::Literal(1.f));
-
-            // Compare against the stop value.
-            co_yield Expression::generate(s_condition, v_target->expression() == onef, m_context);
-
-            co_yield m_context->brancher()->branchIfZero(
-                loop_start, s_condition, "//Conditionally branching to the label register.");
-        };
-
-        auto double_branch = [&]() -> Generator<Instruction> {
-            auto wavefront_size = k->wavefront_size();
-
-            auto s0 = Register::Value::Placeholder(
-                m_context, Register::Type::Scalar, DataType::UInt32, wavefront_size / 32);
-            co_yield s0->allocate();
-
-            co_yield m_context->copier()->copy(s0, Register::Value::Literal(0xFFFF), "Move value");
-
-            auto if_label = Register::Value::Label("if_label");
-
-            co_yield m_context->brancher()->branchIfZero(if_label, s0);
-
-            auto v_temp = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Float, 1);
-            co_yield m_context->copier()->copy(v_temp, Register::Value::Literal(32.f), "");
-
-            co_yield generateOp<Expression::Subtract>(v_value, v_value, v_temp);
-
-            co_yield_(Instruction::Label(if_label));
-
-            co_yield Expression::generate(
-                v_value, v_value->expression() + v_value->expression(), m_context);
-
-            co_yield m_context->copier()->copy(s0, Register::Value::Literal(0), "Zero out value");
-
-            co_yield m_context->mem()->storeFlat(v_ptr, v_value, "", 4);
-        };
-
-        auto math = [&]() -> Generator<Instruction> {
-            auto v_lhs = std::make_shared<Register::Value>(
-                m_context, Register::Type::Vector, DataType::Int32, 1);
-            co_yield m_context->copier()->fill(v_lhs, Register::Value::Literal(1));
-            auto v_rhs = std::make_shared<Register::Value>(
-                m_context, Register::Type::Vector, DataType::Int32, 1);
-            co_yield m_context->copier()->fill(v_rhs, Register::Value::Literal(2));
-
-            co_yield Expression::generate(
-                v_lhs, v_lhs->expression() + v_rhs->expression(), m_context);
-            co_yield Expression::generate(
-                v_lhs, v_lhs->expression() * v_rhs->expression(), m_context);
-        };
-
-        sequences.push_back(loop(3.f)); // res = (4 * 4) * (4 * 4) = 256
-        sequences.push_back(math()); // res untouched in this block
-        sequences.push_back(double_branch()); // res = 256 - 32; res = res + res  = 448
-
-        std::shared_ptr<Scheduling::Scheduler> scheduler
-            = Component::Get<Scheduling::Scheduler>(GetParam(), m_context);
-
-        m_context->schedule((*scheduler)(sequences));
-
-        m_context->schedule(k->postamble());
-        m_context->schedule(k->amdgpu_metadata());
-
-        CommandKernel commandKernel(m_context);
-
-        auto         ptr  = make_shared_device<float>();
-        float        val  = 4.0f;
-        unsigned int size = 1;
-
-        ASSERT_THAT(hipMemset(ptr.get(), 0, sizeof(float)), HasHipSuccess(0));
-
-        KernelArguments runtimeArgs;
-        runtimeArgs.append("ptr", ptr.get());
-        runtimeArgs.append("val", val);
-        runtimeArgs.append("size", size);
-
-        commandKernel.launchKernel(runtimeArgs.runtimeArguments());
-
-        float resultValue = 0.0f;
-        ASSERT_THAT(hipMemcpy(&resultValue, ptr.get(), sizeof(float), hipMemcpyDefault),
-                    HasHipSuccess(0));
-
-        if(GetParam() == Scheduling::SchedulerProcedure::Sequential)
-        {
-            EXPECT_EQ(resultValue, 448.0f);
-        }
-        else
-        {
-            EXPECT_NE(resultValue, 448.0f);
-        }
+        EXPECT_EQ(resultValue, 10);
     }
 
     INSTANTIATE_TEST_SUITE_P(DependencyTest,

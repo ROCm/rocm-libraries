@@ -430,7 +430,6 @@ namespace rocRollerTest
 
         m_context->schedule((*schedulerA)(a_sequences));
 
-        // TODO: Fix when m_comments.push_back() issue is fixed
         std::string expected = R"( (A) Op A Begin
                                     (A) For Loop Begin // (A) Scheduler A Lock
                                     +++ Scheduler A Lock Depth: 1
