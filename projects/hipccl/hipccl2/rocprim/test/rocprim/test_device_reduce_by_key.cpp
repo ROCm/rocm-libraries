@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "common_test_header.hpp"
+#include "../common_test_header.hpp"
 
 // required rocprim headers
 #include <rocprim/device/device_reduce_by_key.hpp>
@@ -92,16 +92,16 @@ typedef ::testing::Types<
     params<float, custom_double2, rocprim::minimum<custom_double2>, 1, 10000>,
     params<custom_double2, custom_int2, rocprim::plus<custom_int2>, 1, 10>,
     params<unsigned long long, float, rocprim::minimum<float>, 1, 30>,
-    params<int, rocprim::half, test_utils::half_minimum, 15, 100>,
-    params<int, rocprim::bfloat16, test_utils::bfloat16_minimum, 15, 100>,
+    params<int, rocprim::half, rocprim::minimum<rocprim::half>, 15, 100>,
+    params<int, rocprim::bfloat16, rocprim::minimum<rocprim::bfloat16>, 15, 100>,
     params<int, unsigned int, rocprim::maximum<unsigned int>, 20, 100>,
     params<float, long long, rocprim::maximum<unsigned long long>, 100, 400, long long, custom_key_compare_op1<float>>,
     params<unsigned int, unsigned char, rocprim::plus<unsigned char>, 200, 600>,
     params<double, int, rocprim::plus<int>, 100, 2000, double, custom_key_compare_op1<double>>,
     params<int8_t, int8_t, rocprim::maximum<int8_t>, 20, 100>,
     params<uint8_t, uint8_t, rocprim::maximum<uint8_t>, 20, 100>,
-    params<char, rocprim::half, test_utils::half_maximum, 123, 1234>,
-    params<char, rocprim::bfloat16, test_utils::bfloat16_maximum, 123, 1234>,
+    params<char, rocprim::half, rocprim::maximum<rocprim::half>, 123, 1234>,
+    params<char, rocprim::bfloat16, rocprim::maximum<rocprim::bfloat16>, 123, 1234>,
     params<custom_int2, unsigned int, rocprim::plus<unsigned int>, 1000, 5000>,
     params<unsigned int, int, rocprim::plus<int>, 2048, 2048>,
     params<long long, short, rocprim::plus<long long>, 1000, 10000, long long>,
@@ -113,24 +113,10 @@ typedef ::testing::Types<
 
 TYPED_TEST_SUITE(RocprimDeviceReduceByKey, Params);
 
-std::vector<size_t> get_sizes(int seed_value)
-{
-    std::vector<size_t> sizes = {
-        1024, 2048, 4096, 1792,
-        0, 1, 10, 53, 211, 500,
-        2345, 11001, 34567,
-        100000,
-        (1 << 16) - 1220, (1 << 23) - 76543
-    };
-    const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(10, 1, 100000, seed_value);
-    sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
-    return sizes;
-}
-
 TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using key_type = typename TestFixture::params::key_type;
@@ -163,17 +149,12 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
-        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
-        for(size_t size : get_sizes(seed_value))
+        for(size_t size : test_utils::get_sizes(seed_value))
         {
-            if (size == 0 && test_common_utils::use_hmm())
-            {
-                // hipMallocManaged() currently doesnt support zero byte allocation
-                continue;
-            }
-
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             hipStream_t stream = 0; // default
@@ -337,20 +318,11 @@ TYPED_TEST(RocprimDeviceReduceByKey, ReduceByKey)
 
 }
 
-std::vector<size_t> get_large_sizes()
-{
-    std::vector<size_t> sizes = {
-        (size_t{1} << 32) + (size_t{1} << 31),
-        (size_t{1} << 35) - 1,
-    };
-    return sizes;
-}
-
 template<typename value_type>
 void large_indices_reduce_by_key()
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using key_type       = size_t;
@@ -363,9 +335,7 @@ void large_indices_reduce_by_key()
 
     hipStream_t stream = 0; // default
 
-    const std::vector<size_t> sizes = get_large_sizes();
-
-    for(size_t size : sizes)
+    for(size_t size : test_utils::get_large_sizes(42))
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
@@ -485,7 +455,7 @@ template<typename value_type>
 void large_segment_count_reduce_by_key()
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using key_type = size_t;
@@ -497,9 +467,7 @@ void large_segment_count_reduce_by_key()
 
     hipStream_t stream = 0; // default
 
-    const std::vector<size_t> sizes = get_large_sizes();
-
-    for(size_t size : sizes)
+    for(size_t size : test_utils::get_large_sizes(42))
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 

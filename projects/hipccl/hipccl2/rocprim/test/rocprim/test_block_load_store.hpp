@@ -27,7 +27,7 @@ typed_test_suite_def(suite_name, name_suffix, warp_params);
 typed_test_def(suite_name, name_suffix, LoadStoreClass)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using Type = typename TestFixture::params::type;
@@ -47,7 +47,7 @@ typed_test_def(suite_name, name_suffix, LoadStoreClass)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
         std::vector<Type> input = test_utils::get_random_data<Type>(size, -100, 100, seed_value);
@@ -111,7 +111,7 @@ typed_test_def(suite_name, name_suffix, LoadStoreClass)
 typed_test_def(suite_name, name_suffix, LoadStoreClassValid)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using Type = typename TestFixture::params::type;
@@ -133,7 +133,7 @@ typed_test_def(suite_name, name_suffix, LoadStoreClassValid)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
         std::vector<Type> input = test_utils::get_random_data<Type>(size, -100, 100, seed_value);
@@ -209,7 +209,7 @@ typed_test_def(suite_name, name_suffix, LoadStoreClassValid)
 typed_test_def(suite_name, name_suffix, LoadStoreClassDefault)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using Type = typename TestFixture::params::type;
@@ -232,7 +232,7 @@ typed_test_def(suite_name, name_suffix, LoadStoreClassDefault)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
         std::vector<Type> input = test_utils::get_random_data<Type>(size, -100, 100, seed_value);

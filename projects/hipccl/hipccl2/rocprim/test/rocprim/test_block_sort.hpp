@@ -39,7 +39,7 @@ template<unsigned int block_size,
 void TestSortKeyValue()
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     static constexpr const unsigned int items_per_block = block_size * items_per_thread;
@@ -56,7 +56,8 @@ void TestSortKeyValue()
     {
         unsigned int seed_value
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with size = " << size);
 
         // Generate data
         std::vector<key_type> output_key
@@ -137,8 +138,8 @@ void TestSortKeyValue()
 
         // Keys are sorted, Values order not guaranteed
         // Sort subsets where key was the same to make sure all values are still present
-        using value_op_type = typename test_utils::select_less_operator<value_type>::type;
-        using eq_op_type    = typename test_utils::select_equal_to_operator<key_type>::type;
+        using value_op_type = rocprim::less<value_type>;
+        using eq_op_type    = rocprim::equal_to<key_type>;
         value_op_type value_op;
         eq_op_type    eq_op;
         for(size_t i = 0; i < output_key.size();)
@@ -168,7 +169,7 @@ template<unsigned int block_size,
 void TestSortKey(std::vector<size_t> sizes)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     static constexpr const unsigned int items_per_block = block_size * items_per_thread;
@@ -183,11 +184,11 @@ void TestSortKey(std::vector<size_t> sizes)
     {
         unsigned int seed_value
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         for(size_t size : sizes)
         {
-            SCOPED_TRACE(testing::Message() << "with size= " << size);
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
             if(size == 0 && test_common_utils::use_hmm())
             {
                 // hipMallocManaged() currently doesnt support zero byte allocation
@@ -246,11 +247,11 @@ void TestSortKey(std::vector<size_t> sizes)
 // integrals and floating point types.
 typed_test_def(suite_name, name_suffix, SortKeys)
 {
-    using key_type       = typename TestFixture::key_type;
-    using value_type     = typename TestFixture::value_type;
-    using binary_op_type = typename test_utils::select_less_operator<key_type>::type;
-    static constexpr const rocprim::block_sort_algorithm algo       = TEST_BLOCK_SORT_ALGORITHM;
-    static constexpr const unsigned int                  block_size = TestFixture::block_size;
+    using key_type                                            = typename TestFixture::key_type;
+    using value_type                                          = typename TestFixture::value_type;
+    using binary_op_type                                      = rocprim::less<key_type>;
+    static constexpr const rocprim::block_sort_algorithm algo = TEST_BLOCK_SORT_ALGORITHM;
+    static constexpr const unsigned int                  block_size       = TestFixture::block_size;
     static constexpr const unsigned int                  items_per_thread = 1;
 
     std::vector<size_t> sizes = {1134 * items_per_thread * block_size};
@@ -270,11 +271,11 @@ typed_test_def(suite_name, name_suffix, SortKeyValue)
 
 typed_test_def(suite_name, name_suffix, SortKeysMultipleItemsPerThread)
 {
-    using key_type       = typename TestFixture::key_type;
-    using value_type     = typename TestFixture::value_type;
-    using binary_op_type = typename test_utils::select_less_operator<key_type>::type;
-    static constexpr const rocprim::block_sort_algorithm algo       = TEST_BLOCK_SORT_ALGORITHM;
-    static constexpr const unsigned int                  block_size = TestFixture::block_size;
+    using key_type                                            = typename TestFixture::key_type;
+    using value_type                                          = typename TestFixture::value_type;
+    using binary_op_type                                      = rocprim::less<key_type>;
+    static constexpr const rocprim::block_sort_algorithm algo = TEST_BLOCK_SORT_ALGORITHM;
+    static constexpr const unsigned int                  block_size       = TestFixture::block_size;
     static constexpr const unsigned int                  items_per_thread = 4;
 
     std::vector<size_t> sizes = {1134 * items_per_thread * block_size};
@@ -294,11 +295,11 @@ typed_test_def(suite_name, name_suffix, SortKeyValueMultipleItemsPerThread)
 
 typed_test_def(suite_name, name_suffix, SortKeyInputSizeNotMultipleOfBlockSize)
 {
-    using key_type       = typename TestFixture::key_type;
-    using value_type     = typename TestFixture::value_type;
-    using binary_op_type = typename test_utils::select_less_operator<key_type>::type;
-    static constexpr const rocprim::block_sort_algorithm algo       = TEST_BLOCK_SORT_ALGORITHM;
-    static constexpr const unsigned int                  block_size = TestFixture::block_size;
+    using key_type                                            = typename TestFixture::key_type;
+    using value_type                                          = typename TestFixture::value_type;
+    using binary_op_type                                      = typename rocprim::less<key_type>;
+    static constexpr const rocprim::block_sort_algorithm algo = TEST_BLOCK_SORT_ALGORITHM;
+    static constexpr const unsigned int                  block_size       = TestFixture::block_size;
     static constexpr const unsigned int                  items_per_thread = 1;
     if(algo != rocprim::block_sort_algorithm::bitonic_sort || items_per_thread != 1u)
     {

@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "common_test_header.hpp"
+#include "../common_test_header.hpp"
 
 // required rocprim headers
 #include <rocprim/device/device_reduce.hpp>
@@ -98,24 +98,12 @@ typedef ::testing::Types<
     RocprimDeviceReduceTestsParams;
 
 typedef ::testing::Types<
+    DeviceReduceParams<double, double>,
     DeviceReduceParams<float, float, false, 2048>,
     // #156 temporarily disable half test due to known issue with converting from double to half
-    // DeviceReduceParams<rocprim::half, rocprim::half>,
+    //  DeviceReduceParams<rocprim::half, rocprim::half>,
     DeviceReduceParams<rocprim::bfloat16, rocprim::bfloat16>>
     RocprimDeviceReducePrecisionTestsParams;
-
-std::vector<size_t> get_sizes(int seed_value)
-{
-    std::vector<size_t> sizes = {
-        1, 10, 53, 211, 512,
-        1024, 2048, 5096,
-        34567, (1 << 17) - 1220
-    };
-    const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(2, 1, 16384, seed_value);
-    sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
-    std::sort(sizes.begin(), sizes.end());
-    return sizes;
-}
 
 TYPED_TEST_SUITE(RocprimDeviceReduceTests, RocprimDeviceReduceTestsParams);
 TYPED_TEST_SUITE(RocprimDeviceReducePrecisionTests, RocprimDeviceReducePrecisionTestsParams);
@@ -123,17 +111,13 @@ TYPED_TEST_SUITE(RocprimDeviceReducePrecisionTests, RocprimDeviceReducePrecision
 TYPED_TEST(RocprimDeviceReduceTests, ReduceEmptyInput)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
     using Config = size_limit_config_t<TestFixture::size_limit>;
-
-    // TODO: ReduceEmptyInput cause random faulire with bfloat16
-    if( std::is_same<T, rocprim::bfloat16>::value || std::is_same<U, rocprim::bfloat16>::value )
-        GTEST_SKIP();
 
     hipStream_t stream = 0; // default stream
 
@@ -186,7 +170,7 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceEmptyInput)
 TYPED_TEST(RocprimDeviceReduceTests, ReduceSum)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using T = typename TestFixture::input_type;
@@ -199,18 +183,26 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceSum)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
-        const std::vector<size_t> sizes = get_sizes(seed_value);
-        for(auto size : sizes)
+        for(auto size : test_utils::get_sizes(seed_value))
         {
+            if(test_utils::precision<U> * size > 0.5)
+            {
+                std::cout << "Test is skipped from size " << size
+                          << " on, potential error of summation is more than 0.5 of the result "
+                             "with current or larger size"
+                          << std::endl;
+                break;
+            }
+
             hipStream_t stream = 0; // default
 
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             // Generate data
             std::vector<T> input = test_utils::get_random_data<T>(size, 0, 100, seed_value);
-            std::vector<U> output(1, (U)0);
+            std::vector<U> output(1, U(0));
 
             T * d_input;
             U * d_output;
@@ -227,6 +219,9 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceSum)
 
             // Calculate expected results on host
             U expected = test_utils::host_reduce(input.begin(), input.end(), rocprim::plus<U>());
+            // fix for custom_test_type case with size == 0
+            if(size == 0)
+                expected = U();
             // temp storage
             size_t temp_storage_size_bytes;
             void * d_temp_storage = nullptr;
@@ -270,7 +265,8 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceSum)
             HIP_CHECK(hipDeviceSynchronize());
 
             // Check if output values are as expected
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output[0], expected, test_utils::precision_threshold<T>::percentage));
+            ASSERT_NO_FATAL_FAILURE(
+                test_utils::assert_near(output[0], expected, test_utils::precision<U> * size));
 
             hipFree(d_input);
             hipFree(d_output);
@@ -283,12 +279,14 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceSum)
 TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
-    using binary_op_type = typename test_utils::select_minimum_operator<U>::type;
+
+    using binary_op_type = rocprim::minimum<U>;
+
     const bool debug_synchronous = TestFixture::debug_synchronous;
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
     using Config = size_limit_config_t<TestFixture::size_limit>;
@@ -296,10 +294,9 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
-        const std::vector<size_t> sizes = get_sizes(seed_value);
-        for(auto size : sizes)
+        for(auto size : test_utils::get_sizes(seed_value))
         {
             hipStream_t stream = 0; // default
 
@@ -307,7 +304,7 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
 
             // Generate data
             std::vector<T> input = test_utils::get_random_data<T>(size, 1, 100, seed_value);
-            std::vector<U> output(1, (U)0);
+            std::vector<U> output(1, U(0));
 
             T * d_input;
             U * d_output;
@@ -375,7 +372,12 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceMinimum)
             HIP_CHECK(hipDeviceSynchronize());
 
             // Check if output values are as expected
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output[0], expected, test_utils::precision_threshold<T>::percentage));
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(
+                output[0],
+                expected,
+                std::is_same<T, U>::value
+                    ? 0
+                    : std::max(test_utils::precision<T>, test_utils::precision<U>)));
 
             hipFree(d_input);
             hipFree(d_output);
@@ -396,23 +398,11 @@ struct arg_min
     operator()(const rocprim::key_value_pair<Key, Value>& a,
                const rocprim::key_value_pair<Key, Value>& b) const
     {
-        return ((b.value < a.value) || ((a.value == b.value) && (b.key < a.key))) ? b : a;
-    }
-};
-
-template<>
-struct arg_min<int, rocprim::half>
-{
-    ROCPRIM_HOST_DEVICE inline
-    rocprim::key_value_pair<int, rocprim::half>
-    operator()(const rocprim::key_value_pair<int, rocprim::half>& a,
-               const rocprim::key_value_pair<int, rocprim::half>& b) const
-    {
-        #if __HIP_DEVICE_COMPILE__
-        return ((b.value < a.value) || ((a.value == b.value) && (b.key < a.key))) ? b : a;
-        #else
-        return (test_utils::half_less()(b.value, a.value) || (test_utils::half_equal_to()(a.value, b.value) && (b.key < a.key))) ? b : a;
-        #endif
+        rocprim::less<Value>     less_v;
+        rocprim::less<Key>       less_k;
+        rocprim::equal_to<Value> eq_v;
+        return (less_v(b.value, a.value) || (eq_v(a.value, b.value) && less_k(b.key, a.key))) ? b
+                                                                                              : a;
     }
 };
 
@@ -420,7 +410,7 @@ struct arg_min<int, rocprim::half>
 TYPED_TEST(RocprimDeviceReduceTests, ReduceArgMinimum)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using T = typename TestFixture::input_type;
@@ -432,10 +422,9 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceArgMinimum)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
-        const std::vector<size_t> sizes = get_sizes(seed_value);
-        for(auto size : sizes)
+        for(auto size : test_utils::get_sizes(seed_value))
         {
             hipStream_t stream = 0; // default
 
@@ -516,8 +505,8 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceArgMinimum)
             HIP_CHECK(hipDeviceSynchronize());
 
             // Check if output values are as expected
-            ASSERT_EQ(output[0].key, expected.key);
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output[0].value, expected.value, test_utils::precision_threshold<T>::percentage));
+            test_utils::assert_eq(output[0].key, expected.key);
+            test_utils::assert_eq(output[0].value, expected.value);
 
             hipFree(d_input);
             hipFree(d_output);
@@ -527,26 +516,10 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceArgMinimum)
 
 }
 
-std::vector<size_t> get_large_sizes(int seed_value)
-{
-    std::vector<size_t> sizes = {
-        (size_t{1} << 30) - 1, size_t{1} << 30,
-        (size_t{1} << 31) - 1, size_t{1} << 31,
-        (size_t{1} << 32) - 1, size_t{1} << 32,
-        (size_t{1} << 35) - 1, size_t{1} << 35,
-        (size_t{1} << 37) - 1,
-    };
-    const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(
-        2, (size_t {1} << 30) + 1, (size_t {1} << 37) - 2, seed_value);
-    sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
-    std::sort(sizes.begin(), sizes.end());
-    return sizes;
-}
-
 TEST(RocprimDeviceReduceTests, LargeIndices)
 {
     const int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using T                      = size_t;
@@ -559,11 +532,9 @@ TEST(RocprimDeviceReduceTests, LargeIndices)
     {
         unsigned int seed_value
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
-        const std::vector<size_t> sizes = get_large_sizes(seed_value);
-
-        for(const auto size : sizes)
+        for(const auto size : test_utils::get_large_sizes(seed_value))
         {
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
@@ -621,7 +592,7 @@ TEST(RocprimDeviceReduceTests, LargeIndices)
 TYPED_TEST(RocprimDeviceReducePrecisionTests, ReduceSumInputEqualExponentFunction)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using T = typename TestFixture::input_type;
@@ -631,9 +602,21 @@ TYPED_TEST(RocprimDeviceReducePrecisionTests, ReduceSumInputEqualExponentFunctio
     static constexpr bool use_identity_iterator = TestFixture::use_identity_iterator;
     using Config                                = size_limit_config_t<TestFixture::size_limit>;
 
-    const std::vector<size_t> sizes = get_sizes(42);
-    for(auto size : sizes)
+    for(auto size : test_utils::get_sizes(42))
     {
+        //if(size == 0)
+        //    continue;
+        // as all numbers here are the same and have only 1 significant bit in matnissa the error is like this
+        const float precision = std::max(0.0, test_utils::precision<U> / 2.0 * size - 1.0);
+        if(precision > 0.5)
+        {
+            std::cout << "Test is skipped from size " << size
+                      << " on, potential error of summation is more than 0.5 of the result with "
+                         "current or larger size"
+                      << std::endl;
+            break;
+        }
+
         hipStream_t stream = 0; // default
 
         SCOPED_TRACE(testing::Message() << "with size = " << size);
@@ -700,8 +683,7 @@ TYPED_TEST(RocprimDeviceReducePrecisionTests, ReduceSumInputEqualExponentFunctio
         HIP_CHECK(hipDeviceSynchronize());
 
         // Check if output values are as expected
-        ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(
-            output[0], expected, test_utils::precision_threshold<T>::percentage));
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output[0], expected, precision));
 
         hipFree(d_input);
         hipFree(d_output);

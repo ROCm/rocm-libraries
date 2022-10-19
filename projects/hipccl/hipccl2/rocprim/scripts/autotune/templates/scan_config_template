@@ -1,0 +1,27 @@
+{% extends "config_template" %}
+
+{% macro get_header_guard() %}
+ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_DEVICE_SCAN_HPP_
+{%- endmacro %}
+
+{% macro kernel_configuration(measurement) -%}
+scan_config<{{ measurement['block_size'] }}, {{ measurement['items_per_thread'] }}, true, ::rocprim::block_load_method::block_load_transpose, ::rocprim::block_store_method::block_store_transpose, {{ measurement['block_scan_algo'] }}> { }; 
+{%- endmacro %}
+
+{% macro general_case() -%}
+template<unsigned int arch, class value_type, class enable = void> struct default_scan_config :
+default_scan_config_base<value_type> { };
+{%- endmacro %}
+
+{% macro configuration_arch_specific(benchmark_of_architecture, configuration) -%}
+template<> struct default_scan_config<static_cast<unsigned int>({{ benchmark_of_architecture.name }}), {{ configuration.value_type }}> :
+{%- endmacro %}
+
+{% macro configuration_fallback(benchmark_of_architecture, based_on_type, fallback_selection_criteria) -%}
+// Based on {{ based_on_type }}
+template<class value_type> struct default_scan_config<static_cast<unsigned int>({{ benchmark_of_architecture.name }}), value_type, {{ fallback_selection_criteria }}> :
+{%- endmacro %}
+
+  
+
+

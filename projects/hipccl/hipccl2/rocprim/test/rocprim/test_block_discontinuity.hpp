@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -26,12 +26,12 @@ typed_test_suite_def(RocprimBlockDiscontinuity, name_suffix, warp_params);
 
 typed_test_def(RocprimBlockDiscontinuity, name_suffix, FlagHeads)
 {
-    using type = typename TestFixture::params::input_type;
-    using flag_type = typename TestFixture::params::output_type;
-    using flag_op_type_1 = typename test_utils::select_less_operator<type>::type;
-    using flag_op_type_2 = typename test_utils::select_equal_to_operator<type>::type;
-    using flag_op_type_3 = typename test_utils::select_greater_operator<type>::type;
-    using flag_op_type_4 = typename test_utils::select_not_equal_to_operator<type>::type;
+    using type                  = typename TestFixture::params::input_type;
+    using flag_type             = typename TestFixture::params::output_type;
+    using flag_op_type_1        = rocprim::less<type>;
+    using flag_op_type_2        = rocprim::equal_to<type>;
+    using flag_op_type_3        = rocprim::greater<type>;
+    using flag_op_type_4        = rocprim::not_equal_to<type>;
     constexpr size_t block_size = TestFixture::params::block_size;
 
     static_for<0, 2, type, flag_type, flag_op_type_1, 0, block_size>::run();
@@ -42,12 +42,12 @@ typed_test_def(RocprimBlockDiscontinuity, name_suffix, FlagHeads)
 
 typed_test_def(RocprimBlockDiscontinuity, name_suffix, FlagTails)
 {
-    using type = typename TestFixture::params::input_type;
-    using flag_type = typename TestFixture::params::output_type;
-    using flag_op_type_1 = typename test_utils::select_less_operator<type>::type;
-    using flag_op_type_2 = typename test_utils::select_equal_to_operator<type>::type;;
-    using flag_op_type_3 = typename test_utils::select_greater_operator<type>::type;
-    using flag_op_type_4 = typename test_utils::select_not_equal_to_operator<type>::type;
+    using type                  = typename TestFixture::params::input_type;
+    using flag_type             = typename TestFixture::params::output_type;
+    using flag_op_type_1        = rocprim::less<type>;
+    using flag_op_type_2        = rocprim::equal_to<type>;
+    using flag_op_type_3        = rocprim::greater<type>;
+    using flag_op_type_4        = rocprim::not_equal_to<type>;
     constexpr size_t block_size = TestFixture::params::block_size;
 
     static_for<0, 2, type, flag_type, flag_op_type_1, 1, block_size>::run();
@@ -58,12 +58,12 @@ typed_test_def(RocprimBlockDiscontinuity, name_suffix, FlagTails)
 
 typed_test_def(RocprimBlockDiscontinuity, name_suffix, FlagHeadsAndTails)
 {
-    using type = typename TestFixture::params::input_type;
-    using flag_type = typename TestFixture::params::output_type;
-    using flag_op_type_1 = typename test_utils::select_less_operator<type>::type;
-    using flag_op_type_2 = typename test_utils::select_equal_to_operator<type>::type;;
-    using flag_op_type_3 = typename test_utils::select_greater_operator<type>::type;
-    using flag_op_type_4 = typename test_utils::select_not_equal_to_operator<type>::type;
+    using type                  = typename TestFixture::params::input_type;
+    using flag_type             = typename TestFixture::params::output_type;
+    using flag_op_type_1        = rocprim::less<type>;
+    using flag_op_type_2        = rocprim::equal_to<type>;
+    using flag_op_type_3        = rocprim::greater<type>;
+    using flag_op_type_4        = rocprim::not_equal_to<type>;
     constexpr size_t block_size = TestFixture::params::block_size;
 
     static_for<0, 2, type, flag_type, flag_op_type_1, 2, block_size>::run();

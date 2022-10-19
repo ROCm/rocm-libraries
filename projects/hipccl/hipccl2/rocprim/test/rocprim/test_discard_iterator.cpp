@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "common_test_header.hpp"
+#include "../common_test_header.hpp"
 
 // required rocprim headers
 #include <rocprim/functional.hpp>
@@ -34,7 +34,7 @@
 TEST(RocprimDiscardIteratorTests, Equal)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using Iterator = typename rocprim::discard_iterator;
@@ -42,7 +42,7 @@ TEST(RocprimDiscardIteratorTests, Equal)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         Iterator x(test_utils::get_random_value<size_t>(0, 200, seed_value));
             Iterator y = x;
@@ -63,7 +63,7 @@ TEST(RocprimDiscardIteratorTests, Equal)
 TEST(RocprimDiscardIteratorTests, Less)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using Iterator = typename rocprim::discard_iterator;
@@ -71,7 +71,7 @@ TEST(RocprimDiscardIteratorTests, Less)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         Iterator x(test_utils::get_random_value<size_t>(0, 200, seed_value));
         Iterator y = x + 1;
@@ -89,7 +89,7 @@ TEST(RocprimDiscardIteratorTests, Less)
 TEST(RocprimDiscardIteratorTests, ReduceByKey)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
     
     const bool debug_synchronous = false;

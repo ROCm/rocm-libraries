@@ -75,7 +75,6 @@ if(NOT USE_HIP_CPU)
     set(GPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for" FORCE)
   endif()
 
-  # Verify that hcc compiler is used on ROCM platform
   # TODO: Fix VerifyCompiler for HIP on Windows
   if (NOT WIN32)
     include(cmake/VerifyCompiler.cmake)

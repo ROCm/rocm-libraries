@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "common_test_header.hpp"
+#include "../common_test_header.hpp"
 
 // required rocprim headers
 #include <rocprim/functional.hpp>
@@ -85,7 +85,7 @@ TYPED_TEST_SUITE(RocprimTransformIteratorTests, RocprimTransformIteratorTestsPar
 TYPED_TEST(RocprimTransformIteratorTests, TransformReduce)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using input_type = typename TestFixture::input_type;
@@ -102,7 +102,7 @@ TYPED_TEST(RocprimTransformIteratorTests, TransformReduce)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
         std::vector<input_type> input = test_utils::get_random_data<input_type>(size, 1, 200, seed_value);
@@ -180,15 +180,7 @@ TYPED_TEST(RocprimTransformIteratorTests, TransformReduce)
         HIP_CHECK(hipDeviceSynchronize());
 
         // Check if output values are as expected
-        if(std::is_integral<value_type>::value)
-        {
-            ASSERT_EQ(output[0], expected);
-        }
-        else if(std::is_floating_point<value_type>::value)
-        {
-            auto tolerance = std::abs(test_utils::precision_threshold<value_type>::percentage * expected);
-            ASSERT_NEAR(output[0], expected, tolerance);
-        }
+        test_utils::assert_near(output[0], expected, test_utils::precision<value_type> * size);
 
         hipFree(d_input);
         hipFree(d_output);

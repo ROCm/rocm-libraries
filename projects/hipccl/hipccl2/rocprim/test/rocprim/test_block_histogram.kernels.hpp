@@ -29,8 +29,8 @@
 #include <rocprim/block/block_histogram.hpp>
 
 // required test headers
+#include "../common_test_header.hpp"
 #include "test_utils_types.hpp"
-#include "common_test_header.hpp"
 
 template<
     unsigned int BlockSize,
@@ -103,8 +103,8 @@ void test_block_histogram_input_arrays()
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
-        SCOPED_TRACE(testing::Message() << "with ItemsPerThread= " << items_per_thread);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with ItemsPerThread = " << items_per_thread);
 
         // Generate data
         std::vector<T> output = test_utils::get_random_data<T>(size, 0, bin - 1, seed_value);
@@ -184,7 +184,7 @@ struct static_for_input_array
     static void run()
     {
         int device_id = test_common_utils::obtain_device_from_ctest();
-        SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+        SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
         HIP_CHECK(hipSetDevice(device_id));
 
         test_block_histogram_input_arrays<T, BinType, BlockSize, items[First], Algorithm>();

@@ -26,16 +26,17 @@
 #include <type_traits>
 
 #include "../config.hpp"
+#include "../detail/temp_storage.hpp"
+#include "../detail/various.hpp"
 #include "../functional.hpp"
 #include "../type_traits.hpp"
 #include "../types/future_value.hpp"
-#include "../detail/various.hpp"
 
-#include "device_scan_config.hpp"
-#include "device_transform.hpp"
+#include "detail/config/device_scan.hpp"
 #include "detail/device_scan_common.hpp"
 #include "detail/device_scan_lookback.hpp"
 #include "detail/device_scan_reduce_then_scan.hpp"
+#include "device_transform.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -210,18 +211,22 @@ auto scan_impl(void * temporary_storage,
     const bool use_limited_size = limited_size == aligned_size_limit;
     size_t nested_prefixes_size_bytes = scan_get_temporary_storage_bytes<real_init_value_type>(limited_size, items_per_block);
 
-    // Calculate required temporary storage
-    if(temporary_storage == nullptr)
+    // Pointer to array with block_prefixes
+    real_init_value_type* block_prefixes;
+    real_init_value_type* previous_last_element;
+    real_init_value_type* new_last_element;
+
+    const hipError_t partition_result = detail::temp_storage::partition(
+        temporary_storage,
+        storage_size,
+        detail::temp_storage::make_linear_partition(
+            detail::temp_storage::make_partition(&block_prefixes, nested_prefixes_size_bytes),
+            detail::temp_storage::ptr_aligned_array(&previous_last_element,
+                                                    use_limited_size ? 1 : 0),
+            detail::temp_storage::ptr_aligned_array(&new_last_element, use_limited_size ? 1 : 0)));
+    if(partition_result != hipSuccess || temporary_storage == nullptr)
     {
-        storage_size = nested_prefixes_size_bytes;
-
-        if(use_limited_size)
-            storage_size += 4 * sizeof(real_init_value_type);
-
-        // Make sure user won't try to allocate 0 bytes memory, because
-        // hipMalloc will return nullptr when size is zero.
-        storage_size = storage_size == 0 ? 4 : storage_size;
-        return hipSuccess;
+        return partition_result;
     }
 
     // Start point for time measurements
@@ -250,20 +255,6 @@ auto scan_impl(void * temporary_storage,
                 std::cout << "number of blocks " << number_of_blocks << '\n';
                 std::cout << "items_per_block " << items_per_block << '\n';
                 std::cout.flush();
-            }
-
-            // Pointer to array with block_prefixes
-            char * ptr = reinterpret_cast<char *>(temporary_storage);
-            real_init_value_type* block_prefixes = reinterpret_cast<real_init_value_type*>(ptr);
-            real_init_value_type* previous_last_element = nullptr;
-            real_init_value_type* new_last_element = nullptr;
-            if(use_limited_size)
-            {
-                ptr += nested_prefixes_size_bytes;
-                previous_last_element = reinterpret_cast<real_init_value_type*>(ptr);
-
-                ptr += sizeof(real_init_value_type);
-                new_last_element = reinterpret_cast<real_init_value_type*>(ptr);
             }
 
             // Grid size for block_reduce_kernel, we don't need to calculate reduction
@@ -412,21 +403,28 @@ auto scan_impl(void * temporary_storage,
 
     unsigned int number_of_blocks = (limited_size + items_per_block - 1)/items_per_block;
 
-    // Calculate required temporary storage
-    size_t scan_state_bytes = ::rocprim::detail::align_size(
-        // This is valid even with scan_state_with_sleep_type
-        scan_state_type::get_storage_size(number_of_blocks)
-    );
-    size_t ordered_block_id_bytes = ordered_block_id_type::get_storage_size();
-    if(temporary_storage == nullptr)
+    // Pointer to array with block_prefixes
+    void*                           scan_state_storage;
+    ordered_block_id_type::id_type* ordered_bid_storage;
+    real_init_value_type*           previous_last_element;
+    real_init_value_type*           new_last_element;
+
+    const hipError_t partition_result = detail::temp_storage::partition(
+        temporary_storage,
+        storage_size,
+        detail::temp_storage::make_linear_partition(
+            // This is valid even with offset_scan_state_with_sleep_type
+            detail::temp_storage::make_partition(
+                &scan_state_storage,
+                scan_state_type::get_temp_storage_layout(number_of_blocks)),
+            detail::temp_storage::make_partition(&ordered_bid_storage,
+                                                 ordered_block_id_type::get_temp_storage_layout()),
+            detail::temp_storage::ptr_aligned_array(&previous_last_element,
+                                                    use_limited_size ? 1 : 0),
+            detail::temp_storage::ptr_aligned_array(&new_last_element, use_limited_size ? 1 : 0)));
+    if(partition_result != hipSuccess || temporary_storage == nullptr)
     {
-        // storage_size is never zero
-        storage_size = scan_state_bytes + ordered_block_id_bytes;
-
-        if(use_limited_size)
-            storage_size += 2 * sizeof(real_init_value_type);
-
-        return hipSuccess;
+        return partition_result;
     }
 
     // Start point for time measurements
@@ -438,24 +436,11 @@ auto scan_impl(void * temporary_storage,
     if(number_of_blocks > 1 || use_limited_size)
     {
         // Create and initialize lookback_scan_state obj
-        auto scan_state = scan_state_type::create(temporary_storage, number_of_blocks);
-        auto scan_state_with_sleep = scan_state_with_sleep_type::create(temporary_storage, number_of_blocks);
-        // Create ad initialize ordered_block_id obj
-        auto ptr = reinterpret_cast<char*>(temporary_storage);
-        auto ordered_bid = ordered_block_id_type::create(
-            reinterpret_cast<ordered_block_id_type::id_type*>(ptr + scan_state_bytes)
-        );
-
-        // The last element
-        real_init_value_type* previous_last_element = nullptr;
-        real_init_value_type* new_last_element = nullptr;
-        if(use_limited_size)
-        {
-            ptr += storage_size - sizeof(real_init_value_type);
-            new_last_element = reinterpret_cast<real_init_value_type*>(ptr);
-            ptr -= sizeof(real_init_value_type);
-            previous_last_element = reinterpret_cast<real_init_value_type*>(ptr);
-        }
+        auto scan_state = scan_state_type::create(scan_state_storage, number_of_blocks);
+        auto scan_state_with_sleep
+            = scan_state_with_sleep_type::create(scan_state_storage, number_of_blocks);
+        // Create and initialize ordered_block_id obj
+        auto ordered_bid = ordered_block_id_type::create(ordered_bid_storage);
 
         hipDeviceProp_t prop;
         int deviceId;

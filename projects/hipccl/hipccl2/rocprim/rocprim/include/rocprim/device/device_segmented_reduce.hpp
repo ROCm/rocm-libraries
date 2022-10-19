@@ -25,13 +25,12 @@
 #include <iterator>
 #include <type_traits>
 
-#include "device_reduce_config.hpp"
-
 #include "../config.hpp"
 #include "../functional.hpp"
 #include "../detail/various.hpp"
 #include "../detail/match_result_type.hpp"
 
+#include "detail/config/device_reduce.hpp"
 #include "detail/device_segmented_reduce.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE

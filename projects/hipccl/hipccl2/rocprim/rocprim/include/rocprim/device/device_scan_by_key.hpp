@@ -26,9 +26,10 @@
 #include "detail/ordered_block_id.hpp"
 
 #include "config_types.hpp"
-#include "device_scan_by_key_config.hpp"
+#include "detail/config/device_scan_by_key.hpp"
 
 #include "../config.hpp"
+#include "../detail/temp_storage.hpp"
 #include "../detail/various.hpp"
 #include "../functional.hpp"
 #include "../types/future_value.hpp"
@@ -145,19 +146,26 @@ namespace detail
         // Number of blocks in a single launch (or the only launch if it fits)
         const unsigned int number_of_blocks = ceiling_div(limited_size, items_per_block);
 
-        // Calculate required temporary storage, this is valid even with scan_state_with_sleep_type
-        const size_t scan_state_bytes
-            = align_size(scan_state_type::get_storage_size(number_of_blocks));
-        if(temporary_storage == nullptr)
+        void*                           scan_state_storage;
+        ordered_block_id_type::id_type* ordered_bid_storage;
+        wrapped_type*                   previous_last_value;
+
+        const hipError_t partition_result = detail::temp_storage::partition(
+            temporary_storage,
+            storage_size,
+            detail::temp_storage::make_linear_partition(
+                // This is valid even with offset_scan_state_with_sleep_type
+                detail::temp_storage::make_partition(
+                    &scan_state_storage,
+                    scan_state_type::get_temp_storage_layout(number_of_blocks)),
+                detail::temp_storage::make_partition(
+                    &ordered_bid_storage,
+                    ordered_block_id_type::get_temp_storage_layout()),
+                detail::temp_storage::ptr_aligned_array(&previous_last_value,
+                                                        use_limited_size ? 1 : 0)));
+        if(partition_result != hipSuccess || temporary_storage == nullptr)
         {
-            const size_t ordered_block_id_bytes
-                = align_size(ordered_block_id_type::get_storage_size(), alignof(wrapped_type));
-
-            // storage_size is never zero
-            storage_size = scan_state_bytes + ordered_block_id_bytes
-                           + (use_limited_size ? sizeof(wrapped_type) : 0);
-
-            return hipSuccess;
+            return partition_result;
         }
 
         if(number_of_blocks == 0u)
@@ -175,9 +183,11 @@ namespace detail
         // the value of use_sleep_scan_state
         auto with_scan_state
             = [use_sleep,
-               scan_state            = scan_state_type::create(temporary_storage, number_of_blocks),
-               scan_state_with_sleep = scan_state_with_sleep_type::create(
-                   temporary_storage, number_of_blocks)](auto&& func) mutable -> decltype(auto) {
+               scan_state = scan_state_type::create(scan_state_storage, number_of_blocks),
+               scan_state_with_sleep
+               = scan_state_with_sleep_type::create(scan_state_storage, number_of_blocks)](
+                  auto&& func) mutable -> decltype(auto)
+        {
             if(use_sleep)
             {
                 return func(scan_state_with_sleep);
@@ -189,15 +199,7 @@ namespace detail
         };
 
         // Create and initialize ordered_block_id obj
-        auto* const ptr         = static_cast<char*>(temporary_storage);
-        const auto  ordered_bid = ordered_block_id_type::create(
-             reinterpret_cast<ordered_block_id_type::id_type*>(ptr + scan_state_bytes));
-
-        // The last element
-        auto* const previous_last_value
-            = use_limited_size
-                  ? reinterpret_cast<wrapped_type*>(ptr + storage_size - sizeof(wrapped_type))
-                  : nullptr;
+        const auto ordered_bid = ordered_block_id_type::create(ordered_bid_storage);
 
         // Total number of blocks in all launches
         const auto   total_number_of_blocks = ceiling_div(size, items_per_block);
@@ -376,7 +378,7 @@ namespace detail
 ///     values_output, size,
 ///     rocprim::plus<int>()
 /// );
-/// // values_output: [1, 2, 3, 7, 5, 11, 18, 8]
+/// // values_output: [1, 3, 3, 7, 5, 11, 18, 8]
 /// \endcode
 /// \endparblock
 template <typename Config = default_config,

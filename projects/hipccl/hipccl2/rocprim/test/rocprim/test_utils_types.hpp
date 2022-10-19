@@ -1,4 +1,4 @@
-// Copyright (c) 2019-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2019-2022 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -82,26 +82,29 @@ struct class_params
     static constexpr unsigned int items_per_thread = ItemsPerThread;
 };
 
+// clang-format off
 #define warp_param_type(type) \
-   warp_params<type, 4U>, \
-   warp_params<type, 8U>, \
-   warp_params<type, 16U>, \
-   warp_params<type, 32U>, \
-   warp_params<type, 64U>, \
-   warp_params<type, 3U>, \
-   warp_params<type, 7U>, \
-   warp_params<type, 15U>, \
-   warp_params<type, 37U>, \
+   warp_params<type, 4U>,     \
+   warp_params<type, 8U>,     \
+   warp_params<type, 16U>,    \
+   warp_params<type, 32U>,    \
+   warp_params<type, 64U>,    \
+   warp_params<type, 3U>,     \
+   warp_params<type, 7U>,     \
+   warp_params<type, 15U>,    \
+   warp_params<type, 37U>,    \
    warp_params<type, 61U>
 
 #define block_param_type(input_type, output_type) \
-    block_params<input_type, output_type, 64U>, \
-    block_params<input_type, output_type, 128U>, \
-    block_params<input_type, output_type, 192U>, \
-    block_params<input_type, output_type, 256U>, \
-    block_params<input_type, output_type, 129U>, \
-    block_params<input_type, output_type, 162U>, \
+    block_params<input_type, output_type, 32U>,   \
+    block_params<input_type, output_type, 64U>,   \
+    block_params<input_type, output_type, 128U>,  \
+    block_params<input_type, output_type, 192U>,  \
+    block_params<input_type, output_type, 256U>,  \
+    block_params<input_type, output_type, 129U>,  \
+    block_params<input_type, output_type, 162U>,  \
     block_params<input_type, output_type, 255U>
+// clang-format on
 
 typedef ::testing::Types<
     warp_param_type(int),

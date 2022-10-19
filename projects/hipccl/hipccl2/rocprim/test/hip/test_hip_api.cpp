@@ -42,7 +42,7 @@ void saxpy_kernel(const T * x, T * y, const T a, const size_t size)
 TEST(HIPTests, Saxpy)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id =" << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     const size_t N = 100;

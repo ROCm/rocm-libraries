@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "common_test_header.hpp"
+#include "../common_test_header.hpp"
 
 // required rocprim headers
 #include <rocprim/iterator/arg_index_iterator.hpp>
@@ -58,7 +58,7 @@ TYPED_TEST_SUITE(RocprimArgIndexIteratorTests, RocprimArgIndexIteratorTestsParam
 TYPED_TEST(RocprimArgIndexIteratorTests, Equal)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using T = typename TestFixture::input_type;
@@ -67,7 +67,7 @@ TYPED_TEST(RocprimArgIndexIteratorTests, Equal)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         std::vector<T> input = test_utils::get_random_data<T>(5, 1, 200, seed_value);
 
@@ -107,7 +107,7 @@ struct arg_min
 TYPED_TEST(RocprimArgIndexIteratorTests, ReduceArgMinimum)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using T = typename TestFixture::input_type;
@@ -123,7 +123,7 @@ TYPED_TEST(RocprimArgIndexIteratorTests, ReduceArgMinimum)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
         std::vector<T> input = test_utils::get_random_data<T>(size, 1, 200, seed_value);
@@ -192,10 +192,8 @@ TYPED_TEST(RocprimArgIndexIteratorTests, ReduceArgMinimum)
         HIP_CHECK(hipDeviceSynchronize());
 
         // Check if output values are as expected
-        auto diff = std::abs(test_utils::precision_threshold<T>::percentage * expected.value);
-        if(std::is_integral<T>::value) diff = 0;
-        ASSERT_EQ(output[0].key, expected.key);
-        ASSERT_NEAR(output[0].value, expected.value, diff);
+        test_utils::assert_eq(output[0].key, expected.key);
+        test_utils::assert_eq(output[0].value, expected.value);
 
         hipFree(d_input);
         hipFree(d_output);

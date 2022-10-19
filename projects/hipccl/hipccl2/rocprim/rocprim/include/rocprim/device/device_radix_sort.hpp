@@ -27,18 +27,19 @@
 #include <utility>
 
 #include "../config.hpp"
-#include "../detail/various.hpp"
 #include "../detail/radix_sort.hpp"
+#include "../detail/temp_storage.hpp"
+#include "../detail/various.hpp"
 
 #include "../intrinsics.hpp"
 #include "../functional.hpp"
 #include "../types.hpp"
 
-#include "device_radix_sort_config.hpp"
-#include "device_transform.hpp"
+#include "detail/config/device_radix_sort.hpp"
 #include "detail/device_radix_sort.hpp"
-#include "specialization/device_radix_single_sort.hpp"
+#include "device_transform.hpp"
 #include "specialization/device_radix_merge_sort.hpp"
+#include "specialization/device_radix_single_sort.hpp"
 
 /// \addtogroup devicemodule
 /// @{
@@ -419,17 +420,22 @@ hipError_t radix_sort_merge_impl(void * temporary_storage,
     constexpr bool with_values = !std::is_same<value_type, ::rocprim::empty_type>::value;
 
     const bool with_double_buffer = keys_tmp != nullptr;
-    const size_t keys_bytes = ::rocprim::detail::align_size(size * sizeof(key_type));
-    const size_t values_bytes = with_values ? ::rocprim::detail::align_size(size * sizeof(value_type)) : 0;
 
-    const size_t minimum_bytes = ::rocprim::detail::align_size(1);
-    if(temporary_storage == nullptr)
+    key_type*   keys_tmp_storage;
+    value_type* values_tmp_storage;
+
+    const hipError_t partition_result = detail::temp_storage::partition(
+        temporary_storage,
+        storage_size,
+        detail::temp_storage::make_linear_partition(
+            detail::temp_storage::ptr_aligned_array(&keys_tmp_storage,
+                                                    !with_double_buffer ? size : 0),
+            detail::temp_storage::ptr_aligned_array(&values_tmp_storage,
+                                                    !with_double_buffer && with_values ? size
+                                                                                       : 0)));
+    if(partition_result != hipSuccess || temporary_storage == nullptr)
     {
-        if(!with_double_buffer)
-            storage_size = keys_bytes + values_bytes;
-        else
-            storage_size = minimum_bytes;
-        return hipSuccess;
+        return partition_result;
     }
 
     if(debug_synchronous)
@@ -441,10 +447,8 @@ hipError_t radix_sort_merge_impl(void * temporary_storage,
 
     if(!with_double_buffer)
     {
-        char * ptr = reinterpret_cast<char *>(temporary_storage);
-        keys_tmp = reinterpret_cast<key_type *>(ptr);
-        ptr += keys_bytes;
-        values_tmp = with_values ? reinterpret_cast<value_type *>(ptr) : nullptr;
+        keys_tmp   = keys_tmp_storage;
+        values_tmp = values_tmp_storage;
     }
 
     hipError_t error = radix_sort_merge<config, Descending>(
@@ -522,19 +526,25 @@ hipError_t radix_sort_iterations_impl(void * temporary_storage,
         : 0;
     const unsigned int long_iterations = iterations - short_iterations;
 
-    const size_t batch_digit_counts_bytes =
-        ::rocprim::detail::align_size(batches * max_radix_size * sizeof(offset_type));
-    const size_t digit_counts_bytes = ::rocprim::detail::align_size(max_radix_size * sizeof(offset_type));
-    const size_t keys_bytes = ::rocprim::detail::align_size(size * sizeof(key_type));
-    const size_t values_bytes = with_values ? ::rocprim::detail::align_size(size * sizeof(value_type)) : 0;
-    if(temporary_storage == nullptr)
+    offset_type* batch_digit_counts;
+    offset_type* digit_counts;
+    key_type*    keys_tmp_storage;
+    value_type*  values_tmp_storage;
+
+    const hipError_t partition_result = detail::temp_storage::partition(
+        temporary_storage,
+        storage_size,
+        detail::temp_storage::make_linear_partition(
+            detail::temp_storage::ptr_aligned_array(&batch_digit_counts, batches * max_radix_size),
+            detail::temp_storage::ptr_aligned_array(&digit_counts, max_radix_size),
+            detail::temp_storage::ptr_aligned_array(&keys_tmp_storage,
+                                                    !with_double_buffer ? size : 0),
+            detail::temp_storage::ptr_aligned_array(&values_tmp_storage,
+                                                    !with_double_buffer && with_values ? size
+                                                                                       : 0)));
+    if(partition_result != hipSuccess || temporary_storage == nullptr)
     {
-        storage_size = batch_digit_counts_bytes + digit_counts_bytes;
-        if(!with_double_buffer)
-        {
-            storage_size += keys_bytes + values_bytes;
-        }
-        return hipSuccess;
+        return partition_result;
     }
 
     if( size == 0u )
@@ -555,16 +565,10 @@ hipError_t radix_sort_iterations_impl(void * temporary_storage,
         if(error != hipSuccess) return error;
     }
 
-    char * ptr = reinterpret_cast<char *>(temporary_storage);
-    offset_type * batch_digit_counts = reinterpret_cast<offset_type *>(ptr);
-    ptr += batch_digit_counts_bytes;
-    offset_type * digit_counts = reinterpret_cast<offset_type *>(ptr);
-    ptr += digit_counts_bytes;
     if(!with_double_buffer)
     {
-        keys_tmp = reinterpret_cast<key_type *>(ptr);
-        ptr += keys_bytes;
-        values_tmp = with_values ? reinterpret_cast<value_type *>(ptr) : nullptr;
+        keys_tmp   = keys_tmp_storage;
+        values_tmp = values_tmp_storage;
     }
 
     bool to_output = with_double_buffer || (iterations - 1) % 2 == 0;

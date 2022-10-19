@@ -35,9 +35,9 @@
 #include "../iterator/counting_iterator.hpp"
 #include "../types/tuple.hpp"
 
-#include "device_scan_config.hpp"
-#include "device_scan.hpp"
+#include "detail/config/device_scan.hpp"
 #include "detail/device_segmented_scan.hpp"
+#include "device_scan.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 

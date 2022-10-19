@@ -32,8 +32,8 @@
 
 #include "../../block/block_load_func.hpp"
 #include "../../block/block_reduce.hpp"
-#include "rocprim/device/config_types.hpp"
-#include "rocprim/device/device_reduce_config.hpp"
+#include "../config_types.hpp"
+#include "../device_reduce_config.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 

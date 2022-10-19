@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "common_test_header.hpp"
+#include "../common_test_header.hpp"
 
 // required rocprim headers
 #include <rocprim/device/device_transform.hpp>
@@ -60,8 +60,8 @@ public:
     static constexpr size_t size_limit = Params::size_limit;
 };
 
-using custom_short2 = test_utils::custom_test_type<short>;
-using custom_int2 = test_utils::custom_test_type<int>;
+using custom_short2  = test_utils::custom_test_type<short>;
+using custom_int2    = test_utils::custom_test_type<int>;
 using custom_double2 = test_utils::custom_test_type<double>;
 
 typedef ::testing::Types<
@@ -95,19 +95,6 @@ struct size_limit_config<ROCPRIM_GRID_SIZE_LIMIT> {
 template <unsigned int SizeLimit>
 using size_limit_config_t = typename size_limit_config<SizeLimit>::type;
 
-std::vector<size_t> get_sizes(int seed_value)
-{
-    std::vector<size_t> sizes = {
-        0, 1, 10, 53, 211,
-        1024, 2048, 5096,
-        34567, (1 << 17) - 1220
-    };
-    const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(2, 1, 16384, seed_value);
-    sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
-    std::sort(sizes.begin(), sizes.end());
-    return sizes;
-}
-
 TYPED_TEST_SUITE(RocprimDeviceTransformTests, RocprimDeviceTransformTestsParams);
 
 template<class T>
@@ -116,43 +103,14 @@ struct transform
     __device__ __host__ inline
     T operator()(const T& a) const
     {
-        return a + 5;
+        return rocprim::plus<T>()(a, T(5));
     }
 };
-
-template<>
-struct transform<rocprim::half>
-{
-    __device__ __host__ inline
-    rocprim::half operator()(const rocprim::half& a) const
-    {
-        #if __HIP_DEVICE_COMPILE__
-        return a + rocprim::half(5);
-        #else
-        return test_utils::half_plus()(a, rocprim::half(5));
-        #endif
-    }
-};
-
-template<>
-struct transform<rocprim::bfloat16>
-{
-    __device__ __host__ inline
-    rocprim::bfloat16 operator()(const rocprim::bfloat16& a) const
-    {
-        #if __HIP_DEVICE_COMPILE__
-        return a + rocprim::bfloat16(5);
-        #else
-        return test_utils::bfloat16_plus()(a, rocprim::bfloat16(5));
-        #endif
-    }
-};
-
 
 TYPED_TEST(RocprimDeviceTransformTests, Transform)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using T = typename TestFixture::input_type;
@@ -164,16 +122,10 @@ TYPED_TEST(RocprimDeviceTransformTests, Transform)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
-        const std::vector<size_t> sizes = get_sizes(seed_value);
-        for(auto size : sizes)
+        for(auto size : test_utils::get_sizes(seed_value))
         {
-            if (size == 0 && test_common_utils::use_hmm())
-            {
-                // hipMallocManaged() currently doesnt support zero byte allocation
-                continue;
-            }
             hipStream_t stream = 0; // default
 
             SCOPED_TRACE(testing::Message() << "with size = " << size);
@@ -221,7 +173,8 @@ TYPED_TEST(RocprimDeviceTransformTests, Transform)
             HIP_CHECK(hipDeviceSynchronize());
 
             // Check if output values are as expected
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected, test_utils::precision_threshold<T>::percentage));
+            ASSERT_NO_FATAL_FAILURE(
+                test_utils::assert_near(output, expected, test_utils::precision<U>));
 
             hipFree(d_input);
             hipFree(d_output);
@@ -240,39 +193,10 @@ struct binary_transform
     }
 };
 
-template<>
-struct binary_transform<rocprim::half, rocprim::half, rocprim::half>
-{
-    __device__ __host__ inline
-    rocprim::half operator()(const rocprim::half& a, const rocprim::half& b) const
-    {
-        #if __HIP_DEVICE_COMPILE__
-        return a + b;
-        #else
-        return test_utils::half_plus()(a, b);
-        #endif
-    }
-};
-
-template<>
-struct binary_transform<rocprim::bfloat16, rocprim::bfloat16, rocprim::bfloat16>
-{
-    __device__ __host__ inline
-    rocprim::bfloat16 operator()(const rocprim::bfloat16& a, const rocprim::bfloat16& b) const
-    {
-        #if __HIP_DEVICE_COMPILE__
-        return a + b;
-        #else
-        return test_utils::bfloat16_plus()(a, b);
-        #endif
-    }
-};
-
-
 TYPED_TEST(RocprimDeviceTransformTests, BinaryTransform)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using T1 = typename TestFixture::input_type;
@@ -285,16 +209,10 @@ TYPED_TEST(RocprimDeviceTransformTests, BinaryTransform)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
-        const std::vector<size_t> sizes = get_sizes(seed_value);
-        for(auto size : sizes)
+        for(auto size : test_utils::get_sizes(seed_value))
         {
-            if (size == 0 && test_common_utils::use_hmm())
-            {
-                // hipMallocManaged() currently doesnt support zero byte allocation
-                continue;
-            }
             hipStream_t stream = 0; // default
 
             SCOPED_TRACE(testing::Message() << "with size = " << size);
@@ -355,7 +273,8 @@ TYPED_TEST(RocprimDeviceTransformTests, BinaryTransform)
             HIP_CHECK(hipDeviceSynchronize());
 
             // Check if output values are as expected
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(output, expected, test_utils::precision_threshold<U>::percentage));
+            ASSERT_NO_FATAL_FAILURE(
+                test_utils::assert_near(output, expected, test_utils::precision<U>));
 
             hipFree(d_input1);
             hipFree(d_input2);
@@ -365,26 +284,10 @@ TYPED_TEST(RocprimDeviceTransformTests, BinaryTransform)
 
 }
 
-std::vector<size_t> get_large_sizes(int seed_value)
-{
-    std::vector<size_t> sizes = {
-        (size_t{1} << 30) - 1, size_t{1} << 30,
-        (size_t{1} << 31) - 1, size_t{1} << 31,
-        (size_t{1} << 32) - 1, size_t{1} << 32,
-        (size_t{1} << 35) - 1, size_t{1} << 35,
-        (size_t{1} << 37) - 1,
-    };
-    const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(
-        2, (size_t {1} << 30) + 1, (size_t {1} << 37) - 2, seed_value);
-    sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
-    std::sort(sizes.begin(), sizes.end());
-    return sizes;
-}
-
 TEST(RocprimDeviceTransformTests, LargeIndices)
 {
     const int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using T                      = size_t;
@@ -398,11 +301,9 @@ TEST(RocprimDeviceTransformTests, LargeIndices)
     {
         unsigned int seed_value
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
-        const std::vector<size_t> sizes = get_large_sizes(seed_value);
-
-        for(const auto size : sizes)
+        for(const auto size : test_utils::get_large_sizes(seed_value))
         {
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
@@ -452,4 +353,3 @@ TEST(RocprimDeviceTransformTests, LargeIndices)
         }
     }
 }
-

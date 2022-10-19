@@ -27,10 +27,11 @@
 #include <type_traits>
 
 #include "../config.hpp"
-#include "../functional.hpp"
-#include "../types.hpp"
-#include "../type_traits.hpp"
+#include "../detail/temp_storage.hpp"
 #include "../detail/various.hpp"
+#include "../functional.hpp"
+#include "../type_traits.hpp"
+#include "../types.hpp"
 
 #include "device_select_config.hpp"
 #include "detail/device_scan_common.hpp"
@@ -165,61 +166,60 @@ hipError_t partition_impl(void * temporary_storage,
     static constexpr auto items_per_block = block_size * items_per_thread;
 
     static constexpr bool is_three_way = sizeof...(UnaryPredicates) == 2;
+    static constexpr const size_t selected_count_size = is_three_way ? 2 : 1;
 
     static constexpr size_t size_limit = config::size_limit;
     static constexpr size_t aligned_size_limit = ::rocprim::max<size_t>(size_limit - (size_limit % items_per_block), items_per_block);
     const size_t limited_size = std::min<size_t>(size, aligned_size_limit);
     const bool use_limited_size = limited_size == aligned_size_limit;
 
-    const unsigned int number_of_blocks = 
-        static_cast<unsigned int>(::rocprim::detail::ceiling_div(limited_size, items_per_block));
+    const unsigned int number_of_blocks
+        = static_cast<unsigned int>(::rocprim::detail::ceiling_div(limited_size, items_per_block));
 
     // Calculate required temporary storage
-    size_t offset_scan_state_bytes = ::rocprim::detail::align_size(
-        // This is valid even with offset_scan_state_with_sleep_type
-        offset_scan_state_type::get_storage_size(number_of_blocks)
-    );
-    size_t ordered_block_id_bytes = ::rocprim::detail::align_size(
-        ordered_block_id_type::get_storage_size(),
-        alignof(size_t)
-    );
+    void*                           offset_scan_state_storage;
+    ordered_block_id_type::id_type* ordered_bid_storage;
+    size_t*                         selected_count;
+    size_t*                         prev_selected_count;
 
-    if(temporary_storage == nullptr)
+    const hipError_t partition_result = detail::temp_storage::partition(
+        temporary_storage,
+        storage_size,
+        detail::temp_storage::make_linear_partition(
+            // This is valid even with offset_scan_state_with_sleep_type
+            detail::temp_storage::make_partition(
+                &offset_scan_state_storage,
+                offset_scan_state_type::get_temp_storage_layout(number_of_blocks)),
+            detail::temp_storage::make_partition(&ordered_bid_storage,
+                                                 ordered_block_id_type::get_temp_storage_layout()),
+            // Note: the following two are to be allocated continuously, so that they can be initialized
+            // simultaneously.
+            // They have the same base type, so there is no padding between the types.
+            detail::temp_storage::ptr_aligned_array(&selected_count, selected_count_size),
+            detail::temp_storage::ptr_aligned_array(&prev_selected_count, selected_count_size)));
+    if(partition_result != hipSuccess || temporary_storage == nullptr)
     {
-        // storage_size is never zero
-        storage_size = offset_scan_state_bytes + ordered_block_id_bytes + (sizeof(size_t) * 2 * (is_three_way ? 2 : 1));
-
-        return hipSuccess;
+        return partition_result;
     }
 
     // Start point for time measurements
     std::chrono::high_resolution_clock::time_point start;
 
     // Create and initialize lookback_scan_state obj
-    auto offset_scan_state = offset_scan_state_type::create(
-        temporary_storage, number_of_blocks
-    );
-    auto offset_scan_state_with_sleep = offset_scan_state_with_sleep_type::create(
-        temporary_storage, number_of_blocks
-    );
-    // Create ad initialize ordered_block_id obj
-    auto ptr = reinterpret_cast<char*>(temporary_storage);
-    auto ordered_bid = ordered_block_id_type::create(
-        reinterpret_cast<ordered_block_id_type::id_type*>(ptr + offset_scan_state_bytes)
-    );
+    auto offset_scan_state
+        = offset_scan_state_type::create(offset_scan_state_storage, number_of_blocks);
+    auto offset_scan_state_with_sleep
+        = offset_scan_state_with_sleep_type::create(offset_scan_state_storage, number_of_blocks);
 
-    size_t* selected_count = reinterpret_cast<size_t*>(ptr + offset_scan_state_bytes
-                                                       + ordered_block_id_bytes);
-    size_t* prev_selected_count
-        = reinterpret_cast<size_t*>(ptr + offset_scan_state_bytes + ordered_block_id_bytes
-                                    + (is_three_way ? 2 : 1) * sizeof(size_t));
+    // Create and initialize ordered_block_id obj
+    auto ordered_bid = ordered_block_id_type::create(ordered_bid_storage);
 
     hipError_t error;
 
     // Memset selected_count and prev_selected_count at once
     error = hipMemsetAsync(selected_count,
                            0,
-                           sizeof(*selected_count) * 2 * (is_three_way ? 2 : 1),
+                           sizeof(*selected_count) * 2 * selected_count_size,
                            stream);
     if (error != hipSuccess) return error;
 
@@ -286,7 +286,7 @@ hipError_t partition_impl(void * temporary_storage,
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
 
         grid_size = current_number_of_blocks;
-        
+
         if (prop.gcnArch == 908 && asicRevision < 2)
         {
             hipLaunchKernelGGL(
@@ -338,11 +338,12 @@ hipError_t partition_impl(void * temporary_storage,
         std::swap(selected_count, prev_selected_count);
     }
 
-    error = ::rocprim::transform(
-        prev_selected_count, selected_count_output, (is_three_way ? 2 : 1), 
-        ::rocprim::identity<>{},
-        stream, debug_synchronous
-    );
+    error = ::rocprim::transform(prev_selected_count,
+                                 selected_count_output,
+                                 (is_three_way ? 2 : 1),
+                                 ::rocprim::identity<>{},
+                                 stream,
+                                 debug_synchronous);
     if (error != hipSuccess) return error;
 
     return hipSuccess;

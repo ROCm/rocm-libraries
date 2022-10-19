@@ -34,7 +34,7 @@
 #include "rocprim/thread/thread_scan.hpp"
 #include "rocprim/thread/thread_search.hpp"
 
-#include "common_test_header.hpp"
+#include "../common_test_header.hpp"
 #include "test_utils.hpp"
 
 template<class T>
@@ -79,7 +79,7 @@ TYPED_TEST(RocprimThreadOperationTests, Load)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
         std::vector<T> input = test_utils::get_random_data<T>(size, 2, 200, seed_value);
@@ -146,7 +146,7 @@ TYPED_TEST(RocprimThreadOperationTests, Store)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
         std::vector<T> input = test_utils::get_random_data<T>(size, 2, 200, seed_value);
@@ -226,7 +226,7 @@ TYPED_TEST(RocprimThreadOperationTests, Reduction)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
         std::vector<T> input = test_utils::get_random_data<T>(size, 2, 200, seed_value);
@@ -314,7 +314,7 @@ TYPED_TEST(RocprimThreadOperationTests, Scan)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
         std::vector<T> input = test_utils::get_random_data<T>(size, 2, 200, seed_value);

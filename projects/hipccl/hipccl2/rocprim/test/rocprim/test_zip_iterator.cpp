@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "common_test_header.hpp"
+#include "../common_test_header.hpp"
 
 // required rocprim headers
 #include <rocprim/device/device_reduce.hpp>
@@ -150,7 +150,7 @@ struct tuple3_transform_op
 TEST(RocprimZipIteratorTests, Transform)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using T1 = int;
@@ -166,7 +166,7 @@ TEST(RocprimZipIteratorTests, Transform)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
         std::vector<T1> input1 = test_utils::get_random_data<T1>(size, 1, 100, seed_value);
@@ -246,12 +246,11 @@ TEST(RocprimZipIteratorTests, Transform)
         HIP_CHECK(hipDeviceSynchronize());
 
         // Check if output values are as expected
-        for(size_t i = 0; i < output.size(); i++)
-        {
-            auto diff = std::abs(test_utils::precision_threshold<U>::percentage * expected[i]);
-            if(std::is_integral<U>::value) diff = 0;
-            ASSERT_NEAR(output[i], expected[i], diff) << "where index = " << i;
-        }
+        // precision of tuple3_transform_op<T1, T2, T3> is precision<T1> * 2
+        // presision of T1 -> U is precision<U>
+        test_utils::assert_near(output,
+                                expected,
+                                std::max(test_utils::precision<U>, test_utils::precision<T1> * 2));
 
         hipFree(d_input1);
         hipFree(d_input2);
@@ -290,7 +289,7 @@ struct tuple2_reduce_op
 TEST(RocprimZipIteratorTests, TransformReduce)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using T1 = int;
@@ -307,7 +306,7 @@ TEST(RocprimZipIteratorTests, TransformReduce)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
         std::vector<T1> input1 = test_utils::get_random_data<T1>(size, 1, 100, seed_value);
@@ -429,13 +428,18 @@ TEST(RocprimZipIteratorTests, TransformReduce)
         HIP_CHECK(hipDeviceSynchronize());
 
         // Check if output values are as expected
-        auto diff1 = std::abs(test_utils::precision_threshold<U1>::percentage * expected1);
-        if(std::is_integral<U1>::value) diff1 = 0;
-        ASSERT_NEAR(output1[0], expected1, diff1);
+        // precision of tuple3to2_transform_op<T1, T2, T3> is (0, precision<T2>)
+        // precision of subsequent reduction by tuple2_reduce_op<T1, T2> is
+        // (max(precision<T1>, precision<U1>), max(precision<T2>, precision<U2>)) * size)
+        test_utils::assert_near(output1[0],
+                                expected1,
+                                std::max(test_utils::precision<T1>, test_utils::precision<U1>)
+                                    * size);
 
-        auto diff2 = std::abs(test_utils::precision_threshold<U2>::percentage * expected2);
-        if(std::is_integral<U2>::value) diff2 = 0;
-        ASSERT_NEAR(output2[0], expected2, diff2);
+        test_utils::assert_near(output2[0],
+                                expected2,
+                                (std::max(test_utils::precision<T2>, test_utils::precision<U2>)
+                                 + test_utils::precision<T2>)*size);
 
         hipFree(d_input1);
         hipFree(d_input2);

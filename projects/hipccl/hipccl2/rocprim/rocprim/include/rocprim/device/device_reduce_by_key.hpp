@@ -31,6 +31,7 @@
 
 #include "../config.hpp"
 #include "../detail/match_result_type.hpp"
+#include "../detail/temp_storage.hpp"
 #include "../detail/various.hpp"
 #include "../functional.hpp"
 #include "../iterator/constant_iterator.hpp"
@@ -207,31 +208,29 @@ hipError_t reduce_by_key_impl(void*                     temporary_storage,
     const std::size_t number_of_blocks = detail::ceiling_div(number_of_tiles, tiles_per_block);
 
     // Calculate required temporary storage
-    // scan_state_bytes is valid even with scan_state_with_sleep_type
-    const std::size_t scan_state_bytes       = scan_state_type::get_storage_size(number_of_tiles);
-    const std::size_t block_id_bytes         = ordered_tile_id_type::get_storage_size();
-    const std::size_t head_count_bytes       = sizeof(size_t);
-    const std::size_t prev_accumulated_bytes = sizeof(accumulator_type);
+    void*                          scan_state_storage;
+    ordered_tile_id_type::id_type* ordered_bid_storage;
+    // The number of segment heads in previous launches.
+    std::size_t* d_global_head_count = nullptr;
+    // The running accumulation across the launch boundary.
+    accumulator_type* d_previous_accumulated = nullptr;
 
-    const std::size_t block_id_offset = align_size(scan_state_bytes, alignof(std::size_t));
-    const std::size_t head_count_offset
-        = align_size(block_id_offset + block_id_bytes, alignof(ordered_tile_id_type));
-    const std::size_t prev_accumulated_offset
-        = align_size(head_count_offset + head_count_bytes, alignof(accumulator_type));
-
-    if(temporary_storage == nullptr)
+    const hipError_t partition_result = detail::temp_storage::partition(
+        temporary_storage,
+        storage_size,
+        detail::temp_storage::make_linear_partition(
+            // This is valid even with scan_state_with_sleep_type
+            detail::temp_storage::make_partition(
+                &scan_state_storage,
+                scan_state_type::get_temp_storage_layout(number_of_tiles)),
+            detail::temp_storage::make_partition(&ordered_bid_storage,
+                                                 ordered_tile_id_type::get_temp_storage_layout()),
+            detail::temp_storage::ptr_aligned_array(&d_global_head_count, use_limited_size ? 1 : 0),
+            detail::temp_storage::ptr_aligned_array(&d_previous_accumulated,
+                                                    use_limited_size ? 1 : 0)));
+    if(partition_result != hipSuccess || temporary_storage == nullptr)
     {
-        // storage_size is never zero
-        if(use_limited_size)
-        {
-            storage_size = block_id_offset + block_id_bytes;
-        }
-        else
-        {
-            storage_size = prev_accumulated_offset + prev_accumulated_bytes;
-        }
-
-        return hipSuccess;
+        return partition_result;
     }
 
     bool             use_sleep;
@@ -242,9 +241,9 @@ hipError_t reduce_by_key_impl(void*                     temporary_storage,
     }
     auto with_scan_state
         = [use_sleep,
-           scan_state = scan_state_type::create(temporary_storage, number_of_tiles),
+           scan_state = scan_state_type::create(scan_state_storage, number_of_tiles),
            scan_state_with_sleep
-           = scan_state_with_sleep_type::create(temporary_storage, number_of_tiles)](
+           = scan_state_with_sleep_type::create(scan_state_storage, number_of_tiles)](
               auto&& func) mutable -> decltype(auto)
     {
         if(use_sleep)
@@ -257,20 +256,7 @@ hipError_t reduce_by_key_impl(void*                     temporary_storage,
         }
     };
 
-    auto* temp_storage_ptr = static_cast<char*>(temporary_storage);
-    auto  ordered_bid      = ordered_tile_id_type::create(
-        reinterpret_cast<ordered_tile_id_type::id_type*>(temp_storage_ptr + block_id_offset));
-
-    // The number of segment heads in previous launches.
-    std::size_t* d_global_head_count = nullptr;
-    // The running accumulation across the launch boundary.
-    accumulator_type* d_previous_accumulated = nullptr;
-    if(use_limited_size)
-    {
-        d_global_head_count = reinterpret_cast<std::size_t*>(temp_storage_ptr + head_count_offset);
-        d_previous_accumulated
-            = reinterpret_cast<accumulator_type*>(temp_storage_ptr + prev_accumulated_offset);
-    }
+    auto ordered_bid = ordered_tile_id_type::create(ordered_bid_storage);
 
     if(size == 0)
     {

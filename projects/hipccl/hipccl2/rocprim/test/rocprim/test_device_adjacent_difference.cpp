@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "common_test_header.hpp"
+#include "../common_test_header.hpp"
 
 #include "test_utils_types.hpp"
 
@@ -58,35 +58,6 @@ struct size_limit_config<T, ROCPRIM_GRID_SIZE_LIMIT>
 
 template <typename T, unsigned int SizeLimit>
 using size_limit_config_t = typename size_limit_config<T, SizeLimit>::type;
-
-std::vector<size_t> get_sizes(int seed_value)
-{
-    std::vector<size_t> sizes = {1, 10, 53, 211, 1024, 2048, 5096, 34567, (1 << 17) - 1220};
-    if(!test_common_utils::use_hmm())
-    {
-        sizes.push_back(0);
-    }
-    const std::vector<size_t> random_sizes
-        = test_utils::get_random_data<size_t>(2, 1, 16384, seed_value);
-    sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
-    std::sort(sizes.begin(), sizes.end());
-    return sizes;
-}
-
-std::vector<size_t> get_large_sizes(int seed_value)
-{
-    // clang-format off
-    std::vector<size_t> sizes = {
-        (size_t{1} << 32) - 1, size_t{1} << 32,
-        (size_t{1} << 35) - 1, size_t{1} << 35,
-    };
-    // clang-format on
-    const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(
-        2, (size_t {1} << 30) + 1, (size_t {1} << 35) - 2, seed_value);
-    sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
-    std::sort(sizes.begin(), sizes.end());
-    return sizes;
-}
 
 template <typename Config = rocprim::default_config,
           typename InputIt,
@@ -226,7 +197,7 @@ TYPED_TEST_SUITE(RocprimDeviceAdjacentDifferenceTests, RocprimDeviceAdjacentDiff
 TYPED_TEST(RocprimDeviceAdjacentDifferenceTests, AdjacentDifference)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using T                                     = typename TestFixture::input_type;
@@ -243,10 +214,9 @@ TYPED_TEST(RocprimDeviceAdjacentDifferenceTests, AdjacentDifference)
     {
         const unsigned int seed_value
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
-        const std::vector<std::size_t> sizes = get_sizes(seed_value);
-        for(auto size : sizes)
+        for(auto size : test_utils::get_sizes(seed_value))
         {
             static constexpr hipStream_t stream = 0; // default
 
@@ -319,7 +289,9 @@ TYPED_TEST(RocprimDeviceAdjacentDifferenceTests, AdjacentDifference)
 
             // Check if output values are as expected
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(
-                output, expected, test_utils::precision_threshold<output_type>::percentage));
+                output,
+                expected,
+                std::max(test_utils::precision<T>, test_utils::precision<output_type>)));
 
             hipFree(d_input);
             if(!in_place)
@@ -466,7 +438,7 @@ TYPED_TEST_SUITE(RocprimDeviceAdjacentDifferenceLargeTests,
 TYPED_TEST(RocprimDeviceAdjacentDifferenceLargeTests, LargeIndices)
 {
     const int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using T                                         = size_t;
@@ -486,11 +458,9 @@ TYPED_TEST(RocprimDeviceAdjacentDifferenceLargeTests, LargeIndices)
     {
         unsigned int seed_value
             = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
-        const std::vector<size_t> sizes = get_large_sizes(seed_value);
-
-        for(const auto size : sizes)
+        for(const auto size : test_utils::get_large_sizes(seed_value))
         {
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 

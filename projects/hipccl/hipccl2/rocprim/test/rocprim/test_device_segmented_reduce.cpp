@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "common_test_header.hpp"
+#include "../common_test_header.hpp"
 
 // required rocprim headers
 #include <rocprim/device/device_segmented_reduce.hpp>
@@ -58,6 +58,8 @@ public:
 using custom_short2 = test_utils::custom_test_type<short>;
 using custom_int2 = test_utils::custom_test_type<int>;
 using custom_double2 = test_utils::custom_test_type<double>;
+using half           = rocprim::half;
+using bfloat16       = rocprim::bfloat16;
 
 typedef ::testing::Types<
     params<unsigned char, unsigned int, rocprim::plus<unsigned int>>,
@@ -66,66 +68,39 @@ typedef ::testing::Types<
     params<int8_t, int8_t, rocprim::maximum<int8_t>, 0, 0, 2000>,
     params<uint8_t, uint8_t, rocprim::plus<uint8_t>, 10, 1000, 10000>,
     params<uint8_t, uint8_t, rocprim::maximum<uint8_t>, 50, 2, 10>,
-    params<rocprim::half, rocprim::half, test_utils::half_maximum, 0, 1000, 2000>,
-    // #156 temporarily disable half test due to known issue with converting from double to half
-    // params<rocprim::half, rocprim::half, test_utils::half_plus, 50, 2, 10>,
-    params<rocprim::bfloat16, rocprim::bfloat16, test_utils::bfloat16_maximum, 0, 1000, 2000>,
-    params<rocprim::bfloat16, rocprim::bfloat16, test_utils::bfloat16_plus, 50, 2, 10>,
+    params<half, half, rocprim::maximum<half>, 0, 1000, 2000>,
+    params<half, half, rocprim::plus<half>, 50, 2, 10>,
+    params<bfloat16, bfloat16, rocprim::maximum<bfloat16>, 0, 1000, 2000>,
+    params<bfloat16, bfloat16, rocprim::plus<bfloat16>, 50, 2, 10>,
     params<custom_short2, custom_int2, rocprim::plus<custom_int2>, 10, 1000, 10000>,
     params<custom_double2, custom_double2, rocprim::maximum<custom_double2>, 50, 2, 10>,
     params<float, float, rocprim::plus<float>, 123, 100, 200>,
     params<unsigned char, long long, rocprim::plus<int>, 10, 3000, 4000>,
-#ifndef __HIP__
-    // hip-clang does not allow to convert half to float
-    params<rocprim::half, float, rocprim::plus<float>, 0, 10, 300>,
-#endif
-    params<rocprim::bfloat16, float, rocprim::plus<float>, 0, 10, 300>,
-    params<rocprim::half, rocprim::half, test_utils::half_minimum, 0, 1000, 30000>,
-    params<rocprim::bfloat16, rocprim::bfloat16, test_utils::bfloat16_minimum, 0, 1000, 30000>>
+    params<half, float, rocprim::plus<float>, 0, 10, 300>,
+    params<bfloat16, float, rocprim::plus<float>, 0, 10, 300>,
+    params<half, half, rocprim::minimum<half>, 0, 1000, 30000>,
+    params<bfloat16, bfloat16, rocprim::minimum<bfloat16>, 0, 1000, 30000>>
     Params;
 
 TYPED_TEST_SUITE(RocprimDeviceSegmentedReduce, Params);
 
-std::vector<size_t> get_sizes(int seed_value)
-{
-    std::vector<size_t> sizes = {
-        1024, 2048, 4096, 1792,
-        0, 1, 10, 53, 211, 500,
-        2345, 11001, 34567,
-        100000,
-        (1 << 16) - 1220
-    };
-    const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(5, 1, 1000000, seed_value);
-    sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
-    return sizes;
-}
-
 TYPED_TEST(RocprimDeviceSegmentedReduce, Reduce)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    using input_type = typename TestFixture::params::input_type;
-    using output_type = typename TestFixture::params::output_type;
+    using input_type     = typename TestFixture::params::input_type;
+    using output_type    = typename TestFixture::params::output_type;
     using reduce_op_type = typename TestFixture::params::reduce_op_type;
-    // for bfloat16 and half we use double for host-side accumulation
-    using reduce_op_type_host = typename std::conditional<std::is_same<reduce_op_type,test_utils::bfloat16_plus>::value ||
-                                                         std::is_same<reduce_op_type,test_utils::half_plus>::value,
-                                                     rocprim::plus<double>, reduce_op_type>::type;
+    using offset_type    = unsigned int;
+
     reduce_op_type reduce_op;
-    reduce_op_type_host reduce_op_host;
 
     constexpr bool use_identity_iterator = TestFixture::params::use_identity_iterator;
 
-    // for bfloat16 and half we use double for host-side accumulation
-    using result_type = typename std::conditional<
-        std::is_same<reduce_op_type_host,rocprim::plus<double>>::value, double, output_type>::type;
-    using offset_type = unsigned int;
-
-    const input_type init = (input_type)TestFixture::params::init;
-    const bool debug_synchronous = false;
-    SCOPED_TRACE(testing::Message() << "with reduce_op_type_host= " << typeid(reduce_op_host).name());
+    const input_type init              = input_type{TestFixture::params::init};
+    const bool       debug_synchronous = false;
 
     std::random_device rd;
     std::default_random_engine gen(rd());
@@ -137,16 +112,10 @@ TYPED_TEST(RocprimDeviceSegmentedReduce, Reduce)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
-        for(size_t size : get_sizes(seed_value))
+        for(size_t size : test_utils::get_sizes(seed_value))
         {
-            if (size == 0 && test_common_utils::use_hmm())
-            {
-                // hipMallocManaged() currently doesnt support zero byte allocation
-                continue;
-            }
-
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             hipStream_t stream = 0; // default
@@ -159,23 +128,41 @@ TYPED_TEST(RocprimDeviceSegmentedReduce, Reduce)
             std::vector<offset_type> offsets;
             unsigned int segments_count = 0;
             size_t offset = 0;
+            size_t                   max_segment_length = 0;
             while(offset < size)
             {
                 const size_t segment_length = segment_length_dis(gen);
                 offsets.push_back(offset);
 
                 const size_t end = std::min(size, offset + segment_length);
-                result_type aggregate = init;
+                max_segment_length = std::max(max_segment_length, end - offset);
+
+                output_type aggregate = init;
                 for(size_t i = offset; i < end; i++)
                 {
-                    aggregate = reduce_op_host(aggregate, values_input[i]);
+                    aggregate = reduce_op(aggregate, values_input[i]);
                 }
-                aggregates_expected.push_back(static_cast<output_type>(aggregate));
+                aggregates_expected.push_back(aggregate);
 
                 segments_count++;
                 offset += segment_length;
             }
             offsets.push_back(size);
+
+            // intermediate results for segmented reduce are stored as output_type,
+            // but reduced by the reduce_op_type operation,
+            // however that opeartion uses the same output_type for all tests
+            const float precision = test_utils::is_plus_operator<reduce_op_type>::value
+                                        ? test_utils::precision<output_type> * max_segment_length
+                                        : 0;
+            if(precision > 0.5)
+            {
+                std::cout << "Test is skipped from size " << size
+                          << " on, potential error of summation is more than 0.5 of the result "
+                             "with current or larger size"
+                          << std::endl;
+                continue;
+            }
 
             input_type * d_values_input;
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_values_input, size * sizeof(input_type)));
@@ -245,7 +232,8 @@ TYPED_TEST(RocprimDeviceSegmentedReduce, Reduce)
             HIP_CHECK(hipFree(d_offsets));
             HIP_CHECK(hipFree(d_aggregates_output));
 
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_near(aggregates_output, aggregates_expected, test_utils::precision_threshold<output_type>::percentage));
+            ASSERT_NO_FATAL_FAILURE(
+                test_utils::assert_near(aggregates_output, aggregates_expected, precision));
         }
     }
 

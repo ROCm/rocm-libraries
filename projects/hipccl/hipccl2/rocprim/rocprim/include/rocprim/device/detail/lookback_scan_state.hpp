@@ -32,6 +32,7 @@
 #include "../../warp/detail/warp_scan_crosslane.hpp"
 
 #include "../../detail/binary_op_wrappers.hpp"
+#include "../../detail/temp_storage.hpp"
 #include "../../detail/various.hpp"
 
 extern "C"
@@ -110,6 +111,13 @@ public:
     size_t get_storage_size(const unsigned int number_of_blocks)
     {
         return sizeof(prefix_underlying_type) * (::rocprim::host_warp_size() + number_of_blocks);
+    }
+
+    ROCPRIM_HOST static inline detail::temp_storage::layout
+        get_temp_storage_layout(const unsigned int number_of_blocks)
+    {
+        return detail::temp_storage::layout{get_storage_size(number_of_blocks),
+                                            alignof(prefix_underlying_type)};
     }
 
     ROCPRIM_DEVICE ROCPRIM_INLINE
@@ -255,6 +263,13 @@ public:
         size_t size = ::rocprim::detail::align_size(n * sizeof(flag_type));
         size += 2 * ::rocprim::detail::align_size(n * sizeof(T));
         return size;
+    }
+
+    ROCPRIM_HOST static inline detail::temp_storage::layout
+        get_temp_storage_layout(const unsigned int number_of_blocks)
+    {
+        size_t alignment = std::max(alignof(flag_type), alignof(T));
+        return detail::temp_storage::layout{get_storage_size(number_of_blocks), alignment};
     }
 
     ROCPRIM_DEVICE ROCPRIM_INLINE

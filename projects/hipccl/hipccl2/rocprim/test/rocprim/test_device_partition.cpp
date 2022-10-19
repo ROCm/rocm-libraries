@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "common_test_header.hpp"
+#include "../common_test_header.hpp"
 
 // required rocprim headers
 #include <rocprim/device/device_partition.hpp>
@@ -68,27 +68,12 @@ typedef ::testing::Types<
     DevicePartitionParams<test_utils::custom_test_type<long long>>
 > RocprimDevicePartitionTestsParams;
 
-std::vector<size_t> get_sizes(int seed_value)
-{
-    std::vector<size_t> sizes = {
-        0, 1, 2, 32, 64, 256,
-        1024, 2048,
-        3072, 4096,
-        27845, (1 << 18) + 1111,
-        1024 * 1024 * 32
-    };
-    const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(2, 1, 16384, seed_value);
-    sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
-    std::sort(sizes.begin(), sizes.end());
-    return sizes;
-}
-
 TYPED_TEST_SUITE(RocprimDevicePartitionTests, RocprimDevicePartitionTestsParams);
 
 TYPED_TEST(RocprimDevicePartitionTests, Flagged)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using T = typename TestFixture::input_type;
@@ -102,16 +87,10 @@ TYPED_TEST(RocprimDevicePartitionTests, Flagged)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
-        const std::vector<size_t> sizes = get_sizes(seed_value);
-        for(auto size : sizes)
+        for(auto size : test_utils::get_sizes(seed_value))
         {
-            if (size == 0 && test_common_utils::use_hmm())
-            {
-                // hipMallocManaged() currently doesnt support zero byte allocation
-                continue;
-            }
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             // Generate data
@@ -247,7 +226,7 @@ TYPED_TEST(RocprimDevicePartitionTests, Flagged)
 TYPED_TEST(RocprimDevicePartitionTests, PredicateEmptyInput)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using T = typename TestFixture::input_type;
@@ -340,7 +319,7 @@ TYPED_TEST(RocprimDevicePartitionTests, PredicateEmptyInput)
 TYPED_TEST(RocprimDevicePartitionTests, Predicate)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using T = typename TestFixture::input_type;
@@ -359,16 +338,10 @@ TYPED_TEST(RocprimDevicePartitionTests, Predicate)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
-        const std::vector<size_t> sizes = get_sizes(seed_value);
-        for(auto size : sizes)
+        for(auto size : test_utils::get_sizes(seed_value))
         {
-            if (size == 0 && test_common_utils::use_hmm())
-            {
-                // hipMallocManaged() currently doesnt support zero byte allocation
-                continue;
-            }
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             // Generate data
@@ -524,10 +497,9 @@ TYPED_TEST(RocprimDevicePartitionTests, PredicateThreeWay)
     {
         const unsigned int seed_value = seed_index < random_seeds_count
             ? static_cast<unsigned int>(rand()) : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
-        const std::vector<size_t> sizes = get_sizes(seed_value);
-        for(auto size : sizes)
+        for(auto size : test_utils::get_sizes(seed_value))
         {
             SCOPED_TRACE(testing::Message() << "with size = " << size);
             for(const auto& limits : limit_pairs)
@@ -909,7 +881,7 @@ TEST_P(RocprimDevicePartitionLargeInputTests, LargeInputPartition)
     static constexpr hipStream_t stream            = 0;
 
     const int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     const auto modulo = GetParam();
@@ -917,7 +889,7 @@ TEST_P(RocprimDevicePartitionLargeInputTests, LargeInputPartition)
 
     for(const auto size : sizes)
     {
-        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        SCOPED_TRACE(testing::Message() << "with size = " << size);
         const auto input_iterator = rocprim::make_counting_iterator(static_cast<size_t>(0));
         const modulo_predicate predicate{modulo};
 
@@ -986,7 +958,7 @@ TEST_P(RocprimDevicePartitionLargeInputTests, LargeInputPartitionThreeWay)
     static constexpr hipStream_t stream            = 0;
 
     const int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     const auto modulo_a = GetParam();
@@ -995,7 +967,7 @@ TEST_P(RocprimDevicePartitionLargeInputTests, LargeInputPartitionThreeWay)
 
     for(const auto size : sizes)
     {
-        SCOPED_TRACE(testing::Message() << "with size= " << size);
+        SCOPED_TRACE(testing::Message() << "with size = " << size);
         const auto input_iterator = rocprim::make_counting_iterator(static_cast<size_t>(0));
         const auto predicate_a    = modulo_predicate{modulo_a};
         const auto predicate_b    = modulo_predicate{modulo_b};

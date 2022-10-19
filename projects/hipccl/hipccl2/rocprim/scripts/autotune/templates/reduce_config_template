@@ -1,0 +1,27 @@
+{% extends "config_template" %}
+
+{% macro get_header_guard() %}
+ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_REDUCE_HPP_
+{%- endmacro %}
+
+{% macro kernel_configuration(measurement) -%}
+reduce_config<{{ measurement['block_size'] }}, {{ measurement['items_per_thread'] }}, ::rocprim::block_reduce_algorithm::using_warp_reduce> { };
+{%- endmacro %}
+
+{% macro general_case() -%}
+template<unsigned int arch, class datatype, class enable = void> struct default_reduce_config :
+default_reduce_config_base<datatype> { };
+{%- endmacro %}
+
+{% macro configuration_arch_specific(benchmark_of_architecture, configuration) -%}
+template<> struct default_reduce_config<static_cast<unsigned int>({{ benchmark_of_architecture.name }}), {{configuration.datatype}}> :
+{%- endmacro %}
+
+{% macro configuration_fallback(benchmark_of_architecture, based_on_type, fallback_selection_criteria) -%}
+// Based on {{ based_on_type }}
+template<class datatype> struct default_reduce_config<static_cast<unsigned int>({{ benchmark_of_architecture.name }}), datatype, {{ fallback_selection_criteria }}> :
+{%- endmacro %}
+
+  
+
+
