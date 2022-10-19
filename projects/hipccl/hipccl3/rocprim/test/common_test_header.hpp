@@ -47,15 +47,20 @@
 #include <hip/hip_ext.h>
 #endif
 
+// GoogleTest-compatible HIP_CHECK macro. FAIL is called to log the Google Test trace.
+// The lambda is invoked immediately as assertions that generate a fatal failure can
+// only be used in void-returning functions.
 #ifndef HIP_CHECK
-#define HIP_CHECK(condition)         \
-{                                    \
-    hipError_t error = condition;    \
-    if(error != hipSuccess){         \
-        std::cout << "HIP error: " << error << " line: " << __LINE__ << std::endl; \
-        exit(error); \
-    } \
-}
+    #define HIP_CHECK(condition)                                                            \
+        {                                                                                   \
+            hipError_t error = condition;                                                   \
+            if(error != hipSuccess)                                                         \
+            {                                                                               \
+                [error]()                                                                   \
+                { FAIL() << "HIP error " << error << ": " << hipGetErrorString(error); }(); \
+                exit(error);                                                                \
+            }                                                                               \
+        }
 #endif
 
 #define INSTANTIATE_TYPED_TEST_EXPANDED_1(line, test_suite_name, ...)         \

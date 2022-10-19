@@ -24,6 +24,7 @@
 #include <type_traits>
 #include <limits>
 
+#include "../../detail/temp_storage.hpp"
 #include "../../detail/various.hpp"
 #include "../../intrinsics.hpp"
 #include "../../types.hpp"
@@ -58,6 +59,11 @@ struct ordered_block_id
     size_t get_storage_size()
     {
         return sizeof(id_type);
+    }
+
+    ROCPRIM_HOST static inline detail::temp_storage::layout get_temp_storage_layout()
+    {
+        return detail::temp_storage::layout{get_storage_size(), alignof(id_type)};
     }
 
     ROCPRIM_DEVICE ROCPRIM_INLINE

@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "common_test_header.hpp"
+#include "../common_test_header.hpp"
 
 // required rocprim headers
 #include <rocprim/iterator/transform_iterator.hpp>
@@ -142,7 +142,7 @@ TYPED_TEST_SUITE(RocprimDeviceHistogramEven, Params1);
 TEST(RocprimDeviceHistogramEven, IncorrectInput)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     size_t temporary_storage_bytes = 0;
@@ -162,7 +162,7 @@ TEST(RocprimDeviceHistogramEven, IncorrectInput)
 TYPED_TEST(RocprimDeviceHistogramEven, Even)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using sample_type = typename TestFixture::params::sample_type;
@@ -193,7 +193,8 @@ TYPED_TEST(RocprimDeviceHistogramEven, Even)
         for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
         {
             unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             // Generate data
             std::vector<sample_type> input = get_random_samples<sample_type>(size, lower_level, upper_level, seed_value);
@@ -349,7 +350,7 @@ TYPED_TEST_SUITE(RocprimDeviceHistogramRange, Params2);
 TEST(RocprimDeviceHistogramRange, IncorrectInput)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     size_t temporary_storage_bytes = 0;
@@ -370,7 +371,7 @@ TEST(RocprimDeviceHistogramRange, IncorrectInput)
 TYPED_TEST(RocprimDeviceHistogramRange, Range)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using sample_type = typename TestFixture::params::sample_type;
@@ -417,7 +418,8 @@ TYPED_TEST(RocprimDeviceHistogramRange, Range)
         for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
         {
             unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             std::vector<sample_type> input = get_random_samples<sample_type>(size, levels[0], levels[bins], seed_value);
 
@@ -590,7 +592,7 @@ TYPED_TEST_SUITE(RocprimDeviceHistogramMultiEven, Params3);
 TYPED_TEST(RocprimDeviceHistogramMultiEven, MultiEven)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using sample_type = typename TestFixture::params::sample_type;
@@ -637,7 +639,8 @@ TYPED_TEST(RocprimDeviceHistogramMultiEven, MultiEven)
         for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
         {
             unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             // Generate data
             std::vector<sample_type> input(size);
@@ -844,7 +847,7 @@ TYPED_TEST_SUITE(RocprimDeviceHistogramMultiRange, Params4);
 TYPED_TEST(RocprimDeviceHistogramMultiRange, MultiRange)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using sample_type = typename TestFixture::params::sample_type;
@@ -891,7 +894,8 @@ TYPED_TEST(RocprimDeviceHistogramMultiRange, MultiRange)
         for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
         {
             unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-            SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+            SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             // Generate data
             std::vector<level_type> levels[active_channels];

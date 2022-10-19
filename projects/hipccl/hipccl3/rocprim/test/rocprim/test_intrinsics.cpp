@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "common_test_header.hpp"
+#include "../common_test_header.hpp"
 
 // required rocprim headers
 #include <rocprim/intrinsics/thread.hpp>
@@ -107,7 +107,7 @@ void shuffle_up_kernel(T* data, unsigned int delta, unsigned int width)
 TYPED_TEST(RocprimIntrinsicsTests, ShuffleUp)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using T = typename TestFixture::type;
@@ -117,7 +117,7 @@ TYPED_TEST(RocprimIntrinsicsTests, ShuffleUp)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate input
         auto input = test_utils::get_random_data<T>(size, T(-100), T(100), seed_value);
@@ -210,7 +210,7 @@ void shuffle_down_kernel(T* data, unsigned int delta, unsigned int width)
 TYPED_TEST(RocprimIntrinsicsTests, ShuffleDown)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using T = typename TestFixture::type;
@@ -220,7 +220,7 @@ TYPED_TEST(RocprimIntrinsicsTests, ShuffleDown)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate input
         auto input = test_utils::get_random_data<T>(size, T(-100), T(100), seed_value);
@@ -315,7 +315,7 @@ void shuffle_index_kernel(T* data, int* src_lanes, unsigned int width)
 TYPED_TEST(RocprimIntrinsicsTests, ShuffleIndex)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using T = typename TestFixture::type;
@@ -325,7 +325,7 @@ TYPED_TEST(RocprimIntrinsicsTests, ShuffleIndex)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate input
         auto input = test_utils::get_random_data<T>(size, T(-100), T(100), seed_value);
@@ -418,7 +418,7 @@ TYPED_TEST(RocprimIntrinsicsTests, ShuffleIndex)
 TEST(RocprimIntrinsicsTests, ShuffleUpCustomStruct)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using T = custom_notaligned;
@@ -428,7 +428,7 @@ TEST(RocprimIntrinsicsTests, ShuffleUpCustomStruct)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate input
         std::vector<double> random_data = test_utils::get_random_data<double>(4 * size, -100, 100, seed_value);
@@ -518,7 +518,7 @@ TEST(RocprimIntrinsicsTests, ShuffleUpCustomStruct)
 TEST(RocprimIntrinsicsTests, ShuffleUpCustomAlignedStruct)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using T = custom_16aligned;
@@ -528,7 +528,7 @@ TEST(RocprimIntrinsicsTests, ShuffleUpCustomAlignedStruct)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate input
         std::vector<double> random_data = test_utils::get_random_data<double>(3 * size, -100, 100, seed_value);

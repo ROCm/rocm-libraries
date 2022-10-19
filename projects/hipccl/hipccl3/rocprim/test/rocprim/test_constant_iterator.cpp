@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "common_test_header.hpp"
+#include "../common_test_header.hpp"
 
 // required rocprim headers
 #include <rocprim/iterator/constant_iterator.hpp>
@@ -66,7 +66,7 @@ struct transform
 TYPED_TEST(RocprimConstantIteratorTests, Transform)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
     
     using T = typename TestFixture::input_type;
@@ -80,7 +80,7 @@ TYPED_TEST(RocprimConstantIteratorTests, Transform)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Create constant_iterator<U> with random starting point
         const auto value = test_utils::get_random_value<T>(0, 200, seed_value);
@@ -115,19 +115,7 @@ TYPED_TEST(RocprimConstantIteratorTests, Transform)
         HIP_CHECK(hipDeviceSynchronize());
 
         // Validating results
-        for(size_t i = 0; i < output.size(); i++)
-        {
-            if(std::is_integral<T>::value)
-            {
-                ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
-            }
-            else if(std::is_floating_point<T>::value)
-            {
-                float percentage = test_utils::precision_threshold<T>::percentage;
-                auto tolerance = std::max(std::abs(0.1f * (float)expected[i]), (float)percentage);
-                ASSERT_NEAR(output[i], expected[i], tolerance) << "where index = " << i;
-            }
-        }
+        test_utils::assert_near(output, expected, test_utils::precision<T>);
 
         hipFree(d_output);
     }

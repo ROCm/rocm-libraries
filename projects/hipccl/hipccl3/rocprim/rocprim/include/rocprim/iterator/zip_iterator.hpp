@@ -26,6 +26,7 @@
 #include <type_traits>
 
 #include "../config.hpp"
+#include "../detail/various.hpp"
 #include "../types/tuple.hpp"
 
 /// \addtogroup iteratormodule
@@ -53,23 +54,6 @@ struct tuple_of_values<::rocprim::tuple<Types...>>
 {
     using type = ::rocprim::tuple<typename std::iterator_traits<Types>::value_type...>;
 };
-
-template<class... Types, class Function, size_t... Indices>
-ROCPRIM_HOST_DEVICE inline
-void for_each_in_tuple_impl(::rocprim::tuple<Types...>& t,
-                            Function f,
-                            ::rocprim::index_sequence<Indices...>)
-{
-    auto swallow = { (f(::rocprim::get<Indices>(t)), 0)... };
-    (void) swallow;
-}
-
-template<class... Types, class Function>
-ROCPRIM_HOST_DEVICE inline
-void for_each_in_tuple(::rocprim::tuple<Types...>& t, Function f)
-{
-    for_each_in_tuple_impl(t, f, ::rocprim::index_sequence_for<Types...>());
-}
 
 struct increment_iterator
 {

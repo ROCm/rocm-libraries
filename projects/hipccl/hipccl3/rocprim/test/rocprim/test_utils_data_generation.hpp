@@ -1,4 +1,4 @@
-// Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2021-2022 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -380,6 +380,57 @@ inline std::vector<T> get_random_data01(size_t size, float p, seed_type seed_val
     return data;
 }
 
+template<class T>
+std::vector<size_t> get_sizes(T seed_value)
+{
+    // clang-format off
+    std::vector<size_t> sizes = {
+        1024, 2048, 4096, 1792,
+        1, 10, 53, 211, 500, 2345,
+        11001, 34567, 100000,
+        (1 << 16) - 1220,
+        (1 << 20) + 123
+    };
+    // clang-format on
+    if(!test_common_utils::use_hmm())
+    {
+        // hipMallocManaged() currently doesnt support zero byte allocation
+        sizes.push_back(0);
+    }
+
+    const std::vector<size_t> random_sizes1
+        = test_utils::get_random_data<size_t>(2, 2, 1 << 20, seed_value);
+    sizes.insert(sizes.end(), random_sizes1.begin(), random_sizes1.end());
+
+    const std::vector<size_t> random_sizes2
+        = test_utils::get_random_data<size_t>(3, 2, 1 << 17, seed_value);
+    sizes.insert(sizes.end(), random_sizes2.begin(), random_sizes2.end());
+
+    std::sort(sizes.begin(), sizes.end());
+
+    return sizes;
+}
+
+template<class T>
+std::vector<size_t> get_large_sizes(T seed_value)
+{
+    // clang-format off
+    std::vector<size_t> sizes = {
+        (size_t{1} << 30) - 1, size_t{1} << 30,
+        (size_t{1} << 32) - 1, size_t{1} << 32,
+        (size_t{1} << 35) + 1,
+        (size_t{1} << 37) - 1,
+    };
+    // clang-format on
+    const std::vector<size_t> random_sizes
+        = test_utils::get_random_data<size_t>(2,
+                                              (size_t{1} << 30) + 1,
+                                              (size_t{1} << 37) - 2,
+                                              seed_value);
+    sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
+    std::sort(sizes.begin(), sizes.end());
+    return sizes;
+}
 }
 
 #endif //ROCPRIM_TEST_UTILS_DATA_GENERATION_HPP

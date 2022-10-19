@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2019-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2019-2022 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "common_test_header.hpp"
+#include "../common_test_header.hpp"
 
 // required rocprim headers
 #include <rocprim/functional.hpp>
@@ -54,31 +54,23 @@ using custom_double2 = test_utils::custom_test_type<double>;
 
 typedef ::testing::Types<
     params<int, int>,
-    params<unsigned long long, unsigned long long, size_t, rocprim::greater<unsigned long long> >,
-    params<float, double, unsigned int, rocprim::greater<double> >,
+    params<unsigned long long, unsigned long long, size_t, rocprim::greater<unsigned long long>>,
+    params<float, double, unsigned int, rocprim::greater<double>>,
     params<double, int>,
     params<int8_t, int8_t>,
     params<uint8_t, uint8_t>,
-    params<rocprim::half, rocprim::half, size_t, test_utils::half_less>,
-    params<rocprim::bfloat16, rocprim::bfloat16, size_t, test_utils::bfloat16_less>,
+    params<rocprim::half, rocprim::half, size_t, rocprim::less<rocprim::half>>,
+    params<rocprim::bfloat16, rocprim::bfloat16, size_t, rocprim::less<rocprim::bfloat16>>,
     params<custom_int2, custom_int2>,
-    params<custom_double2, custom_double2, unsigned int, rocprim::greater<custom_double2> >
-> Params;
+    params<custom_double2, custom_double2, unsigned int, rocprim::greater<custom_double2>>>
+    Params;
 
 TYPED_TEST_SUITE(RocprimDeviceBinarySearch, Params);
-
-std::vector<size_t> get_sizes(int seed_value)
-{
-    std::vector<size_t> sizes = { 0, 1, 10, 53, 211, 1024, 2345, 4096, 34567, (1 << 16) - 1220, (1 << 22) - 76543 };
-    const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(5, 1, 100000, seed_value);
-    sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
-    return sizes;
-}
 
 TYPED_TEST(RocprimDeviceBinarySearch, LowerBound)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using haystack_type = typename TestFixture::params::haystack_type;
@@ -95,15 +87,10 @@ TYPED_TEST(RocprimDeviceBinarySearch, LowerBound)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
-        for(size_t size : get_sizes(seed_value))
+        for(size_t size : test_utils::get_sizes(seed_value))
         {
-            if (size == 0 && test_common_utils::use_hmm())
-            {
-                // hipMallocManaged() currently doesnt support zero byte allocation
-                continue;
-            }
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             const size_t haystack_size = size;
@@ -201,7 +188,7 @@ TYPED_TEST(RocprimDeviceBinarySearch, LowerBound)
 TYPED_TEST(RocprimDeviceBinarySearch, UpperBound)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using haystack_type = typename TestFixture::params::haystack_type;
@@ -218,15 +205,10 @@ TYPED_TEST(RocprimDeviceBinarySearch, UpperBound)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         seed_type seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
-        for(size_t size : get_sizes(seed_value))
+        for(size_t size : test_utils::get_sizes(seed_value))
         {
-            if (size == 0 && test_common_utils::use_hmm())
-            {
-                // hipMallocManaged() currently doesnt support zero byte allocation
-                continue;
-            }
             SCOPED_TRACE(testing::Message() << "with size = " << size);
             const size_t haystack_size = size;
             const size_t needles_size = (size_t)std::sqrt(size); // cast promises no data loss, silences warning
@@ -323,7 +305,7 @@ TYPED_TEST(RocprimDeviceBinarySearch, UpperBound)
 TYPED_TEST(RocprimDeviceBinarySearch, BinarySearch)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using haystack_type = typename TestFixture::params::haystack_type;
@@ -340,15 +322,10 @@ TYPED_TEST(RocprimDeviceBinarySearch, BinarySearch)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
-        for(size_t size : get_sizes(seed_value))
+        for(size_t size : test_utils::get_sizes(seed_value))
         {
-            if (size == 0 && test_common_utils::use_hmm())
-            {
-                // hipMallocManaged() currently doesnt support zero byte allocation
-                continue;
-            }
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             const size_t haystack_size = size;

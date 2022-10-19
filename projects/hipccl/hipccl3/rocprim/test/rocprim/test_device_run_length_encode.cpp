@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "common_test_header.hpp"
+#include "../common_test_header.hpp"
 
 // required rocprim headers
 #include <rocprim/device/device_run_length_encode.hpp>
@@ -80,20 +80,6 @@ typedef ::testing::Types<
 
 TYPED_TEST_SUITE(RocprimDeviceRunLengthEncode, Params);
 
-std::vector<size_t> get_sizes(int seed_value)
-{
-    std::vector<size_t> sizes = {
-        1024, 2048, 4096, 1792,
-        0, 1, 10, 53, 211, 500,
-        2345, 11001, 34567,
-        100000,
-        (1 << 16) - 1220, (1 << 21) - 76543
-    };
-    const std::vector<size_t> random_sizes = test_utils::get_random_data<size_t>(5, 1, 100000, seed_value);
-    sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
-    return sizes;
-}
-
 template <class T>
 T get_random_value_no_duplicate(const T duplicate, const std::vector<T> &source, const size_t start_index)
 {
@@ -110,7 +96,7 @@ T get_random_value_no_duplicate(const T duplicate, const std::vector<T> &source,
 TYPED_TEST(RocprimDeviceRunLengthEncode, Encode)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using key_type = typename TestFixture::params::key_type;
@@ -126,16 +112,10 @@ TYPED_TEST(RocprimDeviceRunLengthEncode, Encode)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
-        for(size_t size : get_sizes(seed_value))
+        for(size_t size : test_utils::get_sizes(seed_value))
         {
-            if (size == 0 && test_common_utils::use_hmm())
-            {
-                // hipMallocManaged() currently doesnt support zero byte allocation
-                continue;
-            }
-
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             hipStream_t stream = 0; // default
@@ -268,7 +248,7 @@ TYPED_TEST(RocprimDeviceRunLengthEncode, Encode)
 TYPED_TEST(RocprimDeviceRunLengthEncode, NonTrivialRuns)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using key_type = typename TestFixture::params::key_type;
@@ -285,16 +265,10 @@ TYPED_TEST(RocprimDeviceRunLengthEncode, NonTrivialRuns)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
-        for(size_t size : get_sizes(seed_value))
+        for(size_t size : test_utils::get_sizes(seed_value))
         {
-            if (size == 0 && test_common_utils::use_hmm())
-            {
-                // hipMallocManaged() currently doesnt support zero byte allocation
-                continue;
-            }
-
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             hipStream_t stream = 0; // default

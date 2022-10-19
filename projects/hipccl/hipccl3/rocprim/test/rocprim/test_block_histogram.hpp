@@ -29,11 +29,11 @@
 #include <rocprim/block/block_histogram.hpp>
 
 // required test headers
-#include "test_utils_types.hpp"
-#include "common_test_header.hpp"
+    #include "../common_test_header.hpp"
+    #include "test_utils_types.hpp"
 
-// kernel definitions
-#include "test_block_histogram.kernels.hpp"
+    // kernel definitions
+    #include "test_block_histogram.kernels.hpp"
 
 // Start stamping out tests
 struct RocprimBlockHistogramAtomicInputArrayTests;

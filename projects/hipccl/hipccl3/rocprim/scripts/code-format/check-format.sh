@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 SOURCE_COMMIT="$1"
 if [ "$#" -gt 0 ]; then

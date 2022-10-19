@@ -27,7 +27,7 @@ typed_test_suite_def(suite_name, name_suffix, warp_params);
 typed_test_def(suite_name, name_suffix, BlockOffset)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using type = typename TestFixture::input_type;
@@ -38,7 +38,8 @@ typed_test_def(suite_name, name_suffix, BlockOffset)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         int distance = (rand()%std::min<size_t>(10,block_size/2))-std::min<size_t>(10,block_size/2);
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value <<" & distance = "<<distance);
+        SCOPED_TRACE(testing::Message()
+                     << "with seed = " << seed_value << ", distance = " << distance);
         // Generate data
         std::vector<type> input_data = test_utils::get_random_data<type>(size, -100, 100, seed_value);
         std::vector<type> output_data(input_data);
@@ -97,7 +98,7 @@ typed_test_def(suite_name, name_suffix, BlockOffset)
 typed_test_def(suite_name, name_suffix, BlockRotate)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using type = typename TestFixture::input_type;
@@ -108,7 +109,8 @@ typed_test_def(suite_name, name_suffix, BlockRotate)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
         int distance = (rand()%std::min<size_t>(5,block_size/2));
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value <<" & distance = "<<distance);
+        SCOPED_TRACE(testing::Message()
+                     << "with seed = " << seed_value << ", distance = " << distance);
         // Generate data
         std::vector<type> input_data = test_utils::get_random_data<type>(size, -100, 100, seed_value);
         std::vector<type> output_data(input_data);
@@ -166,7 +168,7 @@ typed_test_def(suite_name, name_suffix, BlockRotate)
 typed_test_def(suite_name, name_suffix, BlockUp)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using type = typename TestFixture::input_type;
@@ -177,7 +179,7 @@ typed_test_def(suite_name, name_suffix, BlockUp)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
         // Generate data
         std::vector<type> input_data = test_utils::get_random_data<type>(ItemsPerThread * size, -100, 100, seed_value);
         std::vector<type> output_data(input_data);
@@ -246,7 +248,7 @@ typed_test_def(suite_name, name_suffix, BlockUp)
 typed_test_def(suite_name, name_suffix, BlockDown)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using type = typename TestFixture::input_type;
@@ -257,7 +259,7 @@ typed_test_def(suite_name, name_suffix, BlockDown)
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
         std::vector<type> input_data = test_utils::get_random_data<type>(ItemsPerThread * size, -100, 100, seed_value);

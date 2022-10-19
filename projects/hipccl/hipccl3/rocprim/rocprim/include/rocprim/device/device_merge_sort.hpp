@@ -26,13 +26,14 @@
 #include <type_traits>
 
 #include "../config.hpp"
+#include "../detail/temp_storage.hpp"
 #include "../detail/various.hpp"
 
+#include "detail/config/device_merge_sort.hpp"
 #include "detail/device_merge.hpp"
 #include "detail/device_merge_sort.hpp"
 #include "detail/device_merge_sort_mergepath.hpp"
 #include "device_transform.hpp"
-#include "device_merge_sort_config.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -244,9 +245,6 @@ hipError_t merge_sort_impl(void * temporary_storage,
     static_assert(sort_items_per_block % config::merge_impl1_config::block_size == 0,
                   "Merge block size must be a divisor of the items per block of the sort step");
 
-    const size_t keys_bytes = ::rocprim::detail::align_size(size * sizeof(key_type));
-    const size_t values_bytes = with_values ? ::rocprim::detail::align_size(size * sizeof(value_type)) : 0;
-
     const unsigned int sort_number_of_blocks = ceiling_div(size, sort_items_per_block);
     const unsigned int merge_impl1_number_of_blocks = ceiling_div(size, merge_impl1_items_per_block);
     const unsigned int merge_mergepath_number_of_blocks = ceiling_div(size, merge_mergepath_items_per_block);
@@ -254,15 +252,24 @@ hipError_t merge_sort_impl(void * temporary_storage,
     bool use_mergepath = size > config::min_input_size_mergepath;
     // variables below used for mergepath
     const unsigned int merge_num_partitions = merge_mergepath_number_of_blocks + 1;
-    const unsigned int merge_partition_number_of_blocks = ceiling_div(merge_num_partitions, merge_partition_block_size);
-    const size_t d_merge_partitions_bytes = use_mergepath ? merge_num_partitions * sizeof(OffsetT) : 0;
+    const unsigned int merge_partition_number_of_blocks
+        = ceiling_div(merge_num_partitions, merge_partition_block_size);
 
-    if(temporary_storage == nullptr)
+    OffsetT*    d_merge_partitions;
+    key_type*   keys_buffer;
+    value_type* values_buffer;
+
+    const hipError_t partition_result = detail::temp_storage::partition(
+        temporary_storage,
+        storage_size,
+        detail::temp_storage::make_linear_partition(
+            detail::temp_storage::ptr_aligned_array(&d_merge_partitions,
+                                                    use_mergepath ? merge_num_partitions : 0),
+            detail::temp_storage::ptr_aligned_array(&keys_buffer, size),
+            detail::temp_storage::ptr_aligned_array(&values_buffer, with_values ? size : 0)));
+    if(partition_result != hipSuccess || temporary_storage == nullptr)
     {
-        storage_size = d_merge_partitions_bytes + keys_bytes + values_bytes;
-        // Make sure user won't try to allocate 0 bytes memory
-        storage_size = storage_size == 0 ? 4 : storage_size;
-        return hipSuccess;
+        return partition_result;
     }
 
     if( size == size_t(0) )
@@ -288,13 +295,6 @@ hipError_t merge_sort_impl(void * temporary_storage,
         std::cout << "merge_mergepath_partition_block_size: " << merge_partition_block_size << '\n';
         std::cout << "merge_mergepath_partition_number_of_blocks: " << merge_partition_number_of_blocks << '\n';
     }
-
-    char* ptr = reinterpret_cast<char*>(temporary_storage);
-    OffsetT* d_merge_partitions = reinterpret_cast<OffsetT*>(ptr);
-    ptr += d_merge_partitions_bytes;
-    key_type * keys_buffer = reinterpret_cast<key_type*>(ptr);
-    ptr += keys_bytes;
-    value_type * values_buffer = with_values ? reinterpret_cast<value_type*>(ptr) : nullptr;
 
     // Start point for time measurements
     std::chrono::high_resolution_clock::time_point start;

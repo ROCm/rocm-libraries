@@ -27,7 +27,7 @@ typed_test_suite_def(suite_name, name_suffix, warp_params);
 typed_test_def(suite_name, name_suffix, SortKeys)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using key_type = typename TestFixture::params::input_type;
@@ -40,7 +40,7 @@ typed_test_def(suite_name, name_suffix, SortKeys)
 typed_test_def(suite_name, name_suffix, SortKeysValues)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     using key_type = typename TestFixture::params::input_type;

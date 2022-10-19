@@ -1,4 +1,4 @@
-// Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2021-2022 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -66,8 +66,8 @@ struct custom_test_type
     ROCPRIM_HOST_DEVICE inline
         custom_test_type(const custom_test_type<U>& other)
     {
-        x = other.x;
-        y = other.y;
+        x = static_cast<T>(other.x);
+        y = static_cast<T>(other.y);
     }
 
     ROCPRIM_HOST_DEVICE inline
@@ -84,183 +84,36 @@ struct custom_test_type
     ROCPRIM_HOST_DEVICE inline
         custom_test_type operator+(const custom_test_type& other) const
     {
-        return custom_test_type(x + other.x, y + other.y);
+        rocprim::plus<T> plus;
+        return custom_test_type(plus(x, other.x), plus(y, other.y));
     }
 
     ROCPRIM_HOST_DEVICE inline
         custom_test_type operator-(const custom_test_type& other) const
     {
-        return custom_test_type(x - other.x, y - other.y);
+        rocprim::minus<T> minus;
+        return custom_test_type(minus(x, other.x), minus(y, other.y));
     }
 
     ROCPRIM_HOST_DEVICE inline
         bool operator<(const custom_test_type& other) const
     {
-        return (x < other.x || (x == other.x && y < other.y));
+        rocprim::less<T> less;
+        return (less(x, other.x) || (rocprim::equal_to<T>{}(x, other.x) && less(y, other.y)));
     }
 
     ROCPRIM_HOST_DEVICE inline
         bool operator>(const custom_test_type& other) const
     {
-        return (x > other.x || (x == other.x && y > other.y));
+        rocprim::greater<T> greater;
+        return (greater(x, other.x) || (rocprim::equal_to<T>{}(x, other.x) && greater(y, other.y)));
     }
 
     ROCPRIM_HOST_DEVICE inline
         bool operator==(const custom_test_type& other) const
     {
-        return (x == other.x && y == other.y);
-    }
-
-    ROCPRIM_HOST_DEVICE inline
-        bool operator!=(const custom_test_type& other) const
-    {
-        return !(*this == other);
-    }
-};
-
-//Overload for rocprim::half
-template<>
-struct custom_test_type<rocprim::half>
-{
-    using value_type = rocprim::half;
-
-    rocprim::half x;
-    rocprim::half y;
-
-    // Non-zero values in default constructor for checking reduce and scan:
-    // ensure that scan_op(custom_test_type(), value) != value
-    ROCPRIM_HOST_DEVICE inline
-        custom_test_type() : x(12), y(34) {}
-
-    ROCPRIM_HOST_DEVICE inline
-        custom_test_type(rocprim::half x, rocprim::half y) : x(x), y(y) {}
-
-    ROCPRIM_HOST_DEVICE inline
-        custom_test_type(rocprim::half xy) : x(xy), y(xy) {}
-
-    template<class U>
-    ROCPRIM_HOST_DEVICE inline
-        custom_test_type(const custom_test_type<U>& other)
-    {
-        x = static_cast<rocprim::half>(other.x);
-        y = static_cast<rocprim::half>(other.y);
-    }
-
-    ROCPRIM_HOST_DEVICE inline
-        ~custom_test_type() {}
-
-    ROCPRIM_HOST_DEVICE inline
-        custom_test_type& operator=(const custom_test_type& other)
-    {
-        x = other.x;
-        y = other.y;
-        return *this;
-    }
-
-    ROCPRIM_HOST_DEVICE inline
-        custom_test_type operator+(const custom_test_type& other) const
-    {
-        return custom_test_type(half_plus()(x, other.x), half_plus()(y, other.y));
-    }
-
-    ROCPRIM_HOST_DEVICE inline
-        custom_test_type operator-(const custom_test_type& other) const
-    {
-        return custom_test_type(half_minus()(x, other.x), half_minus()(y, other.y));
-    }
-
-    ROCPRIM_HOST_DEVICE inline
-        bool operator<(const custom_test_type& other) const
-    {
-        return (half_less()(x, other.x) || (half_equal_to()(x, other.x) && half_less()(y, other.y)));
-    }
-
-    ROCPRIM_HOST_DEVICE inline
-        bool operator>(const custom_test_type& other) const
-    {
-        return (half_greater()(x, other.x) || (half_equal_to()(x, other.x) && half_greater()(y, other.y)));
-    }
-
-    ROCPRIM_HOST_DEVICE inline
-        bool operator==(const custom_test_type& other) const
-    {
-        return (half_equal_to()(x, other.x) && half_equal_to()(y, other.y));
-    }
-
-    ROCPRIM_HOST_DEVICE inline
-        bool operator!=(const custom_test_type& other) const
-    {
-        return !(*this == other);
-    }
-};
-
-//Overload for rocprim::bfloat16
-template<>
-struct custom_test_type<rocprim::bfloat16>
-{
-    using value_type = rocprim::bfloat16;
-
-    rocprim::bfloat16 x;
-    rocprim::bfloat16 y;
-
-    // Non-zero values in default constructor for checking reduce and scan:
-    // ensure that scan_op(custom_test_type(), value) != value
-    ROCPRIM_HOST_DEVICE inline
-        custom_test_type() : x(12), y(34) {}
-
-    ROCPRIM_HOST_DEVICE inline
-        custom_test_type(rocprim::bfloat16 x, rocprim::bfloat16 y) : x(x), y(y) {}
-
-    ROCPRIM_HOST_DEVICE inline
-        custom_test_type(rocprim::bfloat16 xy) : x(xy), y(xy) {}
-
-    template<class U>
-    ROCPRIM_HOST_DEVICE inline
-        custom_test_type(const custom_test_type<U>& other)
-    {
-        x = static_cast<rocprim::bfloat16>(other.x);
-        y = static_cast<rocprim::bfloat16>(other.y);
-    }
-
-    ROCPRIM_HOST_DEVICE inline
-        ~custom_test_type() {}
-
-    ROCPRIM_HOST_DEVICE inline
-        custom_test_type& operator=(const custom_test_type& other)
-    {
-        x = other.x;
-        y = other.y;
-        return *this;
-    }
-
-    ROCPRIM_HOST_DEVICE inline
-        custom_test_type operator+(const custom_test_type& other) const
-    {
-        return custom_test_type(bfloat16_plus()(x, other.x), bfloat16_plus()(y, other.y));
-    }
-
-    ROCPRIM_HOST_DEVICE inline
-        custom_test_type operator-(const custom_test_type& other) const
-    {
-        return custom_test_type(bfloat16_minus()(x, other.x), bfloat16_minus()(y, other.y));
-    }
-
-    ROCPRIM_HOST_DEVICE inline
-        bool operator<(const custom_test_type& other) const
-    {
-        return (bfloat16_less()(x, other.x) || (bfloat16_equal_to()(x, other.x) && bfloat16_less()(y, other.y)));
-    }
-
-    ROCPRIM_HOST_DEVICE inline
-        bool operator>(const custom_test_type& other) const
-    {
-        return (bfloat16_greater()(x, other.x) || (bfloat16_equal_to()(x, other.x) && bfloat16_greater()(y, other.y)));
-    }
-
-    ROCPRIM_HOST_DEVICE inline
-        bool operator==(const custom_test_type& other) const
-    {
-        return (bfloat16_equal_to()(x, other.x) && bfloat16_equal_to()(y, other.y));
+        rocprim::equal_to<T> equal_to;
+        return (equal_to(x, other.x) && equal_to(y, other.y));
     }
 
     ROCPRIM_HOST_DEVICE inline
@@ -271,6 +124,7 @@ struct custom_test_type<rocprim::bfloat16>
 };
 
 // Custom type used in tests
+// Loops are prevented from being unrolled due to a compiler bug in ROCm 5.2 for device code
 template<class T, size_t N>
 struct custom_test_array_type
 {
@@ -282,6 +136,7 @@ struct custom_test_array_type
     ROCPRIM_HOST_DEVICE inline
         custom_test_array_type()
     {
+#pragma unroll 1
         for(size_t i = 0; i < N; i++)
         {
             values[i] = T(i + 1);
@@ -291,6 +146,7 @@ struct custom_test_array_type
     ROCPRIM_HOST_DEVICE inline
         custom_test_array_type(T v)
     {
+#pragma unroll 1
         for(size_t i = 0; i < N; i++)
         {
             values[i] = v;
@@ -301,6 +157,7 @@ struct custom_test_array_type
     ROCPRIM_HOST_DEVICE inline
         custom_test_array_type(const custom_test_array_type<U, N>& other)
     {
+#pragma unroll 1
         for(size_t i = 0; i < N; i++)
         {
             values[i] = other.values[i];
@@ -313,6 +170,7 @@ struct custom_test_array_type
     ROCPRIM_HOST_DEVICE inline
         custom_test_array_type& operator=(const custom_test_array_type& other)
     {
+#pragma unroll 1
         for(size_t i = 0; i < N; i++)
         {
             values[i] = other.values[i];
@@ -324,6 +182,7 @@ struct custom_test_array_type
         custom_test_array_type operator+(const custom_test_array_type& other) const
     {
         custom_test_array_type result;
+#pragma unroll 1
         for(size_t i = 0; i < N; i++)
         {
             result.values[i] = values[i] + other.values[i];
@@ -335,6 +194,7 @@ struct custom_test_array_type
         custom_test_array_type operator-(const custom_test_array_type& other) const
     {
         custom_test_array_type result;
+#pragma unroll 1
         for(size_t i = 0; i < N; i++)
         {
             result.values[i] = values[i] - other.values[i];
@@ -345,32 +205,43 @@ struct custom_test_array_type
     ROCPRIM_HOST_DEVICE inline
         bool operator<(const custom_test_array_type& other) const
     {
-        for(size_t i = 0; i < N; i++)
+#pragma unroll 1
+        for(unsigned int i = 0; i < N; i++)
         {
-            if(values[i] >= other.values[i])
+            if(values[i] < other.values[i])
+            {
+                return true;
+            }
+            else if(other.values[i] < values[i])
             {
                 return false;
             }
         }
-        return true;
+        return false;
     }
 
     ROCPRIM_HOST_DEVICE inline
         bool operator>(const custom_test_array_type& other) const
     {
-        for(size_t i = 0; i < N; i++)
+#pragma unroll 1
+        for(unsigned int i = 0; i < N; i++)
         {
-            if(values[i] <= other.values[i])
+            if(values[i] > other.values[i])
+            {
+                return true;
+            }
+            else if(other.values[i] > values[i])
             {
                 return false;
             }
         }
-        return true;
+        return false;
     }
 
     ROCPRIM_HOST_DEVICE inline
         bool operator==(const custom_test_array_type& other) const
     {
+#pragma unroll 1
         for(size_t i = 0; i < N; i++)
         {
             if(values[i] != other.values[i])

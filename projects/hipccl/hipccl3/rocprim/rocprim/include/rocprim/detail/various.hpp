@@ -268,7 +268,7 @@ using bool_constant = std::integral_constant<bool, Value>;
 
 /**
  * \brief Copy data from src to dest with stream ordering and synchronization
- * 
+ *
  * Equivalent to `hipStreamMemcpyAsync(...,stream)` followed by `hipStreamSynchronize(stream)`,
  * but is potentially more performant.
  *
@@ -318,6 +318,21 @@ template<typename T>
 constexpr std::add_const_t<T>* as_const_ptr(T* ptr)
 {
     return ptr;
+}
+
+template<class... Types, class Function, size_t... Indices>
+ROCPRIM_HOST_DEVICE inline void for_each_in_tuple_impl(::rocprim::tuple<Types...>& t,
+                                                       Function                    f,
+                                                       ::rocprim::index_sequence<Indices...>)
+{
+    auto swallow = {(f(::rocprim::get<Indices>(t)), 0)...};
+    (void)swallow;
+}
+
+template<class... Types, class Function>
+ROCPRIM_HOST_DEVICE inline void for_each_in_tuple(::rocprim::tuple<Types...>& t, Function f)
+{
+    for_each_in_tuple_impl(t, f, ::rocprim::index_sequence_for<Types...>());
 }
 
 } // end namespace detail

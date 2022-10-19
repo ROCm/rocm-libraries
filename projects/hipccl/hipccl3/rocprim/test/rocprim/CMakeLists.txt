@@ -43,19 +43,11 @@ function(add_rocprim_test_internal TEST_NAME TEST_SOURCES TEST_TARGET)
       $<BUILD_INTERFACE:${COMMON_TEST_HEADER_DIRECTORY}>
   )
 
-  if(TARGET GTest::GTest)
-    target_link_libraries(${TEST_TARGET}
-      PRIVATE
-        GTest::GTest
-        GTest::Main
-    )
-  else()
-    target_link_libraries(${TEST_TARGET}
-      PRIVATE
-        GTest::gtest
-        GTest::gtest_main
-    )
-  endif()
+  target_link_libraries(${TEST_TARGET}
+    PRIVATE
+      GTest::GTest
+      GTest::Main
+  )
   if(NOT USE_HIP_CPU)
     target_link_libraries(${TEST_TARGET}
       PRIVATE
@@ -137,9 +129,9 @@ endfunction()
 # Replacement for add_rocprim_test that splits up test cases allowing them to be compiled in parallel.
 # A single .cpp.in file is provided containing valid C++ code with the addition of slice definitions.
 # The slice definitions ROCPRIM_TEST_SLICE, ROCPRIM_TEST_SUITE_SLICE, and ROCPRIM_TEST_TYPE_SLICE demarkate
-# slices of non-typed tests, typed test suites, and test types respectively. The slice cases must be 
-# marked with an "(el)if" statement (no "else") that has a unique value to ensure that the correct slice 
-# gets enabled. This function will generate a separate .cpp file for all non-typed test slices and the 
+# slices of non-typed tests, typed test suites, and test types respectively. The slice cases must be
+# marked with an "(el)if" statement (no "else") that has a unique value to ensure that the correct slice
+# gets enabled. This function will generate a separate .cpp file for all non-typed test slices and the
 # product of the typed test suites and test types.
 #
 # This example will generate five files:
@@ -152,18 +144,18 @@ endfunction()
 #   DEFINE_NAMED_TEST(TestSuiteName, NonTypedTest)
 # #endif
 # #if   ROCPRIM_TEST_SUITE_SLICE == 0
-#   REGISTER_TYPED_TEST(TestSuiteName, TestZero, test_zero) 
+#   REGISTER_TYPED_TEST(TestSuiteName, TestZero, test_zero)
 #   REGISTER_TYPED_TEST_SUITE(TestSuiteName, TestZero)
 # #elif ROCPRIM_TEST_SUITE_SLICE == 1
-#   REGISTER_TYPED_TEST(TestSuiteName, TestOne, test_one) 
-#   REGISTER_TYPED_TEST(TestSuiteName, TestTwo, test_two) 
+#   REGISTER_TYPED_TEST(TestSuiteName, TestOne, test_one)
+#   REGISTER_TYPED_TEST(TestSuiteName, TestTwo, test_two)
 #   REGISTER_TYPED_TEST_SUITE(TestSuiteName, TestOne, TestTwo)
 # #endif
 # #if   ROCPRIM_TEST_TYPE_SLICE == 0
 #   INSTANTIATE_TYPED_TEST(TestSuiteName, double)
 # #elif ROCPRIM_TEST_TYPE_SLICE == 1
-#   INSTANTIATE_TYPED_TEST(TestSuiteName, float) 
-#   INSTANTIATE_TYPED_TEST(TestSuiteName, int) 
+#   INSTANTIATE_TYPED_TEST(TestSuiteName, float)
+#   INSTANTIATE_TYPED_TEST(TestSuiteName, int)
 # #endif
 function(add_rocprim_test_parallel TEST_NAME TEST_SOURCE)
   get_rocprim_test_target(${TEST_SOURCE} TEST_TARGET)
@@ -229,6 +221,7 @@ endfunction()
 add_rocprim_test("rocprim.basic_test" "test_basic.cpp;detail/get_rocprim_version.cpp")
 
 add_rocprim_test("rocprim.arg_index_iterator" test_arg_index_iterator.cpp)
+add_rocprim_test("rocprim.temporary_storage_partitioning" test_temporary_storage_partitioning.cpp)
 add_rocprim_test_parallel("rocprim.block_adjacent_difference" test_block_adjacent_difference.cpp.in)
 add_rocprim_test("rocprim.block_discontinuity" test_block_discontinuity.cpp)
 add_rocprim_test("rocprim.block_exchange" test_block_exchange.cpp)

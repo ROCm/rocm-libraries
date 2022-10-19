@@ -26,7 +26,7 @@ import os
 import re
 import stat
 import subprocess
-
+import sys
 
 BenchmarkContext = namedtuple('BenchmarkContext', ['gpu_architecture', 'benchmark_output_dir', 'benchmark_dir', 'benchmark_filename_regex', 'benchmark_filter_regex'])
 
@@ -43,6 +43,7 @@ def run_benchmarks(benchmark_context):
 
     success = True
     benchmark_names = [name for name in os.listdir(benchmark_context.benchmark_dir) if is_benchmark_executable(name)]
+    print('The following benchmarks will be ran:\n{}'.format('\n'.join(benchmark_names)), file=sys.stderr, flush=True)
     for benchmark_name in benchmark_names:
         results_json_name = f'{benchmark_name}_{benchmark_context.gpu_architecture}.json'
 
@@ -57,7 +58,7 @@ def run_benchmarks(benchmark_context):
         try:
             subprocess.call(args)
         except OSError as error:
-            print(f'Could not run benchmark at {benchmark_path}. Error: "{error}"')
+            print(f'Could not run benchmark at {benchmark_path}. Error: "{error}"', file=sys.stderr, flush=True)
             success = False
     return success
 

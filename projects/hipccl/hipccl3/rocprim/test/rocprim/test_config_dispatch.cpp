@@ -1,4 +1,4 @@
-#include "common_test_header.hpp"
+#include "../common_test_header.hpp"
 
 #include <rocprim/device/config_types.hpp>
 
@@ -41,7 +41,7 @@ TEST(RocprimConfigDispatchTests, StrEqualN)
 TEST(RocprimConfigDispatchTests, HostMatchesDevice)
 {
     const int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     const hipStream_t stream = 0;
@@ -85,7 +85,7 @@ TEST(RocprimConfigDispatchTests, DeviceIdFromStream)
     using rocprim::detail::get_device_from_stream;
 
     const int device_id = test_common_utils::obtain_device_from_ctest();
-    SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
     int                          result;

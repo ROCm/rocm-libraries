@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -59,6 +59,25 @@ struct static_run_algo
                     size_t grid_size,
                     bool check_equal)
     {
+        float precision = 0;
+        if(!check_equal)
+        {
+            if(test_utils::is_plus_operator<BinaryOp>::value)
+            {
+                precision = test_utils::precision<T> / 2 * BlockSize;
+            }
+            if(test_utils::is_multiply_operator<BinaryOp>::value)
+            {
+                precision = std::pow(1.0 + test_utils::precision<T> / 2, BlockSize) - 1;
+            }
+            if(precision > 0.5)
+            {
+                std::cout << "Test skipped with size " << BlockSize
+                          << " due to high relative error " << precision << std::endl;
+                return;
+            }
+        }
+
         HIP_CHECK(
             hipMemcpy(
                 device_output, output.data(),
@@ -90,7 +109,7 @@ struct static_run_algo
         }
         else
         {
-            test_utils::assert_near(output_reductions, expected_reductions, test_utils::precision_threshold<T>::percentage);
+            test_utils::assert_near(output_reductions, expected_reductions, precision);
         }
     }
 };
@@ -156,7 +175,9 @@ struct static_run_valid
         );
 
         // Verifying results
-        test_utils::assert_near(output_reductions, expected_reductions, test_utils::precision_threshold<T>::percentage);
+        test_utils::assert_near(output_reductions,
+                                expected_reductions,
+                                test_utils::precision<T> * valid_items);
     }
 };
 
@@ -198,7 +219,8 @@ template<
 >
 void test_block_reduce_input_arrays()
 {
-    using binary_op_type = typename test_utils::select_maximum_operator<T>::type;
+    using binary_op_type = rocprim::maximum<T>;
+
     static constexpr auto algorithm = Algorithm;
     static constexpr size_t block_size = BlockSize;
     static constexpr size_t items_per_thread = ItemsPerThread;
@@ -216,20 +238,20 @@ void test_block_reduce_input_arrays()
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
         std::vector<T> output = test_utils::get_random_data<T>(size, 0, 100, seed_value);
 
         // Output reduce results
-        std::vector<T> output_reductions(size / block_size, (T)0);
+        std::vector<T> output_reductions(size / block_size, T(0));
 
         // Calculate expected results on host
-        std::vector<T> expected_reductions(output_reductions.size(), (T)0);
+        std::vector<T> expected_reductions(output_reductions.size(), T(0));
         binary_op_type binary_op;
         for(size_t i = 0; i < output.size() / items_per_block; i++)
         {
-            T value = (T)0;
+            T value = T(0);
             for(size_t j = 0; j < items_per_block; j++)
             {
                 auto idx = i * items_per_block + j;
@@ -277,7 +299,7 @@ void test_block_reduce_input_arrays()
         );
 
         // Verifying results
-        test_utils::assert_near(output_reductions, expected_reductions, test_utils::precision_threshold<T>::percentage);
+        test_utils::assert_eq(output_reductions, expected_reductions);
 
         HIP_CHECK(hipFree(device_output));
         HIP_CHECK(hipFree(device_output_reductions));

@@ -58,114 +58,75 @@
 namespace test_utils
 {
 
+// Values of relative error for non-assotiative operations
+// (+, -, *) and type conversions for floats
+// They are doubled from 1 / (1 << mantissa_bits) as we compare in tests
+// the results of _two_ sequences of operations with different order
+// For all other operations (i.e. integer arithmetics) default 0 is used
 template<class T>
-struct precision_threshold
-{
-    static constexpr float percentage = 0.0008f;
-};
+static constexpr float precision = 0;
 
 template<>
-struct precision_threshold<rocprim::half>
-{
-    static constexpr float percentage = 0.02f;
-};
+static constexpr float precision<double> = 2.0f / (1ll << 52);
 
 template<>
-struct precision_threshold<rocprim::bfloat16>
-{
-    static constexpr float percentage = 0.08f;
-};
+static constexpr float precision<float> = 2.0f / (1ll << 23);
+
+template<>
+static constexpr float precision<rocprim::half> = 2.0f / (1ll << 10);
+
+template<>
+static constexpr float precision<rocprim::bfloat16> = 2.0f / (1ll << 7);
 
 template<class T>
-struct precision_threshold<custom_test_type<T>>
-{
-    static constexpr float percentage = 0.01f;
-};
+static constexpr float precision<const T> = precision<T>;
 
 template<class T>
-struct is_plus_operator : std::false_type {
+static constexpr float precision<custom_test_type<T>> = precision<T>;
+
+template<class T, int N>
+static constexpr float precision<custom_test_array_type<T, N>> = precision<T>;
+
+template<class T>
+struct is_plus_operator : std::false_type
+{
     typedef uint8_t value_type;
 };
 
 template<class T>
-struct is_plus_operator<rocprim::plus<T>> : std::true_type {
+struct is_plus_operator<rocprim::plus<T>> : std::true_type
+{
     typedef T value_type;
 };
 
-// Less operator selector
-template<typename T>
-struct select_less_operator
+template<class T>
+struct is_add_operator : std::false_type
 {
-    typedef ::rocprim::less<T> type;
+    typedef uint8_t value_type;
 };
 
-template<>
-struct select_less_operator<::rocprim::half>
+template<class T>
+struct is_add_operator<rocprim::plus<T>> : std::true_type
 {
-    typedef half_less type;
+    typedef T value_type;
 };
 
-template<>
-struct select_less_operator<::rocprim::bfloat16>
+template<class T>
+struct is_add_operator<rocprim::minus<T>> : std::true_type
 {
-    typedef bfloat16_less type;
+    typedef T value_type;
 };
 
-// Equal to operator selector
-template<typename T>
-struct select_equal_to_operator
+template<class T>
+struct is_multiply_operator : std::false_type
 {
-    typedef ::rocprim::equal_to<T> type;
+    typedef uint8_t value_type;
 };
 
-template<>
-struct select_equal_to_operator<::rocprim::half>
+template<class T>
+struct is_multiply_operator<rocprim::multiplies<T>> : std::true_type
 {
-    typedef half_equal_to type;
-};
-
-template<>
-struct select_equal_to_operator<::rocprim::bfloat16>
-{
-    typedef bfloat16_equal_to type;
-};
-
-// Greator to operator selector
-template<typename T>
-struct select_greater_operator
-{
-    typedef ::rocprim::greater<T> type;
-};
-
-template<>
-struct select_greater_operator<::rocprim::half>
-{
-    typedef half_greater type;
-};
-
-template<>
-struct select_greater_operator<::rocprim::bfloat16>
-{
-    typedef bfloat16_greater type;
-};
-
-// Not equeal to operator selector
-template<typename T>
-struct select_not_equal_to_operator
-{
-    typedef ::rocprim::not_equal_to<T> type;
-};
-
-template<>
-struct select_not_equal_to_operator<::rocprim::half>
-{
-    typedef half_not_equal_to type;
-};
-
-template<>
-struct select_not_equal_to_operator<::rocprim::bfloat16>
-{
-    typedef bfloat16_not_equal_to type;
+    typedef T value_type;
 };
 
 /* Plus to operator selector for host-side
@@ -199,44 +160,6 @@ struct select_plus_operator_host<::rocprim::bfloat16>
     typedef ::rocprim::plus<double> type;
     typedef double acc_type;
     typedef ::rocprim::bfloat16     cast_type;
-};
-
-// Minimum to operator selector
-template<typename T>
-struct select_minimum_operator
-{
-    typedef ::rocprim::minimum<T> type;
-};
-
-template<>
-struct select_minimum_operator<::rocprim::half>
-{
-    typedef half_minimum type;
-};
-
-template<>
-struct select_minimum_operator<::rocprim::bfloat16>
-{
-    typedef bfloat16_minimum type;
-};
-
-// Maximum to operator selector
-template<typename T>
-struct select_maximum_operator
-{
-    typedef ::rocprim::maximum<T> type;
-};
-
-template<>
-struct select_maximum_operator<::rocprim::half>
-{
-    typedef half_maximum type;
-};
-
-template<>
-struct select_maximum_operator<::rocprim::bfloat16>
-{
-    typedef bfloat16_maximum type;
 };
 
 template<class InputIt, class T,
@@ -285,7 +208,7 @@ OutputIt host_inclusive_segmented_scan_headflags(InputIt first, InputIt last, Fl
 
     while (++first != last) {
         ++flags;
-        sum = *flags ? *first : op(sum, *first);
+        sum        = *flags ? acc_type(*first) : acc_type(op(sum, *first));
         *++d_first = sum;
     }
     return ++d_first;
@@ -302,8 +225,8 @@ OutputIt host_exclusive_segmented_scan_headflags(InputIt first, InputIt last, Fl
 
     while ((first+1) != last){
         ++flags;
-        sum = *flags ? init : op(sum, *first);
-        *++d_first = static_cast<acc_type>(sum);
+        sum        = *flags ? acc_type(init) : acc_type(op(sum, *first));
+        *++d_first = sum;
         first++;
     }
     return ++d_first;

@@ -91,10 +91,12 @@ struct headflag_scan_op_wrapper
     ROCPRIM_HOST_DEVICE inline
     result_type operator()(const input_type& t1, const input_type& t2)
     {
-        return rocprim::make_tuple(!rocprim::get<1>(t2)
-                                       ? scan_op_(rocprim::get<0>(t1), rocprim::get<0>(t2))
-                                       : rocprim::get<0>(t2),
-                                   F {rocprim::get<1>(t2) || rocprim::get<1>(t1)});
+        return rocprim::make_tuple(
+            rocprim::get<1>(t2) == 0
+                ? scan_op_(rocprim::get<0>(t1), rocprim::get<0>(t2))
+                : static_cast<decltype(scan_op_(rocprim::get<0>(t1), rocprim::get<0>(t2)))>(
+                    rocprim::get<0>(t2)),
+            F{rocprim::get<1>(t2) || rocprim::get<1>(t1)});
     }
 
 private:

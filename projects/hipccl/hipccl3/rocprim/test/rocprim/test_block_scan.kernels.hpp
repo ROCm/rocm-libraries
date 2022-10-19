@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -228,10 +228,10 @@ struct static_run_algo
         }
 
         // Verifying results
-        test_utils::assert_near(output, expected, test_utils::precision_threshold<T>::percentage);
+        test_utils::assert_near(output, expected, test_utils::precision<T> * BlockSize);
         if(device_output_b)
         {
-            test_utils::assert_near(output_b, expected_b, test_utils::precision_threshold<T>::percentage);
+            test_utils::assert_near(output_b, expected_b, test_utils::precision<T> * BlockSize);
         }
     }
 };
@@ -467,7 +467,8 @@ template<
 auto test_block_scan_input_arrays()
 -> typename std::enable_if<Method == 0>::type
 {
-    using binary_op_type = typename test_utils::select_maximum_operator<T>::type;
+    using binary_op_type = rocprim::maximum<T>;
+
     static constexpr auto algorithm = Algorithm;
     static constexpr size_t block_size = BlockSize;
     static constexpr size_t items_per_thread = ItemsPerThread;
@@ -485,13 +486,13 @@ auto test_block_scan_input_arrays()
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
         std::vector<T> output = test_utils::get_random_data<T>(size, 2, 100, seed_value);
 
         // Calculate expected results on host
-        std::vector<T> expected(output.size(), (T)0);
+        std::vector<T> expected(output.size(), T(0));
         binary_op_type binary_op;
         for(size_t i = 0; i < output.size() / items_per_block; i++)
         {
@@ -550,7 +551,8 @@ template<
 auto test_block_scan_input_arrays()
 -> typename std::enable_if<Method == 1>::type
 {
-    using binary_op_type = typename test_utils::select_maximum_operator<T>::type;
+    using binary_op_type = rocprim::maximum<T>;
+
     static constexpr auto algorithm = Algorithm;
     static constexpr size_t block_size = BlockSize;
     static constexpr size_t items_per_thread = ItemsPerThread;
@@ -568,17 +570,17 @@ auto test_block_scan_input_arrays()
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
         std::vector<T> output = test_utils::get_random_data<T>(size, 2, 100, seed_value);
 
         // Output reduce results
-        std::vector<T> output_reductions(size / block_size, (T)0);
+        std::vector<T> output_reductions(size / block_size, T(0));
 
         // Calculate expected results on host
-        std::vector<T> expected(output.size(), (T)0);
-        std::vector<T> expected_reductions(output_reductions.size(), (T)0);
+        std::vector<T> expected(output.size(), T(0));
+        std::vector<T> expected_reductions(output_reductions.size(), T(0));
         binary_op_type binary_op;
         for(size_t i = 0; i < output.size() / items_per_block; i++)
         {
@@ -664,7 +666,8 @@ template<
 auto test_block_scan_input_arrays()
 -> typename std::enable_if<Method == 2>::type
 {
-    using binary_op_type = typename test_utils::select_maximum_operator<T>::type;
+    using binary_op_type = rocprim::maximum<T>;
+
     static constexpr auto algorithm = Algorithm;
     static constexpr size_t block_size = BlockSize;
     static constexpr size_t items_per_thread = ItemsPerThread;
@@ -682,16 +685,16 @@ auto test_block_scan_input_arrays()
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
         std::vector<T> output = test_utils::get_random_data<T>(size, 2, 100, seed_value);
-        std::vector<T> output_block_prefixes(size / items_per_block, (T)0);
+        std::vector<T> output_block_prefixes(size / items_per_block, T(0));
         T block_prefix = test_utils::get_random_value<T>(0, 100, seed_value);
 
         // Calculate expected results on host
-        std::vector<T> expected(output.size(), (T)0);
-        std::vector<T> expected_block_prefixes(output_block_prefixes.size(), (T)0);
+        std::vector<T> expected(output.size(), T(0));
+        std::vector<T> expected_block_prefixes(output_block_prefixes.size(), T(0));
         binary_op_type binary_op;
         for(size_t i = 0; i < output.size() / items_per_block; i++)
         {
@@ -780,7 +783,8 @@ template<
 auto test_block_scan_input_arrays()
 -> typename std::enable_if<Method == 3>::type
 {
-    using binary_op_type = typename test_utils::select_maximum_operator<T>::type;
+    using binary_op_type = rocprim::maximum<T>;
+
     static constexpr auto algorithm = Algorithm;
     static constexpr size_t block_size = BlockSize;
     static constexpr size_t items_per_thread = ItemsPerThread;
@@ -798,14 +802,14 @@ auto test_block_scan_input_arrays()
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
         std::vector<T> output = test_utils::get_random_data<T>(size, 2, 100, seed_value);
         const T init = test_utils::get_random_value<T>(0, 100, seed_value);
 
         // Calculate expected results on host
-        std::vector<T> expected(output.size(), (T)0);
+        std::vector<T> expected(output.size(), T(0));
         binary_op_type binary_op;
         for(size_t i = 0; i < output.size() / items_per_block; i++)
         {
@@ -866,7 +870,8 @@ template<
 auto test_block_scan_input_arrays()
 -> typename std::enable_if<Method == 4>::type
 {
-    using binary_op_type = typename test_utils::select_maximum_operator<T>::type;
+    using binary_op_type = rocprim::maximum<T>;
+
     static constexpr auto algorithm = Algorithm;
     static constexpr size_t block_size = BlockSize;
     static constexpr size_t items_per_thread = ItemsPerThread;
@@ -884,7 +889,7 @@ auto test_block_scan_input_arrays()
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
         std::vector<T> output = test_utils::get_random_data<T>(size, 2, 100, seed_value);
@@ -894,8 +899,8 @@ auto test_block_scan_input_arrays()
         const T init = test_utils::get_random_value<T>(0, 100, seed_value);
 
         // Calculate expected results on host
-        std::vector<T> expected(output.size(), (T)0);
-        std::vector<T> expected_reductions(output_reductions.size(), (T)0);
+        std::vector<T> expected(output.size(), T(0));
+        std::vector<T> expected_reductions(output_reductions.size(), T(0));
         binary_op_type binary_op;
         for(size_t i = 0; i < output.size() / items_per_block; i++)
         {
@@ -977,7 +982,8 @@ template<
 auto test_block_scan_input_arrays()
 -> typename std::enable_if<Method == 5>::type
 {
-    using binary_op_type = typename test_utils::select_maximum_operator<T>::type;
+    using binary_op_type = rocprim::maximum<T>;
+
     static constexpr auto algorithm = Algorithm;
     static constexpr size_t block_size = BlockSize;
     static constexpr size_t items_per_thread = ItemsPerThread;
@@ -995,7 +1001,7 @@ auto test_block_scan_input_arrays()
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
         unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
-        SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
         std::vector<T> output = test_utils::get_random_data<T>(size, 2, 100, seed_value);
@@ -1003,8 +1009,8 @@ auto test_block_scan_input_arrays()
         T block_prefix = test_utils::get_random_value<T>(0, 100, seed_value);
 
         // Calculate expected results on host
-        std::vector<T> expected(output.size(), (T)0);
-        std::vector<T> expected_block_prefixes(output_block_prefixes.size(), (T)0);
+        std::vector<T> expected(output.size(), T(0));
+        std::vector<T> expected_block_prefixes(output_block_prefixes.size(), T(0));
         binary_op_type binary_op;
         for(size_t i = 0; i < output.size() / items_per_block; i++)
         {
@@ -1093,7 +1099,7 @@ struct static_for_input_array
     static void run()
     {
         int device_id = test_common_utils::obtain_device_from_ctest();
-        SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+        SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
         HIP_CHECK(hipSetDevice(device_id));
 
         test_block_scan_input_arrays<T, Method, BlockSize, items[First], rocprim::block_scan_algorithm::using_warp_scan>();
