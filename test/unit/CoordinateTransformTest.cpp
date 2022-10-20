@@ -2,8 +2,6 @@
 #include <gtest/gtest.h>
 #include <variant>
 
-#include <rocRoller/CodeGen/Arithmetic.hpp>
-#include <rocRoller/CodeGen/Arithmetic/Int32.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/KernelGraph/CoordinateTransform/HyperGraph.hpp>

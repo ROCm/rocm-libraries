@@ -213,8 +213,7 @@ namespace MemoryInstructionsTest
 
         m_context->schedule(k->preamble());
         m_context->schedule(k->prolog());
-        auto varith32
-            = Component::Get<Arithmetic>(m_context, Register::Type::Vector, DataType::Int32);
+
         auto kb = [&]() -> Generator<Instruction> {
             Register::ValuePtr s_result, s_a;
             co_yield m_context->argLoader()->getValue("result", s_result);
@@ -766,9 +765,6 @@ namespace MemoryInstructionsTest
                 lds3_offset, Register::Value::Literal(lds3->getLDSAllocation()->offset()));
             co_yield m_context->copier()->copy(literal,
                                                Register::Value::Literal(workItemCount - 1));
-
-            auto arith
-                = Component::Get<Arithmetic>(m_context, Register::Type::Vector, DataType::Int32);
 
             // Load 5 + workitemIndex.x into lds3[workitemIndex.x]
             co_yield generateOp<Expression::Add>(lds3_current, lds3_offset, workitemIndex[0]);

@@ -326,8 +326,6 @@ namespace rocRollerTest
 
     TEST_P(DependencyTest, VCCCarry)
     {
-        auto arith = Component::Get<Arithmetic>(m_context, Register::Type::Vector, DataType::Int64);
-
         auto k = m_context->kernel();
 
         k->setKernelDimensions(1);

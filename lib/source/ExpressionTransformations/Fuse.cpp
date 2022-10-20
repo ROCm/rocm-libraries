@@ -64,7 +64,7 @@ namespace rocRoller
                 if(eval_lhs && eval_rhs && std::holds_alternative<ShiftL>(*lhs))
                 {
                     auto shift = std::get<ShiftL>(*lhs);
-                    return std::make_shared<Expression>(FusedShiftAdd({shift.lhs, shift.rhs, rhs}));
+                    return std::make_shared<Expression>(ShiftLAdd({shift.lhs, shift.rhs, rhs}));
                 }
 
                 if(rv != nullptr)
@@ -86,7 +86,7 @@ namespace rocRoller
                 if(eval_lhs && eval_rhs && std::holds_alternative<Add>(*lhs))
                 {
                     auto add = std::get<Add>(*lhs);
-                    return std::make_shared<Expression>(FusedAddShift({add.lhs, add.rhs, rhs}));
+                    return std::make_shared<Expression>(AddShiftL({add.lhs, add.rhs, rhs}));
                 }
                 else
                 {

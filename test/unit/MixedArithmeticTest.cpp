@@ -6,12 +6,7 @@
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
-#include <rocRoller/CodeGen/Arithmetic.hpp>
 #include <rocRoller/CodeGen/Arithmetic/ArithmeticGenerator.hpp>
-#include <rocRoller/CodeGen/Arithmetic/Double.hpp>
-#include <rocRoller/CodeGen/Arithmetic/Float.hpp>
-#include <rocRoller/CodeGen/Arithmetic/Int32.hpp>
-#include <rocRoller/CodeGen/Arithmetic/Int64.hpp>
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/KernelArguments.hpp>
@@ -219,13 +214,6 @@ namespace MixedArithmeticTest
                 co_yield m_context->copier()->copy(reg, tmp, "");
             }
         }
-
-        /**
-         * Generate the GPU arithmetic for this specific test case.  Generally
-         * should just call the appropriate member of Arithmetic.
-         */
-        using GenerateArithmetic = std::function<Generator<Instruction>(
-            ArithmeticPtr, Register::ValuePtr, Register::ValuePtr, Register::ValuePtr)>;
 
         /**
          * Generate an expression to calculate the reference value.  Can return

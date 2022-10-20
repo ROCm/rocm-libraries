@@ -19,21 +19,6 @@ namespace rocRoller
             ContextPtr m_context;
             using RegisterValue = std::variant<Register::ValuePtr>;
 
-            template <typename Operation>
-            Generator<Instruction> callArithmeticUnary(ArithmeticPtr const&      arith,
-                                                       Register::ValuePtr const& dest,
-                                                       Register::ValuePtr const& arg)
-            {
-                Throw<FatalError>("Unsupported callArithmeticUnaryOperation");
-            }
-
-            template <typename Operation>
-            Generator<Instruction> callArithmeticTernary(ArithmeticPtr const&      arith,
-                                                         Register::ValuePtr const& dest,
-                                                         Register::ValuePtr const& lhs,
-                                                         Register::ValuePtr const& r1hs,
-                                                         Register::ValuePtr const& r2hs);
-
             Register::ValuePtr resultPlaceholder(ResultType const& resType)
             {
                 if(resType.first == Register::Type::Special && resType.second == DataType::Bool)
@@ -72,12 +57,7 @@ namespace rocRoller
                     dest = resultPlaceholder(resultType(expr));
                 }
 
-                auto generator = GetGenerator<Operation>(dest, lhsResult, rhsResult);
-                if(generator)
-                {
-                    co_yield generator->generate(dest, lhsResult, rhsResult);
-                    co_return;
-                }
+                co_yield generateOp<Operation>(dest, lhsResult, rhsResult);
             }
 
             template <CTernary Operation>
@@ -96,10 +76,7 @@ namespace rocRoller
                     Scheduling::SchedulerProcedure::Sequential, m_context);
                 co_yield (*scheduler)(subExprs);
 
-                ArithmeticPtr arith;
-                arith = Arithmetic::Get(dest, lhsResult, r1hsResult, r2hsResult);
-                co_yield callArithmeticTernary<Operation>(
-                    arith, dest, lhsResult, r1hsResult, r2hsResult);
+                co_yield generateOp<Operation>(dest, lhsResult, r1hsResult, r2hsResult);
             }
 
             Generator<Instruction> operator()(Register::ValuePtr& dest, MatrixMultiply expr)
@@ -190,15 +167,7 @@ namespace rocRoller
                     dest = resultPlaceholder(resultType(expr));
                 }
 
-                auto generator = GetGenerator<Operation>(dest, argResult);
-                if(generator)
-                {
-                    co_yield generator->generate(dest, argResult);
-                    co_return;
-                }
-
-                auto arith = Arithmetic::Get(dest, argResult);
-                co_yield callArithmeticUnary<Operation>(arith, dest, argResult);
+                co_yield generateOp<Operation>(dest, argResult);
             }
 
             template <CExpression Operation>
@@ -301,32 +270,5 @@ namespace rocRoller
             CodeGeneratorVisitor v{context};
             co_yield v.call(dest, expr);
         }
-
-#define DEFINE_UNARY_CALL(Op, call)                                                                \
-    template <>                                                                                    \
-    Generator<Instruction> CodeGeneratorVisitor::callArithmeticUnary<Op>(                          \
-        ArithmeticPtr const& arith, Register::ValuePtr const& dest, Register::ValuePtr const& arg) \
-    {                                                                                              \
-        co_yield arith->call(dest, arg);                                                           \
-    }
-        DEFINE_UNARY_CALL(Negate, negate);
-
-#undef DEFINE_UNARY_CALL
-
-#define DEFINE_TERNARY_CALL(Op, call)                                       \
-    template <>                                                             \
-    Generator<Instruction> CodeGeneratorVisitor::callArithmeticTernary<Op>( \
-        ArithmeticPtr const&      arith,                                    \
-        Register::ValuePtr const& dest,                                     \
-        Register::ValuePtr const& lhs,                                      \
-        Register::ValuePtr const& r1hs,                                     \
-        Register::ValuePtr const& r2hs)                                     \
-    {                                                                       \
-        co_yield arith->call(dest, lhs, r1hs, r2hs);                        \
-    }
-        DEFINE_TERNARY_CALL(FusedAddShift, addShiftL);
-        DEFINE_TERNARY_CALL(FusedShiftAdd, shiftLAdd);
-#undef DEFINE_TERNARY_CALL
-
     }
 }

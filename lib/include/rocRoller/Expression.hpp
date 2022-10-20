@@ -33,7 +33,6 @@
 
 #include "Expression_fwd.hpp"
 
-#include "CodeGen/Arithmetic_fwd.hpp"
 #include "InstructionValues/Register_fwd.hpp"
 #include "Operations/CommandArgument_fwd.hpp"
 
@@ -225,22 +224,22 @@ namespace rocRoller
         };
 
         /*
-         * FusedAddShift performs a fusion of Add expression followed by
+         * AddShiftL performs a fusion of Add expression followed by
          * ShiftL expression, lowering to the fused instruction if possible.
          * result = (lhs  + r1hs) << r2hs
          */
-        struct FusedAddShift : Ternary
+        struct AddShiftL : Ternary
         {
             constexpr static inline auto            Type = Category::Arithmetic;
             constexpr static inline EvaluationTimes EvalTimes{EvaluationTime::KernelExecute};
         };
 
         /*
-         * FusedShiftAdd performs a fusion of ShiftL expression followed by
+         * ShiftLAdd performs a fusion of ShiftL expression followed by
          * Add expression, lowering to the fused instruction if possible.
          * result = (lhs << r1hs) + r2hs
          */
-        struct FusedShiftAdd : Ternary
+        struct ShiftLAdd : Ternary
         {
             constexpr static inline auto            Type = Category::Arithmetic;
             constexpr static inline EvaluationTimes EvalTimes{EvaluationTime::KernelExecute};

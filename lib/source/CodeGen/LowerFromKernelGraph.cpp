@@ -1,7 +1,6 @@
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
-#include <rocRoller/CodeGen/Arithmetic.hpp>
 #include <rocRoller/CodeGen/Arithmetic/ArithmeticGenerator.hpp>
 #include <rocRoller/CodeGen/Arithmetic/MatrixMultiply.hpp>
 #include <rocRoller/CodeGen/BranchGenerator.hpp>
@@ -289,9 +288,7 @@ namespace rocRoller
                 auto dst
                     = m_context->registerTagManager()->getRegister(xop.dest, src->placeholder());
 
-                auto arith = Arithmetic::Get(dst);
-
-                co_yield arith->negate(dst, src);
+                co_yield generateOp<Expression::Negate>(dst, src);
             }
 
             Generator<Instruction> operator()(Operations::E_Abs const& xop)

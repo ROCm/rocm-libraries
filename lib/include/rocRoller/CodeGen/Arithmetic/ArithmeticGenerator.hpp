@@ -103,6 +103,39 @@ namespace rocRoller
     const std::string BinaryArithmeticGenerator<Operation>::Name
         = concatenate(Expression::ExpressionInfo<Operation>::name(), "Generator");
 
+    // Ternary Arithmetic Generator. Most ternary generators should be derived from
+    // this class.
+    template <Expression::CTernary Operation>
+    class TernaryArithmeticGenerator : public ArithmeticGenerator
+    {
+    public:
+        TernaryArithmeticGenerator(std::shared_ptr<Context> context)
+            : ArithmeticGenerator(context)
+        {
+        }
+
+        virtual Generator<Instruction> generate(Register::ValuePtr dst,
+                                                Register::ValuePtr arg1,
+                                                Register::ValuePtr arg2,
+                                                Register::ValuePtr arg3)
+        {
+            Throw<FatalError>(concatenate("Generate function not implemented for ", Name));
+        }
+
+        using Argument = std::tuple<std::shared_ptr<Context>, Register::Type, DataType>;
+        using Base     = TernaryArithmeticGenerator<Operation>;
+        static const std::string Name;
+
+        std::string name() const override
+        {
+            return Expression::ExpressionInfo<Operation>::name();
+        }
+    };
+
+    template <Expression::CTernary Operation>
+    const std::string TernaryArithmeticGenerator<Operation>::Name
+        = concatenate(Expression::ExpressionInfo<Operation>::name(), "Generator");
+
     // --------------------------------------------------
     // Get Functions
     // These functions are used to pick the proper Generator class for the provided
@@ -137,6 +170,26 @@ namespace rocRoller
         auto gen = GetGenerator<Operation>(dst, lhs, rhs);
         AssertFatal(gen != nullptr, "No generator");
         co_yield gen->generate(dst, lhs, rhs);
+    }
+
+    template <Expression::CTernary Operation>
+    std::shared_ptr<TernaryArithmeticGenerator<Operation>> GetGenerator(Register::ValuePtr dst,
+                                                                        Register::ValuePtr arg1,
+                                                                        Register::ValuePtr arg2,
+                                                                        Register::ValuePtr arg3)
+    {
+        return nullptr;
+    }
+
+    template <Expression::CTernary Operation>
+    Generator<Instruction> generateOp(Register::ValuePtr dst,
+                                      Register::ValuePtr arg1,
+                                      Register::ValuePtr arg2,
+                                      Register::ValuePtr arg3)
+    {
+        auto gen = GetGenerator<Operation>(dst, arg1, arg2, arg3);
+        AssertFatal(gen != nullptr, "No generator");
+        co_yield gen->generate(dst, arg1, arg2, arg3);
     }
 
     // --------------------------------------------------
@@ -184,6 +237,7 @@ namespace rocRoller
 }
 
 #include "Add.hpp"
+#include "AddShiftL.hpp"
 #include "BitwiseAnd.hpp"
 #include "BitwiseOr.hpp"
 #include "BitwiseXor.hpp"
@@ -197,7 +251,9 @@ namespace rocRoller
 #include "Modulo.hpp"
 #include "Multiply.hpp"
 #include "MultiplyHigh.hpp"
+#include "Negate.hpp"
 #include "ShiftL.hpp"
+#include "ShiftLAdd.hpp"
 #include "ShiftR.hpp"
 #include "SignedShiftR.hpp"
 #include "Subtract.hpp"

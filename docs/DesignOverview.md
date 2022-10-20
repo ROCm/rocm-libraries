@@ -140,9 +140,7 @@ A `Register::Value` can also be used to represent a literal value or label that 
 
 ### Generating Instructions
 
-In general, it is best not to directly create an `Instruction` object. Instead, different classes are provided that will generate `Instruction` objects. The `Arithmetic` class can be used to create simple arithmetic instructions such as "add" and "multiply". It can also be used to generate comparison operations such as "equal" and "less than". It can also be used to generate bitwise operations such as "and" and "shift". The list of operations provided by the `Arithmetic` class can be found in `Arithmetic.hpp`.
-
-Different versions of the `Arithmetic` class exist for different data types and register types. They are all derived from the base class `Arithmetic`. For example, there is a class for performing arithmetic operations on 32-bit scalar integers called `Arithmetic_Scalar_Int32`. All of the different `Arithmetic` classes can be found within the folder `lib/include/rocRoller/Arithmetic`.
+In general, it is best not to directly create an `Instruction` object. Instead, different classes are provided that will generate `Instruction` objects. The `generateOp<Expression>` function can be used to generate `Instruction` objects for different `Expression` operations.
 
 Instructions to load and store data to and from memory can be generated using the `MemoryInstructions` class. For a list of available load and store instructions, see `MemoryInstructions.hpp`.
 

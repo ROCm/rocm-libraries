@@ -29,7 +29,6 @@
 #include <typeinfo>
 #include <variant>
 
-#include "CodeGen/Arithmetic.hpp"
 #include "CodeGen/Instruction.hpp"
 #include "Expression.hpp"
 #include "InstructionValues/Register.hpp"

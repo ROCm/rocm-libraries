@@ -30,7 +30,6 @@
 #include <stack>
 #include <variant>
 
-#include "CodeGen/Arithmetic.hpp"
 #include "CodeGen/Instruction.hpp"
 #include "InstructionValues/Register.hpp"
 #include "Operations/CommandArgument.hpp"
@@ -215,8 +214,8 @@ namespace rocRoller
         EXPRESSION_INFO(BitwiseOr);
         EXPRESSION_INFO(BitwiseXor);
 
-        EXPRESSION_INFO(FusedShiftAdd);
-        EXPRESSION_INFO(FusedAddShift);
+        EXPRESSION_INFO(ShiftLAdd);
+        EXPRESSION_INFO(AddShiftL);
 
         EXPRESSION_INFO(GreaterThan);
         EXPRESSION_INFO(GreaterThanEqual);

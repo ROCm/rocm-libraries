@@ -9,11 +9,6 @@
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
-#include <rocRoller/CodeGen/Arithmetic.hpp>
-#include <rocRoller/CodeGen/Arithmetic/Double.hpp>
-#include <rocRoller/CodeGen/Arithmetic/Float.hpp>
-#include <rocRoller/CodeGen/Arithmetic/Int32.hpp>
-#include <rocRoller/CodeGen/Arithmetic/Int64.hpp>
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>

@@ -16,11 +16,7 @@ using namespace rocRoller;
 
 Generator<Instruction> rocRollerTest::SGEMM_Minimal_Program(rocRoller::ContextPtr m_context)
 {
-    auto sarith32 = Component::Get<Arithmetic>(m_context, Register::Type::Scalar, DataType::Int32);
-    auto sarith64 = Component::Get<Arithmetic>(m_context, Register::Type::Scalar, DataType::Int64);
-    auto varith32 = Component::Get<Arithmetic>(m_context, Register::Type::Vector, DataType::Int32);
-    auto varith64 = Component::Get<Arithmetic>(m_context, Register::Type::Vector, DataType::Int64);
-    auto fmm      = Component::Get<rocRoller::InstructionGenerators::MatrixMultiply>(
+    auto fmm = Component::Get<rocRoller::InstructionGenerators::MatrixMultiply>(
         m_context, DataType::Float, DataType::Float);
 
     auto label_4 = m_context->labelAllocator()->label("label_0013");
@@ -201,17 +197,17 @@ auto LRAddresses = [&](Register::ValuePtr     macroTile,
     co_yield generateOp<Expression::BitwiseAnd>(vtemp2, Register::Value::Literal(0), vtemp2); //" 2. block offset: bnIdx = bnIdx % num1DBlocks(1)"
     //" 2. block offset: bnOffset = bnIdx * strideBlock(32)"
     //" 3. add N and block offset: bnOffset = block and N offset"
-    co_yield varith32->shiftLAdd(lro, vtemp2, Register::Value::Literal(5), lro);
+    co_yield generateOp<Expression::ShiftLAdd>(lro, vtemp2, Register::Value::Literal(5), lro);
     co_yield Instruction::Comment(" 3. apply VectorWidth: bnOffset = bnOffset * vw(1) (multiplier is 1, do nothing)");
     co_yield generateOp<Expression::ShiftR>(vtemp3, vtemp3, Register::Value::Literal(5)); //" 4. K offset: kIdx = wtid / (MIN(32) * MIBB(1))"
     //" 4. K offset: lrKOffset = kIdx * mStride(64)"
     //" 5. offset in wave: lrOffset = bnOffset + lrKOffset"
-    co_yield varith32->shiftLAdd(lro, vtemp3, Register::Value::Literal(6), lro);
+    co_yield generateOp<Expression::ShiftLAdd>(lro, vtemp3, Register::Value::Literal(6), lro);
     co_yield generateOp<Expression::ShiftR>(vtemp2, vgprSerial, Register::Value::Literal(dividedForWaveId)); //" 6. wave offset in N dimen: wtid = tid / dividedForWaveId(64)"
     co_yield generateOp<Expression::BitwiseAnd>(vtemp2, Register::Value::Literal(1), vtemp2); //" 6. wave offset in M dimen: wtid0 = wtid / num1DWaves(2)"
     //" 6. wave offset in M dimen: wOffset = wtid0 * W0Stride(32)"
     //" 7. final local read offset: flrOffset = lrOffset + WOffset"
-    co_yield varith32->shiftLAdd(lro, vtemp2, Register::Value::Literal(5), lro);
+    co_yield generateOp<Expression::ShiftLAdd>(lro, vtemp2, Register::Value::Literal(5), lro);
     co_yield Instruction::Comment(" local read addresses: final offsets");
     co_yield generateOp<Expression::ShiftR>(vtemp, vgprSerial, Register::Value::Literal(8)); //" LSU offset: sgid = Serial / subGroup(256)"
     co_yield m_context->copier()->copy(stemp, macroTile, " LSU offset: stride = MT(64) + PAD(0)");
@@ -258,7 +254,7 @@ auto GlobalOffset = [&](Register::ValuePtr     vgprAddr,
     co_yield_(Instruction("v_add_co_u32", {vgprAddr}, {m_context->getVCC(), vgprOffset, vgprTmp}, {}, "accumulate K lower"));
     //"add prepad for pointer shift"
     //"offset *= bytes/element"
-    co_yield varith32->addShiftL(vgprAddr, Register::Value::Literal(1), vgprAddr, Register::Value::Literal(2));
+    co_yield generateOp<Expression::AddShiftL>(vgprAddr, Register::Value::Literal(1), vgprAddr, Register::Value::Literal(2));
 };
 auto GlobalReadAddresses = [&](Register::ValuePtr     val,
                                Register::ValuePtr     size,
@@ -492,7 +488,7 @@ co_yield generateOp<Expression::BitwiseAnd>(vtemp4, Register::Value::Literal(63)
 co_yield generateOp<Expression::ShiftR>(vtemp4, vtemp4, Register::Value::Literal(5)); //" vtemp4 = vtemp4 / 32"
 //" thread0 * continuous_output"
 //" coordination 0 = wave_id0 + tid0"
-co_yield varith32->shiftLAdd(vtemp4, vtemp4, Register::Value::Literal(2), vtemp2);
+co_yield generateOp<Expression::ShiftLAdd>(vtemp4, vtemp4, Register::Value::Literal(2), vtemp2);
 co_yield generateOp<Expression::Multiply>(stemp, macroTile0, sgprWorkGroup0); //" wgp0 * MT0"
 co_yield generateOp<Expression::Add>(vtemp4, stemp, vtemp4); //" coord 0 = (tid0/MI_m)*4 + waveG0*MIB_m + MT0*SG0"
 co_yield generateOp<Expression::Multiply>(stemp, macroTile1, sgprWorkGroup1); //" wgp1 * MT1"

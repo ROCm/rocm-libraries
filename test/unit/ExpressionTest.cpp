@@ -6,9 +6,6 @@
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
-#include <rocRoller/CodeGen/Arithmetic.hpp>
-#include <rocRoller/CodeGen/Arithmetic/Double.hpp>
-#include <rocRoller/CodeGen/Arithmetic/Int32.hpp>
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
 #include <rocRoller/ExecutableKernel.hpp>
 #include <rocRoller/Expression.hpp>
@@ -85,8 +82,8 @@ namespace ExpressionTest
         EXPECT_EQ(sexpr7, "LessThanEqual(" + sexpr5 + ", " + sexpr6 + ")");
         EXPECT_EQ(sexpr8, "Equal(" + sexpr6 + ", " + sexpr7 + ")");
         EXPECT_EQ(sexpr9, "Negate(" + sexpr2 + ")");
-        EXPECT_EQ(sexpr10, "FusedAddShift(1i, 2i, 2i)");
-        EXPECT_EQ(sexpr11, "FusedShiftAdd(1i, 2i, 2i)");
+        EXPECT_EQ(sexpr10, "AddShiftL(1i, 2i, 2i)");
+        EXPECT_EQ(sexpr11, "ShiftLAdd(1i, 2i, 2i)");
 
         Expression::EvaluationTimes expectedTimes{Expression::EvaluationTime::KernelExecute};
         EXPECT_EQ(expectedTimes, Expression::evaluationTimes(expr8));
@@ -1192,7 +1189,7 @@ namespace ExpressionTest
         }
     }
 
-    TEST_P(ARCH_ExpressionTest, ExpressionFusedAddShift)
+    TEST_P(ARCH_ExpressionTest, ExpressionAddShiftL)
     {
         auto v_a
             = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Int32, 1);
@@ -1207,7 +1204,7 @@ namespace ExpressionTest
 
         auto k = m_context->kernel();
 
-        k->setKernelName("ExpressionFusedAddShift");
+        k->setKernelName("ExpressionAddShiftL");
 
         k->addArgument(
             {"result", {DataType::Int32, PointerType::PointerGlobal}, DataDirection::WriteOnly});

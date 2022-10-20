@@ -4,12 +4,7 @@
 
 #include <memory>
 
-#include <rocRoller/CodeGen/Arithmetic.hpp>
 #include <rocRoller/CodeGen/Arithmetic/ArithmeticGenerator.hpp>
-#include <rocRoller/CodeGen/Arithmetic/Double.hpp>
-#include <rocRoller/CodeGen/Arithmetic/Float.hpp>
-#include <rocRoller/CodeGen/Arithmetic/Int32.hpp>
-#include <rocRoller/CodeGen/Arithmetic/Int64.hpp>
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
@@ -38,8 +33,6 @@ namespace ArithmeticTest
 
     TEST_P(ArithmeticTest, ArithInt32)
     {
-        auto arith = Component::Get<Arithmetic>(m_context, Register::Type::Vector, DataType::Int32);
-
         auto k = m_context->kernel();
 
         k->setKernelName("ArithInt32");
@@ -196,7 +189,7 @@ namespace ArithmeticTest
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(56), 4);
 
-            co_yield arith->negate(v_c, v_a);
+            co_yield generateOp<Expression::Negate>(v_c, v_a);
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(60), 4);
 
@@ -204,11 +197,11 @@ namespace ArithmeticTest
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(64), 4);
 
-            co_yield arith->addShiftL(v_c, v_a, v_b, v_shift);
+            co_yield generateOp<Expression::AddShiftL>(v_c, v_a, v_b, v_shift);
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(68), 4);
 
-            co_yield arith->shiftLAdd(v_c, v_a, v_shift, v_b);
+            co_yield generateOp<Expression::ShiftLAdd>(v_c, v_a, v_shift, v_b);
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(72), 4);
 
@@ -292,8 +285,6 @@ namespace ArithmeticTest
 
     TEST_P(ArithmeticTest, ArithInt32Scalar)
     {
-        auto arith = Component::Get<Arithmetic>(m_context, Register::Type::Scalar, DataType::Int32);
-
         auto k = m_context->kernel();
 
         k->setKernelName("ArithInt32Scalar");
@@ -423,7 +414,7 @@ namespace ArithmeticTest
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(56), 4);
 
-            co_yield arith->negate(s_c, s_a);
+            co_yield generateOp<Expression::Negate>(s_c, s_a);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(60), 4);
@@ -433,42 +424,42 @@ namespace ArithmeticTest
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(64), 4);
 
-            co_yield arith->addShiftL(s_c, s_a, s_b, s_shift);
+            co_yield generateOp<Expression::AddShiftL>(s_c, s_a, s_b, s_shift);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(68), 4);
 
-            co_yield arith->shiftLAdd(s_c, s_a, s_shift, s_b);
+            co_yield generateOp<Expression::ShiftLAdd>(s_c, s_a, s_shift, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(72), 4);
 
             auto shift1 = Register::Value::Literal(1u);
-            co_yield arith->shiftLAdd(s_c, s_a, shift1, s_b);
+            co_yield generateOp<Expression::ShiftLAdd>(s_c, s_a, shift1, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(76), 4);
 
             auto shift2 = Register::Value::Literal(2u);
-            co_yield arith->shiftLAdd(s_c, s_a, shift2, s_b);
+            co_yield generateOp<Expression::ShiftLAdd>(s_c, s_a, shift2, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(80), 4);
 
             auto shift3 = Register::Value::Literal(3u);
-            co_yield arith->shiftLAdd(s_c, s_a, shift3, s_b);
+            co_yield generateOp<Expression::ShiftLAdd>(s_c, s_a, shift3, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(84), 4);
 
             auto shift4 = Register::Value::Literal(4u);
-            co_yield arith->shiftLAdd(s_c, s_a, shift4, s_b);
+            co_yield generateOp<Expression::ShiftLAdd>(s_c, s_a, shift4, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(88), 4);
 
             auto shift5 = Register::Value::Literal(5u);
-            co_yield arith->shiftLAdd(s_c, s_a, shift5, s_b);
+            co_yield generateOp<Expression::ShiftLAdd>(s_c, s_a, shift5, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(92), 4);
@@ -574,8 +565,6 @@ namespace ArithmeticTest
 
     TEST_P(ArithmeticTest, ArithInt64)
     {
-        auto arith = Component::Get<Arithmetic>(m_context, Register::Type::Vector, DataType::Int64);
-
         auto k = m_context->kernel();
 
         k->setKernelName("ArithInt64");
@@ -708,7 +697,7 @@ namespace ArithmeticTest
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(96), 8);
 
-            co_yield arith->negate(v_c, v_a);
+            co_yield generateOp<Expression::Negate>(v_c, v_a);
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(104), 8);
 
@@ -716,11 +705,11 @@ namespace ArithmeticTest
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(112), 8);
 
-            co_yield arith->addShiftL(v_c, v_a, v_b, v_shift);
+            co_yield generateOp<Expression::AddShiftL>(v_c, v_a, v_b, v_shift);
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(120), 8);
 
-            co_yield arith->shiftLAdd(v_c, v_a, v_shift, v_b);
+            co_yield generateOp<Expression::ShiftLAdd>(v_c, v_a, v_shift, v_b);
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(128), 8);
 
@@ -816,10 +805,6 @@ namespace ArithmeticTest
 
     TEST_P(ArithmeticTest, ArithInt64Scalar)
     {
-        auto arithVector
-            = Component::Get<Arithmetic>(m_context, Register::Type::Vector, DataType::Int64);
-        auto arith = Component::Get<Arithmetic>(m_context, Register::Type::Scalar, DataType::Int64);
-
         auto k = m_context->kernel();
 
         k->setKernelName("ArithInt64Scalar");
@@ -834,7 +819,7 @@ namespace ArithmeticTest
         auto b_exp = std::make_shared<Expression::Expression>(
             command->allocateArgument({DataType::Int64, PointerType::Value}));
         auto sh_exp = std::make_shared<Expression::Expression>(
-            command->allocateArgument({DataType::UInt64, PointerType::Value}));
+            command->allocateArgument({DataType::UInt32, PointerType::Value}));
 
         auto one  = std::make_shared<Expression::Expression>(1u);
         auto zero = std::make_shared<Expression::Expression>(0u);
@@ -845,7 +830,7 @@ namespace ArithmeticTest
                         result_exp});
         k->addArgument({"a", DataType::Int64, DataDirection::ReadOnly, a_exp});
         k->addArgument({"b", DataType::Int64, DataDirection::ReadOnly, b_exp});
-        k->addArgument({"shift", DataType::UInt64, DataDirection::ReadOnly, sh_exp});
+        k->addArgument({"shift", DataType::UInt32, DataDirection::ReadOnly, sh_exp});
 
         k->setWorkgroupSize({1, 1, 1});
         k->setWorkitemCount({one, one, one});
@@ -869,7 +854,7 @@ namespace ArithmeticTest
                 m_context, Register::Type::Vector, DataType::Raw32, 2);
 
             auto s_c = Register::Value::Placeholder(
-                m_context, Register::Type::Scalar, DataType::Raw32, 2);
+                m_context, Register::Type::Scalar, DataType::Int64, 1);
 
             co_yield v_c->allocate();
             co_yield s_c->allocate();
@@ -941,7 +926,7 @@ namespace ArithmeticTest
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(96), 8);
 
-            co_yield arith->negate(s_c, s_a);
+            co_yield generateOp<Expression::Negate>(s_c, s_a);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(104), 8);
@@ -951,12 +936,12 @@ namespace ArithmeticTest
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(112), 8);
 
-            co_yield arith->addShiftL(s_c, s_a, s_b, s_shift);
+            co_yield generateOp<Expression::AddShiftL>(s_c, s_a, s_b, s_shift);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(120), 8);
 
-            co_yield arith->shiftLAdd(s_c, s_a, s_shift, s_b);
+            co_yield generateOp<Expression::ShiftLAdd>(s_c, s_a, s_shift, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(128), 8);
@@ -1052,8 +1037,6 @@ namespace ArithmeticTest
 
     TEST_P(ArithmeticTest, ArithFloat)
     {
-        auto arith = Component::Get<Arithmetic>(m_context, Register::Type::Vector, DataType::Float);
-
         auto k = m_context->kernel();
 
         k->setKernelName("ArithFloat");
@@ -1141,7 +1124,7 @@ namespace ArithmeticTest
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(8), 4);
 
-            co_yield arith->negate(v_c, v_a);
+            co_yield generateOp<Expression::Negate>(v_c, v_a);
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(12), 4);
 
@@ -1237,9 +1220,6 @@ namespace ArithmeticTest
 
     TEST_P(ArithmeticTest, ArithDouble)
     {
-        auto arith
-            = Component::Get<Arithmetic>(m_context, Register::Type::Vector, DataType::Double);
-
         auto k = m_context->kernel();
 
         k->setKernelName("ArithDouble");
@@ -1327,7 +1307,7 @@ namespace ArithmeticTest
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(16), 8);
 
-            co_yield arith->negate(v_c, v_a);
+            co_yield generateOp<Expression::Negate>(v_c, v_a);
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(24), 8);
 

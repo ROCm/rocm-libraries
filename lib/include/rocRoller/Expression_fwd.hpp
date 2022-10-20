@@ -42,8 +42,8 @@ namespace rocRoller
         struct MagicSign;
         struct Negate;
 
-        struct FusedAddShift;
-        struct FusedShiftAdd;
+        struct AddShiftL;
+        struct ShiftLAdd;
 
         template <DataType DATATYPE>
         struct Convert;
@@ -79,8 +79,8 @@ namespace rocRoller
             Negate,
 
             // --- Ternary Operations ---
-            FusedAddShift,
-            FusedShiftAdd,
+            AddShiftL,
+            ShiftLAdd,
 
             // --- Convert Operations ---
             Convert<DataType::Half>,
