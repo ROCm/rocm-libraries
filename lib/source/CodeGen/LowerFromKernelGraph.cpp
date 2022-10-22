@@ -406,6 +406,7 @@ namespace rocRoller
                     }
                 }
 
+                co_yield_(Instruction::Lock(Scheduling::Dependency::Branch, "Lock For Loop"));
                 auto scc = m_context->getSCC();
                 co_yield Expression::generate(scc, edge.condition, m_context);
                 co_yield m_context->brancher()->branchIfZero(
@@ -434,6 +435,7 @@ namespace rocRoller
                 co_yield Instruction::Label(botLabel);
 
                 co_yield Instruction::Comment("For Loop End");
+                co_yield_(Instruction::Unlock("Unlock For Loop"));
             }
 
             Generator<Instruction> operator()(ControlGraph::UnrollOp const& unroll,

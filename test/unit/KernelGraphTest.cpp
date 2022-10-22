@@ -202,6 +202,9 @@ namespace KernelGraphTest
                 hipMemcpy(c_actual.data(), c_d.get(), vecSize * sizeof(int), hipMemcpyDeviceToHost),
                 HasHipSuccess(0));
 
+            EXPECT_THAT(output(), testing::HasSubstr("Lock For Loop"));
+            EXPECT_THAT(output(), testing::HasSubstr("Unlock For Loop"));
+
             for(int i = 0; i < vecSize; i++)
                 EXPECT_EQ(c_actual[i], c_expected[i]) << i << ", " << a[i] << ", " << b[i];
         }
