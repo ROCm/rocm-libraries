@@ -1,7 +1,4 @@
-#include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/Expression.hpp>
-
-#include <bit>
 
 template <typename T>
 constexpr auto cast_to_unsigned(T val)
@@ -322,6 +319,8 @@ namespace rocRoller
 
             ExpressionPtr operator()(Add const& expr) const
             {
+                static_assert(CCommutativeBinary<Add>);
+
                 auto lhs = (*this)(expr.lhs);
                 auto rhs = (*this)(expr.rhs);
 
@@ -366,6 +365,8 @@ namespace rocRoller
 
             ExpressionPtr operator()(Multiply const& expr) const
             {
+                static_assert(CCommutativeBinary<Multiply>);
+
                 auto lhs = (*this)(expr.lhs);
                 auto rhs = (*this)(expr.rhs);
 
@@ -432,6 +433,8 @@ namespace rocRoller
 
             ExpressionPtr operator()(BitwiseAnd const& expr) const
             {
+                static_assert(CCommutativeBinary<BitwiseAnd>);
+
                 auto lhs = (*this)(expr.lhs);
                 auto rhs = (*this)(expr.rhs);
 
@@ -468,9 +471,6 @@ namespace rocRoller
             }
         };
 
-        /**
-         * Attempts to use simplify an Expression.
-         */
         ExpressionPtr simplify(ExpressionPtr expr)
         {
             auto visitor = SimplifyExpressionVisitor();

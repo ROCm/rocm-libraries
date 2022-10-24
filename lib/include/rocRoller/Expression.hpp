@@ -29,7 +29,6 @@
 #include <bitset>
 #include <memory>
 #include <stack>
-#include <variant>
 
 #include "Expression_fwd.hpp"
 
@@ -81,14 +80,18 @@ namespace rocRoller
 
         struct Add : Binary
         {
-            constexpr static inline auto Type      = Category::Arithmetic;
-            constexpr static inline auto EvalTimes = EvaluationTimes::All();
+            constexpr static inline auto Type        = Category::Arithmetic;
+            constexpr static inline auto EvalTimes   = EvaluationTimes::All();
+            constexpr static inline bool Associative = true;
+            constexpr static inline bool Commutative = true;
         };
 
         struct Subtract : Binary
         {
-            constexpr static inline auto Type      = Category::Arithmetic;
-            constexpr static inline auto EvalTimes = EvaluationTimes::All();
+            constexpr static inline auto Type        = Category::Arithmetic;
+            constexpr static inline auto EvalTimes   = EvaluationTimes::All();
+            constexpr static inline bool Associative = false;
+            constexpr static inline bool Commutative = false;
         };
 
         /**
@@ -119,96 +122,128 @@ namespace rocRoller
 
             constexpr static inline auto            Type = Category::Arithmetic;
             constexpr static inline EvaluationTimes EvalTimes{EvaluationTime::KernelExecute};
+            constexpr static inline bool            Associative = true;
+            constexpr static inline bool            Commutative = false;
         };
 
         struct Multiply : Binary
         {
-            constexpr static inline auto Type      = Category::Arithmetic;
-            constexpr static inline auto EvalTimes = EvaluationTimes::All();
+            constexpr static inline auto Type        = Category::Arithmetic;
+            constexpr static inline auto EvalTimes   = EvaluationTimes::All();
+            constexpr static inline bool Associative = true;
+            constexpr static inline bool Commutative = true;
         };
 
         struct MultiplyHigh : Binary
         {
-            constexpr static inline auto Type      = Category::Arithmetic;
-            constexpr static inline auto EvalTimes = EvaluationTimes::All();
+            constexpr static inline auto Type        = Category::Arithmetic;
+            constexpr static inline auto EvalTimes   = EvaluationTimes::All();
+            constexpr static inline bool Associative = false;
+            constexpr static inline bool Commutative = true;
         };
 
         struct Divide : Binary
         {
-            constexpr static inline auto Type      = Category::Arithmetic;
-            constexpr static inline auto EvalTimes = EvaluationTimes::All();
+            constexpr static inline auto Type        = Category::Arithmetic;
+            constexpr static inline auto EvalTimes   = EvaluationTimes::All();
+            constexpr static inline bool Associative = false;
+            constexpr static inline bool Commutative = false;
         };
 
         struct Modulo : Binary
         {
-            constexpr static inline auto Type      = Category::Arithmetic;
-            constexpr static inline auto EvalTimes = EvaluationTimes::All();
+            constexpr static inline auto Type        = Category::Arithmetic;
+            constexpr static inline auto EvalTimes   = EvaluationTimes::All();
+            constexpr static inline bool Associative = false;
+            constexpr static inline bool Commutative = false;
         };
 
         struct ShiftL : Binary
         {
-            constexpr static inline auto Type      = Category::Arithmetic;
-            constexpr static inline auto EvalTimes = EvaluationTimes::All();
+            constexpr static inline auto Type        = Category::Arithmetic;
+            constexpr static inline auto EvalTimes   = EvaluationTimes::All();
+            constexpr static inline bool Associative = false;
+            constexpr static inline bool Commutative = false;
         };
 
         struct ShiftR : Binary
         {
-            constexpr static inline auto Type      = Category::Arithmetic;
-            constexpr static inline auto EvalTimes = EvaluationTimes::All();
+            constexpr static inline auto Type        = Category::Arithmetic;
+            constexpr static inline auto EvalTimes   = EvaluationTimes::All();
+            constexpr static inline bool Associative = false;
+            constexpr static inline bool Commutative = false;
         };
 
         struct SignedShiftR : Binary
         {
-            constexpr static inline auto Type      = Category::Arithmetic;
-            constexpr static inline auto EvalTimes = EvaluationTimes::All();
+            constexpr static inline auto Type        = Category::Arithmetic;
+            constexpr static inline auto EvalTimes   = EvaluationTimes::All();
+            constexpr static inline bool Associative = false;
+            constexpr static inline bool Commutative = false;
         };
 
         struct BitwiseAnd : Binary
         {
-            constexpr static inline auto Type      = Category::Arithmetic;
-            constexpr static inline auto EvalTimes = EvaluationTimes::All();
+            constexpr static inline auto Type        = Category::Arithmetic;
+            constexpr static inline auto EvalTimes   = EvaluationTimes::All();
+            constexpr static inline bool Associative = true;
+            constexpr static inline bool Commutative = true;
         };
 
         struct BitwiseOr : Binary
         {
-            constexpr static inline auto Type      = Category::Arithmetic;
-            constexpr static inline auto EvalTimes = EvaluationTimes::All();
+            constexpr static inline auto Type        = Category::Arithmetic;
+            constexpr static inline auto EvalTimes   = EvaluationTimes::All();
+            constexpr static inline bool Associative = true;
+            constexpr static inline bool Commutative = true;
         };
 
         struct BitwiseXor : Binary
         {
-            constexpr static inline auto Type      = Category::Arithmetic;
-            constexpr static inline auto EvalTimes = EvaluationTimes::All();
+            constexpr static inline auto Type        = Category::Arithmetic;
+            constexpr static inline auto EvalTimes   = EvaluationTimes::All();
+            constexpr static inline bool Associative = true;
+            constexpr static inline bool Commutative = true;
         };
 
         struct GreaterThan : Binary
         {
-            constexpr static inline auto Type      = Category::Comparison;
-            constexpr static inline auto EvalTimes = EvaluationTimes::All();
+            constexpr static inline auto Type        = Category::Comparison;
+            constexpr static inline auto EvalTimes   = EvaluationTimes::All();
+            constexpr static inline bool Associative = false;
+            constexpr static inline bool Commutative = false;
         };
 
         struct GreaterThanEqual : Binary
         {
-            constexpr static inline auto Type      = Category::Comparison;
-            constexpr static inline auto EvalTimes = EvaluationTimes::All();
+            constexpr static inline auto Type        = Category::Comparison;
+            constexpr static inline auto EvalTimes   = EvaluationTimes::All();
+            constexpr static inline bool Associative = false;
+            constexpr static inline bool Commutative = false;
         };
 
         struct LessThan : Binary
         {
-            constexpr static inline auto Type      = Category::Comparison;
-            constexpr static inline auto EvalTimes = EvaluationTimes::All();
+            constexpr static inline auto Type        = Category::Comparison;
+            constexpr static inline auto EvalTimes   = EvaluationTimes::All();
+            constexpr static inline bool Associative = false;
+            constexpr static inline bool Commutative = false;
         };
 
         struct LessThanEqual : Binary
         {
-            constexpr static inline auto Type      = Category::Comparison;
-            constexpr static inline auto EvalTimes = EvaluationTimes::All();
+            constexpr static inline auto Type        = Category::Comparison;
+            constexpr static inline auto EvalTimes   = EvaluationTimes::All();
+            constexpr static inline bool Associative = false;
+            constexpr static inline bool Commutative = false;
         };
 
         struct Equal : Binary
         {
-            constexpr static inline auto Type      = Category::Comparison;
-            constexpr static inline auto EvalTimes = EvaluationTimes::All();
+            constexpr static inline auto Type        = Category::Comparison;
+            constexpr static inline auto EvalTimes   = EvaluationTimes::All();
+            constexpr static inline bool Associative = false;
+            constexpr static inline bool Commutative = true;
         };
 
         struct Ternary
@@ -356,16 +391,31 @@ namespace rocRoller
         {
             requires static_cast<Category>(T::Type) == Category::Arithmetic;
         };
+
         template <typename T>
         concept CComparison = requires
         {
             requires static_cast<Category>(T::Type) == Category::Comparison;
         };
 
+        template <typename T>
+        concept CAssociativeBinary = requires
+        {
+            requires CBinary<T> && T::Associative;
+        };
+
+        template <typename T>
+        concept CCommutativeBinary = requires
+        {
+            requires CBinary<T> && T::Commutative;
+        };
+
         static_assert(CBinary<Add>);
         static_assert(CArithmetic<Add>);
         static_assert(!CComparison<Add>);
         static_assert(!CBinary<std::shared_ptr<Register::Value>>);
+        static_assert(CAssociativeBinary<Add>);
+        static_assert(!CAssociativeBinary<Subtract>);
 
         template <typename T>
         concept CTranslateTimeValue = requires

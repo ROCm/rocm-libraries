@@ -1,7 +1,4 @@
-#include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/Expression.hpp>
-
-#include <bit>
 
 template <typename T>
 constexpr auto cast_to_unsigned(T val)
@@ -13,18 +10,6 @@ namespace rocRoller
 {
     namespace Expression
     {
-        /**
-         * Fuse binary expressions into available ternary expressions.
-         *
-         * Fusions:
-         * - Add followed by shiftL -> addShiftL
-         * - shiftL followed by add -> shiftAddL
-         * TODO fused multiply add
-         */
-
-        template <typename T>
-        concept CIntegral = std::integral<T> && !std::same_as<bool, T>;
-
         struct FuseExpressionVisitor
         {
             template <CBinary Expr>
@@ -109,10 +94,7 @@ namespace rocRoller
             }
         };
 
-        /**
-         * Attempts to use fuse an Expression.
-         */
-        ExpressionPtr fuse(ExpressionPtr expr)
+        ExpressionPtr fuseTernary(ExpressionPtr expr)
         {
             auto visitor = FuseExpressionVisitor();
             return visitor(expr);

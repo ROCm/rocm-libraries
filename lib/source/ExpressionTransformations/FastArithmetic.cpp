@@ -16,7 +16,8 @@ namespace rocRoller
             x = simplify(x);
             x = fastDivision(x, m_context);
             x = fastMultiplication(x);
-            // x = fuse(x); // TODO: Add fuse
+            x = fuseAssociative(x);
+            // x = fuseTernary(x); // TODO: Add fuse
             // x = launchTimeSubExpressions(x, m_context); // TODO: Add launchTimeSubExpressions
 
             return x;

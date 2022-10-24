@@ -58,8 +58,8 @@ namespace ExpressionTest
         auto expr7  = expr5 <= expr6;
         auto expr8  = expr6 == expr7;
         auto expr9  = -expr2;
-        auto expr10 = Expression::fuse(expr1 << b);
-        auto expr11 = Expression::fuse((a << b) + b);
+        auto expr10 = Expression::fuseTernary(expr1 << b);
+        auto expr11 = Expression::fuseTernary((a << b) + b);
 
         auto sexpr1  = Expression::toString(expr1);
         auto sexpr2  = Expression::toString(expr2);
@@ -134,8 +134,8 @@ namespace ExpressionTest
         auto expr7  = expr5 <= expr6;
         auto expr8  = expr6 == expr7;
         auto expr9  = -expr2;
-        auto expr10 = Expression::fuse(expr1 << b);
-        auto expr11 = Expression::fuse((a << b) + b);
+        auto expr10 = Expression::fuseTernary(expr1 << b);
+        auto expr11 = Expression::fuseTernary((a << b) + b);
         auto expr12 = b >> std::make_shared<Expression::Expression>(kernelArg);
         auto expr13 = std::make_shared<Expression::Expression>(dataFlow) / a;
         auto expr14 = std::make_shared<Expression::Expression>(waveTile) + b;
@@ -1200,7 +1200,7 @@ namespace ExpressionTest
         auto a = v_a->expression();
         auto b = v_b->expression();
 
-        auto expr = Expression::fuse((a + b) << b);
+        auto expr = Expression::fuseTernary((a + b) << b);
 
         auto k = m_context->kernel();
 

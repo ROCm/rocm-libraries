@@ -352,7 +352,7 @@ TEST_F(CoordinateTransformTest, Basic1D03)
                        {wg, thread, unroll},
                        fastArith);
     sexpr = Expression::toString(exprs[0]);
-    EXPECT_EQ(sexpr, "ShiftL(Add(512i, Add(ShiftL(v0:I, 2j), 2i)), 1j)");
+    EXPECT_EQ(sexpr, "ShiftL(Add(ShiftL(v0:I, 2j), 514i), 1j)");
 }
 
 TEST_F(CoordinateTransformTest, TensorTile2DLoadStore01)

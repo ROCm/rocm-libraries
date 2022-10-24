@@ -273,7 +273,8 @@ set(rocroller_src
  lib/source/ExpressionTransformations/FastMultiplication.cpp
  lib/source/ExpressionTransformations/LaunchTimeSubExpressions.cpp
  lib/source/ExpressionTransformations/Simplify.cpp
- lib/source/ExpressionTransformations/Fuse.cpp
+ lib/source/ExpressionTransformations/FuseAssociative.cpp
+ lib/source/ExpressionTransformations/FuseTernary.cpp
  lib/source/GPUArchitecture.cpp
  lib/source/GPUArchitectureLibrary.cpp
  lib/source/KernelArguments.cpp
@@ -385,6 +386,7 @@ set(
   test/unit/DependencyTest.cpp
   test/unit/ErrorTest.cpp
   test/unit/ExpressionTest.cpp
+  test/unit/ExpressionTransformationTest.cpp
   test/unit/FastDivisionTest.cpp
   test/unit/FastMultiplicationTest.cpp
   test/unit/FileWritingObserverTest.cpp
@@ -414,7 +416,6 @@ set(
   test/unit/RegisterTest.cpp
   test/unit/SchedulerTest.cpp
   test/unit/SettingsTest.cpp
-  test/unit/SimplifyTest.cpp
   test/unit/SourceMatcherTest.cpp
   test/unit/TileTransposeAdd.cpp
   test/unit/TimerTest.cpp
