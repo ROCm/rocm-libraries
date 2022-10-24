@@ -15,9 +15,9 @@ namespace rocRoller
                                                            std::shared_ptr<Register::Value> dest,
                                                            std::shared_ptr<Register::Value> addr,
                                                            std::shared_ptr<Register::Value> offset,
-                                                           int         numBytes,
-                                                           std::string comment,
-                                                           bool        high)
+                                                           int                numBytes,
+                                                           std::string const& comment,
+                                                           bool               high)
     {
         auto                             context    = m_context.lock();
         std::string                      offset_str = "";
@@ -69,8 +69,8 @@ namespace rocRoller
                                                             std::shared_ptr<Register::Value> addr,
                                                             std::shared_ptr<Register::Value> data,
                                                             std::shared_ptr<Register::Value> offset,
-                                                            int         numBytes,
-                                                            std::string comment)
+                                                            int                numBytes,
+                                                            std::string const& comment)
     {
         auto                             context    = m_context.lock();
         std::string                      offset_str = "";
@@ -126,7 +126,7 @@ namespace rocRoller
     inline Generator<Instruction>
         MemoryInstructions::loadFlat(std::shared_ptr<Register::Value> dest,
                                      std::shared_ptr<Register::Value> addr,
-                                     std::string                      offset,
+                                     std::string const&               offset,
                                      int                              numBytes,
                                      bool                             high)
     {
@@ -182,7 +182,7 @@ namespace rocRoller
     inline Generator<Instruction>
         MemoryInstructions::storeFlat(std::shared_ptr<Register::Value> addr,
                                       std::shared_ptr<Register::Value> data,
-                                      std::string                      offset,
+                                      std::string const&               offset,
                                       int                              numBytes)
     {
         AssertFatal(addr != nullptr);
@@ -268,9 +268,9 @@ namespace rocRoller
     inline Generator<Instruction>
         MemoryInstructions::loadLocal(std::shared_ptr<Register::Value> dest,
                                       std::shared_ptr<Register::Value> addr,
-                                      std::string                      offset,
+                                      std::string const&               offset,
                                       int                              numBytes,
-                                      std::string                      comment,
+                                      std::string const&               comment,
                                       bool                             high)
     {
         AssertFatal(dest != nullptr);
@@ -309,9 +309,9 @@ namespace rocRoller
     inline Generator<Instruction>
         MemoryInstructions::storeLocal(std::shared_ptr<Register::Value> addr,
                                        std::shared_ptr<Register::Value> data,
-                                       std::string                      offset,
+                                       std::string const&               offset,
                                        int                              numBytes,
-                                       std::string                      comment)
+                                       std::string const&               comment)
     {
         AssertFatal(addr != nullptr);
         AssertFatal(data != nullptr);
@@ -341,7 +341,7 @@ namespace rocRoller
     inline Generator<Instruction>
         MemoryInstructions::loadBuffer(std::shared_ptr<Register::Value> dest,
                                        std::shared_ptr<Register::Value> addr,
-                                       std::string                      offset,
+                                       std::string const&               offset,
                                        BufferDescriptor                 buffDesc,
                                        BufferInstructionOptions         buffOpts,
                                        int                              numBytes,
@@ -419,7 +419,7 @@ namespace rocRoller
     inline Generator<Instruction>
         MemoryInstructions::storeBuffer(std::shared_ptr<Register::Value> addr,
                                         std::shared_ptr<Register::Value> data,
-                                        std::string                      offset,
+                                        std::string const&               offset,
                                         BufferDescriptor                 buffDesc,
                                         BufferInstructionOptions         buffOpts,
                                         int                              numBytes)

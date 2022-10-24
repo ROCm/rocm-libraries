@@ -48,7 +48,7 @@ namespace rocRoller
                                     std::shared_ptr<Register::Value> addr,
                                     std::shared_ptr<Register::Value> offset,
                                     int                              numBytes,
-                                    std::string                      comment = "",
+                                    std::string const&               comment = "",
                                     bool                             high    = false);
 
         /**
@@ -67,7 +67,7 @@ namespace rocRoller
                                      std::shared_ptr<Register::Value> data,
                                      std::shared_ptr<Register::Value> offset,
                                      int                              numBytes,
-                                     std::string                      comment = "");
+                                     std::string const&               comment = "");
 
         /**
          * @brief Generate instructions that will load two 16bit values and pack them into
@@ -87,7 +87,7 @@ namespace rocRoller
                                            std::shared_ptr<Register::Value> offset1,
                                            std::shared_ptr<Register::Value> addr2,
                                            std::shared_ptr<Register::Value> offset2,
-                                           std::string                      comment = "");
+                                           std::string const&               comment = "");
 
         /**
          * @brief Generate instructions that will pack 2 16bit values into a single 32bit register and store the value
@@ -105,7 +105,7 @@ namespace rocRoller
                                             std::shared_ptr<Register::Value> data1,
                                             std::shared_ptr<Register::Value> data2,
                                             std::shared_ptr<Register::Value> offset,
-                                            std::string                      comment = "");
+                                            std::string const&               comment = "");
 
         /**
          * @brief Generate the instructions required to perform a flat load.
@@ -119,7 +119,7 @@ namespace rocRoller
          */
         Generator<Instruction> loadFlat(std::shared_ptr<Register::Value> dest,
                                         std::shared_ptr<Register::Value> addr,
-                                        std::string                      offset,
+                                        std::string const&               offset,
                                         int                              numBytes,
                                         bool                             high = false);
 
@@ -134,7 +134,7 @@ namespace rocRoller
          */
         Generator<Instruction> storeFlat(std::shared_ptr<Register::Value> addr,
                                          std::shared_ptr<Register::Value> data,
-                                         std::string                      offset,
+                                         std::string const&               offset,
                                          int                              numBytes);
 
         /**
@@ -164,9 +164,9 @@ namespace rocRoller
          */
         Generator<Instruction> loadLocal(std::shared_ptr<Register::Value> dest,
                                          std::shared_ptr<Register::Value> addr,
-                                         std::string                      offset,
+                                         std::string const&               offset,
                                          int                              numBytes,
-                                         std::string                      comment = "",
+                                         std::string const&               comment = "",
                                          bool                             high    = false);
 
         /**
@@ -181,9 +181,9 @@ namespace rocRoller
          */
         Generator<Instruction> storeLocal(std::shared_ptr<Register::Value> addr,
                                           std::shared_ptr<Register::Value> data,
-                                          std::string                      offset,
+                                          std::string const&               offset,
                                           int                              numBytes,
-                                          std::string                      comment = "");
+                                          std::string const&               comment = "");
 
         /**
          * @brief Generate the instructions required to perform a buffer load.
@@ -197,7 +197,7 @@ namespace rocRoller
          */
         Generator<Instruction> loadBuffer(std::shared_ptr<Register::Value> dest,
                                           std::shared_ptr<Register::Value> addr,
-                                          std::string                      offset,
+                                          std::string const&               offset,
                                           BufferDescriptor                 buffDesc,
                                           BufferInstructionOptions         buffOpts,
                                           int                              numBytes,
@@ -214,7 +214,7 @@ namespace rocRoller
          */
         Generator<Instruction> storeBuffer(std::shared_ptr<Register::Value> addr,
                                            std::shared_ptr<Register::Value> data,
-                                           std::string                      offset,
+                                           std::string const&               offset,
                                            BufferDescriptor                 buffDesc,
                                            BufferInstructionOptions         buffOpts,
                                            int                              numBytes);

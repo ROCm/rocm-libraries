@@ -9,7 +9,7 @@ namespace rocRoller
                                                            std::shared_ptr<Register::Value> offset1,
                                                            std::shared_ptr<Register::Value> addr2,
                                                            std::shared_ptr<Register::Value> offset2,
-                                                           std::string                      comment)
+                                                           std::string const&               comment)
     {
         AssertFatal(dest && dest->regType() == Register::Type::Vector
                         && dest->variableType() == DataType::Halfx2,
@@ -34,7 +34,7 @@ namespace rocRoller
                                                             std::shared_ptr<Register::Value> data1,
                                                             std::shared_ptr<Register::Value> data2,
                                                             std::shared_ptr<Register::Value> offset,
-                                                            std::string comment)
+                                                            std::string const& comment)
     {
         auto val = Register::Value::Placeholder(
             m_context.lock(), Register::Type::Vector, DataType::Halfx2, 1);
