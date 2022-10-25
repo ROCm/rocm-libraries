@@ -24,6 +24,7 @@
 #include "SourceMatcher.hpp"
 
 using namespace rocRoller;
+using ::testing::HasSubstr;
 
 namespace KernelGraphTest
 {
@@ -1677,6 +1678,33 @@ namespace KernelGraphTest
 
         EXPECT_EQ(Expression::toString(clean_expr),
                   "Multiply(user_Int32_Value_1, Add(user_Int32_Value_0, user_Int32_Value_1))");
+    }
+
+    TEST_F(KernelGraphTest, CleanArguments)
+    {
+        auto command = commonCommand();
+
+        m_context->kernel()->addCommandArguments(command->getArguments());
+
+        int workGroupSize = 64;
+        m_context->kernel()->setKernelDimensions(1);
+        m_context->kernel()->setWorkgroupSize({64, 1, 1});
+
+        auto kgraph = KernelGraph::translate2(command);
+        kgraph      = KernelGraph::cleanArguments(kgraph, m_context->kernel());
+
+        auto dot = kgraph.toDOT();
+        EXPECT_THAT(dot, Not(HasSubstr("SubDimension{0, CommandArgument(Load_Linear_0_size_0)}")));
+        EXPECT_THAT(dot, Not(HasSubstr("SubDimension{0, CommandArgument(Load_Linear_2_size_0)}")));
+        EXPECT_THAT(
+            dot, Not(HasSubstr("SubDimension{0, Linear{CommandArgument(Load_Linear_0_size_0)}")));
+        EXPECT_THAT(
+            dot, Not(HasSubstr("SubDimension{0, Linear{CommandArgument(Load_Linear_2_size_0)}")));
+
+        EXPECT_THAT(dot, HasSubstr("SubDimension{0, Load_Linear_0_size_0}"));
+        EXPECT_THAT(dot, HasSubstr("SubDimension{0, Load_Linear_2_size_0}"));
+        EXPECT_THAT(dot, HasSubstr("Linear{Load_Linear_0_size_0}"));
+        EXPECT_THAT(dot, HasSubstr("Linear{Load_Linear_2_size_0}"));
     }
 
 }

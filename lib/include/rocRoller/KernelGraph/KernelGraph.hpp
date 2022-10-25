@@ -77,6 +77,9 @@ namespace rocRoller
          */
         KernelGraph cleanArguments(KernelGraph, std::shared_ptr<AssemblyKernel>);
 
+        // replace above when new graph arch complete
+        KernelHypergraph cleanArguments(KernelHypergraph, std::shared_ptr<AssemblyKernel>);
+
         /**
          * Removes all CommandArgruments found within an expression
          * with the appropriate AssemblyKernel Argument.
