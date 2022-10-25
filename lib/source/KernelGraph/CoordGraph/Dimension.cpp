@@ -15,7 +15,7 @@ namespace rocRoller
         std::string BaseDimension::toString() const
         {
             auto _size = size ? rocRoller::Expression::toString(size) : "NA";
-            auto stag  = "{" + _size + ", " + (output ? "o" : "i") + "}";
+            auto stag  = "{" + _size + "}";
             return name() + stag;
         }
 
@@ -23,17 +23,17 @@ namespace rocRoller
         {
             auto _size = size ? rocRoller::Expression::toString(size) : "NA";
             auto _sdim = std::to_string(dim);
-            auto stag  = "{" + _sdim + ", " + _size + ", " + (output ? "o" : "i") + "}";
+            auto stag  = "{" + _sdim + ", " + _size + "}";
             return name() + stag;
         }
 
-        MacroTileNumber MacroTile::tileNumber(int sdim, bool output) const
+        MacroTileNumber MacroTile::tileNumber(int sdim) const
         {
             return CoordGraph::MacroTileNumber(
-                sdim, Expression::literal(1u), Expression::literal(1u), output);
+                sdim, Expression::literal(1u), Expression::literal(1u));
         }
 
-        MacroTileIndex MacroTile::tileIndex(int sdim, bool output) const
+        MacroTileIndex MacroTile::tileIndex(int sdim) const
         {
             AssertFatal(!sizes.empty(), "MacroTile doesn't have sizes set.");
             int stride = 1;
@@ -45,17 +45,16 @@ namespace rocRoller
             return CoordGraph::MacroTileIndex(
                 sdim,
                 Expression::literal(static_cast<uint>(sizes.at(sdim))),
-                Expression::literal(stride),
-                output);
+                Expression::literal(stride));
         }
 
-        ThreadTileNumber ThreadTile::tileNumber(int sdim, bool output) const
+        ThreadTileNumber ThreadTile::tileNumber(int sdim) const
         {
             return CoordGraph::ThreadTileNumber(
-                sdim, Expression::literal(1u), Expression::literal(1u), output);
+                sdim, Expression::literal(1u), Expression::literal(1u));
         }
 
-        ThreadTileIndex ThreadTile::tileIndex(int sdim, bool output) const
+        ThreadTileIndex ThreadTile::tileIndex(int sdim) const
         {
             AssertFatal(!sizes.empty(), "ThreadTile doesn't have sizes set.");
             int stride = 1;
@@ -67,17 +66,16 @@ namespace rocRoller
             return CoordGraph::ThreadTileIndex(
                 sdim,
                 Expression::literal(static_cast<uint>(sizes.at(sdim))),
-                Expression::literal(stride),
-                output);
+                Expression::literal(stride));
         }
 
-        WaveTileNumber WaveTile::tileNumber(int sdim, bool output) const
+        WaveTileNumber WaveTile::tileNumber(int sdim) const
         {
             return CoordGraph::WaveTileNumber(
-                sdim, Expression::literal(1u), Expression::literal(1u), output);
+                sdim, Expression::literal(1u), Expression::literal(1u));
         }
 
-        WaveTileIndex WaveTile::tileIndex(int sdim, bool output) const
+        WaveTileIndex WaveTile::tileIndex(int sdim) const
         {
             AssertFatal(!sizes.empty(), "WaveTile doesn't have sizes set.");
             int stride = 1;
@@ -88,8 +86,7 @@ namespace rocRoller
             }
             return CoordGraph::WaveTileIndex(sdim,
                                              Expression::literal(static_cast<uint>(sizes.at(sdim))),
-                                             Expression::literal(stride),
-                                             output);
+                                             Expression::literal(stride));
         }
 
         int MacroTile::elements() const

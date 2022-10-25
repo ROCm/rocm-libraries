@@ -21,7 +21,6 @@ namespace rocRoller
      * Coordinate transforms are represented as graphs.  A coordinate
      * transform graph encodes:
      *
-     * - algorithm decomposition onto hardware
      * - data flow
      * - data locality
      * - how indexes are computed/transformed

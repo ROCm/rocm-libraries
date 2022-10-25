@@ -5,6 +5,7 @@
 #include <rocRoller/KernelGraph/ControlHypergraph/ControlHypergraph.hpp>
 #include <rocRoller/KernelGraph/ControlHypergraph/Operation_fwd.hpp>
 
+#include "DataTypes/DataTypes.hpp"
 #include "SourceMatcher.hpp"
 
 using namespace rocRoller;
@@ -18,8 +19,8 @@ namespace rocRollerTest
         ControlHypergraph control = ControlHypergraph();
 
         int kernel_index = control.addElement(Kernel());
-        int loadA_index  = control.addElement(LoadLinear());
-        int loadB_index  = control.addElement(LoadLinear());
+        int loadA_index  = control.addElement(LoadLinear(DataType::Float));
+        int loadB_index  = control.addElement(LoadLinear(DataType::Float));
         int body1_index  = control.addElement(Body(), {kernel_index}, {loadA_index});
         int body2_index  = control.addElement(Body(), {kernel_index}, {loadB_index});
 

@@ -6,23 +6,22 @@
 #include <hip/hip_runtime.h>
 
 #include <random>
+#include <variant>
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Expression.hpp>
-#include <rocRoller/ExpressionTransformations.hpp>
+#include <rocRoller/KernelGraph/CoordGraph/CoordinateHypergraph.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
-#include <rocRoller/KernelGraph/RegisterTagManager.hpp>
+#include <rocRoller/KernelGraph/Visitors.hpp>
+#include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
 #include <rocRoller/Utilities/Timer.hpp>
 
-#include "DataTypes/DataTypes.hpp"
 #include "GPUContextFixture.hpp"
 #include "GenericContextFixture.hpp"
-#include "Scheduling/Observers/FileWritingObserver.hpp"
 #include "SourceMatcher.hpp"
-#include "Utilities/Error.hpp"
 
 using namespace rocRoller;
 
@@ -464,6 +463,417 @@ namespace KernelGraphTest
 
         auto kgraph1 = KernelGraph::lowerLinear(kgraph0, m_context);
         EXPECT_EQ(NormalizedSource(expected1), NormalizedSource(kgraph1.toDOT()));
+    }
+
+    TEST_F(KernelGraphTest, Translate01B)
+    {
+        auto command = commonCommand();
+        auto kgraph0 = KernelGraph::translate2(command);
+
+        auto bottom = kgraph0.coordinates.roots().to<std::vector>();
+        EXPECT_EQ(bottom.size(), 2);
+        for(auto const& id : bottom)
+        {
+            EXPECT_TRUE(std::holds_alternative<KernelGraph::CoordGraph::User>(
+                std::get<KernelGraph::CoordGraph::Dimension>(kgraph0.coordinates.getElement(id))));
+        }
+
+        auto top = kgraph0.coordinates.leaves().to<std::vector>();
+        EXPECT_EQ(top.size(), 1);
+        for(auto const& id : top)
+        {
+            EXPECT_TRUE(std::holds_alternative<KernelGraph::CoordGraph::User>(
+                std::get<KernelGraph::CoordGraph::Dimension>(kgraph0.coordinates.getElement(id))));
+        }
+
+        auto visitor = KernelGraph::BaseGraphVisitor2(m_context);
+        auto kgraphC = rewrite(kgraph0, visitor);
+
+        std::string expectedC = R".(
+             digraph {
+             "coord1"[label="User{NA}(1)"];
+             "coord2"[label="User{NA}(2)"];
+             "coord3"[label="SubDimension{0, CommandArgument(Load_Linear_0_size_0)}(3)"];
+             "coord4"[label="Split(4)",shape=box];
+             "coord5"[label="Linear{CommandArgument(Load_Linear_0_size_0)}(5)"];
+             "coord6"[label="Flatten(6)",shape=box];
+             "coord7"[label="DataFlow(7)",shape=box];
+             "coord8"[label="SubDimension{0, CommandArgument(Load_Linear_2_size_0)}(8)"];
+             "coord9"[label="Split(9)",shape=box];
+             "coord10"[label="Linear{CommandArgument(Load_Linear_2_size_0)}(10)"];
+             "coord11"[label="Flatten(11)",shape=box];
+             "coord12"[label="DataFlow(12)",shape=box];
+             "coord13"[label="Linear{NA}(13)"];
+             "coord14"[label="DataFlow(14)",shape=box];
+             "coord15"[label="Linear{NA}(15)"];
+             "coord16"[label="DataFlow(16)",shape=box];
+             "coord17"[label="Linear{NA}(17)"];
+             "coord18"[label="DataFlow(18)",shape=box];
+             "coord19"[label="SubDimension{0, NA}(19)"];
+             "coord20"[label="Split(20)",shape=box];
+             "coord21"[label="User{NA}(21)"];
+             "coord22"[label="Join(22)",shape=box];
+             "coord23"[label="DataFlow(23)",shape=box];
+             "coord1" -> "coord4"
+             "coord1" -> "coord7"
+             "coord2" -> "coord9"
+             "coord2" -> "coord12"
+             "coord3" -> "coord6"
+             "coord4" -> "coord3"
+             "coord5" -> "coord14"
+             "coord6" -> "coord5"
+             "coord7" -> "coord5"
+             "coord8" -> "coord11"
+             "coord9" -> "coord8"
+             "coord10" -> "coord14"
+             "coord11" -> "coord10"
+             "coord12" -> "coord10"
+             "coord13" -> "coord16"
+             "coord13" -> "coord18"
+             "coord14" -> "coord13"
+             "coord15" -> "coord18"
+             "coord16" -> "coord15"
+             "coord17" -> "coord20"
+             "coord17" -> "coord23"
+             "coord18" -> "coord17"
+             "coord19" -> "coord22"
+             "coord20" -> "coord19"
+             "coord22" -> "coord21"
+             "coord23" -> "coord21"
+             {
+             rank=same
+             "coord5"->"coord10"[style=invis]
+             rankdir=LR
+             }
+             {
+             rank=same
+             "coord15"->"coord13"[style=invis]
+             rankdir=LR
+             }
+             subgraph clusterCF {"cntrl1"[label="Kernel(1)"];
+             "cntrl2"[label="LoadLinear(2)"];
+             "cntrl3"[label="Body(3)",shape=box];
+             "cntrl4"[label="LoadLinear(4)"];
+             "cntrl5"[label="Body(5)",shape=box];
+             "cntrl6"[label="ElementOp(4, 10)(6)"];
+             "cntrl7"[label="Sequence(7)",shape=box];
+             "cntrl8"[label="Sequence(8)",shape=box];
+             "cntrl9"[label="ElementOp(13, -1)(9)"];
+             "cntrl10"[label="Sequence(10)",shape=box];
+             "cntrl11"[label="ElementOp(15, 13)(11)"];
+             "cntrl12"[label="Sequence(12)",shape=box];
+             "cntrl13"[label="Sequence(13)",shape=box];
+             "cntrl14"[label="StoreLinear(14)"];
+             "cntrl15"[label="Sequence(15)",shape=box];
+             "cntrl1" -> "cntrl3"
+             "cntrl1" -> "cntrl5"
+             "cntrl2" -> "cntrl7"
+             "cntrl3" -> "cntrl2"
+             "cntrl4" -> "cntrl8"
+             "cntrl5" -> "cntrl4"
+             "cntrl6" -> "cntrl10"
+             "cntrl6" -> "cntrl13"
+             "cntrl7" -> "cntrl6"
+             "cntrl8" -> "cntrl6"
+             "cntrl9" -> "cntrl12"
+             "cntrl10" -> "cntrl9"
+             "cntrl11" -> "cntrl15"
+             "cntrl12" -> "cntrl11"
+             "cntrl13" -> "cntrl11"
+             "cntrl15" -> "cntrl14"
+             }
+             "coord1" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
+             "coord5" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
+             "coord2" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
+             "coord10" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
+             "coord13" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
+             "coord15" -> "cntrl9" [style=dotted,weight=0,arrowsize=0]
+             "coord17" -> "cntrl11" [style=dotted,weight=0,arrowsize=0]
+             "coord21" -> "cntrl14" [style=dotted,weight=0,arrowsize=0]
+             "coord17" -> "cntrl14" [style=dotted,weight=0,arrowsize=0]
+             }).";
+
+        EXPECT_EQ(NormalizedSource(expectedC), NormalizedSource(kgraphC.toDOT(true)));
+
+        std::string expected0 = R".(
+             digraph {
+             "coord1"[label="SubDimension{0, CommandArgument(Load_Linear_0_size_0)}(1)"];
+             "coord2"[label="User{NA}(2)"];
+             "coord3"[label="Split(3)",shape=box];
+             "coord4"[label="Linear{CommandArgument(Load_Linear_0_size_0)}(4)"];
+             "coord5"[label="Flatten(5)",shape=box];
+             "coord6"[label="DataFlow(6)",shape=box];
+             "coord7"[label="SubDimension{0, CommandArgument(Load_Linear_2_size_0)}(7)"];
+             "coord8"[label="User{NA}(8)"];
+             "coord9"[label="Split(9)",shape=box];
+             "coord10"[label="Linear{CommandArgument(Load_Linear_2_size_0)}(10)"];
+             "coord11"[label="Flatten(11)",shape=box];
+             "coord12"[label="DataFlow(12)",shape=box];
+             "coord13"[label="Linear{NA}(13)"];
+             "coord14"[label="DataFlow(14)",shape=box];
+             "coord15"[label="Linear{NA}(15)"];
+             "coord16"[label="DataFlow(16)",shape=box];
+             "coord17"[label="Linear{NA}(17)"];
+             "coord18"[label="DataFlow(18)",shape=box];
+             "coord19"[label="SubDimension{0, NA}(19)"];
+             "coord20"[label="User{NA}(20)"];
+             "coord21"[label="Split(21)",shape=box];
+             "coord22"[label="Join(22)",shape=box];
+             "coord23"[label="DataFlow(23)",shape=box];
+             "coord1" -> "coord5"
+             "coord2" -> "coord3"
+             "coord2" -> "coord6"
+             "coord3" -> "coord1"
+             "coord4" -> "coord14"
+             "coord5" -> "coord4"
+             "coord6" -> "coord4"
+             "coord7" -> "coord11"
+             "coord8" -> "coord9"
+             "coord8" -> "coord12"
+             "coord9" -> "coord7"
+             "coord10" -> "coord14"
+             "coord11" -> "coord10"
+             "coord12" -> "coord10"
+             "coord13" -> "coord16"
+             "coord13" -> "coord18"
+             "coord14" -> "coord13"
+             "coord15" -> "coord18"
+             "coord16" -> "coord15"
+             "coord17" -> "coord21"
+             "coord17" -> "coord23"
+             "coord18" -> "coord17"
+             "coord19" -> "coord22"
+             "coord21" -> "coord19"
+             "coord22" -> "coord20"
+             "coord23" -> "coord20"
+             {
+             rank=same
+             "coord4"->"coord10"[style=invis]
+             rankdir=LR
+             }
+             {
+             rank=same
+             "coord15"->"coord13"[style=invis]
+             rankdir=LR
+             }
+             subgraph clusterCF {"cntrl1"[label="Kernel(1)"];
+             "cntrl2"[label="LoadLinear(2)"];
+             "cntrl3"[label="Body(3)",shape=box];
+             "cntrl4"[label="LoadLinear(4)"];
+             "cntrl5"[label="Body(5)",shape=box];
+             "cntrl6"[label="ElementOp(4, 10)(6)"];
+             "cntrl7"[label="Sequence(7)",shape=box];
+             "cntrl8"[label="Sequence(8)",shape=box];
+             "cntrl9"[label="ElementOp(13, -1)(9)"];
+             "cntrl10"[label="Sequence(10)",shape=box];
+             "cntrl11"[label="ElementOp(15, 13)(11)"];
+             "cntrl12"[label="Sequence(12)",shape=box];
+             "cntrl13"[label="Sequence(13)",shape=box];
+             "cntrl14"[label="StoreLinear(14)"];
+             "cntrl15"[label="Sequence(15)",shape=box];
+             "cntrl1" -> "cntrl3"
+             "cntrl1" -> "cntrl5"
+             "cntrl2" -> "cntrl7"
+             "cntrl3" -> "cntrl2"
+             "cntrl4" -> "cntrl8"
+             "cntrl5" -> "cntrl4"
+             "cntrl6" -> "cntrl10"
+             "cntrl6" -> "cntrl13"
+             "cntrl7" -> "cntrl6"
+             "cntrl8" -> "cntrl6"
+             "cntrl9" -> "cntrl12"
+             "cntrl10" -> "cntrl9"
+             "cntrl11" -> "cntrl15"
+             "cntrl12" -> "cntrl11"
+             "cntrl13" -> "cntrl11"
+             "cntrl15" -> "cntrl14"
+             }
+             "coord2" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
+             "coord4" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
+             "coord8" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
+             "coord10" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
+             "coord13" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
+             "coord15" -> "cntrl9" [style=dotted,weight=0,arrowsize=0]
+             "coord17" -> "cntrl11" [style=dotted,weight=0,arrowsize=0]
+             "coord20" -> "cntrl14" [style=dotted,weight=0,arrowsize=0]
+             "coord17" -> "cntrl14" [style=dotted,weight=0,arrowsize=0]
+             }).";
+
+        EXPECT_EQ(NormalizedSource(expected0), NormalizedSource(kgraph0.toDOT(true)));
+
+        std::string expected1 = R".(
+             digraph {
+             "coord1"[label="User{NA}(1)"];
+             "coord2"[label="User{NA}(2)"];
+             "coord3"[label="SubDimension{0, CommandArgument(Load_Linear_0_size_0)}(3)"];
+             "coord4"[label="Split(4)",shape=box];
+             "coord5"[label="Linear{CommandArgument(Load_Linear_0_size_0)}(5)"];
+             "coord6"[label="Flatten(6)",shape=box];
+             "coord7"[label="SubDimension{0, CommandArgument(Load_Linear_2_size_0)}(7)"];
+             "coord8"[label="Split(8)",shape=box];
+             "coord9"[label="Linear{CommandArgument(Load_Linear_2_size_0)}(9)"];
+             "coord10"[label="Flatten(10)",shape=box];
+             "coord11"[label="Linear{NA}(11)"];
+             "coord12"[label="SubDimension{0, NA}(12)"];
+             "coord13"[label="Split(13)",shape=box];
+             "coord14"[label="User{NA}(14)"];
+             "coord15"[label="Join(15)",shape=box];
+             "coord16"[label="Workgroup{0, NA}(16)"];
+             "coord17"[label="Workitem{0, 32j}(17)"];
+             "coord18"[label="VGPR{NA}(18)"];
+             "coord19"[label="Tile(19)",shape=box];
+             "coord20"[label="Forget(20)",shape=box];
+             "coord21"[label="DataFlow(21)",shape=box];
+             "coord22"[label="Workgroup{0, NA}(22)"];
+             "coord23"[label="Workitem{0, 32j}(23)"];
+             "coord24"[label="VGPR{NA}(24)"];
+             "coord25"[label="Tile(25)",shape=box];
+             "coord26"[label="Forget(26)",shape=box];
+             "coord27"[label="DataFlow(27)",shape=box];
+             "coord28"[label="VGPR{NA}(28)"];
+             "coord29"[label="DataFlow(29)",shape=box];
+             "coord30"[label="VGPR{NA}(30)"];
+             "coord31"[label="DataFlow(31)",shape=box];
+             "coord32"[label="VGPR{NA}(32)"];
+             "coord33"[label="DataFlow(33)",shape=box];
+             "coord34"[label="Workgroup{0, NA}(34)"];
+             "coord35"[label="Workitem{0, 32j}(35)"];
+             "coord36"[label="Inherit(36)",shape=box];
+             "coord37"[label="Flatten(37)",shape=box];
+             "coord38"[label="DataFlow(38)",shape=box];
+             "coord1" -> "coord4"
+             "coord1" -> "coord21"
+             "coord2" -> "coord8"
+             "coord2" -> "coord27"
+             "coord3" -> "coord6"
+             "coord4" -> "coord3"
+             "coord5" -> "coord19"
+             "coord6" -> "coord5"
+             "coord7" -> "coord10"
+             "coord8" -> "coord7"
+             "coord9" -> "coord25"
+             "coord10" -> "coord9"
+             "coord11" -> "coord13"
+             "coord12" -> "coord15"
+             "coord13" -> "coord12"
+             "coord15" -> "coord14"
+             "coord16" -> "coord20"
+             "coord17" -> "coord20"
+             "coord18" -> "coord29"
+             "coord19" -> "coord16"
+             "coord19" -> "coord17"
+             "coord20" -> "coord18"
+             "coord21" -> "coord18"
+             "coord22" -> "coord26"
+             "coord23" -> "coord26"
+             "coord24" -> "coord29"
+             "coord25" -> "coord22"
+             "coord25" -> "coord23"
+             "coord26" -> "coord24"
+             "coord27" -> "coord24"
+             "coord28" -> "coord31"
+             "coord28" -> "coord33"
+             "coord29" -> "coord28"
+             "coord30" -> "coord33"
+             "coord31" -> "coord30"
+             "coord32" -> "coord36"
+             "coord32" -> "coord38"
+             "coord33" -> "coord32"
+             "coord34" -> "coord37"
+             "coord35" -> "coord37"
+             "coord36" -> "coord34"
+             "coord36" -> "coord35"
+             "coord37" -> "coord11"
+             "coord38" -> "coord14"
+             {
+             rank=same
+             "coord16"->"coord17"[style=invis]
+             rankdir=LR
+             }
+             {
+             rank=same
+             "coord16"->"coord17"[style=invis]
+             rankdir=LR
+             }
+             {
+             rank=same
+             "coord22"->"coord23"[style=invis]
+             rankdir=LR
+             }
+             {
+             rank=same
+             "coord22"->"coord23"[style=invis]
+             rankdir=LR
+             }
+             {
+             rank=same
+             "coord18"->"coord24"[style=invis]
+             rankdir=LR
+             }
+             {
+             rank=same
+             "coord30"->"coord28"[style=invis]
+             rankdir=LR
+             }
+             {
+             rank=same
+             "coord34"->"coord35"[style=invis]
+             rankdir=LR
+             }
+             {
+             rank=same
+             "coord34"->"coord35"[style=invis]
+             rankdir=LR
+             }
+             subgraph clusterCF {"cntrl1"[label="Kernel(1)"];
+             "cntrl2"[label="LoadVGPR(2)"];
+             "cntrl3"[label="Body(3)",shape=box];
+             "cntrl4"[label="LoadVGPR(4)"];
+             "cntrl5"[label="Body(5)",shape=box];
+             "cntrl6"[label="ElementOp(18, 24)(6)"];
+             "cntrl7"[label="Sequence(7)",shape=box];
+             "cntrl8"[label="Sequence(8)",shape=box];
+             "cntrl9"[label="ElementOp(28, -1)(9)"];
+             "cntrl10"[label="Sequence(10)",shape=box];
+             "cntrl11"[label="ElementOp(30, 28)(11)"];
+             "cntrl12"[label="Sequence(12)",shape=box];
+             "cntrl13"[label="Sequence(13)",shape=box];
+             "cntrl14"[label="StoreVGPR(14)"];
+             "cntrl15"[label="Sequence(15)",shape=box];
+             "cntrl1" -> "cntrl3"
+             "cntrl1" -> "cntrl5"
+             "cntrl2" -> "cntrl7"
+             "cntrl3" -> "cntrl2"
+             "cntrl4" -> "cntrl8"
+             "cntrl5" -> "cntrl4"
+             "cntrl6" -> "cntrl10"
+             "cntrl6" -> "cntrl13"
+             "cntrl7" -> "cntrl6"
+             "cntrl8" -> "cntrl6"
+             "cntrl9" -> "cntrl12"
+             "cntrl10" -> "cntrl9"
+             "cntrl11" -> "cntrl15"
+             "cntrl12" -> "cntrl11"
+             "cntrl13" -> "cntrl11"
+             "cntrl15" -> "cntrl14"
+             }
+             "coord1" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
+             "coord18" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
+             "coord2" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
+             "coord24" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
+             "coord28" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
+             "coord30" -> "cntrl9" [style=dotted,weight=0,arrowsize=0]
+             "coord32" -> "cntrl11" [style=dotted,weight=0,arrowsize=0]
+             "coord14" -> "cntrl14" [style=dotted,weight=0,arrowsize=0]
+             "coord32" -> "cntrl14" [style=dotted,weight=0,arrowsize=0]
+             }).";
+
+        auto one = Expression::literal(1u);
+        m_context->kernel()->setWorkgroupSize({64, 1, 1});
+        m_context->kernel()->setWorkitemCount({one, one, one});
+
+        auto kgraph1 = KernelGraph::lowerLinear(kgraph0, m_context);
+        EXPECT_EQ(NormalizedSource(expected1), NormalizedSource(kgraph1.toDOT(true)));
     }
 
     TEST_F(KernelGraphTest, TranslateTMul)

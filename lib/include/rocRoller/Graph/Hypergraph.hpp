@@ -86,8 +86,13 @@ namespace rocRoller
             template <typename T>
             int addElement(T&& element);
 
+            /**
+             * @brief Set (overwrite) existing element.
+             *
+             * Asserts that the index exists already.
+             */
             template <typename T>
-            void addElement(int index, T&& element);
+            void setElement(int index, T&& element);
 
             template <typename T>
             int addElement(T&&                        element,
@@ -184,6 +189,14 @@ namespace rocRoller
 
             template <Direction Dir>
             Generator<int> getNeighbours(int const element) const;
+
+            /**
+             * @brief Return edges in topological order.
+             *
+             * Traversing edges in topological order preserves edge
+             * dependencies.
+             */
+            Generator<int> topologicalSort() const;
 
             std::string toDOT(std::string prefix = "", bool standalone = true) const;
 

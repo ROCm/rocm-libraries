@@ -4,7 +4,7 @@
 #include <vector>
 
 #include <rocRoller/KernelGraph/CoordGraph/Dimension.hpp>
-#include <rocRoller/Operations/T_Execute_fwd.hpp>
+#include <rocRoller/Operations/T_Execute.hpp>
 
 #include "Expression_fwd.hpp"
 #include "InstructionValues/Register_fwd.hpp"
@@ -121,6 +121,14 @@ namespace rocRoller
          */
         struct LoadLinear : public BaseOperation
         {
+            LoadLinear() = delete;
+            LoadLinear(rocRoller::VariableType const varType)
+                : varType(varType)
+            {
+            }
+
+            rocRoller::VariableType varType;
+
             virtual std::string toString() const override
             {
                 return "LoadLinear";
@@ -151,6 +159,16 @@ namespace rocRoller
          */
         struct LoadVGPR : public BaseOperation
         {
+            LoadVGPR() = delete;
+            LoadVGPR(VariableType const varType, bool const scalar = false)
+                : vtype(varType)
+                , scalar(scalar)
+            {
+            }
+
+            VariableType vtype;
+            bool         scalar;
+
             virtual std::string toString() const override
             {
                 return "LoadVGPR";
@@ -177,7 +195,7 @@ namespace rocRoller
             // TODO
             // it's a link to a dimension in the coordinate graph
             // can have a type alias
-            Multiply(int a, int b)
+            Multiply(int const a, int const b)
                 : a(a)
                 , b(b)
             {
@@ -211,7 +229,7 @@ namespace rocRoller
         struct StoreTiled : public BaseOperation
         {
             StoreTiled() = delete;
-            StoreTiled(DataType dtype)
+            StoreTiled(DataType const dtype)
                 : dataType(dtype)
             {
             }
@@ -251,17 +269,19 @@ namespace rocRoller
          */
         struct ElementOp : public BaseOperation
         {
-            ElementOp() = delete;
-            ElementOp(std::shared_ptr<Operations::XOp> xop)
-                : xop(xop)
+            ElementOp(Operations::XOp const& op, int const a, int const b)
+                : op(op)
+                , a(a)
+                , b(b)
             {
             }
 
-            std::shared_ptr<Operations::XOp> xop;
+            Operations::XOp op;
+            int             a, b;
 
             virtual std::string toString() const override
             {
-                return "ElementOp";
+                return concatenate("ElementOp(", a, ", ", b, ")");
             }
         };
 
@@ -271,10 +291,10 @@ namespace rocRoller
         struct TensorContraction : public BaseOperation
         {
             TensorContraction() = delete;
-            TensorContraction(CoordGraph::MacroTile a,
-                              CoordGraph::MacroTile b,
-                              std::vector<int>      aContractedDimensions,
-                              std::vector<int>      bContractedDimensions)
+            TensorContraction(CoordGraph::MacroTile const& a,
+                              CoordGraph::MacroTile const& b,
+                              std::vector<int> const&      aContractedDimensions,
+                              std::vector<int> const&      bContractedDimensions)
                 : a(a)
                 , b(b)
                 , aDims(aContractedDimensions)

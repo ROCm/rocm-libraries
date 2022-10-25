@@ -4,6 +4,7 @@
 #pragma once
 
 #include "Command_fwd.hpp"
+#include "T_Execute_fwd.hpp"
 
 #include <memory>
 #include <unordered_set>

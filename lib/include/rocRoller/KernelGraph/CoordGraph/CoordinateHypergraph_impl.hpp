@@ -2,6 +2,8 @@
 
 #include "CoordinateHypergraph.hpp"
 #include "EdgeVisitor.hpp"
+#include "Graph/Hypergraph.hpp"
+#include <vector>
 
 namespace rocRoller
 {

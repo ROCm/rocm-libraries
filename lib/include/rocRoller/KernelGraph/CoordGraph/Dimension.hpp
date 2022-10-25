@@ -19,22 +19,17 @@ namespace rocRoller
 
         struct BaseDimension
         {
-            bool                      output;
             Expression::ExpressionPtr size, stride;
 
-            BaseDimension(bool output = false)
+            BaseDimension()
                 : size(nullptr)
                 , stride(nullptr)
-                , output(output)
             {
             }
 
-            BaseDimension(Expression::ExpressionPtr size,
-                          Expression::ExpressionPtr stride,
-                          bool                      output = false)
+            BaseDimension(Expression::ExpressionPtr size, Expression::ExpressionPtr stride)
                 : size(size)
                 , stride(stride)
-                , output(output)
             {
             }
 
@@ -64,11 +59,10 @@ namespace rocRoller
              * Create an Adhoc dimension with a specific name,
              * size and stride.
              */
-            Adhoc(std::string               name,
+            Adhoc(std::string const&        name,
                   Expression::ExpressionPtr size,
-                  Expression::ExpressionPtr stride,
-                  bool                      output = false)
-                : BaseDimension(size, stride, output)
+                  Expression::ExpressionPtr stride)
+                : BaseDimension(size, stride)
                 , m_name(name)
             {
                 m_hash = std::hash<std::string>()(m_name);
@@ -78,8 +72,8 @@ namespace rocRoller
              * Create an Adhoc dimension with a specific name and
              * command tag.
              */
-            Adhoc(std::string name, bool output = false)
-                : Adhoc(name, nullptr, nullptr, output)
+            Adhoc(std::string const& name)
+                : Adhoc(name, nullptr, nullptr)
             {
             }
 
@@ -102,17 +96,16 @@ namespace rocRoller
         {
             int dim;
 
-            SubDimension(int                       dim,
+            SubDimension(int const                 dim,
                          Expression::ExpressionPtr size,
-                         Expression::ExpressionPtr stride,
-                         bool                      output = false)
-                : BaseDimension(size, stride, output)
+                         Expression::ExpressionPtr stride)
+                : BaseDimension(size, stride)
                 , dim(dim)
             {
             }
 
-            SubDimension(int dim = 0, bool output = false)
-                : BaseDimension(output)
+            SubDimension(int const dim = 0)
+                : BaseDimension()
                 , dim(dim)
             {
             }
@@ -135,8 +128,8 @@ namespace rocRoller
         {
             using BaseDimension::BaseDimension;
 
-            User(std::string name, bool output = false)
-                : BaseDimension(output)
+            User(std::string const& name)
+                : BaseDimension()
                 , m_argument_name(name)
             {
             }
@@ -160,22 +153,7 @@ namespace rocRoller
          */
         struct Linear : public BaseDimension
         {
-            Linear()
-                : BaseDimension(false)
-            {
-            }
-
-            Linear(bool output)
-                : BaseDimension(output)
-            {
-            }
-
-            Linear(Expression::ExpressionPtr size,
-                   Expression::ExpressionPtr stride,
-                   bool                      output = false)
-                : BaseDimension(size, stride, output)
-            {
-            }
+            using BaseDimension::BaseDimension;
 
             virtual std::string name() const override
             {
@@ -217,8 +195,8 @@ namespace rocRoller
          */
         struct Workgroup : public SubDimension
         {
-            Workgroup(int dim = 0, bool output = false)
-                : SubDimension(dim, output)
+            Workgroup(int const dim = 0)
+                : SubDimension(dim)
             {
             }
 
@@ -241,8 +219,8 @@ namespace rocRoller
          */
         struct Workitem : public SubDimension
         {
-            Workitem(int dim = 0, Expression::ExpressionPtr size = nullptr, bool output = false)
-                : SubDimension(dim, size, Expression::literal(1u), output)
+            Workitem(int const dim = 0, Expression::ExpressionPtr size = nullptr)
+                : SubDimension(dim, size, Expression::literal(1u))
             {
             }
 
@@ -294,11 +272,11 @@ namespace rocRoller
         struct Unroll : public BaseDimension
         {
             Unroll()
-                : BaseDimension(false)
+                : BaseDimension()
             {
             }
 
-            Unroll(uint usize)
+            Unroll(uint const usize)
                 : BaseDimension(nullptr, nullptr)
             {
                 size   = rocRoller::Expression::literal(usize);
@@ -361,7 +339,7 @@ namespace rocRoller
              * Construct MacroTile dimension with deferred rank etc.
              */
             MacroTile()
-                : BaseDimension(false)
+                : BaseDimension()
                 , rank(0)
                 , memoryType(MemoryType::None)
                 , layoutType(LayoutType::None)
@@ -372,8 +350,8 @@ namespace rocRoller
              * Construct MacroTile dimension with deferred sizes and
              * memory type.
              */
-            MacroTile(int rank, bool output = false)
-                : BaseDimension(output)
+            MacroTile(int const rank)
+                : BaseDimension()
                 , rank(rank)
                 , memoryType(MemoryType::None)
                 , layoutType(LayoutType::None)
@@ -384,11 +362,10 @@ namespace rocRoller
              * Construct MacroTile dimension with fully specified sizes
              * and memory type (ie, LDS vs VGPR).
              */
-            MacroTile(std::vector<int> sizes,
-                      MemoryType       memoryType,
-                      std::vector<int> subTileSizes = {},
-                      bool             output       = false)
-                : BaseDimension(output)
+            MacroTile(std::vector<int> const& sizes,
+                      MemoryType const        memoryType,
+                      std::vector<int> const& subTileSizes = {})
+                : BaseDimension()
                 , rank(sizes.size())
                 , sizes(sizes)
                 , memoryType(memoryType)
@@ -403,11 +380,10 @@ namespace rocRoller
              *
              * Memory type is WAVE.
              */
-            MacroTile(std::vector<int> sizes,
-                      LayoutType       layoutType,
-                      std::vector<int> subTileSizes = {},
-                      bool             output       = false)
-                : BaseDimension(output)
+            MacroTile(std::vector<int> const& sizes,
+                      LayoutType const        layoutType,
+                      std::vector<int> const& subTileSizes = {})
+                : BaseDimension()
                 , rank(sizes.size())
                 , sizes(sizes)
                 , memoryType(MemoryType::WAVE)
@@ -425,12 +401,12 @@ namespace rocRoller
             /**
              * Return MacroTileNumber cooresponding to sub-dimension `sdim` of this tile.
              */
-            MacroTileNumber tileNumber(int sdim, bool output = false) const;
+            MacroTileNumber tileNumber(int sdim) const;
 
             /**
              * Return MacroTileIndex cooresponding to sub-dimension `sdim` of this tile.
              */
-            MacroTileIndex tileIndex(int sdim, bool output = false) const;
+            MacroTileIndex tileIndex(int sdim) const;
 
             /**
              * Return total number of elements.
@@ -490,8 +466,8 @@ namespace rocRoller
              * Construct ThreadTile dimension with fully specified sizes
              * and memory type (ie, LDS vs VGPR).
              */
-            ThreadTile(std::vector<int> sizes, bool output = false)
-                : BaseDimension(output)
+            ThreadTile(std::vector<int> const& sizes)
+                : BaseDimension()
                 , rank(sizes.size())
                 , sizes(sizes)
             {
@@ -505,12 +481,12 @@ namespace rocRoller
             /**
              * Return ThreadTileNumber cooresponding to sub-dimension `sdim` of this tile.
              */
-            ThreadTileNumber tileNumber(int sdim, bool output = false) const;
+            ThreadTileNumber tileNumber(int const sdim) const;
 
             /**
              * Return ThreadTileIndex cooresponding to sub-dimension `sdim` of this tile.
              */
-            ThreadTileIndex tileIndex(int sdim, bool output = false) const;
+            ThreadTileIndex tileIndex(int const sdim) const;
         };
 
         /**
@@ -554,7 +530,7 @@ namespace rocRoller
              * Construct WaveTile dimension with deferred rank and size.
              */
             WaveTile()
-                : BaseDimension(false)
+                : BaseDimension()
                 , rank(0)
                 , layout(LayoutType::None)
             {
@@ -563,8 +539,8 @@ namespace rocRoller
             /**
              * Construct WaveTile dimension with deferred size and layout
              */
-            WaveTile(int rank, bool output = false)
-                : BaseDimension(output)
+            WaveTile(int const rank)
+                : BaseDimension()
                 , rank(rank)
                 , layout(LayoutType::None)
             {
@@ -573,9 +549,8 @@ namespace rocRoller
             /**
              * Construct WaveTile dimension with fully specified sizes.
              */
-            WaveTile(std::vector<int> sizes, LayoutType layout, bool output = false)
-                : BaseDimension(
-                    Expression::literal(product(sizes)), Expression::literal(1u), output)
+            WaveTile(std::vector<int> const& sizes, LayoutType const layout)
+                : BaseDimension(Expression::literal(product(sizes)), Expression::literal(1u))
                 , rank(sizes.size())
                 , sizes(sizes)
                 , layout(layout)
@@ -590,12 +565,12 @@ namespace rocRoller
             /**
              * Return WaveTileNumber cooresponding to sub-dimension `sdim` of this tile.
              */
-            WaveTileNumber tileNumber(int sdim, bool output = false) const;
+            WaveTileNumber tileNumber(int const sdim) const;
 
             /**
              * Return WaveTileIndex cooresponding to sub-dimension `sdim` of this tile.
              */
-            WaveTileIndex tileIndex(int sdim, bool output = false) const;
+            WaveTileIndex tileIndex(int const sdim) const;
 
             /**
              * Return total number of elements.

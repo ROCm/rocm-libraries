@@ -59,18 +59,18 @@ namespace rocRoller
         template <typename T>
         int Hypergraph<Node, Edge, Hyper>::addElement(T&& element)
         {
-            int index = m_nextIndex;
-            m_nextIndex++;
-            addElement(index, std::forward<T>(element));
-
+            int index = m_nextIndex++;
+            AssertFatal(m_elements.find(index) == m_elements.end());
+            m_elements[index] = std::forward<T>(element);
+            clearCache();
             return index;
         }
 
         template <typename Node, typename Edge, bool Hyper>
         template <typename T>
-        void Hypergraph<Node, Edge, Hyper>::addElement(int index, T&& element)
+        void Hypergraph<Node, Edge, Hyper>::setElement(int index, T&& element)
         {
-            AssertFatal(m_elements.find(index) == m_elements.end());
+            AssertFatal(m_elements.find(index) != m_elements.end());
 
             m_elements[index] = std::forward<T>(element);
             clearCache();
@@ -495,6 +495,16 @@ namespace rocRoller
         }
 
         template <typename Node, typename Edge, bool Hyper>
+        inline Generator<int> Hypergraph<Node, Edge, Hyper>::topologicalSort() const
+        {
+            std::map<int, bool> visited;
+
+            auto start = roots().template to<std::vector>();
+            auto end   = leaves().template to<std::vector>();
+            co_yield path<Graph::Direction::Downstream>(start, end, visited);
+        }
+
+        template <typename Node, typename Edge, bool Hyper>
         std::string Hypergraph<Node, Edge, Hyper>::toDOT(std::string prefix, bool standalone) const
         {
             std::ostringstream msg;
@@ -555,7 +565,7 @@ namespace rocRoller
                     {
                         if(!first)
                             msg << "->";
-                        msg << '"' << idx << '"';
+                        msg << '"' << prefix << idx << '"';
                         first = false;
                     }
                     msg << "[style=invis]\nrankdir=LR\n}\n";

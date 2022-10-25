@@ -24,8 +24,8 @@ namespace rocRollerTest
 
         // Control Graph
         int kernel_index = kgraph.control.addElement(Kernel());
-        int loadA_index  = kgraph.control.addElement(LoadLinear());
-        int loadB_index  = kgraph.control.addElement(LoadLinear());
+        int loadA_index  = kgraph.control.addElement(LoadLinear(DataType::Float));
+        int loadB_index  = kgraph.control.addElement(LoadLinear(DataType::Float));
         int body1_index  = kgraph.control.addElement(Body(), {kernel_index}, {loadA_index});
         int body2_index  = kgraph.control.addElement(Body(), {kernel_index}, {loadB_index});
 
@@ -70,41 +70,41 @@ namespace rocRollerTest
         int dataflow5_index = kgraph.coordinates.addElement(
             DataFlow(), {linear3_index, linear4_index}, {linear5i_index});
 
-        int linear5o_index = kgraph.coordinates.addElement(Linear(true));
+        int linear5o_index = kgraph.coordinates.addElement(Linear());
         int makeoutput1_index
             = kgraph.coordinates.addElement(MakeOutput(), {linear5i_index}, {linear5o_index});
-        int sd5o_index   = kgraph.coordinates.addElement(SubDimension(0, true));
+        int sd5o_index   = kgraph.coordinates.addElement(SubDimension(0));
         int split3_index = kgraph.coordinates.addElement(Split(), {linear5o_index}, {sd5o_index});
-        int u5o_index    = kgraph.coordinates.addElement(User("", true));
+        int u5o_index    = kgraph.coordinates.addElement(User(""));
         int join1_index  = kgraph.coordinates.addElement(Join(), {sd5o_index}, {u5o_index});
         int dataflow6_index
             = kgraph.coordinates.addElement(DataFlow(), {linear5i_index}, {u5o_index});
 
         std::string expected = R".(
 	    digraph {
-		"coord1"[label="User{NA, i}(1)"];
-		"coord2"[label="SubDimension{0, NA, i}(2)"];
+		"coord1"[label="User{NA}(1)"];
+		"coord2"[label="SubDimension{0, NA}(2)"];
 		"coord3"[label="Split(3)",shape=box];
-		"coord4"[label="Linear{NA, i}(4)"];
+		"coord4"[label="Linear{NA}(4)"];
 		"coord5"[label="Flatten(5)",shape=box];
 		"coord6"[label="DataFlow(6)",shape=box];
-		"coord7"[label="User{NA, i}(7)"];
-		"coord8"[label="SubDimension{0, NA, i}(8)"];
+		"coord7"[label="User{NA}(7)"];
+		"coord8"[label="SubDimension{0, NA}(8)"];
 		"coord9"[label="Split(9)",shape=box];
-		"coord10"[label="Linear{NA, i}(10)"];
+		"coord10"[label="Linear{NA}(10)"];
 		"coord11"[label="Flatten(11)",shape=box];
 		"coord12"[label="DataFlow(12)",shape=box];
-		"coord13"[label="Linear{NA, i}(13)"];
+		"coord13"[label="Linear{NA}(13)"];
 		"coord14"[label="DataFlow(14)",shape=box];
-		"coord15"[label="Linear{NA, i}(15)"];
+		"coord15"[label="Linear{NA}(15)"];
 		"coord16"[label="DataFlow(16)",shape=box];
-		"coord17"[label="Linear{NA, i}(17)"];
+		"coord17"[label="Linear{NA}(17)"];
 		"coord18"[label="DataFlow(18)",shape=box];
-		"coord19"[label="Linear{NA, o}(19)"];
+		"coord19"[label="Linear{NA}(19)"];
 		"coord20"[label="MakeOutput(20)",shape=box];
-		"coord21"[label="SubDimension{0, NA, o}(21)"];
+		"coord21"[label="SubDimension{0, NA}(21)"];
 		"coord22"[label="Split(22)",shape=box];
-		"coord23"[label="User{NA, o}(23)"];
+		"coord23"[label="User{NA}(23)"];
 		"coord24"[label="Join(24)",shape=box];
 		"coord25"[label="DataFlow(25)",shape=box];
 		"coord1" -> "coord3"
@@ -177,7 +177,8 @@ namespace rocRollerTest
 		"cntrl12" -> "cntrl11"
 		"cntrl13" -> "cntrl11"
 		"cntrl15" -> "cntrl14"
-	    } }
+	    }
+            }
         ).";
 
         EXPECT_EQ(NormalizedSource(expected), NormalizedSource(kgraph.toDOT()));

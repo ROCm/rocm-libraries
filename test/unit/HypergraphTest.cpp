@@ -447,4 +447,29 @@ namespace rocRollerTest
         // Nodes to nodes
         EXPECT_THROW({ auto sd2 = g.addElement(TestSubDimension{}, {u0}, {}); }, FatalError);
     }
+
+    TEST(HypergraphTest, TopoSort)
+    {
+        myHypergraph g;
+
+        auto u1 = g.addElement(TestUser{});
+
+        auto sd2 = g.addElement(TestSubDimension{});
+        auto sp3 = g.addElement(TestSplit{}, {u1}, {sd2});
+
+        auto sd4 = g.addElement(TestSubDimension{});
+        auto sp5 = g.addElement(TestSplit{}, {u1}, {sd4});
+
+        auto sd6 = g.addElement(TestSubDimension{});
+        auto sp7 = g.addElement(TestSplit{}, {sd4}, {sd6});
+
+        auto sd8 = g.addElement(TestSubDimension{});
+        auto sp9 = g.addElement(TestSplit{}, {sd2, sd6}, {sd8});
+
+        auto topo = g.topologicalSort().to<std::vector>();
+        EXPECT_EQ(topo, std::vector<int>({1, 3, 2, 5, 4, 7, 6, 9, 8}));
+
+        auto bfs = g.breadthFirstVisit(*g.roots().begin()).to<std::vector>();
+        EXPECT_EQ(bfs, std::vector<int>({1, 3, 5, 2, 4, 9, 7, 8, 6}));
+    }
 }

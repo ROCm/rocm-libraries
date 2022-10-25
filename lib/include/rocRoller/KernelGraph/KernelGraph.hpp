@@ -7,6 +7,8 @@
 #include "ControlGraph/ControlGraph.hpp"
 #include "CoordinateTransform/HyperGraph.hpp"
 
+#include "KernelHypergraph.hpp"
+
 namespace rocRoller
 {
     namespace KernelGraph
@@ -32,6 +34,9 @@ namespace rocRoller
          */
         KernelGraph translate(std::shared_ptr<Command>);
 
+        // Delete above and rename this to 'translate' when graph rearch complete
+        KernelHypergraph translate2(std::shared_ptr<Command>);
+
         /**
          * Rewrite KernelGraph to distribute linear packets onto GPU.
          *
@@ -39,6 +44,9 @@ namespace rocRoller
          * workgroups and wavefronts, and then operated on.
          */
         KernelGraph lowerLinear(KernelGraph, ContextPtr);
+
+        // Delete above when graph rearch complete
+        KernelHypergraph lowerLinear(KernelHypergraph, ContextPtr);
 
         /**
          * Rewrite KernelGraph to additionally distribute linear dimensions onto a For loop.
