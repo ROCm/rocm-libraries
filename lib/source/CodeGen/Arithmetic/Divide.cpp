@@ -153,6 +153,7 @@ namespace rocRoller
         co_yield_(Instruction("v_sub_u32_e32", {dest}, {v_6, v_1}, {}, ""));
     }
 
+    // TODO: Investigate if stricter locking/unlocking yields better performance
     template <>
     Generator<Instruction> DivideGenerator<Register::Type::Scalar, DataType::Int64>::generate(
         Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
@@ -166,6 +167,7 @@ namespace rocRoller
         //
         // Generated code was modified to use the provided dest, lhs and rhs registers and
         // to save the result in the dest register instead of memory.
+        co_yield Instruction::Lock(Scheduling::Dependency::SCC, "Start of Divide64");
         co_yield describeOpArgs("dest", dest, "lhs", lhs, "rhs", rhs);
         Register::ValuePtr l0, l1, r0, r1;
         co_yield get2DwordsScalar(l0, l1, lhs);
@@ -502,8 +504,10 @@ namespace rocRoller
                               {v_8, Register::Value::Literal(0)},
                               {},
                               "Move value"));
+        co_yield(Instruction::Unlock("End of Divide64"));
     }
 
+    // TODO: Investigate if stricter locking/unlocking yields better performance
     template <>
     Generator<Instruction> DivideGenerator<Register::Type::Vector, DataType::Int64>::generate(
         Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
@@ -518,7 +522,7 @@ namespace rocRoller
         //
         // Generated code was modified to use the provided dest, lhs and rhs registers and
         // to save the result in the dest register instead of memory.
-
+        co_yield(Instruction::Lock(Scheduling::Dependency::SCC, "Start of Divide64"));
         co_yield describeOpArgs("dest", dest, "lhs", lhs, "rhs", rhs);
 
         Register::ValuePtr l0, l1, r0, r1;
@@ -886,5 +890,6 @@ namespace rocRoller
         co_yield_(Instruction::Label(label_22));
         co_yield_(
             Instruction("s_or_b64", {m_context->getExec()}, {m_context->getExec(), s_5}, {}, ""));
+        co_yield(Instruction::Unlock("End of Divide64"));
     }
 }

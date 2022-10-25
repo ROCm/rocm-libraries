@@ -79,11 +79,15 @@ namespace rocRoller
 
         co_yield Register::AllocateIfNeeded(dest);
 
-        co_yield_(Instruction(
-            "s_add_u32", {dest->subset({0})}, {l0, r0}, {}, "least significant half; sets scc"));
+        co_yield_(
+            Instruction(
+                "s_add_u32", {dest->subset({0})}, {l0, r0}, {}, "least significant half; sets scc")
+                .lock(Scheduling::Dependency::SCC));
 
-        co_yield_(Instruction(
-            "s_addc_u32", {dest->subset({1})}, {l1, r1}, {}, "most significant half; uses scc"));
+        co_yield_(
+            Instruction(
+                "s_addc_u32", {dest->subset({1})}, {l1, r1}, {}, "most significant half; uses scc")
+                .unlock());
     }
 
     template <>

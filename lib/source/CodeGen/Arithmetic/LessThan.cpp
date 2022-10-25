@@ -34,11 +34,18 @@ namespace rocRoller
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
 
+        if(dst != nullptr && !dst->isSCC())
+        {
+            co_yield(Instruction::Lock(Scheduling::Dependency::SCC,
+                                       "Start Compare writing to non-SCC dest"));
+        }
+
         co_yield_(Instruction("s_cmp_lt_i32", {}, {lhs, rhs}, {}, ""));
 
         if(dst != nullptr && !dst->isSCC())
         {
             co_yield m_context->copier()->copy(dst, m_context->getSCC(), "");
+            co_yield(Instruction::Unlock("End Compare writing to non-SCC dest"));
         }
     }
 
