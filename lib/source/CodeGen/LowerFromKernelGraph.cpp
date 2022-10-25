@@ -171,11 +171,18 @@ namespace rocRoller
 
                     // Generate code for all the nodes we found.
 
+                    std::vector<Generator<Instruction>> generators;
+                    generators.reserve(nodes.size());
+
                     for(auto const& tag : nodes)
                     {
                         auto op = m_graph.control.getOperation(tag);
-                        co_yield (*this)(op, coords);
+                        generators.push_back(call(op, coords));
                     }
+
+                    auto scheduler = Component::GetNew<Scheduling::Scheduler>(
+                        Scheduling::SchedulerProcedure::Sequential, m_context);
+                    co_yield (*scheduler)(generators);
 
                     // Add output nodes to candidates.
 
@@ -263,8 +270,8 @@ namespace rocRoller
                 co_yield generate(cset, coords);
             }
 
-            Generator<Instruction> operator()(ControlGraph::Operation const& operation,
-                                              Transformer const&             coords)
+            Generator<Instruction> call(ControlGraph::Operation operation,
+                                        Transformer const&      coords)
             {
                 auto opName = toString(operation);
                 co_yield Instruction::Comment(opName + " BEGIN");
