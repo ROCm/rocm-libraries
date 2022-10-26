@@ -12,41 +12,9 @@ namespace rocRoller
         concept CConstant = CIntegral<T> || std::floating_point<T>;
 
         template <CAssociativeBinary OP>
-        requires(CCommutativeBinary<OP>) struct AssociativeBinary
+        struct AssociativeBinary
         {
             ExpressionPtr m_lhs;
-
-            template <typename LHS, typename RHS>
-            requires(CConstant<LHS>&& CConstant<RHS>) ExpressionPtr operator()(LHS lhs, RHS rhs)
-            {
-                ExpressionPtr operation
-                    = std::make_shared<Expression>(OP{literal(lhs), literal(rhs)});
-                return simplify(operation);
-            }
-
-            template <typename LHS>
-            requires(CConstant<LHS>) ExpressionPtr operator()(LHS lhs, ExpressionPtr rhs)
-            {
-                return nullptr;
-            }
-
-            template <typename LHS, typename RHS>
-            requires(CConstant<LHS> && !CConstant<RHS>) ExpressionPtr operator()(LHS lhs, RHS rhs)
-            {
-                return nullptr;
-            }
-
-            template <typename LHS, typename RHS>
-            requires(!CConstant<LHS> && CConstant<RHS>) ExpressionPtr operator()(LHS lhs, RHS rhs)
-            {
-                return (*this)(rhs, lhs);
-            }
-
-            template <typename LHS, typename RHS>
-            requires(!CConstant<LHS> && !CConstant<RHS>) ExpressionPtr operator()(LHS lhs, RHS rhs)
-            {
-                return nullptr;
-            }
 
             template <typename RHS>
             ExpressionPtr operator()(RHS rhs)
@@ -55,18 +23,29 @@ namespace rocRoller
                 {
                     auto lhs_op = std::get<OP>(*m_lhs);
 
-                    ExpressionPtr simple
-                        = std::make_shared<Expression>(OP{lhs_op.rhs, literal(rhs)});
+                    bool eval_lhs = evaluationTimes(lhs_op.lhs)[EvaluationTime::Translate];
+                    bool eval_rhs = evaluationTimes(lhs_op.rhs)[EvaluationTime::Translate];
 
                     OP operation;
-                    operation.lhs = lhs_op.lhs;
-                    operation.rhs = simplify(simple);
+                    if(CCommutativeBinary<OP> && eval_lhs)
+                    {
+                        operation.lhs
+                            = simplify(std::make_shared<Expression>(OP{lhs_op.lhs, literal(rhs)}));
+                        operation.rhs = lhs_op.rhs;
+                    }
+                    else
+                    {
+                        operation.lhs = lhs_op.lhs;
+                        operation.rhs
+                            = simplify(std::make_shared<Expression>(OP{lhs_op.rhs, literal(rhs)}));
+                    }
+
                     return std::make_shared<Expression>(operation);
                 }
                 return nullptr;
             }
 
-            ExpressionPtr operator()(ExpressionPtr lhs, CommandArgumentValue rhs)
+            ExpressionPtr call(ExpressionPtr lhs, CommandArgumentValue rhs)
             {
                 m_lhs = lhs;
                 return visit(*this, rhs);
@@ -76,10 +55,10 @@ namespace rocRoller
         struct AssociativeExpressionVisitor
         {
             template <CAssociativeBinary Expr>
-            requires(CCommutativeBinary<Expr>) ExpressionPtr operator()(Expr const& expr) const
+            ExpressionPtr operator()(Expr const& expr) const
             {
-                auto lhs = (*this)(expr.lhs);
-                auto rhs = (*this)(expr.rhs);
+                auto lhs = call(expr.lhs);
+                auto rhs = call(expr.rhs);
 
                 bool eval_lhs = evaluationTimes(lhs)[EvaluationTime::Translate];
                 bool eval_rhs = evaluationTimes(rhs)[EvaluationTime::Translate];
@@ -89,11 +68,15 @@ namespace rocRoller
                 ExpressionPtr rv;
 
                 if(eval_lhs && eval_rhs)
-                    rv = std::visit(associativeBinary, evaluate(lhs), evaluate(rhs));
-                else if(eval_lhs)
-                    rv = associativeBinary(rhs, evaluate(lhs));
+                    rv = literal(evaluate(std::make_shared<Expression>(Expr{lhs, rhs})));
+                else if(CCommutativeBinary<Expr> && eval_lhs)
+                {
+                    rv = associativeBinary.call(rhs, evaluate(lhs));
+                }
                 else if(eval_rhs)
-                    rv = associativeBinary(lhs, evaluate(rhs));
+                {
+                    rv = associativeBinary.call(lhs, evaluate(rhs));
+                }
 
                 if(rv != nullptr)
                     return rv;
@@ -104,20 +87,20 @@ namespace rocRoller
             template <CBinary Expr>
             requires(!CAssociativeBinary<Expr>) ExpressionPtr operator()(Expr const& expr) const
             {
-                return std::make_shared<Expression>(Expr({(*this)(expr.lhs), (*this)(expr.rhs)}));
+                return std::make_shared<Expression>(Expr({call(expr.lhs), call(expr.rhs)}));
             }
 
             template <CTernary Expr>
             ExpressionPtr operator()(Expr const& expr) const
             {
                 return std::make_shared<Expression>(
-                    Expr({(*this)(expr.lhs), (*this)(expr.r1hs), (*this)(expr.r2hs)}));
+                    Expr({call(expr.lhs), call(expr.r1hs), call(expr.r2hs)}));
             }
 
             template <CUnary Expr>
             ExpressionPtr operator()(Expr const& expr) const
             {
-                return std::make_shared<Expression>(Expr({(*this)(expr.arg)}));
+                return std::make_shared<Expression>(Expr({call(expr.arg)}));
             }
 
             ExpressionPtr operator()(MatrixMultiply const& expr) const
@@ -131,7 +114,7 @@ namespace rocRoller
                 return std::make_shared<Expression>(expr);
             }
 
-            ExpressionPtr operator()(ExpressionPtr expr) const
+            ExpressionPtr call(ExpressionPtr expr) const
             {
                 if(!expr)
                     return expr;
@@ -143,7 +126,7 @@ namespace rocRoller
         ExpressionPtr fuseAssociative(ExpressionPtr expr)
         {
             auto visitor = AssociativeExpressionVisitor();
-            return visitor(expr);
+            return visitor.call(expr);
         }
 
     }

@@ -78,8 +78,8 @@ TEST_F(ExpressionTransformationTest, FuseAssociative)
     EXPECT_EQ(Expression::toString(fuseAssociative(simplify((one & a) & v))),
               "BitwiseAnd(1i, v0:I)");
     EXPECT_EQ(Expression::toString(fuseAssociative(a & (v & one))), "BitwiseAnd(v0:I, 1i)");
-    // EXPECT_EQ(Expression::toString(fuseAssociative((one & v) & a)), "BitwiseAnd(v0:I, 1i)"); // FIXME: fuseAssociative should condense this case
-    // EXPECT_EQ(Expression::toString(fuseAssociative(a & (one & v))), "BitwiseAnd(v0:I, 1i)"); // FIXME: fuseAssociative should condense this case
+    EXPECT_EQ(Expression::toString(fuseAssociative((one & v) & a)), "BitwiseAnd(1i, v0:I)");
+    EXPECT_EQ(Expression::toString(fuseAssociative(a & (one & v))), "BitwiseAnd(1i, v0:I)");
     EXPECT_EQ(Expression::toString(fuseAssociative(((((v & one) & a) & a) & a) & a)),
               "BitwiseAnd(v0:I, 1i)");
     EXPECT_EQ(Expression::toString(fuseAssociative(((((v & one) & a) + a) & a) & one)),
