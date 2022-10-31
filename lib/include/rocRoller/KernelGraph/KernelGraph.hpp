@@ -69,7 +69,7 @@ namespace rocRoller
          * translation time.  To specify these attributes, call
          * `setDimension`.
          */
-        KernelGraph lowerTile(KernelGraph, ContextPtr);
+        KernelGraph lowerTile(KernelGraph, std::shared_ptr<CommandParameters>, ContextPtr);
 
         /**
          * Rewrite KernelGraphs to make sure no more CommandArgument

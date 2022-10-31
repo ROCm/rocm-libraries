@@ -45,6 +45,9 @@ class GEMM:
     alpha: float = 2.0
     beta: float = 0.5
 
+    workgroup_size_x: int = 64 * 2
+    workgroup_size_y: int = 2
+
     type_A: str = "float"
     type_B: str = "float"
     type_C: str = "float"
@@ -82,6 +85,8 @@ class GEMMRun(GEMM):
             "--mac_m=" + str(self.mac_m),
             "--mac_n=" + str(self.mac_n),
             "--mac_k=" + str(self.mac_k),
+            "--workgroup_size_x=" + str(self.workgroup_size_x),
+            "--workgroup_size_y=" + str(self.workgroup_size_y),
             "--alpha=" + str(self.alpha),
             "--beta=" + str(self.beta),
             "--type_A=" + str(self.type_A),

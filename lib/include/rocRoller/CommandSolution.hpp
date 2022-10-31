@@ -21,6 +21,7 @@ namespace rocRoller
     class CommandParameters
     {
     public:
+        CommandParameters();
         /**
          * Set (reset) a dimensions properties.
          */
@@ -51,12 +52,29 @@ namespace rocRoller
         void setManualWorkitemCount(std::array<Expression::ExpressionPtr, 3> const&);
         std::optional<std::array<Expression::ExpressionPtr, 3>> getManualWorkitemCount() const;
 
+        /**
+         * @brief Set the number of wave tiles to execute within a workgroup
+         *
+         * @param x Number of wave tiles to execute in the x dimension
+         * @param y Number of wave tiles to execute in the y dimension
+         */
+        void setWaveTilesPerWavefront(unsigned int x = 1, unsigned int y = 1);
+
+        /**
+         * @brief Get the number of wave tiles to execute within a workgroup
+         *
+         * @return std::vector<unsigned int>
+         */
+        std::vector<unsigned int> getWaveTilesPerWorkgroup() const;
+
     private:
         std::vector<KernelGraph::CoordinateTransform::Dimension> m_dimInfo;
         std::optional<std::array<unsigned int, 3>>               m_workgroupSize;
         std::optional<std::array<Expression::ExpressionPtr, 3>>  m_workitemCount;
 
         int m_kernelDimension = 0;
+
+        std::vector<unsigned int> m_waveTilesPerWorkgroup;
     };
 
     class CommandKernel
@@ -73,9 +91,11 @@ namespace rocRoller
          * Create a CommandKernel based on a Command object. This will generate
          * a kernel and allow the launchKernel method to be called.
          */
+        CommandKernel(std::shared_ptr<Command> command, std::string name);
+
         CommandKernel(std::shared_ptr<Command>           command,
                       std::string                        name,
-                      std::shared_ptr<CommandParameters> params = nullptr);
+                      std::shared_ptr<CommandParameters> params);
 
         CommandKernel(std::shared_ptr<Command>        command,
                       std::shared_ptr<Context>        ctx,

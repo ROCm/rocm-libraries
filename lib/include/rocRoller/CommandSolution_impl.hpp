@@ -15,6 +15,11 @@
 
 namespace rocRoller
 {
+    inline CommandParameters::CommandParameters()
+        : m_waveTilesPerWorkgroup({1, 1})
+    {
+    }
+
     inline void CommandParameters::setDimensionInfo(KernelGraph::CoordinateTransform::Dimension dim)
     {
         m_dimInfo.push_back(dim);
@@ -57,6 +62,17 @@ namespace rocRoller
         CommandParameters::getManualWorkitemCount() const
     {
         return m_workitemCount;
+    }
+
+    inline void CommandParameters::setWaveTilesPerWavefront(unsigned int x, unsigned int y)
+    {
+        m_waveTilesPerWorkgroup[0] = x;
+        m_waveTilesPerWorkgroup[1] = y;
+    }
+
+    inline std::vector<unsigned int> CommandParameters::getWaveTilesPerWorkgroup() const
+    {
+        return m_waveTilesPerWorkgroup;
     }
 
     inline KernelArguments CommandKernel::getKernelArguments(RuntimeArguments const& args)
@@ -116,12 +132,21 @@ namespace rocRoller
     {
     }
 
+    inline CommandKernel::CommandKernel(std::shared_ptr<Command> command, std::string name)
+        : m_command(command)
+        , m_parameters(std::make_shared<CommandParameters>())
+    {
+        generateKernel(name);
+    }
+
     inline CommandKernel::CommandKernel(std::shared_ptr<Command>           command,
                                         std::string                        name,
                                         std::shared_ptr<CommandParameters> parameters)
         : m_command(command)
         , m_parameters(parameters)
     {
+        AssertFatal(m_parameters);
+
         generateKernel(name);
     }
 
@@ -131,6 +156,7 @@ namespace rocRoller
         : m_command(command)
         , m_context(context)
         , m_kernelGraph(kernelGraph)
+        , m_parameters(std::make_shared<CommandParameters>())
     {
         generateKernelSource();
         assembleKernel();
@@ -156,18 +182,18 @@ namespace rocRoller
         m_context = Context::ForDefaultHipDevice(name);
 
         // TODO: Determine the correct kernel dimensions
-        if(m_parameters && m_parameters->getManualKernelDimension() > 0)
+        if(m_parameters->getManualKernelDimension() > 0)
             m_context->kernel()->setKernelDimensions(m_parameters->getManualKernelDimension());
         else
             m_context->kernel()->setKernelDimensions(1);
 
         // TODO: Determine the correct work group size
-        if(m_parameters && m_parameters->getManualWorkgroupSize())
+        if(m_parameters->getManualWorkgroupSize())
             m_context->kernel()->setWorkgroupSize(*m_parameters->getManualWorkgroupSize());
         else
             m_context->kernel()->setWorkgroupSize({64, 1, 1});
 
-        if(m_parameters && m_parameters->getManualWorkitemCount())
+        if(m_parameters->getManualWorkitemCount())
             m_context->kernel()->setWorkitemCount(*m_parameters->getManualWorkitemCount());
         else
             m_context->kernel()->setWorkitemCount(m_command->createWorkItemCount());
@@ -179,19 +205,15 @@ namespace rocRoller
 
         m_kernelGraph = KernelGraph::translate(m_command);
         logger->debug("CommandKernel::generateKernel: post translate: {}", m_kernelGraph.toDOT());
-        if(m_parameters)
-        {
-            m_kernelGraph = updateParameters(m_kernelGraph, m_parameters);
-        }
+        m_kernelGraph = updateParameters(m_kernelGraph, m_parameters);
+
         m_kernelGraph = KernelGraph::lowerLinear(m_kernelGraph, m_context);
 
-        m_kernelGraph = KernelGraph::lowerTile(m_kernelGraph, m_context);
+        m_kernelGraph = KernelGraph::lowerTile(m_kernelGraph, m_parameters, m_context);
 
         m_kernelGraph = KernelGraph::cleanArguments(m_kernelGraph, m_context->kernel());
-        if(m_parameters)
-        {
-            m_kernelGraph = updateParameters(m_kernelGraph, m_parameters);
-        }
+
+        m_kernelGraph = updateParameters(m_kernelGraph, m_parameters);
     }
 
     inline void CommandKernel::generateKernelSource()

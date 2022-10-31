@@ -27,16 +27,8 @@ namespace GEMMDriverTest
     {
     };
 
-    template <typename T>
-    void basicGEMM(std::shared_ptr<Context> m_context,
-                   int                      wave_m,
-                   int                      wave_n,
-                   int                      wave_k,
-                   int                      wave_b,
-                   double                   acceptableError)
+    struct GEMMProblem
     {
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
-
         // D (MxN) = alpha * A (MxK) X B (KxN) + beta * C (MxN)
         int   M     = 512;
         int   N     = 512;
@@ -49,10 +41,56 @@ namespace GEMMDriverTest
         int mac_n = 64;
         int mac_k = 64;
 
+        // Wave tile size
+        int wave_m = 32;
+        int wave_n = 32;
+        int wave_k = 2;
+        int wave_b = 1;
+
+        // Workgroup size
+        uint wavefront_size   = 64;
+        uint workgroup_size_x = 2 * wavefront_size;
+        uint workgroup_size_y = 2;
+    };
+
+    template <typename T>
+    void basicGEMM(std::shared_ptr<Context> m_context,
+                   const GEMMProblem&       gemm,
+                   double                   acceptableError)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
+
+        // D (MxN) = alpha * A (MxK) X B (KxN) + beta * C (MxN)
+        int   M     = gemm.M;
+        int   N     = gemm.N;
+        int   K     = gemm.K;
+        float alpha = gemm.alpha;
+        float beta  = gemm.beta;
+
+        // output macro tile size
+        int mac_m = gemm.mac_m;
+        int mac_n = gemm.mac_n;
+        int mac_k = gemm.mac_k;
+
+        int wave_m = gemm.wave_m;
+        int wave_n = gemm.wave_n;
+        int wave_k = gemm.wave_k;
+        int wave_b = gemm.wave_b;
+
         AssertFatal(M % mac_m == 0, "MacroTile size mismatch (M)");
         AssertFatal(N % mac_n == 0, "MacroTile size mismatch (N)");
 
-        uint workgroup_size_x = 256;
+        AssertFatal(gemm.workgroup_size_x % gemm.wavefront_size == 0,
+                    "Workgroup Size X must be multiply of wave front size");
+
+        uint wavetile_per_wavefront_m
+            = gemm.wavefront_size * mac_m / wave_m / gemm.workgroup_size_x;
+        uint wavetile_per_wavefront_n = mac_n / wave_n / gemm.workgroup_size_y;
+
+        AssertFatal(mac_m % (wave_m * wavetile_per_wavefront_m) == 0, "WaveTile size mismatch (M)");
+        AssertFatal(mac_n % (wave_n * wavetile_per_wavefront_n) == 0, "WaveTile size mismatch (N)");
+
+        uint workgroup_size_x = gemm.workgroup_size_x * gemm.workgroup_size_y;
         uint workgroup_size_y = 1;
 
         // one macro tile per workgroup
@@ -142,6 +180,8 @@ namespace GEMMDriverTest
 
         auto params = std::make_shared<CommandParameters>();
         params->setManualKernelDimension(2);
+        // TODO: Calculate these values internally based on workgroup sizes.
+        params->setWaveTilesPerWavefront(wavetile_per_wavefront_m, wavetile_per_wavefront_n);
 
         auto mac_tile_0 = KernelGraph::CoordinateTransform::MacroTile( // A
             0,
@@ -188,27 +228,37 @@ namespace GEMMDriverTest
         params->setDimensionInfo(mac_tile_7);
         params->setDimensionInfo(mac_tile_8);
 
-        auto four = Expression::literal(4u);
-        auto two  = Expression::literal(2u);
-        auto one  = Expression::literal(1u);
+        auto one         = Expression::literal(1u);
+        auto wavefront_n = Expression::literal(static_cast<uint>(
+            mac_m * mac_n / wave_m / wave_n / wavetile_per_wavefront_m / wavetile_per_wavefront_n));
+        auto wavefront_nx
+            = Expression::literal(static_cast<uint>(mac_m / wave_m / wavetile_per_wavefront_m));
+        auto wavefront_ny
+            = Expression::literal(static_cast<uint>(mac_n / wave_n / wavetile_per_wavefront_n));
         params->setDimensionInfo(
-            KernelGraph::CoordinateTransform::Wavefront(0, -1, four, nullptr)); // A Load
-        params->setDimensionInfo(KernelGraph::CoordinateTransform::Wavefront(0, 0, two, nullptr));
-        params->setDimensionInfo(KernelGraph::CoordinateTransform::Wavefront(0, 1, two, nullptr));
+            KernelGraph::CoordinateTransform::Wavefront(0, -1, wavefront_n, nullptr)); // A Load
         params->setDimensionInfo(
-            KernelGraph::CoordinateTransform::Wavefront(1, -1, four, nullptr)); // B Load
-        params->setDimensionInfo(KernelGraph::CoordinateTransform::Wavefront(1, 0, two, nullptr));
-        params->setDimensionInfo(KernelGraph::CoordinateTransform::Wavefront(1, 1, two, nullptr));
+            KernelGraph::CoordinateTransform::Wavefront(0, 0, wavefront_nx, nullptr));
         params->setDimensionInfo(
-            KernelGraph::CoordinateTransform::Wavefront(2, -1, four, nullptr)); // C Load
-        params->setDimensionInfo(KernelGraph::CoordinateTransform::Wavefront(2, 0, two, nullptr));
-        params->setDimensionInfo(KernelGraph::CoordinateTransform::Wavefront(2, 1, two, nullptr));
+            KernelGraph::CoordinateTransform::Wavefront(0, 1, wavefront_ny, nullptr));
         params->setDimensionInfo(
-            KernelGraph::CoordinateTransform::Wavefront(8, -1, four, one, true)); // D
+            KernelGraph::CoordinateTransform::Wavefront(1, -1, wavefront_n, nullptr)); // B Load
         params->setDimensionInfo(
-            KernelGraph::CoordinateTransform::Wavefront(8, 0, two, nullptr, true));
+            KernelGraph::CoordinateTransform::Wavefront(1, 0, wavefront_nx, nullptr));
         params->setDimensionInfo(
-            KernelGraph::CoordinateTransform::Wavefront(8, 1, two, nullptr, true));
+            KernelGraph::CoordinateTransform::Wavefront(1, 1, wavefront_ny, nullptr));
+        params->setDimensionInfo(
+            KernelGraph::CoordinateTransform::Wavefront(2, -1, wavefront_n, nullptr)); // C Load
+        params->setDimensionInfo(
+            KernelGraph::CoordinateTransform::Wavefront(2, 0, wavefront_nx, nullptr));
+        params->setDimensionInfo(
+            KernelGraph::CoordinateTransform::Wavefront(2, 1, wavefront_ny, nullptr));
+        params->setDimensionInfo(
+            KernelGraph::CoordinateTransform::Wavefront(8, -1, wavefront_n, one, true)); // D
+        params->setDimensionInfo(
+            KernelGraph::CoordinateTransform::Wavefront(8, 0, wavefront_nx, nullptr, true));
+        params->setDimensionInfo(
+            KernelGraph::CoordinateTransform::Wavefront(8, 1, wavefront_ny, nullptr, true));
 
         params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
         params->setManualWorkitemCount({NX, NY, NZ});
@@ -233,11 +283,74 @@ namespace GEMMDriverTest
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMM)
     {
-        basicGEMM<float>(m_context, 32, 32, 2, 1, 1.e-6);
+        GEMMProblem gemm;
+        basicGEMM<float>(m_context, gemm, 1.e-6);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16)
     {
-        basicGEMM<Half>(m_context, 32, 32, 8, 1, 2.e-5);
+        GEMMProblem gemm;
+        gemm.wave_k = 8;
+        basicGEMM<Half>(m_context, gemm, 2.e-5);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Unroll2x4)
+    {
+        GEMMProblem gemm;
+
+        gemm.M = 256;
+        gemm.N = 512;
+        gemm.K = 16;
+
+        gemm.mac_m = 128;
+        gemm.mac_n = 256;
+        gemm.mac_k = 16;
+
+        gemm.wave_k = 8;
+
+        gemm.workgroup_size_x = 2 * gemm.wavefront_size;
+        gemm.workgroup_size_y = 4;
+
+        basicGEMM<Half>(m_context, gemm, 2.e-5);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Unroll8x1)
+    {
+        GEMMProblem gemm;
+
+        gemm.M = 256;
+        gemm.N = 512;
+        gemm.K = 16;
+
+        gemm.mac_m = 128;
+        gemm.mac_n = 256;
+        gemm.mac_k = 16;
+
+        gemm.wave_k = 8;
+
+        gemm.workgroup_size_x = 4 * gemm.wavefront_size;
+        gemm.workgroup_size_y = 1;
+
+        basicGEMM<Half>(m_context, gemm, 2.e-5);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Unroll1x8)
+    {
+        GEMMProblem gemm;
+
+        gemm.M = 256;
+        gemm.N = 512;
+        gemm.K = 16;
+
+        gemm.mac_m = 128;
+        gemm.mac_n = 256;
+        gemm.mac_k = 16;
+
+        gemm.wave_k = 8;
+
+        gemm.workgroup_size_x = 1 * gemm.wavefront_size;
+        gemm.workgroup_size_y = 8;
+
+        basicGEMM<Half>(m_context, gemm, 2.e-5);
     }
 }

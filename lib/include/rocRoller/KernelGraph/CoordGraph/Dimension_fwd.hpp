@@ -28,6 +28,7 @@ namespace rocRoller
         struct WaveTile;
         struct WaveTileIndex;
         struct WaveTileNumber;
+        struct JammedWaveTileNumber;
         struct Wavefront;
         struct Workgroup;
         struct Workitem;
@@ -50,6 +51,7 @@ namespace rocRoller
                                        WaveTile,
                                        WaveTileIndex,
                                        WaveTileNumber,
+                                       JammedWaveTileNumber,
                                        Wavefront,
                                        Workgroup,
                                        Workitem>;

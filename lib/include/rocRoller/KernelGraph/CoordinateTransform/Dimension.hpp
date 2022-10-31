@@ -740,6 +740,24 @@ namespace rocRoller
             int elements() const;
         };
 
+        /**
+         * WaveTilePerWorkGroup - Number of wave tiles to execute per workgroup
+         */
+        struct JammedWaveTileNumber : public SubDimension
+        {
+            using SubDimension::SubDimension;
+
+            virtual std::string name() const
+            {
+                return "WaveTilePerWorkGroup";
+            }
+
+            TagType getTag() const
+            {
+                return {tag, dim, output, 0};
+            }
+        };
+
         /*
          * Helpers
          */

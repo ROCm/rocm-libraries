@@ -578,6 +578,19 @@ namespace rocRoller
             int elements() const;
         };
 
+        /**
+         * JammedWaveTileNumber - Number of wave tiles to execute per wavefront
+         */
+        struct JammedWaveTileNumber : public SubDimension
+        {
+            using SubDimension::SubDimension;
+
+            virtual std::string name() const
+            {
+                return "WaveTilePerWorkGroup";
+            }
+        };
+
         /*
          * Helpers
          */

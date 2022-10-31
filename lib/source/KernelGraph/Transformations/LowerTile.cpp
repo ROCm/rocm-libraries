@@ -1,5 +1,6 @@
 #include "KernelGraph/CoordinateTransform/Dimension.hpp"
 #include "KernelGraph/CoordinateTransform/HyperGraph.hpp"
+#include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
@@ -26,8 +27,10 @@ namespace rocRoller
             using BaseGraphVisitor::visitEdge;
             using BaseGraphVisitor::visitOperation;
 
-            LowerTileVisitor(std::shared_ptr<Context> context)
+            LowerTileVisitor(std::shared_ptr<CommandParameters> params,
+                             std::shared_ptr<Context>           context)
                 : BaseGraphVisitor(context)
+                , m_params(params)
                 , m_kernel(context->kernel())
             {
             }
@@ -176,6 +179,12 @@ namespace rocRoller
 
                     coordGraph.addEdge({block_number, block_index}, {lane}, Flatten());
 
+                    auto wavetilesPerWorkgroup = m_params->getWaveTilesPerWorkgroup();
+                    auto jammed_wavetile_x     = JammedWaveTileNumber(
+                        mac_tile.tag, 0, literal(wavetilesPerWorkgroup[0]), literal(1));
+                    auto jammed_wavetile_y = JammedWaveTileNumber(
+                        mac_tile.tag, 1, literal(wavetilesPerWorkgroup[1]), literal(1));
+
                     switch(wave_tile.layout)
                     {
                     case LayoutType::MATRIX_A:
@@ -187,8 +196,10 @@ namespace rocRoller
                         coordGraph.addEdge({i_wave_y}, {block_number, vgpr}, Tile());
                         coordGraph.addEdge({i_wave_x}, {block_index}, PassThrough());
 
-                        // TODO: Should this be set here?  Or deferred?
-                        coordGraph.addEdge({n_wave_x}, {wave_x}, PassThrough());
+                        if(wavetilesPerWorkgroup[0] > 1)
+                            coordGraph.addEdge({n_wave_x}, {wave_x, jammed_wavetile_x}, Tile());
+                        else
+                            coordGraph.addEdge({n_wave_x}, {wave_x}, PassThrough());
                     }
                     break;
                     case LayoutType::MATRIX_B:
@@ -200,8 +211,10 @@ namespace rocRoller
                         coordGraph.addEdge({i_wave_x}, {block_number, vgpr}, Tile());
                         coordGraph.addEdge({i_wave_y}, {block_index}, PassThrough());
 
-                        // TODO: Should this be set here?  Or deferred?
-                        coordGraph.addEdge({n_wave_y}, {wave_y}, PassThrough());
+                        if(wavetilesPerWorkgroup[1] > 1)
+                            coordGraph.addEdge({n_wave_y}, {wave_y, jammed_wavetile_y}, Tile());
+                        else
+                            coordGraph.addEdge({n_wave_y}, {wave_y}, PassThrough());
                     }
                     break;
                     case LayoutType::MATRIX_ACCUMULATOR:
@@ -250,8 +263,15 @@ namespace rocRoller
                         coordGraph.addEdge({n_vblk, i_vblk}, {vgpr}, Flatten());
                         coordGraph.addEdge({n_lblk, i_lblk}, {lane}, Flatten());
 
-                        coordGraph.addEdge({n_wave_y}, {wave_y}, PassThrough());
-                        coordGraph.addEdge({n_wave_x}, {wave_x}, PassThrough());
+                        if(wavetilesPerWorkgroup[0] > 1)
+                            coordGraph.addEdge({n_wave_x}, {wave_x, jammed_wavetile_x}, Tile());
+                        else
+                            coordGraph.addEdge({n_wave_x}, {wave_x}, PassThrough());
+
+                        if(wavetilesPerWorkgroup[1] > 1)
+                            coordGraph.addEdge({n_wave_y}, {wave_y, jammed_wavetile_y}, Tile());
+                        else
+                            coordGraph.addEdge({n_wave_y}, {wave_y}, PassThrough());
 
                         coordGraph.addEdge({wave, lane}, {workitem}, Flatten());
                     }
@@ -435,8 +455,20 @@ namespace rocRoller
                     coordGraph.addEdge({n_vblk, n_lblk}, {block}, Flatten());
                     coordGraph.addEdge({block}, {row_block, col_block}, Tile());
 
-                    coordGraph.addEdge({wave_y}, {n_wave_y}, PassThrough());
-                    coordGraph.addEdge({wave_x}, {n_wave_x}, PassThrough());
+                    auto wavetilesPerWorkgroup = m_params->getWaveTilesPerWorkgroup();
+                    auto jammed_wavetile_x     = JammedWaveTileNumber(
+                        mac_tile.tag, 0, literal(wavetilesPerWorkgroup[0]), literal(1), true);
+                    auto jammed_wavetile_y = JammedWaveTileNumber(
+                        mac_tile.tag, 1, literal(wavetilesPerWorkgroup[1]), literal(1), true);
+
+                    if(wavetilesPerWorkgroup[0] > 1)
+                        coordGraph.addEdge({wave_x, jammed_wavetile_x}, {n_wave_x}, Flatten());
+                    else
+                        coordGraph.addEdge({wave_x}, {n_wave_x}, PassThrough());
+                    if(wavetilesPerWorkgroup[1] > 1)
+                        coordGraph.addEdge({wave_y, jammed_wavetile_y}, {n_wave_y}, Flatten());
+                    else
+                        coordGraph.addEdge({wave_y}, {n_wave_y}, PassThrough());
 
                     coordGraph.addEdge({row_block, i_vblk}, {i_wave_x}, Flatten());
                     coordGraph.addEdge({col_block, i_lblk}, {i_wave_y}, Flatten());
@@ -483,7 +515,8 @@ namespace rocRoller
             }
 
         private:
-            std::shared_ptr<AssemblyKernel> m_kernel;
+            std::shared_ptr<AssemblyKernel>    m_kernel;
+            std::shared_ptr<CommandParameters> m_params;
         };
 
         // Add LDSLoad and LDSStore nodes following a LoadTiled node within
@@ -537,6 +570,7 @@ namespace rocRoller
                                  MacroTile const&                       a,
                                  MacroTile const&                       b,
                                  MacroTile const&                       d,
+                                 std::shared_ptr<CommandParameters>     params,
                                  std::shared_ptr<Context>               context)
         {
             rocRoller::Log::getLogger()->debug("KernelGraph::matrixMultiply() {}", d.tag);
@@ -611,13 +645,79 @@ namespace rocRoller
             graph.control.addEdge({forK}, outputs, ControlGraph::Sequence());
 
             graph.control.removeOperation(getTag(contraction), true);
+
+            // Add loops to iterate over wavetiles within a workgroup
+            auto wavetilesPerWorkgroup = params->getWaveTilesPerWorkgroup();
+
+            if(wavetilesPerWorkgroup[0] > 1 || wavetilesPerWorkgroup[1] > 1)
+            {
+                auto topOfKernel = graph.control.findOperations<ControlGraph::Kernel>();
+                AssertFatal(topOfKernel.size() == 1, "More than one Kernel node not supported");
+                auto kernelOutputs = graph.control.getOutputs(getTag(topOfKernel[0]));
+
+                // Remove edges from Kernel to kernel outputs
+                for(auto& kernelOutput : kernelOutputs)
+                {
+                    graph.control.removeEdge({ControlGraph::Kernel()}, {kernelOutput});
+                }
+
+                auto [WaveTilesY, forWaveTilesY]
+                    = rangeFor(graph.coordinates, graph.control, literal(wavetilesPerWorkgroup[1]));
+                auto [WaveTilesX, forWaveTilesX]
+                    = rangeFor(graph.coordinates, graph.control, literal(wavetilesPerWorkgroup[0]));
+
+                // Add edges from inner loop to kernel outputs
+                if(wavetilesPerWorkgroup[1] > 1)
+                {
+                    for(auto& kernelOutput : kernelOutputs)
+                    {
+                        graph.control.addEdge(
+                            {forWaveTilesY}, {kernelOutput}, ControlGraph::Body());
+                    }
+                }
+                else
+                {
+                    for(auto& kernelOutput : kernelOutputs)
+                    {
+                        graph.control.addEdge(
+                            {forWaveTilesX}, {kernelOutput}, ControlGraph::Body());
+                    }
+                }
+
+                if(wavetilesPerWorkgroup[0] > 1 && wavetilesPerWorkgroup[1] > 1)
+                    graph.control.addEdge({forWaveTilesX}, {forWaveTilesY}, ControlGraph::Body());
+
+                // Add edges from Kernel to outer loop
+                if(wavetilesPerWorkgroup[0] > 1)
+                    graph.control.addEdge(
+                        {ControlGraph::Kernel()}, {forWaveTilesX}, ControlGraph::Body());
+                else
+                    graph.control.addEdge(
+                        {ControlGraph::Kernel()}, {forWaveTilesY}, ControlGraph::Body());
+
+                // Add edges from all JammedWaveTileNumber dimensions to the for loop
+                for(auto const& dimension : graph.coordinates.getDimensions())
+                {
+                    if(std::holds_alternative<JammedWaveTileNumber>(dimension))
+                    {
+                        auto wavetilePerWorkgroup = std::get<JammedWaveTileNumber>(dimension);
+                        auto forLoopDim = wavetilePerWorkgroup.dim == 0 ? WaveTilesX : WaveTilesY;
+                        if(wavetilePerWorkgroup.output)
+                            graph.coordinates.addEdge({forLoopDim}, {dimension}, PassThrough());
+                        else
+                            graph.coordinates.addEdge({dimension}, {forLoopDim}, PassThrough());
+                    }
+                }
+            }
         }
 
-        KernelGraph lowerTile(KernelGraph k, std::shared_ptr<Context> context)
+        KernelGraph lowerTile(KernelGraph                        k,
+                              std::shared_ptr<CommandParameters> params,
+                              std::shared_ptr<Context>           context)
         {
             TIMER(t, "KernelGraph::lowerTile");
             rocRoller::Log::getLogger()->debug("KernelGraph::lowerTile()");
-            auto visitor = LowerTileVisitor(context);
+            auto visitor = LowerTileVisitor(params, context);
             auto kgraph  = rewrite(k, visitor);
 
             auto contractions = kgraph.control.findOperations<ControlGraph::TensorContraction>();
@@ -632,7 +732,7 @@ namespace rocRoller
                 if(a.rank == 2 && b.rank == 2 && op.aDims == std::vector<int>{1}
                    && op.bDims == std::vector<int>{0})
                 {
-                    lowerMatrixMultiply(kgraph, op, a, b, d, context);
+                    lowerMatrixMultiply(kgraph, op, a, b, d, params, context);
                 }
                 else
                 {

@@ -560,10 +560,10 @@ namespace rocRoller
                         ss << "  - incident count "
                            << CoordinateTransform::toString(m_nodes.at(kv.first)) << ": "
                            << kv.second << std::endl;
-                    ss << "Graph: " << std::endl << toDOT() << std::endl;
+                    ss << "Graph: " << std::endl << toDOT(false) << std::endl;
                     {
                         std::ofstream badGraph("badGraph.dot");
-                        badGraph << toDOT() << std::endl;
+                        badGraph << "digraph {\n" << toDOT(false) << "\n}" << std::endl;
                     }
                     AssertRecoverable(found_edge, ss.str());
                 }

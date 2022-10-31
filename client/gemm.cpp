@@ -15,18 +15,29 @@
 
 using namespace rocRoller;
 
+const int wavefront_size = 64;
+
 struct GEMMProblem
 {
     std::string name;
 
-    int         M;
-    int         N;
-    int         K;
-    int         mac_m;
-    int         mac_n;
-    int         mac_k;
-    float       alpha;
-    float       beta;
+    // D (MxN) = alpha * A (MxK) X B (KxN) + beta * C (MxN)
+    int   M;
+    int   N;
+    int   K;
+    float alpha;
+    float beta;
+
+    // Macro Tile Size
+    int mac_m;
+    int mac_n;
+    int mac_k;
+
+    // Number of wave tiles to execute per workgroup
+    int workgroup_size_x = 64;
+    int workgroup_size_y = 1;
+
+    // Datatype of inputs and outputs
     std::string type_A;
     std::string type_B;
     std::string type_C;
@@ -76,6 +87,8 @@ struct rocRoller::Serialization::
         iot::mapRequired(io, "mac_m", result.mac_m);
         iot::mapRequired(io, "mac_n", result.mac_n);
         iot::mapRequired(io, "mac_k", result.mac_k);
+        iot::mapRequired(io, "workgroup_size_x", result.workgroup_size_x);
+        iot::mapRequired(io, "workgroup_size_y", result.workgroup_size_y);
         iot::mapRequired(io, "kernelGenerate", result.kernelGenerate);
         iot::mapRequired(io, "kernelAssemble", result.kernelAssemble);
         iot::mapRequired(io, "kernelExecute", result.kernelExecute);
@@ -95,6 +108,9 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult)
 
     AssertFatal(result.M % result.mac_m == 0, "MacroTile size mismatch (M)");
     AssertFatal(result.N % result.mac_n == 0, "MacroTile size mismatch (N)");
+
+    AssertFatal(result.workgroup_size_x % wavefront_size == 0,
+                "Workgroup Size X must be multiply of wave front size");
 
     int wave_m, wave_n, wave_k, wave_b = 0;
 
@@ -119,11 +135,16 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult)
         Throw<FatalError>("Unsupported datatype combination in client");
     }
 
-    AssertFatal(result.mac_m % wave_m == 0, "WaveTile size mismatch (M)");
-    AssertFatal(result.mac_n % wave_n == 0, "WaveTile size mismatch (N)");
+    uint wavetile_per_wavefront_m
+        = wavefront_size * result.mac_m / wave_m / result.workgroup_size_x;
+    uint wavetile_per_wavefront_n = result.mac_n / wave_n / result.workgroup_size_y;
 
-    uint wavefront_size   = 64;
-    uint workgroup_size_x = wavefront_size * (result.mac_m * result.mac_n / wave_m / wave_n);
+    AssertFatal(result.mac_m % (wave_m * wavetile_per_wavefront_m) == 0,
+                "WaveTile size mismatch (M)");
+    AssertFatal(result.mac_n % (wave_n * wavetile_per_wavefront_n) == 0,
+                "WaveTile size mismatch (N)");
+
+    uint workgroup_size_x = result.workgroup_size_x * result.workgroup_size_y;
     uint workgroup_size_y = 1;
 
     // one macro tile per workgroup
@@ -212,6 +233,8 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult)
 
     auto params = std::make_shared<CommandParameters>();
     params->setManualKernelDimension(2);
+    // TODO: Calculate these values internally based on workgroup sizes.
+    params->setWaveTilesPerWavefront(wavetile_per_wavefront_m, wavetile_per_wavefront_n);
 
     auto mac_tile_0 = KernelGraph::CoordinateTransform::MacroTile( // A
         0,
@@ -258,11 +281,14 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult)
     params->setDimensionInfo(mac_tile_7);
     params->setDimensionInfo(mac_tile_8);
 
-    auto one = Expression::literal(1u);
-    auto wavefront_n
-        = Expression::literal(static_cast<uint>(result.mac_m * result.mac_n / wave_m / wave_n));
-    auto wavefront_nx = Expression::literal(static_cast<uint>(result.mac_m / wave_m));
-    auto wavefront_ny = Expression::literal(static_cast<uint>(result.mac_n / wave_n));
+    auto one         = Expression::literal(1u);
+    auto wavefront_n = Expression::literal(
+        static_cast<uint>(result.mac_m * result.mac_n / wave_m / wave_n / wavetile_per_wavefront_m
+                          / wavetile_per_wavefront_n));
+    auto wavefront_nx
+        = Expression::literal(static_cast<uint>(result.mac_m / wave_m / wavetile_per_wavefront_m));
+    auto wavefront_ny
+        = Expression::literal(static_cast<uint>(result.mac_n / wave_n / wavetile_per_wavefront_n));
 
     std::vector<int> ctags_with_wavefronts = {0, 1, 2, 8};
     for(auto ctag : ctags_with_wavefronts)
@@ -356,6 +382,8 @@ int main(int argc, const char* argv[])
     po.addArg("alpha", Arg({"a", "alpha"}, "Alpha scalar"));
     po.addArg("beta", Arg({"b", "beta"}, "Beta scalar"));
     po.addArg("yaml", Arg({"o", "yaml"}, "Results"));
+    po.addArg("workgroup_size_x", Arg({"workgroup_size_x"}, "Workgroup size in the x dimension"));
+    po.addArg("workgroup_size_y", Arg({"workgroup_size_y"}, "Workgroup size in the y dimension"));
     po.addArg("type_A", Arg({"type_A"}, "Datatype of A Matrix [float | half]"));
     po.addArg("type_B", Arg({"type_B"}, "Datatype of B Matrix [float | half]"));
     po.addArg("type_C", Arg({"type_C"}, "Datatype of C Matrix [float | half]"));
@@ -368,20 +396,22 @@ int main(int argc, const char* argv[])
     po.parse_args(argc, argv);
 
     GEMMProblem prob;
-    prob.name     = "GEMMv00";
-    prob.M        = po.get("M", 3072);
-    prob.N        = po.get("N", 4096);
-    prob.K        = po.get("K", 4096);
-    prob.mac_m    = po.get("mac_m", 64);
-    prob.mac_n    = po.get("mac_n", 64);
-    prob.mac_k    = po.get("mac_k", 64);
-    prob.alpha    = po.get("alpha", 2.0f);
-    prob.beta     = po.get("beta", 0.5f);
-    prob.type_A   = po.get("type_A", std::string("float"));
-    prob.type_B   = po.get("type_B", std::string("float"));
-    prob.type_C   = po.get("type_C", std::string("float"));
-    prob.type_D   = po.get("type_D", std::string("float"));
-    prob.type_acc = po.get("type_acc", std::string("float"));
+    prob.name             = "GEMMv00";
+    prob.M                = po.get("M", 3072);
+    prob.N                = po.get("N", 4096);
+    prob.K                = po.get("K", 4096);
+    prob.alpha            = po.get("alpha", 2.0f);
+    prob.beta             = po.get("beta", 0.5f);
+    prob.mac_m            = po.get("mac_m", 64);
+    prob.mac_n            = po.get("mac_n", 64);
+    prob.mac_k            = po.get("mac_k", 64);
+    prob.workgroup_size_x = po.get("workgroup_size_x", wavefront_size * 2);
+    prob.workgroup_size_y = po.get("workgroup_size_y", 2);
+    prob.type_A           = po.get("type_A", std::string("float"));
+    prob.type_B           = po.get("type_B", std::string("float"));
+    prob.type_C           = po.get("type_C", std::string("float"));
+    prob.type_D           = po.get("type_D", std::string("float"));
+    prob.type_acc         = po.get("type_acc", std::string("float"));
 
     prob.numWarmUp = po.get("num_warmup", 3);
     prob.numOuter  = po.get("num_outer", 5);
