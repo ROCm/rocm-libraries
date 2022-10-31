@@ -25,7 +25,6 @@
 
 using namespace rocRoller;
 
-#ifndef ROCROLLER_CODE_COVERAGE
 namespace rocRollerTest
 {
     using KernelProgram = Generator<Instruction>(rocRoller::ContextPtr);
@@ -1882,4 +1881,3 @@ namespace rocRollerTest
         EXPECT_LT(rnormInf, 1.e-4);
     }
 }
-#endif

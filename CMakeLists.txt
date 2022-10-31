@@ -35,7 +35,7 @@ if (ROCROLLER_ENABLE_TIMERS)
 endif()
 
 if(CODE_COVERAGE)
-  add_definitions(-DROCROLLER_CODE_COVERAGE)
+  set(ROCROLLER_TESTS_SKIP_GUIDEPOSTS ON)
   set(EXTRA_COMPILE_OPTIONS -fprofile-instr-generate -fcoverage-mapping ${EXTRA_COMPILE_OPTIONS})
   set(EXTRA_LINK_OPTIONS -fprofile-instr-generate -fcoverage-mapping ${EXTRA_LINK_OPTIONS})
 endif()
