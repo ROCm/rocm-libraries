@@ -6,6 +6,7 @@
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
+#include <rocRoller/CodeGen/Arithmetic/MatrixMultiply.hpp>
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
 #include <rocRoller/ExecutableKernel.hpp>
 #include <rocRoller/Expression.hpp>
@@ -211,32 +212,6 @@ namespace ExpressionTest
         EXPECT_FALSE(identical(expr6, expr7));
         EXPECT_FALSE(identical(e, f));
 
-        auto A_tile = std::make_shared<KernelGraph::CoordinateTransform::WaveTile>(0);
-        auto B_tile = std::make_shared<KernelGraph::CoordinateTransform::WaveTile>(1);
-
-        int M = 32;
-        int N = 32;
-        int K = 2;
-
-        A_tile->sizes = {M, K};
-        A_tile->vgpr  = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Float, M * K / 64);
-        A_tile->vgpr->allocateNow();
-
-        B_tile->sizes = {K, N};
-        B_tile->vgpr  = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Float, K * N / 64);
-        B_tile->vgpr->allocateNow();
-
-        auto A = std::make_shared<Expression::Expression>(A_tile);
-        auto B = std::make_shared<Expression::Expression>(B_tile);
-
-        auto expr8 = A * B;
-        auto expr9 = a * b;
-
-        EXPECT_FALSE(identical(expr8, expr9));
-        EXPECT_TRUE(identical(A * B, expr8));
-
         EXPECT_TRUE(Expression::identical(nullptr, nullptr));
         EXPECT_FALSE(identical(nullptr, a));
         EXPECT_FALSE(identical(a, nullptr));
@@ -376,61 +351,12 @@ namespace ExpressionTest
         EXPECT_ANY_THROW(m_context->schedule(Expression::generate(result, argExp, m_context)));
     }
 
-    TEST_F(ExpressionTest, MatrixMultiply01)
+    TEST_F(ExpressionTest, MatrixMultiplyWaveTiles)
     {
-        int M = 32;
-        int N = 32;
-        int K = 2;
-        int B = 1;
-
-        auto ra = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Float, M * K * B / 64);
-        ra->allocateNow();
-
-        auto rb = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Float, K * N * B / 64);
-        rb->allocateNow();
-
-        auto a = ra->expression();
-        auto b = rb->expression();
-
-        auto expr = std::make_shared<Expression::Expression>(
-            Expression::MatrixMultiply(a, b, M, N, K, B));
-
-        Register::ValuePtr rc;
-        m_context->schedule(Expression::generate(rc, expr, m_context));
-
-        EXPECT_EQ(rc->regType(), Register::Type::Accumulator);
-        EXPECT_EQ(rc->valueCount(), 16);
-
-        auto result = R"(
-            v_accvgpr_write a0, 0x0
-            v_accvgpr_write a1, 0x0
-            v_accvgpr_write a2, 0x0
-            v_accvgpr_write a3, 0x0
-            v_accvgpr_write a4, 0x0
-            v_accvgpr_write a5, 0x0
-            v_accvgpr_write a6, 0x0
-            v_accvgpr_write a7, 0x0
-            v_accvgpr_write a8, 0x0
-            v_accvgpr_write a9, 0x0
-            v_accvgpr_write a10, 0x0
-            v_accvgpr_write a11, 0x0
-            v_accvgpr_write a12, 0x0
-            v_accvgpr_write a13, 0x0
-            v_accvgpr_write a14, 0x0
-            v_accvgpr_write a15, 0x0
-            v_mfma_f32_32x32x2f32 a[0:15], v0, v1, a[0:15]
-        )";
-
-        EXPECT_EQ(NormalizedSource(output()), NormalizedSource(result));
-    }
-
-    TEST_F(ExpressionTest, MatrixMultiply02)
-    {
-        int M = 32;
-        int N = 32;
-        int K = 2;
+        int M       = 32;
+        int N       = 32;
+        int K       = 2;
+        int batches = 1;
 
         auto A_tile = std::make_shared<KernelGraph::CoordinateTransform::WaveTile>(0);
         auto B_tile = std::make_shared<KernelGraph::CoordinateTransform::WaveTile>(1);
@@ -445,34 +371,22 @@ namespace ExpressionTest
             m_context, Register::Type::Vector, DataType::Float, K * N / 64);
         B_tile->vgpr->allocateNow();
 
+        auto rc = std::make_shared<Register::Value>(
+            m_context, Register::Type::Accumulator, DataType::Float, M * N * batches / 64);
+        rc->allocateNow();
+
         auto A = std::make_shared<Expression::Expression>(A_tile);
         auto B = std::make_shared<Expression::Expression>(B_tile);
+        auto C = rc->expression();
 
-        auto expr = A * B;
+        auto expr = std::make_shared<Expression::Expression>(Expression::MatrixMultiply(A, B, C));
 
-        Register::ValuePtr rc;
         m_context->schedule(Expression::generate(rc, expr, m_context));
 
         EXPECT_EQ(rc->regType(), Register::Type::Accumulator);
         EXPECT_EQ(rc->valueCount(), 16);
 
         auto result = R"(
-            v_accvgpr_write a0, 0x0
-            v_accvgpr_write a1, 0x0
-            v_accvgpr_write a2, 0x0
-            v_accvgpr_write a3, 0x0
-            v_accvgpr_write a4, 0x0
-            v_accvgpr_write a5, 0x0
-            v_accvgpr_write a6, 0x0
-            v_accvgpr_write a7, 0x0
-            v_accvgpr_write a8, 0x0
-            v_accvgpr_write a9, 0x0
-            v_accvgpr_write a10, 0x0
-            v_accvgpr_write a11, 0x0
-            v_accvgpr_write a12, 0x0
-            v_accvgpr_write a13, 0x0
-            v_accvgpr_write a14, 0x0
-            v_accvgpr_write a15, 0x0
             v_mfma_f32_32x32x2f32 a[0:15], v0, v1, a[0:15]
         )";
 
@@ -1289,189 +1203,4 @@ namespace ExpressionTest
     class GPU_ExpressionTest : public CurrentGPUContextFixture
     {
     };
-
-    TEST_F(GPU_ExpressionTest, MatrixMultiply)
-    {
-        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
-
-        auto const VGPR = [&](VariableType type, int count) {
-            return Register::Value::Placeholder(m_context, Register::Type::Vector, type, count);
-        };
-        auto const FloatPointer = VariableType(DataType::Float, PointerType::PointerGlobal);
-
-        unsigned int const M      = 32;
-        unsigned int const N      = 32;
-        unsigned int const K      = 2;
-        unsigned int const nbatch = 1;
-
-        auto const L = [](auto x) { return Expression::literal(x); };
-
-        auto kernel = m_context->kernel();
-
-        kernel->setKernelName("MatrixMultiply");
-
-        auto workitems = Expression::literal(64u);
-        auto one       = Expression::literal(1u);
-
-        kernel->setWorkgroupSize({64, 1, 1});
-        kernel->setWorkitemCount({workitems, one, one});
-
-        kernel->addArgument({"d", FloatPointer, DataDirection::WriteOnly});
-        kernel->addArgument({"a", FloatPointer});
-        kernel->addArgument({"b", FloatPointer});
-
-        m_context->schedule(kernel->preamble());
-        m_context->schedule(kernel->prolog());
-
-        // all matrices stored in column-major order
-        auto kb = [&]() -> Generator<Instruction> {
-            Register::ValuePtr s_d, s_a, s_b;
-            co_yield m_context->argLoader()->getValue("d", s_d);
-            co_yield m_context->argLoader()->getValue("a", s_a);
-            co_yield m_context->argLoader()->getValue("b", s_b);
-
-            auto v_a = VGPR(DataType::Float, 1);
-            co_yield v_a->allocate();
-
-            auto v_b = VGPR(DataType::Float, 1);
-            co_yield v_b->allocate();
-
-            auto thread = m_context->kernel()->workitemIndex()[0];
-            // TODO: this gives an error currently
-            // co_yield exprInt32->generate(
-            //     fastDivision(thread->expression()
-            //                      % Expression::literal(m_context->kernel()->wavefront_size()),
-            //                  m_context),
-            //     m_context);
-            // auto lane = exprInt32->getResult();
-            auto lane = thread;
-
-            auto A    = v_a->expression();
-            auto B    = v_b->expression();
-            auto LANE = lane->expression();
-            auto SA   = s_a->expression();
-            auto SB   = s_b->expression();
-            auto SD   = s_d->expression();
-
-            // Load A
-            co_yield_(Instruction::Comment("Load A"));
-            {
-                // todo: incorporate wave number
-                auto g = LANE;
-                auto b = g * L(4u);
-
-                Register::ValuePtr byteOffset;
-                co_yield Expression::generate(byteOffset, fastDivision(b, m_context), m_context);
-
-                Register::ValuePtr ptr;
-                co_yield Expression::generate(ptr, SA + byteOffset->expression(), m_context);
-
-                co_yield m_context->mem()->loadFlat(v_a, ptr, "", 4);
-            }
-
-            // Load B
-            co_yield_(Instruction::Comment("Load B"));
-            {
-                // todo: incorporate wave number
-                auto i = LANE / L(32u);
-                auto j = LANE % L(32u);
-                auto g = j * L(2u) + i;
-                auto b = g * L(4u);
-
-                Register::ValuePtr byteOffset;
-                co_yield Expression::generate(byteOffset, fastDivision(b, m_context), m_context);
-
-                Register::ValuePtr ptr;
-                co_yield Expression::generate(ptr, SB + byteOffset->expression(), m_context);
-
-                co_yield m_context->mem()->loadFlat(v_b, ptr, "", 4);
-            }
-
-            auto expr = std::make_shared<Expression::Expression>(
-                Expression::MatrixMultiply(A, B, M, N, K, nbatch));
-
-            Register::ValuePtr v_d;
-            co_yield Expression::generate(v_d, expr, m_context);
-            co_yield Instruction::Nop(16, "MFMA hazard");
-
-            // Store D
-            co_yield_(Instruction::Comment("Store D"));
-            {
-                for(int a = 0; a < 16; ++a)
-                {
-                    // todo: incorporate wave number
-                    auto i = LANE / L(32u) * L(4u) + L(8 * (a / 4) + a % 4);
-                    auto j = LANE % L(32u);
-                    auto g = j * L(32u) + i;
-                    auto b = g * L(4u);
-
-                    Register::ValuePtr byteOffset;
-                    co_yield Expression::generate(
-                        byteOffset, fastDivision(b, m_context), m_context);
-
-                    Register::ValuePtr ptr;
-                    co_yield Expression::generate(ptr, SD + byteOffset->expression(), m_context);
-
-                    auto val = VGPR(DataType::Float, 1);
-                    co_yield m_context->copier()->copy(val,
-                                                       v_d->element({a}));
-                    co_yield_(Instruction(
-                        "s_nop", {Register::Value::Literal(2u)}, {}, {}, "MFMA hazard"));
-                    co_yield m_context->mem()->storeFlat(ptr, val, "", 4);
-                }
-            }
-        };
-
-        m_context->schedule(kb());
-        m_context->schedule(kernel->postamble());
-        m_context->schedule(kernel->amdgpu_metadata());
-
-        if(m_context->targetArchitecture().target().getMajorVersion() != 9)
-            GTEST_SKIP() << "Skipping GPU tests for " << ARCH_ExpressionTest::GetParam();
-
-        // Only execute the kernels if running on the architecture that the kernel was built for,
-        // otherwise just assemble the instructions.
-        if(isLocalDevice())
-        {
-            auto random = RandomGenerator(12679u);
-
-            std::shared_ptr<rocRoller::ExecutableKernel> executableKernel
-                = m_context->instructions()->getExecutableKernel();
-
-            auto a = random.vector<float>(M * K * nbatch, -1.f, 1.f);
-            auto b = random.vector<float>(K * N * nbatch, -1.f, 1.f);
-
-            auto d_a = make_shared_device(a);
-            auto d_b = make_shared_device(b);
-            auto d_d = make_shared_device<float>(M * N * nbatch);
-
-            KernelArguments kargs;
-            kargs.append("d", d_d.get());
-            kargs.append("a", d_a.get());
-            kargs.append("b", d_b.get());
-            KernelInvocation invocation;
-
-            invocation.workgroupSize = {64, 1, 1};
-            invocation.workitemCount = {64, 1, 1};
-
-            executableKernel->executeKernel(kargs, invocation);
-
-            std::vector<float> d(M * N * nbatch);
-            ASSERT_THAT(
-                hipMemcpy(d.data(), d_d.get(), M * N * nbatch * sizeof(float), hipMemcpyDefault),
-                HasHipSuccess(0));
-
-            std::vector<float> D(M * N * nbatch, 0.f);
-            std::vector<float> C(M * N * nbatch, 0.f);
-            CPUMM(D, C, a, b, M, N, K, 1.0, 0.0, false);
-
-            double rnorm = relativeNorm(d, D);
-            ASSERT_LT(rnorm, 2.e-6);
-        }
-        else
-        {
-            std::vector<char> assembledKernel = m_context->instructions()->assemble();
-            EXPECT_GT(assembledKernel.size(), 0);
-        }
-    }
 }

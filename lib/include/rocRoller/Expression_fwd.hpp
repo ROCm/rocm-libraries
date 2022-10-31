@@ -55,7 +55,6 @@ namespace rocRoller
             // --- Binary Operations ---
             Add,
             Subtract,
-            MatrixMultiply,
             Multiply,
             MultiplyHigh,
             Divide,
@@ -81,6 +80,7 @@ namespace rocRoller
             // --- Ternary Operations ---
             AddShiftL,
             ShiftLAdd,
+            MatrixMultiply,
 
             // --- Convert Operations ---
             Convert<DataType::Half>,

@@ -13,11 +13,16 @@ namespace rocRoller
 
         ExpressionPtr FastArithmetic::operator()(ExpressionPtr x)
         {
+            if(!x)
+            {
+                return x;
+            }
+
             x = simplify(x);
             x = fastDivision(x, m_context);
             x = fastMultiplication(x);
             x = fuseAssociative(x);
-            // x = fuseTernary(x); // TODO: Add fuse
+            x = fuseTernary(x);
             // x = launchTimeSubExpressions(x, m_context); // TODO: Add launchTimeSubExpressions
 
             return x;

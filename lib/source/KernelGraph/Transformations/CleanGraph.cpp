@@ -33,35 +33,49 @@ namespace rocRoller
             {
             }
 
-            template <CTernary Expr>
+            template <CUnary Expr>
             ExpressionPtr operator()(Expr const& expr) const
             {
-                auto result = std::make_shared<Expression::Expression>(
-                    Expr({(*this)(expr.lhs), (*this)(expr.r1hs), (*this)(expr.r2hs)}));
-
-                return result;
+                Expr cpy = expr;
+                if(expr.arg)
+                {
+                    cpy.arg = (*this)(expr.arg);
+                }
+                return std::make_shared<Expression::Expression>(cpy);
             }
 
             template <CBinary Expr>
             ExpressionPtr operator()(Expr const& expr) const
             {
-                auto result = std::make_shared<Expression::Expression>(
-                    Expr({(*this)(expr.lhs), (*this)(expr.rhs)}));
-
-                return result;
+                Expr cpy = expr;
+                if(expr.lhs)
+                {
+                    cpy.lhs = (*this)(expr.lhs);
+                }
+                if(expr.rhs)
+                {
+                    cpy.rhs = (*this)(expr.rhs);
+                }
+                return std::make_shared<Expression::Expression>(cpy);
             }
 
-            template <CUnary Expr>
+            template <CTernary Expr>
             ExpressionPtr operator()(Expr const& expr) const
             {
-                auto result = std::make_shared<Expression::Expression>(Expr({(*this)(expr.arg)}));
-
-                return result;
-            }
-
-            ExpressionPtr operator()(MatrixMultiply const& expr) const
-            {
-                return std::make_shared<Expression::Expression>(MatrixMultiply(expr));
+                Expr cpy = expr;
+                if(expr.lhs)
+                {
+                    cpy.lhs = (*this)(expr.lhs);
+                }
+                if(expr.r1hs)
+                {
+                    cpy.r1hs = (*this)(expr.r1hs);
+                }
+                if(expr.r2hs)
+                {
+                    cpy.r2hs = (*this)(expr.r2hs);
+                }
+                return std::make_shared<Expression::Expression>(cpy);
             }
 
             // Finds the AssemblyKernelArgument with the same name as the provided

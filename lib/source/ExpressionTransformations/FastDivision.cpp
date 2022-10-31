@@ -260,7 +260,7 @@ namespace rocRoller
                 return m_lhs / literal(rhs);
             }
 
-            ExpressionPtr operator()(ExpressionPtr lhs, CommandArgumentValue rhs)
+            ExpressionPtr call(ExpressionPtr lhs, CommandArgumentValue rhs)
             {
                 m_lhs = lhs;
                 return visit(*this, rhs);
@@ -305,7 +305,7 @@ namespace rocRoller
                 return m_lhs % literal(rhs);
             }
 
-            ExpressionPtr operator()(ExpressionPtr lhs, CommandArgumentValue rhs)
+            ExpressionPtr call(ExpressionPtr lhs, CommandArgumentValue rhs)
             {
                 m_lhs = lhs;
                 return visit(*this, rhs);
@@ -319,44 +319,64 @@ namespace rocRoller
             {
             }
 
-            template <CTernary Expr>
+            template <CUnary Expr>
             ExpressionPtr operator()(Expr const& expr) const
             {
-                auto result = std::make_shared<Expression>(
-                    Expr({(*this)(expr.lhs), (*this)(expr.r1hs), (*this)(expr.r2hs)}));
-
-                return result;
+                Expr cpy = expr;
+                if(expr.arg)
+                {
+                    cpy.arg = call(expr.arg);
+                }
+                return std::make_shared<Expression>(cpy);
             }
 
             template <CBinary Expr>
             ExpressionPtr operator()(Expr const& expr) const
             {
-                auto result
-                    = std::make_shared<Expression>(Expr({(*this)(expr.lhs), (*this)(expr.rhs)}));
-
-                return result;
+                Expr cpy = expr;
+                if(expr.lhs)
+                {
+                    cpy.lhs = call(expr.lhs);
+                }
+                if(expr.rhs)
+                {
+                    cpy.rhs = call(expr.rhs);
+                }
+                return std::make_shared<Expression>(cpy);
             }
 
-            template <CUnary Expr>
+            template <CTernary Expr>
             ExpressionPtr operator()(Expr const& expr) const
             {
-                auto result = std::make_shared<Expression>(Expr({(*this)(expr.arg)}));
-
-                return result;
+                Expr cpy = expr;
+                if(expr.lhs)
+                {
+                    cpy.lhs = call(expr.lhs);
+                }
+                if(expr.r1hs)
+                {
+                    cpy.r1hs = call(expr.r1hs);
+                }
+                if(expr.r2hs)
+                {
+                    cpy.r2hs = call(expr.r2hs);
+                }
+                return std::make_shared<Expression>(cpy);
             }
 
             ExpressionPtr operator()(Divide const& expr) const
             {
-                auto lhs          = (*this)(expr.lhs);
-                auto rhs          = (*this)(expr.rhs);
+                auto lhs          = call(expr.lhs);
+                auto rhs          = call(expr.rhs);
                 auto rhsEvalTimes = evaluationTimes(rhs);
 
                 // Obtain a CommandArgumentValue from rhs. If there is one,
                 // attempt to replace the division with faster operations.
                 if(rhsEvalTimes[EvaluationTime::Translate])
                 {
-                    auto rhs_val = evaluate(rhs);
-                    return DivisionByConstant()(lhs, rhs_val);
+                    auto rhs_val    = evaluate(rhs);
+                    auto divByConst = DivisionByConstant();
+                    return divByConst.call(lhs, rhs_val);
                 }
 
                 auto rhs_type = resultVariableType(rhs);
@@ -372,16 +392,17 @@ namespace rocRoller
             ExpressionPtr operator()(Modulo const& expr) const
             {
 
-                auto lhs          = (*this)(expr.lhs);
-                auto rhs          = (*this)(expr.rhs);
+                auto lhs          = call(expr.lhs);
+                auto rhs          = call(expr.rhs);
                 auto rhsEvalTimes = evaluationTimes(rhs);
 
                 // Obtain a CommandArgumentValue from rhs. If there is one,
                 // attempt to replace the modulo with faster operations.
                 if(rhsEvalTimes[EvaluationTime::Translate])
                 {
-                    auto rhs_val = evaluate(rhs);
-                    return ModuloByConstant()(lhs, rhs_val);
+                    auto rhs_val    = evaluate(rhs);
+                    auto modByConst = ModuloByConstant();
+                    return modByConst.call(lhs, rhs_val);
                 }
 
                 auto rhs_type = resultVariableType(rhs);
@@ -395,18 +416,13 @@ namespace rocRoller
                 return std::make_shared<Expression>(Modulo({lhs, rhs}));
             }
 
-            ExpressionPtr operator()(MatrixMultiply const& expr) const
-            {
-                return std::make_shared<Expression>(MatrixMultiply(expr));
-            }
-
             template <CValue Value>
             ExpressionPtr operator()(Value const& expr) const
             {
                 return std::make_shared<Expression>(expr);
             }
 
-            ExpressionPtr operator()(ExpressionPtr expr) const
+            ExpressionPtr call(ExpressionPtr expr) const
             {
                 if(!expr)
                     return expr;
@@ -424,7 +440,7 @@ namespace rocRoller
         ExpressionPtr fastDivision(ExpressionPtr expr, std::shared_ptr<Context> cxt)
         {
             auto visitor = FastDivisionExpressionVisitor(cxt);
-            return visitor(expr);
+            return visitor.call(expr);
         }
 
     }

@@ -12,35 +12,37 @@ namespace rocRoller
     {
         struct FuseExpressionVisitor
         {
+            template <CUnary Expr>
+            ExpressionPtr operator()(Expr const& expr) const
+            {
+                Expr cpy = expr;
+                cpy.arg  = call(expr.arg);
+                return std::make_shared<Expression>(cpy);
+            }
+
             template <CBinary Expr>
             ExpressionPtr operator()(Expr const& expr) const
             {
-                return std::make_shared<Expression>(Expr({(*this)(expr.lhs), (*this)(expr.rhs)}));
-            }
-
-            // TODO add to binary
-            ExpressionPtr operator()(MatrixMultiply const& expr) const
-            {
-                return std::make_shared<Expression>(MatrixMultiply(expr));
+                Expr cpy = expr;
+                cpy.lhs  = call(expr.lhs);
+                cpy.rhs  = call(expr.rhs);
+                return std::make_shared<Expression>(cpy);
             }
 
             template <CTernary Expr>
             ExpressionPtr operator()(Expr const& expr) const
             {
-                return std::make_shared<Expression>(
-                    Expr({(*this)(expr.lhs), (*this)(expr.r1hs), (*this)(expr.r2hs)}));
-            }
-
-            template <CUnary Expr>
-            ExpressionPtr operator()(Expr const& expr) const
-            {
-                return std::make_shared<Expression>(Expr({(*this)(expr.arg)}));
+                Expr cpy = expr;
+                cpy.lhs  = call(expr.lhs);
+                cpy.r1hs = call(expr.r1hs);
+                cpy.r2hs = call(expr.r2hs);
+                return std::make_shared<Expression>(cpy);
             }
 
             ExpressionPtr operator()(Add const& expr) const
             {
-                auto lhs = (*this)(expr.lhs);
-                auto rhs = (*this)(expr.rhs);
+                auto lhs = call(expr.lhs);
+                auto rhs = call(expr.rhs);
 
                 bool eval_lhs = evaluationTimes(lhs)[EvaluationTime::Translate];
                 bool eval_rhs = evaluationTimes(rhs)[EvaluationTime::Translate];
@@ -62,8 +64,8 @@ namespace rocRoller
 
             ExpressionPtr operator()(ShiftL const& expr) const
             {
-                auto lhs = (*this)(expr.lhs);
-                auto rhs = (*this)(expr.rhs);
+                auto lhs = call(expr.lhs);
+                auto rhs = call(expr.rhs);
 
                 bool eval_lhs = evaluationTimes(lhs)[EvaluationTime::Translate];
                 bool eval_rhs = evaluationTimes(rhs)[EvaluationTime::Translate];
@@ -85,11 +87,9 @@ namespace rocRoller
                 return std::make_shared<Expression>(expr);
             }
 
-            ExpressionPtr operator()(ExpressionPtr expr) const
+            ExpressionPtr call(ExpressionPtr expr) const
             {
-                if(!expr)
-                    return expr;
-
+                AssertFatal(expr != nullptr, "Found nullptr in expression");
                 return std::visit(*this, *expr);
             }
         };
@@ -97,7 +97,7 @@ namespace rocRoller
         ExpressionPtr fuseTernary(ExpressionPtr expr)
         {
             auto visitor = FuseExpressionVisitor();
-            return visitor(expr);
+            return visitor.call(expr);
         }
     }
 }

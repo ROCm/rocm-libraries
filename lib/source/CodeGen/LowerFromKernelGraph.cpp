@@ -858,7 +858,7 @@ namespace rocRoller
 
                 auto completed = m_completedControlNodes;
 
-                // D is not initialised here
+                // D is not initialized here
 
                 uint const num_wave_tiles = macA.sizes[1] / waveA.sizes[1];
                 for(uint k = 0; k < num_wave_tiles; k++)
@@ -875,19 +875,14 @@ namespace rocRoller
                     waveA.vgpr = m_context->registerTagManager()->getRegister(waveA.tag);
                     waveB.vgpr = m_context->registerTagManager()->getRegister(waveB.tag);
 
-                    auto mfma = Component::Get<rocRoller::InstructionGenerators::MatrixMultiply>(
-                        rocRoller::InstructionGenerators::MatrixMultiply::Argument{
-                            m_context,
-                            D->variableType().dataType,
-                            waveA.vgpr->variableType().dataType});
+                    Expression::ExpressionPtr A = std::make_shared<Expression::Expression>(
+                        std::make_shared<WaveTile>(waveA));
+                    Expression::ExpressionPtr B = std::make_shared<Expression::Expression>(
+                        std::make_shared<WaveTile>(waveB));
 
-                    co_yield mfma->mul(D,
-                                       waveA.vgpr,
-                                       waveB.vgpr,
-                                       waveA.sizes[0],
-                                       waveB.sizes[1],
-                                       waveA.sizes[1],
-                                       1);
+                    co_yield generate(D,
+                                      std::make_shared<Expression::Expression>(
+                                          Expression::MatrixMultiply(A, B, D->expression())));
 
                     // TODO: Extend MatrixMultiply arithmetic to recognize this
                     // co_yield generate(D, D + A * B);

@@ -44,7 +44,7 @@ namespace rocRoller
             template <typename LHS, typename RHS>
             requires(!CIntegral<LHS> && CIntegral<RHS>) ExpressionPtr operator()(LHS lhs, RHS rhs)
             {
-                return (*this)(rhs, lhs);
+                return call(rhs, lhs);
             }
 
             template <typename LHS, typename RHS>
@@ -67,10 +67,15 @@ namespace rocRoller
                 return nullptr;
             }
 
-            ExpressionPtr operator()(ExpressionPtr lhs, CommandArgumentValue rhs)
+            ExpressionPtr call(ExpressionPtr lhs, CommandArgumentValue rhs)
             {
                 m_lhs = lhs;
                 return visit(*this, rhs);
+            }
+
+            ExpressionPtr call(CommandArgumentValue lhs, CommandArgumentValue rhs)
+            {
+                return visit(*this, lhs, rhs);
             }
         };
 
@@ -118,10 +123,15 @@ namespace rocRoller
                 return nullptr;
             }
 
-            ExpressionPtr operator()(ExpressionPtr lhs, CommandArgumentValue rhs)
+            ExpressionPtr call(ExpressionPtr lhs, CommandArgumentValue rhs)
             {
                 m_lhs = lhs;
                 return visit(*this, rhs);
+            }
+
+            ExpressionPtr call(CommandArgumentValue lhs, CommandArgumentValue rhs)
+            {
+                return visit(*this, lhs, rhs);
             }
         };
 
@@ -149,7 +159,7 @@ namespace rocRoller
             template <typename LHS, typename RHS>
             requires(!CIntegral<LHS> && CIntegral<RHS>) ExpressionPtr operator()(LHS lhs, RHS rhs)
             {
-                return (*this)(rhs, lhs);
+                return call(rhs, lhs);
             }
 
             template <typename LHS, typename RHS>
@@ -172,10 +182,15 @@ namespace rocRoller
                 return nullptr;
             }
 
-            ExpressionPtr operator()(ExpressionPtr lhs, CommandArgumentValue rhs)
+            ExpressionPtr call(ExpressionPtr lhs, CommandArgumentValue rhs)
             {
                 m_lhs = lhs;
                 return visit(*this, rhs);
+            }
+
+            ExpressionPtr call(CommandArgumentValue lhs, CommandArgumentValue rhs)
+            {
+                return visit(*this, lhs, rhs);
             }
         };
 
@@ -202,7 +217,7 @@ namespace rocRoller
             template <typename LHS, typename RHS>
             requires(!CIntegral<LHS> && CIntegral<RHS>) ExpressionPtr operator()(LHS lhs, RHS rhs)
             {
-                return (*this)(rhs, lhs);
+                return call(rhs, lhs);
             }
 
             template <typename LHS, typename RHS>
@@ -227,10 +242,15 @@ namespace rocRoller
                 return nullptr;
             }
 
-            ExpressionPtr operator()(ExpressionPtr lhs, CommandArgumentValue rhs)
+            ExpressionPtr call(ExpressionPtr lhs, CommandArgumentValue rhs)
             {
                 m_lhs = lhs;
                 return visit(*this, rhs);
+            }
+
+            ExpressionPtr call(CommandArgumentValue lhs, CommandArgumentValue rhs)
+            {
+                return visit(*this, lhs, rhs);
             }
         };
 
@@ -252,7 +272,7 @@ namespace rocRoller
                 return nullptr;
             }
 
-            ExpressionPtr operator()(ExpressionPtr lhs, CommandArgumentValue rhs)
+            ExpressionPtr call(ExpressionPtr lhs, CommandArgumentValue rhs)
             {
                 m_lhs = lhs;
                 return visit(*this, rhs);
@@ -266,6 +286,7 @@ namespace rocRoller
             template <typename LHS, typename RHS>
             requires(CIntegral<LHS>&& CIntegral<RHS>) ExpressionPtr operator()(LHS lhs, RHS rhs)
             {
+                AssertFatal(rhs != 0, "Modulo operation by 0");
                 return literal(lhs % rhs);
             }
 
@@ -289,40 +310,71 @@ namespace rocRoller
                 return nullptr;
             }
 
-            ExpressionPtr operator()(ExpressionPtr lhs, CommandArgumentValue rhs)
+            ExpressionPtr call(ExpressionPtr lhs, CommandArgumentValue rhs)
             {
                 m_lhs = lhs;
                 return visit(*this, rhs);
+            }
+
+            ExpressionPtr call(CommandArgumentValue lhs, CommandArgumentValue rhs)
+            {
+                return visit(*this, lhs, rhs);
             }
         };
 
         struct SimplifyExpressionVisitor
         {
+            template <CUnary Expr>
+            ExpressionPtr operator()(Expr const& expr) const
+            {
+                Expr cpy = expr;
+                if(expr.arg)
+                {
+                    cpy.arg = call(expr.arg);
+                }
+                return std::make_shared<Expression>(cpy);
+            }
+
             template <CBinary Expr>
             ExpressionPtr operator()(Expr const& expr) const
             {
-                return std::make_shared<Expression>(Expr({(*this)(expr.lhs), (*this)(expr.rhs)}));
+                Expr cpy = expr;
+                if(expr.lhs)
+                {
+                    cpy.lhs = call(expr.lhs);
+                }
+                if(expr.rhs)
+                {
+                    cpy.rhs = call(expr.rhs);
+                }
+                return std::make_shared<Expression>(cpy);
             }
 
             template <CTernary Expr>
             ExpressionPtr operator()(Expr const& expr) const
             {
-                return std::make_shared<Expression>(
-                    Expr({(*this)(expr.lhs), (*this)(expr.r1hs), (*this)(expr.r2hs)}));
-            }
-
-            template <CUnary Expr>
-            ExpressionPtr operator()(Expr const& expr) const
-            {
-                return std::make_shared<Expression>(Expr({(*this)(expr.arg)}));
+                Expr cpy = expr;
+                if(expr.lhs)
+                {
+                    cpy.lhs = call(expr.lhs);
+                }
+                if(expr.r1hs)
+                {
+                    cpy.r1hs = call(expr.r1hs);
+                }
+                if(expr.r2hs)
+                {
+                    cpy.r2hs = call(expr.r2hs);
+                }
+                return std::make_shared<Expression>(cpy);
             }
 
             ExpressionPtr operator()(Add const& expr) const
             {
                 static_assert(CCommutativeBinary<Add>);
 
-                auto lhs = (*this)(expr.lhs);
-                auto rhs = (*this)(expr.rhs);
+                auto lhs = call(expr.lhs);
+                auto rhs = call(expr.rhs);
 
                 bool eval_lhs = evaluationTimes(lhs)[EvaluationTime::Translate];
                 bool eval_rhs = evaluationTimes(rhs)[EvaluationTime::Translate];
@@ -331,11 +383,11 @@ namespace rocRoller
 
                 ExpressionPtr rv;
                 if(eval_lhs && eval_rhs)
-                    rv = std::visit(simplifier, evaluate(lhs), evaluate(rhs));
+                    rv = simplifier.call(evaluate(lhs), evaluate(rhs));
                 else if(eval_lhs)
-                    rv = simplifier(rhs, evaluate(lhs));
+                    rv = simplifier.call(rhs, evaluate(lhs));
                 else if(eval_rhs)
-                    rv = simplifier(lhs, evaluate(rhs));
+                    rv = simplifier.call(lhs, evaluate(rhs));
                 if(rv != nullptr)
                     return rv;
 
@@ -344,8 +396,8 @@ namespace rocRoller
 
             ExpressionPtr operator()(ShiftL const& expr) const
             {
-                auto lhs = (*this)(expr.lhs);
-                auto rhs = (*this)(expr.rhs);
+                auto lhs = call(expr.lhs);
+                auto rhs = call(expr.rhs);
 
                 bool eval_lhs = evaluationTimes(lhs)[EvaluationTime::Translate];
                 bool eval_rhs = evaluationTimes(rhs)[EvaluationTime::Translate];
@@ -354,9 +406,9 @@ namespace rocRoller
 
                 ExpressionPtr rv;
                 if(eval_lhs && eval_rhs)
-                    rv = std::visit(simplifier, evaluate(lhs), evaluate(rhs));
+                    rv = simplifier.call(evaluate(lhs), evaluate(rhs));
                 else if(eval_rhs)
-                    rv = simplifier(lhs, evaluate(rhs));
+                    rv = simplifier.call(lhs, evaluate(rhs));
                 if(rv != nullptr)
                     return rv;
 
@@ -367,8 +419,8 @@ namespace rocRoller
             {
                 static_assert(CCommutativeBinary<Multiply>);
 
-                auto lhs = (*this)(expr.lhs);
-                auto rhs = (*this)(expr.rhs);
+                auto lhs = call(expr.lhs);
+                auto rhs = call(expr.rhs);
 
                 bool eval_lhs = evaluationTimes(lhs)[EvaluationTime::Translate];
                 bool eval_rhs = evaluationTimes(rhs)[EvaluationTime::Translate];
@@ -377,11 +429,11 @@ namespace rocRoller
 
                 ExpressionPtr rv;
                 if(eval_lhs && eval_rhs)
-                    rv = std::visit(simplifier, evaluate(lhs), evaluate(rhs));
+                    rv = simplifier.call(evaluate(lhs), evaluate(rhs));
                 else if(eval_lhs)
-                    rv = simplifier(rhs, evaluate(lhs));
+                    rv = simplifier.call(rhs, evaluate(lhs));
                 else if(eval_rhs)
-                    rv = simplifier(lhs, evaluate(rhs));
+                    rv = simplifier.call(lhs, evaluate(rhs));
                 if(rv != nullptr)
                     return rv;
 
@@ -390,13 +442,13 @@ namespace rocRoller
 
             ExpressionPtr operator()(Divide const& expr) const
             {
-                auto lhs = (*this)(expr.lhs);
-                auto rhs = (*this)(expr.rhs);
+                auto lhs = call(expr.lhs);
+                auto rhs = call(expr.rhs);
 
                 if(evaluationTimes(rhs)[EvaluationTime::Translate])
                 {
-                    auto rhs_val = evaluate(rhs);
-                    auto rv      = SimplifyDivideByConstant()(lhs, rhs_val);
+                    auto simplifier = SimplifyDivideByConstant();
+                    auto rv         = simplifier.call(lhs, evaluate(rhs));
                     if(rv != nullptr)
                         return rv;
                 }
@@ -406,8 +458,8 @@ namespace rocRoller
 
             ExpressionPtr operator()(Modulo const& expr) const
             {
-                auto lhs = (*this)(expr.lhs);
-                auto rhs = (*this)(expr.rhs);
+                auto lhs = call(expr.lhs);
+                auto rhs = call(expr.rhs);
 
                 bool eval_lhs = evaluationTimes(lhs)[EvaluationTime::Translate];
                 bool eval_rhs = evaluationTimes(rhs)[EvaluationTime::Translate];
@@ -416,27 +468,21 @@ namespace rocRoller
 
                 ExpressionPtr rv;
                 if(eval_lhs && eval_rhs)
-                    rv = std::visit(simplifier, evaluate(lhs), evaluate(rhs));
+                    rv = simplifier.call(evaluate(lhs), evaluate(rhs));
                 else if(eval_rhs)
-                    rv = simplifier(lhs, evaluate(rhs));
+                    rv = simplifier.call(lhs, evaluate(rhs));
                 if(rv != nullptr)
                     return rv;
 
                 return std::make_shared<Expression>(Modulo({lhs, rhs}));
             }
 
-            // TODO add to binary
-            ExpressionPtr operator()(MatrixMultiply const& expr) const
-            {
-                return std::make_shared<Expression>(MatrixMultiply(expr));
-            }
-
             ExpressionPtr operator()(BitwiseAnd const& expr) const
             {
                 static_assert(CCommutativeBinary<BitwiseAnd>);
 
-                auto lhs = (*this)(expr.lhs);
-                auto rhs = (*this)(expr.rhs);
+                auto lhs = call(expr.lhs);
+                auto rhs = call(expr.rhs);
 
                 bool eval_lhs = evaluationTimes(lhs)[EvaluationTime::Translate];
                 bool eval_rhs = evaluationTimes(rhs)[EvaluationTime::Translate];
@@ -445,11 +491,11 @@ namespace rocRoller
 
                 ExpressionPtr rv;
                 if(eval_lhs && eval_rhs)
-                    rv = std::visit(simplifier, evaluate(lhs), evaluate(rhs));
+                    rv = simplifier.call(evaluate(lhs), evaluate(rhs));
                 else if(eval_lhs)
-                    rv = simplifier(rhs, evaluate(lhs));
+                    rv = simplifier.call(rhs, evaluate(lhs));
                 else if(eval_rhs)
-                    rv = simplifier(lhs, evaluate(rhs));
+                    rv = simplifier.call(lhs, evaluate(rhs));
                 if(rv != nullptr)
                     return rv;
 
@@ -462,7 +508,7 @@ namespace rocRoller
                 return std::make_shared<Expression>(expr);
             }
 
-            ExpressionPtr operator()(ExpressionPtr expr) const
+            ExpressionPtr call(ExpressionPtr expr) const
             {
                 if(!expr)
                     return expr;
@@ -474,7 +520,7 @@ namespace rocRoller
         ExpressionPtr simplify(ExpressionPtr expr)
         {
             auto visitor = SimplifyExpressionVisitor();
-            return visitor(expr);
+            return visitor.call(expr);
         }
 
     }

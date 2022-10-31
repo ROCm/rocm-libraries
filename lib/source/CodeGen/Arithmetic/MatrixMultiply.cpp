@@ -15,19 +15,6 @@ namespace rocRoller
 
         const std::string MatrixMultiply::Name = "MatrixMultiply";
 
-        template <DataType ACC, DataType INPUT>
-        Generator<Instruction>
-            MatrixMultiplyGenerator<ACC, INPUT>::zero(std::shared_ptr<Register::Value> dest)
-        {
-            co_yield Register::AllocateIfNeeded(dest);
-            for(size_t i = 0; i < dest->valueCount(); ++i)
-                co_yield_(Instruction("v_accvgpr_write",
-                                      {dest->subset({i})},
-                                      {Register::Value::Special("0x0")},
-                                      {},
-                                      "initialise to zero"));
-        }
-
         template <DataType DATATYPE>
         std::string typeStr()
         {
@@ -43,14 +30,16 @@ namespace rocRoller
         Generator<Instruction>
             MatrixMultiplyGenerator<ACC, INPUT>::mul(std::shared_ptr<Register::Value> dest,
                                                      std::shared_ptr<Register::Value> lhs,
-                                                     std::shared_ptr<Register::Value> rhs,
+                                                     std::shared_ptr<Register::Value> r1hs,
+                                                     std::shared_ptr<Register::Value> r2hs,
                                                      int                              M,
                                                      int                              N,
                                                      int                              K,
                                                      int                              B)
         {
             AssertFatal(lhs != nullptr);
-            AssertFatal(rhs != nullptr);
+            AssertFatal(r1hs != nullptr);
+            AssertFatal(r2hs != nullptr);
 
             auto const lanesPerWavefront = m_context->targetArchitecture().GetCapability(
                 GPUCapability::DefaultWavefrontSize);
@@ -70,14 +59,22 @@ namespace rocRoller
                         ShowValue(lanesPerWavefront),
                         ShowValue(M * K * B / lanesPerWavefront),
                         ShowValue(lhs->valueCount()));
-            AssertFatal(rhs->valueCount() * packing == (size_t)K * N * B / lanesPerWavefront,
+            AssertFatal(r1hs->valueCount() * packing == (size_t)K * N * B / lanesPerWavefront,
                         "B matrix size mismatch",
                         ShowValue(K),
                         ShowValue(N),
                         ShowValue(B),
                         ShowValue(lanesPerWavefront),
                         ShowValue(K * N * B / lanesPerWavefront),
-                        ShowValue(rhs->valueCount()));
+                        ShowValue(r1hs->valueCount()));
+            AssertFatal(r2hs->valueCount() == (size_t)M * N * B / lanesPerWavefront,
+                        "C matrix size mismatch",
+                        ShowValue(M),
+                        ShowValue(N),
+                        ShowValue(B),
+                        ShowValue(lanesPerWavefront),
+                        ShowValue(M * N * B / lanesPerWavefront),
+                        ShowValue(r2hs->valueCount()));
             AssertFatal(dest->valueCount() == (size_t)M * N * B / lanesPerWavefront,
                         "D matrix size mismatch",
                         ShowValue(M),
@@ -87,27 +84,30 @@ namespace rocRoller
                         ShowValue(M * N * B / lanesPerWavefront),
                         ShowValue(dest->valueCount()));
             AssertFatal(lhs->variableType() == INPUT,
-                        "Invalid LHS data type",
+                        "Invalid LHS (A) data type",
                         ShowValue(lhs->variableType()));
             AssertFatal(lhs->regType() == Register::Type::Vector,
-                        "Invalid LHS register type",
+                        "Invalid LHS (A) register type",
                         ShowValue(lhs->regType()));
-            AssertFatal(rhs->variableType() == INPUT,
-                        "Invalid RHS data type",
+            AssertFatal(r1hs->variableType() == INPUT,
+                        "Invalid R1HS (B) data type",
                         ShowValue(lhs->variableType()));
-            AssertFatal(rhs->regType() == Register::Type::Vector,
-                        "Invalid RHS register type",
-                        ShowValue(rhs->regType()));
-            AssertFatal(dest->variableType() == ACC,
-                        "Invalid DEST data type",
-                        ShowValue(lhs->variableType()));
+            AssertFatal(r1hs->regType() == Register::Type::Vector,
+                        "Invalid R1HS (B) register type",
+                        ShowValue(r1hs->regType()));
+            AssertFatal(r2hs->variableType() == ACC,
+                        "Invalid R2HS (C) data type",
+                        ShowValue(r2hs->variableType()));
             AssertFatal(dest->regType() == Register::Type::Accumulator,
-                        "Invalid DEST register type",
+                        "Invalid DEST (D) register type",
                         ShowValue(lhs->regType()));
+            AssertFatal(dest->variableType() == ACC,
+                        "Invalid DEST (D) data type",
+                        ShowValue(lhs->variableType()));
 
             auto mfma
                 = concatenate("v_mfma_", typeStr<ACC>(), "_", M, "x", N, "x", K, typeStr<INPUT>());
-            co_yield_(Instruction(mfma, {dest}, {lhs, rhs, dest}, {}, ""));
+            co_yield_(Instruction(mfma, {dest}, {lhs, r1hs, r2hs}, {}, ""));
         }
     }
 }

@@ -32,11 +32,7 @@ namespace rocRoller
 {
     namespace InstructionGenerators
     {
-
         struct MatrixMultiply;
         using MatrixMultiplyPtr = std::shared_ptr<MatrixMultiply>;
-
-        struct MatrixMultiply_Float_Float;
-
     }
 }

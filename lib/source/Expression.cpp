@@ -7,7 +7,6 @@
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
-#include <rocRoller/CodeGen/Arithmetic/MatrixMultiply.hpp>
 #include <rocRoller/CodeGen/Instruction.hpp>
 #include <rocRoller/Context.hpp>
 #include <rocRoller/Expression.hpp>
@@ -276,20 +275,74 @@ namespace rocRoller
             template <CTernary T>
             bool operator()(T const& a, T const& b)
             {
-                return std::visit(*this, *a.lhs, *b.lhs) && std::visit(*this, *a.r1hs, *b.r1hs)
-                       && std::visit(*this, *a.r2hs, *b.r2hs);
+                bool lhs  = false;
+                bool r1hs = false;
+                bool r2hs = false;
+
+                if(a.lhs != nullptr && b.lhs != nullptr)
+                {
+                    lhs = std::visit(*this, *a.lhs, *b.lhs);
+                }
+                else if(a.lhs == nullptr && b.lhs == nullptr)
+                {
+                    lhs = true;
+                }
+
+                if(a.r1hs != nullptr && b.r1hs != nullptr)
+                {
+                    r1hs = std::visit(*this, *a.r1hs, *b.r1hs);
+                }
+                else if(a.r1hs == nullptr && b.r1hs == nullptr)
+                {
+                    r1hs = true;
+                }
+
+                if(a.r2hs != nullptr && b.r2hs != nullptr)
+                {
+                    r2hs = std::visit(*this, *a.r2hs, *b.r2hs);
+                }
+                else if(a.r2hs == nullptr && b.r2hs == nullptr)
+                {
+                    r2hs = true;
+                }
+                return lhs && r1hs && r2hs;
             }
 
             template <CBinary T>
             bool operator()(T const& a, T const& b)
             {
-                return std::visit(*this, *a.lhs, *b.lhs) && std::visit(*this, *a.rhs, *b.rhs);
+                bool lhs = false;
+                bool rhs = false;
+
+                if(a.lhs != nullptr && b.lhs != nullptr)
+                {
+                    lhs = std::visit(*this, *a.lhs, *b.lhs);
+                }
+                else if(a.lhs == nullptr && b.lhs == nullptr)
+                {
+                    lhs = true;
+                }
+
+                if(a.rhs != nullptr && b.rhs != nullptr)
+                {
+                    rhs = std::visit(*this, *a.rhs, *b.rhs);
+                }
+                else if(a.rhs == nullptr && b.rhs == nullptr)
+                {
+                    rhs = true;
+                }
+
+                return lhs && rhs;
             }
 
             template <CUnary T>
             bool operator()(T const& a, T const& b)
             {
-                return std::visit(*this, *a.arg, *b.arg);
+                if(a.arg != nullptr && b.arg != nullptr)
+                {
+                    return std::visit(*this, *a.arg, *b.arg);
+                }
+                return a.arg == nullptr && b.arg == nullptr;
             }
 
             bool operator()(CommandArgumentValue const& a, CommandArgumentValue const& b)

@@ -94,38 +94,6 @@ namespace rocRoller
             constexpr static inline bool Commutative = false;
         };
 
-        /**
-         * Represents DEST = LHS * RHS.
-         *
-         * LHS is M x K, with B batches.  RHS is K x N, with B batches.
-         *
-         * DEST is initialised to zero before computing the product.
-         *
-         * If LHS and RHS are registers, the dimensions (M, N, K, and
-         * B) must be explicitly set.  If A and B are WaveTiles, the
-         * dimensions can be deferred.
-         */
-        struct MatrixMultiply : Binary
-        {
-            MatrixMultiply() = default;
-            MatrixMultiply(ExpressionPtr lhs, ExpressionPtr rhs, int M, int N, int K, int B)
-                : Binary{lhs, rhs}
-                , M(M)
-                , N(N)
-                , K(K)
-                , B(B)
-            {
-            }
-            int M = 0, N = 0, K = 0, B = 0;
-
-            DataType accumulationPrecision = DataType::Float;
-
-            constexpr static inline auto            Type = Category::Arithmetic;
-            constexpr static inline EvaluationTimes EvalTimes{EvaluationTime::KernelExecute};
-            constexpr static inline bool            Associative = true;
-            constexpr static inline bool            Commutative = false;
-        };
-
         struct Multiply : Binary
         {
             constexpr static inline auto Type        = Category::Arithmetic;
@@ -276,6 +244,33 @@ namespace rocRoller
          */
         struct ShiftLAdd : Ternary
         {
+            constexpr static inline auto            Type = Category::Arithmetic;
+            constexpr static inline EvaluationTimes EvalTimes{EvaluationTime::KernelExecute};
+        };
+
+        /**
+         * Represents DEST = MatA * MatB + MatC.
+         *
+         * MatA is M x K, with B batches.  MatB is K x N, with B batches.  MatC is M x N, with B batches.
+         */
+        struct MatrixMultiply : Ternary
+        {
+            MatrixMultiply() = default;
+
+            /**
+             * @brief Construct a new Matrix Multiply object
+             *
+             * @param matA WaveTile. M x K, B batches
+             * @param matB WaveTile. K x N, B batches
+             * @param matC WaveTile. M x N, B batches
+             */
+            MatrixMultiply(ExpressionPtr matA, ExpressionPtr matB, ExpressionPtr matC)
+                : Ternary{matA, matB, matC}
+            {
+            }
+
+            DataType accumulationPrecision = DataType::Float;
+
             constexpr static inline auto            Type = Category::Arithmetic;
             constexpr static inline EvaluationTimes EvalTimes{EvaluationTime::KernelExecute};
         };

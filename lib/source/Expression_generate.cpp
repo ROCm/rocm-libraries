@@ -81,48 +81,33 @@ namespace rocRoller
 
             Generator<Instruction> operator()(Register::ValuePtr& dest, MatrixMultiply expr)
             {
-                Register::ValuePtr lhs, rhs;
+                Register::ValuePtr lhs, r1hs, r2hs;
                 int                M, N, K, B;
 
-                if(std::holds_alternative<WaveTilePtr>(*expr.lhs)
-                   && std::holds_alternative<WaveTilePtr>(*expr.rhs))
-                {
-                    auto const atile = *std::get<WaveTilePtr>(*expr.lhs);
-                    auto const btile = *std::get<WaveTilePtr>(*expr.rhs);
-                    AssertFatal(!atile.sizes.empty(), "WaveTile in invalid state.");
-                    AssertFatal(!btile.sizes.empty(), "WaveTile in invalid state.");
-                    AssertRecoverable(atile.sizes[1] == btile.sizes[0],
-                                      "MatrixMultiply WaveTile size mismatch.",
-                                      ShowValue(atile.sizes[1]),
-                                      ShowValue(btile.sizes[0]));
+                AssertFatal(std::holds_alternative<WaveTilePtr>(*expr.lhs)
+                                && std::holds_alternative<WaveTilePtr>(*expr.r1hs),
+                            "Expression MatrixMultiply requires WaveTiles");
 
-                    M   = atile.sizes[0];
-                    N   = btile.sizes[1];
-                    K   = atile.sizes[1];
-                    B   = 1;
-                    lhs = atile.vgpr;
-                    rhs = btile.vgpr;
-                }
-                else
-                {
-                    std::vector<Generator<Instruction>> subExprs;
-                    subExprs.push_back(call(lhs, expr.lhs));
-                    subExprs.push_back(call(rhs, expr.rhs));
+                auto const atile = *std::get<WaveTilePtr>(*expr.lhs);
+                auto const btile = *std::get<WaveTilePtr>(*expr.r1hs);
+                AssertFatal(!atile.sizes.empty(), "WaveTile in invalid state.");
+                AssertFatal(!btile.sizes.empty(), "WaveTile in invalid state.");
+                AssertRecoverable(atile.sizes[1] == btile.sizes[0],
+                                  "MatrixMultiply WaveTile size mismatch.",
+                                  ShowValue(atile.sizes[1]),
+                                  ShowValue(btile.sizes[0]));
 
-                    auto scheduler = Component::Get<Scheduling::Scheduler>(
-                        Scheduling::SchedulerProcedure::Sequential, m_context);
-                    co_yield (*scheduler)(subExprs);
+                M    = atile.sizes[0];
+                N    = btile.sizes[1];
+                K    = atile.sizes[1];
+                B    = 1;
+                lhs  = atile.vgpr;
+                r1hs = btile.vgpr;
 
-                    M = expr.M;
-                    N = expr.N;
-                    K = expr.K;
-                    B = expr.B;
-                }
-
-                AssertFatal(lhs->variableType() == rhs->variableType(),
+                AssertFatal(lhs->variableType() == r1hs->variableType(),
                             "Input types must match ",
                             ShowValue(lhs->variableType()),
-                            ShowValue(rhs->variableType()));
+                            ShowValue(r1hs->variableType()));
 
                 AssertFatal(!lhs->variableType().isPointer(),
                             "Input must not be a pointer. ",
@@ -144,9 +129,9 @@ namespace rocRoller
                 auto mm = Component::Get<rocRoller::InstructionGenerators::MatrixMultiply>(
                     m_context, accType, lhs->variableType().dataType);
 
-                // TODO: Only zero if we are allocating a new register?
-                co_yield mm->zero(dest);
-                co_yield mm->mul(dest, lhs, rhs, M, N, K, B);
+                r2hs = std::get<Register::ValuePtr>(*expr.r2hs);
+                co_yield Register::AllocateIfNeeded(r2hs);
+                co_yield mm->mul(dest, lhs, r1hs, r2hs, M, N, K, B);
             }
 
             Generator<Instruction> operator()(Register::ValuePtr& dest, WaveTilePtr const& expr)

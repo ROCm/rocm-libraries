@@ -52,21 +52,17 @@ namespace rocRoller
             static const std::string Name;
 
             /**
-             * Initialises DEST = 0.
-             */
-            virtual Generator<Instruction> zero(std::shared_ptr<Register::Value> dest) = 0;
-
-            /**
-             * Performs matrix multiplication: DEST = LHS * RHS + DEST
+             * Performs matrix multiplication: DEST = LHS * R1HS + R2HS
              * using MFMA instructions.
              *
-             * LHS and RHS are stored in registers.  DEST is accumulated.
+             * LHS and R1HS are stored in registers.  R2HS is the accumulator and can be the same as DEST.
              *
              * LHS is M x K with B batches.  RHS is K x N with B batches.
              */
             virtual Generator<Instruction> mul(std::shared_ptr<Register::Value> dest,
                                                std::shared_ptr<Register::Value> lhs,
-                                               std::shared_ptr<Register::Value> rhs,
+                                               std::shared_ptr<Register::Value> r1hs,
+                                               std::shared_ptr<Register::Value> r2hs,
                                                int                              M,
                                                int                              N,
                                                int                              K,
@@ -100,11 +96,10 @@ namespace rocRoller
                 return std::make_shared<MatrixMultiplyGenerator<ACC, INPUT>>(context);
             }
 
-            virtual Generator<Instruction> zero(std::shared_ptr<Register::Value> dest) override;
-
             virtual Generator<Instruction> mul(std::shared_ptr<Register::Value> dest,
                                                std::shared_ptr<Register::Value> lhs,
-                                               std::shared_ptr<Register::Value> rhs,
+                                               std::shared_ptr<Register::Value> r1hs,
+                                               std::shared_ptr<Register::Value> r2hs,
                                                int                              M,
                                                int                              N,
                                                int                              K,

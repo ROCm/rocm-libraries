@@ -237,3 +237,12 @@ TEST_F(InstructionTest, Classifications)
     InstructionReference ref(inst);
     EXPECT_FALSE(ref.isVALU());
 }
+
+TEST_F(InstructionTest, Special)
+{
+    // This pattern is used in the GuidePosts
+    auto inst = Instruction("s_waitcnt", {Register::Value::Special("lgkmcnt(1)")}, {}, {}, "");
+    m_context->schedule(inst);
+
+    EXPECT_THAT(output(), testing::HasSubstr("s_waitcnt lgkmcnt(1)\n"));
+}

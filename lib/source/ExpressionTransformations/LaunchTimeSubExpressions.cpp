@@ -62,34 +62,66 @@ namespace rocRoller
             ExpressionPtr operator()(Expr const& expr)
             {
                 if(evaluationTimes(expr)[EvaluationTime::KernelLaunch])
+                {
                     return launchEval(expr);
+                }
                 else
-                    return std::make_shared<Expression>(
-                        Expr({(*this)(expr.lhs), (*this)(expr.r1hs), (*this)(expr.r2hs)}));
+                {
+                    Expr cpy = expr;
+                    if(expr.lhs)
+                    {
+                        cpy.lhs = call(expr.lhs);
+                    }
+                    if(expr.r1hs)
+                    {
+                        cpy.r1hs = call(expr.r1hs);
+                    }
+                    if(expr.r2hs)
+                    {
+                        cpy.r2hs = call(expr.r2hs);
+                    }
+                    return std::make_shared<Expression>(cpy);
+                }
             }
 
             template <CBinary Expr>
             ExpressionPtr operator()(Expr const& expr)
             {
                 if(evaluationTimes(expr)[EvaluationTime::KernelLaunch])
+                {
                     return launchEval(expr);
+                }
                 else
-                    return std::make_shared<Expression>(
-                        Expr({(*this)(expr.lhs), (*this)(expr.rhs)}));
+                {
+                    Expr cpy = expr;
+                    if(expr.lhs)
+                    {
+                        cpy.lhs = call(expr.lhs);
+                    }
+                    if(expr.rhs)
+                    {
+                        cpy.rhs = call(expr.rhs);
+                    }
+                    return std::make_shared<Expression>(cpy);
+                }
             }
 
             template <CUnary Expr>
             ExpressionPtr operator()(Expr const& expr)
             {
                 if(evaluationTimes(expr)[EvaluationTime::KernelLaunch])
+                {
                     return launchEval(expr);
+                }
                 else
-                    return std::make_shared<Expression>(Expr({(*this)(expr.arg)}));
-            }
-
-            ExpressionPtr operator()(MatrixMultiply const& expr)
-            {
-                return std::make_shared<Expression>(MatrixMultiply(expr));
+                {
+                    Expr cpy = expr;
+                    if(expr.arg)
+                    {
+                        cpy.arg = call(expr.arg);
+                    }
+                    return std::make_shared<Expression>(cpy);
+                }
             }
 
             template <CValue Value>
@@ -98,7 +130,7 @@ namespace rocRoller
                 return std::make_shared<Expression>(expr);
             }
 
-            ExpressionPtr operator()(ExpressionPtr expr)
+            ExpressionPtr call(ExpressionPtr expr)
             {
                 if(!expr)
                     return expr;
@@ -113,7 +145,7 @@ namespace rocRoller
         ExpressionPtr launchTimeSubExpressions(ExpressionPtr expr, std::shared_ptr<Context> cxt)
         {
             auto visitor = LaunchTimeExpressionVisitor(cxt);
-            return visitor(expr);
+            return visitor.call(expr);
         }
 
     }

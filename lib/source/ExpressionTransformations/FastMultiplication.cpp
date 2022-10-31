@@ -55,7 +55,7 @@ namespace rocRoller
                 return nullptr;
             }
 
-            ExpressionPtr operator()(ExpressionPtr lhs, CommandArgumentValue rhs)
+            ExpressionPtr call(ExpressionPtr lhs, CommandArgumentValue rhs)
             {
                 m_lhs = lhs;
                 return visit(*this, rhs);
@@ -64,34 +64,62 @@ namespace rocRoller
 
         struct FastMultiplicationExpressionVisitor
         {
-            template <CTernary Expr>
+            template <CUnary Expr>
             ExpressionPtr operator()(Expr const& expr) const
             {
-                return std::make_shared<Expression>(
-                    Expr({(*this)(expr.lhs), (*this)(expr.r1hs), (*this)(expr.r2hs)}));
+                Expr cpy = expr;
+                if(expr.arg)
+                {
+                    cpy.arg = call(expr.arg);
+                }
+                return std::make_shared<Expression>(cpy);
             }
 
             template <CBinary Expr>
             ExpressionPtr operator()(Expr const& expr) const
             {
-                return std::make_shared<Expression>(Expr({(*this)(expr.lhs), (*this)(expr.rhs)}));
+                Expr cpy = expr;
+                if(expr.lhs)
+                {
+                    cpy.lhs = call(expr.lhs);
+                }
+                if(expr.rhs)
+                {
+                    cpy.rhs = call(expr.rhs);
+                }
+                return std::make_shared<Expression>(cpy);
             }
 
-            template <CUnary Expr>
+            template <CTernary Expr>
             ExpressionPtr operator()(Expr const& expr) const
             {
-                return std::make_shared<Expression>(Expr({(*this)(expr.arg)}));
+                Expr cpy = expr;
+                if(expr.lhs)
+                {
+                    cpy.lhs = call(expr.lhs);
+                }
+                if(expr.r1hs)
+                {
+                    cpy.r1hs = call(expr.r1hs);
+                }
+                if(expr.r2hs)
+                {
+                    cpy.r2hs = call(expr.r2hs);
+                }
+                return std::make_shared<Expression>(cpy);
             }
 
             ExpressionPtr operator()(Multiply const& expr) const
             {
-                auto lhs = (*this)(expr.lhs);
-                auto rhs = (*this)(expr.rhs);
+                auto lhs = call(expr.lhs);
+                auto rhs = call(expr.rhs);
+
+                auto mulByConst = MultiplicationByConstant();
 
                 if(evaluationTimes(rhs)[EvaluationTime::Translate])
                 {
                     auto rhs_val = evaluate(rhs);
-                    auto rv      = MultiplicationByConstant()(lhs, rhs_val);
+                    auto rv      = mulByConst.call(lhs, rhs_val);
                     if(rv != nullptr)
                         return rv;
                 }
@@ -100,17 +128,12 @@ namespace rocRoller
                 {
                     auto lhs_val = evaluate(lhs);
                     // lhs becomes rhs because visitor checks rhs for optimization
-                    auto rv = MultiplicationByConstant()(rhs, lhs_val);
+                    auto rv = mulByConst.call(rhs, lhs_val);
                     if(rv != nullptr)
                         return rv;
                 }
 
                 return std::make_shared<Expression>(Multiply({lhs, rhs}));
-            }
-
-            ExpressionPtr operator()(MatrixMultiply const& expr) const
-            {
-                return std::make_shared<Expression>(MatrixMultiply(expr));
             }
 
             template <CValue Value>
@@ -119,7 +142,7 @@ namespace rocRoller
                 return std::make_shared<Expression>(expr);
             }
 
-            ExpressionPtr operator()(ExpressionPtr expr) const
+            ExpressionPtr call(ExpressionPtr expr) const
             {
                 if(!expr)
                     return expr;
@@ -134,7 +157,7 @@ namespace rocRoller
         ExpressionPtr fastMultiplication(ExpressionPtr expr)
         {
             auto visitor = FastMultiplicationExpressionVisitor();
-            return visitor(expr);
+            return visitor.call(expr);
         }
 
     }

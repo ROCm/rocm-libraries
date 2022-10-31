@@ -84,28 +84,49 @@ namespace rocRoller
                 return std::make_shared<Expression>(Expr({lhs, rhs}));
             }
 
+            template <CUnary Expr>
+            ExpressionPtr operator()(Expr const& expr) const
+            {
+                Expr cpy = expr;
+                if(expr.arg)
+                {
+                    cpy.arg = call(expr.arg);
+                }
+                return std::make_shared<Expression>(cpy);
+            }
+
             template <CBinary Expr>
             requires(!CAssociativeBinary<Expr>) ExpressionPtr operator()(Expr const& expr) const
             {
-                return std::make_shared<Expression>(Expr({call(expr.lhs), call(expr.rhs)}));
+                Expr cpy = expr;
+                if(expr.lhs)
+                {
+                    cpy.lhs = call(expr.lhs);
+                }
+                if(expr.rhs)
+                {
+                    cpy.rhs = call(expr.rhs);
+                }
+                return std::make_shared<Expression>(cpy);
             }
 
             template <CTernary Expr>
             ExpressionPtr operator()(Expr const& expr) const
             {
-                return std::make_shared<Expression>(
-                    Expr({call(expr.lhs), call(expr.r1hs), call(expr.r2hs)}));
-            }
-
-            template <CUnary Expr>
-            ExpressionPtr operator()(Expr const& expr) const
-            {
-                return std::make_shared<Expression>(Expr({call(expr.arg)}));
-            }
-
-            ExpressionPtr operator()(MatrixMultiply const& expr) const
-            {
-                return std::make_shared<Expression>(MatrixMultiply(expr));
+                Expr cpy = expr;
+                if(expr.lhs)
+                {
+                    cpy.lhs = call(expr.lhs);
+                }
+                if(expr.r1hs)
+                {
+                    cpy.r1hs = call(expr.r1hs);
+                }
+                if(expr.r2hs)
+                {
+                    cpy.r2hs = call(expr.r2hs);
+                }
+                return std::make_shared<Expression>(cpy);
             }
 
             template <CValue Value>

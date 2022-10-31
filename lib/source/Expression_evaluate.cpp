@@ -441,6 +441,7 @@ namespace rocRoller
 
             CommandArgumentValue call(ExpressionPtr const& expr)
             {
+                AssertFatal(expr != nullptr, "Found nullptr in expression");
                 return call(*expr);
             }
 

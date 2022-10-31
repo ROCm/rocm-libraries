@@ -364,7 +364,16 @@ co_yield generateOp<Expression::Add>(sgprSrdD, sgprSrdD, stemp);
 }
 co_yield Instruction::Comment(" initC: remove C-tile 0-0 from pool ");
 co_yield Instruction::Comment(" initC: remove AB-tile 0-4 from pool ");
-co_yield fmm->zero(accDestination);
+// co_yield fmm->zero(accDestination);
+co_yield Register::AllocateIfNeeded(accDestination);
+for(size_t i = 0; i < accDestination->valueCount(); ++i)
+{
+    co_yield_(Instruction("v_accvgpr_write",
+                                  {accDestination->subset({i})},
+                                  {Register::Value::Special("0x0")},
+                                  {},
+                                  " Set accumulator to 0"));
+}
 co_yield generateOp<Expression::Equal>(nullptr, sgprLoopCounterL, Register::Value::Literal(0));// " at last iteration?"
 co_yield Instruction::Comment(" after InitC, skip to end of prefetch last iter if numIter==0 ");
 co_yield m_context->brancher()->branchIfZero(label_1, m_context->getSCC(), " Only branch on scc1");
@@ -421,7 +430,7 @@ co_yield Instruction::Comment(" local read increment a \n"
 //co_yield Instruction("s_waitcnt", {Register::Value::Special("vmcnt(1)")}, {}, {}, " lgkmcnt=-1 vmcnt=1wait for global read before writing to local");
 co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Local, vgprLocalWriteAddrA, vgprG2LA, Register::Value::Literal(0), 4, " lwoA_0_0_0_0 = (0*LSCA) + (0*LSPA)(*MT0I+PAD) = 0");
 co_yield_(Instruction("s_waitcnt", {Register::Value::Special("lgkmcnt(1)")}, {}, {}, " lgkmcnt=0 vmcnt=-1wait for prior local read local write old=0, new=1 newLW=1 newLR=0"));
-co_yield fmm->mul(accDestination, vgprValuA_X0_I0, vgprValuB_X0_I0, 32, 32, 2, 1);
+co_yield fmm->mul(accDestination, vgprValuA_X0_I0, vgprValuB_X0_I0, accDestination, 32, 32, 2, 1);
 co_yield Instruction::Comment(" numPrefetchIter=0 \n"
                               " dataAtIterA=0 numReadsIterA=1 skipReadsIterA=0 readsPerIterA=1 \n"
                               " dataAtIterB=0 numReadsIterB=1 skipReadsIterB=0 readsPerIterB=1 \n"
@@ -446,7 +455,7 @@ co_yield Instruction::Comment(" localReadInitPointers ");
 co_yield Instruction::Comment(" local read init pointers b ");
 co_yield Instruction::Comment(" localReadInitPointers ");
 //co_yield Instruction("s_waitcnt", {Register::Value::Special("lgkmcnt(1)")}, {}, {}, " lgkmcnt=0 vmcnt=-1wait for prior local read local write old=0, new=1 newLW=1 newLR=0");
-co_yield fmm->mul(accDestination, vgprValuA_X1_I0, vgprValuB_X1_I0, 32, 32, 2, 1);
+co_yield fmm->mul(accDestination, vgprValuA_X1_I0, vgprValuB_X1_I0, accDestination, 32, 32, 2, 1);
 co_yield Instruction::Comment(" numPrefetchIter=0 ");
 co_yield Instruction::Comment(" dataAtIterA=1 numReadsIterA=2 skipReadsIterA=0 readsPerIterA=1 ");
 co_yield Instruction::Comment(" dataAtIterB=1 numReadsIterB=2 skipReadsIterB=0 readsPerIterB=1 ");
