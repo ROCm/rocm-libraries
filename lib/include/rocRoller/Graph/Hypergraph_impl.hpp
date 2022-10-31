@@ -663,5 +663,13 @@ namespace rocRoller
                 }
             }
         }
+
+        template <typename Node, typename Edge, bool Hyper>
+        inline std::ostream& operator<<(std::ostream&                        stream,
+                                        Hypergraph<Node, Edge, Hyper> const& graph)
+        {
+            return stream << graph.toDOT();
+        }
+
     }
 }

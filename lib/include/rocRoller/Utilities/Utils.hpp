@@ -86,6 +86,11 @@ namespace rocRoller
         return val;
     }
 
+    inline std::string toString(int x)
+    {
+        return std::to_string(x);
+    }
+
     template <typename T>
     concept CHasToString = requires(T const& x)
     {

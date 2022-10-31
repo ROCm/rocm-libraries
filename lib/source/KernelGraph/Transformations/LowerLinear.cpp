@@ -173,46 +173,24 @@ namespace rocRoller
                                    int                         tag,
                                    CoordGraph::DataFlow const& df) override
             {
-                // // Don't need DataFlow edges to/from Linear anymore
-                // bool drop = false;
+                // Don't need DataFlow edges to/from Linear anymore
+                auto location = original.coordinates.getLocation(tag);
 
-                // auto location = original.coordinates.getLocation(tag);
-                // for(auto const& index : location.incoming)
-                // {
-                //     auto element = original.coordinates.getElement(index);
-                //     if(std::holds_alternative<CoordGraph::Dimension>(element))
-                //     {
-                //         auto dimension = std::get<CoordGraph::Dimension>(element);
-                //         if(std::holds_alternative<CoordGraph::Linear>(dimension))
-                //         {
-                //             drop = true;
-                //             break;
-                //         }
-                //     }
-                // }
-                // for(auto const& index : location.outgoing)
-                // {
-                //     auto element = original.coordinates.getElement(index);
-                //     if(std::holds_alternative<CoordGraph::Dimension>(element))
-                //     {
-                //         auto dimension = std::get<CoordGraph::Dimension>(element);
-                //         if(std::holds_alternative<CoordGraph::Linear>(dimension))
-                //         {
-                //             drop = true;
-                //             break;
-                //             // auto vgpr = graph.coordinates.addElement(CoordGraph::VGPR());
-                //             // reindexer.coordinates.insert_or_assign(index, vgpr);
-                //             // rocRoller::Log::getLogger()->debug(
-                //             //     "KernelGraph::lowerLinear(): DataFlow {} -> {}", index, vgpr);
+                auto check = std::vector<int>();
+                check.insert(check.end(), location.incoming.cbegin(), location.incoming.cend());
+                check.insert(check.end(), location.outgoing.cbegin(), location.outgoing.cend());
 
-                //             //                            break;
-                //         }
-                //     }
-                // }
-                // if(!drop)
-                // {
-                //     copyEdge(graph, original, reindexer, tag);
-                // }
+                bool drop
+                    = std::reduce(check.cbegin(), check.cend(), false, [&](bool rv, int index) {
+                          auto element   = original.coordinates.getElement(index);
+                          auto dimension = std::get<CoordGraph::Dimension>(element);
+                          return rv || std::holds_alternative<CoordGraph::Linear>(dimension);
+                      });
+
+                if(!drop)
+                {
+                    copyEdge(graph, original, reindexer, tag);
+                }
             }
 
             virtual void visitOperation(KernelHypergraph&                   graph,
@@ -301,6 +279,17 @@ namespace rocRoller
 
                 vgprs.insert_or_assign(original_linear, vgpr);
                 reindexer.control.insert_or_assign(tag, load);
+            }
+
+            virtual void visitOperation(KernelHypergraph&                  graph,
+                                        KernelHypergraph const&            original,
+                                        GraphReindexer&                    reindexer,
+                                        int                                tag,
+                                        ControlHypergraph::LoadVGPR const& oload) override
+            {
+                copyOperation(graph, original, reindexer, tag);
+                auto vgpr = original.mapper.get<CoordGraph::VGPR>(tag);
+                vgprs.insert_or_assign(vgpr, reindexer.coordinates.at(vgpr));
             }
 
             virtual void visitOperation(KernelHypergraph&       graph,

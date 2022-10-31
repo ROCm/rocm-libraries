@@ -359,13 +359,20 @@ namespace rocRoller
                 {
                     int parent = *original.control.getNeighbours<Graph::Direction::Upstream>(input)
                                       .begin();
-                    AssertFatal(reindexer.control.count(parent) > 0, "Missing control input.");
+                    AssertFatal(reindexer.control.count(parent) > 0,
+                                "Missing control input: ",
+                                ShowValue(input),
+                                ShowValue(parent));
                     graph.control.addElement(
                         original.control.getElement(input), {reindexer.control.at(parent)}, {op});
                 }
 
                 for(auto const& c : original.mapper.getConnections(tag))
                 {
+                    AssertFatal(reindexer.coordinates.count(c.coordinate) > 0,
+                                "Missing mapped coordinate: ",
+                                ShowValue(tag),
+                                ShowValue(c.coordinate));
                     graph.mapper.connect(
                         op, reindexer.coordinates.at(c.coordinate), c.tindex, c.subDimension);
                 }

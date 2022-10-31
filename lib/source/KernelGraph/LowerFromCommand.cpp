@@ -1,7 +1,11 @@
+#include <variant>
+#include <vector>
+
 #include "KernelGraph/ControlHypergraph/ControlEdge.hpp"
 #include "KernelGraph/ControlHypergraph/Operation.hpp"
 #include "KernelGraph/ControlHypergraph/Operation_fwd.hpp"
 #include "KernelGraph/CoordGraph/Dimension.hpp"
+#include "KernelGraph/CoordinateTransform/Dimension.hpp"
 #include "Operations/T_Execute.hpp"
 #include "Utilities/Error.hpp"
 #include <rocRoller/Expression.hpp>
@@ -13,7 +17,6 @@
 #include <rocRoller/KernelGraph/ControlHypergraph/ControlHypergraph.hpp>
 #include <rocRoller/KernelGraph/CoordGraph/CoordinateHypergraph.hpp>
 #include <rocRoller/KernelGraph/CoordGraph/Edge.hpp>
-#include <vector>
 
 namespace rocRoller
 {
@@ -363,6 +366,45 @@ namespace rocRoller
             return visitor(command);
         }
 
+        /**
+         * Promote element operation (E_Mul, E_Add etc) inputs to an appropriate output.
+         *
+         * For example, given VGPR and Linear inputs, output should be Linear.
+         */
+        CoordGraph::Dimension promoteDimensions(CoordGraph::CoordinateHypergraph const& graph,
+                                                std::vector<int> const&                 dims)
+        {
+            CoordGraph::Dimension rv = CoordGraph::VGPR();
+            for(auto tag : dims)
+            {
+                auto element   = graph.getElement(tag);
+                auto dimension = std::get<CoordGraph::Dimension>(element);
+                if(std::holds_alternative<CoordGraph::VGPR>(dimension))
+                {
+                    // NOP, don't Throw
+                }
+                else if(std::holds_alternative<CoordGraph::Linear>(dimension))
+                {
+                    AssertFatal(!std::holds_alternative<CoordGraph::MacroTile>(rv),
+                                "Element operation between Linear and MacroTile dimensions is not "
+                                "well-posed.");
+                    rv = CoordGraph::Linear();
+                }
+                else if(std::holds_alternative<CoordGraph::MacroTile>(dimension))
+                {
+                    AssertFatal(!std::holds_alternative<CoordGraph::Linear>(rv),
+                                "Element operation between Linear and MacroTile dimensions is not "
+                                "well-posed.");
+                    rv = CoordGraph::MacroTile();
+                }
+                else
+                {
+                    Throw<FatalError>("Invalid argument of element operation.");
+                }
+            }
+            return rv;
+        }
+
         // Rename this when graph rearch complete
         struct TranslateVisitor2
         {
@@ -464,8 +506,8 @@ namespace rocRoller
 
                 graph.coordinates.addElement(CoordGraph::DataFlow(), {user}, {vgpr});
 
-                auto vtype = Operations::VariableTypeVisitor()(*m_command->findTag(tload.getTag()));
-                auto load  = graph.control.addElement(ControlHypergraph::LoadVGPR(vtype, true));
+                auto load = graph.control.addElement(
+                    ControlHypergraph::LoadVGPR(tload.variableType(), true));
                 graph.control.addElement(ControlHypergraph::Body(), {m_kernel}, {load});
 
                 graph.mapper.connect<CoordGraph::User>(load, user);
@@ -636,8 +678,9 @@ namespace rocRoller
              * @brief Translate `T_Execute` to element operations.
              *
              * Each element operation becomes a node in the control
-             * graph.  Nodes in the coordinate graph are connected
-             * with `DataFlow` edges.
+             * graph.  New output nodes are added to the coordinate
+             * graph.  Input and output coordinates are connected with
+             * `DataFlow` edges.
              */
             void operator()(Operations::T_Execute const& exec)
             {
@@ -651,21 +694,24 @@ namespace rocRoller
 
                     for(auto const& sinput : sinputs)
                     {
-                        AssertRecoverable(m_op.count(sinput) > 0,
-                                          "Unable to find XOp inputs in kernel control graph.");
-                        AssertRecoverable(m_dim.count(sinput) > 0,
-                                          "Unable to find XOp inputs in kernel coordinate graph.");
+                        AssertFatal(m_op.count(sinput) > 0,
+                                    "Unable to find XOp inputs in kernel control graph.");
+                        AssertFatal(m_dim.count(sinput) > 0,
+                                    "Unable to find XOp inputs in kernel coordinate graph.");
                         control_inputs.push_back(m_op.at(sinput));
                         coordinate_inputs.push_back(m_dim.at(sinput));
                     }
 
+                    auto coordinateType = promoteDimensions(graph.coordinates, coordinate_inputs);
                     for(auto const& soutput : soutputs)
                     {
-                        AssertRecoverable(m_op.count(soutput) == 0,
-                                          "XOp output already exists in kernel graph.");
-                        auto linear = graph.coordinates.addElement(CoordGraph::Linear());
-                        coordinate_outputs.push_back(linear);
-                        m_dim.insert_or_assign(soutput, linear);
+                        AssertFatal(m_op.count(soutput) == 0,
+                                    "XOp output already exists in kernel graph.");
+                        AssertFatal(m_dim.count(soutput) == 0,
+                                    "XOp output already exists in kernel graph.");
+                        auto dimension = graph.coordinates.addElement(coordinateType);
+                        coordinate_outputs.push_back(dimension);
+                        m_dim.insert_or_assign(soutput, dimension);
                     }
 
                     graph.coordinates.addElement(

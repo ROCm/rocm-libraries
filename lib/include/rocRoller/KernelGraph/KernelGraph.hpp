@@ -101,5 +101,8 @@ namespace rocRoller
         Generator<Instruction>
             generate(KernelGraph, std::shared_ptr<Command>, std::shared_ptr<AssemblyKernel>);
 
+        Generator<Instruction>
+            generate(KernelHypergraph, std::shared_ptr<Command>, std::shared_ptr<AssemblyKernel>);
+
     }
 }

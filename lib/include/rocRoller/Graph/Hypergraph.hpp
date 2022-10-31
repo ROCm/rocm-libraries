@@ -269,6 +269,9 @@ namespace rocRoller
             template <Direction Dir>
             bool edgeSatisfied(int const edge, std::map<int, bool> const& visitedElements) const;
         };
+
+        template <typename Node, typename Edge, bool Hyper>
+        std::ostream& operator<<(std::ostream& stream, Hypergraph<Node, Edge, Hyper> const& graph);
     }
 }
 
