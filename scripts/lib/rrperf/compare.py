@@ -91,7 +91,7 @@ class PerformanceRun:
                     print('Error loading results in "{}": {}'.format(path, e))
                 for element in result:
                     if element.token in results:
-                        #TODO: Handle result files that have multiple results in a single yaml file.
+                        # TODO: Handle result files that have multiple results in a single yaml file.
                         results[element.token] = element
                     else:
                         results[element.token] = element
@@ -140,15 +140,16 @@ def summary_statistics(perf_runs):
 
 
 header = [
-        "Problem",
-        "Run A (ref)",
-        "Run B",
-        "Mean A",
-        "Mean B",
-        "Median A",
-        "Median B",
-        "Moods p-val",
-    ]
+    "Problem",
+    "Run A (ref)",
+    "Run B",
+    "Mean A",
+    "Mean B",
+    "Median A",
+    "Median B",
+    "Moods p-val",
+]
+
 
 def markdown_summary(md, perf_runs):
     """Create Markdown report of summary statistics."""
@@ -221,8 +222,9 @@ def html_summary(html_file, perf_runs):
     """Create HTML report of summary statistics."""
 
     from plotly import graph_objs as go
+    import plotly.express as px
     from plotly.subplots import make_subplots
-    from scipy import stats
+    import pandas as pd
 
     perf_runs.sort()
     summary = summary_statistics(perf_runs[-2:])
@@ -237,16 +239,27 @@ def html_summary(html_file, perf_runs):
 
     for token in tests:
         plot = make_subplots(
-            rows=2,
+            rows=1,
             cols=1,
             shared_xaxes=False,
             vertical_spacing=0.06,
-            specs=[[{"type": "box"}], [{"type": "table"}]],
+            specs=[[{"type": "box"}]],
         )
         medians = []
-        xs = []
-        runs = []
+        xs = list()
         names = []
+        machine_filtered_runs = dict()
+        machine_ids = list()
+        box_data = pd.DataFrame(columns=["timestamp", "runs"])
+        for config in configs:
+            machine_filtered_runs[config] = [
+                list(),  # xs
+                list(),  # medians
+                list(),  # names
+                list(),  # runs
+                pd.DataFrame(columns=["timestamp", "runs"]),  # box_data
+            ]
+
         for run in perf_runs:
             if token in run.results:
                 name = (
@@ -254,44 +267,105 @@ def html_summary(html_file, perf_runs):
                     + " <br> Machine ID: "
                     + str(configs.index(run.machine_spec))
                 )
+                machine_ids.append(configs.index(run.machine_spec))
                 A = run.results[token]
                 ka = np.asarray(A.kernelExecute) / A.numInner
-                runs.append(ka)
                 median = statistics.median(ka)
-                no_outliers = ka
-                count = 1
-                while no_outliers.size != count:
-                    count = no_outliers.size
-                    no_outliers = no_outliers[(np.abs(stats.zscore(no_outliers)) < 2)]
-                plot.add_trace(go.Box(x0=name, y=no_outliers, name=name, boxpoints=False), row=1, col=1)
-                xs.append(name)
+                box_data = pd.concat(
+                    [
+                        box_data,
+                        pd.DataFrame({"timestamp": run.timestamp, "runs": list(ka)}),
+                    ]
+                )
+                machine_filtered_runs[run.machine_spec][0].append(run.timestamp)
+                machine_filtered_runs[run.machine_spec][1].append(median)
+                machine_filtered_runs[run.machine_spec][2].append(name)
+                machine_filtered_runs[run.machine_spec][3].append(ka)
+                machine_filtered_runs[run.machine_spec][4] = pd.concat(
+                    [
+                        machine_filtered_runs[run.machine_spec][4],
+                        pd.DataFrame({"timestamp": run.timestamp, "runs": list(ka)}),
+                    ]
+                )
+                xs.append(run.timestamp)
                 medians.append(median)
                 names.append(name)
 
-        plot.add_trace(go.Scatter(x=xs, y=medians, name="Median"))
+        drop_down_options = list()
 
-        table = go.Table(
-            header=dict(
-                values=names,
-                line_color="darkslategray",
-                fill_color="lightskyblue",
-                align="left",
-            ),
-            cells=dict(
-                values=runs,
-                line_color="darkslategray",
-                fill_color="lightcyan",
-                align="left",
-            ),
+        drop_down_options.append(
+            {
+                "method": "update",
+                "label": "All Machines",
+                "args": [{"visible": [True, True] + ([False] * len(configs) * 2)}],
+            }
         )
 
-        plot.add_trace(table, row=2, col=1)
+        box = list(px.box(box_data, x="timestamp", y="runs").select_traces())[0]
+
+        scatter = go.Scatter(
+            x=xs,
+            y=medians,
+            name="Median",
+            text=names,
+            marker_color=machine_ids,
+            mode="lines+markers",
+        )
+
+        plot.add_trace(box, row=1, col=1)
+        plot.add_trace(scatter, row=1, col=1)
+
+        for i, config in enumerate(configs):
+            index = i + 1
+
+            box = list(
+                px.box(
+                    machine_filtered_runs[config][4], x="timestamp", y="runs"
+                ).select_traces()
+            )[0]
+
+            scatter = go.Scatter(
+                x=machine_filtered_runs[config][0],
+                y=machine_filtered_runs[config][1],
+                visible=False,
+                name="Median",
+                text=machine_filtered_runs[config][2],
+                mode="lines+markers",
+            )
+
+            plot.add_trace(box, row=1, col=1)
+            plot.add_trace(scatter, row=1, col=1)
+            filter = [False] * ((len(configs) + 1) * 2)
+            filter[index * 2] = True
+            filter[index * 2 + 1] = True
+            drop_down_options.append(
+                {
+                    "method": "update",
+                    "label": "Machine ID: {}".format(str(configs.index(config))),
+                    "args": [{"visible": filter}],
+                }
+            )
+
+        plot.update_yaxes(range=[min(medians), max(medians)])
+
+        plot.update_layout(
+            updatemenus=[
+                {
+                    "buttons": drop_down_options,
+                    "direction": "down",
+                    "showactive": True,
+                }
+            ],
+            xaxis=dict(
+                rangeslider=dict(visible=True),
+                type="date",
+            ),
+        )
         plot.update_layout(
             height=1000,
-            showlegend=False,
             title_text=str(token),
         )
-        plot.update_yaxes(title={"text": "Time (ns)"}, row=1, col=1)
+        plot.update_yaxes(title={"text": "Time (ns)"})
         plots.append(plot)
 
     # Make a table of machines for lookup.
