@@ -10,6 +10,7 @@ def runCI =
 
     def prj = new rocProject('rocPRIM', 'PreCheckin')
     prj.paths.build_command = './install -c'
+    prj.timeout.compile = 600
 
     def nodes = new dockerNodes(nodeDetails, jobName, prj)
 
