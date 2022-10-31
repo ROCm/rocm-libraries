@@ -20,15 +20,30 @@ namespace rocRoller
     {
     }
 
+    // TODO Delete this when graph rearch complete
     inline void CommandParameters::setDimensionInfo(KernelGraph::CoordinateTransform::Dimension dim)
     {
         m_dimInfo.push_back(dim);
     }
 
+    // TODO Delete this when graph rearch complete
     inline std::vector<KernelGraph::CoordinateTransform::Dimension>
         CommandParameters::getDimensionInfo() const
     {
         return m_dimInfo;
+    }
+
+    // TODO Rename this when graph rearch complete
+    inline void CommandParameters::setDimensionInfo(int tag, KernelGraph::CoordGraph::Dimension dim)
+    {
+        m_dimInfo2[tag] = dim;
+    }
+
+    // TODO Rename this when graph rearch complete
+    inline std::map<int, KernelGraph::CoordGraph::Dimension>
+        CommandParameters::getDimensionInfo2() const
+    {
+        return m_dimInfo2;
     }
 
     inline int CommandParameters::getManualKernelDimension() const

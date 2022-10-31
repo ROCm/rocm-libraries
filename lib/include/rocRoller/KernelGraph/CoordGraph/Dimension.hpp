@@ -33,7 +33,7 @@ namespace rocRoller
             {
             }
 
-            std::string toString() const;
+            virtual std::string toString() const;
 
             virtual std::string name() const = 0;
         };
@@ -393,7 +393,21 @@ namespace rocRoller
                 AssertFatal(layoutType != LayoutType::None, "Invalid layout type.");
             }
 
-            virtual std::string name() const
+            virtual std::string toString() const override
+            {
+                if(!sizes.empty())
+                {
+                    std::string _sizes = "{";
+                    for(int s : sizes)
+                        _sizes += std::to_string(s) + ",";
+                    _sizes[_sizes.length() - 1] = '}';
+                    return name() + _sizes;
+                }
+
+                return BaseDimension::toString();
+            }
+
+            virtual std::string name() const override
             {
                 return "MacroTile";
             }

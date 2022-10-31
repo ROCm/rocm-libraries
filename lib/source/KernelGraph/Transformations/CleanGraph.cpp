@@ -147,7 +147,7 @@ namespace rocRoller
             }
 
             template <typename T>
-            CoordGraph::Dimension visitDimension(T const& dim)
+            CoordGraph::Dimension visitDimension(int tag, T const& dim)
             {
                 auto d   = dim;
                 d.size   = m_clean_arguments(dim.size);

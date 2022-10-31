@@ -28,6 +28,11 @@ namespace rocRoller
         void setDimensionInfo(KernelGraph::CoordinateTransform::Dimension dim);
         std::vector<KernelGraph::CoordinateTransform::Dimension> getDimensionInfo() const;
 
+        // TODO Delete above when graph rearch complete
+        void setDimensionInfo(int tag, KernelGraph::CoordGraph::Dimension dim);
+        // TODO Rename this when graph rearch complete
+        std::map<int, KernelGraph::CoordGraph::Dimension> getDimensionInfo2() const;
+
         /**
          * Manually override kernel launch dimensions.
          *
@@ -69,8 +74,11 @@ namespace rocRoller
 
     private:
         std::vector<KernelGraph::CoordinateTransform::Dimension> m_dimInfo;
-        std::optional<std::array<unsigned int, 3>>               m_workgroupSize;
-        std::optional<std::array<Expression::ExpressionPtr, 3>>  m_workitemCount;
+        // TODO Delete above when graph rearch complete
+        // TODO Rename this when graph rearch complete
+        std::map<int, KernelGraph::CoordGraph::Dimension>       m_dimInfo2;
+        std::optional<std::array<unsigned int, 3>>              m_workgroupSize;
+        std::optional<std::array<Expression::ExpressionPtr, 3>> m_workitemCount;
 
         int m_kernelDimension = 0;
 

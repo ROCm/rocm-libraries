@@ -45,7 +45,7 @@ namespace rocRoller
          */
         KernelGraph lowerLinear(KernelGraph, ContextPtr);
 
-        // Delete above when graph rearch complete
+        // TODO Delete above when graph rearch complete
         KernelHypergraph lowerLinear(KernelHypergraph, ContextPtr);
 
         /**
@@ -91,6 +91,9 @@ namespace rocRoller
          * Rewrite KernelGraphs to set dimension/operation perameters.
          */
         KernelGraph updateParameters(KernelGraph, std::shared_ptr<CommandParameters>);
+
+        // TODO Delete above when graph rearch complete
+        KernelHypergraph updateParameters(KernelHypergraph, std::shared_ptr<CommandParameters>);
 
         /*
          * Code generation

@@ -245,7 +245,8 @@ namespace rocRoller
             for(auto const& tag : k.coordinates.getNodes())
             {
                 auto x = std::get<CoordGraph::Dimension>(k.coordinates.getElement(tag));
-                auto y = std::visit([&](auto&& arg) { return visitor.visitDimension(arg); }, x);
+                auto y
+                    = std::visit([&](auto&& arg) { return visitor.visitDimension(tag, arg); }, x);
                 graph.coordinates.setElement(tag, y);
             }
             for(auto const& tag : k.control.getNodes())
