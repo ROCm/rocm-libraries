@@ -33,7 +33,7 @@ namespace rocRoller
             else if(elementSize == 8)
             {
                 co_yield_(
-                    Instruction("s_ashr_i64", {dest}, {value, shiftAmount->subset({0})}, {}, ""));
+                    Instruction("s_lshr_b64", {dest}, {value, shiftAmount->subset({0})}, {}, ""));
             }
             else
             {
@@ -50,7 +50,7 @@ namespace rocRoller
             else if(elementSize == 8)
             {
                 co_yield_(Instruction(
-                    "v_ashrrev_i64", {dest}, {shiftAmount->subset({0}), value}, {}, ""));
+                    "v_lshrrev_b64", {dest}, {shiftAmount->subset({0}), value}, {}, ""));
             }
             else
             {

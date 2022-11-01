@@ -773,7 +773,8 @@ namespace ArithmeticTest
                         if(b < 64 && b >= 0)
                         {
                             EXPECT_EQ(result[5], a << b) << "a: " << a << ", b: " << b;
-                            EXPECT_EQ(result[6], a >> b) << "a: " << a << ", b: " << b;
+                            EXPECT_EQ(result[6], static_cast<uint64_t>(a) >> b)
+                                << "a: " << a << ", b: " << b;
                         }
                         EXPECT_EQ(result[7], (a > b ? 1 : 0)) << "a: " << a << ", b: " << b;
                         EXPECT_EQ(result[8], (a >= b ? 1 : 0)) << "a: " << a << ", b: " << b;
@@ -1005,7 +1006,8 @@ namespace ArithmeticTest
                         if(b < 64 && b >= 0)
                         {
                             EXPECT_EQ(result[5], a << b) << "a: " << a << ", b: " << b;
-                            EXPECT_EQ(result[6], a >> b) << "a: " << a << ", b: " << b;
+                            EXPECT_EQ(result[6], static_cast<uint64_t>(a) >> b)
+                                << "a: " << a << ", b: " << b;
                         }
                         EXPECT_EQ(result[7], (a > b ? 1 : 0)) << "a: " << a << ", b: " << b;
                         EXPECT_EQ(result[8], (a >= b ? 1 : 0)) << "a: " << a << ", b: " << b;
