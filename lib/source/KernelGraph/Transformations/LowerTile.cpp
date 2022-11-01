@@ -661,10 +661,19 @@ namespace rocRoller
                     graph.control.removeEdge({ControlGraph::Kernel()}, {kernelOutput});
                 }
 
-                auto [WaveTilesY, forWaveTilesY]
-                    = rangeFor(graph.coordinates, graph.control, literal(wavetilesPerWorkgroup[1]));
-                auto [WaveTilesX, forWaveTilesX]
-                    = rangeFor(graph.coordinates, graph.control, literal(wavetilesPerWorkgroup[0]));
+                CoordinateTransform::ForLoop WaveTilesX(-1), WaveTilesY(-1);
+                ControlGraph::ForLoopOp      forWaveTilesX, forWaveTilesY;
+
+                if(wavetilesPerWorkgroup[1] > 1)
+                {
+                    std::tie(WaveTilesY, forWaveTilesY) = rangeFor(
+                        graph.coordinates, graph.control, literal(wavetilesPerWorkgroup[1]));
+                }
+                if(wavetilesPerWorkgroup[0] > 1)
+                {
+                    std::tie(WaveTilesX, forWaveTilesX) = rangeFor(
+                        graph.coordinates, graph.control, literal(wavetilesPerWorkgroup[0]));
+                }
 
                 // Add edges from inner loop to kernel outputs
                 if(wavetilesPerWorkgroup[1] > 1)

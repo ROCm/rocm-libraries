@@ -170,7 +170,6 @@ namespace rocRoller
 
             AssertFatal(found, "There should be exactly one Kernel node.");
 
-#ifndef NDEBUG
             // Root node should be the only one with no incoming edges.
             std::set<TagType> tags;
             for(auto const& pair : m_nodes)
@@ -190,7 +189,6 @@ namespace rocRoller
                                   "/",
                                   getTag(rv));
             }
-#endif
 
             return rv;
         }
