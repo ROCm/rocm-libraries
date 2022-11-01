@@ -8,6 +8,7 @@ import datetime
 import numpy as np
 import scipy.stats
 import statistics
+import pandas as pd
 
 from collections import defaultdict, OrderedDict
 from dataclasses import dataclass, field
@@ -25,6 +26,18 @@ class ComparisonResult:
     moods_pval: float
 
     results: List[Any] = field(repr=False)
+
+
+@dataclass
+class PlotData:
+    timestamp: List[float] = field(default_factory=list)
+    median: List[float] = field(default_factory=list)
+    name: List[str] = field(default_factory=list)
+    kernel: List[float] = field(default_factory=list)
+    machine: List[int] = field(default_factory=list)
+    box_data: pd.DataFrame = field(
+        default_factory=lambda: pd.DataFrame(columns=["timestamp", "runs"])
+    )
 
 
 class PerformanceRun:
@@ -226,8 +239,6 @@ def html_summary(html_file, perf_runs):
 
     from plotly import graph_objs as go
     import plotly.express as px
-    from plotly.subplots import make_subplots
-    import pandas as pd
 
     perf_runs.sort()
     summary = summary_statistics(perf_runs[-2:])
@@ -241,106 +252,77 @@ def html_summary(html_file, perf_runs):
     configs = PerformanceRun.get_all_specs(perf_runs)
 
     for token in tests:
-        plot = make_subplots(
-            rows=1,
-            cols=1,
-            shared_xaxes=False,
-            vertical_spacing=0.06,
-            specs=[[{"type": "box"}]],
-        )
-        medians = []
-        xs = list()
-        names = []
-        machine_filtered_runs = dict()
-        machine_ids = list()
-        box_data = pd.DataFrame(columns=["timestamp", "runs"])
-        for config in configs:
-            machine_filtered_runs[config] = [
-                list(),  # xs
-                list(),  # medians
-                list(),  # names
-                list(),  # runs
-                pd.DataFrame(columns=["timestamp", "runs"]),  # box_data
-            ]
+        machine_filtered_runs = defaultdict(lambda: PlotData())
 
         for run in perf_runs:
-            if token in run.results:
-                name = (
-                    run.name()
-                    + " <br> Machine ID: "
-                    + str(configs.index(run.machine_spec))
+            if token not in run.results:
+                continue
+
+            name = (
+                run.name() + " <br> Machine ID: " + str(configs.index(run.machine_spec))
+            )
+
+            A = run.results[token]
+            ka = np.asarray(A.kernelExecute) / A.numInner
+            median = statistics.median(ka)
+
+            for machine in ["all", run.machine_spec]:
+                machine_filtered_runs[machine].timestamp.append(run.timestamp)
+                machine_filtered_runs[machine].median.append(median)
+                machine_filtered_runs[machine].name.append(name)
+                machine_filtered_runs[machine].kernel.append(ka)
+                machine_filtered_runs[machine].machine.append(
+                    configs.index(run.machine_spec)
                 )
-                machine_ids.append(configs.index(run.machine_spec))
-                A = run.results[token]
-                ka = np.asarray(A.kernelExecute) / A.numInner
-                median = statistics.median(ka)
-                box_data = pd.concat(
+                machine_filtered_runs[machine].box_data = pd.concat(
                     [
-                        box_data,
-                        pd.DataFrame({"timestamp": run.timestamp, "runs": list(ka)}),
+                        machine_filtered_runs[machine].box_data,
+                        pd.DataFrame({"timestamp": run.timestamp, "runs": ka}),
                     ]
                 )
-                machine_filtered_runs[run.machine_spec][0].append(run.timestamp)
-                machine_filtered_runs[run.machine_spec][1].append(median)
-                machine_filtered_runs[run.machine_spec][2].append(name)
-                machine_filtered_runs[run.machine_spec][3].append(ka)
-                machine_filtered_runs[run.machine_spec][4] = pd.concat(
-                    [
-                        machine_filtered_runs[run.machine_spec][4],
-                        pd.DataFrame({"timestamp": run.timestamp, "runs": list(ka)}),
-                    ]
-                )
-                xs.append(run.timestamp)
-                medians.append(median)
-                names.append(name)
 
-        drop_down_options = list()
-
-        drop_down_options.append(
+        drop_down_options = [
             {
                 "method": "update",
                 "label": "All Machines",
                 "args": [{"visible": [True, True] + ([False] * len(configs) * 2)}],
             }
-        )
+        ]
 
-        box = list(px.box(box_data, x="timestamp", y="runs").select_traces())[0]
-
+        plot = go.Figure()
+        box = px.box(
+            machine_filtered_runs["all"].box_data, x="timestamp", y="runs"
+        ).select_traces()
         scatter = go.Scatter(
-            x=xs,
-            y=medians,
+            x=machine_filtered_runs["all"].timestamp,
+            y=machine_filtered_runs["all"].median,
             name="Median",
-            text=names,
-            marker_color=machine_ids,
+            text=machine_filtered_runs["all"].name,
+            marker_color=machine_filtered_runs["all"].machine,
             mode="lines+markers",
         )
-
-        plot.add_trace(box, row=1, col=1)
-        plot.add_trace(scatter, row=1, col=1)
+        plot.add_trace(next(box))
+        plot.add_trace(scatter)
 
         for i, config in enumerate(configs):
-            index = i + 1
-
-            box = list(
-                px.box(
-                    machine_filtered_runs[config][4], x="timestamp", y="runs"
-                ).select_traces()
-            )[0]
+            box = px.box(
+                machine_filtered_runs[config].box_data, x="timestamp", y="runs"
+            ).select_traces()
 
             scatter = go.Scatter(
-                x=machine_filtered_runs[config][0],
-                y=machine_filtered_runs[config][1],
+                x=machine_filtered_runs[config].timestamp,
+                y=machine_filtered_runs[config].median,
                 visible=False,
                 name="Median",
-                text=machine_filtered_runs[config][2],
+                text=machine_filtered_runs[config].name,
                 mode="lines+markers",
             )
 
-            plot.add_trace(box, row=1, col=1)
-            plot.add_trace(scatter, row=1, col=1)
+            plot.add_trace(next(box))
+            plot.add_trace(scatter)
             filter = [False] * ((len(configs) + 1) * 2)
-            filter[index * 2] = True
-            filter[index * 2 + 1] = True
+            filter[(i + 1) * 2] = True
+            filter[(i + 1) * 2 + 1] = True
             drop_down_options.append(
                 {
                     "method": "update",
@@ -349,7 +331,12 @@ def html_summary(html_file, perf_runs):
                 }
             )
 
-        plot.update_yaxes(range=[min(medians), max(medians)])
+        plot.update_yaxes(
+            range=[
+                min(machine_filtered_runs["all"].median),
+                max(machine_filtered_runs["all"].median),
+            ]
+        )
 
         plot.update_layout(
             updatemenus=[
