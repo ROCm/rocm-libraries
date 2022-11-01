@@ -6,6 +6,7 @@ import pathlib
 import subprocess
 from datetime import datetime
 
+
 def runAndLog(args):
     fname = pathlib.Path(args.output_file)
     output = subprocess.check_output(args.command, cwd=args.working_directory).decode()
@@ -22,6 +23,7 @@ def runAndLog(args):
     with fname.open(mode) as log:
         log.write(output)
         log.write("\n")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Run a program and log its output to a file along with current git commit.')

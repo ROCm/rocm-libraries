@@ -1,3 +1,4 @@
+# flake8: noqa
 import rrperf.cli
 import rrperf.compare
 import rrperf.git

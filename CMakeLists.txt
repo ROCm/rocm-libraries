@@ -533,9 +533,16 @@ add_subdirectory(docs)
 # Add client directory
 add_subdirectory(client)
 
-# Add rrperf unit tests
-add_test(NAME RRPerfPYTest
-         COMMAND pytest-3 scripts
+# Add script linting
+add_test(NAME PythonLint
+         COMMAND flake8 scripts --count --max-complexity=10 --max-line-length=127 --show-source --statistics
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-set_tests_properties(RRPerfPYTest
+set_tests_properties(PythonLint
                      PROPERTIES ENVIRONMENT "ROCROLLER_BUILD_DIR=${CMAKE_BINARY_DIR}")
+
+# Add rrperf unit tests
+add_test(NAME PythonTest
+         COMMAND pytest --cov-report html:python_cov_html --cov=rrperf scripts/lib/rrperf
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+set_tests_properties(PythonTest
+                     PROPERTIES ENVIRONMENT "ROCROLLER_BUILD_DIR=${CMAKE_BINARY_DIR};PYTHONPATH=${CMAKE_SOURCE_DIR}/scripts/lib")

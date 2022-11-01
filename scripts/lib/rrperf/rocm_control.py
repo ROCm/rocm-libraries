@@ -2,9 +2,10 @@ import subprocess
 import shutil
 from time import sleep
 
+
 def pin_clocks(ROCmSMIPath):
     print("Attempting to pin clocks...")
-    rocm_smi_found = shutil.which(ROCmSMIPath) != None
+    rocm_smi_found = shutil.which(ROCmSMIPath) is not None
     if rocm_smi_found:
         print("{} found, pinning clocks...".format(ROCmSMIPath))
         pinresult = subprocess.run(
@@ -38,6 +39,7 @@ def pin_clocks(ROCmSMIPath):
 
 def setupRestoreClocks(ROCmSMIPath):
     import atexit
+
     def restoreClocks():
         print("Resetting clocks...")
         subprocess.call([ROCmSMIPath, "-d", "0", "--resetclocks"])

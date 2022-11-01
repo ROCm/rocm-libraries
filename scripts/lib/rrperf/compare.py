@@ -73,10 +73,10 @@ class PerformanceRun:
             return datetime.datetime.fromtimestamp(
                 float((wrkdir / "timestamp.txt").read_text().strip())
             )
-        except:
+        except Exception:
             try:
                 return datetime.datetime.strptime(wrkdir.stem[0:10], "%Y-%m-%d")
-            except:
+            except Exception:
                 return datetime.datetime.fromtimestamp(0)
 
     def load_perf_runs(directories):
@@ -164,7 +164,8 @@ def markdown_summary(md, perf_runs):
             token, comparison = summary[run][result]
             A, B = comparison.results
             print(
-                f"{token} | {A.path.parent.stem} | {B.path.parent.stem} | {comparison.mean[0]} | {comparison.mean[1]} | {comparison.median[0]} | {comparison.median[1]} | {comparison.moods_pval:0.4e}",
+                f"{token} | {A.path.parent.stem} | {B.path.parent.stem} | {comparison.mean[0]} |",
+                f"{comparison.mean[1]} | {comparison.median[0]} | {comparison.median[1]} | {comparison.moods_pval:0.4e}",
                 file=md,
             )
 
@@ -190,7 +191,9 @@ def html_overview_table(html_file, summary):
             token, comparison = summary[run][result]
             A, B = comparison.results
             print(
-                f'<tr><td><a href="#plot{i}"> {token} </a></td><td> {A.path.parent.stem} </td><td> {B.path.parent.stem} </td><td> {comparison.mean[0]} </td><td> {comparison.mean[1]} </td><td> {comparison.median[0]} </td><td> {comparison.median[1]} </td><td> {comparison.moods_pval:0.4e}</td><tr>',
+                f'<tr><td><a href="#plot{i}"> {token} </a></td><td> {A.path.parent.stem} </td><td> {B.path.parent.stem}',
+                f"</td><td> {comparison.mean[0]} </td><td> {comparison.mean[1]} </td><td> {comparison.median[0]} </td><td>",
+                f"{comparison.median[1]} </td><td> {comparison.moods_pval:0.4e}</td><tr>",
                 file=html_file,
             )
 

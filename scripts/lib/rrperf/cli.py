@@ -8,7 +8,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="rocRoller performance tracking suite."
     )
-    subparsers = parser.add_subparsers(dest="command")
+    subparsers = parser.add_subparsers(dest="command", required=True)
 
     run_cmd = subparsers.add_parser("run")
     run_cmd.add_argument("--suite", help="Benchmark suite to run.")

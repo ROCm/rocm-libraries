@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 
 import argparse
-import itertools
 import re
 import utils
 
@@ -17,8 +16,9 @@ It DOES handle the case where:
 v[2:5] is used somewhere in the file and v2 and v3 are also used somewhere in the file.
 """
 
-special_registers = {"vcc" : "m_context->getVCC()",
-                     "exec" : "m_context->getExec()"}
+special_registers = {"vcc": "m_context->getVCC()",
+                     "exec": "m_context->getExec()"}
+
 
 # Generate C++ code for initializing all Registers that will be used
 def initialize_registers(registers):
@@ -27,10 +27,16 @@ def initialize_registers(registers):
         (name, index, register_type, children) = register
         if index is not None:
             continue
-        retval += "auto " + name +  " = std::make_shared<Register::Value>(m_context, Register::Type::" + register_type + ", DataType::Int32, " + str(children) + ");\n"
+        retval += \
+            "auto {} = std::make_shared<Register::Value>(m_context, Register::Type::{}, DataType::Int32, {});\n".format(
+                name,
+                register_type,
+                str(children)
+            )
         if children > 1:
             retval += "co_yield " + name + "->allocate();\n"
     return retval
+
 
 # Generate C++ code for declaring all Registers that will be used
 def declare_registers(registers):
@@ -42,6 +48,7 @@ def declare_registers(registers):
         retval += "Register::ValuePtr {};\n".format(name)
     return retval
 
+
 # Generate C++ code for defining all Registers that will be used
 def define_registers(registers):
     retval = ""
@@ -49,8 +56,13 @@ def define_registers(registers):
         (name, index, register_type, children) = register
         if index is not None:
             continue
-        retval += "{} = std::make_shared<Register::Value>(m_context, Register::Type::{}, DataType::Int32, {});\n".format(name, register_type, str(children))
+        retval += "{} = std::make_shared<Register::Value>(m_context, Register::Type::{}, DataType::Int32, {});\n".format(
+            name,
+            register_type,
+            str(children)
+        )
     return retval
+
 
 # Generate C++ code for allocating all Registers that need to be allocated
 def allocate_registers(struct_name, registers):
@@ -63,6 +75,7 @@ def allocate_registers(struct_name, registers):
             retval += "co_yield {}.{}->allocate();\n".format(struct_name, name)
     return retval
 
+
 # Generate C++ code for initializing all Labels that will be used
 def initialize_labels(labels):
     retval = ""
@@ -70,6 +83,7 @@ def initialize_labels(labels):
         value = labels[label]
         retval += "auto {} = m_context->labelAllocator()->label(\"{}\");\n".format(value, label)
     return retval
+
 
 # Generate C++ code for declaring all Labels that will be used
 def declare_labels(labels):
@@ -79,6 +93,7 @@ def declare_labels(labels):
         retval += "Register::ValuePtr  {};\n".format(value)
     return retval
 
+
 # Generate C++ code defining all Labels that will be used
 def define_labels(labels):
     retval = ""
@@ -86,6 +101,7 @@ def define_labels(labels):
         value = labels[label]
         retval += "{}  = m_context->labelAllocator()->label(\"{}\");\n".format(value, label)
     return retval
+
 
 # Find all of the registers and labels within a file and create
 # dictionaries to map between registers and labels within machine code
@@ -96,7 +112,7 @@ def find_registers(my_lines):
     registers = dict()
     for my_line in my_lines:
         line_split = my_line.split(" ", 1)
-        instruction = line_split[0]
+        # instruction = line_split[0]
         if len(line_split) > 1:
             args = line_split[1]
             split_args = args.split(",")
@@ -110,7 +126,7 @@ def find_registers(my_lines):
                     register_type = "Scalar"
                 else:
                     continue
-                if not arg in registers:
+                if arg not in registers:
                     multi = multi_register.match(arg)
                     complete_register = arg[0] + "_" + str(counter)
                     # Handle registers written like "v[2:4]"
@@ -123,6 +139,8 @@ def find_registers(my_lines):
                         registers[arg] = (complete_register, None, register_type, 1)
                     counter += 1
     return registers
+
+
 def find_labels(my_lines, cli_args):
     counter = 0
     labels = dict()
@@ -136,6 +154,7 @@ def find_labels(my_lines, cli_args):
                 labels[my_line[:-1]] = "label_" + str(counter)
                 counter += 1
     return labels
+
 
 # Convert an argument from a machine code instruction to a Register::Value
 def convert_arg(arg, registers, labels):
@@ -152,6 +171,7 @@ def convert_arg(arg, registers, labels):
         return labels[arg]
     else:
         return "Register::Value::Special(\"" + arg + "\")"
+
 
 # Generate a CPP file with struct definition to generate the input machine code.
 def machineCodeToInstructionList(lines, cli_args, registers, labels):
@@ -177,7 +197,7 @@ namespace rocRollerTest
     struct {name}
     {{
         ContextPtr m_context;
-""".format(name = cli_args.function_name)
+""".format(name=cli_args.function_name)
 
     result += declare_labels(labels)
     result += declare_registers(registers)
@@ -187,7 +207,7 @@ namespace rocRollerTest
         {name}(ContextPtr context)
             : m_context(context)
         {{
-""".format(name = cli_args.function_name)
+""".format(name=cli_args.function_name)
 
     result += define_labels(labels)
     result += define_registers(registers)
@@ -224,7 +244,6 @@ return {{
 return {{
 """.format(block_count)
 
-
     result += """
 }};
             // clang-format on
@@ -234,7 +253,7 @@ return {{
     Generator<Instruction> {name}_Program(ContextPtr context)
     {{
         {name} gen(context);
-""".format(name = cli_args.function_name)
+""".format(name=cli_args.function_name)
 
     result += allocate_registers(cli_args.function_name, registers)
 
@@ -247,6 +266,7 @@ return {{
 """
     return result
 
+
 # Convert machine code to a sequence of co_yield statements.
 def machineCodeToCoYields(lines, cli_args, registers, labels):
     result = ""
@@ -258,8 +278,9 @@ def machineCodeToCoYields(lines, cli_args, registers, labels):
         result += "co_yield_(" + new_instruction + ");\n"
     return result
 
+
 # Convert a single line of machine code to an instruction.
-def handleLine(in_macro, my_line, registers, labels):
+def handleLine(in_macro, my_line, registers, labels):  # noqa: C901
     if in_macro or my_line.startswith(".macro"):
         in_macro = True
         new_instruction = "Instruction(\"" + my_line + "\", {}, {}, {}, \"\")"
@@ -300,13 +321,21 @@ def handleLine(in_macro, my_line, registers, labels):
                 converted_modifiers = ["\"{}\"".format(arg) for arg in split_args]
                 # If a label is the first argument, there will be no "destination" argument
                 if converted_args[0] in labels.values():
-                    new_instruction += "{{}}, {{{}}}, {{{}}}, ".format(", ".join(converted_args[0:4]), ", ".join(converted_modifiers[4:]))
+                    new_instruction += "{{}}, {{{}}}, {{{}}}, ".format(
+                        ", ".join(converted_args[0:4]),
+                        ", ".join(converted_modifiers[4:])
+                    )
                 else:
-                    new_instruction += "{{{}}}, {{{}}}, {{{}}}, ".format(converted_args[0], ", ".join(converted_args[1:5]), ", ".join(converted_modifiers[5:]))
+                    new_instruction += "{{{}}}, {{{}}}, {{{}}}, ".format(
+                        converted_args[0],
+                        ", ".join(converted_args[1:5]),
+                        ", ".join(converted_modifiers[5:])
+                    )
             else:
                 new_instruction += "{}, {}, {}, "
             new_instruction += "\"" + comment + "\")"
     return in_macro, new_instruction
+
 
 # Take a file containing AMD GPU machine code and print out C++ code using the
 # Instruction class.
@@ -331,13 +360,14 @@ def machineCodeToInstructions(inputFile, cli_args):
 
         print(result)
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=DESCRIPTION)
     parser.add_argument('input_file', type=str, default='a.s', help='File with AMD GPU machine code')
     parser.add_argument('--ignore_labels', action="store_true", help='Skip label detection.')
     parser.add_argument('--ignore_registers', action="store_true", help='Skip register detection.')
     parser.add_argument('--leave_comments', action="store_true", help='Dont remove comments.')
-    parser.add_argument('--instruction_list', action="store_true", help='Convert to list of instructions instead of co_yields.')
+    parser.add_argument('--instruction_list', action="store_true", help='Convert to list of instructions.')
     parser.add_argument('--function_name', default="Program", help='The name of the generated C++ function')
     parser.add_argument('--remove_name_label', action="store_true", help='Ignore the program name label.')
     args = parser.parse_args()

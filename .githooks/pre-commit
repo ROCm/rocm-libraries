@@ -4,7 +4,7 @@
 # are installed, and if so, uses the installed version to format
 # the staged changes.
 
-export PATH=/opt/clang-format/bin:/usr/bin:/bin
+export PATH=/opt/clang-format/bin:/usr/bin:/bin::/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin
 
 # Redirect stdout to stderr.
 exec >&2
@@ -61,6 +61,17 @@ if command -v clang-format >/dev/null; then
        if [[ -e $file ]] && echo $file | grep -Eq '\.c$|\.h$|\.hpp$|\.cpp$|\.cl$|\.h\.in$|\.hpp\.in$|\.cpp\.in$'; then
             echo "clang-format $file"
             clang-format -i -style=file "$file"
+            git add -u "$file"
+        fi
+    done
+fi
+
+# if black(python formatter) exists, run it on python files
+if command -v black >/dev/null; then
+    for file in $files; do
+       if [[ -e $file ]] && echo $file | grep -Eq '\.py$'; then
+            echo "black $file"
+            black "$file"
             git add -u "$file"
         fi
     done

@@ -161,7 +161,7 @@ def get_machine_specs(devicenum, rocm_smi_path="rocm-smi"):
     else:
         rocm_info = "rocm info not available"
 
-    rocm_smi_found = shutil.which(rocm_smi_path) != None
+    rocm_smi_found = shutil.which(rocm_smi_path) is not None
     if rocm_smi_found:
         rocm_smi = run(
             [

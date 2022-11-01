@@ -4,11 +4,8 @@ import os
 import pandas as pd
 import pathlib
 import subprocess
-import tempfile
 import datetime
 import yaml
-
-from dataclasses import dataclass
 
 from itertools import chain
 
@@ -52,7 +49,7 @@ def submit_directory(suite: str, wrkdir: pathlib.Path, ptsdir: pathlib.Path):
     results = []
     for jpath in wrkdir.glob(f"{suite}-*.yaml"):
         results.extend(yaml.load(jpath.read_text()))
-    df = pandas.DataFrame(results)
+    df = pd.DataFrame(results)
     df.to_csv(f"{str(ptsdir)}/{suite}-benchmark.csv", index=False)
     # TODO: add call to SOMEWHERE to submit
 
@@ -72,7 +69,14 @@ def build_directory():
     raise RuntimeError(f"Build directory not found.  Set {varname} to override.")
 
 
-def run(token=None, suite=None, submit=False, filter=None, working_dir=None, rocm_smi="rocm-smi", pin_clocks=False, **kwargs):
+def run(token=None,  # noqa: C901
+        suite=None,
+        submit=False,
+        filter=None,
+        working_dir=None,
+        rocm_smi="rocm-smi",
+        pin_clocks=False,
+        **kwargs):
     """Run benchmarks!
 
     Implements the CLI 'run' subcommand.
@@ -132,7 +136,7 @@ def run(token=None, suite=None, submit=False, filter=None, working_dir=None, roc
         with log.open("w") as f:
             print(f"# command: {scmd}", file=f, flush=True)
             print(f"# token: {repr(problem)}", file=f, flush=True)
-            print(f"running:")
+            print("running:")
             print(f"  command: {scmd}")
             print(f"  log:     {log.resolve()}")
             print(f"  token:   {problem.token}", flush=True)

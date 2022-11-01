@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 
 import argparse
-import itertools
 import re
 import utils
 
@@ -15,6 +14,7 @@ set_end = re.compile(r"\n")
 This script removes unused macros from a kernel file.
 """
 
+
 def is_macro_used(my_lines, macro_name):
     macro_usage = re.compile(r"^\s*" + macro_name + r"\s+.*$")
     counter = 0
@@ -24,6 +24,7 @@ def is_macro_used(my_lines, macro_name):
             counter += 1
     return counter > 0
 
+
 def is_id_used(my_lines, id_name):
     id_usage = re.compile(r"^.*" + id_name + r".*$")
     counter = 0
@@ -32,6 +33,7 @@ def is_id_used(my_lines, id_name):
         if id_match:
             counter += 1
     return counter > 1
+
 
 def removeUnusedMacros(full_text):
     result = full_text
@@ -47,11 +49,12 @@ def removeUnusedMacros(full_text):
                 result = utils.remove_all_between_regex(result, re.compile(re.escape(line)), macro_end)
             var_set = set_definition.match(line)
             if var_set and not is_id_used(cleaned_lines, var_set.group(1)):
-                result =utils. remove_all_between_regex(result, re.compile(re.escape(line)), set_end)
+                result = utils. remove_all_between_regex(result, re.compile(re.escape(line)), set_end)
         if result == prev_result:
             break
 
     return result
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Removes unused macros from a kernel file.')

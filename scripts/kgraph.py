@@ -24,21 +24,26 @@ def extract_dot(path):
     kernel = meta['amdhsa.kernels'][0]
     return kernel['.name'], kernel['.kernel_graph']
 
+
 def write_dot(dot, fname):
     out_fname = fname.with_suffix(".dot")
     out_fname.write_text(dot)
     return out_fname
+
 
 def render_dot(fname, dot):
     """Render graph."""
     with fname.open('w') as out:
         subprocess.run(['dot', '-Tpdf'], input=dot.encode(), stdout=out)
 
+
 def open_dot(fname):
     subprocess.call(['xdg-open', str(fname)])
 
+
 def open_code(fname):
     subprocess.call(['code', str(fname)])
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Extract and render kernel graph.')
