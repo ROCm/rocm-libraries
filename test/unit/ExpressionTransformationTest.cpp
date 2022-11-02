@@ -25,6 +25,9 @@ TEST_F(ExpressionTransformationTest, Simplify)
     auto b    = Expression::literal(100);
     auto c    = Expression::literal(12.f);
 
+    // negate
+    EXPECT_EQ(Expression::toString(simplify(-(one + one))), "Negate(2i)");
+
     // multiply
     EXPECT_EQ(Expression::toString(simplify(zero * one)), "0i");
     EXPECT_EQ(Expression::toString(simplify(c * zero)), "0i");
@@ -70,6 +73,10 @@ TEST_F(ExpressionTransformationTest, Simplify)
         simplify(std::make_shared<Expression::Expression>(Expression::Multiply{nullptr, nullptr})),
         FatalError);
 
+    // addShiftLeft
+    EXPECT_EQ(Expression::toString(simplify(Expression::fuseTernary(a + b << one + one))),
+              "AddShiftL(33i, 100i, 2i)");
+
     EXPECT_EQ(Expression::simplify(nullptr), nullptr);
 }
 
@@ -85,6 +92,9 @@ TEST_F(ExpressionTransformationTest, FuseAssociative)
     auto b    = Expression::literal(100);
     auto c    = Expression::literal(12.f);
 
+    EXPECT_EQ(Expression::toString(fuseAssociative(v & Expression::fuseTernary(a + b << one))),
+              "BitwiseAnd(v0:I, AddShiftL(33i, 100i, 1i))");
+    EXPECT_EQ(Expression::toString(fuseAssociative(v & -one)), "BitwiseAnd(v0:I, Negate(1i))");
     EXPECT_EQ(Expression::toString(fuseAssociative(v & one)), "BitwiseAnd(v0:I, 1i)");
     EXPECT_EQ(Expression::toString(fuseAssociative((v & one) & a)), "BitwiseAnd(v0:I, 1i)");
     EXPECT_EQ(Expression::toString(fuseAssociative(simplify((one & a) & v))),
@@ -128,6 +138,7 @@ TEST_F(ExpressionTransformationTest, FuseTernary)
     auto b    = Expression::literal(100);
     auto c    = Expression::literal(12.f);
 
+    EXPECT_EQ(Expression::toString(fuseTernary(-one + one)), "Add(Negate(1i), 1i)");
     EXPECT_EQ(Expression::toString(fuseTernary(one + one)), "Add(1i, 1i)");
     EXPECT_EQ(Expression::toString(fuseTernary((b + a) << one)), "AddShiftL(100i, 33i, 1i)");
     EXPECT_EQ(Expression::toString(fuseTernary((b << one) + a)), "ShiftLAdd(100i, 1i, 33i)");

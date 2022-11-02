@@ -371,23 +371,32 @@ namespace ExpressionTest
             m_context, Register::Type::Vector, DataType::Float, K * N / 64);
         B_tile->vgpr->allocateNow();
 
-        auto rc = std::make_shared<Register::Value>(
+        auto ic = std::make_shared<Register::Value>(
             m_context, Register::Type::Accumulator, DataType::Float, M * N * batches / 64);
-        rc->allocateNow();
+        ic->allocateNow();
 
         auto A = std::make_shared<Expression::Expression>(A_tile);
         auto B = std::make_shared<Expression::Expression>(B_tile);
-        auto C = rc->expression();
+        auto C = ic->expression();
 
         auto expr = std::make_shared<Expression::Expression>(Expression::MatrixMultiply(A, B, C));
 
-        m_context->schedule(Expression::generate(rc, expr, m_context));
+        m_context->schedule(
+            Expression::generate(ic, expr, m_context)); //Test using input C as dest.
+
+        std::shared_ptr<Register::Value> rc;
+        m_context->schedule(
+            Expression::generate(rc, expr, m_context)); //Test using a nullptr as dest.
+
+        EXPECT_EQ(ic->regType(), Register::Type::Accumulator);
+        EXPECT_EQ(ic->valueCount(), 16);
 
         EXPECT_EQ(rc->regType(), Register::Type::Accumulator);
         EXPECT_EQ(rc->valueCount(), 16);
 
         auto result = R"(
-            v_mfma_f32_32x32x2f32 a[0:15], v0, v1, a[0:15]
+            v_mfma_f32_32x32x2f32 a[0:15], v0, v1, a[0:15] //is matmul
+            v_mfma_f32_32x32x2f32 a[16:31], v0, v1, a[0:15] //rc matmul
         )";
 
         EXPECT_EQ(NormalizedSource(output()), NormalizedSource(result));
