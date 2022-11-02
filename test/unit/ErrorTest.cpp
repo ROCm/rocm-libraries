@@ -103,7 +103,9 @@ namespace rocRollerTest
         EXPECT_ANY_THROW({ Throw<FatalError>("Error"); });
     }
 
-    TEST_F(ErrorFixtureTest, BreakOnAssertFatal)
+    using ErrorFixtureDeathTest = ErrorFixtureTest;
+
+    TEST_F(ErrorFixtureDeathTest, BreakOnAssertFatal)
     {
         (void)(::testing::GTEST_FLAG(death_test_style) = "threadsafe");
 
@@ -112,7 +114,7 @@ namespace rocRollerTest
         EXPECT_DEATH({ AssertFatal(0 == 1); }, "");
     }
 
-    TEST_F(ErrorFixtureTest, BreakOnThrow)
+    TEST_F(ErrorFixtureDeathTest, BreakOnThrow)
     {
         (void)(::testing::GTEST_FLAG(death_test_style) = "threadsafe");
 

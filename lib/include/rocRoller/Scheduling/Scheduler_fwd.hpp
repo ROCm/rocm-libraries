@@ -9,8 +9,7 @@ namespace rocRoller
         {
             Sequential = 0,
             RoundRobin,
-            Cooperative,
-            Priority,
+            Random,
             Count
         };
 
@@ -25,8 +24,6 @@ namespace rocRoller
         };
 
         class Scheduler;
-
-        class SequentialScheduler;
-        class RoundRobinScheduler;
+        class LockState;
     }
 }

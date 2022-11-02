@@ -18,38 +18,56 @@ namespace rocRollerTest
 {
     struct SchedulerTest : public GenericContextFixture
     {
-        Generator<Instruction> testGeneratorWithComments();
+        Generator<Instruction> testGeneratorWithComments(bool includeComments = true);
     };
 
-    Generator<Instruction> SchedulerTest::testGeneratorWithComments()
+    Generator<Instruction> SchedulerTest::testGeneratorWithComments(bool includeComments)
     {
         co_yield_(Instruction("s_sub_u32", {}, {}, {}, "Comment on an instruction"));
-        co_yield Instruction::Comment("Pure comment 1");
-        co_yield Instruction::Comment("Pure comment 2");
+        if(includeComments)
+        {
+            co_yield Instruction::Comment("Pure comment 1");
+            co_yield Instruction::Comment("Pure comment 2");
+        }
 
         co_yield_(Instruction("s_add_u32", {}, {}, {}, "Comment on an instruction"));
-        co_yield Instruction::Comment("Pure comment 3");
+        if(includeComments)
+        {
+            co_yield Instruction::Comment("Pure comment 3");
+        }
         co_yield Instruction::Nop("Nop Comment");
 
         co_yield Instruction::Lock(Scheduling::Dependency::SCC, "Lock instruction");
         co_yield Instruction::Unlock("Unlock instruction");
 
-        co_yield Instruction::Comment("Pure comment 4");
-        co_yield Instruction::Comment("Pure comment 5");
+        if(includeComments)
+        {
+            co_yield Instruction::Comment("Pure comment 4");
+            co_yield Instruction::Comment("Pure comment 5");
+        }
 
         auto reg = std::make_shared<Register::Value>(
             m_context, Register::Type::Vector, DataType::Float, 1);
         co_yield reg->allocate();
 
-        co_yield Instruction::Comment("Pure comment 6");
+        if(includeComments)
+        {
+            co_yield Instruction::Comment("Pure comment 6");
+        }
         co_yield Instruction::Directive(".set .amdgcn.next_free_vgpr, 0");
 
         co_yield Instruction::Label("FooLabel");
 
-        co_yield Instruction::Comment("Pure comment 7");
+        if(includeComments)
+        {
+            co_yield Instruction::Comment("Pure comment 7");
+        }
         co_yield Instruction::Wait(WaitCount::Zero(m_context->targetArchitecture()));
 
-        co_yield Instruction::Comment("Pure comment 8");
+        if(includeComments)
+        {
+            co_yield Instruction::Comment("Pure comment 8");
+        }
     }
 
     template <typename Begin, typename End>
@@ -462,4 +480,149 @@ namespace rocRollerTest
 
         EXPECT_EQ(NormalizedSource(output(), true), NormalizedSource(expected, true));
     }
+
+    struct RandomSchedulerTest : public SchedulerTest, public testing::WithParamInterface<int>
+    {
+        virtual void SetUp() override
+        {
+            GenericContextFixture::SetUp();
+            int seed = GetParam();
+
+            RecordProperty("random_seed", seed);
+
+            m_context->setRandomSeed(seed);
+        }
+    };
+
+    Generator<Instruction> noComments()
+    {
+        for(int i = 0; i < 100; i++)
+            co_yield_(Inst(concatenate("I", i)));
+    }
+
+    TEST_P(RandomSchedulerTest, RandomScheduler)
+    {
+        std::string output1, output2, output3, output4, output5;
+
+        {
+            std::vector<Generator<Instruction>> gens;
+            gens.push_back(testGeneratorWithComments());
+            gens.push_back(noComments());
+            gens.push_back(noComments());
+
+            auto scheduler = Component::GetNew<Scheduling::Scheduler>(
+                Scheduling::SchedulerProcedure::Random, m_context);
+            m_context->schedule((*scheduler)(gens));
+
+            output1 = NormalizedSource(output(), true);
+        }
+
+        {
+            m_context->setRandomSeed(GetParam());
+            clearOutput();
+
+            std::vector<Generator<Instruction>> gens;
+            gens.push_back(testGeneratorWithComments());
+            gens.push_back(noComments());
+            gens.push_back(noComments());
+
+            auto scheduler = Component::GetNew<Scheduling::Scheduler>(
+                Scheduling::SchedulerProcedure::Random, m_context);
+            m_context->schedule((*scheduler)(gens));
+
+            output2 = NormalizedSource(output(), true);
+        }
+
+        {
+            m_context->setRandomSeed(GetParam());
+            clearOutput();
+
+            std::vector<Generator<Instruction>> gens;
+            gens.push_back(testGeneratorWithComments(false));
+            gens.push_back(noComments());
+            gens.push_back(noComments());
+
+            auto scheduler = Component::GetNew<Scheduling::Scheduler>(
+                Scheduling::SchedulerProcedure::Random, m_context);
+            m_context->schedule((*scheduler)(gens));
+
+            output3 = NormalizedSource(output(), true);
+        }
+
+        {
+            m_context->setRandomSeed(GetParam() + 1);
+            clearOutput();
+
+            std::vector<Generator<Instruction>> gens;
+            gens.push_back(testGeneratorWithComments());
+            gens.push_back(noComments());
+            gens.push_back(noComments());
+
+            auto scheduler = Component::GetNew<Scheduling::Scheduler>(
+                Scheduling::SchedulerProcedure::Random, m_context);
+            m_context->schedule((*scheduler)(gens));
+
+            output4 = NormalizedSource(output(), true);
+        }
+
+        Settings::getInstance()->set(Settings::RandomSeed, GetParam());
+        {
+            m_context->setRandomSeed(GetParam() + 1);
+            clearOutput();
+
+            std::vector<Generator<Instruction>> gens;
+            gens.push_back(testGeneratorWithComments());
+            gens.push_back(noComments());
+            gens.push_back(noComments());
+
+            auto scheduler = Component::GetNew<Scheduling::Scheduler>(
+                Scheduling::SchedulerProcedure::Random, m_context);
+            m_context->schedule((*scheduler)(gens));
+
+            output5 = NormalizedSource(output(), true);
+        }
+
+        // The same generators with the same random seed should produce the same output.
+        EXPECT_EQ(output1, output2);
+
+        // Not including the comments should still produce the same code.
+        EXPECT_EQ(NormalizedSource(output1), NormalizedSource(output3));
+
+        // The same generators with a different random seed should produce different output.
+        EXPECT_NE(output1, output4);
+
+        // The settings override should take precedence.
+        EXPECT_EQ(output1, output5);
+
+        // The scheduler should not break up comments or locked sections of instructions.
+        auto block1 = NormalizedSource(R"(
+        // Pure comment 1
+        // Pure comment 2
+        )",
+                                       true);
+
+        auto block2 = NormalizedSource(R"(
+        // Lock instruction
+        // Unlock instruction
+        )",
+                                       true);
+
+        std::string block3 = NormalizedSource(R"(
+        // Pure comment 4
+        // Pure comment 5
+        )",
+                                              true);
+
+        EXPECT_THAT(output1, testing::HasSubstr(block1));
+        EXPECT_THAT(output1, testing::HasSubstr(block2));
+        EXPECT_THAT(output1, testing::HasSubstr(block3));
+
+        EXPECT_THAT(output4, testing::HasSubstr(block1));
+        EXPECT_THAT(output4, testing::HasSubstr(block2));
+        EXPECT_THAT(output4, testing::HasSubstr(block3));
+    }
+
+    INSTANTIATE_TEST_SUITE_P(RandomSchedulerTest,
+                             RandomSchedulerTest,
+                             ::testing::Values(0, 1, 4, 8, 15, 16, 23, 42));
 }

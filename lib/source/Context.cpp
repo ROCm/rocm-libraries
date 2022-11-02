@@ -15,6 +15,7 @@
 #include <rocRoller/Scheduling/Observers/FileWritingObserver.hpp>
 #include <rocRoller/Scheduling/Observers/MFMA90aObserver.hpp>
 #include <rocRoller/Scheduling/Observers/WaitcntObserver.hpp>
+#include <rocRoller/Utilities/Random.hpp>
 
 namespace rocRoller
 {
@@ -47,6 +48,11 @@ namespace rocRoller
         return Create(-1, arch, kernelName);
     }
 
+    void Context::setRandomSeed(int seed)
+    {
+        m_random = std::make_shared<RandomGenerator>(seed);
+    }
+
     ContextPtr
         Context::Create(int deviceIdx, GPUArchitecture const& arch, std::string const& kernelName)
     {
@@ -67,6 +73,7 @@ namespace rocRoller
         rv->m_mem          = std::make_shared<MemoryInstructions>(rv);
         rv->m_copier       = std::make_shared<CopyGenerator>(rv);
         rv->m_brancher     = std::make_shared<BranchGenerator>(rv);
+        rv->m_random       = std::make_shared<RandomGenerator>(0);
 
         rv->m_labelAllocator = std::make_shared<LabelAllocator>(kernelName);
 

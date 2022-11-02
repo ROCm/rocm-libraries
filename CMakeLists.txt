@@ -282,9 +282,13 @@ set(rocroller_src
  lib/source/KernelOptions.cpp
  lib/source/LDSAllocator.cpp
  lib/source/Logging.cpp
+ lib/source/Random.cpp
  lib/source/Register.cpp
  lib/source/ScheduledInstructions.cpp
  lib/source/Scheduler.cpp
+ lib/source/Schedulers/RandomScheduler.cpp
+ lib/source/Schedulers/RoundRobinScheduler.cpp
+ lib/source/Schedulers/SequentialScheduler.cpp
  lib/source/Timer.cpp
 )
 

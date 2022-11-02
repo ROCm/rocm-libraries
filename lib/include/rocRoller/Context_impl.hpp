@@ -99,6 +99,11 @@ namespace rocRoller
         return m_brancher;
     }
 
+    inline std::shared_ptr<RandomGenerator> Context::random() const
+    {
+        return m_random;
+    }
+
     inline KernelOptions& Context::kernelOptions()
     {
         return m_kernelOptions;

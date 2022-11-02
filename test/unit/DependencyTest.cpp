@@ -23,9 +23,19 @@ using namespace rocRoller;
 
 namespace rocRollerTest
 {
-    class DependencyTest : public CurrentGPUContextFixture,
-                           public ::testing::WithParamInterface<Scheduling::SchedulerProcedure>
+    struct DependencyTest
+        : public CurrentGPUContextFixture,
+          public ::testing::WithParamInterface<std::tuple<Scheduling::SchedulerProcedure, int>>
     {
+        Scheduling::SchedulerProcedure m_procedure;
+        int                            m_randomSeed;
+
+        void SetUp() override
+        {
+            std::tie(m_procedure, m_randomSeed) = GetParam();
+            CurrentGPUContextFixture::SetUp();
+            m_context->setRandomSeed(m_randomSeed);
+        }
     };
 
     /**
@@ -38,6 +48,7 @@ namespace rocRollerTest
      **/
     TEST_P(DependencyTest, ForLoopsWithVCC)
     {
+
         ASSERT_EQ(true, isLocalDevice());
 
         auto command = std::make_shared<Command>();
@@ -102,9 +113,7 @@ namespace rocRollerTest
             auto v_target = Register::Value::Placeholder(
                 m_context, Register::Type::Vector, DataType::Float, 1);
 
-            co_yield v_ptr->allocate();
             co_yield m_context->copier()->copy(v_ptr, s_ptr, "Move pointer");
-            co_yield v_value->allocate();
             co_yield m_context->copier()->copy(v_value, s_value, "Move value");
 
             // v_target is val we check against
@@ -146,7 +155,7 @@ namespace rocRollerTest
         sequences.push_back(comment_generator(5));
 
         std::shared_ptr<Scheduling::Scheduler> scheduler
-            = Component::Get<Scheduling::Scheduler>(GetParam(), m_context);
+            = Component::Get<Scheduling::Scheduler>(m_procedure, m_context);
 
         m_context->schedule((*scheduler)(sequences));
 
@@ -245,9 +254,7 @@ namespace rocRollerTest
             co_yield m_context->argLoader()->getValue("ptr", s_ptr);
             co_yield m_context->argLoader()->getValue("val", s_value);
 
-            co_yield r_ptr->allocate();
             co_yield m_context->copier()->copy(r_ptr, s_ptr, "Move pointer");
-            co_yield r_value->allocate();
             co_yield m_context->copier()->copy(r_value, s_value, "Move value");
 
             auto s_res = Register::Value::Placeholder(
@@ -295,7 +302,7 @@ namespace rocRollerTest
         sequences.push_back(scalar_compare());
 
         std::shared_ptr<Scheduling::Scheduler> scheduler
-            = Component::Get<Scheduling::Scheduler>(GetParam(), m_context);
+            = Component::Get<Scheduling::Scheduler>(m_procedure, m_context);
 
         m_context->schedule((*scheduler)(sequences));
 
@@ -365,24 +372,13 @@ namespace rocRollerTest
             = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Int64, 1);
 
         auto setup = [&]() -> Generator<Instruction> {
-            co_yield(Instruction::Lock(Scheduling::Dependency::SCC, "Setting up Registers"));
-
             co_yield m_context->argLoader()->getValue("result", s_result);
             co_yield m_context->argLoader()->getValue("a", s_a);
             co_yield m_context->argLoader()->getValue("b", s_b);
 
-            co_yield v_a->allocate();
-            co_yield v_b->allocate();
-            co_yield v_c->allocate();
-            co_yield v_result->allocate();
-
             co_yield m_context->copier()->copy(v_result, s_result, "Move pointer");
-
             co_yield m_context->copier()->copy(v_a, s_a, "Move value");
-
             co_yield m_context->copier()->copy(v_b, s_b, "Move value");
-
-            co_yield(Instruction::Unlock("Done Setting Up"));
         };
 
         auto int64_addc = [&]() -> Generator<Instruction> {
@@ -399,15 +395,17 @@ namespace rocRollerTest
             co_yield Expression::generate(vcc, v_b->expression() > v_a->expression(), m_context);
         };
 
+        m_context->schedule(setup());
+
         std::vector<Generator<Instruction>> sequences;
-        sequences.push_back(setup());
         sequences.push_back(int64_addc());
         sequences.push_back(set_vcc_to_zero());
 
         std::shared_ptr<Scheduling::Scheduler> scheduler
-            = Component::Get<Scheduling::Scheduler>(GetParam(), m_context);
+            = Component::Get<Scheduling::Scheduler>(m_procedure, m_context);
 
         m_context->schedule((*scheduler)(sequences));
+
         m_context->schedule(k->postamble());
         m_context->schedule(k->amdgpu_metadata());
 
@@ -491,9 +489,7 @@ namespace rocRollerTest
             auto v_res = Register::Value::Placeholder(
                 m_context, Register::Type::Vector, DataType::Int32, 1);
 
-            co_yield v_ptr->allocate();
             co_yield m_context->copier()->copy(v_ptr, s_ptr, "Move pointer");
-            co_yield v_value->allocate();
             co_yield m_context->copier()->copy(v_value, s_value, "Move value");
 
             co_yield m_context->copier()->fill(v_lhs, Register::Value::Literal(2));
@@ -561,7 +557,7 @@ namespace rocRollerTest
         sequences.push_back(set_vcc2());
 
         std::shared_ptr<Scheduling::Scheduler> scheduler
-            = Component::Get<Scheduling::Scheduler>(GetParam(), m_context);
+            = Component::Get<Scheduling::Scheduler>(m_procedure, m_context);
 
         m_context->schedule((*scheduler)(sequences));
 
@@ -590,8 +586,24 @@ namespace rocRollerTest
         EXPECT_EQ(resultValue, 10);
     }
 
-    INSTANTIATE_TEST_SUITE_P(DependencyTest,
-                             DependencyTest,
-                             ::testing::ValuesIn({Scheduling::SchedulerProcedure::Sequential,
-                                                  Scheduling::SchedulerProcedure::RoundRobin}));
+    INSTANTIATE_TEST_SUITE_P(
+        DependencyTest,
+        DependencyTest,
+        ::testing::ValuesIn({std::make_tuple(Scheduling::SchedulerProcedure::Sequential, 0),
+                             std::make_tuple(Scheduling::SchedulerProcedure::RoundRobin, 0),
+                             std::make_tuple(Scheduling::SchedulerProcedure::Random, 0),
+                             std::make_tuple(Scheduling::SchedulerProcedure::Random, 5),
+                             std::make_tuple(Scheduling::SchedulerProcedure::Random, 18),
+                             std::make_tuple(Scheduling::SchedulerProcedure::Random, 21),
+                             std::make_tuple(Scheduling::SchedulerProcedure::Random, 34),
+                             std::make_tuple(Scheduling::SchedulerProcedure::Random, 48),
+                             std::make_tuple(Scheduling::SchedulerProcedure::Random, 49),
+                             std::make_tuple(Scheduling::SchedulerProcedure::Random, 52),
+                             std::make_tuple(Scheduling::SchedulerProcedure::Random, 63),
+                             std::make_tuple(Scheduling::SchedulerProcedure::Random, 73),
+                             std::make_tuple(Scheduling::SchedulerProcedure::Random, 89),
+                             std::make_tuple(Scheduling::SchedulerProcedure::Random, 90),
+                             std::make_tuple(Scheduling::SchedulerProcedure::Random, 96),
+                             std::make_tuple(Scheduling::SchedulerProcedure::Random, 97),
+                             std::make_tuple(Scheduling::SchedulerProcedure::Random, 98)}));
 }

@@ -16,18 +16,18 @@
 #include "CodeGen/Instruction_fwd.hpp"
 #include "CodeGen/MemoryInstructions_fwd.hpp"
 #include "GPUArchitecture/GPUArchitectureTarget_fwd.hpp"
-#include "InstructionValues/LDSAllocator.hpp"
+#include "InstructionValues/LDSAllocator_fwd.hpp"
 #include "InstructionValues/LabelAllocator_fwd.hpp"
 #include "InstructionValues/RegisterAllocator_fwd.hpp"
 #include "InstructionValues/Register_fwd.hpp"
+#include "KernelGraph/RegisterTagManager_fwd.hpp"
 #include "ScheduledInstructions_fwd.hpp"
 #include "Scheduling/Scheduling_fwd.hpp"
+#include "Utilities/Random_fwd.hpp"
 
 #include "DataTypes/DataTypes.hpp"
 #include "GPUArchitecture/GPUArchitecture.hpp"
-#include "KernelGraph/RegisterTagManager_fwd.hpp"
 #include "KernelOptions.hpp"
-#include "Utilities/Settings.hpp"
 
 namespace rocRoller
 {
@@ -71,6 +71,9 @@ namespace rocRoller
         std::shared_ptr<BranchGenerator>       brancher() const;
         KernelOptions&                         kernelOptions();
 
+        std::shared_ptr<RandomGenerator> random() const;
+        void                             setRandomSeed(int seed);
+
         std::string assemblyFileName() const;
 
         void setKernelOptions(KernelOptions input);
@@ -99,11 +102,12 @@ namespace rocRoller
         std::shared_ptr<ScheduledInstructions> m_instructions;
         std::shared_ptr<MemoryInstructions>    m_mem;
         std::shared_ptr<LabelAllocator>        m_labelAllocator;
-        std::string                            m_assemblyFileName;
         std::shared_ptr<LDSAllocator>          m_ldsAllocator;
         std::shared_ptr<CopyGenerator>         m_copier;
         std::shared_ptr<BranchGenerator>       m_brancher;
+        std::shared_ptr<RandomGenerator>       m_random;
 
+        std::string   m_assemblyFileName;
         KernelOptions m_kernelOptions;
     };
 

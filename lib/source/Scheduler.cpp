@@ -5,8 +5,6 @@ namespace rocRoller
     namespace Scheduling
     {
         RegisterComponentBase(Scheduler);
-        RegisterComponent(SequentialScheduler);
-        RegisterComponent(RoundRobinScheduler);
 
         std::string toString(SchedulerProcedure proc)
         {
@@ -16,10 +14,8 @@ namespace rocRoller
                 return "Sequential";
             case SchedulerProcedure::RoundRobin:
                 return "RoundRobin";
-            case SchedulerProcedure::Cooperative:
-                return "Cooperative";
-            case SchedulerProcedure::Priority:
-                return "Priority";
+            case SchedulerProcedure::Random:
+                return "Random";
             case SchedulerProcedure::Count:
                 return "Count";
             }

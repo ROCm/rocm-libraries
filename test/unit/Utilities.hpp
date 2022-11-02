@@ -12,9 +12,9 @@
 #include <hip/amd_detail/amd_hip_fp16.h>
 #include <hip/hip_runtime.h>
 #include <memory>
-#include <random>
 
 #include <rocRoller/Utilities/Logging.hpp>
+#include <rocRoller/Utilities/Random.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
 
 template <typename T>
@@ -161,63 +161,6 @@ namespace rocRoller
 
 namespace rocRoller
 {
-    /**
-     * Random vector generator.
-     *
-     * A seed must be passed to the constructor.  If the environment
-     * variable specified by `ROCROLLER_RANDOM_SEED` is present, it
-     * supercedes the seed passed to the constructor.
-     *
-     * A seed may be set programmatically (at any time) by calling
-     * seed().
-     */
-    class RandomGenerator
-    {
-    public:
-        RandomGenerator(int seedNumber)
-        {
-            std::mt19937::result_type seed = static_cast<std::mt19937::result_type>(seedNumber);
-
-            // if set
-            int settingsSeed = Settings::getInstance()->get(Settings::RandomSeed);
-            if(settingsSeed != Settings::RandomSeed.defaultValue)
-            {
-                seed = static_cast<std::mt19937::result_type>(settingsSeed);
-            }
-            m_gen.seed(seed);
-        }
-
-        /**
-         * Set a new seed.
-         */
-        void seed(int seedNumber)
-        {
-            std::mt19937::result_type seed = static_cast<std::mt19937::result_type>(seedNumber);
-            m_gen.seed(seed);
-        }
-
-        /**
-         * Generate a random vector of length `nx`, with values
-         * between `min` and `max`.
-         */
-        template <typename T>
-        std::vector<T> vector(uint nx, T min, T max)
-        {
-            std::vector<T>                   x(nx);
-            std::uniform_real_distribution<> udist(min, max);
-
-            for(unsigned i = 0; i < nx; i++)
-            {
-                x[i] = static_cast<T>(udist(m_gen));
-            }
-
-            return x;
-        }
-
-    private:
-        std::mt19937 m_gen;
-    };
-
     template <typename T>
     void GenerateRandomInput(std::mt19937::result_type seed,
                              std::vector<T>&           A,
