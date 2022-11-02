@@ -35,9 +35,8 @@ namespace KernelGraphTest
 
         void SetUp()
         {
-            Settings::getInstance()->set(Settings::SaveAssembly, true);
-
             CurrentGPUContextFixture::SetUp();
+            Settings::getInstance()->set(Settings::SaveAssembly, true);
 
             fastArith = Expression::FastArithmetic(m_context);
         }

@@ -25,14 +25,15 @@ namespace rocRollerTest
         void SetUp()
         {
             Settings::getInstance()->set(Settings::SaveAssembly, true);
-
+            Settings::getInstance()->set(Settings::AssemblyFile,
+                                         "FileWritingObserverTestSaveAssemblyFile_kernel_gfx90a.s");
             GenericContextFixture::SetUp();
         }
     };
 
     TEST_F(FileWritingObserverTest, SaveAssemblyFile)
     {
-        std::string expected_file = "FileWritingObserverTestSaveAssemblyFile_kernel_gfx90a.s";
+        std::string expected_file = Settings::getInstance()->get(Settings::AssemblyFile);
 
         if(std::filesystem::exists(expected_file))
             std::remove(expected_file.c_str());

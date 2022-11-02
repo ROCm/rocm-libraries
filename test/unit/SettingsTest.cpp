@@ -41,8 +41,10 @@ namespace rocRollerTest
                 Settings::AssemblyFile.name, getenv(Settings::AssemblyFile.name.c_str())));
             envVars.push_back(std::pair<std::string, char*>(
                 Settings::RandomSeed.name, getenv(Settings::RandomSeed.name.c_str())));
-
+            envVars.push_back(std::pair<std::string, char*>(
+                Settings::SaveAssembly.name, getenv(Settings::SaveAssembly.name.c_str())));
             setenv(Settings::LogConsole.name.c_str(), "0", 1);
+            setenv(Settings::SaveAssembly.name.c_str(), "1", 1);
             setenv(Settings::AssemblyFile.name.c_str(), "assemblyFileTest.s", 1);
             setenv(Settings::RandomSeed.name.c_str(), "31415", 1);
 
@@ -165,21 +167,24 @@ namespace rocRollerTest
 
         EXPECT_EQ(settings->get(Settings::SettingsBitField),
                   Settings::SettingsBitField.defaultValue);
-        EXPECT_EQ(settings->get(Settings::SaveAssembly), Settings::SaveAssembly.defaultValue);
         EXPECT_EQ(settings->get(Settings::BreakOnThrow), Settings::BreakOnThrow.defaultValue);
         EXPECT_EQ(settings->get(Settings::LogFile), Settings::LogFile.defaultValue);
         EXPECT_EQ(settings->get(Settings::LogLvl), Settings::LogLvl.defaultValue);
 
-        // Environment variables persist after reset, unless explicitly overwritten with set()
+        // Environment variables persist after reset
         EXPECT_EQ(settings->get(Settings::LogConsole), false);
         EXPECT_EQ(settings->get(Settings::AssemblyFile), "assemblyFileTest.s");
         EXPECT_EQ(settings->get(Settings::RandomSeed), 31415);
+        EXPECT_EQ(settings->get(Settings::SaveAssembly), true);
 
+        // Calling set will have no effect against the environment variables
         std::string assemblyName = "newAssemblyFileTest.s";
         settings->set(Settings::AssemblyFile, assemblyName);
         settings->set(Settings::RandomSeed, 271828);
+        settings->set(Settings::SaveAssembly, false);
 
-        EXPECT_EQ(settings->get(Settings::AssemblyFile), std::string("newAssemblyFileTest.s"));
-        EXPECT_EQ(settings->get(Settings::RandomSeed), 271828);
+        EXPECT_EQ(settings->get(Settings::AssemblyFile), "assemblyFileTest.s");
+        EXPECT_EQ(settings->get(Settings::RandomSeed), 31415);
+        EXPECT_EQ(settings->get(Settings::SaveAssembly), true);
     }
 }

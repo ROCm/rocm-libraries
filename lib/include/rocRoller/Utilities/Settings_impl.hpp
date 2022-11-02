@@ -135,12 +135,19 @@ namespace rocRoller
         }
     }
 
+    template <typename Option>
+    inline void Settings::set(Option const& opt, char const* val)
+    {
+        set(opt, std::string(val));
+    }
+
     template <typename Option, typename T>
     inline void Settings::set(Option const& opt, T const& val)
     {
         if constexpr(std::is_same_v<typename Option::Type, T>)
         {
-            m_values[opt.name] = val;
+            if(!getenv(opt.name.c_str()))
+                m_values[opt.name] = val;
 
             // Setting new bitfield changes values of those covered by bitfield
             if constexpr(std::is_same_v<typename Option::Type, bitFieldType>)

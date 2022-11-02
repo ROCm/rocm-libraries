@@ -31,8 +31,6 @@ namespace VectorAddBenchmark
     {
         void SetUp()
         {
-            Settings::getInstance()->set(Settings::SaveAssembly, true);
-
             CurrentGPUContextFixture::SetUp();
         }
     };

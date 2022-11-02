@@ -34,10 +34,10 @@ namespace rocRoller
      * Getting a value requires a call to get(SettingsOption opt). When get() is called,
      * we probe m_values which maps an option name to its corresponding value. If opt does
      * not exist in m_values then we assign the value based on the following precedence order:
-     *     1. set(opt, val) will always set, or overwrite, the value of opt in m_values. Otherwise
-     *     2. the correspodning env variable will be used. If no env variable is set then
+     *     1. the corresponding env variable will be used. If no env variable is set then
+     *     2. set(opt, val) will always set, or overwrite, the value of opt in m_values. Otherwise
      *     3. the corresponding bit field value in SettingsBitField is used. Lastly
-     *     4. the default value is used if the value is not obtained in the above order.
+     *     4. the default value is used if the value is not otherwise obtained.
      */
     class Settings : public LazySingleton<Settings>
     {
@@ -51,7 +51,7 @@ namespace rocRoller
             "ROCROLLER_SAVE_ASSEMBLY",
             "Assembly code written to text file in the current working directory as it is "
             "generated",
-            true,
+            false,
             1};
 
         static inline SettingsOption<bool> BreakOnThrow{
@@ -138,6 +138,16 @@ namespace rocRoller
          */
         template <typename Option, typename T>
         void set(Option const& opt, T const& val);
+
+        /**
+         * @brief Alias function to convert char* to std::string
+         *
+         * @tparam Option
+         * @param opt
+         * @param val
+         */
+        template <typename Option>
+        inline void set(Option const& opt, char const* val);
 
         /**
          * @brief Stringify Settings variables
