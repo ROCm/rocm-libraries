@@ -23,6 +23,8 @@
 
 #include "../config.hpp"
 
+#include <iterator>
+
 BEGIN_ROCPRIM_NAMESPACE
 
 namespace detail
@@ -46,25 +48,26 @@ struct range_t
     }
 };
 
-template<class KeysInputIterator, class OffsetT, class BinaryFunction>
-ROCPRIM_DEVICE ROCPRIM_INLINE OffsetT merge_path(KeysInputIterator keys_input1,
-                                                 KeysInputIterator keys_input2,
-                                                 const OffsetT     input1_size,
-                                                 const OffsetT     input2_size,
-                                                 const OffsetT     diag,
-                                                 BinaryFunction    compare_function)
+template<class KeysInputIterator1, class KeysInputIterator2, class OffsetT, class BinaryFunction>
+ROCPRIM_DEVICE ROCPRIM_INLINE OffsetT merge_path(KeysInputIterator1 keys_input1,
+                                                 KeysInputIterator2 keys_input2,
+                                                 const OffsetT      input1_size,
+                                                 const OffsetT      input2_size,
+                                                 const OffsetT      diag,
+                                                 BinaryFunction     compare_function)
 {
-    using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
+    using key_type_1 = typename std::iterator_traits<KeysInputIterator1>::value_type;
+    using key_type_2 = typename std::iterator_traits<KeysInputIterator2>::value_type;
 
     OffsetT begin = diag < input2_size ? 0u : diag - input2_size;
     OffsetT end   = min(diag, input1_size);
 
     while(begin < end)
     {
-        OffsetT  a       = (begin + end) / 2;
-        OffsetT  b       = diag - 1 - a;
-        key_type input_a = keys_input1[a];
-        key_type input_b = keys_input2[b];
+        OffsetT    a       = (begin + end) / 2;
+        OffsetT    b       = diag - 1 - a;
+        key_type_1 input_a = keys_input1[a];
+        key_type_2 input_b = keys_input2[b];
         if(!compare_function(input_b, input_a))
         {
             begin = a + 1;

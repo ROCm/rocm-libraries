@@ -12,7 +12,9 @@ Full documentation for rocPRIM is available at [https://codedocs.xyz/ROCmSoftwar
 - `block_sort::sort()` overload for keys and values with a dynamic size. This overload was documented but the
   implementation is missing. To avoid further confusion the documentation is removed until a decision is made on
   implementing the function.
-  
+### Fixed
+- Fixed the compilation failure in `device_merge` if the two key iterators don't match.
+
 ## [Unreleased rocPRIM-2.11.0 for ROCm 5.3.0]
 ### Added
 - New functions `subtract_left` and `subtract_right` in `block_adjacent_difference` to apply functions
