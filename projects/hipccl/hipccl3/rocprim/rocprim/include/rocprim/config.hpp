@@ -43,7 +43,7 @@
     #else
     #define ROCPRIM_KERNEL __global__
     #endif
-    // TODO: These paremeters should be tuned for NAVI in the close future.
+    // TODO: These parameters should be tuned for NAVI in the close future.
     #ifndef ROCPRIM_DEFAULT_MAX_BLOCK_SIZE
         #define ROCPRIM_DEFAULT_MAX_BLOCK_SIZE 256
     #endif

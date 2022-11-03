@@ -36,7 +36,7 @@ BEGIN_ROCPRIM_NAMESPACE
 /// \brief Configuration of device-level histogram operation.
 ///
 /// \tparam HistogramConfig - configuration of histogram kernel. Must be \p kernel_config.
-/// \tparam MaxGridSize - maximim number of blocks to launch.
+/// \tparam MaxGridSize - maximum number of blocks to launch.
 /// \tparam SharedImplMaxBins - maximum total number of bins for all active channels
 /// for the shared memory histogram implementation (samples -> shared memory bins -> global memory bins),
 /// when exceeded the global memory implementation is used (samples -> global memory bins).

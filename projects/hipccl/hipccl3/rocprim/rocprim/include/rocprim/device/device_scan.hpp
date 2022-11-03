@@ -664,7 +664,7 @@ auto scan_impl(void * temporary_storage,
 /// short * input;
 /// int * output;
 ///
-/// // Use a transform iterator to specifiy a custom accumulator type
+/// // Use a transform iterator to specify a custom accumulator type
 /// auto input_iterator = rocprim::make_transform_iterator(
 ///     input, [] __device__ (T in) { return static_cast<int>(in); });
 ///

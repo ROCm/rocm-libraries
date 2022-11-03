@@ -66,7 +66,7 @@ namespace detail
         };
 
         // Load flagged values
-        // - if the scan is exlusive the last item of each segment (range where the keys compare equal)
+        // - if the scan is exclusive, the last item of each segment (range where the keys compare equal)
         //   is flagged and reset to the initial value. Adding the last item of the range to the 
         //   second to last using `headflag_scan_op_wrapper` will return the initial_value,
         //   which is exactly what should be saved at the start of the next range.
