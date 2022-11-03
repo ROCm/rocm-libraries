@@ -44,7 +44,7 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-// Wrapping functions that allow to call proper methods (with or without values)
+// Wrapping functions that allow one to call proper methods (with or without values)
 // (a variant with values is enabled only when Value is not empty_type)
 template<bool Descending = false, class SortType, class SortKey, class SortValue, unsigned int ItemsPerThread>
 ROCPRIM_DEVICE ROCPRIM_INLINE
