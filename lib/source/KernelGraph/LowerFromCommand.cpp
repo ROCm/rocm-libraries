@@ -377,30 +377,29 @@ namespace rocRoller
             CoordGraph::Dimension rv = CoordGraph::VGPR();
             for(auto tag : dims)
             {
-                auto element   = graph.getElement(tag);
-                auto dimension = std::get<CoordGraph::Dimension>(element);
-                if(std::holds_alternative<CoordGraph::VGPR>(dimension))
-                {
-                    // NOP, don't Throw
-                }
-                else if(std::holds_alternative<CoordGraph::Linear>(dimension))
-                {
-                    AssertFatal(!std::holds_alternative<CoordGraph::MacroTile>(rv),
+                auto element = graph.getElement(tag);
+
+                visit(
+                    rocRoller::overloaded{
+                        [](CoordGraph::VGPR const& op) {},
+                        [&rv](CoordGraph::Linear const& op) {
+                            AssertFatal(
+                                !std::holds_alternative<CoordGraph::MacroTile>(rv),
                                 "Element operation between Linear and MacroTile dimensions is not "
                                 "well-posed.");
-                    rv = CoordGraph::Linear();
-                }
-                else if(std::holds_alternative<CoordGraph::MacroTile>(dimension))
-                {
-                    AssertFatal(!std::holds_alternative<CoordGraph::Linear>(rv),
+                            rv = CoordGraph::Linear();
+                        },
+                        [&rv](CoordGraph::MacroTile const& op) {
+                            AssertFatal(
+                                !std::holds_alternative<CoordGraph::Linear>(rv),
                                 "Element operation between Linear and MacroTile dimensions is not "
                                 "well-posed.");
-                    rv = CoordGraph::MacroTile();
-                }
-                else
-                {
-                    Throw<FatalError>("Invalid argument of element operation.");
-                }
+                            rv = CoordGraph::MacroTile();
+                        },
+                        [](auto const& op) {
+                            Throw<FatalError>("Invalid argument of element operation.");
+                        }},
+                    std::get<CoordGraph::Dimension>(element));
             }
             return rv;
         }
