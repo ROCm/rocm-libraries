@@ -63,12 +63,6 @@ namespace rocRoller
 #undef MAKE_OPERATION_VISITOR
 
         // TODO Rename this when graph rearch complete
-#define MAKE_OPERATION_VISITOR2(CLS)                                              \
-    ControlHypergraph::Operation visitOperation(ControlHypergraph::CLS const& op) \
-    {                                                                             \
-        return op;                                                                \
-    }
-        // TODO Rename this when graph rearch complete
         struct UpdateParametersVisitor2
         {
             UpdateParametersVisitor2(std::shared_ptr<CommandParameters> params)
@@ -84,27 +78,15 @@ namespace rocRoller
                 return dim;
             }
 
-            MAKE_OPERATION_VISITOR2(Assign);
-            MAKE_OPERATION_VISITOR2(Barrier);
-            MAKE_OPERATION_VISITOR2(ElementOp);
-            MAKE_OPERATION_VISITOR2(ForLoopOp);
-            MAKE_OPERATION_VISITOR2(Kernel);
-            MAKE_OPERATION_VISITOR2(LoadLDSTile);
-            MAKE_OPERATION_VISITOR2(LoadLinear);
-            MAKE_OPERATION_VISITOR2(LoadTiled);
-            MAKE_OPERATION_VISITOR2(LoadVGPR);
-            MAKE_OPERATION_VISITOR2(Multiply);
-            MAKE_OPERATION_VISITOR2(StoreLDSTile);
-            MAKE_OPERATION_VISITOR2(StoreLinear);
-            MAKE_OPERATION_VISITOR2(StoreTiled);
-            MAKE_OPERATION_VISITOR2(StoreVGPR);
-            MAKE_OPERATION_VISITOR2(TensorContraction);
-            MAKE_OPERATION_VISITOR2(UnrollOp);
+            template <typename T>
+            ControlHypergraph::Operation visitOperation(T const& op)
+            {
+                return op;
+            }
 
         private:
             std::map<int, Dimension> m_new_dimensions;
         };
-#undef MAKE_OPERATION_VISITOR2
 
         KernelGraph updateParameters(KernelGraph k, std::shared_ptr<CommandParameters> params)
         {
