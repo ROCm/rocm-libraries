@@ -20,14 +20,23 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+// required test headers
 #include "../common_test_header.hpp"
+#include "test_utils_types.hpp"
 
 // required rocprim headers
-#include <rocprim/functional.hpp>
 #include <rocprim/device/device_merge.hpp>
+#include <rocprim/functional.hpp>
+#include <rocprim/iterator/counting_iterator.hpp>
+#include <rocprim/iterator/transform_iterator.hpp>
 
-// required test headers
-#include "test_utils_types.hpp"
+#include <gtest/gtest.h>
+
+#include <hip/hip_runtime.h>
+
+#include <algorithm>
+#include <numeric>
+#include <vector>
 
 // Params for tests
 template<
@@ -432,4 +441,83 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKeyValue)
         }
 
     }
+}
+
+TEST(RocprimDeviceMergeTests, MergeMismatchedIteratorTypes)
+{
+    const int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    std::vector<int> keys_input1(1'024);
+    std::generate(keys_input1.begin(),
+                  keys_input1.end(),
+                  [n = 0]() mutable
+                  {
+                      const int temp = n;
+                      n += 2;
+                      return temp;
+                  });
+
+    std::vector<int> expected_keys_output(2 * keys_input1.size());
+    std::iota(expected_keys_output.begin(), expected_keys_output.end(), 0);
+
+    int* d_keys_input1 = nullptr;
+    int* d_keys_output = nullptr;
+    HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys_input1,
+                                                 keys_input1.size() * sizeof(keys_input1[0])));
+    HIP_CHECK(
+        test_common_utils::hipMallocHelper(&d_keys_output,
+                                           expected_keys_output.size() * sizeof(keys_input1[0])));
+
+    HIP_CHECK(hipMemcpy(d_keys_input1,
+                        keys_input1.data(),
+                        keys_input1.size() * sizeof(keys_input1[0]),
+                        hipMemcpyHostToDevice));
+
+    const auto d_keys_input2 = rocprim::make_transform_iterator(rocprim::make_counting_iterator(0),
+                                                                [] __host__ __device__(int value)
+                                                                { return value * 2 + 1; });
+
+    static constexpr bool debug_synchronous = false;
+
+    size_t temp_storage_size_bytes = 0;
+    HIP_CHECK(rocprim::merge(nullptr,
+                             temp_storage_size_bytes,
+                             d_keys_input1,
+                             d_keys_input2,
+                             d_keys_output,
+                             keys_input1.size(),
+                             keys_input1.size(),
+                             rocprim::less<int>{},
+                             hipStreamDefault,
+                             debug_synchronous));
+
+    ASSERT_GT(temp_storage_size_bytes, 0);
+
+    void* d_temp_storage = nullptr;
+    HIP_CHECK(test_common_utils::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes));
+
+    HIP_CHECK(rocprim::merge(d_temp_storage,
+                             temp_storage_size_bytes,
+                             d_keys_input1,
+                             d_keys_input2,
+                             d_keys_output,
+                             keys_input1.size(),
+                             keys_input1.size(),
+                             rocprim::less<int>{},
+                             hipStreamDefault,
+                             debug_synchronous));
+
+    std::vector<int> keys_output(expected_keys_output.size());
+    HIP_CHECK(hipMemcpy(keys_output.data(),
+                        d_keys_output,
+                        keys_output.size() * sizeof(keys_output[0]),
+                        hipMemcpyDeviceToHost));
+
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected_keys_output));
+
+    HIP_CHECK(hipFree(d_temp_storage));
+    HIP_CHECK(hipFree(d_keys_output));
+    HIP_CHECK(hipFree(d_keys_input1));
 }
