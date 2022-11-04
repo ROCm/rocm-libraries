@@ -244,20 +244,13 @@ namespace rocRoller
                                         int                                  tag,
                                         ControlHypergraph::LoadLinear const& oload) override
             {
-                auto wavefront_size = wavefrontSize();
-
                 auto original_user   = original.mapper.get<CoordGraph::User>(tag);
                 auto original_linear = original.mapper.get<CoordGraph::Linear>(tag);
                 auto user            = reindexer.coordinates.at(original_user);
                 auto linear          = reindexer.coordinates.at(original_linear);
-
-                auto wg_ = CoordGraph::Workgroup();
-                // wg_.stride = workgroupSize()[0];
-                // wg_.size   = workgroupCountX();
-
-                auto wg   = graph.coordinates.addElement(wg_);
-                auto wi   = graph.coordinates.addElement(CoordGraph::Workitem(0, wavefront_size));
-                auto vgpr = graph.coordinates.addElement(CoordGraph::VGPR());
+                auto vgpr            = graph.coordinates.addElement(CoordGraph::VGPR());
+                auto wg              = graph.coordinates.addElement(CoordGraph::Workgroup());
+                auto wi = graph.coordinates.addElement(CoordGraph::Workitem(0, wavefrontSize()));
 
                 graph.coordinates.addElement(CoordGraph::Tile(), {linear}, {wg, wi});
                 graph.coordinates.addElement(CoordGraph::Forget(), {wg, wi}, {vgpr});
@@ -298,20 +291,13 @@ namespace rocRoller
                                         int                     tag,
                                         ControlHypergraph::StoreLinear const&) override
             {
-                auto wavefront_size = wavefrontSize();
-
                 auto original_user   = original.mapper.get<CoordGraph::User>(tag);
                 auto original_linear = original.mapper.get<CoordGraph::Linear>(tag);
                 auto user            = reindexer.coordinates.at(original_user);
                 auto linear          = reindexer.coordinates.at(original_linear);
                 auto vgpr            = vgprs.at(original_linear);
-
-                auto wg_ = CoordGraph::Workgroup();
-                // wg_.stride = workgroupSize()[0];
-                // wg_.size   = workgroupCountX();
-
-                auto wg = graph.coordinates.addElement(wg_);
-                auto wi = graph.coordinates.addElement(CoordGraph::Workitem(0, wavefront_size));
+                auto wg              = graph.coordinates.addElement(CoordGraph::Workgroup());
+                auto wi = graph.coordinates.addElement(CoordGraph::Workitem(0, wavefrontSize()));
 
                 graph.coordinates.addElement(CoordGraph::Inherit(), {vgpr}, {wg, wi});
                 graph.coordinates.addElement(CoordGraph::Flatten(), {wg, wi}, {linear});
@@ -320,6 +306,13 @@ namespace rocRoller
                 auto parent = reindexer.control.at(*original.control.parentNodes(tag).begin());
                 auto store  = graph.control.addElement(ControlHypergraph::StoreVGPR());
                 graph.control.addElement(ControlHypergraph::Sequence(), {parent}, {store});
+
+                rocRoller::Log::getLogger()->debug(
+                    "KernelGraph::lowerLinear(): StoreLinear {} -> StoreVGPR {}: {} -> {}",
+                    tag,
+                    store,
+                    linear,
+                    vgpr);
 
                 graph.mapper.connect<CoordGraph::User>(store, user);
                 graph.mapper.connect<CoordGraph::VGPR>(store, vgpr);

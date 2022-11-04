@@ -718,15 +718,15 @@ namespace KernelGraphTest
              "coord13"[label="Split(13)",shape=box];
              "coord14"[label="User{NA}(14)"];
              "coord15"[label="Join(15)",shape=box];
-             "coord16"[label="Workgroup{0, NA}(16)"];
-             "coord17"[label="Workitem{0, 32j}(17)"];
-             "coord18"[label="VGPR{NA}(18)"];
+             "coord16"[label="VGPR{NA}(16)"];
+             "coord17"[label="Workgroup{0, NA}(17)"];
+             "coord18"[label="Workitem{0, 32j}(18)"];
              "coord19"[label="Tile(19)",shape=box];
              "coord20"[label="Forget(20)",shape=box];
              "coord21"[label="DataFlow(21)",shape=box];
-             "coord22"[label="Workgroup{0, NA}(22)"];
-             "coord23"[label="Workitem{0, 32j}(23)"];
-             "coord24"[label="VGPR{NA}(24)"];
+             "coord22"[label="VGPR{NA}(22)"];
+             "coord23"[label="Workgroup{0, NA}(23)"];
+             "coord24"[label="Workitem{0, 32j}(24)"];
              "coord25"[label="Tile(25)",shape=box];
              "coord26"[label="Forget(26)",shape=box];
              "coord27"[label="DataFlow(27)",shape=box];
@@ -757,20 +757,20 @@ namespace KernelGraphTest
              "coord12" -> "coord15"
              "coord13" -> "coord12"
              "coord15" -> "coord14"
-             "coord16" -> "coord20"
+             "coord16" -> "coord29"
              "coord17" -> "coord20"
-             "coord18" -> "coord29"
-             "coord19" -> "coord16"
+             "coord18" -> "coord20"
              "coord19" -> "coord17"
-             "coord20" -> "coord18"
-             "coord21" -> "coord18"
-             "coord22" -> "coord26"
+             "coord19" -> "coord18"
+             "coord20" -> "coord16"
+             "coord21" -> "coord16"
+             "coord22" -> "coord29"
              "coord23" -> "coord26"
-             "coord24" -> "coord29"
-             "coord25" -> "coord22"
+             "coord24" -> "coord26"
              "coord25" -> "coord23"
-             "coord26" -> "coord24"
-             "coord27" -> "coord24"
+             "coord25" -> "coord24"
+             "coord26" -> "coord22"
+             "coord27" -> "coord22"
              "coord28" -> "coord31"
              "coord28" -> "coord33"
              "coord29" -> "coord28"
@@ -787,27 +787,27 @@ namespace KernelGraphTest
              "coord38" -> "coord14"
              {
              rank=same
-             "coord16"->"coord17"[style=invis]
+             "coord17"->"coord18"[style=invis]
              rankdir=LR
              }
              {
              rank=same
-             "coord16"->"coord17"[style=invis]
+             "coord17"->"coord18"[style=invis]
              rankdir=LR
              }
              {
              rank=same
-             "coord22"->"coord23"[style=invis]
+             "coord23"->"coord24"[style=invis]
              rankdir=LR
              }
              {
              rank=same
-             "coord22"->"coord23"[style=invis]
+             "coord23"->"coord24"[style=invis]
              rankdir=LR
              }
              {
              rank=same
-             "coord18"->"coord24"[style=invis]
+             "coord16"->"coord22"[style=invis]
              rankdir=LR
              }
              {
@@ -830,7 +830,7 @@ namespace KernelGraphTest
              "cntrl3"[label="Body(3)",shape=box];
              "cntrl4"[label="LoadVGPR(4)"];
              "cntrl5"[label="Body(5)",shape=box];
-             "cntrl6"[label="ElementOp(18, 24)(6)"];
+             "cntrl6"[label="ElementOp(16, 22)(6)"];
              "cntrl7"[label="Sequence(7)",shape=box];
              "cntrl8"[label="Sequence(8)",shape=box];
              "cntrl9"[label="ElementOp(28, -1)(9)"];
@@ -858,9 +858,9 @@ namespace KernelGraphTest
              "cntrl15" -> "cntrl14"
              }
              "coord1" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
-             "coord18" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
+             "coord16" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
              "coord2" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
-             "coord24" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
+             "coord22" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
              "coord28" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
              "coord30" -> "cntrl9" [style=dotted,weight=0,arrowsize=0]
              "coord32" -> "cntrl11" [style=dotted,weight=0,arrowsize=0]
