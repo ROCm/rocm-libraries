@@ -417,7 +417,7 @@ namespace rocRoller
              */
 
             /**
-             * @brief Tranlate `T_Load_Linear` to `LoadLinear`.
+             * @brief Translate `T_Load_Linear` to `LoadLinear`.
              *
              * Coordinates for `T_Load_Linear` are:
              *

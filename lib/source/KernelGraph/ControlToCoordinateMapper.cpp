@@ -33,9 +33,28 @@ namespace rocRoller::KernelGraph
     std::string ControlToCoordinateMapper::toDOT(std::string coord, std::string cntrl) const
     {
         std::stringstream ss;
+
+        // Sort the map keys so that dot output is consistent.
+        // Currently only sorting based on the control index (first value of key tuple) and
+        // coordinate index (the value in the map). If we ever output additional information
+        // we'll need to take it into account when sorting as well.
+        std::vector<key_type> keys;
         for(auto kv : m_map)
         {
-            ss << "\"" << coord << kv.second << "\" -> \"" << cntrl << std::get<0>(kv.first)
+            keys.insert(std::upper_bound(keys.begin(),
+                                         keys.end(),
+                                         kv.first,
+                                         [&](key_type a, key_type b) {
+                                             return (std::get<0>(a) < std::get<0>(b))
+                                                    || (std::get<0>(a) == std::get<0>(b)
+                                                        && m_map.at(a) < m_map.at(b));
+                                         }),
+                        kv.first);
+        }
+
+        for(auto key : keys)
+        {
+            ss << "\"" << coord << m_map.at(key) << "\" -> \"" << cntrl << std::get<0>(key)
                << "\" [style=dotted,weight=0,arrowsize=0]\n";
         }
         return ss.str();

@@ -589,8 +589,8 @@ namespace KernelGraphTest
              "coord13" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
              "coord15" -> "cntrl9" [style=dotted,weight=0,arrowsize=0]
              "coord17" -> "cntrl11" [style=dotted,weight=0,arrowsize=0]
-             "coord21" -> "cntrl14" [style=dotted,weight=0,arrowsize=0]
              "coord17" -> "cntrl14" [style=dotted,weight=0,arrowsize=0]
+             "coord21" -> "cntrl14" [style=dotted,weight=0,arrowsize=0]
              }).";
 
         EXPECT_EQ(NormalizedSource(expectedC), NormalizedSource(kgraphC.toDOT(true)));
@@ -695,8 +695,8 @@ namespace KernelGraphTest
              "coord13" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
              "coord15" -> "cntrl9" [style=dotted,weight=0,arrowsize=0]
              "coord17" -> "cntrl11" [style=dotted,weight=0,arrowsize=0]
-             "coord20" -> "cntrl14" [style=dotted,weight=0,arrowsize=0]
              "coord17" -> "cntrl14" [style=dotted,weight=0,arrowsize=0]
+             "coord20" -> "cntrl14" [style=dotted,weight=0,arrowsize=0]
              }).";
 
         EXPECT_EQ(NormalizedSource(expected0), NormalizedSource(kgraph0.toDOT(true)));
@@ -874,6 +874,264 @@ namespace KernelGraphTest
 
         auto kgraph1 = KernelGraph::lowerLinear(kgraph0, m_context);
         EXPECT_EQ(NormalizedSource(expected1), NormalizedSource(kgraph1.toDOT(true)));
+    }
+
+    TEST_F(KernelGraphTest, Translate01BTiled)
+    {
+        auto command  = std::make_shared<Command>();
+        auto dataType = DataType::Int32;
+
+        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
+            rocRoller::Operations::T_Load_Tiled(dataType, 2, 0))); // A
+        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
+            rocRoller::Operations::T_Load_Tiled(dataType, 2, 1))); // B
+
+        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
+            rocRoller::Operations::T_Mul(2, 0, 1))); // D = A * B
+
+        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
+            rocRoller::Operations::T_Store_Tiled(dataType, 2, 2))); // D
+
+        auto kgraph0 = KernelGraph::translate2(command);
+
+        auto bottom = kgraph0.coordinates.roots().to<std::vector>();
+        EXPECT_EQ(bottom.size(), 2);
+        for(auto const& id : bottom)
+        {
+            EXPECT_TRUE(std::holds_alternative<KernelGraph::CoordGraph::User>(
+                std::get<KernelGraph::CoordGraph::Dimension>(kgraph0.coordinates.getElement(id))));
+        }
+
+        auto top = kgraph0.coordinates.leaves().to<std::vector>();
+        EXPECT_EQ(top.size(), 1);
+        for(auto const& id : top)
+        {
+            EXPECT_TRUE(std::holds_alternative<KernelGraph::CoordGraph::User>(
+                std::get<KernelGraph::CoordGraph::Dimension>(kgraph0.coordinates.getElement(id))));
+        }
+
+        std::string expected0 = R".(
+             digraph {
+             "coord1"[label="SubDimension{0, CommandArgument(Load_Tiled_0_size_0)}(1)"];
+             "coord2"[label="SubDimension{1, CommandArgument(Load_Tiled_0_size_1)}(2)"];
+             "coord3"[label="User{NA}(3)"];
+             "coord4"[label="MacroTile{NA}(4)"];
+             "coord5"[label="Split(5)",shape=box];
+             "coord6"[label="ConstructTensorTile(6)",shape=box];
+             "coord7"[label="DataFlow(7)",shape=box];
+             "coord8"[label="SubDimension{0, CommandArgument(Load_Tiled_1_size_0)}(8)"];
+             "coord9"[label="SubDimension{1, CommandArgument(Load_Tiled_1_size_1)}(9)"];
+             "coord10"[label="User{NA}(10)"];
+             "coord11"[label="MacroTile{NA}(11)"];
+             "coord12"[label="Split(12)",shape=box];
+             "coord13"[label="ConstructTensorTile(13)",shape=box];
+             "coord14"[label="DataFlow(14)",shape=box];
+             "coord15"[label="MacroTile{NA}(15)"];
+             "coord16"[label="DataFlow(16)",shape=box];
+             "coord17"[label="SubDimension{0, NA}(17)"];
+             "coord18"[label="SubDimension{1, NA}(18)"];
+             "coord19"[label="User{NA}(19)"];
+             "coord20"[label="DestructTensorTile(20)",shape=box];
+             "coord21"[label="Join(21)",shape=box];
+             "coord22"[label="DataFlow(22)",shape=box];
+             "coord1" -> "coord6"
+             "coord2" -> "coord6"
+             "coord3" -> "coord5"
+             "coord3" -> "coord7"
+             "coord4" -> "coord16"
+             "coord5" -> "coord1"
+             "coord5" -> "coord2"
+             "coord6" -> "coord4"
+             "coord7" -> "coord4"
+             "coord8" -> "coord13"
+             "coord9" -> "coord13"
+             "coord10" -> "coord12"
+             "coord10" -> "coord14"
+             "coord11" -> "coord16"
+             "coord12" -> "coord8"
+             "coord12" -> "coord9"
+             "coord13" -> "coord11"
+             "coord14" -> "coord11"
+             "coord15" -> "coord20"
+             "coord15" -> "coord22"
+             "coord16" -> "coord15"
+             "coord17" -> "coord21"
+             "coord18" -> "coord21"
+             "coord20" -> "coord17"
+             "coord20" -> "coord18"
+             "coord21" -> "coord19"
+             "coord22" -> "coord19"
+             {
+             rank=same
+             "coord1"->"coord2"[style=invis]
+             rankdir=LR
+             }
+             {
+             rank=same
+             "coord1"->"coord2"[style=invis]
+             rankdir=LR
+             }
+             {
+             rank=same
+             "coord8"->"coord9"[style=invis]
+             rankdir=LR
+             }
+             {
+             rank=same
+             "coord8"->"coord9"[style=invis]
+             rankdir=LR
+             }
+             {
+             rank=same
+             "coord4"->"coord11"[style=invis]
+             rankdir=LR
+             }
+             {
+             rank=same
+             "coord17"->"coord18"[style=invis]
+             rankdir=LR
+             }
+             {
+             rank=same
+             "coord17"->"coord18"[style=invis]
+             rankdir=LR
+             }
+             subgraph clusterCF {"cntrl1"[label="Kernel(1)"];
+             "cntrl2"[label="LoadTiled(2)"];
+             "cntrl3"[label="Body(3)",shape=box];
+             "cntrl4"[label="LoadTiled(4)"];
+             "cntrl5"[label="Body(5)",shape=box];
+             "cntrl6"[label="TensorContraction(6)"];
+             "cntrl7"[label="Sequence(7)",shape=box];
+             "cntrl8"[label="StoreTiled(8)"];
+             "cntrl9"[label="Sequence(9)",shape=box];
+             "cntrl1" -> "cntrl3"
+             "cntrl1" -> "cntrl5"
+             "cntrl2" -> "cntrl7"
+             "cntrl3" -> "cntrl2"
+             "cntrl4" -> "cntrl7"
+             "cntrl5" -> "cntrl4"
+             "cntrl6" -> "cntrl9"
+             "cntrl7" -> "cntrl6"
+             "cntrl9" -> "cntrl8"
+             {
+             rank=same
+             "cntrl2"->"cntrl4"[style=invis]
+             rankdir=LR
+             }
+             }
+             "coord3" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
+             "coord4" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
+             "coord10" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
+             "coord11" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
+             "coord15" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
+             "coord15" -> "cntrl8" [style=dotted,weight=0,arrowsize=0]
+             "coord19" -> "cntrl8" [style=dotted,weight=0,arrowsize=0]
+             }).";
+
+        EXPECT_EQ(NormalizedSource(expected0), NormalizedSource(kgraph0.toDOT(true)));
+    }
+
+    TEST_F(KernelGraphTest, Translate01BScalar)
+    {
+        auto command = std::make_shared<Command>();
+
+        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
+            rocRoller::Operations::T_Load_Scalar(DataType::Float, 0)));
+        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
+            rocRoller::Operations::T_Load_Scalar(DataType::Float, 1)));
+
+        Operations::T_Execute execute;
+        execute.addXOp(std::make_shared<Operations::XOp>(Operations::E_Add(3, 1, 0)));
+        execute.addXOp(std::make_shared<Operations::XOp>(Operations::E_Neg(4, 3)));
+        execute.addXOp(std::make_shared<Operations::XOp>(Operations::E_Mul(5, 3, 4)));
+
+        command->addOperation(std::make_shared<Operations::Operation>(std::move(execute)));
+
+        auto kgraph0 = KernelGraph::translate2(command);
+
+        auto bottom = kgraph0.coordinates.roots().to<std::vector>();
+        EXPECT_EQ(bottom.size(), 2);
+        for(auto const& id : bottom)
+        {
+            EXPECT_TRUE(std::holds_alternative<KernelGraph::CoordGraph::User>(
+                std::get<KernelGraph::CoordGraph::Dimension>(kgraph0.coordinates.getElement(id))));
+        }
+
+        std::string expected0 = R".(
+             digraph {
+             "coord1"[label="User{NA}(1)"];
+             "coord2"[label="VGPR{NA}(2)"];
+             "coord3"[label="DataFlow(3)",shape=box];
+             "coord4"[label="User{NA}(4)"];
+             "coord5"[label="VGPR{NA}(5)"];
+             "coord6"[label="DataFlow(6)",shape=box];
+             "coord7"[label="VGPR{NA}(7)"];
+             "coord8"[label="DataFlow(8)",shape=box];
+             "coord9"[label="VGPR{NA}(9)"];
+             "coord10"[label="DataFlow(10)",shape=box];
+             "coord11"[label="VGPR{NA}(11)"];
+             "coord12"[label="DataFlow(12)",shape=box];
+             "coord1" -> "coord3"
+             "coord2" -> "coord8"
+             "coord3" -> "coord2"
+             "coord4" -> "coord6"
+             "coord5" -> "coord8"
+             "coord6" -> "coord5"
+             "coord7" -> "coord10"
+             "coord7" -> "coord12"
+             "coord8" -> "coord7"
+             "coord9" -> "coord12"
+             "coord10" -> "coord9"
+             "coord12" -> "coord11"
+             {
+             rank=same
+             "coord2"->"coord5"[style=invis]
+             rankdir=LR
+             }
+             {
+             rank=same
+             "coord9"->"coord7"[style=invis]
+             rankdir=LR
+             }
+             subgraph clusterCF {"cntrl1"[label="Kernel(1)"];
+             "cntrl2"[label="LoadVGPR(2)"];
+             "cntrl3"[label="Body(3)",shape=box];
+             "cntrl4"[label="LoadVGPR(4)"];
+             "cntrl5"[label="Body(5)",shape=box];
+             "cntrl6"[label="ElementOp(2, 5)(6)"];
+             "cntrl7"[label="Sequence(7)",shape=box];
+             "cntrl8"[label="Sequence(8)",shape=box];
+             "cntrl9"[label="ElementOp(7, -1)(9)"];
+             "cntrl10"[label="Sequence(10)",shape=box];
+             "cntrl11"[label="ElementOp(9, 7)(11)"];
+             "cntrl12"[label="Sequence(12)",shape=box];
+             "cntrl13"[label="Sequence(13)",shape=box];
+             "cntrl1" -> "cntrl3"
+             "cntrl1" -> "cntrl5"
+             "cntrl2" -> "cntrl7"
+             "cntrl3" -> "cntrl2"
+             "cntrl4" -> "cntrl8"
+             "cntrl5" -> "cntrl4"
+             "cntrl6" -> "cntrl10"
+             "cntrl6" -> "cntrl13"
+             "cntrl7" -> "cntrl6"
+             "cntrl8" -> "cntrl6"
+             "cntrl9" -> "cntrl12"
+             "cntrl10" -> "cntrl9"
+             "cntrl12" -> "cntrl11"
+             "cntrl13" -> "cntrl11"
+             }
+             "coord1" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
+             "coord2" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
+             "coord4" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
+             "coord5" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
+             "coord7" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
+             "coord9" -> "cntrl9" [style=dotted,weight=0,arrowsize=0]
+             "coord11" -> "cntrl11" [style=dotted,weight=0,arrowsize=0]
+             }).";
+
+        EXPECT_EQ(NormalizedSource(expected0), NormalizedSource(kgraph0.toDOT(true)));
     }
 
     TEST_F(KernelGraphTest, TranslateTMul)
