@@ -1,6 +1,9 @@
 #pragma once
 
-#include "Utilities/Settings.hpp"
+#include <ostream>
+#include <string>
+
+#include "Utilities/Settings_fwd.hpp"
 
 namespace rocRoller
 {
@@ -8,11 +11,11 @@ namespace rocRoller
     {
         KernelOptions();
 
-        Settings::LogLevel logLevel;
-        bool               alwaysWaitAfterLoad;
-        bool               alwaysWaitAfterStore;
-        bool               alwaysWaitBeforeBranch;
-        bool               preloadKernelArguments;
+        LogLevel logLevel;
+        bool     alwaysWaitAfterLoad;
+        bool     alwaysWaitAfterStore;
+        bool     alwaysWaitBeforeBranch;
+        bool     preloadKernelArguments;
 
         unsigned int loadLocalWidth;
         unsigned int loadGlobalWidth;

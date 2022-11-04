@@ -1,6 +1,7 @@
 
 #pragma once
 
+#include <string>
 namespace rocRoller
 {
     namespace Scheduling
@@ -25,5 +26,7 @@ namespace rocRoller
 
         class Scheduler;
         class LockState;
+
+        std::string toString(SchedulerProcedure);
     }
 }

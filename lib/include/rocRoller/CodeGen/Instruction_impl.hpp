@@ -296,23 +296,23 @@ namespace rocRoller
         return false;
     }
 
-    inline void Instruction::toStream(std::ostream& os, Settings::LogLevel level) const
+    inline void Instruction::toStream(std::ostream& os, LogLevel level) const
     {
         preambleString(os, level);
         functionalString(os, level);
         codaString(os, level);
     }
 
-    inline std::string Instruction::toString(Settings::LogLevel level) const
+    inline std::string Instruction::toString(LogLevel level) const
     {
         std::ostringstream oss;
         toStream(oss, level);
         return oss.str();
     }
 
-    inline void Instruction::preambleString(std::ostream& os, Settings::LogLevel level) const
+    inline void Instruction::preambleString(std::ostream& os, LogLevel level) const
     {
-        if(level >= Settings::LogLevel::Warning)
+        if(level >= LogLevel::Warning)
         {
             for(auto const& w : m_warnings)
             {
@@ -326,12 +326,12 @@ namespace rocRoller
         allocationString(os, level);
     }
 
-    inline void Instruction::directiveString(std::ostream& os, Settings::LogLevel level) const
+    inline void Instruction::directiveString(std::ostream& os, LogLevel level) const
     {
         os << m_directive;
     }
 
-    inline void Instruction::functionalString(std::ostream& os, Settings::LogLevel level) const
+    inline void Instruction::functionalString(std::ostream& os, LogLevel level) const
     {
         auto pos = os.tellp();
 
@@ -358,7 +358,7 @@ namespace rocRoller
 
         coreInstructionString(os);
 
-        if(level > Settings::LogLevel::Terse && !m_comments.empty())
+        if(level > LogLevel::Terse && !m_comments.empty())
         {
             // Only include the first comment in the functional string.
             for(auto const& s : EscapeComment(m_comments[0], 1))
@@ -373,9 +373,9 @@ namespace rocRoller
         }
     }
 
-    inline void Instruction::codaString(std::ostream& os, Settings::LogLevel level) const
+    inline void Instruction::codaString(std::ostream& os, LogLevel level) const
     {
-        if(level >= Settings::LogLevel::Terse && m_comments.size() > 1)
+        if(level >= LogLevel::Terse && m_comments.size() > 1)
         {
             // Only include everything but the first comment in the code string.
             for(int i = 1; i < m_comments.size(); i++)
@@ -389,9 +389,9 @@ namespace rocRoller
         }
     }
 
-    inline void Instruction::allocationString(std::ostream& os, Settings::LogLevel level) const
+    inline void Instruction::allocationString(std::ostream& os, LogLevel level) const
     {
-        if(level > Settings::LogLevel::Terse)
+        if(level > LogLevel::Terse)
         {
             for(auto const& alloc : m_allocations)
             {

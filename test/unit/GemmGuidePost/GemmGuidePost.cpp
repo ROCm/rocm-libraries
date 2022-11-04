@@ -12,7 +12,7 @@
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/KernelArguments.hpp>
 #include <rocRoller/Utilities/Generator.hpp>
-#include <rocRoller/Utilities/Settings.hpp>
+#include <rocRoller/Utilities/Settings_fwd.hpp>
 #include <rocRoller/Utilities/Timer.hpp>
 
 #include <rocRoller/Operations/Command.hpp>
@@ -81,7 +81,7 @@ namespace rocRollerTest
                      bool                                hasBeta = true)
     {
         KernelOptions options;
-        //options.logLevel               = Settings::LogLevel::Debug;
+        //options.logLevel               = LogLevel::Debug;
         options.preloadKernelArguments = true;
         m_context->setKernelOptions(options);
         auto command = std::make_shared<Command>();
@@ -559,7 +559,7 @@ namespace rocRollerTest
               bool                                hasBeta = true)
     {
         KernelOptions options;
-        options.logLevel               = Settings::LogLevel::Debug;
+        options.logLevel               = LogLevel::Debug;
         options.preloadKernelArguments = false;
         m_context->setKernelOptions(options);
         auto command = std::make_shared<Command>();
@@ -1051,7 +1051,7 @@ namespace rocRollerTest
                            bool                                hasBeta = true)
     {
         KernelOptions options;
-        options.logLevel               = Settings::LogLevel::Debug;
+        options.logLevel               = LogLevel::Debug;
         options.preloadKernelArguments = false;
         m_context->setKernelOptions(options);
         auto command = std::make_shared<Command>();
@@ -1485,7 +1485,7 @@ namespace rocRollerTest
                     bool                                hasBeta = true)
     {
         KernelOptions options;
-        options.logLevel               = Settings::LogLevel::Debug;
+        options.logLevel               = LogLevel::Debug;
         options.preloadKernelArguments = false;
         m_context->setKernelOptions(options);
         auto command = std::make_shared<Command>();

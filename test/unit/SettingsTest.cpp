@@ -43,10 +43,13 @@ namespace rocRollerTest
                 Settings::RandomSeed.name, getenv(Settings::RandomSeed.name.c_str())));
             envVars.push_back(std::pair<std::string, char*>(
                 Settings::SaveAssembly.name, getenv(Settings::SaveAssembly.name.c_str())));
+            envVars.push_back(std::pair<std::string, char*>(
+                Settings::Scheduler.name, getenv(Settings::SaveAssembly.name.c_str())));
             setenv(Settings::LogConsole.name.c_str(), "0", 1);
             setenv(Settings::SaveAssembly.name.c_str(), "1", 1);
             setenv(Settings::AssemblyFile.name.c_str(), "assemblyFileTest.s", 1);
             setenv(Settings::RandomSeed.name.c_str(), "31415", 1);
+            setenv(Settings::Scheduler.name.c_str(), "invalidScheduler", 1);
 
             GenericContextFixture::SetUp();
         }
@@ -82,6 +85,7 @@ namespace rocRollerTest
         EXPECT_EQ(settings->get(Settings::LogFile), Settings::LogFile.defaultValue);
         EXPECT_EQ(settings->get(Settings::LogLvl), Settings::LogLvl.defaultValue);
         EXPECT_EQ(settings->get(Settings::RandomSeed), Settings::RandomSeed.defaultValue);
+        EXPECT_EQ(settings->get(Settings::Scheduler), Settings::Scheduler.defaultValue);
     }
 
     TEST_F(GenericSettings, LogLevelTest)
@@ -89,22 +93,22 @@ namespace rocRollerTest
         auto settings = Settings::getInstance();
 
         std::ostringstream out;
-        out << Settings::LogLevel::None << std::endl;
-        out << Settings::LogLevel::Error << std::endl;
-        out << Settings::LogLevel::Warning << std::endl;
-        out << Settings::LogLevel::Terse << std::endl;
-        out << Settings::LogLevel::Verbose << std::endl;
-        out << Settings::LogLevel::Debug << std::endl;
-        out << Settings::LogLevel::Count;
+        out << LogLevel::None << std::endl;
+        out << LogLevel::Error << std::endl;
+        out << LogLevel::Warning << std::endl;
+        out << LogLevel::Terse << std::endl;
+        out << LogLevel::Verbose << std::endl;
+        out << LogLevel::Debug << std::endl;
+        out << LogLevel::Count;
 
         std::string stringify = "";
-        stringify += settings->toString(Settings::LogLevel::None) + '\n';
-        stringify += settings->toString(Settings::LogLevel::Error) + '\n';
-        stringify += settings->toString(Settings::LogLevel::Warning) + '\n';
-        stringify += settings->toString(Settings::LogLevel::Terse) + '\n';
-        stringify += settings->toString(Settings::LogLevel::Verbose) + '\n';
-        stringify += settings->toString(Settings::LogLevel::Debug) + '\n';
-        stringify += settings->toString(Settings::LogLevel::Count) + '\n';
+        stringify += settings->toString(LogLevel::None) + '\n';
+        stringify += settings->toString(LogLevel::Error) + '\n';
+        stringify += settings->toString(LogLevel::Warning) + '\n';
+        stringify += settings->toString(LogLevel::Terse) + '\n';
+        stringify += settings->toString(LogLevel::Verbose) + '\n';
+        stringify += settings->toString(LogLevel::Debug) + '\n';
+        stringify += settings->toString(LogLevel::Count) + '\n';
 
         std::string expected = R"(
             None
@@ -186,5 +190,7 @@ namespace rocRollerTest
         EXPECT_EQ(settings->get(Settings::AssemblyFile), "assemblyFileTest.s");
         EXPECT_EQ(settings->get(Settings::RandomSeed), 31415);
         EXPECT_EQ(settings->get(Settings::SaveAssembly), true);
+
+        EXPECT_THROW(settings->get(Settings::Scheduler), FatalError);
     }
 }

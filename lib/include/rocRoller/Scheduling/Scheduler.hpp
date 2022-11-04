@@ -61,7 +61,6 @@ namespace rocRoller
             LockState m_lockstate;
         };
 
-        std::string   toString(SchedulerProcedure);
         std::ostream& operator<<(std::ostream&, SchedulerProcedure);
     }
 }

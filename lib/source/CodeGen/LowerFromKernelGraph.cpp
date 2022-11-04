@@ -24,6 +24,7 @@
 #include <rocRoller/Scheduling/Scheduler.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Generator.hpp>
+#include <rocRoller/Utilities/Settings.hpp>
 #include <rocRoller/Utilities/Timer.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
 
@@ -182,8 +183,8 @@ namespace rocRoller
                         generators.push_back(call(op, coords));
                     }
 
-                    auto scheduler = Component::GetNew<Scheduling::Scheduler>(
-                        Scheduling::SchedulerProcedure::Sequential, m_context);
+                    auto proc      = Settings::getInstance()->get(Settings::Scheduler);
+                    auto scheduler = Component::GetNew<Scheduling::Scheduler>(proc, m_context);
                     co_yield (*scheduler)(generators);
 
                     // Add output nodes to candidates.

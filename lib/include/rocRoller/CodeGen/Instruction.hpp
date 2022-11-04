@@ -13,7 +13,7 @@
 #include "../Context_fwd.hpp"
 #include "../InstructionValues/Register_fwd.hpp"
 #include "../Scheduling/Scheduler_fwd.hpp"
-#include "../Utilities/Settings.hpp"
+#include "../Utilities/Settings_fwd.hpp"
 
 namespace rocRoller
 {
@@ -66,8 +66,8 @@ namespace rocRoller
         bool registersIntersect(std::vector<std::shared_ptr<Register::Value>>,
                                 std::vector<std::shared_ptr<Register::Value>>) const;
 
-        void        toStream(std::ostream&, Settings::LogLevel level) const;
-        std::string toString(Settings::LogLevel level) const;
+        void        toStream(std::ostream&, LogLevel level) const;
+        std::string toString(LogLevel level) const;
 
         int                    getLockValue() const;
         Scheduling::Dependency getDependency() const;
@@ -124,19 +124,19 @@ namespace rocRoller
         /**
          * toString = preamble + functional + coda
          */
-        void preambleString(std::ostream& oss, Settings::LogLevel level) const;
-        void functionalString(std::ostream& oss, Settings::LogLevel level) const;
-        void codaString(std::ostream& oss, Settings::LogLevel level) const;
+        void preambleString(std::ostream& oss, LogLevel level) const;
+        void functionalString(std::ostream& oss, LogLevel level) const;
+        void codaString(std::ostream& oss, LogLevel level) const;
 
         /**
          * A comment detailing allocations that happened when scheduling this instruction.
          */
-        void allocationString(std::ostream& oss, Settings::LogLevel level) const;
+        void allocationString(std::ostream& oss, LogLevel level) const;
 
         /**
          * Assembler directive(s), if this instruction contains an any.
          */
-        void directiveString(std::ostream& oss, Settings::LogLevel level) const;
+        void directiveString(std::ostream& oss, LogLevel level) const;
 
         /**
          * Just the main instruction.

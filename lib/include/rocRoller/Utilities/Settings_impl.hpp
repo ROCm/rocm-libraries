@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <type_traits>
 
+#include <rocRoller/Scheduling/Scheduler.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
 
@@ -63,6 +64,28 @@ namespace rocRoller
     }
 
     template <>
+    inline Scheduling::SchedulerProcedure
+        Settings::getTypeValue<Scheduling::SchedulerProcedure>(std::string const& proc) const
+    {
+        if(proc == Scheduling::toString(Scheduling::SchedulerProcedure::Sequential))
+        {
+            return Scheduling::SchedulerProcedure::Sequential;
+        }
+        else if(proc == Scheduling::toString(Scheduling::SchedulerProcedure::RoundRobin))
+        {
+            return Scheduling::SchedulerProcedure::RoundRobin;
+        }
+        else if(proc == Scheduling::toString(Scheduling::SchedulerProcedure::Random))
+        {
+            return Scheduling::SchedulerProcedure::Random;
+        }
+        else
+        {
+            Throw<FatalError>("Trying to get unsupported/invalid scheduling procedure.");
+        }
+    }
+
+    template <>
     inline Settings::bitFieldType
         Settings::getTypeValue<Settings::bitFieldType>(std::string const& var) const
     {
@@ -89,32 +112,31 @@ namespace rocRoller
     }
 
     template <>
-    inline Settings::LogLevel
-        Settings::getTypeValue<Settings::LogLevel>(std::string const& var) const
+    inline LogLevel Settings::getTypeValue<LogLevel>(std::string const& var) const
     {
         if(var == "None")
         {
-            return Settings::LogLevel::None;
+            return LogLevel::None;
         }
         else if(var == "Error")
         {
-            return Settings::LogLevel::Error;
+            return LogLevel::Error;
         }
         else if(var == "Warning")
         {
-            return Settings::LogLevel::Warning;
+            return LogLevel::Warning;
         }
         else if(var == "Terse")
         {
-            return Settings::LogLevel::Terse;
+            return LogLevel::Terse;
         }
         else if(var == "Verbose")
         {
-            return Settings::LogLevel::Verbose;
+            return LogLevel::Verbose;
         }
         else if(var == "Debug")
         {
-            return Settings::LogLevel::Debug;
+            return LogLevel::Debug;
         }
         else
         {
@@ -184,33 +206,33 @@ namespace rocRoller
     }
 
     template <>
-    inline std::string Settings::toString(Settings::LogLevel const& logLevel) const
+    inline std::string Settings::toString(LogLevel const& logLevel) const
     {
         std::string rv = "";
 
         switch(logLevel)
         {
-        case Settings::LogLevel::None:
+        case LogLevel::None:
             rv = "None";
             break;
-        case Settings::LogLevel::Error:
+        case LogLevel::Error:
             rv = "Error";
             break;
-        case Settings::LogLevel::Warning:
+        case LogLevel::Warning:
             rv = "Warning";
             break;
-        case Settings::LogLevel::Terse:
+        case LogLevel::Terse:
             rv = "Terse";
             break;
-        case Settings::LogLevel::Verbose:
+        case LogLevel::Verbose:
             rv = "Verbose";
             break;
-        case Settings::LogLevel::Debug:
+        case LogLevel::Debug:
             rv = "Debug";
             break;
-        case Settings::LogLevel::Count:
+        case LogLevel::Count:
             rv = "LogLevel Count (";
-            rv += std::to_string(static_cast<int>(Settings::LogLevel::Count));
+            rv += std::to_string(static_cast<int>(LogLevel::Count));
             rv += ")";
             break;
         default:
@@ -220,7 +242,7 @@ namespace rocRoller
         return rv;
     }
 
-    inline std::ostream& operator<<(std::ostream& os, const Settings::LogLevel& input)
+    inline std::ostream& operator<<(std::ostream& os, const LogLevel& input)
     {
         os << Settings::getInstance()->toString(input);
         return os;

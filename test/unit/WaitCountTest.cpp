@@ -17,7 +17,7 @@ TEST(WaitCountTest, Basic)
     EXPECT_EQ(-1, wc.vscnt());
     EXPECT_EQ(-1, wc.expcnt());
 
-    EXPECT_EQ("s_waitcnt lgkmcnt(2)\n", wc.toString(Settings::LogLevel::Terse));
+    EXPECT_EQ("s_waitcnt lgkmcnt(2)\n", wc.toString(LogLevel::Terse));
 }
 
 TEST(WaitCountTest, Combine)
@@ -67,7 +67,7 @@ TEST(WaitCountTest, Combine)
     EXPECT_EQ(2, wc.vscnt());
     EXPECT_EQ(20, wc.expcnt());
 
-    auto stringValue = wc.toString(Settings::LogLevel::Debug);
+    auto stringValue = wc.toString(LogLevel::Debug);
 
     EXPECT_THAT(stringValue, testing::HasSubstr("// Wait for LDS"));
     EXPECT_THAT(stringValue, testing::HasSubstr("// Wait for store"));
@@ -79,7 +79,7 @@ TEST(WaitCountTest, Combine)
 
     EXPECT_THAT(stringValue, testing::HasSubstr("s_waitcnt_vscnt 2"));
 
-    stringValue = wc.toString(Settings::LogLevel::Terse);
+    stringValue = wc.toString(LogLevel::Terse);
 
     // No comments for terse version
     EXPECT_THAT(stringValue, testing::Not(testing::HasSubstr("// Wait for LDS")));
@@ -118,7 +118,7 @@ TEST(WaitCountTest, VSCnt)
                                         s_waitcnt_vscnt 0
                                     )";
 
-    EXPECT_EQ(NormalizedSource(wcWithVSCnt.toString(Settings::LogLevel::Debug)),
+    EXPECT_EQ(NormalizedSource(wcWithVSCnt.toString(LogLevel::Debug)),
               NormalizedSource(expectedWithVSCnt));
 
     GPUArchitecture TestNoVSCnt;
@@ -137,7 +137,7 @@ TEST(WaitCountTest, VSCnt)
                                         s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0)
                                     )";
 
-    EXPECT_EQ(NormalizedSource(wcNoVSCnt.toString(Settings::LogLevel::Debug)),
+    EXPECT_EQ(NormalizedSource(wcNoVSCnt.toString(LogLevel::Debug)),
               NormalizedSource(expectedNoVSCnt));
 }
 

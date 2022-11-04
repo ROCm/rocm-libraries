@@ -114,7 +114,7 @@ namespace rocRollerTest
 
             auto inst = next(begin, end);
             EXPECT_EQ(inst.nopCount(), 1);
-            EXPECT_EQ(inst.toString(Settings::LogLevel::Debug), "s_nop 0\n // Nop Comment\n");
+            EXPECT_EQ(inst.toString(LogLevel::Debug), "s_nop 0\n // Nop Comment\n");
         }
 
         {
@@ -126,7 +126,7 @@ namespace rocRollerTest
             EXPECT_EQ(NormalizedSource(expected, true), NormalizedSource(output(), true));
 
             auto inst = next(begin, end);
-            EXPECT_EQ(inst.toString(Settings::LogLevel::Debug), " // Lock instruction\n");
+            EXPECT_EQ(inst.toString(LogLevel::Debug), " // Lock instruction\n");
         }
 
         {
@@ -138,7 +138,7 @@ namespace rocRollerTest
             EXPECT_EQ(NormalizedSource(expected, true), NormalizedSource(output(), true));
 
             auto inst = next(begin, end);
-            EXPECT_EQ(inst.toString(Settings::LogLevel::Debug), " // Unlock instruction\n");
+            EXPECT_EQ(inst.toString(LogLevel::Debug), " // Unlock instruction\n");
         }
 
         {
@@ -149,8 +149,7 @@ namespace rocRollerTest
             EXPECT_EQ(NormalizedSource(expected, true), NormalizedSource(output(), true));
 
             auto inst = next(begin, end);
-            EXPECT_EQ(inst.toString(Settings::LogLevel::Debug),
-                      "// Allocated : 1 VGPR (Value: Float)\n");
+            EXPECT_EQ(inst.toString(LogLevel::Debug), "// Allocated : 1 VGPR (Value: Float)\n");
         }
 
         {
@@ -161,7 +160,7 @@ namespace rocRollerTest
             EXPECT_EQ(NormalizedSource(expected, true), NormalizedSource(output(), true));
 
             auto inst = next(begin, end);
-            EXPECT_EQ(inst.toString(Settings::LogLevel::Debug), ".set .amdgcn.next_free_vgpr, 0\n");
+            EXPECT_EQ(inst.toString(LogLevel::Debug), ".set .amdgcn.next_free_vgpr, 0\n");
         }
 
         {
@@ -173,7 +172,7 @@ namespace rocRollerTest
             EXPECT_EQ(NormalizedSource(expected, true), NormalizedSource(output(), true));
 
             auto inst = next(begin, end);
-            EXPECT_EQ(inst.toString(Settings::LogLevel::Debug), "FooLabel:\n\n");
+            EXPECT_EQ(inst.toString(LogLevel::Debug), "FooLabel:\n\n");
         }
 
         {
@@ -186,7 +185,7 @@ namespace rocRollerTest
             auto inst       = next(begin, end);
             auto instString = R"(s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0)
                                  s_waitcnt_vscnt 0)";
-            EXPECT_EQ(NormalizedSource(inst.toString(Settings::LogLevel::Debug)),
+            EXPECT_EQ(NormalizedSource(inst.toString(LogLevel::Debug)),
                       NormalizedSource(instString));
         }
 

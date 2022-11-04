@@ -124,6 +124,8 @@ namespace rocRoller
 
         KernelGraph::KernelGraph getKernelGraph() const;
 
+        std::shared_ptr<Context> getContext();
+
     private:
         std::shared_ptr<Command> m_command;
 

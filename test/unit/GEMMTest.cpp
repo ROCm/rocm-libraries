@@ -54,9 +54,9 @@ namespace GEMMDriverTest
     };
 
     template <typename T>
-    void basicGEMM(std::shared_ptr<Context> m_context,
-                   const GEMMProblem&       gemm,
-                   double                   acceptableError)
+    void basicGEMM(std::shared_ptr<Context>& m_context,
+                   const GEMMProblem&        gemm,
+                   double                    acceptableError)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
 
@@ -266,6 +266,7 @@ namespace GEMMDriverTest
         // Execute the GEMM kernel
         CommandKernel commandKernel(command, "GEMM", params);
         commandKernel.launchKernel(runtimeArgs.runtimeArguments());
+        m_context = commandKernel.getContext();
 
         // Device result
         std::vector<T> d_result(M * N, 0.0);
@@ -279,6 +280,22 @@ namespace GEMMDriverTest
         double rnorm = relativeNorm(d_result, h_result);
 
         ASSERT_LT(rnorm, acceptableError);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMM_Schedulers)
+    {
+        GEMMProblem gemm;
+        auto        settings = Settings::getInstance();
+
+        settings->set(Settings::Scheduler, Scheduling::SchedulerProcedure::Sequential);
+        basicGEMM<float>(m_context, gemm, 1.e-6);
+        std::string seq = m_context->instructions()->toString();
+
+        settings->set(Settings::Scheduler, Scheduling::SchedulerProcedure::RoundRobin);
+        basicGEMM<float>(m_context, gemm, 1.e-6);
+        std::string rr = m_context->instructions()->toString();
+
+        EXPECT_NE(NormalizedSource(seq), NormalizedSource(rr));
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMM)

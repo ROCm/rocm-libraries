@@ -10,7 +10,7 @@
 #include "KernelArguments.hpp"
 #include "Operations/Command.hpp"
 #include "Scheduling/Scheduler.hpp"
-#include "Utilities/Settings.hpp"
+#include "Utilities/Settings_fwd.hpp"
 #include "Utilities/Timer.hpp"
 
 namespace rocRoller
@@ -94,7 +94,7 @@ namespace rocRoller
     {
         TIMER(t, "CommandKernel::getKernelArguments");
 
-        bool            log = m_context->kernelOptions().logLevel >= Settings::LogLevel::Debug;
+        bool            log = m_context->kernelOptions().logLevel >= LogLevel::Debug;
         KernelArguments rv(log);
 
         auto const& argStructs = m_context->kernel()->arguments();
@@ -303,6 +303,11 @@ namespace rocRoller
         m_executableKernel = std::make_shared<ExecutableKernel>();
         m_executableKernel->loadKernelFromFile(
             fileName, kernelName, m_context->targetArchitecture().target());
+    }
+
+    inline std::shared_ptr<Context> CommandKernel::getContext()
+    {
+        return m_context;
     }
 
 }

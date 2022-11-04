@@ -7,7 +7,9 @@
 #include <string>
 #include <vector>
 
+#include <rocRoller/Scheduling/Scheduler_fwd.hpp>
 #include <rocRoller/Utilities/LazySingleton.hpp>
+#include <rocRoller/Utilities/Settings_fwd.hpp>
 
 namespace rocRoller
 {
@@ -69,16 +71,11 @@ namespace rocRoller
         static inline SettingsOption<std::string> LogFile{
             "ROCROLLER_LOG_FILE", "Log file name", "", -1};
 
-        enum class LogLevel
-        {
-            None = 0,
-            Error,
-            Warning,
-            Terse,
-            Verbose,
-            Debug,
-            Count //Count is a special Enum entry acting as the "size" of enum LogLevel
-        };
+        static inline SettingsOption<Scheduling::SchedulerProcedure> Scheduler{
+            "ROCROLLER_SCHEDULER",
+            "Scheduler used when scheduling independent instruction streams.",
+            Scheduling::SchedulerProcedure::Sequential,
+            -1};
 
         static inline SettingsOption<LogLevel> LogLvl{
             "ROCROLLER_LOG_LEVEL", "Log level", LogLevel::None, -1};

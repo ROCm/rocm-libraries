@@ -14,7 +14,7 @@
 #include "../Scheduling/Scheduling.hpp"
 #include "../Utilities/Error.hpp"
 #include "../Utilities/Generator.hpp"
-#include "../Utilities/Settings.hpp"
+#include "../Utilities/Settings_fwd.hpp"
 #include "../Utilities/Utils.hpp"
 
 namespace rocRoller
@@ -776,7 +776,7 @@ namespace rocRoller
             if(m_allocationState == AllocationState::Allocated)
             {
                 auto context = m_context.lock();
-                if(context && context->kernelOptions().logLevel > Settings::LogLevel::Terse)
+                if(context && context->kernelOptions().logLevel > LogLevel::Terse)
                 {
                     auto inst = Instruction::Comment(descriptiveComment("Freeing"));
                     context->schedule(inst);

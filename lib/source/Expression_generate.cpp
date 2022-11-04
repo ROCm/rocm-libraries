@@ -48,8 +48,8 @@ namespace rocRoller
                 subExprs.push_back(call(lhsResult, expr.lhs));
                 subExprs.push_back(call(rhsResult, expr.rhs));
 
-                auto scheduler = Component::Get<Scheduling::Scheduler>(
-                    Scheduling::SchedulerProcedure::Sequential, m_context);
+                auto proc      = Settings::getInstance()->get(Settings::Scheduler);
+                auto scheduler = Component::Get<Scheduling::Scheduler>(proc, m_context);
                 co_yield (*scheduler)(subExprs);
 
                 if(dest == nullptr)
