@@ -247,10 +247,10 @@ namespace CopyGeneratorTest
 
         auto copy = [&]() -> Generator<Instruction> {
             co_yield m_context->copier()->copy(v_addr, input_mem);
-            co_yield m_context->mem()->loadFlat(v_value, v_addr, "", 16);
+            co_yield m_context->mem()->loadFlat(v_value, v_addr, 0, 16);
             co_yield m_context->copier()->copy(v_tmp, v_value);
             co_yield m_context->copier()->copy(v_addr, output_mem);
-            co_yield m_context->mem()->storeFlat(v_addr, v_tmp, "", 16);
+            co_yield m_context->mem()->storeFlat(v_addr, v_tmp, 0, 16);
         };
 
         m_context->schedule(init());

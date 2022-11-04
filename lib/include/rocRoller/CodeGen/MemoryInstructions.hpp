@@ -113,13 +113,13 @@ namespace rocRoller
          *
          * @param dest The register to store the loaded data in.
          * @param addr  The register containing the address to load the data from.
-         * @param offset String containing an offset to be added to addr.
+         * @param offset Offset to be added to addr.
          * @param numBytes The number of bytes to load.
          * @param high Whether the value will be loaded into the high bits of the register. (Default=false)
          */
         Generator<Instruction> loadFlat(std::shared_ptr<Register::Value> dest,
                                         std::shared_ptr<Register::Value> addr,
-                                        std::string const&               offset,
+                                        int                              offset,
                                         int                              numBytes,
                                         bool                             high = false);
 
@@ -129,12 +129,12 @@ namespace rocRoller
          *
          * @param addr The register containing the address to store the data.
          * @param data  The register containing the data to store.
-         * @param offset String containing an offset to be added to addr.
+         * @param offset Offset to be added to addr.
          * @param numBytes The number of bytes to load.
          */
         Generator<Instruction> storeFlat(std::shared_ptr<Register::Value> addr,
                                          std::shared_ptr<Register::Value> data,
-                                         std::string const&               offset,
+                                         int                              offset,
                                          int                              numBytes);
 
         /**
@@ -164,7 +164,7 @@ namespace rocRoller
          */
         Generator<Instruction> loadLocal(std::shared_ptr<Register::Value> dest,
                                          std::shared_ptr<Register::Value> addr,
-                                         std::string const&               offset,
+                                         int                              offset,
                                          int                              numBytes,
                                          std::string const&               comment = "",
                                          bool                             high    = false);
@@ -181,7 +181,7 @@ namespace rocRoller
          */
         Generator<Instruction> storeLocal(std::shared_ptr<Register::Value> addr,
                                           std::shared_ptr<Register::Value> data,
-                                          std::string const&               offset,
+                                          int                              offset,
                                           int                              numBytes,
                                           std::string const&               comment = "");
 
@@ -191,13 +191,13 @@ namespace rocRoller
          *
          * @param dest The register to store the loaded data in.
          * @param addr  The register containing the address to load the data from.
-         * @param offset String containing an offset to be added to addr.
+         * @param offset Offset to be added to addr.
          * @param numBytes The number of bytes to load.
          * @param high Whether the value will be loaded into the high bits of the register. (Default=false)
          */
         Generator<Instruction> loadBuffer(std::shared_ptr<Register::Value> dest,
                                           std::shared_ptr<Register::Value> addr,
-                                          std::string const&               offset,
+                                          int                              offset,
                                           BufferDescriptor                 buffDesc,
                                           BufferInstructionOptions         buffOpts,
                                           int                              numBytes,
@@ -209,12 +209,12 @@ namespace rocRoller
          *
          * @param addr The register containing the address to store the data.
          * @param data  The register containing the data to store.
-         * @param offset String containing an offset to be added to addr.
+         * @param offset Offset to be added to addr.
          * @param numBytes The number of bytes to load.
          */
         Generator<Instruction> storeBuffer(std::shared_ptr<Register::Value> addr,
                                            std::shared_ptr<Register::Value> data,
-                                           std::string const&               offset,
+                                           int                              offset,
                                            BufferDescriptor                 buffDesc,
                                            BufferInstructionOptions         buffOpts,
                                            int                              numBytes);
@@ -227,9 +227,12 @@ namespace rocRoller
         Generator<Instruction> barrier();
 
     private:
+        const int wordSize = 4;
+
         std::weak_ptr<Context> m_context;
 
-        std::string            genOffsetModifier(std::string offset) const;
+        int chooseWidth(int numWords, const std::vector<int>& potentialWidths, int maxWidth) const;
+        std::string            genOffsetModifier(int) const;
         Generator<Instruction> genLocalAddr(std::shared_ptr<Register::Value>& addr) const;
     };
 }

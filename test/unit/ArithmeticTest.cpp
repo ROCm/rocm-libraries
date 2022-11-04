@@ -106,7 +106,7 @@ namespace ArithmeticTest
             co_yield m_context->copier()->copy(v_shift, s_shift, "Move value");
 
             co_yield generateOp<Expression::Add>(v_c, v_a, v_b);
-            co_yield m_context->mem()->storeFlat(v_result, v_c, "0", 4);
+            co_yield m_context->mem()->storeFlat(v_result, v_c, 0, 4);
 
             co_yield generateOp<Expression::Subtract>(v_c, v_a, v_b);
             co_yield m_context->mem()->store(
@@ -342,7 +342,7 @@ namespace ArithmeticTest
 
             co_yield generateOp<Expression::Add>(s_c, s_a, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->storeFlat(v_result, v_c, "", 4);
+            co_yield m_context->mem()->storeFlat(v_result, v_c, 0, 4);
 
             co_yield generateOp<Expression::Subtract>(s_c, s_a, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
@@ -637,7 +637,7 @@ namespace ArithmeticTest
             co_yield m_context->copier()->copy(v_shift, s_sh, "Move value");
 
             co_yield generateOp<Expression::Add>(v_c, v_a, v_b);
-            co_yield m_context->mem()->storeFlat(v_result, v_c, "", 8);
+            co_yield m_context->mem()->storeFlat(v_result, v_c, 0, 8);
 
             co_yield generateOp<Expression::Subtract>(v_c, v_a, v_b);
             co_yield m_context->mem()->store(
@@ -865,7 +865,7 @@ namespace ArithmeticTest
 
             co_yield generateOp<Expression::Add>(s_c, s_a, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
-            co_yield m_context->mem()->storeFlat(v_result, v_c, "", 8);
+            co_yield m_context->mem()->storeFlat(v_result, v_c, 0, 8);
 
             co_yield generateOp<Expression::Subtract>(s_c, s_a, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
@@ -1116,7 +1116,7 @@ namespace ArithmeticTest
             co_yield m_context->copier()->copy(v_b, s_b, "Move value");
 
             co_yield generateOp<Expression::Add>(v_c, v_a, v_b);
-            co_yield m_context->mem()->storeFlat(v_result, v_c, "", 4);
+            co_yield m_context->mem()->storeFlat(v_result, v_c, 0, 4);
 
             co_yield generateOp<Expression::Subtract>(v_c, v_a, v_b);
             co_yield m_context->mem()->store(
@@ -1133,27 +1133,27 @@ namespace ArithmeticTest
             co_yield generateOp<Expression::GreaterThan>(s_c, v_a, v_b);
             co_yield m_context->copier()->copy(
                 v_c, s_c->subset({0}), "Move result to vgpr to store.");
-            co_yield m_context->mem()->storeFlat(v_cond_result, v_c->subset({0}), "", 4);
+            co_yield m_context->mem()->storeFlat(v_cond_result, v_c->subset({0}), 0, 4);
 
             co_yield generateOp<Expression::GreaterThanEqual>(s_c, v_a, v_b);
             co_yield m_context->copier()->copy(
                 v_c, s_c->subset({0}), "Move result to vgpr to store.");
-            co_yield m_context->mem()->storeFlat(v_cond_result, v_c->subset({0}), "4", 4);
+            co_yield m_context->mem()->storeFlat(v_cond_result, v_c->subset({0}), 4, 4);
 
             co_yield generateOp<Expression::LessThan>(s_c, v_a, v_b);
             co_yield m_context->copier()->copy(
                 v_c, s_c->subset({0}), "Move result to vgpr to store.");
-            co_yield m_context->mem()->storeFlat(v_cond_result, v_c->subset({0}), "8", 4);
+            co_yield m_context->mem()->storeFlat(v_cond_result, v_c->subset({0}), 8, 4);
 
             co_yield generateOp<Expression::LessThanEqual>(s_c, v_a, v_b);
             co_yield m_context->copier()->copy(
                 v_c, s_c->subset({0}), "Move result to vgpr to store.");
-            co_yield m_context->mem()->storeFlat(v_cond_result, v_c->subset({0}), "12", 4);
+            co_yield m_context->mem()->storeFlat(v_cond_result, v_c->subset({0}), 12, 4);
 
             co_yield generateOp<Expression::Equal>(s_c, v_a, v_b);
             co_yield m_context->copier()->copy(
                 v_c, s_c->subset({0}), "Move result to vgpr to store.");
-            co_yield m_context->mem()->storeFlat(v_cond_result, v_c->subset({0}), "16", 4);
+            co_yield m_context->mem()->storeFlat(v_cond_result, v_c->subset({0}), 16, 4);
         };
 
         m_context->schedule(kb());
@@ -1299,7 +1299,7 @@ namespace ArithmeticTest
             co_yield m_context->copier()->copy(v_b, s_b, "Move value");
 
             co_yield generateOp<Expression::Add>(v_c, v_a, v_b);
-            co_yield m_context->mem()->storeFlat(v_result, v_c, "", 8);
+            co_yield m_context->mem()->storeFlat(v_result, v_c, 0, 8);
 
             co_yield generateOp<Expression::Subtract>(v_c, v_a, v_b);
             co_yield m_context->mem()->store(

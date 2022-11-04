@@ -1069,7 +1069,7 @@ namespace ExpressionTest
             Register::ValuePtr v_c;
             co_yield Expression::generate(v_c, expr, m_context);
 
-            co_yield m_context->mem()->storeFlat(v_result, v_c, "", 8);
+            co_yield m_context->mem()->storeFlat(v_result, v_c, 0, 8);
         };
 
         m_context->schedule(kb());
@@ -1161,7 +1161,7 @@ namespace ExpressionTest
 
             co_yield Expression::generate(v_c, expr, m_context);
 
-            co_yield m_context->mem()->storeFlat(v_result, v_c, "", 4);
+            co_yield m_context->mem()->storeFlat(v_result, v_c, 0, 4);
         };
 
         m_context->schedule(kb());

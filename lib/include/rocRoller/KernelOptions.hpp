@@ -14,6 +14,11 @@ namespace rocRoller
         bool               alwaysWaitBeforeBranch;
         bool               preloadKernelArguments;
 
+        unsigned int loadLocalWidth;
+        unsigned int loadGlobalWidth;
+        unsigned int storeLocalWidth;
+        unsigned int storeGlobalWidth;
+
         std::string          toString() const;
         friend std::ostream& operator<<(std::ostream&, const KernelOptions&);
     };

@@ -71,7 +71,7 @@ namespace MemoryInstructionsTest
 
             auto sRD = bufDesc.allRegisters();
             co_yield m_context->copier()->copy(v_a, sRD, "Move Value");
-            co_yield m_context->mem()->storeFlat(v_result, v_a, "0", 16);
+            co_yield m_context->mem()->storeFlat(v_result, v_a, 0, 16);
 
             auto bPnS = bufDesc.basePointerAndStride();
             co_yield m_context->copier()->copy(v_a->subset({0, 1}), bPnS, "Move Value");
@@ -140,8 +140,8 @@ namespace MemoryInstructionsTest
 
             co_yield m_context->copier()->copy(v_ptr, s_a, "Move pointer.");
 
-            co_yield m_context->mem()->loadFlat(v_a, v_ptr, "0", N);
-            co_yield m_context->mem()->storeFlat(v_result, v_a, "0", N);
+            co_yield m_context->mem()->loadFlat(v_a, v_ptr, 0, N);
+            co_yield m_context->mem()->storeFlat(v_result, v_a, 0, N);
         };
 
         m_context->schedule(kb());
@@ -233,9 +233,9 @@ namespace MemoryInstructionsTest
 
             auto bufInstOpts = rocRoller::BufferInstructionOptions();
 
-            co_yield m_context->mem()->loadBuffer(v_a, vgprSerial, "0", bufDesc, bufInstOpts, N);
+            co_yield m_context->mem()->loadBuffer(v_a, vgprSerial, 0, bufDesc, bufInstOpts, N);
             co_yield bufDesc.setBasePointer(s_result);
-            co_yield m_context->mem()->storeBuffer(v_a, vgprSerial, "0", bufDesc, bufInstOpts, N);
+            co_yield m_context->mem()->storeBuffer(v_a, vgprSerial, 0, bufDesc, bufInstOpts, N);
         };
 
         m_context->schedule(kb());
@@ -318,6 +318,16 @@ namespace MemoryInstructionsTest
     TEST_F(MemoryInstructionsExecuter, GPU_ExecuteFlatTest16Bytes)
     {
         executeFlatTest(m_context, 16);
+    }
+
+    TEST_F(MemoryInstructionsExecuter, GPU_ExecuteFlatTest20Bytes)
+    {
+        executeFlatTest(m_context, 20);
+    }
+
+    TEST_F(MemoryInstructionsExecuter, GPU_ExecuteFlatTest44Bytes)
+    {
+        executeFlatTest(m_context, 44);
     }
 
     TEST_F(MemoryInstructionsExecuter, GPU_ExecuteBufDescriptor)
@@ -519,7 +529,8 @@ namespace MemoryInstructionsTest
 
             co_yield m_context->copier()->copy(v_ptr, s_a, "Move pointer.");
 
-            co_yield m_context->mem()->load(MemoryInstructions::Flat, v_a, v_ptr, v_offset, 4);
+            co_yield m_context->mem()->load(
+                MemoryInstructions::Flat, v_a->subset({0}), v_ptr, v_offset, 4);
             co_yield m_context->mem()->store(MemoryInstructions::Flat, v_result, v_a, v_offset, 4);
         };
 
@@ -591,6 +602,8 @@ namespace MemoryInstructionsTest
 
             auto lds2 = Register::Value::AllocateLDS(m_context, DataType::Int32, 9);
 
+            auto lds3 = Register::Value::AllocateLDS(m_context, DataType::Int32, 11);
+
             auto v_result = Register::Value::Placeholder(
                 m_context, Register::Type::Vector, DataType::Raw32, 2);
 
@@ -598,12 +611,15 @@ namespace MemoryInstructionsTest
                 m_context, Register::Type::Vector, DataType::Raw32, 2);
 
             auto v_a = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Int32, 4);
+                m_context, Register::Type::Vector, DataType::Int32, 11);
 
             auto lds1_offset = Register::Value::Placeholder(
                 m_context, Register::Type::Vector, DataType::Int32, 1);
 
             auto lds2_offset = Register::Value::Placeholder(
+                m_context, Register::Type::Vector, DataType::Int32, 1);
+
+            auto lds3_offset = Register::Value::Placeholder(
                 m_context, Register::Type::Vector, DataType::Int32, 1);
 
             auto twenty = Register::Value::Placeholder(
@@ -619,55 +635,63 @@ namespace MemoryInstructionsTest
                 lds1_offset, Register::Value::Literal(lds1->getLDSAllocation()->offset()));
             co_yield m_context->copier()->copy(
                 lds2_offset, Register::Value::Literal(lds2->getLDSAllocation()->offset()));
+            co_yield m_context->copier()->copy(
+                lds3_offset, Register::Value::Literal(lds3->getLDSAllocation()->offset()));
             co_yield m_context->copier()->copy(twenty, Register::Value::Literal(20));
 
             // Load 8 bytes into LDS1
-            co_yield m_context->mem()->loadFlat(v_a->subset({0}), v_ptr, "0", 1);
-            co_yield m_context->mem()->storeLocal(lds1_offset, v_a->subset({0}), "0", 1);
-            co_yield m_context->mem()->loadFlat(v_a->subset({0}), v_ptr, "1", 1);
-            co_yield m_context->mem()->storeLocal(lds1_offset, v_a->subset({0}), "1", 1);
-            co_yield m_context->mem()->loadFlat(v_a->subset({0}), v_ptr, "2", 2);
+            co_yield m_context->mem()->loadFlat(v_a->subset({0}), v_ptr, 0, 1);
+            co_yield m_context->mem()->storeLocal(lds1_offset, v_a->subset({0}), 0, 1);
+            co_yield m_context->mem()->loadFlat(v_a->subset({0}), v_ptr, 1, 1);
+            co_yield m_context->mem()->storeLocal(lds1_offset, v_a->subset({0}), 1, 1);
+            co_yield m_context->mem()->loadFlat(v_a->subset({0}), v_ptr, 2, 2);
             co_yield m_context->mem()->storeLocal(
-                lds1, v_a->subset({0}), "2", 2); // Use LDS1 value instead of offset register
-            co_yield m_context->mem()->loadFlat(v_a->subset({0}), v_ptr, "4", 4);
-            co_yield m_context->mem()->storeLocal(lds1_offset, v_a->subset({0}), "4", 4);
+                lds1, v_a->subset({0}), 2, 2); // Use LDS1 value instead of offset register
+            co_yield m_context->mem()->loadFlat(v_a->subset({0}), v_ptr, 4, 4);
+            co_yield m_context->mem()->storeLocal(lds1_offset, v_a->subset({0}), 4, 4);
 
             // Load 36 bytes into LDS2
-            co_yield m_context->mem()->loadFlat(v_a->subset({0, 1}), v_ptr, "8", 8);
-            co_yield m_context->mem()->storeLocal(lds2_offset, v_a->subset({0, 1}), "0", 8);
-            co_yield m_context->mem()->loadFlat(v_a->subset({0, 1, 2}), v_ptr, "16", 12);
+            co_yield m_context->mem()->loadFlat(v_a->subset({0, 1}), v_ptr, 8, 8);
+            co_yield m_context->mem()->storeLocal(lds2_offset, v_a->subset({0, 1}), 0, 8);
+            co_yield m_context->mem()->loadFlat(v_a->subset({0, 1, 2}), v_ptr, 16, 12);
             co_yield m_context->mem()->store(MemoryInstructions::Local,
                                              lds2_offset,
                                              v_a->subset({0, 1, 2}),
                                              Register::Value::Literal(8),
                                              12);
-            co_yield m_context->mem()->loadFlat(v_a, v_ptr, "28", 16);
+            co_yield m_context->mem()->loadFlat(v_a->subset({0, 1, 2, 3}), v_ptr, 28, 16);
             co_yield m_context->mem()->store(
-                MemoryInstructions::Local, lds2_offset, v_a, twenty, 16);
+                MemoryInstructions::Local, lds2_offset, v_a->subset({0, 1, 2, 3}), twenty, 16);
 
             // Read 8 bytes from LDS1 and store to global data
-            co_yield m_context->mem()->loadLocal(v_a->subset({0}), lds1_offset, "0", 1);
-            co_yield m_context->mem()->storeFlat(v_result, v_a->subset({0}), "0", 1);
-            co_yield m_context->mem()->loadLocal(v_a->subset({0}), lds1_offset, "1", 1);
-            co_yield m_context->mem()->storeFlat(v_result, v_a->subset({0}), "1", 1);
-            co_yield m_context->mem()->loadLocal(v_a->subset({0}), lds1_offset, "2", 2);
-            co_yield m_context->mem()->storeFlat(v_result, v_a->subset({0}), "2", 2);
-            co_yield m_context->mem()->loadLocal(v_a->subset({0}), lds1_offset, "4", 4);
-            co_yield m_context->mem()->storeFlat(v_result, v_a->subset({0}), "4", 4);
+            co_yield m_context->mem()->loadLocal(v_a->subset({0}), lds1_offset, 0, 1);
+            co_yield m_context->mem()->storeFlat(v_result, v_a->subset({0}), 0, 1);
+            co_yield m_context->mem()->loadLocal(v_a->subset({0}), lds1_offset, 1, 1);
+            co_yield m_context->mem()->storeFlat(v_result, v_a->subset({0}), 1, 1);
+            co_yield m_context->mem()->loadLocal(v_a->subset({0}), lds1_offset, 2, 2);
+            co_yield m_context->mem()->storeFlat(v_result, v_a->subset({0}), 2, 2);
+            co_yield m_context->mem()->loadLocal(v_a->subset({0}), lds1_offset, 4, 4);
+            co_yield m_context->mem()->storeFlat(v_result, v_a->subset({0}), 4, 4);
 
             // Read 36 bytes from LDS2 and store to global data
             co_yield m_context->mem()->loadLocal(
-                v_a->subset({0, 1}), lds2, "0", 8); // Use LDS2 value instead of offset register
-            co_yield m_context->mem()->storeFlat(v_result, v_a->subset({0, 1}), "8", 8);
+                v_a->subset({0, 1}), lds2, 0, 8); // Use LDS2 value instead of offset register
+            co_yield m_context->mem()->storeFlat(v_result, v_a->subset({0, 1}), 8, 8);
             co_yield m_context->mem()->load(MemoryInstructions::Local,
                                             v_a->subset({0, 1, 2}),
                                             lds2_offset,
                                             Register::Value::Literal(8),
                                             12);
-            co_yield m_context->mem()->storeFlat(v_result, v_a->subset({0, 1, 2}), "16", 12);
+            co_yield m_context->mem()->storeFlat(v_result, v_a->subset({0, 1, 2}), 16, 12);
             co_yield m_context->mem()->load(
-                MemoryInstructions::Local, v_a, lds2_offset, twenty, 16);
-            co_yield m_context->mem()->storeFlat(v_result, v_a, "28", 16);
+                MemoryInstructions::Local, v_a->subset({0, 1, 2, 3}), lds2_offset, twenty, 16);
+            co_yield m_context->mem()->storeFlat(v_result, v_a->subset({0, 1, 2, 3}), 28, 16);
+
+            // Load 44 bytes into LDS3
+            co_yield m_context->mem()->loadFlat(v_a, v_ptr, 44, 44);
+            co_yield m_context->mem()->storeLocal(lds3_offset, v_a, 0, 44);
+            co_yield m_context->mem()->loadLocal(v_a, lds3_offset, 0, 44);
+            co_yield m_context->mem()->storeFlat(v_result, v_a, 44, 44);
         };
 
         m_context->schedule(kb());
@@ -678,7 +702,7 @@ namespace MemoryInstructionsTest
     void executeLDSTest(std::shared_ptr<rocRoller::Context> m_context)
     {
         genLDSTest(m_context);
-        int N = 44;
+        int N = 88;
 
         std::vector<char> a(N);
         for(int i = 0; i < N; i++)
@@ -772,7 +796,7 @@ namespace MemoryInstructionsTest
                 v_a, workitemIndex[0], Register::Value::Literal(5));
             co_yield generateOp<Expression::ShiftL>(
                 lds3_current, lds3_current, Register::Value::Literal(2));
-            co_yield m_context->mem()->storeLocal(lds3_current, v_a, "0", 4);
+            co_yield m_context->mem()->storeLocal(lds3_current, v_a, 0, 4);
 
             co_yield m_context->mem()->barrier();
 
@@ -785,12 +809,12 @@ namespace MemoryInstructionsTest
             co_yield generateOp<Expression::Add>(lds3_current, lds3_offset, lds3_current);
             co_yield generateOp<Expression::ShiftL>(
                 lds3_current, lds3_current, Register::Value::Literal(2));
-            co_yield m_context->mem()->loadLocal(v_a, lds3_current, "0", 4);
+            co_yield m_context->mem()->loadLocal(v_a, lds3_current, 0, 4);
             co_yield generateOp<Expression::ShiftL>(
                 lds3_current, workitemIndex[0], Register::Value::Literal(2));
             co_yield generateOp<Expression::Add>(
                 v_result->subset({0}), v_result->subset({0}), lds3_current);
-            co_yield m_context->mem()->storeFlat(v_result, v_a, "0", 4);
+            co_yield m_context->mem()->storeFlat(v_result, v_a, 0, 4);
         };
 
         m_context->schedule(kb());
@@ -825,6 +849,196 @@ namespace MemoryInstructionsTest
     TEST_F(MemoryInstructionsExecuter, GPU_LDSBarrierTest)
     {
         executeLDSBarrierTest(m_context);
+    }
+
+    TEST_P(MemoryInstructionsTest, MemoryKernelOptions)
+    {
+        auto v_addr_64bit
+            = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Raw32, 2);
+        auto v_addr_32bit
+            = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Raw32, 1);
+        auto v_data
+            = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Int32, 4);
+        std::string expected;
+
+        auto setupRegisters = [&]() -> Generator<Instruction> {
+            co_yield v_data->allocate();
+            co_yield v_addr_64bit->allocate();
+            co_yield v_addr_32bit->allocate();
+        };
+        m_context->schedule(setupRegisters());
+
+        // Test storeGlobalWidth
+        {
+            auto kb = [&]() -> Generator<Instruction> {
+                co_yield m_context->mem()->storeFlat(v_addr_64bit, v_data, 0, 16);
+            };
+
+            clearOutput();
+            m_context->kernelOptions().storeGlobalWidth = 4;
+            m_context->schedule(kb());
+            expected = R"(flat_store_dwordx4 v[4:5], v[0:3])";
+            EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)));
+
+            clearOutput();
+            m_context->kernelOptions().storeGlobalWidth = 3;
+            m_context->schedule(kb());
+            expected = R"(
+            flat_store_dwordx3 v[4:5], v[0:2]
+            flat_store_dword v[4:5], v3 offset:12
+            )";
+            EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)));
+
+            clearOutput();
+            m_context->kernelOptions().storeGlobalWidth = 2;
+            m_context->schedule(kb());
+            expected = R"(
+            flat_store_dwordx2 v[4:5], v[0:1]
+            flat_store_dwordx2 v[4:5], v[2:3] offset:8
+            )";
+            EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)));
+
+            clearOutput();
+            m_context->kernelOptions().storeGlobalWidth = 1;
+            m_context->schedule(kb());
+            expected = R"(
+            flat_store_dword v[4:5], v0
+            flat_store_dword v[4:5], v1 offset:4
+            flat_store_dword v[4:5], v2 offset:8
+            flat_store_dword v[4:5], v3 offset:12
+            )";
+            EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)));
+        }
+
+        // Test loadGlobalWidth
+        {
+            auto kb = [&]() -> Generator<Instruction> {
+                co_yield m_context->mem()->loadFlat(v_data, v_addr_64bit, 0, 16);
+            };
+
+            clearOutput();
+            m_context->kernelOptions().loadGlobalWidth = 4;
+            m_context->schedule(kb());
+            expected = R"(
+            flat_load_dwordx4 v[0:3], v[4:5]
+            )";
+            EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)));
+
+            clearOutput();
+            m_context->kernelOptions().loadGlobalWidth = 3;
+            m_context->schedule(kb());
+            expected = R"(
+            flat_load_dwordx3 v[0:2], v[4:5]
+            flat_load_dword v3, v[4:5] offset:12
+            )";
+            EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)));
+
+            clearOutput();
+            m_context->kernelOptions().loadGlobalWidth = 2;
+            m_context->schedule(kb());
+            expected = R"(
+            flat_load_dwordx2 v[0:1], v[4:5]
+            flat_load_dwordx2 v[2:3], v[4:5] offset:8
+            )";
+            EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)));
+
+            clearOutput();
+            m_context->kernelOptions().loadGlobalWidth = 1;
+            m_context->schedule(kb());
+            expected = R"(
+            flat_load_dword v0, v[4:5]
+            flat_load_dword v1, v[4:5] offset:4
+            flat_load_dword v2, v[4:5] offset:8
+            flat_load_dword v3, v[4:5] offset:12
+            )";
+            EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)));
+        }
+
+        // Test storeLocalWidth
+        {
+            auto kb = [&]() -> Generator<Instruction> {
+                co_yield m_context->mem()->storeLocal(v_addr_32bit, v_data, 0, 16);
+            };
+
+            clearOutput();
+            m_context->kernelOptions().storeLocalWidth = 4;
+            m_context->schedule(kb());
+            expected = R"(ds_write_b128 v6, v[0:3])";
+            EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)));
+
+            clearOutput();
+            m_context->kernelOptions().storeLocalWidth = 3;
+            m_context->schedule(kb());
+            expected = R"(
+            ds_write_b96 v6, v[0:2]
+            ds_write_b32 v6, v3 offset:12
+            )";
+            EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)));
+
+            clearOutput();
+            m_context->kernelOptions().storeLocalWidth = 2;
+            m_context->schedule(kb());
+            expected = R"(
+            ds_write_b64 v6, v[0:1]
+            ds_write_b64 v6, v[2:3] offset:8
+            )";
+            EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)));
+
+            clearOutput();
+            m_context->kernelOptions().storeLocalWidth = 1;
+            m_context->schedule(kb());
+            expected = R"(
+            ds_write_b32 v6, v0
+            ds_write_b32 v6, v1 offset:4
+            ds_write_b32 v6, v2 offset:8
+            ds_write_b32 v6, v3 offset:12
+            )";
+            EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)));
+        }
+
+        // Test loadLocalWidth
+        {
+            auto kb = [&]() -> Generator<Instruction> {
+                co_yield m_context->mem()->loadLocal(v_data, v_addr_32bit, 0, 16);
+            };
+
+            clearOutput();
+            m_context->kernelOptions().loadLocalWidth = 4;
+            m_context->schedule(kb());
+            expected = R"(
+            ds_read_b128 v[0:3], v6
+            )";
+            EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)));
+
+            clearOutput();
+            m_context->kernelOptions().loadLocalWidth = 3;
+            m_context->schedule(kb());
+            expected = R"(
+            ds_read_b96 v[0:2], v6
+            ds_read_b32 v3, v6 offset:12
+            )";
+            EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)));
+
+            clearOutput();
+            m_context->kernelOptions().loadLocalWidth = 2;
+            m_context->schedule(kb());
+            expected = R"(
+            ds_read_b64 v[0:1], v6
+            ds_read_b64 v[2:3], v6 offset:8
+            )";
+            EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)));
+
+            clearOutput();
+            m_context->kernelOptions().loadLocalWidth = 1;
+            m_context->schedule(kb());
+            expected = R"(
+            ds_read_b32 v0, v6
+            ds_read_b32 v1, v6 offset:4
+            ds_read_b32 v2, v6 offset:8
+            ds_read_b32 v3, v6 offset:12
+            )";
+            EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)));
+        }
     }
 
     INSTANTIATE_TEST_SUITE_P(

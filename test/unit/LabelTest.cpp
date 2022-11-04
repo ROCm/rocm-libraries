@@ -118,7 +118,7 @@ namespace rocRollerTest
                 loop_start, s_condition, "//Conditionally branching to the label register.");
             //===========End Core Test Block======================================
 
-            co_yield m_context->mem()->storeFlat(v_ptr, v_value, "", 4);
+            co_yield m_context->mem()->storeFlat(v_ptr, v_value, 0, 4);
         };
 
         m_context->schedule(kb());

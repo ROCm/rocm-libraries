@@ -735,13 +735,11 @@ namespace rocRoller
                 // TODO multi dimensional tiles
                 for(int i = 0; i < m; ++i)
                 {
-                    for(int j = 0; j < n; ++j)
-                    {
-                        co_yield m_context->mem()->loadLocal(vgpr->element({i * n + j}),
-                                                             lds_offset,
-                                                             std::to_string((i * n + j) * numBytes),
-                                                             numBytes);
-                    }
+                    co_yield m_context->mem()->loadLocal(
+                        vgpr->element(Generated(iota(i * n, i * n + n))),
+                        lds_offset,
+                        i * n * numBytes,
+                        n * numBytes);
                 }
             }
 
@@ -1116,15 +1114,12 @@ namespace rocRoller
                 // TODO multi dimensional tiles
                 for(int i = 0; i < m; ++i)
                 {
-                    for(int j = 0; j < n; ++j)
-                    {
-                        // Store the value into local memory
-                        co_yield m_context->mem()->storeLocal(
-                            lds_offset->subset({0}),
-                            vgpr->element({i * n + j}),
-                            std::to_string((i * n + j) * numBytes),
-                            numBytes);
-                    }
+                    // Store the value into local memory
+                    co_yield m_context->mem()->storeLocal(
+                        lds_offset->subset({0}),
+                        vgpr->element(Generated(iota(i * n, i * n + n))),
+                        i * n * numBytes,
+                        n * numBytes);
                 }
             }
 

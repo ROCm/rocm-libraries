@@ -85,13 +85,13 @@ namespace rocRollerTest
 
             for(int i = 0; i < N / 2; i++)
             {
-                co_yield m_context->mem()->loadFlat(v_a, a_ptr, std::to_string(i * 4), 4);
-                co_yield m_context->mem()->loadFlat(v_b, b_ptr, std::to_string(i * 4), 4);
+                co_yield m_context->mem()->loadFlat(v_a, a_ptr, i * 4, 4);
+                co_yield m_context->mem()->loadFlat(v_b, b_ptr, i * 4, 4);
 
                 co_yield generateOp<Expression::Multiply>(v_b, v_a, v_b);
                 co_yield generateOp<Expression::Add>(v_a, v_a, v_b);
 
-                co_yield m_context->mem()->storeFlat(v_result, v_a, std::to_string(i * 4), 4);
+                co_yield m_context->mem()->storeFlat(v_result, v_a, i * 4, 4);
             }
         };
 
@@ -181,12 +181,12 @@ namespace rocRollerTest
 
             for(int i = 0; i < N; i++)
             {
-                co_yield m_context->mem()->loadFlat(v_a, a_ptr, std::to_string(i * 2), 2);
-                co_yield m_context->mem()->loadFlat(v_b, b_ptr, std::to_string(i * 2), 2);
+                co_yield m_context->mem()->loadFlat(v_a, a_ptr, i * 2, 2);
+                co_yield m_context->mem()->loadFlat(v_b, b_ptr, i * 2, 2);
 
                 co_yield Expression::generate(v_a, expr, m_context);
 
-                co_yield m_context->mem()->storeFlat(v_result, v_a, std::to_string(i * 2), 2);
+                co_yield m_context->mem()->storeFlat(v_result, v_a, i * 2, 2);
             }
         };
 
@@ -460,12 +460,11 @@ namespace rocRollerTest
                      FatalError);
 
         // memory instructions
-        EXPECT_THROW(m_context->schedule(m_context->mem()->loadFlat(vh16x2, addr, "0", 4, true)),
+        EXPECT_THROW(m_context->schedule(m_context->mem()->loadFlat(vh16x2, addr, 0, 4, true)),
                      FatalError);
 
-        EXPECT_THROW(
-            m_context->schedule(m_context->mem()->loadLocal(vh16x2, addr, "0", 4, "", true)),
-            FatalError);
+        EXPECT_THROW(m_context->schedule(m_context->mem()->loadLocal(vh16x2, addr, 0, 4, "", true)),
+                     FatalError);
 
         EXPECT_THROW(m_context->schedule(m_context->mem()->loadAndPack(
                          MemoryInstructions::MemoryKind::Flat, vf32, addr, addr, addr, addr, "")),

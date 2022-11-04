@@ -323,7 +323,7 @@ namespace MixedArithmeticTest
                         }
 
                         co_yield m_context->mem()->storeFlat(
-                            resultPtr, v_result, "0", param.resultVarType.getElementSize());
+                            resultPtr, v_result, 0, param.resultVarType.getElementSize());
 
                         co_yield generateOp<Expression::Add>(
                             resultPtr,
