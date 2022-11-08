@@ -39,6 +39,12 @@ namespace rocRoller
 
         }
 
+        template <>
+        inline InstructionStatus MetaObserver<>::peek(Instruction const& inst) const
+        {
+            return {};
+        }
+
         template <CObserver... Types>
         InstructionStatus MetaObserver<Types...>::peek(Instruction const& inst) const
         {
@@ -57,6 +63,12 @@ namespace rocRoller
                     Modify(inst, rest...);
                 }
             }
+        }
+
+        template <>
+        inline void MetaObserver<>::modify(Instruction& inst) const
+        {
+            return;
         }
 
         template <CObserver... Types>
@@ -78,6 +90,12 @@ namespace rocRoller
                 return rv;
             }
 
+        }
+
+        template <>
+        inline InstructionStatus MetaObserver<>::observe(Instruction const& inst)
+        {
+            return {};
         }
 
         template <CObserver... Types>

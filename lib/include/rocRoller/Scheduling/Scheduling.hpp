@@ -5,7 +5,9 @@
 #include <string>
 #include <vector>
 
+#include "../CodeGen/Instruction_fwd.hpp"
 #include "../CodeGen/WaitCount.hpp"
+#include "../Context_fwd.hpp"
 
 namespace rocRoller
 {
@@ -28,7 +30,7 @@ namespace rocRoller
         };
 
         template <typename T>
-        concept CObserver = requires(T a, Instruction inst)
+        concept CObserver = requires(T a, Instruction inst, ContextPtr const& ctx)
         {
             //> Speculatively predict stalls if this instruction were scheduled now.
             {
@@ -44,6 +46,11 @@ namespace rocRoller
             {
                 a.observe(inst)
                 } -> std::convertible_to<InstructionStatus>;
+
+            //> This observer is required in ctx.
+            {
+                a.required(ctx)
+                } -> std::convertible_to<bool>;
         };
 
         struct IObserver

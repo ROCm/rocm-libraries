@@ -36,6 +36,12 @@ namespace rocRoller
                 return InstructionStatus::Nops(inst.getNopCount());
             }
 
+            static bool required(std::shared_ptr<Context> context)
+            {
+                // TODO: This should be fixed once we have a 908 hazard observer.
+                return true; //context->targetArchitecture().target().getVersionString() == "gfx90a";
+            }
+
         private:
             std::weak_ptr<Context> m_context;
             InstructionReference   m_prevInst;

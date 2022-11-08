@@ -10,12 +10,9 @@
 #include <rocRoller/InstructionValues/LabelAllocator.hpp>
 #include <rocRoller/InstructionValues/Register.hpp>
 #include <rocRoller/KernelGraph/RegisterTagManager.hpp>
-#include <rocRoller/Scheduling/MetaObserver.hpp>
-#include <rocRoller/Scheduling/Observers/AllocatingObserver.hpp>
-#include <rocRoller/Scheduling/Observers/FileWritingObserver.hpp>
-#include <rocRoller/Scheduling/Observers/MFMA90aObserver.hpp>
-#include <rocRoller/Scheduling/Observers/WaitcntObserver.hpp>
+#include <rocRoller/Scheduling/Observers/ObserverCreation.hpp>
 #include <rocRoller/Utilities/Random.hpp>
+#include <rocRoller/Utilities/Settings.hpp>
 
 namespace rocRoller
 {
@@ -88,20 +85,7 @@ namespace rocRoller
         rv->m_ldsAllocator = std::make_shared<LDSAllocator>(
             rv->targetArchitecture().GetCapability(GPUCapability::MaxLdsSize));
 
-        std::tuple<Scheduling::AllocatingObserver,
-                   Scheduling::WaitcntObserver,
-                   Scheduling::FileWritingObserver,
-                   Scheduling::MFMA90aObserver>
-            constructedObservers = {Scheduling::AllocatingObserver(rv),
-                                    Scheduling::WaitcntObserver(rv),
-                                    Scheduling::FileWritingObserver(rv),
-                                    Scheduling::MFMA90aObserver(rv)};
-
-        using MyObserver = Scheduling::MetaObserver<Scheduling::AllocatingObserver,
-                                                    Scheduling::WaitcntObserver,
-                                                    Scheduling::FileWritingObserver,
-                                                    Scheduling::MFMA90aObserver>;
-        rv->m_observer   = std::make_shared<MyObserver>(constructedObservers);
+        rv->m_observer = Scheduling::createObserver(rv);
 
         rv->m_registerTagMan = std::make_shared<RegisterTagManager>(rv);
         return rv;
