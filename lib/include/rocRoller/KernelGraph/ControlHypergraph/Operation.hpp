@@ -73,7 +73,7 @@ namespace rocRoller
         };
 
         /**
-         * Kernel - a kernel unroll.
+         * UnrollOp - a kernel unroll.
          */
         struct UnrollOp
         {

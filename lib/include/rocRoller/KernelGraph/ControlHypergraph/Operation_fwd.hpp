@@ -39,5 +39,8 @@ namespace rocRoller
                                        StoreVGPR,
                                        TensorContraction,
                                        UnrollOp>;
+
+        template <typename T>
+        concept COperation = std::constructible_from<Operation, T>;
     }
 }

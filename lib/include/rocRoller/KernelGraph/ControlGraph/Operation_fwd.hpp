@@ -39,5 +39,8 @@ namespace rocRoller
                                        StoreLinear,
                                        StoreTiled,
                                        StoreVGPR>;
+
+        template <typename T>
+        concept COperation = std::constructible_from<Operation, T>;
     }
 }

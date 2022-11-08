@@ -56,5 +56,7 @@ namespace rocRoller
                                        Workgroup,
                                        Workitem>;
 
+        template <typename T>
+        concept CDimension = std::constructible_from<Dimension, T>;
     }
 }

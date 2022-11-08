@@ -160,7 +160,7 @@ namespace rocRoller
             {
             }
 
-            template <typename T>
+            template <CoordGraph::CDimension T>
             CoordGraph::Dimension visitDimension(int tag, T const& dim)
             {
                 auto d   = dim;
@@ -176,7 +176,7 @@ namespace rocRoller
                 return forOp;
             }
 
-            template <typename T>
+            template <ControlHypergraph::COperation T>
             ControlHypergraph::Operation visitOperation(T const& op)
             {
                 return op;
