@@ -39,6 +39,17 @@ namespace rocRoller
         };
 
         /**
+         * Scope - represents a register scope.
+         */
+        struct Scope
+        {
+            std::string toString() const
+            {
+                return "Scope";
+            }
+        };
+
+        /**
          * ForLoopOp - Represents a for loop.
          *
          * Must have nodes connected via the following outgoing edges:

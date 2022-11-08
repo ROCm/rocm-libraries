@@ -5,6 +5,7 @@
 #include <rocRoller/Expression_fwd.hpp>
 #include <rocRoller/KernelGraph/CoordGraph/CoordinateHypergraph.hpp>
 #include <rocRoller/KernelGraph/CoordGraph/Transformer_fwd.hpp>
+#include <rocRoller/KernelGraph/ScopeManager_fwd.hpp>
 
 namespace rocRoller
 {
@@ -71,6 +72,16 @@ namespace rocRoller
              */
             void fillExecutionCoordinates();
 
+            /**
+             * Get register scope.
+             */
+            std::shared_ptr<ScopeManager> getScope() const;
+
+            /**
+             * Set register scope.
+             */
+            void setScope(std::shared_ptr<ScopeManager>);
+
         private:
             template <typename Visitor>
             std::vector<Expression::ExpressionPtr>
@@ -79,6 +90,7 @@ namespace rocRoller
             std::map<int, Expression::ExpressionPtr> m_indexes;
             std::shared_ptr<CoordinateHypergraph>    m_graph;
             std::shared_ptr<Context>                 m_context;
+            std::shared_ptr<ScopeManager>            m_scope;
             Expression::ExpressionTransducer         m_transducer;
         };
     }

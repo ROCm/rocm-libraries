@@ -255,6 +255,7 @@ set(rocroller_src
  lib/source/KernelGraph/KernelGraph.cpp
  lib/source/KernelGraph/KernelHypergraph.cpp
  lib/source/KernelGraph/LowerFromCommand.cpp
+ lib/source/KernelGraph/ScopeManager.cpp
  lib/source/KernelGraph/TagType.cpp
  lib/source/KernelGraph/Utils.cpp
 
@@ -420,6 +421,7 @@ set(
   test/unit/RegisterAllocatorTest.cpp
   test/unit/RegisterTest.cpp
   test/unit/SchedulerTest.cpp
+  test/unit/ScopeTest.cpp
   test/unit/SettingsTest.cpp
   test/unit/SourceMatcherTest.cpp
   test/unit/TileTransposeAdd.cpp

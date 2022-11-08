@@ -1,37 +1,25 @@
 
-#include "KernelGraph/CoordGraph/Dimension.hpp"
-#include <rocRoller/AssemblyKernel.hpp>
-#include <rocRoller/CodeGen/ArgumentLoader.hpp>
-#include <rocRoller/CodeGen/Arithmetic/ArithmeticGenerator.hpp>
-#include <rocRoller/CodeGen/Arithmetic/MatrixMultiply.hpp>
-#include <rocRoller/CodeGen/BranchGenerator.hpp>
-#include <rocRoller/CodeGen/CopyGenerator.hpp>
-#include <rocRoller/CodeGen/MemoryInstructions.hpp>
-#include <rocRoller/Context.hpp>
-#include <rocRoller/DataTypes/DataTypes.hpp>
-#include <rocRoller/Expression.hpp>
-#include <rocRoller/ExpressionTransformations.hpp>
-#include <rocRoller/InstructionValues/LabelAllocator.hpp>
-#include <rocRoller/InstructionValues/Register.hpp>
-#include <rocRoller/InstructionValues/RegisterUtils.hpp>
-#include <rocRoller/KernelGraph/CoordGraph/Transformer.hpp>
-#include <rocRoller/KernelGraph/CoordinateTransform/Transformer.hpp>
-#include <rocRoller/KernelGraph/KernelGraph.hpp>
-#include <rocRoller/KernelGraph/RegisterTagManager.hpp>
-#include <rocRoller/Operations/Command.hpp>
-#include <rocRoller/Operations/CommandArgument.hpp>
-#include <rocRoller/Operations/Operations.hpp>
-#include <rocRoller/Scheduling/Scheduler.hpp>
-#include <rocRoller/Utilities/Error.hpp>
-#include <rocRoller/Utilities/Generator.hpp>
-#include <rocRoller/Utilities/Settings.hpp>
-#include <rocRoller/Utilities/Timer.hpp>
-#include <rocRoller/Utilities/Utils.hpp>
-
 #include <iostream>
 #include <memory>
 #include <set>
 #include <variant>
+
+#include <rocRoller/CodeGen/ArgumentLoader.hpp>
+#include <rocRoller/CodeGen/Arithmetic/ArithmeticGenerator.hpp>
+#include <rocRoller/CodeGen/BranchGenerator.hpp>
+#include <rocRoller/Context.hpp>
+#include <rocRoller/Expression.hpp>
+#include <rocRoller/InstructionValues/LabelAllocator.hpp>
+#include <rocRoller/InstructionValues/Register.hpp>
+#include <rocRoller/InstructionValues/RegisterUtils.hpp>
+#include <rocRoller/KernelGraph/CoordGraph/Dimension.hpp>
+#include <rocRoller/KernelGraph/CoordGraph/Transformer.hpp>
+#include <rocRoller/KernelGraph/CoordinateTransform/Transformer.hpp>
+#include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/KernelGraph/RegisterTagManager.hpp>
+#include <rocRoller/KernelGraph/ScopeManager.hpp>
+#include <rocRoller/Scheduling/Scheduler.hpp>
+#include <rocRoller/Utilities/Error.hpp>
 
 namespace rocRoller
 {
@@ -1507,6 +1495,22 @@ namespace rocRoller
                 co_yield Instruction::Comment("End Kernel");
             }
 
+            Generator<Instruction>
+                operator()(int tag, ControlHypergraph::Scope const&, CoordGraph::Transformer coords)
+            {
+                co_yield Instruction::Comment("BEGIN SCOPE");
+
+                auto scope = std::make_shared<ScopeManager>(m_context);
+                coords.setScope(scope);
+
+                auto body = m_graph.control.getOutputNodeIndices<ControlHypergraph::Body>(tag)
+                                .to<std::set>();
+                co_yield generate(body, coords);
+
+                scope->release();
+                co_yield Instruction::Comment("END SCOPE");
+            }
+
             Generator<Instruction> operator()(int                                 tag,
                                               ControlHypergraph::ForLoopOp const& edge,
                                               CoordGraph::Transformer             coords)
@@ -1522,15 +1526,26 @@ namespace rocRoller
             }
 
             Generator<Instruction> operator()(int                              tag,
-                                              ControlHypergraph::Assign const& edge,
+                                              ControlHypergraph::Assign const& assign,
                                               CoordGraph::Transformer          coords)
             {
-                auto varType = resultVariableType(edge.expression);
+                auto varType = resultVariableType(assign.expression);
+
+                auto connections = m_graph.mapper.getConnections(tag);
+                AssertFatal(connections.size() == 1,
+                            "Invalid Assign operation; coordinate missing.");
+                auto dim_tag = connections[0].coordinate;
 
                 auto dest = m_context->registerTagManager()->getRegister(
-                    tag, edge.regType, varType, edge.valueCount);
+                    dim_tag, assign.regType, varType, assign.valueCount);
 
-                co_yield Expression::generate(dest, edge.expression, m_context);
+                auto scope = coords.getScope();
+                if(scope)
+                {
+                    scope->add(dim_tag);
+                }
+
+                co_yield Expression::generate(dest, assign.expression, m_context);
             }
 
             Generator<Instruction> operator()(int                               tag,

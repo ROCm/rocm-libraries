@@ -334,5 +334,15 @@ namespace rocRoller
             return stride(dsts, false, visitor);
         }
 
+        std::shared_ptr<ScopeManager> Transformer::getScope() const
+        {
+            return m_scope;
+        }
+
+        void Transformer::setScope(std::shared_ptr<ScopeManager> scope)
+        {
+            m_scope = scope;
+        }
+
     }
 }
