@@ -251,5 +251,30 @@ namespace rocRoller
         {
             return std::visit([](const auto& a) { return toString(a); }, x);
         }
+
+        template <typename T>
+        requires(
+            std::constructible_from<
+                CoordinateTransformEdge,
+                T> || std::constructible_from<DataFlowEdge, T>) inline bool isEdge(const Edge& x)
+        {
+            if constexpr(std::constructible_from<DataFlowEdge, T>)
+            {
+                if(std::holds_alternative<DataFlowEdge>(x))
+                {
+                    if(std::holds_alternative<T>(std::get<DataFlowEdge>(x)))
+                        return true;
+                }
+            }
+            else if constexpr(std::constructible_from<CoordinateTransformEdge, T>)
+            {
+                if(std::holds_alternative<CoordinateTransformEdge>(x))
+                {
+                    if(std::holds_alternative<T>(std::get<CoordinateTransformEdge>(x)))
+                        return true;
+                }
+            }
+            return false;
+        }
     }
 }

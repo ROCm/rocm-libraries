@@ -302,10 +302,10 @@ namespace rocRoller
         struct TensorContraction : public BaseOperation
         {
             TensorContraction() = delete;
-            TensorContraction(CoordGraph::MacroTile const& a,
-                              CoordGraph::MacroTile const& b,
-                              std::vector<int> const&      aContractedDimensions,
-                              std::vector<int> const&      bContractedDimensions)
+            TensorContraction(int const               a,
+                              int const               b,
+                              std::vector<int> const& aContractedDimensions,
+                              std::vector<int> const& bContractedDimensions)
                 : a(a)
                 , b(b)
                 , aDims(aContractedDimensions)
@@ -313,12 +313,12 @@ namespace rocRoller
             {
             }
 
-            CoordGraph::MacroTile a, b;
-            std::vector<int>      aDims, bDims; // contracted dimensions
+            int              a, b;
+            std::vector<int> aDims, bDims; // contracted dimensions
 
             virtual std::string toString() const override
             {
-                return "TensorContraction";
+                return concatenate("TensorContraction(", a, ", ", b, ")");
             }
         };
 

@@ -71,6 +71,10 @@ namespace rocRoller
          */
         KernelGraph lowerTile(KernelGraph, std::shared_ptr<CommandParameters>, ContextPtr);
 
+        // TODO Delete above when graph rearch complete
+        KernelHypergraph
+            lowerTile(KernelHypergraph, std::shared_ptr<CommandParameters>, ContextPtr);
+
         /**
          * Rewrite KernelGraphs to make sure no more CommandArgument
          * values are present within the graph.

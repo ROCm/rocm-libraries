@@ -1,9 +1,12 @@
 #pragma once
 
+#include <variant>
+
 #include <rocRoller/Graph/Hypergraph.hpp>
 #include <rocRoller/Graph/Hypergraph_fwd.hpp>
 
 #include "ControlEdge.hpp"
+#include "KernelGraph/ControlHypergraph/Operation_fwd.hpp"
 #include "Operation.hpp"
 
 namespace rocRoller
@@ -30,6 +33,23 @@ namespace rocRoller
             ControlHypergraph()
                 : Graph::Hypergraph<Operation, ControlEdge, false>()
             {
+            }
+
+            template <typename T>
+            Generator<T> findOperations(int start) const
+            {
+                for(auto const x : depthFirstVisit(start))
+                {
+                    auto element = getElement(x);
+                    if(std::holds_alternative<Operation>(element))
+                    {
+                        auto operation = std::get<Operation>(element);
+                        if(std::holds_alternative<T>(operation))
+                        {
+                            co_yield std::get<T>(operation);
+                        }
+                    }
+                }
             }
 
         private:

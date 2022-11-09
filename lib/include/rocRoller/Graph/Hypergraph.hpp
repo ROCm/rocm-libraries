@@ -76,6 +76,9 @@ namespace rocRoller
              */
             ElementType getElementType(int index) const;
 
+            template <typename T>
+            T getNode(int index) const;
+
             /**
              * @brief Returns whether `e` is a node or an edge.
              */
@@ -119,6 +122,8 @@ namespace rocRoller
                                 T&&              element,
                                 T_Inputs const&  inputs,
                                 T_Outputs const& outputs);
+
+            void deleteElement(int index);
 
             size_t getIncidenceSize() const;
             size_t getElementCount() const;
@@ -228,12 +233,26 @@ namespace rocRoller
             const;
 
             /**
+             * @brief Yields indices of nodes that immediately preceed `dst` where the Edges satisfy the edgePredicate.
+             */
+            Generator<int>
+                getInputNodeIndices(int const                              dst,
+                                    const std::function<bool(Edge const&)> edgePredicate) const;
+
+            /**
              * @brief Yields indices of nodes that immediately follow `src` where the Edges are of type T.
              */
             template <typename T>
             requires(std::constructible_from<Edge, T>) Generator<int> getOutputNodeIndices(
                 int const src)
             const;
+
+            /**
+             * @brief Yields indices of nodes that immediately follow `src` where the Edges satisfy the edgePredicate.
+             */
+            Generator<int>
+                getOutputNodeIndices(int const                              src,
+                                     const std::function<bool(Edge const&)> edgePredicate) const;
 
         private:
             int m_nextIndex = 1;

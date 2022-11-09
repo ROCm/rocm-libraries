@@ -361,6 +361,7 @@ namespace rocRoller
                                       .begin();
                     AssertFatal(reindexer.control.count(parent) > 0,
                                 "Missing control input: ",
+                                ShowValue(tag),
                                 ShowValue(input),
                                 ShowValue(parent));
                     graph.control.addElement(

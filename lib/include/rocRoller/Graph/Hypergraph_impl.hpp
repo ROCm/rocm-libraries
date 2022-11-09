@@ -143,11 +143,13 @@ namespace rocRoller
                 {
                     m_incidence.insert({src, index, incidentOrder++});
                 }
+                AssertFatal(Hyper || (!Hyper && incidentOrder <= 1));
                 incidentOrder = 0;
                 for(int dst : outputs)
                 {
                     m_incidence.insert({index, dst, incidentOrder++});
                 }
+                AssertFatal(Hyper || (!Hyper && incidentOrder <= 1));
             }
             else
             {
@@ -162,6 +164,7 @@ namespace rocRoller
                     if(lastSrcIter != bySrc.end() && lastSrcIter->src == src)
                         incidentOrder = lastSrcIter->edgeOrder + 1;
 
+                    AssertFatal(Hyper || (!Hyper && incidentOrder == 0));
                     m_incidence.insert({src, index, incidentOrder});
                 }
 
@@ -176,9 +179,35 @@ namespace rocRoller
                     if(lastDstIter != byDst.end() && lastDstIter->dst == dst)
                         incidentOrder = lastDstIter->edgeOrder + 1;
 
+                    AssertFatal(Hyper || (!Hyper && incidentOrder == 0));
                     m_incidence.insert({index, dst, incidentOrder});
                 }
             }
+        }
+
+        template <typename Node, typename Edge, bool Hyper>
+        void Hypergraph<Node, Edge, Hyper>::deleteElement(int index)
+        {
+            auto elem        = getElement(index);
+            auto elementType = getElementType(elem);
+
+            auto& src = m_incidence.template get<BySrc>();
+
+            for(auto iter = src.lower_bound(std::make_tuple(index, 0));
+                iter != src.end() && iter->src == index;)
+            {
+                iter = src.erase(iter);
+            }
+
+            auto& dst = m_incidence.template get<ByDst>();
+
+            for(auto iter = dst.lower_bound(std::make_tuple(index, 0));
+                iter != dst.end() && iter->dst == index;)
+            {
+                iter = dst.erase(iter);
+            }
+
+            m_elements.erase(index);
         }
 
         template <typename Node, typename Edge, bool Hyper>
@@ -198,6 +227,13 @@ namespace rocRoller
         {
             AssertFatal(index >= 0 && index < m_nextIndex, "Element not found ", ShowValue(index));
             return m_elements.at(index);
+        }
+
+        template <typename Node, typename Edge, bool Hyper>
+        template <typename T>
+        T Hypergraph<Node, Edge, Hyper>::getNode(int index) const
+        {
+            return std::get<T>(std::get<Node>(getElement(index)));
         }
 
         template <typename Node, typename Edge, bool Hyper>
@@ -636,11 +672,26 @@ namespace rocRoller
             Generator<int> Hypergraph<Node, Edge, Hyper>::getInputNodeIndices(int const dst)
         const
         {
-            AssertRecoverable(getElementType(dst) == ElementType::Node, "Require a node handle");
+            AssertFatal(getElementType(dst) == ElementType::Node, "Require a node handle");
 
             for(int const elem : getNeighbours<Direction::Upstream>(dst))
             {
                 if(std::holds_alternative<T>(std::get<Edge>(getElement(elem))))
+                {
+                    co_yield getNeighbours<Direction::Upstream>(elem);
+                }
+            }
+        }
+
+        template <typename Node, typename Edge, bool Hyper>
+        Generator<int> Hypergraph<Node, Edge, Hyper>::getInputNodeIndices(
+            int const dst, const std::function<bool(Edge const&)> edgePredicate) const
+        {
+            AssertFatal(getElementType(dst) == ElementType::Node, "Require a node handle");
+
+            for(int const elem : getNeighbours<Direction::Upstream>(dst))
+            {
+                if(edgePredicate(std::get<Edge>(getElement(elem))))
                 {
                     co_yield getNeighbours<Direction::Upstream>(elem);
                 }
@@ -653,11 +704,26 @@ namespace rocRoller
             Generator<int> Hypergraph<Node, Edge, Hyper>::getOutputNodeIndices(int const src)
         const
         {
-            AssertRecoverable(getElementType(src) == ElementType::Node, "Require a node handle");
+            AssertFatal(getElementType(src) == ElementType::Node, "Require a node handle");
 
             for(int const elem : getNeighbours<Direction::Downstream>(src))
             {
                 if(std::holds_alternative<T>(std::get<Edge>(getElement(elem))))
+                {
+                    co_yield getNeighbours<Direction::Downstream>(elem);
+                }
+            }
+        }
+
+        template <typename Node, typename Edge, bool Hyper>
+        Generator<int> Hypergraph<Node, Edge, Hyper>::getOutputNodeIndices(
+            int const src, const std::function<bool(Edge const&)> edgePredicate) const
+        {
+            AssertFatal(getElementType(src) == ElementType::Node, "Require a node handle");
+
+            for(int const elem : getNeighbours<Direction::Downstream>(src))
+            {
+                if(edgePredicate(std::get<Edge>(getElement(elem))))
                 {
                     co_yield getNeighbours<Direction::Downstream>(elem);
                 }

@@ -456,6 +456,8 @@ namespace rocRoller
 
                 auto total_size_expr = std::make_shared<Expression::Expression>(sizes[0]);
 
+                auto user = graph.coordinates.addElement(CoordGraph::User(tload.data()->name()));
+
                 std::vector<int> dims;
                 for(size_t i = 0; i < sizes.size(); ++i)
                 {
@@ -468,7 +470,6 @@ namespace rocRoller
                         total_size_expr = total_size_expr * size_expr;
                 }
 
-                auto user = graph.coordinates.addElement(CoordGraph::User(tload.data()->name()));
                 graph.coordinates.addElement(CoordGraph::Split(), std::vector<int>{user}, dims);
 
                 auto unit_stride = Expression::literal(1u);
@@ -554,6 +555,8 @@ namespace rocRoller
                 auto const sizes   = tload.sizes();
                 auto const strides = tload.strides();
 
+                auto user = graph.coordinates.addElement(CoordGraph::User(tload.data()->name()));
+
                 std::vector<int> dims;
                 for(size_t i = 0; i < sizes.size(); ++i)
                 {
@@ -565,7 +568,6 @@ namespace rocRoller
                     dims.push_back(dim);
                 }
 
-                auto user  = graph.coordinates.addElement(CoordGraph::User(tload.data()->name()));
                 auto tiled = graph.coordinates.addElement(CoordGraph::MacroTile(sizes.size()));
 
                 graph.coordinates.addElement(CoordGraph::Split(), std::vector<int>{user}, dims);
@@ -759,7 +761,8 @@ namespace rocRoller
                 auto loadA = m_op.at(mul.a);
                 auto loadB = m_op.at(mul.b);
 
-                graph.control.addElement(ControlHypergraph::Sequence(), {loadA, loadB}, {TC});
+                graph.control.addElement(ControlHypergraph::Sequence(), {loadA}, {TC});
+                graph.control.addElement(ControlHypergraph::Sequence(), {loadB}, {TC});
 
                 graph.mapper.connect<CoordGraph::MacroTile>(TC, D);
 

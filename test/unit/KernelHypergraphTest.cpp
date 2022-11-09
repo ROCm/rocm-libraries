@@ -200,60 +200,60 @@ namespace rocRollerTest
         auto kgraph0 = translate2(command);
 
         std::string expected0 = R".(
-            digraph {
-		"coord1"[label="SubDimension{0, CommandArgument(Load_Tiled_0_size_0)}(1)"];
-		"coord2"[label="SubDimension{1, CommandArgument(Load_Tiled_0_size_1)}(2)"];
-		"coord3"[label="User{NA}(3)"];
+		digraph {
+		"coord1"[label="User{NA}(1)"];
+		"coord2"[label="SubDimension{0, CommandArgument(Load_Tiled_0_size_0)}(2)"];
+		"coord3"[label="SubDimension{1, CommandArgument(Load_Tiled_0_size_1)}(3)"];
 		"coord4"[label="MacroTile{NA}(4)"];
 		"coord5"[label="Split(5)",shape=box];
 		"coord6"[label="ConstructTensorTile(6)",shape=box];
 		"coord7"[label="DataFlow(7)",shape=box];
-		"coord8"[label="SubDimension{0, CommandArgument(Load_Tiled_1_size_0)}(8)"];
-		"coord9"[label="SubDimension{1, CommandArgument(Load_Tiled_1_size_1)}(9)"];
-		"coord10"[label="User{NA}(10)"];
+		"coord8"[label="User{NA}(8)"];
+		"coord9"[label="SubDimension{0, CommandArgument(Load_Tiled_1_size_0)}(9)"];
+		"coord10"[label="SubDimension{1, CommandArgument(Load_Tiled_1_size_1)}(10)"];
 		"coord11"[label="MacroTile{NA}(11)"];
 		"coord12"[label="Split(12)",shape=box];
 		"coord13"[label="ConstructTensorTile(13)",shape=box];
 		"coord14"[label="DataFlow(14)",shape=box];
 		"coord15"[label="MacroTile{NA}(15)"];
 		"coord16"[label="DataFlow(16)",shape=box];
-		"coord1" -> "coord6"
+		"coord1" -> "coord5"
+		"coord1" -> "coord7"
 		"coord2" -> "coord6"
-		"coord3" -> "coord5"
-		"coord3" -> "coord7"
+		"coord3" -> "coord6"
 		"coord4" -> "coord16"
-		"coord5" -> "coord1"
 		"coord5" -> "coord2"
+		"coord5" -> "coord3"
 		"coord6" -> "coord4"
 		"coord7" -> "coord4"
-		"coord8" -> "coord13"
+		"coord8" -> "coord12"
+		"coord8" -> "coord14"
 		"coord9" -> "coord13"
-		"coord10" -> "coord12"
-		"coord10" -> "coord14"
+		"coord10" -> "coord13"
 		"coord11" -> "coord16"
-		"coord12" -> "coord8"
 		"coord12" -> "coord9"
+		"coord12" -> "coord10"
 		"coord13" -> "coord11"
 		"coord14" -> "coord11"
 		"coord16" -> "coord15"
 		{
 		rank=same
-		"coord1"->"coord2"[style=invis]
+		"coord2"->"coord3"[style=invis]
 		rankdir=LR
 		}
 		{
 		rank=same
-		"coord1"->"coord2"[style=invis]
+		"coord2"->"coord3"[style=invis]
 		rankdir=LR
 		}
 		{
 		rank=same
-		"coord8"->"coord9"[style=invis]
+		"coord9"->"coord10"[style=invis]
 		rankdir=LR
 		}
 		{
 		rank=same
-		"coord8"->"coord9"[style=invis]
+		"coord9"->"coord10"[style=invis]
 		rankdir=LR
 		}
 		{
@@ -266,23 +266,20 @@ namespace rocRollerTest
 		"cntrl3"[label="Body(3)",shape=box];
 		"cntrl4"[label="LoadTiled(4)"];
 		"cntrl5"[label="Body(5)",shape=box];
-		"cntrl6"[label="TensorContraction(6)"];
+		"cntrl6"[label="TensorContraction(4, 11)(6)"];
 		"cntrl7"[label="Sequence(7)",shape=box];
+		"cntrl8"[label="Sequence(8)",shape=box];
 		"cntrl1" -> "cntrl3"
 		"cntrl1" -> "cntrl5"
 		"cntrl2" -> "cntrl7"
 		"cntrl3" -> "cntrl2"
-		"cntrl4" -> "cntrl7"
+		"cntrl4" -> "cntrl8"
 		"cntrl5" -> "cntrl4"
 		"cntrl7" -> "cntrl6"
-		{
-		rank=same
-		"cntrl2"->"cntrl4"[style=invis]
-		rankdir=LR
+		"cntrl8" -> "cntrl6"
 		}
 		}
-            }
-        ).";
+	).";
 
         EXPECT_EQ(NormalizedSource(expected0), NormalizedSource(kgraph0.toDOT()));
 
@@ -302,60 +299,60 @@ namespace rocRollerTest
         kgraph0 = updateParameters(kgraph0, params);
 
         std::string expected1 = R".(
-            digraph {
-		"coord1"[label="SubDimension{0, CommandArgument(Load_Tiled_0_size_0)}(1)"];
-		"coord2"[label="SubDimension{1, CommandArgument(Load_Tiled_0_size_1)}(2)"];
-		"coord3"[label="User{NA}(3)"];
+		digraph {
+		"coord1"[label="User{NA}(1)"];
+		"coord2"[label="SubDimension{0, CommandArgument(Load_Tiled_0_size_0)}(2)"];
+		"coord3"[label="SubDimension{1, CommandArgument(Load_Tiled_0_size_1)}(3)"];
 		"coord4"[label="MacroTile{64,64}(4)"];
 		"coord5"[label="Split(5)",shape=box];
 		"coord6"[label="ConstructTensorTile(6)",shape=box];
 		"coord7"[label="DataFlow(7)",shape=box];
-		"coord8"[label="SubDimension{0, CommandArgument(Load_Tiled_1_size_0)}(8)"];
-		"coord9"[label="SubDimension{1, CommandArgument(Load_Tiled_1_size_1)}(9)"];
-		"coord10"[label="User{NA}(10)"];
+		"coord8"[label="User{NA}(8)"];
+		"coord9"[label="SubDimension{0, CommandArgument(Load_Tiled_1_size_0)}(9)"];
+		"coord10"[label="SubDimension{1, CommandArgument(Load_Tiled_1_size_1)}(10)"];
 		"coord11"[label="MacroTile{64,64}(11)"];
 		"coord12"[label="Split(12)",shape=box];
 		"coord13"[label="ConstructTensorTile(13)",shape=box];
 		"coord14"[label="DataFlow(14)",shape=box];
 		"coord15"[label="MacroTile{NA}(15)"];
 		"coord16"[label="DataFlow(16)",shape=box];
-		"coord1" -> "coord6"
+		"coord1" -> "coord5"
+		"coord1" -> "coord7"
 		"coord2" -> "coord6"
-		"coord3" -> "coord5"
-		"coord3" -> "coord7"
+		"coord3" -> "coord6"
 		"coord4" -> "coord16"
-		"coord5" -> "coord1"
 		"coord5" -> "coord2"
+		"coord5" -> "coord3"
 		"coord6" -> "coord4"
 		"coord7" -> "coord4"
-		"coord8" -> "coord13"
+		"coord8" -> "coord12"
+		"coord8" -> "coord14"
 		"coord9" -> "coord13"
-		"coord10" -> "coord12"
-		"coord10" -> "coord14"
+		"coord10" -> "coord13"
 		"coord11" -> "coord16"
-		"coord12" -> "coord8"
 		"coord12" -> "coord9"
+		"coord12" -> "coord10"
 		"coord13" -> "coord11"
 		"coord14" -> "coord11"
 		"coord16" -> "coord15"
 		{
 		rank=same
-		"coord1"->"coord2"[style=invis]
+		"coord2"->"coord3"[style=invis]
 		rankdir=LR
 		}
 		{
 		rank=same
-		"coord1"->"coord2"[style=invis]
+		"coord2"->"coord3"[style=invis]
 		rankdir=LR
 		}
 		{
 		rank=same
-		"coord8"->"coord9"[style=invis]
+		"coord9"->"coord10"[style=invis]
 		rankdir=LR
 		}
 		{
 		rank=same
-		"coord8"->"coord9"[style=invis]
+		"coord9"->"coord10"[style=invis]
 		rankdir=LR
 		}
 		{
@@ -368,23 +365,20 @@ namespace rocRollerTest
 		"cntrl3"[label="Body(3)",shape=box];
 		"cntrl4"[label="LoadTiled(4)"];
 		"cntrl5"[label="Body(5)",shape=box];
-		"cntrl6"[label="TensorContraction(6)"];
+		"cntrl6"[label="TensorContraction(4, 11)(6)"];
 		"cntrl7"[label="Sequence(7)",shape=box];
+		"cntrl8"[label="Sequence(8)",shape=box];
 		"cntrl1" -> "cntrl3"
 		"cntrl1" -> "cntrl5"
 		"cntrl2" -> "cntrl7"
 		"cntrl3" -> "cntrl2"
-		"cntrl4" -> "cntrl7"
+		"cntrl4" -> "cntrl8"
 		"cntrl5" -> "cntrl4"
 		"cntrl7" -> "cntrl6"
-		{
-		rank=same
-		"cntrl2"->"cntrl4"[style=invis]
-		rankdir=LR
+		"cntrl8" -> "cntrl6"
 		}
 		}
-            }
-        ).";
+	).";
 
         EXPECT_EQ(NormalizedSource(expected1), NormalizedSource(kgraph0.toDOT()));
     }

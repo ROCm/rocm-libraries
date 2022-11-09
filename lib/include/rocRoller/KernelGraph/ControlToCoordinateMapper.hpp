@@ -61,7 +61,7 @@ namespace rocRoller::KernelGraph
         void connect(int control, int coordinate, int subDimension = 0);
 
         /**
-         * @brief Get the coorindate index associated with the control
+         * @brief Get the coordinate index associated with the control
          * flow node `control`.
          */
         template <typename T>
