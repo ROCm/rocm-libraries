@@ -25,12 +25,15 @@ namespace rocRoller
             promoteDataType(dst, lhs, rhs));
     }
 
+    // TODO: Investigate if stricter locking/unlocking yields better performance
     template <>
     Generator<Instruction> DivideGenerator<Register::Type::Scalar, DataType::Int32>::generate(
         Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
+
+        co_yield_(Instruction::Lock(Scheduling::Dependency::VCC, "Start of Division"));
 
         // Allocate temporary registers
         auto s_1 = std::make_shared<Register::Value>(
@@ -88,14 +91,19 @@ namespace rocRoller
         co_yield_(Instruction("v_subrev_u32_e32", {v_1}, {s_3, v_1}, {}, ""));
         co_yield_(Instruction(
             "v_readlane_b32", {dest}, {v_1, Register::Value::Literal(0)}, {}, "Move value"));
+
+        co_yield_(Instruction::Unlock("End of Division"));
     }
 
+    // TODO: Investigate if stricter locking/unlocking yields better performance
     template <>
     Generator<Instruction> DivideGenerator<Register::Type::Vector, DataType::Int32>::generate(
         Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
+
+        co_yield_(Instruction::Lock(Scheduling::Dependency::VCC, "Start of Division"));
 
         // Allocate temporary registers
 
@@ -151,6 +159,8 @@ namespace rocRoller
         co_yield_(Instruction("v_cndmask_b32_e32", {v_6}, {v_3, v_4, m_context->getVCC()}, {}, ""));
         co_yield_(Instruction("v_xor_b32_e32", {v_6}, {v_6, v_1}, {}, ""));
         co_yield_(Instruction("v_sub_u32_e32", {dest}, {v_6, v_1}, {}, ""));
+
+        co_yield_(Instruction::Unlock("End of Division"));
     }
 
     // TODO: Investigate if stricter locking/unlocking yields better performance
@@ -167,7 +177,8 @@ namespace rocRoller
         //
         // Generated code was modified to use the provided dest, lhs and rhs registers and
         // to save the result in the dest register instead of memory.
-        co_yield Instruction::Lock(Scheduling::Dependency::SCC, "Start of Divide64");
+        co_yield Instruction::Lock(Scheduling::Dependency::SCC, "Start of Divide64(SCC)");
+        co_yield(Instruction::Lock(Scheduling::Dependency::VCC, "Start of Divide64(VCC)"));
         co_yield describeOpArgs("dest", dest, "lhs", lhs, "rhs", rhs);
         Register::ValuePtr l0, l1, r0, r1;
         co_yield get2DwordsScalar(l0, l1, lhs);
@@ -504,7 +515,8 @@ namespace rocRoller
                               {v_8, Register::Value::Literal(0)},
                               {},
                               "Move value"));
-        co_yield(Instruction::Unlock("End of Divide64"));
+        co_yield(Instruction::Unlock("End of Divide64(VCC)"));
+        co_yield(Instruction::Unlock("End of Divide64(SCC)"));
     }
 
     // TODO: Investigate if stricter locking/unlocking yields better performance
@@ -522,7 +534,8 @@ namespace rocRoller
         //
         // Generated code was modified to use the provided dest, lhs and rhs registers and
         // to save the result in the dest register instead of memory.
-        co_yield(Instruction::Lock(Scheduling::Dependency::SCC, "Start of Divide64"));
+        co_yield(Instruction::Lock(Scheduling::Dependency::SCC, "Start of Divide64(SCC)"));
+        co_yield(Instruction::Lock(Scheduling::Dependency::VCC, "Start of Divide64(VCC)"));
         co_yield describeOpArgs("dest", dest, "lhs", lhs, "rhs", rhs);
 
         Register::ValuePtr l0, l1, r0, r1;
@@ -890,6 +903,7 @@ namespace rocRoller
         co_yield_(Instruction::Label(label_22));
         co_yield_(
             Instruction("s_or_b64", {m_context->getExec()}, {m_context->getExec(), s_5}, {}, ""));
-        co_yield(Instruction::Unlock("End of Divide64"));
+        co_yield(Instruction::Unlock("End of Divide64(VCC)"));
+        co_yield(Instruction::Unlock("End of Divide64(SCC)"));
     }
 }

@@ -105,14 +105,17 @@ namespace rocRoller
 
         co_yield Register::AllocateIfNeeded(dest);
 
-        co_yield_(Instruction(
-            "v_sub_co_u32", {dest->subset({0}), borrow}, {l0, r0}, {}, "least significant half"));
+        co_yield_(
+            Instruction(
+                "v_sub_co_u32", {dest->subset({0}), borrow}, {l0, r0}, {}, "least significant half")
+                .lock(Scheduling::Dependency::VCC));
 
         co_yield_(Instruction("v_subb_co_u32",
                               {dest->subset({1}), borrow},
                               {l1, r1, borrow},
                               {},
-                              "most significant half"));
+                              "most significant half")
+                      .unlock());
     }
 
     template <>
