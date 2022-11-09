@@ -11,14 +11,20 @@ namespace rocRoller
 {
     BufferDescriptor::BufferDescriptor(std::shared_ptr<Context> context)
     {
-        m_bufferResourceDescriptor = std::make_shared<Register::Value>(
-            context, Register::Type::Scalar, DataType::Raw32, 4);
+        VariableType bufferPointer{DataType::None, PointerType::Buffer};
+        m_bufferResourceDescriptor
+            = std::make_shared<Register::Value>(context, Register::Type::Scalar, bufferPointer, 1);
         m_context = context;
     }
 
     Generator<Instruction> BufferDescriptor::setup()
     {
         co_yield m_bufferResourceDescriptor->allocate();
+        co_yield m_context->copier()->copy(
+            m_bufferResourceDescriptor->subset({2}), Register::Value::Literal(2147483548), "");
+        co_yield m_context->copier()->copy(m_bufferResourceDescriptor->subset({3}),
+                                           Register::Value::Literal(0x00020000),
+                                           ""); //default options
     }
 
     Generator<Instruction>

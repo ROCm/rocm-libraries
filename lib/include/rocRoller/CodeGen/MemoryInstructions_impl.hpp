@@ -448,7 +448,7 @@ namespace rocRoller
                         + std::to_string(numBytes));
 
         std::string offset_modifier = "", glc = "", slc = "", lds = "";
-        if(buffOpts.getOffen())
+        if(buffOpts.getOffen() || offset == 0)
         {
             offset_modifier += "offset: 0";
         }
@@ -521,7 +521,7 @@ namespace rocRoller
         AssertFatal(data != nullptr);
 
         std::string offset_modifier = "", glc = "", slc = "", lds = "";
-        if(buffOpts.getOffen())
+        if(buffOpts.getOffen() || offset == 0)
         {
             offset_modifier += "offset: 0";
         }

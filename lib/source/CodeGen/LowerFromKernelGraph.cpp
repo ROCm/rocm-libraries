@@ -7,6 +7,10 @@
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
 #include <rocRoller/CodeGen/Arithmetic/ArithmeticGenerator.hpp>
 #include <rocRoller/CodeGen/BranchGenerator.hpp>
+#include <rocRoller/CodeGen/Buffer.hpp>
+#include <rocRoller/CodeGen/BufferInstructionOptions.hpp>
+#include <rocRoller/CodeGen/CopyGenerator.hpp>
+#include <rocRoller/CodeGen/MemoryInstructions.hpp>
 #include <rocRoller/Context.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/InstructionValues/LabelAllocator.hpp>
@@ -902,18 +906,17 @@ namespace rocRoller
                 Register::ValuePtr s_ptr;
                 co_yield m_context->argLoader()->getValue(user.argumentName(), s_ptr);
 
-                auto v_ptr = s_ptr->placeholder(Register::Type::Vector);
-                co_yield v_ptr->allocate();
-
-                co_yield copy(v_ptr, s_ptr);
-
                 auto numBytes = DataTypeInfo::Get(vgpr->variableType()).elementSize;
+                auto bufDesc  = BufferDescriptor(m_context);
+                auto bufOpt   = BufferInstructionOptions();
 
-                auto const m = tiled.subTileSizes[0];
-                auto const n = tiled.subTileSizes[1];
+                co_yield bufDesc.setup();
+                co_yield bufDesc.setBasePointer(s_ptr);
 
-                auto rowIndex = ThreadTileIndex(tiled.tag, 0, true);
-                auto colIndex = ThreadTileIndex(tiled.tag, 1, true);
+                auto const m        = tiled.subTileSizes[0];
+                auto const n        = tiled.subTileSizes[1];
+                auto       rowIndex = ThreadTileIndex(tiled.tag, 0, true);
+                auto       colIndex = ThreadTileIndex(tiled.tag, 1, true);
 
                 coords.setCoordinate(rowIndex, L(0));
                 coords.setCoordinate(colIndex, L(0));
@@ -927,7 +930,7 @@ namespace rocRoller
                 co_yield generate(rowOffset, baseIndexExpr * L(numBytes));
 
                 // row stride
-                auto rowStride     = MkVGPR(DataType::Int64);
+                auto rowStride     = MkSGPR(DataType::Int64);
                 auto rowStrideExpr = rowStride->expression();
                 {
                     auto sgpr = MkSGPR(DataType::Int64);
@@ -937,7 +940,7 @@ namespace rocRoller
                 }
 
                 // col stride
-                auto colStride     = MkVGPR(DataType::Int64);
+                auto colStride     = MkSGPR(DataType::Int64);
                 auto colStrideExpr = colStride->expression();
                 {
                     auto sgpr = MkSGPR(DataType::Int64);
@@ -946,24 +949,33 @@ namespace rocRoller
                     co_yield copy(colStride, sgpr);
                 }
 
+                auto increment     = MkSGPR(DataType::Int64);
+                auto incrementExpr = increment->expression();
+                co_yield copy(increment, s_ptr);
+
                 // TODO multidimensional tiles
                 for(int i = 0; i < m; ++i)
                 {
-                    co_yield copy(offset, rowOffset);
                     for(int j = 0; j < n; ++j)
                     {
-                        co_yield m_context->mem()->store(
-                            MemoryInstructions::MemoryKind::Flat,
-                            v_ptr,
+                        co_yield m_context->mem()->storeBuffer(
                             vgpr->element({static_cast<int>(i * n + j)}),
-                            offset,
+                            rowOffset->subset({0}),
+                            0,
+                            bufDesc,
+                            bufOpt,
                             numBytes);
-
                         if(j < n - 1)
-                            co_yield generate(offset, offsetExpr + colStrideExpr);
+                        {
+                            co_yield bufDesc.incrementBasePointer(colStride);
+                        }
                     }
+                    co_yield bufDesc.incrementBasePointer(increment);
                     if(i < m - 1)
-                        co_yield generate(rowOffset, rowOffsetExpr + rowStrideExpr);
+                    {
+                        co_yield generate(increment, incrementExpr + rowStrideExpr);
+                    }
+                    co_yield bufDesc.setBasePointer(increment);
                 }
             }
 
@@ -987,10 +999,11 @@ namespace rocRoller
                 Register::ValuePtr s_ptr;
                 co_yield m_context->argLoader()->getValue(user.argumentName(), s_ptr);
 
-                auto v_ptr = s_ptr->placeholder(Register::Type::Vector);
-                co_yield v_ptr->allocate();
+                auto bufDesc = BufferDescriptor(m_context);
+                auto bufOpt  = BufferInstructionOptions();
 
-                co_yield m_context->copier()->copy(v_ptr, s_ptr);
+                co_yield bufDesc.setup();
+                co_yield bufDesc.setBasePointer(s_ptr);
 
                 auto offset = Register::Value::Placeholder(
                     m_context, Register::Type::Vector, DataType::Int64, 1);
@@ -1011,8 +1024,8 @@ namespace rocRoller
                 {
                     coords.setCoordinate(VGPR(tile.tag, true), literal(a));
 
-                    auto user_index = coords.forward({user})[0];
-                    co_yield generateOffset(offset, user_index, dataType);
+                    auto userIndex = coords.forward({user})[0];
+                    co_yield generateOffset(offset, userIndex, dataType);
                     if(value->variableType() != dataType)
                     {
                         co_yield m_context->copier()->copy(value,
@@ -1027,9 +1040,11 @@ namespace rocRoller
                         co_yield m_context->copier()->copy(converted,
                                                            agpr->element({static_cast<int>(a)}));
                     }
-
-                    co_yield m_context->mem()->store(
-                        MemoryInstructions::MemoryKind::Flat, v_ptr, converted, offset, numBytes);
+                    //v_accvgpr_read for V_MFMA with 2 pass instructions is 4, 10 for 8 pass instruction
+                    // and 18 for 16 pass instructions like V_MFMA_F32_32x32x8F16
+                    co_yield Instruction::Nop(18, "Nops required for v_accvgpr_read");
+                    co_yield m_context->mem()->storeBuffer(
+                        converted, offset->subset({0}), 0, bufDesc, bufOpt, numBytes);
                 }
             }
 

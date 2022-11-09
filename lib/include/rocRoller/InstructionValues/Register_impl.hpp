@@ -729,6 +729,12 @@ namespace rocRoller
             auto elementSize = DataTypeInfo::Get(variableType).elementSize;
 
             // TODO: Use variabletype to calculate whether alignment is needed
+            if(m_variableType.pointerType == PointerType::Buffer)
+            {
+                m_options.alignment = 4;
+                return;
+            }
+
             if(m_regType == Type::Vector && count * elementSize > 4
                && !context->targetArchitecture().HasCapability(GPUCapability::UnalignedVGPRs))
             {
