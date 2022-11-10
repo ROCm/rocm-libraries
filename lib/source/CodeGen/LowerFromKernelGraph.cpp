@@ -500,8 +500,11 @@ namespace rocRoller
                 Register::ValuePtr s_ptr;
                 co_yield m_context->argLoader()->getValue(user.argumentName(), s_ptr);
 
-                auto v_ptr = s_ptr->placeholder(Register::Type::Vector);
-                co_yield copy(v_ptr, s_ptr);
+                auto bufDesc = BufferDescriptor(m_context);
+                auto bufOpt  = BufferInstructionOptions();
+
+                co_yield bufDesc.setup();
+                co_yield bufDesc.setBasePointer(s_ptr);
 
                 auto const m = tiled.subTileSizes[0];
                 auto const n = tiled.subTileSizes[1];
@@ -518,14 +521,12 @@ namespace rocRoller
 
                 auto rowOffset     = MkVGPR(DataType::Int64);
                 auto rowOffsetExpr = rowOffset->expression();
-                auto offset        = MkVGPR(DataType::Int64);
-                auto offsetExpr    = offset->expression();
 
                 auto baseIndexExpr = coords.reverse({user})[0];
                 co_yield generate(rowOffset, baseIndexExpr * L(numBytes));
 
                 // row stride
-                auto rowStride     = MkVGPR(DataType::Int64);
+                auto rowStride     = MkSGPR(DataType::Int64);
                 auto rowStrideExpr = rowStride->expression();
                 {
                     auto sgpr = MkSGPR(DataType::Int64);
@@ -535,7 +536,7 @@ namespace rocRoller
                 }
 
                 // col stride
-                auto colStride     = MkVGPR(DataType::Int64);
+                auto colStride     = MkSGPR(DataType::Int64);
                 auto colStrideExpr = colStride->expression();
                 {
                     auto sgpr = MkSGPR(DataType::Int64);
@@ -544,24 +545,29 @@ namespace rocRoller
                     co_yield copy(colStride, sgpr);
                 }
 
+                auto increment     = MkSGPR(DataType::Int64);
+                auto incrementExpr = increment->expression();
+                co_yield copy(increment, s_ptr);
+
                 // TODO multi dimensional tiles
                 for(int i = 0; i < m; ++i)
                 {
-                    co_yield copy(offset, rowOffset);
                     for(int j = 0; j < n; ++j)
                     {
-                        co_yield m_context->mem()->load(MemoryInstructions::MemoryKind::Flat,
-                                                        vgpr->element({i * n + j}),
-                                                        v_ptr,
-                                                        offset,
-                                                        numBytes);
-
+                        co_yield m_context->mem()->loadBuffer(
+                            vgpr->element({static_cast<int>(i * n + j)}),
+                            rowOffset->subset({0}),
+                            0,
+                            bufDesc,
+                            bufOpt,
+                            numBytes);
                         if(j < n - 1)
-                            co_yield generate(offset, offsetExpr + colStrideExpr);
+                            co_yield bufDesc.incrementBasePointer(colStride);
                     }
 
                     if(i < m - 1)
-                        co_yield generate(rowOffset, rowOffsetExpr + rowStrideExpr);
+                        co_yield generate(increment, incrementExpr + rowStrideExpr);
+                    co_yield bufDesc.setBasePointer(increment);
                 }
             }
 
@@ -577,8 +583,12 @@ namespace rocRoller
                 // Move the argument pointer into v_ptr
                 Register::ValuePtr s_ptr;
                 co_yield m_context->argLoader()->getValue(user.argumentName(), s_ptr);
-                auto v_ptr = s_ptr->placeholder(Register::Type::Vector);
-                co_yield m_context->copier()->copy(v_ptr, s_ptr);
+
+                auto bufDesc = BufferDescriptor(m_context);
+                auto bufOpt  = BufferInstructionOptions();
+
+                co_yield bufDesc.setup();
+                co_yield bufDesc.setBasePointer(s_ptr);
 
                 // Register Value used to contain the offset
                 auto offset = Register::Value::Placeholder(
@@ -617,13 +627,12 @@ namespace rocRoller
                         setComment(user_index2, "User Index Expression");
                         co_yield generateOffset(offset2, user_index2, vtype.dataType);
 
-                        co_yield m_context->mem()->loadAndPack(
-                            MemoryInstructions::MemoryKind::Flat,
+                        co_yield m_context->mem()->loadAndPackBuffer(
                             vgpr->element({static_cast<int>(a / 2)}),
-                            v_ptr,
                             offset,
-                            v_ptr,
-                            offset2);
+                            offset2,
+                            bufDesc,
+                            bufOpt);
                     }
                 }
                 else
@@ -645,11 +654,12 @@ namespace rocRoller
                         setComment(user_index, "User Index Expression");
                         co_yield generateOffset(offset, user_index, vgpr->variableType().dataType);
 
-                        co_yield m_context->mem()->load(MemoryInstructions::MemoryKind::Flat,
-                                                        vgpr->element({static_cast<int>(a)}),
-                                                        v_ptr,
-                                                        offset,
-                                                        numBytes);
+                        co_yield m_context->mem()->loadBuffer(vgpr->element({static_cast<int>(a)}),
+                                                              offset->subset({0}),
+                                                              0,
+                                                              bufDesc,
+                                                              bufOpt,
+                                                              numBytes);
                     }
                 }
             }
@@ -923,8 +933,6 @@ namespace rocRoller
 
                 auto rowOffset     = MkVGPR(DataType::Int64);
                 auto rowOffsetExpr = rowOffset->expression();
-                auto offset        = MkVGPR(DataType::Int64);
-                auto offsetExpr    = offset->expression();
 
                 auto baseIndexExpr = coords.forward({user})[0];
                 co_yield generate(rowOffset, baseIndexExpr * L(numBytes));
@@ -970,7 +978,6 @@ namespace rocRoller
                             co_yield bufDesc.incrementBasePointer(colStride);
                         }
                     }
-                    co_yield bufDesc.incrementBasePointer(increment);
                     if(i < m - 1)
                     {
                         co_yield generate(increment, incrementExpr + rowStrideExpr);

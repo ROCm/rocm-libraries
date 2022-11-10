@@ -75,9 +75,9 @@ namespace rocRoller
          *
          * @param kind The kind of memory operation to perform.
          * @param dest The register to store the loaded data in.
-         * @param addr1 The register containing the address of the first 16bit value to laod the data from.
+         * @param addr1 The register containing the address of the first 16bit value to load the data from.
          * @param offset1 Register containing an offset to be added to addr1.
-         * @param addr2 The register containing the address of the second 16bit value to laod the data from.
+         * @param addr2 The register containing the address of the second 16bit value to load the data from.
          * @param offset2 Register containing an offset to be added to addr2.
          * @param comment Comment that will be generated along with the instructions. (Default = "")
          */
@@ -88,6 +88,23 @@ namespace rocRoller
                                            std::shared_ptr<Register::Value> addr2,
                                            std::shared_ptr<Register::Value> offset2,
                                            std::string const&               comment = "");
+
+        /**
+         * @brief Generate instructions that will load two 16bit values and pack them into
+         *        a single register with MUBUF instructions.
+         *
+         * @param dest The register to store the loaded data in.
+         * @param offset1 The register containing the address of the first 16bit value to load the data from.
+         * @param offset2 The register containing the address of the second 16bit value to load the data from.
+         * @param buffDesc The buffer resource descriptor, contains the base address, size, buffer resource options
+         * @param buffOpts Struct containing the buffer options required by the buffer load 
+         * @param comment Comment that will be generated along with the instructions. (Default = "")
+         */
+        Generator<Instruction> loadAndPackBuffer(std::shared_ptr<Register::Value> dest,
+                                                 std::shared_ptr<Register::Value> offset1,
+                                                 std::shared_ptr<Register::Value> offset2,
+                                                 BufferDescriptor                 buffDesc,
+                                                 BufferInstructionOptions         buffOpts);
 
         /**
          * @brief Generate instructions that will pack 2 16bit values into a single 32bit register and store the value

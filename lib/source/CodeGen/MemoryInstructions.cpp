@@ -29,6 +29,31 @@ namespace rocRoller
         co_yield generateOp<Expression::BitwiseOr>(dest, val1, val2);
     }
 
+    Generator<Instruction>
+        MemoryInstructions::loadAndPackBuffer(std::shared_ptr<Register::Value> dest,
+                                              std::shared_ptr<Register::Value> offset1,
+                                              std::shared_ptr<Register::Value> offset2,
+                                              BufferDescriptor                 buffDesc,
+                                              BufferInstructionOptions         buffOpts)
+    {
+        AssertFatal(dest && dest->regType() == Register::Type::Vector
+                        && dest->variableType() == DataType::Halfx2,
+                    "loadAndPack destination must be a vector register of type Halfx2");
+
+        co_yield Register::AllocateIfNeeded(dest);
+
+        // Use the same register for the destination and the temporary val1
+        auto val1 = std::make_shared<Register::Value>(
+            dest->allocation(), Register::Type::Vector, DataType::Half, dest->allocationCoord());
+        auto val2 = Register::Value::Placeholder(
+            m_context.lock(), Register::Type::Vector, DataType::Half, 1);
+
+        co_yield loadBuffer(val1, offset1->subset({0}), 0, buffDesc, buffOpts, 2, false);
+        co_yield loadBuffer(val2, offset2->subset({0}), 0, buffDesc, buffOpts, 2, true);
+
+        co_yield generateOp<Expression::BitwiseOr>(dest, val1, val2);
+    }
+
     Generator<Instruction> MemoryInstructions::packAndStore(MemoryKind                       kind,
                                                             std::shared_ptr<Register::Value> addr,
                                                             std::shared_ptr<Register::Value> data1,
