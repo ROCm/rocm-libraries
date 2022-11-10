@@ -49,7 +49,7 @@ namespace rocRoller
                 subExprs.push_back(call(rhsResult, expr.rhs));
 
                 auto proc      = Settings::getInstance()->get(Settings::Scheduler);
-                auto scheduler = Component::Get<Scheduling::Scheduler>(proc, m_context);
+                auto scheduler = Component::GetNew<Scheduling::Scheduler>(proc, m_context);
                 co_yield (*scheduler)(subExprs);
 
                 if(dest == nullptr)
@@ -72,7 +72,7 @@ namespace rocRoller
                 subExprs.push_back(call(r1hsResult, expr.r1hs));
                 subExprs.push_back(call(r2hsResult, expr.r2hs));
 
-                auto scheduler = Component::Get<Scheduling::Scheduler>(
+                auto scheduler = Component::GetNew<Scheduling::Scheduler>(
                     Scheduling::SchedulerProcedure::Sequential, m_context);
                 co_yield (*scheduler)(subExprs);
 

@@ -51,6 +51,7 @@ namespace rocRoller
             using Argument = std::tuple<SchedulerProcedure, std::shared_ptr<rocRoller::Context>>;
 
             static const std::string Name;
+            static const bool        SingleUse = true;
 
             virtual std::string            name()                                           = 0;
             virtual Generator<Instruction> operator()(std::vector<Generator<Instruction>>&) = 0;

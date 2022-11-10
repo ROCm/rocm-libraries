@@ -114,7 +114,7 @@ namespace rocRollerTest
         std::string expected = std::string("s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0)")
                                + std::string("\n") + std::string("s_branch");
 
-        auto scheduler = Component::Get<Scheduling::Scheduler>(
+        auto scheduler = Component::GetNew<Scheduling::Scheduler>(
             Scheduling::SchedulerProcedure::Sequential, m_context);
         std::vector<Generator<Instruction>> generators;
         generators.push_back(kb());
@@ -141,7 +141,7 @@ namespace rocRollerTest
         std::string expected = std::string("s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0)")
                                + std::string("\n") + std::string("s_branch");
 
-        auto scheduler = Component::Get<Scheduling::Scheduler>(
+        auto scheduler = Component::GetNew<Scheduling::Scheduler>(
             Scheduling::SchedulerProcedure::Sequential, m_context);
         std::vector<Generator<Instruction>> generators;
         generators.push_back(kb());

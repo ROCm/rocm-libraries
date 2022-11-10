@@ -155,7 +155,7 @@ namespace rocRollerTest
         sequences.push_back(comment_generator(5));
 
         std::shared_ptr<Scheduling::Scheduler> scheduler
-            = Component::Get<Scheduling::Scheduler>(m_procedure, m_context);
+            = Component::GetNew<Scheduling::Scheduler>(m_procedure, m_context);
 
         m_context->schedule((*scheduler)(sequences));
 
@@ -302,7 +302,7 @@ namespace rocRollerTest
         sequences.push_back(scalar_compare());
 
         std::shared_ptr<Scheduling::Scheduler> scheduler
-            = Component::Get<Scheduling::Scheduler>(m_procedure, m_context);
+            = Component::GetNew<Scheduling::Scheduler>(m_procedure, m_context);
 
         m_context->schedule((*scheduler)(sequences));
 
@@ -402,7 +402,7 @@ namespace rocRollerTest
         sequences.push_back(set_vcc_to_zero());
 
         std::shared_ptr<Scheduling::Scheduler> scheduler
-            = Component::Get<Scheduling::Scheduler>(m_procedure, m_context);
+            = Component::GetNew<Scheduling::Scheduler>(m_procedure, m_context);
 
         m_context->schedule((*scheduler)(sequences));
 
@@ -557,7 +557,7 @@ namespace rocRollerTest
         sequences.push_back(set_vcc2());
 
         std::shared_ptr<Scheduling::Scheduler> scheduler
-            = Component::Get<Scheduling::Scheduler>(m_procedure, m_context);
+            = Component::GetNew<Scheduling::Scheduler>(m_procedure, m_context);
 
         m_context->schedule((*scheduler)(sequences));
 

@@ -282,6 +282,7 @@ namespace GEMMDriverTest
         ASSERT_LT(rnorm, acceptableError);
     }
 
+    // This test is to ensure each scheduler properly yields insts for a basic GEMM
     TEST_F(GEMMTestGPU, GPU_BasicGEMM_Schedulers)
     {
         GEMMProblem gemm;
@@ -296,6 +297,19 @@ namespace GEMMDriverTest
         std::string rr = m_context->instructions()->toString();
 
         EXPECT_NE(NormalizedSource(seq), NormalizedSource(rr));
+
+        std::set<std::string> insts;
+        std::vector<int>      seeds = {2, 4, 8, 314, 1729};
+        settings->set(Settings::Scheduler, Scheduling::SchedulerProcedure::Random);
+        for(auto seed : seeds)
+        {
+            settings->set(Settings::RandomSeed, seed);
+            basicGEMM<float>(m_context, gemm, 1.e-6);
+            std::string rand     = m_context->instructions()->toString();
+            bool        not_seen = insts.insert(rand).second;
+            EXPECT_EQ(not_seen, true);
+        }
+        // Can not compare random insts to others because non-zero chance seed generates such insts
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMM)

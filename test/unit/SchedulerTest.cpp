@@ -227,7 +227,7 @@ namespace rocRollerTest
                                     Instruction 4, Generator 2
                                 )";
 
-        auto scheduler = Component::Get<Scheduling::Scheduler>(
+        auto scheduler = Component::GetNew<Scheduling::Scheduler>(
             Scheduling::SchedulerProcedure::Sequential, m_context);
         m_context->schedule((*scheduler)(generators));
         EXPECT_EQ(NormalizedSource(output(), true), NormalizedSource(expected, true));
@@ -260,7 +260,7 @@ namespace rocRollerTest
                                     Instruction 4, Generator 2
                                 )";
 
-        auto scheduler = Component::Get<Scheduling::Scheduler>(
+        auto scheduler = Component::GetNew<Scheduling::Scheduler>(
             Scheduling::SchedulerProcedure::RoundRobin, m_context);
         m_context->schedule((*scheduler)(generators));
         EXPECT_EQ(NormalizedSource(output(), true), NormalizedSource(expected, true));
@@ -303,7 +303,7 @@ namespace rocRollerTest
 
     TEST_F(SchedulerTest, DoubleUnlocking)
     {
-        auto scheduler = Component::Get<Scheduling::Scheduler>(
+        auto scheduler = Component::GetNew<Scheduling::Scheduler>(
             Scheduling::SchedulerProcedure::RoundRobin, m_context);
 
         std::vector<Generator<Instruction>> sequences;
@@ -322,7 +322,7 @@ namespace rocRollerTest
 
     TEST_F(SchedulerTest, noUnlocking)
     {
-        auto scheduler = Component::Get<Scheduling::Scheduler>(
+        auto scheduler = Component::GetNew<Scheduling::Scheduler>(
             Scheduling::SchedulerProcedure::RoundRobin, m_context);
 
         std::vector<Generator<Instruction>> sequences;
