@@ -624,4 +624,57 @@ namespace rocRollerTest
     INSTANTIATE_TEST_SUITE_P(RandomSchedulerTest,
                              RandomSchedulerTest,
                              ::testing::Values(0, 1, 4, 8, 15, 16, 23, 42));
+
+    struct LockCheckSchedulerTest : public SchedulerTest,
+                                    public testing::WithParamInterface<
+                                        std::tuple<Scheduling::SchedulerProcedure, std::string>>
+    {
+    protected:
+        std::string targetArchitecture()
+        {
+            return "gfx90a";
+        }
+    };
+
+    TEST_P(LockCheckSchedulerTest, LockCheckTest)
+    {
+#ifdef NDEBUG
+        GTEST_SKIP() << "Skipping LockCheckTest in release mode.";
+#endif
+
+        auto gen = [&](std::string inst, bool lock) -> Generator<Instruction> {
+            if(lock)
+                co_yield(Instruction::Lock(Scheduling::Dependency::SCC));
+            co_yield(Instruction(inst, {}, {}, {}, ""));
+            if(lock)
+                co_yield(Instruction::Unlock());
+        };
+
+        {
+            std::vector<Generator<Instruction>> gens;
+            gens.push_back(testGeneratorWithComments(true));
+            gens.push_back(gen(std::get<1>(GetParam()), false));
+            auto scheduler
+                = Component::GetNew<Scheduling::Scheduler>(std::get<0>(GetParam()), m_context);
+            EXPECT_THROW({ m_context->schedule((*scheduler)(gens)); }, FatalError);
+        }
+
+        {
+            std::vector<Generator<Instruction>> gens;
+            gens.push_back(testGeneratorWithComments(true));
+            gens.push_back(gen(std::get<1>(GetParam()), true));
+            auto scheduler
+                = Component::GetNew<Scheduling::Scheduler>(std::get<0>(GetParam()), m_context);
+            EXPECT_NO_THROW({ m_context->schedule((*scheduler)(gens)); });
+        }
+    }
+
+    INSTANTIATE_TEST_SUITE_P(
+        LockCheckSchedulerTest,
+        LockCheckSchedulerTest,
+        testing::Combine(
+            ::testing::Values(Scheduling::SchedulerProcedure::Sequential,
+                              Scheduling::SchedulerProcedure::RoundRobin,
+                              Scheduling::SchedulerProcedure::Random),
+            ::testing::Values("s_branch", "s_cbranch_scc0", "s_addc_u32", "s_subb_u32")));
 }

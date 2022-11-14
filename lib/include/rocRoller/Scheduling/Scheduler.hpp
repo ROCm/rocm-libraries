@@ -19,19 +19,22 @@ namespace rocRoller
         class LockState
         {
         public:
-            LockState();
-            LockState(Dependency dependency);
+            LockState(ContextPtr ctx);
+            LockState(ContextPtr ctx, Dependency dependency);
 
             void add(Instruction const& instr);
             bool isLocked() const;
             void isValid(bool locked = false) const;
 
+            void lockCheck(Instruction const& instr);
+
             Dependency getDependency() const;
             int        getLockDepth() const;
 
         private:
-            int        m_lockdepth;
-            Dependency m_dependency;
+            int                               m_lockdepth;
+            Dependency                        m_dependency;
+            std::weak_ptr<rocRoller::Context> m_ctx;
         };
 
         /**
@@ -50,6 +53,8 @@ namespace rocRoller
         public:
             using Argument = std::tuple<SchedulerProcedure, std::shared_ptr<rocRoller::Context>>;
 
+            Scheduler(ContextPtr);
+
             static const std::string Name;
             static const bool        SingleUse = true;
 
@@ -59,7 +64,8 @@ namespace rocRoller
             LockState getLockState() const;
 
         protected:
-            LockState m_lockstate;
+            LockState                         m_lockstate;
+            std::weak_ptr<rocRoller::Context> m_ctx;
         };
 
         std::ostream& operator<<(std::ostream&, SchedulerProcedure);

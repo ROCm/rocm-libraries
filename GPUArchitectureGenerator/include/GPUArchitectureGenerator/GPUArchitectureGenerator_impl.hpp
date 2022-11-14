@@ -40,7 +40,36 @@ namespace GPUArchitectureGenerator
         {
             GPUArchitectures[isaVersion] = rocRoller::GPUArchitecture(isaVersion);
         }
-        GPUArchitectures[isaVersion].AddInstructionInfo(instruction_info);
+        std::string instruction = instruction_info.getInstruction();
+        bool        isBranch    = instruction_info.isBranch()
+                        || (BranchInstructions.find(instruction) != BranchInstructions.end()
+                            && (std::find(BranchInstructions.at(instruction).begin(),
+                                          BranchInstructions.at(instruction).end(),
+                                          isaVersion)
+                                != BranchInstructions.at(instruction).end()));
+        bool isImplicit
+            = instruction_info.hasImplicitAccess()
+              || (ImplicitReadInstructions.find(instruction) != ImplicitReadInstructions.end()
+                  && (std::find(ImplicitReadInstructions.at(instruction).begin(),
+                                ImplicitReadInstructions.at(instruction).end(),
+                                isaVersion)
+                      != ImplicitReadInstructions.at(instruction).end()));
+
+        if(instruction_info.isBranch() != isBranch
+           || instruction_info.hasImplicitAccess() != isImplicit)
+        {
+            GPUArchitectures[isaVersion].AddInstructionInfo(
+                rocRoller::GPUInstructionInfo(instruction,
+                                              instruction_info.getWaitCount(),
+                                              instruction_info.getWaitQueues(),
+                                              instruction_info.getLatency(),
+                                              isImplicit,
+                                              isBranch));
+        }
+        else
+        {
+            GPUArchitectures[isaVersion].AddInstructionInfo(instruction_info);
+        }
     }
 
     inline std::tuple<int, std::string> Execute(std::string command)
@@ -191,6 +220,34 @@ namespace GPUArchitectureGenerator
                             rocRoller::GPUInstructionInfo(instruction,
                                                           std::get<1>(std::get<1>(group)),
                                                           std::get<2>(std::get<1>(group))));
+                    }
+                }
+            }
+
+            for(const auto& instruction : BranchInstructions)
+            {
+                if(std::find(instruction.second.begin(), instruction.second.end(), isaVersion)
+                   != instruction.second.end())
+                {
+                    if(!GPUArchitectures[isaVersion].HasInstructionInfo(instruction.first))
+                    {
+                        AddInstructionInfo(isaVersion,
+                                           rocRoller::GPUInstructionInfo(
+                                               instruction.first, -1, {}, -1, false, true));
+                    }
+                }
+            }
+
+            for(const auto& instruction : ImplicitReadInstructions)
+            {
+                if(std::find(instruction.second.begin(), instruction.second.end(), isaVersion)
+                   != instruction.second.end())
+                {
+                    if(!GPUArchitectures[isaVersion].HasInstructionInfo(instruction.first))
+                    {
+                        AddInstructionInfo(isaVersion,
+                                           rocRoller::GPUInstructionInfo(
+                                               instruction.first, -1, {}, -1, true, false));
                     }
                 }
             }

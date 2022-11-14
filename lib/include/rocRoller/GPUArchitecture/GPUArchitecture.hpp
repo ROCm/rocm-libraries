@@ -36,6 +36,7 @@ namespace rocRoller
         bool                          HasCapability(std::string) const;
         int                           GetCapability(std::string) const;
         rocRoller::GPUInstructionInfo GetInstructionInfo(std::string) const;
+        bool                          HasInstructionInfo(std::string) const;
 
         friend std::ostream& operator<<(std::ostream& os, const GPUArchitecture& d);
 

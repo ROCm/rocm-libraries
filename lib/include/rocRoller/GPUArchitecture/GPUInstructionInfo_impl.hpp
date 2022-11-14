@@ -23,11 +23,15 @@ namespace rocRoller
     inline GPUInstructionInfo::GPUInstructionInfo(std::string const&                   instruction,
                                                   int                                  waitcnt,
                                                   std::vector<GPUWaitQueueType> const& waitQueues,
-                                                  int                                  latency)
+                                                  int                                  latency,
+                                                  bool implicitAccess,
+                                                  bool branch)
         : m_instruction(instruction)
         , m_waitCount(waitcnt)
         , m_waitQueues(waitQueues)
         , m_latency(latency)
+        , m_implicitAccess(implicitAccess)
+        , m_isBranch(branch)
     {
     }
 
@@ -48,6 +52,16 @@ namespace rocRoller
     inline int GPUInstructionInfo::getLatency() const
     {
         return m_latency;
+    }
+
+    inline bool GPUInstructionInfo::hasImplicitAccess() const
+    {
+        return m_implicitAccess;
+    }
+
+    inline bool GPUInstructionInfo::isBranch() const
+    {
+        return m_isBranch;
     }
 
     //--GPUWaitQueue

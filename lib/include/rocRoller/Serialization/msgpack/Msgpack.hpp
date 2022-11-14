@@ -125,7 +125,7 @@ namespace msgpack
                     {
                         throw msgpack::type_error();
                     }
-                    if(o.via.array.size != 4)
+                    if(o.via.array.size != 6)
                     {
                         throw msgpack::type_error();
                     }
@@ -133,7 +133,9 @@ namespace msgpack
                         o.via.array.ptr[0].as<std::string>(),
                         o.via.array.ptr[1].as<int>(),
                         o.via.array.ptr[2].as<std::vector<rocRoller::GPUWaitQueueType>>(),
-                        o.via.array.ptr[3].as<int>());
+                        o.via.array.ptr[3].as<int>(),
+                        o.via.array.ptr[4].as<bool>(),
+                        o.via.array.ptr[5].as<bool>());
                     return o;
                 }
             };
@@ -145,11 +147,13 @@ namespace msgpack
                 packer<Stream>& operator()(msgpack::packer<Stream>&             o,
                                            rocRoller::GPUInstructionInfo const& v) const
                 {
-                    o.pack_array(4);
+                    o.pack_array(6);
                     o.pack(v.getInstruction());
                     o.pack(v.getWaitCount());
                     o.pack(v.getWaitQueues());
                     o.pack(v.getLatency());
+                    o.pack(v.hasImplicitAccess());
+                    o.pack(v.isBranch());
                     return o;
                 }
             };

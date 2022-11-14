@@ -17,11 +17,11 @@ namespace rocRollerTest
     {
     };
 
-    TEST(LockStateTest, Basic)
+    TEST_F(LockStateTest, Basic)
     {
-        auto none_lock = Scheduling::LockState();
-        auto scc_lock  = Scheduling::LockState(Scheduling::Dependency::SCC);
-        auto vcc_lock  = Scheduling::LockState(Scheduling::Dependency::VCC);
+        auto none_lock = Scheduling::LockState(m_context);
+        auto scc_lock  = Scheduling::LockState(m_context, Scheduling::Dependency::SCC);
+        auto vcc_lock  = Scheduling::LockState(m_context, Scheduling::Dependency::VCC);
 
         EXPECT_EQ(none_lock.isLocked(), false);
         EXPECT_EQ(scc_lock.isLocked(), true);
@@ -58,9 +58,9 @@ namespace rocRollerTest
         EXPECT_THROW(vcc_lock.isValid(true), FatalError);
         EXPECT_NO_THROW(vcc_lock.isValid(false));
 
-        EXPECT_THROW({ auto l = Scheduling::LockState(Scheduling::Dependency::Unlock); },
+        EXPECT_THROW({ auto l = Scheduling::LockState(m_context, Scheduling::Dependency::Unlock); },
                      FatalError);
-        EXPECT_THROW({ auto l = Scheduling::LockState(Scheduling::Dependency::Count); },
+        EXPECT_THROW({ auto l = Scheduling::LockState(m_context, Scheduling::Dependency::Count); },
                      FatalError);
     }
 }

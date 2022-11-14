@@ -383,6 +383,11 @@ namespace rocRoller
             return std::visit([](auto const& val) { return val == 0; }, m_literalValue);
         }
 
+        inline bool Value::isSpecial() const
+        {
+            return m_regType == Type::Special;
+        }
+
         inline bool Value::isSCC() const
         {
             return m_regType == Type::Special && m_specialName == "scc";

@@ -703,4 +703,40 @@ namespace GPUArchitectureGenerator
                  rocRoller::GPUInstructionInfo("v_accvgpr_write", 0, {}, 2),
              }},
     };
+
+    const std::unordered_map<std::string, std::vector<rocRoller::GPUArchitectureTarget>>
+        BranchInstructions = {
+            {"s_branch", gfx9ISAs()},
+            {"s_cbranch_scc0", gfx9ISAs()},
+            {"s_cbranch_scc1", gfx9ISAs()},
+            {"s_cbranch_vccz", gfx9ISAs()},
+            {"s_cbranch_vccnz", gfx9ISAs()},
+            {"s_cbranch_execz", gfx9ISAs()},
+            {"s_cbranch_execnz", gfx9ISAs()},
+            {"s_cbranch_cdbgsys", gfx9ISAs()},
+            {"s_cbranch_cdbguser", gfx9ISAs()},
+            {"s_cbranch_cdbgsys_and_user", gfx9ISAs()},
+            {"s_setpc", gfx9ISAs()},
+            {"s_swappc", gfx9ISAs()},
+            {"s_call_b64", gfx9ISAs()},
+            {"s_subvector_loop_begin", gfx9ISAs()},
+            {"s_subvector_loop_end", gfx9ISAs()},
+    };
+
+    const std::unordered_map<std::string, std::vector<rocRoller::GPUArchitectureTarget>>
+        ImplicitReadInstructions = {
+            {"s_addc_u32", gfx9ISAs()},
+            {"s_subb_u32", gfx9ISAs()},
+            {"s_cbranch_scc0", gfx9ISAs()},
+            {"s_cbranch_scc1", gfx9ISAs()},
+            {"s_cbranch_vccz", gfx9ISAs()},
+            {"s_cbranch_vccnz", gfx9ISAs()},
+            {"s_cbranch_execz", gfx9ISAs()},
+            {"s_cbranch_execnz", gfx9ISAs()},
+            {"s_cselect_b32", gfx9ISAs()},
+            {"s_cselect_b64", gfx9ISAs()},
+            {"s_cmovk_i32", gfx9ISAs()},
+            {"s_cmov_b32", gfx9ISAs()},
+            {"s_cmov_b64", gfx9ISAs()},
+    };
 }

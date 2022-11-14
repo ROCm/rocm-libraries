@@ -244,3 +244,53 @@ TEST_F(InstructionTest, Special)
 
     EXPECT_THAT(output(), testing::HasSubstr("s_waitcnt lgkmcnt(1)\n"));
 }
+
+TEST_F(InstructionTest, ReadsSpecial)
+{
+    {
+        auto inst = Instruction("s_arbitrary_instruction", {}, {m_context->getVCC()}, {}, "");
+        EXPECT_TRUE(inst.readsSpecialRegisters());
+    }
+    {
+        auto dst = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Float, 1);
+        auto src = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Float, 1);
+        dst->allocateNow();
+        src->allocateNow();
+        auto inst
+            = Instruction("s_arbitrary_instruction", {dst}, {src, m_context->getSCC()}, {}, "");
+        EXPECT_TRUE(inst.readsSpecialRegisters());
+    }
+    {
+        auto inst = Instruction("s_arbitrary_instruction", {}, {m_context->getVCC_HI()}, {}, "");
+        EXPECT_TRUE(inst.readsSpecialRegisters());
+    }
+    {
+        auto inst = Instruction("s_arbitrary_instruction", {m_context->getVCC()}, {}, {}, "");
+        EXPECT_FALSE(inst.readsSpecialRegisters());
+    }
+    {
+        auto inst = Instruction(
+            "s_arbitrary_instruction", {}, {Register::Value::Special("lgkmcnt(1)")}, {}, "");
+        EXPECT_TRUE(inst.readsSpecialRegisters());
+    }
+    {
+        auto dst = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Float, 1);
+        auto src = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Float, 1);
+        dst->allocateNow();
+        src->allocateNow();
+        auto inst = Instruction("s_arbitrary_instruction", {dst}, {src}, {}, "");
+        EXPECT_FALSE(inst.readsSpecialRegisters());
+    }
+    {
+        auto inst = Instruction("s_arbitrary_instruction", {}, {}, {"vcc"}, "");
+        EXPECT_FALSE(inst.readsSpecialRegisters());
+    }
+    {
+        auto inst = Instruction("s_arbitrary_instruction", {}, {}, {}, "vcc");
+        EXPECT_FALSE(inst.readsSpecialRegisters());
+    }
+}

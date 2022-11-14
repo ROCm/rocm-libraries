@@ -232,6 +232,18 @@ namespace rocRoller
         return (m_src[0] || m_dst[0]);
     }
 
+    inline bool Instruction::readsSpecialRegisters() const
+    {
+        for(auto& reg : m_src)
+        {
+            if(reg && reg->isSpecial())
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
     inline bool Instruction::isCommentOnly() const
     {
         // clang-format off

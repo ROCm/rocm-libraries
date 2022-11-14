@@ -154,12 +154,16 @@ namespace rocRoller
         GPUInstructionInfo(std::string const& instruction,
                            int,
                            std::vector<GPUWaitQueueType> const&,
-                           int = 0);
+                           int  = 0,
+                           bool = false,
+                           bool = false);
 
         std::string                   getInstruction() const;
         int                           getWaitCount() const;
         std::vector<GPUWaitQueueType> getWaitQueues() const;
         int                           getLatency() const;
+        bool                          hasImplicitAccess() const;
+        bool                          isBranch() const;
 
         friend std::ostream& operator<<(std::ostream& os, const GPUInstructionInfo& d);
 
@@ -167,10 +171,12 @@ namespace rocRoller
         friend struct rocRoller::Serialization::MappingTraits;
 
     private:
-        std::string                   m_instruction;
-        int                           m_waitCount;
+        std::string                   m_instruction = "";
+        int                           m_waitCount   = -1;
         std::vector<GPUWaitQueueType> m_waitQueues;
-        int                           m_latency;
+        int                           m_latency        = -1;
+        bool                          m_implicitAccess = false;
+        bool                          m_isBranch       = false;
     };
 
     std::string ToString(GPUWaitQueueType);

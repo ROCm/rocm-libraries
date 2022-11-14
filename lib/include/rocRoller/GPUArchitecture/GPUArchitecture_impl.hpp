@@ -27,6 +27,9 @@ namespace rocRoller
 
     inline void GPUArchitecture::AddInstructionInfo(GPUInstructionInfo info)
     {
+        if(m_instruction_infos.find(info.getInstruction()) != m_instruction_infos.end())
+            throw std::runtime_error(
+                concatenate("Instruction info already exists for ", info.getInstruction()));
         m_instruction_infos[info.getInstruction()] = info;
     }
 
@@ -52,6 +55,12 @@ namespace rocRoller
     inline int GPUArchitecture::GetCapability(std::string capabilityString) const
     {
         return GetCapability(GPUCapability(capabilityString));
+    }
+
+    inline bool GPUArchitecture::HasInstructionInfo(std::string instruction) const
+    {
+        auto iter = m_instruction_infos.find(instruction);
+        return iter != m_instruction_infos.end();
     }
 
     inline rocRoller::GPUInstructionInfo

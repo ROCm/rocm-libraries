@@ -28,6 +28,8 @@ namespace rocRoller
         const std::string KeyWaitCount        = "WaitCount";
         const std::string KeyWaitQueues       = "WaitQueues";
         const std::string KeyLatency          = "Latency";
+        const std::string KeyImplicitAccess   = "ImplicitAccess";
+        const std::string KeyIsBranch         = "IsBranch";
         const std::string KeyISAVersion       = "ISAVersion";
         const std::string KeyInstructionInfos = "InstructionInfos";
         const std::string KeyCapabilities     = "Capabilities";
@@ -105,6 +107,8 @@ namespace rocRoller
                 iot::mapRequired(io, KeyWaitCount.c_str(), info.m_waitCount);
                 iot::mapRequired(io, KeyWaitQueues.c_str(), info.m_waitQueues);
                 iot::mapRequired(io, KeyLatency.c_str(), info.m_latency);
+                iot::mapRequired(io, KeyImplicitAccess.c_str(), info.m_implicitAccess);
+                iot::mapRequired(io, KeyIsBranch.c_str(), info.m_isBranch);
             }
 
             static void mapping(IO& io, GPUInstructionInfo& info, EmptyContext& ctx)

@@ -61,6 +61,7 @@ namespace rocRoller
                    std::vector<std::shared_ptr<Register::Value>>>
                   getRegisters() const;
         bool      hasRegisters() const;
+        bool      readsSpecialRegisters() const;
         WaitCount getWaitCount() const;
 
         bool registersIntersect(std::vector<std::shared_ptr<Register::Value>>,

@@ -50,9 +50,6 @@ namespace rocRoller
              */
             virtual Generator<Instruction>
                 operator()(std::vector<Generator<Instruction>>& seqs) override;
-
-        private:
-            std::weak_ptr<rocRoller::Context> m_ctx;
         };
     }
 }
