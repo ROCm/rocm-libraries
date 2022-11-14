@@ -362,6 +362,18 @@ namespace rocRoller
         template <CCommandArgumentValue T>
         ExpressionPtr literal(T value);
 
+        /**
+         * @brief Create an Expression representing a literal value with a
+         *        specific datatype. Does not accept pointer variable types.
+         *
+         * @tparam T
+         * @param value The value to represent.
+         * @param v The datatype of value.
+         * @return ExpressionPtr
+         */
+        template <CCommandArgumentValue T>
+        ExpressionPtr literal(T value, VariableType v);
+
         template <typename T>
         concept CValue = requires
         {

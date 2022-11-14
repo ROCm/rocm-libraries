@@ -227,10 +227,6 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult)
     runtimeArgs.append("d_d_stride_0", (size_t)1);
     runtimeArgs.append("d_d_stride_1", (size_t)result.M);
 
-    // TODO: remove this when for loop indexing is fixed
-    command->allocateArgument(DataType::UInt32, DataDirection::ReadOnly, "UINT_MAT_K");
-    runtimeArgs.append("UINT_MAT_K", static_cast<uint>(result.K));
-
     auto params = std::make_shared<CommandParameters>();
     params->setManualKernelDimension(2);
     // TODO: Calculate these values internally based on workgroup sizes.

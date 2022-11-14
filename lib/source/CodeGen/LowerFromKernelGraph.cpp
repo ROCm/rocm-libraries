@@ -409,11 +409,17 @@ namespace rocRoller
                 }
 
                 co_yield_(Instruction::Lock(Scheduling::Dependency::Branch, "Lock For Loop"));
-                auto scc = m_context->getSCC();
-                co_yield Expression::generate(scc, edge.condition, m_context);
+                auto [conditionRegisterType, conditionVariableType]
+                    = Expression::resultType(edge.condition);
+                auto conditionResult = conditionRegisterType == Register::Type::Special
+                                               && conditionVariableType == DataType::Bool
+                                           ? m_context->getSCC()
+                                           : m_context->getVCC();
+                co_yield Expression::generate(
+                    conditionResult, coords.getTransducer()(edge.condition), m_context);
                 co_yield m_context->brancher()->branchIfZero(
                     botLabel,
-                    scc,
+                    conditionResult,
                     concatenate("Condition: Top (jump to " + botLabel->toString() + " if false)"));
 
                 co_yield Instruction::Label(topLabel);
@@ -427,10 +433,11 @@ namespace rocRoller
                 co_yield Instruction::Comment("Condition: Bottom (jump to " + topLabel->toString()
                                               + " if true)");
 
-                co_yield Expression::generate(scc, edge.condition, m_context);
+                co_yield Expression::generate(
+                    conditionResult, coords.getTransducer()(edge.condition), m_context);
                 co_yield m_context->brancher()->branchIfNonZero(
                     topLabel,
-                    scc,
+                    conditionResult,
                     concatenate("Condition: Bottom (jump to " + topLabel->toString()
                                 + " if true)"));
 
@@ -469,7 +476,8 @@ namespace rocRoller
                 auto dest = m_context->registerTagManager()->getRegister(
                     edge.destTag, edge.regType, varType, edge.valueCount);
 
-                co_yield Expression::generate(dest, edge.expression, m_context);
+                co_yield Expression::generate(
+                    dest, coords.getTransducer()(edge.expression), m_context);
             }
 
             Generator<Instruction> operator()(ControlGraph::Barrier const& edge, Transformer coords)

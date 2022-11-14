@@ -124,6 +124,16 @@ namespace rocRoller
         auto v_6 = std::make_shared<Register::Value>(
             m_context, Register::Type::Vector, DataType::Int32, 1);
 
+        if(rhs->regType() == Register::Type::Literal)
+        {
+            co_yield moveToVGPR(rhs);
+        }
+
+        if(lhs->regType() == Register::Type::Literal)
+        {
+            co_yield moveToVGPR(lhs);
+        }
+
         co_yield_(
             Instruction("v_ashrrev_i32_e32", {v_1}, {Register::Value::Literal(31), rhs}, {}, ""));
         co_yield_(Instruction("v_add_u32_e32", {v_2}, {rhs, v_1}, {}, ""));
@@ -482,8 +492,10 @@ namespace rocRoller
         co_yield_(Instruction("v_mul_lo_u32", {v_8}, {s_0->subset({0}), v_7}, {}, ""));
         co_yield_(Instruction("v_mul_hi_u32", {v_8}, {v_7, v_8}, {}, ""));
         co_yield_(Instruction("v_add_u32_e32", {v_7}, {v_7, v_8}, {}, ""));
-        co_yield_(Instruction("v_mul_hi_u32", {v_7}, {l0, v_7}, {}, ""));
-        co_yield_(Instruction("v_mul_lo_u32", {v_7}, {v_7, r0}, {}, ""));
+        co_yield m_context->copier()->copy(v_8, l0, "");
+        co_yield_(Instruction("v_mul_hi_u32", {v_7}, {v_8, v_7}, {}, ""));
+        co_yield m_context->copier()->copy(v_8, r0, "");
+        co_yield_(Instruction("v_mul_lo_u32", {v_7}, {v_7, v_8}, {}, ""));
         co_yield_(Instruction("v_sub_u32_e32", {v_7}, {l0, v_7}, {}, ""));
         co_yield_(Instruction("v_subrev_u32_e32", {v_8}, {r0, v_7}, {}, ""));
         co_yield_(Instruction("v_cmp_le_u32_e32", {m_context->getVCC()}, {r0, v_7}, {}, ""));

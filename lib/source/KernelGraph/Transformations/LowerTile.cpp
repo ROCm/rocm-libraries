@@ -1198,24 +1198,7 @@ namespace rocRoller
             auto loadA = graph.control.getOperation(getTag(ControlGraph::LoadTiled(a.tag)));
             auto loadB = graph.control.getOperation(getTag(ControlGraph::LoadTiled(b.tag)));
 
-            // TODO: The size of the K dimension should be loaded from the command arguments
-            //
-            // start of proper way
-            //   auto matK = graph.coordinates.getDimension(SubDimension(a.tag, 1)).size;
-            // end of proper way
-            //
-            // Using the proper way, the size is a UInt64 (size_t),
-            // and I can't get this to play nicely with the for loop
-            // expression.
-            //
-            // As a workaround, I'm also passing the size of the K
-            // dimension as a UInt32.
-            //
-            // start of workaround
-            auto matKArg = context->kernel()->findArgument("UINT_MAT_K");
-            auto matK    = std::make_shared<Expression::Expression>(
-                std::make_shared<AssemblyKernelArgument>(matKArg));
-            // end of workaround
+            auto matK = graph.coordinates.getDimension(SubDimension(a.tag, 1)).size;
 
             auto macK = literal(static_cast<uint>(a.sizes[1]));
 

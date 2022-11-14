@@ -184,13 +184,18 @@ namespace rocRoller
                             ShowValue(rhsVal.second));
 
                 auto inputRegType = Register::PromoteType(lhsVal.first, rhsVal.first);
+                auto inputVarType = VariableType::Promote(lhsVal.second, rhsVal.second);
 
                 switch(inputRegType)
                 {
                 case Register::Type::Literal:
                     return {Register::Type::Literal, DataType::Bool};
                 case Register::Type::Scalar:
-                    return {Register::Type::Special, DataType::Bool};
+                    if(inputVarType == DataType::Int32 || inputVarType == DataType::UInt32
+                       || inputVarType == DataType::Bool)
+                        return {Register::Type::Special, DataType::Bool};
+                    else
+                        return {Register::Type::Scalar, DataType::Bool32};
                 case Register::Type::Vector:
                     return {Register::Type::Scalar, DataType::Bool32};
 

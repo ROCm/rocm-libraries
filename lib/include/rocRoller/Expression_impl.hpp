@@ -176,6 +176,34 @@ namespace rocRoller
             return std::make_shared<Expression>(value);
         }
 
+        template <CCommandArgumentValue T>
+        ExpressionPtr literal(T value, VariableType v)
+        {
+            AssertFatal(v.pointerType == PointerType::Value);
+
+            switch(v.dataType)
+            {
+            case DataType::Int32:
+                return literal<int32_t>(value);
+            case DataType::UInt32:
+                return literal<uint32_t>(value);
+            case DataType::Int64:
+                return literal<int64_t>(value);
+            case DataType::UInt64:
+                return literal<uint64_t>(value);
+            case DataType::Bool:
+                return literal<bool>(value);
+            case DataType::Half:
+                return literal<Half>(static_cast<float>(value));
+            case DataType::Float:
+                return literal<float>(value);
+            case DataType::Double:
+                return literal<double>(value);
+            default:
+                Throw<FatalError>("Unsupported datatype provided to Expression::literal");
+            }
+        }
+
         static_assert(CExpression<Add>);
         static_assert(!CExpression<Register::Value>,
                       "ValuePtr can be an Expression but Value cannot.");

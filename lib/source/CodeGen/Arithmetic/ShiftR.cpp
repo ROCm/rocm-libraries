@@ -24,16 +24,18 @@ namespace rocRoller
         auto elementSize = std::max({DataTypeInfo::Get(dest->variableType()).elementSize,
                                      DataTypeInfo::Get(value->variableType()).elementSize});
 
+        auto toShift = shiftAmount->regType() == Register::Type::Literal ? shiftAmount
+                                                                         : shiftAmount->subset({0});
+
         if(dest->regType() == Register::Type::Scalar)
         {
             if(elementSize <= 4)
             {
-                co_yield_(Instruction("s_lshr_b32", {dest}, {value, shiftAmount}, {}, ""));
+                co_yield_(Instruction("s_lshr_b32", {dest}, {value, toShift}, {}, ""));
             }
             else if(elementSize == 8)
             {
-                co_yield_(
-                    Instruction("s_lshr_b64", {dest}, {value, shiftAmount->subset({0})}, {}, ""));
+                co_yield_(Instruction("s_lshr_b64", {dest}, {value, toShift}, {}, ""));
             }
             else
             {
@@ -45,12 +47,11 @@ namespace rocRoller
         {
             if(elementSize <= 4)
             {
-                co_yield_(Instruction("v_lshrrev_b32", {dest}, {shiftAmount, value}, {}, ""));
+                co_yield_(Instruction("v_lshrrev_b32", {dest}, {toShift, value}, {}, ""));
             }
             else if(elementSize == 8)
             {
-                co_yield_(Instruction(
-                    "v_lshrrev_b64", {dest}, {shiftAmount->subset({0}), value}, {}, ""));
+                co_yield_(Instruction("v_lshrrev_b64", {dest}, {toShift, value}, {}, ""));
             }
             else
             {

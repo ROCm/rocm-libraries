@@ -493,7 +493,7 @@ namespace ExpressionTest
         EXPECT_EQ(rSgprBool32, resultType(sgprDouble <= vgprDouble));
         EXPECT_EQ(rSgprBool32, resultType(sgprInt32 <= vgprInt32));
         EXPECT_EQ(rSgprBool32, resultType(litInt32 > vgprInt64));
-        EXPECT_EQ(rSpecialBool, resultType(litInt32 <= sgprInt64));
+        EXPECT_EQ(rSgprBool32, resultType(litInt32 <= sgprInt64));
         EXPECT_EQ(rSpecialBool, resultType(litInt32 >= sgprInt32));
 
         EXPECT_ANY_THROW(resultType(sgprDouble <= vgprFloat));
@@ -919,6 +919,23 @@ namespace ExpressionTest
         EXPECT_EQ(std::get<float>(evaluate(exp4)), a);
         EXPECT_EQ(std::get<float>(evaluate(exp5)), static_cast<float>(b));
         EXPECT_EQ(std::get<float>(evaluate(exp6)), static_cast<float>(c));
+    }
+
+    TEST_F(ExpressionTest, LiteralTest)
+    {
+        std::vector<VariableType> dataTypes = {{DataType::Int32},
+                                               {DataType::UInt32},
+                                               {DataType::Int64},
+                                               {DataType::UInt64},
+                                               {DataType::Float},
+                                               {DataType::Half},
+                                               {DataType::Double},
+                                               {DataType::Bool}};
+
+        for(auto& dataType : dataTypes)
+        {
+            EXPECT_EQ(dataType, Expression::resultVariableType(Expression::literal(1, dataType)));
+        }
     }
 
     TEST_F(ExpressionTest, VariantTest)
