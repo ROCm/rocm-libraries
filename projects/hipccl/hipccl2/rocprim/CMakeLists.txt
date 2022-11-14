@@ -56,6 +56,11 @@ endif()
 
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Add paths to linker search and installed rpath")
 
+# Set CXX flags
+set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
 set(BUILD_SHARED_LIBS OFF) # don't build client dependencies as shared
 if(NOT USE_HIP_CPU)
   # Get dependencies (required here to get rocm-cmake)
@@ -98,11 +103,6 @@ if(BUILD_CODE_COVERAGE)
   add_compile_options(-fprofile-arcs -ftest-coverage)
   add_link_options(--coverage)
 endif()
-
-# Set CXX flags
-set(CMAKE_CXX_STANDARD 14)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
 
 if(USE_HIP_CPU)
   # Get dependencies

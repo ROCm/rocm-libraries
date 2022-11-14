@@ -163,6 +163,8 @@ if(BUILD_BENCHMARK)
       GIT_REPOSITORY https://github.com/google/benchmark.git
       GIT_TAG        d17ea665515f0c54d100c6fc973632431379f64b # v1.6.1
     )
+    set(HAVE_STD_REGEX ON)
+    set(RUN_HAVE_STD_REGEX 1)
     FetchContent_MakeAvailable(googlebench)
     if(NOT TARGET benchmark::benchmark)
       add_library(benchmark::benchmark ALIAS benchmark)
