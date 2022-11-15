@@ -26,36 +26,49 @@ namespace ScopeTest
 
         int dst1 = kgraph.coordinates.addElement(CoordGraph::VGPR());
         int dst2 = kgraph.coordinates.addElement(CoordGraph::VGPR());
+        int dst3 = kgraph.coordinates.addElement(CoordGraph::VGPR());
 
         int kernel = kgraph.control.addElement(Kernel());
-        int scope  = kgraph.control.addElement(Scope());
+
+        int scope1 = kgraph.control.addElement(Scope());
+        int scope2 = kgraph.control.addElement(Scope());
+
         int assign1
             = kgraph.control.addElement(Assign{Register::Type::Vector, Expression::literal(11u)});
         int assign2
             = kgraph.control.addElement(Assign{Register::Type::Vector, Expression::literal(22u)});
+        int assign3
+            = kgraph.control.addElement(Assign{Register::Type::Vector, Expression::literal(33u)});
 
         kgraph.mapper.connect<CoordGraph::VGPR>(assign1, dst1);
         kgraph.mapper.connect<CoordGraph::VGPR>(assign2, dst2);
+        kgraph.mapper.connect<CoordGraph::VGPR>(assign3, dst3);
 
         // kernel:
         // - assign vector: 11u
-        // - scope:
+        // - scope1:
+        //   - scope2:
+        //       - scope3:
+        //         - assign vector: 33u
         //   - assign vector: 22u
         kgraph.control.addElement(Body(), {kernel}, {assign1});
-        kgraph.control.addElement(Sequence(), {assign1}, {scope});
-        kgraph.control.addElement(Body(), {scope}, {assign2});
+        kgraph.control.addElement(Sequence(), {assign1}, {scope1});
+        kgraph.control.addElement(Body(), {scope1}, {scope2});
+        kgraph.control.addElement(Body(), {scope2}, {assign3});
+        kgraph.control.addElement(Sequence(), {scope2}, {assign2});
 
         m_context->schedule(generate(kgraph, nullptr, m_context->kernel()));
 
         // assign1 should be to v0, which is not deallocated
         // assign2 should be to v1, which is deallocated
+        // assign3 should be to v1, which is deallocated
 
         auto kexpected = R"(
             // CFCodeGeneratorVisitor::generate() begin
             // generate(set{1})
             // Kernel BEGIN
             // Begin Kernel
-            // generate(set{3})
+            // generate(set{4})
             // Assign VGPR 11j BEGIN
             // 11j
             // Allocated : 1 VGPR (Value: UInt32): v0
@@ -63,7 +76,18 @@ namespace ScopeTest
             // Assign VGPR 11j END
             // Scope BEGIN
             // BEGIN SCOPE
-            // generate(set{4})
+            // generate(set{3})
+            // Scope BEGIN
+            // BEGIN SCOPE
+            // generate(set{6})
+            // Assign VGPR 33j BEGIN
+            // 33j
+            // Allocated : 1 VGPR (Value: UInt32): v1
+            v_mov_b32 v1, 33
+            // Assign VGPR 33j END
+            // Freeing : 1 VGPR (Value: UInt32): v1
+            // END SCOPE
+            // Scope END
             // Assign VGPR 22j BEGIN
             // 22j
             // Allocated : 1 VGPR (Value: UInt32): v1
