@@ -3,9 +3,10 @@
 import pathlib
 import sys
 
+
 rr = pathlib.Path(__file__).resolve().parent.parent
 sys.path.append(str(rr / "scripts" / "lib"))
 
-import rrperf.cli
+import rrperf.cli  # noqa: E402
 
 rrperf.cli.main()

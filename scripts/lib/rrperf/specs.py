@@ -19,16 +19,16 @@
 # THE SOFTWARE.
 """Get host/gpu specs."""
 
+import os
 import re
+import shutil
 import socket
 import subprocess
-import os
-import shutil
-import yaml
-
 from dataclasses import dataclass
 from pathlib import Path as path
 from textwrap import dedent
+
+import yaml
 
 
 @dataclass

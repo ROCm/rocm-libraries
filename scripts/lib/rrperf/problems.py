@@ -1,8 +1,8 @@
 import pathlib
-import yaml
-
 from dataclasses import dataclass, field, fields
 from typing import List
+
+import yaml
 
 
 def field_dict(cls, obj):
@@ -124,7 +124,9 @@ _base_to_run_class = {
 
 
 def load_results(path: pathlib.Path):
-    """Load results from a YAML file `path` and return an array of RESULT objects."""
+    """
+    Load results from a YAML file `path` and return an array of RESULT objects.
+    """
     rv = []
     for r in yaml.load_all(path.read_text(), Loader=yaml.FullLoader):
         ResultClass = _client_to_result_class[r["client"]]

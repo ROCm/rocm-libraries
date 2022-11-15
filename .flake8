@@ -1,0 +1,5 @@
+[flake8]
+exclude = scripts/build*, build*, extern
+ignore = W503
+max-line-length = 88
+extend-ignore = E203

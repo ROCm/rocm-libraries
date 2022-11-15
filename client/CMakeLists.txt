@@ -67,4 +67,8 @@ if(BUILD_CLIENT)
     target_link_libraries(gemm PUBLIC yaml-cpp)
     set_property(TARGET yaml-cpp PROPERTY POSITION_INDEPENDENT_CODE ON)
   endif()
+
+
+  add_custom_target(all_clients)
+  add_dependencies(all_clients gemm)
 endif()

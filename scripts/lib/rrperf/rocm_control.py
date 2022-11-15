@@ -1,5 +1,5 @@
-import subprocess
 import shutil
+import subprocess
 from time import sleep
 
 
@@ -17,17 +17,21 @@ def pin_clocks(ROCmSMIPath):
                 "255",
                 "--setsclk",
                 "7",
-            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
         )
-        print("Pinning clocks finished...\n{}\n{}".format(pinresult.stdout.decode("ascii"), pinresult.stderr.decode("ascii")))
+        print(
+            "Pinning clocks finished...\n{}\n{}".format(
+                pinresult.stdout.decode("ascii"),
+                pinresult.stderr.decode("ascii"),
+            )
+        )
         sleep(1)
         checkresult = subprocess.run(
-            [
-                ROCmSMIPath,
-                "-d",
-                "0",
-                "-a"
-            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            [ROCmSMIPath, "-d", "0", "-a"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
         )
         print("Clocks status:\n{}".format(checkresult.stdout.decode("ascii")))
         print("Setting up clock restore...")
@@ -45,4 +49,5 @@ def setupRestoreClocks(ROCmSMIPath):
         subprocess.call([ROCmSMIPath, "-d", "0", "--resetclocks"])
         print("Resetting fans...")
         subprocess.call([ROCmSMIPath, "-d", "0", "--resetfans"])
+
     atexit.register(restoreClocks)

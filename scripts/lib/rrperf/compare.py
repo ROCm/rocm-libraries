@@ -1,21 +1,18 @@
 """Result comparison routines."""
 
-import pathlib
+import datetime
 import io
 import os
-import datetime
-
-import numpy as np
-import scipy.stats
+import pathlib
 import statistics
-import pandas as pd
-
-from collections import defaultdict, OrderedDict
+from collections import OrderedDict, defaultdict
 from dataclasses import dataclass, field
 from typing import Any, List
 
+import numpy as np
+import pandas as pd
 import rrperf
-
+import scipy.stats
 from rrperf.specs import MachineSpecs
 
 
@@ -104,7 +101,8 @@ class PerformanceRun:
                     print('Error loading results in "{}": {}'.format(path, e))
                 for element in result:
                     if element.token in results:
-                        # TODO: Handle result files that have multiple results in a single yaml file.
+                        # TODO: Handle result files that have multiple results in
+                        # a single yaml file.
                         results[element.token] = element
                     else:
                         results[element.token] = element
@@ -176,9 +174,18 @@ def markdown_summary(md, perf_runs):
         for result in summary[run]:
             token, comparison = summary[run][result]
             A, B = comparison.results
+            row_str = [
+                f"{token}",
+                f"{A.path.parent.stem}",
+                f"{B.path.parent.stem}",
+                f"{comparison.mean[0]}",
+                f"{comparison.mean[1]}",
+                f"{comparison.median[0]}",
+                f"{comparison.median[1]}",
+                f"{comparison.moods_pval:0.4e}",
+            ]
             print(
-                f"{token} | {A.path.parent.stem} | {B.path.parent.stem} | {comparison.mean[0]} |",
-                f"{comparison.mean[1]} | {comparison.median[0]} | {comparison.median[1]} | {comparison.moods_pval:0.4e}",
+                " | ".join(row_str),
                 file=md,
             )
 
@@ -204,9 +211,16 @@ def html_overview_table(html_file, summary):
             token, comparison = summary[run][result]
             A, B = comparison.results
             print(
-                f'<tr><td><a href="#plot{i}"> {token} </a></td><td> {A.path.parent.stem} </td><td> {B.path.parent.stem}',
-                f"</td><td> {comparison.mean[0]} </td><td> {comparison.mean[1]} </td><td> {comparison.median[0]} </td><td>",
-                f"{comparison.median[1]} </td><td> {comparison.moods_pval:0.4e}</td><tr>",
+                f"""<tr>
+                <td><a href="#plot{i}"> {token} </a></td>
+                <td> {A.path.parent.stem} </td>
+                <td> {B.path.parent.stem}</td>
+                <td> {comparison.mean[0]} </td>
+                <td> {comparison.mean[1]} </td>
+                <td> {comparison.median[0]} </td>
+                <td>{comparison.median[1]} </td>
+                <td> {comparison.moods_pval:0.4e}</td>
+                <tr>""",
                 file=html_file,
             )
 
@@ -237,8 +251,8 @@ def email_html_summary(html_file, perf_runs):
 def html_summary(html_file, perf_runs):
     """Create HTML report of summary statistics."""
 
-    from plotly import graph_objs as go
     import plotly.express as px
+    from plotly import graph_objs as go
 
     perf_runs.sort()
     summary = summary_statistics(perf_runs[-2:])
@@ -333,8 +347,8 @@ def html_summary(html_file, perf_runs):
 
         plot.update_yaxes(
             range=[
-                min(machine_filtered_runs["all"].median),
-                max(machine_filtered_runs["all"].median),
+                min(machine_filtered_runs["all"].median) * 0.97,
+                max(machine_filtered_runs["all"].median) * 1.03,
             ]
         )
 
@@ -424,7 +438,7 @@ def html_summary(html_file, perf_runs):
     )
 
 
-def compare(directories=None, format="md", **kwargs):
+def compare(directories=None, format="md", output=None, **kwargs):
     """Compare multiple run directories.
 
     Implements the CLI 'compare' subcommand.
@@ -432,15 +446,21 @@ def compare(directories=None, format="md", **kwargs):
 
     perf_runs = PerformanceRun.load_perf_runs(directories)
 
-    output = io.StringIO()
+    print_final = False
+
+    if output is None:
+        print_final = True
+        output = io.StringIO()
+
     if format == "html":
         html_summary(
             output,
             perf_runs,
         )
-
     elif format == "email_html":
         email_html_summary(output, perf_runs)
     else:
         markdown_summary(output, perf_runs)
-    print(output.getvalue())
+
+    if print_final:
+        print(output.getvalue())
