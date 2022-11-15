@@ -57,30 +57,23 @@ def main():
         The output is in {workdir}/doc_{datetime}.""",
     )
     autoperf_cmd.add_argument(
-        "--commits",
-        type=str,
-        help="""Commits to test, comma separated in order of oldest to newest.
-        e.g. abcdef0,HEAD""",
-        required=False,
-    )
-    autoperf_cmd.add_argument(
-        "--workdir",
-        type=str,
-        help="Working directory",
-        default=".",
+        "--workdir", type=str, help="Working directory", default="."
     )
     autoperf_cmd.add_argument(
         "--ancestral",
         action="store_true",
-        help="""Also test every commit between oldest and newest commits.
-        Off by default.""",
+        help="Test every commit between first and last commits.  Off by default.",
         required=False,
     )
     autoperf_cmd.add_argument(
         "--current",
         action="store_true",
-        help="Also test the repository in its current state. Off by default.",
+        help="Test the repository in its current state.  Off by default.",
         required=False,
+    )
+    autoperf_cmd.add_argument("--suite", help="Benchmark suite to run.")
+    autoperf_cmd.add_argument(
+        "commits", type=str, nargs="*", help="Commits/tags/branches to test."
     )
 
     args = parser.parse_args()

@@ -3,7 +3,7 @@
 import datetime
 import os
 import subprocess
-import sys
+
 from itertools import chain
 from pathlib import Path
 from typing import Dict, Tuple
@@ -97,6 +97,7 @@ def run_problems(
             print(f"# token: {repr(problem)}", file=f, flush=True)
             print("running:")
             print(f"  command: {scmd}")
+            print(f"  wrkdir:  {work_dir.resolve()}")
             print(f"  log:     {log.resolve()}")
             print(f"  token:   {problem.token}", flush=True)
             p = subprocess.run(cmd, stdout=f, cwd=build_dir, env=env, check=False)
@@ -161,9 +162,6 @@ def run(
     timestamp = working_dir / "timestamp.txt"
     timestamp.write_text(str(datetime.datetime.now().timestamp()) + "\n")
 
-    print(f"rrperf: {' '.join(sys.argv)}")
-    print(f"work directory: {working_dir.resolve()}")
-
     result = run_problems(generator, build_dir, working_dir, env)
 
     if submit:
@@ -172,4 +170,4 @@ def run(
         # XXX if running single token, suite might be None
         submit_directory(suite, working_dir, ptsdir)
 
-    return (result, working_dir)
+    return result, working_dir
