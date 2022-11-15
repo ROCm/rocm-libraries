@@ -57,7 +57,7 @@ namespace ScopeTest
         kgraph.control.addElement(Body(), {scope2}, {assign3});
         kgraph.control.addElement(Sequence(), {scope2}, {assign2});
 
-        m_context->schedule(generate(kgraph, nullptr, m_context->kernel()));
+        m_context->schedule(generate(kgraph, m_context->kernel()));
 
         // assign1 should be to v0, which is not deallocated
         // assign2 should be to v1, which is deallocated

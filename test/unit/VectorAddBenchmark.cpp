@@ -185,7 +185,7 @@ namespace VectorAddBenchmark
 
         context->schedule(context->kernel()->preamble());
         context->schedule(context->kernel()->prolog());
-        context->schedule(KernelGraph::generate(kgraph, command, context->kernel()));
+        context->schedule(KernelGraph::generate(kgraph, context->kernel()));
         context->schedule(context->kernel()->postamble());
         context->schedule(context->kernel()->amdgpu_metadata());
 

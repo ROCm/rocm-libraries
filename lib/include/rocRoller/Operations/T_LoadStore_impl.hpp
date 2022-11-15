@@ -172,6 +172,7 @@ namespace rocRoller
 
         inline T_Load_Tiled::T_Load_Tiled(DataType dataType, int dims, int dest)
             : Load_Store_Operation(dataType, dims, dest)
+            , m_variable_type(dataType)
         {
         }
 
@@ -205,6 +206,11 @@ namespace rocRoller
         inline std::string T_Load_Tiled::toString(const unsigned char* runtime_args) const
         {
             return "T_LOAD_TILED" + Load_Store_Operation::getArgumentString(runtime_args);
+        }
+
+        inline VariableType T_Load_Tiled::variableType() const
+        {
+            return m_variable_type;
         }
 
         inline std::ostream& operator<<(std::ostream& stream, T_Load_Tiled const& val)

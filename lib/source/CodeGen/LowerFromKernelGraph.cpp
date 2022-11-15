@@ -1196,10 +1196,8 @@ namespace rocRoller
         struct NewCFCodeGeneratorVisitor
         {
             NewCFCodeGeneratorVisitor(KernelHypergraph                graph,
-                                      std::shared_ptr<Command>        command,
                                       std::shared_ptr<AssemblyKernel> kernel)
                 : m_graph(graph)
-                , m_command(command)
                 , m_kernel(kernel)
                 , m_context(kernel->context())
                 , m_fastArith{kernel->context()}
@@ -1233,6 +1231,11 @@ namespace rocRoller
             inline ExpressionPtr L(auto const& x)
             {
                 return Expression::literal(x);
+            }
+
+            inline Generator<Instruction> generate(auto& dest, ExpressionPtr expr) const
+            {
+                co_yield Expression::generate(dest, expr, m_context);
             }
 
             inline Generator<Instruction> copy(auto& dest, auto const& src) const
@@ -1499,17 +1502,22 @@ namespace rocRoller
             }
 
             Generator<Instruction> operator()(int                          tag,
-                                              ControlHypergraph::ElementOp edge,
+                                              ControlHypergraph::ElementOp eop,
                                               CoordGraph::Transformer      coords)
             {
                 rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::ElementOp()");
-                int vgprTag = std::get<0>(m_graph.getDimension<CoordGraph::VGPR>(tag));
                 co_yield_(Instruction::Comment("GEN: ElementOp"));
+
+                auto connections = m_graph.mapper.getConnections(tag);
+                AssertFatal(connections.size() == 1,
+                            "Output of element op must be a single dimension.");
+
+                int dest = connections[0].coordinate;
                 co_yield std::visit(
                     [&](auto&& arg) -> Generator<Instruction> {
-                        co_yield (*this)(arg, vgprTag, edge.a, edge.b);
+                        co_yield (*this)(arg, dest, eop.a, eop.b);
                     },
-                    edge.op);
+                    eop.op);
             }
 
             Generator<Instruction> operator()(int                              tag,
@@ -1578,9 +1586,8 @@ namespace rocRoller
                 co_yield Expression::generate(dest, assign.expression, m_context);
             }
 
-            Generator<Instruction> operator()(int                               tag,
-                                              ControlHypergraph::Barrier const& edge,
-                                              CoordGraph::Transformer           coords)
+            Generator<Instruction>
+                operator()(int, ControlHypergraph::Barrier const&, CoordGraph::Transformer)
             {
                 co_yield m_context->mem()->barrier();
             }
@@ -1592,22 +1599,247 @@ namespace rocRoller
                 Throw<FatalError>("LoadLinear present in kernel graph.");
             }
 
+            Generator<Instruction> loadMacroTileVGPR(int                                 tag,
+                                                     ControlHypergraph::LoadTiled const& load,
+                                                     CoordGraph::Transformer             coords)
+            {
+                rocRoller::Log::getLogger()->debug(
+                    "KernelGraph::CodeGenerator::loadMacroTileVGPR()");
+                co_yield_(Instruction::Comment("GEN: loadMacroTileVGPR"));
+
+                auto [user_tag, user]         = m_graph.getDimension<CoordGraph::User>(tag);
+                auto [mac_tile_tag, mac_tile] = m_graph.getDimension<CoordGraph::MacroTile>(tag);
+
+                auto vgpr = MkVGPR(load.vtype, product(mac_tile.subTileSizes));
+                vgpr      = m_context->registerTagManager()->getRegister(mac_tile_tag, vgpr);
+                co_yield vgpr->allocate();
+
+                auto rowOffset = MkSGPR(DataType::Int64);
+                co_yield m_context->argLoader()->getValue(user.argumentName(), rowOffset);
+
+                auto numBytes = DataTypeInfo::Get(vgpr->variableType()).elementSize;
+                auto bufDesc  = BufferDescriptor(m_context);
+                auto bufOpt   = BufferInstructionOptions();
+
+                co_yield bufDesc.setup();
+                co_yield bufDesc.setBasePointer(rowOffset);
+
+                auto const m = mac_tile.subTileSizes[0];
+                auto const n = mac_tile.subTileSizes[1];
+
+                AssertFatal(m > 0 && n > 0, "Invalid/unknown subtile size dimensions");
+
+                auto [row_index_tag, row_index]
+                    = m_graph.getDimension<CoordGraph::ThreadTileIndex>(tag, 0);
+                auto [col_index_tag, col_index]
+                    = m_graph.getDimension<CoordGraph::ThreadTileIndex>(tag, 1);
+
+                coords.setCoordinate(row_index_tag, L(0));
+                coords.setCoordinate(col_index_tag, L(0));
+
+                auto threadOffset = MkVGPR(DataType::Int64);
+                {
+                    auto expr = coords.reverse({user_tag})[0];
+                    co_yield generate(threadOffset, expr * L(numBytes));
+                }
+
+                auto rowStride = MkSGPR(DataType::Int64);
+                {
+                    auto expr = coords.reverseStride(row_index_tag, L(1), {user_tag})[0];
+                    co_yield generate(rowStride, expr * L(numBytes));
+                }
+
+                auto colStride = MkSGPR(DataType::Int64);
+                {
+                    auto expr = coords.reverseStride(col_index_tag, L(1), {user_tag})[0];
+                    co_yield generate(colStride, expr * L(numBytes));
+                }
+
+                auto rowOffsetExpr = rowOffset->expression();
+                auto rowStrideExpr = rowStride->expression();
+
+                // TODO multi dimensional tiles
+                for(int i = 0; i < m; ++i)
+                {
+                    for(int j = 0; j < n; ++j)
+                    {
+                        co_yield m_context->mem()->loadBuffer(
+                            vgpr->element({static_cast<int>(i * n + j)}),
+                            threadOffset->subset({0}),
+                            0,
+                            bufDesc,
+                            bufOpt,
+                            numBytes);
+                        if(j < n - 1)
+                            co_yield bufDesc.incrementBasePointer(colStride);
+                    }
+
+                    if(i < m - 1)
+                        co_yield generate(rowOffset, rowOffsetExpr + rowStrideExpr);
+                    co_yield bufDesc.setBasePointer(rowOffset);
+                }
+            }
+
+            Generator<Instruction> loadMacroTileWAVE(int                                 tag,
+                                                     ControlHypergraph::LoadTiled const& load,
+                                                     CoordGraph::Transformer             coords)
+            {
+                rocRoller::Log::getLogger()->debug(
+                    "KernelGraph::CodeGenerator::loadMacroTileWAVE()");
+                co_yield_(Instruction::Comment("GEN: loadMacroTileWAVE"));
+
+                auto [user_tag, user]           = m_graph.getDimension<CoordGraph::User>(tag);
+                auto [wave_tile_tag, wave_tile] = m_graph.getDimension<CoordGraph::WaveTile>(tag);
+                auto [vgpr_tag, vgpr]           = m_graph.getDimension<CoordGraph::VGPR>(tag);
+
+                // Move the argument pointer into v_ptr
+                Register::ValuePtr s_ptr;
+                co_yield m_context->argLoader()->getValue(user.argumentName(), s_ptr);
+
+                auto bufDesc = BufferDescriptor(m_context);
+                auto bufOpt  = BufferInstructionOptions();
+
+                co_yield bufDesc.setup();
+                co_yield bufDesc.setBasePointer(s_ptr);
+
+                // Register Value used to contain the offset
+                auto offset = Register::Value::Placeholder(
+                    m_context, Register::Type::Vector, DataType::Int64, 1);
+                co_yield offset->allocate();
+
+                uint num_elements = wave_tile.sizes[0] * wave_tile.sizes[1];
+                uint wfs          = m_context->kernel()->wavefront_size();
+                uint num_vgpr     = num_elements / wfs;
+
+                if(load.vtype == DataType::Half)
+                {
+                    auto tmpl = Register::Value::Placeholder(
+                        m_context, Register::Type::Vector, DataType::Halfx2, num_vgpr / 2);
+
+                    auto vgpr = m_context->registerTagManager()->getRegister(wave_tile_tag, tmpl);
+                    co_yield Register::AllocateIfNeeded(vgpr);
+
+                    auto offset2 = Register::Value::Placeholder(
+                        m_context, Register::Type::Vector, DataType::Int64, 1);
+
+                    for(uint a = 0; a < num_vgpr; a += 2)
+                    {
+                        coords.setCoordinate(vgpr_tag, literal(a));
+
+                        auto user_index = coords.reverse({user_tag})[0];
+                        setComment(user_index, "User Index Expression");
+                        co_yield generateOffset(offset, user_index, load.vtype.dataType);
+
+                        coords.setCoordinate(vgpr_tag, literal(a + 1));
+
+                        auto user_index2 = coords.reverse({user_tag})[0];
+                        setComment(user_index2, "User Index Expression");
+                        co_yield generateOffset(offset2, user_index2, load.vtype.dataType);
+
+                        co_yield m_context->mem()->loadAndPackBuffer(
+                            vgpr->element({static_cast<int>(a / 2)}),
+                            offset,
+                            offset2,
+                            bufDesc,
+                            bufOpt);
+                    }
+                }
+                else
+                {
+                    auto tmpl = Register::Value::Placeholder(
+                        m_context, Register::Type::Vector, load.vtype, num_vgpr);
+
+                    auto vgpr = m_context->registerTagManager()->getRegister(wave_tile_tag, tmpl);
+                    co_yield Register::AllocateIfNeeded(vgpr);
+
+                    auto numBytes = (uint)DataTypeInfo::Get(vgpr->variableType()).elementSize;
+
+                    for(uint a = 0; a < num_vgpr; ++a)
+                    {
+                        coords.setCoordinate(vgpr_tag, literal(a));
+
+                        auto user_index = coords.reverse({user_tag})[0];
+                        setComment(user_index, "User Index Expression");
+                        co_yield generateOffset(offset, user_index, vgpr->variableType().dataType);
+
+                        co_yield m_context->mem()->loadBuffer(vgpr->element({static_cast<int>(a)}),
+                                                              offset->subset({0}),
+                                                              0,
+                                                              bufDesc,
+                                                              bufOpt,
+                                                              numBytes);
+                    }
+                }
+            }
+
             Generator<Instruction> operator()(int                                 tag,
                                               ControlHypergraph::LoadTiled const& load,
                                               CoordGraph::Transformer             coords)
             {
                 rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::LoadTiled()");
                 co_yield_(Instruction::Comment("GEN: LoadTiled"));
-                Throw<FatalError>("Not implemented yet.");
+
+                auto [mac_tile_tag, mac_tile] = m_graph.getDimension<CoordGraph::MacroTile>(tag);
+
+                switch(mac_tile.memoryType)
+                {
+                case MemoryType::VGPR:
+                case MemoryType::LDS:
+                    co_yield loadMacroTileVGPR(tag, load, coords);
+                    break;
+                case MemoryType::WAVE:
+                    co_yield loadMacroTileWAVE(tag, load, coords);
+                    break;
+                default:
+                    Throw<FatalError>("Tile affinity type not supported yet.");
+                }
             }
 
             Generator<Instruction> operator()(int                                   tag,
                                               ControlHypergraph::LoadLDSTile const& load,
                                               CoordGraph::Transformer               coords)
             {
-                rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::LoadLDSTile()");
+                rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::LoadLDSTile({})",
+                                                   tag);
                 co_yield_(Instruction::Comment("GEN: LoadLDSTile"));
-                Throw<FatalError>("Not implemented yet.");
+
+                auto [user_tag, user] = m_graph.getDimension<CoordGraph::User>(tag);
+                auto [lds_tag, lds]   = m_graph.getDimension<CoordGraph::LDS>(tag);
+                auto [tile_tag, tile] = m_graph.getDimension<CoordGraph::MacroTile>(tag);
+
+                // Find the LDS allocation that contains the tile and store
+                // the offset of the beginning of the allocation into lds_offset.
+                auto ldsAllocation = m_context->registerTagManager()->getRegister(lds_tag);
+
+                auto vtype = ldsAllocation->variableType();
+
+                auto lds_offset = Register::Value::Placeholder(
+                    m_context, Register::Type::Vector, DataType::Int32, 1);
+
+                auto lds_offset_expr
+                    = (Expression::literal(ldsAllocation->getLDSAllocation()->offset())
+                       + coords.forward({lds_tag})[0])
+                      * Expression::literal(product(tile.subTileSizes));
+
+                auto numBytes = DataTypeInfo::Get(vtype).elementSize;
+
+                co_yield generate(lds_offset,
+                                  coords.getTransducer()(lds_offset_expr * L(numBytes)));
+
+                auto vgpr = m_context->registerTagManager()->getRegister(tile_tag);
+
+                auto const m = tile.subTileSizes[0];
+                auto const n = tile.subTileSizes[1];
+
+                // TODO multi dimensional tiles
+                for(int i = 0; i < m; ++i)
+                {
+                    co_yield m_context->mem()->loadLocal(
+                        vgpr->element(Generated(iota(i * n, i * n + n))),
+                        lds_offset,
+                        i * n * numBytes,
+                        n * numBytes);
+                }
             }
 
             Generator<Instruction> operator()(int                                tag,
@@ -1707,7 +1939,56 @@ namespace rocRoller
             {
                 rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::Multiply()");
                 co_yield_(Instruction::Comment("GEN: Multiply"));
-                Throw<FatalError>("Not implemented yet.");
+
+                auto [waveA_tag, waveA] = m_graph.getDimension<CoordGraph::WaveTile>(mult.a);
+                auto [waveB_tag, waveB] = m_graph.getDimension<CoordGraph::WaveTile>(mult.b);
+                auto [macA_tag, macA]   = m_graph.getDimension<CoordGraph::MacroTile>(mult.a);
+                auto [macB_tag, macB]   = m_graph.getDimension<CoordGraph::MacroTile>(mult.b);
+                auto [n_waveA_y_tag, n_waveA_y]
+                    = m_graph.getDimension<CoordGraph::WaveTileNumber>(mult.a, 1);
+                auto [n_waveB_x_tag, n_waveB_x]
+                    = m_graph.getDimension<CoordGraph::WaveTileNumber>(mult.b, 0);
+
+                auto loadAB = m_graph.control.getOutputNodeIndices<ControlHypergraph::Body>(tag)
+                                  .to<std::set>();
+
+                AssertFatal(macA.sizes[1] == macB.sizes[0], "MacroTile size mismatch.");
+
+                uint num_elements = waveA.sizes[0] * waveB.sizes[1];
+                uint wfs          = m_context->kernel()->wavefront_size();
+                uint num_agpr     = num_elements / wfs;
+
+                auto D = m_context->registerTagManager()->getRegister(
+                    tag, Register::Type::Accumulator, DataType::Float, num_agpr);
+
+                auto completed = m_completedControlNodes;
+
+                // D is not initialized here
+
+                uint const num_wave_tiles = macA.sizes[1] / waveA.sizes[1];
+                for(uint k = 0; k < num_wave_tiles; k++)
+                {
+                    m_completedControlNodes = completed; // TODO: remove this?
+
+                    // A WaveTile number; tall-skinny column block
+                    coords.setCoordinate(n_waveA_y_tag, literal(k));
+                    // B WaveTile number; short-fat row block
+                    coords.setCoordinate(n_waveB_x_tag, literal(k));
+
+                    co_yield generate(loadAB, coords);
+
+                    waveA.vgpr = m_context->registerTagManager()->getRegister(waveA_tag);
+                    waveB.vgpr = m_context->registerTagManager()->getRegister(waveB_tag);
+
+                    Expression::ExpressionPtr A = std::make_shared<Expression::Expression>(
+                        std::make_shared<CoordGraph::WaveTile>(waveA));
+                    Expression::ExpressionPtr B = std::make_shared<Expression::Expression>(
+                        std::make_shared<CoordGraph::WaveTile>(waveB));
+
+                    co_yield generate(D,
+                                      std::make_shared<Expression::Expression>(
+                                          Expression::MatrixMultiply(A, B, D->expression())));
+                }
             }
 
             Generator<Instruction> operator()(int                                         tag,
@@ -1724,21 +2005,223 @@ namespace rocRoller
                 Throw<FatalError>("StoreLinear present in kernel graph.");
             }
 
+            Generator<Instruction> storeMacroTileVGPR(int                                  tag,
+                                                      ControlHypergraph::StoreTiled const& store,
+                                                      CoordGraph::Transformer              coords)
+            {
+                rocRoller::Log::getLogger()->debug(
+                    "KernelGraph::CodeGenerator::storeMacroTileVGPR()");
+                co_yield_(Instruction::Comment("GEN: storeMacroTileVGPR"));
+
+                auto [user_tag, user]         = m_graph.getDimension<CoordGraph::User>(tag);
+                auto [mac_tile_tag, mac_tile] = m_graph.getDimension<CoordGraph::MacroTile>(tag);
+
+                auto vgpr = m_context->registerTagManager()->getRegister(mac_tile_tag);
+
+                auto rowOffset = MkSGPR(DataType::Int64);
+                co_yield m_context->argLoader()->getValue(user.argumentName(), rowOffset);
+
+                auto numBytes = DataTypeInfo::Get(vgpr->variableType()).elementSize;
+                auto bufDesc  = BufferDescriptor(m_context);
+                auto bufOpt   = BufferInstructionOptions();
+
+                co_yield bufDesc.setup();
+                co_yield bufDesc.setBasePointer(rowOffset);
+
+                auto const m = mac_tile.subTileSizes[0];
+                auto const n = mac_tile.subTileSizes[1];
+
+                auto [row_index_tag, row_index]
+                    = m_graph.getDimension<CoordGraph::ThreadTileIndex>(tag, 0);
+                auto [col_index_tag, col_index]
+                    = m_graph.getDimension<CoordGraph::ThreadTileIndex>(tag, 1);
+
+                coords.setCoordinate(row_index_tag, L(0));
+                coords.setCoordinate(col_index_tag, L(0));
+
+                auto threadOffset = MkVGPR(DataType::Int64);
+                {
+                    auto expr = coords.forward({user_tag})[0];
+                    co_yield generate(threadOffset, expr * L(numBytes));
+                }
+
+                auto rowStride = MkSGPR(DataType::Int64);
+                {
+                    auto expr = coords.forwardStride(row_index_tag, L(1), {user_tag})[0];
+                    co_yield generate(rowStride, expr * L(numBytes));
+                }
+
+                auto colStride = MkSGPR(DataType::Int64);
+                {
+                    auto expr = coords.forwardStride(col_index_tag, L(1), {user_tag})[0];
+                    co_yield generate(colStride, expr * L(numBytes));
+                }
+
+                auto rowOffsetExpr = rowOffset->expression();
+                auto rowStrideExpr = rowStride->expression();
+
+                // TODO multidimensional tiles
+                for(int i = 0; i < m; ++i)
+                {
+                    for(int j = 0; j < n; ++j)
+                    {
+                        co_yield m_context->mem()->storeBuffer(
+                            vgpr->element({static_cast<int>(i * n + j)}),
+                            threadOffset->subset({0}),
+                            0,
+                            bufDesc,
+                            bufOpt,
+                            numBytes);
+                        if(j < n - 1)
+                        {
+                            co_yield bufDesc.incrementBasePointer(colStride);
+                        }
+                    }
+                    if(i < m - 1)
+                    {
+                        co_yield generate(rowOffset, rowOffsetExpr + rowStrideExpr);
+                    }
+                    co_yield bufDesc.setBasePointer(rowOffset);
+                }
+            }
+
+            Generator<Instruction> storeMacroTileWAVE(int                                  tag,
+                                                      ControlHypergraph::StoreTiled const& store,
+                                                      CoordGraph::Transformer              coords)
+
+            {
+                rocRoller::Log::getLogger()->debug(
+                    "KernelGraph::CodeGenerator::storeMacroTileWAVE()");
+                co_yield_(Instruction::Comment("GEN: storeMacroTileWAVE"));
+
+                auto [user_tag, user]           = m_graph.getDimension<CoordGraph::User>(tag);
+                auto [wave_tile_tag, wave_tile] = m_graph.getDimension<CoordGraph::WaveTile>(tag);
+                auto [vgpr_tag, vgpr]           = m_graph.getDimension<CoordGraph::VGPR>(tag);
+
+                uint num_elements = wave_tile.sizes[0] * wave_tile.sizes[1];
+                uint wfs          = m_context->kernel()->wavefront_size();
+                uint num_vgpr     = num_elements / wfs;
+
+                auto agpr = m_context->registerTagManager()->getRegister(vgpr_tag);
+
+                AssertFatal(agpr->registerCount() == num_vgpr);
+
+                Register::ValuePtr s_ptr;
+                co_yield m_context->argLoader()->getValue(user.argumentName(), s_ptr);
+
+                auto bufDesc = BufferDescriptor(m_context);
+                auto bufOpt  = BufferInstructionOptions();
+
+                co_yield bufDesc.setup();
+                co_yield bufDesc.setBasePointer(s_ptr);
+
+                auto offset = MkVGPR(DataType::Int64);
+                auto value  = MkVGPR(agpr->variableType());
+
+                auto converted = MkVGPR(store.dataType);
+
+                auto numBytes = DataTypeInfo::Get(store.dataType).elementSize;
+
+                for(uint a = 0; a < num_vgpr; ++a)
+                {
+                    // TODO Use a stride here
+                    coords.setCoordinate(vgpr_tag, literal(a));
+
+                    auto user_index = coords.forward({user_tag})[0];
+                    co_yield generateOffset(offset, user_index, store.dataType);
+                    if(value->variableType() != store.dataType)
+                    {
+                        co_yield m_context->copier()->copy(value,
+                                                           agpr->element({static_cast<int>(a)}));
+                        co_yield Expression::generate(
+                            converted,
+                            convert(store.dataType,
+                                    std::make_shared<Expression::Expression>(value)),
+                            m_context);
+                    }
+                    else
+                    {
+                        co_yield m_context->copier()->copy(converted,
+                                                           agpr->element({static_cast<int>(a)}));
+                    }
+                    //v_accvgpr_read for V_MFMA with 2 pass instructions is 4, 10 for 8 pass instruction
+                    // and 18 for 16 pass instructions like V_MFMA_F32_32x32x8F16
+                    co_yield Instruction::Nop(18, "Nops required for v_accvgpr_read");
+                    co_yield m_context->mem()->storeBuffer(
+                        converted, offset->subset({0}), 0, bufDesc, bufOpt, numBytes);
+                }
+            }
+
             Generator<Instruction> operator()(int                                  tag,
                                               ControlHypergraph::StoreTiled const& store,
                                               CoordGraph::Transformer              coords)
             {
                 rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::StoreTiled()");
                 co_yield_(Instruction::Comment("GEN: StoreTiled"));
-                Throw<FatalError>("Not implemented yet.");
+
+                auto [mac_tile_tag, mac_tile] = m_graph.getDimension<CoordGraph::MacroTile>(tag);
+
+                switch(mac_tile.memoryType)
+                {
+                case MemoryType::VGPR:
+                    co_yield storeMacroTileVGPR(tag, store, coords);
+                    break;
+                case MemoryType::WAVE:
+                    co_yield storeMacroTileWAVE(tag, store, coords);
+                    break;
+                default:
+                    Throw<FatalError>("Tile affinity type not supported yet.");
+                }
             }
 
             Generator<Instruction> operator()(int                                    tag,
                                               ControlHypergraph::StoreLDSTile const& store,
                                               CoordGraph::Transformer                coords)
             {
+                rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::StoreLDSTiled({})",
+                                                   tag);
                 co_yield_(Instruction::Comment("GEN: StoreLDSTile"));
-                Throw<FatalError>("Not implemented yet.");
+
+                auto [lds_tag, lds]   = m_graph.getDimension<CoordGraph::LDS>(tag);
+                auto [tile_tag, tile] = m_graph.getDimension<CoordGraph::MacroTile>(tag);
+
+                // Temporary register that is used to copy the data from global memory to
+                // local memory.
+                auto vgpr  = m_context->registerTagManager()->getRegister(tile_tag);
+                auto vtype = vgpr->variableType();
+
+                // Allocate LDS memory, and store the offset of the beginning of the allocation
+                // into lds_offset.
+                auto ldsAllocation = Register::Value::AllocateLDS(
+                    m_context, vtype, product(tile.subTileSizes) * product(m_workgroupSize));
+
+                m_context->registerTagManager()->addRegister(lds_tag, ldsAllocation);
+
+                auto lds_offset = Register::Value::Placeholder(
+                    m_context, Register::Type::Vector, DataType::Int32, 1);
+
+                auto lds_offset_expr
+                    = (Expression::literal(ldsAllocation->getLDSAllocation()->offset())
+                       + coords.forward({lds_tag})[0])
+                      * Expression::literal(product(tile.subTileSizes));
+
+                auto numBytes = DataTypeInfo::Get(vtype).elementSize;
+                co_yield generate(lds_offset,
+                                  coords.getTransducer()(lds_offset_expr * L(numBytes)));
+
+                auto const m = tile.subTileSizes[0];
+                auto const n = tile.subTileSizes[1];
+
+                // TODO multi dimensional tiles
+                for(int i = 0; i < m; ++i)
+                {
+                    // Store the value into local memory
+                    co_yield m_context->mem()->storeLocal(
+                        lds_offset->subset({0}),
+                        vgpr->element(Generated(iota(i * n, i * n + n))),
+                        i * n * numBytes,
+                        n * numBytes);
+                }
             }
 
             Generator<Instruction> operator()(int                                 tag,
@@ -1777,7 +2260,6 @@ namespace rocRoller
 
         private:
             KernelHypergraph                m_graph;
-            std::shared_ptr<Command>        m_command;
             std::shared_ptr<Context>        m_context;
             std::shared_ptr<AssemblyKernel> m_kernel;
 
@@ -1802,14 +2284,13 @@ namespace rocRoller
         }
 
         Generator<Instruction> generate(KernelHypergraph                graph,
-                                        std::shared_ptr<Command>        command,
                                         std::shared_ptr<AssemblyKernel> kernel)
         {
             TIMER(t, "KernelGraph::generate");
             rocRoller::Log::getLogger()->debug("KernelGraph::generate(); DOT\n{}",
                                                graph.toDOT(true));
 
-            auto visitor = NewCFCodeGeneratorVisitor(graph, command, kernel);
+            auto visitor = NewCFCodeGeneratorVisitor(graph, kernel);
 
             co_yield visitor.generate();
         }

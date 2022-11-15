@@ -587,12 +587,13 @@ namespace rocRoller
                 graph.control.setElement(new_tag, new_op);
             }
 
-            void loadWaveMacroTile(KernelHypergraph&      graph,
-                                   CoordGraph::MacroTile& mac_tile,
-                                   int                    i_mac_x,
-                                   int                    i_mac_y,
-                                   int                    workitem,
-                                   int                    user_tag)
+            void loadWaveMacroTile(KernelHypergraph&            graph,
+                                   CoordGraph::MacroTile const& mac_tile,
+                                   int                          load_tag,
+                                   int                          i_mac_x,
+                                   int                          i_mac_y,
+                                   int                          workitem,
+                                   int                          user_tag)
             {
                 AssertFatal(mac_tile.subTileSizes.size() == 4, "Invalid tile specification.");
 
@@ -619,6 +620,9 @@ namespace rocRoller
                 graph.coordinates.addElement(CoordGraph::Tile(), {i_mac_x}, {n_wave_x, i_wave_x});
                 graph.coordinates.addElement(CoordGraph::Tile(), {i_mac_y}, {n_wave_y, i_wave_y});
 
+                graph.mapper.connect<CoordGraph::WaveTileNumber>(load_tag, n_wave_x, 0);
+                graph.mapper.connect<CoordGraph::WaveTileNumber>(load_tag, n_wave_y, 1);
+
                 auto wave_x = graph.coordinates.addElement(CoordGraph::Wavefront(0));
                 auto wave_y = graph.coordinates.addElement(CoordGraph::Wavefront(1));
                 auto wave   = graph.coordinates.addElement(CoordGraph::Wavefront(-1));
@@ -635,6 +639,8 @@ namespace rocRoller
 
                 graph.coordinates.addElement(CoordGraph::Flatten(), {wave_x, wave_y}, {wave});
                 graph.coordinates.addElement(CoordGraph::Flatten(), {wave, lane}, {workitem});
+
+                graph.mapper.connect<CoordGraph::VGPR>(load_tag, vgpr);
 
                 auto block_number = graph.coordinates.addElement(
                     CoordGraph::Adhoc("BlockNumber", literal(static_cast<uint>(wfs / m)), nullptr));
@@ -757,6 +763,7 @@ namespace rocRoller
             }
 
             void loadMacroTile(KernelHypergraph& graph,
+                               int               load_tag,
                                int               user_tag,
                                int               mac_tile_tag,
                                std::vector<int>& sdim)
@@ -765,7 +772,11 @@ namespace rocRoller
                 auto user     = graph.coordinates.getNode<CoordGraph::User>(user_tag);
 
                 rocRoller::Log::getLogger()->debug(
-                    "KernelGraph::LowerTileVisitor::loadMacroTile(): size {} by {}",
+                    "KernelGraph::LowerTileVisitor::loadMacroTile(): User({}), MacroTile({})",
+                    user_tag,
+                    mac_tile_tag);
+                rocRoller::Log::getLogger()->debug(
+                    "KernelGraph::LowerTileVisitor::loadMacroTile(): MacroTile size: {}x{}",
                     mac_tile.sizes[0],
                     mac_tile.sizes[1]);
 
@@ -810,6 +821,9 @@ namespace rocRoller
                     auto i_thr_x = graph.coordinates.addElement(thr_tile.tileIndex(0));
                     auto i_thr_y = graph.coordinates.addElement(thr_tile.tileIndex(1));
 
+                    graph.mapper.connect<CoordGraph::ThreadTileIndex>(load_tag, i_thr_x, 0);
+                    graph.mapper.connect<CoordGraph::ThreadTileIndex>(load_tag, i_thr_y, 1);
+
                     graph.coordinates.addElement(
                         CoordGraph::Join(), {i_thr_x, i_thr_y}, {thr_tile_tag});
                     graph.coordinates.addElement(CoordGraph::Tile(), {i_mac_x}, {n_thr_x, i_thr_x});
@@ -822,18 +836,13 @@ namespace rocRoller
                     graph.coordinates.addElement(
                         CoordGraph::PassThrough(), {n_thr_y}, {workitem_y});
 
-                    if(mac_tile.memoryType == MemoryType::VGPR)
-                    {
-                        auto vgpr = graph.coordinates.addElement(CoordGraph::VGPR());
-                        graph.coordinates.addElement(CoordGraph::DataFlow(), {user_tag}, {vgpr});
-                    }
-
                     // User -> DataFlow() -> LDS gets added in addLDSOps
                 }
                 break;
 
                 case MemoryType::WAVE:
-                    loadWaveMacroTile(graph, mac_tile, i_mac_x, i_mac_y, workitem, user_tag);
+                    loadWaveMacroTile(
+                        graph, mac_tile, load_tag, i_mac_x, i_mac_y, workitem, user_tag);
                     break;
 
                 default:
@@ -845,10 +854,10 @@ namespace rocRoller
                                         KernelHypergraph const&             original,
                                         GraphReindexer&                     reindexer,
                                         int                                 tag,
-                                        ControlHypergraph::LoadTiled const& load) override
+                                        ControlHypergraph::LoadTiled const& oload) override
             {
                 auto logger = rocRoller::Log::getLogger();
-                logger->debug("KernelGraph::LowerTileVisitor::LoadTiled() {}", tag);
+                logger->debug("KernelGraph::LowerTileVisitor::LoadTiled({})", tag);
 
                 auto original_user     = original.mapper.get<CoordGraph::User>(tag);
                 auto original_mac_tile = original.mapper.get<CoordGraph::MacroTile>(tag);
@@ -863,9 +872,10 @@ namespace rocRoller
                 for(int i = 0; i < sdims.size(); i++)
                     sdims[i] = reindexer.coordinates.at(sdims[i]);
 
-                loadMacroTile(graph, user, mac_tile, sdims);
-
                 copyOperation(graph, original, reindexer, tag);
+
+                auto load = reindexer.control.at(tag);
+                loadMacroTile(graph, load, user, mac_tile, sdims);
             }
 
             void storeWaveMacroTile(KernelHypergraph&      graph,
@@ -969,6 +979,7 @@ namespace rocRoller
             }
 
             void storeMacroTile(KernelHypergraph& graph,
+                                int               store_tag,
                                 int               user_tag,
                                 int               mac_tile_tag,
                                 std::vector<int>& sdims)
@@ -977,7 +988,11 @@ namespace rocRoller
                 auto user     = graph.coordinates.getNode<CoordGraph::User>(user_tag);
 
                 rocRoller::Log::getLogger()->debug(
-                    "KernelGraph::LowerTileVisitor::storeMacroTile(): size {} by {}",
+                    "KernelGraph::LowerTileVisitor::storeMacroTile(): User({}), MacroTile({})",
+                    user_tag,
+                    mac_tile_tag);
+                rocRoller::Log::getLogger()->debug(
+                    "KernelGraph::LowerTileVisitor::storeMacroTile(): MacroTile size: {}x{}",
                     mac_tile.sizes[0],
                     mac_tile.sizes[1]);
 
@@ -1017,10 +1032,14 @@ namespace rocRoller
                 {
                     auto thr_tile     = CoordGraph::ThreadTile(mac_tile.subTileSizes);
                     auto thr_tile_tag = graph.coordinates.addElement(thr_tile);
-                    auto n_thr_x      = graph.coordinates.addElement(thr_tile.tileNumber(0));
-                    auto n_thr_y      = graph.coordinates.addElement(thr_tile.tileNumber(1));
-                    auto i_thr_x      = graph.coordinates.addElement(thr_tile.tileIndex(0));
-                    auto i_thr_y      = graph.coordinates.addElement(thr_tile.tileIndex(1));
+
+                    auto n_thr_x = graph.coordinates.addElement(thr_tile.tileNumber(0));
+                    auto n_thr_y = graph.coordinates.addElement(thr_tile.tileNumber(1));
+                    auto i_thr_x = graph.coordinates.addElement(thr_tile.tileIndex(0));
+                    auto i_thr_y = graph.coordinates.addElement(thr_tile.tileIndex(1));
+
+                    graph.mapper.connect<CoordGraph::ThreadTileIndex>(store_tag, i_thr_x, 0);
+                    graph.mapper.connect<CoordGraph::ThreadTileIndex>(store_tag, i_thr_y, 1);
 
                     graph.coordinates.addElement(
                         CoordGraph::Split(), {thr_tile_tag}, {i_thr_x, i_thr_y});
@@ -1051,9 +1070,10 @@ namespace rocRoller
                                         KernelHypergraph const&              original,
                                         GraphReindexer&                      reindexer,
                                         int                                  tag,
-                                        ControlHypergraph::StoreTiled const& store) override
+                                        ControlHypergraph::StoreTiled const& ostore) override
             {
-                rocRoller::Log::getLogger()->debug("KernelGraph::LowerTileVisitor::StoreTiled()");
+                rocRoller::Log::getLogger()->debug("KernelGraph::LowerTileVisitor::StoreTiled({})",
+                                                   tag);
 
                 auto original_user     = original.mapper.get<CoordGraph::User>(tag);
                 auto original_mac_tile = original.mapper.get<CoordGraph::MacroTile>(tag);
@@ -1068,9 +1088,10 @@ namespace rocRoller
                 for(int i = 0; i < sdims.size(); i++)
                     sdims[i] = reindexer.coordinates.at(sdims[i]);
 
-                storeMacroTile(graph, user, mac_tile, sdims);
-
                 copyOperation(graph, original, reindexer, tag);
+
+                auto store = reindexer.control.at(tag);
+                storeMacroTile(graph, store, user, mac_tile, sdims);
             }
 
         private:
@@ -1093,6 +1114,13 @@ namespace rocRoller
                 auto storeLDS = graph.control.addElement(ControlHypergraph::StoreLDSTile());
                 auto barrier  = graph.control.addElement(ControlHypergraph::Barrier());
                 auto loadLDS  = graph.control.addElement(ControlHypergraph::LoadLDSTile());
+
+                graph.mapper.connect<CoordGraph::LDS>(storeLDS, lds);
+                graph.mapper.connect<CoordGraph::MacroTile>(storeLDS, tile_tag);
+
+                graph.mapper.connect<CoordGraph::User>(loadLDS, user_tag);
+                graph.mapper.connect<CoordGraph::LDS>(loadLDS, lds);
+                graph.mapper.connect<CoordGraph::MacroTile>(loadLDS, tile_tag);
 
                 // Add an edge to the coordinate graph to index into the LDS allocation.
                 auto workgroupSizes = context->kernel()->workgroupSize();

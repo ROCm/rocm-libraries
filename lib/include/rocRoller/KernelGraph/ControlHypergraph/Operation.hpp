@@ -159,6 +159,14 @@ namespace rocRoller
          */
         struct LoadTiled : public BaseOperation
         {
+            LoadTiled() = delete;
+            LoadTiled(VariableType const varType)
+                : vtype(varType)
+            {
+            }
+
+            VariableType vtype;
+
             virtual std::string toString() const override
             {
                 return concatenate("LoadTiled");

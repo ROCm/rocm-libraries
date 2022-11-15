@@ -8,6 +8,7 @@
 #include "KernelGraph/CoordinateTransform/Dimension.hpp"
 #include "Operations/T_Execute.hpp"
 #include "Utilities/Error.hpp"
+#include "Utilities/Utils.hpp"
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Visitors.hpp>
@@ -575,7 +576,8 @@ namespace rocRoller
                     CoordGraph::ConstructMacroTile(), dims, std::vector<int>{tiled});
                 graph.coordinates.addElement(CoordGraph::DataFlow(), {user}, {tiled});
 
-                auto load = graph.control.addElement(ControlHypergraph::LoadTiled());
+                auto load
+                    = graph.control.addElement(ControlHypergraph::LoadTiled(tload.variableType()));
                 graph.control.addElement(ControlHypergraph::Body(), {m_kernel}, {load});
 
                 graph.mapper.connect<CoordGraph::User>(load, user);
@@ -687,7 +689,16 @@ namespace rocRoller
             {
                 for(auto const& xop : exec.getXOps())
                 {
-                    auto sinputs  = Operations::Inputs()(*xop);
+                    auto sinputs = std::visit(
+                        overloaded{
+                            [&](Operations::E_Binary const& op) {
+                                return std::vector<int>{op.a, op.b};
+                            },
+                            [&](Operations::E_Unary const& op) { return std::vector<int>{op.a}; },
+                            [&](Operations::Nop const& op) { return std::vector<int>{}; },
+                        },
+                        *xop);
+
                     auto soutputs = Operations::Outputs()(*xop);
 
                     std::vector<int> coordinate_inputs, coordinate_outputs;

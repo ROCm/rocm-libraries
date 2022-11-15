@@ -56,6 +56,11 @@ namespace rocRoller
             {
                 Throw<FatalError>("Matrix multiplication not supported by *");
             }
+            // delete after graph rearch complete
+            if(std::holds_alternative<WaveTilePtr2>(*a) || std::holds_alternative<WaveTilePtr2>(*b))
+            {
+                Throw<FatalError>("Matrix multiplication not supported by *");
+            }
             return std::make_shared<Expression>(Multiply{a, b});
         }
 
@@ -264,6 +269,8 @@ namespace rocRoller
         EXPRESSION_INFO_CUSTOM(CommandArgumentValue, "Literal Value");
         EXPRESSION_INFO_CUSTOM(AssemblyKernelArgumentPtr, "Kernel Argument");
         EXPRESSION_INFO_CUSTOM(WaveTilePtr, "WaveTile");
+        // delete after graph rearch complete
+        EXPRESSION_INFO_CUSTOM(WaveTilePtr2, "WaveTile");
 
         EXPRESSION_INFO(DataFlowTag);
 
@@ -301,6 +308,12 @@ namespace rocRoller
         struct ExpressionEvaluationTimesVisitor
         {
             EvaluationTimes operator()(WaveTilePtr const& expr) const
+            {
+                return {EvaluationTime::KernelExecute};
+            }
+
+            // delete after graph rearch complete
+            EvaluationTimes operator()(WaveTilePtr2 const& expr) const
             {
                 return {EvaluationTime::KernelExecute};
             }
