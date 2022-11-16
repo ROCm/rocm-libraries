@@ -575,6 +575,29 @@ namespace rocRoller
                 co_yield m_allocation->m_registerIndices.at(coord);
         }
 
+        /**
+         * @brief Yields RegisterId for the registers associated with this allocation
+         *
+         * Note: This function does not yield any ids for Literals, Labels, or unallocated registers
+         *
+         * @return Generator<RegisterId>
+         */
+        inline Generator<RegisterId> Value::getRegisterIds() const
+        {
+            if(m_regType == Type::Literal || m_regType == Type::Label)
+            {
+                co_return;
+            }
+            if(!m_allocation || m_allocation->allocationState() != AllocationState::Allocated)
+            {
+                co_return;
+            }
+            for(int coord : m_allocationCoord)
+            {
+                co_yield RegisterId(m_regType, m_allocation->m_registerIndices.at(coord));
+            }
+        }
+
         inline std::string Value::getLiteral() const
         {
             if(m_regType != Type::Literal)

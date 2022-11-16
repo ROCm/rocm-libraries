@@ -17,7 +17,7 @@ namespace rocRoller
             LocalData,
             Label,
             Special,
-            Count
+            Count // Always last enum entry
         };
 
         enum class AllocationState
@@ -29,6 +29,9 @@ namespace rocRoller
             Error,
             Count
         };
+
+        struct RegisterId;
+        struct RegisterIdHash;
 
         class Allocation;
         struct Value;

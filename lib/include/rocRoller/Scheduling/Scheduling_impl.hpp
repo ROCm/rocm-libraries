@@ -42,8 +42,7 @@ namespace rocRoller
         inline void InstructionStatus::combine(InstructionStatus const& other)
         {
             stallCycles = std::max(stallCycles, other.stallCycles);
-
-            nops += other.nops;
+            nops        = std::max(nops, other.nops);
             waitCount.combine(other.waitCount);
 
             errors.insert(errors.end(), other.errors.begin(), other.errors.end());

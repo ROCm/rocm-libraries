@@ -1,5 +1,6 @@
 #pragma once
 
+#include <bit>
 #include <cassert>
 #include <concepts>
 
@@ -25,6 +26,28 @@ namespace rocRoller
      */
     namespace Register
     {
+        struct RegisterId
+        {
+            RegisterId(Type regType, int index)
+                : regType(regType)
+                , regIndex(index)
+            {
+            }
+            Type regType;
+            int  regIndex;
+            auto operator<=>(RegisterId const&) const = default;
+        };
+
+        struct RegisterIdHash
+        {
+            size_t operator()(RegisterId const& regId) const noexcept
+            {
+                size_t h1 = static_cast<size_t>(regId.regType);
+                size_t h2 = static_cast<size_t>(regId.regIndex);
+                return h1 | (h2 << std::bit_width(static_cast<unsigned int>(Type::Count)));
+            }
+        };
+
         std::string TypePrefix(Type t);
 
         /**
@@ -215,6 +238,8 @@ namespace rocRoller
 
             bool           hasContiguousIndices() const;
             Generator<int> registerIndices() const;
+
+            Generator<RegisterId> getRegisterIds() const;
 
             std::string getLiteral() const;
 

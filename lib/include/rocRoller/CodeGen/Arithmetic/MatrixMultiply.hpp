@@ -31,11 +31,7 @@
 #include <memory>
 #include <tuple>
 
-#include "../../Context.hpp"
-#include "../../DataTypes/DataTypes.hpp"
-#include "../../Expression.hpp"
-#include "../../InstructionValues/Register_fwd.hpp"
-#include "../../Utilities/Generator.hpp"
+#include "ArithmeticGenerator.hpp"
 
 namespace rocRoller
 {

@@ -111,7 +111,7 @@ namespace rocRollerTest
 
     TEST_F(MFMA90aObserverTest, VALUThenMFMA)
     {
-        auto v = createRegisters(Register::Type::Vector, DataType::Float, 5);
+        auto v = createRegisters(Register::Type::Vector, DataType::Float, 6);
         auto a = createRegisters(Register::Type::Accumulator, DataType::Float, 1);
 
         {
@@ -139,7 +139,23 @@ namespace rocRollerTest
             peekAndSchedule(insts[0]);
             peekAndSchedule(insts[1], 0);
 
-            EXPECT_THAT(output(), Not(HasSubstr("s_nop 1")));
+            EXPECT_THAT(output(), Not(HasSubstr("s_nop")));
+            clearOutput();
+        }
+
+        {
+            Scheduling::InstructionStatus peeked;
+            std::vector<Instruction>      insts
+                = {Instruction("v_or_b32", {v[2]}, {v[0], v[1]}, {}, ""),
+                   Instruction("v_or_b32", {v[5]}, {v[3], v[4]}, {}, ""), // Unrelated
+                   Instruction("v_mfma_f32_16x16x4f32", {a[0]}, {v[0], v[2], a[0]}, {}, ""),
+                   Instruction("s_endpgm", {}, {}, {}, "")};
+
+            peekAndSchedule(insts[0]);
+            peekAndSchedule(insts[1]);
+            peekAndSchedule(insts[2], 1);
+
+            EXPECT_THAT(output(), HasSubstr("s_nop 0"));
             clearOutput();
         }
     }

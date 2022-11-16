@@ -39,6 +39,19 @@ namespace rocRoller
         }
     }
 
+    /**
+     * @brief Get the Register Hazard Map.
+     *
+     * This tracks the state of registers that may have associated wait state hazards
+     * caused by previous instructions.
+     *
+     * @return std::shared_ptr<RegisterHazardMap>
+     */
+    inline std::shared_ptr<RegisterHazardMap> Context::getRegisterHazardMap() const
+    {
+        return m_regMap;
+    }
+
     inline std::shared_ptr<Register::Allocator> Context::allocator(Register::Type registerType)
     {
         return m_allocators.at(static_cast<int>(registerType));

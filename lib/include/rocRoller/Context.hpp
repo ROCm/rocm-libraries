@@ -6,6 +6,8 @@
 #include <memory>
 #include <ranges>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 #include "Context_fwd.hpp"
 
@@ -28,11 +30,17 @@
 #include "DataTypes/DataTypes.hpp"
 #include "GPUArchitecture/GPUArchitecture.hpp"
 #include "KernelOptions.hpp"
+#include "Scheduling/WaitStateHazardCounter.hpp"
 
 namespace rocRoller
 {
-    struct Context : public std::enable_shared_from_this<Context>
+    using RegisterHazardMap = std::unordered_map<Register::RegisterId,
+                                                 std::vector<Scheduling::WaitStateHazardCounter>,
+                                                 Register::RegisterIdHash>;
+
+    class Context : public std::enable_shared_from_this<Context>
     {
+    public:
         Context();
         ~Context();
 
@@ -84,6 +92,8 @@ namespace rocRoller
         GPUArchitecture const&          targetArchitecture() const;
         int                             hipDeviceIndex() const;
 
+        std::shared_ptr<RegisterHazardMap> getRegisterHazardMap() const;
+
     private:
         static ContextPtr
             Create(int deviceIndex, GPUArchitecture const& arch, std::string const& kernelName);
@@ -109,6 +119,9 @@ namespace rocRoller
 
         std::string   m_assemblyFileName;
         KernelOptions m_kernelOptions;
+
+        // Represents registers and their associated wait state hazards
+        std::shared_ptr<RegisterHazardMap> m_regMap;
     };
 
     std::ostream& operator<<(std::ostream&, ContextPtr const&);

@@ -10,6 +10,12 @@ namespace rocRoller
 {
     namespace Scheduling
     {
+        /**
+         * @brief Observer for wait state hazards specific to GFX 90a MFMA instructions
+         *
+         * @deprecated
+         * TODO: Remove when all rules here are implemented with smaller observers
+         */
         class MFMA90aObserver
         {
         public:
@@ -220,21 +226,7 @@ namespace rocRoller
                         }
                     }
                 }
-                // VALU write followed by MFMA read instruction
-                if(m_prevInst.isVALU() && !m_prevInst.isDLOP() && currentInst.isMFMA())
-                {
-                    for(auto const& prevDst : m_prevInst.getDsts())
-                    {
-                        for(auto const& currentSrc : currentInst.getSrcs())
-                        {
-                            if(prevDst.getRegisterType() == Register::Type::Vector
-                               && prevDst.intersects(currentSrc))
-                            {
-                                minNop = std::max(minNop, m_VALUWriteFollowedByMFMAReadNops);
-                            }
-                        }
-                    }
-                }
+                // VALU write followed by MFMA read instruction covered by the observer VALUWriteFollowedByMFMARead
                 return minNop;
             }
 

@@ -236,6 +236,7 @@ set(rocroller_src
  lib/source/CodeGen/Arithmetic/SignedShiftR.cpp
  lib/source/CodeGen/Arithmetic/Subtract.cpp
  lib/source/CodeGen/Buffer.cpp
+ lib/source/CodeGen/InstructionRef.cpp
  lib/source/CodeGen/MemoryInstructions.cpp
 
  lib/source/KernelGraph/ControlGraph/ControlEdge.cpp
@@ -291,6 +292,8 @@ set(rocroller_src
  lib/source/Schedulers/RoundRobinScheduler.cpp
  lib/source/Schedulers/SequentialScheduler.cpp
  lib/source/Observers/ObserverCreation.cpp
+ lib/source/Observers/RegisterMapObserver.cpp
+ lib/source/Observers/VALUWriteFollowedByMFMARead.cpp
  lib/source/Timer.cpp
 )
 

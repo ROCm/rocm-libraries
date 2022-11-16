@@ -13,6 +13,9 @@ namespace rocRoller
      * InstructionReference can be used to copy an instruction to refer to in the future.
      * It does not carry direct reference to its registers, so those registers' lifecycles are unaffected in the generated code.
      * This is useful in places where being able to refer to instructions that were already generated is needed, such as hazard observers.
+     *
+     * @deprecated
+     * TODO: Remove when the MFME90aObserver is replaced
      */
     class InstructionReference
     {

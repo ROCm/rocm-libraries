@@ -72,6 +72,8 @@ namespace rocRoller
         rv->m_brancher     = std::make_shared<BranchGenerator>(rv);
         rv->m_random       = std::make_shared<RandomGenerator>(0);
 
+        rv->m_regMap = std::make_shared<RegisterHazardMap>();
+
         rv->m_labelAllocator = std::make_shared<LabelAllocator>(kernelName);
 
         rv->m_assemblyFileName = Settings::getInstance()->get(Settings::AssemblyFile);

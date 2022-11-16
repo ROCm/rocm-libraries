@@ -4,6 +4,8 @@
 #include <rocRoller/Scheduling/Observers/AllocatingObserver.hpp>
 #include <rocRoller/Scheduling/Observers/FileWritingObserver.hpp>
 #include <rocRoller/Scheduling/Observers/MFMA90aObserver.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/RegisterMapObserver.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/VALUWriteFollowedByMFMARead.hpp>
 #include <rocRoller/Scheduling/Observers/WaitcntObserver.hpp>
 
 namespace rocRoller
@@ -51,10 +53,13 @@ namespace rocRoller
 
         std::shared_ptr<Scheduling::IObserver> createObserver(ContextPtr const& ctx)
         {
-            PotentialObservers<Scheduling::AllocatingObserver,
-                               Scheduling::WaitcntObserver,
-                               Scheduling::FileWritingObserver,
-                               Scheduling::MFMA90aObserver>
+            PotentialObservers<
+                Scheduling::RegisterMapObserver, // NOTE: RegisterMapObserver should be first
+                Scheduling::AllocatingObserver,
+                Scheduling::WaitcntObserver,
+                Scheduling::FileWritingObserver,
+                Scheduling::MFMA90aObserver,
+                Scheduling::VALUWriteFollowedByMFMARead>
                 potentialObservers;
             return createObserver_Conditional(ctx, potentialObservers);
         }
