@@ -364,6 +364,9 @@ def html_summary(html_file, perf_runs):
                 rangeslider=dict(visible=True),
                 type="date",
             ),
+            yaxis=dict(
+                fixedrange=False,
+            ),
         )
         plot.update_layout(
             height=1000,
