@@ -15,7 +15,15 @@ Full documentation for rocPRIM is available at [https://codedocs.xyz/ROCmSoftwar
 ### Fixed
 - Fixed the compilation failure in `device_merge` if the two key iterators don't match.
 
-## [Unreleased rocPRIM-2.11.0 for ROCm 5.3.0]
+## [rocPRIM-2.11.1 for ROCm 5.3.3]
+### Fixed
+- Fixed the compilation failure in device_merge if the two key iterators don't match.
+
+## [rocPRIM-2.11.0 for ROCm 5.3.2]
+### Known Issue
+- device_merge no longer correctly supports using different types for `keys_input1` and `keys_input2` (starting from the 5.3.0 release).
+
+## [rocPRIM-2.11.0 for ROCm 5.3.0]
 ### Added
 - New functions `subtract_left` and `subtract_right` in `block_adjacent_difference` to apply functions
   on pairs of adjacent items distributed between threads in a block.
