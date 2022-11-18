@@ -11,6 +11,7 @@ project(rocThrust_package_install_test CXX)
 # CMake modules
 list(APPEND CMAKE_MODULE_PATH
   ${CMAKE_CURRENT_SOURCE_DIR}/../cmake
+  ${ROCM_PATH}/lib/cmake/hip /opt/rocm/lib/cmake/hip # FindHIP.cmake
   ${HIP_PATH}/cmake /opt/rocm/hip/cmake # FindHIP.cmake
 )
 
