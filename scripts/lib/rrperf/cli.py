@@ -20,7 +20,7 @@ def main():
         default=False,
     )
     run_cmd.add_argument(
-        "--working_dir",
+        "--rundir",
         help="Location to run tests and store performance results.",
         default=None,
     )
@@ -54,10 +54,18 @@ def main():
         description="""Run multiple performance tests against multiple commits and/or
         the current workspace.
         HEAD is tested if commits are not provided. Tags (like HEAD) can be specified.
-        The output is in {workdir}/doc_{datetime}.""",
+        The output is in {clonedir}/doc_{datetime}.""",
     )
     autoperf_cmd.add_argument(
-        "--workdir", type=str, help="Working directory", default="."
+        "--clonedir",
+        type=str,
+        help="Base directory for repo clone destinations.",
+        default=".",
+    )
+    autoperf_cmd.add_argument(
+        "--rundir",
+        help="Location to run tests and store performance results.",
+        default=None,
     )
     autoperf_cmd.add_argument(
         "--ancestral",

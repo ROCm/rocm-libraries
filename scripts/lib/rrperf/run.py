@@ -26,20 +26,30 @@ def load_suite(suite: str):
     return ns[suite]()
 
 
-def get_work_dir(working_dir: Path = None) -> Path:
+def get_work_dir(rundir: Path = None, build_dir: Path = None) -> Path:
     """Return a new work directory path."""
 
     date = datetime.date.today().strftime("%Y-%m-%d")
     root = "."
-    if working_dir:
+    commit = None
+    if build_dir is not None:
         try:
-            commit = rrperf.git.short_hash(working_dir)
-        except OSError:
-            commit = rrperf.git.short_hash(root)
-        finally:
-            root = working_dir
-    else:
+            commit = rrperf.git.short_hash(build_dir)
+        except Exception:
+            pass
+
+    if commit is None and rundir is not None:
+        try:
+            commit = rrperf.git.short_hash(rundir)
+        except Exception:
+            pass
+
+    if commit is None:
         commit = rrperf.git.short_hash(root)
+
+    if rundir is not None:
+        root = rundir
+
     serial = len(list(Path(root).glob(f"{date}-{commit}-*")))
     return Path(root) / Path(f"{date}-{commit}-{serial:03d}")
 
@@ -117,7 +127,7 @@ def run(
     suite: str = None,
     submit: bool = False,
     filter: str = None,
-    working_dir: Path = None,
+    rundir: Path = None,
     build_dir: Path = None,
     rocm_smi: str = "rocm-smi",
     pin_clocks: bool = False,
@@ -149,25 +159,25 @@ def run(
         arch = build_dir / "source" / "rocRoller" / "GPUArchitecture_def.msgpack"
         env["ROCROLLER_ARCHITECTURE_FILE"] = arch
 
-    working_dir = get_work_dir(working_dir)
-    working_dir.mkdir(parents=True, exist_ok=True)
+    rundir = get_work_dir(rundir, build_dir)
+    rundir.mkdir(parents=True, exist_ok=True)
 
     # pts.create_git_info(str(wrkdir / "git-commit.txt"))
-    git_commit = working_dir / "git-commit.txt"
+    git_commit = rundir / "git-commit.txt"
     git_commit.write_text(rrperf.git.full_hash(top) + "\n")
     # pts.create_specs_info(str(wrkdir / "machine-specs.txt"))
-    machine_specs = working_dir / "machine-specs.txt"
+    machine_specs = rundir / "machine-specs.txt"
     machine_specs.write_text(str(rrperf.specs.get_machine_specs(0, rocm_smi)) + "\n")
 
-    timestamp = working_dir / "timestamp.txt"
+    timestamp = rundir / "timestamp.txt"
     timestamp.write_text(str(datetime.datetime.now().timestamp()) + "\n")
 
-    result = run_problems(generator, build_dir, working_dir, env)
+    result = run_problems(generator, build_dir, rundir, env)
 
     if submit:
-        ptsdir = working_dir / "rocRoller"
+        ptsdir = rundir / "rocRoller"
         ptsdir.mkdir(parents=True)
         # XXX if running single token, suite might be None
-        submit_directory(suite, working_dir, ptsdir)
+        submit_directory(suite, rundir, ptsdir)
 
-    return result, working_dir
+    return result, rundir

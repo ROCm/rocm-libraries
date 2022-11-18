@@ -59,7 +59,8 @@ def build_rocroller(
 
 def run(
     commits: List[str],
-    workdir: str,
+    clonedir: str,
+    rundir: str,
     current: bool = False,
     ancestral: bool = False,
     suite: str = None,
@@ -86,7 +87,7 @@ def run(
     if current:
         targets.append("current")
 
-    top = Path(workdir).resolve()
+    top = Path(clonedir).resolve()
     top.mkdir(parents=True, exist_ok=True)
     os.chdir(str(top))
 
@@ -102,7 +103,7 @@ def run(
             target,
         )
         _, result_dir = suite_run.run(
-            build_dir=build_dir, working_dir=project_dir, suite=suite, filter=filter
+            build_dir=build_dir, rundir=rundir, suite=suite, filter=filter
         )
         results.append(result_dir)
 

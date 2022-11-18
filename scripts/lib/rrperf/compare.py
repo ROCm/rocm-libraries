@@ -158,6 +158,7 @@ header = [
     "Mean B",
     "Median A",
     "Median B",
+    "Median Diff %",
     "Moods p-val",
 ]
 
@@ -182,6 +183,7 @@ def markdown_summary(md, perf_runs):
                 f"{comparison.mean[1]}",
                 f"{comparison.median[0]}",
                 f"{comparison.median[1]}",
+                f"{(((comparison.median[1] - comparison.median[0]) * 100.0)/comparison.median[0]):.2f}%",
                 f"{comparison.moods_pval:0.4e}",
             ]
             print(
@@ -191,10 +193,16 @@ def markdown_summary(md, perf_runs):
 
     perf_runs.sort()
 
-    print("\n\n## Machines\n", file=md)
+    machines = dict()
     for run in perf_runs:
-        print("### Machine for {}:\n".format(run.name()), file=md)
-        print(run.machine_spec.pretty_string(), file=md)
+        if run.machine_spec not in machines:
+            machines[run.machine_spec] = list()
+        machines[run.machine_spec].append(run.name())
+
+    print("\n\n## Machines\n", file=md)
+    for machine in machines:
+        print("### Machine for {}:\n".format(", ".join(machines[machine])), file=md)
+        print(machine.pretty_string(), file=md)
         print("\n")
 
 
@@ -219,6 +227,7 @@ def html_overview_table(html_file, summary):
                 <td> {comparison.mean[1]} </td>
                 <td> {comparison.median[0]} </td>
                 <td>{comparison.median[1]} </td>
+                <td>{(((comparison.median[1] - comparison.median[0]) * 100.0)/comparison.median[0]):.2f}% </td>
                 <td> {comparison.moods_pval:0.4e}</td>
                 <tr>""",
                 file=html_file,
@@ -237,12 +246,22 @@ def email_html_summary(html_file, perf_runs):
     html_overview_table(html_file, summary)
 
     perf_runs.sort()
-    print("<h2>Machines</h2>", file=html_file)
+
+    machines = dict()
     for run in perf_runs:
-        print("<h3>Machine for {}:</h3>".format(run.name()), file=html_file)
+        if run.machine_spec not in machines:
+            machines[run.machine_spec] = list()
+        machines[run.machine_spec].append(run.name())
+
+    print("<h2>Machines</h2>", file=html_file)
+    for machine in machines:
+        print(
+            "<h3>Machine for {}:</h3>".format(", ".join(machines[machine])),
+            file=html_file,
+        )
         print(
             "<blockquote>{}</blockquote>".format(
-                run.machine_spec.pretty_string().replace("\n", "<br>")
+                machine.pretty_string().replace("\n", "<br>")
             ),
             file=html_file,
         )
