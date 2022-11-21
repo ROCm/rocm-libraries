@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2022, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -61,7 +61,7 @@ namespace __set_operations
         T    key2 = data[mid];
         bool pred = UpperBound ? !comp(key, key2) : comp(key2, key);
         if(pred)
-            begin = (int)mid + 1;
+            begin = mid + static_cast<Size>(1);
         else
             end = mid;
     }
