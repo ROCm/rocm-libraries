@@ -239,6 +239,40 @@ TEST_F(RegisterTest, RegisterReuse)
     EXPECT_EQ(val1->toString(), val2->toString());
 }
 
+TEST_F(RegisterTest, Split)
+{
+    std::vector<Register::ValuePtr> individualValues;
+
+    std::vector<int> blockIndices;
+
+    {
+        auto block = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Raw32, 8);
+        block->allocateNow();
+        EXPECT_EQ(block->allocationState(), Register::AllocationState::Allocated);
+        blockIndices = block->registerIndices().to<std::vector>();
+        ASSERT_EQ(8, blockIndices.size());
+
+        std::vector<std::vector<int>> indices = {{0}, {2, 3}, {4, 5, 6, 7}};
+
+        individualValues = block->split(indices);
+
+        ASSERT_EQ(3, individualValues.size());
+    }
+
+    EXPECT_EQ(std::vector<int>{blockIndices[0]},
+              individualValues[0]->registerIndices().to<std::vector>());
+
+    EXPECT_EQ((std::vector<int>{blockIndices[2], blockIndices[3]}),
+              individualValues[1]->registerIndices().to<std::vector>());
+    EXPECT_EQ(
+        (std::vector<int>{blockIndices[4], blockIndices[5], blockIndices[6], blockIndices[7]}),
+        individualValues[2]->registerIndices().to<std::vector>());
+
+    auto allocator = m_context->allocator(Register::Type::Vector);
+    EXPECT_EQ(true, allocator->isFree(blockIndices[1]));
+}
+
 TEST_F(RegisterTest, RegisterIDBasic)
 {
     auto rs

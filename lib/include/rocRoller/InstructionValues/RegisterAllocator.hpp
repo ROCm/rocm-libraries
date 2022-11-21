@@ -3,6 +3,8 @@
 
 #include "Register.hpp"
 
+class RegisterTest_RegisterToString_Test;
+
 namespace rocRoller
 {
     namespace Register
@@ -20,10 +22,12 @@ namespace rocRoller
 
             void allocate(std::shared_ptr<Allocation> alloc);
 
-            //> Allocate these specific registers.
-            void allocate(std::shared_ptr<Allocation> alloc, std::vector<int> const& registers);
-            //> Allocate these specific registers.
-            void allocate(std::shared_ptr<Allocation> alloc, std::vector<int>&& registers);
+            /**
+             * Reassigns the registers in `indices` to a new `Allocation` that is returned.
+             * The indices must all be currently assigned to the same `Allocation`.
+             */
+            template <std::ranges::forward_range T>
+            AllocationPtr reassign(T const& indices);
 
             bool canAllocate(std::shared_ptr<const Allocation> alloc) const;
 
@@ -43,6 +47,13 @@ namespace rocRoller
             void free(std::vector<int> const& registers);
 
         private:
+            friend class ::RegisterTest_RegisterToString_Test;
+
+            //> Allocate these specific registers.
+            void allocate(std::shared_ptr<Allocation> alloc, std::vector<int> const& registers);
+            //> Allocate these specific registers.
+            void allocate(std::shared_ptr<Allocation> alloc, std::vector<int>&& registers);
+
             Type m_regType;
 
             int m_maxUsed = -1;

@@ -207,10 +207,24 @@ namespace rocRoller
              * would give v1, a single 32-bit register.
              */
             template <std::ranges::forward_range T>
-            std::shared_ptr<Value> subset(T const& indices);
+            std::shared_ptr<Value> subset(T const& indices) const;
 
             template <std::integral T>
-            std::shared_ptr<Value> subset(std::initializer_list<T> indices);
+            std::shared_ptr<Value> subset(std::initializer_list<T> indices) const;
+
+            /**
+             * Splits the registers allocated into individual values.
+             *
+             * For each entry in `indices`, will return a `Value` that now has ownership
+             * over those individual registers.
+             *
+             * The indices may not have any overlap, and any registers assigned to `this`
+             * that are not used will be freed.
+
+             * `this` will be in an unallocated state.
+             *
+             */
+            std::vector<ValuePtr> split(std::vector<std::vector<int>> const& indices);
 
             bool intersects(std::shared_ptr<Register::Value>) const;
 
@@ -230,11 +244,11 @@ namespace rocRoller
              * (that spans two 32-bit registers).
              */
             template <std::ranges::forward_range T>
-            std::shared_ptr<Value> element(T const& indices);
+            std::shared_ptr<Value> element(T const& indices) const;
             template <typename T>
             std::enable_if_t<std::is_integral_v<T> && !std::is_same_v<T, bool>,
                              std::shared_ptr<Value>>
-                element(std::initializer_list<T> indices);
+                element(std::initializer_list<T> indices) const;
 
             size_t registerCount() const;
             size_t valueCount() const;
@@ -265,20 +279,25 @@ namespace rocRoller
              */
             void gprString(std::ostream& os) const;
 
-            friend class Allocation;
+            /**
+             * Must only be called during `split()`.
+             * Creates a new Allocation which consists of only the registers assigned to `this`.
+             * The parent `Value` and `Allocation` will be left in an invalid state.
+             */
+            void takeAllocation();
 
-            std::string m_name;
+            friend class Allocation;
 
             std::weak_ptr<Context> m_context;
 
-            CommandArgumentValue m_literalValue;
-
+            std::string m_name;
             SpecialType m_specialName;
 
             std::string m_label;
 
-            std::shared_ptr<Allocation> m_allocation;
+            CommandArgumentValue m_literalValue;
 
+            std::shared_ptr<Allocation>    m_allocation;
             std::shared_ptr<LDSAllocation> m_ldsAllocation;
 
             Type         m_regType;
@@ -371,6 +390,7 @@ namespace rocRoller
 
         private:
             friend class Value;
+            friend class Allocator;
 
             std::weak_ptr<Context> m_context;
 

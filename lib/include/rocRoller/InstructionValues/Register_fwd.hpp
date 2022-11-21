@@ -45,7 +45,7 @@ namespace rocRoller
         class Allocation;
         struct Value;
 
-        using AllocationPtr = std::shared_ptr<Value>;
+        using AllocationPtr = std::shared_ptr<Allocation>;
         using ValuePtr      = std::shared_ptr<Value>;
     }
 

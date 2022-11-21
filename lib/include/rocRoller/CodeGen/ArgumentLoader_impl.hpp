@@ -122,6 +122,9 @@ namespace rocRoller
 
         co_yield loadRange(beginOffset, endOffset, allArgs);
 
+        std::vector<std::vector<int>> indices;
+        indices.reserve(m_kernel->arguments().size());
+
         for(auto const& arg : m_kernel->arguments())
         {
             // TODO Fix argument alignment
@@ -130,12 +133,22 @@ namespace rocRoller
             // which may have resulted in arg.size > getElementSize.
             auto beginReg = arg.offset / 4;
             auto endReg   = (arg.offset + static_cast<int>(arg.variableType.getElementSize())) / 4;
-            auto regRange = Generated(iota(beginReg, endReg));
 
-            auto subReg = allArgs->subset(regRange);
+            auto range = iota(beginReg, endReg);
+            indices.emplace_back(range.begin(), range.end());
+        }
+
+        auto valueRegs = allArgs->split(indices);
+
+        int idx = 0;
+        for(auto const& arg : m_kernel->arguments())
+        {
+            auto subReg = valueRegs[idx];
             subReg->setName(arg.name);
             subReg->setVariableType(arg.variableType);
             m_loadedValues[arg.name] = subReg;
+
+            idx++;
         }
     }
 

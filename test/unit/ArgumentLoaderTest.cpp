@@ -198,19 +198,16 @@ namespace rocRollerTest
         a.reset();
         m_context->schedule(loader->getValue("a", a));
 
-        // Since args were loaded using loadAllArguments(), they are allocated and freed as
-        // a block using a single Register::Allocation object, and then partitioned into
-        // multiple Register::Value objects.  We won't get registers s[4:5] back until all
-        // the shared_ptrs referring to the arguments have been destroyed.
-        // A future optimization may be to allow an Allocation to be freed piecemeal.
-        EXPECT_EQ(NormalizedSource("s_load_dwordx2 s[10:11], s[0:1], 0"),
-                  NormalizedSource(output()));
-        EXPECT_EQ((std::vector<int>{10, 11}), Generated(a->registerIndices()));
+        // Since loadAllArguments() splits the allocation into each of the individual values,
+        // loading it again will go back into the same set of registers.
+        EXPECT_EQ(NormalizedSource("s_load_dwordx2 s[4:5], s[0:1], 0"), NormalizedSource(output()));
+        EXPECT_EQ((std::vector<int>{4, 5}), Generated(a->registerIndices()));
         VariableType expectedType = {DataType::Float, PointerType::PointerGlobal};
         EXPECT_EQ(expectedType, a->variableType());
 
         // This should destroy all remaining pointers to the original Allocation.
         loader->releaseAllArguments();
+        a.reset();
         b.reset();
         c.reset();
         clearOutput();

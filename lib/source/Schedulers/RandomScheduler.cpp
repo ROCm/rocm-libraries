@@ -35,7 +35,8 @@ namespace rocRoller
         inline Generator<Instruction>
             RandomScheduler::operator()(std::vector<Generator<Instruction>>& seqs)
         {
-            auto                                          random = m_ctx.lock()->random();
+            auto random = m_ctx.lock()->random();
+
             std::vector<Generator<Instruction>::iterator> iterators;
 
             if(seqs.empty())

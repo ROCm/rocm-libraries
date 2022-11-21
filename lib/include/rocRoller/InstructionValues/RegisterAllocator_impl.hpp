@@ -64,6 +64,27 @@ namespace rocRoller
             return !theRegisters.empty();
         }
 
+        template <std::ranges::forward_range T>
+        AllocationPtr Allocator::reassign(T const& indices)
+        {
+            std::vector<int> registers(indices.begin(), indices.end());
+
+            AssertFatal(registers.size() != 0);
+
+            auto firstAlloc = m_registers.at(registers[0]).lock();
+            AssertFatal(firstAlloc);
+
+            for(auto index : registers)
+                AssertFatal(m_registers.at(index).lock() == firstAlloc);
+
+            auto newAlloc = std::make_shared<Allocation>(
+                firstAlloc->m_context.lock(), m_regType, DataType::Raw32, registers.size());
+
+            allocate(newAlloc, registers);
+
+            return newAlloc;
+        }
+
         inline std::vector<int> Allocator::findFree(int                        count,
                                                     Allocation::Options const& options) const
         {

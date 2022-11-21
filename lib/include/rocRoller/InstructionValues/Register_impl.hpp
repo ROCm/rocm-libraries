@@ -667,7 +667,7 @@ namespace rocRoller
         }
 
         template <std::ranges::forward_range T>
-        inline std::shared_ptr<Value> Value::subset(T const& indices)
+        inline std::shared_ptr<Value> Value::subset(T const& indices) const
         {
             AssertFatal(allocationState() == AllocationState::Allocated,
                         ShowValue(allocationState()));
@@ -685,36 +685,13 @@ namespace rocRoller
         }
 
         template <std::integral T>
-        inline std::shared_ptr<Value> Value::subset(std::initializer_list<T> indices)
+        inline std::shared_ptr<Value> Value::subset(std::initializer_list<T> indices) const
         {
             return subset<std::initializer_list<T>>(indices);
         }
 
-        inline bool Value::intersects(std::shared_ptr<Register::Value> input) const
-        {
-            if(regType() != input->regType())
-                return false;
-
-            if(allocationState() != AllocationState::Allocated
-               || input->allocationState() != AllocationState::Allocated)
-                return false;
-
-            for(int a : registerIndices())
-            {
-                for(int b : input->registerIndices())
-                {
-                    if(a == b)
-                    {
-                        return true;
-                    }
-                }
-            }
-
-            return false;
-        }
-
         template <std::ranges::forward_range T>
-        inline std::shared_ptr<Value> Value::element(T const& indices)
+        inline std::shared_ptr<Value> Value::element(T const& indices) const
         {
             AssertFatal(!m_allocationCoord.empty(), ShowValue(m_allocationCoord.size()));
             auto const   info                = DataTypeInfo::Get(m_varType);
@@ -731,7 +708,7 @@ namespace rocRoller
         template <typename T>
         std::enable_if_t<std::is_integral_v<T> && !std::is_same_v<T, bool>,
                          std::shared_ptr<Value>> inline Value::element(std::initializer_list<T>
-                                                                           indices)
+                                                                           indices) const
         {
             return element<std::initializer_list<T>>(indices);
         }

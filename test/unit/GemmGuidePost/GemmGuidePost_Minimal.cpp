@@ -107,17 +107,19 @@ Generator<Instruction> rocRollerTest::SGEMM_Minimal_Program(rocRoller::ContextPt
         = std::make_shared<Register::Value>(m_context, Register::Type::Scalar, DataType::Int32, 1);
     auto sgprGlobalReadIncsA
         = std::make_shared<Register::Value>(m_context, Register::Type::Scalar, DataType::Int32, 1);
-    auto sgprSrdA
-        = std::make_shared<Register::Value>(m_context, Register::Type::Scalar, DataType::Raw32, 4);
+
+    VariableType bufferPointer{DataType::None, PointerType::Buffer};
+    auto         sgprSrdA
+        = std::make_shared<Register::Value>(m_context, Register::Type::Scalar, bufferPointer, 1);
     co_yield sgprSrdA->allocate();
     auto sgprSrdB
-        = std::make_shared<Register::Value>(m_context, Register::Type::Scalar, DataType::Raw32, 4);
+        = std::make_shared<Register::Value>(m_context, Register::Type::Scalar, bufferPointer, 1);
     co_yield sgprSrdB->allocate();
     auto sgprSrdD
-        = std::make_shared<Register::Value>(m_context, Register::Type::Scalar, DataType::Raw32, 4);
+        = std::make_shared<Register::Value>(m_context, Register::Type::Scalar, bufferPointer, 1);
     co_yield sgprSrdD->allocate();
     auto sgprSrdC
-        = std::make_shared<Register::Value>(m_context, Register::Type::Scalar, DataType::Raw32, 4);
+        = std::make_shared<Register::Value>(m_context, Register::Type::Scalar, bufferPointer, 1);
     co_yield sgprSrdC->allocate();
 
     auto macroTile0 = Register::Value::Literal(64);
@@ -275,7 +277,7 @@ auto GlobalReadAddresses = [&](Register::ValuePtr     val,
     co_yield generateOp<Expression::Multiply>(stemp, sgprStride, sgprWorkGroup2); //" Stride*WG"
     co_yield generateOp<Expression::Add>(tileStart, tileStart, stemp); //" accum wg term to tilestart"
     co_yield generateOp<Expression::ShiftL>(tileStart, tileStart, Register::Value::Literal(2)); //" tileStart *= BPE"
-    co_yield generateOp<Expression::Add>(sgprSrd, val, tileStart); //" SRD base = Address+ tileStart0"
+    co_yield generateOp<Expression::Add>(sgprSrd->subset({0,1}), val, tileStart); //" SRD base = Address+ tileStart0"
     co_yield m_context->copier()->copy(sgprSrd->subset({3}), Srd127_96, " Set bits 127_96 in SRD");
 };
 {
@@ -357,10 +359,10 @@ co_yield generateOp<Expression::ShiftL>(stemp, stemp, Register::Value::Literal(2
 co_yield generateOp<Expression::Add>(sgprSrdD, D, stemp);
 co_yield generateOp<Expression::Multiply>(stemp, sgprWorkGroup2, sgprStrideCK); //"CScale s[sgprWorkGroup2] by Stride"
 co_yield generateOp<Expression::ShiftL>(stemp, stemp, Register::Value::Literal(2)); //" scale by bpe"
-co_yield generateOp<Expression::Add>(sgprSrdC, sgprSrdC, stemp);
+co_yield generateOp<Expression::Add>(sgprSrdC->subset({0,1}), sgprSrdC->subset({0,1}), stemp);
 co_yield generateOp<Expression::Multiply>(stemp, sgprWorkGroup2, sgprStrideDK); //"CScale s[sgprWorkGroup2] by Stride"
 co_yield generateOp<Expression::ShiftL>(stemp, stemp, Register::Value::Literal(2)); //" scale by bpe"
-co_yield generateOp<Expression::Add>(sgprSrdD, sgprSrdD, stemp);
+co_yield generateOp<Expression::Add>(sgprSrdD->subset({0,1}), sgprSrdD->subset({0,1}), stemp);
 }
 co_yield Instruction::Comment(" initC: remove C-tile 0-0 from pool ");
 co_yield Instruction::Comment(" initC: remove AB-tile 0-4 from pool ");
