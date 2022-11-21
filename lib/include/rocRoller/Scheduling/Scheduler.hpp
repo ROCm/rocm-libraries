@@ -26,6 +26,13 @@ namespace rocRoller
             bool isLocked() const;
             void isValid(bool locked = false) const;
 
+            /**
+             * @brief Extra checks to verify lock state integrity.
+             *
+             * Note: disabled in Release mode.
+             *
+             * @param instr The instruction to verify
+             */
             void lockCheck(Instruction const& instr);
 
             Dependency getDependency() const;

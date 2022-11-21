@@ -23,7 +23,8 @@ namespace rocRoller
             {
                 if(resType.first == Register::Type::Special && resType.second == DataType::Bool)
                 {
-                    return m_context->getSCC();
+                    return Register::Value::Placeholder(
+                        m_context, Register::Type::Scalar, resType.second, 1);
                 }
                 else if(resType.first == Register::Type::Scalar
                         && resType.second == DataType::Bool32)

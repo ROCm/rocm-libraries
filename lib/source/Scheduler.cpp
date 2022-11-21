@@ -49,9 +49,8 @@ namespace rocRoller
 
         void LockState::add(Instruction const& instruction)
         {
-#ifndef NDEBUG
             lockCheck(instruction);
-#endif
+
             int inst_lockvalue = instruction.getLockValue();
 
             // Instruction does not lock or unlock, do nothing
@@ -98,7 +97,6 @@ namespace rocRoller
             AssertFatal(isLocked() == locked, "Lock in invalid state");
         }
 
-#ifndef NDEBUG
         void LockState::lockCheck(Instruction const& instruction)
         {
             auto               context      = m_ctx.lock();
@@ -117,10 +115,9 @@ namespace rocRoller
 
             AssertFatal(
                 !instruction.readsSpecialRegisters() || isLocked(),
-                concatenate(instruction.toString(LogLevel::Debug),
+                concatenate(instruction.getOpCode(),
                             " reads a special register, it should only be used within a lock."));
         }
-#endif
 
         Dependency LockState::getDependency() const
         {

@@ -92,7 +92,9 @@ namespace rocRollerTest
         m_context->schedule(k->amdgpu_metadata());
 
         if(m_context->targetArchitecture().target().getMajorVersion() != 9)
+        {
             GTEST_SKIP() << "Skipping BranchGenerator tests for " << GetParam();
+        }
 
         std::vector<char> assembledKernel = m_context->instructions()->assemble();
         EXPECT_GT(assembledKernel.size(), 0);
@@ -107,8 +109,10 @@ namespace rocRollerTest
 
         auto kb = [&]() -> Generator<Instruction> {
             auto l0 = m_context->labelAllocator()->label("l0");
+            co_yield(Instruction::Lock(Scheduling::Dependency::Branch));
             co_yield_(Instruction::Label(l0));
             co_yield m_context->brancher()->branch(l0);
+            co_yield(Instruction::Unlock());
         };
 
         std::string expected = std::string("s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0)")
@@ -120,7 +124,9 @@ namespace rocRollerTest
         generators.push_back(kb());
         m_context->schedule((*scheduler)(generators));
         if(m_context->targetArchitecture().target().getMajorVersion() != 9)
+        {
             GTEST_SKIP() << "Skipping BranchGeneratorWait tests for " << GetParam();
+        }
         auto found = NormalizedSource(output()).find(expected) != std::string::npos;
         EXPECT_EQ(found, true);
     }
@@ -134,8 +140,10 @@ namespace rocRollerTest
         m_context->kernelOptions().alwaysWaitBeforeBranch = false;
         auto kb                                           = [&]() -> Generator<Instruction> {
             auto l0 = m_context->labelAllocator()->label("l0");
+            co_yield(Instruction::Lock(Scheduling::Dependency::Branch));
             co_yield_(Instruction::Label(l0));
             co_yield m_context->brancher()->branch(l0);
+            co_yield(Instruction::Unlock());
         };
 
         std::string expected = std::string("s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0)")
@@ -147,7 +155,9 @@ namespace rocRollerTest
         generators.push_back(kb());
         m_context->schedule((*scheduler)(generators));
         if(m_context->targetArchitecture().target().getMajorVersion() != 9)
+        {
             GTEST_SKIP() << "Skipping BranchGeneratorWait tests for " << GetParam();
+        }
         auto found = NormalizedSource(output()).find(expected) != std::string::npos;
         EXPECT_EQ(found, false);
     }
