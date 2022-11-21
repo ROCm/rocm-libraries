@@ -125,6 +125,25 @@ namespace rocRoller
 
             void deleteElement(int index);
 
+            // clang-format off
+            template <std::ranges::forward_range T_Inputs, std::ranges::forward_range T_Outputs>
+            requires(std::convertible_to<std::ranges::range_value_t<T_Inputs>,  int>
+                  && std::convertible_to<std::ranges::range_value_t<T_Outputs>, int>)
+                // clang-format on
+                void deleteElement(T_Inputs const&                        inputs,
+                                   T_Outputs const&                       outputs,
+                                   const std::function<bool(Edge const&)> edgePredicate);
+
+            // clang-format off
+            template <typename T,
+                      std::ranges::forward_range T_Inputs,
+                      std::ranges::forward_range T_Outputs>
+            requires(std::convertible_to<std::ranges::range_value_t<T_Inputs>,  int>
+                  && std::convertible_to<std::ranges::range_value_t<T_Outputs>, int>
+                  && std::constructible_from<Edge,T>)
+                // clang-format on
+                void deleteElement(T_Inputs const& inputs, T_Outputs const& outputs);
+
             size_t getIncidenceSize() const;
             size_t getElementCount() const;
 

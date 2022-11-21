@@ -741,7 +741,12 @@ namespace rocRoller
 
                     AssertFatal(coordinate_outputs.size() == 1,
                                 "Element op must have a single output.");
-                    graph.mapper.connect<CoordGraph::Linear>(op, coordinate_outputs[0]);
+                    auto odim = std::get<CoordGraph::Dimension>(
+                        graph.coordinates.getElement(coordinate_outputs[0]));
+                    if(CoordGraph::isDimension<CoordGraph::MacroTile>(odim))
+                        graph.mapper.connect<CoordGraph::MacroTile>(op, coordinate_outputs[0]);
+                    else
+                        graph.mapper.connect<CoordGraph::Linear>(op, coordinate_outputs[0]);
 
                     m_op.insert_or_assign(Operations::Tag()(*xop), op);
                 }

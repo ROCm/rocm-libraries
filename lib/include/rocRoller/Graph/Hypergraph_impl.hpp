@@ -210,6 +210,101 @@ namespace rocRoller
             m_elements.erase(index);
         }
 
+        // delete edge between the inputs and outputs with exact match
+        // deletes the first match found (duplicates not deleted)
+        // clang-format off
+        template <typename Node, typename Edge, bool Hyper>
+        template <std::ranges::forward_range T_Inputs, std::ranges::forward_range T_Outputs>
+        requires(std::convertible_to<std::ranges::range_value_t<T_Inputs>,  int>
+              && std::convertible_to<std::ranges::range_value_t<T_Outputs>, int>)
+            // clang-format on
+            void Hypergraph<Node, Edge, Hyper>::deleteElement(
+                T_Inputs const&                        inputs,
+                T_Outputs const&                       outputs,
+                const std::function<bool(Edge const&)> edgePredicate)
+        {
+            AssertFatal(!inputs.empty() && !outputs.empty());
+
+            for(int cIdx : inputs)
+            {
+                AssertFatal(getElementType(cIdx) == ElementType::Node, "Requires node handles");
+            }
+            for(int cIdx : outputs)
+            {
+                AssertFatal(getElementType(cIdx) == ElementType::Node, "Requires node handles");
+            }
+
+            auto outgoing_edges
+                = getNeighbours<Graph::Direction::Downstream>(inputs[0]).template to<std::vector>();
+            auto match = false;
+            for(auto e : outgoing_edges)
+            {
+                auto elem = getElement(e);
+                if(!edgePredicate(std::get<Edge>(elem)))
+                    continue;
+
+                match = true;
+
+                auto srcs = getNeighbours<Graph::Direction::Upstream>(e)
+                                .template to<std::unordered_set>();
+                if(srcs.size() != inputs.size())
+                {
+                    match = false;
+                    continue;
+                }
+                for(auto src : inputs)
+                {
+                    if(srcs.find(src) == srcs.end())
+                    {
+                        match = false;
+                        break;
+                    }
+                }
+
+                if(match)
+                {
+                    auto dsts = getNeighbours<Graph::Direction::Downstream>(e)
+                                    .template to<std::unordered_set>();
+                    if(dsts.size() != outputs.size())
+                    {
+                        match = false;
+                        continue;
+                    }
+                    for(auto dst : outputs)
+                    {
+                        if(dsts.find(dst) == dsts.end())
+                        {
+                            match = false;
+                            break;
+                        }
+                    }
+                }
+
+                if(match)
+                {
+                    deleteElement(e);
+                    return;
+                }
+            }
+            AssertFatal(match, "edge to delete : match not found");
+        }
+
+        // clang-format off
+        template <typename Node, typename Edge, bool Hyper>
+        template <typename T,
+                    std::ranges::forward_range T_Inputs,
+                    std::ranges::forward_range T_Outputs>
+        requires(std::convertible_to<std::ranges::range_value_t<T_Inputs>,  int>
+              && std::convertible_to<std::ranges::range_value_t<T_Outputs>, int>
+              && std::constructible_from<Edge,T>)
+            // clang-format on
+            void Hypergraph<Node, Edge, Hyper>::deleteElement(T_Inputs const&  inputs,
+                                                              T_Outputs const& outputs)
+        {
+            return deleteElement(
+                inputs, outputs, [](Edge const& edge) { return std::holds_alternative<T>(edge); });
+        }
+
         template <typename Node, typename Edge, bool Hyper>
         size_t Hypergraph<Node, Edge, Hyper>::getIncidenceSize() const
         {

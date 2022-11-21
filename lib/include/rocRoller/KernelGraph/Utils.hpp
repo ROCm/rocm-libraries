@@ -14,5 +14,8 @@ namespace rocRoller
             rangeFor(CoordinateTransform::HyperGraph& coordGraph,
                      ControlGraph::ControlGraph&      controlGraph,
                      Expression::ExpressionPtr        size);
+
+        // TODO : Delete above and rename this when rearch complete
+        std::pair<int, int> rangeFor(KernelHypergraph& graph, Expression::ExpressionPtr size);
     }
 }

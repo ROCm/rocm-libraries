@@ -347,11 +347,6 @@ namespace rocRoller
                                GraphReindexer&         reindexer,
                                int                     tag)
             {
-                auto element = original.control.getElement(tag);
-                auto oop     = std::get<ControlHypergraph::Operation>(element);
-                if(std::holds_alternative<ControlHypergraph::Kernel>(oop))
-                    return;
-
                 auto location = original.control.getLocation(tag);
 
                 auto op = graph.control.addElement(original.control.getElement(tag));
@@ -507,12 +502,14 @@ namespace rocRoller
             reindexer.control.emplace(
                 kernel, graph.control.addElement(original.control.getElement(kernel)));
 
-            for(auto const& index : original.control.breadthFirstVisit(kernel))
+            for(auto const& index : original.control.topologicalSort())
             {
                 auto element = original.control.getElement(index);
                 if(std::holds_alternative<ControlHypergraph::Operation>(element))
                 {
                     auto node = std::get<ControlHypergraph::Operation>(element);
+                    if(std::holds_alternative<ControlHypergraph::Kernel>(node))
+                        continue;
                     std::visit(
                         [&](auto&& arg) {
                             visitor.visitOperation(graph, original, reindexer, index, arg);

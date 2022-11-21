@@ -472,4 +472,27 @@ namespace rocRollerTest
         auto bfs = g.breadthFirstVisit(*g.roots().begin()).to<std::vector>();
         EXPECT_EQ(bfs, std::vector<int>({1, 3, 5, 2, 4, 9, 7, 8, 6}));
     }
+
+    TEST(HypergraphTest, DeleteElement)
+    {
+        myHypergraph g;
+
+        auto u0  = g.addElement(TestUser{});
+        auto sd0 = g.addElement(TestSubDimension{});
+        auto sd1 = g.addElement(TestSubDimension{});
+
+        auto TestSplit0 = g.addElement(TestSplit{}, {u0}, {sd0, sd1});
+
+        auto TestVGPR0   = g.addElement(TestVGPR{});
+        auto TestForget0 = g.addElement(TestForget{}, {sd0, sd1}, {TestVGPR0});
+
+        auto TestVGPR1   = g.addElement(TestVGPR{});
+        auto TestForget1 = g.addElement(TestForget{}, {sd0, sd1}, {TestVGPR1});
+
+        EXPECT_THROW(
+            { g.deleteElement<TestForget>(std::vector<int>{sd0}, std::vector<int>{TestVGPR0}); },
+            FatalError);
+
+        g.deleteElement<TestForget>(std::vector<int>{sd0, sd1}, std::vector<int>{TestVGPR0});
+    }
 }

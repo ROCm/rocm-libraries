@@ -641,5 +641,13 @@ namespace rocRoller
         {
             std::visit([stride](auto& a) { a.stride = stride; }, x);
         }
+
+        template <CDimension D>
+        inline bool isDimension(const Dimension& x)
+        {
+            if(std::holds_alternative<D>(x))
+                return true;
+            return false;
+        }
     }
 }

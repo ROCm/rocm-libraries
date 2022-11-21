@@ -611,6 +611,7 @@ namespace rocRoller
 
                 auto wave_tile     = CoordGraph::WaveTile(tileSize, mac_tile.layoutType);
                 auto wave_tile_tag = graph.coordinates.addElement(wave_tile);
+                graph.mapper.connect<CoordGraph::WaveTile>(load_tag, wave_tile_tag);
 
                 auto n_wave_x = graph.coordinates.addElement(wave_tile.tileNumber(0));
                 auto n_wave_y = graph.coordinates.addElement(wave_tile.tileNumber(1));
@@ -657,6 +658,10 @@ namespace rocRoller
                 auto jammed_wavetile_y
                     = graph.coordinates.addElement(CoordGraph::JammedWaveTileNumber(
                         1, literal(wavetilesPerWorkgroup[1]), literal(1)));
+                graph.mapper.connect<CoordGraph::JammedWaveTileNumber>(
+                    load_tag, jammed_wavetile_x, 0);
+                graph.mapper.connect<CoordGraph::JammedWaveTileNumber>(
+                    load_tag, jammed_wavetile_y, 1);
 
                 switch(wave_tile.layout)
                 {
@@ -786,14 +791,22 @@ namespace rocRoller
 
                 auto sdim_x = sdim[0];
                 auto sdim_y = sdim[1];
+                graph.mapper.connect<CoordGraph::SubDimension>(load_tag, sdim_x, 0);
+                graph.mapper.connect<CoordGraph::SubDimension>(load_tag, sdim_y, 1);
 
                 auto n_mac_x = graph.coordinates.addElement(mac_tile.tileNumber(0));
                 auto n_mac_y = graph.coordinates.addElement(mac_tile.tileNumber(1));
                 auto i_mac_x = graph.coordinates.addElement(mac_tile.tileIndex(0));
                 auto i_mac_y = graph.coordinates.addElement(mac_tile.tileIndex(1));
 
+                graph.mapper.connect<CoordGraph::MacroTileNumber>(load_tag, n_mac_x, 0);
+                graph.mapper.connect<CoordGraph::MacroTileNumber>(load_tag, n_mac_y, 1);
+
                 auto workgroup_x = graph.coordinates.addElement(CoordGraph::Workgroup(0));
                 auto workgroup_y = graph.coordinates.addElement(CoordGraph::Workgroup(1));
+
+                graph.mapper.connect<CoordGraph::Workgroup>(load_tag, workgroup_x, 0);
+                graph.mapper.connect<CoordGraph::Workgroup>(load_tag, workgroup_y, 1);
 
                 auto workitem   = graph.coordinates.addElement(CoordGraph::Workitem(0));
                 auto workitem_x = graph.coordinates.addElement(CoordGraph::Workitem(0));
@@ -880,6 +893,7 @@ namespace rocRoller
 
             void storeWaveMacroTile(KernelHypergraph&      graph,
                                     CoordGraph::MacroTile& mac_tile,
+                                    int                    store_tag,
                                     int                    i_mac_x,
                                     int                    i_mac_y,
                                     int                    workitem,
@@ -957,6 +971,10 @@ namespace rocRoller
                 auto jammed_wavetile_y
                     = graph.coordinates.addElement(CoordGraph::JammedWaveTileNumber(
                         1, literal(wavetilesPerWorkgroup[1]), literal(1)));
+                graph.mapper.connect<CoordGraph::JammedWaveTileNumber>(
+                    store_tag, jammed_wavetile_x, 0);
+                graph.mapper.connect<CoordGraph::JammedWaveTileNumber>(
+                    store_tag, jammed_wavetile_y, 1);
 
                 if(wavetilesPerWorkgroup[0] > 1)
                     graph.coordinates.addElement(
@@ -1058,7 +1076,8 @@ namespace rocRoller
                 break;
 
                 case MemoryType::WAVE:
-                    storeWaveMacroTile(graph, mac_tile, i_mac_x, i_mac_y, workitem, user_tag);
+                    storeWaveMacroTile(
+                        graph, mac_tile, store_tag, i_mac_x, i_mac_y, workitem, user_tag);
                     break;
 
                 default:
@@ -1136,8 +1155,8 @@ namespace rocRoller
                     CoordGraph::Flatten(), {workitem_x, workitem_y}, {lds});
 
                 // Find all edges leaving from load. Those should be changed to leave from loadLDS.
-                auto outgoing_edges
-                    = graph.control.getNeighbours<Graph::Direction::Downstream>(tag);
+                auto outgoing_edges = graph.control.getNeighbours<Graph::Direction::Downstream>(tag)
+                                          .to<std::vector>();
                 for(auto e : outgoing_edges)
                 {
                     auto elem = graph.control.getElement(e);
@@ -1207,7 +1226,252 @@ namespace rocRoller
                                  std::shared_ptr<CommandParameters> params,
                                  std::shared_ptr<Context>           context)
         {
-            //TODO : lower rank-2 TensorContraction into a matrix multiply.
+            rocRoller::Log::getLogger()->debug("KernelGraph::matrixMultiply() {}", d);
+
+            auto macrotile_a = graph.coordinates.getNode<CoordGraph::MacroTile>(a);
+            auto macrotile_b = graph.coordinates.getNode<CoordGraph::MacroTile>(b);
+
+            // get tensor contraction operands
+            auto parents = graph.control.parentNodes(tag).to<std::vector>();
+            AssertFatal(parents.size() == 2);
+            auto operandA = parents[0];
+            auto operandB = parents[1];
+            AssertFatal(a == graph.mapper.get<CoordGraph::MacroTile>(operandA));
+            AssertFatal(b == graph.mapper.get<CoordGraph::MacroTile>(operandB));
+
+            auto reachable_from_tensor
+                = graph.control.depthFirstVisit(tag).to<std::unordered_set>();
+
+            // find loadtiled ops that lead to the tensor contraction op
+            // find storetiled ops that follow the tensor contraction op
+            // find elementOps that follow the tensor contraction op
+            std::vector<int> loadA;
+            std::vector<int> loadB;
+            std::vector<int> stores;
+            std::vector<int> elemops;
+            for(auto const index : graph.control.getNodes())
+            {
+                auto elem = graph.control.getElement(index);
+                visit(rocRoller::overloaded{
+                          [&](auto op) {},
+                          [&](ControlHypergraph::LoadTiled const& load) {
+                              auto reachable_from_load
+                                  = graph.control.depthFirstVisit(index).to<std::unordered_set>();
+                              if(reachable_from_load.find(operandA) != reachable_from_load.end())
+                                  loadA.push_back(index);
+                              else if(reachable_from_load.find(operandB)
+                                      != reachable_from_load.end())
+                                  loadB.push_back(index);
+                          },
+                          [&](ControlHypergraph::StoreTiled const& store) {
+                              if(reachable_from_tensor.find(index) != reachable_from_tensor.end())
+                                  stores.push_back(index);
+                          },
+                          [&](ControlHypergraph::ElementOp const& op) {
+                              if(reachable_from_tensor.find(index) != reachable_from_tensor.end())
+                                  elemops.push_back(index);
+                          }},
+                      std::get<ControlHypergraph::Operation>(elem));
+            }
+            AssertFatal(loadA.size() == 1 && loadB.size() == 1);
+            AssertFatal(stores.size() <= 1);
+            auto storeD = !stores.empty() ? stores[0] : -1;
+
+            // find kernel
+            auto root = graph.control.roots().to<std::vector>();
+            AssertFatal(root.size() == 1, "More than one Kernel node not supported");
+            auto kernel = root[0];
+
+            graph.control.deleteElement<ControlHypergraph::Body>(std::vector<int>{kernel},
+                                                                 std::vector<int>{loadA[0]});
+            graph.control.deleteElement<ControlHypergraph::Body>(std::vector<int>{kernel},
+                                                                 std::vector<int>{loadB[0]});
+
+            auto matK = (graph.coordinates.getNode<CoordGraph::SubDimension>(
+                             graph.mapper.get<CoordGraph::SubDimension>(loadA[0], 1)))
+                            .size;
+
+            auto macK = literal(static_cast<uint>(macrotile_a.sizes[1])); // M x K
+
+            auto [K, forK] = rangeFor(graph, matK / macK); // num of loop iterations : matK / macK
+
+            // remove passthrough between A column block and y-workgroup
+            auto a_tilenum_y   = graph.mapper.get<CoordGraph::MacroTileNumber>(loadA[0], 1);
+            auto a_workgroup_y = graph.mapper.get<CoordGraph::Workgroup>(loadA[0], 1);
+            graph.coordinates.deleteElement(std::vector<int>{a_tilenum_y},
+                                            std::vector<int>{a_workgroup_y},
+                                            CoordGraph::isEdge<CoordGraph::PassThrough>);
+
+            // remove passthrough between B row block and x-workgroup
+            auto b_tilenum_x   = graph.mapper.get<CoordGraph::MacroTileNumber>(loadB[0], 0);
+            auto b_workgroup_x = graph.mapper.get<CoordGraph::Workgroup>(loadB[0], 0);
+            graph.coordinates.deleteElement(std::vector<int>{b_tilenum_x},
+                                            std::vector<int>{b_workgroup_x},
+                                            CoordGraph::isEdge<CoordGraph::PassThrough>);
+
+            // A row block is x-workgroup, column block is for loop index
+            graph.coordinates.addElement(CoordGraph::PassThrough(), {a_tilenum_y}, {K});
+
+            // B row block is for loop index, column block is y-workgroup
+            graph.coordinates.addElement(CoordGraph::PassThrough(), {b_tilenum_x}, {K});
+
+            // TODO : create helper functions to make this lowering modular and readable.
+            auto waveMult = graph.control.addElement(ControlHypergraph::Multiply(a, b));
+
+            // initialise accumulator
+            auto waveA = graph.coordinates.getNode<CoordGraph::WaveTile>(
+                graph.mapper.get<CoordGraph::WaveTile>(loadA[0]));
+            auto waveB = graph.coordinates.getNode<CoordGraph::WaveTile>(
+                graph.mapper.get<CoordGraph::WaveTile>(loadB[0]));
+
+            uint num_elements = waveA.sizes[0] * waveB.sizes[1];
+            uint wfs          = context->kernel()->wavefront_size();
+            uint num_agpr     = num_elements / wfs; // number of output registers per thread
+
+            auto initD = graph.control.addElement(
+                ControlHypergraph::Assign{Register::Type::Accumulator, literal(0.f), num_agpr});
+
+            graph.control.addElement(ControlHypergraph::Initialize(), {forK}, {initD});
+            graph.control.addElement(ControlHypergraph::Body(), {forK}, {waveMult});
+            graph.control.addElement(ControlHypergraph::Body(), {waveMult}, {loadA[0]});
+            graph.control.addElement(ControlHypergraph::Body(), {waveMult}, {loadB[0]});
+
+            // connect ops after contraction to for loop, remove contraction and its incoming edges
+            auto tensor_outgoing_edges
+                = graph.control.getNeighbours<Graph::Direction::Downstream>(tag).to<std::vector>();
+            for(auto const e : tensor_outgoing_edges)
+            {
+                auto elem = graph.control.getElement(e);
+                auto dst  = graph.control.getNeighbours<Graph::Direction::Downstream>(e)
+                               .to<std::vector>();
+                graph.control.deleteElement(e);
+                graph.control.addElement(e, elem, std::vector<int>{forK}, dst);
+            }
+            auto tensor_incoming_edges
+                = graph.control.getNeighbours<Graph::Direction::Upstream>(tag).to<std::vector>();
+            for(auto const e : tensor_incoming_edges)
+                graph.control.deleteElement(e);
+            graph.control.deleteElement(tag);
+
+            // Add loops to iterate over wavetiles within a wavefront
+            auto wavetilesPerWorkgroup = params->getWaveTilesPerWorkgroup();
+            AssertFatal(wavetilesPerWorkgroup.size() > 1);
+
+            auto WaveTilesX = -1, WaveTilesY = -1, forWaveTilesX = -1, forWaveTilesY = -1;
+
+            if(wavetilesPerWorkgroup[0] > 1 || wavetilesPerWorkgroup[1] > 1)
+            {
+                if(wavetilesPerWorkgroup[0] > 1)
+                {
+                    std::tie(WaveTilesX, forWaveTilesX)
+                        = rangeFor(graph, literal(wavetilesPerWorkgroup[0]));
+                }
+                if(wavetilesPerWorkgroup[1] > 1)
+                {
+                    std::tie(WaveTilesY, forWaveTilesY)
+                        = rangeFor(graph, literal(wavetilesPerWorkgroup[1]));
+                }
+
+                // find other loadtiled ops from kernel that lead to elemops
+                auto kernel_outputs = graph.control.childNodes(kernel).to<std::vector>();
+                std::vector<int> otherLoads;
+                for(auto const index : kernel_outputs)
+                {
+                    auto elem = graph.control.getElement(index);
+                    visit(
+                        rocRoller::overloaded{
+                            [&](auto op) {},
+                            [&](ControlHypergraph::LoadTiled const& load) {
+                                auto reachable_from_load
+                                    = graph.control.depthFirstVisit(index).to<std::unordered_set>();
+                                for(auto const& elemop : elemops)
+                                {
+                                    if(reachable_from_load.find(elemop)
+                                       != reachable_from_load.end())
+                                    {
+                                        otherLoads.push_back(index);
+                                        break;
+                                    }
+                                }
+                            }},
+                        std::get<ControlHypergraph::Operation>(elem));
+                }
+                AssertFatal(otherLoads.size() == 1);
+
+                // Add edges from inner loop to some kernel outputs : forK and otherLoads
+                // need to leave other nodes attached with kernel
+                // ex: loadtiled ops that don't lead to elemops
+                // ex : loadVGPRs for alpha and beta in GEMM
+                if(wavetilesPerWorkgroup[1] > 1)
+                {
+                    graph.control.addElement(ControlHypergraph::Body(), {forWaveTilesY}, {forK});
+
+                    for(auto const index : otherLoads)
+                    {
+                        auto e = graph.control.getNeighbours<Graph::Direction::Upstream>(index)
+                                     .to<std::vector>()[0];
+                        auto elem = graph.control.getElement(e);
+                        graph.control.deleteElement(e);
+                        graph.control.addElement(
+                            e, elem, std::vector<int>{forWaveTilesY}, std::vector<int>{index});
+                    }
+                }
+                else
+                {
+                    graph.control.addElement(ControlHypergraph::Body(), {forWaveTilesX}, {forK});
+
+                    for(auto const index : otherLoads)
+                    {
+                        auto e = graph.control.getNeighbours<Graph::Direction::Upstream>(index)
+                                     .to<std::vector>()[0];
+                        auto elem = graph.control.getElement(e);
+                        graph.control.deleteElement(e);
+                        graph.control.addElement(
+                            e, elem, std::vector<int>{forWaveTilesX}, std::vector<int>{index});
+                    }
+                }
+
+                // make nested inner loops (forWaveTilesY inside the forWaveTilesX loop)
+                if(wavetilesPerWorkgroup[0] > 1 && wavetilesPerWorkgroup[1] > 1)
+                    graph.control.addElement(
+                        ControlHypergraph::Body(), {forWaveTilesX}, {forWaveTilesY});
+
+                // Add edges from Kernel to outer loop
+                if(wavetilesPerWorkgroup[0] > 1)
+                    graph.control.addElement(ControlHypergraph::Body(), {kernel}, {forWaveTilesX});
+                else
+                    graph.control.addElement(ControlHypergraph::Body(), {kernel}, {forWaveTilesY});
+
+                // Add edges from all JammedWaveTileNumber dimensions to the for loop
+                auto a_jammed_x = graph.mapper.get<CoordGraph::JammedWaveTileNumber>(loadA[0], 0);
+                graph.coordinates.addElement(CoordGraph::PassThrough(), {a_jammed_x}, {WaveTilesX});
+                auto a_jammed_y = graph.mapper.get<CoordGraph::JammedWaveTileNumber>(loadA[0], 1);
+                graph.coordinates.addElement(CoordGraph::PassThrough(), {a_jammed_y}, {WaveTilesY});
+
+                auto b_jammed_x = graph.mapper.get<CoordGraph::JammedWaveTileNumber>(loadB[0], 0);
+                graph.coordinates.addElement(CoordGraph::PassThrough(), {b_jammed_x}, {WaveTilesX});
+                auto b_jammed_y = graph.mapper.get<CoordGraph::JammedWaveTileNumber>(loadB[0], 1);
+                graph.coordinates.addElement(CoordGraph::PassThrough(), {b_jammed_y}, {WaveTilesY});
+
+                auto c_jammed_x
+                    = graph.mapper.get<CoordGraph::JammedWaveTileNumber>(otherLoads[0], 0);
+                graph.coordinates.addElement(CoordGraph::PassThrough(), {c_jammed_x}, {WaveTilesX});
+                auto c_jammed_y
+                    = graph.mapper.get<CoordGraph::JammedWaveTileNumber>(otherLoads[0], 1);
+                graph.coordinates.addElement(CoordGraph::PassThrough(), {c_jammed_y}, {WaveTilesY});
+
+                if(storeD > 0)
+                {
+                    auto d_jammed_x = graph.mapper.get<CoordGraph::JammedWaveTileNumber>(storeD, 0);
+                    graph.coordinates.addElement(
+                        CoordGraph::PassThrough(), {WaveTilesX}, {d_jammed_x});
+                    auto d_jammed_y = graph.mapper.get<CoordGraph::JammedWaveTileNumber>(storeD, 1);
+                    graph.coordinates.addElement(
+                        CoordGraph::PassThrough(), {WaveTilesY}, {d_jammed_y});
+                }
+            }
+            else
+                graph.control.addElement(ControlHypergraph::Body(), {kernel}, {forK});
         }
 
         /**

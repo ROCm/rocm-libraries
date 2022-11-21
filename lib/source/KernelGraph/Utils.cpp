@@ -46,5 +46,26 @@ namespace rocRoller
             return {dimK, forK};
         }
 
+        std::pair<int, int> rangeFor(KernelHypergraph& graph, Expression::ExpressionPtr size)
+        {
+            auto unit_stride  = Expression::literal(1u);
+            auto rangeK       = graph.coordinates.addElement(CoordGraph::Linear(size, unit_stride));
+            auto dimK         = graph.coordinates.addElement(CoordGraph::ForLoop());
+            auto sizeDataType = Expression::resultVariableType(size);
+            auto exprK        = std::make_shared<Expression::Expression>(
+                DataFlowTag{dimK, Register::Type::Scalar, sizeDataType});
+
+            auto forK       = graph.control.addElement(ControlHypergraph::ForLoopOp{exprK < size});
+            auto initK      = graph.control.addElement(ControlHypergraph::Assign{
+                Register::Type::Scalar, Expression::literal(0, sizeDataType)});
+            auto incrementK = graph.control.addElement(
+                ControlHypergraph::Assign{Register::Type::Scalar, exprK + unit_stride});
+
+            graph.coordinates.addElement(CoordGraph::DataFlow(), {rangeK}, {dimK});
+            graph.control.addElement(ControlHypergraph::Initialize(), {forK}, {initK});
+            graph.control.addElement(ControlHypergraph::ForLoopIncrement(), {forK}, {incrementK});
+
+            return {dimK, forK};
+        }
     }
 }
