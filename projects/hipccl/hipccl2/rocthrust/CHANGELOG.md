@@ -2,11 +2,13 @@
 
 Full documentation for rocThrust is available at [https://rocthrust.readthedocs.io/en/latest/](https://rocthrust.readthedocs.io/en/latest/)
 
-## (Unreleased) rocThrust 2.17.0 for ROCm 5.4
+## (Unreleased) rocThrust 2.17.0 for ROCm 5.5
 ### Added
-- Updated to match upstream Thrust 1.17.0
+- Updated to match upstream Thrust 1.17.2
+### Fixed
+- set_difference and set_intersection no longer hang if the number of items is above `UINT_MAX`. Previously, the unit tests for set_difference and set_intersection failed the `TestSetDifferenceWithBigIndexes`.
 
-## (Unreleased) rocThrust 2.16.0 for ROCm 5.3
+## rocThrust 2.16.0 for ROCm 5.3
 ### Added
 - Updated to match upstream Thrust 1.16.0
 ### Changed
