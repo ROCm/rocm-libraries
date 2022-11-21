@@ -71,6 +71,9 @@ namespace rocRoller
         std::string   ToString(AllocationState state);
         std::ostream& operator<<(std::ostream& stream, AllocationState state);
 
+        std::string   ToString(SpecialType);
+        std::ostream& operator<<(std::ostream&, SpecialType);
+
         /**
          * Represents a single value (or single value per lane) stored in one or more registers,
          * or a literal value, or a one-dimensional array of registers suitable for use in a
@@ -94,8 +97,8 @@ namespace rocRoller
             /**
              * Special-purpose register such as vcc or exec.
              */
-            static ValuePtr Special(std::string const& name);
-            static ValuePtr Special(std::string const& name, ContextPtr ctx);
+            static ValuePtr Special(SpecialType name);
+            static ValuePtr Special(SpecialType name, ContextPtr ctx);
 
             static std::shared_ptr<Value> Label(const std::string& label);
 
@@ -270,7 +273,7 @@ namespace rocRoller
 
             CommandArgumentValue m_literalValue;
 
-            std::string m_specialName;
+            SpecialType m_specialName;
 
             std::string m_label;
 

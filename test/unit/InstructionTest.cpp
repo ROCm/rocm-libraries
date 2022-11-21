@@ -239,10 +239,10 @@ TEST_F(InstructionTest, Classifications)
 TEST_F(InstructionTest, Special)
 {
     // This pattern is used in the GuidePosts
-    auto inst = Instruction("s_waitcnt", {Register::Value::Special("lgkmcnt(1)")}, {}, {}, "");
+    auto inst = Instruction("s_waitcnt", {}, {}, {"lgkmcnt(1)"}, "");
     m_context->schedule(inst);
 
-    EXPECT_THAT(output(), testing::HasSubstr("s_waitcnt lgkmcnt(1)\n"));
+    EXPECT_THAT(output(), testing::HasSubstr("s_waitcnt  lgkmcnt(1)\n"));
 }
 
 TEST_F(InstructionTest, ReadsSpecial)
@@ -269,11 +269,6 @@ TEST_F(InstructionTest, ReadsSpecial)
     {
         auto inst = Instruction("s_arbitrary_instruction", {m_context->getVCC()}, {}, {}, "");
         EXPECT_FALSE(inst.readsSpecialRegisters());
-    }
-    {
-        auto inst = Instruction(
-            "s_arbitrary_instruction", {}, {Register::Value::Special("lgkmcnt(1)")}, {}, "");
-        EXPECT_TRUE(inst.readsSpecialRegisters());
     }
     {
         auto dst = std::make_shared<Register::Value>(

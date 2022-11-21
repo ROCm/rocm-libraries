@@ -141,7 +141,7 @@ co_yield Instruction::Comment("****************************************"
                               " UseSgprForGRO=1 \n"
                               " Number of elements to shift-left SRD \n"
                               " 2GB limit - set offsets to -1 to exceed this and clamp \n");
-auto BufferLimit = Register::Value::Special("0xffffffff");
+auto BufferLimit = Register::Value::Label("0xffffffff");
 co_yield Instruction::Comment("****************************************\n"
                               " Bits 127:96 of SRD.                    \n"
                               " hex: 0x00020000                        \n"
@@ -164,7 +164,7 @@ auto Srd127_96 = Register::Value::Literal(131072); //0x00020000
 co_yield Instruction::Comment("****************************************\n"
                               " Allocate Resources                     \n"
                               "****************************************\n");
-co_yield_(Instruction("s_mov_b32", {Register::Value::Special("m0")}, {Register::Value::Literal(4096)}, {}, " LDS clamp at 4096 bytes"));
+co_yield_(Instruction("s_mov_b32", {Register::Value::Label("m0")}, {Register::Value::Literal(4096)}, {}, " LDS clamp at 4096 bytes"));
 //co_yield Instruction::Wait(WaitCount::LGKMCnt(0, "wait for 148 bytes of kern args"));
 co_yield generateOp<Expression::ShiftL>(OffsetD, OffsetD, Register::Value::Literal(2));
 co_yield generateOp<Expression::Add>(D, D, OffsetD);
@@ -370,7 +370,7 @@ for(size_t i = 0; i < accDestination->valueCount(); ++i)
 {
     co_yield_(Instruction("v_accvgpr_write",
                                   {accDestination->subset({i})},
-                                  {Register::Value::Special("0x0")},
+                                  {Register::Value::Label("0x0")},
                                   {},
                                   " Set accumulator to 0"));
 }
@@ -427,9 +427,9 @@ co_yield Instruction::Comment(" local read increment a \n"
                               " N/A, lro->128 \n"
                               " self.localReadDoCntA 1 self.localReadDoCntB 1 \n"
                               " sched write - iter 0 writesPerItem=1 \n");
-//co_yield Instruction("s_waitcnt", {Register::Value::Special("vmcnt(1)")}, {}, {}, " lgkmcnt=-1 vmcnt=1wait for global read before writing to local");
+//co_yield Instruction("s_waitcnt", {Register::Value::Label("vmcnt(1)")}, {}, {}, " lgkmcnt=-1 vmcnt=1wait for global read before writing to local");
 co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Local, vgprLocalWriteAddrA, vgprG2LA, Register::Value::Literal(0), 4, " lwoA_0_0_0_0 = (0*LSCA) + (0*LSPA)(*MT0I+PAD) = 0");
-co_yield_(Instruction("s_waitcnt", {Register::Value::Special("lgkmcnt(1)")}, {}, {}, " lgkmcnt=0 vmcnt=-1wait for prior local read local write old=0, new=1 newLW=1 newLR=0"));
+co_yield_(Instruction("s_waitcnt", {Register::Value::Label("lgkmcnt(1)")}, {}, {}, " lgkmcnt=0 vmcnt=-1wait for prior local read local write old=0, new=1 newLW=1 newLR=0"));
 co_yield fmm->mul(accDestination, vgprValuA_X0_I0, vgprValuB_X0_I0, accDestination, 32, 32, 2, 1);
 co_yield Instruction::Comment(" numPrefetchIter=0 \n"
                               " dataAtIterA=0 numReadsIterA=1 skipReadsIterA=0 readsPerIterA=1 \n"
@@ -440,7 +440,7 @@ co_yield m_context->mem()->load(MemoryInstructions::MemoryKind::Local, vgprValuA
 co_yield Instruction::Comment(" local read b ");
 co_yield m_context->mem()->load(MemoryInstructions::MemoryKind::Local, vgprValuB_X1_I0, vgprLocalReadAddrB, Register::Value::Literal(512), 4, "L -> Reg lro=128 swapByteOffset=0 ti=64 vIdx=0 rIdx=0 oIdx=0 buffer=1 iui=0");
 co_yield Instruction::Comment(" sched write - iter 1 writesPerItem=1 ");
-//co_yield Instruction("s_waitcnt", {Register::Value::Special("vmcnt(0)")}, {}, {}, " lgkmcnt=-1 vmcnt=0wait for global read before writing to local");
+//co_yield Instruction("s_waitcnt", {Register::Value::Label("vmcnt(0)")}, {}, {}, " lgkmcnt=-1 vmcnt=0wait for global read before writing to local");
 co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Local, vgprLocalWriteAddrB, vgprG2LB, Register::Value::Literal(0), 4, " lwoB_0_0_0_0 = (0*LSCB) + (0*LSPB)(*MT1J+PAD) = 0");
 co_yield Instruction::Comment(" local write swap offsets a ");
 co_yield generateOp<Expression::BitwiseXor>(vgprLocalWriteAddrA, Register::Value::Literal(2048), vgprLocalWriteAddrA); //" swap Red Blk"
@@ -454,7 +454,7 @@ co_yield Instruction::Comment(" local read init pointers a ");
 co_yield Instruction::Comment(" localReadInitPointers ");
 co_yield Instruction::Comment(" local read init pointers b ");
 co_yield Instruction::Comment(" localReadInitPointers ");
-//co_yield Instruction("s_waitcnt", {Register::Value::Special("lgkmcnt(1)")}, {}, {}, " lgkmcnt=0 vmcnt=-1wait for prior local read local write old=0, new=1 newLW=1 newLR=0");
+//co_yield Instruction("s_waitcnt", {Register::Value::Label("lgkmcnt(1)")}, {}, {}, " lgkmcnt=0 vmcnt=-1wait for prior local read local write old=0, new=1 newLW=1 newLR=0");
 co_yield fmm->mul(accDestination, vgprValuA_X1_I0, vgprValuB_X1_I0, accDestination, 32, 32, 2, 1);
 co_yield Instruction::Comment(" numPrefetchIter=0 ");
 co_yield Instruction::Comment(" dataAtIterA=1 numReadsIterA=2 skipReadsIterA=0 readsPerIterA=1 ");
@@ -471,7 +471,7 @@ co_yield Instruction::Label(label_5);
 co_yield Instruction::Comment(" Before NLL: Check VGPR.checkin for INT8 LW ");
 co_yield Instruction::Label(label_6);
 co_yield Instruction::Comment(" endSummation: add vgpr [0...11) to pool ");
-//co_yield Instruction("s_waitcnt", {Register::Value::Special("lgkmcnt(0) & vmcnt(0)")}, {}, {}, " wait for all summation activity");
+//co_yield Instruction("s_waitcnt", {Register::Value::Label("lgkmcnt(0) & vmcnt(0)")}, {}, {}, " wait for all summation activity");
 co_yield Instruction::Comment(" Mapping of Acc register -> C Vgpr register ");
 co_yield Instruction::Comment(" not-LocalSplitU: global write indices ");
 {

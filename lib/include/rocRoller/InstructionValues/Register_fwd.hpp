@@ -19,6 +19,15 @@ namespace rocRoller
             Special,
             Count // Always last enum entry
         };
+        enum class SpecialType
+        {
+            SCC = 0,
+            VCC,
+            VCC_LO,
+            VCC_HI,
+            EXEC,
+            Count // Always last enum entry
+        };
 
         enum class AllocationState
         {

@@ -17,7 +17,11 @@ It DOES handle the case where:
 v[2:5] is used somewhere in the file and v2 and v3 are also used somewhere in the file.
 """
 
-special_registers = {"vcc": "m_context->getVCC()", "exec": "m_context->getExec()"}
+special_registers = {
+    "vcc": "m_context->getVCC()",
+    "scc": "m_context->getSCC()",
+    "exec": "m_context->getExec()",
+}
 
 
 # Generate C++ code for initializing all Registers that will be used
@@ -183,7 +187,7 @@ def convert_arg(arg, registers, labels):
     elif arg in labels:
         return labels[arg]
     else:
-        return 'Register::Value::Special("' + arg + '")'
+        return 'Register::Value::Label("' + arg + '")'
 
 
 # Generate a CPP file with struct definition to generate the input machine code.

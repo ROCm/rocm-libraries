@@ -138,6 +138,32 @@ namespace rocRoller
             return stream << ToString(state);
         }
 
+        inline std::string ToString(SpecialType spec)
+        {
+            switch(spec)
+            {
+            case SpecialType::SCC:
+                return "scc";
+            case SpecialType::VCC:
+                return "vcc";
+            case SpecialType::VCC_LO:
+                return "vcc_lo";
+            case SpecialType::VCC_HI:
+                return "vcc_hi";
+            case SpecialType::EXEC:
+                return "exec";
+            case SpecialType::Count:
+            default:
+                break;
+            }
+            throw std::runtime_error("Invalid SpecialType");
+        }
+
+        inline std::ostream& operator<<(std::ostream& stream, SpecialType spec)
+        {
+            return stream << ToString(spec);
+        }
+
         inline Value::Value() = default;
 
         inline Value::~Value() = default;
@@ -245,9 +271,9 @@ namespace rocRoller
             return v;
         }
 
-        inline ValuePtr Value::Special(std::string const& name)
+        inline ValuePtr Value::Special(SpecialType name)
         {
-            AssertFatal(!name.empty(), "Special register must have a name!");
+            AssertFatal(name != SpecialType::Count, "Count not a valid type for Special register!");
             auto v = std::make_shared<Value>();
 
             v->m_specialName = name;
@@ -257,9 +283,9 @@ namespace rocRoller
             return v;
         }
 
-        inline ValuePtr Value::Special(std::string const& name, ContextPtr ctx)
+        inline ValuePtr Value::Special(SpecialType name, ContextPtr ctx)
         {
-            AssertFatal(!name.empty(), "Special register must have a name!");
+            AssertFatal(name != SpecialType::Count, "Count not a valid type for Special register!");
             auto v = std::make_shared<Value>();
 
             v->m_specialName = name;
@@ -390,12 +416,12 @@ namespace rocRoller
 
         inline bool Value::isSCC() const
         {
-            return m_regType == Type::Special && m_specialName == "scc";
+            return m_regType == Type::Special && m_specialName == SpecialType::SCC;
         }
 
         inline bool Value::isExec() const
         {
-            return m_regType == Type::Special && m_specialName == "exec";
+            return m_regType == Type::Special && m_specialName == SpecialType::EXEC;
         }
 
         inline std::shared_ptr<Value> Value::placeholder() const
@@ -573,29 +599,6 @@ namespace rocRoller
 
             for(int coord : m_allocationCoord)
                 co_yield m_allocation->m_registerIndices.at(coord);
-        }
-
-        /**
-         * @brief Yields RegisterId for the registers associated with this allocation
-         *
-         * Note: This function does not yield any ids for Literals, Labels, or unallocated registers
-         *
-         * @return Generator<RegisterId>
-         */
-        inline Generator<RegisterId> Value::getRegisterIds() const
-        {
-            if(m_regType == Type::Literal || m_regType == Type::Label)
-            {
-                co_return;
-            }
-            if(!m_allocation || m_allocation->allocationState() != AllocationState::Allocated)
-            {
-                co_return;
-            }
-            for(int coord : m_allocationCoord)
-            {
-                co_yield RegisterId(m_regType, m_allocation->m_registerIndices.at(coord));
-            }
         }
 
         inline std::string Value::getLiteral() const

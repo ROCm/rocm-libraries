@@ -320,22 +320,33 @@ namespace rocRollerTest
 
     TEST_F(MFMA90aObserverTest, XDLOPThenVALU_WAR)
     {
-        auto v = createRegisters(Register::Type::Vector, DataType::Float, 6);
-        auto a = createRegisters(Register::Type::Accumulator, DataType::Float, 2, 4);
+        // If SrcC is fully overlapped
+        auto                     v = createRegisters(Register::Type::Vector, DataType::Float, 6);
+        std::vector<Instruction> insts
+            = {Instruction("v_mfma_f32_16x16x4f32", {v[2]}, {v[0], v[1], v[3]}, {}, ""),
+               Instruction("v_or_b32", {v[3]}, {v[4], v[5]}, {}, ""),
+               Instruction("s_endpgm", {}, {}, {}, "")};
 
+        peekAndSchedule(insts[0]);
+        peekAndSchedule(insts[1], 11);
+
+        EXPECT_THAT(output(), HasSubstr("s_nop 10"));
+    }
+
+    TEST_F(MFMA90aObserverTest, XDLOPThenVALU_WAR_Partial)
+    {
         // If SrcC is partially overlapped
-        {
-            Scheduling::InstructionStatus peeked;
-            std::vector<Instruction>      insts
-                = {Instruction("v_mfma_f32_16x16x4f32", {v[2]}, {v[0], v[1], v[3]}, {}, ""),
-                   Instruction("v_or_b32", {v[3]}, {v[4], v[5]}, {}, ""),
-                   Instruction("s_endpgm", {}, {}, {}, "")};
+        auto                     v = createRegisters(Register::Type::Vector, DataType::Float, 6, 4);
+        std::vector<Instruction> insts
+            = {Instruction(
+                   "v_mfma_f32_16x16x4f32", {v[2]}, {v[0], v[1], v[3]->subset({2, 3})}, {}, ""),
+               Instruction("v_or_b32", {v[3]->subset({1, 2})}, {v[4], v[5]}, {}, ""),
+               Instruction("s_endpgm", {}, {}, {}, "")};
 
-            peekAndSchedule(insts[0]);
-            peekAndSchedule(insts[1], 11);
+        peekAndSchedule(insts[0]);
+        peekAndSchedule(insts[1], 11);
 
-            EXPECT_THAT(output(), HasSubstr("s_nop 10"));
-            clearOutput();
-        }
+        EXPECT_THAT(output(), HasSubstr("s_nop 10"));
+        clearOutput();
     }
 }

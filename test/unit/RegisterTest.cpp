@@ -2,10 +2,12 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/Context.hpp>
 #include <rocRoller/InstructionValues/LabelAllocator.hpp>
 #include <rocRoller/InstructionValues/Register.hpp>
 
+#include "GPUContextFixture.hpp"
 #include "GenericContextFixture.hpp"
 #include "SourceMatcher.hpp"
 
@@ -236,3 +238,117 @@ TEST_F(RegisterTest, RegisterReuse)
 
     EXPECT_EQ(val1->toString(), val2->toString());
 }
+
+TEST_F(RegisterTest, RegisterIDBasic)
+{
+    auto rs
+        = std::make_shared<Register::Value>(m_context, Register::Type::Scalar, DataType::Float, 8);
+    rs->allocateNow();
+
+    for(auto& id1 : rs->getRegisterIds())
+    {
+        for(auto& id2 : rs->getRegisterIds())
+        {
+            if(id1 != id2)
+            {
+                EXPECT_NE(Register::RegisterIdHash()(id1), Register::RegisterIdHash()(id2));
+            }
+            else
+            {
+                EXPECT_EQ(Register::RegisterIdHash()(id1), Register::RegisterIdHash()(id2));
+            }
+        }
+    }
+
+    auto rv
+        = std::make_shared<Register::Value>(m_context, Register::Type::Vector, DataType::Float, 8);
+    rv->allocateNow();
+
+    for(auto& id1 : rv->getRegisterIds())
+    {
+        for(auto& id2 : rv->getRegisterIds())
+        {
+            if(id1 != id2)
+            {
+                EXPECT_NE(Register::RegisterIdHash()(id1), Register::RegisterIdHash()(id2));
+            }
+            else
+            {
+                EXPECT_EQ(Register::RegisterIdHash()(id1), Register::RegisterIdHash()(id2));
+            }
+        }
+    }
+
+    for(auto& id1 : rv->getRegisterIds())
+    {
+        for(auto& id2 : rs->getRegisterIds())
+        {
+            EXPECT_NE(Register::RegisterIdHash()(id1), Register::RegisterIdHash()(id2));
+        }
+    }
+}
+
+class ARCH_RegisterTest : public GPUContextFixture
+{
+};
+
+TEST_P(ARCH_RegisterTest, RegisterIDSpecial)
+{
+    std::vector<std::shared_ptr<rocRoller::Register::Value>> specialRegisters(
+        {m_context->getVCC_LO(),
+         m_context->getVCC_HI(),
+         m_context->getSCC(),
+         m_context->getExec()});
+    std::vector<Register::RegisterId> specialRegisterIDs;
+    for(auto& specialRegister : specialRegisters)
+    {
+        for(auto& id : specialRegister->getRegisterIds())
+        {
+            specialRegisterIDs.push_back(id);
+        }
+    }
+    EXPECT_EQ(specialRegisterIDs.size(), specialRegisters.size());
+
+    for(int i = 0; i < specialRegisters.size(); i++)
+    {
+        for(int j = 0; j < specialRegisters.size(); j++)
+        {
+            if(specialRegisters[i]->toString() != specialRegisters[j]->toString())
+            {
+                EXPECT_NE(specialRegisterIDs[i], specialRegisterIDs[j]);
+                EXPECT_NE(Register::RegisterIdHash()(specialRegisterIDs[i]),
+                          Register::RegisterIdHash()(specialRegisterIDs[j]));
+            }
+            else
+            {
+                EXPECT_EQ(specialRegisterIDs[i], specialRegisterIDs[j]);
+                EXPECT_EQ(Register::RegisterIdHash()(specialRegisterIDs[i]),
+                          Register::RegisterIdHash()(specialRegisterIDs[j]));
+            }
+        }
+    }
+
+    std::vector<Register::RegisterId> vccRegisterIDs;
+    for(auto& id : m_context->getVCC()->getRegisterIds())
+    {
+        vccRegisterIDs.push_back(id);
+    }
+    if(m_context->kernel()->wavefront_size() == 64)
+    {
+        EXPECT_EQ(vccRegisterIDs.size(), 2);
+        EXPECT_NE(vccRegisterIDs[0], vccRegisterIDs[1]);
+        EXPECT_NE(Register::RegisterIdHash()(vccRegisterIDs[0]),
+                  Register::RegisterIdHash()(vccRegisterIDs[1]));
+        EXPECT_EQ(vccRegisterIDs[1], specialRegisterIDs[1]);
+    }
+    else
+    {
+        EXPECT_EQ(vccRegisterIDs.size(), 1);
+    }
+    EXPECT_EQ(vccRegisterIDs[0], specialRegisterIDs[0]);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    ARCH_RegisterTest,
+    ARCH_RegisterTest,
+    ::testing::ValuesIn(rocRoller::GPUArchitectureLibrary::getAllSupportedISAs()));
