@@ -35,10 +35,6 @@ endfunction()
 
 function(add_hipcub_test_internal TEST_NAME TEST_SOURCES TEST_TARGET)
   add_executable(${TEST_TARGET} ${TEST_SOURCES})
-  target_include_directories(${TEST_TARGET} SYSTEM BEFORE
-    PUBLIC
-      GoogleTest>
-  )
   target_link_libraries(${TEST_TARGET}
     PRIVATE
       GTest::gtest

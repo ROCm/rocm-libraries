@@ -30,6 +30,8 @@
 #include "test_utils_half.hpp"
 #include "test_utils_bfloat16.hpp"
 
+#include <cstring>
+
 namespace test_utils
 {
 
@@ -40,17 +42,28 @@ constexpr auto is_floating_nan_host(const T& a)
     return (a != a);
 }
 
-template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit, bool ShiftLess = (StartBit == 0 && EndBit == sizeof(Key) * 8), class Enable = void>
-struct key_comparator {};
+template<class Key,
+         bool         Descending,
+         unsigned int StartBit,
+         unsigned int EndBit,
+         class Enable = void>
+struct key_comparator
+{};
 
-template <class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
-struct key_comparator<Key, Descending, StartBit, EndBit, false, typename std::enable_if<std::is_integral<Key>::value>::type>
+template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
+struct key_comparator<
+    Key,
+    Descending,
+    StartBit,
+    EndBit,
+    typename std::enable_if<hipcub::NumericTraits<Key>::CATEGORY != hipcub::FLOATING_POINT>::type>
 {
-    static constexpr Key radix_mask_upper  = (Key(1) << EndBit) - 1;
+    static constexpr Key radix_mask_upper
+        = EndBit == 8 * sizeof(Key) ? ~Key(0) : (Key(1) << EndBit) - 1;
     static constexpr Key radix_mask_bottom = (Key(1) << StartBit) - 1;
     static constexpr Key radix_mask = radix_mask_upper ^ radix_mask_bottom;
 
-    bool operator()(const Key& lhs, const Key& rhs)
+    bool operator()(const Key& lhs, const Key& rhs) const
     {
         Key l = lhs & radix_mask;
         Key r = rhs & radix_mask;
@@ -58,73 +71,52 @@ struct key_comparator<Key, Descending, StartBit, EndBit, false, typename std::en
     }
 };
 
-template <class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
-struct key_comparator<Key, Descending, StartBit, EndBit, false, typename std::enable_if<std::is_floating_point<Key>::value>::type>
-{
-    // Floating-point types do not support StartBit and EndBit.
-    bool operator()(const Key&, const Key&)
-    {
-        return false;
-    }
-};
-
 template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
-struct key_comparator<Key, Descending, StartBit, EndBit, true, typename std::enable_if<std::is_integral<Key>::value>::type>
+struct key_comparator<
+    Key,
+    Descending,
+    StartBit,
+    EndBit,
+    typename std::enable_if<hipcub::NumericTraits<Key>::CATEGORY == hipcub::FLOATING_POINT>::type>
 {
-    bool operator()(const Key& lhs, const Key& rhs)
-    {
-        return Descending ? (rhs < lhs) : (lhs < rhs);
-    }
-};
+    using unsigned_bits_type = typename hipcub::NumericTraits<Key>::UnsignedBits;
 
-template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
-struct key_comparator<Key, Descending, StartBit, EndBit, true, typename std::enable_if<std::is_floating_point<Key>::value>::type>
-{
-    bool operator()(const Key& lhs, const Key& rhs)
+    bool operator()(const Key& lhs, const Key& rhs) const
     {
-        if(is_floating_nan_host(lhs) && is_floating_nan_host(rhs) && std::signbit(lhs) == std::signbit(rhs)){
-            return false;
+        return key_comparator<unsigned_bits_type, Descending, StartBit, EndBit>()(
+            this->to_bits(lhs),
+            this->to_bits(rhs));
+    }
+
+    unsigned_bits_type to_bits(const Key& key) const
+    {
+        unsigned_bits_type bit_key;
+        std::memcpy(&bit_key, &key, sizeof(Key));
+
+        // Remove signed zero, this case is supposed to be treated the same as
+        // unsigned zero in hipcub sorting algorithms.
+        constexpr unsigned_bits_type minus_zero = unsigned_bits_type{1} << (8 * sizeof(Key) - 1);
+        // Positive and negative zero should compare the same.
+        if(bit_key == minus_zero)
+        {
+            bit_key = 0;
         }
-        if(Descending){
-            if(is_floating_nan_host(lhs)) return !std::signbit(lhs);
-            if(is_floating_nan_host(rhs)) return std::signbit(rhs);
-            return (rhs < lhs);
-        }else{
-            if(is_floating_nan_host(lhs)) return std::signbit(lhs);
-            if(is_floating_nan_host(rhs)) return !std::signbit(rhs);
-            return (lhs < rhs);
+        // Flip bits mantissa and exponent if the key is negative, so as to make
+        // 'more negative' values compare before 'less negative'.
+        if(bit_key & minus_zero)
+        {
+            bit_key ^= ~minus_zero;
         }
-    }
-};
-
-// TODO: Merge this half specialization with bfloat16 below, once NVidia fixed its __half2float conversion for -NaN
-template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
-struct key_comparator<Key, Descending, StartBit, EndBit, true,
-                      typename std::enable_if<std::is_same<Key, test_utils::half>::value>::type>
-{
-    bool operator()(const Key& lhs, const Key& rhs)
-    {
-        test_utils::native_half lhs_native(lhs);
-        test_utils::native_half rhs_native(rhs);
-        return key_comparator<float, Descending, 0, sizeof(float) * 8>()(lhs_native, rhs_native);
-    }
-};
-
-template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
-struct key_comparator<Key, Descending, StartBit, EndBit, true,
-                      typename std::enable_if<std::is_same<Key, test_utils::bfloat16>::value>::type>
-{
-    bool operator()(const Key& lhs, const Key& rhs)
-    {
-        // HIP's half and bfloat16 doesn't have __host__ comparison operators, use floats instead
-        return key_comparator<float, Descending, 0, sizeof(float) * 8>()(lhs, rhs);
+        // Make negatives compare before positives.
+        bit_key ^= minus_zero;
+        return bit_key;
     }
 };
 
 template<class Key, class Value, bool Descending, unsigned int StartBit, unsigned int EndBit>
 struct key_value_comparator
 {
-    bool operator()(const std::pair<Key, Value>& lhs, const std::pair<Key, Value>& rhs)
+    bool operator()(const std::pair<Key, Value>& lhs, const std::pair<Key, Value>& rhs) const
     {
         return key_comparator<Key, Descending, StartBit, EndBit>()(lhs.first, rhs.first);
     }

@@ -103,14 +103,30 @@ struct special_values {
         if(std::is_integral<T>::value){
             return std::vector<T>();
         }else {
-            std::vector<T> r = {test_utils::numeric_limits<T>::quiet_NaN(),
-                                sign_bit_flip(test_utils::numeric_limits<T>::quiet_NaN()),
-                                //test_utils::numeric_limits<T>::signaling_NaN(), // signaling_NaN not supported on NVIDIA yet
-                                //sign_bit_flip(test_utils::numeric_limits<T>::signaling_NaN()),
-                                test_utils::numeric_limits<T>::infinity(),
-                                sign_bit_flip(test_utils::numeric_limits<T>::infinity()),
-                                T(0.0),
-                                T(-0.0)};
+            using traits          = hipcub::NumericTraits<T>;
+            using unsigned_bits   = typename traits::UnsignedBits;
+            auto nan_with_payload = [](unsigned_bits payload)
+            {
+                T             value = test_utils::numeric_limits<T>::quiet_NaN();
+                unsigned_bits int_value;
+                std::memcpy(&int_value, &value, sizeof(T));
+                int_value |= payload;
+                std::memcpy(&value, &int_value, sizeof(T));
+                return value;
+            };
+
+            std::vector<T> r = {
+                test_utils::numeric_limits<T>::quiet_NaN(),
+                sign_bit_flip(test_utils::numeric_limits<T>::quiet_NaN()),
+                //test_utils::numeric_limits<T>::signaling_NaN(), // signaling_NaN not supported on NVIDIA yet
+                //sign_bit_flip(test_utils::numeric_limits<T>::signaling_NaN()),
+                test_utils::numeric_limits<T>::infinity(),
+                sign_bit_flip(test_utils::numeric_limits<T>::infinity()),
+                T(0.0),
+                T(-0.0),
+                nan_with_payload(0x11),
+                nan_with_payload(0x80),
+                nan_with_payload(0x1)};
             return r;
         }
     }
