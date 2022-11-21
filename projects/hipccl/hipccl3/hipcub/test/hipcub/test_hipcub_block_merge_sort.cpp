@@ -113,7 +113,7 @@ TYPED_TEST(HipcubBlockMergeSort, SortKeys)
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
     {
-        return;
+        GTEST_SKIP();
     }
 
     const size_t size = items_per_block * 1134;

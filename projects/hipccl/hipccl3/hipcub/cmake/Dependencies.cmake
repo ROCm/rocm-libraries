@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -40,54 +40,54 @@ if(HIP_COMPILER STREQUAL "nvcc")
 
   if(NOT DEFINED CUB_INCLUDE_DIR)
     file(
-      DOWNLOAD https://github.com/NVIDIA/cub/archive/1.17.1.zip
-      ${CMAKE_CURRENT_BINARY_DIR}/cub-1.17.1.zip
+      DOWNLOAD https://github.com/NVIDIA/cub/archive/1.17.2.zip
+      ${CMAKE_CURRENT_BINARY_DIR}/cub-1.17.2.zip
       STATUS cub_download_status LOG cub_download_log
     )
     list(GET cub_download_status 0 cub_download_error_code)
     if(cub_download_error_code)
       message(FATAL_ERROR "Error: downloading "
-        "https://github.com/NVIDIA/cub/archive/1.17.1.zip failed "
+        "https://github.com/NVIDIA/cub/archive/1.17.2.zip failed "
         "error_code: ${cub_download_error_code} "
         "log: ${cub_download_log} "
       )
     endif()
 
     execute_process(
-      COMMAND ${CMAKE_COMMAND} -E tar xzf ${CMAKE_CURRENT_BINARY_DIR}/cub-1.17.1.zip
+      COMMAND ${CMAKE_COMMAND} -E tar xzf ${CMAKE_CURRENT_BINARY_DIR}/cub-1.17.2.zip
       WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
       RESULT_VARIABLE cub_unpack_error_code
     )
     if(cub_unpack_error_code)
-      message(FATAL_ERROR "Error: unpacking ${CMAKE_CURRENT_BINARY_DIR}/cub-1.17.1.zip failed")
+      message(FATAL_ERROR "Error: unpacking ${CMAKE_CURRENT_BINARY_DIR}/cub-1.17.2.zip failed")
     endif()
-    set(CUB_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/cub-1.17.1/ CACHE PATH "")
+    set(CUB_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/cub-1.17.2/ CACHE PATH "")
   endif()
 
   if(NOT DEFINED THRUST_INCLUDE_DIR)
     file(
-      DOWNLOAD https://github.com/NVIDIA/thrust/archive/1.17.1.zip
-      ${CMAKE_CURRENT_BINARY_DIR}/thrust-1.17.1.zip
+      DOWNLOAD https://github.com/NVIDIA/thrust/archive/1.17.2.zip
+      ${CMAKE_CURRENT_BINARY_DIR}/thrust-1.17.2.zip
       STATUS thrust_download_status LOG thrust_download_log
     )
     list(GET thrust_download_status 0 thrust_download_error_code)
     if(thrust_download_error_code)
       message(FATAL_ERROR "Error: downloading "
-        "https://github.com/NVIDIA/thrust/archive/1.17.1.zip failed "
+        "https://github.com/NVIDIA/thrust/archive/1.17.2.zip failed "
         "error_code: ${thrust_download_error_code} "
         "log: ${thrust_download_log} "
       )
     endif()
 
     execute_process(
-      COMMAND ${CMAKE_COMMAND} -E tar xzf ${CMAKE_CURRENT_BINARY_DIR}/thrust-1.17.1.zip
+      COMMAND ${CMAKE_COMMAND} -E tar xzf ${CMAKE_CURRENT_BINARY_DIR}/thrust-1.17.2.zip
       WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
       RESULT_VARIABLE thrust_unpack_error_code
     )
     if(thrust_unpack_error_code)
-      message(FATAL_ERROR "Error: unpacking ${CMAKE_CURRENT_BINARY_DIR}/thrust-1.17.1.zip failed")
+      message(FATAL_ERROR "Error: unpacking ${CMAKE_CURRENT_BINARY_DIR}/thrust-1.17.2.zip failed")
     endif()
-    set(THRUST_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/thrust-1.17.1/ CACHE PATH "")
+    set(THRUST_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/thrust-1.17.2/ CACHE PATH "")
   endif()
 else()
   # rocPRIM (only for ROCm platform)
@@ -116,14 +116,28 @@ endif()
 
 # Test dependencies
 if(BUILD_TEST)
+  # NOTE1: Google Test has has two incompatible find_package paths: 
+  #        the legacy FindGTest.cmake and the newer GTestConfig.cmake
+  #
+  # FindGTest.cmake defines:   GTest::GTest, GTest::Main, GTEST_FOUND
+  #
+  # GTestConfig.cmake defines: GTest::gtest, GTest::gtest_main, GTest::gmock, GTest::gmock_main
+  #
+  # NOTE2: Finding GTest in MODULE mode, one cannot invoke find_package in CONFIG mode, because targets
+  #        will be duplicately defined.
+  #
+  # NOTE3: The following snippet first tries to find Google Test binary either in MODULE or CONFIG modes.
+  #        If neither succeeds it goes on to download Google Test from GitHub and defines the CONFIG
+  #        mode targets. 
+  #        Otherwise, if MODULE or CONFIG succeeded, then it prints the result to the
+  #        console via a non-QUIET find_package call and if MODULE succeeded, creates ALIAS targets
+  #        with the CONFIG names.
   if(NOT DEPENDENCIES_FORCE_DOWNLOAD)
-    # Google Test (https://github.com/google/googletest)
-    find_package(GTest 1.11.0 CONFIG)
+    find_package(GTest 1.11.0 QUIET)
   endif()
 
-  if(NOT GTest_FOUND)
+  if(NOT TARGET GTest::GTest AND NOT TARGET GTest::gtest)
     message(STATUS "GTest not found or force download GTest on. Downloading and building GTest.")
-    # Google Test (https://github.com/google/googletest)
     if(WIN32)
       set(COMPILER_OVERRIDE "-DCMAKE_CXX_COMPILER=cl")
     endif()
@@ -142,7 +156,14 @@ if(BUILD_TEST)
       BUILD_PROJECT       TRUE
       UPDATE_DISCONNECTED TRUE # Never update automatically from the remote repository
     )
-    find_package(GTest 1.11.0 EXACT REQUIRED MODULE)
+    list(APPEND CMAKE_PREFIX_PATH ${GTEST_ROOT})
+    find_package(GTest 1.11.0 EXACT CONFIG REQUIRED PATHS ${GTEST_ROOT})
+  else()
+    find_package(GTest 1.11.0 REQUIRED)
+    if(TARGET GTest::Main AND NOT TARGET GTest::gtest_main)
+      add_library(GTest::gtest       ALIAS GTest::GTest)
+      add_library(GTest::gtest_main  ALIAS GTest::Main)
+    endif()
   endif()
 endif()
 
