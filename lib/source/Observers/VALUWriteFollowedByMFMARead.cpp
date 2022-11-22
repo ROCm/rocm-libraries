@@ -4,37 +4,19 @@ namespace rocRoller
 {
     namespace Scheduling
     {
-        InstructionStatus VALUWriteFollowedByMFMARead::peek(Instruction const& inst) const
+        int VALUWriteFollowedByMFMARead::getMaxNops(std::shared_ptr<InstructionRef> inst) const
         {
-            return InstructionStatus::Nops(getNops(inst));
-        };
-
-        void VALUWriteFollowedByMFMARead::modify(Instruction& inst) const
-        {
-            inst.setNopMin(getNops(inst));
+            return 2;
         }
 
-        InstructionStatus VALUWriteFollowedByMFMARead::observe(Instruction const& inst)
+        bool VALUWriteFollowedByMFMARead::trigger(std::shared_ptr<InstructionRef> inst) const
         {
-            auto instRef = std::make_shared<InstructionRef>(inst);
-            if(instRef->isVALU() && !instRef->isXDLOP())
-            {
-                auto regMap = m_context.lock()->getRegisterHazardMap();
-                auto regs   = inst.getRegisters();
-                for(auto const& dst : std::get<1>(regs))
-                {
-                    for(auto const& dstId : dst->getRegisterIds())
-                    {
-                        if(!regMap->contains(dstId))
-                        {
-                            (*regMap)[dstId] = {};
-                        }
-                        (*regMap)[dstId].push_back(WaitStateHazardCounter(nops, instRef, true));
-                    }
-                }
-            }
+            return inst->isVALU() && !inst->isXDLOP();
+        };
 
-            return InstructionStatus::Nops(inst.getNopCount());
+        bool VALUWriteFollowedByMFMARead::writeTrigger() const
+        {
+            return true;
         }
 
         int VALUWriteFollowedByMFMARead::getNops(Instruction const& inst) const
@@ -51,11 +33,9 @@ namespace rocRoller
                     {
                         if(regMap->contains(srcId))
                         {
-                            auto hazards = regMap->at(srcId);
-                            for(auto const& hazard : hazards)
+                            for(auto const& hazard : regMap->at(srcId))
                             {
-                                if(hazard.regWasWritten() && hazard.getInstructionRef()->isVALU()
-                                   && !hazard.getInstructionRef()->isXDLOP())
+                                if(hazard.regWasWritten() && trigger(hazard.getInstructionRef()))
                                 {
                                     return hazard.getRequiredNops();
                                 }

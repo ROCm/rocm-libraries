@@ -1,24 +1,20 @@
 #pragma once
 
-#include <rocRoller/Scheduling/Scheduling.hpp>
-
-#include <rocRoller/CodeGen/InstructionRef.hpp>
-#include <rocRoller/Context.hpp>
-#include <rocRoller/GPUArchitecture/GPUInstructionInfo.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/GenericWaitStateObserver.hpp>
 
 namespace rocRoller
 {
     namespace Scheduling
     {
-        class VALUWriteFollowedByMFMARead
+        /**
+         * @brief 90a rule for VALU Write followed by an MFMA Read requiring 2 NOPs
+         *
+         */
+        class VALUWriteFollowedByMFMARead : public GenericWaitStateObserver
         {
         public:
             VALUWriteFollowedByMFMARead(std::shared_ptr<Context> context)
-                : m_context(context){};
-
-            InstructionStatus peek(Instruction const& inst) const;
-            void              modify(Instruction& inst) const;
-            InstructionStatus observe(Instruction const& inst);
+                : GenericWaitStateObserver(context){};
 
             static bool required(std::shared_ptr<Context> context)
             {
@@ -27,11 +23,11 @@ namespace rocRoller
                 // return context->targetArchitecture().target().getVersionString() == "gfx90a";
             }
 
-        private:
-            std::weak_ptr<Context> m_context;
-            int const              nops = 2;
-
-            int getNops(Instruction const& inst) const;
+        protected:
+            virtual int  getMaxNops(std::shared_ptr<InstructionRef> inst) const;
+            virtual bool trigger(std::shared_ptr<InstructionRef> inst) const;
+            virtual bool writeTrigger() const;
+            virtual int  getNops(Instruction const& inst) const;
         };
 
         static_assert(CObserver<VALUWriteFollowedByMFMARead>);

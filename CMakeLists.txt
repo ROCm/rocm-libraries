@@ -291,6 +291,7 @@ set(rocroller_src
  lib/source/Schedulers/RandomScheduler.cpp
  lib/source/Schedulers/RoundRobinScheduler.cpp
  lib/source/Schedulers/SequentialScheduler.cpp
+ lib/source/Observers/GenericWaitStateObserver.cpp
  lib/source/Observers/ObserverCreation.cpp
  lib/source/Observers/RegisterMapObserver.cpp
  lib/source/Observers/VALUWriteFollowedByMFMARead.cpp

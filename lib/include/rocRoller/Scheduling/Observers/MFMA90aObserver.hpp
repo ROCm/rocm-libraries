@@ -53,7 +53,6 @@ namespace rocRoller
             InstructionReference   m_prevInst;
 
             int const m_CMPXExecWriteFollowedByMFMANops     = 4;
-            int const m_VALUWriteFollowedByMFMAReadNops     = 2;
             int const m_XDLWriteFollowedByMFMAExactReadNops = 0;
             int const m_DLWriteFollowedBySameReadCNops      = 0;
             int const m_DLWriteFollowedBySameReadABNops     = 3;
