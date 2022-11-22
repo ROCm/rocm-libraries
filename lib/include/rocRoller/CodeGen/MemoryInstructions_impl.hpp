@@ -442,7 +442,8 @@ namespace rocRoller
     {
         AssertFatal(dest != nullptr);
         AssertFatal(addr != nullptr);
-
+        AssertFatal(numBytes > 0 && (numBytes < wordSize || numBytes % wordSize == 0),
+                    "Invalid number of bytes");
         AssertFatal(!high || (high && numBytes == 2),
                     "Operation doesn't support hi argument for sizes of "
                         + std::to_string(numBytes));
@@ -468,42 +469,49 @@ namespace rocRoller
         {
             lds += "lds";
         }
-        auto        sgprSrd = buffDesc.allRegisters();
-        std::string opEnd   = "";
-        switch(numBytes)
+        auto sgprSrd = buffDesc.allRegisters();
+        auto ctx     = m_context.lock();
+
+        if(numBytes < wordSize)
         {
-        case 1:
-            opEnd += "ubyte";
-            break;
-        case 2:
-            if(high)
-                opEnd += "short_d16_hi";
-            else
-                opEnd += "ushort";
-            break;
-        case 4:
-            opEnd += "dword";
-            break;
-        case 8:
-            opEnd += "dwordx2";
-            break;
-        case 12:
-            opEnd += "dwordx3";
-            break;
-        case 16:
-            opEnd += "dwordx4";
-            break;
-        default:
-            throw std::runtime_error("Unsupported number of bytes for load.");
+            std::string opEnd = "";
+            if(numBytes == 1)
+            {
+                opEnd += "ubyte";
+            }
+            else if(numBytes == 2)
+            {
+                if(high)
+                    opEnd += "short_d16_hi";
+                else
+                    opEnd += "ushort";
+            }
+            co_yield_(Instruction("buffer_load_" + opEnd,
+                                  {dest},
+                                  {addr, sgprSrd, Register::Value::Literal(0)},
+                                  {"offen", offset_modifier, glc, slc, lds},
+                                  "Load value"));
+        }
+        else
+        {
+            int              numWords       = numBytes / wordSize;
+            std::vector<int> potentialWords = {4, 3, 2, 1};
+            int              count          = 0;
+            while(count < numWords)
+            {
+                auto width = chooseWidth(
+                    numWords - count, potentialWords, ctx->kernelOptions().loadGlobalWidth);
+                auto offset_modifier = genOffsetModifier(offset + count * wordSize);
+                co_yield_(Instruction(
+                    concatenate("buffer_load_dword", width == 1 ? "" : "x" + std::to_string(width)),
+                    {dest->subset(Generated(iota(count, count + width)))},
+                    {addr, sgprSrd, Register::Value::Literal(0)},
+                    {"offen", offset_modifier, glc, slc, lds},
+                    "Load value"));
+                count += width;
+            }
         }
 
-        co_yield_(Instruction("buffer_load_" + opEnd,
-                              {dest},
-                              {addr, sgprSrd, Register::Value::Literal(0)},
-                              {"offen", offset_modifier, glc, slc, lds},
-                              "Load value"));
-
-        auto ctx = m_context.lock();
         if(ctx->kernelOptions().alwaysWaitAfterLoad)
             co_yield Instruction::Wait(
                 WaitCount::Zero("DEBUG: Wait after load", ctx->targetArchitecture()));
@@ -519,6 +527,8 @@ namespace rocRoller
     {
         AssertFatal(addr != nullptr);
         AssertFatal(data != nullptr);
+        AssertFatal(numBytes > 0 && (numBytes < wordSize || numBytes % wordSize == 0),
+                    "Invalid number of bytes");
 
         std::string offset_modifier = "", glc = "", slc = "", lds = "";
         if(buffOpts.getOffen() || offset == 0)
@@ -542,38 +552,46 @@ namespace rocRoller
             lds += "lds";
         }
         auto sgprSrd = buffDesc.allRegisters();
+        auto ctx     = m_context.lock();
 
-        std::string opEnd = "";
-        switch(numBytes)
+        if(numBytes < wordSize)
         {
-        case 1:
-            opEnd += "byte";
-            break;
-        case 2:
-            opEnd += "short";
-            break;
-        case 4:
-            opEnd += "dword";
-            break;
-        case 8:
-            opEnd += "dwordx2";
-            break;
-        case 12:
-            opEnd += "dwordx3";
-            break;
-        case 16:
-            opEnd += "dwordx4";
-            break;
-        default:
-            throw std::runtime_error("Unsupported number of bytes for store.");
+            std::string opEnd = "";
+            AssertFatal(numBytes <= 2);
+            if(numBytes == 1)
+            {
+                opEnd += "byte";
+            }
+            else if(numBytes == 2)
+            {
+                opEnd += "short";
+            }
+            co_yield_(Instruction("buffer_store_" + opEnd,
+                                  {addr},
+                                  {data, sgprSrd, Register::Value::Literal(0)},
+                                  {"offen", offset_modifier, glc, slc, lds},
+                                  "Store value"));
+        }
+        else
+        {
+            int              numWords       = numBytes / wordSize;
+            std::vector<int> potentialWords = {4, 3, 2, 1};
+            int              count          = 0;
+            while(count < numWords)
+            {
+                auto width = chooseWidth(
+                    numWords - count, potentialWords, ctx->kernelOptions().storeGlobalWidth);
+                auto offset_modifier = genOffsetModifier(offset + count * wordSize);
+                co_yield_(Instruction(concatenate("buffer_store_dword",
+                                                  width == 1 ? "" : "x" + std::to_string(width)),
+                                      {addr->subset(Generated(iota(count, count + width)))},
+                                      {data, sgprSrd, Register::Value::Literal(0)},
+                                      {"offen", offset_modifier, glc, slc, lds},
+                                      "Store value"));
+                count += width;
+            }
         }
 
-        co_yield_(Instruction("buffer_store_" + opEnd,
-                              {addr},
-                              {data, sgprSrd, Register::Value::Literal(0)},
-                              {"offen", offset_modifier, glc, slc, lds},
-                              "Store value"));
-        auto ctx = m_context.lock();
         if(ctx->kernelOptions().alwaysWaitAfterStore)
             co_yield Instruction::Wait(
                 WaitCount::Zero("DEBUG: Wait after store", ctx->targetArchitecture()));

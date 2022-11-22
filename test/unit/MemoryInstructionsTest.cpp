@@ -220,8 +220,17 @@ namespace MemoryInstructionsTest
             co_yield m_context->argLoader()->getValue("a", s_a);
 
             auto vgprSerial = m_context->kernel()->workitemIndex()[0];
-            auto v_a        = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Int32, N > 4 ? N / 4 : 1);
+            int  size;
+            if(N > 4)
+            {
+                size = ((N % 4) == 3) ? N / 4 + 2 : N / 4 + 1;
+            }
+            else
+            {
+                size = 1;
+            }
+            auto v_a = Register::Value::Placeholder(
+                m_context, Register::Type::Vector, DataType::Int32, size);
 
             co_yield v_a->allocate();
 
@@ -274,7 +283,9 @@ namespace MemoryInstructionsTest
                     HasHipSuccess(0));
 
         for(int i = 0; i < N; i++)
+        {
             EXPECT_EQ(result[i], a[i]);
+        }
     }
 
     void assembleBufferTest(std::shared_ptr<rocRoller::Context> m_context, int N)
@@ -451,6 +462,16 @@ namespace MemoryInstructionsTest
     TEST_F(MemoryInstructionsExecuter, GPU_ExecuteBufferTest16Bytes)
     {
         executeBufferTest(m_context, 16);
+    }
+
+    TEST_F(MemoryInstructionsExecuter, GPU_ExecuteBufferTest32Bytes)
+    {
+        executeBufferTest(m_context, 32);
+    }
+
+    TEST_F(MemoryInstructionsExecuter, GPU_ExecuteBufferTest44Bytes)
+    {
+        executeBufferTest(m_context, 44);
     }
 
     TEST_P(MemoryInstructionsTest, AssembleBufferTest1Byte)
