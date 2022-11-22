@@ -764,7 +764,6 @@ namespace rocRoller
                 default:
                     Throw<FatalError>("Not implemented yet.");
                 }
-                graph.coordinates.addElement(CoordGraph::DataFlow(), {user_tag}, {vgpr});
             }
 
             void loadMacroTile(KernelHypergraph& graph,
@@ -808,9 +807,7 @@ namespace rocRoller
                 graph.mapper.connect<CoordGraph::Workgroup>(load_tag, workgroup_x, 0);
                 graph.mapper.connect<CoordGraph::Workgroup>(load_tag, workgroup_y, 1);
 
-                auto workitem   = graph.coordinates.addElement(CoordGraph::Workitem(0));
-                auto workitem_x = graph.coordinates.addElement(CoordGraph::Workitem(0));
-                auto workitem_y = graph.coordinates.addElement(CoordGraph::Workitem(1));
+                auto workitem = graph.coordinates.addElement(CoordGraph::Workitem(0));
 
                 graph.coordinates.addElement(
                     CoordGraph::Flatten(), {i_mac_x, i_mac_y}, {mac_tile_tag});
@@ -826,6 +823,9 @@ namespace rocRoller
                 case MemoryType::VGPR:
                 case MemoryType::LDS:
                 {
+                    auto workitem_x = graph.coordinates.addElement(CoordGraph::Workitem(0));
+                    auto workitem_y = graph.coordinates.addElement(CoordGraph::Workitem(1));
+
                     auto thr_tile     = CoordGraph::ThreadTile(mac_tile.subTileSizes);
                     auto thr_tile_tag = graph.coordinates.addElement(thr_tile);
 
@@ -993,7 +993,6 @@ namespace rocRoller
                     CoordGraph::Flatten(), {col_block, i_lblk}, {i_wave_y});
 
                 graph.coordinates.addElement(CoordGraph::Tile(), {workitem}, {wave, lane});
-                graph.coordinates.addElement(CoordGraph::DataFlow(), {vgpr}, {user_tag});
             }
 
             void storeMacroTile(KernelHypergraph& graph,
@@ -1029,10 +1028,6 @@ namespace rocRoller
 
                 auto workitem = graph.coordinates.addElement(
                     CoordGraph::Workitem(0, literal(workgroupSizes.at(0))));
-                auto workitem_x = graph.coordinates.addElement(
-                    CoordGraph::Workitem(0, literal(workgroupSizes.at(0))));
-                auto workitem_y = graph.coordinates.addElement(
-                    CoordGraph::Workitem(1, literal(workgroupSizes.at(1))));
 
                 graph.coordinates.addElement(
                     CoordGraph::Flatten(), {i_mac_x, i_mac_y}, {mac_tile_tag});
@@ -1048,6 +1043,11 @@ namespace rocRoller
                 case MemoryType::VGPR:
                 case MemoryType::LDS:
                 {
+                    auto workitem_x = graph.coordinates.addElement(
+                        CoordGraph::Workitem(0, literal(workgroupSizes.at(0))));
+                    auto workitem_y = graph.coordinates.addElement(
+                        CoordGraph::Workitem(1, literal(workgroupSizes.at(1))));
+
                     auto thr_tile     = CoordGraph::ThreadTile(mac_tile.subTileSizes);
                     auto thr_tile_tag = graph.coordinates.addElement(thr_tile);
 
@@ -1301,6 +1301,7 @@ namespace rocRoller
             graph.coordinates.deleteElement(std::vector<int>{a_tilenum_y},
                                             std::vector<int>{a_workgroup_y},
                                             CoordGraph::isEdge<CoordGraph::PassThrough>);
+            graph.coordinates.deleteElement(a_workgroup_y);
 
             // remove passthrough between B row block and x-workgroup
             auto b_tilenum_x   = graph.mapper.get<CoordGraph::MacroTileNumber>(loadB[0], 0);
@@ -1308,6 +1309,7 @@ namespace rocRoller
             graph.coordinates.deleteElement(std::vector<int>{b_tilenum_x},
                                             std::vector<int>{b_workgroup_x},
                                             CoordGraph::isEdge<CoordGraph::PassThrough>);
+            graph.coordinates.deleteElement(b_workgroup_x);
 
             // A row block is x-workgroup, column block is for loop index
             graph.coordinates.addElement(CoordGraph::PassThrough(), {a_tilenum_y}, {K});
