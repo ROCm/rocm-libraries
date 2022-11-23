@@ -92,8 +92,8 @@ void block_reduce_kernel_impl(InputIterator input,
 {
     static constexpr reduce_config_params params = device_params<Config>();
 
-    constexpr unsigned int block_size       = params.block_size;
-    constexpr unsigned int items_per_thread = params.items_per_thread;
+    constexpr unsigned int block_size       = params.reduce_config.block_size;
+    constexpr unsigned int items_per_thread = params.reduce_config.items_per_thread;
 
     using result_type = ResultType;
 

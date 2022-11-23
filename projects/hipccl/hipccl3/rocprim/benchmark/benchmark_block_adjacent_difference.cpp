@@ -33,7 +33,6 @@
 // HIP API
 #include <hip/hip_runtime.h>
 
-#include <chrono>
 #include <iostream>
 #include <limits>
 #include <string>
@@ -248,9 +247,15 @@ auto run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
         )
     );
 
+    // HIP events creation
+    hipEvent_t start, stop;
+    HIP_CHECK(hipEventCreate(&start));
+    HIP_CHECK(hipEventCreate(&stop));
+
     for(auto _ : state)
     {
-        auto start = std::chrono::high_resolution_clock::now();
+        // Record start event
+        HIP_CHECK(hipEventRecord(start, stream));
 
         hipLaunchKernelGGL(
             HIP_KERNEL_NAME(kernel<Benchmark, BlockSize, ItemsPerThread, WithTile>),
@@ -258,13 +263,20 @@ auto run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
             d_input, d_output, Trials
         );
         HIP_CHECK(hipGetLastError());
-        HIP_CHECK(hipDeviceSynchronize());
 
-        auto end = std::chrono::high_resolution_clock::now();
-        auto elapsed_seconds =
-            std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
-        state.SetIterationTime(elapsed_seconds.count());
+        // Record stop event and wait until it completes
+        HIP_CHECK(hipEventRecord(stop, stream));
+        HIP_CHECK(hipEventSynchronize(stop));
+
+        float elapsed_mseconds;
+        HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
+        state.SetIterationTime(elapsed_mseconds / 1000);
     }
+
+    // Destroy HIP events
+    HIP_CHECK(hipEventDestroy(start));
+    HIP_CHECK(hipEventDestroy(stop));
+
     state.SetBytesProcessed(state.iterations() * Trials * size * sizeof(T));
     state.SetItemsProcessed(state.iterations() * Trials * size);
 
@@ -312,9 +324,15 @@ auto run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
         )
     );
 
+    // HIP events creation
+    hipEvent_t start, stop;
+    HIP_CHECK(hipEventCreate(&start));
+    HIP_CHECK(hipEventCreate(&stop));
+
     for(auto _ : state)
     {
-        auto start = std::chrono::high_resolution_clock::now();
+        // Record start event
+        HIP_CHECK(hipEventRecord(start, stream));
 
         hipLaunchKernelGGL(
             HIP_KERNEL_NAME(kernel<Benchmark, BlockSize, ItemsPerThread, WithTile>),
@@ -322,13 +340,20 @@ auto run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
             d_input, d_tile_sizes, d_output, Trials
         );
         HIP_CHECK(hipGetLastError());
-        HIP_CHECK(hipDeviceSynchronize());
 
-        auto end = std::chrono::high_resolution_clock::now();
-        auto elapsed_seconds =
-            std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
-        state.SetIterationTime(elapsed_seconds.count());
+        // Record stop event and wait until it completes
+        HIP_CHECK(hipEventRecord(stop, stream));
+        HIP_CHECK(hipEventSynchronize(stop));
+
+        float elapsed_mseconds;
+        HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
+        state.SetIterationTime(elapsed_mseconds / 1000);
     }
+
+    // Destroy HIP events
+    HIP_CHECK(hipEventDestroy(start));
+    HIP_CHECK(hipEventDestroy(stop));
+
     state.SetBytesProcessed(state.iterations() * Trials * size * sizeof(T));
     state.SetItemsProcessed(state.iterations() * Trials * size);
 

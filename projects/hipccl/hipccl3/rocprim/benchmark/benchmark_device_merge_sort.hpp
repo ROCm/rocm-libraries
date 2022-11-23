@@ -40,30 +40,19 @@
 
 namespace rp = rocprim;
 
-template<typename Key   = int,
-         typename Value = rocprim::empty_type,
-         typename Config
-         = rocprim::detail::default_merge_sort_config<ROCPRIM_TARGET_ARCH, Key, Value>>
+template<typename Key    = int,
+         typename Value  = rocprim::empty_type,
+         typename Config = rocprim::default_config>
 struct device_merge_sort_benchmark : public config_autotune_interface
 {
-    static std::string get_name_pattern()
-    {
-        return R"regex((?P<algo>\S*?)<)regex"
-               R"regex((?P<key_type>\S*),(?:\s*(?P<value_type>\S*),)?\s*merge_sort_config<\s*)regex"
-               R"regex((?P<sort_block_size>[0-9]+),\s*(?P<sort_items_per_thread>[0-9]+),\s*(?P<merge_block_size>[0-9]+)>>)regex";
-    }
-
     std::string name() const override
     {
         using namespace std::string_literals;
-        return std::string(
-            "device_merge_sort<" + std::string(Traits<Key>::name()) + ", "
-            + (std::is_same<Value, rocprim::empty_type>::value
-                   ? ""s
-                   : std::string(Traits<Value>::name()) + ", ")
-            + "merge_sort_config<" + pad_string(std::to_string(Config::sort_config::block_size), 4)
-            + ", " + pad_string(std::to_string(Config::sort_config::items_per_thread), 2) + ", "
-            + pad_string(std::to_string(Config::merge_impl1_config::block_size), 4) + ">>");
+        return std::string("device_merge_sort<" + std::string(Traits<Key>::name()) + ", "
+                           + (std::is_same<Value, rocprim::empty_type>::value
+                                  ? ""s
+                                  : std::string(Traits<Value>::name()) + ", ")
+                           + "default_config>");
     }
 
     static constexpr unsigned int batch_size  = 10;
@@ -80,7 +69,9 @@ struct device_merge_sort_benchmark : public config_autotune_interface
         std::vector<key_type> keys_input;
         if(std::is_floating_point<key_type>::value)
         {
-            keys_input = get_random_data<key_type>(size, (key_type)-1000, (key_type) + 1000);
+            keys_input = get_random_data<key_type>(size,
+                                                   static_cast<key_type>(-1000),
+                                                   static_cast<key_type>(1000));
         }
         else
         {
@@ -128,9 +119,15 @@ struct device_merge_sort_benchmark : public config_autotune_interface
         }
         HIP_CHECK(hipDeviceSynchronize());
 
+        // HIP events creation
+        hipEvent_t start, stop;
+        HIP_CHECK(hipEventCreate(&start));
+        HIP_CHECK(hipEventCreate(&stop));
+
         for(auto _ : state)
         {
-            auto start = std::chrono::high_resolution_clock::now();
+            // Record start event
+            HIP_CHECK(hipEventRecord(start, stream));
 
             for(size_t i = 0; i < batch_size; i++)
             {
@@ -143,13 +140,20 @@ struct device_merge_sort_benchmark : public config_autotune_interface
                                                  stream,
                                                  false));
             }
-            HIP_CHECK(hipDeviceSynchronize());
 
-            auto end = std::chrono::high_resolution_clock::now();
-            auto elapsed_seconds
-                = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
-            state.SetIterationTime(elapsed_seconds.count());
+            // Record stop event and wait until it completes
+            HIP_CHECK(hipEventRecord(stop, stream));
+            HIP_CHECK(hipEventSynchronize(stop));
+
+            float elapsed_mseconds;
+            HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
+            state.SetIterationTime(elapsed_mseconds / 1000);
         }
+
+        // Destroy HIP events
+        HIP_CHECK(hipEventDestroy(start));
+        HIP_CHECK(hipEventDestroy(stop));
+
         state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(key_type));
         state.SetItemsProcessed(state.iterations() * batch_size * size);
 
@@ -170,7 +174,9 @@ struct device_merge_sort_benchmark : public config_autotune_interface
         std::vector<key_type> keys_input;
         if(std::is_floating_point<key_type>::value)
         {
-            keys_input = get_random_data<key_type>(size, (key_type)-1000, (key_type) + 1000);
+            keys_input = get_random_data<key_type>(size,
+                                                   static_cast<key_type>(-1000),
+                                                   static_cast<key_type>(1000));
         }
         else
         {
@@ -234,9 +240,15 @@ struct device_merge_sort_benchmark : public config_autotune_interface
         }
         HIP_CHECK(hipDeviceSynchronize());
 
+        // HIP events creation
+        hipEvent_t start, stop;
+        HIP_CHECK(hipEventCreate(&start));
+        HIP_CHECK(hipEventCreate(&stop));
+
         for(auto _ : state)
         {
-            auto start = std::chrono::high_resolution_clock::now();
+            // Record start event
+            HIP_CHECK(hipEventRecord(start, stream));
 
             for(size_t i = 0; i < batch_size; i++)
             {
@@ -251,13 +263,20 @@ struct device_merge_sort_benchmark : public config_autotune_interface
                                                  stream,
                                                  false));
             }
-            HIP_CHECK(hipDeviceSynchronize());
 
-            auto end = std::chrono::high_resolution_clock::now();
-            auto elapsed_seconds
-                = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
-            state.SetIterationTime(elapsed_seconds.count());
+            // Record stop event and wait until it completes
+            HIP_CHECK(hipEventRecord(stop, stream));
+            HIP_CHECK(hipEventSynchronize(stop));
+
+            float elapsed_mseconds;
+            HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
+            state.SetIterationTime(elapsed_mseconds / 1000);
         }
+
+        // Destroy HIP events
+        HIP_CHECK(hipEventDestroy(start));
+        HIP_CHECK(hipEventDestroy(stop));
+
         state.SetBytesProcessed(state.iterations() * batch_size * size
                                 * (sizeof(key_type) + sizeof(value_type)));
         state.SetItemsProcessed(state.iterations() * batch_size * size);
@@ -274,53 +293,5 @@ struct device_merge_sort_benchmark : public config_autotune_interface
         do_run(state, size, stream);
     }
 };
-
-#ifdef BENCHMARK_CONFIG_TUNING
-
-template<unsigned int MergeBlockSizeExponent,
-         unsigned int SortBlockSizeExponent,
-         typename Key,
-         typename Value = rocprim::empty_type>
-struct device_merge_sort_benchmark_generator
-{
-    template<unsigned int ItemsPerThreadExponent>
-    struct create_ipt
-    {
-        static constexpr unsigned int merge_block_size = 1u << MergeBlockSizeExponent;
-        static constexpr unsigned int sort_block_size  = 1u << SortBlockSizeExponent;
-        static constexpr unsigned int items_per_thread = 1u << ItemsPerThreadExponent;
-
-        void operator()(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
-        {
-            storage.emplace_back(
-                std::make_unique<device_merge_sort_benchmark<
-                    Key,
-                    Value,
-                    rocprim::
-                        merge_sort_config<merge_block_size, sort_block_size, items_per_thread>>>());
-        }
-    };
-
-    static void create(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
-    {
-        // Sort items per block must be divisible by merge_block_size, so make
-        // the items per thread at least as large that the items_per_block
-        // is equal to merge_block_size.
-        static constexpr unsigned int min_items_per_thread_exponent
-            = MergeBlockSizeExponent - std::min(SortBlockSizeExponent, MergeBlockSizeExponent);
-
-        // Very large block sizes don't work with large items_per_blocks since
-        // shared memory is limited
-        static constexpr unsigned int max_items_per_thread_exponent
-            = std::min(4u, 11u - SortBlockSizeExponent);
-
-        static_for_each<make_index_range<unsigned int,
-                                         min_items_per_thread_exponent,
-                                         max_items_per_thread_exponent>,
-                        create_ipt>(storage);
-    }
-};
-
-#endif // BENCHMARK_CONFIG_TUNING
 
 #endif // ROCPRIM_BENCHMARK_DEVICE_MERGE_SORT_PARALLEL_HPP_

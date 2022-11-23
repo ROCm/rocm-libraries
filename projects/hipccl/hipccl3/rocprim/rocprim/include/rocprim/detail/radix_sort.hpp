@@ -58,8 +58,9 @@ struct radix_key_codec_integral<Key, BitKey, typename std::enable_if<::rocprim::
         return __builtin_bit_cast(Key, bit_key);
     }
 
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    static unsigned int extract_digit(bit_key_type bit_key, unsigned int start, unsigned int length)
+    template<bool Descending>
+    ROCPRIM_DEVICE static unsigned int
+        extract_digit(bit_key_type bit_key, unsigned int start, unsigned int length)
     {
         unsigned int mask = (1u << length) - 1;
         return static_cast<unsigned int>(bit_key >> start) & mask;
@@ -87,8 +88,9 @@ struct radix_key_codec_integral<Key, BitKey, typename std::enable_if<::rocprim::
         return __builtin_bit_cast(Key, bit_key);
     }
 
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    static unsigned int extract_digit(bit_key_type bit_key, unsigned int start, unsigned int length)
+    template<bool Descending>
+    ROCPRIM_DEVICE static unsigned int
+        extract_digit(bit_key_type bit_key, unsigned int start, unsigned int length)
     {
         unsigned int mask = (1u << length) - 1;
         return static_cast<unsigned int>(bit_key >> start) & mask;
@@ -156,17 +158,31 @@ struct radix_key_codec_floating
         return __builtin_bit_cast(Key, bit_key);
     }
 
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    static unsigned int extract_digit(bit_key_type bit_key, unsigned int start, unsigned int length)
+    template<bool Descending>
+    ROCPRIM_DEVICE static unsigned int
+        extract_digit(bit_key_type bit_key, unsigned int start, unsigned int length)
     {
         unsigned int mask = (1u << length) - 1;
-        
-        // -0.0 should be treated as +0.0 for stable sort
-        // -0.0 is encoded as inverted sign_bit, +0.0 as sign_bit
-        // or vice versa for descending sort
-        bit_key_type key = bit_key == sign_bit ? bit_key_type(~sign_bit) : bit_key;
-        
-        return static_cast<unsigned int>(key >> start) & mask;
+
+        // radix_key_codec_floating::encode() maps 0.0 to 0x8000'0000,
+        // and -0.0 to 0x7FFF'FFFF.
+        // radix_key_codec::encode() then flips the bits if descending, yielding:
+        // value | descending  | ascending   |
+        // ----- | ----------- | ----------- |
+        //   0.0 | 0x7FFF'FFFF | 0x8000'0000 |
+        //  -0.0 | 0x8000'0000 | 0x7FFF'FFFF |
+        //
+        // For ascending sort, both should be mapped to 0x8000'0000,
+        // and for descending sort, both should be mapped to 0x7FFF'FFFF.
+        if ROCPRIM_IF_CONSTEXPR(Descending)
+        {
+            bit_key = bit_key == sign_bit ? static_cast<bit_key_type>(~sign_bit) : bit_key;
+        }
+        else
+        {
+            bit_key = bit_key == static_cast<bit_key_type>(~sign_bit) ? sign_bit : bit_key;
+        }
+        return static_cast<unsigned int>(bit_key >> start) & mask;
     }
 };
 
@@ -200,8 +216,9 @@ struct radix_key_codec_base<bool>
         return static_cast<bool>(bit_key);
     }
 
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    static unsigned int extract_digit(bit_key_type bit_key, unsigned int start, unsigned int length)
+    template<bool Descending>
+    ROCPRIM_DEVICE static unsigned int
+        extract_digit(bit_key_type bit_key, unsigned int start, unsigned int length)
     {
         unsigned int mask = (1u << length) - 1;
         return static_cast<unsigned int>(bit_key >> start) & mask;
@@ -245,7 +262,7 @@ public:
     ROCPRIM_DEVICE ROCPRIM_INLINE
     static unsigned int extract_digit(bit_key_type bit_key, unsigned int start, unsigned int radix_bits)
     {
-        return base_type::extract_digit(bit_key, start, radix_bits);
+        return base_type::template extract_digit<Descending>(bit_key, start, radix_bits);
     }
 };
 

@@ -47,13 +47,14 @@ template<class Config,
          class OffsetIterator,
          class ResultType,
          class BinaryFunction>
-ROCPRIM_KERNEL __launch_bounds__(device_params<Config>().block_size) void segmented_reduce_kernel(
-    InputIterator  input,
-    OutputIterator output,
-    OffsetIterator begin_offsets,
-    OffsetIterator end_offsets,
-    BinaryFunction reduce_op,
-    ResultType     initial_value)
+ROCPRIM_KERNEL __launch_bounds__(
+    device_params<Config>()
+        .reduce_config.block_size) void segmented_reduce_kernel(InputIterator  input,
+                                                                OutputIterator output,
+                                                                OffsetIterator begin_offsets,
+                                                                OffsetIterator end_offsets,
+                                                                BinaryFunction reduce_op,
+                                                                ResultType     initial_value)
 {
     segmented_reduce<Config>(
         input, output,
@@ -113,7 +114,7 @@ hipError_t segmented_reduce_impl(void * temporary_storage,
     }
     const reduce_config_params params = dispatch_target_arch<config>(target_arch);
 
-    const unsigned int block_size = params.block_size;
+    const unsigned int block_size = params.reduce_config.block_size;
 
     if(temporary_storage == nullptr)
     {

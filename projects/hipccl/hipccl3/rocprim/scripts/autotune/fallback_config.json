@@ -5,6 +5,7 @@
                 "datatype": "double"
             },
             "sizeof": {
+                "max_inclusive": 8,
                 "min_exclusive": 4
             },
             "floating_point": true
@@ -33,6 +34,7 @@
                 "datatype": "int64_t"
             },
             "sizeof": {
+                "max_inclusive": 8,
                 "min_exclusive": 4
             },
             "floating_point": false

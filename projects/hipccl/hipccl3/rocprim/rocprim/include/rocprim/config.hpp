@@ -33,6 +33,10 @@
 #include <hip/hip_fp16.h>
 #include <hip/hip_bfloat16.h>
 
+#if __cplusplus < 201402L
+    #error "rocPRIM requires at least C++14"
+#endif
+
 #ifndef ROCPRIM_DEVICE
     #define ROCPRIM_DEVICE __device__
     #define ROCPRIM_HOST __host__

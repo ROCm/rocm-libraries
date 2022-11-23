@@ -37,17 +37,27 @@ constexpr bool is_floating_nan_host(const T& a)
     return (a != a);
 }
 
-template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit, bool ShiftLess = (StartBit == 0 && EndBit == sizeof(Key) * 8), class Enable = void>
-struct key_comparator {};
+template<class Key,
+         bool         Descending,
+         unsigned int StartBit,
+         unsigned int EndBit,
+         class Enable = void>
+struct key_comparator
+{};
 
-template <class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
-struct key_comparator<Key, Descending, StartBit, EndBit, false, typename std::enable_if<std::is_integral<Key>::value>::type>
+template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
+struct key_comparator<Key,
+                      Descending,
+                      StartBit,
+                      EndBit,
+                      typename std::enable_if<rocprim::is_integral<Key>::value>::type>
 {
-    static constexpr Key radix_mask_upper  = (Key(1) << EndBit) - 1;
+    static constexpr Key radix_mask_upper
+        = EndBit == 8 * sizeof(Key) ? ~Key(0) : (Key(1) << EndBit) - 1;
     static constexpr Key radix_mask_bottom = (Key(1) << StartBit) - 1;
     static constexpr Key radix_mask = radix_mask_upper ^ radix_mask_bottom;
 
-    bool operator()(const Key& lhs, const Key& rhs)
+    bool operator()(const Key& lhs, const Key& rhs) const
     {
         Key l = lhs & radix_mask;
         Key r = rhs & radix_mask;
@@ -60,48 +70,39 @@ struct key_comparator<Key,
                       Descending,
                       StartBit,
                       EndBit,
-                      false,
-                      typename std::enable_if<!std::is_integral<Key>::value>::type>
+                      typename std::enable_if<rocprim::is_floating_point<Key>::value>::type>
 {
-    // Floating-point types do not support StartBit and EndBit.
-    bool operator()(const Key&, const Key&)
-    {
-        return false;
-    }
-};
+    using unsigned_bits_type = typename rocprim::get_unsigned_bits_type<Key>::unsigned_type;
 
-template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
-struct key_comparator<Key, Descending, StartBit, EndBit, true, typename std::enable_if<std::is_integral<Key>::value>::type>
-{
-    bool operator()(const Key& lhs, const Key& rhs)
+    bool operator()(const Key& lhs, const Key& rhs) const
     {
-        return Descending ? (rhs < lhs) : (lhs < rhs);
+        return key_comparator<unsigned_bits_type, Descending, StartBit, EndBit>()(
+            this->to_bits(lhs),
+            this->to_bits(rhs));
     }
-};
 
-template<class Key, bool Descending, unsigned int StartBit, unsigned int EndBit>
-struct key_comparator<Key, Descending, StartBit, EndBit, true, typename std::enable_if<!std::is_integral<Key>::value>::type>
-{
-    bool operator()(const Key& lhs, const Key& rhs)
+    unsigned_bits_type to_bits(const Key& key) const
     {
-        using namespace std;
-        if(is_floating_nan_host(lhs) && is_floating_nan_host(rhs) && signbit(lhs) == signbit(rhs))
+        unsigned_bits_type bit_key;
+        memcpy(&bit_key, &key, sizeof(Key));
+
+        // Remove signed zero, this case is supposed to be treated the same as
+        // unsigned zero in rocprim sorting algorithms.
+        constexpr unsigned_bits_type minus_zero = unsigned_bits_type{1} << (8 * sizeof(Key) - 1);
+        // Positive and negative zero should compare the same.
+        if(bit_key == minus_zero)
         {
-            return false;
+            bit_key = 0;
         }
-        if(Descending){
-            if(is_floating_nan_host(lhs))
-                return !signbit(lhs);
-            if(is_floating_nan_host(rhs))
-                return signbit(rhs);
-            return (rhs < lhs);
-        }else{
-            if(is_floating_nan_host(lhs))
-                return signbit(lhs);
-            if(is_floating_nan_host(rhs))
-                return !signbit(rhs);
-            return (lhs < rhs);
+        // Flip bits mantissa and exponent if the key is negative, so as to make
+        // 'more negative' values compare before 'less negative'.
+        if(bit_key & minus_zero)
+        {
+            bit_key ^= ~minus_zero;
         }
+        // Make negatives compare before positives.
+        bit_key ^= minus_zero;
+        return bit_key;
     }
 };
 

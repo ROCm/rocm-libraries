@@ -20,12 +20,32 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <cstdint>
+test_suite_type_def(suite_name, name_suffix)
 
-#include "benchmark_utils.hpp"
-#include "benchmark_device_radix_sort.parallel.hpp"
+    typed_test_suite_def(suite_name, name_suffix, warp_params);
 
-namespace {
-    auto benchmarks = config_autotune_register::create_bulk(
-        device_radix_sort_single_benchmark_generator<@BlockSize@, @KeyType_ValueType@>::create);    
+typed_test_def(suite_name, name_suffix, RankBasic)
+{
+    using type                  = typename TestFixture::params::input_type;
+    constexpr size_t block_size = TestFixture::params::block_size;
+
+    if(block_size > test_utils::get_max_block_size())
+    {
+        GTEST_SKIP();
+    }
+
+    static_for<0, n_sizes, type, block_size, false>::run();
+}
+
+typed_test_def(suite_name, name_suffix, RankBasicMemoize)
+{
+    using type                  = typename TestFixture::params::input_type;
+    constexpr size_t block_size = TestFixture::params::block_size;
+
+    if(block_size > test_utils::get_max_block_size())
+    {
+        GTEST_SKIP();
+    }
+
+    static_for<0, n_sizes, type, block_size, true>::run();
 }

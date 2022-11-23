@@ -40,43 +40,24 @@
 
 namespace rp = rocprim;
 
-template<typename Key   = int,
-         typename Value = rocprim::empty_type,
-         typename Config
-         = rocprim::detail::default_radix_sort_config<ROCPRIM_TARGET_ARCH, Key, Value>>
+template<typename Key    = int,
+         typename Value  = rocprim::empty_type,
+         typename Config = rocprim::default_config>
 struct device_radix_sort_benchmark : public config_autotune_interface
 {
     static std::string get_name_pattern()
     {
-        return R"regex((?P<algo>\S*?)<)regex"
-               R"regex((?P<key_type>\S*),(?:\s*(?P<value_type>\S*),)?\s*radix_sort_config<)regex"
-               R"regex((?P<long_radix_bits>[0-9]+),\s*(?P<short_radix_bits>[0-9]+),\s*)regex"
-               R"regex(kernel_config<\s*(?P<scan_block_size>[0-9]+),\s*(?P<scan_items_per_thread>[0-9]+)>,\s*)regex"
-               R"regex(kernel_config<\s*(?P<sort_block_size>[0-9]+),\s*(?P<sort_items_per_thread>[0-9]+)>,\s*)regex"
-               R"regex(kernel_config<\s*(?P<sort_single_block_size>[0-9]+),\s*(?P<sort_single_items_per_thread>[0-9]+)>,\s*)regex"
-               R"regex(kernel_config<\s*(?P<sort_merge_block_size>[0-9]+),\s*(?P<sort_merge_items_per_thread>[0-9]+)>,\s*)regex"
-               R"regex((?P<force_single_kernel_config>[0-9]+)>>)regex";
+        return R"regex((?P<algo>\S*?)<)regex";
     }
 
     std::string name() const override
     {
         using namespace std::string_literals;
-        return std::string(
-            "device_radix_sort<" + std::string(Traits<Key>::name()) + ", "
-            + (std::is_same<Value, rocprim::empty_type>::value
-                   ? ""s
-                   : std::string(Traits<Value>::name()) + ", ")
-            + "radix_sort_config<" + std::to_string(Config::long_radix_bits) + ", "
-            + std::to_string(Config::short_radix_bits) + ", " + "kernel_config<"
-            + pad_string(std::to_string(Config::scan::block_size), 4) + ", "
-            + pad_string(std::to_string(Config::scan::items_per_thread), 2) + ">, "
-            + "kernel_config<" + pad_string(std::to_string(Config::sort::block_size), 4) + ", "
-            + pad_string(std::to_string(Config::sort::items_per_thread), 2) + ">, "
-            + "kernel_config<" + pad_string(std::to_string(Config::sort_single::block_size), 4)
-            + ", " + pad_string(std::to_string(Config::sort_single::items_per_thread), 2) + ">, "
-            + "kernel_config<" + pad_string(std::to_string(Config::sort_merge::block_size), 4)
-            + ", " + pad_string(std::to_string(Config::sort_merge::items_per_thread), 2) + ">, "
-            + std::to_string(Config::force_single_kernel_config) + ">>");
+        return std::string("device_radix_sort<" + std::string(Traits<Key>::name())
+                           + (std::is_same<Value, rocprim::empty_type>::value
+                                  ? ""s
+                                  : ", " + std::string(Traits<Value>::name()))
+                           + ", default_config>");
     }
 
     static constexpr unsigned int batch_size  = 10;
@@ -88,7 +69,10 @@ struct device_radix_sort_benchmark : public config_autotune_interface
 
         if(std::is_floating_point<key_type>::value)
         {
-            return get_random_data<key_type>(size, (key_type)-1000, (key_type) + 1000, size);
+            return get_random_data<key_type>(size,
+                                             static_cast<key_type>(-1000),
+                                             static_cast<key_type>(1000),
+                                             size);
         }
         else
         {
@@ -148,9 +132,15 @@ struct device_radix_sort_benchmark : public config_autotune_interface
         }
         HIP_CHECK(hipDeviceSynchronize());
 
+        // HIP events creation
+        hipEvent_t start, stop;
+        HIP_CHECK(hipEventCreate(&start));
+        HIP_CHECK(hipEventCreate(&stop));
+
         for(auto _ : state)
         {
-            auto start = std::chrono::high_resolution_clock::now();
+            // Record start event
+            HIP_CHECK(hipEventRecord(start, stream));
 
             for(size_t i = 0; i < batch_size; i++)
             {
@@ -164,13 +154,20 @@ struct device_radix_sort_benchmark : public config_autotune_interface
                                                       stream,
                                                       false));
             }
-            HIP_CHECK(hipDeviceSynchronize());
 
-            auto end = std::chrono::high_resolution_clock::now();
-            auto elapsed_seconds
-                = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
-            state.SetIterationTime(elapsed_seconds.count());
+            // Record stop event and wait until it completes
+            HIP_CHECK(hipEventRecord(stop, stream));
+            HIP_CHECK(hipEventSynchronize(stop));
+
+            float elapsed_mseconds;
+            HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
+            state.SetIterationTime(elapsed_mseconds / 1000);
         }
+
+        // Destroy HIP events
+        HIP_CHECK(hipEventDestroy(start));
+        HIP_CHECK(hipEventDestroy(stop));
+
         state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(key_type));
         state.SetItemsProcessed(state.iterations() * batch_size * size);
 
@@ -247,9 +244,15 @@ struct device_radix_sort_benchmark : public config_autotune_interface
         }
         HIP_CHECK(hipDeviceSynchronize());
 
+        // HIP events creation
+        hipEvent_t start, stop;
+        HIP_CHECK(hipEventCreate(&start));
+        HIP_CHECK(hipEventCreate(&stop));
+
         for(auto _ : state)
         {
-            auto start = std::chrono::high_resolution_clock::now();
+            // Record start event
+            HIP_CHECK(hipEventRecord(start, stream));
 
             for(size_t i = 0; i < batch_size; i++)
             {
@@ -265,13 +268,20 @@ struct device_radix_sort_benchmark : public config_autotune_interface
                                                        stream,
                                                        false));
             }
-            HIP_CHECK(hipDeviceSynchronize());
 
-            auto end = std::chrono::high_resolution_clock::now();
-            auto elapsed_seconds
-                = std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
-            state.SetIterationTime(elapsed_seconds.count());
+            // Record stop event and wait until it completes
+            HIP_CHECK(hipEventRecord(stop, stream));
+            HIP_CHECK(hipEventSynchronize(stop));
+
+            float elapsed_mseconds;
+            HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
+            state.SetIterationTime(elapsed_mseconds / 1000);
         }
+
+        // Destroy HIP events
+        HIP_CHECK(hipEventDestroy(start));
+        HIP_CHECK(hipEventDestroy(stop));
+
         state.SetBytesProcessed(state.iterations() * batch_size * size
                                 * (sizeof(key_type) + sizeof(value_type)));
         state.SetItemsProcessed(state.iterations() * batch_size * size);
@@ -289,97 +299,11 @@ struct device_radix_sort_benchmark : public config_autotune_interface
     }
 };
 
-#ifdef BENCHMARK_CONFIG_TUNING
-
-inline constexpr unsigned int get_max_items_per_thread(size_t key_bytes, size_t value_bytes)
-{
-    size_t total_bytes = key_bytes + value_bytes;
-    if(total_bytes <= 12)
-    {
-        return 30;
+#define CREATE_RADIX_SORT_BENCHMARK(...)                         \
+    {                                                            \
+        const device_radix_sort_benchmark<__VA_ARGS__> instance; \
+        REGISTER_BENCHMARK(benchmarks, size, stream, instance);  \
     }
-    else if(12 < total_bytes && total_bytes <= 18)
-    {
-        return 20;
-    }
-    else //(18 < total_bytes)
-    {
-        return 10;
-    }
-}
-template<unsigned int LongRadixBits,
-         unsigned int ShortRadixBits,
-         unsigned int ItemsPerThread2,
-         typename Key,
-         typename Value = rocprim::empty_type>
-struct device_radix_sort_benchmark_generator
-{
-    template<unsigned int ItemsPerThread1>
-    struct create_ipt1
-    {
-        void operator()(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
-        {
-            storage.emplace_back(
-                std::make_unique<device_radix_sort_benchmark<
-                    Key,
-                    Value,
-                    rocprim::radix_sort_config<LongRadixBits,
-                                               ShortRadixBits,
-                                               rocprim::kernel_config<256u, ItemsPerThread1>,
-                                               rocprim::kernel_config<256u, ItemsPerThread2>>>>());
-        }
-    };
-
-    static void create(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
-    {
-        static constexpr unsigned int max_items_per_thread
-            = get_max_items_per_thread(sizeof(Key), sizeof(Value));
-        static_for_each<make_index_range<unsigned int, 1, max_items_per_thread>, create_ipt1>(
-            storage);
-    }
-};
-
-template<unsigned int BlockSize, typename Key, typename Value = rocprim::empty_type>
-struct device_radix_sort_single_benchmark_generator
-{
-    template<unsigned int ItemsPerThread>
-    struct create_ipt
-    {
-        void operator()(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
-        {
-            storage.emplace_back(
-                std::make_unique<device_radix_sort_benchmark<
-                    Key,
-                    Value,
-                    rocprim::radix_sort_config<8,
-                                               7,
-                                               rocprim::kernel_config<256, 2>,
-                                               rocprim::kernel_config<256, 10>,
-                                               rocprim::kernel_config<BlockSize, ItemsPerThread>,
-                                               rocprim::kernel_config<1024, 1>,
-                                               1024,
-                                               true>>>());
-        }
-    };
-
-    static void create(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
-    {
-        static constexpr unsigned int max_items_per_thread
-            = BlockSize < 512 ? get_max_items_per_thread(sizeof(Key), sizeof(Value))
-                              : (BlockSize < 1024 ? 7 : 1);
-
-        static_for_each<make_index_range<unsigned int, 1, max_items_per_thread>, create_ipt>(
-            storage);
-    }
-};
-
-#else // BENCHMARK_CONFIG_TUNING
-
-    #define CREATE_RADIX_SORT_BENCHMARK(...)                         \
-        {                                                            \
-            const device_radix_sort_benchmark<__VA_ARGS__> instance; \
-            REGISTER_BENCHMARK(benchmarks, size, stream, instance);  \
-        }
 
 inline void add_sort_keys_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
                                      hipStream_t                                   stream,
@@ -418,7 +342,5 @@ inline void add_sort_pairs_benchmarks(std::vector<benchmark::internal::Benchmark
     CREATE_RADIX_SORT_BENCHMARK(uint8_t, uint8_t)
     CREATE_RADIX_SORT_BENCHMARK(rocprim::half, rocprim::half)
 }
-
-#endif // BENCHMARK_CONFIG_TUNING
 
 #endif // ROCPRIM_BENCHMARK_DEVICE_RADIX_SORT_PARALLEL_HPP_

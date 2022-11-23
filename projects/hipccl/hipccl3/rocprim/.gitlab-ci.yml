@@ -107,7 +107,7 @@ clang-format:
       -B $BUILD_DIR
     - cmake
       --build $BUILD_DIR
-      --target test_basic benchmark_config_dispatch
+      --target test_basic
 
 build:cmake-minimum-vcpkg:
   stage: build
@@ -361,16 +361,22 @@ test:doc:
     - cd doc
     - doxygen Doxyfile
 
-benchmark:
+.benchmark-base:
   stage: benchmark
+  extends:
+    - .rules:benchmark
+  variables:
+    BENCHMARK_RESULT_DIR: ${CI_PROJECT_DIR}/benchmark_results
+    BENCHMARK_RESULT_CACHE_DIR: ${BENCHMARK_RESULT_DIR}_cache
+
+benchmark:
   needs:
     - build:benchmark
   extends:
     - .cmake-minimum
     - .gpus:rocm
-    - .rules:benchmark
+    - .benchmark-base
   variables:
-    BENCHMARK_RESULT_DIR: ${CI_PROJECT_DIR}/benchmark_results/
     BENCHMARK_FILENAME_REGEX: ^benchmark
     BENCHMARK_ALGORITHM_REGEX: ""
   script:
@@ -384,6 +390,47 @@ benchmark:
       --benchmark_output_dir "${BENCHMARK_RESULT_DIR}"
       --benchmark_filename_regex "${BENCHMARK_FILENAME_REGEX}"
       --benchmark_filter_regex "${BENCHMARK_ALGORITHM_REGEX}"
+  artifacts:
+    paths:
+      - ${BENCHMARK_RESULT_DIR}
+    expire_in: 1 week
+
+benchmark:cache-or-report:
+  needs:
+    - benchmark
+  extends:
+    - .benchmark-base
+  tags:
+    - single-cache
+  cache:
+    key: benchmark-cache
+    paths:
+      - ${BENCHMARK_RESULT_CACHE_DIR}
+  script:
+    # If on MR branch, generate report, else cache results
+    - >
+      if [ ! -z "${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME}" ]; then
+        if [ ! -d "${BENCHMARK_RESULT_CACHE_DIR}" ]; then
+          echo 'ERROR: Cache directory does not exist'
+          exit 1
+        elif [ ! -d "${BENCHMARK_RESULT_DIR}" ]; then
+          echo 'ERROR: Benchmark results directory does not exist'
+          exit 1
+        else
+          echo 'INFO: Files in cache (reference benchmarks):'
+          ls -al ${BENCHMARK_RESULT_CACHE_DIR}
+          echo 'INFO: Generating report...'
+          python3 .gitlab/generate_report.py --old ${BENCHMARK_RESULT_CACHE_DIR} --new ${BENCHMARK_RESULT_DIR}
+        fi
+      elif [ "${CI_COMMIT_BRANCH}" == "${CI_DEFAULT_BRANCH}" ]; then
+        echo 'INFO: Caching benchmark results...'
+        mkdir -p ${BENCHMARK_RESULT_CACHE_DIR}
+        cp -R ${BENCHMARK_RESULT_DIR}/*.json ${BENCHMARK_RESULT_CACHE_DIR}
+      else
+        echo 'ERROR: Neither on a merge-request branch or the default branch'
+        exit 1
+      fi
+
 
 .autotune-base:
   stage: autotune
@@ -400,8 +447,7 @@ autotune:execute-tuning:
     - .cmake-minimum
     - .gpus:rocm
   variables:
-    #temporarily disabled radix_sort in autotune_filename_regex
-    AUTOTUNE_FILENAME_REGEX: (?!^benchmark_device_radix_sort$)^benchmark
+    AUTOTUNE_FILENAME_REGEX: ^benchmark
     AUTOTUNE_ALGORITHM_REGEX: ""
   timeout: 8h
   artifacts:
@@ -417,7 +463,7 @@ autotune:execute-tuning:
       --benchmark_gpu_architecture "${GPU_TARGET}"
       --benchmark_output_dir "${AUTOTUNE_RESULT_DIR}"
       --benchmark_filename_regex "${AUTOTUNE_FILENAME_REGEX}"
-      --benchmark_filter_regex "${AUTOTUNE_ALGORITHM_REGEX}" > /dev/null
+      --benchmark_filter_regex "${AUTOTUNE_ALGORITHM_REGEX}"
 
 autotune:generate-config:
   image: python:3.10.5-buster

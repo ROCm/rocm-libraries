@@ -32,6 +32,7 @@
 #include "../../block/block_store.hpp"
 
 #include "../config_types.hpp"
+#include "rocprim/block/block_sort.hpp"
 
 /// \addtogroup primitivesmodule_deviceconfigs
 /// @{
@@ -41,20 +42,124 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<unsigned int SortBlockSize,
-         unsigned int SortItemsPerThread,
-         unsigned int MergeImpl1BlockSize,
-         unsigned int MergeImplMPPartitionBlockSize,
-         unsigned int MergeImplMPBlockSize,
-         unsigned int MergeImplMPItemsPerThread,
-         unsigned int MinInputSizeMergepath>
-struct merge_sort_config_impl
+struct merge_sort_block_sort_config_params
 {
-    using sort_config                      = kernel_config<SortBlockSize, SortItemsPerThread>;
-    using merge_impl1_config               = kernel_config<MergeImpl1BlockSize, 1>;
-    using merge_mergepath_partition_config = kernel_config<MergeImplMPPartitionBlockSize, 1>;
-    using merge_mergepath_config = kernel_config<MergeImplMPBlockSize, MergeImplMPItemsPerThread>;
-    static constexpr unsigned int min_input_size_mergepath = MinInputSizeMergepath;
+    kernel_config_params block_sort_config = {512, 4};
+    block_sort_algorithm block_sort_method = block_sort_algorithm::merge_sort;
+};
+
+// Necessary to construct a parameterized type of `merge_sort_block_sort_config_params`.
+// Used in passing to host-side sub-algorithms and GPU kernels so non-default parameters can be available during compile-time.
+template<unsigned int BlockSize, unsigned int ItemsPerThread, rocprim::block_sort_algorithm Algo>
+struct merge_sort_block_sort_config : rocprim::detail::merge_sort_block_sort_config_params
+{
+    constexpr merge_sort_block_sort_config()
+        : rocprim::detail::merge_sort_block_sort_config_params{
+            {BlockSize, ItemsPerThread},
+            Algo
+    } {};
+};
+
+constexpr unsigned int merge_sort_items_per_thread(const unsigned int item_scale)
+{
+    if(item_scale < 32)
+    {
+        return 8;
+    }
+    else if(item_scale < 64)
+    {
+        return 4;
+    }
+    else if(item_scale < 128)
+    {
+        return 2;
+    }
+    return 1;
+}
+constexpr unsigned int merge_sort_block_size(const unsigned int item_scale)
+{
+    if(item_scale < 16)
+    {
+        return 128;
+    }
+    else if(item_scale < 32)
+    {
+        return 64;
+    }
+    return 32;
+}
+
+// Calculate kernel configurations, such that it will not exceed shared memory maximum
+template<class Key, class Value>
+struct merge_sort_block_sort_config_base
+{
+    static constexpr unsigned int item_scale
+        = ::rocprim::max(sizeof(Key) + sizeof(unsigned int), sizeof(Value));
+    // multiply by 2 to ensure block_sort's items_per_block >= block_merge's items_per_block
+    static constexpr unsigned int block_size       = merge_sort_block_size(item_scale) * 2;
+    static constexpr unsigned int items_per_thread = merge_sort_items_per_thread(item_scale);
+    using type                                     = merge_sort_block_sort_config<block_size,
+                                              items_per_thread,
+                                              block_sort_algorithm::merge_sort>;
+};
+
+// Calculate kernel configurations, such that it will not exceed shared memory maximum
+template<class Key, class Value>
+struct radix_sort_block_sort_config_base
+{
+    static constexpr unsigned int item_scale = ::rocprim::max(sizeof(Key), sizeof(Value));
+
+    // multiply by 2 to ensure block_sort's items_per_block >= block_merge's items_per_block
+    static constexpr unsigned int block_size = merge_sort_block_size(item_scale) * 2;
+    static constexpr unsigned int items_per_thread
+        = rocprim::min(4u, merge_sort_items_per_thread(item_scale));
+    using type = kernel_config<block_size, items_per_thread>;
+};
+
+struct merge_sort_block_merge_config_params
+{
+    kernel_config_params merge_oddeven_config             = {256, 1, (1 << 17) + 70000};
+    kernel_config_params merge_mergepath_partition_config = {128, 1};
+    kernel_config_params merge_mergepath_config           = {128, 4};
+};
+
+// Necessary to construct a parameterized type of `merge_sort_block_merge_config_params`.
+// Used in passing to host-side sub-algorithms and GPU kernels so non-default parameters can be available during compile-time.
+template<unsigned int OddEvenBlockSize        = 256,
+         unsigned int OddEvenItemsPerThread   = 1,
+         unsigned int OddEvenSizeLimit        = (1 << 17) + 70000,
+         unsigned int PartitionBlockSize      = 128,
+         unsigned int MergePathBlockSize      = 128,
+         unsigned int MergePathItemsPerThread = 4>
+struct merge_sort_block_merge_config : rocprim::detail::merge_sort_block_merge_config_params
+{
+    constexpr merge_sort_block_merge_config()
+        : rocprim::detail::merge_sort_block_merge_config_params{
+            {OddEvenBlockSize, OddEvenItemsPerThread, OddEvenSizeLimit},
+            {PartitionBlockSize, 1},
+            {MergePathBlockSize, MergePathItemsPerThread}
+    } {};
+};
+
+template<class Key, class Value>
+struct merge_sort_block_merge_config_base
+{
+    static constexpr unsigned int item_scale = ::rocprim::max(sizeof(Key), sizeof(Value));
+
+    static constexpr unsigned int block_size       = merge_sort_block_size(item_scale);
+    static constexpr unsigned int items_per_thread = merge_sort_items_per_thread(item_scale);
+    using type                                     = merge_sort_block_merge_config<block_size,
+                                               1,
+                                               (1 << 17) + 70000,
+                                               128,
+                                               block_size,
+                                               items_per_thread>;
+};
+
+struct merge_sort_config_params
+{
+    merge_sort_block_sort_config_params  block_sort_config;
+    merge_sort_block_merge_config_params block_merge_config;
 };
 
 } // namespace detail
@@ -63,26 +168,34 @@ struct merge_sort_config_impl
 ///
 /// \tparam SortBlockSize - block size in the block-sort step
 /// \tparam SortItemsPerThread - ItemsPerThread in the block-sort step
-/// \tparam MergeImpl1BlockSize - block size in the block merge step using impl1 (used when input_size < MinInputSizeMergepath)
-/// \tparam MergeImplMPPartitionBlockSize - block size of the partition kernel in the block merge step using mergepath impl
-/// \tparam MergeImplMPBlockSize - block size in the block merge step using mergepath impl
-/// \tparam MergeImplMPItemsPerThread - ItemsPerThread in the block merge step using mergepath impl
+/// \tparam MergeOddevenBlockSize - block size in the block merge step using oddeven impl (used when input_size < MinInputSizeMergepath)
+/// \tparam MergeMergepathPartitionBlockSize - block size of the partition kernel in the block merge step using mergepath impl
+/// \tparam MergeMergepathBlockSize - block size in the block merge step using mergepath impl
+/// \tparam MergeMergepathItemsPerThread - ItemsPerThread in the block merge step using mergepath impl
 /// \tparam MinInputSizeMergepath - breakpoint of input-size to use mergepath impl for block merge step
-template<unsigned int     MergeImpl1BlockSize           = 512,
-         unsigned int     SortBlockSize                 = MergeImpl1BlockSize,
-         unsigned int     SortItemsPerThread            = 1,
-         unsigned int     MergeImplMPPartitionBlockSize = 128,
-         unsigned int     MergeImplMPBlockSize          = std::min(SortBlockSize, 128u),
-         unsigned int     MergeImplMPItemsPerThread
-         = SortBlockSize* SortItemsPerThread / MergeImplMPBlockSize,
-         unsigned int     MinInputSizeMergepath = 200000>
-using merge_sort_config = detail::merge_sort_config_impl<SortBlockSize,
-                                                         SortItemsPerThread,
-                                                         MergeImpl1BlockSize,
-                                                         MergeImplMPPartitionBlockSize,
-                                                         MergeImplMPBlockSize,
-                                                         MergeImplMPItemsPerThread,
-                                                         MinInputSizeMergepath>;
+template<unsigned int MergeOddevenBlockSize            = 512,
+         unsigned int SortBlockSize                    = MergeOddevenBlockSize,
+         unsigned int SortItemsPerThread               = 1,
+         unsigned int MergeMergepathPartitionBlockSize = 128,
+         unsigned int MergeMergepathBlockSize          = 128,
+         unsigned int MergeMergepathItemsPerThread     = 4,
+         unsigned int MinInputSizeMergepath            = (1 << 17) + 70000>
+struct merge_sort_config : detail::merge_sort_config_params
+{
+    /// \remark Here we map the public parameters to our internal structure.
+    using block_sort_config
+        = detail::merge_sort_block_sort_config<SortBlockSize,
+                                               SortItemsPerThread,
+                                               block_sort_algorithm::default_algorithm>;
+    using block_merge_config = detail::merge_sort_block_merge_config<MergeOddevenBlockSize,
+                                                                     1,
+                                                                     MinInputSizeMergepath,
+                                                                     MergeMergepathBlockSize,
+                                                                     MergeMergepathBlockSize,
+                                                                     MergeMergepathItemsPerThread>;
+    constexpr merge_sort_config()
+        : detail::merge_sort_config_params{block_sort_config(), block_merge_config()} {};
+};
 
 namespace detail
 {
@@ -121,6 +234,46 @@ template<class Key, class Value>
 struct default_merge_sort_config_base : default_merge_sort_config_base_helper<Key, Value>::type
 {};
 
+struct radix_sort_onesweep_config_params
+{
+    kernel_config_params histogram = {256, 12};
+    kernel_config_params sort      = {256, 12};
+
+    /// \brief The number of bits to sort in one onesweep iteration.
+    unsigned int radix_bits_per_place = 4;
+};
+
+template<class HistogramConfig  = kernel_config<256, 12>,
+         class SortConfig       = kernel_config<256, 12>,
+         unsigned int RadixBits = 4>
+struct radix_sort_onesweep_config : radix_sort_onesweep_config_params
+{
+    /// \brief Configration of radix sort onesweep histogram kernel.
+    using histogram = HistogramConfig;
+    /// \brief Configration of radix sort onesweep sort kernel.
+    using sort = SortConfig;
+
+    constexpr radix_sort_onesweep_config()
+        : radix_sort_onesweep_config_params{
+            {HistogramConfig::block_size, HistogramConfig::items_per_thread},
+            {     SortConfig::block_size,      SortConfig::items_per_thread},
+            RadixBits
+    } {};
+};
+
+// Calculate kernel configurations, such that it will not exceed shared memory maximum
+template<class Key, class Value>
+struct radix_sort_onesweep_config_base
+{
+    static constexpr unsigned int item_scale = ::rocprim::max(sizeof(Key), sizeof(Value));
+
+    static constexpr unsigned int block_size = merge_sort_block_size(item_scale) * 4;
+    using type                               = radix_sort_onesweep_config<
+        kernel_config<256, 12>,
+        kernel_config<block_size, ::rocprim::max(1u, 65000u / block_size / item_scale)>,
+        4>;
+};
+
 } // namespace detail
 
 /// \brief Configuration of device-level radix sort operation.
@@ -144,24 +297,24 @@ template<unsigned int LongRadixBits,
          class SortSingleConfig               = kernel_config<256, 10>,
          class SortMergeConfig                = kernel_config<1024, 1>,
          unsigned int MergeSizeLimitBlocks    = 1024U,
-         bool         ForceSingleKernelConfig = false>
+         bool         ForceSingleKernelConfig = false,
+         class OnesweepHistogramConfig        = kernel_config<256, 8>,
+         class OnesweepSortConfig             = kernel_config<256, 15>,
+         unsigned int OnesweepRadixBits       = 4>
 struct radix_sort_config
 {
-    /// \brief Number of bits in long iterations.
-    static constexpr unsigned int long_radix_bits = LongRadixBits;
-    /// \brief Number of bits in short iterations.
-    static constexpr unsigned int short_radix_bits = ShortRadixBits;
+    /// \remark Here we map the public parameters to our internal structure.
     /// \brief Limit number of blocks to use merge kernel.
     static constexpr unsigned int merge_size_limit_blocks = MergeSizeLimitBlocks;
 
-    /// \brief Configuration of digits scan kernel.
-    using scan = ScanConfig;
-    /// \brief Configuration of radix sort kernel.
-    using sort = SortConfig;
     /// \brief Configuration of radix sort single kernel.
-    using sort_single = SortSingleConfig;
-    /// \brief Configuration of radix sort merge kernel.
-    using sort_merge = SortMergeConfig;
+    using block_sort_config = SortSingleConfig;
+    /// \brief Configuration of merge sort algorithm.
+    using merge_sort_config = default_config;
+    /// \brief Configration of radix sort onesweep.
+    using onesweep = detail::
+        radix_sort_onesweep_config<OnesweepHistogramConfig, OnesweepSortConfig, OnesweepRadixBits>;
+
     /// \brief Force use radix sort single kernel configuration.
     static constexpr bool force_single_kernel_config = ForceSingleKernelConfig;
 };
@@ -234,6 +387,12 @@ template<class Value, class Key>
 struct default_radix_sort_config_base : default_radix_sort_config_base_helper<Key, Value>::type
 {};
 
+struct reduce_config_params
+{
+    kernel_config_params   reduce_config;
+    block_reduce_algorithm block_reduce_method;
+};
+
 } // namespace detail
 
 /// \brief Configuration of device-level reduce primitives.
@@ -242,22 +401,18 @@ struct default_radix_sort_config_base : default_radix_sort_config_base_helper<Ke
 /// \tparam ItemsPerThread - number of items processed by each thread.
 /// \tparam BlockReduceMethod - algorithm for block reduce.
 /// \tparam SizeLimit - limit on the number of items reduced by a single launch
-template<
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
-    ::rocprim::block_reduce_algorithm BlockReduceMethod,
-    unsigned int SizeLimit = ROCPRIM_GRID_SIZE_LIMIT
->
-struct reduce_config
+template<unsigned int                      BlockSize      = 256,
+         unsigned int                      ItemsPerThread = 8,
+         ::rocprim::block_reduce_algorithm BlockReduceMethod
+         = ::rocprim::block_reduce_algorithm::default_algorithm,
+         unsigned int SizeLimit = ROCPRIM_GRID_SIZE_LIMIT>
+struct reduce_config : rocprim::detail::reduce_config_params
 {
-    /// \brief Number of threads in a block.
-    static constexpr unsigned int block_size = BlockSize;
-    /// \brief Number of items processed by each thread.
-    static constexpr unsigned int items_per_thread = ItemsPerThread;
-    /// \brief Algorithm for block reduce.
-    static constexpr block_reduce_algorithm block_reduce_method = BlockReduceMethod;
-    /// \brief Limit on the number of items reduced by a single launch
-    static constexpr unsigned int size_limit = SizeLimit;
+    constexpr reduce_config()
+        : rocprim::detail::reduce_config_params{
+            {BlockSize, ItemsPerThread, SizeLimit},
+            BlockReduceMethod
+    } {};
 };
 
 namespace detail

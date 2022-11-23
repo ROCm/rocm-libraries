@@ -6,16 +6,7 @@
 
 #include <iostream>
 
-#define HIP_CHECK(condition)                                                                \
-    {                                                                                       \
-        hipError_t error = condition;                                                       \
-        if(error != hipSuccess)                                                             \
-        {                                                                                   \
-            std::cout << "HIP error: " << hipGetErrorString(error) << " line: " << __LINE__ \
-                      << std::endl;                                                         \
-            exit(error);                                                                    \
-        }                                                                                   \
-    }
+#include "benchmark_utils.hpp"
 
 enum class stream_kind
 {
@@ -60,6 +51,7 @@ __global__ void empty_kernel() {}
 static void BM_kernel_launch(benchmark::State& state)
 {
     static constexpr hipStream_t stream = 0;
+
     for(auto _ : state)
     {
         hipLaunchKernelGGL(empty_kernel, dim3(1), dim3(1), 0, stream);
@@ -77,5 +69,6 @@ BENCHMARK(BM_kernel_launch);
 int main(int argc, char** argv)
 {
     benchmark::Initialize(&argc, argv);
+    add_common_benchmark_info();
     benchmark::RunSpecifiedBenchmarks();
 }

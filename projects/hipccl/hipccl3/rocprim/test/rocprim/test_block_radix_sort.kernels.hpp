@@ -156,8 +156,8 @@ auto test_block_radix_sort()
     static constexpr size_t items_per_thread = ItemsPerThread;
     static constexpr bool descending = Descending;
     static constexpr bool to_striped = ToStriped;
-    static constexpr unsigned int start_bit = (rocprim::is_unsigned<Key>::value == false) ? 0 : StartBit;
-    static constexpr unsigned int end_bit = (rocprim::is_unsigned<Key>::value == false) ? sizeof(Key) * 8 : EndBit;
+    static constexpr unsigned int start_bit        = StartBit;
+    static constexpr unsigned int end_bit          = EndBit;
     static constexpr size_t items_per_block = block_size * items_per_thread;
 
     // Given block size not supported

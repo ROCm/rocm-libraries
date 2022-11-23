@@ -38,11 +38,27 @@
 
 #include "benchmark_utils.hpp"
 
+constexpr const char* get_reduce_method_name(rocprim::block_reduce_algorithm alg)
+{
+    switch(alg)
+    {
+        case rocprim::block_reduce_algorithm::raking_reduce: return "raking_reduce";
+        case rocprim::block_reduce_algorithm::raking_reduce_commutative_only:
+            return "raking_reduce_commutative_only";
+        case rocprim::block_reduce_algorithm::using_warp_reduce:
+            return "using_warp_reduce";
+            // Not using `default: ...` because it kills effectiveness of -Wswitch
+    }
+    return "unknown_algorithm";
+}
+
 template<typename Config>
 std::string config_name()
 {
-    return "reduce_config<" + pad_string(std::to_string(Config::block_size), 3) + ", "
-           + pad_string(std::to_string(Config::items_per_thread), 2) + ">";
+    const rocprim::detail::reduce_config_params config = Config();
+    return "reduce_config<" + pad_string(std::to_string(config.reduce_config.block_size), 3) + ", "
+           + pad_string(std::to_string(config.reduce_config.items_per_thread), 2) + ", "
+           + std::string(get_reduce_method_name(config.block_reduce_method)) + ">";
 }
 
 template<>
@@ -60,7 +76,7 @@ struct device_reduce_benchmark : public config_autotune_interface
     {
         return R"regex((?P<algo>\S*?)<)regex"
                R"regex((?P<datatype>\S*),\s*reduce_config<)regex"
-               R"regex(\s*(?P<block_size>[0-9]+),\s*(?P<items_per_thread>[0-9]+)>>)regex";
+               R"regex(\s*(?P<block_size>[0-9]+),\s*(?P<items_per_thread>[0-9]+),\s*(?P<block_reduce_method>[A-z0-9]+)>>)regex";
     }
 
     std::string name() const override
@@ -119,9 +135,15 @@ struct device_reduce_benchmark : public config_autotune_interface
         }
         HIP_CHECK(hipDeviceSynchronize());
 
+        // HIP events creation
+        hipEvent_t start, stop;
+        HIP_CHECK(hipEventCreate(&start));
+        HIP_CHECK(hipEventCreate(&stop));
+
         for(auto _ : state)
         {
-            auto start = std::chrono::high_resolution_clock::now();
+            // Record start event
+            HIP_CHECK(hipEventRecord(start, stream));
 
             for(size_t i = 0; i < batch_size; i++)
             {
@@ -135,11 +157,19 @@ struct device_reduce_benchmark : public config_autotune_interface
             }
             HIP_CHECK(hipStreamSynchronize(stream));
 
-            auto end = std::chrono::high_resolution_clock::now();
-            auto elapsed_seconds =
-                std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
-            state.SetIterationTime(elapsed_seconds.count());
+            // Record stop event and wait until it completes
+            HIP_CHECK(hipEventRecord(stop, stream));
+            HIP_CHECK(hipEventSynchronize(stop));
+
+            float elapsed_mseconds;
+            HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
+            state.SetIterationTime(elapsed_mseconds / 1000);
         }
+
+        // Destroy HIP events
+        HIP_CHECK(hipEventDestroy(start));
+        HIP_CHECK(hipEventDestroy(stop));
+
         state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(T));
         state.SetItemsProcessed(state.iterations() * batch_size * size);
 

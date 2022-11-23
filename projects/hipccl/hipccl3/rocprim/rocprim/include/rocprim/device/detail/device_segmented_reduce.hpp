@@ -58,8 +58,8 @@ void segmented_reduce(InputIterator input,
 {
     static constexpr reduce_config_params params = device_params<Config>();
 
-    constexpr unsigned int block_size       = params.block_size;
-    constexpr unsigned int items_per_thread = params.items_per_thread;
+    constexpr unsigned int block_size       = params.reduce_config.block_size;
+    constexpr unsigned int items_per_thread = params.reduce_config.items_per_thread;
     constexpr unsigned int items_per_block  = block_size * items_per_thread;
 
     using reduce_type = ::rocprim::block_reduce<ResultType, block_size, params.block_reduce_method>;

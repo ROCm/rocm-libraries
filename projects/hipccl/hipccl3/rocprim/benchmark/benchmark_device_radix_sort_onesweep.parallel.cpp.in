@@ -23,11 +23,9 @@
 #include <cstdint>
 
 #include "benchmark_utils.hpp"
-#include "benchmark_device_merge_sort.parallel.hpp"
+#include "benchmark_device_radix_sort_onesweep.parallel.hpp"
 
-namespace { 
+namespace {
     auto benchmarks = config_autotune_register::create_bulk(
-        device_merge_sort_benchmark_generator<@MergeBlockSizeExponent@, 
-                                              @SortBlockSizeExponent@,
-                                              @KeyType_ValueType@>::create);    
+        device_radix_sort_onesweep_benchmark_generator<@BlockSize@, @RadixBits@, @KeyType_ValueType@>::create);
 }

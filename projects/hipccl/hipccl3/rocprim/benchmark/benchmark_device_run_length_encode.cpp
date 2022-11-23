@@ -21,11 +21,10 @@
 // SOFTWARE.
 
 #include <iostream>
-#include <chrono>
-#include <vector>
+#include <limits>
 #include <locale>
 #include <string>
-#include <limits>
+#include <vector>
 
 // Google Benchmark
 #include "benchmark/benchmark.h"
@@ -116,10 +115,16 @@ void run_encode_benchmark(benchmark::State& state, size_t max_length, hipStream_
     }
     HIP_CHECK(hipDeviceSynchronize());
 
+    // HIP events creation
+    hipEvent_t start, stop;
+    HIP_CHECK(hipEventCreate(&start));
+    HIP_CHECK(hipEventCreate(&stop));
+
     const unsigned int batch_size = 10;
     for (auto _ : state)
     {
-        auto start = std::chrono::high_resolution_clock::now();
+        // Record start event
+        HIP_CHECK(hipEventRecord(start, stream));
 
         for(size_t i = 0; i < batch_size; i++)
         {
@@ -130,13 +135,20 @@ void run_encode_benchmark(benchmark::State& state, size_t max_length, hipStream_
                 stream, false
             );
         }
-        HIP_CHECK(hipStreamSynchronize(stream));
 
-        auto end = std::chrono::high_resolution_clock::now();
-        auto elapsed_seconds =
-            std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
-        state.SetIterationTime(elapsed_seconds.count());
+        // Record stop event and wait until it completes
+        HIP_CHECK(hipEventRecord(stop, stream));
+        HIP_CHECK(hipEventSynchronize(stop));
+
+        float elapsed_mseconds;
+        HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
+        state.SetIterationTime(elapsed_mseconds / 1000);
     }
+
+    // Destroy HIP events
+    HIP_CHECK(hipEventDestroy(start));
+    HIP_CHECK(hipEventDestroy(stop));
+
     state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(key_type));
     state.SetItemsProcessed(state.iterations() * batch_size * size);
 
@@ -219,10 +231,16 @@ void run_non_trivial_runs_benchmark(benchmark::State& state, size_t max_length, 
     }
     HIP_CHECK(hipDeviceSynchronize());
 
+    // HIP events creation
+    hipEvent_t start, stop;
+    HIP_CHECK(hipEventCreate(&start));
+    HIP_CHECK(hipEventCreate(&stop));
+
     const unsigned int batch_size = 10;
     for (auto _ : state)
     {
-        auto start = std::chrono::high_resolution_clock::now();
+        // Record start event
+        HIP_CHECK(hipEventRecord(start, stream));
 
         for(size_t i = 0; i < batch_size; i++)
         {
@@ -233,13 +251,20 @@ void run_non_trivial_runs_benchmark(benchmark::State& state, size_t max_length, 
                 stream, false
             );
         }
-        HIP_CHECK(hipStreamSynchronize(stream));
 
-        auto end = std::chrono::high_resolution_clock::now();
-        auto elapsed_seconds =
-            std::chrono::duration_cast<std::chrono::duration<double>>(end - start);
-        state.SetIterationTime(elapsed_seconds.count());
+        // Record stop event and wait until it completes
+        HIP_CHECK(hipEventRecord(stop, stream));
+        HIP_CHECK(hipEventSynchronize(stop));
+
+        float elapsed_mseconds;
+        HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
+        state.SetIterationTime(elapsed_mseconds / 1000);
     }
+
+    // Destroy HIP events
+    HIP_CHECK(hipEventDestroy(start));
+    HIP_CHECK(hipEventDestroy(stop));
+
     state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(key_type));
     state.SetItemsProcessed(state.iterations() * batch_size * size);
 
