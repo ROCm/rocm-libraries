@@ -422,14 +422,14 @@ namespace detail
              class OffsetT,
              class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
-        block_merge_kernel_impl(KeysInputIterator    keys_input,
-                                KeysOutputIterator   keys_output,
-                                ValuesInputIterator  values_input,
-                                ValuesOutputIterator values_output,
-                                const OffsetT        input_size,
-                                const OffsetT        sorted_block_size,
-                                BinaryFunction       compare_function,
-                                const OffsetT*       merge_partitions)
+        block_merge_mergepath_kernel(KeysInputIterator    keys_input,
+                                     KeysOutputIterator   keys_output,
+                                     ValuesInputIterator  values_input,
+                                     ValuesOutputIterator values_output,
+                                     const OffsetT        input_size,
+                                     const OffsetT        sorted_block_size,
+                                     BinaryFunction       compare_function,
+                                     const OffsetT*       merge_partitions)
     {
         block_merge_process_tile<BlockSize, ItemsPerThread>(keys_input,
                                                             keys_output,

@@ -652,23 +652,6 @@ TYPED_TEST(RocprimDevicePartitionTests, PredicateThreeWay)
 namespace
 {
 
-std::vector<size_t> get_large_sizes()
-{
-    std::vector<size_t> sizes = {(size_t{1} << 30),
-                                 (size_t{1} << 31) - 1,
-                                 size_t{1} << 31,
-                                 size_t{1} << 32,
-                                 (size_t{1} << 35) - 1};
-
-    const auto random_sizes = test_utils::get_random_data<size_t>(1,
-                                                                  (size_t{1} << 30) + 1,
-                                                                  (size_t{1} << 35) - 2,
-                                                                  std::random_device{}());
-    sizes.insert(sizes.end(), random_sizes.begin(), random_sizes.end());
-    std::sort(sizes.begin(), sizes.end());
-    return sizes;
-}
-
 /// \brief An output iterator which checks the values written to it.
 /// The expected output values should be partitioned with regards to the \p modulo parameter.
 /// The check algorithm depends on \p CheckValue.
@@ -885,10 +868,15 @@ TEST_P(RocprimDevicePartitionLargeInputTests, LargeInputPartition)
     HIP_CHECK(hipSetDevice(device_id));
 
     const auto modulo = GetParam();
-    const auto sizes  = get_large_sizes();
 
-    for(const auto size : sizes)
+    for(const auto size : test_utils::get_large_sizes(std::random_device{}()))
     {
+        // limit the running time of the test
+        if(size > (size_t{1} << 35))
+        {
+            break;
+        }
+
         SCOPED_TRACE(testing::Message() << "with size = " << size);
         const auto input_iterator = rocprim::make_counting_iterator(static_cast<size_t>(0));
         const modulo_predicate predicate{modulo};
@@ -963,10 +951,15 @@ TEST_P(RocprimDevicePartitionLargeInputTests, LargeInputPartitionThreeWay)
 
     const auto modulo_a = GetParam();
     const auto modulo_b = modulo_a + 1;
-    const auto sizes    = get_large_sizes();
 
-    for(const auto size : sizes)
+    for(const auto size : test_utils::get_large_sizes(std::random_device{}()))
     {
+        // limit the running time of the test
+        if(size > (size_t{1} << 35))
+        {
+            break;
+        }
+
         SCOPED_TRACE(testing::Message() << "with size = " << size);
         const auto input_iterator = rocprim::make_counting_iterator(static_cast<size_t>(0));
         const auto predicate_a    = modulo_predicate{modulo_a};

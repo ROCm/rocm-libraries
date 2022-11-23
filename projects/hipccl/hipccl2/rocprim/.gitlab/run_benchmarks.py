@@ -56,8 +56,8 @@ def run_benchmarks(benchmark_context):
             f'--benchmark_filter={benchmark_context.benchmark_filter_regex}'
         ]
         try:
-            subprocess.call(args)
-        except OSError as error:
+            subprocess.check_call(args)
+        except subprocess.CalledProcessError as error:
             print(f'Could not run benchmark at {benchmark_path}. Error: "{error}"', file=sys.stderr, flush=True)
             success = False
     return success

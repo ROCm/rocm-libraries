@@ -33,6 +33,7 @@ import argparse
 import os
 import sys
 import collections
+import math
 from enum import Enum
 from dataclasses import dataclass
 from collections import defaultdict
@@ -78,30 +79,31 @@ def tokenize_benchmark_name(input_name: str, name_regex: str) -> Dict[str, str]:
     else:
         return None
 
-def translate_settings_to_cpp_metaprogramming(entry, typename) -> str:
+def translate_settings_to_cpp_metaprogramming(fallback_configuration) -> str:
     """
-    Translates a list of named fallback configuration entries to 
+    Translates a list of named fallback configuration entries to
     C++ metaprogramming idioms.
     """
-    
+
     setting_list: List[str] = []
-    if entry["based_on"]["datatype"] == EMPTY_TYPENAME:
-        # If the entry is based on the empty type
-        # (which is not present in the fallback file, but separately inserted)
-        setting_list.append(f"(std::is_same<{typename}, {EMPTY_TYPENAME}>::value)")
-    else:
-        if "floating_point" in entry.keys():
-            negation: str = "" if entry['floating_point'] else "!"
-            output: str = negation + f"bool(rocprim::is_floating_point<{typename}>::value)"
-            setting_list.append(output)
-        for config_setting, value in entry['sizeof'].items():
-            if config_setting == "min_exclusive":
-                setting_list.append(f"(sizeof({typename}) > {value})")
-            elif config_setting == "max_inclusive":
-                setting_list.append(f"(sizeof({typename}) <= {value})")
-            else:
-                print(f"WARNING: {config_setting} is not known")
-    
+    for typename, entry in fallback_configuration.items():
+        if entry["based_on"]["datatype"] == EMPTY_TYPENAME:
+            # If the entry is based on the empty type
+            # (which is not present in the fallback file, but separately inserted)
+            setting_list.append(f"(std::is_same<{typename}, {EMPTY_TYPENAME}>::value)")
+        else:
+            if "floating_point" in entry.keys():
+                negation: str = "" if entry['floating_point'] else "!"
+                output: str = negation + f"bool(rocprim::is_floating_point<{typename}>::value)"
+                setting_list.append(output)
+
+            for config_setting, value in entry['sizeof'].items():
+                if config_setting == "min_exclusive":
+                    setting_list.append(f"(sizeof({typename}) > {value})")
+                elif config_setting == "max_inclusive":
+                    setting_list.append(f"(sizeof({typename}) <= {value})")
+                else:
+                    print(f"WARNING: {config_setting} is not known")
     return "std::enable_if_t<(" + " && ".join(setting_list) + ")>"
 
 class BenchmarksOfArchitecture:
@@ -109,10 +111,11 @@ class BenchmarksOfArchitecture:
     Stores the benchmark results for a specific architecture and algorithm.
     """
 
-    def __init__(self, arch_name: str, config_selection_types, fallback_entries):
+    def __init__(self, arch_name: str, config_selection_types, fallback_entries, config_get_best):
         self.config_selection_types = config_selection_types
         self.fallback_entries = fallback_entries
         self.arch_name: str = arch_name
+        self.config_get_best: Callable[[Dict], Dict[str, str]] = config_get_best
         # Dictionary storing the benchmarks
         # Key is an instantiation of the configuration selection types
         # Value is a list of all benchmark runs corresponding to that instantiation,
@@ -152,7 +155,7 @@ class BenchmarksOfArchitecture:
         given configuration is not present None is returned
         """
         if instance_key in self.benchmarks.keys():
-            return max(self.benchmarks[instance_key], key=lambda x: x['items_per_second'])
+            return self.config_get_best(self.benchmarks[instance_key])
         else:
             return None
 
@@ -174,7 +177,6 @@ class BenchmarksOfArchitecture:
         non_optional_selection_types: List[str] = \
                 [cfg_type.name for cfg_type in self.config_selection_types if not cfg_type.is_optional]
         return non_optional_selection_types
-
     
     @property
     def fallback_types(self):
@@ -184,24 +186,52 @@ class BenchmarksOfArchitecture:
 
         This function only supports a single non-optional type.
         """
-        
-        # If there are multiple non-optional selection types, do not generate fallback cases
-        # Otherwise, too many benchmarks would be needed to support the full product of fallback entries
-        if len(self.__non_optional_selection_types()) != 1:
-            return []
-        single_selection_type = self.__non_optional_selection_types()[0]
+
         output = []
+        # If there are multiple non-optional selection types, do not generate fallback cases
+        # Otherwise, too many benchmarks would be needed support for the full product of fallback entries
+        non_optional_selection_types = self.__non_optional_selection_types()
+        if len(non_optional_selection_types) != 1:
+            return output
+        single_selection_type: str = non_optional_selection_types[0]
+
+        # Fill all optional types with a special case, indicating these are based on the empty type
+        # Insert None for the singular non-optional type to maintain order
+        fallback_configuration = {cfg_type.name : {'based_on' : {'datatype' : EMPTY_TYPENAME}} if cfg_type.is_optional else None for cfg_type in self.config_selection_types}
+
         for entry in self.fallback_entries:
-            fallback_base_datatype = entry['based_on']['datatype']
-            best_benchmark_result = self.__get_best_benchmark(self.__get_instance_key({single_selection_type : fallback_base_datatype})) 
+            # Let the single non-optional type be based on the current fallback entry
+            fallback_configuration[single_selection_type] = entry
+
+            # Find the closest measurement and create the config line
+            fallback_base_datatype = fallback_configuration[single_selection_type]['based_on']['datatype']
+            best_benchmark_result: Dict[str, str] = self.__get_best_benchmark(self.__get_instance_key({single_selection_type : fallback_base_datatype}))
+            print_config: str = ', '.join([key + ' = ' + value['based_on']['datatype'] for key, value in fallback_configuration.items()])
             if best_benchmark_result is None:
-                print(f'WARNING {self.name}: No measurement found for creating fallback configuration entry for \"{fallback_base_datatype}\"')
+                print(f'WARNING {self.name}: No measurement found for creating fallback configuration entry for \"{print_config}\"')
             else:
-                comment = f"{single_selection_type} = {fallback_base_datatype}"
-                output.append((comment, translate_settings_to_cpp_metaprogramming(entry, single_selection_type), best_benchmark_result))
+                output.append((print_config, translate_settings_to_cpp_metaprogramming(fallback_configuration), best_benchmark_result))
         return output
 
+# Default formula to pick best configuration, only look at items_per_second.
+def default_config_get_best(input: Dict) -> Dict[str, str]:
+    return max(input, key=lambda x: x.get('items_per_second', 0.0))
 
+# If we can double the sorted items_per_block and items_per_second does not degrade more than ~10%, consider it superior.
+def block_sort_config_get_best(input: Dict) -> Dict[str, str]:
+    return max(input, key=lambda x: x.get('items_per_second', 0.0)*((float(x['block_size'])*float(x['items_per_thread']))**(1/5)))
+
+# Best configuration is a combination between best oddeven and best mergepath impl.
+# We use oddeven only for small input sizes (< ~200K), so it is a hardcoded value which is the best for almost all cases.
+# You can find this value in the tuning template
+def merge_sort_block_merge_config_get_best(input: Dict) -> Dict[str, str]:
+    input_mergepath = list(filter(lambda x: (int(x.get('oddeven_size_limit')) == 0), input))
+    # Since merge_sort_block_merge is used after radix_sort_block_sort<256, 4>, and
+    # mergepath_block_size * mergepath_items_per_thread >= 256*4 should hold (TODO: this will be solved in the near future):
+    input_mergepath = list(filter(lambda x: (int(x.get('mergepath_block_size'))*int(x.get('mergepath_items_per_thread')) <= 1024), input_mergepath))
+
+    best_mergepath = max(input_mergepath, key=lambda x: x.get('items_per_second', 0.0))
+    return best_mergepath
 
 class Algorithm:
     """
@@ -209,16 +239,17 @@ class Algorithm:
     the configuration file.
     """
 
-    def __init__(self, fallback_entries):
+    def __init__(self, fallback_entries, config_get_best = default_config_get_best):
         self.architectures: Dict(str, BenchmarksOfArchitecture) = {}
         self.fallback_entries = fallback_entries
+        self.config_get_best = config_get_best
     
     def add_measurement(self, single_benchmark_data: Dict[str, str], architecture: str):
         """
         Adds a single benchmark execution for a given architecture
         """
         if architecture not in self.architectures:
-            self.architectures[architecture] = BenchmarksOfArchitecture(architecture, self.config_selection_types, self.fallback_entries)
+            self.architectures[architecture] = BenchmarksOfArchitecture(architecture, self.config_selection_types, self.fallback_entries, self.config_get_best)
         self.architectures[architecture].add_measurement(single_benchmark_data)
 
     def create_config_file_content(self) -> str:
@@ -266,8 +297,45 @@ class AlgorithmDeviceMergeSort(Algorithm):
     algorithm_name = 'device_merge_sort'
     cpp_configuration_template_name = 'mergesort_config_template'
     config_selection_types = [
-            SelectionType(name='key_type', is_optional=False),
-            SelectionType(name='value_type', is_optional=True)]
+        SelectionType(name='key_type', is_optional=False),
+        SelectionType(name='value_type', is_optional=True)]
+    def __init__(self, fallback_entries):
+        Algorithm.__init__(self, fallback_entries)
+
+class AlgorithmDeviceMergeSortBlockSort(Algorithm):
+    algorithm_name = 'device_merge_sort_block_sort'
+    cpp_configuration_template_name = 'mergesort_block_sort_config_template'
+    config_selection_types = [
+        SelectionType(name='key_type', is_optional=False),
+        SelectionType(name='value_type', is_optional=True)]
+    def __init__(self, fallback_entries):
+        Algorithm.__init__(self, fallback_entries, block_sort_config_get_best)
+
+class AlgorithmDeviceMergeSortBlockMerge(Algorithm):
+    algorithm_name = 'device_merge_sort_block_merge'
+    cpp_configuration_template_name = 'mergesort_block_merge_config_template'
+    config_selection_types = [
+        SelectionType(name='key_type', is_optional=False),
+        SelectionType(name='value_type', is_optional=True)]
+    def __init__(self, fallback_entries):
+        Algorithm.__init__(self, fallback_entries, merge_sort_block_merge_config_get_best)
+
+class AlgorithmDeviceRadixSortBlockSort(Algorithm):
+    algorithm_name = 'device_radix_sort_block_sort'
+    cpp_configuration_template_name = 'radixsort_block_sort_config_template'
+    config_selection_types = [
+        SelectionType(name='key_type', is_optional=False),
+        SelectionType(name='value_type', is_optional=True)]
+    def __init__(self, fallback_entries):
+        Algorithm.__init__(self, fallback_entries, block_sort_config_get_best)
+
+
+class AlgorithmDeviceRadixSortOnesweep(Algorithm):
+    algorithm_name = 'device_radix_sort_onesweep'
+    cpp_configuration_template_name = 'radixsort_onesweep_config_template'
+    config_selection_types = [
+        SelectionType(name='key_type', is_optional=False),
+        SelectionType(name='value_type', is_optional=True)]
     def __init__(self, fallback_entries):
         Algorithm.__init__(self, fallback_entries)
 
@@ -279,6 +347,7 @@ class AlgorithmDeviceRadixSort(Algorithm):
             SelectionType(name='value_type', is_optional=True)]
     def __init__(self, fallback_entries):
         Algorithm.__init__(self, fallback_entries)
+
 class AlgorithmDeviceReduce(Algorithm):
     algorithm_name = 'device_reduce'
     config_selection_types = [SelectionType(name='datatype', is_optional=False)]
@@ -305,6 +374,14 @@ class AlgorithmDeviceScanByKey(Algorithm):
 def create_algorithm(algorithm_name: str, fallback_entries):
     if algorithm_name == 'device_merge_sort':
         return AlgorithmDeviceMergeSort(fallback_entries)
+    elif algorithm_name == 'device_merge_sort_block_sort':
+        return AlgorithmDeviceMergeSortBlockSort(fallback_entries)
+    elif algorithm_name == 'device_merge_sort_block_merge':
+        return AlgorithmDeviceMergeSortBlockMerge(fallback_entries)
+    elif algorithm_name == 'device_radix_sort_block_sort':
+        return AlgorithmDeviceRadixSortBlockSort(fallback_entries)
+    elif algorithm_name == 'device_radix_sort_onesweep':
+        return AlgorithmDeviceRadixSortOnesweep(fallback_entries)
     elif algorithm_name == 'device_radix_sort':
         return AlgorithmDeviceRadixSort(fallback_entries)
     elif algorithm_name == 'device_reduce':

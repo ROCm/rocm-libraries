@@ -2,8 +2,14 @@
 
 Full documentation for rocPRIM is available at [https://codedocs.xyz/ROCmSoftwarePlatform/rocPRIM/](https://codedocs.xyz/ROCmSoftwarePlatform/rocPRIM/)
 
+## [Unreleased rocPRIM-2.13.0 for ROCm 5.5.0]
+### Added
+- New block level `radix_rank` primitive.
+### Changed
+- Improved the performance of `block_radix_sort` and `device_radix_sort`.
+
 ## [Unreleased rocPRIM-2.12.0 for ROCm 5.4.0]
-## Changed
+### Changed
 - `device_partition`, `device_unique`, and `device_reduce_by_key` now support problem 
   sizes larger than 2^32 items.
 - Device algorithms now return `hipErrorInvalidValue` if the amount of passed temporary memory is insufficient.

@@ -32,18 +32,21 @@
 #include <numeric>
 #endif
 
-#include <rocprim/rocprim.hpp>
 #include "benchmark/benchmark.h"
+#include <rocprim/rocprim.hpp>
 
-#define HIP_CHECK(condition)         \
-  {                                  \
-    hipError_t error = condition;    \
-    if(error != hipSuccess){         \
-        std::cout << "HIP error: " << error << " line: " << __LINE__ << std::endl; \
-        exit(error); \
-    } \
-  }
+#define HIP_CHECK(condition)                                                                \
+    {                                                                                       \
+        hipError_t error = condition;                                                       \
+        if(error != hipSuccess)                                                             \
+        {                                                                                   \
+            std::cout << "HIP error: " << hipGetErrorString(error) << " line: " << __LINE__ \
+                      << std::endl;                                                         \
+            exit(error);                                                                    \
+        }                                                                                   \
+    }
 
+#define TUNING_SHARED_MEMORY_MAX 65536u
 // Support half operators on host side
 
 ROCPRIM_HOST inline

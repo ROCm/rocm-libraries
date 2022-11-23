@@ -45,6 +45,12 @@ namespace detail
         return ::atomicAdd(address, value);
     }
 
+    ROCPRIM_DEVICE ROCPRIM_INLINE unsigned long atomic_add(unsigned long* address,
+                                                           unsigned long  value)
+    {
+        return ::atomicAdd(address, value);
+    }
+
     ROCPRIM_DEVICE ROCPRIM_INLINE
     unsigned long long atomic_add(unsigned long long * address, unsigned long long value)
     {

@@ -52,12 +52,13 @@ template<bool WithInitialValue,
          class OutputIterator,
          class InitValueType,
          class BinaryFunction>
-ROCPRIM_KERNEL __launch_bounds__(device_params<Config>().block_size) void block_reduce_kernel(
-    InputIterator  input,
-    const size_t   size,
-    OutputIterator output,
-    InitValueType  initial_value,
-    BinaryFunction reduce_op)
+ROCPRIM_KERNEL
+    __launch_bounds__(device_params<Config>().reduce_config.block_size) void block_reduce_kernel(
+        InputIterator  input,
+        const size_t   size,
+        OutputIterator output,
+        InitValueType  initial_value,
+        BinaryFunction reduce_op)
 {
     block_reduce_kernel_impl<WithInitialValue, Config, ResultType>(
         input, size, output, initial_value, reduce_op
@@ -125,8 +126,8 @@ hipError_t reduce_impl(void * temporary_storage,
     }
     const reduce_config_params params = dispatch_target_arch<config>(target_arch);
 
-    const unsigned int block_size       = params.block_size;
-    const unsigned int items_per_thread = params.items_per_thread;
+    const unsigned int block_size       = params.reduce_config.block_size;
+    const unsigned int items_per_thread = params.reduce_config.items_per_thread;
     const auto         items_per_block  = block_size * items_per_thread;
 
     const size_t number_of_blocks  = (size + items_per_block - 1) / items_per_block;
@@ -171,7 +172,7 @@ hipError_t reduce_impl(void * temporary_storage,
     // Start point for time measurements
     std::chrono::high_resolution_clock::time_point start;
 
-    const auto size_limit             = params.size_limit;
+    const auto size_limit             = params.reduce_config.size_limit;
     const auto number_of_blocks_limit = ::rocprim::max<size_t>(size_limit / items_per_block, 1);
 
     if(debug_synchronous)

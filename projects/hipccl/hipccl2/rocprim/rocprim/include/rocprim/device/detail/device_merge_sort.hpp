@@ -265,11 +265,12 @@ struct block_store_impl<true, BlockSize, ItemsPerThread, Key, Value> {
     }
 };
 
-template <unsigned int BlockSize, unsigned int ItemsPerThread, class Key>
+template<unsigned int BlockSize, unsigned int ItemsPerThread, block_sort_algorithm Algo, class Key>
 struct block_sort_impl
 {
     using stable_key_type = rocprim::tuple<Key, unsigned int>;
-    using block_sort_type = ::rocprim::block_sort<stable_key_type, BlockSize, ItemsPerThread>;
+    using block_sort_type = ::rocprim::
+        block_sort<stable_key_type, BlockSize, ItemsPerThread, rocprim::empty_type, Algo>;
 
     using storage_type = typename block_sort_type::storage_type;
 
@@ -307,8 +308,9 @@ struct block_sort_impl
     }
 };
 
-template<unsigned int BlockSize,
-         unsigned int ItemsPerThread,
+template<unsigned int         BlockSize,
+         unsigned int         ItemsPerThread,
+         block_sort_algorithm Algo,
          class KeysInputIterator,
          class KeysOutputIterator,
          class ValuesInputIterator,
@@ -342,7 +344,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto block_sort_kernel_impl(KeysInputIterato
     key_type keys[ItemsPerThread];
 
     using block_load_keys_impl = block_load_keys_impl<BlockSize, ItemsPerThread, key_type>;
-    using block_sort_impl      = block_sort_impl<BlockSize, ItemsPerThread, key_type>;
+    using block_sort_impl      = block_sort_impl<BlockSize, ItemsPerThread, Algo, key_type>;
     using block_load_values_impl
         = block_load_values_impl<with_values, BlockSize, ItemsPerThread, value_type>;
     using block_store_impl
@@ -425,8 +427,9 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto block_sort_kernel_impl(KeysInputIterato
 // ValueTypes with misaligned datastructures in them (e.g. custom_char_double)
 // when storing/loading those ValueTypes to/from registers.
 // Thus this is a temporary workaround.
-template<unsigned int BlockSize,
-         unsigned int ItemsPerThread,
+template<unsigned int         BlockSize,
+         unsigned int         ItemsPerThread,
+         block_sort_algorithm Algo,
          class KeysInputIterator,
          class KeysOutputIterator,
          class ValuesInputIterator,
@@ -460,7 +463,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto block_sort_kernel_impl(KeysInputIterato
     key_type keys[ItemsPerThread];
 
     using block_load_keys_impl = block_load_keys_impl<BlockSize, ItemsPerThread, key_type>;
-    using block_sort_impl = block_sort_impl<BlockSize, ItemsPerThread, key_type>;
+    using block_sort_impl      = block_sort_impl<BlockSize, ItemsPerThread, Algo, key_type>;
     using block_store_impl
         = block_store_impl<false, BlockSize, ItemsPerThread, key_type, rocprim::empty_type>;
 
@@ -591,13 +594,13 @@ template<unsigned int BlockSize,
          class ValuesOutputIterator,
          class OffsetT,
          class BinaryFunction>
-ROCPRIM_DEVICE ROCPRIM_INLINE void block_merge_kernel_impl(KeysInputIterator    keys_input,
-                                                           KeysOutputIterator   keys_output,
-                                                           ValuesInputIterator  values_input,
-                                                           ValuesOutputIterator values_output,
-                                                           const OffsetT        input_size,
-                                                           const OffsetT        sorted_block_size,
-                                                           BinaryFunction       compare_function)
+ROCPRIM_DEVICE ROCPRIM_INLINE void block_merge_oddeven_kernel(KeysInputIterator    keys_input,
+                                                              KeysOutputIterator   keys_output,
+                                                              ValuesInputIterator  values_input,
+                                                              ValuesOutputIterator values_output,
+                                                              const OffsetT        input_size,
+                                                              const OffsetT  sorted_block_size,
+                                                              BinaryFunction compare_function)
 {
     using key_type             = typename std::iterator_traits<KeysInputIterator>::value_type;
     using value_type           = typename std::iterator_traits<ValuesInputIterator>::value_type;
@@ -612,8 +615,8 @@ ROCPRIM_DEVICE ROCPRIM_INLINE void block_merge_kernel_impl(KeysInputIterator    
     const OffsetT block_offset        = flat_block_id * items_per_block;
     const OffsetT valid_in_last_block = input_size - block_offset;
 
-    OffsetT block_thread_offset = block_offset + flat_id * ItemsPerThread;
-    if(block_thread_offset >= input_size)
+    const OffsetT thread_offset = flat_id * ItemsPerThread;
+    if(thread_offset >= valid_in_last_block)
     {
         return;
     }
@@ -662,7 +665,7 @@ ROCPRIM_DEVICE ROCPRIM_INLINE void block_merge_kernel_impl(KeysInputIterator    
             ROCPRIM_UNROLL
             for(unsigned int i = 0; i < ItemsPerThread; i++)
             {
-                const unsigned int id = block_thread_offset + i;
+                const unsigned int id = block_offset + thread_offset + i;
                 if(id < input_size)
                 {
                     keys_output[id] = keys[i];
@@ -678,7 +681,7 @@ ROCPRIM_DEVICE ROCPRIM_INLINE void block_merge_kernel_impl(KeysInputIterator    
             ROCPRIM_UNROLL
             for(unsigned int i = 0; i < ItemsPerThread; i++)
             {
-                const unsigned int id = block_thread_offset + i;
+                const unsigned int id = block_offset + thread_offset + i;
                 keys_output[id]       = keys[i];
                 if ROCPRIM_IF_CONSTEXPR(with_values)
                 {
@@ -689,41 +692,27 @@ ROCPRIM_DEVICE ROCPRIM_INLINE void block_merge_kernel_impl(KeysInputIterator    
         return;
     }
 
-    const auto merge_function = [&](OffsetT i)
+    OffsetT left_id = next_block_start;
+
+    const OffsetT dest_offset
+        = min(block_start, next_block_start) + block_offset + thread_offset - block_start
+          - next_block_start; // Destination offset (base+source+partial target calculation)
+
+    const auto merge_function = [&](const unsigned int i)
     {
-        OffsetT left_id  = next_block_start;
         OffsetT right_id = next_block_end;
 
         while(left_id < right_id)
         {
-            OffsetT  mid_id  = (left_id + right_id) / 2;
-            key_type mid_key = keys_input[mid_id];
-            bool     smaller = compare_function(mid_key, keys[i]);
-            left_id          = smaller ? mid_id + 1 : left_id;
-            right_id         = smaller ? right_id : mid_id;
+            OffsetT    mid_id      = (left_id + right_id) / 2;
+            key_type   mid_key     = keys_input[mid_id];
+            const bool mid_smaller = block_is_odd ? !compare_function(keys[i], mid_key)
+                                                  : compare_function(mid_key, keys[i]);
+            left_id                = mid_smaller ? mid_id + 1 : left_id;
+            right_id               = mid_smaller ? right_id : mid_id;
         }
 
-        right_id = next_block_end;
-        if(block_is_odd && left_id != right_id)
-        {
-            key_type upper_key = keys_input[left_id];
-            while(!compare_function(upper_key, keys[i]) && !compare_function(keys[i], upper_key)
-                  && left_id < right_id)
-            {
-                OffsetT  mid_id  = (left_id + right_id) / 2;
-                key_type mid_key = keys_input[mid_id];
-                bool     equal
-                    = !compare_function(mid_key, keys[i]) && !compare_function(keys[i], mid_key);
-                left_id   = equal ? mid_id + 1 : left_id + 1;
-                right_id  = equal ? right_id : mid_id;
-                upper_key = keys_input[left_id];
-            }
-        }
-
-        OffsetT offset = min(block_start, next_block_start); // get start of resulting merged block
-        offset += left_id - next_block_start; // add offset of found position in other block
-        offset += block_thread_offset + i - block_start; // add offset of position in current block
-
+        OffsetT offset      = dest_offset + i + left_id; // Destination offset (target calculation)
         keys_output[offset] = keys[i];
         if ROCPRIM_IF_CONSTEXPR(with_values)
         {
@@ -736,7 +725,7 @@ ROCPRIM_DEVICE ROCPRIM_INLINE void block_merge_kernel_impl(KeysInputIterator    
         ROCPRIM_UNROLL
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            if(block_thread_offset + i < input_size)
+            if(thread_offset + i < valid_in_last_block)
             {
                 merge_function(i);
             }

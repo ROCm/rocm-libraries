@@ -40,17 +40,43 @@ BEGIN_ROCPRIM_NAMESPACE
 /// \brief Special type used to show that the given device-level operation
 /// will be executed with optimal configuration dependent on types of the function's parameters
 /// and the target device architecture specified by ROCPRIM_TARGET_ARCH.
-struct default_config { };
+/// Algorithms supporting dynamic dispatch will ignore ROCPRIM_TARGET_ARCH and
+/// launch using optimal configuration based on the target architecture derived from the stream.
+struct default_config
+{
+    using block_sort_config  = default_config;
+    using block_merge_config = default_config;
+    using merge_sort_config  = default_config;
+    using onesweep           = default_config;
+};
+
+namespace detail
+{
+
+// Non-templated kernel_config for dynamic dispatch
+struct kernel_config_params
+{
+    /// \brief Number of threads in a block.
+    unsigned int block_size = 64;
+    /// \brief Number of items processed by each thread.
+    unsigned int items_per_thread = 1;
+    /// \brief Number of items processed by a single kernel launch.
+    unsigned int size_limit = ROCPRIM_GRID_SIZE_LIMIT;
+};
+
+} // namespace detail
 
 /// \brief Configuration of particular kernels launched by device-level operation
 ///
 /// \tparam BlockSize - number of threads in a block.
 /// \tparam ItemsPerThread - number of items processed by each thread.
-template <unsigned int BlockSize,
-          unsigned int ItemsPerThread,
-          unsigned int SizeLimit = ROCPRIM_GRID_SIZE_LIMIT>
-struct kernel_config
+template<unsigned int BlockSize,
+         unsigned int ItemsPerThread,
+         unsigned int SizeLimit = ROCPRIM_GRID_SIZE_LIMIT>
+struct kernel_config : detail::kernel_config_params
 {
+    constexpr kernel_config() : detail::kernel_config_params{BlockSize, ItemsPerThread, SizeLimit}
+    {}
     /// \brief Number of threads in a block.
     static constexpr unsigned int block_size = BlockSize;
     /// \brief Number of items processed by each thread.
