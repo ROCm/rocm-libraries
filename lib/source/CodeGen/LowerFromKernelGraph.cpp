@@ -1550,10 +1550,74 @@ namespace rocRoller
             }
 
             Generator<Instruction> operator()(int                                 tag,
-                                              ControlHypergraph::ForLoopOp const& edge,
+                                              ControlHypergraph::ForLoopOp const& op,
                                               CoordGraph::Transformer             coords)
             {
-                Throw<FatalError>("Not implemented yet.");
+                // TODO: Logging level for these comments.
+                co_yield Instruction::Comment("For Loop Begin");
+
+                auto topLabel = m_context->labelAllocator()->label("ForLoopTop");
+                auto botLabel = m_context->labelAllocator()->label("ForLoopBottom");
+
+                co_yield Instruction::Comment("Initialize For Loop");
+                auto init = m_graph.control.getOutputNodeIndices<ControlHypergraph::Initialize>(tag)
+                                .to<std::set>();
+                co_yield generate(init, coords);
+
+                auto connections = m_graph.mapper.getConnections(tag);
+                AssertFatal(connections.size() == 1);
+                auto loop_incr_tag = connections[0].coordinate;
+                auto iterReg       = m_context->registerTagManager()->getRegister(loop_incr_tag);
+                {
+                    auto loopDims
+                        = m_graph.coordinates.getOutputNodeIndices<CoordGraph::DataFlowEdge>(
+                            loop_incr_tag);
+                    for(auto const& dim : loopDims)
+                    {
+                        coords.setCoordinate(dim, iterReg->expression());
+                    }
+                }
+
+                co_yield_(Instruction::Lock(Scheduling::Dependency::Branch, "Lock For Loop"));
+                auto [conditionRegisterType, conditionVariableType]
+                    = Expression::resultType(op.condition);
+                auto conditionResult = conditionRegisterType == Register::Type::Special
+                                               && conditionVariableType == DataType::Bool
+                                           ? m_context->getSCC()
+                                           : m_context->getVCC();
+                co_yield Expression::generate(
+                    conditionResult, coords.getTransducer()(op.condition), m_context);
+                co_yield m_context->brancher()->branchIfZero(
+                    botLabel,
+                    conditionResult,
+                    concatenate("Condition: Top (jump to " + botLabel->toString() + " if false)"));
+
+                co_yield Instruction::Label(topLabel);
+
+                auto body = m_graph.control.getOutputNodeIndices<ControlHypergraph::Body>(tag)
+                                .to<std::set>();
+                co_yield generate(body, coords);
+
+                co_yield Instruction::Comment("For Loop Increment");
+                auto incr
+                    = m_graph.control.getOutputNodeIndices<ControlHypergraph::ForLoopIncrement>(tag)
+                          .to<std::set>();
+                co_yield generate(incr, coords);
+                co_yield Instruction::Comment("Condition: Bottom (jump to " + topLabel->toString()
+                                              + " if true)");
+
+                co_yield Expression::generate(
+                    conditionResult, coords.getTransducer()(op.condition), m_context);
+                co_yield m_context->brancher()->branchIfNonZero(
+                    topLabel,
+                    conditionResult,
+                    concatenate("Condition: Bottom (jump to " + topLabel->toString()
+                                + " if true)"));
+
+                co_yield Instruction::Label(botLabel);
+
+                co_yield Instruction::Comment("For Loop End");
+                co_yield_(Instruction::Unlock("Unlock For Loop"));
             }
 
             Generator<Instruction> operator()(int                                tag,
@@ -1567,12 +1631,15 @@ namespace rocRoller
                                               ControlHypergraph::Assign const& assign,
                                               CoordGraph::Transformer          coords)
             {
+                rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::Assign({})", tag);
                 auto varType = resultVariableType(assign.expression);
 
                 auto connections = m_graph.mapper.getConnections(tag);
                 AssertFatal(connections.size() == 1,
                             "Invalid Assign operation; coordinate missing.");
                 auto dim_tag = connections[0].coordinate;
+                rocRoller::Log::getLogger()->debug(
+                    "KernelGraph::CodeGenerator::Assign({}): {}", tag, dim_tag);
 
                 auto dest = m_context->registerTagManager()->getRegister(
                     dim_tag, assign.regType, varType, assign.valueCount);
@@ -1937,17 +2004,50 @@ namespace rocRoller
                                               ControlHypergraph::Multiply const& mult,
                                               CoordGraph::Transformer            coords)
             {
-                rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::Multiply()");
+                rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::Multiply({})", tag);
                 co_yield_(Instruction::Comment("GEN: Multiply"));
 
-                auto [waveA_tag, waveA] = m_graph.getDimension<CoordGraph::WaveTile>(mult.a);
-                auto [waveB_tag, waveB] = m_graph.getDimension<CoordGraph::WaveTile>(mult.b);
-                auto [macA_tag, macA]   = m_graph.getDimension<CoordGraph::MacroTile>(mult.a);
-                auto [macB_tag, macB]   = m_graph.getDimension<CoordGraph::MacroTile>(mult.b);
-                auto [n_waveA_y_tag, n_waveA_y]
-                    = m_graph.getDimension<CoordGraph::WaveTileNumber>(mult.a, 1);
-                auto [n_waveB_x_tag, n_waveB_x]
-                    = m_graph.getDimension<CoordGraph::WaveTileNumber>(mult.b, 0);
+                auto [userA_tag, _uA] = m_graph.getDimension<CoordGraph::User>(tag, 0);
+                auto [userB_tag, _uB] = m_graph.getDimension<CoordGraph::User>(tag, 1);
+
+                auto [waveA_tag, waveA] = m_graph.getDimension<CoordGraph::WaveTile>(tag, 0);
+                auto [waveB_tag, waveB] = m_graph.getDimension<CoordGraph::WaveTile>(tag, 1);
+
+                auto [macA_tag, macA] = m_graph.getDimension<CoordGraph::MacroTile>(tag, 0);
+                auto [macB_tag, macB] = m_graph.getDimension<CoordGraph::MacroTile>(tag, 1);
+
+                auto n_waveA_y_tags
+                    = m_graph.coordinates
+                          .findNodes(userA_tag,
+                                     [&](int index) -> bool {
+                                         auto node
+                                             = m_graph.coordinates.get<CoordGraph::WaveTileNumber>(
+                                                 index);
+                                         if(node)
+                                             return node->dim == 1;
+                                         return false;
+                                     })
+                          .to<std::vector>();
+                AssertFatal(n_waveA_y_tags.size() == 1);
+
+                auto n_waveB_x_tags
+                    = m_graph.coordinates
+                          .findNodes(userB_tag,
+                                     [&](int index) -> bool {
+                                         auto node
+                                             = m_graph.coordinates.get<CoordGraph::WaveTileNumber>(
+                                                 index);
+                                         if(node)
+                                             return node->dim == 0;
+                                         return false;
+                                     })
+                          .to<std::vector>();
+                AssertFatal(n_waveB_x_tags.size() == 1);
+
+                auto n_waveA_y
+                    = *m_graph.coordinates.get<CoordGraph::WaveTileNumber>(n_waveA_y_tags.front());
+                auto n_waveB_x
+                    = *m_graph.coordinates.get<CoordGraph::WaveTileNumber>(n_waveB_x_tags.front());
 
                 auto loadAB = m_graph.control.getOutputNodeIndices<ControlHypergraph::Body>(tag)
                                   .to<std::set>();
@@ -1958,8 +2058,10 @@ namespace rocRoller
                 uint wfs          = m_context->kernel()->wavefront_size();
                 uint num_agpr     = num_elements / wfs;
 
+                auto [D_tag, _D] = m_graph.getDimension<CoordGraph::MacroTile>(tag, 2);
+
                 auto D = m_context->registerTagManager()->getRegister(
-                    tag, Register::Type::Accumulator, DataType::Float, num_agpr);
+                    D_tag, Register::Type::Accumulator, DataType::Float, num_agpr);
 
                 auto completed = m_completedControlNodes;
 
@@ -1971,9 +2073,9 @@ namespace rocRoller
                     m_completedControlNodes = completed; // TODO: remove this?
 
                     // A WaveTile number; tall-skinny column block
-                    coords.setCoordinate(n_waveA_y_tag, literal(k));
+                    coords.setCoordinate(n_waveA_y_tags.front(), literal(k));
                     // B WaveTile number; short-fat row block
-                    coords.setCoordinate(n_waveB_x_tag, literal(k));
+                    coords.setCoordinate(n_waveB_x_tags.front(), literal(k));
 
                     co_yield generate(loadAB, coords);
 
@@ -2095,6 +2197,7 @@ namespace rocRoller
                 co_yield_(Instruction::Comment("GEN: storeMacroTileWAVE"));
 
                 auto [user_tag, user]           = m_graph.getDimension<CoordGraph::User>(tag);
+                auto [mac_tile_tag, mac_tile]   = m_graph.getDimension<CoordGraph::MacroTile>(tag);
                 auto [wave_tile_tag, wave_tile] = m_graph.getDimension<CoordGraph::WaveTile>(tag);
                 auto [vgpr_tag, vgpr]           = m_graph.getDimension<CoordGraph::VGPR>(tag);
 
@@ -2102,7 +2205,7 @@ namespace rocRoller
                 uint wfs          = m_context->kernel()->wavefront_size();
                 uint num_vgpr     = num_elements / wfs;
 
-                auto agpr = m_context->registerTagManager()->getRegister(vgpr_tag);
+                auto agpr = m_context->registerTagManager()->getRegister(mac_tile_tag);
 
                 AssertFatal(agpr->registerCount() == num_vgpr);
 

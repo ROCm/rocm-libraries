@@ -53,7 +53,7 @@ namespace rocRoller
             auto dimK         = graph.coordinates.addElement(CoordGraph::ForLoop());
             auto sizeDataType = Expression::resultVariableType(size);
             auto exprK        = std::make_shared<Expression::Expression>(
-                DataFlowTag{dimK, Register::Type::Scalar, sizeDataType});
+                DataFlowTag{rangeK, Register::Type::Scalar, sizeDataType});
 
             auto forK       = graph.control.addElement(ControlHypergraph::ForLoopOp{exprK < size});
             auto initK      = graph.control.addElement(ControlHypergraph::Assign{
@@ -64,6 +64,10 @@ namespace rocRoller
             graph.coordinates.addElement(CoordGraph::DataFlow(), {rangeK}, {dimK});
             graph.control.addElement(ControlHypergraph::Initialize(), {forK}, {initK});
             graph.control.addElement(ControlHypergraph::ForLoopIncrement(), {forK}, {incrementK});
+
+            graph.mapper.connect<CoordGraph::Dimension>(forK, rangeK);
+            graph.mapper.connect<CoordGraph::Dimension>(initK, rangeK);
+            graph.mapper.connect<CoordGraph::ForLoop>(incrementK, rangeK);
 
             return {dimK, forK};
         }

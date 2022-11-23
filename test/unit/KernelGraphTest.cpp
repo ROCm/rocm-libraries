@@ -2187,25 +2187,25 @@ namespace KernelGraphTest
 		"cntrl23"[label="Sequence(23)",shape=box];
 		"cntrl24"[label="StoreTiled(24)"];
 		"cntrl25"[label="Sequence(25)",shape=box];
-		"cntrl26"[label="ForLoopOp: LessThan(DataFlowTag(188), Divide(CommandArgument(Load_Tiled_0_size_1), 16j))(26)"];
+		"cntrl26"[label="ForLoopOp: LessThan(DataFlowTag(187), Divide(CommandArgument(Load_Tiled_0_size_1), 16j))(26)"];
 		"cntrl27"[label="Assign SGPR 0l(27)"];
-		"cntrl28"[label="Assign SGPR Add(DataFlowTag(188), 1j)(28)"];
+		"cntrl28"[label="Assign SGPR Add(DataFlowTag(187), 1j)(28)"];
 		"cntrl29"[label="Initialize(29)",shape=box];
 		"cntrl30"[label="ForLoopIncrement(30)",shape=box];
-		"cntrl31"[label="Multiply(11, 16)(31)"];
+		"cntrl31"[label="Multiply(31)"];
 		"cntrl32"[label="Assign ACCVGPR 0.00000f(32)"];
 		"cntrl33"[label="Initialize(33)",shape=box];
 		"cntrl34"[label="Body(34)",shape=box];
 		"cntrl35"[label="Body(35)",shape=box];
 		"cntrl36"[label="Body(36)",shape=box];
-		"cntrl37"[label="ForLoopOp: LessThan(DataFlowTag(193), 2j)(37)"];
+		"cntrl37"[label="ForLoopOp: LessThan(DataFlowTag(192), 2j)(37)"];
 		"cntrl38"[label="Assign SGPR 0j(38)"];
-		"cntrl39"[label="Assign SGPR Add(DataFlowTag(193), 1j)(39)"];
+		"cntrl39"[label="Assign SGPR Add(DataFlowTag(192), 1j)(39)"];
 		"cntrl40"[label="Initialize(40)",shape=box];
 		"cntrl41"[label="ForLoopIncrement(41)",shape=box];
-		"cntrl42"[label="ForLoopOp: LessThan(DataFlowTag(196), 2j)(42)"];
+		"cntrl42"[label="ForLoopOp: LessThan(DataFlowTag(195), 2j)(42)"];
 		"cntrl43"[label="Assign SGPR 0j(43)"];
-		"cntrl44"[label="Assign SGPR Add(DataFlowTag(196), 1j)(44)"];
+		"cntrl44"[label="Assign SGPR Add(DataFlowTag(195), 1j)(44)"];
 		"cntrl45"[label="Initialize(45)",shape=box];
 		"cntrl46"[label="ForLoopIncrement(46)",shape=box];
 		"cntrl47"[label="Body(47)",shape=box];
@@ -2310,8 +2310,27 @@ namespace KernelGraphTest
 		"coord31" -> "cntrl21" [style=dotted,weight=0,arrowsize=0]
 		"coord31" -> "cntrl24" [style=dotted,weight=0,arrowsize=0]
 		"coord35" -> "cntrl24" [style=dotted,weight=0,arrowsize=0]
+		"coord155" -> "cntrl24" [style=dotted,weight=0,arrowsize=0]
+		"coord175" -> "cntrl24" [style=dotted,weight=0,arrowsize=0]
 		"coord180" -> "cntrl24" [style=dotted,weight=0,arrowsize=0]
 		"coord181" -> "cntrl24" [style=dotted,weight=0,arrowsize=0]
+		"coord187" -> "cntrl26" [style=dotted,weight=0,arrowsize=0]
+		"coord187" -> "cntrl27" [style=dotted,weight=0,arrowsize=0]
+		"coord187" -> "cntrl28" [style=dotted,weight=0,arrowsize=0]
+		"coord1" -> "cntrl31" [style=dotted,weight=0,arrowsize=0]
+		"coord2" -> "cntrl31" [style=dotted,weight=0,arrowsize=0]
+		"coord11" -> "cntrl31" [style=dotted,weight=0,arrowsize=0]
+		"coord16" -> "cntrl31" [style=dotted,weight=0,arrowsize=0]
+		"coord18" -> "cntrl31" [style=dotted,weight=0,arrowsize=0]
+		"coord50" -> "cntrl31" [style=dotted,weight=0,arrowsize=0]
+		"coord85" -> "cntrl31" [style=dotted,weight=0,arrowsize=0]
+		"coord18" -> "cntrl32" [style=dotted,weight=0,arrowsize=0]
+		"coord192" -> "cntrl37" [style=dotted,weight=0,arrowsize=0]
+		"coord192" -> "cntrl38" [style=dotted,weight=0,arrowsize=0]
+		"coord192" -> "cntrl39" [style=dotted,weight=0,arrowsize=0]
+		"coord195" -> "cntrl42" [style=dotted,weight=0,arrowsize=0]
+		"coord195" -> "cntrl43" [style=dotted,weight=0,arrowsize=0]
+		"coord195" -> "cntrl44" [style=dotted,weight=0,arrowsize=0]
 	     }).";
         EXPECT_EQ(NormalizedSource(expected1), NormalizedSource(kgraph1.toDOT(true)));
     }

@@ -176,6 +176,173 @@ namespace MatrixMultiplyTest
     }
 
     template <typename T>
+    void matrixMultiplyAB2(std::shared_ptr<Context> m_context,
+                           int                      wave_m,
+                           int                      wave_n,
+                           int                      wave_k,
+                           int                      wave_b,
+                           double                   acceptableError)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
+        // matrix size: A is MxK; B is KxN; D is MxN
+        int M = 1024;
+        int N = 1024;
+        int K = 512;
+
+        // output macro tile size
+        int mac_m = 64;
+        int mac_n = 64;
+        int mac_k = 64;
+
+        AssertFatal(M % mac_m == 0, "MacroTile size mismatch (M)");
+        AssertFatal(N % mac_n == 0, "MacroTile size mismatch (N)");
+
+        uint workgroup_size_x = 256;
+        uint workgroup_size_y = 1;
+
+        // one macro tile per workgroup
+        uint num_workgroup_x = M / mac_m;
+        uint num_workgroup_y = N / mac_n;
+
+        auto NX = std::make_shared<Expression::Expression>(num_workgroup_x * workgroup_size_x);
+        auto NY = std::make_shared<Expression::Expression>(num_workgroup_y * workgroup_size_y);
+        auto NZ = std::make_shared<Expression::Expression>(1u);
+
+        RandomGenerator random(61u);
+
+        auto A = random.vector<T>(M * K, -1.f, 1.f);
+        auto B = random.vector<T>(K * N, -1.f, 1.f);
+
+        auto d_A = make_shared_device(A);
+        auto d_B = make_shared_device(B);
+        auto d_D = make_shared_device<T>(M * N);
+
+        auto command  = std::make_shared<Command>();
+        auto dataType = TypeInfo<T>::Var.dataType;
+
+        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
+            rocRoller::Operations::T_Load_Tiled(dataType, 2, 0))); // A
+        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
+            rocRoller::Operations::T_Load_Tiled(dataType, 2, 1))); // B
+
+        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
+            rocRoller::Operations::T_Mul(2, 0, 1))); // D = A * B
+
+        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
+            rocRoller::Operations::T_Store_Tiled(dataType, 2, 2))); // D
+
+        KernelArguments runtimeArgs;
+
+        // tiled?
+        runtimeArgs.append("A", d_A.get());
+        runtimeArgs.append("d_a_limit", (size_t)M * K);
+        runtimeArgs.append("d_a_size_0", (size_t)M);
+        runtimeArgs.append("d_a_size_1", (size_t)K);
+        runtimeArgs.append("d_a_stride_0", (size_t)1);
+        runtimeArgs.append("d_a_stride_1", (size_t)M);
+
+        runtimeArgs.append("B", d_B.get());
+        runtimeArgs.append("d_b_limit", (size_t)K * N);
+        runtimeArgs.append("d_b_size_0", (size_t)K);
+        runtimeArgs.append("d_b_size_1", (size_t)N);
+        runtimeArgs.append("d_b_stride_0", (size_t)1);
+        runtimeArgs.append("d_b_stride_1", (size_t)K);
+
+        runtimeArgs.append("D", d_D.get());
+        runtimeArgs.append("d_d_limit", (size_t)M * N);
+        runtimeArgs.append("d_d_stride_0", (size_t)1);
+        runtimeArgs.append("d_d_stride_1", (size_t)M);
+
+        // TODO: remove this when for loop indexing is fixed
+        command->allocateArgument(DataType::UInt32, DataDirection::ReadOnly, "UINT_MAT_K");
+        runtimeArgs.append("UINT_MAT_K", static_cast<uint>(K));
+
+        auto params = std::make_shared<CommandParameters>();
+        params->setManualKernelDimension(2);
+
+        // TODO: the translate step should figure out that there is a
+        // T_Mul and do the right thing for the T_Load_Tiled commands
+        auto mac_tile_A = KernelGraph::CoordGraph::MacroTile(
+            {mac_m, mac_k}, LayoutType::MATRIX_A, {wave_m, wave_n, wave_k, wave_b});
+        auto mac_tile_B = KernelGraph::CoordGraph::MacroTile(
+            {mac_k, mac_n}, LayoutType::MATRIX_B, {wave_m, wave_n, wave_k, wave_b});
+        auto mac_tile_C = KernelGraph::CoordGraph::MacroTile(
+            {mac_m, mac_n}, LayoutType::MATRIX_ACCUMULATOR, {wave_m, wave_n, wave_k, wave_b});
+
+        params->setDimensionInfo(4, mac_tile_A);
+        params->setDimensionInfo(11, mac_tile_B);
+        params->setDimensionInfo(15, mac_tile_C);
+
+        auto paramsWF = std::make_shared<CommandParameters>();
+        auto four     = Expression::literal(4u);
+        auto two      = Expression::literal(2u);
+        auto one      = Expression::literal(1u);
+        auto WF       = KernelGraph::CoordGraph::Wavefront(-1, four, one);
+        auto WFX      = KernelGraph::CoordGraph::Wavefront(-1, two, nullptr);
+        auto WFY      = KernelGraph::CoordGraph::Wavefront(-1, two, nullptr);
+
+        paramsWF->setDimensionInfo(41, WF); // A
+        paramsWF->setDimensionInfo(39, WFX);
+        paramsWF->setDimensionInfo(40, WFY);
+        paramsWF->setDimensionInfo(76, WF); // B
+        paramsWF->setDimensionInfo(74, WFX);
+        paramsWF->setDimensionInfo(75, WFY);
+        paramsWF->setDimensionInfo(119, WF); // C
+        paramsWF->setDimensionInfo(117, WFX);
+        paramsWF->setDimensionInfo(118, WFY);
+
+        auto context = m_context;
+        context->kernel()->setKernelDimensions(2);
+        context->kernel()->setWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
+        context->kernel()->setWorkitemCount({NX, NY, NZ});
+
+        context->kernel()->addCommandArguments(command->getArguments());
+        auto kgraph = KernelGraph::translate2(command);
+        kgraph      = KernelGraph::updateParameters(kgraph, params);
+        kgraph      = KernelGraph::lowerTile(kgraph, params, context);
+        kgraph      = KernelGraph::cleanArguments(kgraph, context->kernel());
+        kgraph      = KernelGraph::updateParameters(kgraph, paramsWF);
+
+        context->schedule(context->kernel()->preamble());
+        context->schedule(context->kernel()->prolog());
+        context->schedule(KernelGraph::generate(kgraph, context->kernel()));
+        context->schedule(context->kernel()->postamble());
+        context->schedule(context->kernel()->amdgpu_metadata());
+
+        auto executableKernel = context->instructions()->getExecutableKernel();
+
+        KernelArguments kargs;
+        for(auto& arg : context->kernel()->arguments())
+        {
+            auto value = evaluate(arg.expression, runtimeArgs.runtimeArguments());
+            kargs.append(arg.name, value);
+        }
+
+        KernelInvocation kinv;
+        kinv.workgroupSize    = context->kernel()->workgroupSize();
+        kinv.workitemCount[0] = num_workgroup_x * workgroup_size_x;
+        kinv.workitemCount[1] = num_workgroup_y * workgroup_size_y;
+
+        executableKernel->executeKernel(kargs, kinv);
+
+        std::vector<T> D(M * N, 0.f);
+        ASSERT_THAT(hipMemcpy(D.data(), d_D.get(), M * N * sizeof(T), hipMemcpyDefault),
+                    HasHipSuccess(0));
+
+        std::vector<T> c_D(M * N, 0.f);
+        std::vector<T> c_C(M * N, 0.f);
+        CPUMM(c_D, c_C, A, B, M, N, K, 1.0, 0.0, false);
+
+        double rnorm = relativeNorm(D, c_D);
+        ASSERT_LT(rnorm, acceptableError);
+    }
+
+    TEST_F(MatrixMultiplyTestGPU, GPU_MatrixMultiplyAB2)
+    {
+        matrixMultiplyAB2<float>(m_context, 32, 32, 2, 1, 2.e-6);
+    }
+
+    template <typename T>
     void matrixMultiplyAB(std::shared_ptr<Context> m_context,
                           int                      wave_m,
                           int                      wave_n,

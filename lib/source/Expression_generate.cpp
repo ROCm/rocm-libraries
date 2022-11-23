@@ -85,25 +85,49 @@ namespace rocRoller
                 Register::ValuePtr lhs, r1hs, r2hs;
                 int                M, N, K, B;
 
-                AssertFatal(std::holds_alternative<WaveTilePtr>(*expr.lhs)
-                                && std::holds_alternative<WaveTilePtr>(*expr.r1hs),
+                AssertFatal((std::holds_alternative<WaveTilePtr>(*expr.lhs)
+                             && std::holds_alternative<WaveTilePtr>(*expr.r1hs))
+                                || (std::holds_alternative<WaveTilePtr2>(*expr.lhs)
+                                    && std::holds_alternative<WaveTilePtr2>(*expr.r1hs)),
                             "Expression MatrixMultiply requires WaveTiles");
 
-                auto const atile = *std::get<WaveTilePtr>(*expr.lhs);
-                auto const btile = *std::get<WaveTilePtr>(*expr.r1hs);
-                AssertFatal(!atile.sizes.empty(), "WaveTile in invalid state.");
-                AssertFatal(!btile.sizes.empty(), "WaveTile in invalid state.");
-                AssertRecoverable(atile.sizes[1] == btile.sizes[0],
-                                  "MatrixMultiply WaveTile size mismatch.",
-                                  ShowValue(atile.sizes[1]),
-                                  ShowValue(btile.sizes[0]));
+                if(std::holds_alternative<WaveTilePtr>(*expr.lhs))
+                {
+                    auto const atile = *std::get<WaveTilePtr>(*expr.lhs);
+                    auto const btile = *std::get<WaveTilePtr>(*expr.r1hs);
+                    AssertFatal(!atile.sizes.empty(), "WaveTile in invalid state.");
+                    AssertFatal(!btile.sizes.empty(), "WaveTile in invalid state.");
+                    AssertRecoverable(atile.sizes[1] == btile.sizes[0],
+                                      "MatrixMultiply WaveTile size mismatch.",
+                                      ShowValue(atile.sizes[1]),
+                                      ShowValue(btile.sizes[0]));
 
-                M    = atile.sizes[0];
-                N    = btile.sizes[1];
-                K    = atile.sizes[1];
-                B    = 1;
-                lhs  = atile.vgpr;
-                r1hs = btile.vgpr;
+                    M    = atile.sizes[0];
+                    N    = btile.sizes[1];
+                    K    = atile.sizes[1];
+                    B    = 1;
+                    lhs  = atile.vgpr;
+                    r1hs = btile.vgpr;
+                }
+                else
+                {
+                    // delete this when graph rearch complete
+                    auto const atile = *std::get<WaveTilePtr2>(*expr.lhs);
+                    auto const btile = *std::get<WaveTilePtr2>(*expr.r1hs);
+                    AssertFatal(!atile.sizes.empty(), "WaveTile in invalid state.");
+                    AssertFatal(!btile.sizes.empty(), "WaveTile in invalid state.");
+                    AssertRecoverable(atile.sizes[1] == btile.sizes[0],
+                                      "MatrixMultiply WaveTile size mismatch.",
+                                      ShowValue(atile.sizes[1]),
+                                      ShowValue(btile.sizes[0]));
+
+                    M    = atile.sizes[0];
+                    N    = btile.sizes[1];
+                    K    = atile.sizes[1];
+                    B    = 1;
+                    lhs  = atile.vgpr;
+                    r1hs = btile.vgpr;
+                }
 
                 AssertFatal(lhs->variableType() == r1hs->variableType(),
                             "Input types must match ",

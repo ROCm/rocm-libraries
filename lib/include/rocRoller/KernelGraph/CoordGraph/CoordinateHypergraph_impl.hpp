@@ -145,5 +145,50 @@ namespace rocRoller
             }
             return EdgeType::None;
         }
+
+        template <typename T>
+        requires(std::constructible_from<CoordinateHypergraph::Element, T>)
+            std::optional<T> CoordinateHypergraph::get(int tag)
+        {
+            auto x = getElement(tag);
+            if constexpr(std::constructible_from<Edge, T>)
+            {
+                if(std::holds_alternative<Edge>(x))
+                {
+                    auto y = std::get<Edge>(x);
+                    if constexpr(std::constructible_from<DataFlowEdge, T>)
+                    {
+                        if(std::holds_alternative<DataFlowEdge>(y))
+                        {
+                            if(std::holds_alternative<T>(std::get<DataFlowEdge>(y)))
+                            {
+                                return std::get<T>(std::get<DataFlowEdge>(y));
+                            }
+                        }
+                    }
+                    else if constexpr(std::constructible_from<CoordinateTransformEdge, T>)
+                    {
+                        if(std::holds_alternative<CoordinateTransformEdge>(y))
+                        {
+                            if(std::holds_alternative<T>(std::get<CoordinateTransformEdge>(y)))
+                            {
+                                return std::get<T>(std::get<CoordinateTransformEdge>(y));
+                            }
+                        }
+                    }
+                }
+            }
+            if constexpr(std::constructible_from<Dimension, T>)
+            {
+                if(std::holds_alternative<Dimension>(x))
+                {
+                    if(std::holds_alternative<T>(std::get<Dimension>(x)))
+                    {
+                        return std::get<T>(std::get<Dimension>(x));
+                    }
+                }
+            }
+            return {};
+        }
     }
 }

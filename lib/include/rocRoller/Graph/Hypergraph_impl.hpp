@@ -468,6 +468,17 @@ namespace rocRoller
         }
 
         template <typename Node, typename Edge, bool Hyper>
+        Generator<int> Hypergraph<Node, Edge, Hyper>::findNodes(
+            int start, std::function<bool(int)> nodeSelector, Direction dir) const
+        {
+            for(auto index : depthFirstVisit(start, dir))
+            {
+                if(nodeSelector(index))
+                    co_yield index;
+            }
+        }
+
+        template <typename Node, typename Edge, bool Hyper>
         Generator<int> Hypergraph<Node, Edge, Hyper>::breadthFirstVisit(int start) const
         {
             // Only downstream is implemented for now.

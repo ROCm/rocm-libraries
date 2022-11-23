@@ -105,6 +105,18 @@ namespace rocRoller
                          std::vector<int> const&                dsts,
                          Visitor&                               visitor,
                          Expression::ExpressionTransducer       transducer);
+
+            /**
+             * @brief Get a node/edge from the coordinate graph.
+             *
+             * If the element specified by tag cannot be converted to
+             * T, the return value is empty.
+             *
+             * @param tag Graph tag/index.
+             */
+            template <typename T>
+            requires(std::constructible_from<CoordinateHypergraph::Element, T>)
+                std::optional<T> get(int tag);
         };
     }
 }

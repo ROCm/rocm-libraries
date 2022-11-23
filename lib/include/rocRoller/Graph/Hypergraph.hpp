@@ -180,6 +180,13 @@ namespace rocRoller
             Generator<int> depthFirstVisit(int start, Direction dir = Direction::Downstream) const;
 
             /**
+             * @brief Yields node indices connected in the specified direction to start, that satisfy the node selector.
+             */
+            Generator<int> findNodes(int                      start,
+                                     std::function<bool(int)> nodeSelector,
+                                     Direction                dir = Direction::Downstream) const;
+
+            /**
              * @brief Yields node indices connected in the specified direction to starts, in depth-first order
              */
             template <std::ranges::forward_range Range>

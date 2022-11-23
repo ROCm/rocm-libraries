@@ -208,23 +208,11 @@ namespace rocRoller
         /**
          * Multiply - Multiply two MacroTiles
          */
-        struct Multiply
+        struct Multiply : BaseOperation
         {
-            Multiply() = delete;
-            // TODO
-            // it's a link to a dimension in the coordinate graph
-            // can have a type alias
-            Multiply(int const a, int const b)
-                : a(a)
-                , b(b)
+            std::string toString() const override
             {
-            }
-
-            int a, b;
-
-            std::string toString() const
-            {
-                return concatenate("Multiply(", a, ", ", b, ")");
+                return "Multiply";
             }
         };
 

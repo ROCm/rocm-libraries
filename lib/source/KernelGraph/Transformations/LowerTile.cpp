@@ -959,6 +959,9 @@ namespace rocRoller
                 auto vgpr = graph.coordinates.addElement(
                     CoordGraph::VGPR(literal(num_agpr), unit_stride));
 
+                graph.mapper.connect<CoordGraph::WaveTile>(store_tag, wave_tile_tag);
+                graph.mapper.connect<CoordGraph::VGPR>(store_tag, vgpr);
+
                 graph.coordinates.addElement(CoordGraph::Tile(), {vgpr}, {n_vblk, i_vblk});
                 graph.coordinates.addElement(CoordGraph::Tile(), {lane}, {n_lblk, i_lblk});
                 graph.coordinates.addElement(CoordGraph::Flatten(), {n_vblk, n_lblk}, {block});
@@ -1318,13 +1321,22 @@ namespace rocRoller
             graph.coordinates.addElement(CoordGraph::PassThrough(), {b_tilenum_x}, {K});
 
             // TODO : create helper functions to make this lowering modular and readable.
-            auto waveMult = graph.control.addElement(ControlHypergraph::Multiply(a, b));
+            auto waveMult = graph.control.addElement(ControlHypergraph::Multiply());
 
             // initialise accumulator
-            auto waveA = graph.coordinates.getNode<CoordGraph::WaveTile>(
-                graph.mapper.get<CoordGraph::WaveTile>(loadA[0]));
-            auto waveB = graph.coordinates.getNode<CoordGraph::WaveTile>(
-                graph.mapper.get<CoordGraph::WaveTile>(loadB[0]));
+            auto [userA_tag, userA] = graph.getDimension<CoordGraph::User>(loadA[0]);
+            auto [userB_tag, userB] = graph.getDimension<CoordGraph::User>(loadB[0]);
+            auto [waveA_tag, waveA] = graph.getDimension<CoordGraph::WaveTile>(loadA[0]);
+            auto [waveB_tag, waveB] = graph.getDimension<CoordGraph::WaveTile>(loadB[0]);
+
+            // connections are: 0: lhs (A); 1: rhs (B); 2: dst (D)
+            graph.mapper.connect<CoordGraph::User>(waveMult, userA_tag, 0);
+            graph.mapper.connect<CoordGraph::User>(waveMult, userB_tag, 1);
+            graph.mapper.connect<CoordGraph::MacroTile>(waveMult, a, 0);
+            graph.mapper.connect<CoordGraph::MacroTile>(waveMult, b, 1);
+            graph.mapper.connect<CoordGraph::WaveTile>(waveMult, waveA_tag, 0);
+            graph.mapper.connect<CoordGraph::WaveTile>(waveMult, waveB_tag, 1);
+            graph.mapper.connect<CoordGraph::MacroTile>(waveMult, d, 2);
 
             uint num_elements = waveA.sizes[0] * waveB.sizes[1];
             uint wfs          = context->kernel()->wavefront_size();
@@ -1337,6 +1349,8 @@ namespace rocRoller
             graph.control.addElement(ControlHypergraph::Body(), {forK}, {waveMult});
             graph.control.addElement(ControlHypergraph::Body(), {waveMult}, {loadA[0]});
             graph.control.addElement(ControlHypergraph::Body(), {waveMult}, {loadB[0]});
+
+            graph.mapper.connect<CoordGraph::MacroTile>(initD, d);
 
             // connect ops after contraction to for loop, remove contraction and its incoming edges
             auto tensor_outgoing_edges
