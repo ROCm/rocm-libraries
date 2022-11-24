@@ -442,8 +442,12 @@ namespace rocRoller
     {
         AssertFatal(dest != nullptr);
         AssertFatal(addr != nullptr);
-        AssertFatal(numBytes > 0 && (numBytes < wordSize || numBytes % wordSize == 0),
+
+        // TODO : add support for buffer loads where numBytes == 3 || numBytes % wordSize != 0
+        AssertFatal(numBytes > 0
+                        && ((numBytes < wordSize && numBytes != 3) || numBytes % wordSize == 0),
                     "Invalid number of bytes");
+
         AssertFatal(!high || (high && numBytes == 2),
                     "Operation doesn't support hi argument for sizes of "
                         + std::to_string(numBytes));
@@ -527,7 +531,10 @@ namespace rocRoller
     {
         AssertFatal(addr != nullptr);
         AssertFatal(data != nullptr);
-        AssertFatal(numBytes > 0 && (numBytes < wordSize || numBytes % wordSize == 0),
+
+        // TODO : add support for buffer stores where numBytes == 3 || numBytes % wordSize != 0
+        AssertFatal(numBytes > 0
+                        && ((numBytes < wordSize && numBytes != 3) || numBytes % wordSize == 0),
                     "Invalid number of bytes");
 
         std::string offset_modifier = "", glc = "", slc = "", lds = "";

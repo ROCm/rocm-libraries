@@ -220,16 +220,9 @@ namespace MemoryInstructionsTest
             co_yield m_context->argLoader()->getValue("a", s_a);
 
             auto vgprSerial = m_context->kernel()->workitemIndex()[0];
-            int  size;
-            if(N > 4)
-            {
-                size = ((N % 4) == 3) ? N / 4 + 2 : N / 4 + 1;
-            }
-            else
-            {
-                size = 1;
-            }
-            auto v_a = Register::Value::Placeholder(
+
+            int  size = (N % 4 == 0) ? N / 4 : N / 4 + 1;
+            auto v_a  = Register::Value::Placeholder(
                 m_context, Register::Type::Vector, DataType::Int32, size);
 
             co_yield v_a->allocate();
@@ -444,6 +437,12 @@ namespace MemoryInstructionsTest
         executeBufferTest(m_context, 2);
     }
 
+    // TODO : add support for buffer loads/stores for odd number of bytes >= 3
+    TEST_F(MemoryInstructionsExecuter, GPU_ExecuteBufferTest3Bytes)
+    {
+        EXPECT_THROW({ executeBufferTest(m_context, 3); }, FatalError);
+    }
+
     TEST_F(MemoryInstructionsExecuter, GPU_ExecuteBufferTest4Bytes)
     {
         executeBufferTest(m_context, 4);
@@ -472,6 +471,12 @@ namespace MemoryInstructionsTest
     TEST_F(MemoryInstructionsExecuter, GPU_ExecuteBufferTest44Bytes)
     {
         executeBufferTest(m_context, 44);
+    }
+
+    // TODO : add support for buffer loads/stores for odd number of bytes >= 3
+    TEST_F(MemoryInstructionsExecuter, GPU_ExecuteBufferTest47Bytes)
+    {
+        EXPECT_THROW({ executeBufferTest(m_context, 47); }, FatalError);
     }
 
     TEST_P(MemoryInstructionsTest, AssembleBufferTest1Byte)
