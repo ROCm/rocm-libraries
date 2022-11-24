@@ -52,6 +52,10 @@ namespace rocRoller
          * Rewrite KernelGraph to additionally distribute linear dimensions onto a For loop.
          */
         KernelGraph lowerLinearLoop(KernelGraph, Expression::ExpressionPtr loopSize, ContextPtr);
+        // TODO Delete above when graph rearch complete
+        KernelHypergraph lowerLinearLoop(KernelHypergraph const&,
+                                         Expression::ExpressionPtr loopSize,
+                                         ContextPtr);
 
         /**
          * Rewrite KernelGraph to additionally unroll linear dimensions.

@@ -463,6 +463,60 @@ namespace KernelGraphTest
 
         auto kgraph1 = KernelGraph::lowerLinear(kgraph0, m_context);
         EXPECT_EQ(NormalizedSource(expected1), NormalizedSource(kgraph1.toDOT()));
+
+        std::string expected2 = R".(
+		digraph {
+		{ "User{0, NA, i}" } -> { "SubDimension{0, 0, CommandArgument(Load_Linear_0_size_0), i}" } [color=blue label="Split"]
+		{ "SubDimension{0, 0, CommandArgument(Load_Linear_0_size_0), i}" } -> { "Linear{0, CommandArgument(Load_Linear_0_size_0), i}" } [color=blue label="Flatten"]
+		{ "Linear{0, CommandArgument(Load_Linear_0_size_0), i}" } -> { "Workgroup{0, 0, LAUNCH_WORKGROUPCOUNT_0, i}", "Workitem{0, 0, 32j, i}", "ForLoop{7, 16i, i}" } [color=blue label="Tile"]
+		{ "Linear{6, 16i, i}" } -> { "ForLoop{7, 16i, i}" } [color=red label="DataFlow"]
+		{ "User{0, NA, i}" } -> { "VGPR{0, NA, i}" } [color=red label="DataFlow"]
+		{ "Workgroup{0, 0, LAUNCH_WORKGROUPCOUNT_0, i}", "Workitem{0, 0, 32j, i}", "ForLoop{7, 16i, i}" } -> { "VGPR{0, NA, i}" } [color=blue label="Forget"]
+		{ "User{2, NA, i}" } -> { "SubDimension{2, 0, CommandArgument(Load_Linear_2_size_0), i}" } [color=blue label="Split"]
+		{ "SubDimension{2, 0, CommandArgument(Load_Linear_2_size_0), i}" } -> { "Linear{2, CommandArgument(Load_Linear_2_size_0), i}" } [color=blue label="Flatten"]
+		{ "Linear{2, CommandArgument(Load_Linear_2_size_0), i}" } -> { "Workgroup{2, 0, LAUNCH_WORKGROUPCOUNT_0, i}", "Workitem{2, 0, 32j, i}", "ForLoop{8, 16i, i}" } [color=blue label="Tile"]
+		{ "Linear{6, 16i, i}" } -> { "ForLoop{8, 16i, i}" } [color=red label="DataFlow"]
+		{ "User{2, NA, i}" } -> { "VGPR{2, NA, i}" } [color=red label="DataFlow"]
+		{ "Workgroup{2, 0, LAUNCH_WORKGROUPCOUNT_0, i}", "Workitem{2, 0, 32j, i}", "ForLoop{8, 16i, i}" } -> { "VGPR{2, NA, i}" } [color=blue label="Forget"]
+		{ "VGPR{0, NA, i}", "VGPR{2, NA, i}" } -> { "VGPR{3, NA, i}" } [color=red label="DataFlow"]
+		{ "VGPR{3, NA, i}" } -> { "VGPR{4, NA, i}" } [color=red label="DataFlow"]
+		{ "VGPR{3, NA, i}", "VGPR{4, NA, i}" } -> { "VGPR{5, NA, i}" } [color=red label="DataFlow"]
+		{ "VGPR{5, NA, i}" } -> { "Workgroup{5, 0, LAUNCH_WORKGROUPCOUNT_0, o}", "Workitem{5, 0, 32j, o}", "ForLoop{9, 16i, i}" } [color=blue label="Inherit"]
+		{ "Linear{6, 16i, i}" } -> { "ForLoop{9, 16i, i}" } [color=red label="DataFlow"]
+		{ "Workgroup{5, 0, LAUNCH_WORKGROUPCOUNT_0, o}", "Workitem{5, 0, 32j, o}", "ForLoop{9, 16i, i}" } -> { "Linear{5, NA, o}" } [color=blue label="Flatten"]
+		{ "Linear{5, NA, o}" } -> { "SubDimension{5, 0, NA, o}" } [color=blue label="Split"]
+		{ "VGPR{5, NA, i}" } -> { "User{5, NA, o}" } [color=red label="DataFlow"]
+		{ "SubDimension{5, 0, NA, o}" } -> { "User{5, NA, o}" } [color=blue label="Join"]
+
+		subgraph clusterCF {"krnKernel"[label="Kernel"];
+		"krnLoadVGPR(0)"[label="LoadVGPR(0)"];
+		"krnLoadVGPR(2)"[label="LoadVGPR(2)"];
+		"krnElementOp(3)"[label="ElementOp(3)"];
+		"krnElementOp(4)"[label="ElementOp(4)"];
+		"krnElementOp(5)"[label="ElementOp(5)"];
+		"krnStoreVGPR(5)"[label="StoreVGPR(5)"];
+		"krnForLoopOp(6): LessThan(DataFlowTag(6), 16i)"[label="ForLoopOp(6): LessThan(DataFlowTag(6), 16i)"];
+		"krnAssign(7): tag(6) = SGPR 0i"[label="Assign(7): tag(6) = SGPR 0i"];
+		"krnAssign(8): tag(6) = SGPR Add(DataFlowTag(6), 1i)"[label="Assign(8): tag(6) = SGPR Add(DataFlowTag(6), 1i)"];
+		"krnKernel" -> "krnForLoopOp(6): LessThan(DataFlowTag(6), 16i)"[label="Body"];
+		"krnLoadVGPR(0)" -> "krnElementOp(3)"[label="Sequence"];
+		"krnLoadVGPR(2)" -> "krnElementOp(3)"[label="Sequence"];
+		"krnElementOp(3)" -> "krnElementOp(4)"[label="Sequence"];
+		"krnElementOp(3)" -> "krnElementOp(5)"[label="Sequence"];
+		"krnElementOp(4)" -> "krnElementOp(5)"[label="Sequence"];
+		"krnElementOp(5)" -> "krnStoreVGPR(5)"[label="Sequence"];
+		"krnForLoopOp(6): LessThan(DataFlowTag(6), 16i)" -> "krnLoadVGPR(0)"[label="Body"];
+		"krnForLoopOp(6): LessThan(DataFlowTag(6), 16i)" -> "krnLoadVGPR(2)"[label="Body"];
+		"krnForLoopOp(6): LessThan(DataFlowTag(6), 16i)" -> "krnAssign(7): tag(6) = SGPR 0i"[label="Initialize"];
+		"krnForLoopOp(6): LessThan(DataFlowTag(6), 16i)" -> "krnAssign(8): tag(6) = SGPR Add(DataFlowTag(6), 1i)"[label="ForLoopIncrement"];
+		} }
+        ).";
+
+        int  loopSize     = 16;
+        auto loopSizeExpr = Expression::literal(loopSize);
+
+        auto kgraph2 = KernelGraph::lowerLinearLoop(kgraph1, loopSizeExpr, m_context);
+        EXPECT_EQ(NormalizedSource(expected2), NormalizedSource(kgraph2.toDOT()));
     }
 
     TEST_F(KernelGraphTest, Translate01B)
@@ -874,6 +928,210 @@ namespace KernelGraphTest
 
         auto kgraph1 = KernelGraph::lowerLinear(kgraph0, m_context);
         EXPECT_EQ(NormalizedSource(expected1), NormalizedSource(kgraph1.toDOT(true)));
+
+        std::string expected2 = R".(
+	    digraph {
+		"coord1"[label="User{NA}(1)"];
+		"coord2"[label="User{NA}(2)"];
+		"coord3"[label="SubDimension{0, CommandArgument(Load_Linear_2_size_0)}(3)"];
+		"coord4"[label="Split(4)",shape=box];
+		"coord5"[label="Linear{CommandArgument(Load_Linear_2_size_0)}(5)"];
+		"coord6"[label="Flatten(6)",shape=box];
+		"coord7"[label="Workgroup{0, NA}(7)"];
+		"coord8"[label="Workitem{0, 32j}(8)"];
+		"coord9"[label="Tile(9)",shape=box];
+		"coord10"[label="Linear{16i}(10)"];
+		"coord11"[label="ForLoop{16i}(11)"];
+		"coord12"[label="DataFlow(12)",shape=box];
+		"coord13"[label="VGPR{NA}(13)"];
+		"coord14"[label="Forget(14)",shape=box];
+		"coord15"[label="DataFlow(15)",shape=box];
+		"coord16"[label="SubDimension{0, CommandArgument(Load_Linear_0_size_0)}(16)"];
+		"coord17"[label="Split(17)",shape=box];
+		"coord18"[label="Linear{CommandArgument(Load_Linear_0_size_0)}(18)"];
+		"coord19"[label="Flatten(19)",shape=box];
+		"coord20"[label="Workgroup{0, NA}(20)"];
+		"coord21"[label="Workitem{0, 32j}(21)"];
+		"coord22"[label="Tile(22)",shape=box];
+		"coord23"[label="ForLoop{16i}(23)"];
+		"coord24"[label="DataFlow(24)",shape=box];
+		"coord25"[label="VGPR{NA}(25)"];
+		"coord26"[label="Forget(26)",shape=box];
+		"coord27"[label="DataFlow(27)",shape=box];
+		"coord28"[label="VGPR{NA}(28)"];
+		"coord29"[label="DataFlow(29)",shape=box];
+		"coord30"[label="VGPR{NA}(30)"];
+		"coord31"[label="DataFlow(31)",shape=box];
+		"coord32"[label="VGPR{NA}(32)"];
+		"coord33"[label="DataFlow(33)",shape=box];
+		"coord34"[label="Workgroup{0, NA}(34)"];
+		"coord35"[label="Workitem{0, 32j}(35)"];
+		"coord36"[label="Inherit(36)",shape=box];
+		"coord37"[label="ForLoop{16i}(37)"];
+		"coord38"[label="DataFlow(38)",shape=box];
+		"coord39"[label="Linear{NA}(39)"];
+		"coord40"[label="Flatten(40)",shape=box];
+		"coord41"[label="SubDimension{0, NA}(41)"];
+		"coord42"[label="Split(42)",shape=box];
+		"coord43"[label="User{NA}(43)"];
+		"coord44"[label="Join(44)",shape=box];
+		"coord45"[label="DataFlow(45)",shape=box];
+		"coord1" -> "coord17"
+		"coord1" -> "coord27"
+		"coord2" -> "coord4"
+		"coord2" -> "coord15"
+		"coord3" -> "coord6"
+		"coord4" -> "coord3"
+		"coord5" -> "coord9"
+		"coord6" -> "coord5"
+		"coord7" -> "coord14"
+		"coord8" -> "coord14"
+		"coord9" -> "coord7"
+		"coord9" -> "coord8"
+		"coord9" -> "coord11"
+		"coord10" -> "coord12"
+		"coord10" -> "coord24"
+		"coord10" -> "coord38"
+		"coord11" -> "coord14"
+		"coord12" -> "coord11"
+		"coord13" -> "coord29"
+		"coord14" -> "coord13"
+		"coord15" -> "coord13"
+		"coord16" -> "coord19"
+		"coord17" -> "coord16"
+		"coord18" -> "coord22"
+		"coord19" -> "coord18"
+		"coord20" -> "coord26"
+		"coord21" -> "coord26"
+		"coord22" -> "coord20"
+		"coord22" -> "coord21"
+		"coord22" -> "coord23"
+		"coord23" -> "coord26"
+		"coord24" -> "coord23"
+		"coord25" -> "coord29"
+		"coord26" -> "coord25"
+		"coord27" -> "coord25"
+		"coord28" -> "coord31"
+		"coord28" -> "coord33"
+		"coord29" -> "coord28"
+		"coord30" -> "coord33"
+		"coord31" -> "coord30"
+		"coord32" -> "coord36"
+		"coord32" -> "coord45"
+		"coord33" -> "coord32"
+		"coord34" -> "coord40"
+		"coord35" -> "coord40"
+		"coord36" -> "coord34"
+		"coord36" -> "coord35"
+		"coord36" -> "coord37"
+		"coord37" -> "coord40"
+		"coord38" -> "coord37"
+		"coord39" -> "coord42"
+		"coord40" -> "coord39"
+		"coord41" -> "coord44"
+		"coord42" -> "coord41"
+		"coord44" -> "coord43"
+		"coord45" -> "coord43"
+		{
+		rank=same
+		"coord7"->"coord8"->"coord11"[style=invis]
+		rankdir=LR
+		}
+		{
+		rank=same
+		"coord7"->"coord8"->"coord11"[style=invis]
+		rankdir=LR
+		}
+		{
+		rank=same
+		"coord20"->"coord21"->"coord23"[style=invis]
+		rankdir=LR
+		}
+		{
+		rank=same
+		"coord20"->"coord21"->"coord23"[style=invis]
+		rankdir=LR
+		}
+		{
+		rank=same
+		"coord13"->"coord25"[style=invis]
+		rankdir=LR
+		}
+		{
+		rank=same
+		"coord28"->"coord30"[style=invis]
+		rankdir=LR
+		}
+		{
+		rank=same
+		"coord34"->"coord35"->"coord37"[style=invis]
+		rankdir=LR
+		}
+		{
+		rank=same
+		"coord34"->"coord35"->"coord37"[style=invis]
+		rankdir=LR
+		}
+		subgraph clusterCF {"cntrl1"[label="Kernel(1)"];
+		"cntrl2"[label="ForLoopOp: LessThan(DataFlowTag(10), 16i)(2)"];
+		"cntrl3"[label="Body(3)",shape=box];
+		"cntrl4"[label="Assign SGPR 0i(4)"];
+		"cntrl5"[label="Initialize(5)",shape=box];
+		"cntrl6"[label="Assign SGPR Add(DataFlowTag(10), 1i)(6)"];
+		"cntrl7"[label="ForLoopIncrement(7)",shape=box];
+		"cntrl8"[label="LoadVGPR(8)"];
+		"cntrl9"[label="Body(9)",shape=box];
+		"cntrl10"[label="LoadVGPR(10)"];
+		"cntrl11"[label="Body(11)",shape=box];
+		"cntrl12"[label="ElementOp(16, 22)(12)"];
+		"cntrl13"[label="Sequence(13)",shape=box];
+		"cntrl14"[label="Sequence(14)",shape=box];
+		"cntrl15"[label="ElementOp(28, -1)(15)"];
+		"cntrl16"[label="Sequence(16)",shape=box];
+		"cntrl17"[label="ElementOp(28, 30)(17)"];
+		"cntrl18"[label="Sequence(18)",shape=box];
+		"cntrl19"[label="Sequence(19)",shape=box];
+		"cntrl20"[label="StoreVGPR(20)"];
+		"cntrl21"[label="Sequence(21)",shape=box];
+		"cntrl1" -> "cntrl3"
+		"cntrl2" -> "cntrl5"
+		"cntrl2" -> "cntrl7"
+		"cntrl2" -> "cntrl9"
+		"cntrl2" -> "cntrl11"
+		"cntrl3" -> "cntrl2"
+		"cntrl5" -> "cntrl4"
+		"cntrl7" -> "cntrl6"
+		"cntrl8" -> "cntrl13"
+		"cntrl9" -> "cntrl8"
+		"cntrl10" -> "cntrl14"
+		"cntrl11" -> "cntrl10"
+		"cntrl12" -> "cntrl16"
+		"cntrl12" -> "cntrl18"
+		"cntrl13" -> "cntrl12"
+		"cntrl14" -> "cntrl12"
+		"cntrl15" -> "cntrl19"
+		"cntrl16" -> "cntrl15"
+		"cntrl17" -> "cntrl21"
+		"cntrl18" -> "cntrl17"
+		"cntrl19" -> "cntrl17"
+		"cntrl21" -> "cntrl20"
+		}
+		"coord2" -> "cntrl8" [style=dotted,weight=0,arrowsize=0]
+		"coord13" -> "cntrl8" [style=dotted,weight=0,arrowsize=0]
+		"coord1" -> "cntrl10" [style=dotted,weight=0,arrowsize=0]
+		"coord25" -> "cntrl10" [style=dotted,weight=0,arrowsize=0]
+		"coord28" -> "cntrl12" [style=dotted,weight=0,arrowsize=0]
+		"coord30" -> "cntrl15" [style=dotted,weight=0,arrowsize=0]
+		"coord32" -> "cntrl17" [style=dotted,weight=0,arrowsize=0]
+		"coord32" -> "cntrl20" [style=dotted,weight=0,arrowsize=0]
+		"coord43" -> "cntrl20" [style=dotted,weight=0,arrowsize=0]
+		}).";
+
+        int  loopSize     = 16;
+        auto loopSizeExpr = Expression::literal(loopSize);
+
+        auto kgraph2 = KernelGraph::lowerLinearLoop(kgraph1, loopSizeExpr, m_context);
+        EXPECT_EQ(NormalizedSource(expected2), NormalizedSource(kgraph2.toDOT(true)));
     }
 
     TEST_F(KernelGraphTest, Translate01BTiled)

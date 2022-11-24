@@ -338,6 +338,8 @@ namespace rocRoller
                 auto newEdge = graph.coordinates.addElement(
                     original.coordinates.getElement(edge), inputs, outputs);
 
+                reindexer.coordinates.emplace(edge, newEdge);
+
                 rocRoller::Log::getLogger()->debug(
                     "KernelGraph::copyEdge(): Edge {} -> Edge {}", edge, newEdge);
             }
@@ -457,6 +459,13 @@ namespace rocRoller
                            edge);
             }
 
+            virtual void visitRoot(KernelHypergraph&       graph,
+                                   KernelHypergraph const& original,
+                                   GraphReindexer&         reindexer,
+                                   int                     kernel)
+            {
+            }
+
         protected:
             std::shared_ptr<Context> m_context;
         };
@@ -501,6 +510,7 @@ namespace rocRoller
             int kernel = *original.control.roots().begin();
             reindexer.control.emplace(
                 kernel, graph.control.addElement(original.control.getElement(kernel)));
+            visitor.visitRoot(graph, original, reindexer, kernel);
 
             for(auto const& index : original.control.topologicalSort())
             {
