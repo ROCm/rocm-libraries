@@ -12,6 +12,7 @@ namespace rocRoller
         class GenericWaitStateObserver
         {
         public:
+            GenericWaitStateObserver() {}
             GenericWaitStateObserver(std::shared_ptr<Context> context)
                 : m_context(context){};
 

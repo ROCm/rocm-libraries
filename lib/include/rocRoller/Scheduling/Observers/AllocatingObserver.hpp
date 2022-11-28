@@ -13,6 +13,7 @@ namespace rocRoller
         class AllocatingObserver
         {
         public:
+            AllocatingObserver() {}
             AllocatingObserver(std::shared_ptr<Context> context)
                 : m_context(context)
             {

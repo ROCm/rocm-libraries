@@ -12,6 +12,8 @@ namespace rocRoller
         class WaitcntObserver
         {
         public:
+            WaitcntObserver() {}
+
             WaitcntObserver(std::shared_ptr<Context> context)
                 : m_context(context)
             {

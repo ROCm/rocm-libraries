@@ -19,6 +19,7 @@ namespace rocRoller
         class MFMA90aObserver
         {
         public:
+            MFMA90aObserver() {}
             MFMA90aObserver(std::shared_ptr<Context> context)
                 : m_context(context){};
 

@@ -23,6 +23,7 @@ namespace rocRoller
         class RegisterMapObserver
         {
         public:
+            RegisterMapObserver() {}
             RegisterMapObserver(std::shared_ptr<Context> context)
                 : m_context(context){};
 

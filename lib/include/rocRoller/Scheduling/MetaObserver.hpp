@@ -3,6 +3,7 @@
 
 #include <concepts>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "Scheduling.hpp"
@@ -28,6 +29,7 @@ namespace rocRoller
             };
 
             MetaObserver();
+            MetaObserver(ContextPtr ctx);
             MetaObserver(Tup const& tup);
 
             ~MetaObserver();
@@ -42,6 +44,8 @@ namespace rocRoller
             //> This instruction _will_ be scheduled now, record any side effects.
             // TODO: Should this return void? Is the InstructionStatus object useful here?
             virtual InstructionStatus observe(Instruction const& inst) override;
+
+            static bool required(std::shared_ptr<Context> ctx);
 
         private:
             Tup m_tuple;

@@ -13,6 +13,7 @@ namespace rocRoller
         class VALUWriteFollowedByMFMARead : public GenericWaitStateObserver
         {
         public:
+            VALUWriteFollowedByMFMARead() {}
             VALUWriteFollowedByMFMARead(std::shared_ptr<Context> context)
                 : GenericWaitStateObserver(context){};
 

@@ -12,8 +12,26 @@ namespace rocRoller
 {
     namespace Scheduling
     {
+        namespace Detail
+        {
+            template <typename TupType, size_t... Indices>
+            TupType ConstructMapping(ContextPtr ctx, std::index_sequence<Indices...>)
+            {
+                auto tup     = TupType();
+                auto mapping = [&ctx]<CObserver T>(T head, auto... tail) { return T(ctx); };
+
+                return {mapping(std::get<Indices>(tup))...};
+            }
+        }
+
         template <CObserver... Types>
         MetaObserver<Types...>::MetaObserver() = default;
+
+        template <CObserver... Types>
+        MetaObserver<Types...>::MetaObserver(ContextPtr ctx)
+            : m_tuple(Detail::ConstructMapping<Tup>(ctx, std::make_index_sequence<Size>{}))
+        {
+        }
 
         template <CObserver... Types>
         MetaObserver<Types...>::MetaObserver(Tup const& tup)
@@ -36,7 +54,6 @@ namespace rocRoller
                 }
                 return rv;
             }
-
         }
 
         template <>
@@ -103,6 +120,23 @@ namespace rocRoller
         {
             return std::apply([&inst](auto&&... args) { return Detail::Observe(inst, args...); },
                               m_tuple);
+        }
+
+        template <>
+        inline bool MetaObserver<>::required(std::shared_ptr<Context>)
+        {
+            return true;
+        }
+
+        template <CObserver... Types>
+        inline bool MetaObserver<Types...>::required(std::shared_ptr<Context> ctx)
+        {
+            bool result = true;
+            auto tup    = Tup();
+            std::apply(
+                [&ctx, &result]<CObserver T>(T obs, auto... rest) { result &= obs.required(ctx); },
+                tup);
+            return result;
         }
     }
 }
