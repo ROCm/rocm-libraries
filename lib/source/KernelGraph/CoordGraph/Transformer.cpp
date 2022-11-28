@@ -36,7 +36,9 @@ namespace rocRoller
             ExpressionPtr getDelta(int tag) const
             {
                 if(deltas.count(tag) > 0)
-                    return deltas.at(tag);
+                {
+                    return literal(evaluate(deltas.at(tag)));
+                }
                 return zero;
             }
         };
@@ -52,24 +54,19 @@ namespace rocRoller
                             ShowValue(indexes.size()));
                 AssertFatal(dsts.size() == 1, ShowValue(dsts.size()));
 
-                auto index = indexes[0];
-                for(uint d = 1; d < srcs.size(); ++d)
-                    index = index * getSize(srcs[d]) + indexes[d];
-
-                std::vector<ExpressionPtr> coeffs(srcs.size());
-                for(size_t d = 0; d < srcs.size(); ++d)
+                std::vector<ExpressionPtr> strides(srcs.size());
+                strides[srcs.size() - 1] = literal(1);
+                for(size_t i = srcs.size() - 1; i > 0; --i)
                 {
-                    coeffs[d] = literal(1);
-                    for(size_t j = 0; j < srcs.size() - d - 1; ++j)
-                    {
-                        coeffs[d] = coeffs[d] * getSize(srcs[j]);
-                    }
+                    strides[i - 1] = strides[i] * getSize(srcs[i]);
                 }
 
-                auto delta = getDelta(srcTags[0]) * coeffs[0];
+                auto index = indexes[0] * strides[0];
+                auto delta = getDelta(srcTags[0]) * strides[0];
                 for(uint d = 1; d < srcs.size(); ++d)
                 {
-                    delta = delta + getDelta(srcTags[d]) * coeffs[d];
+                    index = index + indexes[d] * strides[d];
+                    delta = delta + getDelta(srcTags[d]) * strides[d];
                 }
                 deltas.emplace(dstTags[0], delta);
                 return {index};
@@ -91,6 +88,26 @@ namespace rocRoller
                 }
                 deltas.emplace(dstTags[0], delta);
                 return {index};
+            }
+
+            std::vector<ExpressionPtr> operator()(Tile const& e)
+            {
+                AssertFatal(srcs.size() == 1, ShowValue(srcs.size()));
+                auto delta = getDelta(srcTags[0]);
+                auto input = indexes[0];
+
+                std::vector<ExpressionPtr> rv(dsts.size());
+                for(int i = dsts.size() - 1; i > 0; i--)
+                {
+                    auto size = getSize(dsts[i]);
+                    rv[i]     = input % size;
+                    input     = input / size;
+                    deltas.emplace(dstTags[i], delta % size);
+                    delta = delta / size;
+                }
+                deltas.emplace(dstTags[0], delta);
+                rv[0] = input;
+                return rv;
             }
 
             std::vector<ExpressionPtr> operator()(PassThrough const& e)
@@ -163,6 +180,30 @@ namespace rocRoller
                 }
                 deltas.emplace(srcTags[0], delta);
                 return {index};
+            }
+
+            std::vector<ExpressionPtr> operator()(Flatten const& e)
+            {
+                AssertFatal(dsts.size() == 1 && dsts.size() == indexes.size(),
+                            ShowValue(dsts.size()),
+                            ShowValue(indexes.size()));
+                AssertFatal(srcs.size() > 1, ShowValue(srcs.size()));
+
+                auto delta = getDelta(dstTags[0]);
+                auto input = indexes[0];
+
+                std::vector<ExpressionPtr> rv(srcs.size());
+                for(int i = srcs.size() - 1; i > 0; i--)
+                {
+                    auto size = getSize(srcs[i]);
+                    rv[i]     = input % size;
+                    input     = input / size;
+                    deltas.emplace(srcTags[i], delta % size);
+                    delta = delta / size;
+                }
+                deltas.emplace(srcTags[0], delta);
+                rv[0] = input;
+                return rv;
             }
 
             std::vector<ExpressionPtr> operator()(PassThrough const& e)

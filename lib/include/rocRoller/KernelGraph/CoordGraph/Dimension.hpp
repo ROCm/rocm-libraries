@@ -243,6 +243,26 @@ namespace rocRoller
             }
         };
 
+        struct VGPRBlockNumber : public BaseDimension
+        {
+            using BaseDimension::BaseDimension;
+
+            virtual std::string name() const override
+            {
+                return "VGPRBlockNumber";
+            }
+        };
+
+        struct VGPRBlockIndex : public BaseDimension
+        {
+            using BaseDimension::BaseDimension;
+
+            virtual std::string name() const override
+            {
+                return "VGPRBlockIndex";
+            }
+        };
+
         /**
          * LDS - represents local memory.
          */

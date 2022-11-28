@@ -1,3 +1,6 @@
+#include "DataTypes/DataTypes.hpp"
+#include "Graph/Hypergraph.hpp"
+#include "KernelGraph/ControlHypergraph/ControlEdge.hpp"
 #include "KernelGraph/ControlHypergraph/Operation.hpp"
 #include "KernelGraph/CoordGraph/CoordinateHypergraph.hpp"
 #include "KernelGraph/CoordGraph/Dimension.hpp"
@@ -714,10 +717,9 @@ namespace rocRoller
                     auto n_col_blocks = literal(wave_tile.sizes[1] / mts);
 
                     auto n_vblk = graph.coordinates.addElement(
-                        CoordGraph::Adhoc("VGPRBlockNumber", literal(num_vgpr / mts), unit_stride));
-
+                        CoordGraph::VGPRBlockNumber(literal(num_vgpr / mts), unit_stride));
                     auto i_vblk = graph.coordinates.addElement(
-                        CoordGraph::Adhoc("VGPRBlockIndex", mfma_tile_size, unit_stride));
+                        CoordGraph::VGPRBlockIndex(mfma_tile_size, unit_stride));
                     auto n_lblk = graph.coordinates.addElement(
                         CoordGraph::Adhoc("LANEBlockNumber", literal(wfs / mts), unit_stride));
                     auto i_lblk = graph.coordinates.addElement(
@@ -728,6 +730,9 @@ namespace rocRoller
                         CoordGraph::Adhoc("RowBlock", n_row_blocks, unit_stride));
                     auto col_block = graph.coordinates.addElement(
                         CoordGraph::Adhoc("ColBlock", n_col_blocks, unit_stride));
+
+                    graph.mapper.connect<CoordGraph::VGPRBlockNumber>(load_tag, n_vblk);
+                    graph.mapper.connect<CoordGraph::VGPRBlockIndex>(load_tag, i_vblk);
 
                     // ORDER?
                     graph.coordinates.addElement(
@@ -929,9 +934,9 @@ namespace rocRoller
                 auto unit_stride    = literal(1u);
 
                 auto n_vblk = graph.coordinates.addElement(
-                    CoordGraph::Adhoc("VGPRBlockNumber", literal(num_agpr / mts), unit_stride));
+                    CoordGraph::VGPRBlockNumber(literal(num_agpr / mts), unit_stride));
                 auto i_vblk = graph.coordinates.addElement(
-                    CoordGraph::Adhoc("VGPRBlockIndex", mfma_tile_size, unit_stride));
+                    CoordGraph::VGPRBlockIndex(mfma_tile_size, unit_stride));
                 auto n_lblk = graph.coordinates.addElement(
                     CoordGraph::Adhoc("LANEBlockNumber", literal(wfs / mts), unit_stride));
                 auto i_lblk = graph.coordinates.addElement(
@@ -960,6 +965,8 @@ namespace rocRoller
                     CoordGraph::VGPR(literal(num_agpr), unit_stride));
 
                 graph.mapper.connect<CoordGraph::WaveTile>(store_tag, wave_tile_tag);
+                graph.mapper.connect<CoordGraph::VGPRBlockNumber>(store_tag, n_vblk);
+                graph.mapper.connect<CoordGraph::VGPRBlockIndex>(store_tag, i_vblk);
                 graph.mapper.connect<CoordGraph::VGPR>(store_tag, vgpr);
 
                 graph.coordinates.addElement(CoordGraph::Tile(), {vgpr}, {n_vblk, i_vblk});
@@ -1342,8 +1349,8 @@ namespace rocRoller
             uint wfs          = context->kernel()->wavefront_size();
             uint num_agpr     = num_elements / wfs; // number of output registers per thread
 
-            auto initD = graph.control.addElement(
-                ControlHypergraph::Assign{Register::Type::Accumulator, literal(0.f), num_agpr});
+            auto initD = graph.control.addElement(ControlHypergraph::Assign{
+                Register::Type::Accumulator, literal(0.f), num_agpr, false});
 
             graph.control.addElement(ControlHypergraph::Initialize(), {forK}, {initD});
             graph.control.addElement(ControlHypergraph::Body(), {forK}, {waveMult});
@@ -1391,12 +1398,13 @@ namespace rocRoller
                 // find other loadtiled ops from kernel that lead to elemops
                 auto kernel_outputs = graph.control.childNodes(kernel).to<std::vector>();
                 std::vector<int> otherLoads;
+                std::vector<int> otherOps;
                 for(auto const index : kernel_outputs)
                 {
                     auto elem = graph.control.getElement(index);
                     visit(
                         rocRoller::overloaded{
-                            [&](auto op) {},
+                            [&](auto op) { otherOps.push_back(index); },
                             [&](ControlHypergraph::LoadTiled const& load) {
                                 auto reachable_from_load
                                     = graph.control.depthFirstVisit(index).to<std::unordered_set>();
@@ -1418,33 +1426,43 @@ namespace rocRoller
                 // need to leave other nodes attached with kernel
                 // ex: loadtiled ops that don't lead to elemops
                 // ex : loadVGPRs for alpha and beta in GEMM
-                if(wavetilesPerWorkgroup[1] > 1)
+                int lowerLoop, upperLoop;
+                if(wavetilesPerWorkgroup[0] > 1 && wavetilesPerWorkgroup[1] > 1)
                 {
-                    graph.control.addElement(ControlHypergraph::Body(), {forWaveTilesY}, {forK});
-
-                    for(auto const index : otherLoads)
-                    {
-                        auto e = graph.control.getNeighbours<Graph::Direction::Upstream>(index)
-                                     .to<std::vector>()[0];
-                        auto elem = graph.control.getElement(e);
-                        graph.control.deleteElement(e);
-                        graph.control.addElement(
-                            e, elem, std::vector<int>{forWaveTilesY}, std::vector<int>{index});
-                    }
+                    upperLoop = forWaveTilesX;
+                    lowerLoop = forWaveTilesY;
+                }
+                else if(wavetilesPerWorkgroup[0] > 1)
+                {
+                    lowerLoop = forWaveTilesX;
+                    upperLoop = forWaveTilesX;
                 }
                 else
                 {
-                    graph.control.addElement(ControlHypergraph::Body(), {forWaveTilesX}, {forK});
+                    lowerLoop = forWaveTilesY;
+                    upperLoop = forWaveTilesY;
+                }
 
-                    for(auto const index : otherLoads)
-                    {
-                        auto e = graph.control.getNeighbours<Graph::Direction::Upstream>(index)
-                                     .to<std::vector>()[0];
-                        auto elem = graph.control.getElement(e);
-                        graph.control.deleteElement(e);
-                        graph.control.addElement(
-                            e, elem, std::vector<int>{forWaveTilesX}, std::vector<int>{index});
-                    }
+                graph.control.addElement(ControlHypergraph::Body(), {lowerLoop}, {forK});
+
+                for(auto const index : otherLoads)
+                {
+                    auto e = graph.control.getNeighbours<Graph::Direction::Upstream>(index)
+                                 .to<std::vector>()[0];
+                    auto elem = graph.control.getElement(e);
+                    graph.control.deleteElement(e);
+                    graph.control.addElement(
+                        e, elem, std::vector<int>{lowerLoop}, std::vector<int>{index});
+                }
+
+                for(auto const index : otherOps)
+                {
+                    auto e = graph.control.getNeighbours<Graph::Direction::Downstream>(index)
+                                 .to<std::vector>()[0];
+                    auto elem = graph.control.getElement(e);
+                    graph.control.deleteElement(e);
+                    graph.control.addElement(
+                        e, elem, std::vector<int>{index}, std::vector<int>{upperLoop});
                 }
 
                 // make nested inner loops (forWaveTilesY inside the forWaveTilesX loop)
@@ -1453,41 +1471,143 @@ namespace rocRoller
                         ControlHypergraph::Body(), {forWaveTilesX}, {forWaveTilesY});
 
                 // Add edges from Kernel to outer loop
-                if(wavetilesPerWorkgroup[0] > 1)
-                    graph.control.addElement(ControlHypergraph::Body(), {kernel}, {forWaveTilesX});
-                else
-                    graph.control.addElement(ControlHypergraph::Body(), {kernel}, {forWaveTilesY});
+                graph.control.addElement(ControlHypergraph::Body(), {kernel}, {upperLoop});
 
                 // Add edges from all JammedWaveTileNumber dimensions to the for loop
-                auto a_jammed_x = graph.mapper.get<CoordGraph::JammedWaveTileNumber>(loadA[0], 0);
-                graph.coordinates.addElement(CoordGraph::PassThrough(), {a_jammed_x}, {WaveTilesX});
-                auto a_jammed_y = graph.mapper.get<CoordGraph::JammedWaveTileNumber>(loadA[0], 1);
-                graph.coordinates.addElement(CoordGraph::PassThrough(), {a_jammed_y}, {WaveTilesY});
-
-                auto b_jammed_x = graph.mapper.get<CoordGraph::JammedWaveTileNumber>(loadB[0], 0);
-                graph.coordinates.addElement(CoordGraph::PassThrough(), {b_jammed_x}, {WaveTilesX});
-                auto b_jammed_y = graph.mapper.get<CoordGraph::JammedWaveTileNumber>(loadB[0], 1);
-                graph.coordinates.addElement(CoordGraph::PassThrough(), {b_jammed_y}, {WaveTilesY});
-
-                auto c_jammed_x
-                    = graph.mapper.get<CoordGraph::JammedWaveTileNumber>(otherLoads[0], 0);
-                graph.coordinates.addElement(CoordGraph::PassThrough(), {c_jammed_x}, {WaveTilesX});
-                auto c_jammed_y
-                    = graph.mapper.get<CoordGraph::JammedWaveTileNumber>(otherLoads[0], 1);
-                graph.coordinates.addElement(CoordGraph::PassThrough(), {c_jammed_y}, {WaveTilesY});
-
-                if(storeD > 0)
+                if(WaveTilesX != -1)
                 {
-                    auto d_jammed_x = graph.mapper.get<CoordGraph::JammedWaveTileNumber>(storeD, 0);
+                    auto a_jammed_x
+                        = graph.mapper.get<CoordGraph::JammedWaveTileNumber>(loadA[0], 0);
                     graph.coordinates.addElement(
-                        CoordGraph::PassThrough(), {WaveTilesX}, {d_jammed_x});
-                    auto d_jammed_y = graph.mapper.get<CoordGraph::JammedWaveTileNumber>(storeD, 1);
+                        CoordGraph::PassThrough(), {a_jammed_x}, {WaveTilesX});
+                    auto b_jammed_x
+                        = graph.mapper.get<CoordGraph::JammedWaveTileNumber>(loadB[0], 0);
                     graph.coordinates.addElement(
-                        CoordGraph::PassThrough(), {WaveTilesY}, {d_jammed_y});
+                        CoordGraph::PassThrough(), {b_jammed_x}, {WaveTilesX});
+                    auto c_jammed_x
+                        = graph.mapper.get<CoordGraph::JammedWaveTileNumber>(otherLoads[0], 0);
+                    graph.coordinates.addElement(
+                        CoordGraph::PassThrough(), {c_jammed_x}, {WaveTilesX});
+
+                    if(storeD > 0)
+                    {
+                        auto d_jammed_x
+                            = graph.mapper.get<CoordGraph::JammedWaveTileNumber>(storeD, 0);
+                        graph.coordinates.addElement(
+                            CoordGraph::PassThrough(), {WaveTilesX}, {d_jammed_x});
+                    }
+                }
+                if(WaveTilesY != -1)
+                {
+                    auto a_jammed_y
+                        = graph.mapper.get<CoordGraph::JammedWaveTileNumber>(loadA[0], 1);
+                    graph.coordinates.addElement(
+                        CoordGraph::PassThrough(), {a_jammed_y}, {WaveTilesY});
+                    auto b_jammed_y
+                        = graph.mapper.get<CoordGraph::JammedWaveTileNumber>(loadB[0], 1);
+                    graph.coordinates.addElement(
+                        CoordGraph::PassThrough(), {b_jammed_y}, {WaveTilesY});
+                    auto c_jammed_y
+                        = graph.mapper.get<CoordGraph::JammedWaveTileNumber>(otherLoads[0], 1);
+                    graph.coordinates.addElement(
+                        CoordGraph::PassThrough(), {c_jammed_y}, {WaveTilesY});
+
+                    if(storeD > 0)
+                    {
+                        auto d_jammed_y
+                            = graph.mapper.get<CoordGraph::JammedWaveTileNumber>(storeD, 1);
+                        graph.coordinates.addElement(
+                            CoordGraph::PassThrough(), {WaveTilesY}, {d_jammed_y});
+                    }
                 }
             }
             else
                 graph.control.addElement(ControlHypergraph::Body(), {kernel}, {forK});
+        }
+
+        KernelHypergraph addComputeIndexOperations(KernelHypergraph const& original)
+        {
+            auto kgraph = original;
+            auto kernel = *kgraph.control.roots().begin();
+
+            // MATRIX_A and MATRIX_B loads within a ForLoop
+            auto multiplies
+                = kgraph.control.getNodes<ControlHypergraph::Multiply>().to<std::vector>();
+            AssertFatal(multiplies.size() <= 1, "More than one Multiply not supported yet.");
+            if(multiplies.size() == 1)
+            {
+                auto forK = kgraph.control
+                                .findNodes(
+                                    multiplies[0],
+                                    [&](int tag) -> bool {
+                                        return isOperation<ControlHypergraph::ForLoopOp>(
+                                            kgraph.control.getElement(tag));
+                                    },
+                                    Graph::Direction::Upstream)
+                                .to<std::vector>();
+                AssertFatal(forK.size() > 0, "Didn't find for loop.");
+                auto loads = kgraph.control
+                                 .findNodes(
+                                     multiplies[0],
+                                     [&](int tag) -> bool {
+                                         return isOperation<ControlHypergraph::LoadTiled>(
+                                             kgraph.control.getElement(tag));
+                                     },
+                                     Graph::Direction::Downstream)
+                                 .to<std::vector>();
+                AssertFatal(loads.size() == 2, "More than one Multiply not supported yet.");
+                kgraph = addComputeIndexAB(kgraph, forK[0], loads[0], loads[1]);
+            }
+
+            // MATRIX_ACCUMULATOR loads anywhere
+            auto loadAccums
+                = kgraph.control
+                      .findNodes(
+                          kernel,
+                          [&](int tag) -> bool {
+                              auto load = kgraph.control.get<ControlHypergraph::LoadTiled>(tag);
+                              if(load)
+                              {
+                                  auto [tile_tag, tile]
+                                      = kgraph.getDimension<CoordGraph::MacroTile>(tag);
+                                  if(tile.layoutType == LayoutType::MATRIX_ACCUMULATOR)
+                                      return true;
+                              }
+                              return false;
+                          },
+                          Graph::Direction::Downstream)
+                      .to<std::vector>();
+
+            for(auto const tag : loadAccums)
+            {
+                kgraph = addComputeIndexC(kgraph, tag, tag, false);
+            }
+
+            // MATRIX_ACCUMULATOR stores anywhere
+            auto storeAccums
+                = kgraph.control
+                      .findNodes(
+                          kernel,
+                          [&](int tag) -> bool {
+                              auto load = kgraph.control.get<ControlHypergraph::StoreTiled>(tag);
+                              if(load)
+                              {
+                                  auto [tile_tag, tile]
+                                      = kgraph.getDimension<CoordGraph::MacroTile>(tag);
+                                  if(tile.layoutType == LayoutType::MATRIX_ACCUMULATOR)
+                                      return true;
+                              }
+                              return false;
+                          },
+                          Graph::Direction::Downstream)
+                      .to<std::vector>();
+
+            for(auto const tag : storeAccums)
+            {
+                kgraph = addComputeIndexC(kgraph, tag, tag, true);
+            }
+
+            return kgraph;
         }
 
         /**
@@ -1710,6 +1830,9 @@ namespace rocRoller
                     Throw<FatalError>("General contraction not implemented yet.");
                 }
             }
+
+            // Find WAVE tile load/store operations and add ComputeIndex operations
+            kgraph = addComputeIndexOperations(kgraph);
 
             // Add LDS operations to the control graph following LoadTiled nodes.
             // This is done after the control graph is completly built to make

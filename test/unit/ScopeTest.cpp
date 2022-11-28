@@ -75,10 +75,8 @@ namespace ScopeTest
             v_mov_b32 v0, 11
             // Assign VGPR 11j END
             // Scope BEGIN
-            // BEGIN SCOPE
             // generate(set{3})
             // Scope BEGIN
-            // BEGIN SCOPE
             // generate(set{6})
             // Assign VGPR 33j BEGIN
             // 33j
@@ -86,7 +84,6 @@ namespace ScopeTest
             v_mov_b32 v1, 33
             // Assign VGPR 33j END
             // Freeing : 1 VGPR (Value: UInt32): v1
-            // END SCOPE
             // Scope END
             // Assign VGPR 22j BEGIN
             // 22j
@@ -94,7 +91,6 @@ namespace ScopeTest
             v_mov_b32 v1, 22
             // Assign VGPR 22j END
             // Freeing : 1 VGPR (Value: UInt32): v1
-            // END SCOPE
             // Scope END
             // End Kernel
             // Kernel END

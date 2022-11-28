@@ -1,4 +1,7 @@
 
+#include "DataTypes/DataTypes.hpp"
+#include "Utilities/Generator.hpp"
+#include "Utilities/Utils.hpp"
 #include <iostream>
 #include <memory>
 #include <set>
@@ -1228,6 +1231,26 @@ namespace rocRoller
                 return Register::Value::Placeholder(m_context, Register::Type::Scalar, type, count);
             }
 
+            template <Graph::Direction dir>
+            std::pair<Register::ValuePtr, Register::ValuePtr> getOffsetAndStride(int tag)
+            {
+                Register::ValuePtr offset, stride;
+                for(int const ntag : m_graph.coordinates.getNeighbours<dir>(tag))
+                {
+                    auto oelem = m_graph.coordinates.get<CoordGraph::Offset>(ntag);
+                    if(oelem)
+                    {
+                        offset = m_context->registerTagManager()->getRegister(ntag);
+                    }
+                    auto selem = m_graph.coordinates.get<CoordGraph::Stride>(ntag);
+                    if(selem)
+                    {
+                        stride = m_context->registerTagManager()->getRegister(ntag);
+                    }
+                }
+                return {offset, stride};
+            }
+
             inline ExpressionPtr L(auto const& x)
             {
                 return Expression::literal(x);
@@ -1412,6 +1435,8 @@ namespace rocRoller
                                               CoordGraph::Transformer const&      coords)
             {
                 auto opName = toString(operation);
+                rocRoller::Log::getLogger()->debug(
+                    "KernelGraph::CodeGenerator::{}({})", opName, tag);
                 co_yield Instruction::Comment(opName + " BEGIN");
 
                 AssertFatal(m_completedControlNodes.find(tag) == m_completedControlNodes.end(),
@@ -1505,7 +1530,8 @@ namespace rocRoller
                                               ControlHypergraph::ElementOp eop,
                                               CoordGraph::Transformer      coords)
             {
-                rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::ElementOp()");
+                rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::ElementOp({})",
+                                                   tag);
                 co_yield_(Instruction::Comment("GEN: ElementOp"));
 
                 auto connections = m_graph.mapper.getConnections(tag);
@@ -1536,7 +1562,7 @@ namespace rocRoller
             Generator<Instruction>
                 operator()(int tag, ControlHypergraph::Scope const&, CoordGraph::Transformer coords)
             {
-                co_yield Instruction::Comment("BEGIN SCOPE");
+                rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::Scope({})", tag);
 
                 auto scope = std::make_shared<ScopeManager>(m_context);
                 coords.setScope(scope);
@@ -1546,7 +1572,6 @@ namespace rocRoller
                 co_yield generate(body, coords);
 
                 scope->release();
-                co_yield Instruction::Comment("END SCOPE");
             }
 
             Generator<Instruction> operator()(int                                 tag,
@@ -1554,6 +1579,8 @@ namespace rocRoller
                                               CoordGraph::Transformer             coords)
             {
                 // TODO: Logging level for these comments.
+                rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::ForLoopOp({})",
+                                                   tag);
                 co_yield Instruction::Comment("For Loop Begin");
 
                 auto topLabel = m_context->labelAllocator()->label("ForLoopTop");
@@ -1645,7 +1672,7 @@ namespace rocRoller
                     dim_tag, assign.regType, varType, assign.valueCount);
 
                 auto scope = coords.getScope();
-                if(scope)
+                if(scope && assign.localScope)
                 {
                     scope->add(dim_tag);
                 }
@@ -1657,6 +1684,56 @@ namespace rocRoller
                 operator()(int, ControlHypergraph::Barrier const&, CoordGraph::Transformer)
             {
                 co_yield m_context->mem()->barrier();
+            }
+
+            Generator<Instruction> operator()(int                                    tag,
+                                              ControlHypergraph::ComputeIndex const& ci,
+                                              CoordGraph::Transformer                coords)
+            {
+                rocRoller::Log::getLogger()->debug(
+                    "KernelGraph::CodeGenerator::ComputeIndex({}): {}/{}",
+                    tag,
+                    ci.offset,
+                    ci.stride);
+                co_yield_(Instruction::Comment(concatenate("GEN: ComputeIndex ", tag)));
+
+                auto scope    = coords.getScope();
+                uint numBytes = DataTypeInfo::Get(ci.valueType).elementSize;
+
+                coords.setCoordinate(ci.increment, L(0u));
+                for(auto const tag_ : ci.zero)
+                    coords.setCoordinate(tag_, L(0u));
+
+                auto offsetReg = m_context->registerTagManager()->getRegister(
+                    ci.offset, Register::Type::Vector, ci.offsetType, 1);
+                offsetReg->setName(concatenate("offset", tag));
+                co_yield offsetReg->allocate();
+                scope->add(ci.offset);
+
+                if(ci.base < 0)
+                {
+                    auto indexExpr = ci.forward ? coords.forward({ci.target})[0]
+                                                : coords.reverse({ci.target})[0];
+                    rocRoller::Log::getLogger()->debug(
+                        "  Offset({}): {}", ci.offset, toString(indexExpr));
+                    co_yield generate(offsetReg, indexExpr * L(numBytes));
+                }
+
+                auto strideReg = m_context->registerTagManager()->getRegister(
+                    ci.stride, Register::Type::Scalar, ci.strideType, 1);
+                strideReg->setName(concatenate("stride", tag));
+                co_yield strideReg->allocate();
+                scope->add(ci.stride);
+
+                if(ci.stride > 0)
+                {
+                    auto indexExpr = ci.forward
+                                         ? coords.forwardStride(ci.increment, L(1), {ci.target})[0]
+                                         : coords.reverseStride(ci.increment, L(1), {ci.target})[0];
+                    rocRoller::Log::getLogger()->debug(
+                        "  Stride({}): {}", ci.stride, toString(indexExpr));
+                    co_yield generate(strideReg, indexExpr * L(numBytes));
+                }
             }
 
             Generator<Instruction> operator()(int                                  tag,
@@ -1681,25 +1758,23 @@ namespace rocRoller
                 vgpr      = m_context->registerTagManager()->getRegister(mac_tile_tag, vgpr);
                 co_yield vgpr->allocate();
 
-                auto rowOffset = MkSGPR(DataType::Int64);
-                co_yield m_context->argLoader()->getValue(user.argumentName(), rowOffset);
+                auto baseAddress = MkSGPR(DataType::Int64);
+                co_yield m_context->argLoader()->getValue(user.argumentName(), baseAddress);
 
                 auto numBytes = DataTypeInfo::Get(vgpr->variableType()).elementSize;
                 auto bufDesc  = BufferDescriptor(m_context);
                 auto bufOpt   = BufferInstructionOptions();
 
                 co_yield bufDesc.setup();
-                co_yield bufDesc.setBasePointer(rowOffset);
+                co_yield bufDesc.setBasePointer(baseAddress);
 
                 auto const m = mac_tile.subTileSizes[0];
                 auto const n = mac_tile.subTileSizes[1];
 
                 AssertFatal(m > 0 && n > 0, "Invalid/unknown subtile size dimensions");
 
-                auto [row_index_tag, row_index]
-                    = m_graph.getDimension<CoordGraph::ThreadTileIndex>(tag, 0);
-                auto [col_index_tag, col_index]
-                    = m_graph.getDimension<CoordGraph::ThreadTileIndex>(tag, 1);
+                auto row_index_tag = m_graph.mapper.get<CoordGraph::ThreadTileIndex>(tag, 0);
+                auto col_index_tag = m_graph.mapper.get<CoordGraph::ThreadTileIndex>(tag, 1);
 
                 coords.setCoordinate(row_index_tag, L(0));
                 coords.setCoordinate(col_index_tag, L(0));
@@ -1722,8 +1797,8 @@ namespace rocRoller
                     co_yield generate(colStride, expr * L(numBytes));
                 }
 
-                auto rowOffsetExpr = rowOffset->expression();
-                auto rowStrideExpr = rowStride->expression();
+                auto baseAddressExpr = baseAddress->expression();
+                auto rowStrideExpr   = rowStride->expression();
 
                 // TODO multi dimensional tiles
                 for(int i = 0; i < m; ++i)
@@ -1738,25 +1813,31 @@ namespace rocRoller
                             bufOpt,
                             numBytes);
                         if(j < n - 1)
+                        {
                             co_yield bufDesc.incrementBasePointer(colStride);
+                        }
                     }
 
                     if(i < m - 1)
-                        co_yield generate(rowOffset, rowOffsetExpr + rowStrideExpr);
-                    co_yield bufDesc.setBasePointer(rowOffset);
+                    {
+                        co_yield generate(baseAddress, baseAddressExpr + rowStrideExpr);
+                        co_yield bufDesc.setBasePointer(baseAddress);
+                    }
                 }
             }
 
-            Generator<Instruction> loadMacroTileWAVE(int                                 tag,
-                                                     ControlHypergraph::LoadTiled const& load,
-                                                     CoordGraph::Transformer             coords)
+            Generator<Instruction> loadMacroTileWAVECI(int                                 tag,
+                                                       ControlHypergraph::LoadTiled const& load,
+                                                       CoordGraph::Transformer             coords,
+                                                       int                                 sdim)
             {
                 rocRoller::Log::getLogger()->debug(
-                    "KernelGraph::CodeGenerator::loadMacroTileWAVE()");
-                co_yield_(Instruction::Comment("GEN: loadMacroTileWAVE"));
+                    "KernelGraph::CodeGenerator::loadMacroTileWAVECI({})", tag);
+                co_yield_(Instruction::Comment("GEN: loadMacroTileWAVECI"));
 
                 auto [user_tag, user]           = m_graph.getDimension<CoordGraph::User>(tag);
                 auto [wave_tile_tag, wave_tile] = m_graph.getDimension<CoordGraph::WaveTile>(tag);
+                auto [mac_tile_tag, mac_tile]   = m_graph.getDimension<CoordGraph::MacroTile>(tag);
                 auto [vgpr_tag, vgpr]           = m_graph.getDimension<CoordGraph::VGPR>(tag);
 
                 // Move the argument pointer into v_ptr
@@ -1769,10 +1850,16 @@ namespace rocRoller
                 co_yield bufDesc.setup();
                 co_yield bufDesc.setBasePointer(s_ptr);
 
-                // Register Value used to contain the offset
-                auto offset = Register::Value::Placeholder(
-                    m_context, Register::Type::Vector, DataType::Int64, 1);
-                co_yield offset->allocate();
+                auto n_wave_tag = m_graph.mapper.get<CoordGraph::WaveTileNumber>(tag, sdim);
+
+                auto [wave_offset_reg, wave_stride_reg]
+                    = getOffsetAndStride<Graph::Direction::Upstream>(n_wave_tag);
+                auto [vgpr_offset_reg, vgpr_stride_reg]
+                    = getOffsetAndStride<Graph::Direction::Upstream>(vgpr_tag);
+
+                AssertFatal(wave_offset_reg, "Invalid WAVE offset register.");
+                AssertFatal(vgpr_offset_reg, "Invalid VGPR offset register.");
+                AssertFatal(vgpr_stride_reg, "Invalid VGPR stride register.");
 
                 uint num_elements = wave_tile.sizes[0] * wave_tile.sizes[1];
                 uint wfs          = m_context->kernel()->wavefront_size();
@@ -1783,29 +1870,30 @@ namespace rocRoller
                     auto tmpl = Register::Value::Placeholder(
                         m_context, Register::Type::Vector, DataType::Halfx2, num_vgpr / 2);
 
-                    auto vgpr = m_context->registerTagManager()->getRegister(wave_tile_tag, tmpl);
+                    auto vgpr = m_context->registerTagManager()->getRegister(mac_tile_tag, tmpl);
                     co_yield Register::AllocateIfNeeded(vgpr);
 
+                    auto offset1 = Register::Value::Placeholder(
+                        m_context, Register::Type::Vector, DataType::Int64, 1);
                     auto offset2 = Register::Value::Placeholder(
                         m_context, Register::Type::Vector, DataType::Int64, 1);
 
+                    co_yield copy(vgpr_offset_reg, wave_offset_reg);
+
                     for(uint a = 0; a < num_vgpr; a += 2)
                     {
-                        coords.setCoordinate(vgpr_tag, literal(a));
-
-                        auto user_index = coords.reverse({user_tag})[0];
-                        setComment(user_index, "User Index Expression");
-                        co_yield generateOffset(offset, user_index, load.vtype.dataType);
-
-                        coords.setCoordinate(vgpr_tag, literal(a + 1));
-
-                        auto user_index2 = coords.reverse({user_tag})[0];
-                        setComment(user_index2, "User Index Expression");
-                        co_yield generateOffset(offset2, user_index2, load.vtype.dataType);
+                        co_yield copy(offset1, vgpr_offset_reg);
+                        co_yield generate(vgpr_offset_reg,
+                                          vgpr_offset_reg->expression()
+                                              + vgpr_stride_reg->expression());
+                        co_yield copy(offset2, vgpr_offset_reg);
+                        co_yield generate(vgpr_offset_reg,
+                                          vgpr_offset_reg->expression()
+                                              + vgpr_stride_reg->expression());
 
                         co_yield m_context->mem()->loadAndPackBuffer(
                             vgpr->element({static_cast<int>(a / 2)}),
-                            offset,
+                            offset1,
                             offset2,
                             bufDesc,
                             bufOpt);
@@ -1816,25 +1904,144 @@ namespace rocRoller
                     auto tmpl = Register::Value::Placeholder(
                         m_context, Register::Type::Vector, load.vtype, num_vgpr);
 
-                    auto vgpr = m_context->registerTagManager()->getRegister(wave_tile_tag, tmpl);
+                    auto vgpr = m_context->registerTagManager()->getRegister(mac_tile_tag, tmpl);
                     co_yield Register::AllocateIfNeeded(vgpr);
 
                     auto numBytes = (uint)DataTypeInfo::Get(vgpr->variableType()).elementSize;
 
+                    co_yield copy(vgpr_offset_reg, wave_offset_reg);
+
                     for(uint a = 0; a < num_vgpr; ++a)
                     {
-                        coords.setCoordinate(vgpr_tag, literal(a));
-
-                        auto user_index = coords.reverse({user_tag})[0];
-                        setComment(user_index, "User Index Expression");
-                        co_yield generateOffset(offset, user_index, vgpr->variableType().dataType);
-
                         co_yield m_context->mem()->loadBuffer(vgpr->element({static_cast<int>(a)}),
-                                                              offset->subset({0}),
+                                                              vgpr_offset_reg->subset({0}),
                                                               0,
                                                               bufDesc,
                                                               bufOpt,
                                                               numBytes);
+
+                        if(a < num_vgpr - 1)
+                            co_yield generate(vgpr_offset_reg,
+                                              vgpr_offset_reg->expression()
+                                                  + vgpr_stride_reg->expression());
+                    }
+                }
+            }
+
+            Generator<Instruction> loadMacroTileWAVECIACCUM(
+                int tag, ControlHypergraph::LoadTiled const& load, CoordGraph::Transformer coords)
+
+            {
+                rocRoller::Log::getLogger()->debug(
+                    "KernelGraph::CodeGenerator::loadMacroTileWAVECIACCUM({})", tag);
+                co_yield_(Instruction::Comment("GEN: loadMacroTileWAVECIACCUM"));
+
+                auto [user_tag, user]           = m_graph.getDimension<CoordGraph::User>(tag);
+                auto [wave_tile_tag, wave_tile] = m_graph.getDimension<CoordGraph::WaveTile>(tag);
+                auto mac_tile_tag               = m_graph.mapper.get<CoordGraph::MacroTile>(tag);
+                auto vgpr_tag                   = m_graph.mapper.get<CoordGraph::VGPR>(tag);
+                auto vgpr_block_tag = m_graph.mapper.get<CoordGraph::VGPRBlockNumber>(tag);
+                auto vgpr_index_tag = m_graph.mapper.get<CoordGraph::VGPRBlockIndex>(tag);
+
+                // Move the argument pointer into v_ptr
+                Register::ValuePtr s_ptr;
+                co_yield m_context->argLoader()->getValue(user.argumentName(), s_ptr);
+
+                auto bufDesc = BufferDescriptor(m_context);
+                auto bufOpt  = BufferInstructionOptions();
+
+                co_yield bufDesc.setup();
+                co_yield bufDesc.setBasePointer(s_ptr);
+
+                auto [vgpr_block_offset_reg, vgpr_block_stride_reg]
+                    = getOffsetAndStride<Graph::Direction::Upstream>(vgpr_block_tag);
+                auto [vgpr_index_offset_reg, vgpr_index_stride_reg]
+                    = getOffsetAndStride<Graph::Direction::Upstream>(vgpr_index_tag);
+
+                AssertFatal(vgpr_block_offset_reg, "Invalid VGPR BLOCK offset register.");
+                AssertFatal(vgpr_block_stride_reg, "Invalid VGPR BLOCK stride register.");
+                AssertFatal(vgpr_index_stride_reg, "Invalid VGPR INDEX stride register.");
+
+                uint num_elements = wave_tile.sizes[0] * wave_tile.sizes[1];
+                uint wfs          = m_context->kernel()->wavefront_size();
+                uint num_vgpr     = num_elements / wfs;
+
+                if(load.vtype == DataType::Half)
+                {
+                    auto tmpl = Register::Value::Placeholder(
+                        m_context, Register::Type::Vector, DataType::Halfx2, num_vgpr / 2);
+
+                    auto vgpr = m_context->registerTagManager()->getRegister(mac_tile_tag, tmpl);
+                    co_yield Register::AllocateIfNeeded(vgpr);
+
+                    auto offset1 = Register::Value::Placeholder(
+                        m_context, Register::Type::Vector, DataType::Int64, 1);
+                    auto offset2 = Register::Value::Placeholder(
+                        m_context, Register::Type::Vector, DataType::Int64, 1);
+
+                    for(uint ablk = 0; ablk < num_vgpr / 4; ++ablk)
+                    {
+                        co_yield copy(vgpr_index_offset_reg, vgpr_block_offset_reg);
+                        for(uint aidx = 0; aidx < 4; aidx += 2)
+                        {
+                            uint a = ablk * 4 + aidx;
+
+                            co_yield copy(offset1, vgpr_index_offset_reg);
+                            co_yield generate(vgpr_index_offset_reg,
+                                              vgpr_index_offset_reg->expression()
+                                                  + vgpr_index_stride_reg->expression());
+                            co_yield copy(offset2, vgpr_index_offset_reg);
+                            co_yield generate(vgpr_index_offset_reg,
+                                              vgpr_index_offset_reg->expression()
+                                                  + vgpr_index_stride_reg->expression());
+
+                            co_yield m_context->mem()->loadAndPackBuffer(
+                                vgpr->element({static_cast<int>(a / 2)}),
+                                offset1,
+                                offset2,
+                                bufDesc,
+                                bufOpt);
+                        }
+                        if(ablk < num_vgpr / 4 - 1)
+                            co_yield generate(vgpr_block_offset_reg,
+                                              vgpr_block_offset_reg->expression()
+                                                  + vgpr_block_stride_reg->expression());
+                    }
+                }
+                else
+                {
+                    auto tmpl = Register::Value::Placeholder(
+                        m_context, Register::Type::Vector, load.vtype, num_vgpr);
+
+                    auto vgpr = m_context->registerTagManager()->getRegister(mac_tile_tag, tmpl);
+                    co_yield Register::AllocateIfNeeded(vgpr);
+
+                    auto numBytes = (uint)DataTypeInfo::Get(vgpr->variableType()).elementSize;
+
+                    for(uint ablk = 0; ablk < num_vgpr / 4; ++ablk)
+                    {
+                        co_yield copy(vgpr_index_offset_reg, vgpr_block_offset_reg);
+                        for(uint aidx = 0; aidx < 4; ++aidx)
+                        {
+                            uint a = ablk * 4 + aidx;
+
+                            co_yield m_context->mem()->loadBuffer(
+                                vgpr->element({static_cast<int>(a)}),
+                                vgpr_index_offset_reg->subset({0}),
+                                0,
+                                bufDesc,
+                                bufOpt,
+                                numBytes);
+
+                            if(aidx < 3)
+                                co_yield generate(vgpr_index_offset_reg,
+                                                  vgpr_index_offset_reg->expression()
+                                                      + vgpr_index_stride_reg->expression());
+                        }
+                        if(ablk < num_vgpr / 4 - 1)
+                            co_yield generate(vgpr_block_offset_reg,
+                                              vgpr_block_offset_reg->expression()
+                                                  + vgpr_block_stride_reg->expression());
                     }
                 }
             }
@@ -1843,7 +2050,8 @@ namespace rocRoller
                                               ControlHypergraph::LoadTiled const& load,
                                               CoordGraph::Transformer             coords)
             {
-                rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::LoadTiled()");
+                rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::LoadTiled({})",
+                                                   tag);
                 co_yield_(Instruction::Comment("GEN: LoadTiled"));
 
                 auto [mac_tile_tag, mac_tile] = m_graph.getDimension<CoordGraph::MacroTile>(tag);
@@ -1855,8 +2063,23 @@ namespace rocRoller
                     co_yield loadMacroTileVGPR(tag, load, coords);
                     break;
                 case MemoryType::WAVE:
-                    co_yield loadMacroTileWAVE(tag, load, coords);
-                    break;
+                {
+                    switch(mac_tile.layoutType)
+                    {
+                    case LayoutType::MATRIX_A:
+                        co_yield loadMacroTileWAVECI(tag, load, coords, 1);
+                        break;
+                    case LayoutType::MATRIX_B:
+                        co_yield loadMacroTileWAVECI(tag, load, coords, 0);
+                        break;
+                    case LayoutType::MATRIX_ACCUMULATOR:
+                        co_yield loadMacroTileWAVECIACCUM(tag, load, coords);
+                        break;
+                    default:
+                        Throw<FatalError>("Layout type not supported yet.");
+                    }
+                }
+                break;
                 default:
                     Throw<FatalError>("Tile affinity type not supported yet.");
                 }
@@ -1913,18 +2136,21 @@ namespace rocRoller
                                               ControlHypergraph::LoadVGPR const& load,
                                               CoordGraph::Transformer            coords)
             {
-                rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::LoadVGPR()");
+                rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::LoadVGPR({})", tag);
                 co_yield_(Instruction::Comment("GEN: LoadVGPR"));
 
                 auto [userTag, user] = m_graph.getDimension<CoordGraph::User>(tag);
                 auto [vgprTag, vgpr] = m_graph.getDimension<CoordGraph::VGPR>(tag);
 
+                rocRoller::Log::getLogger()->debug(
+                    "KernelGraph::CodeGenerator::LoadVGPR({}): User({}), VGPR({})",
+                    tag,
+                    userTag,
+                    vgprTag);
+
                 auto dst = m_context->registerTagManager()->getRegister(
                     vgprTag, Register::Type::Vector, load.vtype.dataType);
                 co_yield Register::AllocateIfNeeded(dst);
-
-                rocRoller::Log::getLogger()->debug(
-                    "KernelGraph::CodeGenerator::LoadVGPR(): dst tag {}", vgprTag);
 
                 if(load.scalar)
                 {
@@ -2016,6 +2242,20 @@ namespace rocRoller
                 auto [macA_tag, macA] = m_graph.getDimension<CoordGraph::MacroTile>(tag, 0);
                 auto [macB_tag, macB] = m_graph.getDimension<CoordGraph::MacroTile>(tag, 1);
 
+                auto n_macA_y_tags
+                    = m_graph.coordinates
+                          .findNodes(userA_tag,
+                                     [&](int index) -> bool {
+                                         auto node
+                                             = m_graph.coordinates.get<CoordGraph::MacroTileNumber>(
+                                                 index);
+                                         if(node)
+                                             return node->dim == 1;
+                                         return false;
+                                     })
+                          .to<std::vector>();
+                AssertFatal(n_macA_y_tags.size() == 1);
+
                 auto n_waveA_y_tags
                     = m_graph.coordinates
                           .findNodes(userA_tag,
@@ -2029,6 +2269,20 @@ namespace rocRoller
                                      })
                           .to<std::vector>();
                 AssertFatal(n_waveA_y_tags.size() == 1);
+
+                auto n_macB_x_tags
+                    = m_graph.coordinates
+                          .findNodes(userB_tag,
+                                     [&](int index) -> bool {
+                                         auto node
+                                             = m_graph.coordinates.get<CoordGraph::MacroTileNumber>(
+                                                 index);
+                                         if(node)
+                                             return node->dim == 0;
+                                         return false;
+                                     })
+                          .to<std::vector>();
+                AssertFatal(n_macA_y_tags.size() == 1);
 
                 auto n_waveB_x_tags
                     = m_graph.coordinates
@@ -2052,6 +2306,16 @@ namespace rocRoller
                 auto loadAB = m_graph.control.getOutputNodeIndices<ControlHypergraph::Body>(tag)
                                   .to<std::set>();
 
+                auto [mac_offset_x_reg, mac_stride_x_reg]
+                    = getOffsetAndStride<Graph::Direction::Upstream>(n_macA_y_tags.front());
+                auto [wave_offset_x_reg, wave_stride_x_reg]
+                    = getOffsetAndStride<Graph::Direction::Upstream>(n_waveA_y_tags.front());
+
+                auto [mac_offset_y_reg, mac_stride_y_reg]
+                    = getOffsetAndStride<Graph::Direction::Upstream>(n_macB_x_tags.front());
+                auto [wave_offset_y_reg, wave_stride_y_reg]
+                    = getOffsetAndStride<Graph::Direction::Upstream>(n_waveB_x_tags.front());
+
                 AssertFatal(macA.sizes[1] == macB.sizes[0], "MacroTile size mismatch.");
 
                 uint num_elements = waveA.sizes[0] * waveB.sizes[1];
@@ -2067,6 +2331,9 @@ namespace rocRoller
 
                 // D is not initialized here
 
+                co_yield copy(wave_offset_x_reg, mac_offset_x_reg);
+                co_yield copy(wave_offset_y_reg, mac_offset_y_reg);
+
                 uint const num_wave_tiles = macA.sizes[1] / waveA.sizes[1];
                 for(uint k = 0; k < num_wave_tiles; k++)
                 {
@@ -2079,8 +2346,8 @@ namespace rocRoller
 
                     co_yield generate(loadAB, coords);
 
-                    waveA.vgpr = m_context->registerTagManager()->getRegister(waveA_tag);
-                    waveB.vgpr = m_context->registerTagManager()->getRegister(waveB_tag);
+                    waveA.vgpr = m_context->registerTagManager()->getRegister(macA_tag);
+                    waveB.vgpr = m_context->registerTagManager()->getRegister(macB_tag);
 
                     Expression::ExpressionPtr A = std::make_shared<Expression::Expression>(
                         std::make_shared<CoordGraph::WaveTile>(waveA));
@@ -2090,6 +2357,14 @@ namespace rocRoller
                     co_yield generate(D,
                                       std::make_shared<Expression::Expression>(
                                           Expression::MatrixMultiply(A, B, D->expression())));
+
+                    co_yield generate(wave_offset_x_reg,
+                                      wave_offset_x_reg->expression()
+                                          + wave_stride_x_reg->expression());
+
+                    co_yield generate(wave_offset_y_reg,
+                                      wave_offset_y_reg->expression()
+                                          + wave_stride_y_reg->expression());
                 }
             }
 
@@ -2120,15 +2395,15 @@ namespace rocRoller
 
                 auto vgpr = m_context->registerTagManager()->getRegister(mac_tile_tag);
 
-                auto rowOffset = MkSGPR(DataType::Int64);
-                co_yield m_context->argLoader()->getValue(user.argumentName(), rowOffset);
+                auto baseAddress = MkSGPR(DataType::Int64);
+                co_yield m_context->argLoader()->getValue(user.argumentName(), baseAddress);
 
                 auto numBytes = DataTypeInfo::Get(vgpr->variableType()).elementSize;
                 auto bufDesc  = BufferDescriptor(m_context);
                 auto bufOpt   = BufferInstructionOptions();
 
                 co_yield bufDesc.setup();
-                co_yield bufDesc.setBasePointer(rowOffset);
+                co_yield bufDesc.setBasePointer(baseAddress);
 
                 auto const m = mac_tile.subTileSizes[0];
                 auto const n = mac_tile.subTileSizes[1];
@@ -2159,8 +2434,8 @@ namespace rocRoller
                     co_yield generate(colStride, expr * L(numBytes));
                 }
 
-                auto rowOffsetExpr = rowOffset->expression();
-                auto rowStrideExpr = rowStride->expression();
+                auto baseAddressExpr = baseAddress->expression();
+                auto rowStrideExpr   = rowStride->expression();
 
                 // TODO multidimensional tiles
                 for(int i = 0; i < m; ++i)
@@ -2181,9 +2456,98 @@ namespace rocRoller
                     }
                     if(i < m - 1)
                     {
-                        co_yield generate(rowOffset, rowOffsetExpr + rowStrideExpr);
+                        co_yield generate(baseAddress, baseAddressExpr + rowStrideExpr);
+                        co_yield bufDesc.setBasePointer(baseAddress);
                     }
-                    co_yield bufDesc.setBasePointer(rowOffset);
+                }
+            }
+
+            Generator<Instruction> storeMacroTileWAVECI(int                                  tag,
+                                                        ControlHypergraph::StoreTiled const& store,
+                                                        CoordGraph::Transformer              coords)
+
+            {
+                rocRoller::Log::getLogger()->debug(
+                    "KernelGraph::CodeGenerator::storeMacroTileWAVE()");
+                co_yield_(Instruction::Comment("GEN: storeMacroTileWAVE"));
+
+                auto [user_tag, user]           = m_graph.getDimension<CoordGraph::User>(tag);
+                auto [mac_tile_tag, mac_tile]   = m_graph.getDimension<CoordGraph::MacroTile>(tag);
+                auto [wave_tile_tag, wave_tile] = m_graph.getDimension<CoordGraph::WaveTile>(tag);
+                auto [vgpr_tag, vgpr]           = m_graph.getDimension<CoordGraph::VGPR>(tag);
+                auto vgpr_block_tag = m_graph.mapper.get<CoordGraph::VGPRBlockNumber>(tag);
+                auto vgpr_index_tag = m_graph.mapper.get<CoordGraph::VGPRBlockIndex>(tag);
+
+                uint num_elements = wave_tile.sizes[0] * wave_tile.sizes[1];
+                uint wfs          = m_context->kernel()->wavefront_size();
+                uint num_vgpr     = num_elements / wfs;
+
+                auto agpr = m_context->registerTagManager()->getRegister(mac_tile_tag);
+
+                AssertFatal(agpr->registerCount() == num_vgpr);
+
+                Register::ValuePtr s_ptr;
+                co_yield m_context->argLoader()->getValue(user.argumentName(), s_ptr);
+
+                auto bufDesc = BufferDescriptor(m_context);
+                auto bufOpt  = BufferInstructionOptions();
+
+                co_yield bufDesc.setup();
+                co_yield bufDesc.setBasePointer(s_ptr);
+
+                auto [vgpr_block_offset_reg, vgpr_block_stride_reg]
+                    = getOffsetAndStride<Graph::Direction::Upstream>(vgpr_block_tag);
+                auto [vgpr_index_offset_reg, vgpr_index_stride_reg]
+                    = getOffsetAndStride<Graph::Direction::Upstream>(vgpr_index_tag);
+
+                AssertFatal(vgpr_block_offset_reg, "Invalid VGPR BLOCK offset register.");
+                AssertFatal(vgpr_block_stride_reg, "Invalid VGPR BLOCK stride register.");
+                AssertFatal(vgpr_index_stride_reg, "Invalid VGPR INDEX stride register.");
+
+                auto numBytes  = DataTypeInfo::Get(store.dataType).elementSize;
+                auto value     = MkVGPR(agpr->variableType());
+                auto converted = MkVGPR(store.dataType);
+
+                for(uint ablk = 0; ablk < num_vgpr / 4; ++ablk)
+                {
+                    co_yield copy(vgpr_index_offset_reg, vgpr_block_offset_reg);
+                    for(uint aidx = 0; aidx < 4; ++aidx)
+                    {
+                        uint a = ablk * 4 + aidx;
+                        if(value->variableType() != store.dataType)
+                        {
+                            co_yield m_context->copier()->copy(
+                                value, agpr->element({static_cast<int>(a)}));
+                            co_yield Expression::generate(
+                                converted,
+                                convert(store.dataType,
+                                        std::make_shared<Expression::Expression>(value)),
+                                m_context);
+                        }
+                        else
+                        {
+                            co_yield m_context->copier()->copy(
+                                converted, agpr->element({static_cast<int>(a)}));
+                        }
+                        //v_accvgpr_read for V_MFMA with 2 pass instructions is 4, 10 for 8 pass instruction
+                        // and 18 for 16 pass instructions like V_MFMA_F32_32x32x8F16
+                        co_yield Instruction::Nop(18, "Nops required for v_accvgpr_read");
+                        co_yield m_context->mem()->storeBuffer(converted,
+                                                               vgpr_index_offset_reg->subset({0}),
+                                                               0,
+                                                               bufDesc,
+                                                               bufOpt,
+                                                               numBytes);
+
+                        if(aidx < 3)
+                            co_yield generate(vgpr_index_offset_reg,
+                                              vgpr_index_offset_reg->expression()
+                                                  + vgpr_index_stride_reg->expression());
+                    }
+                    if(ablk < num_vgpr / 4 - 1)
+                        co_yield generate(vgpr_block_offset_reg,
+                                          vgpr_block_offset_reg->expression()
+                                              + vgpr_block_stride_reg->expression());
                 }
             }
 
@@ -2270,7 +2634,7 @@ namespace rocRoller
                     co_yield storeMacroTileVGPR(tag, store, coords);
                     break;
                 case MemoryType::WAVE:
-                    co_yield storeMacroTileWAVE(tag, store, coords);
+                    co_yield storeMacroTileWAVECI(tag, store, coords);
                     break;
                 default:
                     Throw<FatalError>("Tile affinity type not supported yet.");

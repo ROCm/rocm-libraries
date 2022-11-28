@@ -344,36 +344,65 @@ namespace rocRoller
                     "KernelGraph::copyEdge(): Edge {} -> Edge {}", edge, newEdge);
             }
 
-            void copyOperation(KernelHypergraph&       graph,
-                               KernelHypergraph const& original,
-                               GraphReindexer&         reindexer,
-                               int                     tag)
+            /**
+             * @brief Reconnect inputs from original operation to new operation.
+             */
+            void reconnectOperation(KernelHypergraph&       graph,
+                                    KernelHypergraph const& original,
+                                    GraphReindexer&         reindexer,
+                                    int                     new_tag,
+                                    int                     old_tag)
             {
-                auto location = original.control.getLocation(tag);
+                auto location = original.control.getLocation(old_tag);
 
-                auto op = graph.control.addElement(original.control.getElement(tag));
                 for(auto const& input : location.incoming)
                 {
                     int parent = *original.control.getNeighbours<Graph::Direction::Upstream>(input)
                                       .begin();
                     AssertFatal(reindexer.control.count(parent) > 0,
                                 "Missing control input: ",
-                                ShowValue(tag),
+                                ShowValue(old_tag),
                                 ShowValue(input),
                                 ShowValue(parent));
-                    graph.control.addElement(
-                        original.control.getElement(input), {reindexer.control.at(parent)}, {op});
+                    graph.control.addElement(original.control.getElement(input),
+                                             {reindexer.control.at(parent)},
+                                             {new_tag});
                 }
+            }
 
-                for(auto const& c : original.mapper.getConnections(tag))
+            /**
+             * @brief Reconnect mappings from original operation to new operation.
+             */
+            void reconnectMappings(KernelHypergraph&       graph,
+                                   KernelHypergraph const& original,
+                                   GraphReindexer&         reindexer,
+                                   int                     new_tag,
+                                   int                     old_tag)
+            {
+                for(auto const& c : original.mapper.getConnections(old_tag))
                 {
                     AssertFatal(reindexer.coordinates.count(c.coordinate) > 0,
                                 "Missing mapped coordinate: ",
-                                ShowValue(tag),
+                                ShowValue(old_tag),
                                 ShowValue(c.coordinate));
                     graph.mapper.connect(
-                        op, reindexer.coordinates.at(c.coordinate), c.tindex, c.subDimension);
+                        new_tag, reindexer.coordinates.at(c.coordinate), c.tindex, c.subDimension);
                 }
+            }
+
+            /**
+             * @brief Copy operation from original graph to new graph.
+             *
+             * Inputs and mappings are preserved.
+             */
+            void copyOperation(KernelHypergraph&       graph,
+                               KernelHypergraph const& original,
+                               GraphReindexer&         reindexer,
+                               int                     tag)
+            {
+                auto op = graph.control.addElement(original.control.getElement(tag));
+                reconnectOperation(graph, original, reindexer, op, tag);
+                reconnectMappings(graph, original, reindexer, op, tag);
 
                 reindexer.control.emplace(tag, op);
             }
@@ -411,6 +440,8 @@ namespace rocRoller
 
             MAKE_EDGE_VISITOR(ConstructMacroTile);
             MAKE_EDGE_VISITOR(DataFlow);
+            MAKE_EDGE_VISITOR(Offset);
+            MAKE_EDGE_VISITOR(Stride);
             MAKE_EDGE_VISITOR(DestructMacroTile);
             MAKE_EDGE_VISITOR(Flatten);
             MAKE_EDGE_VISITOR(Forget);
@@ -438,6 +469,7 @@ namespace rocRoller
             MAKE_OPERATION_VISITOR(Assign);
             MAKE_OPERATION_VISITOR(UnrollOp);
             MAKE_OPERATION_VISITOR(Barrier);
+            MAKE_OPERATION_VISITOR(ComputeIndex);
 
             virtual void visitEdge(KernelHypergraph&                          graph,
                                    KernelHypergraph const&                    original,

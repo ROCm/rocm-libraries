@@ -4,6 +4,7 @@
 #include "CoordGraph/CoordinateHypergraph.hpp"
 
 #include "ControlToCoordinateMapper.hpp"
+#include "Utilities/Error.hpp"
 
 namespace rocRoller
 {
@@ -27,8 +28,15 @@ namespace rocRoller
             {
                 int  tag     = mapper.get<T>(controlIndex, subDimension);
                 auto element = coordinates.getElement(tag);
-                AssertFatal(std::holds_alternative<CoordGraph::Dimension>(element));
+                AssertFatal(std::holds_alternative<CoordGraph::Dimension>(element),
+                            "Invalid connection: element isn't a Dimension.",
+                            ShowValue(controlIndex));
                 auto dim = std::get<CoordGraph::Dimension>(element);
+                AssertFatal(std::holds_alternative<T>(dim),
+                            "Invalid connection: Dimension type mismatch.",
+                            ShowValue(controlIndex),
+                            ShowValue(typeid(T).name()),
+                            ShowValue(dim));
                 return {tag, std::get<T>(dim)};
             }
         };

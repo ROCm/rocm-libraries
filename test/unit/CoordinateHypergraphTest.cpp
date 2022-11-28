@@ -155,8 +155,7 @@ namespace rocRollerTest
 
             EXPECT_EQ(Expression::toString(exprs_reverse[2]), "Modulo(5i, 16j)");
             EXPECT_EQ(Expression::toString(exprs_reverse[1]), "Modulo(Divide(5i, 16j), 32j)");
-            EXPECT_EQ(Expression::toString(exprs_reverse[0]),
-                      "Modulo(Divide(Divide(5i, 16j), 32j), 64j)");
+            EXPECT_EQ(Expression::toString(exprs_reverse[0]), "Divide(Divide(5i, 16j), 32j)");
         }
 
         {
@@ -667,7 +666,7 @@ namespace rocRollerTest
 
         exprs = coords.forwardStride(tile_y, Expression::literal(2u), {D});
         sexpr = Expression::toString(exprs[0]);
-        EXPECT_EQ(sexpr, "600j");
+        EXPECT_EQ(sexpr, "32j");
     }
 
     TEST_F(CoordinateHypergraphTest, WaveTileBasic)

@@ -246,6 +246,7 @@ set(rocroller_src
  lib/source/KernelGraph/CoordinateTransform/Dimension.cpp
  lib/source/KernelGraph/CoordinateTransform/HyperGraph.cpp
  lib/source/KernelGraph/CoordinateTransform/Transformer.cpp
+ lib/source/KernelGraph/Transformations/AddComputeIndex.cpp
  lib/source/KernelGraph/Transformations/CleanGraph.cpp
  lib/source/KernelGraph/Transformations/KernelGraph_loop.cpp
  lib/source/KernelGraph/Transformations/KernelGraph_unrollKernel.cpp

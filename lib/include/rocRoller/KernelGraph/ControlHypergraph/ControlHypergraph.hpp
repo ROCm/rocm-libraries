@@ -35,24 +35,29 @@ namespace rocRoller
             {
             }
 
+            /**
+             * @brief Get a node/edge from the control graph.
+             *
+             * If the element specified by tag cannot be converted to
+             * T, the return value is empty.
+             *
+             * @param tag Graph tag/index.
+             */
             template <typename T>
-            Generator<T> findOperations(int start) const
-            {
-                for(auto const x : depthFirstVisit(start))
-                {
-                    auto element = getElement(x);
-                    if(std::holds_alternative<Operation>(element))
-                    {
-                        auto operation = std::get<Operation>(element);
-                        if(std::holds_alternative<T>(operation))
-                        {
-                            co_yield std::get<T>(operation);
-                        }
-                    }
-                }
-            }
+            requires(std::constructible_from<ControlHypergraph::Element, T>) std::optional<T> get(
+                int tag)
+            const;
 
         private:
         };
+
+        /**
+         * @brief Determine if x holds an Operation of type T.
+         */
+        template <typename T>
+        bool isOperation(auto x);
+
     }
 }
+
+#include "ControlHypergraph_impl.hpp"

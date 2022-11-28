@@ -60,8 +60,11 @@ namespace rocRoller
 
             std::vector<Expression::ExpressionPtr> operator()(Tile const& e)
             {
+                AssertFatal(srcs.size() == 1, ShowValue(srcs.size()));
                 std::vector<Expression::ExpressionPtr> rv(dsts.size());
 
+                // TODO: Is dividing by first stride necessary?
+                // TODO: Audit/test this for > 2 destinations
                 auto input = indexes[0] / getStride(srcs[0]);
 
                 for(size_t i = 1; i < dsts.size(); i++)
@@ -104,14 +107,13 @@ namespace rocRoller
                 std::vector<Expression::ExpressionPtr> rv(srcs.size());
 
                 auto input = indexes[0];
-
-                for(int i = srcs.size() - 1; i >= 0; i--)
+                for(int i = srcs.size() - 1; i > 0; i--)
                 {
-                    auto mysrc = srcs[i];
-                    auto size  = getSize(mysrc);
-                    rv[i]      = input % size;
-                    input      = input / size;
+                    auto size = getSize(srcs[i]);
+                    rv[i]     = input % size;
+                    input     = input / size;
                 }
+                rv[0] = input;
                 return rv;
             }
 

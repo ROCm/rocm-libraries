@@ -79,6 +79,9 @@ namespace rocRoller
         KernelHypergraph
             lowerTile(KernelHypergraph, std::shared_ptr<CommandParameters>, ContextPtr);
 
+        KernelHypergraph addComputeIndexAB(KernelHypergraph const&, int, int, int);
+        KernelHypergraph addComputeIndexC(KernelHypergraph const&, int, int, bool);
+
         /**
          * Rewrite KernelGraphs to make sure no more CommandArgument
          * values are present within the graph.

@@ -232,50 +232,25 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult)
     // TODO: Calculate these values internally based on workgroup sizes.
     params->setWaveTilesPerWavefront(wavetile_per_wavefront_m, wavetile_per_wavefront_n);
 
-    auto mac_tile_0 = KernelGraph::CoordinateTransform::MacroTile( // A
-        0,
-        {result.mac_m, result.mac_k},
-        LayoutType::MATRIX_A,
-        {wave_m, wave_n, wave_k, wave_b});
-    auto mac_tile_1 = KernelGraph::CoordinateTransform::MacroTile( // B
-        1,
-        {result.mac_k, result.mac_n},
-        LayoutType::MATRIX_B,
-        {wave_m, wave_n, wave_k, wave_b});
-    auto mac_tile_2 = KernelGraph::CoordinateTransform::MacroTile( // C
-        2,
-        {result.mac_m, result.mac_n},
-        LayoutType::MATRIX_ACCUMULATOR,
-        {wave_m, wave_n, wave_k, wave_b});
-    auto mac_tile_5 = KernelGraph::CoordinateTransform::MacroTile( // A * B
-        5,
-        {result.mac_m, result.mac_n},
-        LayoutType::MATRIX_ACCUMULATOR,
-        {wave_m, wave_n, wave_k, wave_b});
-    auto mac_tile_6 = KernelGraph::CoordinateTransform::MacroTile( // alpha * (A * B)
-        6,
-        {result.mac_m, result.mac_n},
-        LayoutType::MATRIX_ACCUMULATOR,
-        {wave_m, wave_n, wave_k, wave_b});
-    auto mac_tile_7 = KernelGraph::CoordinateTransform::MacroTile( // beta * C
-        7,
-        {result.mac_m, result.mac_n},
-        LayoutType::MATRIX_ACCUMULATOR,
-        {wave_m, wave_n, wave_k, wave_b});
-    auto mac_tile_8 = KernelGraph::CoordinateTransform::MacroTile( // D
-        8,
-        {result.mac_m, result.mac_n},
-        LayoutType::MATRIX_ACCUMULATOR,
-        {wave_m, wave_n, wave_k, wave_b},
-        true);
+    auto mac_tile_A = KernelGraph::CoordGraph::MacroTile(
+        {result.mac_m, result.mac_k}, LayoutType::MATRIX_A, {wave_m, wave_n, wave_k, wave_b});
+    auto mac_tile_B = KernelGraph::CoordGraph::MacroTile(
+        {result.mac_k, result.mac_n}, LayoutType::MATRIX_B, {wave_m, wave_n, wave_k, wave_b});
+    auto mac_tile_C = KernelGraph::CoordGraph::MacroTile({result.mac_m, result.mac_n},
+                                                         LayoutType::MATRIX_ACCUMULATOR,
+                                                         {wave_m, wave_n, wave_k, wave_b});
 
-    params->setDimensionInfo(mac_tile_0);
-    params->setDimensionInfo(mac_tile_1);
-    params->setDimensionInfo(mac_tile_2);
-    params->setDimensionInfo(mac_tile_5);
-    params->setDimensionInfo(mac_tile_6);
-    params->setDimensionInfo(mac_tile_7);
-    params->setDimensionInfo(mac_tile_8);
+    params->setDimensionInfo(4, mac_tile_A);
+    params->setDimensionInfo(11, mac_tile_B);
+    params->setDimensionInfo(18, mac_tile_C);
+    params->setDimensionInfo(30, mac_tile_C);
+    params->setDimensionInfo(32, mac_tile_C);
+    params->setDimensionInfo(34, mac_tile_C);
+
+    params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
+    params->setManualWorkitemCount({NX, NY, NZ});
+
+    auto params2 = std::make_shared<CommandParameters>();
 
     auto one         = Expression::literal(1u);
     auto wavefront_n = Expression::literal(
@@ -286,28 +261,68 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult)
     auto wavefront_ny
         = Expression::literal(static_cast<uint>(result.mac_n / wave_n / wavetile_per_wavefront_n));
 
-    std::vector<int> ctags_with_wavefronts = {0, 1, 2, 8};
-    for(auto ctag : ctags_with_wavefronts)
-    {
-        bool output = ctag == 8;
-        params->setDimensionInfo(
-            KernelGraph::CoordinateTransform::Wavefront(ctag, -1, wavefront_n, one, output));
-        params->setDimensionInfo(
-            KernelGraph::CoordinateTransform::Wavefront(ctag, 0, wavefront_nx, one, output));
-        params->setDimensionInfo(
-            KernelGraph::CoordinateTransform::Wavefront(ctag, 1, wavefront_ny, one, output));
-    }
+    auto WF  = KernelGraph::CoordGraph::Wavefront(-1, wavefront_n, one);
+    auto WFX = KernelGraph::CoordGraph::Wavefront(0, wavefront_nx, one);
+    auto WFY = KernelGraph::CoordGraph::Wavefront(1, wavefront_ny, one);
 
-    params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
-    params->setManualWorkitemCount({NX, NY, NZ});
+    params2->setDimensionInfo(59, WF); // A
+    params2->setDimensionInfo(57, WFX);
+    params2->setDimensionInfo(58, WFY);
+    params2->setDimensionInfo(94, WF); // B
+    params2->setDimensionInfo(92, WFX);
+    params2->setDimensionInfo(93, WFY);
+    params2->setDimensionInfo(129, WF); // C
+    params2->setDimensionInfo(127, WFX);
+    params2->setDimensionInfo(128, WFY);
+    params2->setDimensionInfo(184, WF); // D
+    params2->setDimensionInfo(182, WFX);
+    params2->setDimensionInfo(183, WFY);
 
     // Build GEMM kernel
-    CommandKernel commandKernel(command, "GEMM", params);
+    // reenable this after graph rearch done
+    // CommandKernel commandKernel(command, "GEMM", params);
+
+    // delete this after graph rearch done
+    // from here...
+    auto context = Context::ForDefaultHipDevice("GEMM_CLIENT");
+    context->kernel()->setKernelDimensions(2);
+    context->kernel()->setWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
+    context->kernel()->setWorkitemCount({NX, NY, NZ});
+
+    context->kernel()->addCommandArguments(command->getArguments());
+    auto kgraph = KernelGraph::translate2(command);
+    kgraph      = KernelGraph::updateParameters(kgraph, params);
+    kgraph      = KernelGraph::lowerTile(kgraph, params, context);
+    kgraph      = KernelGraph::cleanArguments(kgraph, context->kernel());
+    kgraph      = KernelGraph::updateParameters(kgraph, params2);
+
+    context->schedule(context->kernel()->preamble());
+    context->schedule(context->kernel()->prolog());
+    context->schedule(KernelGraph::generate(kgraph, context->kernel()));
+    context->schedule(context->kernel()->postamble());
+    context->schedule(context->kernel()->amdgpu_metadata());
+
+    auto executableKernel = context->instructions()->getExecutableKernel();
+
+    KernelArguments kargs;
+    for(auto& arg : context->kernel()->arguments())
+    {
+        auto value = evaluate(arg.expression, runtimeArgs.runtimeArguments());
+        kargs.append(arg.name, value);
+    }
+
+    KernelInvocation kinv;
+    kinv.workgroupSize    = context->kernel()->workgroupSize();
+    kinv.workitemCount[0] = num_workgroup_x * workgroup_size_x;
+    kinv.workitemCount[1] = num_workgroup_y * workgroup_size_y;
+    // ...to here
 
     // Warmup runs
     for(int i = 0; i < result.numWarmUp; ++i)
     {
-        commandKernel.launchKernel(runtimeArgs.runtimeArguments());
+        // swap after graph rearch complete
+        // commandKernel.launchKernel(runtimeArgs.runtimeArguments());
+        executableKernel->executeKernel(kargs, kinv);
     }
 
     // Benchmark runs
@@ -317,7 +332,9 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult)
         HIP_TIC(t_kernel);
         for(int inner = 0; inner < result.numInner; ++inner)
         {
-            commandKernel.launchKernel(runtimeArgs.runtimeArguments());
+            // swap after graph rearch complete
+            // commandKernel.launchKernel(runtimeArgs.runtimeArguments());
+            executableKernel->executeKernel(kargs, kinv);
         }
         HIP_TOC(t_kernel);
         HIP_SYNC(t_kernel);

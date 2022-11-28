@@ -8,6 +8,7 @@ namespace rocRoller
     {
         struct Assign;
         struct Barrier;
+        struct ComputeIndex;
         struct ElementOp;
         struct ForLoopOp;
         struct Kernel;
@@ -26,6 +27,7 @@ namespace rocRoller
 
         using Operation = std::variant<Assign,
                                        Barrier,
+                                       ComputeIndex,
                                        ElementOp,
                                        ForLoopOp,
                                        Kernel,

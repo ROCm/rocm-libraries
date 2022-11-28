@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+#include <initializer_list>
 #include <string>
 #include <vector>
 
@@ -109,6 +111,8 @@ namespace rocRoller
 
             size_t valueCount = 1;
 
+            bool localScope = true;
+
             std::string toString() const
             {
                 return concatenate("Assign ", regType, " ", expression);
@@ -124,6 +128,57 @@ namespace rocRoller
             std::string toString() const
             {
                 return "Barrier";
+            }
+        };
+
+        /**
+         * @brief Computes offsets and strides between coordinates.
+         *
+         * Offsets and strides into the `target` dimension, based on
+         * incrementing the `increment` dimension.
+         *
+         * @param target Target dimension.
+         * @param increment Increment dimension
+         * @param base
+         */
+        struct ComputeIndex
+        {
+            // TODO: might be nicer to have UInt32 for strides; need
+            // to allow user to specify stride types instead of
+            // forcing size_t.
+            ComputeIndex() = default;
+            ComputeIndex(int                        target,
+                         int                        increment,
+                         int                        base,
+                         int                        offset,
+                         int                        stride,
+                         bool                       forward,
+                         DataType                   valueType,
+                         std::initializer_list<int> zero       = {},
+                         DataType                   offsetType = DataType::UInt64,
+                         DataType                   strideType = DataType::UInt64)
+                : target(target)
+                , increment(increment)
+                , base(base)
+                , offset(offset)
+                , stride(stride)
+                , forward(forward)
+                , zero(zero)
+                , valueType(valueType)
+                , offsetType(offsetType)
+                , strideType(strideType)
+            {
+            }
+
+            bool             forward;
+            int              target, increment, base, offset, stride;
+            std::vector<int> zero;
+
+            DataType valueType, offsetType, strideType;
+
+            std::string toString() const
+            {
+                return "ComputeIndex";
             }
         };
 

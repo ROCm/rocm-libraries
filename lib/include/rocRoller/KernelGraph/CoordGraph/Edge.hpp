@@ -38,6 +38,34 @@ namespace rocRoller
         };
 
         /**
+         * Offset - denotes offset between target/increment
+         * dimensions.
+         *
+         * See ComputeIndex.
+         */
+        struct Offset
+        {
+            virtual std::string toString() const
+            {
+                return "Offset";
+            }
+        };
+
+        /**
+         * Stride - denotes stride between target/increment
+         * dimensions.
+         *
+         * See ComputeIndex.
+         */
+        struct Stride
+        {
+            virtual std::string toString() const
+            {
+                return "Stride";
+            }
+        };
+
+        /**
          * Construct MacroTile.
          *
          * Joins SubDimensions to MacroTile during translation and

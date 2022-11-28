@@ -1659,42 +1659,19 @@ namespace KernelGraphTest
         int wave_k = 8;
         int wave_b = 1;
 
-        auto mac_tile_0 = KernelGraph::CoordGraph::MacroTile( // A
-            {mac_m, mac_k},
-            LayoutType::MATRIX_A,
-            {wave_m, wave_n, wave_k, wave_b});
-        auto mac_tile_1 = KernelGraph::CoordGraph::MacroTile( // B
-            {mac_k, mac_n},
-            LayoutType::MATRIX_B,
-            {wave_m, wave_n, wave_k, wave_b});
-        auto mac_tile_2 = KernelGraph::CoordGraph::MacroTile( // C
-            {mac_m, mac_n},
-            LayoutType::MATRIX_ACCUMULATOR,
-            {wave_m, wave_n, wave_k, wave_b});
-        auto mac_tile_3 = KernelGraph::CoordGraph::MacroTile( // A * B
-            {mac_m, mac_n},
-            LayoutType::MATRIX_ACCUMULATOR,
-            {wave_m, wave_n, wave_k, wave_b});
-        auto mac_tile_4 = KernelGraph::CoordGraph::MacroTile( // alpha * (A * B)
-            {mac_m, mac_n},
-            LayoutType::MATRIX_ACCUMULATOR,
-            {wave_m, wave_n, wave_k, wave_b});
-        auto mac_tile_5 = KernelGraph::CoordGraph::MacroTile( // beta * C
-            {mac_m, mac_n},
-            LayoutType::MATRIX_ACCUMULATOR,
-            {wave_m, wave_n, wave_k, wave_b});
-        auto mac_tile_6 = KernelGraph::CoordGraph::MacroTile( // D
-            {mac_m, mac_n},
-            LayoutType::MATRIX_ACCUMULATOR,
-            {wave_m, wave_n, wave_k, wave_b});
+        auto mac_tile_A = KernelGraph::CoordGraph::MacroTile(
+            {mac_m, mac_k}, LayoutType::MATRIX_A, {wave_m, wave_n, wave_k, wave_b});
+        auto mac_tile_B = KernelGraph::CoordGraph::MacroTile(
+            {mac_k, mac_n}, LayoutType::MATRIX_B, {wave_m, wave_n, wave_k, wave_b});
+        auto mac_tile_C = KernelGraph::CoordGraph::MacroTile(
+            {mac_m, mac_n}, LayoutType::MATRIX_ACCUMULATOR, {wave_m, wave_n, wave_k, wave_b});
 
-        params->setDimensionInfo(4, mac_tile_0);
-        params->setDimensionInfo(11, mac_tile_1);
-        params->setDimensionInfo(18, mac_tile_0);
-        params->setDimensionInfo(28, mac_tile_1);
-        params->setDimensionInfo(30, mac_tile_2);
-        params->setDimensionInfo(32, mac_tile_3);
-        params->setDimensionInfo(34, mac_tile_4);
+        params->setDimensionInfo(4, mac_tile_A);
+        params->setDimensionInfo(11, mac_tile_B);
+        params->setDimensionInfo(18, mac_tile_C);
+        params->setDimensionInfo(30, mac_tile_C);
+        params->setDimensionInfo(32, mac_tile_C);
+        params->setDimensionInfo(34, mac_tile_C);
 
         // Workgroup size
         uint wavefront_size   = 64;
@@ -1729,7 +1706,7 @@ namespace KernelGraphTest
 		"coord15"[label="Split(15)",shape=box];
 		"coord16"[label="MacroTile{16,256}(16)"];
 		"coord17"[label="DataFlow(17)",shape=box];
-		"coord18"[label="MacroTile{16,256}(18)"];
+		"coord18"[label="MacroTile{NA}(18)"];
 		"coord19"[label="DataFlow(19)",shape=box];
 		"coord20"[label="MacroTile{128,256}(20)"];
 		"coord21"[label="DataFlow(21)",shape=box];
@@ -1738,7 +1715,7 @@ namespace KernelGraphTest
 		"coord24"[label="SubDimension{0, CommandArgument(Load_Tiled_2_size_0)}(24)"];
 		"coord25"[label="SubDimension{1, CommandArgument(Load_Tiled_2_size_1)}(25)"];
 		"coord26"[label="Split(26)",shape=box];
-		"coord27"[label="MacroTile{128,16}(27)"];
+		"coord27"[label="MacroTile{128,256}(27)"];
 		"coord28"[label="DataFlow(28)",shape=box];
 		"coord29"[label="MacroTile{128,256}(29)"];
 		"coord30"[label="DataFlow(30)",shape=box];
@@ -1818,7 +1795,7 @@ namespace KernelGraphTest
 		"coord108"[label="MacroTileNumber{0, 1j}(108)"];
 		"coord109"[label="MacroTileNumber{1, 1j}(109)"];
 		"coord110"[label="MacroTileIndex{0, 128j}(110)"];
-		"coord111"[label="MacroTileIndex{1, 16j}(111)"];
+		"coord111"[label="MacroTileIndex{1, 256j}(111)"];
 		"coord112"[label="Workgroup{0, NA}(112)"];
 		"coord113"[label="Workgroup{1, NA}(113)"];
 		"coord114"[label="Workitem{0, NA}(114)"];
@@ -1827,18 +1804,18 @@ namespace KernelGraphTest
 		"coord117"[label="Tile(117)",shape=box];
 		"coord118"[label="PassThrough(118)",shape=box];
 		"coord119"[label="PassThrough(119)",shape=box];
-		"coord120"[label="WaveTile{256i}(120)"];
+		"coord120"[label="WaveTile{1024i}(120)"];
 		"coord121"[label="WaveTileNumber{0, 1j}(121)"];
 		"coord122"[label="WaveTileNumber{1, 1j}(122)"];
 		"coord123"[label="WaveTileIndex{0, 32j}(123)"];
-		"coord124"[label="WaveTileIndex{1, 8j}(124)"];
+		"coord124"[label="WaveTileIndex{1, 32j}(124)"];
 		"coord125"[label="Tile(125)",shape=box];
 		"coord126"[label="Tile(126)",shape=box];
 		"coord127"[label="Wavefront{0, NA}(127)"];
 		"coord128"[label="Wavefront{1, NA}(128)"];
 		"coord129"[label="Wavefront{-1, NA}(129)"];
 		"coord130"[label="Lane{32j}(130)"];
-		"coord131"[label="VGPR{8j}(131)"];
+		"coord131"[label="VGPR{32j}(131)"];
 		"coord132"[label="Flatten(132)",shape=box];
 		"coord133"[label="Flatten(133)",shape=box];
 		"coord134"[label="BlockNumber{1j}(134)"];
@@ -1846,79 +1823,127 @@ namespace KernelGraphTest
 		"coord136"[label="Flatten(136)",shape=box];
 		"coord137"[label="WaveTilePerWorkGroup{0, 2j}(137)"];
 		"coord138"[label="WaveTilePerWorkGroup{1, 2j}(138)"];
-		"coord139"[label="Flatten(139)",shape=box];
-		"coord140"[label="Tile(140)",shape=box];
-		"coord141"[label="PassThrough(141)",shape=box];
-		"coord142"[label="Tile(142)",shape=box];
-		"coord143"[label="MacroTileNumber{0, 1j}(143)"];
-		"coord144"[label="MacroTileNumber{1, 1j}(144)"];
-		"coord145"[label="MacroTileIndex{0, 128j}(145)"];
-		"coord146"[label="MacroTileIndex{1, 256j}(146)"];
-		"coord147"[label="Workgroup{0, NA}(147)"];
-		"coord148"[label="Workgroup{1, NA}(148)"];
-		"coord149"[label="Workitem{0, 1j}(149)"];
-		"coord150"[label="Flatten(150)",shape=box];
+		"coord139"[label="VGPRBlockNumber{8j}(139)"];
+		"coord140"[label="VGPRBlockIndex{4j}(140)"];
+		"coord141"[label="LANEBlockNumber{8j}(141)"];
+		"coord142"[label="LANEBlockIndex{4j}(142)"];
+		"coord143"[label="LinearBlock{64j}(143)"];
+		"coord144"[label="RowBlock{8j}(144)"];
+		"coord145"[label="ColBlock{8j}(145)"];
+		"coord146"[label="Flatten(146)",shape=box];
+		"coord147"[label="Tile(147)",shape=box];
+		"coord148"[label="Tile(148)",shape=box];
+		"coord149"[label="Flatten(149)",shape=box];
+		"coord150"[label="Tile(150)",shape=box];
 		"coord151"[label="Flatten(151)",shape=box];
 		"coord152"[label="Flatten(152)",shape=box];
-		"coord153"[label="PassThrough(153)",shape=box];
-		"coord154"[label="PassThrough(154)",shape=box];
-		"coord155"[label="WaveTile{8192i}(155)"];
-		"coord156"[label="WaveTileNumber{0, 1j}(156)"];
-		"coord157"[label="WaveTileNumber{1, 1j}(157)"];
-		"coord158"[label="WaveTileIndex{0, 32j}(158)"];
-		"coord159"[label="WaveTileIndex{1, 32j}(159)"];
-		"coord160"[label="Join(160)",shape=box];
-		"coord161"[label="VGPRBlockNumber{8j}(161)"];
-		"coord162"[label="VGPRBlockIndex{4j}(162)"];
-		"coord163"[label="LANEBlockNumber{8j}(163)"];
-		"coord164"[label="LANEBlockIndex{4j}(164)"];
-		"coord165"[label="LinearBlock{64j}(165)"];
-		"coord166"[label="RowBlock{8j}(166)"];
-		"coord167"[label="ColBlock{8j}(167)"];
-		"coord168"[label="Flatten(168)",shape=box];
-		"coord169"[label="Flatten(169)",shape=box];
-		"coord170"[label="Wavefront{0, NA}(170)"];
-		"coord171"[label="Wavefront{1, NA}(171)"];
-		"coord172"[label="Wavefront{-1, NA}(172)"];
-		"coord173"[label="Tile(173)",shape=box];
-		"coord174"[label="Lane{32j}(174)"];
-		"coord175"[label="VGPR{32j}(175)"];
-		"coord176"[label="Tile(176)",shape=box];
-		"coord177"[label="Tile(177)",shape=box];
-		"coord178"[label="Flatten(178)",shape=box];
-		"coord179"[label="Tile(179)",shape=box];
-		"coord180"[label="WaveTilePerWorkGroup{0, 2j}(180)"];
-		"coord181"[label="WaveTilePerWorkGroup{1, 2j}(181)"];
-		"coord182"[label="Flatten(182)",shape=box];
-		"coord183"[label="Flatten(183)",shape=box];
-		"coord184"[label="Flatten(184)",shape=box];
-		"coord185"[label="Flatten(185)",shape=box];
-		"coord186"[label="Tile(186)",shape=box];
-		"coord187"[label="Linear{Divide(CommandArgument(Load_Tiled_0_size_1), 16j)}(187)"];
-		"coord188"[label="ForLoop{NA}(188)"];
-		"coord189"[label="DataFlow(189)",shape=box];
-		"coord190"[label="PassThrough(190)",shape=box];
-		"coord191"[label="PassThrough(191)",shape=box];
-		"coord192"[label="Linear{2j}(192)"];
-		"coord193"[label="ForLoop{NA}(193)"];
-		"coord194"[label="DataFlow(194)",shape=box];
-		"coord195"[label="Linear{2j}(195)"];
-		"coord196"[label="ForLoop{NA}(196)"];
-		"coord197"[label="DataFlow(197)",shape=box];
-		"coord198"[label="PassThrough(198)",shape=box];
-		"coord199"[label="PassThrough(199)",shape=box];
-		"coord200"[label="PassThrough(200)",shape=box];
-		"coord201"[label="PassThrough(201)",shape=box];
+		"coord153"[label="Tile(153)",shape=box];
+		"coord154"[label="Tile(154)",shape=box];
+		"coord155"[label="MacroTileNumber{0, 1j}(155)"];
+		"coord156"[label="MacroTileNumber{1, 1j}(156)"];
+		"coord157"[label="MacroTileIndex{0, 128j}(157)"];
+		"coord158"[label="MacroTileIndex{1, 256j}(158)"];
+		"coord159"[label="Workgroup{0, NA}(159)"];
+		"coord160"[label="Workgroup{1, NA}(160)"];
+		"coord161"[label="Workitem{0, 1j}(161)"];
+		"coord162"[label="Flatten(162)",shape=box];
+		"coord163"[label="Flatten(163)",shape=box];
+		"coord164"[label="Flatten(164)",shape=box];
+		"coord165"[label="PassThrough(165)",shape=box];
+		"coord166"[label="PassThrough(166)",shape=box];
+		"coord167"[label="WaveTile{8192i}(167)"];
+		"coord168"[label="WaveTileNumber{0, 1j}(168)"];
+		"coord169"[label="WaveTileNumber{1, 1j}(169)"];
+		"coord170"[label="WaveTileIndex{0, 32j}(170)"];
+		"coord171"[label="WaveTileIndex{1, 32j}(171)"];
+		"coord172"[label="Join(172)",shape=box];
+		"coord173"[label="VGPRBlockNumber{8j}(173)"];
+		"coord174"[label="VGPRBlockIndex{4j}(174)"];
+		"coord175"[label="LANEBlockNumber{8j}(175)"];
+		"coord176"[label="LANEBlockIndex{4j}(176)"];
+		"coord177"[label="LinearBlock{64j}(177)"];
+		"coord178"[label="RowBlock{8j}(178)"];
+		"coord179"[label="ColBlock{8j}(179)"];
+		"coord180"[label="Flatten(180)",shape=box];
+		"coord181"[label="Flatten(181)",shape=box];
+		"coord182"[label="Wavefront{0, NA}(182)"];
+		"coord183"[label="Wavefront{1, NA}(183)"];
+		"coord184"[label="Wavefront{-1, NA}(184)"];
+		"coord185"[label="Tile(185)",shape=box];
+		"coord186"[label="Lane{32j}(186)"];
+		"coord187"[label="VGPR{32j}(187)"];
+		"coord188"[label="Tile(188)",shape=box];
+		"coord189"[label="Tile(189)",shape=box];
+		"coord190"[label="Flatten(190)",shape=box];
+		"coord191"[label="Tile(191)",shape=box];
+		"coord192"[label="WaveTilePerWorkGroup{0, 2j}(192)"];
+		"coord193"[label="WaveTilePerWorkGroup{1, 2j}(193)"];
+		"coord194"[label="Flatten(194)",shape=box];
+		"coord195"[label="Flatten(195)",shape=box];
+		"coord196"[label="Flatten(196)",shape=box];
+		"coord197"[label="Flatten(197)",shape=box];
+		"coord198"[label="Tile(198)",shape=box];
+		"coord199"[label="Linear{Divide(CommandArgument(Load_Tiled_0_size_1), 16j)}(199)"];
+		"coord200"[label="ForLoop{NA}(200)"];
+		"coord201"[label="DataFlow(201)",shape=box];
 		"coord202"[label="PassThrough(202)",shape=box];
 		"coord203"[label="PassThrough(203)",shape=box];
-		"coord204"[label="PassThrough(204)",shape=box];
-		"coord205"[label="PassThrough(205)",shape=box];
+		"coord204"[label="Linear{2j}(204)"];
+		"coord205"[label="ForLoop{NA}(205)"];
+		"coord206"[label="DataFlow(206)",shape=box];
+		"coord207"[label="Linear{2j}(207)"];
+		"coord208"[label="ForLoop{NA}(208)"];
+		"coord209"[label="DataFlow(209)",shape=box];
+		"coord210"[label="PassThrough(210)",shape=box];
+		"coord211"[label="PassThrough(211)",shape=box];
+		"coord212"[label="PassThrough(212)",shape=box];
+		"coord213"[label="PassThrough(213)",shape=box];
+		"coord214"[label="PassThrough(214)",shape=box];
+		"coord215"[label="PassThrough(215)",shape=box];
+		"coord216"[label="PassThrough(216)",shape=box];
+		"coord217"[label="PassThrough(217)",shape=box];
+		"coord218"[label="Offset(218)",shape=box];
+		"coord219"[label="Stride(219)",shape=box];
+		"coord220"[label="Offset(220)",shape=box];
+		"coord221"[label="Stride(221)",shape=box];
+		"coord222"[label="Offset(222)",shape=box];
+		"coord223"[label="Stride(223)",shape=box];
+		"coord224"[label="Offset(224)",shape=box];
+		"coord225"[label="Stride(225)",shape=box];
+		"coord226"[label="Offset(226)",shape=box];
+		"coord227"[label="Stride(227)",shape=box];
+		"coord228"[label="Offset(228)",shape=box];
+		"coord229"[label="Stride(229)",shape=box];
+		"coord230"[label="Offset(230)",shape=box];
+		"coord231"[label="Stride(231)",shape=box];
+		"coord232"[label="Offset(232)",shape=box];
+		"coord233"[label="Stride(233)",shape=box];
+		"coord234"[label="Offset(234)",shape=box];
+		"coord235"[label="Stride(235)",shape=box];
+		"coord236"[label="Offset(236)",shape=box];
+		"coord237"[label="Stride(237)",shape=box];
 		"coord1" -> "coord10"
 		"coord1" -> "coord12"
+		"coord1" -> "coord218"
+		"coord1" -> "coord219"
+		"coord1" -> "coord220"
+		"coord1" -> "coord221"
+		"coord1" -> "coord222"
+		"coord1" -> "coord223"
 		"coord2" -> "coord15"
 		"coord2" -> "coord17"
+		"coord2" -> "coord224"
+		"coord2" -> "coord225"
+		"coord2" -> "coord226"
+		"coord2" -> "coord227"
+		"coord2" -> "coord228"
+		"coord2" -> "coord229"
 		"coord3" -> "coord26"
 		"coord3" -> "coord28"
+		"coord3" -> "coord230"
+		"coord3" -> "coord231"
+		"coord3" -> "coord232"
+		"coord3" -> "coord233"
 		"coord4" -> "coord7"
 		"coord5" -> "coord23"
 		"coord6" -> "coord21"
@@ -1953,10 +1978,14 @@ namespace KernelGraphTest
 		"coord32" -> "coord31"
 		"coord33" -> "coord36"
 		"coord34" -> "coord36"
+		"coord35" -> "coord234"
+		"coord35" -> "coord235"
+		"coord35" -> "coord236"
+		"coord35" -> "coord237"
 		"coord36" -> "coord35"
 		"coord37" -> "coord35"
 		"coord38" -> "coord48"
-		"coord39" -> "coord190"
+		"coord39" -> "coord202"
 		"coord40" -> "coord45"
 		"coord40" -> "coord55"
 		"coord41" -> "coord56"
@@ -1985,15 +2014,15 @@ namespace KernelGraphTest
 		"coord64" -> "coord66"
 		"coord65" -> "coord66"
 		"coord66" -> "coord60"
-		"coord67" -> "coord198"
-		"coord68" -> "coord199"
+		"coord67" -> "coord210"
+		"coord68" -> "coord214"
 		"coord69" -> "coord50"
 		"coord70" -> "coord64"
 		"coord70" -> "coord61"
 		"coord71" -> "coord65"
 		"coord72" -> "coord57"
 		"coord72" -> "coord67"
-		"coord73" -> "coord191"
+		"coord73" -> "coord203"
 		"coord74" -> "coord84"
 		"coord75" -> "coord80"
 		"coord75" -> "coord90"
@@ -2023,8 +2052,8 @@ namespace KernelGraphTest
 		"coord99" -> "coord101"
 		"coord100" -> "coord101"
 		"coord101" -> "coord95"
-		"coord102" -> "coord200"
-		"coord103" -> "coord201"
+		"coord102" -> "coord211"
+		"coord103" -> "coord215"
 		"coord104" -> "coord85"
 		"coord105" -> "coord99"
 		"coord105" -> "coord96"
@@ -2044,11 +2073,12 @@ namespace KernelGraphTest
 		"coord117" -> "coord111"
 		"coord118" -> "coord112"
 		"coord119" -> "coord113"
-		"coord121" -> "coord142"
-		"coord123" -> "coord141"
-		"coord123" -> "coord139"
-		"coord124" -> "coord139"
-		"coord124" -> "coord140"
+		"coord121" -> "coord153"
+		"coord122" -> "coord154"
+		"coord123" -> "coord146"
+		"coord123" -> "coord147"
+		"coord124" -> "coord148"
+		"coord124" -> "coord146"
 		"coord125" -> "coord121"
 		"coord125" -> "coord123"
 		"coord126" -> "coord122"
@@ -2062,84 +2092,119 @@ namespace KernelGraphTest
 		"coord134" -> "coord136"
 		"coord135" -> "coord136"
 		"coord136" -> "coord130"
-		"coord137" -> "coord202"
-		"coord138" -> "coord203"
-		"coord139" -> "coord120"
-		"coord140" -> "coord134"
-		"coord140" -> "coord131"
-		"coord141" -> "coord135"
-		"coord142" -> "coord127"
-		"coord142" -> "coord137"
-		"coord143" -> "coord151"
-		"coord144" -> "coord152"
-		"coord145" -> "coord150"
-		"coord145" -> "coord151"
-		"coord146" -> "coord150"
-		"coord146" -> "coord152"
-		"coord147" -> "coord153"
-		"coord148" -> "coord154"
-		"coord149" -> "coord186"
-		"coord150" -> "coord31"
-		"coord151" -> "coord33"
-		"coord152" -> "coord34"
-		"coord153" -> "coord143"
-		"coord154" -> "coord144"
-		"coord156" -> "coord168"
-		"coord157" -> "coord169"
-		"coord158" -> "coord160"
-		"coord158" -> "coord168"
-		"coord159" -> "coord160"
-		"coord159" -> "coord169"
-		"coord160" -> "coord155"
-		"coord161" -> "coord178"
-		"coord162" -> "coord184"
-		"coord163" -> "coord178"
-		"coord164" -> "coord185"
-		"coord165" -> "coord179"
-		"coord166" -> "coord184"
-		"coord167" -> "coord185"
-		"coord168" -> "coord145"
-		"coord169" -> "coord146"
-		"coord170" -> "coord182"
-		"coord171" -> "coord183"
-		"coord172" -> "coord173"
-		"coord173" -> "coord170"
-		"coord173" -> "coord171"
-		"coord174" -> "coord177"
-		"coord175" -> "coord176"
-		"coord176" -> "coord161"
-		"coord176" -> "coord162"
-		"coord177" -> "coord163"
-		"coord177" -> "coord164"
-		"coord178" -> "coord165"
-		"coord179" -> "coord166"
-		"coord179" -> "coord167"
-		"coord180" -> "coord182"
-		"coord181" -> "coord183"
-		"coord182" -> "coord156"
-		"coord183" -> "coord157"
-		"coord184" -> "coord158"
-		"coord185" -> "coord159"
-		"coord186" -> "coord172"
-		"coord186" -> "coord174"
-		"coord187" -> "coord189"
-		"coord189" -> "coord188"
-		"coord190" -> "coord188"
-		"coord191" -> "coord188"
+		"coord137" -> "coord212"
+		"coord138" -> "coord216"
+		"coord139" -> "coord151"
+		"coord140" -> "coord151"
+		"coord141" -> "coord152"
+		"coord142" -> "coord152"
+		"coord143" -> "coord150"
+		"coord144" -> "coord149"
+		"coord145" -> "coord149"
+		"coord146" -> "coord120"
+		"coord147" -> "coord144"
+		"coord147" -> "coord140"
+		"coord148" -> "coord145"
+		"coord148" -> "coord142"
+		"coord149" -> "coord143"
+		"coord150" -> "coord139"
+		"coord150" -> "coord141"
+		"coord151" -> "coord131"
+		"coord152" -> "coord130"
+		"coord153" -> "coord127"
+		"coord153" -> "coord137"
+		"coord154" -> "coord128"
+		"coord154" -> "coord138"
+		"coord155" -> "coord163"
+		"coord156" -> "coord164"
+		"coord157" -> "coord162"
+		"coord157" -> "coord163"
+		"coord158" -> "coord162"
+		"coord158" -> "coord164"
+		"coord159" -> "coord165"
+		"coord160" -> "coord166"
+		"coord161" -> "coord198"
+		"coord162" -> "coord31"
+		"coord163" -> "coord33"
+		"coord164" -> "coord34"
+		"coord165" -> "coord155"
+		"coord166" -> "coord156"
+		"coord168" -> "coord180"
+		"coord169" -> "coord181"
+		"coord170" -> "coord172"
+		"coord170" -> "coord180"
+		"coord171" -> "coord172"
+		"coord171" -> "coord181"
+		"coord172" -> "coord167"
+		"coord173" -> "coord190"
+		"coord174" -> "coord196"
+		"coord175" -> "coord190"
+		"coord176" -> "coord197"
+		"coord177" -> "coord191"
+		"coord178" -> "coord196"
+		"coord179" -> "coord197"
+		"coord180" -> "coord157"
+		"coord181" -> "coord158"
+		"coord182" -> "coord194"
+		"coord183" -> "coord195"
+		"coord184" -> "coord185"
+		"coord185" -> "coord182"
+		"coord185" -> "coord183"
+		"coord186" -> "coord189"
+		"coord187" -> "coord188"
+		"coord188" -> "coord173"
+		"coord188" -> "coord174"
+		"coord189" -> "coord175"
+		"coord189" -> "coord176"
+		"coord190" -> "coord177"
+		"coord191" -> "coord178"
+		"coord191" -> "coord179"
 		"coord192" -> "coord194"
-		"coord193" -> "coord204"
-		"coord194" -> "coord193"
-		"coord195" -> "coord197"
-		"coord196" -> "coord205"
-		"coord197" -> "coord196"
-		"coord198" -> "coord193"
-		"coord199" -> "coord196"
-		"coord200" -> "coord193"
-		"coord201" -> "coord196"
-		"coord202" -> "coord193"
-		"coord203" -> "coord196"
-		"coord204" -> "coord180"
-		"coord205" -> "coord181"
+		"coord193" -> "coord195"
+		"coord194" -> "coord168"
+		"coord195" -> "coord169"
+		"coord196" -> "coord170"
+		"coord197" -> "coord171"
+		"coord198" -> "coord184"
+		"coord198" -> "coord186"
+		"coord199" -> "coord201"
+		"coord201" -> "coord200"
+		"coord202" -> "coord200"
+		"coord203" -> "coord200"
+		"coord204" -> "coord206"
+		"coord205" -> "coord213"
+		"coord206" -> "coord205"
+		"coord207" -> "coord209"
+		"coord208" -> "coord217"
+		"coord209" -> "coord208"
+		"coord210" -> "coord205"
+		"coord211" -> "coord205"
+		"coord212" -> "coord205"
+		"coord213" -> "coord192"
+		"coord214" -> "coord208"
+		"coord215" -> "coord208"
+		"coord216" -> "coord208"
+		"coord217" -> "coord193"
+		"coord218" -> "coord39"
+		"coord219" -> "coord39"
+		"coord220" -> "coord52"
+		"coord221" -> "coord52"
+		"coord222" -> "coord61"
+		"coord223" -> "coord61"
+		"coord224" -> "coord73"
+		"coord225" -> "coord73"
+		"coord226" -> "coord86"
+		"coord227" -> "coord86"
+		"coord228" -> "coord96"
+		"coord229" -> "coord96"
+		"coord230" -> "coord139"
+		"coord231" -> "coord139"
+		"coord232" -> "coord140"
+		"coord233" -> "coord140"
+		"coord234" -> "coord173"
+		"coord235" -> "coord173"
+		"coord236" -> "coord174"
+		"coord237" -> "coord174"
 		{
 		rank=same
 		"coord8"->"coord9"[style=invis]
@@ -2332,12 +2397,37 @@ namespace KernelGraphTest
 		}
 		{
 		rank=same
-		"coord124"->"coord123"[style=invis]
+		"coord123"->"coord124"[style=invis]
 		rankdir=LR
 		}
 		{
 		rank=same
-		"coord134"->"coord131"[style=invis]
+		"coord144"->"coord140"[style=invis]
+		rankdir=LR
+		}
+		{
+		rank=same
+		"coord145"->"coord142"[style=invis]
+		rankdir=LR
+		}
+		{
+		rank=same
+		"coord144"->"coord145"[style=invis]
+		rankdir=LR
+		}
+		{
+		rank=same
+		"coord139"->"coord141"[style=invis]
+		rankdir=LR
+		}
+		{
+		rank=same
+		"coord139"->"coord140"[style=invis]
+		rankdir=LR
+		}
+		{
+		rank=same
+		"coord141"->"coord142"[style=invis]
 		rankdir=LR
 		}
 		{
@@ -2347,22 +2437,17 @@ namespace KernelGraphTest
 		}
 		{
 		rank=same
-		"coord145"->"coord146"[style=invis]
+		"coord128"->"coord138"[style=invis]
 		rankdir=LR
 		}
 		{
 		rank=same
-		"coord143"->"coord145"[style=invis]
+		"coord157"->"coord158"[style=invis]
 		rankdir=LR
 		}
 		{
 		rank=same
-		"coord144"->"coord146"[style=invis]
-		rankdir=LR
-		}
-		{
-		rank=same
-		"coord158"->"coord159"[style=invis]
+		"coord155"->"coord157"[style=invis]
 		rankdir=LR
 		}
 		{
@@ -2372,57 +2457,67 @@ namespace KernelGraphTest
 		}
 		{
 		rank=same
-		"coord157"->"coord159"[style=invis]
-		rankdir=LR
-		}
-		{
-		rank=same
 		"coord170"->"coord171"[style=invis]
 		rankdir=LR
 		}
 		{
 		rank=same
-		"coord161"->"coord162"[style=invis]
+		"coord168"->"coord170"[style=invis]
 		rankdir=LR
 		}
 		{
 		rank=same
-		"coord163"->"coord164"[style=invis]
+		"coord169"->"coord171"[style=invis]
 		rankdir=LR
 		}
 		{
 		rank=same
-		"coord161"->"coord163"[style=invis]
+		"coord182"->"coord183"[style=invis]
 		rankdir=LR
 		}
 		{
 		rank=same
-		"coord166"->"coord167"[style=invis]
+		"coord173"->"coord174"[style=invis]
 		rankdir=LR
 		}
 		{
 		rank=same
-		"coord170"->"coord180"[style=invis]
+		"coord175"->"coord176"[style=invis]
 		rankdir=LR
 		}
 		{
 		rank=same
-		"coord171"->"coord181"[style=invis]
+		"coord173"->"coord175"[style=invis]
 		rankdir=LR
 		}
 		{
 		rank=same
-		"coord166"->"coord162"[style=invis]
+		"coord178"->"coord179"[style=invis]
 		rankdir=LR
 		}
 		{
 		rank=same
-		"coord167"->"coord164"[style=invis]
+		"coord182"->"coord192"[style=invis]
 		rankdir=LR
 		}
 		{
 		rank=same
-		"coord172"->"coord174"[style=invis]
+		"coord183"->"coord193"[style=invis]
+		rankdir=LR
+		}
+		{
+		rank=same
+		"coord178"->"coord174"[style=invis]
+		rankdir=LR
+		}
+		{
+		rank=same
+		"coord179"->"coord176"[style=invis]
+		rankdir=LR
+		}
+		{
+		rank=same
+		"coord184"->"coord186"[style=invis]
 		rankdir=LR
 		}
 		subgraph clusterCF {"cntrl1"[label="Kernel(1)"];
@@ -2432,22 +2527,18 @@ namespace KernelGraphTest
 		"cntrl6"[label="LoadTiled(6)"];
 		"cntrl11"[label="ElementOp(6, 18)(11)"];
 		"cntrl12"[label="Sequence(12)",shape=box];
-		"cntrl13"[label="Sequence(13)",shape=box];
 		"cntrl14"[label="LoadVGPR(14)"];
 		"cntrl15"[label="Body(15)",shape=box];
 		"cntrl16"[label="LoadTiled(16)"];
-		"cntrl17"[label="Body(17)",shape=box];
 		"cntrl18"[label="ElementOp(22, 27)(18)"];
 		"cntrl19"[label="Sequence(19)",shape=box];
-		"cntrl20"[label="Sequence(20)",shape=box];
 		"cntrl21"[label="ElementOp(20, 29)(21)"];
 		"cntrl22"[label="Sequence(22)",shape=box];
 		"cntrl23"[label="Sequence(23)",shape=box];
 		"cntrl24"[label="StoreTiled(24)"];
-		"cntrl25"[label="Sequence(25)",shape=box];
-		"cntrl26"[label="ForLoopOp: LessThan(DataFlowTag(187), Divide(CommandArgument(Load_Tiled_0_size_1), 16j))(26)"];
+		"cntrl26"[label="ForLoopOp: LessThan(DataFlowTag(199), Divide(CommandArgument(Load_Tiled_0_size_1), 16j))(26)"];
 		"cntrl27"[label="Assign SGPR 0l(27)"];
-		"cntrl28"[label="Assign SGPR Add(DataFlowTag(187), 1j)(28)"];
+		"cntrl28"[label="Assign SGPR Add(DataFlowTag(199), 1j)(28)"];
 		"cntrl29"[label="Initialize(29)",shape=box];
 		"cntrl30"[label="ForLoopIncrement(30)",shape=box];
 		"cntrl31"[label="Multiply(31)"];
@@ -2456,43 +2547,74 @@ namespace KernelGraphTest
 		"cntrl34"[label="Body(34)",shape=box];
 		"cntrl35"[label="Body(35)",shape=box];
 		"cntrl36"[label="Body(36)",shape=box];
-		"cntrl37"[label="ForLoopOp: LessThan(DataFlowTag(192), 2j)(37)"];
+		"cntrl37"[label="ForLoopOp: LessThan(DataFlowTag(204), 2j)(37)"];
 		"cntrl38"[label="Assign SGPR 0j(38)"];
-		"cntrl39"[label="Assign SGPR Add(DataFlowTag(192), 1j)(39)"];
+		"cntrl39"[label="Assign SGPR Add(DataFlowTag(204), 1j)(39)"];
 		"cntrl40"[label="Initialize(40)",shape=box];
 		"cntrl41"[label="ForLoopIncrement(41)",shape=box];
-		"cntrl42"[label="ForLoopOp: LessThan(DataFlowTag(195), 2j)(42)"];
+		"cntrl42"[label="ForLoopOp: LessThan(DataFlowTag(207), 2j)(42)"];
 		"cntrl43"[label="Assign SGPR 0j(43)"];
-		"cntrl44"[label="Assign SGPR Add(DataFlowTag(195), 1j)(44)"];
+		"cntrl44"[label="Assign SGPR Add(DataFlowTag(207), 1j)(44)"];
 		"cntrl45"[label="Initialize(45)",shape=box];
 		"cntrl46"[label="ForLoopIncrement(46)",shape=box];
-		"cntrl47"[label="Body(47)",shape=box];
 		"cntrl48"[label="Body(48)",shape=box];
 		"cntrl49"[label="Body(49)",shape=box];
+		"cntrl50"[label="Scope(50)"];
+		"cntrl51"[label="Body(51)",shape=box];
+		"cntrl52"[label="Sequence(52)",shape=box];
+		"cntrl53"[label="ComputeIndex(53)"];
+		"cntrl54"[label="ComputeIndex(54)"];
+		"cntrl55"[label="ComputeIndex(55)"];
+		"cntrl56"[label="Sequence(56)",shape=box];
+		"cntrl57"[label="Sequence(57)",shape=box];
+		"cntrl58"[label="Assign VGPR Add(DataFlowTag(218), DataFlowTag(219))(58)"];
+		"cntrl59"[label="Body(59)",shape=box];
+		"cntrl60"[label="Sequence(60)",shape=box];
+		"cntrl61"[label="ForLoopIncrement(61)",shape=box];
+		"cntrl62"[label="ComputeIndex(62)"];
+		"cntrl63"[label="ComputeIndex(63)"];
+		"cntrl64"[label="ComputeIndex(64)"];
+		"cntrl65"[label="Sequence(65)",shape=box];
+		"cntrl66"[label="Sequence(66)",shape=box];
+		"cntrl67"[label="Assign VGPR Add(DataFlowTag(224), DataFlowTag(225))(67)"];
+		"cntrl68"[label="Body(68)",shape=box];
+		"cntrl69"[label="Sequence(69)",shape=box];
+		"cntrl70"[label="ForLoopIncrement(70)",shape=box];
+		"cntrl71"[label="Scope(71)"];
+		"cntrl72"[label="Body(72)",shape=box];
+		"cntrl73"[label="Sequence(73)",shape=box];
+		"cntrl74"[label="ComputeIndex(74)"];
+		"cntrl75"[label="ComputeIndex(75)"];
+		"cntrl76"[label="Body(76)",shape=box];
+		"cntrl77"[label="Sequence(77)",shape=box];
+		"cntrl78"[label="Sequence(78)",shape=box];
+		"cntrl79"[label="Scope(79)"];
+		"cntrl80"[label="Sequence(80)",shape=box];
+		"cntrl81"[label="ComputeIndex(81)"];
+		"cntrl82"[label="ComputeIndex(82)"];
+		"cntrl83"[label="Body(83)",shape=box];
+		"cntrl84"[label="Sequence(84)",shape=box];
+		"cntrl85"[label="Sequence(85)",shape=box];
 		"cntrl1" -> "cntrl3"
 		"cntrl1" -> "cntrl15"
 		"cntrl1" -> "cntrl49"
 		"cntrl2" -> "cntrl12"
 		"cntrl3" -> "cntrl2"
 		"cntrl11" -> "cntrl22"
-		"cntrl12" -> "cntrl11"
-		"cntrl13" -> "cntrl11"
+		"cntrl12" -> "cntrl37"
 		"cntrl14" -> "cntrl19"
 		"cntrl15" -> "cntrl14"
-		"cntrl16" -> "cntrl20"
-		"cntrl17" -> "cntrl16"
 		"cntrl18" -> "cntrl23"
-		"cntrl19" -> "cntrl18"
-		"cntrl20" -> "cntrl18"
-		"cntrl21" -> "cntrl25"
+		"cntrl19" -> "cntrl37"
+		"cntrl21" -> "cntrl80"
 		"cntrl22" -> "cntrl21"
 		"cntrl23" -> "cntrl21"
-		"cntrl25" -> "cntrl24"
 		"cntrl26" -> "cntrl29"
 		"cntrl26" -> "cntrl30"
 		"cntrl26" -> "cntrl33"
 		"cntrl26" -> "cntrl34"
-		"cntrl26" -> "cntrl13"
+		"cntrl26" -> "cntrl61"
+		"cntrl26" -> "cntrl70"
 		"cntrl29" -> "cntrl27"
 		"cntrl30" -> "cntrl28"
 		"cntrl31" -> "cntrl35"
@@ -2508,13 +2630,49 @@ namespace KernelGraphTest
 		"cntrl41" -> "cntrl39"
 		"cntrl42" -> "cntrl45"
 		"cntrl42" -> "cntrl46"
-		"cntrl42" -> "cntrl47"
-		"cntrl42" -> "cntrl17"
+		"cntrl42" -> "cntrl51"
+		"cntrl42" -> "cntrl72"
 		"cntrl45" -> "cntrl43"
 		"cntrl46" -> "cntrl44"
-		"cntrl47" -> "cntrl26"
 		"cntrl48" -> "cntrl42"
 		"cntrl49" -> "cntrl37"
+		"cntrl50" -> "cntrl52"
+		"cntrl50" -> "cntrl59"
+		"cntrl50" -> "cntrl68"
+		"cntrl51" -> "cntrl50"
+		"cntrl52" -> "cntrl11"
+		"cntrl53" -> "cntrl56"
+		"cntrl54" -> "cntrl57"
+		"cntrl55" -> "cntrl60"
+		"cntrl56" -> "cntrl54"
+		"cntrl57" -> "cntrl55"
+		"cntrl59" -> "cntrl53"
+		"cntrl60" -> "cntrl26"
+		"cntrl61" -> "cntrl58"
+		"cntrl62" -> "cntrl65"
+		"cntrl63" -> "cntrl66"
+		"cntrl64" -> "cntrl69"
+		"cntrl65" -> "cntrl63"
+		"cntrl66" -> "cntrl64"
+		"cntrl68" -> "cntrl62"
+		"cntrl69" -> "cntrl26"
+		"cntrl70" -> "cntrl67"
+		"cntrl71" -> "cntrl73"
+		"cntrl71" -> "cntrl76"
+		"cntrl72" -> "cntrl71"
+		"cntrl73" -> "cntrl18"
+		"cntrl74" -> "cntrl77"
+		"cntrl75" -> "cntrl78"
+		"cntrl76" -> "cntrl74"
+		"cntrl77" -> "cntrl75"
+		"cntrl78" -> "cntrl16"
+		"cntrl79" -> "cntrl83"
+		"cntrl80" -> "cntrl79"
+		"cntrl81" -> "cntrl84"
+		"cntrl82" -> "cntrl85"
+		"cntrl83" -> "cntrl81"
+		"cntrl84" -> "cntrl82"
+		"cntrl85" -> "cntrl24"
 		}
 		"coord4" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
 		"coord6" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
@@ -2564,17 +2722,21 @@ namespace KernelGraphTest
 		"coord131" -> "cntrl16" [style=dotted,weight=0,arrowsize=0]
 		"coord137" -> "cntrl16" [style=dotted,weight=0,arrowsize=0]
 		"coord138" -> "cntrl16" [style=dotted,weight=0,arrowsize=0]
+		"coord139" -> "cntrl16" [style=dotted,weight=0,arrowsize=0]
+		"coord140" -> "cntrl16" [style=dotted,weight=0,arrowsize=0]
 		"coord29" -> "cntrl18" [style=dotted,weight=0,arrowsize=0]
 		"coord31" -> "cntrl21" [style=dotted,weight=0,arrowsize=0]
 		"coord31" -> "cntrl24" [style=dotted,weight=0,arrowsize=0]
 		"coord35" -> "cntrl24" [style=dotted,weight=0,arrowsize=0]
-		"coord155" -> "cntrl24" [style=dotted,weight=0,arrowsize=0]
-		"coord175" -> "cntrl24" [style=dotted,weight=0,arrowsize=0]
-		"coord180" -> "cntrl24" [style=dotted,weight=0,arrowsize=0]
-		"coord181" -> "cntrl24" [style=dotted,weight=0,arrowsize=0]
-		"coord187" -> "cntrl26" [style=dotted,weight=0,arrowsize=0]
-		"coord187" -> "cntrl27" [style=dotted,weight=0,arrowsize=0]
-		"coord187" -> "cntrl28" [style=dotted,weight=0,arrowsize=0]
+		"coord167" -> "cntrl24" [style=dotted,weight=0,arrowsize=0]
+		"coord173" -> "cntrl24" [style=dotted,weight=0,arrowsize=0]
+		"coord174" -> "cntrl24" [style=dotted,weight=0,arrowsize=0]
+		"coord187" -> "cntrl24" [style=dotted,weight=0,arrowsize=0]
+		"coord192" -> "cntrl24" [style=dotted,weight=0,arrowsize=0]
+		"coord193" -> "cntrl24" [style=dotted,weight=0,arrowsize=0]
+		"coord199" -> "cntrl26" [style=dotted,weight=0,arrowsize=0]
+		"coord199" -> "cntrl27" [style=dotted,weight=0,arrowsize=0]
+		"coord199" -> "cntrl28" [style=dotted,weight=0,arrowsize=0]
 		"coord1" -> "cntrl31" [style=dotted,weight=0,arrowsize=0]
 		"coord2" -> "cntrl31" [style=dotted,weight=0,arrowsize=0]
 		"coord11" -> "cntrl31" [style=dotted,weight=0,arrowsize=0]
@@ -2583,12 +2745,14 @@ namespace KernelGraphTest
 		"coord50" -> "cntrl31" [style=dotted,weight=0,arrowsize=0]
 		"coord85" -> "cntrl31" [style=dotted,weight=0,arrowsize=0]
 		"coord18" -> "cntrl32" [style=dotted,weight=0,arrowsize=0]
-		"coord192" -> "cntrl37" [style=dotted,weight=0,arrowsize=0]
-		"coord192" -> "cntrl38" [style=dotted,weight=0,arrowsize=0]
-		"coord192" -> "cntrl39" [style=dotted,weight=0,arrowsize=0]
-		"coord195" -> "cntrl42" [style=dotted,weight=0,arrowsize=0]
-		"coord195" -> "cntrl43" [style=dotted,weight=0,arrowsize=0]
-		"coord195" -> "cntrl44" [style=dotted,weight=0,arrowsize=0]
+		"coord204" -> "cntrl37" [style=dotted,weight=0,arrowsize=0]
+		"coord204" -> "cntrl38" [style=dotted,weight=0,arrowsize=0]
+		"coord204" -> "cntrl39" [style=dotted,weight=0,arrowsize=0]
+		"coord207" -> "cntrl42" [style=dotted,weight=0,arrowsize=0]
+		"coord207" -> "cntrl43" [style=dotted,weight=0,arrowsize=0]
+		"coord207" -> "cntrl44" [style=dotted,weight=0,arrowsize=0]
+		"coord218" -> "cntrl58" [style=dotted,weight=0,arrowsize=0]
+		"coord224" -> "cntrl67" [style=dotted,weight=0,arrowsize=0]
 	     }).";
         EXPECT_EQ(NormalizedSource(expected1), NormalizedSource(kgraph1.toDOT(true)));
     }
