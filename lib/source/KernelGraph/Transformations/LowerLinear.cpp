@@ -249,11 +249,17 @@ namespace rocRoller
                 auto user            = reindexer.coordinates.at(original_user);
                 auto linear          = reindexer.coordinates.at(original_linear);
                 auto vgpr            = graph.coordinates.addElement(CoordGraph::VGPR());
-                auto wg              = graph.coordinates.addElement(CoordGraph::Workgroup());
-                auto wi = graph.coordinates.addElement(CoordGraph::Workitem(0, wavefrontSize()));
 
-                graph.coordinates.addElement(CoordGraph::Tile(), {linear}, {wg, wi});
-                graph.coordinates.addElement(CoordGraph::Forget(), {wg, wi}, {vgpr});
+                auto wg   = CoordGraph::Workgroup();
+                wg.stride = workgroupSize()[0];
+                wg.size   = workgroupCountX();
+                auto wi   = CoordGraph::Workitem(0, wavefrontSize());
+
+                auto wg_tag = graph.coordinates.addElement(wg);
+                auto wi_tag = graph.coordinates.addElement(wi);
+
+                graph.coordinates.addElement(CoordGraph::Tile(), {linear}, {wg_tag, wi_tag});
+                graph.coordinates.addElement(CoordGraph::Forget(), {wg_tag, wi_tag}, {vgpr});
                 graph.coordinates.addElement(CoordGraph::DataFlow(), {user}, {vgpr});
 
                 auto parent = reindexer.control.at(*original.control.parentNodes(tag).begin());
@@ -296,11 +302,17 @@ namespace rocRoller
                 auto user            = reindexer.coordinates.at(original_user);
                 auto linear          = reindexer.coordinates.at(original_linear);
                 auto vgpr            = vgprs.at(original_linear);
-                auto wg              = graph.coordinates.addElement(CoordGraph::Workgroup());
-                auto wi = graph.coordinates.addElement(CoordGraph::Workitem(0, wavefrontSize()));
 
-                graph.coordinates.addElement(CoordGraph::Inherit(), {vgpr}, {wg, wi});
-                graph.coordinates.addElement(CoordGraph::Flatten(), {wg, wi}, {linear});
+                auto wg   = CoordGraph::Workgroup();
+                wg.stride = workgroupSize()[0];
+                wg.size   = workgroupCountX();
+                auto wi   = CoordGraph::Workitem(0, wavefrontSize());
+
+                auto wg_tag = graph.coordinates.addElement(wg);
+                auto wi_tag = graph.coordinates.addElement(wi);
+
+                graph.coordinates.addElement(CoordGraph::Inherit(), {vgpr}, {wg_tag, wi_tag});
+                graph.coordinates.addElement(CoordGraph::Flatten(), {wg_tag, wi_tag}, {linear});
                 graph.coordinates.addElement(CoordGraph::DataFlow(), {vgpr}, {user});
 
                 auto parent = reindexer.control.at(*original.control.parentNodes(tag).begin());

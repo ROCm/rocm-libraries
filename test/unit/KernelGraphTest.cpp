@@ -209,6 +209,104 @@ namespace KernelGraphTest
         }
     }
 
+    // delete this when graph rearch complete
+    TEST_P(KernelGraphTestGPULoopSize, TestForLoop2)
+    {
+        auto command = commonCommand();
+
+        m_context->kernel()->addCommandArguments(command->getArguments());
+
+        int workGroupSize = 64;
+        m_context->kernel()->setKernelDimensions(1);
+        m_context->kernel()->setWorkgroupSize({64, 1, 1});
+
+        int  loopSize     = GetParam();
+        auto loopSizeExpr = Expression::literal(loopSize);
+
+        auto one          = Expression::literal(1u);
+        auto extent       = std::make_shared<Expression::Expression>(command->getArguments()[1]);
+        auto numWorkitems = extent / loopSizeExpr;
+
+        m_context->kernel()->setWorkitemCount({numWorkitems, one, one});
+
+        size_t origArgSize = m_context->kernel()->arguments().size();
+
+        auto kgraph = KernelGraph::translate2(command);
+        kgraph      = KernelGraph::lowerLinear(kgraph, m_context);
+        kgraph      = KernelGraph::lowerLinearLoop(kgraph, loopSizeExpr, m_context);
+        kgraph      = KernelGraph::cleanArguments(kgraph, m_context->kernel());
+
+        EXPECT_EQ(m_context->kernel()->arguments().size(), origArgSize + 1);
+        ASSERT_NO_THROW(m_context->kernel()->findArgument("LAUNCH_WORKGROUPCOUNT_0"));
+
+        auto context = m_context;
+        context->schedule(context->kernel()->preamble());
+        context->schedule(context->kernel()->prolog());
+        context->schedule(KernelGraph::generate(kgraph, context->kernel()));
+        context->schedule(context->kernel()->postamble());
+        context->schedule(context->kernel()->amdgpu_metadata());
+        auto executableKernel = m_context->instructions()->getExecutableKernel();
+
+        RandomGenerator random(1356);
+
+        int              baseSize = workGroupSize * loopSize;
+        std::vector<int> vecSizes = {baseSize, baseSize * 5, baseSize * 16, baseSize * 65};
+        for(auto vecSize : vecSizes)
+        {
+            auto             a          = random.vector<int>(vecSize, -1000, 1000);
+            auto             b          = random.vector<int>(vecSize, -1000, 1000);
+            auto             c_expected = random.vector<int>(vecSize, -1000, 1000);
+            auto             c_actual   = random.vector<int>(vecSize, -1000, 1000);
+            std::vector<int> c(vecSize);
+            for(int i = 0; i < vecSize; i++)
+                c_expected[i] = -(a[i] + b[i]) * (a[i] + b[i]);
+
+            auto a_d = make_shared_device<int>(vecSize);
+            auto b_d = make_shared_device<int>(vecSize);
+            auto c_d = make_shared_device<int>(vecSize);
+
+            ASSERT_THAT(
+                hipMemcpy(a_d.get(), a.data(), vecSize * sizeof(int), hipMemcpyHostToDevice),
+                HasHipSuccess(0));
+            ASSERT_THAT(
+                hipMemcpy(b_d.get(), b.data(), vecSize * sizeof(int), hipMemcpyHostToDevice),
+                HasHipSuccess(0));
+
+            KernelArguments args;
+            args.append("a", a_d.get());
+            args.append<int64_t>("a_extent", vecSize);
+            args.append<int64_t>("a_size", vecSize);
+            args.append<int64_t>("a_stride", 1);
+
+            args.append("b", b_d.get());
+            args.append<int64_t>("b_extent", vecSize);
+            args.append<int64_t>("b_size", vecSize);
+            args.append<int64_t>("b_stride", 1);
+
+            args.append("c", c_d.get());
+            args.append<int64_t>("c_extent", vecSize);
+            args.append<int64_t>("c_stride", 1);
+
+            args.append<int64_t>("LAUNCH_WORKGROUPCOUNT_0", vecSize / baseSize);
+
+            KernelInvocation kinv;
+            kinv.workgroupSize    = context->kernel()->workgroupSize();
+            kinv.workitemCount[0] = vecSize / loopSize;
+
+            executableKernel->executeKernel(args, kinv);
+
+            ASSERT_THAT(
+                hipMemcpy(c_actual.data(), c_d.get(), vecSize * sizeof(int), hipMemcpyDeviceToHost),
+                HasHipSuccess(0));
+
+            EXPECT_THAT(output(), testing::HasSubstr("Lock For Loop"));
+            EXPECT_THAT(output(), testing::HasSubstr("Unlock For Loop"));
+
+            for(int i = 0; i < vecSize; i++)
+                EXPECT_EQ(c_actual[i], c_expected[i]) << i << ", " << a[i] << ", " << b[i];
+        }
+    }
+
     INSTANTIATE_TEST_SUITE_P(KernelGraphTestGPULoopSize,
                              KernelGraphTestGPULoopSize,
                              ::testing::ValuesIn({1, 5, 16, 73}));
@@ -773,13 +871,13 @@ namespace KernelGraphTest
 		"coord14"[label="User{NA}(14)"];
 		"coord15"[label="Join(15)",shape=box];
 		"coord16"[label="VGPR{NA}(16)"];
-		"coord17"[label="Workgroup{0, NA}(17)"];
+		"coord17"[label="Workgroup{0, LAUNCH_WORKGROUPCOUNT_0}(17)"];
 		"coord18"[label="Workitem{0, 32j}(18)"];
 		"coord19"[label="Tile(19)",shape=box];
 		"coord20"[label="Forget(20)",shape=box];
 		"coord21"[label="DataFlow(21)",shape=box];
 		"coord22"[label="VGPR{NA}(22)"];
-		"coord23"[label="Workgroup{0, NA}(23)"];
+		"coord23"[label="Workgroup{0, LAUNCH_WORKGROUPCOUNT_0}(23)"];
 		"coord24"[label="Workitem{0, 32j}(24)"];
 		"coord25"[label="Tile(25)",shape=box];
 		"coord26"[label="Forget(26)",shape=box];
@@ -790,7 +888,7 @@ namespace KernelGraphTest
 		"coord31"[label="DataFlow(31)",shape=box];
 		"coord32"[label="VGPR{NA}(32)"];
 		"coord33"[label="DataFlow(33)",shape=box];
-		"coord34"[label="Workgroup{0, NA}(34)"];
+		"coord34"[label="Workgroup{0, LAUNCH_WORKGROUPCOUNT_0}(34)"];
 		"coord35"[label="Workitem{0, 32j}(35)"];
 		"coord36"[label="Inherit(36)",shape=box];
 		"coord37"[label="Flatten(37)",shape=box];
@@ -937,7 +1035,7 @@ namespace KernelGraphTest
 		"coord4"[label="Split(4)",shape=box];
 		"coord5"[label="Linear{CommandArgument(Load_Linear_2_size_0)}(5)"];
 		"coord6"[label="Flatten(6)",shape=box];
-		"coord7"[label="Workgroup{0, NA}(7)"];
+		"coord7"[label="Workgroup{0, LAUNCH_WORKGROUPCOUNT_0}(7)"];
 		"coord8"[label="Workitem{0, 32j}(8)"];
 		"coord9"[label="Tile(9)",shape=box];
 		"coord10"[label="Linear{16i}(10)"];
@@ -950,7 +1048,7 @@ namespace KernelGraphTest
 		"coord17"[label="Split(17)",shape=box];
 		"coord18"[label="Linear{CommandArgument(Load_Linear_0_size_0)}(18)"];
 		"coord19"[label="Flatten(19)",shape=box];
-		"coord20"[label="Workgroup{0, NA}(20)"];
+		"coord20"[label="Workgroup{0, LAUNCH_WORKGROUPCOUNT_0}(20)"];
 		"coord21"[label="Workitem{0, 32j}(21)"];
 		"coord22"[label="Tile(22)",shape=box];
 		"coord23"[label="ForLoop{16i}(23)"];
@@ -964,7 +1062,7 @@ namespace KernelGraphTest
 		"coord31"[label="DataFlow(31)",shape=box];
 		"coord32"[label="VGPR{NA}(32)"];
 		"coord33"[label="DataFlow(33)",shape=box];
-		"coord34"[label="Workgroup{0, NA}(34)"];
+		"coord34"[label="Workgroup{0, LAUNCH_WORKGROUPCOUNT_0}(34)"];
 		"coord35"[label="Workitem{0, 32j}(35)"];
 		"coord36"[label="Inherit(36)",shape=box];
 		"coord37"[label="ForLoop{16i}(37)"];
@@ -986,9 +1084,9 @@ namespace KernelGraphTest
 		"coord6" -> "coord5"
 		"coord7" -> "coord14"
 		"coord8" -> "coord14"
+		"coord9" -> "coord11"
 		"coord9" -> "coord7"
 		"coord9" -> "coord8"
-		"coord9" -> "coord11"
 		"coord10" -> "coord12"
 		"coord10" -> "coord24"
 		"coord10" -> "coord38"
@@ -1003,9 +1101,9 @@ namespace KernelGraphTest
 		"coord19" -> "coord18"
 		"coord20" -> "coord26"
 		"coord21" -> "coord26"
+		"coord22" -> "coord23"
 		"coord22" -> "coord20"
 		"coord22" -> "coord21"
-		"coord22" -> "coord23"
 		"coord23" -> "coord26"
 		"coord24" -> "coord23"
 		"coord25" -> "coord29"
@@ -1021,9 +1119,9 @@ namespace KernelGraphTest
 		"coord33" -> "coord32"
 		"coord34" -> "coord40"
 		"coord35" -> "coord40"
+		"coord36" -> "coord37"
 		"coord36" -> "coord34"
 		"coord36" -> "coord35"
-		"coord36" -> "coord37"
 		"coord37" -> "coord40"
 		"coord38" -> "coord37"
 		"coord39" -> "coord42"
@@ -1034,22 +1132,22 @@ namespace KernelGraphTest
 		"coord45" -> "coord43"
 		{
 		rank=same
-		"coord7"->"coord8"->"coord11"[style=invis]
+		"coord11"->"coord7"->"coord8"[style=invis]
 		rankdir=LR
 		}
 		{
 		rank=same
-		"coord7"->"coord8"->"coord11"[style=invis]
+		"coord11"->"coord7"->"coord8"[style=invis]
 		rankdir=LR
 		}
 		{
 		rank=same
-		"coord20"->"coord21"->"coord23"[style=invis]
+		"coord23"->"coord20"->"coord21"[style=invis]
 		rankdir=LR
 		}
 		{
 		rank=same
-		"coord20"->"coord21"->"coord23"[style=invis]
+		"coord23"->"coord20"->"coord21"[style=invis]
 		rankdir=LR
 		}
 		{
@@ -1064,12 +1162,12 @@ namespace KernelGraphTest
 		}
 		{
 		rank=same
-		"coord34"->"coord35"->"coord37"[style=invis]
+		"coord37"->"coord34"->"coord35"[style=invis]
 		rankdir=LR
 		}
 		{
 		rank=same
-		"coord34"->"coord35"->"coord37"[style=invis]
+		"coord37"->"coord34"->"coord35"[style=invis]
 		rankdir=LR
 		}
 		subgraph clusterCF {"cntrl1"[label="Kernel(1)"];
@@ -1083,7 +1181,7 @@ namespace KernelGraphTest
 		"cntrl9"[label="Body(9)",shape=box];
 		"cntrl10"[label="LoadVGPR(10)"];
 		"cntrl11"[label="Body(11)",shape=box];
-		"cntrl12"[label="ElementOp(16, 22)(12)"];
+		"cntrl12"[label="ElementOp(13, 25)(12)"];
 		"cntrl13"[label="Sequence(13)",shape=box];
 		"cntrl14"[label="Sequence(14)",shape=box];
 		"cntrl15"[label="ElementOp(28, -1)(15)"];
@@ -1116,6 +1214,9 @@ namespace KernelGraphTest
 		"cntrl19" -> "cntrl17"
 		"cntrl21" -> "cntrl20"
 		}
+		"coord10" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
+		"coord10" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
+		"coord10" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
 		"coord2" -> "cntrl8" [style=dotted,weight=0,arrowsize=0]
 		"coord13" -> "cntrl8" [style=dotted,weight=0,arrowsize=0]
 		"coord1" -> "cntrl10" [style=dotted,weight=0,arrowsize=0]

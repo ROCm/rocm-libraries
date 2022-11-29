@@ -241,7 +241,7 @@ namespace rocRoller
                 AssertFatal(dstTag > 0, "addLoopDst : Workgroup dimension not found");
 
                 auto loop = getLoop(dstTag, graph);
-                outgoing_nodes.push_back(loop);
+                outgoing_nodes.insert(outgoing_nodes.begin(), loop);
 
                 auto incoming_nodes
                     = graph.coordinates.getNeighbours<Graph::Direction::Upstream>(new_tag)
@@ -295,7 +295,7 @@ namespace rocRoller
                 AssertFatal(srcTag > 0, "addLoopSrc : Workgroup dimension not found");
 
                 auto loop = getLoop(srcTag, graph);
-                incoming_nodes.push_back(loop);
+                incoming_nodes.insert(incoming_nodes.begin(), loop);
 
                 auto outgoing_nodes
                     = graph.coordinates.getNeighbours<Graph::Direction::Downstream>(new_tag)
@@ -327,6 +327,21 @@ namespace rocRoller
             {
                 copyEdge(graph, original, reindexer, tag);
                 addLoopSrc(graph, original, reindexer, tag, edge);
+            }
+
+            virtual void visitOperation(KernelHypergraph&                   graph,
+                                        KernelHypergraph const&             original,
+                                        GraphReindexer&                     reindexer,
+                                        int                                 tag,
+                                        ControlHypergraph::ElementOp const& op) override
+            {
+                copyOperation(graph, original, reindexer, tag);
+
+                auto new_tag = reindexer.control.at(tag);
+                auto new_op  = graph.control.getNode<ControlHypergraph::ElementOp>(new_tag);
+                new_op.a     = op.a > 0 ? reindexer.coordinates.at(op.a) : op.a;
+                new_op.b     = op.b > 0 ? reindexer.coordinates.at(op.b) : op.b;
+                graph.control.setElement(new_tag, new_op);
             }
 
             void visitOperation(KernelHypergraph&                  graph,
@@ -379,6 +394,10 @@ namespace rocRoller
                     ControlHypergraph::Assign{Register::Type::Scalar, loopVarExp + m_loopStride});
                 graph.control.addElement(
                     ControlHypergraph::ForLoopIncrement(), {m_loopOp}, {incOp});
+
+                graph.mapper.connect<CoordGraph::Dimension>(m_loopOp, iterTag);
+                graph.mapper.connect<CoordGraph::Dimension>(initOp, iterTag);
+                graph.mapper.connect<CoordGraph::ForLoop>(incOp, iterTag);
             }
 
         private:
