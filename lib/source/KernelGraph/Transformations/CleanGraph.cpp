@@ -7,9 +7,6 @@ namespace rocRoller
 {
     namespace KernelGraph
     {
-        using CoordinateTransform::MacroTile;
-
-        using namespace CoordinateTransform;
         namespace Expression = rocRoller::Expression;
         using namespace Expression;
 
@@ -118,44 +115,9 @@ namespace rocRoller
          * Calls cleanArguments on all of the expressions stored
          * within a Dimension.
          */
-        // delete this when new graph arch complete
         struct CleanArgumentsVisitor
         {
             CleanArgumentsVisitor(std::shared_ptr<AssemblyKernel> kernel)
-                : m_clean_arguments(kernel)
-            {
-            }
-
-            template <typename T>
-            Dimension visitDimension(T const& dim)
-            {
-                auto d   = dim;
-                d.size   = m_clean_arguments(dim.size);
-                d.stride = m_clean_arguments(dim.stride);
-                return d;
-            }
-
-            ControlGraph::Operation visitOperation(ControlGraph::ForLoopOp const& op)
-            {
-                auto forOp      = op;
-                forOp.condition = m_clean_arguments(op.condition);
-                return forOp;
-            }
-
-            template <typename T>
-            ControlGraph::Operation visitOperation(T const& op)
-            {
-                return op;
-            }
-
-        private:
-            CleanExpressionVisitor m_clean_arguments;
-        };
-
-        // rename this when new graph arch complete, tidy up namespaces
-        struct CleanArgumentsVisitor2
-        {
-            CleanArgumentsVisitor2(std::shared_ptr<AssemblyKernel> kernel)
                 : m_clean_arguments(kernel)
             {
             }
@@ -190,20 +152,11 @@ namespace rocRoller
          * Rewrite HyperGraph to make sure no more CommandArgument
          * values are present within the graph.
          */
-        // delete this when new graph arch complete
-        KernelGraph cleanArguments(KernelGraph k, std::shared_ptr<AssemblyKernel> kernel)
-        {
-            TIMER(t, "KernelGraph::cleanArguments");
-            rocRoller::Log::getLogger()->debug("KernelGraph::cleanArguments()");
-            auto visitor = CleanArgumentsVisitor(kernel);
-            return rewriteDimensions(k, visitor);
-        }
-
         KernelHypergraph cleanArguments(KernelHypergraph k, std::shared_ptr<AssemblyKernel> kernel)
         {
             TIMER(t, "KernelGraph::cleanArguments");
             rocRoller::Log::getLogger()->debug("KernelGraph::cleanArguments()");
-            auto visitor = CleanArgumentsVisitor2(kernel);
+            auto visitor = CleanArgumentsVisitor(kernel);
             return rewriteDimensions(k, visitor);
         }
 

@@ -250,7 +250,7 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult)
     params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
     params->setManualWorkitemCount({NX, NY, NZ});
 
-    auto params2 = std::make_shared<CommandParameters>();
+    auto postParams = std::make_shared<CommandParameters>();
 
     auto one         = Expression::literal(1u);
     auto wavefront_n = Expression::literal(
@@ -265,64 +265,26 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult)
     auto WFX = KernelGraph::CoordGraph::Wavefront(0, wavefront_nx, one);
     auto WFY = KernelGraph::CoordGraph::Wavefront(1, wavefront_ny, one);
 
-    params2->setDimensionInfo(59, WF); // A
-    params2->setDimensionInfo(57, WFX);
-    params2->setDimensionInfo(58, WFY);
-    params2->setDimensionInfo(94, WF); // B
-    params2->setDimensionInfo(92, WFX);
-    params2->setDimensionInfo(93, WFY);
-    params2->setDimensionInfo(129, WF); // C
-    params2->setDimensionInfo(127, WFX);
-    params2->setDimensionInfo(128, WFY);
-    params2->setDimensionInfo(184, WF); // D
-    params2->setDimensionInfo(182, WFX);
-    params2->setDimensionInfo(183, WFY);
+    postParams->setDimensionInfo(59, WF); // A
+    postParams->setDimensionInfo(57, WFX);
+    postParams->setDimensionInfo(58, WFY);
+    postParams->setDimensionInfo(94, WF); // B
+    postParams->setDimensionInfo(92, WFX);
+    postParams->setDimensionInfo(93, WFY);
+    postParams->setDimensionInfo(129, WF); // C
+    postParams->setDimensionInfo(127, WFX);
+    postParams->setDimensionInfo(128, WFY);
+    postParams->setDimensionInfo(184, WF); // D
+    postParams->setDimensionInfo(182, WFX);
+    postParams->setDimensionInfo(183, WFY);
 
     // Build GEMM kernel
-    // reenable this after graph rearch done
-    // CommandKernel commandKernel(command, "GEMM", params);
-
-    // delete this after graph rearch done
-    // from here...
-    auto context = Context::ForDefaultHipDevice("GEMM_CLIENT");
-    context->kernel()->setKernelDimensions(2);
-    context->kernel()->setWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
-    context->kernel()->setWorkitemCount({NX, NY, NZ});
-
-    context->kernel()->addCommandArguments(command->getArguments());
-    auto kgraph = KernelGraph::translate2(command);
-    kgraph      = KernelGraph::updateParameters(kgraph, params);
-    kgraph      = KernelGraph::lowerTile(kgraph, params, context);
-    kgraph      = KernelGraph::cleanArguments(kgraph, context->kernel());
-    kgraph      = KernelGraph::updateParameters(kgraph, params2);
-
-    context->schedule(context->kernel()->preamble());
-    context->schedule(context->kernel()->prolog());
-    context->schedule(KernelGraph::generate(kgraph, context->kernel()));
-    context->schedule(context->kernel()->postamble());
-    context->schedule(context->kernel()->amdgpu_metadata());
-
-    auto executableKernel = context->instructions()->getExecutableKernel();
-
-    KernelArguments kargs;
-    for(auto& arg : context->kernel()->arguments())
-    {
-        auto value = evaluate(arg.expression, runtimeArgs.runtimeArguments());
-        kargs.append(arg.name, value);
-    }
-
-    KernelInvocation kinv;
-    kinv.workgroupSize    = context->kernel()->workgroupSize();
-    kinv.workitemCount[0] = num_workgroup_x * workgroup_size_x;
-    kinv.workitemCount[1] = num_workgroup_y * workgroup_size_y;
-    // ...to here
+    CommandKernel commandKernel(command, "GEMM", params, postParams);
 
     // Warmup runs
     for(int i = 0; i < result.numWarmUp; ++i)
     {
-        // swap after graph rearch complete
-        // commandKernel.launchKernel(runtimeArgs.runtimeArguments());
-        executableKernel->executeKernel(kargs, kinv);
+        commandKernel.launchKernel(runtimeArgs.runtimeArguments());
     }
 
     // Benchmark runs
@@ -332,9 +294,7 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult)
         HIP_TIC(t_kernel);
         for(int inner = 0; inner < result.numInner; ++inner)
         {
-            // swap after graph rearch complete
-            // commandKernel.launchKernel(runtimeArgs.runtimeArguments());
-            executableKernel->executeKernel(kargs, kinv);
+            commandKernel.launchKernel(runtimeArgs.runtimeArguments());
         }
         HIP_TOC(t_kernel);
         HIP_SYNC(t_kernel);

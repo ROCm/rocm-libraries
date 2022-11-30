@@ -74,12 +74,6 @@ namespace rocRoller
                 return "WaveTile";
             }
 
-            // delete after graph rearch complete
-            std::string operator()(WaveTilePtr2 const& expr) const
-            {
-                return "WaveTile2";
-            }
-
             std::string operator()(DataFlowTag const& expr) const
             {
                 return concatenate("DataFlowTag(", expr.tag, ")");
@@ -242,12 +236,6 @@ namespace rocRoller
                 return (*this)(expr->vgpr);
             }
 
-            // delete after graph rearch complete
-            Result operator()(WaveTilePtr2 const& expr) const
-            {
-                return (*this)(expr->vgpr);
-            }
-
             Result call(Expression const& expr) const
             {
                 return std::visit(*this, expr);
@@ -388,12 +376,6 @@ namespace rocRoller
             }
 
             bool operator()(WaveTilePtr const& a, WaveTilePtr const& b)
-            {
-                return a->getTag() == b->getTag();
-            }
-
-            // delete after graph rearch complete
-            bool operator()(WaveTilePtr2 const& a, WaveTilePtr2 const& b)
             {
                 return a == b;
             }

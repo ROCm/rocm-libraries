@@ -434,12 +434,6 @@ namespace rocRoller
                 Throw<FatalError>("Wave tile present in runtime expression", ShowValue(expr));
             }
 
-            // delete after graph rearch complete
-            CommandArgumentValue operator()(WaveTilePtr2 const& expr)
-            {
-                Throw<FatalError>("Wave tile present in runtime expression", ShowValue(expr));
-            }
-
             CommandArgumentValue call(Expression const& expr)
             {
                 return std::visit(*this, expr);

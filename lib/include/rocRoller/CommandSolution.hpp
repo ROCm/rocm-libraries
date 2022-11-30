@@ -5,7 +5,6 @@
 #include "AssemblyKernel.hpp"
 #include "ExecutableKernel_fwd.hpp"
 #include "KernelArguments.hpp"
-#include "KernelGraph/CoordinateTransform/Dimension.hpp"
 #include "Operations/Command_fwd.hpp"
 
 namespace rocRoller
@@ -25,13 +24,8 @@ namespace rocRoller
         /**
          * Set (reset) a dimensions properties.
          */
-        void setDimensionInfo(KernelGraph::CoordinateTransform::Dimension dim);
-        std::vector<KernelGraph::CoordinateTransform::Dimension> getDimensionInfo() const;
-
-        // TODO Delete above when graph rearch complete
         void setDimensionInfo(int tag, KernelGraph::CoordGraph::Dimension dim);
-        // TODO Rename this when graph rearch complete
-        std::map<int, KernelGraph::CoordGraph::Dimension> getDimensionInfo2() const;
+        std::map<int, KernelGraph::CoordGraph::Dimension> getDimensionInfo() const;
 
         /**
          * Manually override kernel launch dimensions.
@@ -73,10 +67,7 @@ namespace rocRoller
         std::vector<unsigned int> getWaveTilesPerWorkgroup() const;
 
     private:
-        std::vector<KernelGraph::CoordinateTransform::Dimension> m_dimInfo;
-        // TODO Delete above when graph rearch complete
-        // TODO Rename this when graph rearch complete
-        std::map<int, KernelGraph::CoordGraph::Dimension>       m_dimInfo2;
+        std::map<int, KernelGraph::CoordGraph::Dimension>       m_dimInfo;
         std::optional<std::array<unsigned int, 3>>              m_workgroupSize;
         std::optional<std::array<Expression::ExpressionPtr, 3>> m_workitemCount;
 
@@ -101,13 +92,33 @@ namespace rocRoller
          */
         CommandKernel(std::shared_ptr<Command> command, std::string name);
 
+        /**
+         * Create a CommandKernel based on a Command object. This will
+         * generate a kernel and allow the launchKernel method to be
+         * called.
+         *
+         * @param preParams CommandParameters applied to the kernel
+         * graph after translation from a command to a graph but
+         * before all lowering stages.
+         *
+         * @param postParams CommandParameters applied to the kernel
+         * graph after all lowering stages but before code-generation.
+         */
+        // TODO: When we have a more robust way of parameterizing the
+        // graph, the two sets of command parameters might be
+        // unnecessary.  Currently we need two sets because:
+        // 1. before lowering you need to specify, eg, tile sizes
+        // 2. graph ids/indexing change during lowering.
+        // 3. during lowering new nodes might be created that didn't before
+        // 4. before code-generating you need to specify, eg, how many wavefronts
         CommandKernel(std::shared_ptr<Command>           command,
                       std::string                        name,
-                      std::shared_ptr<CommandParameters> params);
+                      std::shared_ptr<CommandParameters> preParams,
+                      std::shared_ptr<CommandParameters> postParams = nullptr);
 
-        CommandKernel(std::shared_ptr<Command>        command,
-                      std::shared_ptr<Context>        ctx,
-                      KernelGraph::KernelGraph const& kernelGraph);
+        CommandKernel(std::shared_ptr<Command>             command,
+                      std::shared_ptr<Context>             ctx,
+                      KernelGraph::KernelHypergraph const& kernelGraph);
 
         void addPredicate(Expression::ExpressionPtr expression);
         bool matchesPredicates(/* args */) const;
@@ -122,7 +133,7 @@ namespace rocRoller
          */
         void launchKernel(RuntimeArguments const& args);
 
-        KernelGraph::KernelGraph getKernelGraph() const;
+        KernelGraph::KernelHypergraph getKernelGraph() const;
 
         std::shared_ptr<Context> getContext();
 
@@ -131,10 +142,10 @@ namespace rocRoller
 
         std::vector<Expression::ExpressionPtr> m_predicates;
 
-        KernelGraph::KernelGraph           m_kernelGraph;
+        KernelGraph::KernelHypergraph      m_kernelGraph;
         std::shared_ptr<Context>           m_context;
         std::shared_ptr<ExecutableKernel>  m_executableKernel;
-        std::shared_ptr<CommandParameters> m_parameters;
+        std::shared_ptr<CommandParameters> m_preParameters, m_postParameters;
 
         KernelArguments  getKernelArguments(RuntimeArguments const& args);
         KernelInvocation getKernelInvocation(RuntimeArguments const& args);
@@ -165,5 +176,3 @@ namespace rocRoller
         void launchKernels();
     };
 }
-
-#include "CommandSolution_impl.hpp"

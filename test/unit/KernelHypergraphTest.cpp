@@ -197,7 +197,7 @@ namespace rocRollerTest
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
             rocRoller::Operations::T_Mul(2, 0, 1)));
 
-        auto kgraph0 = translate2(command);
+        auto kgraph0 = translate(command);
 
         std::string expected0 = R".(
 		digraph {

@@ -13,7 +13,7 @@
 #include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitectureLibrary.hpp>
 #include <rocRoller/KernelArguments.hpp>
-#include <rocRoller/KernelGraph/CoordinateTransform/Dimension.hpp>
+#include <rocRoller/KernelGraph/CoordGraph/CoordinateHypergraph.hpp>
 #include <rocRoller/Operations/Command.hpp>
 #include <rocRoller/Utilities/Generator.hpp>
 
@@ -124,7 +124,7 @@ namespace ExpressionTest
         dataFlow.regType          = Register::Type::Vector;
         dataFlow.varType.dataType = DataType::Float;
 
-        auto waveTile = std::make_shared<KernelGraph::CoordinateTransform::WaveTile>(5);
+        auto waveTile = std::make_shared<KernelGraph::CoordGraph::WaveTile>();
 
         auto expr1  = a + b;
         auto expr2  = b * expr1;
@@ -358,8 +358,8 @@ namespace ExpressionTest
         int K       = 2;
         int batches = 1;
 
-        auto A_tile = std::make_shared<KernelGraph::CoordinateTransform::WaveTile>(0);
-        auto B_tile = std::make_shared<KernelGraph::CoordinateTransform::WaveTile>(1);
+        auto A_tile = std::make_shared<KernelGraph::CoordGraph::WaveTile>();
+        auto B_tile = std::make_shared<KernelGraph::CoordGraph::WaveTile>();
 
         A_tile->sizes = {M, K};
         A_tile->vgpr  = std::make_shared<Register::Value>(
@@ -966,10 +966,9 @@ namespace ExpressionTest
         Expression::Expression    value    = Register::Value::Literal(1);
         Expression::ExpressionPtr valuePtr = std::make_shared<Expression::Expression>(value);
 
-        Expression::Expression    tag    = Expression::DataFlowTag();
-        Expression::ExpressionPtr tagPtr = std::make_shared<Expression::Expression>(tag);
-        Expression::Expression    waveTile
-            = std::make_shared<KernelGraph::CoordinateTransform::WaveTile>(1);
+        Expression::Expression    tag      = Expression::DataFlowTag();
+        Expression::ExpressionPtr tagPtr   = std::make_shared<Expression::Expression>(tag);
+        Expression::Expression    waveTile = std::make_shared<KernelGraph::CoordGraph::WaveTile>();
         Expression::ExpressionPtr waveTilePtr = std::make_shared<Expression::Expression>(waveTile);
 
         std::vector<Expression::ExpressionPtr> exprs = {

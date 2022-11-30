@@ -5,6 +5,7 @@
 
 #include "AssemblyKernel.hpp"
 #include "Expression.hpp"
+#include "KernelGraph/KernelHypergraph.hpp"
 #include "Utilities/Utils.hpp"
 
 namespace rocRoller
@@ -276,7 +277,8 @@ namespace rocRoller
         return m_workitemIndex;
     }
 
-    inline void AssemblyKernel::setKernelGraphMeta(std::shared_ptr<KernelGraph::KernelGraph> graph)
+    inline void
+        AssemblyKernel::setKernelGraphMeta(std::shared_ptr<KernelGraph::KernelHypergraph> graph)
     {
         m_kernelGraph = graph;
     }

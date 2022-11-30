@@ -121,22 +121,12 @@ namespace TileTransposeAddTest
         auto params = std::make_shared<CommandParameters>();
         params->setManualKernelDimension(2);
 
-        auto mac_tile_0
-            = KernelGraph::CoordinateTransform::MacroTile(0, {m, n}, MemoryType::VGPR, {t_m, t_n});
-        auto mac_tile_1
-            = KernelGraph::CoordinateTransform::MacroTile(1, {m, n}, MemoryType::VGPR, {t_m, t_n});
-        auto mac_tile_2
-            = KernelGraph::CoordinateTransform::MacroTile(2, {m, n}, MemoryType::VGPR, {t_m, t_n});
-        auto mac_tile_3
-            = KernelGraph::CoordinateTransform::MacroTile(3, {m, n}, MemoryType::VGPR, {t_m, t_n});
-        auto mac_tile_4 = KernelGraph::CoordinateTransform::MacroTile(
-            4, {m, n}, MemoryType::VGPR, {t_m, t_n}, true);
-
-        params->setDimensionInfo(mac_tile_0);
-        params->setDimensionInfo(mac_tile_1);
-        params->setDimensionInfo(mac_tile_2);
-        params->setDimensionInfo(mac_tile_3);
-        params->setDimensionInfo(mac_tile_4);
+        auto mac_tile = KernelGraph::CoordGraph::MacroTile({m, n}, MemoryType::VGPR, {t_m, t_n});
+        params->setDimensionInfo(4, mac_tile);
+        params->setDimensionInfo(11, mac_tile);
+        params->setDimensionInfo(15, mac_tile);
+        params->setDimensionInfo(17, mac_tile);
+        params->setDimensionInfo(19, mac_tile);
 
         params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
         params->setManualWorkitemCount({NX, NY, NZ});

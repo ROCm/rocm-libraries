@@ -383,7 +383,6 @@ namespace rocRoller
                      std::same_as<CommandArgumentValue, T>      ||
                      std::same_as<DataFlowTag, T>               ||
                      std::same_as<Register::ValuePtr, T>        ||
-                     std::same_as<WaveTilePtr2, T>              || /* delete after graph rearch complete */
                      std::same_as<WaveTilePtr, T>;
             // clang-format on
         };

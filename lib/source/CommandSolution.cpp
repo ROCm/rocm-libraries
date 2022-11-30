@@ -1,4 +1,3 @@
-#pragma once
 
 #include <memory>
 
@@ -8,6 +7,7 @@
 
 #include "AssemblyKernel.hpp"
 #include "KernelArguments.hpp"
+#include "KernelGraph/KernelHypergraph.hpp"
 #include "Operations/Command.hpp"
 #include "Scheduling/Scheduler.hpp"
 #include "Utilities/Settings_fwd.hpp"
@@ -15,82 +15,65 @@
 
 namespace rocRoller
 {
-    inline CommandParameters::CommandParameters()
+    CommandParameters::CommandParameters()
         : m_waveTilesPerWorkgroup({1, 1})
     {
     }
 
-    // TODO Delete this when graph rearch complete
-    inline void CommandParameters::setDimensionInfo(KernelGraph::CoordinateTransform::Dimension dim)
+    void CommandParameters::setDimensionInfo(int tag, KernelGraph::CoordGraph::Dimension dim)
     {
-        m_dimInfo.push_back(dim);
+        m_dimInfo[tag] = dim;
     }
 
-    // TODO Delete this when graph rearch complete
-    inline std::vector<KernelGraph::CoordinateTransform::Dimension>
-        CommandParameters::getDimensionInfo() const
+    std::map<int, KernelGraph::CoordGraph::Dimension> CommandParameters::getDimensionInfo() const
     {
         return m_dimInfo;
     }
 
-    // TODO Rename this when graph rearch complete
-    inline void CommandParameters::setDimensionInfo(int tag, KernelGraph::CoordGraph::Dimension dim)
-    {
-        m_dimInfo2[tag] = dim;
-    }
-
-    // TODO Rename this when graph rearch complete
-    inline std::map<int, KernelGraph::CoordGraph::Dimension>
-        CommandParameters::getDimensionInfo2() const
-    {
-        return m_dimInfo2;
-    }
-
-    inline int CommandParameters::getManualKernelDimension() const
+    int CommandParameters::getManualKernelDimension() const
     {
         return m_kernelDimension;
     }
 
-    inline void CommandParameters::setManualKernelDimension(int dim)
+    void CommandParameters::setManualKernelDimension(int dim)
     {
         m_kernelDimension = dim;
     }
 
-    inline void CommandParameters::setManualWorkgroupSize(std::array<unsigned int, 3> const& v)
+    void CommandParameters::setManualWorkgroupSize(std::array<unsigned int, 3> const& v)
     {
         m_workgroupSize = v;
     }
 
-    inline std::optional<std::array<unsigned int, 3>>
-        CommandParameters::getManualWorkgroupSize() const
+    std::optional<std::array<unsigned int, 3>> CommandParameters::getManualWorkgroupSize() const
     {
         return m_workgroupSize;
     }
 
-    inline void
+    void
         CommandParameters::setManualWorkitemCount(std::array<Expression::ExpressionPtr, 3> const& v)
     {
         m_workitemCount = v;
     }
 
-    inline std::optional<std::array<Expression::ExpressionPtr, 3>>
+    std::optional<std::array<Expression::ExpressionPtr, 3>>
         CommandParameters::getManualWorkitemCount() const
     {
         return m_workitemCount;
     }
 
-    inline void CommandParameters::setWaveTilesPerWavefront(unsigned int x, unsigned int y)
+    void CommandParameters::setWaveTilesPerWavefront(unsigned int x, unsigned int y)
     {
         m_waveTilesPerWorkgroup[0] = x;
         m_waveTilesPerWorkgroup[1] = y;
     }
 
-    inline std::vector<unsigned int> CommandParameters::getWaveTilesPerWorkgroup() const
+    std::vector<unsigned int> CommandParameters::getWaveTilesPerWorkgroup() const
     {
         return m_waveTilesPerWorkgroup;
     }
 
-    inline KernelArguments CommandKernel::getKernelArguments(RuntimeArguments const& args)
+    KernelArguments CommandKernel::getKernelArguments(RuntimeArguments const& args)
     {
         TIMER(t, "CommandKernel::getKernelArguments");
 
@@ -119,7 +102,7 @@ namespace rocRoller
         return rv;
     }
 
-    inline KernelInvocation CommandKernel::getKernelInvocation(RuntimeArguments const& args)
+    KernelInvocation CommandKernel::getKernelInvocation(RuntimeArguments const& args)
     {
         TIMER(t, "CommandKernel::getKernelInvocation");
 
@@ -142,53 +125,55 @@ namespace rocRoller
         return rv;
     }
 
-    inline CommandKernel::CommandKernel(std::shared_ptr<Context> context)
+    CommandKernel::CommandKernel(std::shared_ptr<Context> context)
         : m_context(context)
     {
     }
 
-    inline CommandKernel::CommandKernel(std::shared_ptr<Command> command, std::string name)
+    CommandKernel::CommandKernel(std::shared_ptr<Command> command, std::string name)
         : m_command(command)
-        , m_parameters(std::make_shared<CommandParameters>())
+        , m_preParameters(std::make_shared<CommandParameters>())
     {
         generateKernel(name);
     }
 
-    inline CommandKernel::CommandKernel(std::shared_ptr<Command>           command,
-                                        std::string                        name,
-                                        std::shared_ptr<CommandParameters> parameters)
+    CommandKernel::CommandKernel(std::shared_ptr<Command>           command,
+                                 std::string                        name,
+                                 std::shared_ptr<CommandParameters> preParameters,
+                                 std::shared_ptr<CommandParameters> postParameters)
         : m_command(command)
-        , m_parameters(parameters)
+        , m_preParameters(preParameters)
+        , m_postParameters(postParameters)
     {
-        AssertFatal(m_parameters);
+        AssertFatal(m_preParameters);
 
         generateKernel(name);
     }
 
-    inline CommandKernel::CommandKernel(std::shared_ptr<Command>        command,
-                                        std::shared_ptr<Context>        context,
-                                        KernelGraph::KernelGraph const& kernelGraph)
+    CommandKernel::CommandKernel(std::shared_ptr<Command>             command,
+                                 std::shared_ptr<Context>             context,
+                                 KernelGraph::KernelHypergraph const& kernelGraph)
         : m_command(command)
         , m_context(context)
         , m_kernelGraph(kernelGraph)
-        , m_parameters(std::make_shared<CommandParameters>())
+        , m_preParameters(std::make_shared<CommandParameters>())
     {
         generateKernelSource();
         assembleKernel();
     }
 
-    inline KernelGraph::KernelGraph CommandKernel::getKernelGraph() const
+    KernelGraph::KernelHypergraph CommandKernel::getKernelGraph() const
     {
         return m_kernelGraph;
     }
 
-    inline Generator<Instruction> CommandKernel::commandComments()
+    Generator<Instruction> CommandKernel::commandComments()
     {
         co_yield Instruction::Comment(m_command->toString());
         co_yield Instruction::Comment(m_command->argInfo());
     }
 
-    inline void CommandKernel::generateKernelGraph(std::string name)
+    void CommandKernel::generateKernelGraph(std::string name)
     {
         TIMER(t, "CommandKernel::generateKernelGraph");
 
@@ -197,19 +182,19 @@ namespace rocRoller
         m_context = Context::ForDefaultHipDevice(name);
 
         // TODO: Determine the correct kernel dimensions
-        if(m_parameters->getManualKernelDimension() > 0)
-            m_context->kernel()->setKernelDimensions(m_parameters->getManualKernelDimension());
+        if(m_preParameters->getManualKernelDimension() > 0)
+            m_context->kernel()->setKernelDimensions(m_preParameters->getManualKernelDimension());
         else
             m_context->kernel()->setKernelDimensions(1);
 
         // TODO: Determine the correct work group size
-        if(m_parameters->getManualWorkgroupSize())
-            m_context->kernel()->setWorkgroupSize(*m_parameters->getManualWorkgroupSize());
+        if(m_preParameters->getManualWorkgroupSize())
+            m_context->kernel()->setWorkgroupSize(*m_preParameters->getManualWorkgroupSize());
         else
             m_context->kernel()->setWorkgroupSize({64, 1, 1});
 
-        if(m_parameters->getManualWorkitemCount())
-            m_context->kernel()->setWorkitemCount(*m_parameters->getManualWorkitemCount());
+        if(m_preParameters->getManualWorkitemCount())
+            m_context->kernel()->setWorkitemCount(*m_preParameters->getManualWorkitemCount());
         else
             m_context->kernel()->setWorkitemCount(m_command->createWorkItemCount());
 
@@ -220,22 +205,23 @@ namespace rocRoller
 
         m_kernelGraph = KernelGraph::translate(m_command);
         logger->debug("CommandKernel::generateKernel: post translate: {}", m_kernelGraph.toDOT());
-        m_kernelGraph = updateParameters(m_kernelGraph, m_parameters);
+        m_kernelGraph = updateParameters(m_kernelGraph, m_preParameters);
 
         m_kernelGraph = KernelGraph::lowerLinear(m_kernelGraph, m_context);
 
-        m_kernelGraph = KernelGraph::lowerTile(m_kernelGraph, m_parameters, m_context);
+        m_kernelGraph = KernelGraph::lowerTile(m_kernelGraph, m_preParameters, m_context);
 
         m_kernelGraph = KernelGraph::cleanArguments(m_kernelGraph, m_context->kernel());
 
-        m_kernelGraph = updateParameters(m_kernelGraph, m_parameters);
+        if(m_postParameters)
+            m_kernelGraph = updateParameters(m_kernelGraph, m_postParameters);
     }
 
-    inline void CommandKernel::generateKernelSource()
+    void CommandKernel::generateKernelSource()
     {
         TIMER(t, "CommandKernel::generateKernelSource");
         m_context->kernel()->setKernelGraphMeta(
-            std::make_shared<KernelGraph::KernelGraph>(m_kernelGraph));
+            std::make_shared<KernelGraph::KernelHypergraph>(m_kernelGraph));
 
         // A sequential scheduler should always be used here to ensure
         // the parts of the kernel are yielded in the correct order.
@@ -248,7 +234,7 @@ namespace rocRoller
         generators.push_back(m_context->kernel()->preamble());
         generators.push_back(m_context->kernel()->prolog());
 
-        generators.push_back(KernelGraph::generate(m_kernelGraph, m_command, m_context->kernel()));
+        generators.push_back(KernelGraph::generate(m_kernelGraph, m_context->kernel()));
 
         generators.push_back(m_context->kernel()->postamble());
         generators.push_back(m_context->kernel()->amdgpu_metadata());
@@ -256,14 +242,14 @@ namespace rocRoller
         m_context->schedule((*scheduler)(generators));
     }
 
-    inline void CommandKernel::assembleKernel()
+    void CommandKernel::assembleKernel()
     {
         TIMER(t, "CommandKernel::assembleKernel");
 
         m_executableKernel = m_context->instructions()->getExecutableKernel();
     }
 
-    inline void CommandKernel::generateKernel(std::string name)
+    void CommandKernel::generateKernel(std::string name)
     {
         TIMER(t, "CommandKernel::generateKernel");
 
@@ -272,13 +258,13 @@ namespace rocRoller
         assembleKernel();
     }
 
-    inline bool CommandKernel::matchesPredicates(/* args */) const
+    bool CommandKernel::matchesPredicates(/* args */) const
     {
         // TODO: CommandKernel predicates.
         return true;
     }
 
-    inline void CommandKernel::launchKernel(RuntimeArguments const& args)
+    void CommandKernel::launchKernel(RuntimeArguments const& args)
     {
         TIMER(t, "CommandKernel::launchKernel");
 
@@ -294,8 +280,8 @@ namespace rocRoller
         m_executableKernel->executeKernel(kargs, inv);
     }
 
-    inline void CommandKernel::loadKernelFromAssembly(const std::string& fileName,
-                                                      const std::string& kernelName)
+    void CommandKernel::loadKernelFromAssembly(const std::string& fileName,
+                                               const std::string& kernelName)
     {
         AssertFatal(m_context);
         AssertFatal(m_context->kernel());
@@ -305,11 +291,9 @@ namespace rocRoller
             fileName, kernelName, m_context->targetArchitecture().target());
     }
 
-    inline std::shared_ptr<Context> CommandKernel::getContext()
+    std::shared_ptr<Context> CommandKernel::getContext()
     {
         return m_context;
     }
 
 }
-
-#include "CommandSolution_impl.hpp"

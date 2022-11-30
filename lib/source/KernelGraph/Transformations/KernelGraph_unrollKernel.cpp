@@ -1,3 +1,4 @@
+#include "KernelGraph/KernelHypergraph.hpp"
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Visitors.hpp>
@@ -9,6 +10,8 @@ namespace rocRoller
         namespace Expression = rocRoller::Expression;
         using namespace Expression;
 
+// TODO update this
+#if 0
         struct KernelUnrollVisitor : public BaseGraphVisitor
         {
             KernelUnrollVisitor(std::shared_ptr<Context> context, ExpressionPtr unrollSize)
@@ -121,14 +124,16 @@ namespace rocRoller
             TagType       m_unrollDimTag;
             ExpressionPtr m_unrollSize;
         };
+#endif
 
-        KernelGraph lowerLinearUnroll(KernelGraph              k,
-                                      ExpressionPtr            unrollSize,
-                                      std::shared_ptr<Context> context)
+        KernelHypergraph lowerLinearUnroll(KernelHypergraph const&  k,
+                                           ExpressionPtr            unrollSize,
+                                           std::shared_ptr<Context> context)
         {
             TIMER(t, "KernelGraph::lowerLinearUnroll");
-            auto visitor = KernelUnrollVisitor(context, unrollSize);
-            return rewrite(k, visitor);
+            // auto visitor = KernelUnrollVisitor(context, unrollSize);
+            // return rewrite(k, visitor);
+            return k;
         }
     }
 }

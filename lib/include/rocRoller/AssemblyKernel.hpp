@@ -11,6 +11,7 @@
 #include "CodeGen/Instruction.hpp"
 #include "Expression_fwd.hpp"
 #include "KernelGraph/KernelGraph.hpp"
+#include "KernelGraph/KernelHypergraph.hpp"
 #include "Scheduling/Scheduling.hpp"
 #include "Utilities/Generator.hpp"
 
@@ -143,7 +144,7 @@ namespace rocRoller
         void setWorkgroupSize(std::array<unsigned int, 3> const& val);
         void setWorkitemCount(std::array<Expression::ExpressionPtr, 3> const& val);
         void setDynamicSharedMemBytes(Expression::ExpressionPtr const& val);
-        void setKernelGraphMeta(std::shared_ptr<KernelGraph::KernelGraph> graph);
+        void setKernelGraphMeta(std::shared_ptr<KernelGraph::KernelHypergraph> graph);
         void setWavefrontSize(int);
 
         std::array<Register::ValuePtr, 3> const& workgroupIndex() const;
@@ -184,7 +185,7 @@ namespace rocRoller
 
         int m_wavefrontSize = 64;
 
-        std::shared_ptr<KernelGraph::KernelGraph> m_kernelGraph;
+        std::shared_ptr<KernelGraph::KernelHypergraph> m_kernelGraph;
 
         /**
          *

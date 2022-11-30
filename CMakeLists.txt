@@ -239,13 +239,8 @@ set(rocroller_src
  lib/source/CodeGen/InstructionRef.cpp
  lib/source/CodeGen/MemoryInstructions.cpp
 
- lib/source/KernelGraph/ControlGraph/ControlEdge.cpp
- lib/source/KernelGraph/ControlGraph/ControlGraph.cpp
  lib/source/KernelGraph/CoordGraph/Dimension.cpp
  lib/source/KernelGraph/CoordGraph/Transformer.cpp
- lib/source/KernelGraph/CoordinateTransform/Dimension.cpp
- lib/source/KernelGraph/CoordinateTransform/HyperGraph.cpp
- lib/source/KernelGraph/CoordinateTransform/Transformer.cpp
  lib/source/KernelGraph/Transformations/AddComputeIndex.cpp
  lib/source/KernelGraph/Transformations/CleanGraph.cpp
  lib/source/KernelGraph/Transformations/KernelGraph_loop.cpp
@@ -254,7 +249,6 @@ set(rocroller_src
  lib/source/KernelGraph/Transformations/LowerTile.cpp
  lib/source/KernelGraph/Transformations/UpdateParameters.cpp
  lib/source/KernelGraph/ControlToCoordinateMapper.cpp
- lib/source/KernelGraph/KernelGraph.cpp
  lib/source/KernelGraph/KernelHypergraph.cpp
  lib/source/KernelGraph/LowerFromCommand.cpp
  lib/source/KernelGraph/ScopeManager.cpp
@@ -264,6 +258,7 @@ set(rocroller_src
  lib/source/Assembler.cpp
  lib/source/AssemblyKernel.cpp
  lib/source/AssemblyKernel_serialization.cpp
+ lib/source/CommandSolution.cpp
  lib/source/Context.cpp
  lib/source/DataTypes.cpp
  lib/source/Error.cpp
@@ -391,7 +386,6 @@ set(
   test/unit/CommandTest.cpp
   test/unit/ComponentTest.cpp
   test/unit/ControlHypergraphTest.cpp
-  test/unit/CoordinateTransformTest.cpp
   test/unit/CoordinateHypergraphTest.cpp
   test/unit/CopyGeneratorTest.cpp
   test/unit/DataTypesTest.cpp

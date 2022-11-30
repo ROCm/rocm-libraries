@@ -277,8 +277,6 @@ namespace rocRoller
             {
                 AssertFatal(iot::outputting(io));
 
-                iot::mapRequired(io, "tag", val->tag, ctx);
-                iot::mapRequired(io, "output", val->output, ctx);
                 iot::mapRequired(io, "size", val->size, ctx);
                 iot::mapRequired(io, "stride", val->stride, ctx);
                 iot::mapRequired(io, "rank", val->rank, ctx);
@@ -289,32 +287,6 @@ namespace rocRoller
 
             static std::enable_if_t<std::same_as<EmptyContext, Context>>
                 mapping(IO& io, Expression::WaveTilePtr& val)
-            {
-                EmptyContext ctx;
-                mapping(io, val, ctx);
-            }
-        };
-
-        // delete after graph rearch complete
-        template <typename IO, typename Context>
-        struct MappingTraits<Expression::WaveTilePtr2, IO, Context>
-        {
-            using iot = IOTraits<IO>;
-
-            static void mapping(IO& io, Expression::WaveTilePtr2& val, Context& ctx)
-            {
-                AssertFatal(iot::outputting(io));
-
-                iot::mapRequired(io, "size", val->size, ctx);
-                iot::mapRequired(io, "stride", val->stride, ctx);
-                iot::mapRequired(io, "rank", val->rank, ctx);
-                iot::mapRequired(io, "sizes", val->sizes, ctx);
-                iot::mapRequired(io, "layout", val->layout, ctx);
-                iot::mapRequired(io, "vgpr", val->vgpr, ctx);
-            }
-
-            static std::enable_if_t<std::same_as<EmptyContext, Context>>
-                mapping(IO& io, Expression::WaveTilePtr2& val)
             {
                 EmptyContext ctx;
                 mapping(io, val, ctx);

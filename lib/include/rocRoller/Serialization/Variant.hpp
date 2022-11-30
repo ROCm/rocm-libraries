@@ -4,9 +4,6 @@
 
 #include "Base.hpp"
 
-// delete this when graph rearch complete
-#include <rocRoller/Expression.hpp>
-
 namespace rocRoller
 {
     namespace Serialization
@@ -57,11 +54,6 @@ namespace rocRoller
             {
                 using AltType = std::variant_alternative_t<AltIdx, T>;
                 auto typeName = name(defaultConstruct<AltType>());
-                // delete this when graph rearch complete
-                if(typeid(AltType) == typeid(rocRoller::Expression::WaveTilePtr2))
-                {
-                    return std::make_pair(typeName + "2", defaultConstruct<AltType>);
-                }
                 return std::make_pair(typeName, defaultConstruct<AltType>);
             }
 
