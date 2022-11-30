@@ -158,9 +158,8 @@ namespace RegisterAllocatorTest
         EXPECT_GT(assembledKernel.size(), 0);
     }
 
-    INSTANTIATE_TEST_SUITE_P(
-        ARCH_RegisterAllocatorTests,
-        ARCH_RegisterAllocatorTest,
-        ::testing::ValuesIn(rocRoller::GPUArchitectureLibrary::getAllSupportedISAs()));
+    INSTANTIATE_TEST_SUITE_P(ARCH_RegisterAllocatorTests,
+                             ARCH_RegisterAllocatorTest,
+                             supportedISATuples());
 
 }

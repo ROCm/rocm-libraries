@@ -182,14 +182,6 @@ namespace rocRoller
         }
     }
 
-    template <typename... Ts>
-    inline std::ostream& operator<<(std::ostream& stream, std::tuple<Ts...> const& tup)
-    {
-        stream << "[";
-        streamJoinTuple(stream, ", ", tup);
-        return stream << "]";
-    }
-
     template <typename T>
     inline std::ostream& stream_write(std::ostream& stream, T const& val)
     {
@@ -386,3 +378,14 @@ namespace rocRoller
      * @}
      */
 } // namespace rocRoller
+
+namespace std
+{
+    template <typename... Ts>
+    inline std::ostream& operator<<(std::ostream& stream, std::tuple<Ts...> const& tup)
+    {
+        stream << "[";
+        rocRoller::streamJoinTuple(stream, ", ", tup);
+        return stream << "]";
+    }
+}

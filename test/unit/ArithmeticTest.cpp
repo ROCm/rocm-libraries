@@ -14,16 +14,18 @@
 #include <rocRoller/KernelArguments.hpp>
 #include <rocRoller/Operations/Command.hpp>
 #include <rocRoller/Utilities/Generator.hpp>
+#include <rocRoller/Utilities/Utils.hpp>
 
 #include "GPUContextFixture.hpp"
 #include "GenericContextFixture.hpp"
 #include "SourceMatcher.hpp"
 #include "TestValues.hpp"
-
-using namespace rocRoller;
+#include "Utilities.hpp"
 
 namespace ArithmeticTest
 {
+
+    using namespace rocRoller;
 
     class ArithmeticTest : public GPUContextFixture
     {
@@ -238,10 +240,7 @@ namespace ArithmeticTest
         m_context->schedule(k->postamble());
         m_context->schedule(k->amdgpu_metadata());
 
-        if(m_context->targetArchitecture().target().getMajorVersion() != 9)
-        {
-            GTEST_SKIP() << "Skipping GPU arithmetic tests for " << GetParam();
-        }
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
 
         if(isLocalDevice())
         {
@@ -1579,9 +1578,6 @@ namespace ArithmeticTest
         ASSERT_THROW(m_context->schedule(kb_dst()), FatalError);
     }
 
-    INSTANTIATE_TEST_SUITE_P(
-        ArithmeticTests,
-        ArithmeticTest,
-        ::testing::ValuesIn(rocRoller::GPUArchitectureLibrary::getAllSupportedISAs()));
+    INSTANTIATE_TEST_SUITE_P(ArithmeticTests, ArithmeticTest, supportedISATuples());
 
 }

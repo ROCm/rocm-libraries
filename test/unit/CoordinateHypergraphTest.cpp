@@ -753,9 +753,8 @@ namespace rocRollerTest
                   "Multiply(Add(Multiply(s3:U32, 16j), 2j), 1i))");
     }
 
-    INSTANTIATE_TEST_SUITE_P(
-        ARCH_CoordinateHypergraphTests,
-        ARCH_CoordinateHypergraphTest,
-        ::testing::ValuesIn(rocRoller::GPUArchitectureLibrary::getAllSupportedISAs()));
+    INSTANTIATE_TEST_SUITE_P(ARCH_CoordinateHypergraphTests,
+                             ARCH_CoordinateHypergraphTest,
+                             supportedISATuples());
 
 }

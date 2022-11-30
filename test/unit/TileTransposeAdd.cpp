@@ -11,6 +11,7 @@
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Timer.hpp>
 
 #include "DataTypes/DataTypes.hpp"
@@ -18,7 +19,7 @@
 #include "GenericContextFixture.hpp"
 #include "Scheduling/Observers/FileWritingObserver.hpp"
 #include "SourceMatcher.hpp"
-#include "Utilities/Error.hpp"
+#include "Utilities.hpp"
 
 using namespace rocRoller;
 

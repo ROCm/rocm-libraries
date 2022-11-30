@@ -65,6 +65,9 @@ namespace GPUArchitectureGenerator
               "4\n.end_amdhsa_kernel",
               ""}},
 
+            {rocRoller::GPUCapability::HasFlatOffset,
+             {"flat_store_dword v[8:9], v5 offset:16", ""}},
+
             {rocRoller::GPUCapability::v_mac_f16, {"v_mac_f16 v47, v36, v34", ""}},
 
             {rocRoller::GPUCapability::v_fma_f16,

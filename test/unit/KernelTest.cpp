@@ -20,6 +20,7 @@
 #include "GPUContextFixture.hpp"
 #include "GenericContextFixture.hpp"
 #include "SourceMatcher.hpp"
+#include "Utilities.hpp"
 
 using namespace rocRoller;
 
@@ -264,10 +265,7 @@ amdhsa.kernels:
         // /opt/rocm/bin/amdclang -x assembler -target amdgcn-amd-amdhsa -mcpu=gfx90a:xnack+ build/kernel.s -o build/kernel.o
     }
 
-    INSTANTIATE_TEST_SUITE_P(
-        ARCH_KernelTests,
-        ARCH_KernelTest,
-        ::testing::ValuesIn(rocRoller::GPUArchitectureLibrary::getAllSupportedISAs()));
+    INSTANTIATE_TEST_SUITE_P(ARCH_KernelTests, ARCH_KernelTest, supportedISATuples());
 
     class GPU_KernelTest : public CurrentGPUContextFixture
     {

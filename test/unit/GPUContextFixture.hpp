@@ -4,27 +4,82 @@
 #include <gtest/gtest.h>
 
 #include "ContextFixture.hpp"
-#include "Utilities.hpp"
-#include <rocRoller/ExecutableKernel.hpp>
+#include <rocRoller/Utilities/Utils.hpp>
 
 #include <hip/hip_ext.h>
 #include <hip/hip_runtime.h>
 
-class CurrentGPUContextFixture : public ContextFixture
+/**
+ * Returns a (googletest) Generator that will yield every GPU ISA supported by rocRoller.
+ *
+ * Useful if you want to parameterize a test with combinations of each ISA with other parameters. Example:
+ * INSTANTIATE_TEST_SUITE_P(SuiteName,
+ *                          FixtureClass,
+ *                          ::testing::Combine(supportedISAValues(),
+ *                                             ::testing::Values(1, 2, 4, 8, 12, 16, 20, 44)));
+ */
+inline auto supportedISAValues()
+{
+    return ::testing::ValuesIn(rocRoller::GPUArchitectureLibrary::getAllSupportedISAs());
+}
+
+/**
+ * Returns a (googletest) Generator that will yield just the local GPU ISA.
+ *
+ * Useful if you want to parameterize a test with combinations of each ISA with other parameters. Example:
+ * INSTANTIATE_TEST_SUITE_P(SuiteName,
+ *                          FixtureClass,
+ *                          ::testing::Combine(currentGPUISA(),
+ *                                             ::testing::Values(1, 2, 4, 8, 12, 16, 20, 44)));
+ */
+inline auto currentGPUISA()
+{
+    auto currentDevice = rocRoller::GPUArchitectureLibrary::GetDefaultHipDeviceArch();
+    return ::testing::Values(currentDevice.target().ToString());
+}
+
+/**
+ * Returns a (googletest) Generator that will yield a single-item tuple for every GPU ISA supported by rocRoller.
+ *
+ * Useful if you want to parameterize a test with only each supported ISA. Example:
+ * INSTANTIATE_TEST_SUITE_P(SuiteName,
+ *                          FixtureClass,
+ *                          supportedISATuples());
+ */
+inline auto supportedISATuples()
+{
+    return ::testing::Combine(supportedISAValues());
+}
+
+class BaseGPUContextFixture : public ContextFixture
 {
 protected:
     void SetUp() override;
 
-    virtual rocRoller::ContextPtr createContext() override;
+    rocRoller::ContextPtr createContextLocalDevice();
+    rocRoller::ContextPtr createContextForArch(std::string const& device);
 };
 
-class GPUContextFixture : public ContextFixture, public ::testing::WithParamInterface<std::string>
+class CurrentGPUContextFixture : public BaseGPUContextFixture
 {
 protected:
-    void SetUp() override;
-
     virtual rocRoller::ContextPtr createContext() override;
 };
+
+template <typename... Ts>
+class GPUContextFixtureParam : public BaseGPUContextFixture,
+                               public ::testing::WithParamInterface<std::tuple<std::string, Ts...>>
+{
+protected:
+    virtual rocRoller::ContextPtr createContext() override
+    {
+        std::string device = std::get<0>(this->GetParam());
+
+        return this->createContextForArch(device);
+    }
+};
+
+using GPUContextFixture = GPUContextFixtureParam<>;
 
 #define REQUIRE_ARCH_CAP(cap)                                                                 \
     do                                                                                        \
@@ -34,4 +89,14 @@ protected:
             GTEST_SKIP() << m_context->targetArchitecture().target() << " has no capability " \
                          << cap << std::endl;                                                 \
         }                                                                                     \
+    } while(0)
+
+#define REQUIRE_NOT_ARCH_CAP(cap)                                                                 \
+    do                                                                                            \
+    {                                                                                             \
+        if(m_context->targetArchitecture().HasCapability(cap))                                    \
+        {                                                                                         \
+            GTEST_SKIP() << m_context->targetArchitecture().target() << " has capability " << cap \
+                         << std::endl;                                                            \
+        }                                                                                         \
     } while(0)

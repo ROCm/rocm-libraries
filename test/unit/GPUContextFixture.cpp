@@ -1,36 +1,20 @@
 
 #include "GPUContextFixture.hpp"
 
+#include "Utilities.hpp"
+
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/Context.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitecture.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitectureLibrary.hpp>
 #include <rocRoller/KernelArguments.hpp>
 
-void getSupportedISAs()
-{
-    auto m_supported_isas = rocRoller::GPUArchitectureLibrary::getAllSupportedISAs();
-}
-
-void CurrentGPUContextFixture::SetUp()
-{
-    using namespace rocRoller;
-
-    ASSERT_THAT(hipInit(0), HasHipSuccess(0));
-    ASSERT_THAT(hipSetDevice(0), HasHipSuccess(0));
-
-    ContextFixture::SetUp();
-
-    ASSERT_EQ(true, m_context->targetArchitecture().HasCapability(GPUCapability::SupportedISA));
-    ASSERT_EQ(true, isLocalDevice());
-}
-
-rocRoller::ContextPtr CurrentGPUContextFixture::createContext()
+rocRoller::ContextPtr BaseGPUContextFixture::createContextLocalDevice()
 {
     return rocRoller::Context::ForDefaultHipDevice(testKernelName());
 }
 
-void GPUContextFixture::SetUp()
+void BaseGPUContextFixture::SetUp()
 {
     using namespace rocRoller;
     ContextFixture::SetUp();
@@ -46,11 +30,10 @@ void GPUContextFixture::SetUp()
     }
 }
 
-rocRoller::ContextPtr GPUContextFixture::createContext()
+rocRoller::ContextPtr BaseGPUContextFixture::createContextForArch(std::string const& device)
 {
     using namespace rocRoller;
 
-    auto device = GetParam();
     auto target = GPUArchitectureTarget(device);
 
     auto currentDevice = GPUArchitectureLibrary::GetDefaultHipDeviceArch();
@@ -65,4 +48,9 @@ rocRoller::ContextPtr GPUContextFixture::createContext()
     {
         return Context::ForTarget(target, testKernelName());
     }
+}
+
+rocRoller::ContextPtr CurrentGPUContextFixture::createContext()
+{
+    return createContextLocalDevice();
 }

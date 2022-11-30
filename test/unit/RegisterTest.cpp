@@ -382,7 +382,4 @@ TEST_P(ARCH_RegisterTest, RegisterIDSpecial)
     EXPECT_EQ(vccRegisterIDs[0], specialRegisterIDs[0]);
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    ARCH_RegisterTest,
-    ARCH_RegisterTest,
-    ::testing::ValuesIn(rocRoller::GPUArchitectureLibrary::getAllSupportedISAs()));
+INSTANTIATE_TEST_SUITE_P(ARCH_RegisterTest, ARCH_RegisterTest, supportedISATuples());

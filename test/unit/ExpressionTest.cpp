@@ -1221,10 +1221,7 @@ namespace ExpressionTest
         }
     }
 
-    INSTANTIATE_TEST_SUITE_P(
-        ARCH_ExpressionTests,
-        ARCH_ExpressionTest,
-        ::testing::ValuesIn(rocRoller::GPUArchitectureLibrary::getAllSupportedISAs()));
+    INSTANTIATE_TEST_SUITE_P(ARCH_ExpressionTests, ARCH_ExpressionTest, supportedISATuples());
 
     class GPU_ExpressionTest : public CurrentGPUContextFixture
     {

@@ -10,6 +10,7 @@
 #include <rocRoller/Context.hpp>
 
 #include "GPUContextFixture.hpp"
+#include "Utilities.hpp"
 
 using namespace rocRoller;
 

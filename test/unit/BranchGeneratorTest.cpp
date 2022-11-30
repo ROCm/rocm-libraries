@@ -162,9 +162,8 @@ namespace rocRollerTest
         EXPECT_EQ(found, false);
     }
 
-    INSTANTIATE_TEST_SUITE_P(
-        ARCH_BranchGeneratorTests,
-        ARCH_BranchGeneratorTest,
-        ::testing::ValuesIn(rocRoller::GPUArchitectureLibrary::getAllSupportedISAs()));
+    INSTANTIATE_TEST_SUITE_P(ARCH_BranchGeneratorTests,
+                             ARCH_BranchGeneratorTest,
+                             supportedISATuples());
 
 }

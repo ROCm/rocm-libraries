@@ -16,6 +16,7 @@
 #include <rocRoller/Utilities/Generator.hpp>
 
 #include "GPUContextFixture.hpp"
+#include "Utilities.hpp"
 
 using namespace rocRoller;
 
