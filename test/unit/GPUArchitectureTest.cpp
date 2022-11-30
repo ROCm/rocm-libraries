@@ -57,7 +57,7 @@ TEST(GPUArchitectureTest, ValidateGeneratedDef)
               false);
     EXPECT_EQ(GPUArchitectureLibrary::HasCapability(GPUArchitectureTarget("gfx908:xnack-"),
                                                     GPUCapability::HasDirectToLds),
-              true);
+              false);
     EXPECT_EQ(GPUArchitectureLibrary::HasCapability(GPUArchitectureTarget("gfx908:xnack-"),
                                                     GPUCapability::HasAtomicAdd),
               true);

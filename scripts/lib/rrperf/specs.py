@@ -170,7 +170,7 @@ def get_machine_specs(devicenum, rocm_smi_path="rocm-smi"):
                 "--showid",
                 "--showproductname",
                 "--showperflevel",
-                # "--showclocks",
+                "--showclocks",
                 "--showmeminfo",
                 "vram",
             ]
