@@ -9,6 +9,118 @@
 
 namespace rocRoller
 {
+    std::string toString(GFX9BufferDescriptorOptions::DataFormatValue val)
+    {
+        switch(val)
+        {
+        case GFX9BufferDescriptorOptions::DFInvalid:
+            return "DFInvalid";
+        case GFX9BufferDescriptorOptions::DF8:
+            return "DF8";
+        case GFX9BufferDescriptorOptions::DF16:
+            return "DF16";
+        case GFX9BufferDescriptorOptions::DF8_8:
+            return "DF8_8";
+        case GFX9BufferDescriptorOptions::DF32:
+            return "DF32";
+        case GFX9BufferDescriptorOptions::DF16_16:
+            return "DF16_16";
+        case GFX9BufferDescriptorOptions::DF10_11_11:
+            return "DF10_11_11";
+        case GFX9BufferDescriptorOptions::DF11_11_10:
+            return "DF11_11_10";
+        case GFX9BufferDescriptorOptions::DF10_10_10_2:
+            return "DF10_10_10_2";
+        case GFX9BufferDescriptorOptions::DF2_10_10_10:
+            return "DF2_10_10_10";
+        case GFX9BufferDescriptorOptions::DF8_8_8_8:
+            return "DF8_8_8_8";
+        case GFX9BufferDescriptorOptions::DF32_32:
+            return "DF32_32";
+        case GFX9BufferDescriptorOptions::DF16_16_16_16:
+            return "DF16_16_16_16";
+        case GFX9BufferDescriptorOptions::DF32_32_32:
+            return "DF32_32_32";
+        case GFX9BufferDescriptorOptions::DF32_32_32_32:
+            return "DF32_32_32_32";
+        case GFX9BufferDescriptorOptions::DFReserved:
+            return "DFReserved";
+        };
+    }
+
+    std::ostream& operator<<(std::ostream& stream, GFX9BufferDescriptorOptions::DataFormatValue val)
+    {
+        return stream << toString(val);
+    }
+
+    GFX9BufferDescriptorOptions::GFX9BufferDescriptorOptions()
+    {
+        setRawValue(0);
+        data_format = DF32;
+    }
+
+    GFX9BufferDescriptorOptions::GFX9BufferDescriptorOptions(uint32_t raw)
+    {
+        setRawValue(raw);
+    }
+
+    void GFX9BufferDescriptorOptions::setRawValue(uint32_t val)
+    {
+        static_assert(sizeof(val) == sizeof(*this));
+
+        memcpy(this, &val, sizeof(val));
+
+        validate();
+    }
+
+    void GFX9BufferDescriptorOptions::validate() const
+    {
+        AssertFatal(_unusedA == 0 && _unusedB == 0, "Reserved bits must be set to 0\n", toString());
+        AssertFatal(type == 0, "Resource type must be set to 0 for buffers\n", toString());
+    }
+
+    uint32_t GFX9BufferDescriptorOptions::rawValue() const
+    {
+        uint32_t rv;
+
+        static_assert(sizeof(rv) == sizeof(*this));
+
+        memcpy(&rv, this, sizeof(rv));
+        return rv;
+    }
+
+    Register::ValuePtr GFX9BufferDescriptorOptions::literal() const
+    {
+        return Register::Value::Literal(rawValue());
+    }
+
+    std::string GFX9BufferDescriptorOptions::toString() const
+    {
+        std::ostringstream msg;
+
+        auto flags = msg.flags();
+        msg << "GFX9BufferDescriptorOptions: " << std::showbase << std::hex << std::internal
+            << std::setfill('0') << std::setw(2 + 32 / 4) << rawValue() << std::endl;
+        msg.flags(flags);
+
+        msg << "    dst_sel_x: " << dst_sel_x << std::endl;
+        msg << "    dst_sel_y: " << dst_sel_y << std::endl;
+        msg << "    dst_sel_z: " << dst_sel_z << std::endl;
+        msg << "    dst_sel_w: " << dst_sel_w << std::endl;
+        msg << "    num_format: " << num_format << std::endl;
+        msg << "    data_format: " << data_format << std::endl;
+        msg << "    user_vm_enable: " << user_vm_enable << std::endl;
+        msg << "    user_vm_mode: " << user_vm_mode << std::endl;
+        msg << "    index_stride: " << index_stride << std::endl;
+        msg << "    add_tid_enable: " << add_tid_enable << std::endl;
+        msg << "    _unusedA: " << _unusedA << std::endl;
+        msg << "    nv: " << nv << std::endl;
+        msg << "    _unusedB: " << _unusedB << std::endl;
+        msg << "    type: " << type << std::endl;
+
+        return msg.str();
+    }
+
     BufferDescriptor::BufferDescriptor(std::shared_ptr<Context> context)
     {
         VariableType bufferPointer{DataType::None, PointerType::Buffer};

@@ -3,10 +3,9 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include "GPUContextFixture.hpp"
 #include <rocRoller/Utilities/EnumBitset.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
-
-using namespace rocRoller;
 
 TEST(UtilsTest, StreamTuple)
 {
@@ -16,6 +15,16 @@ TEST(UtilsTest, StreamTuple)
     msg << test;
 
     EXPECT_EQ("[4, 5.6, foo]", msg.str());
+}
+
+TEST(UtilsTest, StreamTuple2)
+{
+    std::string        str  = "foo";
+    auto               test = std::make_tuple(str);
+    std::ostringstream msg;
+    msg << test;
+
+    EXPECT_EQ("[foo]", msg.str());
 }
 
 TEST(EnumBitsetTest, LargeEnum)
@@ -59,7 +68,7 @@ TEST(EnumBitsetTest, LargeEnum)
         Count
     };
 
-    using LargeBitset = EnumBitset<TestEnum>;
+    using LargeBitset = rocRoller::EnumBitset<TestEnum>;
 
     LargeBitset a1{TestEnum::A1};
     LargeBitset a33{TestEnum::A33};

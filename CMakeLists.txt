@@ -383,6 +383,7 @@ set(
   test/unit/ArithmeticTest.cpp
   test/unit/AssemblerTest.cpp
   test/unit/BranchGeneratorTest.cpp
+  test/unit/BufferDescriptorTest.cpp
   test/unit/CommandTest.cpp
   test/unit/ComponentTest.cpp
   test/unit/ControlHypergraphTest.cpp

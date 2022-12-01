@@ -522,8 +522,8 @@ namespace rocRoller
     }
 
     inline Generator<Instruction>
-        MemoryInstructions::storeBuffer(std::shared_ptr<Register::Value> addr,
-                                        std::shared_ptr<Register::Value> data,
+        MemoryInstructions::storeBuffer(std::shared_ptr<Register::Value> data,
+                                        std::shared_ptr<Register::Value> addr,
                                         int                              offset,
                                         BufferDescriptor                 buffDesc,
                                         BufferInstructionOptions         buffOpts,
@@ -574,8 +574,8 @@ namespace rocRoller
                 opEnd += "short";
             }
             co_yield_(Instruction("buffer_store_" + opEnd,
-                                  {addr},
-                                  {data, sgprSrd, Register::Value::Literal(0)},
+                                  {},
+                                  {data, addr, sgprSrd, Register::Value::Literal(0)},
                                   {"offen", offset_modifier, glc, slc, lds},
                                   "Store value"));
         }
@@ -589,10 +589,12 @@ namespace rocRoller
                 auto width = chooseWidth(
                     numWords - count, potentialWords, ctx->kernelOptions().storeGlobalWidth);
                 auto offset_modifier = genOffsetModifier(offset + count * wordSize);
+
+                auto dataSubset = data->subset(Generated(iota(count, count + width)));
                 co_yield_(Instruction(concatenate("buffer_store_dword",
                                                   width == 1 ? "" : "x" + std::to_string(width)),
-                                      {addr->subset(Generated(iota(count, count + width)))},
-                                      {data, sgprSrd, Register::Value::Literal(0)},
+                                      {},
+                                      {dataSubset, addr, sgprSrd, Register::Value::Literal(0)},
                                       {"offen", offset_modifier, glc, slc, lds},
                                       "Store value"));
                 count += width;

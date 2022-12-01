@@ -97,7 +97,7 @@ namespace rocRoller
          * @param offset1 The register containing the address of the first 16bit value to load the data from.
          * @param offset2 The register containing the address of the second 16bit value to load the data from.
          * @param buffDesc The buffer resource descriptor, contains the base address, size, buffer resource options
-         * @param buffOpts Struct containing the buffer options required by the buffer load 
+         * @param buffOpts Struct containing the buffer options required by the buffer load
          * @param comment Comment that will be generated along with the instructions. (Default = "")
          */
         Generator<Instruction> loadAndPackBuffer(std::shared_ptr<Register::Value> dest,
@@ -229,8 +229,8 @@ namespace rocRoller
          * @param offset Offset to be added to addr.
          * @param numBytes The number of bytes to load.
          */
-        Generator<Instruction> storeBuffer(std::shared_ptr<Register::Value> addr,
-                                           std::shared_ptr<Register::Value> data,
+        Generator<Instruction> storeBuffer(std::shared_ptr<Register::Value> data,
+                                           std::shared_ptr<Register::Value> addr,
                                            int                              offset,
                                            BufferDescriptor                 buffDesc,
                                            BufferInstructionOptions         buffOpts,
