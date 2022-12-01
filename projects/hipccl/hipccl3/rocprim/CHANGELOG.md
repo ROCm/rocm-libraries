@@ -7,6 +7,8 @@ Full documentation for rocPRIM is available at [https://codedocs.xyz/ROCmSoftwar
 - New block level `radix_rank` primitive.
 ### Changed
 - Improved the performance of `block_radix_sort` and `device_radix_sort`.
+### Known Issues
+- Disabled GPU error messages relating to incorrect warp operation usage with Navi GPUs on Windows, due to GPU printf performance issues on Windows. 
 
 ## [Unreleased rocPRIM-2.12.0 for ROCm 5.4.0]
 ### Changed
