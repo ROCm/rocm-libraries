@@ -35,7 +35,7 @@ def parse_args():
                         help='Install after build (default: False)')
     parser.add_argument(      '--cmake-darg', required=False, dest='cmake_dargs', action='append', default=[],
                         help='List of additional cmake defines for builds (e.g. CMAKE_CXX_COMPILER_LAUNCHER=ccache)')
-    parser.add_argument('-a', '--architecture', dest='gpu_architecture', required=False, default="gfx906;gfx1030;gfx1100;gfx1102", #:sramecc+:xnack-" ) #gfx1030" ) #gfx906" ) # gfx1030" )
+    parser.add_argument('-a', '--architecture', dest='gpu_architecture', required=False, default="gfx906;gfx1030;gfx1100;gfx1101;gfx1102", #:sramecc+:xnack-" ) #gfx1030" ) #gfx906" ) # gfx1030" )
                         help='Set GPU architectures, e.g. all, gfx000, gfx803, gfx906:xnack-;gfx1030 (optional, default: all)')                        
     parser.add_argument('-v', '--verbose', required=False, default=False, action='store_true',
                         help='Verbose build (default: False)')
