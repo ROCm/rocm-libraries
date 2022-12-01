@@ -131,15 +131,8 @@ llvm_map_components_to_libnames(llvm_libs all)
 find_package(LLD REQUIRED CONFIG HINTS ${LLVM_DIR}/../lib/cmake/lld/)
 
 if(ROCROLLER_USE_HIP)
-  if(NOT DEFINED HIP_PATH)
-      if(NOT DEFINED ENV{HIP_PATH})
-          set(HIP_PATH "/opt/rocm/hip" CACHE PATH "Path to which HIP has been installed")
-      else()
-          set(HIP_PATH $ENV{HIP_PATH} CACHE PATH "Path to which HIP has been installed")
-      endif()
-  endif()
-  set(CMAKE_MODULE_PATH "${HIP_PATH}/cmake" ${CMAKE_MODULE_PATH})
-  find_package(HIP)
+  list(APPEND CMAKE_PREFIX_PATH /opt/rocm /opt/rocm/hip)
+  find_package(hip)
 endif()
 
 if (NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/extern/spdlog)
@@ -186,7 +179,7 @@ target_include_directories(GPUArchitectureGenerator SYSTEM PUBLIC
                            ${LLD_INCLUDE_DIRS})
 
 if(ROCROLLER_USE_HIP)
-  target_include_directories(GPUArchitectureGenerator SYSTEM PUBLIC ${HIP_ROOT_DIR}/include)
+  target_link_libraries(GPUArchitectureGenerator PUBLIC hip::host)
   target_compile_definitions(GPUArchitectureGenerator PUBLIC ROCROLLER_USE_HIP __HIP_PLATFORM_AMD__)
 endif()
 
@@ -344,9 +337,8 @@ target_include_directories(rocroller SYSTEM PUBLIC
                             ${LLVM_INCLUDE_DIRS} ${LLD_INCLUDE_DIRS})
 
 if(ROCROLLER_USE_HIP)
-  target_link_directories(rocroller PUBLIC ${HIP_ROOT_DIR}/lib)
-  target_include_directories(rocroller SYSTEM PUBLIC ${HIP_ROOT_DIR}/include)
-  target_link_libraries(rocroller PUBLIC amdhip64)
+  target_link_libraries(rocroller PUBLIC hip::host)
+  # target_link_libraries(rocroller PUBLIC amdhip64)
   target_compile_definitions(rocroller PUBLIC ROCROLLER_USE_HIP __HIP_PLATFORM_AMD__)
 endif()
 
@@ -467,6 +459,12 @@ target_link_libraries(
   openblas
   OpenMP::OpenMP_CXX
 )
+
+if(ROCROLLER_USE_HIP)
+  target_link_libraries(rocRollerTests hip::host)
+  target_compile_definitions(rocRollerTests PUBLIC ROCROLLER_USE_HIP __HIP_PLATFORM_AMD__)
+endif()
+
 if(ROCROLLER_TESTS_USE_YAML_CPP)
   target_compile_definitions(rocRollerTests PUBLIC ROCROLLER_TESTS_USE_YAML_CPP)
   target_link_libraries(rocRollerTests yaml-cpp)
@@ -494,7 +492,7 @@ target_include_directories(ArchGenTests SYSTEM PUBLIC ${CMAKE_CURRENT_BINARY_DIR
                            ${LLD_INCLUDE_DIRS})
 
 if(ROCROLLER_USE_HIP)
-  target_include_directories(ArchGenTests SYSTEM PUBLIC ${HIP_ROOT_DIR}/include)
+  target_link_libraries(ArchGenTests PUBLIC hip::host)
   target_compile_definitions(ArchGenTests PUBLIC ROCROLLER_USE_HIP __HIP_PLATFORM_AMD__)
 endif()
 

@@ -9,15 +9,8 @@ option(BUILD_CLIENT "Build client program" ON)
 if(BUILD_CLIENT)
   message("Building client program")
 
-  if(NOT DEFINED HIP_PATH)
-    if(NOT DEFINED ENV{HIP_PATH})
-        set(HIP_PATH "/opt/rocm/hip" CACHE PATH "Path to which HIP has been installed")
-    else()
-        set(HIP_PATH $ENV{HIP_PATH} CACHE PATH "Path to which HIP has been installed")
-    endif()
-  endif()
-  set(CMAKE_MODULE_PATH "${HIP_PATH}/cmake" ${CMAKE_MODULE_PATH})
-  find_package(HIP)
+  list(APPEND CMAKE_PREFIX_PATH /opt/rocm /opt/rocm/hip)
+  find_package(hip)
 
   add_executable(gemm
     gemm.cpp
@@ -41,10 +34,10 @@ if(BUILD_CLIENT)
     gtest_main
     gmock
     openblas
-    amdhip64
   )
-  target_link_directories(gemm PUBLIC ${HIP_ROOT_DIR}/lib)
-  target_compile_definitions(gemm PUBLIC __HIP_PLATFORM_AMD__)
+
+  target_link_libraries(gemm PUBLIC hip::host)
+  target_compile_definitions(gemm PUBLIC ROCROLLER_USE_HIP __HIP_PLATFORM_AMD__)
 
   if(ROCROLLER_USE_LLVM)
     target_compile_definitions(gemm PUBLIC ROCROLLER_USE_LLVM)
