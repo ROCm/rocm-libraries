@@ -245,7 +245,6 @@ set(rocroller_src
  lib/source/KernelGraph/KernelHypergraph.cpp
  lib/source/KernelGraph/LowerFromCommand.cpp
  lib/source/KernelGraph/ScopeManager.cpp
- lib/source/KernelGraph/TagType.cpp
  lib/source/KernelGraph/Utils.cpp
 
  lib/source/Assembler.cpp

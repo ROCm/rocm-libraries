@@ -168,13 +168,6 @@ namespace rocRoller
                         if(hasGeneratedInputs(tag))
                             nodes.insert(tag);
 
-                    if(nodes.empty())
-                    {
-                        for(auto const& tag : candidates)
-                            if(hasGeneratedInputs(tag))
-                                nodes.insert(tag);
-                    }
-
                     // If there are none, we have a problem.
                     AssertFatal(!nodes.empty(),
                                 "Invalid control graph!",
@@ -1389,74 +1382,6 @@ namespace rocRoller
                         co_yield generate(vgpr_block_offset_reg,
                                           vgpr_block_offset_reg->expression()
                                               + vgpr_block_stride_reg->expression());
-                }
-            }
-
-            Generator<Instruction> storeMacroTileWAVE(int                                  tag,
-                                                      ControlHypergraph::StoreTiled const& store,
-                                                      CoordGraph::Transformer              coords)
-
-            {
-                rocRoller::Log::getLogger()->debug(
-                    "KernelGraph::CodeGenerator::storeMacroTileWAVE()");
-                co_yield_(Instruction::Comment("GEN: storeMacroTileWAVE"));
-
-                auto [user_tag, user]           = m_graph.getDimension<CoordGraph::User>(tag);
-                auto [mac_tile_tag, mac_tile]   = m_graph.getDimension<CoordGraph::MacroTile>(tag);
-                auto [wave_tile_tag, wave_tile] = m_graph.getDimension<CoordGraph::WaveTile>(tag);
-                auto [vgpr_tag, vgpr]           = m_graph.getDimension<CoordGraph::VGPR>(tag);
-
-                uint num_elements = wave_tile.sizes[0] * wave_tile.sizes[1];
-                uint wfs          = m_context->kernel()->wavefront_size();
-                uint num_vgpr     = num_elements / wfs;
-
-                auto agpr = m_context->registerTagManager()->getRegister(mac_tile_tag);
-
-                AssertFatal(agpr->registerCount() == num_vgpr);
-
-                Register::ValuePtr s_ptr;
-                co_yield m_context->argLoader()->getValue(user.argumentName(), s_ptr);
-
-                auto bufDesc = BufferDescriptor(m_context);
-                auto bufOpt  = BufferInstructionOptions();
-
-                co_yield bufDesc.setup();
-                co_yield bufDesc.setBasePointer(s_ptr);
-
-                auto offset = MkVGPR(DataType::Int64);
-                auto value  = MkVGPR(agpr->variableType());
-
-                auto converted = MkVGPR(store.dataType);
-
-                auto numBytes = DataTypeInfo::Get(store.dataType).elementSize;
-
-                for(uint a = 0; a < num_vgpr; ++a)
-                {
-                    // TODO Use a stride here
-                    coords.setCoordinate(vgpr_tag, literal(a));
-
-                    auto user_index = coords.forward({user_tag})[0];
-                    co_yield generateOffset(offset, user_index, store.dataType);
-                    if(value->variableType() != store.dataType)
-                    {
-                        co_yield m_context->copier()->copy(value,
-                                                           agpr->element({static_cast<int>(a)}));
-                        co_yield Expression::generate(
-                            converted,
-                            convert(store.dataType,
-                                    std::make_shared<Expression::Expression>(value)),
-                            m_context);
-                    }
-                    else
-                    {
-                        co_yield m_context->copier()->copy(converted,
-                                                           agpr->element({static_cast<int>(a)}));
-                    }
-                    //v_accvgpr_read for V_MFMA with 2 pass instructions is 4, 10 for 8 pass instruction
-                    // and 18 for 16 pass instructions like V_MFMA_F32_32x32x8F16
-                    co_yield Instruction::Nop(18, "Nops required for v_accvgpr_read");
-                    co_yield m_context->mem()->storeBuffer(
-                        converted, offset->subset({0}), 0, bufDesc, bufOpt, numBytes);
                 }
             }
 
