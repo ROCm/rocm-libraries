@@ -56,9 +56,9 @@ template<typename Config>
 std::string config_name()
 {
     const rocprim::detail::reduce_config_params config = Config();
-    return "reduce_config<" + pad_string(std::to_string(config.reduce_config.block_size), 3) + ", "
-           + pad_string(std::to_string(config.reduce_config.items_per_thread), 2) + ", "
-           + std::string(get_reduce_method_name(config.block_reduce_method)) + ">";
+    return "{bs:" + std::to_string(config.reduce_config.block_size)
+           + ",ipt:" + std::to_string(config.reduce_config.items_per_thread)
+           + ",method:" + std::string(get_reduce_method_name(config.block_reduce_method)) + "}";
 }
 
 template<>
@@ -72,17 +72,11 @@ template<typename T              = int,
          typename Config         = rocprim::default_config>
 struct device_reduce_benchmark : public config_autotune_interface
 {
-    static std::string get_name_pattern()
-    {
-        return R"regex((?P<algo>\S*?)<)regex"
-               R"regex((?P<datatype>\S*),\s*reduce_config<)regex"
-               R"regex(\s*(?P<block_size>[0-9]+),\s*(?P<items_per_thread>[0-9]+),\s*(?P<block_reduce_method>[A-z0-9]+)>>)regex";
-    }
-
     std::string name() const override
     {
-        return std::string("device_reduce<" + std::string(Traits<T>::name()) + ", "
-                           + config_name<Config>() + ">");
+        return bench_naming::format_name("{lvl:device,algo:reduce,key_type:"
+                                         + std::string(Traits<T>::name())
+                                         + ",cfg:" + config_name<Config>() + "}");
     }
 
     static constexpr unsigned int batch_size = 10;

@@ -162,12 +162,14 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
 }
 
 // IPT - items per thread
-#define CREATE_BENCHMARK(T, BS, IPT) \
-    benchmark::RegisterBenchmark( \
-        (std::string("block_reduce<"#T", "#BS", "#IPT", " + algorithm_name + ">.") + method_name).c_str(), \
-        run_benchmark<Benchmark, T, BS, IPT>, \
-        stream, size \
-    )
+#define CREATE_BENCHMARK(T, BS, IPT)                                                               \
+    benchmark::RegisterBenchmark(bench_naming::format_name("{lvl:block,algo:reduce,key_type:" #T   \
+                                                           ",cfg:{bs:" #BS ",ipt:" #IPT ",method:" \
+                                                           + method_name + "}}")                   \
+                                     .c_str(),                                                     \
+                                 run_benchmark<Benchmark, T, BS, IPT>,                             \
+                                 stream,                                                           \
+                                 size)
 
 #define BENCHMARK_TYPE(type, block) \
     CREATE_BENCHMARK(type, block, 1), \
@@ -180,10 +182,9 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
 
 template<class Benchmark>
 void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                    const std::string& method_name,
-                    const std::string& algorithm_name,
-                    hipStream_t stream,
-                    size_t size)
+                    const std::string&                            method_name,
+                    hipStream_t                                   stream,
+                    size_t                                        size)
 {
     using custom_float2 = custom_type<float, float>;
     using custom_double2 = custom_type<double, double>;
@@ -233,12 +234,17 @@ int main(int argc, char *argv[])
     cli::Parser parser(argc, argv);
     parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
     parser.set_optional<int>("trials", "trials", -1, "number of iterations");
+    parser.set_optional<std::string>("name_format",
+                                     "name_format",
+                                     "human",
+                                     "either: json,human,txt");
     parser.run_and_exit_if_error();
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
     const size_t size = parser.get<size_t>("size");
     const int trials = parser.get<int>("trials");
+    bench_naming::set_format(parser.get<std::string>("name_format"));
 
     // HIP
     hipStream_t stream = 0; // default
@@ -251,20 +257,13 @@ int main(int argc, char *argv[])
     std::vector<benchmark::internal::Benchmark*> benchmarks;
     // using_warp_scan
     using reduce_uwr_t = reduce<rocprim::block_reduce_algorithm::using_warp_reduce>;
-    add_benchmarks<reduce_uwr_t>(
-        benchmarks, "reduce", "using_warp_reduce", stream, size
-    );
+    add_benchmarks<reduce_uwr_t>(benchmarks, "using_warp_reduce", stream, size);
     // reduce then scan
     using reduce_rr_t = reduce<rocprim::block_reduce_algorithm::raking_reduce>;
-    add_benchmarks<reduce_rr_t>(
-        benchmarks, "reduce", "raking_reduce", stream, size
-    );
+    add_benchmarks<reduce_rr_t>(benchmarks, "raking_reduce", stream, size);
     // reduce commutative only
     using reduce_rrco_t = reduce<rocprim::block_reduce_algorithm::raking_reduce_commutative_only>;
-    add_benchmarks<reduce_rrco_t>(
-        benchmarks, "reduce", "raking_reduce_commutative_only", stream, size
-    );
-
+    add_benchmarks<reduce_rrco_t>(benchmarks, "raking_reduce_commutative_only", stream, size);
 
     // Use manual timing
     for(auto& b : benchmarks)

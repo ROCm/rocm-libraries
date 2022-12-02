@@ -197,12 +197,15 @@ void run_benchmark(benchmark::State& state, benchmark_kinds benchmark_kind, hipS
     HIP_CHECK(hipFree(d_output));
 }
 
-#define CREATE_BENCHMARK(T, BS, IPT) \
-benchmark::RegisterBenchmark( \
-    (std::string("block_radix_sort<" #T ", " #BS ", " #IPT ">.") + name).c_str(), \
-    run_benchmark<T, BS, IPT>, \
-    benchmark_kind, stream, size \
-)
+#define CREATE_BENCHMARK(T, BS, IPT)                                                           \
+    benchmark::RegisterBenchmark(                                                              \
+        bench_naming::format_name("{lvl:block,algo:radix_sort,key_type:" #T ",subalgo:" + name \
+                                  + ",cfg:{bs:" #BS ",ipt:" #IPT "}}")                         \
+            .c_str(),                                                                          \
+        run_benchmark<T, BS, IPT>,                                                             \
+        benchmark_kind,                                                                        \
+        stream,                                                                                \
+        size)
 
 #define BENCHMARK_TYPE(type, block) \
     CREATE_BENCHMARK(type, block, 1), \
@@ -263,12 +266,17 @@ int main(int argc, char *argv[])
     cli::Parser parser(argc, argv);
     parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
     parser.set_optional<int>("trials", "trials", -1, "number of iterations");
+    parser.set_optional<std::string>("name_format",
+                                     "name_format",
+                                     "human",
+                                     "either: json,human,txt");
     parser.run_and_exit_if_error();
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
     const size_t size = parser.get<size_t>("size");
     const int trials = parser.get<int>("trials");
+    bench_naming::set_format(parser.get<std::string>("name_format"));
 
     // HIP
     hipStream_t stream = 0; // default
@@ -279,8 +287,8 @@ int main(int argc, char *argv[])
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks;
-    add_benchmarks(benchmark_kinds::sort_keys, "sort(keys)", benchmarks, stream, size);
-    add_benchmarks(benchmark_kinds::sort_pairs, "sort(keys, values)", benchmarks, stream, size);
+    add_benchmarks(benchmark_kinds::sort_keys, "keys", benchmarks, stream, size);
+    add_benchmarks(benchmark_kinds::sort_pairs, "pairs", benchmarks, stream, size);
 
     // Use manual timing
     for(auto& b : benchmarks)

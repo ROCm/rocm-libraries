@@ -479,17 +479,24 @@ void run_benchmark_memcpy(benchmark::State& state,
     HIP_CHECK(hipFree(d_output));
 }
 
-#define CREATE_BENCHMARK(METHOD, OPERATION, T, SIZE, BLOCK_SIZE, IPT) \
-benchmark::RegisterBenchmark( \
-    (#METHOD "_" #OPERATION "<" #T "," #SIZE ",BS:" #BLOCK_SIZE ",IPT:" #IPT ">"), \
-    run_benchmark<T, BLOCK_SIZE, IPT, METHOD, OPERATION \
-    >, SIZE, stream \
-)
+#define CREATE_BENCHMARK(METHOD, OPERATION, T, SIZE, BLOCK_SIZE, IPT)                     \
+    benchmark::RegisterBenchmark(                                                         \
+        bench_naming::format_name("{lvl:device,algo:memory,subalgo:" #METHOD              \
+                                  ",operation:" #OPERATION ",key_type:" #T ",size:" #SIZE \
+                                  ",cfg:{bs:" #BLOCK_SIZE ",ipt:" #IPT "}}")              \
+            .c_str(),                                                                     \
+        run_benchmark<T, BLOCK_SIZE, IPT, METHOD, OPERATION>,                             \
+        SIZE,                                                                             \
+        stream)
 
-#define CREATE_BENCHMARK_MEMCPY(T, SIZE) \
-benchmark::RegisterBenchmark( \
-    ("Memcpy<" #T "," #SIZE">"), run_benchmark_memcpy<T>, SIZE, stream \
-)
+#define CREATE_BENCHMARK_MEMCPY(T, SIZE)                                              \
+    benchmark::RegisterBenchmark(                                                     \
+        bench_naming::format_name("{lvl:device,algo:memory,subalgo:copy,key_type:" #T \
+                                  ",size:" #SIZE ",cfg:default_config}")              \
+            .c_str(),                                                                 \
+        run_benchmark_memcpy<T>,                                                      \
+        SIZE,                                                                         \
+        stream)
 
 template<class T>
 constexpr unsigned int megabytes(unsigned int size)
@@ -501,11 +508,16 @@ int main(int argc, char *argv[])
 {
     cli::Parser parser(argc, argv);
     parser.set_optional<int>("trials", "trials", -1, "number of iterations");
+    parser.set_optional<std::string>("name_format",
+                                     "name_format",
+                                     "human",
+                                     "either: json,human,txt");
     parser.run_and_exit_if_error();
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
     const int trials = parser.get<int>("trials");
+    bench_naming::set_format(parser.get<std::string>("name_format"));
 
     // HIP
     hipStream_t stream = 0; // default

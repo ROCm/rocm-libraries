@@ -64,12 +64,17 @@ int main(int argc, char* argv[])
     cli::Parser parser(argc, argv);
     parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
     parser.set_optional<int>("trials", "trials", -1, "number of iterations");
+    parser.set_optional<std::string>("name_format",
+                                     "name_format",
+                                     "human",
+                                     "either: json,human,txt");
     parser.run_and_exit_if_error();
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
     const size_t size   = parser.get<size_t>("size");
     const int    trials = parser.get<int>("trials");
+    bench_naming::set_format(parser.get<std::string>("name_format"));
 
     // HIP
     const hipStream_t stream = 0; // default
@@ -97,14 +102,6 @@ int main(int argc, char* argv[])
 
     std::vector<benchmark::internal::Benchmark*> benchmarks = {};
     config_autotune_register::register_benchmark_subset(benchmarks, 0, 1, size, stream);
-    benchmark::AddCustomContext(
-        "autotune_config_pattern",
-        block_sort_benchmark<int,
-                             rocprim::empty_type,
-                             128u,
-                             2u,
-                             rocprim::block_sort_algorithm::bitonic_sort>::get_name_pattern()
-            .c_str());
 
     // Use manual timing
     for(auto& b : benchmarks)

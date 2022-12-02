@@ -5,8 +5,8 @@ ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_RADIX_SORT_ONESWEEP_HPP_
 {%- endmacro %}
 
 {% macro kernel_configuration(measurement) -%}
-radix_sort_onesweep_config<kernel_config<{{ measurement['histogram_block_size'] }}, {{ measurement['histogram_items_per_thread'] }}>,
-kernel_config<{{ measurement['sort_block_size'] }}, {{ measurement['sort_items_per_thread'] }}>, {{ measurement['radix_bits'] }}> { };
+radix_sort_onesweep_config<kernel_config<{{ measurement['cfg']['histogram']['bs'] }}, {{ measurement['cfg']['histogram']['ipt'] }}>,
+kernel_config<{{ measurement['cfg']['sort']['bs'] }}, {{ measurement['cfg']['sort']['ipt'] }}>, {{ measurement['cfg']['bits_per_place'] }}> { };
 {%- endmacro %}
 
 {% macro general_case() -%}

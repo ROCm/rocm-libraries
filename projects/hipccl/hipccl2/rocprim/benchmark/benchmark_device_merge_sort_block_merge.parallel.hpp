@@ -44,13 +44,12 @@ template<typename Config>
 std::string config_name()
 {
     const rocprim::detail::merge_sort_block_merge_config_params config = Config();
-    return "merge_sort_block_merge_config<"
-           + pad_string(std::to_string(config.merge_oddeven_config.block_size), 4) + ", "
-           + pad_string(std::to_string(config.merge_oddeven_config.items_per_thread), 2) + ", "
-           + pad_string(std::to_string(config.merge_oddeven_config.size_limit), 8) + ", "
-           + pad_string(std::to_string(config.merge_mergepath_partition_config.block_size), 3)
-           + ", " + pad_string(std::to_string(config.merge_mergepath_config.block_size), 4) + ", "
-           + pad_string(std::to_string(config.merge_mergepath_config.items_per_thread), 2) + ">";
+    return "{oddeven_bs:" + std::to_string(config.merge_oddeven_config.block_size) + ",oddeven_ipt:"
+           + std::to_string(config.merge_oddeven_config.items_per_thread) + ",oddeven_size_limit:"
+           + std::to_string(config.merge_oddeven_config.size_limit) + ",mergepath_partition_bs:"
+           + std::to_string(config.merge_mergepath_partition_config.block_size) + ",mergepath_bs:"
+           + std::to_string(config.merge_mergepath_config.block_size) + ",mergepath_ipt:"
+           + std::to_string(config.merge_mergepath_config.items_per_thread) + "}";
 }
 
 template<>
@@ -64,25 +63,12 @@ template<typename Key    = int,
          typename Config = rocprim::default_config>
 struct device_merge_sort_block_merge_benchmark : public config_autotune_interface
 {
-    static std::string get_name_pattern()
-    {
-        return R"regex((?P<algo>\S*?)<)regex"
-               R"regex((?P<key_type>\S*),(?:\s*(?P<value_type>\S*),)?\s*merge_sort_block_merge_config<\s*)regex"
-               R"regex((?P<oddeven_block_size>[0-9]+),\s*(?P<oddeven_items_per_thread>[0-9]+),\s*)regex"
-               R"regex((?P<oddeven_size_limit>[0-9]+),\s*)regex"
-               R"regex((?P<mergepath_partition_block_size>[0-9]+),\s*(?P<mergepath_block_size>[0-9]+),\s*)regex"
-               R"regex((?P<mergepath_items_per_thread>[0-9]+)>>)regex";
-    }
-
     std::string name() const override
     {
-        using namespace std::string_literals;
-        return std::string("device_merge_sort_block_merge<" + std::string(Traits<Key>::name())
-                           + ", "
-                           + (std::is_same<Value, rocprim::empty_type>::value
-                                  ? ""s
-                                  : std::string(Traits<Value>::name()) + ", ")
-                           + config_name<Config>() + ">");
+        return bench_naming::format_name("{lvl:device,algo:merge_sort_block_merge,key_type:"
+                                         + std::string(Traits<Key>::name())
+                                         + ",value_type:" + std::string(Traits<Value>::name())
+                                         + ",cfg:" + config_name<Config>() + "}");
     }
 
     static constexpr unsigned int batch_size  = 10;

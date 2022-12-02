@@ -46,21 +46,14 @@ template<typename T    = int,
          = rocprim::detail::default_adjacent_difference_config<ROCPRIM_TARGET_ARCH, T>>
 struct device_adjacent_difference_benchmark : public config_autotune_interface
 {
-    static std::string get_name_pattern()
-    {
-        return R"regex((?P<algo>\S*?)<)regex"
-               R"regex((?P<datatype>\S*),\s*adjacent_difference_config<\s*)regex"
-               R"regex((?P<block_size>[0-9]+),\s*(?P<items_per_thread>[0-9]+)>>)regex";
-    }
-
     std::string name() const override
     {
         using namespace std::string_literals;
-        return std::string("device_adjacent_difference" + (left ? ""s : "_right"s)
-                           + (in_place ? "_inplace"s : ""s) + "<" + std::string(Traits<T>::name())
-                           + ", adjacent_difference_config<"
-                           + pad_string(std::to_string(Config::block_size), 3) + ", "
-                           + pad_string(std::to_string(Config::items_per_thread), 2) + ">>");
+        return bench_naming::format_name(
+            "{lvl:device,algo:adjacent_difference" + (left ? ""s : "_right"s)
+            + (in_place ? "_inplace"s : ""s) + ",key_type:" + std::string(Traits<T>::name())
+            + ",cfg:{bs:" + std::to_string(Config::block_size)
+            + ",ipt:" + std::to_string(Config::items_per_thread) + "}}");
     }
 
     static constexpr unsigned int batch_size  = 10;

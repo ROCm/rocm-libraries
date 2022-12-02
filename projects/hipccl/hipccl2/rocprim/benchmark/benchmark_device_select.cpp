@@ -539,29 +539,46 @@ void run_unique_by_key_benchmark(benchmark::State& state,
     hipFree(d_temp_storage);
 }
 
-#define CREATE_SELECT_FLAGGED_BENCHMARK(T, F, p) \
-benchmark::RegisterBenchmark( \
-    ("select_flagged<" #T "," #F ", "#T", unsigned int>(p = " #p")"), \
-    run_flagged_benchmark<T, F>, size, stream, p \
-)
+#define CREATE_SELECT_FLAGGED_BENCHMARK(T, F, p)                                              \
+    benchmark::RegisterBenchmark(                                                             \
+        bench_naming::format_name("{lvl:device,algo:select,subalgo:flagged,key_type:" #T      \
+                                  ",flag_type:" #F ",probability:" #p ",cfg:default_config}") \
+            .c_str(),                                                                         \
+        run_flagged_benchmark<T, F>,                                                          \
+        size,                                                                                 \
+        stream,                                                                               \
+        p)
 
-#define CREATE_SELECT_IF_BENCHMARK(T, p) \
-benchmark::RegisterBenchmark( \
-    ("select_if<" #T ", "#T", unsigned int>(p = " #p")"), \
-    run_selectop_benchmark<T>, size, stream, p \
-)
+#define CREATE_SELECT_IF_BENCHMARK(T, p)                                            \
+    benchmark::RegisterBenchmark(                                                   \
+        bench_naming::format_name("{lvl:device,algo:select,subalgo:if,key_type:" #T \
+                                  ",probability:" #p ",cfg:default_config}")        \
+            .c_str(),                                                               \
+        run_selectop_benchmark<T>,                                                  \
+        size,                                                                       \
+        stream,                                                                     \
+        p)
 
-#define CREATE_UNIQUE_BENCHMARK(T, p) \
-benchmark::RegisterBenchmark( \
-    ("unique<" #T ", "#T", unsigned int>(p = " #p")"), \
-    run_unique_benchmark<T>, size, stream, p \
-)
+#define CREATE_UNIQUE_BENCHMARK(T, p)                                                   \
+    benchmark::RegisterBenchmark(                                                       \
+        bench_naming::format_name("{lvl:device,algo:unique,key_type:" #T ",value_type:" \
+                                  + std::string(Traits<rocprim::empty_type>::name())    \
+                                  + ",probability:" #p ",cfg:default_config}")          \
+            .c_str(),                                                                   \
+        run_unique_benchmark<T>,                                                        \
+        size,                                                                           \
+        stream,                                                                         \
+        p)
 
-#define CREATE_UNIQUE_BY_KEY_BENCHMARK(K, V, p) \
-benchmark::RegisterBenchmark( \
-    ("unique_by_key<" #K ", "#V", unsigned int>(p = " #p")"), \
-    run_unique_by_key_benchmark<K, V>, size, stream, p \
-)
+#define CREATE_UNIQUE_BY_KEY_BENCHMARK(K, V, p)                                                   \
+    benchmark::RegisterBenchmark(bench_naming::format_name("{lvl:device,algo:unique,key_type:" #K \
+                                                           ",value_type:" #V ",probability:" #p   \
+                                                           ",cfg:default_config}")                \
+                                     .c_str(),                                                    \
+                                 run_unique_by_key_benchmark<K, V>,                               \
+                                 size,                                                            \
+                                 stream,                                                          \
+                                 p)
 
 #define BENCHMARK_FLAGGED_TYPE(type, value) \
     CREATE_SELECT_FLAGGED_BENCHMARK(type, value, 0.05f), \
@@ -592,12 +609,17 @@ int main(int argc, char *argv[])
     cli::Parser parser(argc, argv);
     parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
     parser.set_optional<int>("trials", "trials", -1, "number of iterations");
+    parser.set_optional<std::string>("name_format",
+                                     "name_format",
+                                     "human",
+                                     "either: json,human,txt");
     parser.run_and_exit_if_error();
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
     const size_t size = parser.get<size_t>("size");
     const int trials = parser.get<int>("trials");
+    bench_naming::set_format(parser.get<std::string>("name_format"));
 
     // HIP
     hipStream_t stream = 0; // default

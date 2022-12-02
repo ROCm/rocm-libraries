@@ -71,14 +71,6 @@ class SelectionType:
     is_optional: bool
 
 
-def tokenize_benchmark_name(input_name: str, name_regex: str) -> Dict[str, str]:
-    match = re.search(name_regex, input_name)
-    if match:
-        data_dict = match.groupdict()
-        return data_dict
-    else:
-        return None
-
 def translate_settings_to_cpp_metaprogramming(fallback_configuration) -> str:
     """
     Translates a list of named fallback configuration entries to
@@ -432,7 +424,7 @@ class BenchmarkDataManager:
         else:
             raise RuntimeError(f"ERROR: unknown hdp_gcn_arch_name: {name_from_context}")
 
-    def __get_single_benchmark(self, name_regex, single_benchmark):
+    def __get_single_benchmark(self, single_benchmark):
         """
         Enriches the benchmark the data in single_benchmark with the information stored in the actual name of the particular benchmark run
 
@@ -440,9 +432,9 @@ class BenchmarkDataManager:
         configuration case.
         """
 
-        tokenized_name = tokenize_benchmark_name(single_benchmark['name'], name_regex)
+        tokenized_name = json.loads(single_benchmark['name'])
         if not tokenized_name:
-            raise RuntimeError(f"ERROR: cannot tokenize \"{single_benchmark['name']}\" with regex:\n{name_regex}")
+            raise RuntimeError(f"ERROR: cannot parse JSON from: \"{single_benchmark['name']}\"")
         return dict(single_benchmark, **tokenized_name)
 
     def __add_benchmark_to_algorithm(self, single_benchmark, arch):
@@ -451,7 +443,7 @@ class BenchmarkDataManager:
 
         In case the Algorithm object does not exist, a new object will be created.
         """
-        algorithm_name: str = single_benchmark['algo']
+        algorithm_name: str = single_benchmark['lvl'] + "_" + single_benchmark['algo']
         if algorithm_name not in self.algorithms:
             self.algorithms[algorithm_name] = create_algorithm(algorithm_name, self.fallback_entries)
         self.algorithms[algorithm_name].add_measurement(single_benchmark, arch)
@@ -476,9 +468,8 @@ class BenchmarkDataManager:
 
         try:
             arch = self.__get_target_architecture_from_context(benchmark_run_data)
-            name_regex = benchmark_run_data['context']['autotune_config_pattern']
             for raw_single_benchmark in benchmark_run_data['benchmarks']:
-                single_benchmark = self.__get_single_benchmark(name_regex, raw_single_benchmark)
+                single_benchmark = self.__get_single_benchmark(raw_single_benchmark)
                 self.__add_benchmark_to_algorithm(single_benchmark, arch)
             print(f'INFO: Successfully processed file "{benchmark_run_file_path}"')
         except NotSupportedError as error:

@@ -46,13 +46,6 @@ template<bool ByKey                    = false,
          class Config = rocprim::detail::default_scan_config<ROCPRIM_TARGET_ARCH, T>>
 struct device_scan_benchmark : public config_autotune_interface
 {
-    static std::string get_name_pattern()
-    {
-        return R"regex((?P<algo>\S*?)<)regex"
-               R"regex((?P<value_type>\S*),\s*(?:(?P<key_type>\S*),\s*)?(?P<exclusive_type>(exclusive)|(inclusive)),\s*(?:(?P<max_segment_len>[0-9]+),\s*)?scan_config<)regex"
-               R"regex(\s*(?P<block_size>[0-9]+),\s*(?P<items_per_thread>[0-9]+),\s*(?P<block_scan_algo>\S*)>>)regex";
-    }
-
     static const char* get_block_scan_method_name(rocprim::block_scan_algorithm alg)
     {
         switch(alg)
@@ -69,14 +62,14 @@ struct device_scan_benchmark : public config_autotune_interface
     std::string name() const override
     {
         using namespace std::string_literals;
-        return std::string(
-            "device_scan" + (ByKey ? "_by_key"s : ""s) + "<" + std::string(Traits<T>::name()) + ", "
-            + (ByKey ? (std::string(Traits<T>::name()) + ", ") : ""s)
-            + (Exclusive ? "exclusive"s : "inclusive"s) + ", "
-            + (ByKey ? (pad_string(std::to_string(MaxSegmentLength), 5) + ", ") : ""s)
-            + "scan_config<" + pad_string(std::to_string(Config::block_size), 3) + ", "
-            + pad_string(std::to_string(Config::items_per_thread), 2) + ", "
-            + std::string(get_block_scan_method_name(Config::block_scan_method)) + ">>");
+        return bench_naming::format_name(
+            "{lvl:device,algo:scan" + (Exclusive ? "_exclusive"s : "_inclusive"s)
+            + ",key_type:" + std::string(Traits<T>::name()) + ",value_type:"
+            + std::string(ByKey ? Traits<T>::name() : Traits<rocprim::empty_type>::name())
+            + ",max_segment_length:" + std::to_string(MaxSegmentLength)
+            + ",cfg:{bs:" + std::to_string(Config::block_size)
+            + ",ipt:" + std::to_string(Config::items_per_thread) + ",method:"
+            + std::string(get_block_scan_method_name(Config::block_scan_method)) + "}}");
     }
 
     template<bool excl = Exclusive>

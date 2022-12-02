@@ -186,14 +186,16 @@ void run_benchmark(benchmark::State& state, size_t max_length, hipStream_t strea
     HIP_CHECK(hipFree(d_unique_count_output));
 }
 
-#define CREATE_BENCHMARK(Key, Value) \
-benchmark::RegisterBenchmark( \
-    (std::string("reduce_by_key") + "<" #Key ", " #Value ">" + \
-        "([1, " + std::to_string(max_length) + "])" \
-    ).c_str(), \
-    run_benchmark<Key, Value>, \
-    max_length, stream, size \
-)
+#define CREATE_BENCHMARK(Key, Value)                                                     \
+    benchmark::RegisterBenchmark(                                                        \
+        bench_naming::format_name("{lvl:device,algo:reduce_by_key,key_type:" #Key        \
+                                  ",value_type:" #Value ",keys_max_length:"              \
+                                  + std::to_string(max_length) + ",cfg:default_config}") \
+            .c_str(),                                                                    \
+        run_benchmark<Key, Value>,                                                       \
+        max_length,                                                                      \
+        stream,                                                                          \
+        size)
 
 void add_benchmarks(size_t max_length,
                     std::vector<benchmark::internal::Benchmark*>& benchmarks,
@@ -228,12 +230,17 @@ int main(int argc, char *argv[])
     cli::Parser parser(argc, argv);
     parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
     parser.set_optional<int>("trials", "trials", -1, "number of iterations");
+    parser.set_optional<std::string>("name_format",
+                                     "name_format",
+                                     "human",
+                                     "either: json,human,txt");
     parser.run_and_exit_if_error();
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
     const size_t size = parser.get<size_t>("size");
     const int trials = parser.get<int>("trials");
+    bench_naming::set_format(parser.get<std::string>("name_format"));
 
     // HIP
     hipStream_t stream = 0; // default

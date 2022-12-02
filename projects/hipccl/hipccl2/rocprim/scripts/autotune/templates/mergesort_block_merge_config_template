@@ -5,7 +5,7 @@ ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_MERGE_SORT_BLOCK_MERGE_HPP_
 {%- endmacro %}
 
 {% macro kernel_configuration(measurement) -%}
-merge_sort_block_merge_config<256, 1, (1 << 17) + 70000, {{ measurement['mergepath_partition_block_size'] }}, {{ measurement['mergepath_block_size'] }}, {{ measurement['mergepath_items_per_thread'] }}> { };
+merge_sort_block_merge_config<256, 1, (1 << 17) + 70000, {{ measurement['cfg']['mergepath_partition_bs'] }}, {{ measurement['cfg']['mergepath_bs'] }}, {{ measurement['cfg']['mergepath_ipt'] }}> { };
 {%- endmacro %}
 
 {% macro general_case() -%}

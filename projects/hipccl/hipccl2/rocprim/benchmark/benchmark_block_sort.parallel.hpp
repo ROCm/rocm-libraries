@@ -166,14 +166,6 @@ private:
     }
 
 public:
-    static std::string get_name_pattern()
-    {
-        return R"---((?P<algo>\S*)<\s*)---"
-               R"---((?P<sort_length>\S*),\s(?P<key_type>\S*),\s*(?P<block_size>\S*),\s*)---"
-               R"---((?P<items_per_thread>\S*)(?:,\s(?P<value_type>\S*)|),\s*(?P<block_sort_algo>\S*))---"
-               R"---(,\s*(?P<stable>\S*)>)---";
-    }
-
     std::string sort_key() const override
     {
         using namespace std::string_literals;
@@ -183,13 +175,11 @@ public:
 
     std::string name() const override
     {
-        using namespace std::string_literals;
-        return std::string("block_sort<" + std::string(Traits<KeyType>::name()) + ", "
-                           + pad_string(std::to_string(BlockSize), 4) + ", "
-                           + pad_string(std::to_string(ItemsPerThread), 2)
-                           + (with_values ? ", "s + std::string(Traits<ValueType>::name()) : ""s)
-                           + ", " + std::string(get_block_sort_method_name(block_sort_algorithm))
-                           + (stable ? ", true"s : ", false"s) + ">");
+        return bench_naming::format_name(
+            "{lvl:block,algo:sort,key_type:" + std::string(Traits<KeyType>::name()) + ",value_type:"
+            + std::string(Traits<ValueType>::name()) + ",stable:" + (stable ? "true" : "false")
+            + ",cfg:{bs:" + std::to_string(BlockSize) + ",ipt:" + std::to_string(ItemsPerThread)
+            + ",method:" + std::string(get_block_sort_method_name(block_sort_algorithm)) + "}}");
     }
 
     static constexpr unsigned int batch_size        = 10;
