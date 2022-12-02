@@ -51,6 +51,8 @@ def run_benchmarks(benchmark_context):
         results_json_path = os.path.join(benchmark_context.benchmark_output_dir, results_json_name)
         args = [
             benchmark_path,
+            '--name_format',
+            'json',
             '--benchmark_out_format=json',
             f'--benchmark_out={results_json_path}',
             f'--benchmark_filter={benchmark_context.benchmark_filter_regex}'

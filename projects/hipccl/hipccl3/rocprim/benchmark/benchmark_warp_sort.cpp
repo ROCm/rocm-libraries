@@ -206,19 +206,24 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
     HIP_CHECK(hipFree(d_output_value));
 }
 
-#define CREATE_SORT_BENCHMARK(K, BS, WS, IPT) \
-    benchmark::RegisterBenchmark( \
-        "warp_sort<"#K", "#BS", "#WS", "#IPT">.sort(only keys)", \
-        run_benchmark<K, BS, WS, IPT>, \
-        stream, size \
-    )
+#define CREATE_SORT_BENCHMARK(K, BS, WS, IPT)                                        \
+    benchmark::RegisterBenchmark(                                                    \
+        bench_naming::format_name("{lvl:warp,algo:sort,key_type:" #K ",value_type:"  \
+                                  + std::string(Traits<rocprim::empty_type>::name()) \
+                                  + ",ws:" #WS ",cfg:{bs:" #BS ",ipt:" #IPT "}}")    \
+            .c_str(),                                                                \
+        run_benchmark<K, BS, WS, IPT>,                                               \
+        stream,                                                                      \
+        size)
 
-#define CREATE_SORTBYKEY_BENCHMARK(K, V, BS, WS, IPT) \
-    benchmark::RegisterBenchmark( \
-        "warp_sort<"#K", "#BS", "#WS", "#IPT", "#V">.sort", \
-        run_benchmark<K, BS, WS, IPT, V, true>, \
-        stream, size \
-    )
+#define CREATE_SORTBYKEY_BENCHMARK(K, V, BS, WS, IPT)                                         \
+    benchmark::RegisterBenchmark(bench_naming::format_name("{lvl:warp,algo:sort,key_type:" #K \
+                                                           ",value_type:" #V ",ws:" #WS       \
+                                                           ",cfg:{bs:" #BS ",ipt:" #IPT "}}") \
+                                     .c_str(),                                                \
+                                 run_benchmark<K, BS, WS, IPT, V, true>,                      \
+                                 stream,                                                      \
+                                 size)
 
 #define BENCHMARK_TYPE(type) \
     CREATE_SORT_BENCHMARK(type,  64, 64, 1), \
@@ -249,12 +254,17 @@ int main(int argc, char *argv[])
     cli::Parser parser(argc, argv);
     parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
     parser.set_optional<int>("trials", "trials", -1, "number of iterations");
+    parser.set_optional<std::string>("name_format",
+                                     "name_format",
+                                     "human",
+                                     "either: json,human,txt");
     parser.run_and_exit_if_error();
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
     const size_t size = parser.get<size_t>("size");
     const int trials = parser.get<int>("trials");
+    bench_naming::set_format(parser.get<std::string>("name_format"));
 
     // HIP
     hipStream_t stream = 0; // default

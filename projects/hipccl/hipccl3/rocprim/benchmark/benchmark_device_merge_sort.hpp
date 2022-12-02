@@ -47,12 +47,9 @@ struct device_merge_sort_benchmark : public config_autotune_interface
 {
     std::string name() const override
     {
-        using namespace std::string_literals;
-        return std::string("device_merge_sort<" + std::string(Traits<Key>::name()) + ", "
-                           + (std::is_same<Value, rocprim::empty_type>::value
-                                  ? ""s
-                                  : std::string(Traits<Value>::name()) + ", ")
-                           + "default_config>");
+        return bench_naming::format_name(
+            "{lvl:device,algo:merge_sort,key_type:" + std::string(Traits<Key>::name())
+            + ",value_type:" + std::string(Traits<Value>::name()) + ",cfg:default_config}");
     }
 
     static constexpr unsigned int batch_size  = 10;

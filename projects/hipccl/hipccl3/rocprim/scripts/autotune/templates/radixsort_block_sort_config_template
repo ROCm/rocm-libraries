@@ -5,7 +5,7 @@ ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_RADIX_SORT_BLOCK_SORT_HPP_
 {%- endmacro %}
 
 {% macro kernel_configuration(measurement) -%}
-kernel_config<{{ measurement['block_size'] }}, {{ measurement['items_per_thread'] }}> { };
+kernel_config<{{ measurement['cfg']['bs'] }}, {{ measurement['cfg']['ipt'] }}> { };
 {%- endmacro %}
 
 {% macro general_case() -%}

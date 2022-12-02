@@ -44,12 +44,11 @@ template<typename Config>
 std::string config_name()
 {
     constexpr rocprim::detail::radix_sort_onesweep_config_params params = Config();
-    return "radix_sort_onesweep_config<kernel_config<"
-           + pad_string(std::to_string(params.histogram.block_size), 4) + ", "
-           + pad_string(std::to_string(params.histogram.items_per_thread), 2) + ">, kernel_config<"
-           + pad_string(std::to_string(params.sort.block_size), 4) + ","
-           + pad_string(std::to_string(params.sort.items_per_thread), 2) + ">,"
-           + pad_string(std::to_string(params.radix_bits_per_place), 2) + ">";
+    return "{histogram:{bs:" + std::to_string(params.histogram.block_size)
+           + ",ipt:" + std::to_string(params.histogram.items_per_thread) + "},sort:{"
+           + ",bs:" + std::to_string(params.sort.block_size)
+           + ",ipt:" + std::to_string(params.sort.items_per_thread)
+           + "},bits_per_place:" + std::to_string(params.radix_bits_per_place) + "}";
 }
 
 template<>
@@ -63,24 +62,12 @@ template<typename Key    = int,
          typename Config = rocprim::default_config>
 struct device_radix_sort_onesweep_benchmark : public config_autotune_interface
 {
-
-    static std::string get_name_pattern()
-    {
-        return R"regex((?P<algo>\S*?)<)regex"
-               R"regex((?P<key_type>\S*),(?:\s*(?P<value_type>\S*),)?\s*radix_sort_onesweep_config<)regex"
-               R"regex(kernel_config<\s*(?P<histogram_block_size>[0-9]+),\s*(?P<histogram_items_per_thread>[0-9]+)>,\s*)regex"
-               R"regex(kernel_config<\s*(?P<sort_block_size>[0-9]+),\s*(?P<sort_items_per_thread>[0-9]+)>,\s*)regex"
-               R"regex((?P<radix_bits>[0-9]+)>>)regex";
-    }
-
     std::string name() const override
     {
-        using namespace std::string_literals;
-        return std::string("device_radix_sort_onesweep<" + std::string(Traits<Key>::name()) + ", "
-                           + (std::is_same<Value, rocprim::empty_type>::value
-                                  ? ""s
-                                  : std::string(Traits<Value>::name()) + ", ")
-                           + config_name<Config>() + ">");
+        return bench_naming::format_name("{lvl:device,algo:radix_sort_onesweep,key_type:"
+                                         + std::string(Traits<Key>::name())
+                                         + ",value_type:" + std::string(Traits<Value>::name())
+                                         + ",cfg:" + config_name<Config>() + "}");
     }
 
     static constexpr unsigned int batch_size  = 10;

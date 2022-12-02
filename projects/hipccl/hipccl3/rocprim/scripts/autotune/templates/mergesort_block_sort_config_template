@@ -5,7 +5,7 @@ ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_MERGE_SORT_BLOCK_SORT_HPP_
 {%- endmacro %}
 
 {% macro kernel_configuration(measurement) -%}
-merge_sort_block_sort_config<{{ measurement['block_size'] }}, {{ measurement['items_per_thread'] }}, block_sort_algorithm::{{ measurement['method'] }}> { };
+merge_sort_block_sort_config<{{ measurement['cfg']['bs'] }}, {{ measurement['cfg']['ipt'] }}, block_sort_algorithm::{{ measurement['cfg']['method'] }}> { };
 {%- endmacro %}
 
 {% macro general_case() -%}

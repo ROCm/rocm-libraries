@@ -44,8 +44,8 @@ template<typename Config>
 std::string config_name()
 {
     const rocprim::detail::kernel_config_params config = Config();
-    return "kernel_config<" + pad_string(std::to_string(config.block_size), 4) + ", "
-           + pad_string(std::to_string(config.items_per_thread), 2) + ">";
+    return "{bs:" + std::to_string(config.block_size)
+           + ",ipt:" + std::to_string(config.items_per_thread) + "}";
 }
 
 template<>
@@ -59,21 +59,12 @@ template<typename Key    = int,
          typename Config = rocprim::default_config>
 struct device_radix_sort_block_sort_benchmark : public config_autotune_interface
 {
-    static std::string get_name_pattern()
-    {
-        return R"regex((?P<algo>\S*?)<)regex"
-               R"regex((?P<key_type>\S*),(?:\s*(?P<value_type>\S*),)?\s*kernel_config<\s*)regex"
-               R"regex((?P<block_size>[0-9]+),\s*(?P<items_per_thread>[0-9]+)>>)regex";
-    }
-
     std::string name() const override
     {
-        using namespace std::string_literals;
-        return std::string("device_radix_sort_block_sort<" + std::string(Traits<Key>::name()) + ", "
-                           + (std::is_same<Value, rocprim::empty_type>::value
-                                  ? ""s
-                                  : std::string(Traits<Value>::name()) + ", ")
-                           + config_name<Config>() + ">");
+        return bench_naming::format_name("{lvl:device,algo:radix_sort_block_sort,key_type:"
+                                         + std::string(Traits<Key>::name())
+                                         + ",value_type:" + std::string(Traits<Value>::name())
+                                         + ",cfg:" + config_name<Config>() + "}");
     }
 
     static constexpr unsigned int batch_size  = 10;

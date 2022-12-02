@@ -45,19 +45,11 @@ template<typename Key    = int,
          typename Config = rocprim::default_config>
 struct device_radix_sort_benchmark : public config_autotune_interface
 {
-    static std::string get_name_pattern()
-    {
-        return R"regex((?P<algo>\S*?)<)regex";
-    }
-
     std::string name() const override
     {
-        using namespace std::string_literals;
-        return std::string("device_radix_sort<" + std::string(Traits<Key>::name())
-                           + (std::is_same<Value, rocprim::empty_type>::value
-                                  ? ""s
-                                  : ", " + std::string(Traits<Value>::name()))
-                           + ", default_config>");
+        return bench_naming::format_name(
+            "{lvl:device,algo:device_radix_sort,key_type:" + std::string(Traits<Key>::name())
+            + ",value_type:" + std::string(Traits<Value>::name()) + ",cfg: default_config}");
     }
 
     static constexpr unsigned int batch_size  = 10;

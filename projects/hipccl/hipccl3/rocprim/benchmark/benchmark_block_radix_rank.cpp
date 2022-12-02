@@ -154,11 +154,13 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
     HIP_CHECK(hipFree(d_output));
 }
 
-#define CREATE_BENCHMARK(T, BS, IPT, KIND)                                                       \
-    benchmark::RegisterBenchmark(                                                                \
-        (std::string("block_radix_rank<" #T ", " #BS ", " #IPT ", " #KIND ">.") + name).c_str(), \
-        run_benchmark<T, BS, IPT, KIND>,                                                         \
-        stream,                                                                                  \
+#define CREATE_BENCHMARK(T, BS, IPT, KIND)                                                  \
+    benchmark::RegisterBenchmark(                                                           \
+        bench_naming::format_name("{lvl:block,algo:radix_rank,key_type:" #T ",cfg:{bs:" #BS \
+                                  ",ipt:" #IPT ",method:" #KIND "}}")                       \
+            .c_str(),                                                                       \
+        run_benchmark<T, BS, IPT, KIND>,                                                    \
+        stream,                                                                             \
         size)
 
 // clang-format off
@@ -175,8 +177,7 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
     CREATE_BENCHMARK_KINDS(type, block, 20)
 // clang-format on
 
-void add_benchmarks(const std::string&                            name,
-                    std::vector<benchmark::internal::Benchmark*>& benchmarks,
+void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
                     hipStream_t                                   stream,
                     size_t                                        size)
 {
@@ -202,12 +203,17 @@ int main(int argc, char* argv[])
     cli::Parser parser(argc, argv);
     parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
     parser.set_optional<int>("trials", "trials", -1, "number of iterations");
+    parser.set_optional<std::string>("name_format",
+                                     "name_format",
+                                     "human",
+                                     "either: json,human,txt");
     parser.run_and_exit_if_error();
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
     const size_t size   = parser.get<size_t>("size");
     const int    trials = parser.get<int>("trials");
+    bench_naming::set_format(parser.get<std::string>("name_format"));
 
     // HIP
     hipStream_t stream = 0; // default
@@ -218,7 +224,7 @@ int main(int argc, char* argv[])
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks;
-    add_benchmarks("rank_keys", benchmarks, stream, size);
+    add_benchmarks(benchmarks, stream, size);
 
     // Use manual timing
     for(auto& b : benchmarks)

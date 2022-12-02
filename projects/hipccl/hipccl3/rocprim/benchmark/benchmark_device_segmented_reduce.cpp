@@ -180,14 +180,16 @@ void run_benchmark(benchmark::State& state, size_t desired_segments, hipStream_t
     HIP_CHECK(hipFree(d_aggregates_output));
 }
 
-#define CREATE_BENCHMARK(T, SEGMENTS) \
-benchmark::RegisterBenchmark( \
-    (std::string("segmented_reduce") + "<" #T ">" + \
-        "(~" + std::to_string(SEGMENTS) + " segments)" \
-    ).c_str(), \
-    run_benchmark<T>, \
-    SEGMENTS, stream, size \
-)
+#define CREATE_BENCHMARK(T, SEGMENTS)                                                  \
+    benchmark::RegisterBenchmark(                                                      \
+        bench_naming::format_name("{lvl:device,algo:reduce_segmented,key_type:" #T     \
+                                  ",segment_count:"                                    \
+                                  + std::to_string(SEGMENTS) + ",cfg:default_config}") \
+            .c_str(),                                                                  \
+        run_benchmark<T>,                                                              \
+        SEGMENTS,                                                                      \
+        stream,                                                                        \
+        size)
 
 #define BENCHMARK_TYPE(type) \
     CREATE_BENCHMARK(type, 1), \
@@ -223,12 +225,17 @@ int main(int argc, char *argv[])
     cli::Parser parser(argc, argv);
     parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
     parser.set_optional<int>("trials", "trials", -1, "number of iterations");
+    parser.set_optional<std::string>("name_format",
+                                     "name_format",
+                                     "human",
+                                     "either: json,human,txt");
     parser.run_and_exit_if_error();
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
     const size_t size = parser.get<size_t>("size");
     const int trials = parser.get<int>("trials");
+    bench_naming::set_format(parser.get<std::string>("name_format"));
 
     // HIP
     hipStream_t stream = 0; // default

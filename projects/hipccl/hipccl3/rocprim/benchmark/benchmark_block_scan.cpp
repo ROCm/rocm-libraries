@@ -201,12 +201,15 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
 }
 
 // IPT - items per thread
-#define CREATE_BENCHMARK(T, BS, IPT) \
-    benchmark::RegisterBenchmark( \
-        (std::string("block_scan<"#T", "#BS", "#IPT", " + algorithm_name + ">.") + method_name).c_str(), \
-        run_benchmark<Benchmark, T, BS, IPT>, \
-        stream, size \
-    )
+#define CREATE_BENCHMARK(T, BS, IPT)                                                        \
+    benchmark::RegisterBenchmark(                                                           \
+        bench_naming::format_name("{lvl:block,algo:scan,subalgo:" + algorithm_name          \
+                                  + ",key_type:" #T ",cfg:{bs:" #BS ",ipt:" #IPT ",method:" \
+                                  + method_name + "}}")                                     \
+            .c_str(),                                                                       \
+        run_benchmark<Benchmark, T, BS, IPT>,                                               \
+        stream,                                                                             \
+        size)
 
 #define BENCHMARK_TYPE(type, block) \
     CREATE_BENCHMARK(type, block, 1), \
@@ -272,12 +275,17 @@ int main(int argc, char *argv[])
     cli::Parser parser(argc, argv);
     parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
     parser.set_optional<int>("trials", "trials", -1, "number of iterations");
+    parser.set_optional<std::string>("name_format",
+                                     "name_format",
+                                     "human",
+                                     "either: json,human,txt");
     parser.run_and_exit_if_error();
 
     // Parse argv
     benchmark::Initialize(&argc, argv);
     const size_t size = parser.get<size_t>("size");
     const int trials = parser.get<int>("trials");
+    bench_naming::set_format(parser.get<std::string>("name_format"));
 
     // HIP
     hipStream_t stream = 0; // default

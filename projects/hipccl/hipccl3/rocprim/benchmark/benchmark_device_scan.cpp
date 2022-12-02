@@ -64,6 +64,10 @@ int main(int argc, char *argv[])
     cli::Parser parser(argc, argv);
     parser.set_optional<size_t>("size", "size", DEFAULT_N, "number of values");
     parser.set_optional<int>("trials", "trials", -1, "number of iterations");
+    parser.set_optional<std::string>("name_format",
+                                     "name_format",
+                                     "human",
+                                     "either: json,human,txt");
 #ifdef BENCHMARK_CONFIG_TUNING
     // optionally run an evenly split subset of benchmarks, when making multiple program invocations
     parser.set_optional<int>("parallel_instance",
@@ -81,6 +85,7 @@ int main(int argc, char *argv[])
     benchmark::Initialize(&argc, argv);
     const size_t size = parser.get<size_t>("size");
     const int trials = parser.get<int>("trials");
+    bench_naming::set_format(parser.get<std::string>("name_format"));
 
     // HIP
     hipStream_t stream = 0; // default
@@ -99,8 +104,6 @@ int main(int argc, char *argv[])
                                                         parallel_instances,
                                                         size,
                                                         stream);
-    benchmark::AddCustomContext("autotune_config_pattern",
-                                device_scan_benchmark<>::get_name_pattern().c_str());
 #else
     using custom_float2  = custom_type<float, float>;
     using custom_double2 = custom_type<double, double>;
