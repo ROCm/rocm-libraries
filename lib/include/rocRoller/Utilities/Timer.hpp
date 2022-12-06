@@ -54,6 +54,12 @@ namespace rocRoller
         static size_t milliseconds(std::string const& name);
 
         /**
+         * @brief clears the timer pool
+         *
+         */
+        static void clear();
+
+        /**
          * Accumulate time into timer `name`.  Atomic.
          */
         void accumulate(std::string const&                         name,

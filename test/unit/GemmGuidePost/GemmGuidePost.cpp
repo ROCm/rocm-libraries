@@ -395,6 +395,8 @@ namespace rocRollerTest
 
     TEST_F(GPU_GemmGuidePostTest, ManualKernelSmall_Minimal)
     {
+        TimerPool::clear();
+
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         ASSERT_EQ(true, isLocalDevice());
 
@@ -461,6 +463,8 @@ namespace rocRollerTest
 
     TEST_F(GPU_GemmGuidePostTest, ManualKernel_Minimal)
     {
+        TimerPool::clear();
+
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         ASSERT_EQ(true, isLocalDevice());
 
@@ -885,6 +889,8 @@ namespace rocRollerTest
 
     TEST_F(GPU_GemmGuidePostTest, ManualKernelSmall_Optimized)
     {
+        TimerPool::clear();
+
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         ASSERT_EQ(true, isLocalDevice());
 
@@ -950,6 +956,8 @@ namespace rocRollerTest
 
     TEST_F(GPU_GemmGuidePostTest, ManualKernel_Optimized)
     {
+        TimerPool::clear();
+
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         ASSERT_EQ(true, isLocalDevice());
 
@@ -1377,6 +1385,8 @@ namespace rocRollerTest
 
     TEST_F(GPU_GemmGuidePostTest, HGEMM_ManualKernel_Minimal)
     {
+        TimerPool::clear();
+
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         ASSERT_EQ(true, isLocalDevice());
 
@@ -1811,6 +1821,8 @@ namespace rocRollerTest
 
     TEST_F(GPU_GemmGuidePostTest, HGEMM_ManualKernel_Optimized)
     {
+        TimerPool::clear();
+
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         ASSERT_EQ(true, isLocalDevice());
 

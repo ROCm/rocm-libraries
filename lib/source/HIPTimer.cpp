@@ -51,5 +51,7 @@ namespace rocRoller
             std::chrono::duration<float, std::milli>(elapsed));
 
         TimerPool::getInstance().accumulate(m_name, m_elapsed);
+
+        m_start = {};
     }
 }

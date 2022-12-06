@@ -53,6 +53,11 @@ namespace rocRoller
         return std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
     }
 
+    void TimerPool::clear()
+    {
+        getInstance().m_elapsed.clear();
+    }
+
     void TimerPool::accumulate(std::string const&                         name,
                                std::chrono::steady_clock::duration const& elapsed)
     {
