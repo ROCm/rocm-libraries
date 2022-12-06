@@ -1363,9 +1363,7 @@ namespace rocRoller
                             co_yield m_context->copier()->copy(
                                 converted, agpr->element({static_cast<int>(a)}));
                         }
-                        //v_accvgpr_read for V_MFMA with 2 pass instructions is 4, 10 for 8 pass instruction
-                        // and 18 for 16 pass instructions like V_MFMA_F32_32x32x8F16
-                        co_yield Instruction::Nop(18, "Nops required for v_accvgpr_read");
+
                         co_yield m_context->mem()->storeBuffer(converted,
                                                                vgpr_index_offset_reg->subset({0}),
                                                                0,

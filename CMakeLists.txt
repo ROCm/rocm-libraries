@@ -279,10 +279,19 @@ set(rocroller_src
  lib/source/Schedulers/RandomScheduler.cpp
  lib/source/Schedulers/RoundRobinScheduler.cpp
  lib/source/Schedulers/SequentialScheduler.cpp
- lib/source/Observers/GenericWaitStateObserver.cpp
+ lib/source/Observers/ACCVGPRReadWrite.cpp
+ lib/source/Observers/ACCVGPRWriteWrite.cpp
+ lib/source/Observers/CMPXWriteExec.cpp
+ lib/source/Observers/DGEMM4x4x4Write.cpp
+ lib/source/Observers/DGEMM16x16x4Write.cpp
+ lib/source/Observers/DLWrite.cpp
  lib/source/Observers/ObserverCreation.cpp
  lib/source/Observers/RegisterMapObserver.cpp
- lib/source/Observers/VALUWriteFollowedByMFMARead.cpp
+ lib/source/Observers/VALUWrite.cpp
+ lib/source/Observers/XDLReadSrcC90a.cpp
+ lib/source/Observers/XDLReadSrcC908.cpp
+ lib/source/Observers/XDLWrite90a.cpp
+ lib/source/Observers/XDLWrite908.cpp
  lib/source/Timer.cpp
 )
 

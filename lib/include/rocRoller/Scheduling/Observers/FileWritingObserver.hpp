@@ -18,6 +18,7 @@ namespace rocRoller
         {
         public:
             FileWritingObserver() {}
+
             FileWritingObserver(std::shared_ptr<Context> context)
                 : m_context(context)
                 , m_assemblyFile()

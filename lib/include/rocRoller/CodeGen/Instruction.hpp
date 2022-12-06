@@ -19,6 +19,14 @@ namespace rocRoller
 {
     struct Instruction
     {
+        enum
+        {
+            MaxDstRegisters = 2,
+            MaxSrcRegisters = 4,
+            MaxModifiers    = 10,
+            MaxAllocations  = 4
+        };
+
         Instruction(std::string const&                                      opcode,
                     std::initializer_list<std::shared_ptr<Register::Value>> dst,
                     std::initializer_list<std::shared_ptr<Register::Value>> src,
@@ -57,15 +65,24 @@ namespace rocRoller
         static Instruction Lock(Scheduling::Dependency const& dependency, std::string comment);
         static Instruction Unlock(std::string comment);
 
-        std::tuple<std::vector<std::shared_ptr<Register::Value>>,
-                   std::vector<std::shared_ptr<Register::Value>>>
-                  getRegisters() const;
+        std::array<std::shared_ptr<Register::Value>, MaxDstRegisters> const& getDsts() const;
+        std::array<std::shared_ptr<Register::Value>, MaxSrcRegisters> const& getSrcs() const;
+
         bool      hasRegisters() const;
         bool      readsSpecialRegisters() const;
         WaitCount getWaitCount() const;
 
-        bool registersIntersect(std::vector<std::shared_ptr<Register::Value>>,
-                                std::vector<std::shared_ptr<Register::Value>>) const;
+        /**
+         * @brief Returns |a.src n b.dest| > 0 or |a.dest n (b.src u b.dest)| > 0
+         *
+         * @param src Source registers to compare against
+         * @param dst Destination registers to compare against
+         * @return whether the registers intersect
+         */
+        bool registersIntersect(
+            std::array<std::shared_ptr<Register::Value>, Instruction::MaxSrcRegisters> const& src,
+            std::array<std::shared_ptr<Register::Value>, Instruction::MaxDstRegisters> const& dst)
+            const;
 
         void        toStream(std::ostream&, LogLevel level) const;
         std::string toString(LogLevel level) const;
@@ -114,14 +131,6 @@ namespace rocRoller
         void allocateNow();
 
     private:
-        enum
-        {
-            MaxDstRegisters = 2,
-            MaxSrcRegisters = 4,
-            MaxModifiers    = 10,
-            MaxAllocations  = 4
-        };
-
         /**
          * toString = preamble + functional + coda
          */
@@ -170,7 +179,6 @@ namespace rocRoller
 
         std::array<std::string, MaxModifiers> m_modifiers;
     };
-
 }
 
 #include "Instruction_impl.hpp"

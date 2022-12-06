@@ -7,7 +7,7 @@
 namespace rocRoller
 {
     /**
-     * @brief InstructionReference represents an Instruction object as a copy, but does not carry the allocations or registers directly.
+     * @brief InstructionRef represents an Instruction object as a copy, but does not carry the allocations or registers directly.
      */
     class InstructionRef
     {
@@ -27,11 +27,6 @@ namespace rocRoller
         bool isMFMA() const
         {
             return m_opCode.rfind("v_mfma", 0) == 0;
-        }
-
-        bool isXDLOP() const
-        {
-            return isMFMA();
         }
 
         bool isCMPX() const
@@ -67,6 +62,16 @@ namespace rocRoller
         bool isLDS() const
         {
             return m_opCode.rfind("ds_", 0) == 0;
+        }
+
+        bool isACCVGPRWrite() const
+        {
+            return m_opCode.rfind("v_accvgpr_write", 0) == 0;
+        }
+
+        bool isACCVGPRRead() const
+        {
+            return m_opCode.rfind("v_accvgpr_read", 0) == 0;
         }
 
     private:

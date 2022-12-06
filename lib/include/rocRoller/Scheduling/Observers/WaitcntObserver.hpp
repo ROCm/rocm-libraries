@@ -19,14 +19,11 @@ namespace rocRoller
             {
                 for(uint8_t i = 0; i < static_cast<uint8_t>(GPUWaitQueue::Count); i++)
                 {
-                    instruction_queues[static_cast<GPUWaitQueue>(i)]
-                        = std::vector<std::tuple<std::vector<std::shared_ptr<Register::Value>>,
-                                                 std::vector<std::shared_ptr<Register::Value>>>>();
-
-                    needs_wait_zero[static_cast<GPUWaitQueue>(i)] = false;
-
-                    type_in_queue[static_cast<GPUWaitQueue>(i)] = GPUWaitQueueType::None;
+                    instruction_queues[static_cast<GPUWaitQueue>(i)] = {};
+                    needs_wait_zero[static_cast<GPUWaitQueue>(i)]    = false;
+                    type_in_queue[static_cast<GPUWaitQueue>(i)]      = GPUWaitQueueType::None;
                 }
+
                 AssertFatal(instruction_queues.size() == static_cast<uint8_t>(GPUWaitQueue::Count),
                             ShowValue(instruction_queues.size()),
                             ShowValue(static_cast<uint32_t>(GPUWaitQueue::Count)));
@@ -64,10 +61,9 @@ namespace rocRoller
             InstructionStatus observe(Instruction const& inst)
             {
                 auto               context      = m_context.lock();
-                const auto&        architecture = context->targetArchitecture();
+                auto const&        architecture = context->targetArchitecture();
                 GPUInstructionInfo info         = architecture.GetInstructionInfo(inst.getOpCode());
 
-                auto registers      = inst.getRegisters();
                 auto instWaitQueues = info.getWaitQueues();
 
                 WaitCount waiting = inst.getWaitCount();
@@ -107,7 +103,8 @@ namespace rocRoller
                             }
                             for(int i = 0; i < instWaitCnt; i++)
                             {
-                                instruction_queues[waitQueue].push_back(registers);
+                                instruction_queues[waitQueue].push_back(
+                                    std::make_tuple(inst.getSrcs(), inst.getDsts()));
                             }
                             type_in_queue[waitQueue] = queueType;
                         }
@@ -126,8 +123,9 @@ namespace rocRoller
 
             std::unordered_map<
                 GPUWaitQueue,
-                std::vector<std::tuple<std::vector<std::shared_ptr<Register::Value>>,
-                                       std::vector<std::shared_ptr<Register::Value>>>>,
+                std::vector<std::tuple<
+                    std::array<std::shared_ptr<Register::Value>, Instruction::MaxSrcRegisters>,
+                    std::array<std::shared_ptr<Register::Value>, Instruction::MaxDstRegisters>>>,
                 GPUWaitQueue::Hash>
                 instruction_queues;
 
@@ -187,8 +185,8 @@ namespace rocRoller
                             queue_i--)
                         {
                             if(inst.registersIntersect(
-                                   std::get<1>(instruction_queues.at(waitQueue)[queue_i]),
-                                   std::get<0>(instruction_queues.at(waitQueue)[queue_i])))
+                                   std::get<0>(instruction_queues.at(waitQueue)[queue_i]),
+                                   std::get<1>(instruction_queues.at(waitQueue)[queue_i])))
                             {
                                 if(needs_wait_zero.at(waitQueue))
                                 {

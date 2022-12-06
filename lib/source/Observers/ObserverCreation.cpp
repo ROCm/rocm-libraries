@@ -2,9 +2,18 @@
 
 #include <rocRoller/Scheduling/Observers/AllocatingObserver.hpp>
 #include <rocRoller/Scheduling/Observers/FileWritingObserver.hpp>
-#include <rocRoller/Scheduling/Observers/MFMA90aObserver.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/ACCVGPRReadWrite.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/ACCVGPRWriteWrite.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/CMPXWriteExec.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/DGEMM16x16x4Write.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/DGEMM4x4x4Write.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/DLWrite.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/RegisterMapObserver.hpp>
-#include <rocRoller/Scheduling/Observers/WaitState/VALUWriteFollowedByMFMARead.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/VALUWrite.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/XDLReadSrcC908.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/XDLReadSrcC90a.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/XDLWrite908.hpp>
+#include <rocRoller/Scheduling/Observers/WaitState/XDLWrite90a.hpp>
 #include <rocRoller/Scheduling/Observers/WaitcntObserver.hpp>
 
 namespace rocRoller
@@ -17,8 +26,19 @@ namespace rocRoller
                 = MetaObserver<RegisterMapObserver, // NOTE: RegisterMapObserver should be first
                                AllocatingObserver,
                                WaitcntObserver>;
-            using Gfx908Observers = MetaObserver<MFMA90aObserver, VALUWriteFollowedByMFMARead>;
-            using Gfx90aObservers = MetaObserver<VALUWriteFollowedByMFMARead>;
+            using Gfx908Observers = MetaObserver<ACCVGPRReadWrite,
+                                                 ACCVGPRWriteWrite,
+                                                 CMPXWriteExec,
+                                                 VALUWrite,
+                                                 XDLReadSrcC908,
+                                                 XDLWrite908>;
+            using Gfx90aObservers = MetaObserver<CMPXWriteExec,
+                                                 DGEMM4x4x4Write,
+                                                 DGEMM16x16x4Write,
+                                                 DLWrite,
+                                                 VALUWrite,
+                                                 XDLReadSrcC90a,
+                                                 XDLWrite90a>;
             using FileObservers   = MetaObserver<FileWritingObserver>;
 
             static_assert(CObserver<AlwaysObservers>);

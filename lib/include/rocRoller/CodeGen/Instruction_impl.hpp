@@ -204,27 +204,16 @@ namespace rocRoller
         return rv;
     }
 
-    inline std::tuple<std::vector<std::shared_ptr<Register::Value>>,
-                      std::vector<std::shared_ptr<Register::Value>>>
-        Instruction::getRegisters() const
+    inline std::array<std::shared_ptr<Register::Value>, Instruction::MaxSrcRegisters> const&
+        Instruction::getSrcs() const
     {
-        std::vector<std::shared_ptr<Register::Value>> retval_src;
-        for(auto& v : m_src)
-        {
-            if(v)
-            {
-                retval_src.push_back(v);
-            }
-        }
-        std::vector<std::shared_ptr<Register::Value>> retval_dst;
-        for(auto& v : m_dst)
-        {
-            if(v)
-            {
-                retval_dst.push_back(v);
-            }
-        }
-        return std::make_tuple(retval_src, retval_dst);
+        return m_src;
+    }
+
+    inline std::array<std::shared_ptr<Register::Value>, Instruction::MaxDstRegisters> const&
+        Instruction::getDsts() const
+    {
+        return m_dst;
     }
 
     inline bool Instruction::hasRegisters() const
@@ -267,38 +256,37 @@ namespace rocRoller
         return m_waitCount;
     }
 
-    //Returns |a.src n b.dest| > 0 or |a.dest n (b.src u b.dest)| > 0
-    inline bool
-        Instruction::registersIntersect(std::vector<std::shared_ptr<Register::Value>> dst,
-                                        std::vector<std::shared_ptr<Register::Value>> src) const
+    inline bool Instruction::registersIntersect(
+        std::array<std::shared_ptr<Register::Value>, Instruction::MaxSrcRegisters> const& src,
+        std::array<std::shared_ptr<Register::Value>, Instruction::MaxDstRegisters> const& dst) const
     {
-        for(auto& regA : m_src)
+        for(auto const& regA : m_src)
         {
             if(regA)
             {
-                for(auto& regB : dst)
+                for(auto const& regB : dst)
                 {
-                    if(regA->intersects(regB))
+                    if(regB && regA->intersects(regB))
                     {
                         return true;
                     }
                 }
             }
         }
-        for(auto& regA : m_dst)
+        for(auto const& regA : m_dst)
         {
             if(regA)
             {
-                for(auto& regB : src)
+                for(auto const& regB : src)
                 {
-                    if(regA->intersects(regB))
+                    if(regB && regA->intersects(regB))
                     {
                         return true;
                     }
                 }
-                for(auto& regB : dst)
+                for(auto const& regB : dst)
                 {
-                    if(regA->intersects(regB))
+                    if(regB && regA->intersects(regB))
                     {
                         return true;
                     }
