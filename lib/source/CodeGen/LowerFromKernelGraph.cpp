@@ -588,74 +588,61 @@ namespace rocRoller
                 auto [user_tag, user]         = m_graph.getDimension<CoordGraph::User>(tag);
                 auto [mac_tile_tag, mac_tile] = m_graph.getDimension<CoordGraph::MacroTile>(tag);
 
-                auto vgpr = MkVGPR(load.vtype, product(mac_tile.subTileSizes));
-                vgpr      = m_context->registerTagManager()->getRegister(mac_tile_tag, vgpr);
-                co_yield vgpr->allocate();
+                auto basePointer = MkSGPR(DataType::Int64);
+                co_yield m_context->argLoader()->getValue(user.argumentName(), basePointer);
 
-                auto baseAddress = MkSGPR(DataType::Int64);
-                co_yield m_context->argLoader()->getValue(user.argumentName(), baseAddress);
-
-                auto numBytes = DataTypeInfo::Get(vgpr->variableType()).elementSize;
-                auto bufDesc  = BufferDescriptor(m_context);
-                auto bufOpt   = BufferInstructionOptions();
+                auto bufDesc = BufferDescriptor(m_context);
+                auto bufOpt  = BufferInstructionOptions();
 
                 co_yield bufDesc.setup();
-                co_yield bufDesc.setBasePointer(baseAddress);
+                co_yield bufDesc.setBasePointer(basePointer);
+
+                auto i_thr_x = m_graph.mapper.get<CoordGraph::ThreadTileIndex>(tag, 0);
+                auto i_thr_y = m_graph.mapper.get<CoordGraph::ThreadTileIndex>(tag, 1);
+
+                auto [row_offset_reg, row_stride_reg]
+                    = getOffsetAndStride<Graph::Direction::Upstream>(i_thr_x);
+                auto [col_offset_reg, col_stride_reg]
+                    = getOffsetAndStride<Graph::Direction::Upstream>(i_thr_y);
+
+                auto tmpl = MkVGPR(load.vtype, product(mac_tile.subTileSizes));
+                auto vgpr = m_context->registerTagManager()->getRegister(mac_tile_tag, tmpl);
+                co_yield Register::AllocateIfNeeded(vgpr);
+
+                auto numBytes = DataTypeInfo::Get(vgpr->variableType()).elementSize;
 
                 auto const m = mac_tile.subTileSizes[0];
                 auto const n = mac_tile.subTileSizes[1];
 
                 AssertFatal(m > 0 && n > 0, "Invalid/unknown subtile size dimensions");
 
-                auto row_index_tag = m_graph.mapper.get<CoordGraph::ThreadTileIndex>(tag, 0);
-                auto col_index_tag = m_graph.mapper.get<CoordGraph::ThreadTileIndex>(tag, 1);
-
-                coords.setCoordinate(row_index_tag, L(0));
-                coords.setCoordinate(col_index_tag, L(0));
-
-                auto threadOffset = MkVGPR(DataType::Int64);
-                {
-                    auto expr = coords.reverse({user_tag})[0];
-                    co_yield generate(threadOffset, expr * L(numBytes));
-                }
-
-                auto rowStride = MkSGPR(DataType::Int64);
-                {
-                    auto expr = coords.reverseStride(row_index_tag, L(1), {user_tag})[0];
-                    co_yield generate(rowStride, expr * L(numBytes));
-                }
-
-                auto colStride = MkSGPR(DataType::Int64);
-                {
-                    auto expr = coords.reverseStride(col_index_tag, L(1), {user_tag})[0];
-                    co_yield generate(colStride, expr * L(numBytes));
-                }
-
-                auto baseAddressExpr = baseAddress->expression();
-                auto rowStrideExpr   = rowStride->expression();
-
-                // TODO multi dimensional tiles
+                // TODO: multidimensional tiles
                 for(int i = 0; i < m; ++i)
                 {
+                    co_yield copy(col_offset_reg, row_offset_reg);
+
                     for(int j = 0; j < n; ++j)
                     {
                         co_yield m_context->mem()->loadBuffer(
                             vgpr->element({static_cast<int>(i * n + j)}),
-                            threadOffset->subset({0}),
+                            col_offset_reg->subset({0}),
                             0,
                             bufDesc,
                             bufOpt,
                             numBytes);
                         if(j < n - 1)
                         {
-                            co_yield bufDesc.incrementBasePointer(colStride);
+                            co_yield generate(col_offset_reg,
+                                              col_offset_reg->expression()
+                                                  + col_stride_reg->expression());
                         }
                     }
 
                     if(i < m - 1)
                     {
-                        co_yield generate(baseAddress, baseAddressExpr + rowStrideExpr);
-                        co_yield bufDesc.setBasePointer(baseAddress);
+                        co_yield generate(row_offset_reg,
+                                          row_offset_reg->expression()
+                                              + row_stride_reg->expression());
                     }
                 }
             }
@@ -674,15 +661,14 @@ namespace rocRoller
                 auto [mac_tile_tag, mac_tile]   = m_graph.getDimension<CoordGraph::MacroTile>(tag);
                 auto [vgpr_tag, vgpr]           = m_graph.getDimension<CoordGraph::VGPR>(tag);
 
-                // Move the argument pointer into v_ptr
-                Register::ValuePtr s_ptr;
-                co_yield m_context->argLoader()->getValue(user.argumentName(), s_ptr);
+                Register::ValuePtr basePointer;
+                co_yield m_context->argLoader()->getValue(user.argumentName(), basePointer);
 
                 auto bufDesc = BufferDescriptor(m_context);
                 auto bufOpt  = BufferInstructionOptions();
 
                 co_yield bufDesc.setup();
-                co_yield bufDesc.setBasePointer(s_ptr);
+                co_yield bufDesc.setBasePointer(basePointer);
 
                 auto n_wave_tag = m_graph.mapper.get<CoordGraph::WaveTileNumber>(tag, sdim);
 
@@ -1229,69 +1215,53 @@ namespace rocRoller
 
                 auto vgpr = m_context->registerTagManager()->getRegister(mac_tile_tag);
 
-                auto baseAddress = MkSGPR(DataType::Int64);
-                co_yield m_context->argLoader()->getValue(user.argumentName(), baseAddress);
+                auto basePointer = MkSGPR(DataType::Int64);
+                co_yield m_context->argLoader()->getValue(user.argumentName(), basePointer);
 
                 auto numBytes = DataTypeInfo::Get(vgpr->variableType()).elementSize;
                 auto bufDesc  = BufferDescriptor(m_context);
                 auto bufOpt   = BufferInstructionOptions();
 
                 co_yield bufDesc.setup();
-                co_yield bufDesc.setBasePointer(baseAddress);
+                co_yield bufDesc.setBasePointer(basePointer);
 
                 auto const m = mac_tile.subTileSizes[0];
                 auto const n = mac_tile.subTileSizes[1];
 
-                auto [row_index_tag, row_index]
-                    = m_graph.getDimension<CoordGraph::ThreadTileIndex>(tag, 0);
-                auto [col_index_tag, col_index]
-                    = m_graph.getDimension<CoordGraph::ThreadTileIndex>(tag, 1);
+                auto i_thr_x = m_graph.mapper.get<CoordGraph::ThreadTileIndex>(tag, 0);
+                auto i_thr_y = m_graph.mapper.get<CoordGraph::ThreadTileIndex>(tag, 1);
 
-                coords.setCoordinate(row_index_tag, L(0));
-                coords.setCoordinate(col_index_tag, L(0));
-
-                auto threadOffset = MkVGPR(DataType::Int64);
-                {
-                    auto expr = coords.forward({user_tag})[0];
-                    co_yield generate(threadOffset, expr * L(numBytes));
-                }
-
-                auto rowStride = MkSGPR(DataType::Int64);
-                {
-                    auto expr = coords.forwardStride(row_index_tag, L(1), {user_tag})[0];
-                    co_yield generate(rowStride, expr * L(numBytes));
-                }
-
-                auto colStride = MkSGPR(DataType::Int64);
-                {
-                    auto expr = coords.forwardStride(col_index_tag, L(1), {user_tag})[0];
-                    co_yield generate(colStride, expr * L(numBytes));
-                }
-
-                auto baseAddressExpr = baseAddress->expression();
-                auto rowStrideExpr   = rowStride->expression();
+                auto [row_offset_reg, row_stride_reg]
+                    = getOffsetAndStride<Graph::Direction::Upstream>(i_thr_x);
+                auto [col_offset_reg, col_stride_reg]
+                    = getOffsetAndStride<Graph::Direction::Upstream>(i_thr_y);
 
                 // TODO multidimensional tiles
                 for(int i = 0; i < m; ++i)
                 {
+                    co_yield copy(col_offset_reg, row_offset_reg);
+
                     for(int j = 0; j < n; ++j)
                     {
                         co_yield m_context->mem()->storeBuffer(
                             vgpr->element({static_cast<int>(i * n + j)}),
-                            threadOffset->subset({0}),
+                            col_offset_reg->subset({0}),
                             0,
                             bufDesc,
                             bufOpt,
                             numBytes);
                         if(j < n - 1)
                         {
-                            co_yield bufDesc.incrementBasePointer(colStride);
+                            co_yield generate(col_offset_reg,
+                                              col_offset_reg->expression()
+                                                  + col_stride_reg->expression());
                         }
                     }
                     if(i < m - 1)
                     {
-                        co_yield generate(baseAddress, baseAddressExpr + rowStrideExpr);
-                        co_yield bufDesc.setBasePointer(baseAddress);
+                        co_yield generate(row_offset_reg,
+                                          row_offset_reg->expression()
+                                              + row_stride_reg->expression());
                     }
                 }
             }

@@ -91,7 +91,6 @@ namespace rocRoller
                                    int                          load_tag,
                                    int                          i_mac_x,
                                    int                          i_mac_y,
-                                   int                          workitem,
                                    int                          user_tag)
             {
                 AssertFatal(mac_tile.subTileSizes.size() == 4, "Invalid tile specification.");
@@ -108,6 +107,7 @@ namespace rocRoller
                 if(mac_tile.layoutType == LayoutType::MATRIX_ACCUMULATOR)
                     tileSize = {m, n};
 
+                auto workitem      = graph.coordinates.addElement(CoordGraph::Workitem(0));
                 auto wave_tile     = CoordGraph::WaveTile(tileSize, mac_tile.layoutType);
                 auto wave_tile_tag = graph.coordinates.addElement(wave_tile);
                 graph.mapper.connect<CoordGraph::WaveTile>(load_tag, wave_tile_tag);
@@ -308,8 +308,6 @@ namespace rocRoller
                 graph.mapper.connect<CoordGraph::Workgroup>(load_tag, workgroup_x, 0);
                 graph.mapper.connect<CoordGraph::Workgroup>(load_tag, workgroup_y, 1);
 
-                auto workitem = graph.coordinates.addElement(CoordGraph::Workitem(0));
-
                 graph.coordinates.addElement(
                     CoordGraph::Flatten(), {i_mac_x, i_mac_y}, {mac_tile_tag});
 
@@ -327,8 +325,7 @@ namespace rocRoller
                     auto workitem_x = graph.coordinates.addElement(CoordGraph::Workitem(0));
                     auto workitem_y = graph.coordinates.addElement(CoordGraph::Workitem(1));
 
-                    auto thr_tile     = CoordGraph::ThreadTile(mac_tile.subTileSizes);
-                    auto thr_tile_tag = graph.coordinates.addElement(thr_tile);
+                    auto thr_tile = CoordGraph::ThreadTile(mac_tile.subTileSizes);
 
                     auto n_thr_x = graph.coordinates.addElement(thr_tile.tileNumber(0));
                     auto n_thr_y = graph.coordinates.addElement(thr_tile.tileNumber(1));
@@ -338,13 +335,9 @@ namespace rocRoller
                     graph.mapper.connect<CoordGraph::ThreadTileIndex>(load_tag, i_thr_x, 0);
                     graph.mapper.connect<CoordGraph::ThreadTileIndex>(load_tag, i_thr_y, 1);
 
-                    graph.coordinates.addElement(
-                        CoordGraph::Join(), {i_thr_x, i_thr_y}, {thr_tile_tag});
                     graph.coordinates.addElement(CoordGraph::Tile(), {i_mac_x}, {n_thr_x, i_thr_x});
                     graph.coordinates.addElement(CoordGraph::Tile(), {i_mac_y}, {n_thr_y, i_thr_y});
 
-                    graph.coordinates.addElement(
-                        CoordGraph::PassThrough(), {workitem}, {i_thr_x, i_thr_y});
                     graph.coordinates.addElement(
                         CoordGraph::PassThrough(), {n_thr_x}, {workitem_x});
                     graph.coordinates.addElement(
@@ -355,8 +348,7 @@ namespace rocRoller
                 break;
 
                 case MemoryType::WAVE:
-                    loadWaveMacroTile(
-                        graph, mac_tile, load_tag, i_mac_x, i_mac_y, workitem, user_tag);
+                    loadWaveMacroTile(graph, mac_tile, load_tag, i_mac_x, i_mac_y, user_tag);
                     break;
 
                 default:
@@ -1036,14 +1028,39 @@ namespace rocRoller
                 kgraph = addComputeIndexC(kgraph, tag, tag, false);
             }
 
+            // VGPR/LDS loads anywhere
+            auto loadVGPR = kgraph.control
+                                .findNodes(
+                                    kernel,
+                                    [&](int tag) -> bool {
+                                        auto load
+                                            = kgraph.control.get<ControlHypergraph::LoadTiled>(tag);
+                                        if(load)
+                                        {
+                                            auto [tile_tag, tile]
+                                                = kgraph.getDimension<CoordGraph::MacroTile>(tag);
+                                            if(tile.memoryType == MemoryType::VGPR
+                                               || tile.memoryType == MemoryType::LDS)
+                                                return true;
+                                        }
+                                        return false;
+                                    },
+                                    Graph::Direction::Downstream)
+                                .to<std::vector>();
+
+            for(auto const tag : loadVGPR)
+            {
+                kgraph = addComputeIndexVGPR(kgraph, tag, tag, false);
+            }
+
             // MATRIX_ACCUMULATOR stores anywhere
             auto storeAccums
                 = kgraph.control
                       .findNodes(
                           kernel,
                           [&](int tag) -> bool {
-                              auto load = kgraph.control.get<ControlHypergraph::StoreTiled>(tag);
-                              if(load)
+                              auto store = kgraph.control.get<ControlHypergraph::StoreTiled>(tag);
+                              if(store)
                               {
                                   auto [tile_tag, tile]
                                       = kgraph.getDimension<CoordGraph::MacroTile>(tag);
@@ -1058,6 +1075,31 @@ namespace rocRoller
             for(auto const tag : storeAccums)
             {
                 kgraph = addComputeIndexC(kgraph, tag, tag, true);
+            }
+
+            // VGPR/LDS stores anywhere
+            auto storeVGPR
+                = kgraph.control
+                      .findNodes(
+                          kernel,
+                          [&](int tag) -> bool {
+                              auto store = kgraph.control.get<ControlHypergraph::StoreTiled>(tag);
+                              if(store)
+                              {
+                                  auto [tile_tag, tile]
+                                      = kgraph.getDimension<CoordGraph::MacroTile>(tag);
+                                  if(tile.memoryType == MemoryType::VGPR
+                                     || tile.memoryType == MemoryType::LDS)
+                                      return true;
+                              }
+                              return false;
+                          },
+                          Graph::Direction::Downstream)
+                      .to<std::vector>();
+
+            for(auto const tag : storeVGPR)
+            {
+                kgraph = addComputeIndexVGPR(kgraph, tag, tag, true);
             }
 
             return kgraph;

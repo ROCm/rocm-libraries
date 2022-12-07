@@ -56,6 +56,7 @@ namespace rocRoller
 
         KernelHypergraph addComputeIndexAB(KernelHypergraph const&, int, int, int);
         KernelHypergraph addComputeIndexC(KernelHypergraph const&, int, int, bool);
+        KernelHypergraph addComputeIndexVGPR(KernelHypergraph const&, int, int, bool);
 
         /**
          * Rewrite KernelGraphs to make sure no more CommandArgument

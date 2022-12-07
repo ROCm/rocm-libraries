@@ -167,5 +167,43 @@ namespace rocRoller
             return graph;
         }
 
+        /**
+         * @brief Add ComputeIndex operations to graph for a MATRIX_ACCUM load.
+         */
+        KernelHypergraph
+            addComputeIndexVGPR(KernelHypergraph const& original, int op, int load, bool forward)
+        {
+            rocRoller::Log::getLogger()->debug(
+                "KernelGraph::addComputeIndexVGPR({}, {}, {})", op, load, forward);
+
+            auto [scope, graph] = replaceWithScope(original, op);
+
+            auto user    = graph.mapper.get<User>(load);
+            auto i_thr_x = graph.mapper.get<ThreadTileIndex>(load, 0);
+            auto i_thr_y = graph.mapper.get<ThreadTileIndex>(load, 1);
+
+            DataType dtype;
+            {
+                auto l = graph.control.get<LoadTiled>(load);
+                auto s = graph.control.get<StoreTiled>(load);
+                dtype  = l ? l->vtype.dataType : s->dataType;
+            }
+
+            auto row_offset = graph.coordinates.addElement(Offset(), {user}, {i_thr_x});
+            auto row_stride = graph.coordinates.addElement(Stride(), {user}, {i_thr_x});
+            auto col_offset = graph.coordinates.addElement(Offset(), {user}, {i_thr_y});
+            auto col_stride = graph.coordinates.addElement(Stride(), {user}, {i_thr_y});
+
+            auto ci_row = graph.control.addElement(
+                ComputeIndex(user, i_thr_x, -1, row_offset, row_stride, forward, dtype, {i_thr_y}));
+            auto ci_col = graph.control.addElement(ComputeIndex(
+                user, i_thr_y, i_thr_x, col_offset, col_stride, forward, dtype, {i_thr_x}));
+
+            graph.control.addElement(Body(), {scope}, {ci_row});
+            graph.control.addElement(Sequence(), {ci_row}, {ci_col});
+            graph.control.addElement(Sequence(), {ci_col}, {op});
+
+            return graph;
+        }
     }
 }
