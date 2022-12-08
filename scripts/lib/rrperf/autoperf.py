@@ -65,6 +65,11 @@ def run(
     ancestral: bool = False,
     suite: str = None,
     filter=None,
+    normalize=False,
+    y_zero=False,
+    plot_median=False,
+    plot_min=False,
+    exclude_boxplot=False,
     **kwargs,
 ):
     orig_project_dir = git.top()
@@ -116,4 +121,9 @@ def run(
             results,
             format="html",
             output=f,
+            normalize=normalize,
+            y_zero=y_zero,
+            plot_median=plot_median,
+            plot_min=plot_min,
+            plot_box=not exclude_boxplot,
         )

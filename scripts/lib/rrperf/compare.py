@@ -29,6 +29,7 @@ class ComparisonResult:
 class PlotData:
     timestamp: List[float] = field(default_factory=list)
     median: List[float] = field(default_factory=list)
+    min: List[float] = field(default_factory=list)
     name: List[str] = field(default_factory=list)
     kernel: List[float] = field(default_factory=list)
     machine: List[int] = field(default_factory=list)
@@ -267,7 +268,15 @@ def email_html_summary(html_file, perf_runs):
         )
 
 
-def html_summary(html_file, perf_runs):
+def html_summary(  # noqa: C901
+    html_file,
+    perf_runs,
+    normalize=False,
+    y_zero=False,
+    plot_box=True,
+    plot_median=False,
+    plot_min=False,
+):
     """Create HTML report of summary statistics."""
 
     import plotly.express as px
@@ -286,7 +295,7 @@ def html_summary(html_file, perf_runs):
 
     for token in tests:
         machine_filtered_runs = defaultdict(lambda: PlotData())
-
+        normalizer = None if normalize else 1
         for run in perf_runs:
             if token not in run.results:
                 continue
@@ -298,10 +307,16 @@ def html_summary(html_file, perf_runs):
             A = run.results[token]
             ka = np.asarray(A.kernelExecute) / A.numInner
             median = statistics.median(ka)
+            if normalizer is None:
+                normalizer = median
 
+            ka = ka / normalizer
+            median = median / normalizer
+            min = np.min(ka)
             for machine in ["all", run.machine_spec]:
                 machine_filtered_runs[machine].timestamp.append(run.timestamp)
                 machine_filtered_runs[machine].median.append(median)
+                machine_filtered_runs[machine].min.append(min)
                 machine_filtered_runs[machine].name.append(name)
                 machine_filtered_runs[machine].kernel.append(ka)
                 machine_filtered_runs[machine].machine.append(
@@ -314,48 +329,80 @@ def html_summary(html_file, perf_runs):
                     ]
                 )
 
+        total_plots = 0
+        for flag in [plot_box, plot_median, plot_min]:
+            total_plots += 1 if flag else 0
+
         drop_down_options = [
             {
                 "method": "update",
                 "label": "All Machines",
-                "args": [{"visible": [True, True] + ([False] * len(configs) * 2)}],
+                "args": [
+                    {
+                        "visible": ([True] * total_plots)
+                        + ([False] * len(configs) * total_plots)
+                    }
+                ],
             }
         ]
 
         plot = go.Figure()
-        box = px.box(
-            machine_filtered_runs["all"].box_data, x="timestamp", y="runs"
-        ).select_traces()
-        scatter = go.Scatter(
-            x=machine_filtered_runs["all"].timestamp,
-            y=machine_filtered_runs["all"].median,
-            name="Median",
-            text=machine_filtered_runs["all"].name,
-            marker_color=machine_filtered_runs["all"].machine,
-            mode="lines+markers",
-        )
-        plot.add_trace(next(box))
-        plot.add_trace(scatter)
-
-        for i, config in enumerate(configs):
+        if plot_box:
             box = px.box(
-                machine_filtered_runs[config].box_data, x="timestamp", y="runs"
+                machine_filtered_runs["all"].box_data, x="timestamp", y="runs"
             ).select_traces()
-
+            plot.add_trace(next(box))
+        if plot_median:
             scatter = go.Scatter(
-                x=machine_filtered_runs[config].timestamp,
-                y=machine_filtered_runs[config].median,
-                visible=False,
+                x=machine_filtered_runs["all"].timestamp,
+                y=machine_filtered_runs["all"].median,
                 name="Median",
-                text=machine_filtered_runs[config].name,
+                text=machine_filtered_runs["all"].name,
+                marker_color=machine_filtered_runs["all"].machine,
                 mode="lines+markers",
             )
-
-            plot.add_trace(next(box))
             plot.add_trace(scatter)
-            filter = [False] * ((len(configs) + 1) * 2)
-            filter[(i + 1) * 2] = True
-            filter[(i + 1) * 2 + 1] = True
+        if plot_min:
+            scatter = go.Scatter(
+                x=machine_filtered_runs["all"].timestamp,
+                y=machine_filtered_runs["all"].min,
+                name="Min",
+                text=machine_filtered_runs["all"].name,
+                marker_color=machine_filtered_runs["all"].machine,
+                mode="lines+markers",
+            )
+            plot.add_trace(scatter)
+
+        for i, config in enumerate(configs):
+            if plot_box:
+                box = px.box(
+                    machine_filtered_runs[config].box_data, x="timestamp", y="runs"
+                ).select_traces()
+                plot.add_trace(next(box))
+            if plot_median:
+                scatter = go.Scatter(
+                    x=machine_filtered_runs[config].timestamp,
+                    y=machine_filtered_runs[config].median,
+                    visible=False,
+                    name="Median",
+                    text=machine_filtered_runs[config].name,
+                    mode="lines+markers",
+                )
+                plot.add_trace(scatter)
+            if plot_min:
+                scatter = go.Scatter(
+                    x=machine_filtered_runs[config].timestamp,
+                    y=machine_filtered_runs[config].min,
+                    visible=False,
+                    name="Min",
+                    text=machine_filtered_runs[config].name,
+                    mode="lines+markers",
+                )
+                plot.add_trace(scatter)
+
+            filter = [False] * ((len(configs) + 1) * total_plots)
+            for j in range(total_plots):
+                filter[(i + 1) * total_plots + j] = True
             drop_down_options.append(
                 {
                     "method": "update",
@@ -364,12 +411,8 @@ def html_summary(html_file, perf_runs):
                 }
             )
 
-        plot.update_yaxes(
-            range=[
-                min(machine_filtered_runs["all"].median) * 0.97,
-                max(machine_filtered_runs["all"].median) * 1.03,
-            ]
-        )
+        if y_zero:
+            plot.update_yaxes(rangemode="tozero")
 
         plot.update_layout(
             updatemenus=[
@@ -391,7 +434,10 @@ def html_summary(html_file, perf_runs):
             height=1000,
             title_text=str(token),
         )
-        plot.update_yaxes(title={"text": "Time (ns)"})
+        if not normalize:
+            plot.update_yaxes(title={"text": "Runtime (ns)"})
+        else:
+            plot.update_yaxes(title={"text": "Normalized Runtime"})
         plots.append(plot)
 
     # Make a table of machines for lookup.
@@ -460,7 +506,17 @@ def html_summary(html_file, perf_runs):
     )
 
 
-def compare(directories=None, format="md", output=None, **kwargs):
+def compare(
+    directories=None,
+    format="md",
+    output=None,
+    normalize=False,
+    y_zero=False,
+    plot_median=False,
+    plot_min=False,
+    exclude_boxplot=False,
+    **kwargs,
+):
     """Compare multiple run directories.
 
     Implements the CLI 'compare' subcommand.
@@ -478,6 +534,11 @@ def compare(directories=None, format="md", output=None, **kwargs):
         html_summary(
             output,
             perf_runs,
+            normalize=normalize,
+            y_zero=y_zero,
+            plot_median=plot_median,
+            plot_min=plot_min,
+            plot_box=not exclude_boxplot,
         )
     elif format == "email_html":
         email_html_summary(output, perf_runs)
