@@ -26,4 +26,10 @@ protected:
     virtual rocRoller::ContextPtr createContext() = 0;
 
     bool isLocalDevice() const;
+
+    std::vector<rocRoller::Register::ValuePtr>
+        createRegisters(rocRoller::Register::Type const regType,
+                        rocRoller::DataType const       dataType,
+                        size_t const                    amount,
+                        int const                       regCount = 1);
 };

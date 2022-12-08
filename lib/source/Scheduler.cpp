@@ -17,6 +17,8 @@ namespace rocRoller
                 return "RoundRobin";
             case SchedulerProcedure::Random:
                 return "Random";
+            case SchedulerProcedure::Cooperative:
+                return "Cooperative";
             case SchedulerProcedure::Count:
                 return "Count";
             }
@@ -127,6 +129,19 @@ namespace rocRoller
         int LockState::getLockDepth() const
         {
             return m_lockdepth;
+        }
+
+        Generator<Instruction> Scheduler::yieldFromStream(Generator<Instruction>::iterator& iter)
+        {
+            do
+            {
+                AssertFatal(iter != std::default_sentinel_t{},
+                            "End of instruction stream reached without unlocking");
+                m_lockstate.add(*iter);
+                co_yield *iter;
+                ++iter;
+                co_yield consumeComments(iter, std::default_sentinel_t{});
+            } while(m_lockstate.isLocked());
         }
     }
 }

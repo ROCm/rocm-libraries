@@ -38,13 +38,12 @@ namespace rocRoller
             /**
              * Return Name of `RoundRobinScheduler`, used for debugging purposes currently
              */
-            virtual std::string name() override;
+            std::string name() override;
 
             /**
              * Call operator schedules instructions based on the round robin priority
              */
-            virtual Generator<Instruction>
-                operator()(std::vector<Generator<Instruction>>& seqs) override;
+            Generator<Instruction> operator()(std::vector<Generator<Instruction>>& seqs) override;
         };
     }
 }

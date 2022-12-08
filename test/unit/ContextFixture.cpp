@@ -80,3 +80,20 @@ bool ContextFixture::isLocalDevice() const
 {
     return m_context && m_context->hipDeviceIndex() >= 0;
 }
+
+std::vector<rocRoller::Register::ValuePtr>
+    ContextFixture::createRegisters(rocRoller::Register::Type const regType,
+                                    rocRoller::DataType const       dataType,
+                                    size_t const                    amount,
+                                    int const                       regCount)
+{
+    std::vector<rocRoller::Register::ValuePtr> regs;
+    for(size_t i = 0; i < amount; i++)
+    {
+        auto reg
+            = std::make_shared<rocRoller::Register::Value>(m_context, regType, dataType, regCount);
+        reg->allocateNow();
+        regs.push_back(reg);
+    }
+    return regs;
+}

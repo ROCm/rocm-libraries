@@ -275,7 +275,12 @@ set(rocroller_src
  lib/source/Random.cpp
  lib/source/Register.cpp
  lib/source/ScheduledInstructions.cpp
+ lib/source/Cost.cpp
+ lib/source/Costs/MinNopsCost.cpp
+ lib/source/Costs/NoneCost.cpp
+ lib/source/Costs/UniformCost.cpp
  lib/source/Scheduler.cpp
+ lib/source/Schedulers/CooperativeScheduler.cpp
  lib/source/Schedulers/RandomScheduler.cpp
  lib/source/Schedulers/RoundRobinScheduler.cpp
  lib/source/Schedulers/SequentialScheduler.cpp
@@ -421,6 +426,7 @@ set(
   test/unit/RandomTest.cpp
   test/unit/RegisterAllocatorTest.cpp
   test/unit/RegisterTest.cpp
+  test/unit/CostTest.cpp
   test/unit/SchedulerTest.cpp
   test/unit/ScopeTest.cpp
   test/unit/SettingsTest.cpp

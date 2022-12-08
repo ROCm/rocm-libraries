@@ -24,7 +24,7 @@ namespace rocRoller
             if(!Match(arg))
                 return nullptr;
 
-            return std::make_shared<SequentialScheduler>(std::get<1>(arg));
+            return std::make_shared<SequentialScheduler>(std::get<2>(arg));
         }
 
         inline std::string SequentialScheduler::name()

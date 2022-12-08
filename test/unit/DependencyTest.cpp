@@ -155,8 +155,8 @@ namespace rocRollerTest
         sequences.push_back(double_and_check(100.f, 1));
         sequences.push_back(comment_generator(5));
 
-        std::shared_ptr<Scheduling::Scheduler> scheduler
-            = Component::GetNew<Scheduling::Scheduler>(m_procedure, m_context);
+        std::shared_ptr<Scheduling::Scheduler> scheduler = Component::GetNew<Scheduling::Scheduler>(
+            m_procedure, Scheduling::CostProcedure::MinNops, m_context);
 
         m_context->schedule((*scheduler)(sequences));
 
@@ -302,8 +302,8 @@ namespace rocRollerTest
         sequences.push_back(scalar_overflow());
         sequences.push_back(scalar_compare());
 
-        std::shared_ptr<Scheduling::Scheduler> scheduler
-            = Component::GetNew<Scheduling::Scheduler>(m_procedure, m_context);
+        std::shared_ptr<Scheduling::Scheduler> scheduler = Component::GetNew<Scheduling::Scheduler>(
+            m_procedure, Scheduling::CostProcedure::MinNops, m_context);
 
         m_context->schedule((*scheduler)(sequences));
 
@@ -402,8 +402,8 @@ namespace rocRollerTest
         sequences.push_back(int64_addc());
         sequences.push_back(set_vcc_to_zero());
 
-        std::shared_ptr<Scheduling::Scheduler> scheduler
-            = Component::GetNew<Scheduling::Scheduler>(m_procedure, m_context);
+        std::shared_ptr<Scheduling::Scheduler> scheduler = Component::GetNew<Scheduling::Scheduler>(
+            m_procedure, Scheduling::CostProcedure::MinNops, m_context);
 
         m_context->schedule((*scheduler)(sequences));
 
@@ -557,8 +557,8 @@ namespace rocRollerTest
         sequences.push_back(set_vcc());
         sequences.push_back(set_vcc2());
 
-        std::shared_ptr<Scheduling::Scheduler> scheduler
-            = Component::GetNew<Scheduling::Scheduler>(m_procedure, m_context);
+        std::shared_ptr<Scheduling::Scheduler> scheduler = Component::GetNew<Scheduling::Scheduler>(
+            m_procedure, Scheduling::CostProcedure::MinNops, m_context);
 
         m_context->schedule((*scheduler)(sequences));
 

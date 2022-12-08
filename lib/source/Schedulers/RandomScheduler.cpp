@@ -24,7 +24,7 @@ namespace rocRoller
             if(!Match(arg))
                 return nullptr;
 
-            return std::make_shared<RandomScheduler>(std::get<1>(arg));
+            return std::make_shared<RandomScheduler>(std::get<2>(arg));
         }
 
         inline std::string RandomScheduler::name()
@@ -56,15 +56,7 @@ namespace rocRoller
 
                 if(iterators[idx] != seqs[idx].end())
                 {
-                    do
-                    {
-                        AssertFatal(iterators[idx] != seqs[idx].end(),
-                                    "End of instruction stream reached without unlocking");
-                        m_lockstate.add(*(iterators[idx]));
-                        co_yield *(iterators[idx]);
-                        ++iterators[idx];
-                        co_yield consumeComments(iterators[idx], seqs[idx].end());
-                    } while(m_lockstate.isLocked());
+                    co_yield yieldFromStream(iterators[idx]);
                 }
                 else
                 {

@@ -79,6 +79,10 @@ namespace rocRoller
         {
             return Scheduling::SchedulerProcedure::Random;
         }
+        else if(proc == Scheduling::toString(Scheduling::SchedulerProcedure::Cooperative))
+        {
+            return Scheduling::SchedulerProcedure::Cooperative;
+        }
         else
         {
             Throw<FatalError>("Trying to get unsupported/invalid scheduling procedure.");

@@ -9,6 +9,7 @@
 #include "KernelArguments.hpp"
 #include "KernelGraph/KernelHypergraph.hpp"
 #include "Operations/Command.hpp"
+#include "Scheduling/Costs/Cost.hpp"
 #include "Scheduling/Scheduler.hpp"
 #include "Utilities/Settings_fwd.hpp"
 #include "Utilities/Timer.hpp"
@@ -226,7 +227,7 @@ namespace rocRoller
         // A sequential scheduler should always be used here to ensure
         // the parts of the kernel are yielded in the correct order.
         auto scheduler = Component::GetNew<Scheduling::Scheduler>(
-            Scheduling::SchedulerProcedure::Sequential, m_context);
+            Scheduling::SchedulerProcedure::Sequential, Scheduling::CostProcedure::None, m_context);
 
         std::vector<Generator<Instruction>> generators;
 

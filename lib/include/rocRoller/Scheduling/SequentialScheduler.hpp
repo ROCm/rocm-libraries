@@ -39,13 +39,12 @@ namespace rocRoller
             /**
              * Return Name of `SequentialScheduler`, used for debugging purposes currently
              */
-            virtual std::string name() override;
+            std::string name() override;
 
             /**
              * Call operator schedules instructions based on Sequential priority
              */
-            virtual Generator<Instruction>
-                operator()(std::vector<Generator<Instruction>>& seqs) override;
+            Generator<Instruction> operator()(std::vector<Generator<Instruction>>& seqs) override;
         };
     }
 }

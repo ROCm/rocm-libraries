@@ -23,7 +23,7 @@ namespace rocRoller
             if(!Match(arg))
                 return nullptr;
 
-            return std::make_shared<RoundRobinScheduler>(std::get<1>(arg));
+            return std::make_shared<RoundRobinScheduler>(std::get<2>(arg));
         }
 
         inline std::string RoundRobinScheduler::name()
@@ -56,15 +56,8 @@ namespace rocRoller
                 {
                     if(iterators[i] != seqs[i].end())
                     {
-                        do
-                        {
-                            AssertFatal(iterators[i] != seqs[i].end(),
-                                        "End of instruction stream reached without unlocking");
-                            yield_seq = true;
-                            m_lockstate.add(*(iterators[i]));
-                            co_yield *(iterators[i]);
-                            ++iterators[i];
-                        } while(m_lockstate.isLocked());
+                        yield_seq = true;
+                        co_yield yieldFromStream(iterators[i]);
                     }
                 }
             }

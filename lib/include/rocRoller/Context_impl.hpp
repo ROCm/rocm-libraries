@@ -11,9 +11,13 @@
 
 namespace rocRoller
 {
+    inline Scheduling::InstructionStatus Context::peek(Instruction const& inst)
+    {
+        return m_observer->peek(inst);
+    }
+
     inline void Context::schedule(Instruction& inst)
     {
-        m_observer->peek(inst);
         m_observer->modify(inst);
         m_observer->observe(inst);
 

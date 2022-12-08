@@ -119,7 +119,7 @@ namespace rocRollerTest
                                + std::string("\n") + std::string("s_branch");
 
         auto scheduler = Component::GetNew<Scheduling::Scheduler>(
-            Scheduling::SchedulerProcedure::Sequential, m_context);
+            Scheduling::SchedulerProcedure::Sequential, Scheduling::CostProcedure::None, m_context);
         std::vector<Generator<Instruction>> generators;
         generators.push_back(kb());
         m_context->schedule((*scheduler)(generators));
@@ -150,7 +150,7 @@ namespace rocRollerTest
                                + std::string("\n") + std::string("s_branch");
 
         auto scheduler = Component::GetNew<Scheduling::Scheduler>(
-            Scheduling::SchedulerProcedure::Sequential, m_context);
+            Scheduling::SchedulerProcedure::Sequential, Scheduling::CostProcedure::None, m_context);
         std::vector<Generator<Instruction>> generators;
         generators.push_back(kb());
         m_context->schedule((*scheduler)(generators));

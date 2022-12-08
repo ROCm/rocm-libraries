@@ -18,6 +18,11 @@ namespace rocRollerTest
 {
     struct SchedulerTest : public GenericContextFixture
     {
+        std::string targetArchitecture()
+        {
+            return "gfx90a";
+        }
+
         Generator<Instruction> testGeneratorWithComments(bool includeComments = true);
     };
 
@@ -183,8 +188,7 @@ namespace rocRollerTest
             EXPECT_EQ(NormalizedSource(expected, true), NormalizedSource(output(), true));
 
             auto inst       = next(begin, end);
-            auto instString = R"(s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0)
-                                 s_waitcnt_vscnt 0)";
+            auto instString = R"(s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0))";
             EXPECT_EQ(NormalizedSource(inst.toString(LogLevel::Debug)),
                       NormalizedSource(instString));
         }
@@ -228,7 +232,7 @@ namespace rocRollerTest
                                 )";
 
         auto scheduler = Component::GetNew<Scheduling::Scheduler>(
-            Scheduling::SchedulerProcedure::Sequential, m_context);
+            Scheduling::SchedulerProcedure::Sequential, Scheduling::CostProcedure::None, m_context);
         m_context->schedule((*scheduler)(generators));
         EXPECT_EQ(NormalizedSource(output(), true), NormalizedSource(expected, true));
     }
@@ -261,7 +265,7 @@ namespace rocRollerTest
                                 )";
 
         auto scheduler = Component::GetNew<Scheduling::Scheduler>(
-            Scheduling::SchedulerProcedure::RoundRobin, m_context);
+            Scheduling::SchedulerProcedure::RoundRobin, Scheduling::CostProcedure::None, m_context);
         m_context->schedule((*scheduler)(generators));
         EXPECT_EQ(NormalizedSource(output(), true), NormalizedSource(expected, true));
     }
@@ -304,7 +308,7 @@ namespace rocRollerTest
     TEST_F(SchedulerTest, DoubleUnlocking)
     {
         auto scheduler = Component::GetNew<Scheduling::Scheduler>(
-            Scheduling::SchedulerProcedure::RoundRobin, m_context);
+            Scheduling::SchedulerProcedure::RoundRobin, Scheduling::CostProcedure::None, m_context);
 
         std::vector<Generator<Instruction>> sequences;
 
@@ -323,7 +327,7 @@ namespace rocRollerTest
     TEST_F(SchedulerTest, noUnlocking)
     {
         auto scheduler = Component::GetNew<Scheduling::Scheduler>(
-            Scheduling::SchedulerProcedure::RoundRobin, m_context);
+            Scheduling::SchedulerProcedure::RoundRobin, Scheduling::CostProcedure::None, m_context);
 
         std::vector<Generator<Instruction>> sequences;
 
@@ -340,11 +344,11 @@ namespace rocRollerTest
     TEST_F(SchedulerTest, SchedulerDepth)
     {
         auto schedulerA = Component::GetNew<Scheduling::Scheduler>(
-            Scheduling::SchedulerProcedure::RoundRobin, m_context);
+            Scheduling::SchedulerProcedure::RoundRobin, Scheduling::CostProcedure::None, m_context);
         auto schedulerB = Component::GetNew<Scheduling::Scheduler>(
-            Scheduling::SchedulerProcedure::RoundRobin, m_context);
+            Scheduling::SchedulerProcedure::RoundRobin, Scheduling::CostProcedure::None, m_context);
         auto schedulerC = Component::GetNew<Scheduling::Scheduler>(
-            Scheduling::SchedulerProcedure::RoundRobin, m_context);
+            Scheduling::SchedulerProcedure::RoundRobin, Scheduling::CostProcedure::None, m_context);
 
         std::vector<Generator<Instruction>> a_sequences;
         std::vector<Generator<Instruction>> b_sequences;
@@ -510,7 +514,7 @@ namespace rocRollerTest
             gens.push_back(noComments());
 
             auto scheduler = Component::GetNew<Scheduling::Scheduler>(
-                Scheduling::SchedulerProcedure::Random, m_context);
+                Scheduling::SchedulerProcedure::Random, Scheduling::CostProcedure::None, m_context);
             m_context->schedule((*scheduler)(gens));
 
             output1 = NormalizedSource(output(), true);
@@ -526,7 +530,7 @@ namespace rocRollerTest
             gens.push_back(noComments());
 
             auto scheduler = Component::GetNew<Scheduling::Scheduler>(
-                Scheduling::SchedulerProcedure::Random, m_context);
+                Scheduling::SchedulerProcedure::Random, Scheduling::CostProcedure::None, m_context);
             m_context->schedule((*scheduler)(gens));
 
             output2 = NormalizedSource(output(), true);
@@ -542,7 +546,7 @@ namespace rocRollerTest
             gens.push_back(noComments());
 
             auto scheduler = Component::GetNew<Scheduling::Scheduler>(
-                Scheduling::SchedulerProcedure::Random, m_context);
+                Scheduling::SchedulerProcedure::Random, Scheduling::CostProcedure::None, m_context);
             m_context->schedule((*scheduler)(gens));
 
             output3 = NormalizedSource(output(), true);
@@ -558,7 +562,7 @@ namespace rocRollerTest
             gens.push_back(noComments());
 
             auto scheduler = Component::GetNew<Scheduling::Scheduler>(
-                Scheduling::SchedulerProcedure::Random, m_context);
+                Scheduling::SchedulerProcedure::Random, Scheduling::CostProcedure::None, m_context);
             m_context->schedule((*scheduler)(gens));
 
             output4 = NormalizedSource(output(), true);
@@ -575,7 +579,7 @@ namespace rocRollerTest
             gens.push_back(noComments());
 
             auto scheduler = Component::GetNew<Scheduling::Scheduler>(
-                Scheduling::SchedulerProcedure::Random, m_context);
+                Scheduling::SchedulerProcedure::Random, Scheduling::CostProcedure::None, m_context);
             m_context->schedule((*scheduler)(gens));
 
             output5 = NormalizedSource(output(), true);
@@ -636,6 +640,223 @@ namespace rocRollerTest
         }
     };
 
+    TEST_F(SchedulerTest, CooperativeSchedulerTest)
+    {
+        {
+            clearOutput();
+            auto v = createRegisters(Register::Type::Vector, DataType::Float, 6);
+            auto a = createRegisters(Register::Type::Accumulator, DataType::Float, 1);
+
+            auto generator_one = [&]() -> Generator<Instruction> {
+                co_yield_(Instruction("v_or_b32", {v[2]}, {v[0], v[1]}, {}, ""));
+                // Since this requires a nop, all the instructions from the other stream will be scheduled here, since none of them require nops.
+                co_yield_(Instruction("v_mfma_f32_16x16x4f32", {a[0]}, {v[0], v[2], a[0]}, {}, ""));
+            };
+            auto generator_two = [&]() -> Generator<Instruction> {
+                co_yield_(Inst("Instruction 1, Generator 2"));
+                co_yield_(Inst("Instruction 2, Generator 2"));
+                co_yield_(Inst("Instruction 3, Generator 2"));
+                co_yield_(Inst("Instruction 4, Generator 2"));
+            };
+
+            std::vector<Generator<Instruction>> generators;
+            generators.push_back(generator_one());
+            generators.push_back(generator_two());
+
+            std::string expected = R"( v_or_b32 v2, v0, v1
+                                    Instruction 1, Generator 2
+                                    Instruction 2, Generator 2
+                                    Instruction 3, Generator 2
+                                    Instruction 4, Generator 2
+                                    v_mfma_f32_16x16x4f32 a0, v0, v2, a0
+                                    )";
+
+            auto scheduler = Component::GetNew<Scheduling::Scheduler>(
+                Scheduling::SchedulerProcedure::Cooperative,
+                Scheduling::CostProcedure::MinNops,
+                m_context);
+            m_context->schedule((*scheduler)(generators));
+            EXPECT_EQ(NormalizedSource(output(), true), NormalizedSource(expected, true));
+        }
+        {
+            clearOutput();
+            auto v = createRegisters(Register::Type::Vector, DataType::Float, 6);
+            auto a = createRegisters(Register::Type::Accumulator, DataType::Float, 2);
+
+            auto generator_one = [&]() -> Generator<Instruction> {
+                co_yield_(Instruction("v_or_b32", {v[2]}, {v[0], v[1]}, {}, ""));
+            };
+            auto generator_two = [&]() -> Generator<Instruction> {
+                co_yield_(Instruction("unrelated_op_2", {}, {}, {}, ""));
+                co_yield_(Instruction("v_mfma_f32_16x16x4f32", {a[0]}, {v[0], v[2], a[0]}, {}, ""));
+            };
+            auto generator_three = [&]() -> Generator<Instruction> {
+                co_yield_(Instruction("unrelated_op_3", {}, {}, {}, ""));
+                co_yield_(Instruction("v_mfma_f32_16x16x4f32", {a[1]}, {v[0], v[2], a[1]}, {}, ""));
+                //This instruction will be the first mfma, because of momentum in the coop scheduler.
+            };
+
+            std::vector<Generator<Instruction>> generators;
+            generators.push_back(generator_one());
+            generators.push_back(generator_two());
+            generators.push_back(generator_three());
+
+            std::string expected = R"( v_or_b32 v2, v0, v1
+                                       unrelated_op_2
+                                       unrelated_op_3
+                                       v_mfma_f32_16x16x4f32 a1, v0, v2, a1
+                                       v_mfma_f32_16x16x4f32 a0, v0, v2, a0
+                                    )";
+
+            auto scheduler = Component::GetNew<Scheduling::Scheduler>(
+                Scheduling::SchedulerProcedure::Cooperative,
+                Scheduling::CostProcedure::MinNops,
+                m_context);
+            m_context->schedule((*scheduler)(generators));
+            EXPECT_EQ(NormalizedSource(output(), true), NormalizedSource(expected, true));
+        }
+        {
+            clearOutput();
+            auto mfma_v = createRegisters(Register::Type::Vector, DataType::Float, 16);
+            auto or_v   = createRegisters(Register::Type::Vector, DataType::Float, 4);
+
+            auto generator_one = [&]() -> Generator<Instruction> {
+                std::string comment = "stream1";
+                co_yield_(Instruction("v_mfma_f32_32x32x1f32",
+                                      {mfma_v[0]},
+                                      {mfma_v[1], mfma_v[2], mfma_v[3]},
+                                      {},
+                                      comment));
+                co_yield_(Instruction("v_mfma_f32_32x32x1f32",
+                                      {mfma_v[4]},
+                                      {mfma_v[5], mfma_v[6], mfma_v[7]},
+                                      {},
+                                      comment));
+                co_yield_(Instruction("v_mfma_f32_32x32x1f32",
+                                      {mfma_v[8]},
+                                      {mfma_v[9], mfma_v[10], mfma_v[11]},
+                                      {},
+                                      comment));
+            };
+            auto generator_two = [&]() -> Generator<Instruction> {
+                std::string comment = "stream2";
+                co_yield_(Instruction("unrelated_op_2", {}, {}, {}, comment));
+                co_yield_(Instruction("v_or_b32", {or_v[0]}, {mfma_v[0], mfma_v[1]}, {}, comment));
+                co_yield_(Instruction("unrelated_op_3", {}, {}, {}, comment));
+                co_yield_(Instruction("v_or_b32", {or_v[1]}, {mfma_v[8], mfma_v[9]}, {}, comment));
+            };
+            auto generator_three = [&]() -> Generator<Instruction> {
+                std::string comment = "stream3";
+                co_yield_(Instruction("unrelated_op_4", {}, {}, {}, comment));
+                co_yield_(Instruction("v_mfma_f32_32x32x1f32",
+                                      {mfma_v[12]},
+                                      {mfma_v[13], mfma_v[14], mfma_v[15]},
+                                      {},
+                                      comment));
+                co_yield_(Instruction("v_or_b32", {or_v[2]}, {mfma_v[4], mfma_v[5]}, {}, comment));
+                co_yield_(Instruction("unrelated_op_5", {}, {}, {}, comment));
+                co_yield_(
+                    Instruction("v_or_b32", {or_v[3]}, {mfma_v[12], mfma_v[13]}, {}, comment));
+            };
+
+            std::vector<Generator<Instruction>> generators;
+            generators.push_back(generator_one());
+            generators.push_back(generator_two());
+            generators.push_back(generator_three());
+
+            std::string expected = R"(
+                        v_mfma_f32_32x32x1f32 v0, v1, v2, v3 // stream1
+                        v_mfma_f32_32x32x1f32 v4, v5, v6, v7 // stream1
+                        v_mfma_f32_32x32x1f32 v8, v9, v10, v11 // stream1
+                        unrelated_op_2 // stream2
+                        unrelated_op_4 // stream3
+                        v_mfma_f32_32x32x1f32 v12, v13, v14, v15 // stream3
+                        s_nop 13
+                        v_or_b32 v16, v0, v1 // stream2
+                        unrelated_op_3 // stream2
+                        v_or_b32 v17, v8, v9 // stream2
+                        v_or_b32 v18, v4, v5 // stream3
+                        unrelated_op_5 // stream3
+                        v_or_b32 v19, v12, v13 // stream3
+                                    )";
+
+            auto scheduler = Component::GetNew<Scheduling::Scheduler>(
+                Scheduling::SchedulerProcedure::Cooperative,
+                Scheduling::CostProcedure::MinNops,
+                m_context);
+            m_context->schedule((*scheduler)(generators));
+            EXPECT_EQ(NormalizedSource(output(), true), NormalizedSource(expected, true));
+        }
+    }
+
+    TEST_F(SchedulerTest, CooperativeUniformSchedulerTest)
+    {
+        //The result of using the Sequential scheduler and the coop scheduler with uniform cost should be the same.
+        std::string seqOutput;
+        std::string coopUniformOutput;
+
+        auto v = createRegisters(Register::Type::Vector, DataType::Float, 6);
+        auto a = createRegisters(Register::Type::Accumulator, DataType::Float, 1);
+
+        auto gen1 = [&]() -> Generator<Instruction> {
+            co_yield_(Instruction("v_or_b32", {v[2]}, {v[0], v[1]}, {}, ""));
+            co_yield_(Instruction("v_mfma_f32_16x16x4f32", {a[0]}, {v[0], v[2], a[0]}, {}, ""));
+        };
+        auto gen2 = [&]() -> Generator<Instruction> {
+            co_yield_(Inst("Instruction 1, Generator 2"));
+            co_yield_(Inst("Instruction 2, Generator 2"));
+            co_yield_(Inst("Instruction 3, Generator 2"));
+            co_yield_(Inst("Instruction 4, Generator 2"));
+        };
+        auto gen3 = [&]() -> Generator<Instruction> {
+            co_yield_(Instruction("v_mfma_f32_32x32x1f32", {v[0]}, {v[1], v[2], v[3]}, {}, ""));
+        };
+        auto gen4 = [&]() -> Generator<Instruction> {
+            co_yield_(Instruction("unrelated_op_2", {}, {}, {}, ""));
+            co_yield_(Instruction("v_or_b32", {v[4]}, {v[0], v[1]}, {}, ""));
+        };
+        auto gen5 = [&]() -> Generator<Instruction> {
+            co_yield_(Instruction("unrelated_op_3", {}, {}, {}, ""));
+            co_yield_(Instruction("v_or_b32", {v[4]}, {v[0], v[1]}, {}, ""));
+        };
+
+        {
+            clearOutput();
+            std::vector<Generator<Instruction>> generators;
+            generators.push_back(gen1());
+            generators.push_back(gen2());
+            generators.push_back(gen3());
+            generators.push_back(gen4());
+            generators.push_back(gen5());
+
+            auto scheduler = Component::GetNew<Scheduling::Scheduler>(
+                Scheduling::SchedulerProcedure::Cooperative,
+                Scheduling::CostProcedure::Uniform,
+                m_context);
+            m_context->schedule((*scheduler)(generators));
+            coopUniformOutput = output();
+        }
+
+        {
+            clearOutput();
+            std::vector<Generator<Instruction>> generators;
+            generators.push_back(gen1());
+            generators.push_back(gen2());
+            generators.push_back(gen3());
+            generators.push_back(gen4());
+            generators.push_back(gen5());
+
+            auto scheduler = Component::GetNew<Scheduling::Scheduler>(
+                Scheduling::SchedulerProcedure::Sequential,
+                Scheduling::CostProcedure::None,
+                m_context);
+            m_context->schedule((*scheduler)(generators));
+            seqOutput = output();
+        }
+
+        EXPECT_EQ(NormalizedSource(seqOutput, true), NormalizedSource(coopUniformOutput, true));
+    }
+
     TEST_P(LockCheckSchedulerTest, LockCheckTest)
     {
 #ifdef NDEBUG
@@ -654,8 +875,8 @@ namespace rocRollerTest
             std::vector<Generator<Instruction>> gens;
             gens.push_back(testGeneratorWithComments(true));
             gens.push_back(gen(std::get<1>(GetParam()), false));
-            auto scheduler
-                = Component::GetNew<Scheduling::Scheduler>(std::get<0>(GetParam()), m_context);
+            auto scheduler = Component::GetNew<Scheduling::Scheduler>(
+                std::get<0>(GetParam()), Scheduling::CostProcedure::MinNops, m_context);
             EXPECT_THROW({ m_context->schedule((*scheduler)(gens)); }, FatalError);
         }
 
@@ -663,8 +884,8 @@ namespace rocRollerTest
             std::vector<Generator<Instruction>> gens;
             gens.push_back(testGeneratorWithComments(true));
             gens.push_back(gen(std::get<1>(GetParam()), true));
-            auto scheduler
-                = Component::GetNew<Scheduling::Scheduler>(std::get<0>(GetParam()), m_context);
+            auto scheduler = Component::GetNew<Scheduling::Scheduler>(
+                std::get<0>(GetParam()), Scheduling::CostProcedure::MinNops, m_context);
             EXPECT_NO_THROW({ m_context->schedule((*scheduler)(gens)); });
         }
     }
@@ -675,6 +896,7 @@ namespace rocRollerTest
         testing::Combine(
             ::testing::Values(Scheduling::SchedulerProcedure::Sequential,
                               Scheduling::SchedulerProcedure::RoundRobin,
-                              Scheduling::SchedulerProcedure::Random),
+                              Scheduling::SchedulerProcedure::Random,
+                              Scheduling::SchedulerProcedure::Cooperative),
             ::testing::Values("s_branch", "s_cbranch_scc0", "s_addc_u32", "s_subb_u32")));
 }

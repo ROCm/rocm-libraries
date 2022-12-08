@@ -44,13 +44,13 @@ namespace rocRoller
             {
                 Register::ValuePtr lhsResult, rhsResult;
 
-                // TODO: Combine these using a scheduler.
                 std::vector<Generator<Instruction>> subExprs;
                 subExprs.push_back(call(lhsResult, expr.lhs));
                 subExprs.push_back(call(rhsResult, expr.rhs));
 
                 auto proc      = Settings::getInstance()->get(Settings::Scheduler);
-                auto scheduler = Component::GetNew<Scheduling::Scheduler>(proc, m_context);
+                auto scheduler = Component::GetNew<Scheduling::Scheduler>(
+                    proc, Scheduling::CostProcedure::MinNops, m_context);
                 co_yield (*scheduler)(subExprs);
 
                 if(dest == nullptr)
@@ -67,14 +67,14 @@ namespace rocRoller
             {
                 Register::ValuePtr lhsResult, r1hsResult, r2hsResult;
 
-                // TODO: Combine these using a scheduler.
                 std::vector<Generator<Instruction>> subExprs;
                 subExprs.push_back(call(lhsResult, expr.lhs));
                 subExprs.push_back(call(r1hsResult, expr.r1hs));
                 subExprs.push_back(call(r2hsResult, expr.r2hs));
 
+                auto proc      = Settings::getInstance()->get(Settings::Scheduler);
                 auto scheduler = Component::GetNew<Scheduling::Scheduler>(
-                    Scheduling::SchedulerProcedure::Sequential, m_context);
+                    proc, Scheduling::CostProcedure::MinNops, m_context);
                 co_yield (*scheduler)(subExprs);
 
                 co_yield generateOp<Operation>(dest, lhsResult, r1hsResult, r2hsResult);

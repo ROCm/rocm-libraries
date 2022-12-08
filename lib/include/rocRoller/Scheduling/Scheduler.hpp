@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "Costs/Cost_fwd.hpp"
 #include "Scheduler_fwd.hpp"
 
 #include "../CodeGen/Instruction.hpp"
@@ -58,7 +59,8 @@ namespace rocRoller
         class Scheduler
         {
         public:
-            using Argument = std::tuple<SchedulerProcedure, std::shared_ptr<rocRoller::Context>>;
+            using Argument = std::
+                tuple<SchedulerProcedure, CostProcedure, std::shared_ptr<rocRoller::Context>>;
 
             Scheduler(ContextPtr);
 
@@ -68,11 +70,14 @@ namespace rocRoller
             virtual std::string            name()                                           = 0;
             virtual Generator<Instruction> operator()(std::vector<Generator<Instruction>>&) = 0;
 
+            Generator<Instruction> yieldFromStream(Generator<Instruction>::iterator& iter);
+
             LockState getLockState() const;
 
         protected:
             LockState                         m_lockstate;
             std::weak_ptr<rocRoller::Context> m_ctx;
+            std::shared_ptr<Cost>             m_cost;
         };
 
         std::ostream& operator<<(std::ostream&, SchedulerProcedure);

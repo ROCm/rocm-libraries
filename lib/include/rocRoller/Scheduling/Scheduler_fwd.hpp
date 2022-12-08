@@ -11,6 +11,7 @@ namespace rocRoller
             Sequential = 0,
             RoundRobin,
             Random,
+            Cooperative,
             Count
         };
 

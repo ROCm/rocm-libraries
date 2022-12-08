@@ -26,22 +26,6 @@ namespace rocRollerTest
             EXPECT_EQ(peeked.nops, expectedNops);
             m_context->schedule(inst);
         }
-
-        std::vector<Register::ValuePtr> createRegisters(Register::Type const regType,
-                                                        DataType const       dataType,
-                                                        size_t const         amount,
-                                                        int const            regCount = 1)
-        {
-            std::vector<Register::ValuePtr> regs;
-            for(size_t i = 0; i < amount; i++)
-            {
-                auto reg
-                    = std::make_shared<Register::Value>(m_context, regType, dataType, regCount);
-                reg->allocateNow();
-                regs.push_back(reg);
-            }
-            return regs;
-        }
     };
 
     class MFMA908ObserverTest : public GenericContextFixture
@@ -54,7 +38,7 @@ namespace rocRollerTest
 
         void peekAndSchedule(Instruction inst, uint expectedNops = 0)
         {
-            auto peeked = m_context->observer()->peek(inst);
+            auto peeked = m_context->peek(inst);
             EXPECT_EQ(peeked.nops, expectedNops);
             m_context->schedule(inst);
         }

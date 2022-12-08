@@ -257,7 +257,17 @@ namespace GEMMDriverTest
         basicGEMM<float>(m_context, gemm, 1.e-6);
         std::string rr = m_context->instructions()->toString();
 
+        settings->set(Settings::Scheduler, Scheduling::SchedulerProcedure::Cooperative);
+        basicGEMM<float>(m_context, gemm, 1.e-6);
+        std::string coop_nop = m_context->instructions()->toString();
+
         EXPECT_NE(NormalizedSource(seq), NormalizedSource(rr));
+
+        EXPECT_NE(NormalizedSource(coop_nop), NormalizedSource(rr));
+
+        EXPECT_EQ(
+            NormalizedSource(coop_nop),
+            NormalizedSource(seq)); //Once we're using a scheduler in more places this will fail.
 
         std::set<std::string> insts;
         std::vector<int>      seeds = {2, 4, 8, 314, 1729};
