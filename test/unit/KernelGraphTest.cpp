@@ -2710,6 +2710,201 @@ namespace KernelGraphTest
 		"coord224" -> "cntrl67" [style=dotted,weight=0,arrowsize=0]
 	     }).";
         EXPECT_EQ(NormalizedSource(expected1), NormalizedSource(kgraph1.toDOT(true)));
+
+        auto        kgraph2   = addDeallocate(kgraph1);
+        std::string expected2 = R".(
+	    digraph {
+		"1"[label="Kernel(1)"];
+		"2"[label="LoadVGPR(2)"];
+		"3"[label="Body(3)",shape=box];
+		"4"[label="LoadTiled(4)"];
+		"6"[label="LoadTiled(6)"];
+		"11"[label="ElementOp(6, 18)(11)"];
+		"12"[label="Sequence(12)",shape=box];
+		"14"[label="LoadVGPR(14)"];
+		"15"[label="Body(15)",shape=box];
+		"16"[label="LoadTiled(16)"];
+		"18"[label="ElementOp(22, 27)(18)"];
+		"19"[label="Sequence(19)",shape=box];
+		"21"[label="ElementOp(20, 29)(21)"];
+		"24"[label="StoreTiled(24)"];
+		"26"[label="ForLoopOp: LessThan(DataFlowTag(199), Divide(CommandArgument(Load_Tiled_0_size_1), 16j))(26)"];
+		"27"[label="Assign SGPR 0l(27)"];
+		"28"[label="Assign SGPR Add(DataFlowTag(199), 1j)(28)"];
+		"29"[label="Initialize(29)",shape=box];
+		"30"[label="ForLoopIncrement(30)",shape=box];
+		"31"[label="Multiply(31)"];
+		"32"[label="Assign ACCVGPR 0.00000f(32)"];
+		"33"[label="Initialize(33)",shape=box];
+		"34"[label="Body(34)",shape=box];
+		"35"[label="Body(35)",shape=box];
+		"36"[label="Body(36)",shape=box];
+		"37"[label="ForLoopOp: LessThan(DataFlowTag(204), 2j)(37)"];
+		"38"[label="Assign SGPR 0j(38)"];
+		"39"[label="Assign SGPR Add(DataFlowTag(204), 1j)(39)"];
+		"40"[label="Initialize(40)",shape=box];
+		"41"[label="ForLoopIncrement(41)",shape=box];
+		"42"[label="ForLoopOp: LessThan(DataFlowTag(207), 2j)(42)"];
+		"43"[label="Assign SGPR 0j(43)"];
+		"44"[label="Assign SGPR Add(DataFlowTag(207), 1j)(44)"];
+		"45"[label="Initialize(45)",shape=box];
+		"46"[label="ForLoopIncrement(46)",shape=box];
+		"48"[label="Body(48)",shape=box];
+		"49"[label="Body(49)",shape=box];
+		"50"[label="Scope(50)"];
+		"51"[label="Body(51)",shape=box];
+		"52"[label="Sequence(52)",shape=box];
+		"53"[label="ComputeIndex(53)"];
+		"54"[label="ComputeIndex(54)"];
+		"55"[label="ComputeIndex(55)"];
+		"56"[label="Sequence(56)",shape=box];
+		"57"[label="Sequence(57)",shape=box];
+		"58"[label="Assign VGPR Add(DataFlowTag(218), DataFlowTag(219))(58)"];
+		"59"[label="Body(59)",shape=box];
+		"60"[label="Sequence(60)",shape=box];
+		"61"[label="ForLoopIncrement(61)",shape=box];
+		"62"[label="ComputeIndex(62)"];
+		"63"[label="ComputeIndex(63)"];
+		"64"[label="ComputeIndex(64)"];
+		"65"[label="Sequence(65)",shape=box];
+		"66"[label="Sequence(66)",shape=box];
+		"67"[label="Assign VGPR Add(DataFlowTag(224), DataFlowTag(225))(67)"];
+		"68"[label="Body(68)",shape=box];
+		"69"[label="Sequence(69)",shape=box];
+		"70"[label="ForLoopIncrement(70)",shape=box];
+		"71"[label="Scope(71)"];
+		"72"[label="Body(72)",shape=box];
+		"73"[label="Sequence(73)",shape=box];
+		"74"[label="ComputeIndex(74)"];
+		"75"[label="ComputeIndex(75)"];
+		"76"[label="Body(76)",shape=box];
+		"77"[label="Sequence(77)",shape=box];
+		"78"[label="Sequence(78)",shape=box];
+		"79"[label="Scope(79)"];
+		"81"[label="ComputeIndex(81)"];
+		"82"[label="ComputeIndex(82)"];
+		"83"[label="Body(83)",shape=box];
+		"84"[label="Sequence(84)",shape=box];
+		"85"[label="Sequence(85)",shape=box];
+		"86"[label="Deallocate(86)"];
+		"88"[label="Deallocate(88)"];
+		"90"[label="Deallocate(90)"];
+		"91"[label="Sequence(91)",shape=box];
+		"92"[label="Sequence(92)",shape=box];
+		"93"[label="Deallocate(93)"];
+		"94"[label="Sequence(94)",shape=box];
+		"95"[label="Sequence(95)",shape=box];
+		"96"[label="Deallocate(96)"];
+		"98"[label="Sequence(98)",shape=box];
+		"99"[label="Deallocate(99)"];
+		"100"[label="Sequence(100)",shape=box];
+		"101"[label="Sequence(101)",shape=box];
+		"102"[label="Deallocate(102)"];
+		"103"[label="Sequence(103)",shape=box];
+		"104"[label="Sequence(104)",shape=box];
+		"105"[label="Deallocate(105)"];
+		"106"[label="Sequence(106)",shape=box];
+		"107"[label="Sequence(107)",shape=box];
+		"108"[label="Deallocate(108)"];
+		"109"[label="Sequence(109)",shape=box];
+		"1" -> "3"
+		"1" -> "15"
+		"1" -> "49"
+		"2" -> "12"
+		"3" -> "2"
+		"11" -> "94"
+		"12" -> "37"
+		"14" -> "19"
+		"15" -> "14"
+		"18" -> "103"
+		"19" -> "37"
+		"21" -> "106"
+		"24" -> "109"
+		"26" -> "29"
+		"26" -> "30"
+		"26" -> "33"
+		"26" -> "34"
+		"26" -> "61"
+		"26" -> "70"
+		"29" -> "27"
+		"30" -> "28"
+		"31" -> "35"
+		"31" -> "36"
+		"31" -> "91"
+		"33" -> "32"
+		"34" -> "31"
+		"35" -> "4"
+		"36" -> "6"
+		"37" -> "40"
+		"37" -> "41"
+		"37" -> "48"
+		"40" -> "38"
+		"41" -> "39"
+		"42" -> "45"
+		"42" -> "46"
+		"42" -> "51"
+		"42" -> "72"
+		"42" -> "100"
+		"45" -> "43"
+		"46" -> "44"
+		"48" -> "42"
+		"49" -> "37"
+		"50" -> "52"
+		"50" -> "59"
+		"50" -> "68"
+		"51" -> "50"
+		"52" -> "11"
+		"53" -> "56"
+		"54" -> "57"
+		"55" -> "60"
+		"56" -> "54"
+		"57" -> "55"
+		"59" -> "53"
+		"60" -> "26"
+		"61" -> "58"
+		"62" -> "65"
+		"63" -> "66"
+		"64" -> "69"
+		"65" -> "63"
+		"66" -> "64"
+		"68" -> "62"
+		"69" -> "26"
+		"70" -> "67"
+		"71" -> "73"
+		"71" -> "76"
+		"72" -> "71"
+		"73" -> "18"
+		"74" -> "77"
+		"75" -> "78"
+		"76" -> "74"
+		"77" -> "75"
+		"78" -> "16"
+		"79" -> "83"
+		"81" -> "84"
+		"82" -> "85"
+		"83" -> "81"
+		"84" -> "82"
+		"85" -> "24"
+		"90" -> "92"
+		"91" -> "90"
+		"92" -> "88"
+		"93" -> "95"
+		"94" -> "93"
+		"95" -> "21"
+		"96" -> "98"
+		"98" -> "79"
+		"99" -> "101"
+		"100" -> "99"
+		"101" -> "86"
+		"102" -> "104"
+		"103" -> "102"
+		"104" -> "21"
+		"105" -> "107"
+		"106" -> "105"
+		"107" -> "96"
+		"109" -> "108"
+	     }).";
+        EXPECT_EQ(NormalizedSource(expected2), NormalizedSource(kgraph2.control.toDOT("", true)));
     }
 
     TEST_F(KernelGraphTest, TranslateTMul)

@@ -264,6 +264,7 @@ namespace rocRoller
             MAKE_OPERATION_VISITOR(UnrollOp);
             MAKE_OPERATION_VISITOR(Barrier);
             MAKE_OPERATION_VISITOR(ComputeIndex);
+            MAKE_OPERATION_VISITOR(Deallocate);
 
             virtual void visitEdge(KernelHypergraph&                          graph,
                                    KernelHypergraph const&                    original,

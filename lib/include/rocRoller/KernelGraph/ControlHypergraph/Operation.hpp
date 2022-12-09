@@ -111,6 +111,7 @@ namespace rocRoller
 
             size_t valueCount = 1;
 
+            // TODO Remove localScope.
             bool localScope = true;
 
             std::string toString() const
@@ -179,6 +180,17 @@ namespace rocRoller
             std::string toString() const
             {
                 return "ComputeIndex";
+            }
+        };
+
+        /**
+         * @brief Deallocates a register.
+         */
+        struct Deallocate
+        {
+            std::string toString() const
+            {
+                return "Deallocate";
             }
         };
 

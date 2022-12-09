@@ -9,6 +9,7 @@ namespace rocRoller
         struct Assign;
         struct Barrier;
         struct ComputeIndex;
+        struct Deallocate;
         struct ElementOp;
         struct ForLoopOp;
         struct Kernel;
@@ -29,6 +30,7 @@ namespace rocRoller
                                        Barrier,
                                        ComputeIndex,
                                        ElementOp,
+                                       Deallocate,
                                        ForLoopOp,
                                        Kernel,
                                        LoadLDSTile,

@@ -514,6 +514,17 @@ namespace rocRoller
                 co_yield Expression::generate(dest, assign.expression, m_context);
             }
 
+            Generator<Instruction> operator()(int                                  tag,
+                                              ControlHypergraph::Deallocate const& deallocate,
+                                              CoordGraph::Transformer              coords)
+            {
+                rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::Deallocate({})",
+                                                   tag);
+                auto dim_tag = m_graph.mapper.get<CoordGraph::Dimension>(tag);
+                m_context->registerTagManager()->deleteRegister(dim_tag);
+                co_return;
+            }
+
             Generator<Instruction>
                 operator()(int, ControlHypergraph::Barrier const&, CoordGraph::Transformer)
             {
