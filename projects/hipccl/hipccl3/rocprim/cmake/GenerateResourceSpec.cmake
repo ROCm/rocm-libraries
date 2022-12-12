@@ -20,7 +20,7 @@ if(ROCMINFO_EXIT_CODE)
   message(FATAL_ERROR ${ROCMINFO_STDERR})
 endif()
 
-string(REGEX MATCHALL [[--(gfx[0-9]+)]]
+string(REGEX MATCHALL [[--(gfx[0-9a-f]+)]]
   ROCMINFO_MATCHES
   ${ROCMINFO_STDOUT}
 )
