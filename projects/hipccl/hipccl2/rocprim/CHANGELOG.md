@@ -5,6 +5,7 @@ Full documentation for rocPRIM is available at [https://codedocs.xyz/ROCmSoftwar
 ## [Unreleased rocPRIM-2.13.0 for ROCm 5.5.0]
 ### Added
 - New block level `radix_rank` primitive.
+- New block level `radix_rank_match` primitive.
 ### Changed
 - Improved the performance of `block_radix_sort` and `device_radix_sort`.
 ### Known Issues
@@ -12,7 +13,7 @@ Full documentation for rocPRIM is available at [https://codedocs.xyz/ROCmSoftwar
 
 ## [Unreleased rocPRIM-2.12.0 for ROCm 5.4.0]
 ### Changed
-- `device_partition`, `device_unique`, and `device_reduce_by_key` now support problem 
+- `device_partition`, `device_unique`, and `device_reduce_by_key` now support problem
   sizes larger than 2^32 items.
 - Device algorithms now return `hipErrorInvalidValue` if the amount of passed temporary memory is insufficient.
 - Lists of sizes for tests are unified, restored scan/reduce tests for `half` and `bfloat16` values.

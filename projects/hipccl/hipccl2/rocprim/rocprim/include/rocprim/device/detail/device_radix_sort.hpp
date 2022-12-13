@@ -898,10 +898,11 @@ struct onesweep_lookback_state
 template<class Key,
          class Value,
          class Offset,
-         unsigned int BlockSize,
-         unsigned int ItemsPerThread,
-         unsigned int RadixBits,
-         bool         Descending>
+         unsigned int               BlockSize,
+         unsigned int               ItemsPerThread,
+         unsigned int               RadixBits,
+         bool                       Descending,
+         block_radix_rank_algorithm RadixRankAlgorithm>
 struct onesweep_iteration_helper
 {
     static constexpr unsigned int radix_size      = 1u << RadixBits;
@@ -910,7 +911,10 @@ struct onesweep_iteration_helper
 
     using key_codec       = radix_key_codec<Key, Descending>;
     using bit_key_type    = typename key_codec::bit_key_type;
-    using radix_rank_type = block_radix_rank<BlockSize, RadixBits, false>;
+    using radix_rank_type = ::rocprim::block_radix_rank<BlockSize, RadixBits, RadixRankAlgorithm>;
+
+    static constexpr bool load_warp_striped
+        = RadixRankAlgorithm == block_radix_rank_algorithm::match;
 
     static constexpr unsigned int digits_per_thread = radix_rank_type::digits_per_thread;
 
@@ -955,7 +959,14 @@ struct onesweep_iteration_helper
         Key keys[ItemsPerThread];
         if ROCPRIM_IF_CONSTEXPR(IsFull)
         {
-            block_load_direct_blocked(flat_id, keys_input + block_offset, keys);
+            if ROCPRIM_IF_CONSTEXPR(load_warp_striped)
+            {
+                block_load_direct_warp_striped(flat_id, keys_input + block_offset, keys);
+            }
+            else
+            {
+                block_load_direct_blocked(flat_id, keys_input + block_offset, keys);
+            }
         }
         else
         {
@@ -966,11 +977,22 @@ struct onesweep_iteration_helper
             // it does not matter. It does cause the final digit offset to be increased past its end,
             // but again this does not matter since this is the last iteration in which it will be used anyway.
             const Key out_of_bounds = key_codec::decode(bit_key_type(-1));
-            block_load_direct_blocked(flat_id,
-                                      keys_input + block_offset,
-                                      keys,
-                                      valid_items,
-                                      out_of_bounds);
+            if ROCPRIM_IF_CONSTEXPR(load_warp_striped)
+            {
+                block_load_direct_warp_striped(flat_id,
+                                               keys_input + block_offset,
+                                               keys,
+                                               valid_items,
+                                               out_of_bounds);
+            }
+            else
+            {
+                block_load_direct_blocked(flat_id,
+                                          keys_input + block_offset,
+                                          keys,
+                                          valid_items,
+                                          out_of_bounds);
+            }
         }
 
         bit_key_type bit_keys[ItemsPerThread];
@@ -982,18 +1004,18 @@ struct onesweep_iteration_helper
 
         // Compute the block-based key ranks, the digit counts, and the prefix sum of the digit counts.
         unsigned int ranks[ItemsPerThread];
+        // Tile-wide digit offset
+        unsigned int exclusive_digit_prefix[digits_per_thread];
+        // Tile-wide digit count
+        unsigned int digit_counts[digits_per_thread];
         radix_rank_type{}.rank_keys(
             bit_keys,
             ranks,
             storage.rank,
             [bit, current_radix_bits](const bit_key_type& key)
-            { return key_codec::extract_digit(key, bit, current_radix_bits); });
-        // Tile-wide digit offset
-        unsigned int exclusive_digit_prefix[digits_per_thread];
-        radix_rank_type{}.get_exclusive_digit_prefix(exclusive_digit_prefix, storage.rank);
-        // Tile-wide digit count
-        unsigned int digit_counts[digits_per_thread];
-        radix_rank_type{}.template get_digit_counts<ItemsPerThread>(digit_counts, storage.rank);
+            { return key_codec::extract_digit(key, bit, current_radix_bits); },
+            exclusive_digit_prefix,
+            digit_counts);
 
         ::rocprim::syncthreads();
 
@@ -1078,14 +1100,31 @@ struct onesweep_iteration_helper
             Value values[ItemsPerThread];
             if ROCPRIM_IF_CONSTEXPR(IsFull)
             {
-                block_load_direct_blocked(flat_id, values_input + block_offset, values);
+                if ROCPRIM_IF_CONSTEXPR(load_warp_striped)
+                {
+                    block_load_direct_warp_striped(flat_id, values_input + block_offset, values);
+                }
+                else
+                {
+                    block_load_direct_blocked(flat_id, values_input + block_offset, values);
+                }
             }
             else
             {
-                block_load_direct_blocked(flat_id,
-                                          values_input + block_offset,
-                                          values,
-                                          valid_items);
+                if ROCPRIM_IF_CONSTEXPR(load_warp_striped)
+                {
+                    block_load_direct_warp_striped(flat_id,
+                                                   values_input + block_offset,
+                                                   values,
+                                                   valid_items);
+                }
+                else
+                {
+                    block_load_direct_blocked(flat_id,
+                                              values_input + block_offset,
+                                              values,
+                                              valid_items);
+                }
             }
 
             // Compute digits up-front so that we can re-use shared memory between ordered_block_keys and
@@ -1145,10 +1184,11 @@ struct onesweep_iteration_helper
     }
 };
 
-template<unsigned int BlockSize,
-         unsigned int ItemsPerThread,
-         unsigned int RadixBits,
-         bool         Descending,
+template<unsigned int               BlockSize,
+         unsigned int               ItemsPerThread,
+         unsigned int               RadixBits,
+         bool                       Descending,
+         block_radix_rank_algorithm RadixRankAlgorithm,
          class KeysInputIterator,
          class KeysOutputIterator,
          class ValuesInputIterator,
@@ -1175,7 +1215,8 @@ ROCPRIM_DEVICE void onesweep_iteration(KeysInputIterator        keys_input,
                                                                      BlockSize,
                                                                      ItemsPerThread,
                                                                      RadixBits,
-                                                                     Descending>;
+                                                                     Descending,
+                                                                     RadixRankAlgorithm>;
 
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
     const unsigned int     block_id        = ::rocprim::detail::block_id<0>();

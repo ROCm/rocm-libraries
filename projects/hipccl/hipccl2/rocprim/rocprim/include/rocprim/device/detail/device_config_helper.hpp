@@ -32,6 +32,7 @@
 #include "../../block/block_store.hpp"
 
 #include "../config_types.hpp"
+#include "rocprim/block/block_radix_rank.hpp"
 #include "rocprim/block/block_sort.hpp"
 
 /// \addtogroup primitivesmodule_deviceconfigs
@@ -241,11 +242,16 @@ struct radix_sort_onesweep_config_params
 
     /// \brief The number of bits to sort in one onesweep iteration.
     unsigned int radix_bits_per_place = 4;
+
+    /// \brief The internal block radix rank algorithm to use during the onesweep iteration.
+    block_radix_rank_algorithm radix_rank_algorithm = block_radix_rank_algorithm::default_algorithm;
 };
 
-template<class HistogramConfig  = kernel_config<256, 12>,
-         class SortConfig       = kernel_config<256, 12>,
-         unsigned int RadixBits = 4>
+template<class HistogramConfig                = kernel_config<256, 12>,
+         class SortConfig                     = kernel_config<256, 12>,
+         unsigned int               RadixBits = 4,
+         block_radix_rank_algorithm RadixRankAlgorithm
+         = block_radix_rank_algorithm::default_algorithm>
 struct radix_sort_onesweep_config : radix_sort_onesweep_config_params
 {
     /// \brief Configration of radix sort onesweep histogram kernel.
@@ -257,7 +263,8 @@ struct radix_sort_onesweep_config : radix_sort_onesweep_config_params
         : radix_sort_onesweep_config_params{
             {HistogramConfig::block_size, HistogramConfig::items_per_thread},
             {     SortConfig::block_size,      SortConfig::items_per_thread},
-            RadixBits
+            RadixBits,
+            RadixRankAlgorithm,
     } {};
 };
 

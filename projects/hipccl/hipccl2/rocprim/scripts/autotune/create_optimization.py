@@ -211,16 +211,16 @@ def default_config_get_best(input: Dict) -> Dict[str, str]:
 
 # If we can double the sorted items_per_block and items_per_second does not degrade more than ~10%, consider it superior.
 def block_sort_config_get_best(input: Dict) -> Dict[str, str]:
-    return max(input, key=lambda x: x.get('items_per_second', 0.0)*((float(x['block_size'])*float(x['items_per_thread']))**(1/5)))
+    return max(input, key=lambda x: x.get('items_per_second', 0.0)*((float(x['cfg']['bs'])*float(x['cfg']['ipt']))**(1/5)))
 
 # Best configuration is a combination between best oddeven and best mergepath impl.
 # We use oddeven only for small input sizes (< ~200K), so it is a hardcoded value which is the best for almost all cases.
 # You can find this value in the tuning template
 def merge_sort_block_merge_config_get_best(input: Dict) -> Dict[str, str]:
-    input_mergepath = list(filter(lambda x: (int(x.get('oddeven_size_limit')) == 0), input))
+    input_mergepath = list(filter(lambda x: (int(x.get('cfg').get('oddeven_size_limit')) == 0), input))
     # Since merge_sort_block_merge is used after radix_sort_block_sort<256, 4>, and
     # mergepath_block_size * mergepath_items_per_thread >= 256*4 should hold (TODO: this will be solved in the near future):
-    input_mergepath = list(filter(lambda x: (int(x.get('mergepath_block_size'))*int(x.get('mergepath_items_per_thread')) <= 1024), input_mergepath))
+    input_mergepath = list(filter(lambda x: (int(x.get('cfg').get('mergepath_bs'))*int(x.get('cfg').get('mergepath_ipt')) <= 1024), input_mergepath))
 
     best_mergepath = max(input_mergepath, key=lambda x: x.get('items_per_second', 0.0))
     return best_mergepath
@@ -431,8 +431,8 @@ class BenchmarkDataManager:
         This information contains the different settings the benchmark has been executed with which will be used to create the customized 
         configuration case.
         """
-
-        tokenized_name = json.loads(single_benchmark['name'])
+        tokenized_name = re.sub(r"/manual_time", "", single_benchmark['name'])
+        tokenized_name = json.loads(tokenized_name)
         if not tokenized_name:
             raise RuntimeError(f"ERROR: cannot parse JSON from: \"{single_benchmark['name']}\"")
         return dict(single_benchmark, **tokenized_name)
@@ -467,6 +467,7 @@ class BenchmarkDataManager:
             benchmark_run_data = json.load(file_handle)
 
         try:
+            print(f'INFO: Processing "{benchmark_run_file_path}"')
             arch = self.__get_target_architecture_from_context(benchmark_run_data)
             for raw_single_benchmark in benchmark_run_data['benchmarks']:
                 single_benchmark = self.__get_single_benchmark(raw_single_benchmark)
