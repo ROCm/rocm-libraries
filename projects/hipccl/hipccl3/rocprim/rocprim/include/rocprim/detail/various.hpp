@@ -197,19 +197,22 @@ struct raw_storage
     }
 };
 
-// Checks if two iterators have the same type and value
+// Checks if two iterators can possibly alias
 template<class Iterator1, class Iterator2>
-inline
-bool are_iterators_equal(Iterator1, Iterator2)
+inline bool can_iterators_alias(Iterator1, Iterator2, const size_t size)
 {
-    return false;
+    (void)size;
+    return true;
 }
 
-template<class Iterator>
-inline
-bool are_iterators_equal(Iterator iter1, Iterator iter2)
+template<typename Value1, typename Value2>
+inline bool can_iterators_alias(Value1* iter1, Value2* iter2, const size_t size)
 {
-    return iter1 == iter2;
+    const uintptr_t start1 = reinterpret_cast<uintptr_t>(iter1);
+    const uintptr_t start2 = reinterpret_cast<uintptr_t>(iter2);
+    const uintptr_t end1   = reinterpret_cast<uintptr_t>(iter1 + size);
+    const uintptr_t end2   = reinterpret_cast<uintptr_t>(iter2 + size);
+    return start1 < end2 && start2 < end1;
 }
 
 template<class...>

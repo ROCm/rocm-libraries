@@ -33,27 +33,28 @@
 #include "test_utils_types.hpp"
 
 // kernel definitions
-#include "test_block_radix_rank.kernels.hpp"
+#include "test_block_radix_rank.hpp"
 
-// Start stamping out tests
-struct RocprimBlockRadixRank;
+#define SUITE RocprimBlockRadixRank
 
-#cmakedefine ROCPRIM_TEST_SLICE @ROCPRIM_TEST_SLICE@
+#define INSTANTIATE(...) INSTANTIATE_TYPED_TEST(SUITE, __VA_ARGS__);
 
-#if ROCPRIM_TEST_SLICE == 0
+#cmakedefine ROCPRIM_TEST_SUITE_SLICE @ROCPRIM_TEST_SUITE_SLICE@
+#cmakedefine ROCPRIM_TEST_TYPE_SLICE  @ROCPRIM_TEST_TYPE_SLICE@
 
-struct Integral;
-#define suite_name RocprimBlockRadixRank
-#define warp_params BlockParamsIntegral
-#define name_suffix Integral
-
-#elif ROCPRIM_TEST_SLICE == 1
-
-struct Floating;
-#define suite_name RocprimBlockRadixRank
-#define warp_params BlockParamsFloating
-#define name_suffix Floating
-
+#if   ROCPRIM_TEST_SUITE_SLICE == 0
+    TYPED_TEST_P(SUITE, RankBasic  ) { test_block_radix_rank_algorithm<rocprim::block_radix_rank_algorithm::basic, TestFixture>(); }
+    REGISTER_TYPED_TEST_SUITE_P(SUITE, RankBasic);
+#elif ROCPRIM_TEST_SUITE_SLICE == 1
+    TYPED_TEST_P(SUITE, RankMemoize) { test_block_radix_rank_algorithm<rocprim::block_radix_rank_algorithm::basic_memoize, TestFixture>(); }
+    REGISTER_TYPED_TEST_SUITE_P(SUITE, RankMemoize);
+#elif ROCPRIM_TEST_SUITE_SLICE == 2
+    TYPED_TEST_P(SUITE, RankMatch  ) { test_block_radix_rank_algorithm<rocprim::block_radix_rank_algorithm::match, TestFixture>(); }
+    REGISTER_TYPED_TEST_SUITE_P(SUITE, RankMatch);
 #endif
 
-#include "test_block_radix_rank.hpp"
+#if   ROCPRIM_TEST_TYPE_SLICE == 0
+    INSTANTIATE(BlockParamsIntegral)
+#elif ROCPRIM_TEST_TYPE_SLICE == 1
+    INSTANTIATE(BlockParamsFloating)
+#endif

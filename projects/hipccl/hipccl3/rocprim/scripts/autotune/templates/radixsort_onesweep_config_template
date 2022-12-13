@@ -6,7 +6,7 @@ ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_RADIX_SORT_ONESWEEP_HPP_
 
 {% macro kernel_configuration(measurement) -%}
 radix_sort_onesweep_config<kernel_config<{{ measurement['cfg']['histogram']['bs'] }}, {{ measurement['cfg']['histogram']['ipt'] }}>,
-kernel_config<{{ measurement['cfg']['sort']['bs'] }}, {{ measurement['cfg']['sort']['ipt'] }}>, {{ measurement['cfg']['bits_per_place'] }}> { };
+kernel_config<{{ measurement['cfg']['sort']['bs'] }}, {{ measurement['cfg']['sort']['ipt'] }}>, {{ measurement['cfg']['bits_per_place'] }}, {{ measurement['cfg']['algorithm'] }}> { };
 {%- endmacro %}
 
 {% macro general_case() -%}
@@ -23,6 +23,6 @@ template<> struct default_radix_sort_onesweep_config<static_cast<unsigned int>({
 template<class key_type, class value_type> struct default_radix_sort_onesweep_config<static_cast<unsigned int>({{ benchmark_of_architecture.name }}), key_type, value_type, {{ fallback_selection_criteria }}> :
 {%- endmacro %}
 
-  
+
 
 

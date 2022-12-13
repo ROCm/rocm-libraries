@@ -350,16 +350,23 @@ test:deb:
     - $SUDO_CMD dpkg -i $PACKAGE_DIR/rocprim*.deb
     - !reference [.test-package, script]
 
-test:doc:
+test:docs:
   stage: test
   extends: .rules:test
+  image: sphinxdoc/sphinx-latexpdf:latest
   needs: []
   before_script:
     - apt-get update -qq
     - apt-get install -y -qq doxygen
+    - pip3 install --user -r $CI_PROJECT_DIR/docs/requirements.txt
   script:
-    - cd doc
-    - doxygen Doxyfile
+    - cd docs
+    - make
+  artifacts:
+    paths:
+      - $CI_PROJECT_DIR/docs/_build
+      - $CI_PROJECT_DIR/docs/docBin
+    expire_in: 1 week
 
 .benchmark-base:
   stage: benchmark

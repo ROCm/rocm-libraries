@@ -463,11 +463,20 @@ private:
     static std::string matches_as_json(std::sregex_iterator& matches)
     {
         std::stringstream result;
-        int8_t            brackets_count = 1;
+        int               brackets_count = 1;
         result << "{";
+        bool insert_comma = false;
         for(std::sregex_iterator i = matches; i != std::sregex_iterator(); ++i)
         {
             std::smatch m = *i;
+            if(insert_comma)
+            {
+                result << ",";
+            }
+            else
+            {
+                insert_comma = true;
+            }
             result << "\"" << m[1].str() << "\":";
             if(m[2].length() > 0)
             {
@@ -481,18 +490,19 @@ private:
                 }
                 if(m[3].length() > 0 && brackets_count > 0)
                 {
-                    brackets_count--;
-                    result << "}";
-                }
-                else
-                {
-                    result << ",";
+                    int n = std::min(brackets_count, static_cast<int>(m[3].length()));
+                    brackets_count -= n;
+                    for(int c = 0; c < n; c++)
+                    {
+                        result << "}";
+                    }
                 }
             }
             else
             {
                 brackets_count++;
                 result << "{";
+                insert_comma = false;
             }
         }
         while(brackets_count > 0)
@@ -506,27 +516,37 @@ private:
     static std::string matches_as_human(std::sregex_iterator& matches)
     {
         std::stringstream result;
-        int8_t            brackets_count = 0;
+        int               brackets_count = 0;
+        bool              insert_comma   = false;
         for(std::sregex_iterator i = matches; i != std::sregex_iterator(); ++i)
         {
             std::smatch m = *i;
+            if(insert_comma)
+            {
+                result << ",";
+            }
+            else
+            {
+                insert_comma = true;
+            }
             if(m[2].length() > 0)
             {
                 result << m[2].str();
                 if(m[3].length() > 0 && brackets_count > 0)
                 {
-                    brackets_count--;
-                    result << ">";
-                }
-                else
-                {
-                    result << ",";
+                    int n = std::min(brackets_count, static_cast<int>(m[3].length()));
+                    brackets_count -= n;
+                    for(int c = 0; c < n; c++)
+                    {
+                        result << ">";
+                    }
                 }
             }
             else
             {
                 brackets_count++;
                 result << "<";
+                insert_comma = false;
             }
         }
         while(brackets_count > 0)
@@ -541,7 +561,7 @@ public:
     static std::string format_name(std::string string)
     {
         format     format = get_format();
-        std::regex r("([A-z0-9]*):\\s*((?:custom_type<[A-z0-9,]*>)|[A-z:().<>\\s0-9]*)(}?)");
+        std::regex r("([A-z0-9]*):\\s*((?:custom_type<[A-z0-9,]*>)|[A-z:().<>\\s0-9]*)(}*)");
 
         // First we perform some checks
         bool checks[4] = {false};
@@ -579,6 +599,7 @@ public:
 
         // Now we generate the desired format
         std::sregex_iterator matches = std::sregex_iterator(string.begin(), string.end(), r);
+
         switch(format)
         {
             case format::json: return matches_as_json(matches);

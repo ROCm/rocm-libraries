@@ -64,7 +64,7 @@ int64_t int short int8_t double float rocprim::half \
 int,float int,double \
 int64_t,float int64_t,double \
 uint8_t,uint8_t rocprim::half,rocprim::half;\
-128 256 512 1024;4 5 6" PARENT_SCOPE)
+128 256 512 1024;4 5 6 7 8" PARENT_SCOPE)
     set(output_pattern_suffix "@KeyType_ValueType@_@BlockSize@_@RadixBits@" PARENT_SCOPE)
   elseif(file STREQUAL "benchmark_device_reduce")
     set(list_across_names "DataType;BlockSize;ItemsPerThread" PARENT_SCOPE)
