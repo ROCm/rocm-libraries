@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2022 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,58 +25,95 @@
 // HIP API
 #include "hipcub/warp/warp_scan.hpp"
 
-
 #ifndef DEFAULT_N
 const size_t DEFAULT_N = 1024 * 1024 * 32;
 #endif
 
-template<class T, unsigned int WarpSize, unsigned int Trials>
-__global__
-__launch_bounds__(256)
-void warp_inclusive_scan_kernel(const T* input, T* output)
+enum class scan_type
 {
-    const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
-    auto value = input[i];
+    inclusive_scan,
+    exclusive_scan,
+    broadcast
+};
 
-    using wscan_t = hipcub::WarpScan<T, WarpSize>;
-    __shared__ typename wscan_t::TempStorage storage;
-    auto scan_op = hipcub::Sum();
-    #pragma nounroll
-    for(unsigned int trial = 0; trial < Trials; trial++)
-    {
-        wscan_t(storage).InclusiveScan(value, value, scan_op);
-    }
-
-    output[i] = value;
+template<class Runner, class T, unsigned int BlockSize, unsigned int WarpSize, unsigned int Trials>
+__global__ __launch_bounds__(BlockSize) void kernel(const T* input, T* output, const T init)
+{
+    Runner::template run<T, WarpSize, Trials>(input, output, init);
 }
 
-template<class T, unsigned int WarpSize, unsigned int Trials>
-__global__
-__launch_bounds__(256)
-void warp_exclusive_scan_kernel(const T* input, T* output, const T init)
+struct inclusive_scan
 {
-    const unsigned int i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
-    auto value = input[i];
-
-    using wscan_t = hipcub::WarpScan<T, WarpSize>;
-    __shared__ typename wscan_t::TempStorage storage;
-    auto scan_op = hipcub::Sum();
-    #pragma nounroll
-    for(unsigned int trial = 0; trial < Trials; trial++)
+    template<class T, unsigned int WarpSize, unsigned int Trials>
+    __device__ static void run(const T* input, T* output, const T init)
     {
-        wscan_t(storage).ExclusiveScan(value, value, init, scan_op);
+        (void)init;
+
+        const unsigned int i     = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+        auto               value = input[i];
+
+        using wscan_t = hipcub::WarpScan<T, WarpSize>;
+        __shared__ typename wscan_t::TempStorage storage;
+        auto                                     scan_op = hipcub::Sum();
+#pragma nounroll
+        for(unsigned int trial = 0; trial < Trials; trial++)
+        {
+            wscan_t(storage).InclusiveScan(value, value, scan_op);
+        }
+
+        output[i] = value;
     }
+};
 
-    output[i] = value;
-}
+struct exclusive_scan
+{
+    template<class T, unsigned int WarpSize, unsigned int Trials>
+    __device__ static void run(const T* input, T* output, const T init)
+    {
+        const unsigned int i     = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+        auto               value = input[i];
 
-template<
-    class T,
-    unsigned int BlockSize,
-    unsigned int WarpSize,
-    bool Inclusive = true,
-    unsigned int Trials = 100
->
+        using wscan_t = hipcub::WarpScan<T, WarpSize>;
+        __shared__ typename wscan_t::TempStorage storage;
+        auto                                     scan_op = hipcub::Sum();
+#pragma nounroll
+        for(unsigned int trial = 0; trial < Trials; trial++)
+        {
+            wscan_t(storage).ExclusiveScan(value, value, init, scan_op);
+        }
+
+        output[i] = value;
+    }
+};
+
+struct broadcast
+{
+    template<class T, unsigned int WarpSize, unsigned int Trials>
+    __device__ static void run(const T* input, T* output, const T init)
+    {
+        (void)init;
+
+        const unsigned int i     = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+        auto               value = input[i];
+
+        using wscan_t = hipcub::WarpScan<T, WarpSize>;
+        __shared__ typename wscan_t::TempStorage storage;
+        auto                                     scan_op = hipcub::Sum();
+#pragma nounroll
+        for(unsigned int trial = 0; trial < Trials; trial++)
+        {
+            value = wscan_t(storage).Broadcast(value, 0);
+        }
+
+        output[i] = value;
+    }
+};
+
+template<class Benchmark,
+         class T,
+         unsigned int BlockSize,
+         unsigned int WarpSize,
+         unsigned int Trials = 100>
 void run_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
 {
     // Make sure size is a multiple of BlockSize
@@ -99,22 +136,14 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
     for (auto _ : state)
     {
         auto start = std::chrono::high_resolution_clock::now();
-        if(Inclusive)
-        {
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(warp_inclusive_scan_kernel<T, WarpSize, Trials>),
-                dim3(size/BlockSize), dim3(BlockSize), 0, stream,
-                d_input, d_output
-            );
-        }
-        else
-        {
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(warp_exclusive_scan_kernel<T, WarpSize, Trials>),
-                dim3(size/BlockSize), dim3(BlockSize), 0, stream,
-                d_input, d_output, input[0]
-            );
-        }
+        hipLaunchKernelGGL(HIP_KERNEL_NAME(kernel<Benchmark, T, BlockSize, WarpSize, Trials>),
+                           dim3(size / BlockSize),
+                           dim3(BlockSize),
+                           0,
+                           stream,
+                           d_input,
+                           d_output,
+                           input[0]);
         HIP_CHECK(hipPeekAtLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
@@ -131,52 +160,55 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t size)
     HIP_CHECK(hipFree(d_output));
 }
 
-#define CREATE_BENCHMARK(T, BS, WS, INCLUSIVE) \
-    benchmark::RegisterBenchmark( \
-        (std::string("warp_scan<Datatype:"#T",Block Size:"#BS",Warp Size:"#WS">.Method Name:") + method_name).c_str(), \
-        &run_benchmark<T, BS, WS, INCLUSIVE>, \
-        stream, size \
-    )
+#define CREATE_BENCHMARK_IMPL(T, BS, WS, OP)                                              \
+    benchmark::RegisterBenchmark((std::string("warp_scan<Datatype:" #T ",Block Size:" #BS \
+                                              ",Warp Size:" #WS ">.Method Name:")         \
+                                  + method_name)                                          \
+                                     .c_str(),                                            \
+                                 &run_benchmark<OP, T, BS, WS>,                           \
+                                 stream,                                                  \
+                                 size)
 
+#define CREATE_BENCHMARK(T, BS, WS) CREATE_BENCHMARK_IMPL(T, BS, WS, Benchmark)
 
+// clang-format off
 // If warp size limit is 16
-#define BENCHMARK_TYPE_WS16(type) \
-    CREATE_BENCHMARK(type, 60, 15, Inclusive), \
-    CREATE_BENCHMARK(type, 256, 16, Inclusive)
+#define BENCHMARK_TYPE_WS16(type)   \
+    CREATE_BENCHMARK(type, 60, 15), \
+    CREATE_BENCHMARK(type, 256, 16)
 
 
 // If warp size limit is 32
-#define BENCHMARK_TYPE_WS32(type) \
-    BENCHMARK_TYPE_WS16(type), \
-    CREATE_BENCHMARK(type, 62, 31, Inclusive), \
-    CREATE_BENCHMARK(type, 256, 32, Inclusive)
+#define BENCHMARK_TYPE_WS32(type)   \
+    BENCHMARK_TYPE_WS16(type),      \
+    CREATE_BENCHMARK(type, 62, 31), \
+    CREATE_BENCHMARK(type, 256, 32)
 
 
 // If warp size limit is 64
-#define BENCHMARK_TYPE_WS64(type) \
-    BENCHMARK_TYPE_WS32(type), \
-    CREATE_BENCHMARK(type, 63, 63, Inclusive), \
-    CREATE_BENCHMARK(type, 64, 64, Inclusive), \
-    CREATE_BENCHMARK(type, 128, 64, Inclusive), \
-    CREATE_BENCHMARK(type, 256, 64, Inclusive)
+#define BENCHMARK_TYPE_WS64(type)    \
+    BENCHMARK_TYPE_WS32(type),       \
+    CREATE_BENCHMARK(type, 63, 63),  \
+    CREATE_BENCHMARK(type, 64, 64),  \
+    CREATE_BENCHMARK(type, 128, 64), \
+    CREATE_BENCHMARK(type, 256, 64)
+// clang-format on
 
-template<bool Inclusive>
+template<typename Benchmark>
 void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
-                    const std::string& method_name,
-                    hipStream_t stream,
-                    size_t size)
+                    const std::string&                            method_name,
+                    hipStream_t                                   stream,
+                    size_t                                        size)
 {
     using custom_double2 = benchmark_utils::custom_type<double, double>;
     using custom_int_double = benchmark_utils::custom_type<int, double>;
 
-    std::vector<benchmark::internal::Benchmark*> new_benchmarks =
-    {
+    std::vector<benchmark::internal::Benchmark*> new_benchmarks = {
 #if HIPCUB_WARP_THREADS_MACRO == 16
         BENCHMARK_TYPE_WS16(int),
         BENCHMARK_TYPE_WS16(float),
         BENCHMARK_TYPE_WS16(double),
         BENCHMARK_TYPE_WS16(int8_t),
-        BENCHMARK_TYPE_WS16(uint8_t),
         BENCHMARK_TYPE_WS16(custom_double2),
         BENCHMARK_TYPE_WS16(custom_int_double)
 #elif HIPCUB_WARP_THREADS_MACRO == 32
@@ -184,7 +216,6 @@ void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
         BENCHMARK_TYPE_WS32(float),
         BENCHMARK_TYPE_WS32(double),
         BENCHMARK_TYPE_WS32(int8_t),
-        BENCHMARK_TYPE_WS32(uint8_t),
         BENCHMARK_TYPE_WS32(custom_double2),
         BENCHMARK_TYPE_WS32(custom_int_double)
 #else
@@ -192,7 +223,6 @@ void add_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
         BENCHMARK_TYPE_WS64(float),
         BENCHMARK_TYPE_WS64(double),
         BENCHMARK_TYPE_WS64(int8_t),
-        BENCHMARK_TYPE_WS64(uint8_t),
         BENCHMARK_TYPE_WS64(custom_double2),
         BENCHMARK_TYPE_WS64(custom_int_double)
 #endif
@@ -224,8 +254,9 @@ int main(int argc, char *argv[])
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks;
-    add_benchmarks<true>(benchmarks, "inclusive_scan", stream, size);
-    add_benchmarks<false>(benchmarks, "exclusive_scan", stream, size);
+    add_benchmarks<inclusive_scan>(benchmarks, "inclusive_scan", stream, size);
+    add_benchmarks<exclusive_scan>(benchmarks, "exclusive_scan", stream, size);
+    add_benchmarks<broadcast>(benchmarks, "broadcast", stream, size);
 
     // Use manual timing
     for(auto& b : benchmarks)

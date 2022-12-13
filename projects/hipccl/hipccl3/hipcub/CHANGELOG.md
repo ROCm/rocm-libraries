@@ -3,8 +3,11 @@
 See README.md on how to build the hipCUB documentation using Doxygen.
 
 ## (Unreleased) hipCUB-2.13.1 for ROCm 5.5.0
+### Added
+- Benchmarks for `BlockShuffle`, `BlockLoad`, and `BlockStore`.
 ### Changed
 - CUB backend references CUB and Thrust version 1.17.2.
+- Improved benchmark coverage of `BlockScan` by adding `ExclusiveScan`, benchmark coverage of `BlockRadixSort` by adding `SortBlockedToStriped`, and benchmark coverage of `WarpScan` by adding `Broadcast`.
 ### Known Issues
 - `BlockRadixRankMatch` is currently broken under the rocPRIM backend.
 - `BlockRadixRankMatch` with a warp size that does not exactly divide the block size is broken under the CUB backend.
@@ -18,6 +21,10 @@ function or by parameters.
 - Improved build parallelism of the test suite by splitting up large compilation units for `DeviceRadixSort`, 
 `DeviceSegmentedRadixSort` and `DeviceSegmentedSort`.
 - CUB backend references CUB and Thrust version 1.17.1.
+
+### Known Issues
+- `BlockRadixRankMatch` is currently broken under the rocPRIM backend.
+- `BlockRadixRankMatch` with a warp size that does not exactly divide the block size is broken under the CUB backend.
 
 ## hipCUB-2.12.0 for ROCm 5.3.0
 ### Added
