@@ -2,12 +2,18 @@
 
 /**
  * Compiler-specific tricks to get coroutines working
+ * 
  *
  * Clang: Alias experimental objects to std space.
  * TODO: Remove when coroutine is moved out of experimental phase
  *
  * gcc: yield a temporary variable to workaround internal compiler error.
  * TODO: Remove when compiler bug has been fixed.
+
+ * NOTE: The compiler bug is ONLY present when yielding the result of calling a constructor:
+ * co_yield Instruction(...) // fails on GCC, use co_yield_()
+ * NOT the result of a normal function call:
+ * co_yield Instruction::Comment(...) // works fine.
  */
 #if defined(__clang__)
 #include <experimental/coroutine>
@@ -160,6 +166,9 @@ namespace rocRoller
     private:
         Handle m_coroutine;
     };
+
+    template <typename T, std::predicate<T> Predicate>
+    Generator<T> filter(Predicate predicate, Generator<T> gen);
 }
 
 #include "Generator_impl.hpp"

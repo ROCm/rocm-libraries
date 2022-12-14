@@ -105,7 +105,7 @@ namespace rocRoller
     {
         if(m_kernel->arguments().empty())
         {
-            co_yield_(Instruction::Comment("No kernel arguments"));
+            co_yield Instruction::Comment("No kernel arguments");
             co_return;
         }
 

@@ -303,7 +303,7 @@ namespace rocRoller
 
             Generator<Instruction> operator()(Operations::E_Neg, int tag, int a, int b)
             {
-                co_yield_(Instruction::Comment("GEN: E_Neg"));
+                co_yield Instruction::Comment("GEN: E_Neg");
 
                 auto src = m_context->registerTagManager()->getRegister(a);
                 auto dst = m_context->registerTagManager()->getRegister(tag, src->placeholder());
@@ -313,28 +313,28 @@ namespace rocRoller
 
             Generator<Instruction> operator()(Operations::E_Abs, int tag, int a, int b)
             {
-                co_yield_(Instruction::Comment("GEN: E_Abs"));
+                co_yield Instruction::Comment("GEN: E_Abs");
                 // TODO: Finish codegen for E_Abs
                 Throw<FatalError>("Not implemented yet.");
             }
 
             Generator<Instruction> operator()(Operations::E_Not, int tag, int a, int b)
             {
-                co_yield_(Instruction::Comment("GEN: E_Not"));
+                co_yield Instruction::Comment("GEN: E_Not");
                 // TODO: Finish codegen for E_Not
                 Throw<FatalError>("Not implemented yet.");
             }
 
             Generator<Instruction> operator()(Operations::E_Add, int tag, int a, int b)
             {
-                co_yield_(Instruction::Comment("GEN: E_Add"));
+                co_yield Instruction::Comment("GEN: E_Add");
 
                 co_yield generateCommutativeBinaryOp<Expression::Add>(tag, a, b);
             }
 
             Generator<Instruction> operator()(Operations::E_Sub, int tag, int a, int b)
             {
-                co_yield_(Instruction::Comment("GEN: E_Sub"));
+                co_yield Instruction::Comment("GEN: E_Sub");
 
                 auto lhs = m_context->registerTagManager()->getRegister(a);
                 auto rhs = m_context->registerTagManager()->getRegister(b);
@@ -345,14 +345,14 @@ namespace rocRoller
 
             Generator<Instruction> operator()(Operations::E_Mul, int tag, int a, int b)
             {
-                co_yield_(Instruction::Comment("GEN: E_Mul"));
+                co_yield Instruction::Comment("GEN: E_Mul");
 
                 co_yield generateCommutativeBinaryOp<Expression::Multiply>(tag, a, b);
             }
 
             Generator<Instruction> operator()(Operations::E_Div, int tag, int a, int b)
             {
-                co_yield_(Instruction::Comment("GEN: E_Div"));
+                co_yield Instruction::Comment("GEN: E_Div");
 
                 auto lhs = m_context->registerTagManager()->getRegister(a);
                 auto rhs = m_context->registerTagManager()->getRegister(b);
@@ -363,14 +363,14 @@ namespace rocRoller
 
             Generator<Instruction> operator()(Operations::E_And, int tag, int a, int b)
             {
-                co_yield_(Instruction::Comment("GEN: E_And"));
+                co_yield Instruction::Comment("GEN: E_And");
                 // TODO: Finish codegen for E_And
                 Throw<FatalError>("Not implemented yet.");
             }
 
             Generator<Instruction> operator()(Operations::E_Or, int tag, int a, int b)
             {
-                co_yield_(Instruction::Comment("GEN: E_Or"));
+                co_yield Instruction::Comment("GEN: E_Or");
                 // TODO: Finish codegen for E_Or
                 Throw<FatalError>("Not implemented yet.");
             }
@@ -381,7 +381,7 @@ namespace rocRoller
             {
                 rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::ElementOp({})",
                                                    tag);
-                co_yield_(Instruction::Comment("GEN: ElementOp"));
+                co_yield Instruction::Comment("GEN: ElementOp");
 
                 auto connections = m_graph.mapper.getConnections(tag);
                 AssertFatal(connections.size() == 1,
@@ -454,7 +454,7 @@ namespace rocRoller
                     }
                 }
 
-                co_yield_(Instruction::Lock(Scheduling::Dependency::Branch, "Lock For Loop"));
+                co_yield Instruction::Lock(Scheduling::Dependency::Branch, "Lock For Loop");
                 auto [conditionRegisterType, conditionVariableType]
                     = Expression::resultType(op.condition);
                 auto conditionResult = conditionRegisterType == Register::Type::Special
@@ -493,7 +493,7 @@ namespace rocRoller
                 co_yield Instruction::Label(botLabel);
 
                 co_yield Instruction::Comment("For Loop End");
-                co_yield_(Instruction::Unlock("Unlock For Loop"));
+                co_yield Instruction::Unlock("Unlock For Loop");
             }
 
             Generator<Instruction> operator()(int                                tag,
@@ -555,7 +555,7 @@ namespace rocRoller
                     tag,
                     ci.offset,
                     ci.stride);
-                co_yield_(Instruction::Comment(concatenate("GEN: ComputeIndex ", tag)));
+                co_yield Instruction::Comment(concatenate("GEN: ComputeIndex ", tag));
 
                 auto scope    = coords.getScope();
                 uint numBytes = DataTypeInfo::Get(ci.valueType).elementSize;
@@ -622,7 +622,7 @@ namespace rocRoller
             {
                 rocRoller::Log::getLogger()->debug(
                     "KernelGraph::CodeGenerator::loadMacroTileVGPR()");
-                co_yield_(Instruction::Comment("GEN: loadMacroTileVGPR"));
+                co_yield Instruction::Comment("GEN: loadMacroTileVGPR");
 
                 auto [user_tag, user]         = m_graph.getDimension<CoordGraph::User>(tag);
                 auto [mac_tile_tag, mac_tile] = m_graph.getDimension<CoordGraph::MacroTile>(tag);
@@ -691,7 +691,7 @@ namespace rocRoller
             {
                 rocRoller::Log::getLogger()->debug(
                     "KernelGraph::CodeGenerator::loadMacroTileWAVECI({})", tag);
-                co_yield_(Instruction::Comment("GEN: loadMacroTileWAVECI"));
+                co_yield Instruction::Comment("GEN: loadMacroTileWAVECI");
 
                 auto [user_tag, user]           = m_graph.getDimension<CoordGraph::User>(tag);
                 auto [wave_tile_tag, wave_tile] = m_graph.getDimension<CoordGraph::WaveTile>(tag);
@@ -790,7 +790,7 @@ namespace rocRoller
             {
                 rocRoller::Log::getLogger()->debug(
                     "KernelGraph::CodeGenerator::loadMacroTileWAVECIACCUM({})", tag);
-                co_yield_(Instruction::Comment("GEN: loadMacroTileWAVECIACCUM"));
+                co_yield Instruction::Comment("GEN: loadMacroTileWAVECIACCUM");
 
                 auto [user_tag, user]           = m_graph.getDimension<CoordGraph::User>(tag);
                 auto [wave_tile_tag, wave_tile] = m_graph.getDimension<CoordGraph::WaveTile>(tag);
@@ -906,7 +906,7 @@ namespace rocRoller
             {
                 rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::LoadTiled({})",
                                                    tag);
-                co_yield_(Instruction::Comment("GEN: LoadTiled"));
+                co_yield Instruction::Comment("GEN: LoadTiled");
 
                 auto [mac_tile_tag, mac_tile] = m_graph.getDimension<CoordGraph::MacroTile>(tag);
 
@@ -945,7 +945,7 @@ namespace rocRoller
             {
                 rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::LoadLDSTile({})",
                                                    tag);
-                co_yield_(Instruction::Comment("GEN: LoadLDSTile"));
+                co_yield Instruction::Comment("GEN: LoadLDSTile");
 
                 auto [user_tag, user] = m_graph.getDimension<CoordGraph::User>(tag);
                 auto [lds_tag, lds]   = m_graph.getDimension<CoordGraph::LDS>(tag);
@@ -991,7 +991,7 @@ namespace rocRoller
                                               CoordGraph::Transformer            coords)
             {
                 rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::LoadVGPR({})", tag);
-                co_yield_(Instruction::Comment("GEN: LoadVGPR"));
+                co_yield Instruction::Comment("GEN: LoadVGPR");
 
                 auto [userTag, user] = m_graph.getDimension<CoordGraph::User>(tag);
                 auto [vgprTag, vgpr] = m_graph.getDimension<CoordGraph::VGPR>(tag);
@@ -1025,7 +1025,7 @@ namespace rocRoller
             {
                 rocRoller::Log::getLogger()->debug(
                     "KernelGraph::CodeGenerator::LoadVGPR(): scalar value");
-                co_yield_(Instruction::Comment("GEN: LoadVGPR; scalar value"));
+                co_yield Instruction::Comment("GEN: LoadVGPR; scalar value");
 
                 Register::ValuePtr s_value;
                 co_yield m_context->argLoader()->getValue(user.argumentName(), s_value);
@@ -1038,7 +1038,7 @@ namespace rocRoller
             {
                 rocRoller::Log::getLogger()->debug(
                     "KernelGraph::CodeGenerator::LoadVGPR(): scalar pointer");
-                co_yield_(Instruction::Comment("GEN: LoadVGPR; scalar pointer"));
+                co_yield Instruction::Comment("GEN: LoadVGPR; scalar pointer");
 
                 Register::ValuePtr s_ptr;
                 co_yield m_context->argLoader()->getValue(user.argumentName(), s_ptr);
@@ -1062,7 +1062,7 @@ namespace rocRoller
                     m_context, Register::Type::Vector, DataType::Int64, 1);
                 co_yield offset->allocate();
 
-                co_yield_(Instruction::Comment("GEN: LoadVGPR; user index"));
+                co_yield Instruction::Comment("GEN: LoadVGPR; user index");
 
                 auto indexes = coords.reverse({userTag});
                 co_yield generateOffset(offset, indexes[0], vgpr->variableType().dataType);
@@ -1085,7 +1085,7 @@ namespace rocRoller
                                               CoordGraph::Transformer            coords)
             {
                 rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::Multiply({})", tag);
-                co_yield_(Instruction::Comment("GEN: Multiply"));
+                co_yield Instruction::Comment("GEN: Multiply");
 
                 auto [userA_tag, _uA] = m_graph.getDimension<CoordGraph::User>(tag, 0);
                 auto [userB_tag, _uB] = m_graph.getDimension<CoordGraph::User>(tag, 1);
@@ -1242,7 +1242,7 @@ namespace rocRoller
             {
                 rocRoller::Log::getLogger()->debug(
                     "KernelGraph::CodeGenerator::storeMacroTileVGPR()");
-                co_yield_(Instruction::Comment("GEN: storeMacroTileVGPR"));
+                co_yield Instruction::Comment("GEN: storeMacroTileVGPR");
 
                 auto [user_tag, user]         = m_graph.getDimension<CoordGraph::User>(tag);
                 auto [mac_tile_tag, mac_tile] = m_graph.getDimension<CoordGraph::MacroTile>(tag);
@@ -1306,7 +1306,7 @@ namespace rocRoller
             {
                 rocRoller::Log::getLogger()->debug(
                     "KernelGraph::CodeGenerator::storeMacroTileWAVE()");
-                co_yield_(Instruction::Comment("GEN: storeMacroTileWAVE"));
+                co_yield Instruction::Comment("GEN: storeMacroTileWAVE");
 
                 auto [user_tag, user]           = m_graph.getDimension<CoordGraph::User>(tag);
                 auto [mac_tile_tag, mac_tile]   = m_graph.getDimension<CoordGraph::MacroTile>(tag);
@@ -1389,7 +1389,7 @@ namespace rocRoller
                                               CoordGraph::Transformer              coords)
             {
                 rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::StoreTiled()");
-                co_yield_(Instruction::Comment("GEN: StoreTiled"));
+                co_yield Instruction::Comment("GEN: StoreTiled");
 
                 auto [mac_tile_tag, mac_tile] = m_graph.getDimension<CoordGraph::MacroTile>(tag);
 
@@ -1412,7 +1412,7 @@ namespace rocRoller
             {
                 rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::StoreLDSTiled({})",
                                                    tag);
-                co_yield_(Instruction::Comment("GEN: StoreLDSTile"));
+                co_yield Instruction::Comment("GEN: StoreLDSTile");
 
                 auto [lds_tag, lds]   = m_graph.getDimension<CoordGraph::LDS>(tag);
                 auto [tile_tag, tile] = m_graph.getDimension<CoordGraph::MacroTile>(tag);
@@ -1460,7 +1460,7 @@ namespace rocRoller
                                               ControlHypergraph::StoreVGPR const& store,
                                               CoordGraph::Transformer             coords)
             {
-                co_yield_(Instruction::Comment("GEN: StoreVGPR"));
+                co_yield Instruction::Comment("GEN: StoreVGPR");
 
                 auto [vgprTag, vgpr] = m_graph.getDimension<CoordGraph::VGPR>(tag);
                 auto [userTag, user] = m_graph.getDimension<CoordGraph::User>(tag);
@@ -1472,7 +1472,7 @@ namespace rocRoller
 
                 auto indexes = coords.forward({userTag});
 
-                co_yield_(Instruction::Comment("GEN: StoreVGPR; user index"));
+                co_yield Instruction::Comment("GEN: StoreVGPR; user index");
                 co_yield offset->allocate();
                 co_yield generateOffset(offset, indexes[0], src->variableType().dataType);
 

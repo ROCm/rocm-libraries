@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "../Utilities/Generator.hpp"
+#include "../Utilities/Utils.hpp"
 
 namespace rocRoller
 {
@@ -102,47 +103,27 @@ namespace rocRoller
                            std::initializer_list<int> inputs,
                            std::initializer_list<int> outputs);
 
-            // clang-format off
-            template <typename T,
-                      std::ranges::forward_range T_Inputs,
-                      std::ranges::forward_range T_Outputs>
-            requires(std::convertible_to<std::ranges::range_value_t<T_Inputs>, int>
-                  && std::convertible_to<std::ranges::range_value_t<T_Outputs>, int>)
-                // clang-format on
-                int addElement(T&& element, T_Inputs const& inputs, T_Outputs const& outputs);
+            template <typename T, CForwardRangeOf<int> T_Inputs, CForwardRangeOf<int> T_Outputs>
+            int addElement(T&& element, T_Inputs const& inputs, T_Outputs const& outputs);
 
-            // clang-format off
-            template <typename T,
-                      std::ranges::forward_range T_Inputs,
-                      std::ranges::forward_range T_Outputs>
-            requires(std::convertible_to<std::ranges::range_value_t<T_Inputs>, int>
-                  && std::convertible_to<std::ranges::range_value_t<T_Outputs>, int>)
-                // clang-format on
-                void addElement(int              index,
-                                T&&              element,
-                                T_Inputs const&  inputs,
-                                T_Outputs const& outputs);
+            template <typename T, CForwardRangeOf<int> T_Inputs, CForwardRangeOf<int> T_Outputs>
+            void addElement(int              index,
+                            T&&              element,
+                            T_Inputs const&  inputs,
+                            T_Outputs const& outputs);
 
             void deleteElement(int index);
 
-            // clang-format off
-            template <std::ranges::forward_range T_Inputs, std::ranges::forward_range T_Outputs>
-            requires(std::convertible_to<std::ranges::range_value_t<T_Inputs>,  int>
-                  && std::convertible_to<std::ranges::range_value_t<T_Outputs>, int>)
-                // clang-format on
-                void deleteElement(T_Inputs const&                        inputs,
-                                   T_Outputs const&                       outputs,
-                                   const std::function<bool(Edge const&)> edgePredicate);
+            template <CForwardRangeOf<int>        T_Inputs,
+                      CForwardRangeOf<int>        T_Outputs,
+                      std::predicate<Edge const&> T_Predicate>
+            void deleteElement(T_Inputs const&  inputs,
+                               T_Outputs const& outputs,
+                               T_Predicate      edgePredicate);
 
-            // clang-format off
-            template <typename T,
-                      std::ranges::forward_range T_Inputs,
-                      std::ranges::forward_range T_Outputs>
-            requires(std::convertible_to<std::ranges::range_value_t<T_Inputs>,  int>
-                  && std::convertible_to<std::ranges::range_value_t<T_Outputs>, int>
-                  && std::constructible_from<Edge,T>)
-                // clang-format on
-                void deleteElement(T_Inputs const& inputs, T_Outputs const& outputs);
+            template <typename T, CForwardRangeOf<int> T_Inputs, CForwardRangeOf<int> T_Outputs>
+            requires(std::constructible_from<Edge, T>) void deleteElement(T_Inputs const&  inputs,
+                                                                          T_Outputs const& outputs);
 
             size_t getIncidenceSize() const;
             size_t getElementCount() const;
@@ -182,17 +163,17 @@ namespace rocRoller
             /**
              * @brief Yields node indices connected in the specified direction to start, that satisfy the node selector.
              */
-            Generator<int> findNodes(int                      start,
-                                     std::function<bool(int)> nodeSelector,
-                                     Direction                dir = Direction::Downstream) const;
+            template <std::predicate<int> Predicate>
+            Generator<int> findNodes(int       start,
+                                     Predicate nodeSelector,
+                                     Direction dir = Direction::Downstream) const;
 
             /**
              * @brief Yields node indices connected in the specified direction to starts, in depth-first order
              */
-            template <std::ranges::forward_range Range>
-            requires(std::convertible_to<std::ranges::range_value_t<Range>, int>)
-                Generator<int> depthFirstVisit(Range& starts, Direction dir = Direction::Downstream)
-            const;
+            template <CForwardRangeOf<int> Range>
+            Generator<int> depthFirstVisit(Range&    starts,
+                                           Direction dir = Direction::Downstream) const;
 
             /**
              * @brief Yields node indices connected in the specified direction to start, in depth-first order.
@@ -211,12 +192,16 @@ namespace rocRoller
             /**
             * @brief Yields node indices that form the paths from the starts to the ends
             */
+            template <Direction Dir, std::predicate<int> Predicate>
+            Generator<int> path(std::vector<int> const starts,
+                                std::vector<int> const ends,
+                                std::map<int, bool>&   visitedElements,
+                                Predicate              edgeSelector) const;
+
             template <Direction Dir>
-            Generator<int> path(
-                std::vector<int> const   starts,
-                std::vector<int> const   ends,
-                std::map<int, bool>&     visitedElements,
-                std::function<bool(int)> edgeSelector = [](int edge) { return true; }) const;
+            Generator<int> path(std::vector<int> const starts,
+                                std::vector<int> const ends,
+                                std::map<int, bool>&   visitedElements) const;
 
             template <Direction Dir>
             Generator<int> getNeighbours(int const element) const;
@@ -261,9 +246,8 @@ namespace rocRoller
             /**
              * @brief Yields indices of nodes that immediately preceed `dst` where the Edges satisfy the edgePredicate.
              */
-            Generator<int>
-                getInputNodeIndices(int const                              dst,
-                                    const std::function<bool(Edge const&)> edgePredicate) const;
+            template <std::predicate<Edge const&> Predicate>
+            Generator<int> getInputNodeIndices(int const dst, Predicate edgePredicate) const;
 
             /**
              * @brief Yields indices of nodes that immediately follow `src` where the Edges are of type T.
@@ -276,9 +260,8 @@ namespace rocRoller
             /**
              * @brief Yields indices of nodes that immediately follow `src` where the Edges satisfy the edgePredicate.
              */
-            Generator<int>
-                getOutputNodeIndices(int const                              src,
-                                     const std::function<bool(Edge const&)> edgePredicate) const;
+            template <std::predicate<Edge const&> Predicate>
+            Generator<int> getOutputNodeIndices(int const src, Predicate edgePredicate) const;
 
         private:
             int m_nextIndex = 1;

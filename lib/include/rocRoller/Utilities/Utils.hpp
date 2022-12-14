@@ -353,16 +353,15 @@ namespace rocRoller
     template <class... Ts>
     overloaded(Ts...) -> overloaded<Ts...>;
 
+    // clang-format off
     /**
-     * Matches enumerations that are scoped, that have a Count member, and that can be converted to string with
-     * ToString().
+     * Matches enumerations that are scoped, that have a Count member, and that
+     * can be converted to string with ToString().
      */
     template <typename T>
     concept CCountedEnum = requires()
     {
         requires std::regular<T>;
-
-        // clang-format off
 
         { T::Count } -> std::convertible_to<T>;
 
@@ -372,8 +371,23 @@ namespace rocRoller
 
         { ToString(T::Count) } -> std::convertible_to<std::string>;
 
-        // clang-format on
     };
+    // clang-format on
+
+    template <typename Range, typename Of>
+    concept CForwardRangeOf = requires
+    {
+        requires std::ranges::forward_range<Range>;
+        requires std::convertible_to<std::ranges::range_value_t<Range>, Of>;
+    };
+
+    static_assert(CForwardRangeOf<std::vector<int>, int>);
+    static_assert(CForwardRangeOf<std::vector<short>, int>);
+    static_assert(CForwardRangeOf<std::vector<float>, int>);
+    static_assert(CForwardRangeOf<std::set<int>, int>);
+    static_assert(!CForwardRangeOf<std::set<std::string>, int>);
+    static_assert(!CForwardRangeOf<int, int>);
+
     /**
      * @}
      */

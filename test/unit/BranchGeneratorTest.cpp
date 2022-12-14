@@ -58,7 +58,7 @@ namespace rocRollerTest
 
         auto kb = [&]() -> Generator<Instruction> {
             auto l0 = m_context->labelAllocator()->label("l0");
-            co_yield_(Instruction::Label(l0));
+            co_yield Instruction::Label(l0);
 
             auto wavefront_size = k->wavefront_size();
 
@@ -109,10 +109,10 @@ namespace rocRollerTest
 
         auto kb = [&]() -> Generator<Instruction> {
             auto l0 = m_context->labelAllocator()->label("l0");
-            co_yield(Instruction::Lock(Scheduling::Dependency::Branch));
-            co_yield_(Instruction::Label(l0));
+            co_yield Instruction::Lock(Scheduling::Dependency::Branch);
+            co_yield Instruction::Label(l0);
             co_yield m_context->brancher()->branch(l0);
-            co_yield(Instruction::Unlock());
+            co_yield Instruction::Unlock();
         };
 
         std::string expected = std::string("s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0)")
@@ -140,10 +140,10 @@ namespace rocRollerTest
         m_context->kernelOptions().alwaysWaitBeforeBranch = false;
         auto kb                                           = [&]() -> Generator<Instruction> {
             auto l0 = m_context->labelAllocator()->label("l0");
-            co_yield(Instruction::Lock(Scheduling::Dependency::Branch));
-            co_yield_(Instruction::Label(l0));
+            co_yield Instruction::Lock(Scheduling::Dependency::Branch);
+            co_yield Instruction::Label(l0);
             co_yield m_context->brancher()->branch(l0);
-            co_yield(Instruction::Unlock());
+            co_yield Instruction::Unlock();
         };
 
         std::string expected = std::string("s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0)")

@@ -122,8 +122,8 @@ namespace rocRollerTest
                 v_target, Register::Value::Literal(check_val), "Move value");
 
             auto loop_start = Register::Value::Label("main_loop_" + std::to_string(n));
-            co_yield_(
-                Instruction::Label(loop_start).lock(Scheduling::Dependency::Branch, "Loop Start"));
+            co_yield Instruction::Label(loop_start)
+                .lock(Scheduling::Dependency::Branch, "Loop Start");
 
             Register::ValuePtr s_condition;
             s_condition = m_context->getVCC();
@@ -138,7 +138,7 @@ namespace rocRollerTest
             co_yield m_context->brancher()->branchIfNonZero(
                 loop_start, s_condition, "// Conditionally branching to the label register.");
 
-            co_yield_(Instruction::Unlock("Loop end"));
+            co_yield Instruction::Unlock("Loop end");
 
             co_yield m_context->mem()->storeFlat(v_ptr, v_value, 0, 4);
         };
@@ -267,7 +267,7 @@ namespace rocRollerTest
 
             co_yield m_context->copier()->fill(s_lhs, Register::Value::Literal(0x7FEFFFFF));
             co_yield m_context->copier()->fill(s_rhs, Register::Value::Literal(0x6DCBFFFF));
-            co_yield_(Instruction::Lock(Scheduling::Dependency::SCC));
+            co_yield Instruction::Lock(Scheduling::Dependency::SCC);
             co_yield generateOp<Expression::Add>(s_res, s_lhs, s_rhs);
 
             auto scc_zero = Register::Value::Label("scc_zero");
@@ -276,9 +276,9 @@ namespace rocRollerTest
             co_yield m_context->brancher()->branchIfNonZero(scc_zero, m_context->getSCC());
             co_yield m_context->copier()->copy(r_value, Register::Value::Literal(1729));
             co_yield m_context->brancher()->branch(end);
-            co_yield_(Instruction::Label(scc_zero));
+            co_yield Instruction::Label(scc_zero);
             co_yield m_context->copier()->copy(r_value, Register::Value::Literal(3014));
-            co_yield_(Instruction::Label(end).unlock());
+            co_yield Instruction::Label(end).unlock();
             co_yield m_context->mem()->storeFlat(r_ptr, r_value, 0, 4);
         };
 
@@ -391,8 +391,8 @@ namespace rocRollerTest
         auto set_vcc_to_zero = [&]() -> Generator<Instruction> {
             Register::ValuePtr vcc;
             vcc = m_context->getVCC();
-            co_yield(Instruction::Comment("Padding Comment"));
-            co_yield(Instruction::Comment("Padding Comment"));
+            co_yield Instruction::Comment("Padding Comment");
+            co_yield Instruction::Comment("Padding Comment");
             co_yield Expression::generate(vcc, v_b->expression() > v_a->expression(), m_context);
         };
 
@@ -499,7 +499,7 @@ namespace rocRollerTest
             Register::ValuePtr vcc;
             vcc = m_context->getVCC();
 
-            co_yield_(Instruction::Lock(Scheduling::Dependency::VCC));
+            co_yield Instruction::Lock(Scheduling::Dependency::VCC);
             co_yield Expression::generate(
                 vcc, v_rhs->expression() > v_lhs->expression(), m_context);
 

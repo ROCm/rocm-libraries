@@ -276,4 +276,14 @@ namespace rocRoller
         return Container<T>(b, e);
     }
 
+    template <typename T, std::predicate<T> Predicate>
+    Generator<T> filter(Predicate predicate, Generator<T> gen)
+    {
+        for(auto val : gen)
+        {
+            if(predicate(val))
+                co_yield val;
+        }
+    }
+
 }

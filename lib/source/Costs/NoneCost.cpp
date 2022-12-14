@@ -22,7 +22,7 @@ namespace rocRoller
 
         inline std::shared_ptr<Cost> NoneCost::Build(Argument arg)
         {
-            AssertFatal(false, "Cannot use None cost.");
+            Throw<FatalError>("Cannot use None cost.");
         }
 
         inline std::string NoneCost::name()
@@ -32,7 +32,7 @@ namespace rocRoller
 
         inline float NoneCost::cost(const InstructionStatus& inst) const
         {
-            AssertFatal(false, "Cannot use None cost.");
+            Throw<FatalError>("Cannot use None cost.");
         }
     }
 }

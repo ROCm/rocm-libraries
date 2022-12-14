@@ -276,7 +276,7 @@ namespace rocRollerTest
         auto generator = []() -> Generator<Instruction> {
             for(size_t i = 0; i < 1000000; i++)
             {
-                co_yield_(Instruction::Wait(WaitCount::VMCnt(1, "Comment")));
+                co_yield Instruction::Wait(WaitCount::VMCnt(1, "Comment"));
             }
         };
 

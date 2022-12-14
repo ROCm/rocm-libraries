@@ -304,4 +304,32 @@ namespace rocRollerTest
         }
     }
 
+    TEST(GeneratorTest, GeneratorFilter)
+    {
+        auto func = []() -> Generator<int> {
+            co_yield 3;
+            co_yield 2;
+            co_yield 9;
+            co_yield 17;
+            co_yield 4;
+            co_yield 4;
+        };
+
+        EXPECT_EQ((std::vector{9, 17, 4, 4}),
+                  filter([](int x) { return x > 3; }, func()).to<std::vector>());
+
+        EXPECT_EQ((std::vector{3, 2}),
+                  filter([](int x) { return x < 4; }, func()).to<std::vector>());
+
+        EXPECT_EQ((std::vector<int>{}),
+                  filter([](int x) { return x < 2; }, func()).to<std::vector>());
+
+        EXPECT_EQ(
+            (std::vector<int>{2, 8, 34, 144, 610, 2584}),
+            filter([](int x) { return x % 2 == 0; }, Take(20, fibonacci<int>())).to<std::vector>());
+
+        EXPECT_EQ(
+            (std::vector<int>{1, 1, 3, 5, 13, 21, 55, 89, 233, 377, 987, 1597, 4181, 6765}),
+            filter([](int x) { return x % 2 != 0; }, Take(20, fibonacci<int>())).to<std::vector>());
+    }
 }

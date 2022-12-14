@@ -86,17 +86,11 @@ namespace rocRoller
                 std::forward<T>(element), inputs, outputs);
         }
 
-        // clang-format off
         template <typename Node, typename Edge, bool Hyper>
-        template <typename T,
-                  std::ranges::forward_range T_Inputs,
-                  std::ranges::forward_range T_Outputs>
-        requires(std::convertible_to<std::ranges::range_value_t<T_Inputs>,  int>
-              && std::convertible_to<std::ranges::range_value_t<T_Outputs>, int>)
-            // clang-format on
-            int Hypergraph<Node, Edge, Hyper>::addElement(T&&              element,
-                                                          T_Inputs const&  inputs,
-                                                          T_Outputs const& outputs)
+        template <typename T, CForwardRangeOf<int> T_Inputs, CForwardRangeOf<int> T_Outputs>
+        int Hypergraph<Node, Edge, Hyper>::addElement(T&&              element,
+                                                      T_Inputs const&  inputs,
+                                                      T_Outputs const& outputs)
         {
             int index = m_nextIndex;
             m_nextIndex++;
@@ -105,18 +99,12 @@ namespace rocRoller
             return index;
         }
 
-        // clang-format off
         template <typename Node, typename Edge, bool Hyper>
-        template <typename T,
-                    std::ranges::forward_range T_Inputs,
-                    std::ranges::forward_range T_Outputs>
-        requires(std::convertible_to<std::ranges::range_value_t<T_Inputs>,  int>
-              && std::convertible_to<std::ranges::range_value_t<T_Outputs>, int>)
-            // clang-format on
-            void Hypergraph<Node, Edge, Hyper>::addElement(int              index,
-                                                           T&&              element,
-                                                           T_Inputs const&  inputs,
-                                                           T_Outputs const& outputs)
+        template <typename T, CForwardRangeOf<int> T_Inputs, CForwardRangeOf<int> T_Outputs>
+        void Hypergraph<Node, Edge, Hyper>::addElement(int              index,
+                                                       T&&              element,
+                                                       T_Inputs const&  inputs,
+                                                       T_Outputs const& outputs)
         {
             AssertFatal(m_elements.find(index) == m_elements.end());
 
@@ -212,16 +200,13 @@ namespace rocRoller
 
         // delete edge between the inputs and outputs with exact match
         // deletes the first match found (duplicates not deleted)
-        // clang-format off
         template <typename Node, typename Edge, bool Hyper>
-        template <std::ranges::forward_range T_Inputs, std::ranges::forward_range T_Outputs>
-        requires(std::convertible_to<std::ranges::range_value_t<T_Inputs>,  int>
-              && std::convertible_to<std::ranges::range_value_t<T_Outputs>, int>)
-            // clang-format on
-            void Hypergraph<Node, Edge, Hyper>::deleteElement(
-                T_Inputs const&                        inputs,
-                T_Outputs const&                       outputs,
-                const std::function<bool(Edge const&)> edgePredicate)
+        template <CForwardRangeOf<int>        T_Inputs,
+                  CForwardRangeOf<int>        T_Outputs,
+                  std::predicate<Edge const&> T_Predicate>
+        void Hypergraph<Node, Edge, Hyper>::deleteElement(T_Inputs const&  inputs,
+                                                          T_Outputs const& outputs,
+                                                          T_Predicate      edgePredicate)
         {
             AssertFatal(!inputs.empty() && !outputs.empty());
 
@@ -289,17 +274,10 @@ namespace rocRoller
             AssertFatal(match, "edge to delete : match not found");
         }
 
-        // clang-format off
         template <typename Node, typename Edge, bool Hyper>
-        template <typename T,
-                    std::ranges::forward_range T_Inputs,
-                    std::ranges::forward_range T_Outputs>
-        requires(std::convertible_to<std::ranges::range_value_t<T_Inputs>,  int>
-              && std::convertible_to<std::ranges::range_value_t<T_Outputs>, int>
-              && std::constructible_from<Edge,T>)
-            // clang-format on
-            void Hypergraph<Node, Edge, Hyper>::deleteElement(T_Inputs const&  inputs,
-                                                              T_Outputs const& outputs)
+        template <typename T, CForwardRangeOf<int> T_Inputs, CForwardRangeOf<int> T_Outputs>
+        requires(std::constructible_from<Edge, T>) void Hypergraph<Node, Edge, Hyper>::
+            deleteElement(T_Inputs const& inputs, T_Outputs const& outputs)
         {
             return deleteElement(
                 inputs, outputs, [](Edge const& edge) { return std::holds_alternative<T>(edge); });
@@ -440,11 +418,9 @@ namespace rocRoller
         }
 
         template <typename Node, typename Edge, bool Hyper>
-        template <std::ranges::forward_range Range>
-        requires(std::convertible_to<std::ranges::range_value_t<Range>, int>)
-            Generator<int> Hypergraph<Node, Edge, Hyper>::depthFirstVisit(Range&    starts,
-                                                                          Direction dir)
-        const
+        template <CForwardRangeOf<int> Range>
+        Generator<int> Hypergraph<Node, Edge, Hyper>::depthFirstVisit(Range&    starts,
+                                                                      Direction dir) const
         {
             std::unordered_set<int> visitedNodes;
             if(dir == Direction::Downstream)
@@ -468,14 +444,12 @@ namespace rocRoller
         }
 
         template <typename Node, typename Edge, bool Hyper>
-        Generator<int> Hypergraph<Node, Edge, Hyper>::findNodes(
-            int start, std::function<bool(int)> nodeSelector, Direction dir) const
+        template <std::predicate<int> Predicate>
+        Generator<int> Hypergraph<Node, Edge, Hyper>::findNodes(int       start,
+                                                                Predicate nodeSelector,
+                                                                Direction dir) const
         {
-            for(auto index : depthFirstVisit(start, dir))
-            {
-                if(nodeSelector(index))
-                    co_yield index;
-            }
+            co_yield filter(nodeSelector, depthFirstVisit(start, dir));
         }
 
         template <typename Node, typename Edge, bool Hyper>
@@ -537,10 +511,19 @@ namespace rocRoller
         template <typename Node, typename Edge, bool Hyper>
         template <Direction Dir>
         Generator<int>
-            Hypergraph<Node, Edge, Hyper>::path(std::vector<int> const   starts,
-                                                std::vector<int> const   ends,
-                                                std::map<int, bool>&     visitedElements,
-                                                std::function<bool(int)> edgeSelector) const
+            Hypergraph<Node, Edge, Hyper>::path(std::vector<int> const starts,
+                                                std::vector<int> const ends,
+                                                std::map<int, bool>&   visitedElements) const
+        {
+            co_yield path<Dir>(starts, ends, visitedElements, [](int) { return true; });
+        }
+
+        template <typename Node, typename Edge, bool Hyper>
+        template <Direction Dir, std::predicate<int> Predicate>
+        Generator<int> Hypergraph<Node, Edge, Hyper>::path(std::vector<int> const starts,
+                                                           std::vector<int> const ends,
+                                                           std::map<int, bool>&   visitedElements,
+                                                           Predicate edgeSelector) const
         {
             Direction const reverseDir
                 = (Dir == Direction::Downstream) ? Direction::Upstream : Direction::Downstream;
@@ -790,8 +773,10 @@ namespace rocRoller
         }
 
         template <typename Node, typename Edge, bool Hyper>
-        Generator<int> Hypergraph<Node, Edge, Hyper>::getInputNodeIndices(
-            int const dst, const std::function<bool(Edge const&)> edgePredicate) const
+        template <std::predicate<Edge const&> Predicate>
+        Generator<int>
+            Hypergraph<Node, Edge, Hyper>::getInputNodeIndices(int const dst,
+                                                               Predicate edgePredicate) const
         {
             AssertFatal(getElementType(dst) == ElementType::Node, "Require a node handle");
 
@@ -822,8 +807,10 @@ namespace rocRoller
         }
 
         template <typename Node, typename Edge, bool Hyper>
-        Generator<int> Hypergraph<Node, Edge, Hyper>::getOutputNodeIndices(
-            int const src, const std::function<bool(Edge const&)> edgePredicate) const
+        template <std::predicate<Edge const&> Predicate>
+        Generator<int>
+            Hypergraph<Node, Edge, Hyper>::getOutputNodeIndices(int const src,
+                                                                Predicate edgePredicate) const
         {
             AssertFatal(getElementType(src) == ElementType::Node, "Require a node handle");
 
