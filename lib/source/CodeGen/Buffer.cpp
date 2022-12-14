@@ -121,6 +121,21 @@ namespace rocRoller
         return msg.str();
     }
 
+    /*
+     * Creates buffer descriptor object from existing SGPRs
+     */
+
+    BufferDescriptor::BufferDescriptor(std::shared_ptr<Register::Value> srd,
+                                       std::shared_ptr<Context>         context)
+    {
+        m_bufferResourceDescriptor = srd;
+        m_context                  = context;
+    }
+
+    /*
+     * Creates buffer descriptor object from context, no existing SGPRs
+     * Requires the use of the BufferDescriptor::setup()
+     */
     BufferDescriptor::BufferDescriptor(std::shared_ptr<Context> context)
     {
         VariableType bufferPointer{DataType::None, PointerType::Buffer};
@@ -132,6 +147,15 @@ namespace rocRoller
     Generator<Instruction> BufferDescriptor::setup()
     {
         co_yield m_bufferResourceDescriptor->allocate();
+        co_yield m_context->copier()->copy(
+            m_bufferResourceDescriptor->subset({2}), Register::Value::Literal(2147483548), "");
+        co_yield m_context->copier()->copy(m_bufferResourceDescriptor->subset({3}),
+                                           Register::Value::Literal(0x00020000),
+                                           ""); //default options
+    }
+
+    Generator<Instruction> BufferDescriptor::setDefaultOpts()
+    {
         co_yield m_context->copier()->copy(
             m_bufferResourceDescriptor->subset({2}), Register::Value::Literal(2147483548), "");
         co_yield m_context->copier()->copy(m_bufferResourceDescriptor->subset({3}),

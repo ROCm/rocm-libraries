@@ -29,10 +29,11 @@ namespace rocRoller
                                                      Tile>;
 
         struct DataFlow;
+        struct Buffer;
         struct Offset;
         struct Stride;
 
-        using DataFlowEdge = std::variant<DataFlow, Offset, Stride>;
+        using DataFlowEdge = std::variant<DataFlow, Buffer, Offset, Stride>;
 
         using Edge = std::variant<CoordinateTransformEdge, DataFlowEdge>;
     }

@@ -67,13 +67,27 @@ namespace rocRoller
             auto stride_wave = graph.coordinates.addElement(Stride(), {user}, {wave});
             auto offset_vgpr = graph.coordinates.addElement(Offset(), {user}, {vgpr});
             auto stride_vgpr = graph.coordinates.addElement(Stride(), {user}, {vgpr});
-
-            auto ci_mac = graph.control.addElement(
-                ComputeIndex(user, mac, -1, offset_mac, stride_mac, false, dtype, {wave, vgpr}));
-            auto ci_wave = graph.control.addElement(ComputeIndex(
-                user, wave, offset_mac, offset_wave, stride_wave, false, dtype, {mac, vgpr}));
-            auto ci_vgpr = graph.control.addElement(ComputeIndex(
-                user, vgpr, offset_wave, offset_vgpr, stride_vgpr, false, dtype, {mac, wave}));
+            auto buffer      = graph.coordinates.addElement(Buffer(), {user}, {mac});
+            auto ci_mac      = graph.control.addElement(ComputeIndex(
+                user, mac, -1, offset_mac, stride_mac, buffer, false, dtype, {wave, vgpr}));
+            auto ci_wave     = graph.control.addElement(ComputeIndex(user,
+                                                                 wave,
+                                                                 offset_mac,
+                                                                 offset_wave,
+                                                                 stride_wave,
+                                                                 buffer,
+                                                                 false,
+                                                                 dtype,
+                                                                 {mac, vgpr}));
+            auto ci_vgpr     = graph.control.addElement(ComputeIndex(user,
+                                                                 vgpr,
+                                                                 offset_wave,
+                                                                 offset_vgpr,
+                                                                 stride_vgpr,
+                                                                 buffer,
+                                                                 false,
+                                                                 dtype,
+                                                                 {mac, wave}));
 
             graph.control.addElement(Sequence(), {ci_mac}, {ci_wave});
             graph.control.addElement(Sequence(), {ci_wave}, {ci_vgpr});
@@ -142,12 +156,14 @@ namespace rocRoller
             auto stride_vgpr_block = graph.coordinates.addElement(Stride(), {user}, {vgpr_block});
             auto offset_vgpr_index = graph.coordinates.addElement(Offset(), {user}, {vgpr_index});
             auto stride_vgpr_index = graph.coordinates.addElement(Stride(), {user}, {vgpr_index});
+            auto buffer            = graph.coordinates.addElement(Buffer(), {user}, {vgpr_block});
 
             auto ci_vgpr_block = graph.control.addElement(ComputeIndex(user,
                                                                        vgpr_block,
                                                                        -1,
                                                                        offset_vgpr_block,
                                                                        stride_vgpr_block,
+                                                                       buffer,
                                                                        forward,
                                                                        dtype,
                                                                        {vgpr_index}));
@@ -156,6 +172,7 @@ namespace rocRoller
                                                                        offset_vgpr_block,
                                                                        offset_vgpr_index,
                                                                        stride_vgpr_index,
+                                                                       buffer,
                                                                        forward,
                                                                        dtype,
                                                                        {vgpr_block}));
@@ -193,11 +210,12 @@ namespace rocRoller
             auto row_stride = graph.coordinates.addElement(Stride(), {user}, {i_thr_x});
             auto col_offset = graph.coordinates.addElement(Offset(), {user}, {i_thr_y});
             auto col_stride = graph.coordinates.addElement(Stride(), {user}, {i_thr_y});
+            auto buffer     = graph.coordinates.addElement(Buffer(), {user}, {i_thr_x});
 
-            auto ci_row = graph.control.addElement(
-                ComputeIndex(user, i_thr_x, -1, row_offset, row_stride, forward, dtype, {i_thr_y}));
+            auto ci_row = graph.control.addElement(ComputeIndex(
+                user, i_thr_x, -1, row_offset, row_stride, buffer, forward, dtype, {i_thr_y}));
             auto ci_col = graph.control.addElement(ComputeIndex(
-                user, i_thr_y, i_thr_x, col_offset, col_stride, forward, dtype, {i_thr_x}));
+                user, i_thr_y, i_thr_x, col_offset, col_stride, buffer, forward, dtype, {i_thr_x}));
 
             graph.control.addElement(Body(), {scope}, {ci_row});
             graph.control.addElement(Sequence(), {ci_row}, {ci_col});

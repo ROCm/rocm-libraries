@@ -38,6 +38,16 @@ namespace rocRoller
         };
 
         /**
+         * Buffer - denotes SRD for MUBUF instructions
+         */
+        struct Buffer
+        {
+            virtual std::string toString() const
+            {
+                return "Buffer";
+            }
+        };
+        /**
          * Offset - denotes offset between target/increment
          * dimensions.
          *

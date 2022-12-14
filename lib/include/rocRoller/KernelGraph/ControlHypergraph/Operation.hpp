@@ -153,6 +153,7 @@ namespace rocRoller
                          int                        base,
                          int                        offset,
                          int                        stride,
+                         int                        buffer,
                          bool                       forward,
                          DataType                   valueType,
                          std::initializer_list<int> zero       = {},
@@ -163,6 +164,7 @@ namespace rocRoller
                 , base(base)
                 , offset(offset)
                 , stride(stride)
+                , buffer(buffer)
                 , forward(forward)
                 , zero(zero)
                 , valueType(valueType)
@@ -172,7 +174,7 @@ namespace rocRoller
             }
 
             bool             forward;
-            int              target, increment, base, offset, stride;
+            int              target, increment, base, offset, stride, buffer;
             std::vector<int> zero;
 
             DataType valueType, offsetType, strideType;

@@ -73,6 +73,21 @@ namespace rocRoller
             }
 
             template <Graph::Direction dir>
+            inline Register::ValuePtr getBufferSrd(int tag)
+            {
+                Register::ValuePtr srd;
+                for(int const ntag : m_graph.coordinates.getNeighbours<dir>(tag))
+                {
+                    auto belem = m_graph.coordinates.get<CoordGraph::Buffer>(ntag);
+                    if(belem)
+                    {
+                        return m_context->registerTagManager()->getRegister(ntag);
+                    }
+                }
+                Throw<FatalError>("Buffer descriptor not found.");
+            }
+
+            template <Graph::Direction dir>
             std::pair<Register::ValuePtr, Register::ValuePtr> getOffsetAndStride(int tag)
             {
                 Register::ValuePtr offset, stride;
@@ -552,7 +567,7 @@ namespace rocRoller
                 auto offsetReg = m_context->registerTagManager()->getRegister(
                     ci.offset, Register::Type::Vector, ci.offsetType, 1);
                 offsetReg->setName(concatenate("offset", tag));
-                co_yield offsetReg->allocate();
+                co_yield Register::AllocateIfNeeded(offsetReg);
                 scope->add(ci.offset);
 
                 if(ci.base < 0)
@@ -567,7 +582,7 @@ namespace rocRoller
                 auto strideReg = m_context->registerTagManager()->getRegister(
                     ci.stride, Register::Type::Scalar, ci.strideType, 1);
                 strideReg->setName(concatenate("stride", tag));
-                co_yield strideReg->allocate();
+                co_yield Register::AllocateIfNeeded(strideReg);
                 scope->add(ci.stride);
 
                 if(ci.stride > 0)
@@ -579,6 +594,19 @@ namespace rocRoller
                         "  Stride({}): {}", ci.stride, toString(indexExpr));
                     co_yield generate(strideReg, indexExpr * L(numBytes));
                 }
+
+                auto         user = m_graph.coordinates.get<CoordGraph::User>(ci.target);
+                VariableType bufferPointer{DataType::None, PointerType::Buffer};
+                auto         bufferReg = m_context->registerTagManager()->getRegister(
+                    ci.buffer, Register::Type::Scalar, bufferPointer, 1);
+                bufferReg->setName(concatenate("buffer", tag));
+                co_yield Register::AllocateIfNeeded(bufferReg);
+                auto basePointer = MkSGPR(DataType::Int64);
+                auto bufDesc     = BufferDescriptor(bufferReg, m_context);
+                co_yield m_context->argLoader()->getValue(user->argumentName(), basePointer);
+                co_yield bufDesc.setBasePointer(basePointer);
+                co_yield bufDesc.setDefaultOpts();
+                scope->add(ci.buffer);
             }
 
             Generator<Instruction> operator()(int                                  tag,
@@ -602,11 +630,7 @@ namespace rocRoller
                 auto basePointer = MkSGPR(DataType::Int64);
                 co_yield m_context->argLoader()->getValue(user.argumentName(), basePointer);
 
-                auto bufDesc = BufferDescriptor(m_context);
-                auto bufOpt  = BufferInstructionOptions();
-
-                co_yield bufDesc.setup();
-                co_yield bufDesc.setBasePointer(basePointer);
+                auto bufOpt = BufferInstructionOptions();
 
                 auto i_thr_x = m_graph.mapper.get<CoordGraph::ThreadTileIndex>(tag, 0);
                 auto i_thr_y = m_graph.mapper.get<CoordGraph::ThreadTileIndex>(tag, 1);
@@ -615,6 +639,8 @@ namespace rocRoller
                     = getOffsetAndStride<Graph::Direction::Upstream>(i_thr_x);
                 auto [col_offset_reg, col_stride_reg]
                     = getOffsetAndStride<Graph::Direction::Upstream>(i_thr_y);
+                auto bufferSrd = getBufferSrd<Graph::Direction::Upstream>(i_thr_x);
+                auto bufDesc   = BufferDescriptor(bufferSrd, m_context);
 
                 auto tmpl = MkVGPR(load.vtype, product(mac_tile.subTileSizes));
                 auto vgpr = m_context->registerTagManager()->getRegister(mac_tile_tag, tmpl);
@@ -675,18 +701,17 @@ namespace rocRoller
                 Register::ValuePtr basePointer;
                 co_yield m_context->argLoader()->getValue(user.argumentName(), basePointer);
 
-                auto bufDesc = BufferDescriptor(m_context);
-                auto bufOpt  = BufferInstructionOptions();
-
-                co_yield bufDesc.setup();
-                co_yield bufDesc.setBasePointer(basePointer);
-
-                auto n_wave_tag = m_graph.mapper.get<CoordGraph::WaveTileNumber>(tag, sdim);
+                auto n_wave_tag  = m_graph.mapper.get<CoordGraph::WaveTileNumber>(tag, sdim);
+                auto mac_num_tag = m_graph.mapper.get<CoordGraph::MacroTileNumber>(tag, sdim);
 
                 auto [wave_offset_reg, wave_stride_reg]
                     = getOffsetAndStride<Graph::Direction::Upstream>(n_wave_tag);
                 auto [vgpr_offset_reg, vgpr_stride_reg]
                     = getOffsetAndStride<Graph::Direction::Upstream>(vgpr_tag);
+                auto bufferSrd = getBufferSrd<Graph::Direction::Upstream>(mac_num_tag);
+
+                auto bufDesc = BufferDescriptor(bufferSrd, m_context);
+                auto bufOpt  = BufferInstructionOptions();
 
                 AssertFatal(wave_offset_reg, "Invalid WAVE offset register.");
                 AssertFatal(vgpr_offset_reg, "Invalid VGPR offset register.");
@@ -778,16 +803,14 @@ namespace rocRoller
                 Register::ValuePtr s_ptr;
                 co_yield m_context->argLoader()->getValue(user.argumentName(), s_ptr);
 
-                auto bufDesc = BufferDescriptor(m_context);
-                auto bufOpt  = BufferInstructionOptions();
-
-                co_yield bufDesc.setup();
-                co_yield bufDesc.setBasePointer(s_ptr);
-
                 auto [vgpr_block_offset_reg, vgpr_block_stride_reg]
                     = getOffsetAndStride<Graph::Direction::Upstream>(vgpr_block_tag);
                 auto [vgpr_index_offset_reg, vgpr_index_stride_reg]
                     = getOffsetAndStride<Graph::Direction::Upstream>(vgpr_index_tag);
+                auto bufferSrd = getBufferSrd<Graph::Direction::Upstream>(vgpr_block_tag);
+
+                auto bufDesc = BufferDescriptor(bufferSrd, m_context);
+                auto bufOpt  = BufferInstructionOptions();
 
                 AssertFatal(vgpr_block_offset_reg, "Invalid VGPR BLOCK offset register.");
                 AssertFatal(vgpr_block_stride_reg, "Invalid VGPR BLOCK stride register.");
@@ -1230,11 +1253,6 @@ namespace rocRoller
                 co_yield m_context->argLoader()->getValue(user.argumentName(), basePointer);
 
                 auto numBytes = DataTypeInfo::Get(vgpr->variableType()).elementSize;
-                auto bufDesc  = BufferDescriptor(m_context);
-                auto bufOpt   = BufferInstructionOptions();
-
-                co_yield bufDesc.setup();
-                co_yield bufDesc.setBasePointer(basePointer);
 
                 auto const m = mac_tile.subTileSizes[0];
                 auto const n = mac_tile.subTileSizes[1];
@@ -1246,6 +1264,10 @@ namespace rocRoller
                     = getOffsetAndStride<Graph::Direction::Upstream>(i_thr_x);
                 auto [col_offset_reg, col_stride_reg]
                     = getOffsetAndStride<Graph::Direction::Upstream>(i_thr_y);
+
+                auto bufferSrd = getBufferSrd<Graph::Direction::Upstream>(i_thr_x);
+                auto bufDesc   = BufferDescriptor(bufferSrd, m_context);
+                auto bufOpt    = BufferInstructionOptions();
 
                 // TODO multidimensional tiles
                 for(int i = 0; i < m; ++i)
@@ -1304,16 +1326,14 @@ namespace rocRoller
                 Register::ValuePtr s_ptr;
                 co_yield m_context->argLoader()->getValue(user.argumentName(), s_ptr);
 
-                auto bufDesc = BufferDescriptor(m_context);
-                auto bufOpt  = BufferInstructionOptions();
-
-                co_yield bufDesc.setup();
-                co_yield bufDesc.setBasePointer(s_ptr);
-
                 auto [vgpr_block_offset_reg, vgpr_block_stride_reg]
                     = getOffsetAndStride<Graph::Direction::Upstream>(vgpr_block_tag);
                 auto [vgpr_index_offset_reg, vgpr_index_stride_reg]
                     = getOffsetAndStride<Graph::Direction::Upstream>(vgpr_index_tag);
+                auto bufferSrd = getBufferSrd<Graph::Direction::Upstream>(vgpr_block_tag);
+
+                auto bufDesc = BufferDescriptor(bufferSrd, m_context);
+                auto bufOpt  = BufferInstructionOptions();
 
                 AssertFatal(vgpr_block_offset_reg, "Invalid VGPR BLOCK offset register.");
                 AssertFatal(vgpr_block_stride_reg, "Invalid VGPR BLOCK stride register.");

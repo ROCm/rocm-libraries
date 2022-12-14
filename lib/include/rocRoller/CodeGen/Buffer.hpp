@@ -75,8 +75,10 @@ namespace rocRoller
     class BufferDescriptor
     {
     public:
+        BufferDescriptor(std::shared_ptr<Register::Value> srd, std::shared_ptr<Context> context);
         BufferDescriptor(std::shared_ptr<Context> context);
         Generator<Instruction> setup();
+        Generator<Instruction> setDefaultOpts();
         Generator<Instruction> incrementBasePointer(std::shared_ptr<Register::Value> value);
         Generator<Instruction> setBasePointer(std::shared_ptr<Register::Value> value);
         Generator<Instruction> setSize(std::shared_ptr<Register::Value> value);
