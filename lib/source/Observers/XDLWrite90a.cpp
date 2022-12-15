@@ -67,14 +67,14 @@ namespace rocRoller
 
                 // SrcA RAW
                 AssertFatal(srcs.at(0) != nullptr, "Empty SrcA");
-                if(value = checkRegister(srcs.at(0)))
+                if((value = checkRegister(srcs.at(0))))
                 {
                     return *value;
                 }
 
                 // SrcB RAW
                 AssertFatal(srcs.at(1) != nullptr, "Empty SrcB");
-                if(value = checkRegister(srcs.at(1)))
+                if((value = checkRegister(srcs.at(1))))
                 {
                     return *value;
                 }
@@ -88,13 +88,13 @@ namespace rocRoller
                 std::optional<int> value;
 
                 // VALU RAW
-                if(value = checkSrcs(inst))
+                if((value = checkSrcs(inst)))
                 {
                     return *value;
                 }
 
                 // VALU WAW
-                if(value = checkDsts(inst))
+                if((value = checkDsts(inst)))
                 {
                     return *value;
                 }

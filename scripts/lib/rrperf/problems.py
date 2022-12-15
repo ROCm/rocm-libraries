@@ -111,15 +111,70 @@ class GEMMResult(GEMM, RRPerfResult):
 
 
 #
+# CodeGen
+#
+
+
+@dataclass(unsafe_hash=True)
+class CodeGen:
+    """CodeGen base problem description."""
+
+    instCount: int
+    instructions: str = "simple_mfma"
+
+    numWarmUp: int = 2
+    numRuns: int = 10
+
+    @property
+    def token(self):
+        return repr(CodeGen(**field_dict(CodeGen, self)))
+
+
+@dataclass(unsafe_hash=True)
+class CodeGenRun(CodeGen):
+    """CodeGen run interface."""
+
+    output: pathlib.Path = field(repr=False, default=None, hash=False)
+
+    @property
+    def group(self):
+        return "codegen"
+
+    def set_output(self, path: pathlib.Path):
+        self.output = path
+
+    def command(self):
+        retval = [
+            "client/codegen_stress",
+            "--inst_count=" + str(self.instCount),
+            "--instructions=" + str(self.instructions),
+            "--yaml=" + str(self.output),
+            "--num_warmup=" + str(self.numWarmUp),
+            "--num_runs=" + str(self.numRuns),
+        ]
+        print(" ".join(retval))
+        return retval
+
+
+@dataclass(frozen=True)
+class CodeGenResult(CodeGen, RRPerfResult):
+    """CodeGen result interface."""
+
+    pass
+
+
+#
 # Up/down cast from BASE classes to RUN and RESULT classes.
 #
 
 _client_to_result_class = {
     "GEMMv00": GEMMResult,
+    "CodeGenv00": CodeGenResult,
 }
 
 _base_to_run_class = {
     GEMM: GEMMRun,
+    CodeGen: CodeGenRun,
 }
 
 

@@ -305,7 +305,10 @@ def html_summary(  # noqa: C901
             )
 
             A = run.results[token]
-            ka = np.asarray(A.kernelExecute) / A.numInner
+            ka = np.asarray(A.kernelExecute)
+            if "numInner" in A.__dict__.values():
+                ka = ka / A.numInner
+
             median = statistics.median(ka)
             if normalizer is None:
                 normalizer = median

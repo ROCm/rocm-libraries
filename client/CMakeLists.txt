@@ -61,7 +61,56 @@ if(BUILD_CLIENT)
     set_property(TARGET yaml-cpp PROPERTY POSITION_INDEPENDENT_CODE ON)
   endif()
 
+  add_executable(codegen_stress
+    codegen_stress_test.cpp
+
+    ../test/unit/Utilities.cpp
+  )
+
+  target_compile_options(codegen_stress PUBLIC ${EXTRA_COMPILE_OPTIONS})
+  target_include_directories(
+    codegen_stress
+    PUBLIC
+    lib/include
+    ${HIP_ROOT_DIR}/include
+  )
+  target_link_options(codegen_stress PUBLIC ${EXTRA_LINK_OPTIONS})
+  target_link_libraries(
+    codegen_stress
+    PUBLIC
+    rocroller
+    msgpackc-cxx
+    gtest_main
+    gmock
+    openblas
+    amdhip64
+  )
+  target_link_directories(codegen_stress PUBLIC ${HIP_ROOT_DIR}/lib)
+  target_compile_definitions(codegen_stress PUBLIC __HIP_PLATFORM_AMD__)
+
+  if(ROCROLLER_USE_LLVM)
+    target_compile_definitions(codegen_stress PUBLIC ROCROLLER_USE_LLVM)
+    target_include_directories(
+      codegen_stress
+      PUBLIC
+      ${HIP_ROOT_DIR}/include
+      ${LLVM_INCLUDE_DIRS}
+      ${LLD_INCLUDE_DIRS}
+    )
+    target_link_libraries(
+      codegen_stress
+      PUBLIC
+      ${llvm_libs}
+      lldELF
+    )
+  endif()
+  if(ROCROLLER_USE_YAML_CPP)
+    target_compile_definitions(codegen_stress PUBLIC ROCROLLER_USE_YAML_CPP)
+    target_link_libraries(codegen_stress PUBLIC yaml-cpp)
+    set_property(TARGET yaml-cpp PROPERTY POSITION_INDEPENDENT_CODE ON)
+  endif()
+
 
   add_custom_target(all_clients)
-  add_dependencies(all_clients gemm)
+  add_dependencies(all_clients gemm codegen_stress)
 endif()

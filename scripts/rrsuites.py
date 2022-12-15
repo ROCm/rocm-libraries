@@ -1,4 +1,4 @@
-from rrperf import GEMMRun
+from rrperf import GEMMRun, CodeGenRun
 
 
 def unit():
@@ -64,6 +64,13 @@ def hgemm():
     )
 
 
+def codegen():
+    yield CodeGenRun(instCount=40000, instructions="comments")
+    yield CodeGenRun(instCount=40000, instructions="simple_mfma")
+    yield CodeGenRun(instCount=40000, instructions="complex_mfma_with_coop")
+
+
 def all():
     yield from sgemm()
     yield from hgemm()
+    yield from codegen()

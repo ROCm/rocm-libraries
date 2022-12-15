@@ -31,21 +31,21 @@ namespace rocRoller
 
                 // SrcC
                 AssertFatal(srcs.at(2) != nullptr, "Empty SrcC");
-                if(value = checkRegister(srcs[2]))
+                if((value = checkRegister(srcs[2])))
                 {
                     return *value - (m_maxNops - 1);
                 }
 
                 // SrcA
                 AssertFatal(srcs.at(0) != nullptr, "Empty SrcA");
-                if(value = checkRegister(srcs.at(0)))
+                if((value = checkRegister(srcs.at(0))))
                 {
                     return *value;
                 }
 
                 // ScrB
                 AssertFatal(srcs.at(1) != nullptr, "Empty SrcB");
-                if(value = checkRegister(srcs.at(1)))
+                if((value = checkRegister(srcs.at(1))))
                 {
                     return *value;
                 }
