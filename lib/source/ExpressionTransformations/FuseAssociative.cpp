@@ -11,6 +11,10 @@ namespace rocRoller
         template <typename T>
         concept CConstant = CIntegral<T> || std::floating_point<T>;
 
+        template <typename T>
+        concept CShift
+            = std::same_as<ShiftL, T> || std::same_as<ShiftR, T> || std::same_as<SignedShiftR, T>;
+
         template <CAssociativeBinary OP>
         struct AssociativeBinary
         {
@@ -38,6 +42,40 @@ namespace rocRoller
                         operation.lhs = lhs_op.lhs;
                         operation.rhs
                             = simplify(std::make_shared<Expression>(OP{lhs_op.rhs, literal(rhs)}));
+                    }
+
+                    return std::make_shared<Expression>(operation);
+                }
+                return nullptr;
+            }
+
+            ExpressionPtr call(ExpressionPtr lhs, CommandArgumentValue rhs)
+            {
+                m_lhs = lhs;
+                return visit(*this, rhs);
+            }
+        };
+
+        template <CShift OP>
+        struct CollectedShift
+        {
+            ExpressionPtr m_lhs;
+
+            template <typename RHS>
+            ExpressionPtr operator()(RHS rhs)
+            {
+                if(std::holds_alternative<OP>(*m_lhs))
+                {
+                    auto lhs_op = std::get<OP>(*m_lhs);
+
+                    bool eval_rhs = evaluationTimes(lhs_op.rhs)[EvaluationTime::Translate];
+
+                    OP operation;
+                    if(eval_rhs)
+                    {
+                        operation.lhs = lhs_op.lhs;
+                        operation.rhs
+                            = simplify(std::make_shared<Expression>(Add{lhs_op.rhs, literal(rhs)}));
                     }
 
                     return std::make_shared<Expression>(operation);
@@ -96,7 +134,8 @@ namespace rocRoller
             }
 
             template <CBinary Expr>
-            requires(!CAssociativeBinary<Expr>) ExpressionPtr operator()(Expr const& expr) const
+            requires(!CAssociativeBinary<Expr> && !CShift<Expr>) ExpressionPtr
+                operator()(Expr const& expr) const
             {
                 Expr cpy = expr;
                 if(expr.lhs)
@@ -127,6 +166,32 @@ namespace rocRoller
                     cpy.r2hs = call(expr.r2hs);
                 }
                 return std::make_shared<Expression>(cpy);
+            }
+
+            template <CShift Expr>
+            ExpressionPtr operator()(Expr const& expr) const
+            {
+                auto lhs = call(expr.lhs);
+                auto rhs = call(expr.rhs);
+
+                bool eval_lhs = evaluationTimes(lhs)[EvaluationTime::Translate];
+                bool eval_rhs = evaluationTimes(rhs)[EvaluationTime::Translate];
+
+                auto collectedShift = CollectedShift<Expr>();
+
+                ExpressionPtr rv;
+
+                if(eval_lhs && eval_rhs)
+                    rv = literal(evaluate(std::make_shared<Expression>(Expr{lhs, rhs})));
+                else if(eval_rhs)
+                {
+                    rv = collectedShift.call(lhs, evaluate(rhs));
+                }
+
+                if(rv != nullptr)
+                    return rv;
+
+                return std::make_shared<Expression>(Expr({lhs, rhs}));
             }
 
             template <CValue Value>

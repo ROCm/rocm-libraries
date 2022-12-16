@@ -62,6 +62,13 @@ TEST_F(ExpressionTransformationTest, Simplify)
 
     // shiftL
     EXPECT_EQ(Expression::toString(simplify(one << zero)), "1i");
+    EXPECT_EQ(Expression::toString(simplify((one << one) << one)), "4i");
+    EXPECT_EQ(Expression::toString(simplify(one << (one << one))), "4i");
+
+    // shiftR
+    EXPECT_EQ(Expression::toString(simplify(one >> zero)), "1i");
+    EXPECT_EQ(Expression::toString(simplify((a >> one) >> one)), "8i");
+    EXPECT_EQ(Expression::toString(simplify(one >> (a >> one))), "0i");
 
     EXPECT_THROW(
         simplify(std::make_shared<Expression::Expression>(Expression::Multiply{zero, nullptr})),
@@ -108,6 +115,12 @@ TEST_F(ExpressionTransformationTest, FuseAssociative)
               "BitwiseAnd(Add(BitwiseAnd(v0:I, 1i), 33i), 1i)");
 
     EXPECT_EQ(Expression::toString(fuseAssociative((v + one) + a)), "Add(v0:I, 34i)");
+
+    // shiftL
+    EXPECT_EQ(Expression::toString(fuseAssociative((v << one) << one)), "ShiftL(v0:I, 2i)");
+
+    // shiftR
+    EXPECT_EQ(Expression::toString(fuseAssociative((v >> one) >> one)), "SignedShiftR(v0:I, 2i)");
 
     EXPECT_EQ(
         Expression::toString(fuseAssociative((v - one) - a)),

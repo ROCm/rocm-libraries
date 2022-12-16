@@ -83,10 +83,10 @@ if(BUILD_CLIENT)
     gtest_main
     gmock
     openblas
-    amdhip64
   )
-  target_link_directories(codegen_stress PUBLIC ${HIP_ROOT_DIR}/lib)
-  target_compile_definitions(codegen_stress PUBLIC __HIP_PLATFORM_AMD__)
+
+  target_link_libraries(codegen_stress PUBLIC hip::host)
+  target_compile_definitions(codegen_stress PUBLIC ROCROLLER_USE_HIP __HIP_PLATFORM_AMD__)
 
   if(ROCROLLER_USE_LLVM)
     target_compile_definitions(codegen_stress PUBLIC ROCROLLER_USE_LLVM)

@@ -135,6 +135,62 @@ namespace rocRoller
             }
         };
 
+        struct SimplifySignedShiftRByConstant
+        {
+            ExpressionPtr m_lhs;
+
+            template <typename LHS, typename RHS>
+            requires(CIntegral<LHS>&& CIntegral<RHS>) ExpressionPtr operator()(LHS lhs, RHS rhs)
+            {
+                return literal(lhs >> rhs);
+            }
+
+            template <typename LHS, typename RHS>
+            requires(CIntegral<LHS> && !CIntegral<RHS>) ExpressionPtr operator()(LHS lhs, RHS rhs)
+            {
+                return nullptr;
+            }
+
+            template <typename LHS, typename RHS>
+            requires(!CIntegral<LHS> && CIntegral<RHS>) ExpressionPtr operator()(LHS lhs, RHS rhs)
+            {
+                if(rhs == 0)
+                    return literal(lhs);
+                return nullptr;
+            }
+
+            template <typename LHS, typename RHS>
+            requires(!CIntegral<LHS> && !CIntegral<RHS>) ExpressionPtr operator()(LHS lhs, RHS rhs)
+            {
+                return nullptr;
+            }
+
+            template <typename RHS>
+            requires(CIntegral<RHS>) ExpressionPtr operator()(RHS rhs)
+            {
+                if(rhs == 0)
+                    return m_lhs;
+                return nullptr;
+            }
+
+            template <typename RHS>
+            requires(!CIntegral<RHS>) ExpressionPtr operator()(RHS rhs)
+            {
+                return nullptr;
+            }
+
+            ExpressionPtr call(ExpressionPtr lhs, CommandArgumentValue rhs)
+            {
+                m_lhs = lhs;
+                return visit(*this, rhs);
+            }
+
+            ExpressionPtr call(CommandArgumentValue lhs, CommandArgumentValue rhs)
+            {
+                return visit(*this, lhs, rhs);
+            }
+        };
+
         struct SimplifyBitwiseAnd
         {
             ExpressionPtr m_lhs;
@@ -413,6 +469,27 @@ namespace rocRoller
                     return rv;
 
                 return std::make_shared<Expression>(ShiftL({lhs, rhs}));
+            }
+
+            ExpressionPtr operator()(SignedShiftR const& expr) const
+            {
+                auto lhs = call(expr.lhs);
+                auto rhs = call(expr.rhs);
+
+                bool eval_lhs = evaluationTimes(lhs)[EvaluationTime::Translate];
+                bool eval_rhs = evaluationTimes(rhs)[EvaluationTime::Translate];
+
+                auto simplifier = SimplifySignedShiftRByConstant();
+
+                ExpressionPtr rv;
+                if(eval_lhs && eval_rhs)
+                    rv = simplifier.call(evaluate(lhs), evaluate(rhs));
+                else if(eval_rhs)
+                    rv = simplifier.call(lhs, evaluate(rhs));
+                if(rv != nullptr)
+                    return rv;
+
+                return std::make_shared<Expression>(SignedShiftR({lhs, rhs}));
             }
 
             ExpressionPtr operator()(Multiply const& expr) const
