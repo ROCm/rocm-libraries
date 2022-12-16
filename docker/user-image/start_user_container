@@ -27,7 +27,9 @@ import subprocess
 import argparse
 
 dockerfiles = {"clang": 'docker/dockerfile-ubuntu-clang-13',
-               "gcc":   'docker/dockerfile-ubuntu-gcc'}
+               "gcc":   'docker/dockerfile-ubuntu-gcc',
+               "trace":   'docker/dockerfile-ubuntu-trace',
+               }
 
 def parseArgs():
     parser = argparse.ArgumentParser(description='Build and Run Project Docker Containers. Run from root of git directory.', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
