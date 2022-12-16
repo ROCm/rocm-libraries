@@ -131,45 +131,43 @@ namespace rocRoller
         }
 
         /**
-         * @brief Add ComputeIndex operations to graph for a MATRIX_ACCUM load.
+         * @brief Add ComputeIndex operations to graph for a MATRIX_ACCUM load/store.
          */
         KernelHypergraph
-            addComputeIndexC(KernelHypergraph const& original, int op, int load, bool forward)
+            addComputeIndexC(KernelHypergraph const& original, int op, int loadstore, bool forward)
         {
             rocRoller::Log::getLogger()->debug(
-                "KernelGraph::addComputeIndexC({}, {}, {})", op, load, forward);
+                "KernelGraph::addComputeIndexC({}, {}, {})", op, loadstore, forward);
 
             auto [scope, graph] = replaceWithScope(original, op);
 
-            auto user       = graph.mapper.get<User>(load);
-            auto vgpr_block = graph.mapper.get<VGPRBlockNumber>(load);
-            auto vgpr_index = graph.mapper.get<VGPRBlockIndex>(load);
+            auto user       = graph.mapper.get<User>(loadstore);
+            auto vgpr_block = graph.mapper.get<VGPRBlockNumber>(loadstore);
+            auto vgpr_index = graph.mapper.get<VGPRBlockIndex>(loadstore);
 
             DataType dtype;
             {
-                auto l = graph.control.get<LoadTiled>(load);
-                auto s = graph.control.get<StoreTiled>(load);
+                auto l = graph.control.get<LoadTiled>(loadstore);
+                auto s = graph.control.get<StoreTiled>(loadstore);
                 dtype  = l ? l->vtype.dataType : s->dataType;
             }
 
-            int offset_vgpr_block, stride_vgpr_block;
-            int offset_vgpr_index, stride_vgpr_index;
-            int buffer;
-            if(!forward)
-            {
-                offset_vgpr_block = graph.coordinates.addElement(Offset(), {user}, {vgpr_block});
-                stride_vgpr_block = graph.coordinates.addElement(Stride(), {user}, {vgpr_block});
-                offset_vgpr_index = graph.coordinates.addElement(Offset(), {user}, {vgpr_index});
-                stride_vgpr_index = graph.coordinates.addElement(Stride(), {user}, {vgpr_index});
-                buffer            = graph.coordinates.addElement(Buffer(), {user}, {vgpr_block});
-            }
-            else
+            int offset_vgpr_block, stride_vgpr_block, offset_vgpr_index, stride_vgpr_index, buffer;
+            if(forward)
             {
                 offset_vgpr_block = graph.coordinates.addElement(Offset(), {vgpr_block}, {user});
                 stride_vgpr_block = graph.coordinates.addElement(Stride(), {vgpr_block}, {user});
                 offset_vgpr_index = graph.coordinates.addElement(Offset(), {vgpr_index}, {user});
                 stride_vgpr_index = graph.coordinates.addElement(Stride(), {vgpr_index}, {user});
                 buffer            = graph.coordinates.addElement(Buffer(), {vgpr_block}, {user});
+            }
+            else
+            {
+                offset_vgpr_block = graph.coordinates.addElement(Offset(), {user}, {vgpr_block});
+                stride_vgpr_block = graph.coordinates.addElement(Stride(), {user}, {vgpr_block});
+                offset_vgpr_index = graph.coordinates.addElement(Offset(), {user}, {vgpr_index});
+                stride_vgpr_index = graph.coordinates.addElement(Stride(), {user}, {vgpr_index});
+                buffer            = graph.coordinates.addElement(Buffer(), {user}, {vgpr_block});
             }
 
             auto ci_vgpr_block = graph.control.addElement(ComputeIndex(user,
@@ -199,32 +197,46 @@ namespace rocRoller
         }
 
         /**
-         * @brief Add ComputeIndex operations to graph for a MATRIX_ACCUM load.
+         * @brief Add ComputeIndex operations to graph for a MATRIX_ACCUM load/store.
          */
-        KernelHypergraph
-            addComputeIndexVGPR(KernelHypergraph const& original, int op, int load, bool forward)
+        KernelHypergraph addComputeIndexVGPR(KernelHypergraph const& original,
+                                             int                     op,
+                                             int                     loadstore,
+                                             bool                    forward)
         {
             rocRoller::Log::getLogger()->debug(
-                "KernelGraph::addComputeIndexVGPR({}, {}, {})", op, load, forward);
+                "KernelGraph::addComputeIndexVGPR({}, {}, {})", op, loadstore, forward);
 
             auto [scope, graph] = replaceWithScope(original, op);
 
-            auto user    = graph.mapper.get<User>(load);
-            auto i_thr_x = graph.mapper.get<ThreadTileIndex>(load, 0);
-            auto i_thr_y = graph.mapper.get<ThreadTileIndex>(load, 1);
+            auto user    = graph.mapper.get<User>(loadstore);
+            auto i_thr_x = graph.mapper.get<ThreadTileIndex>(loadstore, 0);
+            auto i_thr_y = graph.mapper.get<ThreadTileIndex>(loadstore, 1);
 
             DataType dtype;
             {
-                auto l = graph.control.get<LoadTiled>(load);
-                auto s = graph.control.get<StoreTiled>(load);
+                auto l = graph.control.get<LoadTiled>(loadstore);
+                auto s = graph.control.get<StoreTiled>(loadstore);
                 dtype  = l ? l->vtype.dataType : s->dataType;
             }
 
-            auto row_offset = graph.coordinates.addElement(Offset(), {user}, {i_thr_x});
-            auto row_stride = graph.coordinates.addElement(Stride(), {user}, {i_thr_x});
-            auto col_offset = graph.coordinates.addElement(Offset(), {user}, {i_thr_y});
-            auto col_stride = graph.coordinates.addElement(Stride(), {user}, {i_thr_y});
-            auto buffer     = graph.coordinates.addElement(Buffer(), {user}, {i_thr_x});
+            int row_offset, row_stride, col_offset, col_stride, buffer;
+            if(forward)
+            {
+                row_offset = graph.coordinates.addElement(Offset(), {i_thr_x}, {user});
+                row_stride = graph.coordinates.addElement(Stride(), {i_thr_x}, {user});
+                col_offset = graph.coordinates.addElement(Offset(), {i_thr_y}, {user});
+                col_stride = graph.coordinates.addElement(Stride(), {i_thr_y}, {user});
+                buffer     = graph.coordinates.addElement(Buffer(), {i_thr_x}, {user});
+            }
+            else
+            {
+                row_offset = graph.coordinates.addElement(Offset(), {user}, {i_thr_x});
+                row_stride = graph.coordinates.addElement(Stride(), {user}, {i_thr_x});
+                col_offset = graph.coordinates.addElement(Offset(), {user}, {i_thr_y});
+                col_stride = graph.coordinates.addElement(Stride(), {user}, {i_thr_y});
+                buffer     = graph.coordinates.addElement(Buffer(), {user}, {i_thr_x});
+            }
 
             auto ci_row = graph.control.addElement(ComputeIndex(
                 user, i_thr_x, -1, row_offset, row_stride, buffer, forward, dtype, {i_thr_y}));

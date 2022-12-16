@@ -1280,11 +1280,11 @@ namespace rocRoller
                 auto i_thr_y = m_graph.mapper.get<CoordGraph::ThreadTileIndex>(tag, 1);
 
                 auto [row_offset_reg, row_stride_reg]
-                    = getOffsetAndStride<Graph::Direction::Upstream>(i_thr_x);
+                    = getOffsetAndStride<Graph::Direction::Downstream>(i_thr_x);
                 auto [col_offset_reg, col_stride_reg]
-                    = getOffsetAndStride<Graph::Direction::Upstream>(i_thr_y);
+                    = getOffsetAndStride<Graph::Direction::Downstream>(i_thr_y);
 
-                auto bufferSrd = getBufferSrd<Graph::Direction::Upstream>(i_thr_x);
+                auto bufferSrd = getBufferSrd<Graph::Direction::Downstream>(i_thr_x);
                 auto bufDesc   = BufferDescriptor(bufferSrd, m_context);
                 auto bufOpt    = BufferInstructionOptions();
 

@@ -13,6 +13,15 @@ namespace rocRoller::KernelGraph
         m_map.emplace(key, coordinate);
     }
 
+    void ControlToCoordinateMapper::disconnect(int             control,
+                                               int             coordinate,
+                                               std::type_index tindex,
+                                               int             subDimension)
+    {
+        auto key = key_type{control, tindex, subDimension};
+        m_map.erase(key);
+    }
+
     std::vector<ControlToCoordinateMapper::Connection>
         ControlToCoordinateMapper::getConnections(int control) const
     {

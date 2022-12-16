@@ -61,6 +61,22 @@ namespace rocRoller::KernelGraph
         void connect(int control, int coordinate, int subDimension = 0);
 
         /**
+         * @brief Disconnects the control flow node `control` to the
+         * coorindate `coordinate`.
+         */
+        void disconnect(int control, int coordinate, std::type_index tindex, int subDimension);
+
+        /**
+         * @brief Disconnects the control flow node `control` to the
+         * coorindate `coordinate`.
+         *
+         * The type of coordinate is determined from the template
+         * parameter.
+         */
+        template <typename T>
+        void disconnect(int control, int coordinate, int subDimension = 0);
+
+        /**
          * @brief Get the coordinate index associated with the control
          * flow node `control`.
          */

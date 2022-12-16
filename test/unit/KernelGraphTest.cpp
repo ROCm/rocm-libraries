@@ -2650,7 +2650,6 @@ namespace KernelGraphTest
                 "coord38" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
                 "coord39" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
                 "coord42" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
-                "coord43" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
                 "coord50" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
                 "coord51" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
                 "coord52" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
@@ -2663,7 +2662,6 @@ namespace KernelGraphTest
                 "coord16" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
                 "coord73" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
                 "coord74" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
-                "coord77" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
                 "coord78" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
                 "coord85" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
                 "coord86" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
@@ -3337,7 +3335,7 @@ namespace KernelGraphTest
 
         std::string expected1 = R".(
        	    digraph {
-       	        "coord1"[label="User{NA}(1)"];
+       	  	    "coord1"[label="User{NA}(1)"];
        	  	    "coord2"[label="User{NA}(2)"];
        	  	    "coord3"[label="SubDimension{0, CommandArgument(Load_Tiled_1_size_0)}(3)"];
        	  	    "coord4"[label="SubDimension{1, CommandArgument(Load_Tiled_1_size_1)}(4)"];
@@ -3484,11 +3482,6 @@ namespace KernelGraphTest
        	  	    "coord18" -> "coord17"
        	  	    "coord19" -> "coord22"
        	  	    "coord20" -> "coord22"
-       	  	    "coord21" -> "coord101"
-       	  	    "coord21" -> "coord102"
-       	  	    "coord21" -> "coord103"
-       	  	    "coord21" -> "coord104"
-       	  	    "coord21" -> "coord105"
        	  	    "coord22" -> "coord21"
        	  	    "coord23" -> "coord21"
        	  	    "coord24" -> "coord33"
@@ -3552,7 +3545,12 @@ namespace KernelGraphTest
        	  	    "coord80" -> "coord85"
        	  	    "coord81" -> "coord86"
        	  	    "coord82" -> "coord87"
+       	  	    "coord83" -> "coord101"
+       	  	    "coord83" -> "coord102"
+       	  	    "coord83" -> "coord105"
        	  	    "coord83" -> "coord86"
+       	  	    "coord84" -> "coord103"
+       	  	    "coord84" -> "coord104"
        	  	    "coord84" -> "coord87"
        	  	    "coord85" -> "coord83"
        	  	    "coord85" -> "coord84"
@@ -3572,11 +3570,11 @@ namespace KernelGraphTest
        	  	    "coord98" -> "coord61"
        	  	    "coord99" -> "coord61"
        	  	    "coord100" -> "coord60"
-       	  	    "coord101" -> "coord83"
-       	  	    "coord102" -> "coord83"
-       	  	    "coord103" -> "coord84"
-       	  	    "coord104" -> "coord84"
-       	  	    "coord105" -> "coord83"
+       	  	    "coord101" -> "coord21"
+       	  	    "coord102" -> "coord21"
+       	  	    "coord103" -> "coord21"
+       	  	    "coord104" -> "coord21"
+       	  	    "coord105" -> "coord21"
        	  	    "coord107" -> "coord111"
        	  	    "coord108" -> "coord111"
        	  	    "coord109" -> "coord13"
@@ -4517,9 +4515,9 @@ namespace KernelGraphTest
         postParams->setDimensionInfo(38, WF);
         postParams->setDimensionInfo(36, WFX);
         postParams->setDimensionInfo(37, WFY);
-        postParams->setDimensionInfo(93, WF);
-        postParams->setDimensionInfo(91, WFX);
-        postParams->setDimensionInfo(92, WFY);
+        postParams->setDimensionInfo(91, WF);
+        postParams->setDimensionInfo(89, WFX);
+        postParams->setDimensionInfo(90, WFY);
 
         CommandKernel commandKernel(command, "BA", params, postParams);
         commandKernel.launchKernel(runtimeArgs.runtimeArguments());

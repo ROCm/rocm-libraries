@@ -140,15 +140,13 @@ namespace MatrixMultiplyTest
         auto WFX = KernelGraph::CoordGraph::Wavefront(0, two, one);
         auto WFY = KernelGraph::CoordGraph::Wavefront(1, two, one);
 
-        postParams->setDimensionInfo(41, WF); // A
-        postParams->setDimensionInfo(39, WFX);
-        postParams->setDimensionInfo(40, WFY);
-        postParams->setDimensionInfo(76, WF); // B
-        postParams->setDimensionInfo(74, WFX);
-        postParams->setDimensionInfo(75, WFY);
-        postParams->setDimensionInfo(119, WF); // C
-        postParams->setDimensionInfo(117, WFX);
-        postParams->setDimensionInfo(118, WFY);
+        std::vector<int> wavefront_ids = {41, 74, 115};
+        for(auto id : wavefront_ids)
+        {
+            postParams->setDimensionInfo(id, WF);
+            postParams->setDimensionInfo(id - 2, WFX);
+            postParams->setDimensionInfo(id - 1, WFY);
+        }
 
         CommandKernel commandKernel(command, "MatrixMultiplyMacroTile", params, postParams);
         commandKernel.launchKernel(runtimeArgs.runtimeArguments());
@@ -281,15 +279,13 @@ namespace MatrixMultiplyTest
         auto WFX  = KernelGraph::CoordGraph::Wavefront(0, two, nullptr);
         auto WFY  = KernelGraph::CoordGraph::Wavefront(1, two, nullptr);
 
-        postParams->setDimensionInfo(41, WF); // A
-        postParams->setDimensionInfo(39, WFX);
-        postParams->setDimensionInfo(40, WFY);
-        postParams->setDimensionInfo(76, WF); // B
-        postParams->setDimensionInfo(74, WFX);
-        postParams->setDimensionInfo(75, WFY);
-        postParams->setDimensionInfo(119, WF); // C
-        postParams->setDimensionInfo(117, WFX);
-        postParams->setDimensionInfo(118, WFY);
+        std::vector<int> wavefront_ids = {41, 74, 115};
+        for(auto id : wavefront_ids)
+        {
+            postParams->setDimensionInfo(id, WF);
+            postParams->setDimensionInfo(id - 2, WFX);
+            postParams->setDimensionInfo(id - 1, WFY);
+        }
 
         CommandKernel commandKernel(command, "MatrixMultiplyAB", params, postParams);
         commandKernel.launchKernel(runtimeArgs.runtimeArguments());
@@ -439,18 +435,13 @@ namespace MatrixMultiplyTest
         auto WFX = KernelGraph::CoordGraph::Wavefront(0, two, one);
         auto WFY = KernelGraph::CoordGraph::Wavefront(1, two, one);
 
-        postParams->setDimensionInfo(49, WF);
-        postParams->setDimensionInfo(47, WFX);
-        postParams->setDimensionInfo(48, WFY);
-        postParams->setDimensionInfo(84, WF);
-        postParams->setDimensionInfo(82, WFX);
-        postParams->setDimensionInfo(83, WFY);
-        postParams->setDimensionInfo(119, WF);
-        postParams->setDimensionInfo(117, WFX);
-        postParams->setDimensionInfo(118, WFY);
-        postParams->setDimensionInfo(174, WF);
-        postParams->setDimensionInfo(172, WFX);
-        postParams->setDimensionInfo(173, WFY);
+        std::vector<int> wavefront_ids = {49, 82, 115, 168};
+        for(auto id : wavefront_ids)
+        {
+            postParams->setDimensionInfo(id, WF);
+            postParams->setDimensionInfo(id - 2, WFX);
+            postParams->setDimensionInfo(id - 1, WFY);
+        }
 
         params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
         params->setManualWorkitemCount({NX, NY, NZ});

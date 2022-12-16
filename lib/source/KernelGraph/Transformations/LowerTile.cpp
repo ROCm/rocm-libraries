@@ -151,16 +151,25 @@ namespace rocRoller
                     CoordGraph::Flatten(), {block_number, block_index}, {lane});
 
                 auto wavetilesPerWorkgroup = m_params->getWaveTilesPerWorkgroup();
-                auto jammed_wavetile_x
-                    = graph.coordinates.addElement(CoordGraph::JammedWaveTileNumber(
-                        0, literal(wavetilesPerWorkgroup[0]), literal(1)));
-                auto jammed_wavetile_y
-                    = graph.coordinates.addElement(CoordGraph::JammedWaveTileNumber(
-                        1, literal(wavetilesPerWorkgroup[1]), literal(1)));
-                graph.mapper.connect<CoordGraph::JammedWaveTileNumber>(
-                    load_tag, jammed_wavetile_x, 0);
-                graph.mapper.connect<CoordGraph::JammedWaveTileNumber>(
-                    load_tag, jammed_wavetile_y, 1);
+
+                int jammed_wavetile_x = -1;
+                if(wavetilesPerWorkgroup[0] > 1)
+                {
+                    jammed_wavetile_x
+                        = graph.coordinates.addElement(CoordGraph::JammedWaveTileNumber(
+                            0, literal(wavetilesPerWorkgroup[0]), literal(1)));
+                    graph.mapper.connect<CoordGraph::JammedWaveTileNumber>(
+                        load_tag, jammed_wavetile_x, 0);
+                }
+                int jammed_wavetile_y = -1;
+                if(wavetilesPerWorkgroup[1] > 1)
+                {
+                    jammed_wavetile_y
+                        = graph.coordinates.addElement(CoordGraph::JammedWaveTileNumber(
+                            1, literal(wavetilesPerWorkgroup[1]), literal(1)));
+                    graph.mapper.connect<CoordGraph::JammedWaveTileNumber>(
+                        load_tag, jammed_wavetile_y, 1);
+                }
 
                 switch(wave_tile.layout)
                 {
@@ -463,16 +472,25 @@ namespace rocRoller
                 graph.coordinates.addElement(CoordGraph::Tile(), {block}, {row_block, col_block});
 
                 auto wavetilesPerWorkgroup = m_params->getWaveTilesPerWorkgroup();
-                auto jammed_wavetile_x
-                    = graph.coordinates.addElement(CoordGraph::JammedWaveTileNumber(
-                        0, literal(wavetilesPerWorkgroup[0]), literal(1)));
-                auto jammed_wavetile_y
-                    = graph.coordinates.addElement(CoordGraph::JammedWaveTileNumber(
-                        1, literal(wavetilesPerWorkgroup[1]), literal(1)));
-                graph.mapper.connect<CoordGraph::JammedWaveTileNumber>(
-                    store_tag, jammed_wavetile_x, 0);
-                graph.mapper.connect<CoordGraph::JammedWaveTileNumber>(
-                    store_tag, jammed_wavetile_y, 1);
+
+                int jammed_wavetile_x = -1;
+                if(wavetilesPerWorkgroup[0] > 1)
+                {
+                    jammed_wavetile_x
+                        = graph.coordinates.addElement(CoordGraph::JammedWaveTileNumber(
+                            0, literal(wavetilesPerWorkgroup[0]), literal(1)));
+                    graph.mapper.connect<CoordGraph::JammedWaveTileNumber>(
+                        store_tag, jammed_wavetile_x, 0);
+                }
+                int jammed_wavetile_y = -1;
+                if(wavetilesPerWorkgroup[1] > 1)
+                {
+                    jammed_wavetile_y
+                        = graph.coordinates.addElement(CoordGraph::JammedWaveTileNumber(
+                            1, literal(wavetilesPerWorkgroup[1]), literal(1)));
+                    graph.mapper.connect<CoordGraph::JammedWaveTileNumber>(
+                        store_tag, jammed_wavetile_y, 1);
+                }
 
                 if(wavetilesPerWorkgroup[0] > 1)
                     graph.coordinates.addElement(
@@ -756,6 +774,7 @@ namespace rocRoller
             graph.coordinates.deleteElement(std::vector<int>{a_tilenum_y},
                                             std::vector<int>{a_workgroup_y},
                                             CoordGraph::isEdge<CoordGraph::PassThrough>);
+            graph.mapper.disconnect<CoordGraph::Workgroup>(loadA[0], a_workgroup_y, 1);
             graph.coordinates.deleteElement(a_workgroup_y);
 
             // remove passthrough between B row block and x-workgroup
@@ -764,6 +783,7 @@ namespace rocRoller
             graph.coordinates.deleteElement(std::vector<int>{b_tilenum_x},
                                             std::vector<int>{b_workgroup_x},
                                             CoordGraph::isEdge<CoordGraph::PassThrough>);
+            graph.mapper.disconnect<CoordGraph::Workgroup>(loadB[0], b_workgroup_x, 0);
             graph.coordinates.deleteElement(b_workgroup_x);
 
             // A row block is x-workgroup, column block is for loop index

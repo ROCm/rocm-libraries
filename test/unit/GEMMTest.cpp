@@ -212,18 +212,21 @@ namespace GEMMDriverTest
         auto WFX = KernelGraph::CoordGraph::Wavefront(0, wavefront_nx, one);
         auto WFY = KernelGraph::CoordGraph::Wavefront(1, wavefront_ny, one);
 
-        postParams->setDimensionInfo(59, WF); // A
-        postParams->setDimensionInfo(57, WFX);
-        postParams->setDimensionInfo(58, WFY);
-        postParams->setDimensionInfo(94, WF); // B
-        postParams->setDimensionInfo(92, WFX);
-        postParams->setDimensionInfo(93, WFY);
-        postParams->setDimensionInfo(129, WF); // C
-        postParams->setDimensionInfo(127, WFX);
-        postParams->setDimensionInfo(128, WFY);
-        postParams->setDimensionInfo(184, WF); // D
-        postParams->setDimensionInfo(182, WFX);
-        postParams->setDimensionInfo(183, WFY);
+        std::vector<int> wavefront_ids = {59, 92, 125, 179};
+        if(wavetile_per_wavefront_m > 1 && wavetile_per_wavefront_n > 1)
+        {
+            wavefront_ids = {59, 94, 129, 184};
+        }
+        else if(wavetile_per_wavefront_m > 1 || wavetile_per_wavefront_n > 1)
+        {
+            wavefront_ids = {59, 93, 127, 181};
+        }
+        for(auto id : wavefront_ids)
+        {
+            postParams->setDimensionInfo(id, WF);
+            postParams->setDimensionInfo(id - 2, WFX);
+            postParams->setDimensionInfo(id - 1, WFY);
+        }
 
         CommandKernel commandKernel(command, "GEMMTest", params, postParams);
         commandKernel.launchKernel(runtimeArgs.runtimeArguments());
