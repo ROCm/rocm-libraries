@@ -19,6 +19,7 @@ namespace rocRoller
         struct LoadTiled;
         struct Multiply;
         struct Scope;
+        struct SetCoordinate;
         struct StoreLDSTile;
         struct StoreLinear;
         struct StoreTiled;
@@ -39,6 +40,7 @@ namespace rocRoller
                                        LoadVGPR,
                                        Multiply,
                                        Scope,
+                                       SetCoordinate,
                                        StoreLDSTile,
                                        StoreLinear,
                                        StoreTiled,

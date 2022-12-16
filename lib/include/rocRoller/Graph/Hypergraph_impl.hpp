@@ -561,8 +561,8 @@ namespace rocRoller
                     bool satisfied = (getElementType(end) != ElementType::Edge
                                       || edgeSatisfied<reverseDir>(end, visitedElements));
 
-                    visitedElements[end] |= visitedElements[nextElement];
-                    visitedElements[end] &= satisfied;
+                    visitedElements[end] = visitedElements[end] || visitedElements[nextElement];
+                    visitedElements[end] = visitedElements[end] && satisfied;
                 }
 
                 if(visitedElements.at(end))
@@ -627,6 +627,16 @@ namespace rocRoller
             auto start = roots().template to<std::vector>();
             auto end   = leaves().template to<std::vector>();
             co_yield path<Graph::Direction::Downstream>(start, end, visited);
+        }
+
+        template <typename Node, typename Edge, bool Hyper>
+        inline Generator<int> Hypergraph<Node, Edge, Hyper>::reverseTopologicalSort() const
+        {
+            std::map<int, bool> visited;
+
+            auto start = roots().template to<std::vector>();
+            auto end   = leaves().template to<std::vector>();
+            co_yield path<Graph::Direction::Upstream>(end, start, visited);
         }
 
         template <typename Node, typename Edge, bool Hyper>

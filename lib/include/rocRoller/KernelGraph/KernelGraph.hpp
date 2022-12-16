@@ -80,6 +80,8 @@ namespace rocRoller
         Expression::ExpressionPtr cleanArguments(Expression::ExpressionPtr,
                                                  std::shared_ptr<AssemblyKernel>);
 
+        KernelHypergraph unrollLoops(KernelHypergraph const&, ContextPtr);
+
         /**
          * Rewrite KernelGraphs to set dimension/operation perameters.
          */

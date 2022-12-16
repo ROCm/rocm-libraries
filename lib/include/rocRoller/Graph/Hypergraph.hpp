@@ -214,6 +214,14 @@ namespace rocRoller
              */
             Generator<int> topologicalSort() const;
 
+            /**
+             * @brief Return edges in reverse topological order.
+             *
+             * Traversing edges in reverse topological order can preserves edge
+             * dependencies.
+             */
+            Generator<int> reverseTopologicalSort() const;
+
             std::string toDOT(std::string prefix = "", bool standalone = true) const;
 
             template <typename T>

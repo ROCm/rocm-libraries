@@ -43,4 +43,18 @@ namespace rocRoller::KernelGraph::ControlHypergraph
         return false;
     }
 
+    template <typename T>
+    inline bool isEdge(auto x)
+    {
+        if constexpr(std::constructible_from<ControlEdge, T>)
+        {
+            if(std::holds_alternative<ControlEdge>(x))
+            {
+                if(std::holds_alternative<T>(std::get<ControlEdge>(x)))
+                    return true;
+            }
+        }
+        return false;
+    }
+
 }

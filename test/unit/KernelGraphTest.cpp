@@ -561,7 +561,7 @@ namespace KernelGraphTest
                 "cntrl3"[label="Body(3)",shape=box];
                 "cntrl4"[label="LoadLinear(4)"];
                 "cntrl5"[label="Body(5)",shape=box];
-                "cntrl6"[label="ElementOp(10, 4)(6)"];
+                "cntrl6"[label="ElementOp(5, 10)(6)"];
                 "cntrl7"[label="Sequence(7)",shape=box];
                 "cntrl8"[label="Sequence(8)",shape=box];
                 "cntrl9"[label="ElementOp(13, -1)(9)"];
@@ -1839,15 +1839,15 @@ namespace KernelGraphTest
                 "coord197"[label="Flatten(197)",shape=box];
                 "coord198"[label="Tile(198)",shape=box];
                 "coord199"[label="Linear{Divide(CommandArgument(Load_Tiled_0_size_1), 16j)}(199)"];
-                "coord200"[label="ForLoop{NA}(200)"];
+                "coord200"[label="ForLoop{Divide(CommandArgument(Load_Tiled_0_size_1), 16j)}(200)"];
                 "coord201"[label="DataFlow(201)",shape=box];
                 "coord202"[label="PassThrough(202)",shape=box];
                 "coord203"[label="PassThrough(203)",shape=box];
                 "coord204"[label="Linear{2j}(204)"];
-                "coord205"[label="ForLoop{NA}(205)"];
+                "coord205"[label="ForLoop{2j}(205)"];
                 "coord206"[label="DataFlow(206)",shape=box];
                 "coord207"[label="Linear{2j}(207)"];
-                "coord208"[label="ForLoop{NA}(208)"];
+                "coord208"[label="ForLoop{2j}(208)"];
                 "coord209"[label="DataFlow(209)",shape=box];
                 "coord210"[label="PassThrough(210)",shape=box];
                 "coord211"[label="PassThrough(211)",shape=box];
@@ -1940,11 +1940,6 @@ namespace KernelGraphTest
                 "coord32" -> "coord31"
                 "coord33" -> "coord36"
                 "coord34" -> "coord36"
-                "coord35" -> "coord237"
-                "coord35" -> "coord238"
-                "coord35" -> "coord239"
-                "coord35" -> "coord240"
-                "coord35" -> "coord241"
                 "coord36" -> "coord35"
                 "coord37" -> "coord35"
                 "coord38" -> "coord47"
@@ -2100,6 +2095,11 @@ namespace KernelGraphTest
                 "coord171" -> "coord181"
                 "coord172" -> "coord167"
                 "coord173" -> "coord190"
+                "coord173" -> "coord237"
+                "coord173" -> "coord238"
+                "coord173" -> "coord241"
+                "coord174" -> "coord239"
+                "coord174" -> "coord240"
                 "coord174" -> "coord196"
                 "coord175" -> "coord190"
                 "coord176" -> "coord197"
@@ -2167,11 +2167,11 @@ namespace KernelGraphTest
                 "coord234" -> "coord140"
                 "coord235" -> "coord140"
                 "coord236" -> "coord139"
-                "coord237" -> "coord173"
-                "coord238" -> "coord173"
-                "coord239" -> "coord174"
-                "coord240" -> "coord174"
-                "coord241" -> "coord173"
+                "coord237" -> "coord35"
+                "coord238" -> "coord35"
+                "coord239" -> "coord35"
+                "coord240" -> "coord35"
+                "coord241" -> "coord35"
                 {
                 rank=same
                 "coord8"->"coord9"[style=invis]

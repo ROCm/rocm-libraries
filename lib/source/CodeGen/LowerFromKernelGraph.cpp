@@ -609,6 +609,25 @@ namespace rocRoller
                 scope->add(ci.buffer);
             }
 
+            Generator<Instruction> operator()(int                                     tag,
+                                              ControlHypergraph::SetCoordinate const& setCoordinate,
+                                              CoordGraph::Transformer                 coords)
+            {
+                rocRoller::Log::getLogger()->debug(
+                    "KernelGraph::CodeGenerator::SetCoordinate({}): {}",
+                    tag,
+                    Expression::toString(setCoordinate.value));
+
+                auto connections = m_graph.mapper.getConnections(tag);
+                AssertFatal(connections.size() == 1,
+                            "Invalid SetCoordinate operation; coordinate missing.");
+                coords.setCoordinate(connections[0].coordinate, setCoordinate.value);
+
+                auto body = m_graph.control.getOutputNodeIndices<ControlHypergraph::Body>(tag)
+                                .to<std::set>();
+                co_yield generate(body, coords);
+            }
+
             Generator<Instruction> operator()(int                                  tag,
                                               ControlHypergraph::LoadLinear const& edge,
                                               CoordGraph::Transformer              coords)
@@ -1327,10 +1346,10 @@ namespace rocRoller
                 co_yield m_context->argLoader()->getValue(user.argumentName(), s_ptr);
 
                 auto [vgpr_block_offset_reg, vgpr_block_stride_reg]
-                    = getOffsetAndStride<Graph::Direction::Upstream>(vgpr_block_tag);
+                    = getOffsetAndStride<Graph::Direction::Downstream>(vgpr_block_tag);
                 auto [vgpr_index_offset_reg, vgpr_index_stride_reg]
-                    = getOffsetAndStride<Graph::Direction::Upstream>(vgpr_index_tag);
-                auto bufferSrd = getBufferSrd<Graph::Direction::Upstream>(vgpr_block_tag);
+                    = getOffsetAndStride<Graph::Direction::Downstream>(vgpr_index_tag);
+                auto bufferSrd = getBufferSrd<Graph::Direction::Downstream>(vgpr_block_tag);
 
                 auto bufDesc = BufferDescriptor(bufferSrd, m_context);
                 auto bufOpt  = BufferInstructionOptions();

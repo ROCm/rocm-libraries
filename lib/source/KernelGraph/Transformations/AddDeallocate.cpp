@@ -132,7 +132,7 @@ namespace rocRoller::KernelGraph
                 for(auto const& tag : nodes)
                 {
                     auto op = std::get<Operation>(m_graph.control.getElement(tag));
-                    (*this)(op, tag);
+                    call(op, tag);
                 }
 
                 // Add output nodes to candidates.
@@ -148,7 +148,7 @@ namespace rocRoller::KernelGraph
             }
         }
 
-        void operator()(Operation const& op, int tag)
+        void call(Operation const& op, int tag)
         {
             std::visit(*this, op, std::variant<int>(tag));
             m_completedControlNodes.insert(tag);
@@ -165,6 +165,8 @@ namespace rocRoller::KernelGraph
         {
             // already in a scope
         }
+
+        void operator()(Deallocate const& op, int tag) {}
 
         void operator()(ElementOp const& op, int tag)
         {
@@ -232,6 +234,12 @@ namespace rocRoller::KernelGraph
         }
 
         void operator()(Scope const& op, int tag)
+        {
+            auto body = m_graph.control.getOutputNodeIndices<Body>(tag).to<std::set>();
+            generate(body);
+        }
+
+        void operator()(SetCoordinate const& op, int tag)
         {
             auto body = m_graph.control.getOutputNodeIndices<Body>(tag).to<std::set>();
             generate(body);

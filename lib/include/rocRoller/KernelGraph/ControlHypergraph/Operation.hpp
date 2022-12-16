@@ -52,6 +52,24 @@ namespace rocRoller
         };
 
         /**
+         * SetCoordinate - Sets the value of a Coordinate
+         */
+        struct SetCoordinate
+        {
+            SetCoordinate(Expression::ExpressionPtr value)
+                : value(value)
+            {
+            }
+
+            Expression::ExpressionPtr value;
+
+            std::string toString() const
+            {
+                return "SetCoordinate";
+            }
+        };
+
+        /**
          * ForLoopOp - Represents a for loop.
          *
          * Must have nodes connected via the following outgoing edges:

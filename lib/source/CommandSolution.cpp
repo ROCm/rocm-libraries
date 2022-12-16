@@ -212,6 +212,8 @@ namespace rocRoller
 
         m_kernelGraph = KernelGraph::lowerTile(m_kernelGraph, m_preParameters, m_context);
 
+        m_kernelGraph = KernelGraph::unrollLoops(m_kernelGraph, m_context);
+
         m_kernelGraph = KernelGraph::addDeallocate(m_kernelGraph);
 
         m_kernelGraph = KernelGraph::cleanArguments(m_kernelGraph, m_context->kernel());

@@ -18,9 +18,9 @@ namespace rocRoller
          */
         std::pair<int, int> rangeFor(KernelHypergraph& graph, Expression::ExpressionPtr size)
         {
-            auto unit_stride  = Expression::literal(1u);
-            auto rangeK       = graph.coordinates.addElement(CoordGraph::Linear(size, unit_stride));
-            auto dimK         = graph.coordinates.addElement(CoordGraph::ForLoop());
+            auto unit_stride = Expression::literal(1u);
+            auto rangeK      = graph.coordinates.addElement(CoordGraph::Linear(size, unit_stride));
+            auto dimK        = graph.coordinates.addElement(CoordGraph::ForLoop(size, unit_stride));
             auto sizeDataType = Expression::resultVariableType(size);
             auto exprK        = std::make_shared<Expression::Expression>(
                 DataFlowTag{rangeK, Register::Type::Scalar, sizeDataType});

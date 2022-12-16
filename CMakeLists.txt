@@ -241,6 +241,7 @@ set(rocroller_src
  lib/source/KernelGraph/Transformations/KernelGraph_unrollKernel.cpp
  lib/source/KernelGraph/Transformations/LowerLinear.cpp
  lib/source/KernelGraph/Transformations/LowerTile.cpp
+ lib/source/KernelGraph/Transformations/UnrollLoops.cpp
  lib/source/KernelGraph/Transformations/UpdateParameters.cpp
  lib/source/KernelGraph/ControlToCoordinateMapper.cpp
  lib/source/KernelGraph/KernelHypergraph.cpp

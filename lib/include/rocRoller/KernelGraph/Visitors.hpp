@@ -75,8 +75,12 @@ namespace rocRoller
          */
         struct BaseGraphVisitor
         {
-            BaseGraphVisitor(std::shared_ptr<Context> context)
+            BaseGraphVisitor(std::shared_ptr<Context> context,
+                             Graph::Direction controlGraphOrder  = Graph::Direction::Downstream,
+                             bool             rewriteCoordinates = true)
                 : m_context(context)
+                , m_controlGraphDirection(controlGraphOrder)
+                , m_rewriteCoordinates(rewriteCoordinates)
             {
             }
 
@@ -85,8 +89,7 @@ namespace rocRoller
                           GraphReindexer&         reindexer,
                           int                     edge)
             {
-                auto location = original.coordinates.getLocation(edge);
-
+                auto             location = original.coordinates.getLocation(edge);
                 std::vector<int> inputs;
                 for(auto const& input : location.incoming)
                 {
@@ -135,18 +138,39 @@ namespace rocRoller
             {
                 auto location = original.control.getLocation(old_tag);
 
-                for(auto const& input : location.incoming)
+                if(m_controlGraphDirection == Graph::Direction::Downstream)
                 {
-                    int parent = *original.control.getNeighbours<Graph::Direction::Upstream>(input)
-                                      .begin();
-                    AssertFatal(reindexer.control.count(parent) > 0,
-                                "Missing control input: ",
-                                ShowValue(old_tag),
-                                ShowValue(input),
-                                ShowValue(parent));
-                    graph.control.addElement(original.control.getElement(input),
-                                             {reindexer.control.at(parent)},
-                                             {new_tag});
+                    for(auto const& input : location.incoming)
+                    {
+                        int parent
+                            = *original.control.getNeighbours<Graph::Direction::Upstream>(input)
+                                   .begin();
+                        AssertFatal(reindexer.control.count(parent) > 0,
+                                    "Missing control input: ",
+                                    ShowValue(old_tag),
+                                    ShowValue(input),
+                                    ShowValue(parent));
+                        graph.control.addElement(original.control.getElement(input),
+                                                 {reindexer.control.at(parent)},
+                                                 {new_tag});
+                    }
+                }
+                else
+                {
+                    for(auto const& output : location.outgoing)
+                    {
+                        int child
+                            = *original.control.getNeighbours<Graph::Direction::Downstream>(output)
+                                   .begin();
+                        AssertFatal(reindexer.control.count(child) > 0,
+                                    "Missing control output: ",
+                                    ShowValue(old_tag),
+                                    ShowValue(output),
+                                    ShowValue(child));
+                        graph.control.addElement(original.control.getElement(output),
+                                                 {new_tag},
+                                                 {reindexer.control.at(child)});
+                    }
                 }
             }
 
@@ -159,14 +183,26 @@ namespace rocRoller
                                    int                     new_tag,
                                    int                     old_tag)
             {
-                for(auto const& c : original.mapper.getConnections(old_tag))
+                if(m_rewriteCoordinates)
                 {
-                    AssertFatal(reindexer.coordinates.count(c.coordinate) > 0,
-                                "Missing mapped coordinate: ",
-                                ShowValue(old_tag),
-                                ShowValue(c.coordinate));
-                    graph.mapper.connect(
-                        new_tag, reindexer.coordinates.at(c.coordinate), c.tindex, c.subDimension);
+                    for(auto const& c : original.mapper.getConnections(old_tag))
+                    {
+                        AssertFatal(reindexer.coordinates.count(c.coordinate) > 0,
+                                    "Missing mapped coordinate: ",
+                                    ShowValue(old_tag),
+                                    ShowValue(c.coordinate));
+                        graph.mapper.connect(new_tag,
+                                             reindexer.coordinates.at(c.coordinate),
+                                             c.tindex,
+                                             c.subDimension);
+                    }
+                }
+                else
+                {
+                    for(auto const& c : original.mapper.getConnections(old_tag))
+                    {
+                        graph.mapper.connect(new_tag, c.coordinate, c.tindex, c.subDimension);
+                    }
                 }
             }
 
@@ -218,6 +254,16 @@ namespace rocRoller
                 return m_context->kernel()->workgroupCount(2);
             }
 
+            Graph::Direction controlGraphDirection() const
+            {
+                return m_controlGraphDirection;
+            }
+
+            bool rewriteCoordinates() const
+            {
+                return m_rewriteCoordinates;
+            }
+
             virtual void visitOperation(KernelHypergraph&                           graph,
                                         KernelHypergraph const&                     original,
                                         GraphReindexer&                             reindexer,
@@ -226,11 +272,55 @@ namespace rocRoller
             {
                 copyOperation(graph, original, reindexer, tag);
 
-                auto new_tag = reindexer.control.at(tag);
-                auto new_op  = graph.control.getNode<ControlHypergraph::TensorContraction>(new_tag);
-                new_op.a     = reindexer.coordinates.at(op.a);
-                new_op.b     = reindexer.coordinates.at(op.b);
-                graph.control.setElement(new_tag, new_op);
+                if(m_rewriteCoordinates)
+                {
+                    auto new_tag = reindexer.control.at(tag);
+                    auto new_op
+                        = graph.control.getNode<ControlHypergraph::TensorContraction>(new_tag);
+                    new_op.a = reindexer.coordinates.at(op.a);
+                    new_op.b = reindexer.coordinates.at(op.b);
+                    graph.control.setElement(new_tag, new_op);
+                }
+            }
+
+            virtual void visitOperation(KernelHypergraph&                      graph,
+                                        KernelHypergraph const&                original,
+                                        GraphReindexer&                        reindexer,
+                                        int                                    tag,
+                                        ControlHypergraph::ComputeIndex const& op)
+            {
+                copyOperation(graph, original, reindexer, tag);
+
+                if(m_rewriteCoordinates)
+                {
+                    auto new_tag  = reindexer.control.at(tag);
+                    auto new_op   = graph.control.getNode<ControlHypergraph::ComputeIndex>(new_tag);
+                    new_op.target = op.target > 0 ? reindexer.coordinates.at(op.target) : op.target;
+                    new_op.increment
+                        = op.increment > 0 ? reindexer.coordinates.at(op.increment) : op.increment;
+                    new_op.base   = op.base > 0 ? reindexer.coordinates.at(op.base) : op.base;
+                    new_op.offset = op.offset > 0 ? reindexer.coordinates.at(op.offset) : op.offset;
+                    new_op.stride = op.stride > 0 ? reindexer.coordinates.at(op.stride) : op.stride;
+                    graph.control.setElement(new_tag, new_op);
+                }
+            }
+
+            virtual void visitOperation(KernelHypergraph&                   graph,
+                                        KernelHypergraph const&             original,
+                                        GraphReindexer&                     reindexer,
+                                        int                                 tag,
+                                        ControlHypergraph::ElementOp const& op)
+            {
+                copyOperation(graph, original, reindexer, tag);
+
+                if(m_rewriteCoordinates)
+                {
+                    auto new_tag = reindexer.control.at(tag);
+                    auto new_op  = graph.control.getNode<ControlHypergraph::ElementOp>(new_tag);
+                    new_op.a     = op.a > 0 ? reindexer.coordinates.at(op.a) : op.a;
+                    new_op.b     = op.b > 0 ? reindexer.coordinates.at(op.b) : op.b;
+                    graph.control.setElement(new_tag, new_op);
+                }
             }
 
             MAKE_EDGE_VISITOR(ConstructMacroTile);
@@ -247,7 +337,6 @@ namespace rocRoller
             MAKE_EDGE_VISITOR(Split);
             MAKE_EDGE_VISITOR(Tile);
 
-            MAKE_OPERATION_VISITOR(ElementOp);
             MAKE_OPERATION_VISITOR(Kernel);
             MAKE_OPERATION_VISITOR(LoadLDSTile);
             MAKE_OPERATION_VISITOR(LoadLinear);
@@ -263,7 +352,7 @@ namespace rocRoller
             MAKE_OPERATION_VISITOR(Assign);
             MAKE_OPERATION_VISITOR(UnrollOp);
             MAKE_OPERATION_VISITOR(Barrier);
-            MAKE_OPERATION_VISITOR(ComputeIndex);
+            MAKE_OPERATION_VISITOR(SetCoordinate);
             MAKE_OPERATION_VISITOR(Deallocate);
 
             virtual void visitEdge(KernelHypergraph&                          graph,
@@ -289,12 +378,15 @@ namespace rocRoller
             virtual void visitRoot(KernelHypergraph&       graph,
                                    KernelHypergraph const& original,
                                    GraphReindexer&         reindexer,
-                                   int                     kernel)
+                                   int                     tag)
             {
+                copyOperation(graph, original, reindexer, tag);
             }
 
         protected:
             std::shared_ptr<Context> m_context;
+            Graph::Direction         m_controlGraphDirection;
+            bool                     m_rewriteCoordinates;
         };
 #undef MAKE_OPERATION_VISITOR
 #undef MAKE_EDGE_VISITOR
@@ -312,34 +404,46 @@ namespace rocRoller
             KernelHypergraph graph;
             GraphReindexer   reindexer;
 
-            // add coordinate roots
-            for(auto const& index : original.coordinates.roots())
+            if(visitor.rewriteCoordinates())
             {
-                reindexer.coordinates.emplace(
-                    index, graph.coordinates.addElement(original.coordinates.getElement(index)));
-            }
-
-            for(auto const& index : original.coordinates.topologicalSort())
-            {
-                auto element = original.coordinates.getElement(index);
-                if(std::holds_alternative<CoordGraph::Edge>(element))
+                // add coordinate roots
+                for(auto const& index : original.coordinates.roots())
                 {
-                    auto edge = std::get<CoordGraph::Edge>(element);
-                    std::visit(
-                        [&](auto&& arg) {
-                            visitor.visitEdge(graph, original, reindexer, index, arg);
-                        },
-                        edge);
+                    reindexer.coordinates.emplace(
+                        index,
+                        graph.coordinates.addElement(original.coordinates.getElement(index)));
                 }
+
+                for(auto const& index : original.coordinates.topologicalSort())
+                {
+                    auto element = original.coordinates.getElement(index);
+                    if(std::holds_alternative<CoordGraph::Edge>(element))
+                    {
+                        auto edge = std::get<CoordGraph::Edge>(element);
+                        std::visit(
+                            [&](auto&& arg) {
+                                visitor.visitEdge(graph, original, reindexer, index, arg);
+                            },
+                            edge);
+                    }
+                }
+            }
+            else
+            {
+                graph.coordinates = original.coordinates;
             }
 
             // add control flow roots
             int kernel = *original.control.roots().begin();
-            reindexer.control.emplace(
-                kernel, graph.control.addElement(original.control.getElement(kernel)));
-            visitor.visitRoot(graph, original, reindexer, kernel);
 
-            for(auto const& index : original.control.topologicalSort())
+            if(visitor.controlGraphDirection() == Graph::Direction::Downstream)
+            {
+                visitor.visitRoot(graph, original, reindexer, kernel);
+            }
+
+            for(auto const& index : visitor.controlGraphDirection() == Graph::Direction::Downstream
+                                        ? original.control.topologicalSort()
+                                        : original.control.reverseTopologicalSort())
             {
                 auto element = original.control.getElement(index);
                 if(std::holds_alternative<ControlHypergraph::Operation>(element))
@@ -353,6 +457,11 @@ namespace rocRoller
                         },
                         node);
                 }
+            }
+
+            if(visitor.controlGraphDirection() == Graph::Direction::Upstream)
+            {
+                visitor.visitRoot(graph, original, reindexer, kernel);
             }
 
             return graph;

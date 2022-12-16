@@ -57,6 +57,12 @@ namespace rocRoller
         template <typename T>
         bool isOperation(auto x);
 
+        /**
+         * @brief Determine if x holds a ControlEdge of type T.
+         */
+        template <typename T>
+        bool isEdge(auto x);
+
     }
 }
 

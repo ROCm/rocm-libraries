@@ -152,11 +152,25 @@ namespace rocRoller
                 dtype  = l ? l->vtype.dataType : s->dataType;
             }
 
-            auto offset_vgpr_block = graph.coordinates.addElement(Offset(), {user}, {vgpr_block});
-            auto stride_vgpr_block = graph.coordinates.addElement(Stride(), {user}, {vgpr_block});
-            auto offset_vgpr_index = graph.coordinates.addElement(Offset(), {user}, {vgpr_index});
-            auto stride_vgpr_index = graph.coordinates.addElement(Stride(), {user}, {vgpr_index});
-            auto buffer            = graph.coordinates.addElement(Buffer(), {user}, {vgpr_block});
+            int offset_vgpr_block, stride_vgpr_block;
+            int offset_vgpr_index, stride_vgpr_index;
+            int buffer;
+            if(!forward)
+            {
+                offset_vgpr_block = graph.coordinates.addElement(Offset(), {user}, {vgpr_block});
+                stride_vgpr_block = graph.coordinates.addElement(Stride(), {user}, {vgpr_block});
+                offset_vgpr_index = graph.coordinates.addElement(Offset(), {user}, {vgpr_index});
+                stride_vgpr_index = graph.coordinates.addElement(Stride(), {user}, {vgpr_index});
+                buffer            = graph.coordinates.addElement(Buffer(), {user}, {vgpr_block});
+            }
+            else
+            {
+                offset_vgpr_block = graph.coordinates.addElement(Offset(), {vgpr_block}, {user});
+                stride_vgpr_block = graph.coordinates.addElement(Stride(), {vgpr_block}, {user});
+                offset_vgpr_index = graph.coordinates.addElement(Offset(), {vgpr_index}, {user});
+                stride_vgpr_index = graph.coordinates.addElement(Stride(), {vgpr_index}, {user});
+                buffer            = graph.coordinates.addElement(Buffer(), {vgpr_block}, {user});
+            }
 
             auto ci_vgpr_block = graph.control.addElement(ComputeIndex(user,
                                                                        vgpr_block,
