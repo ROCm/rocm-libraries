@@ -1047,6 +1047,7 @@ namespace MemoryInstructionsTest
         // Test loadLocalWidth
         {
             auto kb = [&]() -> Generator<Instruction> {
+                co_yield m_context->mem()->barrier();
                 co_yield m_context->mem()->loadLocal(v_data, v_addr_32bit, 0, 16);
             };
 
