@@ -77,7 +77,7 @@ namespace rocRoller
             {
             }
 
-            virtual std::string name() const override
+            std::string name() const override
             {
                 return m_name;
             }
@@ -134,7 +134,7 @@ namespace rocRoller
             {
             }
 
-            virtual std::string name() const override
+            std::string name() const override
             {
                 return "User";
             }
@@ -155,7 +155,7 @@ namespace rocRoller
         {
             using BaseDimension::BaseDimension;
 
-            virtual std::string name() const override
+            std::string name() const override
             {
                 return "Linear";
             }
@@ -168,7 +168,7 @@ namespace rocRoller
         {
             using SubDimension::SubDimension;
 
-            virtual std::string name() const override
+            std::string name() const override
             {
                 return "Wavefront";
             }
@@ -181,7 +181,7 @@ namespace rocRoller
         {
             using BaseDimension::BaseDimension;
 
-            virtual std::string name() const override
+            std::string name() const override
             {
                 return "Lane";
             }
@@ -200,12 +200,12 @@ namespace rocRoller
             {
             }
 
-            virtual std::string name() const override
+            std::string name() const override
             {
                 return "Workgroup";
             }
 
-            virtual std::string toString() const override
+            std::string toString() const override
             {
                 return SubDimension::toString();
             }
@@ -224,7 +224,7 @@ namespace rocRoller
             {
             }
 
-            virtual std::string name() const override
+            std::string name() const override
             {
                 return "Workitem";
             }
@@ -237,7 +237,7 @@ namespace rocRoller
         {
             using BaseDimension::BaseDimension;
 
-            virtual std::string name() const override
+            std::string name() const override
             {
                 return "VGPR";
             }
@@ -247,7 +247,7 @@ namespace rocRoller
         {
             using BaseDimension::BaseDimension;
 
-            virtual std::string name() const override
+            std::string name() const override
             {
                 return "VGPRBlockNumber";
             }
@@ -257,7 +257,7 @@ namespace rocRoller
         {
             using BaseDimension::BaseDimension;
 
-            virtual std::string name() const override
+            std::string name() const override
             {
                 return "VGPRBlockIndex";
             }
@@ -270,7 +270,7 @@ namespace rocRoller
         {
             using BaseDimension::BaseDimension;
 
-            virtual std::string name() const override
+            std::string name() const override
             {
                 return "LDS";
             }
@@ -283,7 +283,7 @@ namespace rocRoller
         {
             using BaseDimension::BaseDimension;
 
-            virtual std::string name() const override
+            std::string name() const override
             {
                 return "ForLoop";
             }
@@ -310,7 +310,7 @@ namespace rocRoller
                 stride = rocRoller::Expression::literal(1);
             }
 
-            virtual std::string name() const override
+            std::string name() const override
             {
                 return "Unroll";
             }
@@ -322,7 +322,7 @@ namespace rocRoller
         {
             using SubDimension::SubDimension;
 
-            virtual std::string name() const
+            std::string name() const override
             {
                 return "MacroTileIndex";
             }
@@ -335,7 +335,7 @@ namespace rocRoller
         {
             using SubDimension::SubDimension;
 
-            virtual std::string name() const
+            std::string name() const override
             {
                 return "MacroTileNumber";
             }
@@ -413,7 +413,7 @@ namespace rocRoller
                 AssertFatal(layoutType != LayoutType::None, "Invalid layout type.");
             }
 
-            virtual std::string toString() const override
+            std::string toString() const override
             {
                 if(!sizes.empty())
                 {
@@ -427,7 +427,7 @@ namespace rocRoller
                 return BaseDimension::toString();
             }
 
-            virtual std::string name() const override
+            std::string name() const override
             {
                 return "MacroTile";
             }
@@ -462,7 +462,7 @@ namespace rocRoller
         {
             using SubDimension::SubDimension;
 
-            virtual std::string name() const
+            std::string name() const override
             {
                 return "ThreadTileIndex";
             }
@@ -475,7 +475,7 @@ namespace rocRoller
         {
             using SubDimension::SubDimension;
 
-            virtual std::string name() const
+            std::string name() const override
             {
                 return "ThreadTileNumber";
             }
@@ -507,7 +507,7 @@ namespace rocRoller
             {
             }
 
-            virtual std::string name() const
+            std::string name() const override
             {
                 return "ThreadTile";
             }
@@ -530,7 +530,7 @@ namespace rocRoller
         {
             using SubDimension::SubDimension;
 
-            virtual std::string name() const
+            std::string name() const override
             {
                 return "WaveTileIndex";
             }
@@ -543,7 +543,7 @@ namespace rocRoller
         {
             using SubDimension::SubDimension;
 
-            virtual std::string name() const
+            std::string name() const override
             {
                 return "WaveTileNumber";
             }
@@ -591,7 +591,7 @@ namespace rocRoller
             {
             }
 
-            virtual std::string name() const
+            std::string name() const override
             {
                 return "WaveTile";
             }
@@ -619,7 +619,7 @@ namespace rocRoller
         {
             using SubDimension::SubDimension;
 
-            virtual std::string name() const
+            std::string name() const override
             {
                 return "WaveTilePerWorkGroup";
             }

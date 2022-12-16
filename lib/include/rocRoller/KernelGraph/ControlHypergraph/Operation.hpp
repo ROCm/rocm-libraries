@@ -209,7 +209,7 @@ namespace rocRoller
 
             rocRoller::VariableType varType;
 
-            virtual std::string toString() const override
+            std::string toString() const override
             {
                 return "LoadLinear";
             }
@@ -236,7 +236,7 @@ namespace rocRoller
 
             VariableType vtype;
 
-            virtual std::string toString() const override
+            std::string toString() const override
             {
                 return concatenate("LoadTiled");
             }
@@ -257,7 +257,7 @@ namespace rocRoller
             VariableType vtype;
             bool         scalar;
 
-            virtual std::string toString() const override
+            std::string toString() const override
             {
                 return "LoadVGPR";
             }
@@ -268,7 +268,7 @@ namespace rocRoller
          */
         struct LoadLDSTile : BaseOperation
         {
-            virtual std::string toString() const
+            std::string toString() const override
             {
                 return "LoadLDSTile";
             }
@@ -290,7 +290,7 @@ namespace rocRoller
          */
         struct StoreLinear : public BaseOperation
         {
-            virtual std::string toString() const override
+            std::string toString() const override
             {
                 return "StoreLinear";
             }
@@ -312,7 +312,7 @@ namespace rocRoller
 
             DataType dataType;
 
-            virtual std::string toString() const override
+            std::string toString() const override
             {
                 return "StoreTiled";
             }
@@ -323,7 +323,7 @@ namespace rocRoller
          */
         struct StoreVGPR : public BaseOperation
         {
-            virtual std::string toString() const override
+            std::string toString() const override
             {
                 return "StoreVGPR";
             }
@@ -334,7 +334,7 @@ namespace rocRoller
          */
         struct StoreLDSTile : public BaseOperation
         {
-            virtual std::string toString() const
+            std::string toString() const override
             {
                 return "StoreLDSTile";
             }
@@ -355,7 +355,7 @@ namespace rocRoller
             Operations::XOp op;
             int             a, b;
 
-            virtual std::string toString() const override
+            std::string toString() const override
             {
                 return concatenate("ElementOp(", a, ", ", b, ")");
             }
@@ -381,7 +381,7 @@ namespace rocRoller
             int              a, b;
             std::vector<int> aDims, bDims; // contracted dimensions
 
-            virtual std::string toString() const override
+            std::string toString() const override
             {
                 return concatenate("TensorContraction(", a, ", ", b, ")");
             }

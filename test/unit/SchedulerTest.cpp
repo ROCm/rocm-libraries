@@ -486,7 +486,7 @@ namespace rocRollerTest
 
     struct RandomSchedulerTest : public SchedulerTest, public testing::WithParamInterface<int>
     {
-        virtual void SetUp() override
+        void SetUp() override
         {
             GenericContextFixture::SetUp();
             int seed = GetParam();
