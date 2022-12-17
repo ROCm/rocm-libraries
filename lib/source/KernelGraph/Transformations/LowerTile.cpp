@@ -18,7 +18,6 @@ namespace rocRoller
 {
     namespace KernelGraph
     {
-        namespace Expression = rocRoller::Expression;
         using namespace Expression;
 
         /*

@@ -121,22 +121,22 @@ namespace GPUArchitectureGenerator
 
            {rocRoller::GPUCapability::HasWave64, SupportedISAs}};
 
-    bool Is10XGPU(rocRoller::GPUArchitectureTarget input)
+    inline bool Is10XGPU(rocRoller::GPUArchitectureTarget input)
     {
         return input.ToString().find("gfx10") == 0;
     }
 
-    bool Is9XGPU(rocRoller::GPUArchitectureTarget input)
+    inline bool Is9XGPU(rocRoller::GPUArchitectureTarget input)
     {
         return input.ToString().find("gfx9") == 0;
     }
 
-    bool Is90aGPU(rocRoller::GPUArchitectureTarget input)
+    inline bool Is90aGPU(rocRoller::GPUArchitectureTarget input)
     {
         return input.ToString().find("gfx90a") == 0;
     }
 
-    std::vector<rocRoller::GPUArchitectureTarget> gfx9ISAs()
+    inline std::vector<rocRoller::GPUArchitectureTarget> gfx9ISAs()
     {
         std::vector<rocRoller::GPUArchitectureTarget> retval;
         std::copy_if(SupportedISAs.begin(),
