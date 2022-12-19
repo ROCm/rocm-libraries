@@ -64,6 +64,13 @@ namespace rocRoller
                  */
                 obs.getNops(inst)
                 } -> std::same_as<int>;
+
+            {
+                /*
+                * Get a descpritve comment string
+                */
+                obs.getComment()
+                } -> std::same_as<std::string>;
         };
 
         template <class DerivedObserver>

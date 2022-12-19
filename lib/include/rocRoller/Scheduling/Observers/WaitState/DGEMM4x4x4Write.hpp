@@ -38,10 +38,14 @@ namespace rocRoller
                 return context->targetArchitecture().target().getVersionString() == "gfx90a";
             }
 
-            int  getMaxNops(std::shared_ptr<InstructionRef> inst) const;
-            bool trigger(std::shared_ptr<InstructionRef> inst) const;
-            bool writeTrigger() const;
-            int  getNops(Instruction const& inst) const;
+            int         getMaxNops(std::shared_ptr<InstructionRef> inst) const;
+            bool        trigger(std::shared_ptr<InstructionRef> inst) const;
+            bool        writeTrigger() const;
+            int         getNops(Instruction const& inst) const;
+            std::string getComment() const
+            {
+                return "DGEMM Write Hazard";
+            }
 
         private:
             std::string m_targetOpCode = "v_mfma_f64_4x4x4f64";

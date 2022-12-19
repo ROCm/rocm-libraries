@@ -24,10 +24,14 @@ namespace rocRoller
                 return arch == "gfx90a" || arch == "gfx908";
             }
 
-            int  getMaxNops(std::shared_ptr<InstructionRef> inst) const;
-            bool trigger(std::shared_ptr<InstructionRef> inst) const;
-            bool writeTrigger() const;
-            int  getNops(Instruction const& inst) const;
+            int         getMaxNops(std::shared_ptr<InstructionRef> inst) const;
+            bool        trigger(std::shared_ptr<InstructionRef> inst) const;
+            bool        writeTrigger() const;
+            int         getNops(Instruction const& inst) const;
+            std::string getComment() const
+            {
+                return "EXEC Write Hazard";
+            }
 
         private:
             bool      checkACCVGPR;

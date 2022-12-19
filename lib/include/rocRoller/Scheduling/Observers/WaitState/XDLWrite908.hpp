@@ -39,10 +39,14 @@ namespace rocRoller
                 return context->targetArchitecture().target().getVersionString() == "gfx908";
             }
 
-            int  getMaxNops(std::shared_ptr<InstructionRef> inst) const;
-            bool trigger(std::shared_ptr<InstructionRef> inst) const;
-            bool writeTrigger() const;
-            int  getNops(Instruction const& inst) const;
+            int         getMaxNops(std::shared_ptr<InstructionRef> inst) const;
+            bool        trigger(std::shared_ptr<InstructionRef> inst) const;
+            bool        writeTrigger() const;
+            int         getNops(Instruction const& inst) const;
+            std::string getComment() const
+            {
+                return "XDL Write Hazard";
+            }
 
         private:
             std::unordered_map<int, int> m_maxLatencyAndNops = {{2, 4}, {8, 10}, {16, 18}};

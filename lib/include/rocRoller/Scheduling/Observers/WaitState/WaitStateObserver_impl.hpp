@@ -17,7 +17,13 @@ namespace rocRoller
         template <class DerivedObserver>
         void WaitStateObserver<DerivedObserver>::modify(Instruction& inst) const
         {
-            inst.setNopMin(std::max(static_cast<DerivedObserver const*>(this)->getNops(inst), 0));
+            auto const* thisDerived  = static_cast<DerivedObserver const*>(this);
+            int         requiredNops = std::max(thisDerived->getNops(inst), 0);
+            inst.setNopMin(requiredNops);
+            if(requiredNops > 0)
+            {
+                inst.addComment("Wait state hazard: " + thisDerived->getComment());
+            }
         }
 
         template <class DerivedObserver>

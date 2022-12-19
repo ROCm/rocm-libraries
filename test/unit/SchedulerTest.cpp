@@ -773,6 +773,7 @@ namespace rocRollerTest
                         v_mfma_f32_32x32x1f32 v12, v13, v14, v15 // stream3
                         s_nop 13
                         v_or_b32 v16, v0, v1 // stream2
+                        // Wait state hazard: XDL Write Hazard
                         unrelated_op_3 // stream2
                         v_or_b32 v17, v8, v9 // stream2
                         v_or_b32 v18, v4, v5 // stream3
