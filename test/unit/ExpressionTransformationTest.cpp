@@ -30,7 +30,7 @@ TEST_F(ExpressionTransformationTest, Simplify)
 
     // multiply
     EXPECT_EQ(Expression::toString(simplify(zero * one)), "0i");
-    EXPECT_EQ(Expression::toString(simplify(c * zero)), "0i");
+    EXPECT_EQ(Expression::toString(simplify(c * zero)), "0.00000f");
     EXPECT_EQ(Expression::toString(simplify(c * one)), "12.0000f");
     EXPECT_EQ(Expression::toString(simplify(v * zero)), "0i");
     EXPECT_EQ(Expression::toString(simplify(v * zero)), "0i");
@@ -61,14 +61,19 @@ TEST_F(ExpressionTransformationTest, Simplify)
     EXPECT_EQ(Expression::toString(simplify(v & (zero + zero))), "0i");
 
     // shiftL
-    EXPECT_EQ(Expression::toString(simplify(one << zero)), "1i");
+    EXPECT_EQ(Expression::toString(simplify(v << zero)), "v0:I");
     EXPECT_EQ(Expression::toString(simplify((one << one) << one)), "4i");
-    EXPECT_EQ(Expression::toString(simplify(one << (one << one))), "4i");
+    EXPECT_EQ(Expression::toString(simplify(v << (zero << zero))), "v0:I");
+
+    // signedShiftR
+    EXPECT_EQ(Expression::toString(simplify(v >> zero)), "v0:I");
+    EXPECT_EQ(Expression::toString(simplify((a >> one) >> one)), "8i");
+    EXPECT_EQ(Expression::toString(simplify(v >> (zero >> zero))), "v0:I");
 
     // shiftR
-    EXPECT_EQ(Expression::toString(simplify(one >> zero)), "1i");
-    EXPECT_EQ(Expression::toString(simplify((a >> one) >> one)), "8i");
-    EXPECT_EQ(Expression::toString(simplify(one >> (a >> one))), "0i");
+    EXPECT_EQ(Expression::toString(simplify(shiftR(v, zero))), "v0:I");
+    EXPECT_EQ(Expression::toString(simplify(shiftR(shiftR(a, one), one))), "8i");
+    EXPECT_EQ(Expression::toString(simplify(shiftR(v, shiftR(zero, zero)))), "v0:I");
 
     EXPECT_THROW(
         simplify(std::make_shared<Expression::Expression>(Expression::Multiply{zero, nullptr})),
@@ -119,8 +124,13 @@ TEST_F(ExpressionTransformationTest, FuseAssociative)
     // shiftL
     EXPECT_EQ(Expression::toString(fuseAssociative((v << one) << one)), "ShiftL(v0:I, 2i)");
 
+    // signedShiftR
+    EXPECT_EQ(Expression::toString(fuseAssociative(((v >> one) >> one) >> one)),
+              "SignedShiftR(v0:I, 3i)");
+
     // shiftR
-    EXPECT_EQ(Expression::toString(fuseAssociative((v >> one) >> one)), "SignedShiftR(v0:I, 2i)");
+    EXPECT_EQ(Expression::toString(fuseAssociative(shiftR(shiftR(v, one), one))),
+              "ShiftR(v0:I, 2i)");
 
     EXPECT_EQ(
         Expression::toString(fuseAssociative((v - one) - a)),
@@ -181,5 +191,5 @@ TEST_F(ExpressionTransformationTest, Fast)
 
     Expression::FastArithmetic fastArith(m_context);
     EXPECT_EQ(fastArith(nullptr), nullptr);
-    EXPECT_EQ(Expression::toString(fastArith(c * zero)), "0i");
+    EXPECT_EQ(Expression::toString(fastArith(c * zero)), "0.00000f");
 }

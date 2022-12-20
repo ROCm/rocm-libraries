@@ -406,6 +406,10 @@ namespace rocRoller
         };
 
         template <typename T>
+        concept CShift
+            = std::same_as<ShiftL, T> || std::same_as<ShiftR, T> || std::same_as<SignedShiftR, T>;
+
+        template <typename T>
         concept CAssociativeBinary = requires
         {
             requires CBinary<T> && T::Associative;
