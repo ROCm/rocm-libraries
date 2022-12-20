@@ -419,8 +419,8 @@ namespace rocRoller
 
         template <typename Node, typename Edge, bool Hyper>
         template <CForwardRangeOf<int> Range>
-        Generator<int> Hypergraph<Node, Edge, Hyper>::depthFirstVisit(Range&    starts,
-                                                                      Direction dir) const
+        Generator<int> Hypergraph<Node, Edge, Hyper>::depthFirstVisit(Range const& starts,
+                                                                      Direction    dir) const
         {
             std::unordered_set<int> visitedNodes;
             if(dir == Direction::Downstream)
@@ -509,21 +509,24 @@ namespace rocRoller
         }
 
         template <typename Node, typename Edge, bool Hyper>
-        template <Direction Dir>
+        template <Direction Dir, CForwardRangeOf<int> RangeStart, CForwardRangeOf<int> RangeEnd>
         Generator<int>
-            Hypergraph<Node, Edge, Hyper>::path(std::vector<int> const starts,
-                                                std::vector<int> const ends,
-                                                std::map<int, bool>&   visitedElements) const
+            Hypergraph<Node, Edge, Hyper>::path(RangeStart const&    starts,
+                                                RangeEnd const&      ends,
+                                                std::map<int, bool>& visitedElements) const
         {
             co_yield path<Dir>(starts, ends, visitedElements, [](int) { return true; });
         }
 
         template <typename Node, typename Edge, bool Hyper>
-        template <Direction Dir, std::predicate<int> Predicate>
-        Generator<int> Hypergraph<Node, Edge, Hyper>::path(std::vector<int> const starts,
-                                                           std::vector<int> const ends,
-                                                           std::map<int, bool>&   visitedElements,
-                                                           Predicate edgeSelector) const
+        template <Direction            Dir,
+                  std::predicate<int>  Predicate,
+                  CForwardRangeOf<int> RangeStart,
+                  CForwardRangeOf<int> RangeEnd>
+        Generator<int> Hypergraph<Node, Edge, Hyper>::path(RangeStart const&    starts,
+                                                           RangeEnd const&      ends,
+                                                           std::map<int, bool>& visitedElements,
+                                                           Predicate            edgeSelector) const
         {
             Direction const reverseDir
                 = (Dir == Direction::Downstream) ? Direction::Upstream : Direction::Downstream;
@@ -554,7 +557,8 @@ namespace rocRoller
                     }
 
                     std::vector<int> branchResults
-                        = path<Dir>(starts, {nextElement}, visitedElements, edgeSelector)
+                        = path<Dir>(
+                              starts, std::vector<int>{nextElement}, visitedElements, edgeSelector)
                               .template to<std::vector>();
                     results.insert(results.end(), branchResults.begin(), branchResults.end());
 
@@ -640,7 +644,8 @@ namespace rocRoller
         }
 
         template <typename Node, typename Edge, bool Hyper>
-        std::string Hypergraph<Node, Edge, Hyper>::toDOT(std::string prefix, bool standalone) const
+        std::string Hypergraph<Node, Edge, Hyper>::toDOT(std::string const& prefix,
+                                                         bool               standalone) const
         {
             std::ostringstream msg;
 

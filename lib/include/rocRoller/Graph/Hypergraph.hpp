@@ -172,8 +172,8 @@ namespace rocRoller
              * @brief Yields node indices connected in the specified direction to starts, in depth-first order
              */
             template <CForwardRangeOf<int> Range>
-            Generator<int> depthFirstVisit(Range&    starts,
-                                           Direction dir = Direction::Downstream) const;
+            Generator<int> depthFirstVisit(Range const& starts,
+                                           Direction    dir = Direction::Downstream) const;
 
             /**
              * @brief Yields node indices connected in the specified direction to start, in depth-first order.
@@ -192,16 +192,19 @@ namespace rocRoller
             /**
             * @brief Yields node indices that form the paths from the starts to the ends
             */
-            template <Direction Dir, std::predicate<int> Predicate>
-            Generator<int> path(std::vector<int> const starts,
-                                std::vector<int> const ends,
-                                std::map<int, bool>&   visitedElements,
-                                Predicate              edgeSelector) const;
+            template <Direction            Dir,
+                      std::predicate<int>  Predicate,
+                      CForwardRangeOf<int> RangeStart,
+                      CForwardRangeOf<int> RangeEnd>
+            Generator<int> path(RangeStart const&    starts,
+                                RangeEnd const&      ends,
+                                std::map<int, bool>& visitedElements,
+                                Predicate            edgeSelector) const;
 
-            template <Direction Dir>
-            Generator<int> path(std::vector<int> const starts,
-                                std::vector<int> const ends,
-                                std::map<int, bool>&   visitedElements) const;
+            template <Direction Dir, CForwardRangeOf<int> RangeStart, CForwardRangeOf<int> RangeEnd>
+            Generator<int> path(RangeStart const&    starts,
+                                RangeEnd const&      ends,
+                                std::map<int, bool>& visitedElements) const;
 
             template <Direction Dir>
             Generator<int> getNeighbours(int const element) const;
@@ -222,7 +225,7 @@ namespace rocRoller
              */
             Generator<int> reverseTopologicalSort() const;
 
-            std::string toDOT(std::string prefix = "", bool standalone = true) const;
+            std::string toDOT(std::string const& prefix = "", bool standalone = true) const;
 
             template <typename T>
             requires(std::constructible_from<Node, T> || std::constructible_from<Edge, T>)

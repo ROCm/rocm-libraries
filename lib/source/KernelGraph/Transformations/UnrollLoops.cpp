@@ -16,15 +16,15 @@ namespace rocRoller
          * @param startNodes
          * @return std::vector<int>
          */
-        std::vector<int> duplicateControlNodes(KernelHypergraph& graph, std::set<int> startNodes)
+        std::vector<int> duplicateControlNodes(KernelHypergraph&    graph,
+                                               std::set<int> const& startNodes)
         {
             std::vector<int>   newStartNodes;
             std::map<int, int> reindexer;
 
             // Create duplicates of all of the nodes downstream of the startNodes
             for(auto const& node :
-                graph.control.depthFirstVisit(startNodes, Graph::Direction::Downstream)
-                    .to<std::vector>())
+                graph.control.depthFirstVisit(startNodes, Graph::Direction::Downstream))
             {
                 // Only do this step if element is a node
                 if(graph.control.getElementType(node) == Graph::ElementType::Node)
@@ -207,7 +207,7 @@ namespace rocRoller
 
                 // Function for adding a SetCoordinate node inbetween the ForLoop
                 // and a list of nodes.
-                auto connectWithSetCoord = [&](auto toConnect, unsigned int coordValue) {
+                auto connectWithSetCoord = [&](auto const& toConnect, unsigned int coordValue) {
                     auto setCoord = graph.control.addElement(
                         ControlHypergraph::SetCoordinate(Expression::literal(coordValue)));
                     graph.mapper.connect<CoordGraph::Unroll>(setCoord, unrollDimension);

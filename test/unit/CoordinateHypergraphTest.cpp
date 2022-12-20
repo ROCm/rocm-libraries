@@ -88,7 +88,9 @@ namespace rocRollerTest
         {
             std::map<int, bool> visited;
             EXPECT_NE(std::vector<int>(),
-                      ct.path<Graph::Direction::Upstream>({m}, {x}, visited).to<std::vector>());
+                      ct.path<Graph::Direction::Upstream>(
+                            std::vector<int>{m}, std::vector<int>{x}, visited)
+                          .to<std::vector>());
         }
 
         auto m_index = std::make_shared<Expression::Expression>(67u);
