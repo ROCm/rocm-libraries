@@ -3,10 +3,17 @@
 
 #include <GPUArchitectureGenerator/GPUArchitectureGenerator.hpp>
 
-TEST(GPUArchitectureGeneratorTest, BasicYAML)
+class GPUArchitectureGeneratorTest : public ::testing::Test
 {
-    GPUArchitectureGenerator::FillArchitectures();
+protected:
+    void SetUp() override
+    {
+        GPUArchitectureGenerator::FillArchitectures();
+    }
+};
 
+TEST_F(GPUArchitectureGeneratorTest, BasicYAML)
+{
     GPUArchitectureGenerator::GenerateFile("output.yaml", true);
 
     std::ifstream     generated_source_file("output.yaml");
@@ -24,10 +31,8 @@ TEST(GPUArchitectureGeneratorTest, BasicYAML)
     std::remove("output.yaml");
 }
 
-TEST(GPUArchitectureGeneratorTest, BasicMsgpack)
+TEST_F(GPUArchitectureGeneratorTest, BasicMsgpack)
 {
-    GPUArchitectureGenerator::FillArchitectures();
-
     GPUArchitectureGenerator::GenerateFile("output.msgpack");
 
     std::ifstream     generated_source_file("output.msgpack");

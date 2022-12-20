@@ -20,12 +20,12 @@ namespace rocRoller
         return m_isaVersion;
     }
 
-    inline void GPUArchitecture::AddCapability(GPUCapability capability, int value)
+    inline void GPUArchitecture::AddCapability(GPUCapability const& capability, int value)
     {
         m_capabilities[capability] = value;
     }
 
-    inline void GPUArchitecture::AddInstructionInfo(GPUInstructionInfo info)
+    inline void GPUArchitecture::AddInstructionInfo(GPUInstructionInfo const& info)
     {
         if(m_instruction_infos.find(info.getInstruction()) != m_instruction_infos.end())
             throw std::runtime_error(
@@ -33,17 +33,17 @@ namespace rocRoller
         m_instruction_infos[info.getInstruction()] = info;
     }
 
-    inline bool GPUArchitecture::HasCapability(GPUCapability capability) const
+    inline bool GPUArchitecture::HasCapability(GPUCapability const& capability) const
     {
         return m_capabilities.find(capability) != m_capabilities.end();
     }
 
-    inline bool GPUArchitecture::HasCapability(std::string capabilityString) const
+    inline bool GPUArchitecture::HasCapability(std::string const& capabilityString) const
     {
         return m_capabilities.find(GPUCapability(capabilityString)) != m_capabilities.end();
     }
 
-    inline int GPUArchitecture::GetCapability(GPUCapability capability) const
+    inline int GPUArchitecture::GetCapability(GPUCapability const& capability) const
     {
         auto iter = m_capabilities.find(capability);
         if(iter == m_capabilities.end())
@@ -52,19 +52,19 @@ namespace rocRoller
         return iter->second;
     }
 
-    inline int GPUArchitecture::GetCapability(std::string capabilityString) const
+    inline int GPUArchitecture::GetCapability(std::string const& capabilityString) const
     {
         return GetCapability(GPUCapability(capabilityString));
     }
 
-    inline bool GPUArchitecture::HasInstructionInfo(std::string instruction) const
+    inline bool GPUArchitecture::HasInstructionInfo(std::string const& instruction) const
     {
         auto iter = m_instruction_infos.find(instruction);
         return iter != m_instruction_infos.end();
     }
 
     inline rocRoller::GPUInstructionInfo
-        GPUArchitecture::GetInstructionInfo(std::string instruction) const
+        GPUArchitecture::GetInstructionInfo(std::string const& instruction) const
     {
         auto iter = m_instruction_infos.find(instruction);
         if(iter != m_instruction_infos.end())
@@ -82,7 +82,7 @@ namespace rocRoller
     {
     }
 
-    inline GPUArchitecture::GPUArchitecture(GPUArchitectureTarget isaVersion)
+    inline GPUArchitecture::GPUArchitecture(GPUArchitectureTarget const& isaVersion)
         : m_isaVersion(isaVersion)
     {
     }
@@ -97,7 +97,7 @@ namespace rocRoller
     {
     }
 
-    inline std::ostream& operator<<(std::ostream& os, const GPUCapability& input)
+    inline std::ostream& operator<<(std::ostream& os, GPUCapability const& input)
     {
         os << input.ToString();
         return os;
@@ -111,13 +111,13 @@ namespace rocRoller
         return is;
     }
 
-    inline std::ostream& operator<<(std::ostream& os, const GPUWaitQueueType& input)
+    inline std::ostream& operator<<(std::ostream& os, GPUWaitQueueType const& input)
     {
         os << input.ToString();
         return os;
     }
 
-    inline std::ostream& operator<<(std::ostream& os, const GPUArchitectureTarget& input)
+    inline std::ostream& operator<<(std::ostream& os, GPUArchitectureTarget const& input)
     {
         return (os << input.ToString());
     }

@@ -24,19 +24,19 @@ namespace rocRoller
     {
     public:
         GPUArchitecture();
-        GPUArchitecture(GPUArchitectureTarget);
+        GPUArchitecture(GPUArchitectureTarget const&);
         GPUArchitecture(GPUArchitectureTarget const&,
                         std::map<GPUCapability, int> const&,
                         std::map<std::string, GPUInstructionInfo> const&);
 
-        void                          AddCapability(GPUCapability, int);
-        void                          AddInstructionInfo(GPUInstructionInfo);
-        bool                          HasCapability(GPUCapability) const;
-        int                           GetCapability(GPUCapability) const;
-        bool                          HasCapability(std::string) const;
-        int                           GetCapability(std::string) const;
-        rocRoller::GPUInstructionInfo GetInstructionInfo(std::string) const;
-        bool                          HasInstructionInfo(std::string) const;
+        void                          AddCapability(GPUCapability const&, int);
+        void                          AddInstructionInfo(GPUInstructionInfo const&);
+        bool                          HasCapability(GPUCapability const&) const;
+        int                           GetCapability(GPUCapability const&) const;
+        bool                          HasCapability(std::string const&) const;
+        int                           GetCapability(std::string const&) const;
+        rocRoller::GPUInstructionInfo GetInstructionInfo(std::string const&) const;
+        bool                          HasInstructionInfo(std::string const&) const;
 
         friend std::ostream& operator<<(std::ostream& os, const GPUArchitecture& d);
 

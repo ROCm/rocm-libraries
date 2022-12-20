@@ -16,9 +16,9 @@
 
 namespace GPUArchitectureGenerator
 {
-    inline void AddCapability(rocRoller::GPUArchitectureTarget isaVersion,
-                              rocRoller::GPUCapability         capability,
-                              int                              value)
+    inline void AddCapability(rocRoller::GPUArchitectureTarget const& isaVersion,
+                              rocRoller::GPUCapability const&         capability,
+                              int                                     value)
     {
         if(GPUArchitectures.find(isaVersion) == GPUArchitectures.end())
         {
@@ -27,14 +27,14 @@ namespace GPUArchitectureGenerator
         GPUArchitectures[isaVersion].AddCapability(capability, value);
     }
 
-    inline int HasCapability(rocRoller::GPUArchitectureTarget isaVersion,
-                             rocRoller::GPUCapability         capability)
+    inline int HasCapability(rocRoller::GPUArchitectureTarget const& isaVersion,
+                             rocRoller::GPUCapability const&         capability)
     {
         return GPUArchitectures[isaVersion].HasCapability(capability);
     }
 
-    inline void AddInstructionInfo(rocRoller::GPUArchitectureTarget isaVersion,
-                                   rocRoller::GPUInstructionInfo    instruction_info)
+    inline void AddInstructionInfo(rocRoller::GPUArchitectureTarget const& isaVersion,
+                                   rocRoller::GPUInstructionInfo const&    instruction_info)
     {
         if(GPUArchitectures.find(isaVersion) == GPUArchitectures.end())
         {
@@ -72,7 +72,7 @@ namespace GPUArchitectureGenerator
         }
     }
 
-    inline std::tuple<int, std::string> Execute(std::string command)
+    inline std::tuple<int, std::string> Execute(std::string const& command)
     {
         std::array<char, 128> buffer;
         std::string           result;
@@ -95,7 +95,7 @@ namespace GPUArchitectureGenerator
         return CheckAssembler(DEFAULT_ASSEMBLER);
     }
 
-    bool CheckAssembler(std::string hipcc)
+    bool CheckAssembler(std::string const& hipcc)
     {
         std::string cmd    = hipcc + " --version 2>&1";
         auto        result = Execute(cmd);
@@ -109,10 +109,10 @@ namespace GPUArchitectureGenerator
         return true;
     }
 
-    bool TryAssembler(std::string                      hipcc,
-                      rocRoller::GPUArchitectureTarget isaVersion,
-                      std::string                      query,
-                      std::string                      options)
+    bool TryAssembler(std::string const&                      hipcc,
+                      rocRoller::GPUArchitectureTarget const& isaVersion,
+                      std::string const&                      query,
+                      std::string const&                      options)
     {
 
         auto tmpFolderTemplate
@@ -146,8 +146,10 @@ namespace GPUArchitectureGenerator
         return std::get<0>(result) == 0 && std::get<1>(result).length() == 0;
     }
 
-    void FillArchitectures(std::string hipcc)
+    void FillArchitectures(std::string const& hipcc)
     {
+        GPUArchitectures.clear();
+
         for(const auto& isaVersion : SupportedISAs)
         {
             for(const auto& query : AssemblerQueries)
