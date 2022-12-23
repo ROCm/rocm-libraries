@@ -193,6 +193,20 @@ float ParseOptions::get<float>(std::string name, float const defaultVal)
     return defaultVal;
 }
 
+template <>
+bool ParseOptions::get<bool>(std::string name, bool const defaultVal)
+{
+    auto flags = m_valid_args.at(name).flags();
+    for(auto flag : flags)
+    {
+        if(m_parsed_args.find(flag) != m_parsed_args.end())
+        {
+            return m_parsed_args.at(flag) == "1";
+        }
+    }
+    return defaultVal;
+}
+
 Arg::Arg(std::vector<std::string> flags, std::string usage)
     : m_flags(flags)
     , m_usage(usage)

@@ -58,6 +58,9 @@ class GEMM:
     numOuter: int = 10
     numInner: int = 1
 
+    trans_A: str = "N"
+    trans_B: str = "N"
+
     @property
     def token(self):
         return repr(GEMM(**field_dict(GEMM, self)))
@@ -98,6 +101,8 @@ class GEMMRun(GEMM):
             "--num_warmup=" + str(self.numWarmUp),
             "--num_outer=" + str(self.numOuter),
             "--num_inner=" + str(self.numInner),
+            "--trans_A=" + str(self.trans_A),
+            "--trans_B=" + str(self.trans_B),
         ]
         print(" ".join(retval))
         return retval

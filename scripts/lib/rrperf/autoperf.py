@@ -48,7 +48,7 @@ def build_rocroller(
             "make",
             "-j",
             str(threads),
-            "gemm",
+            "all_clients",
         ],
         cwd=str(build_dir),
         check=True,

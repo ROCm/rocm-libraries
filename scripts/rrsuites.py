@@ -1,5 +1,26 @@
 from rrperf import GEMMRun, CodeGenRun
 
+fp16 = {
+    "type_A": "half",
+    "type_B": "half",
+    "type_C": "half",
+    "type_D": "half",
+}
+
+fp32 = {
+    "type_A": "float",
+    "type_B": "float",
+    "type_C": "float",
+    "type_D": "float",
+}
+
+tensile_guidepost_HGEMM = {
+    "M": 7680,
+    "N": 8448,
+    "K": 8448,  # matches the guidepost unit test
+    "trans_B": "T",
+}
+
 
 def unit():
     yield GEMMRun(
@@ -9,6 +30,7 @@ def unit():
         mac_m=64,
         mac_n=64,
         mac_k=64,
+        **fp32,
         numWarmUp=1,
         numOuter=1,
         numInner=1,
@@ -20,10 +42,7 @@ def unit():
         mac_m=64,
         mac_n=64,
         mac_k=64,
-        type_A="half",
-        type_B="half",
-        type_C="half",
-        type_D="half",
+        **fp16,
         numWarmUp=1,
         numOuter=1,
         numInner=1,
@@ -31,8 +50,24 @@ def unit():
 
 
 def sgemm():
-    yield GEMMRun(M=3072, N=4096, K=4096, mac_m=64, mac_n=64, mac_k=64)
-    yield GEMMRun(M=3072, N=4096, K=4096, mac_m=128, mac_n=64, mac_k=16)
+    yield GEMMRun(
+        M=3072,
+        N=4096,
+        K=4096,
+        mac_m=64,
+        mac_n=64,
+        mac_k=64,
+        **fp32,
+    )
+    yield GEMMRun(
+        M=3072,
+        N=4096,
+        K=4096,
+        mac_m=128,
+        mac_n=64,
+        mac_k=16,
+        **fp32,
+    )
 
 
 def hgemm():
@@ -43,10 +78,7 @@ def hgemm():
         mac_m=64,
         mac_n=64,
         mac_k=64,
-        type_A="half",
-        type_B="half",
-        type_C="half",
-        type_D="half",
+        **fp16,
     )
     yield GEMMRun(
         M=7680,
@@ -57,10 +89,27 @@ def hgemm():
         mac_k=16,
         workgroup_size_x=64,
         workgroup_size_y=8,
-        type_A="half",
-        type_B="half",
-        type_C="half",
-        type_D="half",
+        **fp16,
+    )
+
+    yield GEMMRun(
+        **tensile_guidepost_HGEMM,
+        mac_m=64,
+        mac_n=64,
+        mac_k=64,
+        workgroup_size_x=128,
+        workgroup_size_y=2,
+        **fp16,
+    )
+
+    yield GEMMRun(
+        **tensile_guidepost_HGEMM,
+        mac_m=128,
+        mac_n=256,
+        mac_k=16,
+        workgroup_size_x=64,
+        workgroup_size_y=8,
+        **fp16,
     )
 
 

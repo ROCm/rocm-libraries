@@ -17,20 +17,21 @@ namespace rocRoller
                int                       K,
                float                     alpha,
                float                     beta,
-               bool                      transposeB)
+               bool                      transA,
+               bool                      transB)
     {
         D = C;
         cblas_sgemm(CblasColMajor,
                     CblasNoTrans,
-                    transposeB ? CblasTrans : CblasNoTrans,
+                    transB ? CblasTrans : CblasNoTrans,
                     M,
                     N,
                     K,
                     alpha,
                     A.data(),
-                    M,
+                    transA ? K : M,
                     B.data(),
-                    transposeB ? N : K,
+                    transB ? N : K,
                     beta,
                     D.data(),
                     M);
@@ -45,7 +46,8 @@ namespace rocRoller
                int                        K,
                float                      alpha,
                float                      beta,
-               bool                       transposeB)
+               bool                       transA,
+               bool                       transB)
     {
         std::vector<float> floatA(A.size());
         std::vector<float> floatB(B.size());
@@ -70,16 +72,16 @@ namespace rocRoller
         }
 
         cblas_sgemm(CblasColMajor,
-                    CblasNoTrans,
-                    transposeB ? CblasTrans : CblasNoTrans,
+                    transA ? CblasTrans : CblasNoTrans,
+                    transB ? CblasTrans : CblasNoTrans,
                     M,
                     N,
                     K,
                     alpha,
                     floatA.data(),
-                    M,
+                    transA ? K : M,
                     floatB.data(),
-                    transposeB ? N : K,
+                    transB ? N : K,
                     beta,
                     floatD.data(),
                     M);

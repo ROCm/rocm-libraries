@@ -157,7 +157,7 @@ namespace MatrixMultiplyTest
 
         std::vector<T> c_D(M * N, 0.f);
         std::vector<T> c_C(M * N, 0.f);
-        CPUMM(c_D, c_C, A, B, M, N, K, 1.0, 0.0, false);
+        CPUMM(c_D, c_C, A, B, M, N, K, 1.0, 0.0, false, false);
 
         double rnorm = relativeNorm(D, c_D);
         ASSERT_LT(rnorm, acceptableError);
@@ -296,7 +296,7 @@ namespace MatrixMultiplyTest
 
         std::vector<T> c_D(M * N, 0.f);
         std::vector<T> c_C(M * N, 0.f);
-        CPUMM(c_D, c_C, A, B, M, N, K, 1.0, 0.0, false);
+        CPUMM(c_D, c_C, A, B, M, N, K, 1.0, 0.0, false, false);
 
         double rnorm = relativeNorm(D, c_D);
         ASSERT_LT(rnorm, acceptableError);
@@ -454,7 +454,7 @@ namespace MatrixMultiplyTest
                     HasHipSuccess(0));
 
         std::vector<T> c_D(M * N, 0.f);
-        CPUMM(c_D, C, A, B, M, N, K, 1.0, 1.0, false);
+        CPUMM(c_D, C, A, B, M, N, K, 1.0, 1.0, false, false);
 
         double rnorm = relativeNorm(D, c_D);
         ASSERT_LT(rnorm, acceptableError);

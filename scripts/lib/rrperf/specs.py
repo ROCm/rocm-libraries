@@ -141,11 +141,11 @@ def search(pattern, string):
 
 
 def load_machine_specs(path):
-    contents = path.read_text()
-    if contents.startswith(MachineSpecs.yaml_tag):
-        return yaml.load(contents, Loader=yaml.Loader)
-    else:
-        return MachineSpecs()
+    if path.exists():
+        contents = path.read_text()
+        if contents.startswith(MachineSpecs.yaml_tag):
+            return yaml.load(contents, Loader=yaml.Loader)
+    return MachineSpecs()
 
 
 def get_machine_specs(devicenum, rocm_smi_path="rocm-smi"):

@@ -239,7 +239,7 @@ namespace GEMMDriverTest
 
         // Host result
         std::vector<T> h_result(M * N, 0.0);
-        rocRoller::CPUMM(h_result, h_C, h_A, h_B, M, N, K, alpha, beta, false);
+        rocRoller::CPUMM(h_result, h_C, h_A, h_B, M, N, K, alpha, beta, false, false);
 
         double rnorm = relativeNorm(d_result, h_result);
 

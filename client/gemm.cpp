@@ -47,6 +47,9 @@ struct GEMMProblem
     int numWarmUp;
     int numOuter;
     int numInner;
+
+    std::string trans_A; // N or T
+    std::string trans_B; // N or T
 };
 
 struct GEMMResult : GEMMProblem
@@ -89,6 +92,8 @@ struct rocRoller::Serialization::
         iot::mapRequired(io, "mac_k", result.mac_k);
         iot::mapRequired(io, "workgroup_size_x", result.workgroup_size_x);
         iot::mapRequired(io, "workgroup_size_y", result.workgroup_size_y);
+        iot::mapRequired(io, "trans_A", result.trans_A);
+        iot::mapRequired(io, "trans_B", result.trans_B);
         iot::mapRequired(io, "kernelGenerate", result.kernelGenerate);
         iot::mapRequired(io, "kernelAssemble", result.kernelAssemble);
         iot::mapRequired(io, "kernelExecute", result.kernelExecute);
@@ -199,17 +204,41 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult)
 
     runtimeArgs.append("A", d_A.get());
     runtimeArgs.append("d_a_limit", (size_t)result.M * result.K);
-    runtimeArgs.append("d_a_size_0", (size_t)result.M);
-    runtimeArgs.append("d_a_size_1", (size_t)result.K);
-    runtimeArgs.append("d_a_stride_0", (size_t)1);
-    runtimeArgs.append("d_a_stride_1", (size_t)result.M);
+
+    //TODO: Handle transposed matrices more elegantly
+    if(result.trans_A == "T")
+    {
+        runtimeArgs.append("d_a_size_0", (size_t)result.K);
+        runtimeArgs.append("d_a_size_1", (size_t)result.M);
+        runtimeArgs.append("d_a_stride_0", (size_t)result.M);
+        runtimeArgs.append("d_a_stride_1", (size_t)1);
+    }
+    else
+    {
+        runtimeArgs.append("d_a_size_0", (size_t)result.M);
+        runtimeArgs.append("d_a_size_1", (size_t)result.K);
+        runtimeArgs.append("d_a_stride_0", (size_t)1);
+        runtimeArgs.append("d_a_stride_1", (size_t)result.M);
+    }
 
     runtimeArgs.append("B", d_B.get());
     runtimeArgs.append("d_b_limit", (size_t)result.K * result.N);
-    runtimeArgs.append("d_b_size_0", (size_t)result.K);
-    runtimeArgs.append("d_b_size_1", (size_t)result.N);
-    runtimeArgs.append("d_b_stride_0", (size_t)1);
-    runtimeArgs.append("d_b_stride_1", (size_t)result.K);
+
+    //TODO: Handle transposed matrices more elegantly
+    if(result.trans_B == "T")
+    {
+        runtimeArgs.append("d_b_size_0", (size_t)result.N);
+        runtimeArgs.append("d_b_size_1", (size_t)result.K);
+        runtimeArgs.append("d_b_stride_0", (size_t)result.K);
+        runtimeArgs.append("d_b_stride_1", (size_t)1);
+    }
+    else
+    {
+        runtimeArgs.append("d_b_size_0", (size_t)result.K);
+        runtimeArgs.append("d_b_size_1", (size_t)result.N);
+        runtimeArgs.append("d_b_stride_0", (size_t)1);
+        runtimeArgs.append("d_b_stride_1", (size_t)result.K);
+    }
 
     runtimeArgs.append("C", d_C.get());
     runtimeArgs.append("d_c_limit", (size_t)result.M * result.N);
@@ -323,7 +352,8 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult)
                          result.K,
                          result.alpha,
                          result.beta,
-                         false);
+                         result.trans_A == "T",
+                         result.trans_B == "T");
 
         double rnorm = relativeNorm(h_D, h_result);
 
@@ -367,7 +397,11 @@ int main(int argc, const char* argv[])
     po.addArg("type_acc", Arg({"type_acc"}, "Datatype of accumulation [float]"));
     po.addArg("num_warmup", Arg({"num_warmup"}, "Number of warm-up runs."));
     po.addArg("num_outer", Arg({"num_outer"}, "Number of outer runs."));
-    po.addArg("num_inner", Arg({"num_inner"}, "Number of innter runs."));
+    po.addArg("num_inner", Arg({"num_inner"}, "Number of inner runs."));
+    po.addArg("trans_A",
+              Arg({"trans_A"}, "N: A is not already transposed. T: A is already transposed."));
+    po.addArg("trans_B",
+              Arg({"trans_B"}, "N: B is not already transposed. T: B is already transposed."));
 
     po.parse_args(argc, argv);
 
@@ -388,6 +422,8 @@ int main(int argc, const char* argv[])
     prob.type_C           = po.get("type_C", std::string("float"));
     prob.type_D           = po.get("type_D", std::string("float"));
     prob.type_acc         = po.get("type_acc", std::string("float"));
+    prob.trans_A          = po.get("trans_A", std::string("N"));
+    prob.trans_B          = po.get("trans_B", std::string("N"));
 
     prob.numWarmUp = po.get("num_warmup", 3);
     prob.numOuter  = po.get("num_outer", 5);

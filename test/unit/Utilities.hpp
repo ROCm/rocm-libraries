@@ -141,7 +141,8 @@ namespace rocRoller
                int                       K,
                float                     alpha,
                float                     beta,
-               bool                      transposeB = true);
+               bool                      transA = false,
+               bool                      transB = true);
 
     void CPUMM(std::vector<__half>&       D,
                const std::vector<__half>& C,
@@ -152,7 +153,8 @@ namespace rocRoller
                int                        K,
                float                      alpha,
                float                      beta,
-               bool                       transposeB = true);
+               bool                       transA = false,
+               bool                       transB = true);
 }
 
 /*
