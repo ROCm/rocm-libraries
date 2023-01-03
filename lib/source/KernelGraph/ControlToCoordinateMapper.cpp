@@ -10,7 +10,7 @@ namespace rocRoller::KernelGraph
                                             int             subDimension)
     {
         auto key = key_type{control, tindex, subDimension};
-        m_map.emplace(key, coordinate);
+        m_map.insert_or_assign(key, coordinate);
     }
 
     void ControlToCoordinateMapper::disconnect(int             control,

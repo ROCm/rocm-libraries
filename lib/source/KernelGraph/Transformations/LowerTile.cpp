@@ -85,285 +85,6 @@ namespace rocRoller
                 graph.control.setElement(new_tag, new_op);
             }
 
-            void loadWaveMacroTile(KernelHypergraph&            graph,
-                                   CoordGraph::MacroTile const& mac_tile,
-                                   int                          load_tag,
-                                   int                          i_mac_x,
-                                   int                          i_mac_y,
-                                   int                          user_tag)
-            {
-                AssertFatal(mac_tile.subTileSizes.size() == 4, "Invalid tile specification.");
-
-                auto m = mac_tile.subTileSizes[0];
-                auto n = mac_tile.subTileSizes[1];
-                auto k = mac_tile.subTileSizes[2];
-
-                std::vector<int> tileSize;
-                if(mac_tile.layoutType == LayoutType::MATRIX_A)
-                    tileSize = {m, k};
-                if(mac_tile.layoutType == LayoutType::MATRIX_B)
-                    tileSize = {k, n};
-                if(mac_tile.layoutType == LayoutType::MATRIX_ACCUMULATOR)
-                    tileSize = {m, n};
-
-                auto workitem      = graph.coordinates.addElement(CoordGraph::Workitem(0));
-                auto wave_tile     = CoordGraph::WaveTile(tileSize, mac_tile.layoutType);
-                auto wave_tile_tag = graph.coordinates.addElement(wave_tile);
-                graph.mapper.connect<CoordGraph::WaveTile>(load_tag, wave_tile_tag);
-
-                auto n_wave_x = graph.coordinates.addElement(wave_tile.tileNumber(0));
-                auto n_wave_y = graph.coordinates.addElement(wave_tile.tileNumber(1));
-                auto i_wave_x = graph.coordinates.addElement(wave_tile.tileIndex(0));
-                auto i_wave_y = graph.coordinates.addElement(wave_tile.tileIndex(1));
-
-                graph.coordinates.addElement(CoordGraph::Tile(), {i_mac_x}, {n_wave_x, i_wave_x});
-                graph.coordinates.addElement(CoordGraph::Tile(), {i_mac_y}, {n_wave_y, i_wave_y});
-
-                graph.mapper.connect<CoordGraph::WaveTileNumber>(load_tag, n_wave_x, 0);
-                graph.mapper.connect<CoordGraph::WaveTileNumber>(load_tag, n_wave_y, 1);
-
-                auto wave_x = graph.coordinates.addElement(CoordGraph::Wavefront(0));
-                auto wave_y = graph.coordinates.addElement(CoordGraph::Wavefront(1));
-                auto wave   = graph.coordinates.addElement(CoordGraph::Wavefront(-1));
-
-                uint num_elements = product(tileSize);
-                uint wfs          = m_context->kernel()->wavefront_size();
-                uint num_vgpr     = num_elements / wfs;
-
-                auto wavefront_size = wavefrontSize();
-
-                auto lane = graph.coordinates.addElement(CoordGraph::Lane(wavefront_size, nullptr));
-                auto vgpr
-                    = graph.coordinates.addElement(CoordGraph::VGPR(literal(num_vgpr), nullptr));
-
-                graph.coordinates.addElement(CoordGraph::Flatten(), {wave_x, wave_y}, {wave});
-                graph.coordinates.addElement(CoordGraph::Flatten(), {wave, lane}, {workitem});
-
-                graph.mapper.connect<CoordGraph::VGPR>(load_tag, vgpr);
-
-                auto block_number = graph.coordinates.addElement(
-                    CoordGraph::Adhoc("BlockNumber", literal(static_cast<uint>(wfs / m)), nullptr));
-                auto block_index = graph.coordinates.addElement(
-                    CoordGraph::Adhoc("BlockIndex", literal(static_cast<uint>(m)), nullptr));
-
-                graph.coordinates.addElement(
-                    CoordGraph::Flatten(), {block_number, block_index}, {lane});
-
-                auto wavetilesPerWorkgroup = m_params->getWaveTilesPerWorkgroup();
-
-                int jammed_wavetile_x = -1;
-                if(wavetilesPerWorkgroup[0] > 1)
-                {
-                    jammed_wavetile_x
-                        = graph.coordinates.addElement(CoordGraph::JammedWaveTileNumber(
-                            0, literal(wavetilesPerWorkgroup[0]), literal(1)));
-                    graph.mapper.connect<CoordGraph::JammedWaveTileNumber>(
-                        load_tag, jammed_wavetile_x, 0);
-                }
-                int jammed_wavetile_y = -1;
-                if(wavetilesPerWorkgroup[1] > 1)
-                {
-                    jammed_wavetile_y
-                        = graph.coordinates.addElement(CoordGraph::JammedWaveTileNumber(
-                            1, literal(wavetilesPerWorkgroup[1]), literal(1)));
-                    graph.mapper.connect<CoordGraph::JammedWaveTileNumber>(
-                        load_tag, jammed_wavetile_y, 1);
-                }
-
-                switch(wave_tile.layout)
-                {
-                case LayoutType::MATRIX_A:
-                {
-                    // TODO: not necessary here, but used for lookup in generator
-                    graph.coordinates.addElement(
-                        CoordGraph::Flatten(), {i_wave_y, i_wave_x}, {wave_tile_tag});
-                    graph.coordinates.addElement(
-                        CoordGraph::Tile(), {i_wave_y}, {block_number, vgpr});
-                    graph.coordinates.addElement(
-                        CoordGraph::PassThrough(), {i_wave_x}, {block_index});
-
-                    if(wavetilesPerWorkgroup[0] > 1)
-                        graph.coordinates.addElement(
-                            CoordGraph::Tile(), {n_wave_x}, {wave_x, jammed_wavetile_x});
-                    else
-                        graph.coordinates.addElement(
-                            CoordGraph::PassThrough(), {n_wave_x}, {wave_x});
-                }
-                break;
-
-                case LayoutType::MATRIX_B:
-                {
-                    // TODO: not necessary here, but used for lookup in generator
-                    graph.coordinates.addElement(
-                        CoordGraph::Flatten(), {i_wave_x, i_wave_y}, {wave_tile_tag});
-                    graph.coordinates.addElement(
-                        CoordGraph::Tile(), {i_wave_x}, {block_number, vgpr});
-                    graph.coordinates.addElement(
-                        CoordGraph::PassThrough(), {i_wave_y}, {block_index});
-
-                    if(wavetilesPerWorkgroup[1] > 1)
-                        graph.coordinates.addElement(
-                            CoordGraph::Tile(), {n_wave_y}, {wave_y, jammed_wavetile_y});
-                    else
-                        graph.coordinates.addElement(
-                            CoordGraph::PassThrough(), {n_wave_y}, {wave_y});
-                }
-                break;
-
-                case LayoutType::MATRIX_ACCUMULATOR:
-                {
-                    // MFMA accumulator tile size
-                    uint mts            = 4u;
-                    auto mfma_tile_size = literal(mts);
-                    auto unit_stride    = literal(1u);
-
-                    auto n_row_blocks = literal(wave_tile.sizes[0] / mts);
-                    auto n_col_blocks = literal(wave_tile.sizes[1] / mts);
-
-                    auto n_vblk = graph.coordinates.addElement(
-                        CoordGraph::VGPRBlockNumber(literal(num_vgpr / mts), unit_stride));
-                    auto i_vblk = graph.coordinates.addElement(
-                        CoordGraph::VGPRBlockIndex(mfma_tile_size, unit_stride));
-                    auto n_lblk = graph.coordinates.addElement(
-                        CoordGraph::Adhoc("LANEBlockNumber", literal(wfs / mts), unit_stride));
-                    auto i_lblk = graph.coordinates.addElement(
-                        CoordGraph::Adhoc("LANEBlockIndex", mfma_tile_size, unit_stride));
-                    auto block = graph.coordinates.addElement(
-                        CoordGraph::Adhoc("LinearBlock", literal(num_elements / 16u), unit_stride));
-                    auto row_block = graph.coordinates.addElement(
-                        CoordGraph::Adhoc("RowBlock", n_row_blocks, unit_stride));
-                    auto col_block = graph.coordinates.addElement(
-                        CoordGraph::Adhoc("ColBlock", n_col_blocks, unit_stride));
-
-                    graph.mapper.connect<CoordGraph::VGPRBlockNumber>(load_tag, n_vblk);
-                    graph.mapper.connect<CoordGraph::VGPRBlockIndex>(load_tag, i_vblk);
-
-                    // ORDER?
-                    graph.coordinates.addElement(
-                        CoordGraph::Flatten(), {i_wave_x, i_wave_y}, {wave_tile_tag});
-
-                    graph.coordinates.addElement(
-                        CoordGraph::Tile(), {i_wave_x}, {row_block, i_vblk});
-                    graph.coordinates.addElement(
-                        CoordGraph::Tile(), {i_wave_y}, {col_block, i_lblk});
-
-                    graph.coordinates.addElement(
-                        CoordGraph::Flatten(), {row_block, col_block}, {block});
-                    graph.coordinates.addElement(CoordGraph::Tile(), {block}, {n_vblk, n_lblk});
-
-                    graph.coordinates.addElement(CoordGraph::Flatten(), {n_vblk, i_vblk}, {vgpr});
-                    graph.coordinates.addElement(CoordGraph::Flatten(), {n_lblk, i_lblk}, {lane});
-
-                    if(wavetilesPerWorkgroup[0] > 1)
-                        graph.coordinates.addElement(
-                            CoordGraph::Tile(), {n_wave_x}, {wave_x, jammed_wavetile_x});
-                    else
-                        graph.coordinates.addElement(
-                            CoordGraph::PassThrough(), {n_wave_x}, {wave_x});
-
-                    if(wavetilesPerWorkgroup[1] > 1)
-                        graph.coordinates.addElement(
-                            CoordGraph::Tile(), {n_wave_y}, {wave_y, jammed_wavetile_y});
-                    else
-                        graph.coordinates.addElement(
-                            CoordGraph::PassThrough(), {n_wave_y}, {wave_y});
-                }
-                break;
-
-                default:
-                    Throw<FatalError>("Not implemented yet.");
-                }
-            }
-
-            void loadMacroTile(KernelHypergraph& graph,
-                               int               load_tag,
-                               int               user_tag,
-                               int               mac_tile_tag,
-                               std::vector<int>& sdim)
-            {
-                auto mac_tile = graph.coordinates.getNode<CoordGraph::MacroTile>(mac_tile_tag);
-                auto user     = graph.coordinates.getNode<CoordGraph::User>(user_tag);
-
-                rocRoller::Log::getLogger()->debug(
-                    "KernelGraph::LowerTileVisitor::loadMacroTile(): User({}), MacroTile({})",
-                    user_tag,
-                    mac_tile_tag);
-                rocRoller::Log::getLogger()->debug(
-                    "KernelGraph::LowerTileVisitor::loadMacroTile(): MacroTile size: {}x{}",
-                    mac_tile.sizes[0],
-                    mac_tile.sizes[1]);
-
-                auto wavefront_size = wavefrontSize();
-
-                AssertRecoverable(mac_tile.rank == 2, "Rank /= 2 not implemented yet.");
-
-                auto sdim_x = sdim[0];
-                auto sdim_y = sdim[1];
-                graph.mapper.connect<CoordGraph::SubDimension>(load_tag, sdim_x, 0);
-                graph.mapper.connect<CoordGraph::SubDimension>(load_tag, sdim_y, 1);
-
-                auto n_mac_x = graph.coordinates.addElement(mac_tile.tileNumber(0));
-                auto n_mac_y = graph.coordinates.addElement(mac_tile.tileNumber(1));
-                auto i_mac_x = graph.coordinates.addElement(mac_tile.tileIndex(0));
-                auto i_mac_y = graph.coordinates.addElement(mac_tile.tileIndex(1));
-
-                graph.mapper.connect<CoordGraph::MacroTileNumber>(load_tag, n_mac_x, 0);
-                graph.mapper.connect<CoordGraph::MacroTileNumber>(load_tag, n_mac_y, 1);
-
-                auto workgroup_x = graph.coordinates.addElement(CoordGraph::Workgroup(0));
-                auto workgroup_y = graph.coordinates.addElement(CoordGraph::Workgroup(1));
-
-                graph.mapper.connect<CoordGraph::Workgroup>(load_tag, workgroup_x, 0);
-                graph.mapper.connect<CoordGraph::Workgroup>(load_tag, workgroup_y, 1);
-
-                graph.coordinates.addElement(
-                    CoordGraph::Flatten(), {i_mac_x, i_mac_y}, {mac_tile_tag});
-
-                graph.coordinates.addElement(CoordGraph::Tile(), {sdim_x}, {n_mac_x, i_mac_x});
-                graph.coordinates.addElement(CoordGraph::Tile(), {sdim_y}, {n_mac_y, i_mac_y});
-
-                graph.coordinates.addElement(CoordGraph::PassThrough(), {n_mac_x}, {workgroup_x});
-                graph.coordinates.addElement(CoordGraph::PassThrough(), {n_mac_y}, {workgroup_y});
-
-                switch(mac_tile.memoryType)
-                {
-                case MemoryType::VGPR:
-                case MemoryType::LDS:
-                {
-                    auto workitem_x = graph.coordinates.addElement(CoordGraph::Workitem(0));
-                    auto workitem_y = graph.coordinates.addElement(CoordGraph::Workitem(1));
-
-                    auto thr_tile = CoordGraph::ThreadTile(mac_tile.subTileSizes);
-
-                    auto n_thr_x = graph.coordinates.addElement(thr_tile.tileNumber(0));
-                    auto n_thr_y = graph.coordinates.addElement(thr_tile.tileNumber(1));
-                    auto i_thr_x = graph.coordinates.addElement(thr_tile.tileIndex(0));
-                    auto i_thr_y = graph.coordinates.addElement(thr_tile.tileIndex(1));
-
-                    graph.mapper.connect<CoordGraph::ThreadTileIndex>(load_tag, i_thr_x, 0);
-                    graph.mapper.connect<CoordGraph::ThreadTileIndex>(load_tag, i_thr_y, 1);
-
-                    graph.coordinates.addElement(CoordGraph::Tile(), {i_mac_x}, {n_thr_x, i_thr_x});
-                    graph.coordinates.addElement(CoordGraph::Tile(), {i_mac_y}, {n_thr_y, i_thr_y});
-
-                    graph.coordinates.addElement(
-                        CoordGraph::PassThrough(), {n_thr_x}, {workitem_x});
-                    graph.coordinates.addElement(
-                        CoordGraph::PassThrough(), {n_thr_y}, {workitem_y});
-
-                    // User -> DataFlow() -> LDS gets added in addLDSOps
-                }
-                break;
-
-                case MemoryType::WAVE:
-                    loadWaveMacroTile(graph, mac_tile, load_tag, i_mac_x, i_mac_y, user_tag);
-                    break;
-
-                default:
-                    Throw<FatalError>("Load : MacroTile memory type not supported yet.");
-                }
-            }
-
             virtual void visitOperation(KernelHypergraph&                   graph,
                                         KernelHypergraph const&             original,
                                         GraphReindexer&                     reindexer,
@@ -389,215 +110,19 @@ namespace rocRoller
                 copyOperation(graph, original, reindexer, tag);
 
                 auto load = reindexer.control.at(tag);
-                loadMacroTile(graph, load, user, mac_tile, sdims);
-            }
 
-            void storeWaveMacroTile(KernelHypergraph&      graph,
-                                    CoordGraph::MacroTile& mac_tile,
-                                    int                    store_tag,
-                                    int                    i_mac_x,
-                                    int                    i_mac_y,
-                                    int                    workitem,
-                                    int                    user_tag)
-            {
-                AssertFatal(mac_tile.layoutType == LayoutType::MATRIX_ACCUMULATOR,
-                            "Store must be from accumulator.");
-
-                auto wave_tile
-                    = CoordGraph::WaveTile(mac_tile.subTileSizes, LayoutType::MATRIX_ACCUMULATOR);
-                auto wave_tile_tag = graph.coordinates.addElement(wave_tile);
-
-                uint num_elements = wave_tile.sizes[0] * wave_tile.sizes[1];
-                uint wfs          = m_context->kernel()->wavefront_size();
-                uint num_agpr     = num_elements / wfs;
-
-                // MFMA accumulator tile size
-                uint mts            = 4u;
-                auto mfma_tile_size = literal(mts);
-
-                auto n_row_blocks = literal(wave_tile.sizes[0] / mts);
-                auto n_col_blocks = literal(wave_tile.sizes[1] / mts);
-
-                auto n_wave_x = graph.coordinates.addElement(wave_tile.tileNumber(0));
-                auto n_wave_y = graph.coordinates.addElement(wave_tile.tileNumber(1));
-                auto i_wave_x = graph.coordinates.addElement(wave_tile.tileIndex(0));
-                auto i_wave_y = graph.coordinates.addElement(wave_tile.tileIndex(1));
-
-                graph.coordinates.addElement(
-                    CoordGraph::Join(), {i_wave_x, i_wave_y}, {wave_tile_tag});
-
-                auto wavefront_size = wavefrontSize();
-                auto unit_stride    = literal(1u);
-
-                auto n_vblk = graph.coordinates.addElement(
-                    CoordGraph::VGPRBlockNumber(literal(num_agpr / mts), unit_stride));
-                auto i_vblk = graph.coordinates.addElement(
-                    CoordGraph::VGPRBlockIndex(mfma_tile_size, unit_stride));
-                auto n_lblk = graph.coordinates.addElement(
-                    CoordGraph::Adhoc("LANEBlockNumber", literal(wfs / mts), unit_stride));
-                auto i_lblk = graph.coordinates.addElement(
-                    CoordGraph::Adhoc("LANEBlockIndex", mfma_tile_size, unit_stride));
-                auto block = graph.coordinates.addElement(
-                    CoordGraph::Adhoc("LinearBlock", literal(num_elements / 16u), unit_stride));
-                auto row_block = graph.coordinates.addElement(
-                    CoordGraph::Adhoc("RowBlock", n_row_blocks, unit_stride));
-                auto col_block = graph.coordinates.addElement(
-                    CoordGraph::Adhoc("ColBlock", n_col_blocks, unit_stride));
-
-                graph.coordinates.addElement(
-                    CoordGraph::Flatten(), {n_wave_x, i_wave_x}, {i_mac_x});
-                graph.coordinates.addElement(
-                    CoordGraph::Flatten(), {n_wave_y, i_wave_y}, {i_mac_y});
-
-                auto wave_x = graph.coordinates.addElement(CoordGraph::Wavefront(0));
-                auto wave_y = graph.coordinates.addElement(CoordGraph::Wavefront(1));
-                auto wave   = graph.coordinates.addElement(CoordGraph::Wavefront(-1));
-
-                graph.coordinates.addElement(CoordGraph::Tile(), {wave}, {wave_x, wave_y});
-
-                auto lane
-                    = graph.coordinates.addElement(CoordGraph::Lane(wavefront_size, unit_stride));
-                auto vgpr = graph.coordinates.addElement(
-                    CoordGraph::VGPR(literal(num_agpr), unit_stride));
-
-                graph.mapper.connect<CoordGraph::WaveTile>(store_tag, wave_tile_tag);
-                graph.mapper.connect<CoordGraph::VGPRBlockNumber>(store_tag, n_vblk);
-                graph.mapper.connect<CoordGraph::VGPRBlockIndex>(store_tag, i_vblk);
-                graph.mapper.connect<CoordGraph::VGPR>(store_tag, vgpr);
-
-                graph.coordinates.addElement(CoordGraph::Tile(), {vgpr}, {n_vblk, i_vblk});
-                graph.coordinates.addElement(CoordGraph::Tile(), {lane}, {n_lblk, i_lblk});
-                graph.coordinates.addElement(CoordGraph::Flatten(), {n_vblk, n_lblk}, {block});
-                graph.coordinates.addElement(CoordGraph::Tile(), {block}, {row_block, col_block});
-
+                auto workgroupSizes        = m_context->kernel()->workgroupSize();
+                auto wavefrontSize         = m_context->kernel()->wavefront_size();
                 auto wavetilesPerWorkgroup = m_params->getWaveTilesPerWorkgroup();
 
-                int jammed_wavetile_x = -1;
-                if(wavetilesPerWorkgroup[0] > 1)
-                {
-                    jammed_wavetile_x
-                        = graph.coordinates.addElement(CoordGraph::JammedWaveTileNumber(
-                            0, literal(wavetilesPerWorkgroup[0]), literal(1)));
-                    graph.mapper.connect<CoordGraph::JammedWaveTileNumber>(
-                        store_tag, jammed_wavetile_x, 0);
-                }
-                int jammed_wavetile_y = -1;
-                if(wavetilesPerWorkgroup[1] > 1)
-                {
-                    jammed_wavetile_y
-                        = graph.coordinates.addElement(CoordGraph::JammedWaveTileNumber(
-                            1, literal(wavetilesPerWorkgroup[1]), literal(1)));
-                    graph.mapper.connect<CoordGraph::JammedWaveTileNumber>(
-                        store_tag, jammed_wavetile_y, 1);
-                }
-
-                if(wavetilesPerWorkgroup[0] > 1)
-                    graph.coordinates.addElement(
-                        CoordGraph::Flatten(), {wave_x, jammed_wavetile_x}, {n_wave_x});
-                else
-                    graph.coordinates.addElement(CoordGraph::PassThrough(), {wave_x}, {n_wave_x});
-                if(wavetilesPerWorkgroup[1] > 1)
-                    graph.coordinates.addElement(
-                        CoordGraph::Flatten(), {wave_y, jammed_wavetile_y}, {n_wave_y});
-                else
-                    graph.coordinates.addElement(CoordGraph::PassThrough(), {wave_y}, {n_wave_y});
-
-                graph.coordinates.addElement(
-                    CoordGraph::Flatten(), {row_block, i_vblk}, {i_wave_x});
-                graph.coordinates.addElement(
-                    CoordGraph::Flatten(), {col_block, i_lblk}, {i_wave_y});
-
-                graph.coordinates.addElement(CoordGraph::Tile(), {workitem}, {wave, lane});
-            }
-
-            void storeMacroTile(KernelHypergraph& graph,
-                                int               store_tag,
-                                int               user_tag,
-                                int               mac_tile_tag,
-                                std::vector<int>& sdims)
-            {
-                auto mac_tile = graph.coordinates.getNode<CoordGraph::MacroTile>(mac_tile_tag);
-                auto user     = graph.coordinates.getNode<CoordGraph::User>(user_tag);
-
-                rocRoller::Log::getLogger()->debug(
-                    "KernelGraph::LowerTileVisitor::storeMacroTile(): User({}), MacroTile({})",
-                    user_tag,
-                    mac_tile_tag);
-                rocRoller::Log::getLogger()->debug(
-                    "KernelGraph::LowerTileVisitor::storeMacroTile(): MacroTile size: {}x{}",
-                    mac_tile.sizes[0],
-                    mac_tile.sizes[1]);
-
-                AssertRecoverable(mac_tile.rank >= 0 && sdims.size() == (size_t)mac_tile.rank,
-                                  "Tensor size mismatch.");
-                AssertRecoverable(mac_tile.rank == 2, "Rank /= 2 not implemented yet.");
-
-                auto n_mac_x = graph.coordinates.addElement(mac_tile.tileNumber(0));
-                auto n_mac_y = graph.coordinates.addElement(mac_tile.tileNumber(1));
-                auto i_mac_x = graph.coordinates.addElement(mac_tile.tileIndex(0));
-                auto i_mac_y = graph.coordinates.addElement(mac_tile.tileIndex(1));
-
-                auto workgroup_x    = graph.coordinates.addElement(CoordGraph::Workgroup(0));
-                auto workgroup_y    = graph.coordinates.addElement(CoordGraph::Workgroup(1));
-                auto workgroupSizes = m_kernel->workgroupSize();
-
-                auto workitem = graph.coordinates.addElement(
-                    CoordGraph::Workitem(0, literal(workgroupSizes.at(0))));
-
-                graph.coordinates.addElement(
-                    CoordGraph::Flatten(), {i_mac_x, i_mac_y}, {mac_tile_tag});
-
-                graph.coordinates.addElement(CoordGraph::Flatten(), {n_mac_x, i_mac_x}, {sdims[0]});
-                graph.coordinates.addElement(CoordGraph::Flatten(), {n_mac_y, i_mac_y}, {sdims[1]});
-
-                graph.coordinates.addElement(CoordGraph::PassThrough(), {workgroup_x}, {n_mac_x});
-                graph.coordinates.addElement(CoordGraph::PassThrough(), {workgroup_y}, {n_mac_y});
-
-                switch(mac_tile.memoryType)
-                {
-                case MemoryType::VGPR:
-                case MemoryType::LDS:
-                {
-                    auto workitem_x = graph.coordinates.addElement(
-                        CoordGraph::Workitem(0, literal(workgroupSizes.at(0))));
-                    auto workitem_y = graph.coordinates.addElement(
-                        CoordGraph::Workitem(1, literal(workgroupSizes.at(1))));
-
-                    auto thr_tile     = CoordGraph::ThreadTile(mac_tile.subTileSizes);
-                    auto thr_tile_tag = graph.coordinates.addElement(thr_tile);
-
-                    auto n_thr_x = graph.coordinates.addElement(thr_tile.tileNumber(0));
-                    auto n_thr_y = graph.coordinates.addElement(thr_tile.tileNumber(1));
-                    auto i_thr_x = graph.coordinates.addElement(thr_tile.tileIndex(0));
-                    auto i_thr_y = graph.coordinates.addElement(thr_tile.tileIndex(1));
-
-                    graph.mapper.connect<CoordGraph::ThreadTileIndex>(store_tag, i_thr_x, 0);
-                    graph.mapper.connect<CoordGraph::ThreadTileIndex>(store_tag, i_thr_y, 1);
-
-                    graph.coordinates.addElement(
-                        CoordGraph::Split(), {thr_tile_tag}, {i_thr_x, i_thr_y});
-                    graph.coordinates.addElement(
-                        CoordGraph::Flatten(), {n_thr_x, i_thr_x}, {i_mac_x});
-                    graph.coordinates.addElement(
-                        CoordGraph::Flatten(), {n_thr_y, i_thr_y}, {i_mac_y});
-
-                    graph.coordinates.addElement(
-                        CoordGraph::PassThrough(), {workitem}, {i_thr_x, i_thr_y});
-                    graph.coordinates.addElement(
-                        CoordGraph::PassThrough(), {workitem_x}, {n_thr_x});
-                    graph.coordinates.addElement(
-                        CoordGraph::PassThrough(), {workitem_y}, {n_thr_y});
-                }
-                break;
-
-                case MemoryType::WAVE:
-                    storeWaveMacroTile(
-                        graph, mac_tile, store_tag, i_mac_x, i_mac_y, workitem, user_tag);
-                    break;
-
-                default:
-                    Throw<FatalError>("Store : MacroTile memory type not supported yet.");
-                }
+                loadMacroTile(graph,
+                              load,
+                              user,
+                              mac_tile,
+                              sdims,
+                              workgroupSizes,
+                              wavefrontSize,
+                              wavetilesPerWorkgroup);
             }
 
             virtual void visitOperation(KernelHypergraph&                    graph,
@@ -625,7 +150,19 @@ namespace rocRoller
                 copyOperation(graph, original, reindexer, tag);
 
                 auto store = reindexer.control.at(tag);
-                storeMacroTile(graph, store, user, mac_tile, sdims);
+
+                auto workgroupSizes        = m_context->kernel()->workgroupSize();
+                auto wavefrontSize         = m_context->kernel()->wavefront_size();
+                auto wavetilesPerWorkgroup = m_params->getWaveTilesPerWorkgroup();
+
+                storeMacroTile(graph,
+                               store,
+                               user,
+                               mac_tile,
+                               sdims,
+                               workgroupSizes,
+                               wavefrontSize,
+                               wavetilesPerWorkgroup);
             }
 
         private:
@@ -640,34 +177,28 @@ namespace rocRoller
             auto user_tag = graph.mapper.get<CoordGraph::User>(tag);
             auto tile_tag = graph.mapper.get<CoordGraph::MacroTile>(tag);
             auto tile     = graph.coordinates.getNode<CoordGraph::MacroTile>(tile_tag);
+            auto load     = graph.control.getNode<ControlHypergraph::LoadTiled>(tag);
 
             if(tile.memoryType == MemoryType::LDS)
             {
                 auto lds = graph.coordinates.addElement(CoordGraph::LDS());
 
-                auto storeLDS = graph.control.addElement(ControlHypergraph::StoreLDSTile());
-                auto barrier  = graph.control.addElement(ControlHypergraph::Barrier());
-                auto loadLDS  = graph.control.addElement(ControlHypergraph::LoadLDSTile());
+                auto storeLDS = graph.control.addElement(
+                    ControlHypergraph::StoreLDSTile(load.vtype.dataType));
+                auto barrier = graph.control.addElement(ControlHypergraph::Barrier());
+                auto loadLDS = graph.control.addElement(ControlHypergraph::LoadLDSTile(load.vtype));
 
                 graph.mapper.connect<CoordGraph::LDS>(storeLDS, lds);
                 graph.mapper.connect<CoordGraph::MacroTile>(storeLDS, tile_tag);
 
-                graph.mapper.connect<CoordGraph::User>(loadLDS, user_tag);
                 graph.mapper.connect<CoordGraph::LDS>(loadLDS, lds);
                 graph.mapper.connect<CoordGraph::MacroTile>(loadLDS, tile_tag);
 
-                // Add an edge to the coordinate graph to index into the LDS allocation.
                 auto workgroupSizes = context->kernel()->workgroupSize();
-
-                auto workitem_x = graph.coordinates.addElement(
-                    CoordGraph::Workitem(0, literal(workgroupSizes.at(0))));
-                auto workitem_y = graph.coordinates.addElement(
-                    CoordGraph::Workitem(1, literal(workgroupSizes.at(1))));
+                loadMacroTileFromLDS(graph, loadLDS, lds, tile_tag, workgroupSizes);
+                storeMacroTileIntoLDS(graph, storeLDS, lds, tile_tag, workgroupSizes);
 
                 graph.coordinates.addElement(CoordGraph::DataFlow(), {user_tag}, {tile_tag});
-                graph.coordinates.addElement(CoordGraph::DataFlow(), {tile_tag}, {lds});
-                graph.coordinates.addElement(
-                    CoordGraph::Flatten(), {workitem_x, workitem_y}, {lds});
 
                 // Find all edges leaving from load. Those should be changed to leave from loadLDS.
                 auto outgoing_edges = graph.control.getNeighbours<Graph::Direction::Downstream>(tag)
@@ -684,6 +215,108 @@ namespace rocRoller
                 graph.control.addElement(ControlHypergraph::Sequence(), {tag}, {storeLDS});
                 graph.control.addElement(ControlHypergraph::Sequence(), {storeLDS}, {barrier});
                 graph.control.addElement(ControlHypergraph::Sequence(), {barrier}, {loadLDS});
+            }
+        }
+
+        void addWaveLDSOps(KernelHypergraph&                  graph,
+                           std::shared_ptr<CommandParameters> params,
+                           std::shared_ptr<Context>           context,
+                           int                                tile,
+                           int                                load,
+                           int                                forK,
+                           int                                K,
+                           int                                waveMult)
+        {
+            rocRoller::Log::getLogger()->debug(
+                "KernelGraph::LowerTileVisitor::addWaveLDSOps: LoadTiled({})", load);
+
+            auto macrotile = graph.coordinates.getNode<CoordGraph::MacroTile>(tile);
+
+            if(macrotile.memoryType == MemoryType::WAVE_LDS)
+            {
+                // change loadTiled to LoadLDSTile under Multiply
+                // and update its macrotile's memory type
+                auto vtype = graph.control.getNode<ControlHypergraph::LoadTiled>(load).vtype;
+                graph.control.setElement(load, ControlHypergraph::LoadLDSTile(vtype));
+                macrotile.memoryType = MemoryType::WAVE;
+                graph.coordinates.setElement(tile, macrotile);
+
+                auto user = graph.coordinates
+                                .getInputNodeIndices(tile, CoordGraph::isEdge<CoordGraph::DataFlow>)
+                                .to<std::vector>();
+                AssertFatal(user.size() == 1);
+                graph.coordinates.deleteElement(
+                    user, std::vector<int>{tile}, CoordGraph::isEdge<CoordGraph::DataFlow>);
+                auto sdims
+                    = graph.coordinates
+                          .getOutputNodeIndices(user[0], CoordGraph::isEdge<CoordGraph::Split>)
+                          .to<std::vector>();
+
+                auto lds = graph.coordinates.addElement(CoordGraph::LDS());
+
+                // remove workgroups, macrotile numbers and tile edges from sdims
+                loadWaveMacroTileFromLDS(graph, macrotile, load, sdims, K, lds);
+
+                // add new loadTiled node to load a macrotile into VGPRs from global memory under the forK loop
+                auto load_macrotile_from_global
+                    = graph.control.addElement(ControlHypergraph::LoadTiled(vtype));
+                graph.control.addElement(
+                    ControlHypergraph::Body(), {forK}, {load_macrotile_from_global});
+                graph.mapper.connect<CoordGraph::User>(load_macrotile_from_global, user[0]);
+
+                // create an internal macrotile to be loaded by one workgroup
+                auto workgroupSizes = context->kernel()->workgroupSize();
+                auto numWorkitems   = product(workgroupSizes);
+                auto numElements    = product(macrotile.sizes);
+                auto numVGPRs       = static_cast<int>(numElements / numWorkitems);
+                // TODO : load the two Halfs into 1 VGPR
+                //if(vtype == DataType::Half)
+                //num_vgprs = num_vgprs / 2;
+                auto t_m          = numVGPRs;
+                auto t_n          = 1;
+                auto internalTile = graph.coordinates.addElement(
+                    CoordGraph::MacroTile(macrotile.sizes, MemoryType::VGPR, {t_m, t_n}));
+                auto internalTileDim
+                    = graph.coordinates.getNode<CoordGraph::MacroTile>(internalTile);
+                internalTileDim.layoutType = macrotile.layoutType;
+                graph.coordinates.setElement(internalTile, internalTileDim);
+                graph.mapper.connect<CoordGraph::MacroTile>(load_macrotile_from_global,
+                                                            internalTile);
+
+                // user --DataFlow--> internalTile
+                graph.coordinates.addElement(CoordGraph::DataFlow(), {user[0]}, {internalTile});
+
+                // lower tile LoadTiled : load macrotile from global memory
+                loadMacroTileForLDS(graph,
+                                    load_macrotile_from_global,
+                                    user[0],
+                                    internalTile,
+                                    sdims,
+                                    K,
+                                    workgroupSizes);
+
+                // add store from VGPRs to LDS following this new loadTiled under the forK loop
+                auto store_macrotile_into_LDS
+                    = graph.control.addElement(ControlHypergraph::StoreLDSTile(vtype.dataType));
+                auto barrier = graph.control.addElement(ControlHypergraph::Barrier());
+                graph.control.addElement(ControlHypergraph::Sequence(),
+                                         {load_macrotile_from_global},
+                                         {store_macrotile_into_LDS});
+                graph.control.addElement(
+                    ControlHypergraph::Sequence(), {store_macrotile_into_LDS}, {barrier});
+                graph.control.addElement(ControlHypergraph::Sequence(), {barrier}, {waveMult});
+                graph.mapper.connect<CoordGraph::MacroTile>(store_macrotile_into_LDS, internalTile);
+
+                // lower tile StoreLDSTile : store macrotile into LDS
+                storeMacroTileIntoLDS(
+                    graph, store_macrotile_into_LDS, lds, internalTile, workgroupSizes);
+
+                // LDS --DataFlow--> macrotile
+                graph.coordinates.addElement(CoordGraph::DataFlow(), {lds}, {tile});
+
+                graph.mapper.connect<CoordGraph::LDS>(load, lds);
+                graph.mapper.connect<CoordGraph::LDS>(load_macrotile_from_global, lds);
+                graph.mapper.connect<CoordGraph::LDS>(store_macrotile_into_LDS, lds);
             }
         }
 
@@ -793,25 +426,14 @@ namespace rocRoller
 
             // TODO : create helper functions to make this lowering modular and readable.
             auto waveMult = graph.control.addElement(ControlHypergraph::Multiply());
-
-            // initialise accumulator
-            auto [userA_tag, userA] = graph.getDimension<CoordGraph::User>(loadA[0]);
-            auto [userB_tag, userB] = graph.getDimension<CoordGraph::User>(loadB[0]);
-            auto [waveA_tag, waveA] = graph.getDimension<CoordGraph::WaveTile>(loadA[0]);
-            auto [waveB_tag, waveB] = graph.getDimension<CoordGraph::WaveTile>(loadB[0]);
-
             // connections are: 0: lhs (A); 1: rhs (B); 2: dst (D)
-            graph.mapper.connect<CoordGraph::User>(waveMult, userA_tag, 0);
-            graph.mapper.connect<CoordGraph::User>(waveMult, userB_tag, 1);
-            graph.mapper.connect<CoordGraph::MacroTile>(waveMult, a, 0);
-            graph.mapper.connect<CoordGraph::MacroTile>(waveMult, b, 1);
-            graph.mapper.connect<CoordGraph::WaveTile>(waveMult, waveA_tag, 0);
-            graph.mapper.connect<CoordGraph::WaveTile>(waveMult, waveB_tag, 1);
             graph.mapper.connect<CoordGraph::MacroTile>(waveMult, d, 2);
 
-            uint num_elements = waveA.sizes[0] * waveB.sizes[1];
-            uint wfs          = context->kernel()->wavefront_size();
-            uint num_agpr     = num_elements / wfs; // number of output registers per thread
+            auto [waveA_tag, waveA] = graph.getDimension<CoordGraph::WaveTile>(loadA[0]);
+            auto [waveB_tag, waveB] = graph.getDimension<CoordGraph::WaveTile>(loadB[0]);
+            uint num_elements       = waveA.sizes[0] * waveB.sizes[1];
+            uint wfs                = context->kernel()->wavefront_size();
+            uint num_agpr           = num_elements / wfs; // number of output registers per thread
 
             auto initD = graph.control.addElement(ControlHypergraph::Assign{
                 Register::Type::Accumulator, literal(0.f), num_agpr, false});
@@ -987,6 +609,12 @@ namespace rocRoller
             }
             else
                 graph.control.addElement(ControlHypergraph::Body(), {kernel}, {forK});
+
+            // add LDSOps if needed
+            addWaveLDSOps(graph, params, context, a, loadA[0], forK, K, waveMult);
+            addWaveLDSOps(graph, params, context, b, loadB[0], forK, K, waveMult);
+
+            addConnectionsMultiply(graph, waveMult);
         }
 
         KernelHypergraph addComputeIndexOperations(KernelHypergraph const& original)
@@ -998,29 +626,74 @@ namespace rocRoller
             auto multiplies
                 = kgraph.control.getNodes<ControlHypergraph::Multiply>().to<std::vector>();
             AssertFatal(multiplies.size() <= 1, "More than one Multiply not supported yet.");
+            std::vector<int> forK;
             if(multiplies.size() == 1)
             {
-                auto forK = kgraph.control
-                                .findNodes(
-                                    multiplies[0],
-                                    [&](int tag) -> bool {
-                                        return isOperation<ControlHypergraph::ForLoopOp>(
-                                            kgraph.control.getElement(tag));
-                                    },
-                                    Graph::Direction::Upstream)
-                                .to<std::vector>();
-                AssertFatal(forK.size() > 0, "Didn't find for loop.");
-                auto loads = kgraph.control
-                                 .findNodes(
-                                     multiplies[0],
-                                     [&](int tag) -> bool {
-                                         return isOperation<ControlHypergraph::LoadTiled>(
-                                             kgraph.control.getElement(tag));
-                                     },
-                                     Graph::Direction::Downstream)
-                                 .to<std::vector>();
-                AssertFatal(loads.size() == 2, "More than one Multiply not supported yet.");
-                kgraph = addComputeIndexAB(kgraph, forK[0], loads[0], loads[1]);
+                forK = kgraph.control.getInputNodeIndices<ControlHypergraph::Body>(multiplies[0])
+                           .to<std::vector>();
+                AssertFatal(forK.size() == 1, "Didn't find for loop.");
+                auto mulLoads = kgraph.control
+                                    .findNodes(
+                                        multiplies[0],
+                                        [&](int tag) -> bool {
+                                            return isOperation<ControlHypergraph::LoadTiled>(
+                                                       kgraph.control.getElement(tag))
+                                                   || isOperation<ControlHypergraph::LoadLDSTile>(
+                                                       kgraph.control.getElement(tag));
+                                        },
+                                        Graph::Direction::Downstream)
+                                    .to<std::vector>();
+                AssertFatal(mulLoads.size() == 2, "More than one Multiply not supported yet.");
+                auto storesLDS = kgraph.control
+                                     .findNodes(
+                                         forK[0],
+                                         [&](int tag) -> bool {
+                                             return isOperation<ControlHypergraph::StoreLDSTile>(
+                                                 kgraph.control.getElement(tag));
+                                         },
+                                         Graph::Direction::Downstream)
+                                     .to<std::vector>();
+                auto loads
+                    = kgraph.control
+                          .findNodes(
+                              forK[0],
+                              [&](int tag) -> bool {
+                                  if(isOperation<ControlHypergraph::LoadTiled>(
+                                         kgraph.control.getElement(tag)))
+                                  {
+                                      auto parents
+                                          = kgraph.control.parentNodes(tag).to<std::vector>();
+                                      AssertFatal(parents.size() == 1);
+                                      return parents[0] != multiplies[0];
+                                  }
+                                  return false;
+                              },
+                              Graph::Direction::Downstream)
+                          .to<std::vector>();
+                AssertFatal(storesLDS.size() == loads.size(),
+                            "Either store LDS or load is missing");
+                if(storesLDS.size() == 0)
+                    kgraph = addComputeIndexAB(
+                        kgraph, forK[0], mulLoads[0], mulLoads[1], -1, -1, -1, -1);
+                else if(storesLDS.size() == 1
+                        && isOperation<ControlHypergraph::LoadLDSTile>(
+                            kgraph.control.getElement(mulLoads[0])))
+                    kgraph = addComputeIndexAB(
+                        kgraph, forK[0], mulLoads[0], mulLoads[1], loads[0], storesLDS[0], -1, -1);
+                else if(storesLDS.size() == 1
+                        && isOperation<ControlHypergraph::LoadLDSTile>(
+                            kgraph.control.getElement(mulLoads[1])))
+                    kgraph = addComputeIndexAB(
+                        kgraph, forK[0], mulLoads[0], mulLoads[1], -1, -1, loads[0], storesLDS[0]);
+                else if(storesLDS.size() == 2)
+                    kgraph = addComputeIndexAB(kgraph,
+                                               forK[0],
+                                               mulLoads[0],
+                                               mulLoads[1],
+                                               loads[0],
+                                               storesLDS[0],
+                                               loads[1],
+                                               storesLDS[1]);
             }
 
             // MATRIX_ACCUMULATOR loads anywhere
@@ -1048,24 +721,32 @@ namespace rocRoller
             }
 
             // VGPR/LDS loads anywhere
-            auto loadVGPR = kgraph.control
-                                .findNodes(
-                                    kernel,
-                                    [&](int tag) -> bool {
-                                        auto load
-                                            = kgraph.control.get<ControlHypergraph::LoadTiled>(tag);
-                                        if(load)
-                                        {
-                                            auto [tile_tag, tile]
-                                                = kgraph.getDimension<CoordGraph::MacroTile>(tag);
-                                            if(tile.memoryType == MemoryType::VGPR
-                                               || tile.memoryType == MemoryType::LDS)
-                                                return true;
-                                        }
-                                        return false;
-                                    },
-                                    Graph::Direction::Downstream)
-                                .to<std::vector>();
+            std::unordered_set<int> reachable_from_forK;
+            if(!forK.empty())
+                reachable_from_forK
+                    = kgraph.control.depthFirstVisit(forK[0]).to<std::unordered_set>();
+            auto loadVGPR
+                = kgraph.control
+                      .findNodes(
+                          kernel,
+                          [&](int tag) -> bool {
+                              if(reachable_from_forK.find(tag) != reachable_from_forK.end())
+                                  return false;
+                              auto load = kgraph.control.get<ControlHypergraph::LoadTiled>(tag);
+                              auto loadLDS
+                                  = kgraph.control.get<ControlHypergraph::LoadLDSTile>(tag);
+                              if(load || loadLDS)
+                              {
+                                  auto [tile_tag, tile]
+                                      = kgraph.getDimension<CoordGraph::MacroTile>(tag);
+                                  if(tile.memoryType == MemoryType::VGPR
+                                     || tile.memoryType == MemoryType::LDS)
+                                      return true;
+                              }
+                              return false;
+                          },
+                          Graph::Direction::Downstream)
+                      .to<std::vector>();
 
             for(auto const tag : loadVGPR)
             {
@@ -1102,8 +783,12 @@ namespace rocRoller
                       .findNodes(
                           kernel,
                           [&](int tag) -> bool {
+                              if(reachable_from_forK.find(tag) != reachable_from_forK.end())
+                                  return false;
                               auto store = kgraph.control.get<ControlHypergraph::StoreTiled>(tag);
-                              if(store)
+                              auto storeLDS
+                                  = kgraph.control.get<ControlHypergraph::StoreLDSTile>(tag);
+                              if(store || storeLDS)
                               {
                                   auto [tile_tag, tile]
                                       = kgraph.getDimension<CoordGraph::MacroTile>(tag);
@@ -1157,9 +842,6 @@ namespace rocRoller
                 }
             }
 
-            // Find WAVE tile load/store operations and add ComputeIndex operations
-            kgraph = addComputeIndexOperations(kgraph);
-
             // Add LDS operations to the control graph following LoadTiled nodes.
             // This is done after the control graph is completly built to make
             // it easier to modify the edges coming into and out of the
@@ -1173,6 +855,10 @@ namespace rocRoller
                                             }},
                       std::get<ControlHypergraph::Operation>(elem));
             }
+
+            // Find WAVE tile load/store operations and add ComputeIndex operations
+            kgraph = addComputeIndexOperations(kgraph);
+
             return kgraph;
         }
 

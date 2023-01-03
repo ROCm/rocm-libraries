@@ -64,7 +64,7 @@ namespace ScopeTest
         // assign3 should be to v1, which is deallocated
 
         auto kexpected = R"(
-            // CFCodeGeneratorVisitor::generate() begin
+            // CodeGeneratorVisitor::generate() begin
             // generate(set{1})
             // Kernel BEGIN
             // Begin Kernel
@@ -94,7 +94,7 @@ namespace ScopeTest
             // Scope END
             // End Kernel
             // Kernel END
-            // CFCodeGeneratorVisitor::generate() end
+            // CodeGeneratorVisitor::generate() end
         )";
 
         EXPECT_THAT(output(), MatchesSourceIncludingComments(kexpected));

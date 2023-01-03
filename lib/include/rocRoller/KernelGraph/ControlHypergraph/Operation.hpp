@@ -286,6 +286,14 @@ namespace rocRoller
          */
         struct LoadLDSTile : BaseOperation
         {
+            LoadLDSTile() = delete;
+            LoadLDSTile(VariableType const varType)
+                : vtype(varType)
+            {
+            }
+
+            VariableType vtype;
+
             std::string toString() const override
             {
                 return "LoadLDSTile";
@@ -352,6 +360,14 @@ namespace rocRoller
          */
         struct StoreLDSTile : public BaseOperation
         {
+            StoreLDSTile() = delete;
+            StoreLDSTile(DataType const dtype)
+                : dataType(dtype)
+            {
+            }
+
+            DataType dataType;
+
             std::string toString() const override
             {
                 return "StoreLDSTile";

@@ -261,8 +261,10 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult)
     // TODO: Calculate these values internally based on workgroup sizes.
     params->setWaveTilesPerWavefront(wavetile_per_wavefront_m, wavetile_per_wavefront_n);
 
-    auto mac_tile_A = KernelGraph::CoordGraph::MacroTile(
-        {result.mac_m, result.mac_k}, LayoutType::MATRIX_A, {wave_m, wave_n, wave_k, wave_b});
+    auto mac_tile_A = KernelGraph::CoordGraph::MacroTile({result.mac_m, result.mac_k},
+                                                         LayoutType::MATRIX_A,
+                                                         {wave_m, wave_n, wave_k, wave_b},
+                                                         MemoryType::LDS);
     auto mac_tile_B = KernelGraph::CoordGraph::MacroTile(
         {result.mac_k, result.mac_n}, LayoutType::MATRIX_B, {wave_m, wave_n, wave_k, wave_b});
     auto mac_tile_C = KernelGraph::CoordGraph::MacroTile({result.mac_m, result.mac_n},

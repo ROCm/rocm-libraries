@@ -54,7 +54,8 @@ namespace rocRoller
         KernelHypergraph
             lowerTile(KernelHypergraph, std::shared_ptr<CommandParameters>, ContextPtr);
 
-        KernelHypergraph addComputeIndexAB(KernelHypergraph const&, int, int, int);
+        KernelHypergraph
+            addComputeIndexAB(KernelHypergraph const&, int, int, int, int, int, int, int);
         KernelHypergraph addComputeIndexC(KernelHypergraph const&, int, int, bool);
         KernelHypergraph addComputeIndexVGPR(KernelHypergraph const&, int, int, bool);
 

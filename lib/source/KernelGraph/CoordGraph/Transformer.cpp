@@ -297,7 +297,7 @@ namespace rocRoller
         void Transformer::setCoordinate(int tag, ExpressionPtr index)
         {
             rocRoller::Log::getLogger()->debug(
-                "Transformer::setCoorindate: setting {} to {}", tag, toString(index));
+                "Transformer::setCoordinate: setting {} to {}", tag, toString(index));
             m_indexes.insert_or_assign(tag, index);
         }
 

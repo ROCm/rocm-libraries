@@ -180,8 +180,10 @@ namespace GEMMDriverTest
         // TODO: Calculate these values internally based on workgroup sizes.
         params->setWaveTilesPerWavefront(wavetile_per_wavefront_m, wavetile_per_wavefront_n);
 
-        auto mac_tile_A = KernelGraph::CoordGraph::MacroTile(
-            {mac_m, mac_k}, LayoutType::MATRIX_A, {wave_m, wave_n, wave_k, wave_b});
+        auto mac_tile_A = KernelGraph::CoordGraph::MacroTile({mac_m, mac_k},
+                                                             LayoutType::MATRIX_A,
+                                                             {wave_m, wave_n, wave_k, wave_b},
+                                                             MemoryType::LDS);
         auto mac_tile_B = KernelGraph::CoordGraph::MacroTile(
             {mac_k, mac_n}, LayoutType::MATRIX_B, {wave_m, wave_n, wave_k, wave_b});
         auto mac_tile_C = KernelGraph::CoordGraph::MacroTile(

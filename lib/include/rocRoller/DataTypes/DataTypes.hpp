@@ -120,6 +120,7 @@ namespace rocRoller
         AGPR,
         VGPR,
         WAVE,
+        WAVE_LDS,
 
         Count,
         None = Count

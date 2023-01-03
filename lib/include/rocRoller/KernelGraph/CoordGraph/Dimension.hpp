@@ -69,8 +69,7 @@ namespace rocRoller
             }
 
             /**
-             * Create an Adhoc dimension with a specific name and
-             * command tag.
+             * Create an Adhoc dimension with a specific name.
              */
             Adhoc(std::string const& name)
                 : Adhoc(name, nullptr, nullptr)
@@ -395,21 +394,25 @@ namespace rocRoller
             }
 
             /**
-             * Construct MacroTile dimension with fully specified sizes
-             * and memory type (ie, LDS vs VGPR).
+             * Construct MacroTile dimension with fully specified sizes,
+             * layout type (i.e. MATRIX_A, MATRIX_B or MATRIX_ACCUMULATOR) and
+             * memory type (i.e. WAVE or LDS (internally represented as WAVE_LDS)).
              *
-             * Memory type is WAVE.
+             * Memory type is WAVE (by default) for VGPRs or WAVE_LDS for LDS.
              */
             MacroTile(std::vector<int> const& sizes,
                       LayoutType const        layoutType,
-                      std::vector<int> const& subTileSizes = {})
+                      std::vector<int> const& subTileSizes = {},
+                      MemoryType const        memoryType   = MemoryType::WAVE)
                 : BaseDimension()
                 , rank(sizes.size())
                 , sizes(sizes)
-                , memoryType(MemoryType::WAVE)
+                , memoryType(memoryType)
                 , layoutType(layoutType)
                 , subTileSizes(subTileSizes)
             {
+                if(this->memoryType == MemoryType::LDS)
+                    this->memoryType = MemoryType::WAVE_LDS;
                 AssertFatal(layoutType != LayoutType::None, "Invalid layout type.");
             }
 

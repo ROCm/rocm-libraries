@@ -82,10 +82,20 @@ namespace rocRoller
         else if(src->regType() == Register::Type::Literal
                 && dest->regType() == Register::Type::Scalar)
         {
-            // TODO this assumes 32bit
-            for(size_t k = 0; k < dest->registerCount(); ++k)
+            for(size_t k = 0; k < dest->valueCount(); ++k)
             {
-                co_yield_(Instruction("s_mov_b32", {dest->subset({k})}, {src}, {}, comment));
+                if(dest->variableType().getElementSize() == 4)
+                {
+                    co_yield_(Instruction("s_mov_b32", {dest->element({k})}, {src}, {}, comment));
+                }
+                else if(dest->variableType().getElementSize() == 8)
+                {
+                    co_yield_(Instruction("s_mov_b64", {dest->element({k})}, {src}, {}, comment));
+                }
+                else
+                {
+                    Throw<FatalError>("Unsuported copy scalar datasize");
+                }
             }
         }
         else if(src->regType() == Register::Type::Literal
