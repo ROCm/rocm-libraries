@@ -29,9 +29,9 @@ namespace rocRoller
             XDLWrite908(std::shared_ptr<Context> context)
                 : WaitStateObserver<XDLWrite908>(context){};
 
-            InstructionStatus observe(Instruction const& inst)
+            void observe(Instruction const& inst)
             {
-                return observe_base(inst);
+                observe_base(inst);
             }
 
             static bool required(std::shared_ptr<Context> context)

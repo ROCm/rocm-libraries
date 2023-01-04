@@ -42,8 +42,7 @@ namespace rocRoller
             virtual void modify(Instruction& inst) const override;
 
             //> This instruction _will_ be scheduled now, record any side effects.
-            // TODO: Should this return void? Is the InstructionStatus object useful here?
-            virtual InstructionStatus observe(Instruction const& inst) override;
+            virtual void observe(Instruction const& inst) override;
 
             static bool required(std::shared_ptr<Context> ctx);
 

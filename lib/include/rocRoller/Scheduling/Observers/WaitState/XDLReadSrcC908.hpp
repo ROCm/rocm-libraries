@@ -16,7 +16,7 @@ namespace rocRoller
          * | 908  | v_mfma* read SrcC (16 pass) | v_accvgpr_write write overlapped | 13   |
          *
          */
-            InstructionStatus observe(Instruction const& inst);
+            void observe(Instruction const& inst);
 
             static bool required(std::shared_ptr<Context> context)
             {

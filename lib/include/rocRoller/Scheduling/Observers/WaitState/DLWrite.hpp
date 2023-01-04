@@ -23,9 +23,9 @@ namespace rocRoller
             DLWrite(std::shared_ptr<Context> context)
                 : WaitStateObserver<DLWrite>(context){};
 
-            InstructionStatus observe(Instruction const& inst)
+            void observe(Instruction const& inst)
             {
-                return observe_base(inst);
+                observe_base(inst);
             }
 
             static bool required(std::shared_ptr<Context> context)

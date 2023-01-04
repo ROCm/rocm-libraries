@@ -28,9 +28,9 @@ namespace rocRoller
             DGEMM4x4x4Write(std::shared_ptr<Context> context)
                 : WaitStateObserver<DGEMM4x4x4Write>(context){};
 
-            InstructionStatus observe(Instruction const& inst)
+            void observe(Instruction const& inst)
             {
-                return observe_base(inst);
+                observe_base(inst);
             }
 
             static bool required(std::shared_ptr<Context> context)

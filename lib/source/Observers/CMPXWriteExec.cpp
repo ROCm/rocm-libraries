@@ -4,7 +4,7 @@ namespace rocRoller
 {
     namespace Scheduling
     {
-        InstructionStatus CMPXWriteExec::observe(Instruction const& inst)
+        void CMPXWriteExec::observe(Instruction const& inst)
         {
             auto instRef = std::make_shared<InstructionRef>(inst);
             if(trigger(instRef))
@@ -21,8 +21,6 @@ namespace rocRoller
                         WaitStateHazardCounter(getMaxNops(instRef), instRef, writeTrigger()));
                 }
             }
-
-            return InstructionStatus::Nops(inst.getNopCount());
         }
 
         int CMPXWriteExec::getMaxNops(std::shared_ptr<InstructionRef> inst) const

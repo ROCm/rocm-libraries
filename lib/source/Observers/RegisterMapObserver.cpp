@@ -15,7 +15,7 @@ namespace rocRoller
             // No modifications
         }
 
-        InstructionStatus RegisterMapObserver::observe(Instruction const& inst)
+        void RegisterMapObserver::observe(Instruction const& inst)
         {
             // If instruction is not a comment or empty
             if(!inst.getOpCode().empty())
@@ -45,8 +45,6 @@ namespace rocRoller
                     }
                 }
             }
-
-            return InstructionStatus();
         }
     }
 }

@@ -97,29 +97,26 @@ namespace rocRoller
         namespace Detail
         {
             template <CObserver T, CObserver... Rest>
-            InstructionStatus Observe(Instruction const& inst, T& obs, Rest&... rest)
+            void Observe(Instruction const& inst, T& obs, Rest&... rest)
             {
-                auto rv = obs.observe(inst);
+                obs.observe(inst);
                 if constexpr(sizeof...(rest) > 0)
                 {
-                    rv.combine(Observe(inst, rest...));
+                    Observe(inst, rest...);
                 }
-                return rv;
             }
 
         }
 
         template <>
-        inline InstructionStatus MetaObserver<>::observe(Instruction const& inst)
+        inline void MetaObserver<>::observe(Instruction const& inst)
         {
-            return {};
         }
 
         template <CObserver... Types>
-        InstructionStatus MetaObserver<Types...>::observe(Instruction const& inst)
+        void MetaObserver<Types...>::observe(Instruction const& inst)
         {
-            return std::apply([&inst](auto&&... args) { return Detail::Observe(inst, args...); },
-                              m_tuple);
+            std::apply([&inst](auto&&... args) { Detail::Observe(inst, args...); }, m_tuple);
         }
 
         template <>

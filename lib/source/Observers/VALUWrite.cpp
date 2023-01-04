@@ -4,9 +4,9 @@ namespace rocRoller
 {
     namespace Scheduling
     {
-        InstructionStatus VALUWrite::observe(Instruction const& inst)
+        void VALUWrite::observe(Instruction const& inst)
         {
-            return observe_base(inst);
+            observe_base(inst);
         }
 
         int VALUWrite::getMaxNops(std::shared_ptr<InstructionRef> inst) const

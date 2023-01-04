@@ -32,10 +32,7 @@ namespace rocRoller
             }
 
             //> This instruction _will_ be scheduled now, record any side effects.
-            InstructionStatus observe(Instruction const& inst)
-            {
-                return {};
-            }
+            void observe(Instruction const& inst) {}
 
             static bool required(std::shared_ptr<Context>)
             {

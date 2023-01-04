@@ -41,7 +41,7 @@ namespace rocRoller
                 return;
             }
 
-            InstructionStatus observe(Instruction const& inst)
+            void observe(Instruction const& inst)
             {
                 auto context = m_context.lock();
                 if(!m_assemblyFile.is_open())
@@ -52,7 +52,6 @@ namespace rocRoller
                             "Could not open file " + context->assemblyFileName() + " for writing.");
                 m_assemblyFile << inst.toString(context->kernelOptions().logLevel);
                 m_assemblyFile.flush();
-                return {};
             }
 
             static bool required(std::shared_ptr<Context>)

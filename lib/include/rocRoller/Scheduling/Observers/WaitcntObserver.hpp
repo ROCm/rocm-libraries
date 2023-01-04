@@ -58,7 +58,7 @@ namespace rocRoller
              * 3. If the wait is zero, or the queue already has an instruction of a different type, set the needs_wait_zero flag.
              * 4. Set the instruction type flag for each queue the instruction affects.
              **/
-            InstructionStatus observe(Instruction const& inst)
+            void observe(Instruction const& inst)
             {
                 auto               context      = m_context.lock();
                 auto const&        architecture = context->targetArchitecture();
@@ -110,7 +110,6 @@ namespace rocRoller
                         }
                     }
                 }
-                return {};
             }
 
             static bool required(std::shared_ptr<Context>)

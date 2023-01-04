@@ -4,7 +4,7 @@ namespace rocRoller
 {
     namespace Scheduling
     {
-        InstructionStatus XDLReadSrcC908::observe(Instruction const& inst)
+        void XDLReadSrcC908::observe(Instruction const& inst)
         {
             auto instRef = std::make_shared<InstructionRef>(inst);
             if(trigger(instRef))
@@ -24,8 +24,6 @@ namespace rocRoller
                         WaitStateHazardCounter(getMaxNops(instRef), instRef, writeTrigger()));
                 }
             }
-
-            return InstructionStatus::Nops(inst.getNopCount());
         }
 
         int XDLReadSrcC908::getMaxNops(std::shared_ptr<InstructionRef> inst) const

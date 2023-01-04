@@ -43,9 +43,7 @@ namespace rocRoller
 
             //> This instruction _will_ be scheduled now, record any side effects.
             //> This is after all observers have had the opportunity to modify the instruction.
-            {
-                a.observe(inst)
-                } -> std::convertible_to<InstructionStatus>;
+            {a.observe(inst)};
 
             //> This observer is required in ctx.
             {
@@ -65,7 +63,7 @@ namespace rocRoller
             virtual void modify(Instruction& inst) const = 0;
 
             //> This instruction _will_ be scheduled now, record any side effects.
-            virtual InstructionStatus observe(Instruction const& inst) = 0;
+            virtual void observe(Instruction const& inst) = 0;
         };
 
     }

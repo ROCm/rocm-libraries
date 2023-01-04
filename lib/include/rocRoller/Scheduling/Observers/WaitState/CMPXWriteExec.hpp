@@ -16,7 +16,7 @@ namespace rocRoller
          * | 90a  | v_cmpx* write EXEC | v_mfma*         | 4    |
          *
          */
-            InstructionStatus observe(Instruction const& inst);
+            void observe(Instruction const& inst);
 
             static bool required(std::shared_ptr<Context> context)
             {
