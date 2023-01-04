@@ -31,6 +31,7 @@
 #include <limits> 
 #include <cmath>
 #include <cstdlib>
+#include <numeric>
 
 // Google Benchmark
 #include "benchmark/benchmark.h"
