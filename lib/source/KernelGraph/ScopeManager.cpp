@@ -4,18 +4,30 @@
 
 namespace rocRoller::KernelGraph
 {
-    void ScopeManager::add(int tag)
+
+    void ScopeManager::pushNewScope()
     {
-        m_tags.insert(tag);
+        m_tags.push_back({});
     }
 
-    void ScopeManager::release()
+    void ScopeManager::addRegister(int tag)
     {
-        for(auto tag : m_tags)
+        // if alreay in a scope, skip
+        for(auto s : m_tags)
+        {
+            if(s.count(tag) > 0)
+                return;
+        }
+        m_tags.back().insert(tag);
+    }
+
+    void ScopeManager::popAndReleaseScope()
+    {
+        for(auto tag : m_tags.back())
         {
             m_context->registerTagManager()->deleteRegister(tag);
         }
-        m_tags.clear();
+        m_tags.pop_back();
     }
 
 }

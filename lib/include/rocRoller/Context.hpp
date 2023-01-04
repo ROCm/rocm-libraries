@@ -23,6 +23,7 @@
 #include "InstructionValues/RegisterAllocator_fwd.hpp"
 #include "InstructionValues/Register_fwd.hpp"
 #include "KernelGraph/RegisterTagManager_fwd.hpp"
+#include "KernelGraph/ScopeManager_fwd.hpp"
 #include "ScheduledInstructions_fwd.hpp"
 #include "Scheduling/Scheduling_fwd.hpp"
 #include "Utilities/Random_fwd.hpp"
@@ -94,6 +95,16 @@ namespace rocRoller
 
         std::shared_ptr<RegisterHazardMap> getRegisterHazardMap() const;
 
+        /**
+         * @brief Get register scope.
+         */
+        std::shared_ptr<KernelGraph::ScopeManager> getScope() const;
+
+        /**
+         * @brief Set register scope.
+         */
+        void setScope(std::shared_ptr<KernelGraph::ScopeManager>);
+
     private:
         static ContextPtr
             Create(int deviceIndex, GPUArchitecture const& arch, std::string const& kernelName);
@@ -106,16 +117,17 @@ namespace rocRoller
         std::array<std::shared_ptr<Register::Allocator>, static_cast<size_t>(Register::Type::Count)>
             m_allocators;
 
-        std::shared_ptr<Scheduling::IObserver> m_observer;
-        std::shared_ptr<AssemblyKernel>        m_kernel;
-        std::shared_ptr<ArgumentLoader>        m_argLoader;
-        std::shared_ptr<ScheduledInstructions> m_instructions;
-        std::shared_ptr<MemoryInstructions>    m_mem;
-        std::shared_ptr<LabelAllocator>        m_labelAllocator;
-        std::shared_ptr<LDSAllocator>          m_ldsAllocator;
-        std::shared_ptr<CopyGenerator>         m_copier;
-        std::shared_ptr<BranchGenerator>       m_brancher;
-        std::shared_ptr<RandomGenerator>       m_random;
+        std::shared_ptr<Scheduling::IObserver>     m_observer;
+        std::shared_ptr<AssemblyKernel>            m_kernel;
+        std::shared_ptr<ArgumentLoader>            m_argLoader;
+        std::shared_ptr<ScheduledInstructions>     m_instructions;
+        std::shared_ptr<MemoryInstructions>        m_mem;
+        std::shared_ptr<LabelAllocator>            m_labelAllocator;
+        std::shared_ptr<LDSAllocator>              m_ldsAllocator;
+        std::shared_ptr<CopyGenerator>             m_copier;
+        std::shared_ptr<BranchGenerator>           m_brancher;
+        std::shared_ptr<RandomGenerator>           m_random;
+        std::shared_ptr<KernelGraph::ScopeManager> m_scope;
 
         std::string   m_assemblyFileName;
         KernelOptions m_kernelOptions;

@@ -39,10 +39,13 @@ namespace ScopeTest
             = kgraph.control.addElement(Assign{Register::Type::Vector, Expression::literal(22u)});
         int assign3
             = kgraph.control.addElement(Assign{Register::Type::Vector, Expression::literal(33u)});
+        int assign4
+            = kgraph.control.addElement(Assign{Register::Type::Vector, Expression::literal(44u)});
 
         kgraph.mapper.connect<CoordGraph::VGPR>(assign1, dst1);
         kgraph.mapper.connect<CoordGraph::VGPR>(assign2, dst2);
         kgraph.mapper.connect<CoordGraph::VGPR>(assign3, dst3);
+        kgraph.mapper.connect<CoordGraph::VGPR>(assign4, dst1);
 
         // kernel:
         // - assign vector: 11u
@@ -50,16 +53,18 @@ namespace ScopeTest
         //   - scope2:
         //       - scope3:
         //         - assign vector: 33u
+        //         - assign vector: 44u, using pre-existing vector
         //   - assign vector: 22u
         kgraph.control.addElement(Body(), {kernel}, {assign1});
         kgraph.control.addElement(Sequence(), {assign1}, {scope1});
         kgraph.control.addElement(Body(), {scope1}, {scope2});
         kgraph.control.addElement(Body(), {scope2}, {assign3});
+        kgraph.control.addElement(Sequence(), {assign3}, {assign4});
         kgraph.control.addElement(Sequence(), {scope2}, {assign2});
 
         m_context->schedule(generate(kgraph, m_context->kernel()));
 
-        // assign1 should be to v0, which is not deallocated
+        // assign1 should be to v0, which is deallocated before the end of the kernel
         // assign2 should be to v1, which is deallocated
         // assign3 should be to v1, which is deallocated
 
@@ -83,6 +88,10 @@ namespace ScopeTest
             // Allocated : 1 VGPR (Value: UInt32): v1
             v_mov_b32 v1, 33
             // Assign VGPR 33j END
+            // Assign VGPR 44j BEGIN
+            // 44j
+            v_mov_b32 v0, 44
+            // Assign VGPR 44j END
             // Freeing : 1 VGPR (Value: UInt32): v1
             // Scope END
             // Assign VGPR 22j BEGIN
@@ -92,6 +101,7 @@ namespace ScopeTest
             // Assign VGPR 22j END
             // Freeing : 1 VGPR (Value: UInt32): v1
             // Scope END
+            // Freeing : 1 VGPR (Value: UInt32): v0
             // End Kernel
             // Kernel END
             // CodeGeneratorVisitor::generate() end

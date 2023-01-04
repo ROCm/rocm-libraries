@@ -129,9 +129,6 @@ namespace rocRoller
 
             size_t valueCount = 1;
 
-            // TODO Remove localScope.
-            bool localScope = true;
-
             std::string toString() const
             {
                 return concatenate("Assign ", regType, " ", expression);

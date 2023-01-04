@@ -2510,7 +2510,6 @@ namespace KernelGraphTest
                 "cntrl30"[label="ForLoopIncrement(30)",shape=box];
                 "cntrl31"[label="Multiply(31)"];
                 "cntrl32"[label="Assign ACCVGPR 0.00000f(32)"];
-                "cntrl33"[label="Initialize(33)",shape=box];
                 "cntrl34"[label="Body(34)",shape=box];
                 "cntrl35"[label="Body(35)",shape=box];
                 "cntrl36"[label="Body(36)",shape=box];
@@ -2524,10 +2523,11 @@ namespace KernelGraphTest
                 "cntrl44"[label="Assign SGPR Add(DataFlowTag(207), 1j)(44)"];
                 "cntrl45"[label="Initialize(45)",shape=box];
                 "cntrl46"[label="ForLoopIncrement(46)",shape=box];
+                "cntrl47"[label="Body(47)",shape=box];
                 "cntrl48"[label="Body(48)",shape=box];
                 "cntrl49"[label="Body(49)",shape=box];
                 "cntrl50"[label="Scope(50)"];
-                "cntrl51"[label="Body(51)",shape=box];
+                "cntrl51"[label="Sequence(51)",shape=box];
                 "cntrl52"[label="Sequence(52)",shape=box];
                 "cntrl53"[label="ComputeIndex(53)"];
                 "cntrl54"[label="ComputeIndex(54)"];
@@ -2578,7 +2578,6 @@ namespace KernelGraphTest
                 "cntrl23" -> "cntrl21"
                 "cntrl26" -> "cntrl29"
                 "cntrl26" -> "cntrl30"
-                "cntrl26" -> "cntrl33"
                 "cntrl26" -> "cntrl34"
                 "cntrl26" -> "cntrl61"
                 "cntrl26" -> "cntrl70"
@@ -2586,7 +2585,7 @@ namespace KernelGraphTest
                 "cntrl30" -> "cntrl28"
                 "cntrl31" -> "cntrl35"
                 "cntrl31" -> "cntrl36"
-                "cntrl33" -> "cntrl32"
+                "cntrl32" -> "cntrl51"
                 "cntrl34" -> "cntrl31"
                 "cntrl35" -> "cntrl4"
                 "cntrl36" -> "cntrl6"
@@ -2597,10 +2596,11 @@ namespace KernelGraphTest
                 "cntrl41" -> "cntrl39"
                 "cntrl42" -> "cntrl45"
                 "cntrl42" -> "cntrl46"
-                "cntrl42" -> "cntrl51"
+                "cntrl42" -> "cntrl47"
                 "cntrl42" -> "cntrl72"
                 "cntrl45" -> "cntrl43"
                 "cntrl46" -> "cntrl44"
+                "cntrl47" -> "cntrl32"
                 "cntrl48" -> "cntrl42"
                 "cntrl49" -> "cntrl37"
                 "cntrl50" -> "cntrl52"
@@ -2745,7 +2745,6 @@ namespace KernelGraphTest
 		"30"[label="ForLoopIncrement(30)",shape=box];
 		"31"[label="Multiply(31)"];
 		"32"[label="Assign ACCVGPR 0.00000f(32)"];
-		"33"[label="Initialize(33)",shape=box];
 		"34"[label="Body(34)",shape=box];
 		"35"[label="Body(35)",shape=box];
 		"36"[label="Body(36)",shape=box];
@@ -2759,10 +2758,11 @@ namespace KernelGraphTest
 		"44"[label="Assign SGPR Add(DataFlowTag(207), 1j)(44)"];
 		"45"[label="Initialize(45)",shape=box];
 		"46"[label="ForLoopIncrement(46)",shape=box];
+		"47"[label="Body(47)",shape=box];
 		"48"[label="Body(48)",shape=box];
 		"49"[label="Body(49)",shape=box];
 		"50"[label="Scope(50)"];
-		"51"[label="Body(51)",shape=box];
+		"51"[label="Sequence(51)",shape=box];
 		"52"[label="Sequence(52)",shape=box];
 		"53"[label="ComputeIndex(53)"];
 		"54"[label="ComputeIndex(54)"];
@@ -2832,7 +2832,6 @@ namespace KernelGraphTest
 		"24" -> "109"
 		"26" -> "29"
 		"26" -> "30"
-		"26" -> "33"
 		"26" -> "34"
 		"26" -> "61"
 		"26" -> "70"
@@ -2841,7 +2840,7 @@ namespace KernelGraphTest
 		"31" -> "35"
 		"31" -> "36"
 		"31" -> "91"
-		"33" -> "32"
+		"32" -> "51"
 		"34" -> "31"
 		"35" -> "4"
 		"36" -> "6"
@@ -2852,11 +2851,12 @@ namespace KernelGraphTest
 		"41" -> "39"
 		"42" -> "45"
 		"42" -> "46"
-		"42" -> "51"
+		"42" -> "47"
 		"42" -> "72"
 		"42" -> "100"
 		"45" -> "43"
 		"46" -> "44"
+		"47" -> "32"
 		"48" -> "42"
 		"49" -> "37"
 		"50" -> "52"
@@ -3916,7 +3916,6 @@ namespace KernelGraphTest
 	    "cntrl30"[label="ForLoopIncrement(30)",shape=box];
 	    "cntrl31"[label="Multiply(31)"];
 	    "cntrl32"[label="Assign ACCVGPR 0.00000f(32)"];
-	    "cntrl33"[label="Initialize(33)",shape=box];
 	    "cntrl34"[label="Body(34)",shape=box];
 	    "cntrl35"[label="Body(35)",shape=box];
 	    "cntrl36"[label="Body(36)",shape=box];
@@ -3930,6 +3929,7 @@ namespace KernelGraphTest
 	    "cntrl44"[label="Assign SGPR Add(DataFlowTag(207), 1j)(44)"];
 	    "cntrl45"[label="Initialize(45)",shape=box];
 	    "cntrl46"[label="ForLoopIncrement(46)",shape=box];
+	    "cntrl47"[label="Body(47)",shape=box];
 	    "cntrl48"[label="Body(48)",shape=box];
 	    "cntrl49"[label="Body(49)",shape=box];
 	    "cntrl50"[label="LoadTiled(50)"];
@@ -3940,7 +3940,7 @@ namespace KernelGraphTest
 	    "cntrl55"[label="Sequence(55)",shape=box];
 	    "cntrl56"[label="Sequence(56)",shape=box];
 	    "cntrl57"[label="Scope(57)"];
-	    "cntrl58"[label="Body(58)",shape=box];
+	    "cntrl58"[label="Sequence(58)",shape=box];
 	    "cntrl59"[label="Sequence(59)",shape=box];
 	    "cntrl60"[label="ComputeIndex(60)"];
 	    "cntrl61"[label="ComputeIndex(61)"];
@@ -4001,7 +4001,6 @@ namespace KernelGraphTest
 	    "cntrl23" -> "cntrl21"
 	    "cntrl26" -> "cntrl29"
 	    "cntrl26" -> "cntrl30"
-	    "cntrl26" -> "cntrl33"
 	    "cntrl26" -> "cntrl34"
 	    "cntrl26" -> "cntrl51"
 	    "cntrl26" -> "cntrl73"
@@ -4010,7 +4009,7 @@ namespace KernelGraphTest
 	    "cntrl30" -> "cntrl28"
 	    "cntrl31" -> "cntrl35"
 	    "cntrl31" -> "cntrl36"
-	    "cntrl33" -> "cntrl32"
+	    "cntrl32" -> "cntrl58"
 	    "cntrl34" -> "cntrl31"
 	    "cntrl35" -> "cntrl4"
 	    "cntrl36" -> "cntrl6"
@@ -4021,10 +4020,11 @@ namespace KernelGraphTest
 	    "cntrl41" -> "cntrl39"
 	    "cntrl42" -> "cntrl45"
 	    "cntrl42" -> "cntrl46"
-	    "cntrl42" -> "cntrl58"
+	    "cntrl42" -> "cntrl47"
 	    "cntrl42" -> "cntrl89"
 	    "cntrl45" -> "cntrl43"
 	    "cntrl46" -> "cntrl44"
+	    "cntrl47" -> "cntrl32"
 	    "cntrl48" -> "cntrl42"
 	    "cntrl49" -> "cntrl37"
 	    "cntrl50" -> "cntrl54"

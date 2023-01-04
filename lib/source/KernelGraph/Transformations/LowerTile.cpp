@@ -435,15 +435,15 @@ namespace rocRoller
             uint wfs                = context->kernel()->wavefront_size();
             uint num_agpr           = num_elements / wfs; // number of output registers per thread
 
-            auto initD = graph.control.addElement(ControlHypergraph::Assign{
-                Register::Type::Accumulator, literal(0.f), num_agpr, false});
+            auto initD = graph.control.addElement(
+                ControlHypergraph::Assign{Register::Type::Accumulator, literal(0.f), num_agpr});
 
-            graph.control.addElement(ControlHypergraph::Initialize(), {forK}, {initD});
+            graph.mapper.connect<CoordGraph::MacroTile>(initD, d);
+
+            graph.control.addElement(ControlHypergraph::Sequence(), {initD}, {forK});
             graph.control.addElement(ControlHypergraph::Body(), {forK}, {waveMult});
             graph.control.addElement(ControlHypergraph::Body(), {waveMult}, {loadA[0]});
             graph.control.addElement(ControlHypergraph::Body(), {waveMult}, {loadB[0]});
-
-            graph.mapper.connect<CoordGraph::MacroTile>(initD, d);
 
             // connect ops after contraction to for loop, remove contraction and its incoming edges
             auto tensor_outgoing_edges
@@ -529,7 +529,7 @@ namespace rocRoller
                     upperLoop = forWaveTilesY;
                 }
 
-                graph.control.addElement(ControlHypergraph::Body(), {lowerLoop}, {forK});
+                graph.control.addElement(ControlHypergraph::Body(), {lowerLoop}, {initD});
 
                 for(auto const index : otherLoads)
                 {
@@ -608,7 +608,9 @@ namespace rocRoller
                 }
             }
             else
-                graph.control.addElement(ControlHypergraph::Body(), {kernel}, {forK});
+            {
+                graph.control.addElement(ControlHypergraph::Body(), {kernel}, {initD});
+            }
 
             // add LDSOps if needed
             addWaveLDSOps(graph, params, context, a, loadA[0], forK, K, waveMult);

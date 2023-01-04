@@ -399,11 +399,16 @@ namespace rocRoller
                                               CoordGraph::Transformer          coords)
             {
                 co_yield Instruction::Comment("Begin Kernel");
+                auto scope = std::make_shared<ScopeManager>(m_context);
+                m_context->setScope(scope);
 
+                scope->pushNewScope();
                 auto body = m_graph.control.getOutputNodeIndices<ControlHypergraph::Body>(tag)
                                 .to<std::set>();
                 co_yield generate(body, coords);
+                scope->popAndReleaseScope();
 
+                m_context->setScope(nullptr);
                 co_yield Instruction::Comment("End Kernel");
             }
 
@@ -412,14 +417,12 @@ namespace rocRoller
             {
                 rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::Scope({})", tag);
 
-                auto scope = std::make_shared<ScopeManager>(m_context);
-                coords.setScope(scope);
-
+                auto scope = m_context->getScope();
+                scope->pushNewScope();
                 auto body = m_graph.control.getOutputNodeIndices<ControlHypergraph::Body>(tag)
                                 .to<std::set>();
                 co_yield generate(body, coords);
-
-                scope->release();
+                scope->popAndReleaseScope();
             }
 
             Generator<Instruction> operator()(int                                 tag,
@@ -519,11 +522,8 @@ namespace rocRoller
                 auto dest = m_context->registerTagManager()->getRegister(
                     dim_tag, assign.regType, varType, assign.valueCount);
 
-                auto scope = coords.getScope();
-                if(scope && assign.localScope)
-                {
-                    scope->add(dim_tag);
-                }
+                auto scope = m_context->getScope();
+                scope->addRegister(dim_tag);
 
                 co_yield Expression::generate(dest, assign.expression, m_context);
             }
@@ -556,7 +556,7 @@ namespace rocRoller
                     ci.stride);
                 co_yield Instruction::Comment(concatenate("GEN: ComputeIndex ", tag));
 
-                auto scope    = coords.getScope();
+                auto scope    = m_context->getScope();
                 uint numBytes = DataTypeInfo::Get(ci.valueType).elementSize;
 
                 coords.setCoordinate(ci.increment, L(0u));
@@ -567,7 +567,7 @@ namespace rocRoller
                     ci.offset, Register::Type::Vector, ci.offsetType, 1);
                 offsetReg->setName(concatenate("offset", tag));
                 co_yield Register::AllocateIfNeeded(offsetReg);
-                scope->add(ci.offset);
+                scope->addRegister(ci.offset);
 
                 if(ci.base < 0)
                 {
@@ -582,7 +582,7 @@ namespace rocRoller
                     ci.stride, Register::Type::Scalar, ci.strideType, 1);
                 strideReg->setName(concatenate("stride", tag));
                 co_yield Register::AllocateIfNeeded(strideReg);
-                scope->add(ci.stride);
+                scope->addRegister(ci.stride);
 
                 if(ci.stride > 0)
                 {
@@ -607,7 +607,7 @@ namespace rocRoller
                     co_yield m_context->argLoader()->getValue(user->argumentName(), basePointer);
                     co_yield bufDesc.setBasePointer(basePointer);
                     co_yield bufDesc.setDefaultOpts();
-                    scope->add(ci.buffer);
+                    scope->addRegister(ci.buffer);
                 }
             }
 
