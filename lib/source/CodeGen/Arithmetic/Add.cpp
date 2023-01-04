@@ -44,15 +44,7 @@ namespace rocRoller
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
 
-        // Check for unsupported constant values and move them into vgprs
-        if(rhs->regType() == Register::Type::Literal)
-            std::swap(lhs, rhs);
-
-        if(lhs->regType() == Register::Type::Literal
-           && !m_context->targetArchitecture().isSupportedConstantValue(lhs))
-        {
-            co_yield moveToVGPR(lhs);
-        }
+        co_yield swapIfRHSLiteral(lhs, rhs);
 
         co_yield_(Instruction("v_add_i32", {dest}, {lhs, rhs}, {}, ""));
     }
@@ -74,15 +66,7 @@ namespace rocRoller
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
 
-        // Check for unsupported constant values and move them into vgprs
-        if(rhs->regType() == Register::Type::Literal)
-            std::swap(lhs, rhs);
-
-        if(lhs->regType() == Register::Type::Literal
-           && !m_context->targetArchitecture().isSupportedConstantValue(lhs))
-        {
-            co_yield moveToVGPR(lhs);
-        }
+        co_yield swapIfRHSLiteral(lhs, rhs);
 
         co_yield_(Instruction("v_add_u32", {dest}, {lhs, rhs}, {}, ""));
     }
@@ -177,6 +161,8 @@ namespace rocRoller
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
 
+        co_yield swapIfRHSLiteral(lhs, rhs);
+
         co_yield_(Instruction("v_add_f32", {dest}, {lhs, rhs}, {}, ""));
     }
 
@@ -186,6 +172,8 @@ namespace rocRoller
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
+
+        co_yield swapIfRHSLiteral(lhs, rhs);
 
         co_yield_(Instruction("v_add_f64", {dest}, {lhs, rhs}, {}, ""));
     }

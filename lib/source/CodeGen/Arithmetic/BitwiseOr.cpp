@@ -45,6 +45,8 @@ namespace rocRoller
         }
         else if(dest->regType() == Register::Type::Vector)
         {
+            co_yield swapIfRHSLiteral(lhs, rhs);
+
             if(elementSize <= 4)
             {
                 co_yield_(Instruction("v_or_b32", {dest}, {lhs, rhs}, {}, ""));

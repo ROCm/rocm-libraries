@@ -938,6 +938,34 @@ namespace ExpressionTest
         }
     }
 
+    TEST_F(ExpressionTest, SwapLiteralIntTest)
+    {
+        auto ra = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Int32, 1);
+        ra->setName("ra");
+        ra->allocateNow();
+
+        auto expr1 = ra->expression();
+        auto expr2 = Expression::literal(-5);
+
+        Register::ValuePtr destReg;
+
+        m_context->schedule(Expression::generate(destReg, expr1 + expr2, m_context));
+
+        m_context->schedule(Expression::generate(destReg, expr1 & expr2, m_context));
+        m_context->schedule(Expression::generate(destReg, expr1 | expr2, m_context));
+        m_context->schedule(Expression::generate(destReg, expr1 ^ expr2, m_context));
+
+        auto result = R"(
+            v_add_i32 v1, -5, v0
+            v_and_b32 v1, -5, v0
+            v_or_b32 v1, -5, v0
+            v_xor_b32 v1, -5, v0
+        )";
+
+        EXPECT_EQ(NormalizedSource(output()), NormalizedSource(result));
+    }
+
     TEST_F(ExpressionTest, VariantTest)
     {
         int32_t  x1          = 3;
