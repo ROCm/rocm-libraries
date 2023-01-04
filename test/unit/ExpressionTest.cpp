@@ -1054,8 +1054,6 @@ namespace ExpressionTest
 
         auto k = m_context->kernel();
 
-        k->setKernelName("ExpressionTreeDouble");
-
         k->addArgument(
             {"result", {DataType::Double, PointerType::PointerGlobal}, DataDirection::WriteOnly});
         k->addArgument({"a", DataType::Double});
@@ -1143,8 +1141,6 @@ namespace ExpressionTest
 
         auto k = m_context->kernel();
 
-        k->setKernelName("ExpressionAddShiftL");
-
         k->addArgument(
             {"result", {DataType::Int32, PointerType::PointerGlobal}, DataDirection::WriteOnly});
         k->addArgument({"a", DataType::Int32});
@@ -1212,6 +1208,98 @@ namespace ExpressionTest
                         HasHipSuccess(0));
 
             EXPECT_EQ(result[0], (a + b) << b);
+        }
+        else
+        {
+            std::vector<char> assembledKernel = m_context->instructions()->assemble();
+            EXPECT_GT(assembledKernel.size(), 0);
+        }
+    }
+
+    TEST_P(ARCH_ExpressionTest, ComplexExpressionScalar)
+    {
+        auto s_a
+            = Register::Value::Placeholder(m_context, Register::Type::Scalar, DataType::Int32, 1);
+
+        auto s_b
+            = Register::Value::Placeholder(m_context, Register::Type::Scalar, DataType::UInt32, 1);
+
+        auto k = m_context->kernel();
+
+        k->addArgument(
+            {"result", {DataType::Int32, PointerType::PointerGlobal}, DataDirection::WriteOnly});
+        k->addArgument({"a", DataType::Int32});
+        k->addArgument({"b", DataType::UInt32});
+
+        m_context->schedule(k->preamble());
+        m_context->schedule(k->prolog());
+
+        auto kb = [&]() -> Generator<Instruction> {
+            Register::ValuePtr s_result, s_a, s_b, s_c, temp;
+            co_yield m_context->argLoader()->getValue("result", s_result);
+            co_yield m_context->argLoader()->getValue("a", s_a);
+            co_yield m_context->argLoader()->getValue("b", s_b);
+
+            auto a = s_a->expression();
+            auto b = s_b->expression();
+
+            auto v_result = Register::Value::Placeholder(
+                m_context, Register::Type::Vector, DataType::Raw32, 2);
+
+            auto v_c = Register::Value::Placeholder(
+                m_context, Register::Type::Vector, DataType::Int32, 1);
+
+            co_yield m_context->copier()->copy(v_result, s_result, "Move pointer");
+
+            auto expr1 = b > Expression::literal(0);
+            co_yield Expression::generate(temp, expr1, m_context);
+
+            auto expr2 = Expression::fuseTernary((a + (a < Expression::literal(5))) << b)
+                         + temp->expression();
+            co_yield Expression::generate(s_c, expr2, m_context);
+            co_yield m_context->copier()->copy(v_c, s_c, "Copy result");
+
+            co_yield m_context->mem()->storeFlat(v_result, v_c, 0, 4);
+        };
+
+        m_context->schedule(kb());
+        m_context->schedule(k->postamble());
+        m_context->schedule(k->amdgpu_metadata());
+
+        if(m_context->targetArchitecture().target().getMajorVersion() != 9)
+            GTEST_SKIP() << "Skipping GPU tests for " << GetParam();
+
+        // Only execute the kernels if running on the architecture that the kernel was built for,
+        // otherwise just assemble the instructions.
+        if(isLocalDevice())
+        {
+
+            std::shared_ptr<rocRoller::ExecutableKernel> executableKernel
+                = m_context->instructions()->getExecutableKernel();
+
+            auto d_result = make_shared_device<int>();
+
+            for(int a = -10; a < 10; a++)
+            {
+                for(unsigned int b = 0; b < 5; b++)
+                {
+
+                    KernelArguments kargs;
+                    kargs.append("result", d_result.get());
+                    kargs.append("a", a);
+                    kargs.append("b", b);
+                    KernelInvocation invocation;
+
+                    executableKernel->executeKernel(kargs, invocation);
+
+                    int result;
+                    ASSERT_THAT(hipMemcpy(&result, d_result.get(), sizeof(int), hipMemcpyDefault),
+                                HasHipSuccess(0));
+
+                    auto expectedResult = ((a + (a < 5)) << b) + (b > 0);
+                    EXPECT_EQ(result, expectedResult);
+                }
+            }
         }
         else
         {

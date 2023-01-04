@@ -208,11 +208,13 @@ namespace rocRoller
 
             Result operator()(CommandArgumentPtr const& expr) const
             {
+                AssertFatal(expr != nullptr, "Null subexpression!");
                 return {Register::Type::Literal, expr->variableType()};
             }
 
             Result operator()(AssemblyKernelArgumentPtr const& expr) const
             {
+                AssertFatal(expr != nullptr, "Null subexpression!");
                 return {Register::Type::Scalar, expr->variableType};
             }
 
@@ -223,6 +225,7 @@ namespace rocRoller
 
             Result operator()(Register::ValuePtr const& expr) const
             {
+                AssertFatal(expr != nullptr, "Null subexpression!");
                 return {expr->regType(), expr->variableType()};
             }
 

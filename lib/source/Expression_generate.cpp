@@ -19,12 +19,16 @@ namespace rocRoller
             ContextPtr m_context;
             using RegisterValue = std::variant<Register::ValuePtr>;
 
-            Register::ValuePtr resultPlaceholder(ResultType const& resType)
+            Register::ValuePtr resultPlaceholder(ResultType const& resType,
+                                                 bool              allowSpecial = true)
             {
                 if(resType.first == Register::Type::Special && resType.second == DataType::Bool)
                 {
-                    return Register::Value::Placeholder(
-                        m_context, Register::Type::Scalar, resType.second, 1);
+                    if(allowSpecial)
+                        return m_context->getSCC();
+                    else
+                        return Register::Value::Placeholder(
+                            m_context, Register::Type::Scalar, resType.second, 1);
                 }
                 else if(resType.first == Register::Type::Scalar
                         && resType.second == DataType::Bool32)
@@ -38,46 +42,143 @@ namespace rocRoller
                 }
             }
 
+            /**
+             * Evaluates each expression in `exprs`, storing the results in respective indices of
+             * `results`.
+             *
+             * Up to one result may be stored in `scc`. If this is the case, the scheduler will be locked,
+             * and `schedulerLocked` will be set to `true`.  It's the caller's responsibility to unlock
+             * the scheduler in this case, once the value has been consumed.
+             */
+            Generator<Instruction> prepareSourceOperands(std::vector<Register::ValuePtr>& results,
+                                                         bool&                      schedulerLocked,
+                                                         std::vector<ExpressionPtr> exprs)
+            {
+                std::vector<char>       done(exprs.size(), false);
+                std::vector<ResultType> resultTypes(exprs.size());
+
+                schedulerLocked = false;
+
+                results = std::vector<Register::ValuePtr>(exprs.size(), nullptr);
+
+                int specials = 0;
+                for(int i = 0; i < exprs.size(); i++)
+                {
+                    resultTypes[i] = resultType(exprs[i]);
+                    if(resultTypes[i].first == Register::Type::Special)
+                        specials++;
+                }
+
+                // Can't use SCC for two temporary values at once.
+                if(specials > 1)
+                {
+                    for(int i = 0; i < exprs.size() && specials > 1; i++)
+                    {
+                        if(resultTypes[i].first == Register::Type::Special)
+                        {
+                            results[i] = resultPlaceholder(resultTypes[i], false);
+                            specials--;
+                        }
+                    }
+                }
+
+                // First, schedule any sub-expressions that will go into general-purpose registers.
+                {
+                    std::vector<Generator<Instruction>> schedulable;
+                    for(int i = 0; i < exprs.size(); i++)
+                    {
+                        if(resultTypes[i].first != Register::Type::Special || results[i] != nullptr)
+                        {
+                            schedulable.push_back(call(results[i], exprs[i]));
+                            done[i] = true;
+                        }
+                    }
+
+                    if(!schedulable.empty())
+                    {
+                        auto proc      = Settings::getInstance()->get(Settings::Scheduler);
+                        auto scheduler = Component::GetNew<Scheduling::Scheduler>(
+                            proc, Scheduling::CostProcedure::MinNops, m_context);
+
+                        co_yield (*scheduler)(schedulable);
+                    }
+                }
+
+                // Then there might be 1 remaining expression that will go into SCC.
+                if(specials > 0)
+                {
+                    int unscheduled = 0;
+                    for(int i = 0; i < exprs.size(); i++)
+                    {
+                        if(!done[i])
+                        {
+                            unscheduled++;
+                            schedulerLocked = true;
+                            co_yield Instruction::Lock(Scheduling::Dependency::SCC,
+                                                       "Expression temporary in special register");
+                            co_yield call(results[i], exprs[i]);
+                        }
+                    }
+
+                    AssertFatal(unscheduled == specials && specials <= 1,
+                                "Only one special purpose register should have remained.",
+                                ShowValue(unscheduled),
+                                ShowValue(specials));
+                }
+            }
+
             template <CBinary Operation>
             requires CKernelExecuteTime<Operation> Generator<Instruction>
             operator()(Register::ValuePtr& dest, Operation const& expr)
             {
-                Register::ValuePtr lhsResult, rhsResult;
+                bool                            schedulerLocked = false;
+                std::vector<Register::ValuePtr> results;
+                std::vector<ExpressionPtr>      subExprs{expr.lhs, expr.rhs};
 
-                std::vector<Generator<Instruction>> subExprs;
-                subExprs.push_back(call(lhsResult, expr.lhs));
-                subExprs.push_back(call(rhsResult, expr.rhs));
-
-                auto proc      = Settings::getInstance()->get(Settings::Scheduler);
-                auto scheduler = Component::GetNew<Scheduling::Scheduler>(
-                    proc, Scheduling::CostProcedure::MinNops, m_context);
-                co_yield (*scheduler)(subExprs);
+                co_yield prepareSourceOperands(results, schedulerLocked, subExprs);
 
                 if(dest == nullptr)
-                {
                     dest = resultPlaceholder(resultType(expr));
-                }
 
-                co_yield generateOp<Operation>(dest, lhsResult, rhsResult);
+                co_yield generateOp<Operation>(dest, results[0], results[1]);
+
+                if(schedulerLocked)
+                    co_yield Instruction::Unlock("Expression temporary in special register");
             }
 
             template <CTernary Operation>
             requires CKernelExecuteTime<Operation> Generator<Instruction>
             operator()(Register::ValuePtr& dest, Operation const& expr)
             {
-                Register::ValuePtr lhsResult, r1hsResult, r2hsResult;
+                bool                            schedulerLocked = false;
+                std::vector<Register::ValuePtr> results;
+                std::vector<ExpressionPtr>      subExprs{expr.lhs, expr.r1hs, expr.r2hs};
 
-                std::vector<Generator<Instruction>> subExprs;
-                subExprs.push_back(call(lhsResult, expr.lhs));
-                subExprs.push_back(call(r1hsResult, expr.r1hs));
-                subExprs.push_back(call(r2hsResult, expr.r2hs));
+                co_yield prepareSourceOperands(results, schedulerLocked, subExprs);
 
-                auto proc      = Settings::getInstance()->get(Settings::Scheduler);
-                auto scheduler = Component::GetNew<Scheduling::Scheduler>(
-                    proc, Scheduling::CostProcedure::MinNops, m_context);
-                co_yield (*scheduler)(subExprs);
+                co_yield generateOp<Operation>(dest, results[0], results[1], results[2]);
 
-                co_yield generateOp<Operation>(dest, lhsResult, r1hsResult, r2hsResult);
+                if(schedulerLocked)
+                    co_yield Instruction::Unlock("Expression temporary in special register");
+            }
+
+            template <CUnary Operation>
+            requires CKernelExecuteTime<Operation> Generator<Instruction>
+            operator()(Register::ValuePtr& dest, Operation const& expr)
+            {
+                bool                            schedulerLocked = false;
+                std::vector<Register::ValuePtr> results;
+                std::vector<ExpressionPtr>      subExprs{expr.arg};
+
+                co_yield prepareSourceOperands(results, schedulerLocked, subExprs);
+
+                if(dest == nullptr)
+                    dest = resultPlaceholder(resultType(expr));
+
+                co_yield generateOp<Operation>(dest, results[0]);
+
+                if(schedulerLocked)
+                    co_yield Instruction::Unlock("Expression temporary in special register");
             }
 
             Generator<Instruction> operator()(Register::ValuePtr& dest, MatrixMultiply expr)
@@ -138,22 +239,6 @@ namespace rocRoller
             Generator<Instruction> operator()(Register::ValuePtr& dest, WaveTilePtr const& expr)
             {
                 Throw<FatalError>("WaveTile can only appear as an argument to MatrixMultiply.");
-            }
-
-            template <CUnary Operation>
-            requires CKernelExecuteTime<Operation> Generator<Instruction>
-            operator()(Register::ValuePtr& dest, Operation const& expr)
-            {
-                Register::ValuePtr argResult;
-
-                co_yield call(argResult, expr.arg);
-
-                if(dest == nullptr)
-                {
-                    dest = resultPlaceholder(resultType(expr));
-                }
-
-                co_yield generateOp<Operation>(dest, argResult);
             }
 
             template <CExpression Operation>
@@ -253,7 +338,18 @@ namespace rocRoller
             generate(Register::ValuePtr& dest, ExpressionPtr expr, ContextPtr context)
         {
             co_yield Instruction::Comment(toString(expr));
+
             CodeGeneratorVisitor v{context};
+
+            // Top-level evaluations can't go into special-purpose registers
+            // unless explicitly asked for.
+            if(dest == nullptr)
+            {
+                auto resType = resultType(expr);
+                if(resType.first == Register::Type::Special)
+                    dest = v.resultPlaceholder(resType, false);
+            }
+
             co_yield v.call(dest, expr);
         }
     }
