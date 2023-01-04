@@ -43,16 +43,17 @@
 
 namespace benchmark_utils
 {
-
+const size_t default_max_random_size = 1024 * 1024;
 // get_random_data() generates only part of sequence and replicates it,
 // because benchmarks usually do not need "true" random sequence.
 template<class T>
-inline auto get_random_data(size_t size, T min, T max, size_t max_random_size = 1024 * 1024)
+inline auto get_random_data(size_t size, T min, T max, size_t max_random_size = default_max_random_size)
     -> typename std::enable_if<std::is_integral<T>::value, std::vector<T>>::type
 {
     std::random_device rd;
     std::default_random_engine gen(rd());
-    std::uniform_int_distribution<T> distribution(min, max);
+    using distribution_type = typename std::conditional<(sizeof(T)==1), short, T>::type;	
+    std::uniform_int_distribution<distribution_type> distribution(min, max);
     std::vector<T> data(size);
     std::generate(
         data.begin(), data.begin() + std::min(size, max_random_size),
@@ -66,7 +67,7 @@ inline auto get_random_data(size_t size, T min, T max, size_t max_random_size = 
 }
 
 template<class T>
-inline auto get_random_data(size_t size, T min, T max, size_t max_random_size = 1024 * 1024)
+inline auto get_random_data(size_t size, T min, T max, size_t max_random_size = default_max_random_size)
     -> typename std::enable_if<std::is_floating_point<T>::value, std::vector<T>>::type
 {
     std::random_device rd;
@@ -85,7 +86,7 @@ inline auto get_random_data(size_t size, T min, T max, size_t max_random_size = 
 }
 
 template<class T>
-inline std::vector<T> get_random_data01(size_t size, float p, size_t max_random_size = 1024 * 1024)
+inline std::vector<T> get_random_data01(size_t size, float p, size_t max_random_size = default_max_random_size)
 {
     std::random_device rd;
     std::default_random_engine gen(rd());
