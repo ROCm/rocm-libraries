@@ -22,9 +22,10 @@ namespace rocRoller::KernelGraph
     inline int ControlToCoordinateMapper::get(int control, int subDimension) const
     {
         auto key = key_type{control, std::type_index(typeid(T)), subDimension};
-        AssertFatal(
-            m_map.count(key) > 0, "Connection from operation not found.", ShowValue(control));
-        return m_map.at(key);
+        auto it  = m_map.find(key);
+        if(it == m_map.end())
+            return -1;
+        return it->second;
     }
 
 }

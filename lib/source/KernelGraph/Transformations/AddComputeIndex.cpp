@@ -67,6 +67,14 @@ namespace rocRoller
             auto col_stride = graph.coordinates.addElement(Stride(), {user}, {i_thr_y});
             auto buffer     = graph.coordinates.addElement(Buffer(), {user}, {i_thr_x});
 
+            graph.mapper.connect<Offset>(load, offset_mac, -1);
+            graph.mapper.connect<Offset>(load, row_offset, 0);
+            graph.mapper.connect<Offset>(load, col_offset, 1);
+            graph.mapper.connect<Stride>(load, stride_mac, -1);
+            graph.mapper.connect<Stride>(load, row_stride, 0);
+            graph.mapper.connect<Stride>(load, col_stride, 1);
+            graph.mapper.connect<Buffer>(load, buffer);
+
             auto ci_mac = graph.control.addElement(ComputeIndex(
                 user, mac, -1, offset_mac, stride_mac, buffer, false, dtype, {i_thr_x, i_thr_y}));
             auto ci_row = graph.control.addElement(ComputeIndex(
@@ -142,6 +150,12 @@ namespace rocRoller
                 buffer     = graph.coordinates.addElement(Buffer(), {source}, {i_thr_x});
             }
 
+            graph.mapper.connect<Offset>(loadstore, row_offset, 0);
+            graph.mapper.connect<Offset>(loadstore, col_offset, 1);
+            graph.mapper.connect<Stride>(loadstore, row_stride, 0);
+            graph.mapper.connect<Stride>(loadstore, col_stride, 1);
+            graph.mapper.connect<Buffer>(loadstore, buffer);
+
             auto ci_row = graph.control.addElement(ComputeIndex(source,
                                                                 i_thr_x,
                                                                 -1,
@@ -184,6 +198,11 @@ namespace rocRoller
             auto stride_wave = graph.coordinates.addElement(Stride(), {lds}, {wave});
             auto offset_vgpr = graph.coordinates.addElement(Offset(), {lds}, {vgpr});
             auto stride_vgpr = graph.coordinates.addElement(Stride(), {lds}, {vgpr});
+
+            graph.mapper.connect<Offset>(load, offset_wave, 0);
+            graph.mapper.connect<Offset>(load, offset_vgpr, 1);
+            graph.mapper.connect<Stride>(load, stride_wave, 0);
+            graph.mapper.connect<Stride>(load, stride_vgpr, 1);
 
             auto ci_wave = graph.control.addElement(ComputeIndex(lds,
                                                                  wave,
@@ -232,9 +251,18 @@ namespace rocRoller
             auto offset_vgpr = graph.coordinates.addElement(Offset(), {user}, {vgpr});
             auto stride_vgpr = graph.coordinates.addElement(Stride(), {user}, {vgpr});
             auto buffer      = graph.coordinates.addElement(Buffer(), {user}, {mac});
-            auto ci_mac      = graph.control.addElement(ComputeIndex(
+
+            graph.mapper.connect<Offset>(load, offset_mac, -1);
+            graph.mapper.connect<Offset>(load, offset_wave, 0);
+            graph.mapper.connect<Offset>(load, offset_vgpr, 1);
+            graph.mapper.connect<Stride>(load, stride_mac, -1);
+            graph.mapper.connect<Stride>(load, stride_wave, 0);
+            graph.mapper.connect<Stride>(load, stride_vgpr, 1);
+            graph.mapper.connect<Buffer>(load, buffer);
+
+            auto ci_mac  = graph.control.addElement(ComputeIndex(
                 user, mac, -1, offset_mac, stride_mac, buffer, false, dtype, {wave, vgpr}));
-            auto ci_wave     = graph.control.addElement(ComputeIndex(user,
+            auto ci_wave = graph.control.addElement(ComputeIndex(user,
                                                                  wave,
                                                                  offset_mac,
                                                                  offset_wave,
@@ -243,7 +271,7 @@ namespace rocRoller
                                                                  false,
                                                                  dtype,
                                                                  {mac, vgpr}));
-            auto ci_vgpr     = graph.control.addElement(ComputeIndex(user,
+            auto ci_vgpr = graph.control.addElement(ComputeIndex(user,
                                                                  vgpr,
                                                                  offset_wave,
                                                                  offset_vgpr,
@@ -398,6 +426,12 @@ namespace rocRoller
                 buffer            = graph.coordinates.addElement(Buffer(), {user}, {vgpr_block});
             }
 
+            graph.mapper.connect<Offset>(loadstore, offset_vgpr_block, 0);
+            graph.mapper.connect<Offset>(loadstore, offset_vgpr_index, 1);
+            graph.mapper.connect<Stride>(loadstore, stride_vgpr_block, 0);
+            graph.mapper.connect<Stride>(loadstore, stride_vgpr_index, 1);
+            graph.mapper.connect<Buffer>(loadstore, buffer);
+
             auto ci_vgpr_block = graph.control.addElement(ComputeIndex(user,
                                                                        vgpr_block,
                                                                        -1,
@@ -453,6 +487,191 @@ namespace rocRoller
             graph.control.addElement(Sequence(), {ci_col}, {op});
 
             return graph;
+        }
+
+        KernelHypergraph addComputeIndexOperations(KernelHypergraph const& original)
+        {
+            auto kgraph = original;
+            auto kernel = *kgraph.control.roots().begin();
+
+            // MATRIX_A and MATRIX_B loads within a ForLoop
+            auto multiplies = kgraph.control.getNodes<Multiply>().to<std::vector>();
+
+            std::vector<int> allForKs;
+            for(auto const& multiply : multiplies)
+            {
+                auto forK = kgraph.control.getInputNodeIndices<Body>(multiply).to<std::vector>();
+                AssertFatal(forK.size() == 1, "Didn't find for loop.");
+                allForKs.push_back(forK[0]);
+                auto mulLoads
+                    = kgraph.control
+                          .findNodes(
+                              multiply,
+                              [&](int tag) -> bool {
+                                  return isOperation<LoadTiled>(kgraph.control.getElement(tag))
+                                         || isOperation<LoadLDSTile>(
+                                             kgraph.control.getElement(tag));
+                              },
+                              Graph::Direction::Downstream)
+                          .to<std::vector>();
+                AssertFatal(mulLoads.size() == 2, "More than one Multiply not supported yet.");
+                auto storesLDS
+                    = kgraph.control
+                          .findNodes(
+                              forK[0],
+                              [&](int tag) -> bool {
+                                  return isOperation<StoreLDSTile>(kgraph.control.getElement(tag));
+                              },
+                              Graph::Direction::Downstream)
+                          .to<std::vector>();
+                auto loads
+                    = kgraph.control
+                          .findNodes(
+                              forK[0],
+                              [&](int tag) -> bool {
+                                  if(isOperation<LoadTiled>(kgraph.control.getElement(tag)))
+                                  {
+                                      auto parents
+                                          = kgraph.control.parentNodes(tag).to<std::vector>();
+                                      AssertFatal(parents.size() == 1);
+                                      return parents[0] != multiply;
+                                  }
+                                  return false;
+                              },
+                              Graph::Direction::Downstream)
+                          .to<std::vector>();
+                AssertFatal(storesLDS.size() == loads.size(),
+                            "Either store LDS or load is missing");
+                if(storesLDS.size() == 0)
+                    kgraph = addComputeIndexAB(
+                        kgraph, forK[0], mulLoads[0], mulLoads[1], -1, -1, -1, -1);
+                else if(storesLDS.size() == 1
+                        && isOperation<LoadLDSTile>(kgraph.control.getElement(mulLoads[0])))
+                    kgraph = addComputeIndexAB(
+                        kgraph, forK[0], mulLoads[0], mulLoads[1], loads[0], storesLDS[0], -1, -1);
+                else if(storesLDS.size() == 1
+                        && isOperation<LoadLDSTile>(kgraph.control.getElement(mulLoads[1])))
+                    kgraph = addComputeIndexAB(
+                        kgraph, forK[0], mulLoads[0], mulLoads[1], -1, -1, loads[0], storesLDS[0]);
+                else if(storesLDS.size() == 2)
+                    kgraph = addComputeIndexAB(kgraph,
+                                               forK[0],
+                                               mulLoads[0],
+                                               mulLoads[1],
+                                               loads[0],
+                                               storesLDS[0],
+                                               loads[1],
+                                               storesLDS[1]);
+            }
+
+            // MATRIX_ACCUMULATOR loads anywhere
+            auto loadAccums = kgraph.control
+                                  .findNodes(
+                                      kernel,
+                                      [&](int tag) -> bool {
+                                          auto load = kgraph.control.get<LoadTiled>(tag);
+                                          if(load)
+                                          {
+                                              auto [tile_tag, tile]
+                                                  = kgraph.getDimension<CoordGraph::MacroTile>(tag);
+                                              if(tile.layoutType == LayoutType::MATRIX_ACCUMULATOR)
+                                                  return true;
+                                          }
+                                          return false;
+                                      },
+                                      Graph::Direction::Downstream)
+                                  .to<std::vector>();
+
+            for(auto const tag : loadAccums)
+            {
+                kgraph = addComputeIndexC(kgraph, tag, tag, false);
+            }
+
+            // VGPR/LDS loads anywhere
+
+            auto reachable_from_forK
+                = kgraph.control.depthFirstVisit(allForKs).to<std::unordered_set>();
+
+            auto loadVGPR
+                = kgraph.control
+                      .findNodes(
+                          kernel,
+                          [&](int tag) -> bool {
+                              if(reachable_from_forK.find(tag) != reachable_from_forK.end())
+                                  return false;
+                              auto load    = kgraph.control.get<LoadTiled>(tag);
+                              auto loadLDS = kgraph.control.get<LoadLDSTile>(tag);
+                              if(load || loadLDS)
+                              {
+                                  auto [tile_tag, tile]
+                                      = kgraph.getDimension<CoordGraph::MacroTile>(tag);
+                                  if(tile.memoryType == MemoryType::VGPR
+                                     || tile.memoryType == MemoryType::LDS)
+                                      return true;
+                              }
+                              return false;
+                          },
+                          Graph::Direction::Downstream)
+                      .to<std::vector>();
+
+            for(auto const tag : loadVGPR)
+            {
+                kgraph = addComputeIndexVGPR(kgraph, tag, tag, false);
+            }
+
+            // MATRIX_ACCUMULATOR stores anywhere
+            auto storeAccums
+                = kgraph.control
+                      .findNodes(
+                          kernel,
+                          [&](int tag) -> bool {
+                              auto store = kgraph.control.get<StoreTiled>(tag);
+                              if(store)
+                              {
+                                  auto [tile_tag, tile]
+                                      = kgraph.getDimension<CoordGraph::MacroTile>(tag);
+                                  if(tile.layoutType == LayoutType::MATRIX_ACCUMULATOR)
+                                      return true;
+                              }
+                              return false;
+                          },
+                          Graph::Direction::Downstream)
+                      .to<std::vector>();
+
+            for(auto const tag : storeAccums)
+            {
+                kgraph = addComputeIndexC(kgraph, tag, tag, true);
+            }
+
+            // VGPR/LDS stores anywhere
+            auto storeVGPR
+                = kgraph.control
+                      .findNodes(
+                          kernel,
+                          [&](int tag) -> bool {
+                              if(reachable_from_forK.find(tag) != reachable_from_forK.end())
+                                  return false;
+                              auto store    = kgraph.control.get<StoreTiled>(tag);
+                              auto storeLDS = kgraph.control.get<StoreLDSTile>(tag);
+                              if(store || storeLDS)
+                              {
+                                  auto [tile_tag, tile]
+                                      = kgraph.getDimension<CoordGraph::MacroTile>(tag);
+                                  if(tile.memoryType == MemoryType::VGPR
+                                     || tile.memoryType == MemoryType::LDS)
+                                      return true;
+                              }
+                              return false;
+                          },
+                          Graph::Direction::Downstream)
+                      .to<std::vector>();
+
+            for(auto const tag : storeVGPR)
+            {
+                kgraph = addComputeIndexVGPR(kgraph, tag, tag, true);
+            }
+
+            return kgraph;
         }
     }
 }

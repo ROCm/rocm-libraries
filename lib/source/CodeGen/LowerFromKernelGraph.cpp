@@ -71,38 +71,24 @@ namespace rocRoller
                 return Register::Value::Placeholder(m_context, Register::Type::Scalar, type, count);
             }
 
-            template <Graph::Direction dir>
             inline Register::ValuePtr getBufferSrd(int tag)
             {
-                Register::ValuePtr srd;
-                for(int const ntag : m_graph.coordinates.getNeighbours<dir>(tag))
-                {
-                    auto belem = m_graph.coordinates.get<CoordGraph::Buffer>(ntag);
-                    if(belem)
-                    {
-                        return m_context->registerTagManager()->getRegister(ntag);
-                    }
-                }
-                Throw<FatalError>("Buffer descriptor not found.");
+                auto offsetTag = m_graph.mapper.get<CoordGraph::Buffer>(tag);
+                return m_context->registerTagManager()->getRegister(offsetTag);
             }
 
-            template <Graph::Direction dir>
-            std::pair<Register::ValuePtr, Register::ValuePtr> getOffsetAndStride(int tag)
+            std::pair<Register::ValuePtr, Register::ValuePtr> getOffsetAndStride(int tag,
+                                                                                 int dimension)
             {
                 Register::ValuePtr offset, stride;
-                for(int const ntag : m_graph.coordinates.getNeighbours<dir>(tag))
-                {
-                    auto oelem = m_graph.coordinates.get<CoordGraph::Offset>(ntag);
-                    if(oelem)
-                    {
-                        offset = m_context->registerTagManager()->getRegister(ntag);
-                    }
-                    auto selem = m_graph.coordinates.get<CoordGraph::Stride>(ntag);
-                    if(selem)
-                    {
-                        stride = m_context->registerTagManager()->getRegister(ntag);
-                    }
-                }
+
+                auto offsetTag = m_graph.mapper.get<CoordGraph::Offset>(tag, dimension);
+                if(offsetTag >= 0)
+                    offset = m_context->registerTagManager()->getRegister(offsetTag);
+                auto strideTag = m_graph.mapper.get<CoordGraph::Stride>(tag, dimension);
+                if(strideTag >= 0)
+                    stride = m_context->registerTagManager()->getRegister(strideTag);
+
                 return {offset, stride};
             }
 
@@ -654,18 +640,11 @@ namespace rocRoller
 
                 auto bufOpt = BufferInstructionOptions();
 
-                auto n_mac   = m_graph.mapper.get<CoordGraph::MacroTileNumber>(tag, sdim);
-                auto i_thr_x = m_graph.mapper.get<CoordGraph::ThreadTileIndex>(tag, 0);
-                auto i_thr_y = m_graph.mapper.get<CoordGraph::ThreadTileIndex>(tag, 1);
+                auto [mac_offset_reg, mac_stride_reg] = getOffsetAndStride(tag, -1);
+                auto [row_offset_reg, row_stride_reg] = getOffsetAndStride(tag, 0);
+                auto [col_offset_reg, col_stride_reg] = getOffsetAndStride(tag, 1);
 
-                auto [mac_offset_reg, mac_stride_reg]
-                    = getOffsetAndStride<Graph::Direction::Upstream>(n_mac);
-                auto [row_offset_reg, row_stride_reg]
-                    = getOffsetAndStride<Graph::Direction::Upstream>(i_thr_x);
-                auto [col_offset_reg, col_stride_reg]
-                    = getOffsetAndStride<Graph::Direction::Upstream>(i_thr_y);
-
-                auto bufferSrd = getBufferSrd<Graph::Direction::Upstream>(i_thr_x);
+                auto bufferSrd = getBufferSrd(tag);
                 auto bufDesc   = BufferDescriptor(bufferSrd, m_context);
 
                 std::shared_ptr<Register::Value> tmpl;
@@ -733,15 +712,10 @@ namespace rocRoller
 
                 auto bufOpt = BufferInstructionOptions();
 
-                auto i_thr_x = m_graph.mapper.get<CoordGraph::ThreadTileIndex>(tag, 0);
-                auto i_thr_y = m_graph.mapper.get<CoordGraph::ThreadTileIndex>(tag, 1);
-
-                auto [row_offset_reg, row_stride_reg]
-                    = getOffsetAndStride<Graph::Direction::Upstream>(i_thr_x);
-                auto [col_offset_reg, col_stride_reg]
-                    = getOffsetAndStride<Graph::Direction::Upstream>(i_thr_y);
-                auto bufferSrd = getBufferSrd<Graph::Direction::Upstream>(i_thr_x);
-                auto bufDesc   = BufferDescriptor(bufferSrd, m_context);
+                auto [row_offset_reg, row_stride_reg] = getOffsetAndStride(tag, 0);
+                auto [col_offset_reg, col_stride_reg] = getOffsetAndStride(tag, 1);
+                auto bufferSrd                        = getBufferSrd(tag);
+                auto bufDesc                          = BufferDescriptor(bufferSrd, m_context);
 
                 auto tmpl = MkVGPR(load.vtype, product(mac_tile.subTileSizes));
                 auto vgpr = m_context->registerTagManager()->getRegister(mac_tile_tag, tmpl);
@@ -796,13 +770,8 @@ namespace rocRoller
                 auto [lds_tag, lds]   = m_graph.getDimension<CoordGraph::LDS>(tag);
                 auto [tile_tag, tile] = m_graph.getDimension<CoordGraph::MacroTile>(tag);
 
-                auto i_thr_x = m_graph.mapper.get<CoordGraph::ThreadTileIndex>(tag, 0);
-                auto i_thr_y = m_graph.mapper.get<CoordGraph::ThreadTileIndex>(tag, 1);
-
-                auto [row_offset_reg, row_stride_reg]
-                    = getOffsetAndStride<Graph::Direction::Upstream>(i_thr_x);
-                auto [col_offset_reg, col_stride_reg]
-                    = getOffsetAndStride<Graph::Direction::Upstream>(i_thr_y);
+                auto [row_offset_reg, row_stride_reg] = getOffsetAndStride(tag, 0);
+                auto [col_offset_reg, col_stride_reg] = getOffsetAndStride(tag, 1);
 
                 // Find the LDS allocation that contains the tile and store
                 // the offset of the beginning of the allocation into lds_offset.
@@ -864,7 +833,6 @@ namespace rocRoller
                 auto [lds_tag, lds]             = m_graph.getDimension<CoordGraph::LDS>(tag);
                 auto [mac_tile_tag, mac_tile]   = m_graph.getDimension<CoordGraph::MacroTile>(tag);
                 auto [wave_tile_tag, wave_tile] = m_graph.getDimension<CoordGraph::WaveTile>(tag);
-                auto [vgpr_tag, vgpr]           = m_graph.getDimension<CoordGraph::VGPR>(tag);
 
                 // Find the LDS allocation that contains the tile and store
                 // the offset of the beginning of the allocation into lds_offset.
@@ -881,10 +849,8 @@ namespace rocRoller
 
                 auto n_wave_tag = m_graph.mapper.get<CoordGraph::WaveTileNumber>(tag, sdim);
 
-                auto [wave_offset_reg, wave_stride_reg]
-                    = getOffsetAndStride<Graph::Direction::Upstream>(n_wave_tag);
-                auto [vgpr_offset_reg, vgpr_stride_reg]
-                    = getOffsetAndStride<Graph::Direction::Upstream>(vgpr_tag);
+                auto [wave_offset_reg, wave_stride_reg] = getOffsetAndStride(tag, 0);
+                auto [vgpr_offset_reg, vgpr_stride_reg] = getOffsetAndStride(tag, 1);
 
                 AssertFatal(wave_offset_reg, "Invalid WAVE offset register.");
                 AssertFatal(vgpr_offset_reg, "Invalid VGPR offset register.");
@@ -968,19 +934,13 @@ namespace rocRoller
                 auto [user_tag, user]           = m_graph.getDimension<CoordGraph::User>(tag);
                 auto [wave_tile_tag, wave_tile] = m_graph.getDimension<CoordGraph::WaveTile>(tag);
                 auto [mac_tile_tag, mac_tile]   = m_graph.getDimension<CoordGraph::MacroTile>(tag);
-                auto [vgpr_tag, vgpr]           = m_graph.getDimension<CoordGraph::VGPR>(tag);
 
                 Register::ValuePtr basePointer;
                 co_yield m_context->argLoader()->getValue(user.argumentName(), basePointer);
 
-                auto n_wave_tag  = m_graph.mapper.get<CoordGraph::WaveTileNumber>(tag, sdim);
-                auto mac_num_tag = m_graph.mapper.get<CoordGraph::MacroTileNumber>(tag, sdim);
-
-                auto [wave_offset_reg, wave_stride_reg]
-                    = getOffsetAndStride<Graph::Direction::Upstream>(n_wave_tag);
-                auto [vgpr_offset_reg, vgpr_stride_reg]
-                    = getOffsetAndStride<Graph::Direction::Upstream>(vgpr_tag);
-                auto bufferSrd = getBufferSrd<Graph::Direction::Upstream>(mac_num_tag);
+                auto [wave_offset_reg, wave_stride_reg] = getOffsetAndStride(tag, 0);
+                auto [vgpr_offset_reg, vgpr_stride_reg] = getOffsetAndStride(tag, 1);
+                auto bufferSrd                          = getBufferSrd(tag);
 
                 auto bufDesc = BufferDescriptor(bufferSrd, m_context);
                 auto bufOpt  = BufferInstructionOptions();
@@ -1067,19 +1027,14 @@ namespace rocRoller
                 auto [user_tag, user]           = m_graph.getDimension<CoordGraph::User>(tag);
                 auto [wave_tile_tag, wave_tile] = m_graph.getDimension<CoordGraph::WaveTile>(tag);
                 auto mac_tile_tag               = m_graph.mapper.get<CoordGraph::MacroTile>(tag);
-                auto vgpr_tag                   = m_graph.mapper.get<CoordGraph::VGPR>(tag);
-                auto vgpr_block_tag = m_graph.mapper.get<CoordGraph::VGPRBlockNumber>(tag);
-                auto vgpr_index_tag = m_graph.mapper.get<CoordGraph::VGPRBlockIndex>(tag);
 
                 // Move the argument pointer into v_ptr
                 Register::ValuePtr s_ptr;
                 co_yield m_context->argLoader()->getValue(user.argumentName(), s_ptr);
 
-                auto [vgpr_block_offset_reg, vgpr_block_stride_reg]
-                    = getOffsetAndStride<Graph::Direction::Upstream>(vgpr_block_tag);
-                auto [vgpr_index_offset_reg, vgpr_index_stride_reg]
-                    = getOffsetAndStride<Graph::Direction::Upstream>(vgpr_index_tag);
-                auto bufferSrd = getBufferSrd<Graph::Direction::Upstream>(vgpr_block_tag);
+                auto [vgpr_block_offset_reg, vgpr_block_stride_reg] = getOffsetAndStride(tag, 0);
+                auto [vgpr_index_offset_reg, vgpr_index_stride_reg] = getOffsetAndStride(tag, 1);
+                auto bufferSrd                                      = getBufferSrd(tag);
 
                 auto bufDesc = BufferDescriptor(bufferSrd, m_context);
                 auto bufOpt  = BufferInstructionOptions();
@@ -1387,20 +1342,6 @@ namespace rocRoller
                 auto [macA_tag, macA] = m_graph.getDimension<CoordGraph::MacroTile>(tag, 0);
                 auto [macB_tag, macB] = m_graph.getDimension<CoordGraph::MacroTile>(tag, 1);
 
-                auto n_macA_y_tags
-                    = m_graph.coordinates
-                          .findNodes(sourceA_tag,
-                                     [&](int index) -> bool {
-                                         auto node
-                                             = m_graph.coordinates.get<CoordGraph::MacroTileNumber>(
-                                                 index);
-                                         if(node)
-                                             return node->dim == 1;
-                                         return false;
-                                     })
-                          .to<std::vector>();
-                AssertFatal(n_macA_y_tags.size() <= 1);
-
                 auto n_waveA_y_tags
                     = m_graph.coordinates
                           .findNodes(sourceA_tag,
@@ -1414,20 +1355,6 @@ namespace rocRoller
                                      })
                           .to<std::vector>();
                 AssertFatal(n_waveA_y_tags.size() == 1);
-
-                auto n_macB_x_tags
-                    = m_graph.coordinates
-                          .findNodes(sourceB_tag,
-                                     [&](int index) -> bool {
-                                         auto node
-                                             = m_graph.coordinates.get<CoordGraph::MacroTileNumber>(
-                                                 index);
-                                         if(node)
-                                             return node->dim == 0;
-                                         return false;
-                                     })
-                          .to<std::vector>();
-                AssertFatal(n_macA_y_tags.size() <= 1);
 
                 auto n_waveB_x_tags
                     = m_graph.coordinates
@@ -1443,27 +1370,14 @@ namespace rocRoller
                           .to<std::vector>();
                 AssertFatal(n_waveB_x_tags.size() == 1);
 
-                auto n_waveA_y
-                    = *m_graph.coordinates.get<CoordGraph::WaveTileNumber>(n_waveA_y_tags.front());
-                auto n_waveB_x
-                    = *m_graph.coordinates.get<CoordGraph::WaveTileNumber>(n_waveB_x_tags.front());
-
                 auto loadAB = m_graph.control.getOutputNodeIndices<ControlHypergraph::Body>(tag)
                                   .to<std::set>();
 
-                Register::ValuePtr mac_offset_x_reg = nullptr, mac_stride_x_reg = nullptr;
-                if(!n_macA_y_tags.empty())
-                    std::tie(mac_offset_x_reg, mac_stride_x_reg)
-                        = getOffsetAndStride<Graph::Direction::Upstream>(n_macA_y_tags.front());
-                auto [wave_offset_x_reg, wave_stride_x_reg]
-                    = getOffsetAndStride<Graph::Direction::Upstream>(n_waveA_y_tags.front());
+                auto [mac_offset_x_reg, mac_stride_x_reg]   = getOffsetAndStride(loads[0], -1);
+                auto [wave_offset_x_reg, wave_stride_x_reg] = getOffsetAndStride(loads[0], 0);
 
-                Register::ValuePtr mac_offset_y_reg = nullptr, mac_stride_y_reg = nullptr;
-                if(!n_macB_x_tags.empty())
-                    std::tie(mac_offset_y_reg, mac_stride_y_reg)
-                        = getOffsetAndStride<Graph::Direction::Upstream>(n_macB_x_tags.front());
-                auto [wave_offset_y_reg, wave_stride_y_reg]
-                    = getOffsetAndStride<Graph::Direction::Upstream>(n_waveB_x_tags.front());
+                auto [mac_offset_y_reg, mac_stride_y_reg]   = getOffsetAndStride(loads[1], -1);
+                auto [wave_offset_y_reg, wave_stride_y_reg] = getOffsetAndStride(loads[1], 0);
 
                 AssertFatal(macA.sizes[1] == macB.sizes[0], "MacroTile size mismatch.");
 
@@ -1571,15 +1485,10 @@ namespace rocRoller
                 auto const m = mac_tile.subTileSizes[0];
                 auto const n = mac_tile.subTileSizes[1];
 
-                auto i_thr_x = m_graph.mapper.get<CoordGraph::ThreadTileIndex>(tag, 0);
-                auto i_thr_y = m_graph.mapper.get<CoordGraph::ThreadTileIndex>(tag, 1);
+                auto [row_offset_reg, row_stride_reg] = getOffsetAndStride(tag, 0);
+                auto [col_offset_reg, col_stride_reg] = getOffsetAndStride(tag, 1);
 
-                auto [row_offset_reg, row_stride_reg]
-                    = getOffsetAndStride<Graph::Direction::Downstream>(i_thr_x);
-                auto [col_offset_reg, col_stride_reg]
-                    = getOffsetAndStride<Graph::Direction::Downstream>(i_thr_y);
-
-                auto bufferSrd = getBufferSrd<Graph::Direction::Downstream>(i_thr_x);
+                auto bufferSrd = getBufferSrd(tag);
                 auto bufDesc   = BufferDescriptor(bufferSrd, m_context);
                 auto bufOpt    = BufferInstructionOptions();
 
@@ -1625,9 +1534,6 @@ namespace rocRoller
                 auto [user_tag, user]           = m_graph.getDimension<CoordGraph::User>(tag);
                 auto [mac_tile_tag, mac_tile]   = m_graph.getDimension<CoordGraph::MacroTile>(tag);
                 auto [wave_tile_tag, wave_tile] = m_graph.getDimension<CoordGraph::WaveTile>(tag);
-                auto [vgpr_tag, vgpr]           = m_graph.getDimension<CoordGraph::VGPR>(tag);
-                auto vgpr_block_tag = m_graph.mapper.get<CoordGraph::VGPRBlockNumber>(tag);
-                auto vgpr_index_tag = m_graph.mapper.get<CoordGraph::VGPRBlockIndex>(tag);
 
                 uint num_elements = wave_tile.sizes[0] * wave_tile.sizes[1];
                 uint wfs          = m_context->kernel()->wavefront_size();
@@ -1640,11 +1546,9 @@ namespace rocRoller
                 Register::ValuePtr s_ptr;
                 co_yield m_context->argLoader()->getValue(user.argumentName(), s_ptr);
 
-                auto [vgpr_block_offset_reg, vgpr_block_stride_reg]
-                    = getOffsetAndStride<Graph::Direction::Downstream>(vgpr_block_tag);
-                auto [vgpr_index_offset_reg, vgpr_index_stride_reg]
-                    = getOffsetAndStride<Graph::Direction::Downstream>(vgpr_index_tag);
-                auto bufferSrd = getBufferSrd<Graph::Direction::Downstream>(vgpr_block_tag);
+                auto [vgpr_block_offset_reg, vgpr_block_stride_reg] = getOffsetAndStride(tag, 0);
+                auto [vgpr_index_offset_reg, vgpr_index_stride_reg] = getOffsetAndStride(tag, 1);
+                auto bufferSrd                                      = getBufferSrd(tag);
 
                 auto bufDesc = BufferDescriptor(bufferSrd, m_context);
                 auto bufOpt  = BufferInstructionOptions();
@@ -1737,13 +1641,8 @@ namespace rocRoller
                 auto vtype    = store.dataType;
                 auto numBytes = DataTypeInfo::Get(vtype).elementSize;
 
-                auto i_thr_x = m_graph.mapper.get<CoordGraph::ThreadTileIndex>(tag, 0);
-                auto i_thr_y = m_graph.mapper.get<CoordGraph::ThreadTileIndex>(tag, 1);
-
-                auto [row_offset_reg, row_stride_reg]
-                    = getOffsetAndStride<Graph::Direction::Downstream>(i_thr_x);
-                auto [col_offset_reg, col_stride_reg]
-                    = getOffsetAndStride<Graph::Direction::Downstream>(i_thr_y);
+                auto [row_offset_reg, row_stride_reg] = getOffsetAndStride(tag, 0);
+                auto [col_offset_reg, col_stride_reg] = getOffsetAndStride(tag, 1);
 
                 auto numElements = product(tile.subTileSizes) * product(m_workgroupSize);
                 // Allocate LDS memory, and store the offset of the beginning of the allocation
