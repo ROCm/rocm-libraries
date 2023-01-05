@@ -244,7 +244,7 @@ set(rocroller_src
  lib/source/KernelGraph/Transformations/UnrollLoops.cpp
  lib/source/KernelGraph/Transformations/UpdateParameters.cpp
  lib/source/KernelGraph/ControlToCoordinateMapper.cpp
- lib/source/KernelGraph/KernelHypergraph.cpp
+ lib/source/KernelGraph/KernelGraph.cpp
  lib/source/KernelGraph/LowerFromCommand.cpp
  lib/source/KernelGraph/ScopeManager.cpp
  lib/source/KernelGraph/Utils.cpp
@@ -394,7 +394,7 @@ set(
   test/unit/BufferDescriptorTest.cpp
   test/unit/CommandTest.cpp
   test/unit/ComponentTest.cpp
-  test/unit/ControlHypergraphTest.cpp
+  test/unit/ControlGraphTest.cpp
   test/unit/CoordinateHypergraphTest.cpp
   test/unit/CopyGeneratorTest.cpp
   test/unit/DataTypesTest.cpp
@@ -414,7 +414,6 @@ set(
   test/unit/InstructionTest.cpp
   test/unit/KernelArgumentsTest.cpp
   test/unit/KernelGraphTest.cpp
-  test/unit/KernelHypergraphTest.cpp
   test/unit/KernelIndexTest.cpp
   test/unit/KernelOptionsTest.cpp
   test/unit/KernelTest.cpp
