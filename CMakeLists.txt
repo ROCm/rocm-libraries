@@ -232,8 +232,8 @@ set(rocroller_src
  lib/source/CodeGen/InstructionRef.cpp
  lib/source/CodeGen/MemoryInstructions.cpp
 
- lib/source/KernelGraph/CoordGraph/Dimension.cpp
- lib/source/KernelGraph/CoordGraph/Transformer.cpp
+ lib/source/KernelGraph/CoordinateGraph/Dimension.cpp
+ lib/source/KernelGraph/CoordinateGraph/Transformer.cpp
  lib/source/KernelGraph/Transformations/AddComputeIndex.cpp
  lib/source/KernelGraph/Transformations/AddDeallocate.cpp
  lib/source/KernelGraph/Transformations/CleanGraph.cpp
@@ -395,7 +395,7 @@ set(
   test/unit/CommandTest.cpp
   test/unit/ComponentTest.cpp
   test/unit/ControlGraphTest.cpp
-  test/unit/CoordinateHypergraphTest.cpp
+  test/unit/CoordinateGraphTest.cpp
   test/unit/CopyGeneratorTest.cpp
   test/unit/DataTypesTest.cpp
   test/unit/DependencyTest.cpp

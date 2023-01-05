@@ -4,7 +4,7 @@
 
 namespace rocRoller
 {
-    namespace KernelGraph::CoordGraph
+    namespace KernelGraph::CoordinateGraph
     {
         /*
          * Nodes (Dimensions)

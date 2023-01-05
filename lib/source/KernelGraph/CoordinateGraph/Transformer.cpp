@@ -1,16 +1,15 @@
 
-#include "Graph/Hypergraph.hpp"
-#include "KernelGraph/CoordGraph/CoordinateHypergraph.hpp"
 #include <memory>
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/Context.hpp>
-#include <rocRoller/KernelGraph/CoordGraph/EdgeVisitor.hpp>
-#include <rocRoller/KernelGraph/CoordGraph/Transformer.hpp>
+#include <rocRoller/KernelGraph/CoordinateGraph/CoordinateEdgeVisitor.hpp>
+#include <rocRoller/KernelGraph/CoordinateGraph/CoordinateGraph.hpp>
+#include <rocRoller/KernelGraph/CoordinateGraph/Transformer.hpp>
 
 namespace rocRoller
 {
-    namespace KernelGraph::CoordGraph
+    namespace KernelGraph::CoordinateGraph
     {
         using namespace Expression;
 
@@ -238,9 +237,9 @@ namespace rocRoller
             }
         };
 
-        Transformer::Transformer(std::shared_ptr<CoordinateHypergraph> graph,
-                                 std::shared_ptr<Context>              context,
-                                 ExpressionTransducer                  transducer)
+        Transformer::Transformer(std::shared_ptr<CoordinateGraph> graph,
+                                 std::shared_ptr<Context>         context,
+                                 ExpressionTransducer             transducer)
             : m_graph(graph)
             , m_context(context)
             , m_transducer(transducer)

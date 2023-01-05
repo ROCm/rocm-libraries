@@ -19,8 +19,8 @@
 #include <rocRoller/InstructionValues/LabelAllocator.hpp>
 #include <rocRoller/InstructionValues/Register.hpp>
 #include <rocRoller/InstructionValues/RegisterUtils.hpp>
-#include <rocRoller/KernelGraph/CoordGraph/Dimension.hpp>
-#include <rocRoller/KernelGraph/CoordGraph/Transformer.hpp>
+#include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
+#include <rocRoller/KernelGraph/CoordinateGraph/Transformer.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/RegisterTagManager.hpp>
 #include <rocRoller/KernelGraph/ScopeManager.hpp>
@@ -32,6 +32,8 @@ namespace rocRoller
     namespace KernelGraph
     {
         namespace Expression = rocRoller::Expression;
+        using namespace ControlGraph;
+        using namespace CoordinateGraph;
         using namespace Expression;
 
         /*
@@ -39,7 +41,7 @@ namespace rocRoller
          */
         struct CodeGeneratorVisitor
         {
-            CodeGeneratorVisitor(KernelHypergraph graph, std::shared_ptr<AssemblyKernel> kernel)
+            CodeGeneratorVisitor(KernelGraph graph, std::shared_ptr<AssemblyKernel> kernel)
                 : m_graph(graph)
                 , m_kernel(kernel)
                 , m_context(kernel->context())
@@ -49,8 +51,9 @@ namespace rocRoller
 
             Generator<Instruction> generate()
             {
-                auto coords = CoordGraph::Transformer(
-                    std::make_shared<CoordGraph::CoordinateHypergraph>(m_graph.coordinates),
+                auto coords = Transformer(
+                    std::make_shared<rocRoller::KernelGraph::CoordinateGraph::CoordinateGraph>(
+                        m_graph.coordinates),
                     m_context,
                     m_fastArith);
 
@@ -73,7 +76,7 @@ namespace rocRoller
 
             inline Register::ValuePtr getBufferSrd(int tag)
             {
-                auto offsetTag = m_graph.mapper.get<CoordGraph::Buffer>(tag);
+                auto offsetTag = m_graph.mapper.get<Buffer>(tag);
                 return m_context->registerTagManager()->getRegister(offsetTag);
             }
 
@@ -82,10 +85,10 @@ namespace rocRoller
             {
                 Register::ValuePtr offset, stride;
 
-                auto offsetTag = m_graph.mapper.get<CoordGraph::Offset>(tag, dimension);
+                auto offsetTag = m_graph.mapper.get<Offset>(tag, dimension);
                 if(offsetTag >= 0)
                     offset = m_context->registerTagManager()->getRegister(offsetTag);
-                auto strideTag = m_graph.mapper.get<CoordGraph::Stride>(tag, dimension);
+                auto strideTag = m_graph.mapper.get<Stride>(tag, dimension);
                 if(strideTag >= 0)
                     stride = m_context->registerTagManager()->getRegister(strideTag);
 
@@ -138,8 +141,7 @@ namespace rocRoller
 
             bool hasGeneratedInputs(int const& tag)
             {
-                auto inputTags
-                    = m_graph.control.getInputNodeIndices<ControlHypergraph::Sequence>(tag);
+                auto inputTags = m_graph.control.getInputNodeIndices<Sequence>(tag);
                 for(auto const& itag : inputTags)
                 {
                     if(m_completedControlNodes.find(itag) == m_completedControlNodes.end())
@@ -151,8 +153,7 @@ namespace rocRoller
             /**
              * Generate code for the specified nodes and their standard (Sequence) dependencies.
              */
-            Generator<Instruction> generate(std::set<int>           candidates,
-                                            CoordGraph::Transformer coords)
+            Generator<Instruction> generate(std::set<int> candidates, Transformer coords)
             {
                 rocRoller::Log::getLogger()->debug(
                     concatenate("KernelGraph::CodeGeneratorVisitor::generate: ", candidates));
@@ -178,8 +179,7 @@ namespace rocRoller
 
                     for(auto const& tag : nodes)
                     {
-                        auto op = std::get<ControlHypergraph::Operation>(
-                            m_graph.control.getElement(tag));
+                        auto op = std::get<Operation>(m_graph.control.getElement(tag));
                         co_yield (*this)(tag, op, coords);
                     }
 
@@ -187,9 +187,7 @@ namespace rocRoller
 
                     for(auto const& tag : nodes)
                     {
-                        auto outTags
-                            = m_graph.control.getOutputNodeIndices<ControlHypergraph::Sequence>(
-                                tag);
+                        auto outTags = m_graph.control.getOutputNodeIndices<Sequence>(tag);
                         candidates.insert(outTags.begin(), outTags.end());
                     }
 
@@ -264,9 +262,8 @@ namespace rocRoller
                 }
             }
 
-            Generator<Instruction> operator()(int                                 tag,
-                                              ControlHypergraph::Operation const& operation,
-                                              CoordGraph::Transformer const&      coords)
+            Generator<Instruction>
+                operator()(int tag, Operation const& operation, Transformer const& coords)
             {
                 auto opName = toString(operation);
                 rocRoller::Log::getLogger()->debug(
@@ -276,10 +273,8 @@ namespace rocRoller
                 AssertFatal(m_completedControlNodes.find(tag) == m_completedControlNodes.end(),
                             ShowValue(operation));
 
-                co_yield std::visit(*this,
-                                    std::variant<int>(tag),
-                                    operation,
-                                    std::variant<CoordGraph::Transformer>(coords));
+                co_yield std::visit(
+                    *this, std::variant<int>(tag), operation, std::variant<Transformer>(coords));
 
                 co_yield Instruction::Comment(opName + " END");
 
@@ -360,9 +355,7 @@ namespace rocRoller
                 Throw<FatalError>("Not implemented yet.");
             }
 
-            Generator<Instruction> operator()(int                          tag,
-                                              ControlHypergraph::ElementOp eop,
-                                              CoordGraph::Transformer      coords)
+            Generator<Instruction> operator()(int tag, ElementOp eop, Transformer coords)
             {
                 rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::ElementOp({})",
                                                    tag);
@@ -380,17 +373,14 @@ namespace rocRoller
                     eop.op);
             }
 
-            Generator<Instruction> operator()(int                              tag,
-                                              ControlHypergraph::Kernel const& edge,
-                                              CoordGraph::Transformer          coords)
+            Generator<Instruction> operator()(int tag, Kernel const& edge, Transformer coords)
             {
                 co_yield Instruction::Comment("Begin Kernel");
                 auto scope = std::make_shared<ScopeManager>(m_context);
                 m_context->setScopeManager(scope);
 
                 scope->pushNewScope();
-                auto body = m_graph.control.getOutputNodeIndices<ControlHypergraph::Body>(tag)
-                                .to<std::set>();
+                auto body = m_graph.control.getOutputNodeIndices<Body>(tag).to<std::set>();
                 co_yield generate(body, coords);
                 scope->popAndReleaseScope();
 
@@ -398,22 +388,18 @@ namespace rocRoller
                 co_yield Instruction::Comment("End Kernel");
             }
 
-            Generator<Instruction>
-                operator()(int tag, ControlHypergraph::Scope const&, CoordGraph::Transformer coords)
+            Generator<Instruction> operator()(int tag, Scope const&, Transformer coords)
             {
                 rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::Scope({})", tag);
 
                 auto scope = m_context->getScopeManager();
                 scope->pushNewScope();
-                auto body = m_graph.control.getOutputNodeIndices<ControlHypergraph::Body>(tag)
-                                .to<std::set>();
+                auto body = m_graph.control.getOutputNodeIndices<Body>(tag).to<std::set>();
                 co_yield generate(body, coords);
                 scope->popAndReleaseScope();
             }
 
-            Generator<Instruction> operator()(int                                 tag,
-                                              ControlHypergraph::ForLoopOp const& op,
-                                              CoordGraph::Transformer             coords)
+            Generator<Instruction> operator()(int tag, ForLoopOp const& op, Transformer coords)
             {
                 // TODO: Logging level for these comments.
                 rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::ForLoopOp({})",
@@ -424,8 +410,7 @@ namespace rocRoller
                 auto botLabel = m_context->labelAllocator()->label("ForLoopBottom");
 
                 co_yield Instruction::Comment("Initialize For Loop");
-                auto init = m_graph.control.getOutputNodeIndices<ControlHypergraph::Initialize>(tag)
-                                .to<std::set>();
+                auto init = m_graph.control.getOutputNodeIndices<Initialize>(tag).to<std::set>();
                 co_yield generate(init, coords);
 
                 auto connections = m_graph.mapper.getConnections(tag);
@@ -434,8 +419,7 @@ namespace rocRoller
                 auto iterReg       = m_context->registerTagManager()->getRegister(loop_incr_tag);
                 {
                     auto loopDims
-                        = m_graph.coordinates.getOutputNodeIndices<CoordGraph::DataFlowEdge>(
-                            loop_incr_tag);
+                        = m_graph.coordinates.getOutputNodeIndices<DataFlowEdge>(loop_incr_tag);
                     for(auto const& dim : loopDims)
                     {
                         coords.setCoordinate(dim, iterReg->expression());
@@ -458,14 +442,12 @@ namespace rocRoller
 
                 co_yield Instruction::Label(topLabel);
 
-                auto body = m_graph.control.getOutputNodeIndices<ControlHypergraph::Body>(tag)
-                                .to<std::set>();
+                auto body = m_graph.control.getOutputNodeIndices<Body>(tag).to<std::set>();
                 co_yield generate(body, coords);
 
                 co_yield Instruction::Comment("For Loop Increment");
                 auto incr
-                    = m_graph.control.getOutputNodeIndices<ControlHypergraph::ForLoopIncrement>(tag)
-                          .to<std::set>();
+                    = m_graph.control.getOutputNodeIndices<ForLoopIncrement>(tag).to<std::set>();
                 co_yield generate(incr, coords);
                 co_yield Instruction::Comment("Condition: Bottom (jump to " + topLabel->toString()
                                               + " if true)");
@@ -484,16 +466,12 @@ namespace rocRoller
                 co_yield Instruction::Unlock("Unlock For Loop");
             }
 
-            Generator<Instruction> operator()(int                                tag,
-                                              ControlHypergraph::UnrollOp const& unroll,
-                                              CoordGraph::Transformer            coords)
+            Generator<Instruction> operator()(int tag, UnrollOp const& unroll, Transformer coords)
             {
                 Throw<FatalError>("Not implemented yet.");
             }
 
-            Generator<Instruction> operator()(int                              tag,
-                                              ControlHypergraph::Assign const& assign,
-                                              CoordGraph::Transformer          coords)
+            Generator<Instruction> operator()(int tag, Assign const& assign, Transformer coords)
             {
                 rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::Assign({})", tag);
                 auto varType = resultVariableType(assign.expression);
@@ -514,26 +492,22 @@ namespace rocRoller
                 co_yield Expression::generate(dest, assign.expression, m_context);
             }
 
-            Generator<Instruction> operator()(int                                  tag,
-                                              ControlHypergraph::Deallocate const& deallocate,
-                                              CoordGraph::Transformer              coords)
+            Generator<Instruction>
+                operator()(int tag, Deallocate const& deallocate, Transformer coords)
             {
                 rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::Deallocate({})",
                                                    tag);
-                auto dim_tag = m_graph.mapper.get<CoordGraph::Dimension>(tag);
+                auto dim_tag = m_graph.mapper.get<Dimension>(tag);
                 m_context->registerTagManager()->deleteRegister(dim_tag);
                 co_return;
             }
 
-            Generator<Instruction>
-                operator()(int, ControlHypergraph::Barrier const&, CoordGraph::Transformer)
+            Generator<Instruction> operator()(int, Barrier const&, Transformer)
             {
                 co_yield m_context->mem()->barrier();
             }
 
-            Generator<Instruction> operator()(int                                    tag,
-                                              ControlHypergraph::ComputeIndex const& ci,
-                                              CoordGraph::Transformer                coords)
+            Generator<Instruction> operator()(int tag, ComputeIndex const& ci, Transformer coords)
             {
                 rocRoller::Log::getLogger()->debug(
                     "KernelGraph::CodeGenerator::ComputeIndex({}): {}/{}",
@@ -580,7 +554,7 @@ namespace rocRoller
                     co_yield generate(strideReg, indexExpr * L(numBytes));
                 }
 
-                auto user = m_graph.coordinates.get<CoordGraph::User>(ci.target);
+                auto user = m_graph.coordinates.get<User>(ci.target);
                 if(user)
                 {
                     VariableType bufferPointer{DataType::None, PointerType::Buffer};
@@ -597,9 +571,8 @@ namespace rocRoller
                 }
             }
 
-            Generator<Instruction> operator()(int                                     tag,
-                                              ControlHypergraph::SetCoordinate const& setCoordinate,
-                                              CoordGraph::Transformer                 coords)
+            Generator<Instruction>
+                operator()(int tag, SetCoordinate const& setCoordinate, Transformer coords)
             {
                 rocRoller::Log::getLogger()->debug(
                     "KernelGraph::CodeGenerator::SetCoordinate({}): {}",
@@ -611,29 +584,24 @@ namespace rocRoller
                             "Invalid SetCoordinate operation; coordinate missing.");
                 coords.setCoordinate(connections[0].coordinate, setCoordinate.value);
 
-                auto body = m_graph.control.getOutputNodeIndices<ControlHypergraph::Body>(tag)
-                                .to<std::set>();
+                auto body = m_graph.control.getOutputNodeIndices<Body>(tag).to<std::set>();
                 co_yield generate(body, coords);
             }
 
-            Generator<Instruction> operator()(int                                  tag,
-                                              ControlHypergraph::LoadLinear const& edge,
-                                              CoordGraph::Transformer              coords)
+            Generator<Instruction> operator()(int tag, LoadLinear const& edge, Transformer coords)
             {
                 Throw<FatalError>("LoadLinear present in kernel graph.");
             }
 
-            Generator<Instruction> loadMacroTileVGPRCI(int                                 tag,
-                                                       ControlHypergraph::LoadTiled const& load,
-                                                       CoordGraph::Transformer             coords,
-                                                       int                                 sdim)
+            Generator<Instruction>
+                loadMacroTileVGPRCI(int tag, LoadTiled const& load, Transformer coords, int sdim)
             {
                 rocRoller::Log::getLogger()->debug(
                     "KernelGraph::CodeGenerator::loadMacroTileVGPRCI()");
                 co_yield Instruction::Comment("GEN: loadMacroTileVGPRCI");
 
-                auto [user_tag, user]         = m_graph.getDimension<CoordGraph::User>(tag);
-                auto [mac_tile_tag, mac_tile] = m_graph.getDimension<CoordGraph::MacroTile>(tag);
+                auto [user_tag, user]         = m_graph.getDimension<User>(tag);
+                auto [mac_tile_tag, mac_tile] = m_graph.getDimension<MacroTile>(tag);
 
                 auto basePointer = MkSGPR(DataType::Int64);
                 co_yield m_context->argLoader()->getValue(user.argumentName(), basePointer);
@@ -696,16 +664,15 @@ namespace rocRoller
                 }
             }
 
-            Generator<Instruction> loadMacroTileVGPR(int                                 tag,
-                                                     ControlHypergraph::LoadTiled const& load,
-                                                     CoordGraph::Transformer             coords)
+            Generator<Instruction>
+                loadMacroTileVGPR(int tag, LoadTiled const& load, Transformer coords)
             {
                 rocRoller::Log::getLogger()->debug(
                     "KernelGraph::CodeGenerator::loadMacroTileVGPR()");
                 co_yield Instruction::Comment("GEN: loadMacroTileVGPR");
 
-                auto [user_tag, user]         = m_graph.getDimension<CoordGraph::User>(tag);
-                auto [mac_tile_tag, mac_tile] = m_graph.getDimension<CoordGraph::MacroTile>(tag);
+                auto [user_tag, user]         = m_graph.getDimension<User>(tag);
+                auto [mac_tile_tag, mac_tile] = m_graph.getDimension<MacroTile>(tag);
 
                 auto basePointer = MkSGPR(DataType::Int64);
                 co_yield m_context->argLoader()->getValue(user.argumentName(), basePointer);
@@ -759,16 +726,15 @@ namespace rocRoller
                 }
             }
 
-            Generator<Instruction> loadMacroTileLDS(int                                   tag,
-                                                    ControlHypergraph::LoadLDSTile const& load,
-                                                    CoordGraph::Transformer               coords)
+            Generator<Instruction>
+                loadMacroTileLDS(int tag, LoadLDSTile const& load, Transformer coords)
             {
                 rocRoller::Log::getLogger()->debug(
                     "KernelGraph::CodeGenerator::loadMacroTileLDS()");
                 co_yield_(Instruction::Comment("GEN: loadMacroTileLDS"));
 
-                auto [lds_tag, lds]   = m_graph.getDimension<CoordGraph::LDS>(tag);
-                auto [tile_tag, tile] = m_graph.getDimension<CoordGraph::MacroTile>(tag);
+                auto [lds_tag, lds]   = m_graph.getDimension<LDS>(tag);
+                auto [tile_tag, tile] = m_graph.getDimension<MacroTile>(tag);
 
                 auto [row_offset_reg, row_stride_reg] = getOffsetAndStride(tag, 0);
                 auto [col_offset_reg, col_stride_reg] = getOffsetAndStride(tag, 1);
@@ -820,19 +786,18 @@ namespace rocRoller
                 }
             }
 
-            Generator<Instruction>
-                loadMacroTileWAVELDSCI(int                                   tag,
-                                       ControlHypergraph::LoadLDSTile const& load,
-                                       CoordGraph::Transformer               coords,
-                                       int                                   sdim)
+            Generator<Instruction> loadMacroTileWAVELDSCI(int                tag,
+                                                          LoadLDSTile const& load,
+                                                          Transformer        coords,
+                                                          int                sdim)
             {
                 rocRoller::Log::getLogger()->debug(
                     "KernelGraph::CodeGenerator::loadMacroTileWAVELDSCI()");
                 co_yield_(Instruction::Comment("GEN: loadMacroTileWAVELDSCI"));
 
-                auto [lds_tag, lds]             = m_graph.getDimension<CoordGraph::LDS>(tag);
-                auto [mac_tile_tag, mac_tile]   = m_graph.getDimension<CoordGraph::MacroTile>(tag);
-                auto [wave_tile_tag, wave_tile] = m_graph.getDimension<CoordGraph::WaveTile>(tag);
+                auto [lds_tag, lds]             = m_graph.getDimension<LDS>(tag);
+                auto [mac_tile_tag, mac_tile]   = m_graph.getDimension<MacroTile>(tag);
+                auto [wave_tile_tag, wave_tile] = m_graph.getDimension<WaveTile>(tag);
 
                 // Find the LDS allocation that contains the tile and store
                 // the offset of the beginning of the allocation into lds_offset.
@@ -847,7 +812,7 @@ namespace rocRoller
                 auto vtype    = ldsAllocation->variableType();
                 auto numBytes = DataTypeInfo::Get(vtype).elementSize;
 
-                auto n_wave_tag = m_graph.mapper.get<CoordGraph::WaveTileNumber>(tag, sdim);
+                auto n_wave_tag = m_graph.mapper.get<WaveTileNumber>(tag, sdim);
 
                 auto [wave_offset_reg, wave_stride_reg] = getOffsetAndStride(tag, 0);
                 auto [vgpr_offset_reg, vgpr_stride_reg] = getOffsetAndStride(tag, 1);
@@ -922,18 +887,16 @@ namespace rocRoller
             }
 
             // CI : compute index
-            Generator<Instruction> loadMacroTileWAVECI(int                                 tag,
-                                                       ControlHypergraph::LoadTiled const& load,
-                                                       CoordGraph::Transformer             coords,
-                                                       int                                 sdim)
+            Generator<Instruction>
+                loadMacroTileWAVECI(int tag, LoadTiled const& load, Transformer coords, int sdim)
             {
                 rocRoller::Log::getLogger()->debug(
                     "KernelGraph::CodeGenerator::loadMacroTileWAVECI({})", tag);
                 co_yield Instruction::Comment("GEN: loadMacroTileWAVECI");
 
-                auto [user_tag, user]           = m_graph.getDimension<CoordGraph::User>(tag);
-                auto [wave_tile_tag, wave_tile] = m_graph.getDimension<CoordGraph::WaveTile>(tag);
-                auto [mac_tile_tag, mac_tile]   = m_graph.getDimension<CoordGraph::MacroTile>(tag);
+                auto [user_tag, user]           = m_graph.getDimension<User>(tag);
+                auto [wave_tile_tag, wave_tile] = m_graph.getDimension<WaveTile>(tag);
+                auto [mac_tile_tag, mac_tile]   = m_graph.getDimension<MacroTile>(tag);
 
                 Register::ValuePtr basePointer;
                 co_yield m_context->argLoader()->getValue(user.argumentName(), basePointer);
@@ -1016,17 +979,17 @@ namespace rocRoller
                 }
             }
 
-            Generator<Instruction> loadMacroTileWAVECIACCUM(
-                int tag, ControlHypergraph::LoadTiled const& load, CoordGraph::Transformer coords)
+            Generator<Instruction>
+                loadMacroTileWAVECIACCUM(int tag, LoadTiled const& load, Transformer coords)
 
             {
                 rocRoller::Log::getLogger()->debug(
                     "KernelGraph::CodeGenerator::loadMacroTileWAVECIACCUM({})", tag);
                 co_yield Instruction::Comment("GEN: loadMacroTileWAVECIACCUM");
 
-                auto [user_tag, user]           = m_graph.getDimension<CoordGraph::User>(tag);
-                auto [wave_tile_tag, wave_tile] = m_graph.getDimension<CoordGraph::WaveTile>(tag);
-                auto mac_tile_tag               = m_graph.mapper.get<CoordGraph::MacroTile>(tag);
+                auto [user_tag, user]           = m_graph.getDimension<User>(tag);
+                auto [wave_tile_tag, wave_tile] = m_graph.getDimension<WaveTile>(tag);
+                auto mac_tile_tag               = m_graph.mapper.get<MacroTile>(tag);
 
                 // Move the argument pointer into v_ptr
                 Register::ValuePtr s_ptr;
@@ -1127,15 +1090,13 @@ namespace rocRoller
                 }
             }
 
-            Generator<Instruction> operator()(int                                 tag,
-                                              ControlHypergraph::LoadTiled const& load,
-                                              CoordGraph::Transformer             coords)
+            Generator<Instruction> operator()(int tag, LoadTiled const& load, Transformer coords)
             {
                 rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::LoadTiled({})",
                                                    tag);
                 co_yield Instruction::Comment("GEN: LoadTiled");
 
-                auto [mac_tile_tag, mac_tile] = m_graph.getDimension<CoordGraph::MacroTile>(tag);
+                auto [mac_tile_tag, mac_tile] = m_graph.getDimension<MacroTile>(tag);
 
                 switch(mac_tile.memoryType)
                 {
@@ -1179,15 +1140,13 @@ namespace rocRoller
                 }
             }
 
-            Generator<Instruction> operator()(int                                   tag,
-                                              ControlHypergraph::LoadLDSTile const& load,
-                                              CoordGraph::Transformer               coords)
+            Generator<Instruction> operator()(int tag, LoadLDSTile const& load, Transformer coords)
             {
                 rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::LoadLDSTile({})",
                                                    tag);
                 co_yield Instruction::Comment("GEN: LoadLDSTile");
 
-                auto [mac_tile_tag, mac_tile] = m_graph.getDimension<CoordGraph::MacroTile>(tag);
+                auto [mac_tile_tag, mac_tile] = m_graph.getDimension<MacroTile>(tag);
 
                 switch(mac_tile.memoryType)
                 {
@@ -1214,15 +1173,13 @@ namespace rocRoller
                 }
             }
 
-            Generator<Instruction> operator()(int                                tag,
-                                              ControlHypergraph::LoadVGPR const& load,
-                                              CoordGraph::Transformer            coords)
+            Generator<Instruction> operator()(int tag, LoadVGPR const& load, Transformer coords)
             {
                 rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::LoadVGPR({})", tag);
                 co_yield Instruction::Comment("GEN: LoadVGPR");
 
-                auto [userTag, user] = m_graph.getDimension<CoordGraph::User>(tag);
-                auto [vgprTag, vgpr] = m_graph.getDimension<CoordGraph::VGPR>(tag);
+                auto [userTag, user] = m_graph.getDimension<User>(tag);
+                auto [vgprTag, vgpr] = m_graph.getDimension<VGPR>(tag);
 
                 rocRoller::Log::getLogger()->debug(
                     "KernelGraph::CodeGenerator::LoadVGPR({}): User({}), VGPR({})",
@@ -1247,9 +1204,9 @@ namespace rocRoller
                 }
             }
 
-            Generator<Instruction> loadVGPRFromScalarValue(CoordGraph::User                 user,
+            Generator<Instruction> loadVGPRFromScalarValue(User                             user,
                                                            std::shared_ptr<Register::Value> vgpr,
-                                                           CoordGraph::Transformer          coords)
+                                                           Transformer                      coords)
             {
                 rocRoller::Log::getLogger()->debug(
                     "KernelGraph::CodeGenerator::LoadVGPR(): scalar value");
@@ -1260,9 +1217,9 @@ namespace rocRoller
                 co_yield m_context->copier()->copy(vgpr, s_value, "Move value");
             }
 
-            Generator<Instruction> loadVGPRFromScalarPointer(CoordGraph::User                 user,
+            Generator<Instruction> loadVGPRFromScalarPointer(User                             user,
                                                              std::shared_ptr<Register::Value> vgpr,
-                                                             CoordGraph::Transformer coords)
+                                                             Transformer coords)
             {
                 rocRoller::Log::getLogger()->debug(
                     "KernelGraph::CodeGenerator::LoadVGPR(): scalar pointer");
@@ -1282,9 +1239,9 @@ namespace rocRoller
             }
 
             Generator<Instruction> loadVGPRFromGlobalArray(int                              userTag,
-                                                           CoordGraph::User                 user,
+                                                           User                             user,
                                                            std::shared_ptr<Register::Value> vgpr,
-                                                           CoordGraph::Transformer          coords)
+                                                           Transformer                      coords)
             {
                 auto offset = Register::Value::Placeholder(
                     m_context, Register::Type::Vector, DataType::Int64, 1);
@@ -1308,47 +1265,42 @@ namespace rocRoller
                     MemoryInstructions::MemoryKind::Flat, vgpr, v_ptr, offset, numBytes);
             }
 
-            Generator<Instruction> operator()(int                                tag,
-                                              ControlHypergraph::Multiply const& mult,
-                                              CoordGraph::Transformer            coords)
+            Generator<Instruction> operator()(int tag, Multiply const& mult, Transformer coords)
             {
                 rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::Multiply({})", tag);
                 co_yield Instruction::Comment("GEN: Multiply");
 
-                auto loads = m_graph.control.getOutputNodeIndices<ControlHypergraph::Body>(tag)
-                                 .to<std::vector>();
+                auto loads = m_graph.control.getOutputNodeIndices<Body>(tag).to<std::vector>();
                 AssertFatal(loads.size() == 2, "Multiply op needs two operands");
 
                 auto loadA = m_graph.control.getElement(loads[0]);
                 auto loadB = m_graph.control.getElement(loads[1]);
 
                 int sourceA_tag = -1;
-                if(isOperation<ControlHypergraph::LoadTiled>(loadA))
-                    sourceA_tag = m_graph.mapper.get<CoordGraph::User>(tag, 0);
-                else if(isOperation<ControlHypergraph::LoadLDSTile>(loadA))
-                    sourceA_tag = m_graph.mapper.get<CoordGraph::LDS>(tag, 0);
+                if(isOperation<LoadTiled>(loadA))
+                    sourceA_tag = m_graph.mapper.get<User>(tag, 0);
+                else if(isOperation<LoadLDSTile>(loadA))
+                    sourceA_tag = m_graph.mapper.get<LDS>(tag, 0);
 
                 int sourceB_tag = -1;
-                if(isOperation<ControlHypergraph::LoadTiled>(loadB))
-                    sourceB_tag = m_graph.mapper.get<CoordGraph::User>(tag, 1);
-                else if(isOperation<ControlHypergraph::LoadLDSTile>(loadB))
-                    sourceB_tag = m_graph.mapper.get<CoordGraph::LDS>(tag, 1);
+                if(isOperation<LoadTiled>(loadB))
+                    sourceB_tag = m_graph.mapper.get<User>(tag, 1);
+                else if(isOperation<LoadLDSTile>(loadB))
+                    sourceB_tag = m_graph.mapper.get<LDS>(tag, 1);
 
                 AssertFatal(sourceA_tag > 0 && sourceB_tag > 0, "User or LDS dimensions not found");
 
-                auto [waveA_tag, waveA] = m_graph.getDimension<CoordGraph::WaveTile>(tag, 0);
-                auto [waveB_tag, waveB] = m_graph.getDimension<CoordGraph::WaveTile>(tag, 1);
+                auto [waveA_tag, waveA] = m_graph.getDimension<WaveTile>(tag, 0);
+                auto [waveB_tag, waveB] = m_graph.getDimension<WaveTile>(tag, 1);
 
-                auto [macA_tag, macA] = m_graph.getDimension<CoordGraph::MacroTile>(tag, 0);
-                auto [macB_tag, macB] = m_graph.getDimension<CoordGraph::MacroTile>(tag, 1);
+                auto [macA_tag, macA] = m_graph.getDimension<MacroTile>(tag, 0);
+                auto [macB_tag, macB] = m_graph.getDimension<MacroTile>(tag, 1);
 
                 auto n_waveA_y_tags
                     = m_graph.coordinates
                           .findNodes(sourceA_tag,
                                      [&](int index) -> bool {
-                                         auto node
-                                             = m_graph.coordinates.get<CoordGraph::WaveTileNumber>(
-                                                 index);
+                                         auto node = m_graph.coordinates.get<WaveTileNumber>(index);
                                          if(node)
                                              return node->dim == 1;
                                          return false;
@@ -1360,9 +1312,7 @@ namespace rocRoller
                     = m_graph.coordinates
                           .findNodes(sourceB_tag,
                                      [&](int index) -> bool {
-                                         auto node
-                                             = m_graph.coordinates.get<CoordGraph::WaveTileNumber>(
-                                                 index);
+                                         auto node = m_graph.coordinates.get<WaveTileNumber>(index);
                                          if(node)
                                              return node->dim == 0;
                                          return false;
@@ -1370,8 +1320,7 @@ namespace rocRoller
                           .to<std::vector>();
                 AssertFatal(n_waveB_x_tags.size() == 1);
 
-                auto loadAB = m_graph.control.getOutputNodeIndices<ControlHypergraph::Body>(tag)
-                                  .to<std::set>();
+                auto loadAB = m_graph.control.getOutputNodeIndices<Body>(tag).to<std::set>();
 
                 auto [mac_offset_x_reg, mac_stride_x_reg]   = getOffsetAndStride(loads[0], -1);
                 auto [wave_offset_x_reg, wave_stride_x_reg] = getOffsetAndStride(loads[0], 0);
@@ -1385,7 +1334,7 @@ namespace rocRoller
                 uint wfs          = m_context->kernel()->wavefront_size();
                 uint num_agpr     = num_elements / wfs;
 
-                auto [D_tag, _D] = m_graph.getDimension<CoordGraph::MacroTile>(tag, 2);
+                auto [D_tag, _D] = m_graph.getDimension<MacroTile>(tag, 2);
 
                 auto D = m_context->registerTagManager()->getRegister(
                     D_tag, Register::Type::Accumulator, DataType::Float, num_agpr);
@@ -1403,12 +1352,12 @@ namespace rocRoller
                 // TODO : Need more design thought (how to seed an offset register)
                 auto reset_offset_x = Register::Value::Placeholder(
                     m_context, Register::Type::Vector, DataType::UInt32, 1);
-                if(isOperation<ControlHypergraph::LoadLDSTile>(loadA))
+                if(isOperation<LoadLDSTile>(loadA))
                     co_yield copy(reset_offset_x, wave_offset_x_reg);
 
                 auto reset_offset_y = Register::Value::Placeholder(
                     m_context, Register::Type::Vector, DataType::UInt32, 1);
-                if(isOperation<ControlHypergraph::LoadLDSTile>(loadB))
+                if(isOperation<LoadLDSTile>(loadB))
                     co_yield copy(reset_offset_y, wave_offset_y_reg);
 
                 uint const num_wave_tiles = macA.sizes[1] / waveA.sizes[1];
@@ -1427,9 +1376,9 @@ namespace rocRoller
                     waveB.vgpr = m_context->registerTagManager()->getRegister(macB_tag);
 
                     Expression::ExpressionPtr A = std::make_shared<Expression::Expression>(
-                        std::make_shared<CoordGraph::WaveTile>(waveA));
+                        std::make_shared<WaveTile>(waveA));
                     Expression::ExpressionPtr B = std::make_shared<Expression::Expression>(
-                        std::make_shared<CoordGraph::WaveTile>(waveB));
+                        std::make_shared<WaveTile>(waveB));
 
                     co_yield generate(D,
                                       std::make_shared<Expression::Expression>(
@@ -1444,36 +1393,32 @@ namespace rocRoller
                                           + wave_stride_y_reg->expression());
                 }
 
-                if(isOperation<ControlHypergraph::LoadLDSTile>(loadA))
+                if(isOperation<LoadLDSTile>(loadA))
                     co_yield copy(wave_offset_x_reg, reset_offset_x);
-                if(isOperation<ControlHypergraph::LoadLDSTile>(loadB))
+                if(isOperation<LoadLDSTile>(loadB))
                     co_yield copy(wave_offset_y_reg, reset_offset_y);
             }
 
-            Generator<Instruction> operator()(int                                         tag,
-                                              ControlHypergraph::TensorContraction const& mul,
-                                              CoordGraph::Transformer                     coords)
+            Generator<Instruction>
+                operator()(int tag, TensorContraction const& mul, Transformer coords)
             {
                 Throw<FatalError>("TensorContraction present in kernel graph.");
             }
 
-            Generator<Instruction> operator()(int                                   tag,
-                                              ControlHypergraph::StoreLinear const& edge,
-                                              CoordGraph::Transformer               coords)
+            Generator<Instruction> operator()(int tag, StoreLinear const& edge, Transformer coords)
             {
                 Throw<FatalError>("StoreLinear present in kernel graph.");
             }
 
-            Generator<Instruction> storeMacroTileVGPR(int                                  tag,
-                                                      ControlHypergraph::StoreTiled const& store,
-                                                      CoordGraph::Transformer              coords)
+            Generator<Instruction>
+                storeMacroTileVGPR(int tag, StoreTiled const& store, Transformer coords)
             {
                 rocRoller::Log::getLogger()->debug(
                     "KernelGraph::CodeGenerator::storeMacroTileVGPR()");
                 co_yield Instruction::Comment("GEN: storeMacroTileVGPR");
 
-                auto [user_tag, user]         = m_graph.getDimension<CoordGraph::User>(tag);
-                auto [mac_tile_tag, mac_tile] = m_graph.getDimension<CoordGraph::MacroTile>(tag);
+                auto [user_tag, user]         = m_graph.getDimension<User>(tag);
+                auto [mac_tile_tag, mac_tile] = m_graph.getDimension<MacroTile>(tag);
 
                 auto vgpr = m_context->registerTagManager()->getRegister(mac_tile_tag);
 
@@ -1522,18 +1467,17 @@ namespace rocRoller
                 }
             }
 
-            Generator<Instruction> storeMacroTileWAVECI(int                                  tag,
-                                                        ControlHypergraph::StoreTiled const& store,
-                                                        CoordGraph::Transformer              coords)
+            Generator<Instruction>
+                storeMacroTileWAVECI(int tag, StoreTiled const& store, Transformer coords)
 
             {
                 rocRoller::Log::getLogger()->debug(
                     "KernelGraph::CodeGenerator::storeMacroTileWAVE()");
                 co_yield Instruction::Comment("GEN: storeMacroTileWAVE");
 
-                auto [user_tag, user]           = m_graph.getDimension<CoordGraph::User>(tag);
-                auto [mac_tile_tag, mac_tile]   = m_graph.getDimension<CoordGraph::MacroTile>(tag);
-                auto [wave_tile_tag, wave_tile] = m_graph.getDimension<CoordGraph::WaveTile>(tag);
+                auto [user_tag, user]           = m_graph.getDimension<User>(tag);
+                auto [mac_tile_tag, mac_tile]   = m_graph.getDimension<MacroTile>(tag);
+                auto [wave_tile_tag, wave_tile] = m_graph.getDimension<WaveTile>(tag);
 
                 uint num_elements = wave_tile.sizes[0] * wave_tile.sizes[1];
                 uint wfs          = m_context->kernel()->wavefront_size();
@@ -1602,14 +1546,12 @@ namespace rocRoller
                 }
             }
 
-            Generator<Instruction> operator()(int                                  tag,
-                                              ControlHypergraph::StoreTiled const& store,
-                                              CoordGraph::Transformer              coords)
+            Generator<Instruction> operator()(int tag, StoreTiled const& store, Transformer coords)
             {
                 rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::StoreTiled()");
                 co_yield Instruction::Comment("GEN: StoreTiled");
 
-                auto [mac_tile_tag, mac_tile] = m_graph.getDimension<CoordGraph::MacroTile>(tag);
+                auto [mac_tile_tag, mac_tile] = m_graph.getDimension<MacroTile>(tag);
 
                 switch(mac_tile.memoryType)
                 {
@@ -1624,16 +1566,15 @@ namespace rocRoller
                 }
             }
 
-            Generator<Instruction> operator()(int                                    tag,
-                                              ControlHypergraph::StoreLDSTile const& store,
-                                              CoordGraph::Transformer                coords)
+            Generator<Instruction>
+                operator()(int tag, StoreLDSTile const& store, Transformer coords)
             {
                 rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::StoreLDSTiled({})",
                                                    tag);
                 co_yield Instruction::Comment("GEN: StoreLDSTile");
 
-                auto [lds_tag, lds]   = m_graph.getDimension<CoordGraph::LDS>(tag);
-                auto [tile_tag, tile] = m_graph.getDimension<CoordGraph::MacroTile>(tag);
+                auto [lds_tag, lds]   = m_graph.getDimension<LDS>(tag);
+                auto [tile_tag, tile] = m_graph.getDimension<MacroTile>(tag);
 
                 // Temporary register(s) that is used to copy the data from global memory to
                 // local memory.
@@ -1695,14 +1636,12 @@ namespace rocRoller
                 co_yield copy(row_offset_reg, reset_offset);
             }
 
-            Generator<Instruction> operator()(int                                 tag,
-                                              ControlHypergraph::StoreVGPR const& store,
-                                              CoordGraph::Transformer             coords)
+            Generator<Instruction> operator()(int tag, StoreVGPR const& store, Transformer coords)
             {
                 co_yield Instruction::Comment("GEN: StoreVGPR");
 
-                auto [vgprTag, vgpr] = m_graph.getDimension<CoordGraph::VGPR>(tag);
-                auto [userTag, user] = m_graph.getDimension<CoordGraph::User>(tag);
+                auto [vgprTag, vgpr] = m_graph.getDimension<VGPR>(tag);
+                auto [userTag, user] = m_graph.getDimension<User>(tag);
 
                 auto src = m_context->registerTagManager()->getRegister(vgprTag);
 
@@ -1730,7 +1669,7 @@ namespace rocRoller
             }
 
         private:
-            KernelHypergraph                m_graph;
+            KernelGraph                     m_graph;
             std::shared_ptr<Context>        m_context;
             std::shared_ptr<AssemblyKernel> m_kernel;
 
@@ -1742,8 +1681,7 @@ namespace rocRoller
             FastArithmetic             m_fastArith;
         };
 
-        Generator<Instruction> generate(KernelHypergraph                graph,
-                                        std::shared_ptr<AssemblyKernel> kernel)
+        Generator<Instruction> generate(KernelGraph graph, std::shared_ptr<AssemblyKernel> kernel)
         {
             TIMER(t, "KernelGraph::generate");
             rocRoller::Log::getLogger()->debug("KernelGraph::generate(); DOT\n{}",

@@ -7,8 +7,8 @@
 
 namespace rocRoller::KernelGraph
 {
-    using namespace CoordGraph;
-    using namespace ControlHypergraph;
+    using namespace CoordinateGraph;
+    using namespace ControlGraph;
 
     /**
      * @brief Register read/write tracer.
@@ -30,7 +30,7 @@ namespace rocRoller::KernelGraph
             int depth, loop, control, coordinate;
         };
 
-        ControlFlowRWTracer(KernelHypergraph const& graph)
+        ControlFlowRWTracer(KernelGraph const& graph)
             : m_graph(graph)
         {
         }
@@ -277,13 +277,13 @@ namespace rocRoller::KernelGraph
         }
 
     private:
-        KernelHypergraph         m_graph;
+        KernelGraph              m_graph;
         std::set<int>            m_completedControlNodes;
         std::vector<EventRecord> m_trace;
         std::vector<int>         m_loop;
     };
 
-    KernelHypergraph addDeallocate(KernelHypergraph const& original)
+    KernelGraph addDeallocate(KernelGraph const& original)
     {
         auto graph  = original;
         auto tracer = ControlFlowRWTracer(graph);

@@ -1,22 +1,22 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-#include <rocRoller/KernelGraph/ControlHypergraph/ControlEdge_fwd.hpp>
-#include <rocRoller/KernelGraph/ControlHypergraph/ControlHypergraph.hpp>
-#include <rocRoller/KernelGraph/ControlHypergraph/Operation_fwd.hpp>
+#include <rocRoller/KernelGraph/ControlGraph/ControlEdge_fwd.hpp>
+#include <rocRoller/KernelGraph/ControlGraph/ControlGraph.hpp>
+#include <rocRoller/KernelGraph/ControlGraph/Operation_fwd.hpp>
 
 #include "DataTypes/DataTypes.hpp"
 #include "SourceMatcher.hpp"
 
 using namespace rocRoller;
-using namespace KernelGraph::ControlHypergraph;
+using namespace KernelGraph::ControlGraph;
 
 namespace rocRollerTest
 {
 
-    TEST(ControlHypergraphTest, Basic)
+    TEST(ControlGraphTest, Basic)
     {
-        ControlHypergraph control = ControlHypergraph();
+        ControlGraph control = ControlGraph();
 
         int kernel_index = control.addElement(Kernel());
         int loadA_index  = control.addElement(LoadLinear(DataType::Float));

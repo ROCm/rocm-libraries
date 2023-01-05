@@ -4,12 +4,12 @@
 #include <vector>
 
 #include <rocRoller/Expression_fwd.hpp>
-#include <rocRoller/KernelGraph/CoordGraph/Dimension.hpp>
-#include <rocRoller/KernelGraph/CoordGraph/Edge.hpp>
+#include <rocRoller/KernelGraph/CoordinateGraph/CoordinateEdge.hpp>
+#include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
 
 namespace rocRoller
 {
-    namespace KernelGraph::CoordGraph
+    namespace KernelGraph::CoordinateGraph
     {
         template <typename T>
         concept CTEdgePassthrough = std::is_same<Edge, T>::value || std::is_same<DataFlowEdge, T>::

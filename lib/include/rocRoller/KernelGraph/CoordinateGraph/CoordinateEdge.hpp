@@ -2,11 +2,11 @@
 
 #include <string>
 
-#include "Edge_fwd.hpp"
+#include "CoordinateEdge_fwd.hpp"
 
 namespace rocRoller
 {
-    namespace KernelGraph::CoordGraph
+    namespace KernelGraph::CoordinateGraph
     {
         /**
          * EdgeType - type of edge in the coordinate transfrom graph.

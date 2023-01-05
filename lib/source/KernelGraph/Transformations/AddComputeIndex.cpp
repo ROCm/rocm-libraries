@@ -7,15 +7,15 @@ namespace rocRoller
 {
     namespace KernelGraph
     {
-        using namespace CoordGraph;
-        using namespace ControlHypergraph;
+        using namespace CoordinateGraph;
+        using namespace ControlGraph;
         namespace Expression = rocRoller::Expression;
         using namespace Expression;
 
         /**
          * @brief Replace operation with a scope.  Does not delete the original operation.
          */
-        std::pair<int, KernelHypergraph> replaceWithScope(KernelHypergraph const& original, int op)
+        std::pair<int, KernelGraph> replaceWithScope(KernelGraph const& original, int op)
         {
             auto graph = original;
             auto scope = graph.control.addElement(Scope());
@@ -50,7 +50,7 @@ namespace rocRoller
         }
 
         std::tuple<int, int, int>
-            computeIndexVGPRMATRIXAB(KernelHypergraph& graph, int load, int user, int sdim)
+            computeIndexVGPRMATRIXAB(KernelGraph& graph, int load, int user, int sdim)
         {
             AssertFatal(isOperation<LoadTiled>(graph.control.getElement(load)));
             auto mac     = graph.mapper.get<MacroTileNumber>(load, sdim);
@@ -105,7 +105,7 @@ namespace rocRoller
         }
 
         std::tuple<int, int>
-            computeIndexVGPR(KernelHypergraph& graph, int loadstore, int source, bool forward)
+            computeIndexVGPR(KernelGraph& graph, int loadstore, int source, bool forward)
         {
             auto i_thr_x = graph.mapper.get<ThreadTileIndex>(loadstore, 0);
             auto i_thr_y = graph.mapper.get<ThreadTileIndex>(loadstore, 1);
@@ -185,7 +185,7 @@ namespace rocRoller
         /**
          * @brief Add ComputeIndex operations to graph for a MATRIX_A or MATRIX_B LoadLDSTile.
          */
-        std::tuple<int, int> computeIndexLDSMATRIXAB(KernelHypergraph& graph, int load, int sdim)
+        std::tuple<int, int> computeIndexLDSMATRIXAB(KernelGraph& graph, int load, int sdim)
         {
             AssertFatal(isOperation<LoadLDSTile>(graph.control.getElement(load)));
             auto lds  = graph.mapper.get<LDS>(load);
@@ -235,7 +235,7 @@ namespace rocRoller
         /**
          * @brief Add ComputeIndex operations to graph for a MATRIX_A or MATRIX_B LoadTiled.
          */
-        std::tuple<int, int, int> computeIndexMATRIXAB(KernelHypergraph& graph, int load, int sdim)
+        std::tuple<int, int, int> computeIndexMATRIXAB(KernelGraph& graph, int load, int sdim)
         {
             auto user = graph.mapper.get<User>(load);
             auto mac  = graph.mapper.get<MacroTileNumber>(load, sdim);
@@ -299,14 +299,14 @@ namespace rocRoller
         /**
          * @brief Add ComputeIndex operations to graph for MATRIX_A and MATRIX_B loads.
          */
-        KernelHypergraph addComputeIndexAB(KernelHypergraph const& original,
-                                           int                     op,
-                                           int                     mulLoadA,
-                                           int                     mulLoadB,
-                                           int                     loadA,
-                                           int                     storeLDSA,
-                                           int                     loadB,
-                                           int                     storeLDSB)
+        KernelGraph addComputeIndexAB(KernelGraph const& original,
+                                      int                op,
+                                      int                mulLoadA,
+                                      int                mulLoadB,
+                                      int                loadA,
+                                      int                storeLDSA,
+                                      int                loadB,
+                                      int                storeLDSB)
         {
             rocRoller::Log::getLogger()->debug(
                 "KernelGraph::addComputeIndexAB({}, {}, {})", op, mulLoadA, mulLoadB);
@@ -389,8 +389,8 @@ namespace rocRoller
         /**
          * @brief Add ComputeIndex operations to graph for a MATRIX_ACCUM load/store.
          */
-        KernelHypergraph
-            addComputeIndexC(KernelHypergraph const& original, int op, int loadstore, bool forward)
+        KernelGraph
+            addComputeIndexC(KernelGraph const& original, int op, int loadstore, bool forward)
         {
             rocRoller::Log::getLogger()->debug(
                 "KernelGraph::addComputeIndexC({}, {}, {})", op, loadstore, forward);
@@ -461,10 +461,8 @@ namespace rocRoller
         /**
          * @brief Add ComputeIndex operations to graph for loads/stores.
          */
-        KernelHypergraph addComputeIndexVGPR(KernelHypergraph const& original,
-                                             int                     op,
-                                             int                     loadstore,
-                                             bool                    forward)
+        KernelGraph
+            addComputeIndexVGPR(KernelGraph const& original, int op, int loadstore, bool forward)
         {
             rocRoller::Log::getLogger()->debug(
                 "KernelGraph::addComputeIndexVGPR({}, {}, {})", op, loadstore, forward);
@@ -489,7 +487,7 @@ namespace rocRoller
             return graph;
         }
 
-        KernelHypergraph addComputeIndexOperations(KernelHypergraph const& original)
+        KernelGraph addComputeIndexOperations(KernelGraph const& original)
         {
             auto kgraph = original;
             auto kernel = *kgraph.control.roots().begin();
@@ -573,7 +571,7 @@ namespace rocRoller
                                           if(load)
                                           {
                                               auto [tile_tag, tile]
-                                                  = kgraph.getDimension<CoordGraph::MacroTile>(tag);
+                                                  = kgraph.getDimension<MacroTile>(tag);
                                               if(tile.layoutType == LayoutType::MATRIX_ACCUMULATOR)
                                                   return true;
                                           }
@@ -603,8 +601,7 @@ namespace rocRoller
                               auto loadLDS = kgraph.control.get<LoadLDSTile>(tag);
                               if(load || loadLDS)
                               {
-                                  auto [tile_tag, tile]
-                                      = kgraph.getDimension<CoordGraph::MacroTile>(tag);
+                                  auto [tile_tag, tile] = kgraph.getDimension<MacroTile>(tag);
                                   if(tile.memoryType == MemoryType::VGPR
                                      || tile.memoryType == MemoryType::LDS)
                                       return true;
@@ -620,23 +617,22 @@ namespace rocRoller
             }
 
             // MATRIX_ACCUMULATOR stores anywhere
-            auto storeAccums
-                = kgraph.control
-                      .findNodes(
-                          kernel,
-                          [&](int tag) -> bool {
-                              auto store = kgraph.control.get<StoreTiled>(tag);
-                              if(store)
-                              {
-                                  auto [tile_tag, tile]
-                                      = kgraph.getDimension<CoordGraph::MacroTile>(tag);
-                                  if(tile.layoutType == LayoutType::MATRIX_ACCUMULATOR)
-                                      return true;
-                              }
-                              return false;
-                          },
-                          Graph::Direction::Downstream)
-                      .to<std::vector>();
+            auto storeAccums = kgraph.control
+                                   .findNodes(
+                                       kernel,
+                                       [&](int tag) -> bool {
+                                           auto store = kgraph.control.get<StoreTiled>(tag);
+                                           if(store)
+                                           {
+                                               auto [tile_tag, tile]
+                                                   = kgraph.getDimension<MacroTile>(tag);
+                                               if(tile.layoutType == LayoutType::MATRIX_ACCUMULATOR)
+                                                   return true;
+                                           }
+                                           return false;
+                                       },
+                                       Graph::Direction::Downstream)
+                                   .to<std::vector>();
 
             for(auto const tag : storeAccums)
             {
@@ -655,8 +651,7 @@ namespace rocRoller
                               auto storeLDS = kgraph.control.get<StoreLDSTile>(tag);
                               if(store || storeLDS)
                               {
-                                  auto [tile_tag, tile]
-                                      = kgraph.getDimension<CoordGraph::MacroTile>(tag);
+                                  auto [tile_tag, tile] = kgraph.getDimension<MacroTile>(tag);
                                   if(tile.memoryType == MemoryType::VGPR
                                      || tile.memoryType == MemoryType::LDS)
                                       return true;

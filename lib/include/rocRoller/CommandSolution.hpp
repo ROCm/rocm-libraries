@@ -24,8 +24,8 @@ namespace rocRoller
         /**
          * Set (reset) a dimensions properties.
          */
-        void setDimensionInfo(int tag, KernelGraph::CoordGraph::Dimension dim);
-        std::map<int, KernelGraph::CoordGraph::Dimension> getDimensionInfo() const;
+        void setDimensionInfo(int tag, KernelGraph::CoordinateGraph::Dimension dim);
+        std::map<int, KernelGraph::CoordinateGraph::Dimension> getDimensionInfo() const;
 
         /**
          * Manually override kernel launch dimensions.
@@ -67,7 +67,7 @@ namespace rocRoller
         std::vector<unsigned int> getWaveTilesPerWorkgroup() const;
 
     private:
-        std::map<int, KernelGraph::CoordGraph::Dimension>       m_dimInfo;
+        std::map<int, KernelGraph::CoordinateGraph::Dimension>  m_dimInfo;
         std::optional<std::array<unsigned int, 3>>              m_workgroupSize;
         std::optional<std::array<Expression::ExpressionPtr, 3>> m_workitemCount;
 
@@ -116,9 +116,9 @@ namespace rocRoller
                       std::shared_ptr<CommandParameters> preParams,
                       std::shared_ptr<CommandParameters> postParams = nullptr);
 
-        CommandKernel(std::shared_ptr<Command>             command,
-                      std::shared_ptr<Context>             ctx,
-                      KernelGraph::KernelHypergraph const& kernelGraph);
+        CommandKernel(std::shared_ptr<Command>        command,
+                      std::shared_ptr<Context>        ctx,
+                      KernelGraph::KernelGraph const& kernelGraph);
 
         void addPredicate(Expression::ExpressionPtr expression);
         bool matchesPredicates(/* args */) const;
@@ -133,7 +133,7 @@ namespace rocRoller
          */
         void launchKernel(RuntimeArguments const& args);
 
-        KernelGraph::KernelHypergraph getKernelGraph() const;
+        KernelGraph::KernelGraph getKernelGraph() const;
 
         std::shared_ptr<Context> getContext();
 
@@ -142,7 +142,7 @@ namespace rocRoller
 
         std::vector<Expression::ExpressionPtr> m_predicates;
 
-        KernelGraph::KernelHypergraph      m_kernelGraph;
+        KernelGraph::KernelGraph           m_kernelGraph;
         std::shared_ptr<Context>           m_context;
         std::shared_ptr<ExecutableKernel>  m_executableKernel;
         std::shared_ptr<CommandParameters> m_preParameters, m_postParameters;

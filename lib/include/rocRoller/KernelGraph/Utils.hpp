@@ -10,9 +10,9 @@ namespace rocRoller
         /**
          * Create a range-based for loop.
          */
-        std::pair<int, int> rangeFor(KernelHypergraph& graph, Expression::ExpressionPtr size);
+        std::pair<int, int> rangeFor(KernelGraph& graph, Expression::ExpressionPtr size);
 
-        void loadMacroTile(KernelHypergraph&                  graph,
+        void loadMacroTile(KernelGraph&                       graph,
                            int                                load_tag,
                            int                                user_tag,
                            int                                mac_tile_tag,
@@ -21,7 +21,7 @@ namespace rocRoller
                            int                                wavefrontSize,
                            std::vector<unsigned int> const&   wavetilesPerWorkgroup);
 
-        void loadMacroTileForLDS(KernelHypergraph&                  graph,
+        void loadMacroTileForLDS(KernelGraph&                       graph,
                                  int                                load_tag,
                                  int                                user_tag,
                                  int                                mac_tile_tag,
@@ -29,23 +29,23 @@ namespace rocRoller
                                  int                                K,
                                  std::array<unsigned int, 3> const& workgroupSizes);
 
-        void loadWaveMacroTileFromLDS(KernelHypergraph&            graph,
-                                      CoordGraph::MacroTile const& mac_tile,
-                                      int                          load_tag,
-                                      std::vector<int>&            sdims,
-                                      int                          K,
-                                      int                          lds);
+        void loadWaveMacroTileFromLDS(KernelGraph&                      graph,
+                                      CoordinateGraph::MacroTile const& mac_tile,
+                                      int                               load_tag,
+                                      std::vector<int>&                 sdims,
+                                      int                               K,
+                                      int                               lds);
 
-        void loadWaveMacroTile(KernelHypergraph&                graph,
-                               CoordGraph::MacroTile const&     mac_tile,
-                               int                              load_tag,
-                               int                              i_mac_x,
-                               int                              i_mac_y,
-                               int                              user_tag,
-                               int                              wavefrontSize,
-                               std::vector<unsigned int> const& wavetilesPerWorkgroup);
+        void loadWaveMacroTile(KernelGraph&                      graph,
+                               CoordinateGraph::MacroTile const& mac_tile,
+                               int                               load_tag,
+                               int                               i_mac_x,
+                               int                               i_mac_y,
+                               int                               user_tag,
+                               int                               wavefrontSize,
+                               std::vector<unsigned int> const&  wavetilesPerWorkgroup);
 
-        void storeMacroTile(KernelHypergraph&                  graph,
+        void storeMacroTile(KernelGraph&                       graph,
                             int                                store_tag,
                             int                                user_tag,
                             int                                mac_tile_tag,
@@ -54,28 +54,28 @@ namespace rocRoller
                             int                                wavefrontSize,
                             std::vector<unsigned int> const&   wavetilesPerWorkgroup);
 
-        void storeWaveMacroTile(KernelHypergraph&                graph,
-                                CoordGraph::MacroTile const&     mac_tile,
-                                int                              store_tag,
-                                int                              i_mac_x,
-                                int                              i_mac_y,
-                                int                              workitem,
-                                int                              user_tag,
-                                int                              wavefrontSize,
-                                std::vector<unsigned int> const& wavetilesPerWorkgroup);
+        void storeWaveMacroTile(KernelGraph&                      graph,
+                                CoordinateGraph::MacroTile const& mac_tile,
+                                int                               store_tag,
+                                int                               i_mac_x,
+                                int                               i_mac_y,
+                                int                               workitem,
+                                int                               user_tag,
+                                int                               wavefrontSize,
+                                std::vector<unsigned int> const&  wavetilesPerWorkgroup);
 
-        void storeMacroTileIntoLDS(KernelHypergraph&                  graph,
+        void storeMacroTileIntoLDS(KernelGraph&                       graph,
                                    int                                store_tag,
                                    int                                lds_tag,
                                    int                                mac_tile_tag,
                                    std::array<unsigned int, 3> const& workgroupSizes);
 
-        void loadMacroTileFromLDS(KernelHypergraph&                  graph,
+        void loadMacroTileFromLDS(KernelGraph&                       graph,
                                   int                                load_tag,
                                   int                                lds_tag,
                                   int                                mac_tile_tag,
                                   std::array<unsigned int, 3> const& workgroupSizes);
 
-        void addConnectionsMultiply(KernelHypergraph& graph, int waveMult);
+        void addConnectionsMultiply(KernelGraph& graph, int waveMult);
     }
 }

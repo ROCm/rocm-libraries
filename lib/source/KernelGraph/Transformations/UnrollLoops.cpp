@@ -5,6 +5,8 @@ namespace rocRoller
 {
     namespace KernelGraph
     {
+        using namespace ControlGraph;
+        using namespace CoordinateGraph;
 
         /**
          * @brief Create duplicates of all of the nodes downstream of the provided
@@ -16,8 +18,7 @@ namespace rocRoller
          * @param startNodes
          * @return std::vector<int>
          */
-        std::vector<int> duplicateControlNodes(KernelHypergraph&    graph,
-                                               std::set<int> const& startNodes)
+        std::vector<int> duplicateControlNodes(KernelGraph& graph, std::set<int> const& startNodes)
         {
             std::vector<int>   newStartNodes;
             std::map<int, int> reindexer;
@@ -66,21 +67,19 @@ namespace rocRoller
          * @brief Determine whether to unroll a specified loop
          *
          */
-        bool performUnroll(KernelHypergraph& graph, int loopTag)
+        bool performUnroll(KernelGraph& graph, int loopTag)
         {
             // TODO: Better loop dependency checker
             // Do not unroll loops that have a dependency between iterations.
             // At the moment, we are saying that if the first node in a loop's
             // body is a Multiply, then we know it has a dependency. This should
             // be improved in the future.
-            auto directBodyNodes
-                = graph.control.getOutputNodeIndices<ControlHypergraph::Body>(loopTag);
+            auto directBodyNodes = graph.control.getOutputNodeIndices<Body>(loopTag);
 
             for(auto const& directBodyNode : directBodyNodes)
             {
-                auto x = std::get<ControlHypergraph::Operation>(
-                    graph.control.getElement(directBodyNode));
-                if(std::holds_alternative<ControlHypergraph::Multiply>(x))
+                auto x = std::get<Operation>(graph.control.getElement(directBodyNode));
+                if(std::holds_alternative<Multiply>(x))
                     return false;
             }
 
@@ -97,16 +96,15 @@ namespace rocRoller
             using BaseGraphVisitor::visitEdge;
             using BaseGraphVisitor::visitOperation;
 
-            virtual void visitOperation(KernelHypergraph&                   graph,
-                                        KernelHypergraph const&             original,
-                                        GraphReindexer&                     reindexer,
-                                        int                                 tag,
-                                        ControlHypergraph::ForLoopOp const& op) override
+            virtual void visitOperation(KernelGraph&       graph,
+                                        KernelGraph const& original,
+                                        GraphReindexer&    reindexer,
+                                        int                tag,
+                                        ForLoopOp const&   op) override
             {
                 copyOperation(graph, original, reindexer, tag);
                 auto newTag = reindexer.control.at(tag);
-                auto bodies = graph.control.getOutputNodeIndices<ControlHypergraph::Body>(newTag)
-                                  .to<std::set>();
+                auto bodies = graph.control.getOutputNodeIndices<Body>(newTag).to<std::set>();
 
                 if(!performUnroll(graph, newTag))
                     return;
@@ -119,24 +117,22 @@ namespace rocRoller
 
                 // The loop iterator should have a dataflow link to the ForLoop dimension
                 auto forLoopDimension
-                    = graph.coordinates.getOutputNodeIndices<CoordGraph::DataFlowEdge>(loopIterator)
+                    = graph.coordinates.getOutputNodeIndices<DataFlowEdge>(loopIterator)
                           .to<std::vector>()[0];
 
                 // Find all incoming PassThrough edges to the ForLoop dimension and replace them with
                 // a Split edge with an Unroll dimension.
                 auto forLoopLocation = graph.coordinates.getLocation(forLoopDimension);
-                auto unrollDimension
-                    = graph.coordinates.addElement(CoordGraph::Unroll(UNROLL_AMOUNT));
+                auto unrollDimension = graph.coordinates.addElement(Unroll(UNROLL_AMOUNT));
                 for(auto const& input : forLoopLocation.incoming)
                 {
-                    if(CoordGraph::isEdge<CoordGraph::PassThrough>(
-                           std::get<CoordGraph::Edge>(graph.coordinates.getElement(input))))
+                    if(isEdge<PassThrough>(std::get<Edge>(graph.coordinates.getElement(input))))
                     {
                         int parent
                             = *graph.coordinates.getNeighbours<Graph::Direction::Upstream>(input)
                                    .begin();
                         graph.coordinates.addElement(
-                            CoordGraph::Split(), {parent}, {forLoopDimension, unrollDimension});
+                            Split(), {parent}, {forLoopDimension, unrollDimension});
                         graph.coordinates.deleteElement(input);
                     }
                 }
@@ -145,14 +141,13 @@ namespace rocRoller
                 // a Join edge with an Unroll dimension.
                 for(auto const& output : forLoopLocation.outgoing)
                 {
-                    if(CoordGraph::isEdge<CoordGraph::PassThrough>(
-                           std::get<CoordGraph::Edge>(graph.coordinates.getElement(output))))
+                    if(isEdge<PassThrough>(std::get<Edge>(graph.coordinates.getElement(output))))
                     {
                         int child
                             = *graph.coordinates.getNeighbours<Graph::Direction::Downstream>(output)
                                    .begin();
                         graph.coordinates.addElement(
-                            CoordGraph::Join(), {forLoopDimension, unrollDimension}, {child});
+                            Join(), {forLoopDimension, unrollDimension}, {child});
                         graph.coordinates.deleteElement(output);
                     }
                 }
@@ -164,14 +159,11 @@ namespace rocRoller
                 // Find the ForLoopIcrement calculation
                 // TODO: Handle multiple ForLoopIncrement edges that might be in a different
                 // format, such as ones coming from ComputeIndex.
-                auto loopIncrement
-                    = graph.control
-                          .getOutputNodeIndices<ControlHypergraph::ForLoopIncrement>(newTag)
-                          .to<std::vector>();
+                auto loopIncrement = graph.control.getOutputNodeIndices<ForLoopIncrement>(newTag)
+                                         .to<std::vector>();
                 AssertFatal(loopIncrement.size() == 1, "Should only have 1 loop increment edge");
 
-                auto loopIncrementOp
-                    = graph.control.getNode<ControlHypergraph::Assign>(loopIncrement[0]);
+                auto loopIncrementOp = graph.control.getNode<Assign>(loopIncrement[0]);
 
                 AssertFatal(std::holds_alternative<Expression::Add>(*loopIncrementOp.expression),
                             "Loop increment expression must be an addition");
@@ -198,8 +190,7 @@ namespace rocRoller
                 for(auto const& child :
                     graph.control.getNeighbours<Graph::Direction::Downstream>(newTag))
                 {
-                    if(ControlHypergraph::isEdge<ControlHypergraph::Body>(
-                           graph.control.getElement(child)))
+                    if(isEdge<Body>(graph.control.getElement(child)))
                     {
                         graph.control.deleteElement(child);
                     }
@@ -208,13 +199,13 @@ namespace rocRoller
                 // Function for adding a SetCoordinate node inbetween the ForLoop
                 // and a list of nodes.
                 auto connectWithSetCoord = [&](auto const& toConnect, unsigned int coordValue) {
-                    auto setCoord = graph.control.addElement(
-                        ControlHypergraph::SetCoordinate(Expression::literal(coordValue)));
-                    graph.mapper.connect<CoordGraph::Unroll>(setCoord, unrollDimension);
-                    graph.control.addElement(ControlHypergraph::Body(), {newTag}, {setCoord});
+                    auto setCoord
+                        = graph.control.addElement(SetCoordinate(Expression::literal(coordValue)));
+                    graph.mapper.connect<Unroll>(setCoord, unrollDimension);
+                    graph.control.addElement(Body(), {newTag}, {setCoord});
                     for(auto const& body : toConnect)
                     {
-                        graph.control.addElement(ControlHypergraph::Body(), {setCoord}, {body});
+                        graph.control.addElement(Body(), {setCoord}, {body});
                     }
                 };
 
@@ -236,7 +227,7 @@ namespace rocRoller
             const unsigned int UNROLL_AMOUNT = 2;
         };
 
-        KernelHypergraph unrollLoops(KernelHypergraph const& k, std::shared_ptr<Context> context)
+        KernelGraph unrollLoops(KernelGraph const& k, std::shared_ptr<Context> context)
         {
             TIMER(t, "KernelGraph::unrollLoops");
             auto visitor = UnrollLoopsVisitor(context);

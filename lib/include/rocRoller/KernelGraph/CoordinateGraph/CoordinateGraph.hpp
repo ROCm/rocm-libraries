@@ -10,8 +10,8 @@
 #include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/Graph/Hypergraph.hpp>
 
+#include "CoordinateEdge.hpp"
 #include "Dimension.hpp"
-#include "Edge.hpp"
 
 namespace rocRoller
 {
@@ -65,7 +65,7 @@ namespace rocRoller
      * graph.
      *
      */
-    namespace KernelGraph::CoordGraph
+    namespace KernelGraph::CoordinateGraph
     {
         /**
          * Coordinate-transform HyperGraph.
@@ -76,10 +76,10 @@ namespace rocRoller
          * Hyper-edges describe how to transform coordinates and/or
          * apply operations.
          */
-        class CoordinateHypergraph : public Graph::Hypergraph<Dimension, Edge>
+        class CoordinateGraph : public Graph::Hypergraph<Dimension, Edge>
         {
         public:
-            CoordinateHypergraph()
+            CoordinateGraph()
                 : Graph::Hypergraph<Dimension, Edge>()
             {
             }
@@ -115,10 +115,10 @@ namespace rocRoller
              * @param tag Graph tag/index.
              */
             template <typename T>
-            requires(std::constructible_from<CoordinateHypergraph::Element, T>)
-                std::optional<T> get(int tag);
+            requires(std::constructible_from<CoordinateGraph::Element, T>) std::optional<T> get(
+                int tag);
         };
     }
 }
 
-#include "CoordinateHypergraph_impl.hpp"
+#include "CoordinateGraph_impl.hpp"

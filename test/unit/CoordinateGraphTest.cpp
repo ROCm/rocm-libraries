@@ -6,16 +6,16 @@
 #include "GenericContextFixture.hpp"
 
 #include <rocRoller/AssemblyKernel.hpp>
-#include <rocRoller/KernelGraph/CoordGraph/CoordinateHypergraph.hpp>
-#include <rocRoller/KernelGraph/CoordGraph/Dimension.hpp>
-#include <rocRoller/KernelGraph/CoordGraph/Transformer.hpp>
+#include <rocRoller/KernelGraph/CoordinateGraph/CoordinateGraph.hpp>
+#include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
+#include <rocRoller/KernelGraph/CoordinateGraph/Transformer.hpp>
 
 using namespace rocRoller;
-using namespace KernelGraph::CoordGraph;
+using namespace KernelGraph::CoordinateGraph;
 
 namespace rocRollerTest
 {
-    class CoordinateHypergraphTest : public GenericContextFixture
+    class CoordinateGraphTest : public GenericContextFixture
     {
     public:
         Expression::FastArithmetic fastArith{m_context};
@@ -27,9 +27,9 @@ namespace rocRollerTest
         }
     };
 
-    TEST_F(CoordinateHypergraphTest, EdgeType)
+    TEST_F(CoordinateGraphTest, EdgeType)
     {
-        auto ct = CoordinateHypergraph();
+        auto ct = CoordinateGraph();
 
         auto size    = std::make_shared<Expression::Expression>(64u);
         auto unit    = std::make_shared<Expression::Expression>(1u);
@@ -47,9 +47,9 @@ namespace rocRollerTest
         EXPECT_EQ(ct.getNodes().to<std::set>(), std::set<int>({x, y, m}));
     }
 
-    TEST_F(CoordinateHypergraphTest, Basic)
+    TEST_F(CoordinateGraphTest, Basic)
     {
-        auto ct = CoordinateHypergraph();
+        auto ct = CoordinateGraph();
 
         auto size    = std::make_shared<Expression::Expression>(64u);
         auto unit    = std::make_shared<Expression::Expression>(1u);
@@ -109,9 +109,9 @@ namespace rocRollerTest
         EXPECT_EQ(result, 0);
     }
 
-    TEST_F(CoordinateHypergraphTest, Basic3D)
+    TEST_F(CoordinateGraphTest, Basic3D)
     {
-        auto ct = CoordinateHypergraph();
+        auto ct = CoordinateGraph();
 
         auto size_x   = std::make_shared<Expression::Expression>(64u);
         auto stride_x = std::make_shared<Expression::Expression>(1u);
@@ -175,9 +175,9 @@ namespace rocRollerTest
         }
     }
 
-    TEST_F(CoordinateHypergraphTest, Basic1D01)
+    TEST_F(CoordinateGraphTest, Basic1D01)
     {
-        auto ct = CoordinateHypergraph();
+        auto ct = CoordinateGraph();
 
         auto wavefront_size = Expression::literal(64u);
         auto unit           = Expression::literal(1u);
@@ -243,9 +243,9 @@ namespace rocRollerTest
         // EXPECT_EQ(currentEdges[0], savedEdge);
     }
 
-    TEST_F(CoordinateHypergraphTest, Basic1D01Eval)
+    TEST_F(CoordinateGraphTest, Basic1D01Eval)
     {
-        auto ct = CoordinateHypergraph();
+        auto ct = CoordinateGraph();
 
         auto wavefront_size = std::make_shared<Expression::Expression>(64);
         auto unit           = std::make_shared<Expression::Expression>(1);
@@ -287,9 +287,9 @@ namespace rocRollerTest
         EXPECT_EQ(33, std::get<int>(evaluate(fwdExprs[1]))) << toString(fwdExprs[1]);
     }
 
-    TEST_F(CoordinateHypergraphTest, Basic1D02)
+    TEST_F(CoordinateGraphTest, Basic1D02)
     {
-        auto ct = CoordinateHypergraph();
+        auto ct = CoordinateGraph();
 
         auto wavefront_size = Expression::literal(64);
         auto unit           = Expression::literal(1);
@@ -344,9 +344,9 @@ namespace rocRollerTest
         EXPECT_EQ(sexpr, "ShiftL(Add(ShiftL(Add(128i, v0:I), 2j), 2i), 1j)");
     }
 
-    TEST_F(CoordinateHypergraphTest, Basic1D03)
+    TEST_F(CoordinateGraphTest, Basic1D03)
     {
-        auto ct = CoordinateHypergraph();
+        auto ct = CoordinateGraph();
 
         auto wavefront_size = Expression::literal(64);
         auto unit           = Expression::literal(1);
@@ -402,11 +402,11 @@ namespace rocRollerTest
         EXPECT_EQ(sexpr, "ShiftL(Add(ShiftL(v0:I, 2j), 514i), 1j)");
     }
 
-    TEST_F(CoordinateHypergraphTest, TensorTile2DLoadStore01)
+    TEST_F(CoordinateGraphTest, TensorTile2DLoadStore01)
     {
         // one tile per wavefront
 
-        auto ct = CoordinateHypergraph();
+        auto ct = CoordinateGraph();
 
         auto wavefront_size = Expression::literal(64);
         auto unit           = Expression::literal(1);
@@ -494,11 +494,11 @@ namespace rocRollerTest
         EXPECT_EQ(sexpr, "29182j");
     }
 
-    TEST_F(CoordinateHypergraphTest, TensorTile2DLoadStore02)
+    TEST_F(CoordinateGraphTest, TensorTile2DLoadStore02)
     {
         // one tile per wavefront
 
-        auto ct = CoordinateHypergraph();
+        auto ct = CoordinateGraph();
 
         auto wavefront_size = Expression::literal(64);
         auto unit           = Expression::literal(1);
@@ -541,7 +541,7 @@ namespace rocRollerTest
         EXPECT_EQ(ct.getElements<CoordinateTransformEdge>().to<std::set>(),
                   std::set({sp0, join, t0, t1}));
 
-        auto coords = Transformer(std::make_shared<CoordinateHypergraph>(ct));
+        auto coords = Transformer(std::make_shared<CoordinateGraph>(ct));
 
         auto identity_transducer = [&](auto expr) { return expr; };
         auto transducer          = [&](auto expr) { return Expression::fastMultiplication(expr); };
@@ -600,9 +600,9 @@ namespace rocRollerTest
         EXPECT_EQ(sexpr, "Modulo(Divide(17i, 300i), 16j)");
     }
 
-    TEST_F(CoordinateHypergraphTest, TensorTile2DLoadStore03)
+    TEST_F(CoordinateGraphTest, TensorTile2DLoadStore03)
     {
-        auto ct = CoordinateHypergraph();
+        auto ct = CoordinateGraph();
 
         uint m = 16;
         uint n = 16;
@@ -642,8 +642,8 @@ namespace rocRollerTest
         EXPECT_EQ(ct.getNodes().to<std::set>(),
                   std::set<int>({A, Ai, Aj, T_id, i, j, tile_x, tile_y, D, Di, Dj}));
 
-        auto coords = Transformer(
-            std::make_shared<CoordinateHypergraph>(ct), nullptr, Expression::simplify);
+        auto coords
+            = Transformer(std::make_shared<CoordinateGraph>(ct), nullptr, Expression::simplify);
 
         coords.setCoordinate(tile_x, Expression::literal(4u));
         coords.setCoordinate(tile_y, Expression::literal(5u));
@@ -671,10 +671,10 @@ namespace rocRollerTest
         EXPECT_EQ(sexpr, "32j");
     }
 
-    TEST_F(CoordinateHypergraphTest, WaveTileBasic)
+    TEST_F(CoordinateGraphTest, WaveTileBasic)
     {
         // one tile per wavefront
-        auto ct = CoordinateHypergraph();
+        auto ct = CoordinateGraph();
 
         auto WaveA = WaveTile({32u, 2u}, LayoutType::MATRIX_A);
 
@@ -697,13 +697,13 @@ namespace rocRollerTest
         EXPECT_EQ(std::get<int>(Expression::evaluate(WaveAj.stride)), 1);
     }
 
-    class ARCH_CoordinateHypergraphTest : public GPUContextFixture
+    class ARCH_CoordinateGraphTest : public GPUContextFixture
     {
     };
 
-    TEST_P(ARCH_CoordinateHypergraphTest, TensorTile2DLoadStore04)
+    TEST_P(ARCH_CoordinateGraphTest, TensorTile2DLoadStore04)
     {
-        auto ct = CoordinateHypergraph();
+        auto ct = CoordinateGraph();
 
         auto wavefront_size = Expression::literal(64);
         auto unit           = Expression::literal(1);
@@ -743,7 +743,7 @@ namespace rocRollerTest
         k->setKernelDimensions(2);
         m_context->schedule(k->preamble());
 
-        auto coords = Transformer(std::make_shared<CoordinateHypergraph>(ct), m_context);
+        auto coords = Transformer(std::make_shared<CoordinateGraph>(ct), m_context);
 
         coords.setCoordinate(i, Expression::literal(33u));
         coords.setCoordinate(j, Expression::literal(2u));
@@ -755,8 +755,8 @@ namespace rocRollerTest
                   "Multiply(Add(Multiply(s3:U32, 16j), 2j), 1i))");
     }
 
-    INSTANTIATE_TEST_SUITE_P(ARCH_CoordinateHypergraphTests,
-                             ARCH_CoordinateHypergraphTest,
+    INSTANTIATE_TEST_SUITE_P(ARCH_CoordinateGraphTests,
+                             ARCH_CoordinateGraphTest,
                              supportedISATuples());
 
 }

@@ -3,12 +3,12 @@
 
 #include <rocRoller/Context_fwd.hpp>
 #include <rocRoller/Expression_fwd.hpp>
-#include <rocRoller/KernelGraph/CoordGraph/CoordinateHypergraph.hpp>
-#include <rocRoller/KernelGraph/CoordGraph/Transformer_fwd.hpp>
+#include <rocRoller/KernelGraph/CoordinateGraph/CoordinateGraph.hpp>
+#include <rocRoller/KernelGraph/CoordinateGraph/Transformer_fwd.hpp>
 
 namespace rocRoller
 {
-    namespace KernelGraph::CoordGraph
+    namespace KernelGraph::CoordinateGraph
     {
         /**
          * Coordinate/index transformer.
@@ -20,7 +20,7 @@ namespace rocRoller
         {
         public:
             Transformer() = delete;
-            Transformer(std::shared_ptr<CoordinateHypergraph>,
+            Transformer(std::shared_ptr<CoordinateGraph>,
                         std::shared_ptr<Context>         = nullptr,
                         Expression::ExpressionTransducer = nullptr);
 
@@ -77,7 +77,7 @@ namespace rocRoller
                 stride(std::vector<int> const&, bool forward, Visitor& visitor) const;
 
             std::map<int, Expression::ExpressionPtr> m_indexes;
-            std::shared_ptr<CoordinateHypergraph>    m_graph;
+            std::shared_ptr<CoordinateGraph>         m_graph;
             std::shared_ptr<Context>                 m_context;
             Expression::ExpressionTransducer         m_transducer;
         };

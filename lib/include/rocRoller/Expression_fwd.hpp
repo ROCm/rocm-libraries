@@ -11,7 +11,7 @@
 
 #include "AssemblyKernel_fwd.hpp"
 #include "InstructionValues/Register_fwd.hpp"
-#include "KernelGraph/CoordGraph/Dimension_fwd.hpp"
+#include "KernelGraph/CoordinateGraph/Dimension_fwd.hpp"
 #include "Operations/CommandArgument_fwd.hpp"
 
 namespace rocRoller
@@ -49,7 +49,7 @@ namespace rocRoller
         struct Convert;
 
         struct DataFlowTag;
-        using WaveTilePtr = std::shared_ptr<KernelGraph::CoordGraph::WaveTile>;
+        using WaveTilePtr = std::shared_ptr<KernelGraph::CoordinateGraph::WaveTile>;
 
         using Expression = std::variant<
             // --- Binary Operations ---

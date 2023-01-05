@@ -7,7 +7,7 @@
 namespace rocRoller
 {
 
-    namespace KernelGraph::ControlHypergraph
+    namespace KernelGraph::ControlGraph
     {
         /**
          * Control graph edge types

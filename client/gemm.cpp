@@ -261,15 +261,15 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult)
     // TODO: Calculate these values internally based on workgroup sizes.
     params->setWaveTilesPerWavefront(wavetile_per_wavefront_m, wavetile_per_wavefront_n);
 
-    auto mac_tile_A = KernelGraph::CoordGraph::MacroTile({result.mac_m, result.mac_k},
-                                                         LayoutType::MATRIX_A,
-                                                         {wave_m, wave_n, wave_k, wave_b},
-                                                         MemoryType::LDS);
-    auto mac_tile_B = KernelGraph::CoordGraph::MacroTile(
+    auto mac_tile_A = KernelGraph::CoordinateGraph::MacroTile({result.mac_m, result.mac_k},
+                                                              LayoutType::MATRIX_A,
+                                                              {wave_m, wave_n, wave_k, wave_b},
+                                                              MemoryType::LDS);
+    auto mac_tile_B = KernelGraph::CoordinateGraph::MacroTile(
         {result.mac_k, result.mac_n}, LayoutType::MATRIX_B, {wave_m, wave_n, wave_k, wave_b});
-    auto mac_tile_C = KernelGraph::CoordGraph::MacroTile({result.mac_m, result.mac_n},
-                                                         LayoutType::MATRIX_ACCUMULATOR,
-                                                         {wave_m, wave_n, wave_k, wave_b});
+    auto mac_tile_C = KernelGraph::CoordinateGraph::MacroTile({result.mac_m, result.mac_n},
+                                                              LayoutType::MATRIX_ACCUMULATOR,
+                                                              {wave_m, wave_n, wave_k, wave_b});
 
     params->setDimensionInfo(4, mac_tile_A);
     params->setDimensionInfo(11, mac_tile_B);
@@ -292,9 +292,9 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult)
     auto wavefront_ny
         = Expression::literal(static_cast<uint>(result.mac_n / wave_n / wavetile_per_wavefront_n));
 
-    auto WF  = KernelGraph::CoordGraph::Wavefront(-1, wavefront_n, one);
-    auto WFX = KernelGraph::CoordGraph::Wavefront(0, wavefront_nx, one);
-    auto WFY = KernelGraph::CoordGraph::Wavefront(1, wavefront_ny, one);
+    auto WF  = KernelGraph::CoordinateGraph::Wavefront(-1, wavefront_n, one);
+    auto WFX = KernelGraph::CoordinateGraph::Wavefront(0, wavefront_nx, one);
+    auto WFY = KernelGraph::CoordinateGraph::Wavefront(1, wavefront_ny, one);
 
     std::vector<int> wavefront_ids = {59, 92, 125, 179};
     if(wavetile_per_wavefront_m > 1 && wavetile_per_wavefront_n > 1)

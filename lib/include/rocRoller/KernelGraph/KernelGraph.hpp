@@ -4,7 +4,9 @@
 #include <rocRoller/CommandSolution_fwd.hpp>
 #include <rocRoller/Context.hpp>
 
-#include "KernelHypergraph.hpp"
+#include <rocRoller/KernelGraph/ControlGraph/ControlGraph.hpp>
+#include <rocRoller/KernelGraph/ControlToCoordinateMapper.hpp>
+#include <rocRoller/KernelGraph/CoordinateGraph/CoordinateGraph.hpp>
 
 namespace rocRoller
 {
@@ -14,11 +16,11 @@ namespace rocRoller
          * Kernel graph containers
          */
 
-        class KernelHypergraph
+        class KernelGraph
         {
         public:
             ControlGraph::ControlGraph       control;
-            CoordGraph::CoordinateHypergraph coordinates;
+            CoordinateGraph::CoordinateGraph coordinates;
             ControlToCoordinateMapper        mapper;
 
             std::string toDOT(bool drawMappings = false) const;
@@ -28,10 +30,10 @@ namespace rocRoller
             {
                 int  tag     = mapper.get<T>(controlIndex, subDimension);
                 auto element = coordinates.getElement(tag);
-                AssertFatal(std::holds_alternative<CoordGraph::Dimension>(element),
+                AssertFatal(std::holds_alternative<CoordinateGraph::Dimension>(element),
                             "Invalid connection: element isn't a Dimension.",
                             ShowValue(controlIndex));
-                auto dim = std::get<CoordGraph::Dimension>(element);
+                auto dim = std::get<CoordinateGraph::Dimension>(element);
                 AssertFatal(std::holds_alternative<T>(dim),
                             "Invalid connection: Dimension type mismatch.",
                             ShowValue(controlIndex),
@@ -47,7 +49,7 @@ namespace rocRoller
          * Resulting KernelGraph matches the Command operations
          * closely.
          */
-        KernelHypergraph translate(std::shared_ptr<Command>);
+        KernelGraph translate(std::shared_ptr<Command>);
 
         /**
          * Rewrite KernelGraph to distribute linear packets onto GPU.
@@ -55,14 +57,13 @@ namespace rocRoller
          * Linear dimensions are packed/flattened, tiled onto
          * workgroups and wavefronts, and then operated on.
          */
-        KernelHypergraph lowerLinear(KernelHypergraph, ContextPtr);
+        KernelGraph lowerLinear(KernelGraph, ContextPtr);
 
         /**
          * Rewrite KernelGraph to additionally distribute linear dimensions onto a For loop.
          */
-        KernelHypergraph lowerLinearLoop(KernelHypergraph const&,
-                                         Expression::ExpressionPtr loopSize,
-                                         ContextPtr);
+        KernelGraph
+            lowerLinearLoop(KernelGraph const&, Expression::ExpressionPtr loopSize, ContextPtr);
 
         /**
          * Rewrite KernelGraph to additionally unroll linear dimensions.
@@ -78,8 +79,7 @@ namespace rocRoller
          * translation time.  To specify these attributes, call
          * `setDimension`.
          */
-        KernelHypergraph
-            lowerTile(KernelHypergraph, std::shared_ptr<CommandParameters>, ContextPtr);
+        KernelGraph lowerTile(KernelGraph, std::shared_ptr<CommandParameters>, ContextPtr);
 
         /**
          * @brief Rewrite KernelGraph to add ComputeIndex operations.
@@ -97,9 +97,9 @@ namespace rocRoller
          * Coordinate graph to keep track of the data needed to perform the operations.
          *
          * @param original
-         * @return KernelHypergraph
+         * @return KernelGraph
          */
-        KernelHypergraph addComputeIndexOperations(KernelHypergraph const& original);
+        KernelGraph addComputeIndexOperations(KernelGraph const& original);
 
         /**
          * @brief Rewrite KernelGraph to add Deallocate operations.
@@ -108,13 +108,13 @@ namespace rocRoller
          * lifetimes.  Deallocate operations are added when registers
          * are no longer needed.
          */
-        KernelHypergraph addDeallocate(KernelHypergraph const&);
+        KernelGraph addDeallocate(KernelGraph const&);
 
         /**
          * Rewrite KernelGraphs to make sure no more CommandArgument
          * values are present within the graph.
          */
-        KernelHypergraph cleanArguments(KernelHypergraph, std::shared_ptr<AssemblyKernel>);
+        KernelGraph cleanArguments(KernelGraph, std::shared_ptr<AssemblyKernel>);
 
         /**
          * Removes all CommandArgruments found within an expression
@@ -123,17 +123,17 @@ namespace rocRoller
         Expression::ExpressionPtr cleanArguments(Expression::ExpressionPtr,
                                                  std::shared_ptr<AssemblyKernel>);
 
-        KernelHypergraph unrollLoops(KernelHypergraph const&, ContextPtr);
+        KernelGraph unrollLoops(KernelGraph const&, ContextPtr);
 
         /**
          * Rewrite KernelGraphs to set dimension/operation perameters.
          */
-        KernelHypergraph updateParameters(KernelHypergraph, std::shared_ptr<CommandParameters>);
+        KernelGraph updateParameters(KernelGraph, std::shared_ptr<CommandParameters>);
 
         /*
          * Code generation
          */
-        Generator<Instruction> generate(KernelHypergraph, std::shared_ptr<AssemblyKernel>);
+        Generator<Instruction> generate(KernelGraph, std::shared_ptr<AssemblyKernel>);
 
     }
 }

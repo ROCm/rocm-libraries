@@ -7,7 +7,7 @@
 
 #include "AssemblyKernel.hpp"
 #include "KernelArguments.hpp"
-#include "KernelGraph/KernelHypergraph.hpp"
+#include "KernelGraph/KernelGraph.hpp"
 #include "Operations/Command.hpp"
 #include "Scheduling/Costs/Cost.hpp"
 #include "Scheduling/Scheduler.hpp"
@@ -21,12 +21,13 @@ namespace rocRoller
     {
     }
 
-    void CommandParameters::setDimensionInfo(int tag, KernelGraph::CoordGraph::Dimension dim)
+    void CommandParameters::setDimensionInfo(int tag, KernelGraph::CoordinateGraph::Dimension dim)
     {
         m_dimInfo[tag] = dim;
     }
 
-    std::map<int, KernelGraph::CoordGraph::Dimension> CommandParameters::getDimensionInfo() const
+    std::map<int, KernelGraph::CoordinateGraph::Dimension>
+        CommandParameters::getDimensionInfo() const
     {
         return m_dimInfo;
     }
@@ -151,9 +152,9 @@ namespace rocRoller
         generateKernel(name);
     }
 
-    CommandKernel::CommandKernel(std::shared_ptr<Command>             command,
-                                 std::shared_ptr<Context>             context,
-                                 KernelGraph::KernelHypergraph const& kernelGraph)
+    CommandKernel::CommandKernel(std::shared_ptr<Command>        command,
+                                 std::shared_ptr<Context>        context,
+                                 KernelGraph::KernelGraph const& kernelGraph)
         : m_command(command)
         , m_context(context)
         , m_kernelGraph(kernelGraph)
@@ -163,7 +164,7 @@ namespace rocRoller
         assembleKernel();
     }
 
-    KernelGraph::KernelHypergraph CommandKernel::getKernelGraph() const
+    KernelGraph::KernelGraph CommandKernel::getKernelGraph() const
     {
         return m_kernelGraph;
     }
@@ -228,7 +229,7 @@ namespace rocRoller
     {
         TIMER(t, "CommandKernel::generateKernelSource");
         m_context->kernel()->setKernelGraphMeta(
-            std::make_shared<KernelGraph::KernelHypergraph>(m_kernelGraph));
+            std::make_shared<KernelGraph::KernelGraph>(m_kernelGraph));
 
         // A sequential scheduler should always be used here to ensure
         // the parts of the kernel are yielded in the correct order.

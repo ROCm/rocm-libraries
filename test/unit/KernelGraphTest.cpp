@@ -12,7 +12,7 @@
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Expression.hpp>
-#include <rocRoller/KernelGraph/CoordGraph/CoordinateHypergraph.hpp>
+#include <rocRoller/KernelGraph/CoordinateGraph/CoordinateGraph.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Visitors.hpp>
 #include <rocRoller/Utilities/Error.hpp>
@@ -22,18 +22,18 @@
 
 #include "GPUContextFixture.hpp"
 #include "GenericContextFixture.hpp"
-#include "KernelGraph/KernelHypergraph.hpp"
 #include "SourceMatcher.hpp"
 #include "Utilities.hpp"
 
 using namespace rocRoller;
 using namespace rocRoller::KernelGraph;
-using namespace rocRoller::KernelGraph::CoordGraph;
+using namespace rocRoller::KernelGraph::CoordinateGraph;
 using namespace rocRoller::KernelGraph::ControlGraph;
 using ::testing::HasSubstr;
 
 namespace KernelGraphTest
 {
+
     class KernelGraphTestGPU : public CurrentGPUContextFixture
     {
     public:
@@ -344,7 +344,7 @@ namespace KernelGraphTest
 
         kgraph = KernelGraph::cleanArguments(kgraph, m_context->kernel());
 
-        m_context->kernel()->setKernelGraphMeta(std::make_shared<KernelGraph::KernelHypergraph>(kgraph));
+        m_context->kernel()->setKernelGraphMeta(std::make_shared<KernelGraph::KernelGraph>(kgraph));
 
         CommandKernel commandKernel(command, m_context, kgraph);
 
@@ -422,7 +422,7 @@ namespace KernelGraphTest
 
         kgraph = KernelGraph::cleanArguments(kgraph, m_context->kernel());
 
-        m_context->kernel()->setKernelGraphMeta(std::make_shared<KernelGraph::KernelHypergraph>(kgraph));
+        m_context->kernel()->setKernelGraphMeta(std::make_shared<KernelGraph::KernelGraph>(kgraph));
 
         CommandKernel commandKernel(command, m_context, kgraph);
 
@@ -477,25 +477,25 @@ namespace KernelGraphTest
     TEST_F(KernelGraphTest, Translate01)
     {
         auto command = commonCommand();
-        auto kgraph0 = KernelGraph::translate(command);
+        auto kgraph0 = translate(command);
 
         auto bottom = kgraph0.coordinates.roots().to<std::vector>();
         EXPECT_EQ(bottom.size(), 2);
         for(auto const& id : bottom)
         {
-            EXPECT_TRUE(std::holds_alternative<KernelGraph::CoordGraph::User>(
-                std::get<KernelGraph::CoordGraph::Dimension>(kgraph0.coordinates.getElement(id))));
+            EXPECT_TRUE(std::holds_alternative<User>(
+                std::get<Dimension>(kgraph0.coordinates.getElement(id))));
         }
 
         auto top = kgraph0.coordinates.leaves().to<std::vector>();
         EXPECT_EQ(top.size(), 1);
         for(auto const& id : top)
         {
-            EXPECT_TRUE(std::holds_alternative<KernelGraph::CoordGraph::User>(
-                std::get<KernelGraph::CoordGraph::Dimension>(kgraph0.coordinates.getElement(id))));
+            EXPECT_TRUE(std::holds_alternative<User>(
+                std::get<Dimension>(kgraph0.coordinates.getElement(id))));
         }
 
-        auto visitor = KernelGraph::BaseGraphVisitor(m_context);
+        auto visitor = rocRoller::KernelGraph::BaseGraphVisitor(m_context);
         auto kgraphC = rewrite(kgraph0, visitor);
 
         std::string expectedC = R".(
@@ -881,7 +881,7 @@ namespace KernelGraphTest
         m_context->kernel()->setWorkgroupSize({64, 1, 1});
         m_context->kernel()->setWorkitemCount({one, one, one});
 
-        auto kgraph1 = KernelGraph::lowerLinear(kgraph0, m_context);
+        auto kgraph1 = lowerLinear(kgraph0, m_context);
         EXPECT_EQ(NormalizedSource(expected1), NormalizedSource(kgraph1.toDOT(true)));
 
         std::string expected2 = R".(
@@ -1088,7 +1088,7 @@ namespace KernelGraphTest
         int  loopSize     = 16;
         auto loopSizeExpr = Expression::literal(loopSize);
 
-        auto kgraph2 = KernelGraph::lowerLinearLoop(kgraph1, loopSizeExpr, m_context);
+        auto kgraph2 = lowerLinearLoop(kgraph1, loopSizeExpr, m_context);
         EXPECT_EQ(NormalizedSource(expected2), NormalizedSource(kgraph2.toDOT(true)));
     }
 
@@ -1108,22 +1108,22 @@ namespace KernelGraphTest
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
             rocRoller::Operations::T_Store_Tiled(dataType, 2, 2))); // D
 
-        auto kgraph0 = KernelGraph::translate(command);
+        auto kgraph0 = translate(command);
 
         auto bottom = kgraph0.coordinates.roots().to<std::vector>();
         EXPECT_EQ(bottom.size(), 2);
         for(auto const& id : bottom)
         {
-            EXPECT_TRUE(std::holds_alternative<KernelGraph::CoordGraph::User>(
-                std::get<KernelGraph::CoordGraph::Dimension>(kgraph0.coordinates.getElement(id))));
+            EXPECT_TRUE(std::holds_alternative<User>(
+                std::get<Dimension>(kgraph0.coordinates.getElement(id))));
         }
 
         auto top = kgraph0.coordinates.leaves().to<std::vector>();
         EXPECT_EQ(top.size(), 1);
         for(auto const& id : top)
         {
-            EXPECT_TRUE(std::holds_alternative<KernelGraph::CoordGraph::User>(
-                std::get<KernelGraph::CoordGraph::Dimension>(kgraph0.coordinates.getElement(id))));
+            EXPECT_TRUE(std::holds_alternative<User>(
+                std::get<Dimension>(kgraph0.coordinates.getElement(id))));
         }
 
         std::string expected0 = R".(
@@ -1261,14 +1261,14 @@ namespace KernelGraphTest
 
         command->addOperation(std::make_shared<Operations::Operation>(std::move(execute)));
 
-        auto kgraph0 = KernelGraph::translate(command);
+        auto kgraph0 = translate(command);
 
         auto bottom = kgraph0.coordinates.roots().to<std::vector>();
         EXPECT_EQ(bottom.size(), 2);
         for(auto const& id : bottom)
         {
-            EXPECT_TRUE(std::holds_alternative<KernelGraph::CoordGraph::User>(
-                std::get<KernelGraph::CoordGraph::Dimension>(kgraph0.coordinates.getElement(id))));
+            EXPECT_TRUE(std::holds_alternative<User>(
+                std::get<Dimension>(kgraph0.coordinates.getElement(id))));
         }
 
         std::string expected0 = R".(
@@ -1377,7 +1377,7 @@ namespace KernelGraphTest
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
             rocRoller::Operations::T_Store_Tiled(DataType::Float, 2, 8))); // D
 
-        auto kgraph0 = KernelGraph::translate(command);
+        auto kgraph0 = translate(command);
 
         std::string expected0 = R".(
 	    digraph {
@@ -1617,11 +1617,11 @@ namespace KernelGraphTest
         int wave_k = 8;
         int wave_b = 1;
 
-        auto mac_tile_A = KernelGraph::CoordGraph::MacroTile(
-            {mac_m, mac_k}, LayoutType::MATRIX_A, {wave_m, wave_n, wave_k, wave_b});
-        auto mac_tile_B = KernelGraph::CoordGraph::MacroTile(
-            {mac_k, mac_n}, LayoutType::MATRIX_B, {wave_m, wave_n, wave_k, wave_b});
-        auto mac_tile_C = KernelGraph::CoordGraph::MacroTile(
+        auto mac_tile_A
+            = MacroTile({mac_m, mac_k}, LayoutType::MATRIX_A, {wave_m, wave_n, wave_k, wave_b});
+        auto mac_tile_B
+            = MacroTile({mac_k, mac_n}, LayoutType::MATRIX_B, {wave_m, wave_n, wave_k, wave_b});
+        auto mac_tile_C = MacroTile(
             {mac_m, mac_n}, LayoutType::MATRIX_ACCUMULATOR, {wave_m, wave_n, wave_k, wave_b});
 
         params->setDimensionInfo(4, mac_tile_A);
@@ -1643,8 +1643,8 @@ namespace KernelGraphTest
 
         kgraph0 = updateParameters(kgraph0, params);
 
-        auto kgraph1 = KernelGraph::lowerTile(kgraph0, params, m_context);
-        kgraph1      = KernelGraph::addComputeIndexOperations(kgraph1);
+        auto kgraph1 = lowerTile(kgraph0, params, m_context);
+        kgraph1      = addComputeIndexOperations(kgraph1);
 
         std::string expected1 = R".(
             digraph {
@@ -2944,15 +2944,16 @@ namespace KernelGraphTest
 	     }).";
         EXPECT_EQ(NormalizedSource(expected2), NormalizedSource(kgraph2.control.toDOT("", true)));
 
-        mac_tile_A = KernelGraph::CoordGraph::MacroTile({mac_m, mac_k},
-                                                        LayoutType::MATRIX_A,
-                                                        {wave_m, wave_n, wave_k, wave_b},
-                                                        MemoryType::LDS);
+        mac_tile_A = MacroTile({mac_m, mac_k},
+                               LayoutType::MATRIX_A,
+                               {wave_m, wave_n, wave_k, wave_b},
+                               MemoryType::LDS);
         params->setDimensionInfo(4, mac_tile_A);
 
-        auto kgraph_lds       = updateParameters(kgraph0, params);
-        auto kgraph_lds_lower = KernelGraph::lowerTile(kgraph_lds, params, m_context);
-        kgraph_lds_lower      = KernelGraph::addComputeIndexOperations(kgraph_lds_lower);
+        auto kgraph_lds = updateParameters(kgraph0, params);
+
+        auto kgraph_lds_lower = lowerTile(kgraph_lds, params, m_context);
+        kgraph_lds_lower      = addComputeIndexOperations(kgraph_lds_lower);
 
         std::string expected_lds = R".(
 	digraph {
@@ -4251,7 +4252,7 @@ namespace KernelGraphTest
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
             rocRoller::Operations::T_Mul(2, 0, 1)));
 
-        auto kgraph0 = KernelGraph::translate(command);
+        auto kgraph0 = translate(command);
 
         std::string expected0 = R".(
 	  digraph {
@@ -4353,7 +4354,7 @@ namespace KernelGraphTest
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
             rocRoller::Operations::T_Mul(2, 0, 1)));
 
-        auto kgraph0 = KernelGraph::translate(command);
+        auto kgraph0 = translate(command);
 
         // macro tile sizes
         int mac_m = 64;
@@ -4363,12 +4364,9 @@ namespace KernelGraphTest
         int t_m = 4;
         int t_n = 2;
 
-        auto mac_tile_0
-            = KernelGraph::CoordGraph::MacroTile({mac_m, mac_k}, MemoryType::VGPR, {t_m, t_n}); // A
-        auto mac_tile_1
-            = KernelGraph::CoordGraph::MacroTile({mac_k, mac_n}, MemoryType::VGPR, {t_m, t_n}); // B
-        auto mac_tile_2 = KernelGraph::CoordGraph::MacroTile(
-            {mac_m, mac_n}, MemoryType::VGPR, {t_m, t_n}); // A * B
+        auto mac_tile_0 = MacroTile({mac_m, mac_k}, MemoryType::VGPR, {t_m, t_n}); // A
+        auto mac_tile_1 = MacroTile({mac_k, mac_n}, MemoryType::VGPR, {t_m, t_n}); // B
+        auto mac_tile_2 = MacroTile({mac_m, mac_n}, MemoryType::VGPR, {t_m, t_n}); // A * B
 
         auto params = std::make_shared<CommandParameters>();
 
@@ -4489,7 +4487,7 @@ namespace KernelGraphTest
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
             rocRoller::Operations::T_Store_Tiled(DataType::Int32, 2, 4))); // c
 
-        auto kgraph0 = KernelGraph::translate(command);
+        auto kgraph0 = translate(command);
 
         int m = 16;
         int n = 8;
@@ -4499,11 +4497,11 @@ namespace KernelGraphTest
 
         auto params = std::make_shared<CommandParameters>();
 
-        auto mac_tile_0 = KernelGraph::CoordGraph::MacroTile({m, n}, MemoryType::LDS, {t_m, t_n});
-        auto mac_tile_1 = KernelGraph::CoordGraph::MacroTile({m, n}, MemoryType::VGPR, {t_m, t_n});
-        auto mac_tile_2 = KernelGraph::CoordGraph::MacroTile({m, n}, MemoryType::VGPR, {t_m, t_n});
-        auto mac_tile_3 = KernelGraph::CoordGraph::MacroTile({m, n}, MemoryType::VGPR, {t_m, t_n});
-        auto mac_tile_4 = KernelGraph::CoordGraph::MacroTile({m, n}, MemoryType::VGPR, {t_m, t_n});
+        auto mac_tile_0 = MacroTile({m, n}, MemoryType::LDS, {t_m, t_n});
+        auto mac_tile_1 = MacroTile({m, n}, MemoryType::VGPR, {t_m, t_n});
+        auto mac_tile_2 = MacroTile({m, n}, MemoryType::VGPR, {t_m, t_n});
+        auto mac_tile_3 = MacroTile({m, n}, MemoryType::VGPR, {t_m, t_n});
+        auto mac_tile_4 = MacroTile({m, n}, MemoryType::VGPR, {t_m, t_n});
 
         params->setDimensionInfo(4, mac_tile_0);
         params->setDimensionInfo(11, mac_tile_1);
@@ -4654,8 +4652,8 @@ namespace KernelGraphTest
 
         EXPECT_EQ(NormalizedSource(expected0), NormalizedSource(kgraph0.toDOT(true)));
 
-        auto kgraph1 = KernelGraph::lowerTile(kgraph0, params, m_context);
-        kgraph1      = KernelGraph::addComputeIndexOperations(kgraph1);
+        auto kgraph1 = lowerTile(kgraph0, params, m_context);
+        kgraph1      = addComputeIndexOperations(kgraph1);
 
         std::string expected1 = R".(
    	    digraph {
@@ -5304,8 +5302,8 @@ namespace KernelGraphTest
         m_context->kernel()->setWorkgroupSize({64, 1, 1});
         m_context->kernel()->setWorkitemCount({one, one, one});
 
-        auto kgraph0 = KernelGraph::translate(command);
-        auto kgraph1 = KernelGraph::lowerLinear(kgraph0, m_context);
+        auto kgraph0 = translate(command);
+        auto kgraph1 = lowerLinear(kgraph0, m_context);
 
         auto user0   = 1;
         auto block0  = 23;
@@ -5362,18 +5360,18 @@ namespace KernelGraphTest
         {
             auto expected = getTag(kernelNode);
             auto outputs
-                = kgraph2.control.getOutputs<KernelGraph::ControlGraph::Body>(getTag(kernelNode));
+                = kgraph2.control.getOutputs<Body>(getTag(kernelNode));
             EXPECT_EQ(2, outputs.size());
 
-            auto outputs2 = kgraph2.control.getOutputs<KernelGraph::ControlGraph::Sequence>(
+            auto outputs2 = kgraph2.control.getOutputs<Sequence>(
                 getTag(kernelNode));
             EXPECT_EQ(0, outputs2.size());
 
             auto outputs3
-                = kgraph2.control.getOutputs(getTag(kernelNode), KernelGraph::ControlGraph::Body{});
+                = kgraph2.control.getOutputs(getTag(kernelNode), Body{});
 
             auto outputTags3 = kgraph2.control.getOutputTags(getTag(kernelNode),
-                                                             KernelGraph::ControlGraph::Body{});
+                                                             Body{});
 
             EXPECT_EQ(outputs3.size(), outputTags3.size());
             for(size_t i = 0; i < outputs3.size(); i++)
@@ -5384,18 +5382,18 @@ namespace KernelGraphTest
             EXPECT_EQ(getTag(outputs[0]), getTag(outputs3[0]));
 
             auto inputs1
-                = kgraph2.control.getInputs<KernelGraph::ControlGraph::Body>(getTag(outputs.at(0)));
+                = kgraph2.control.getInputs<Body>(getTag(outputs.at(0)));
             ASSERT_EQ(1, inputs1.size());
 
             auto actual1 = getTag(inputs1.at(0));
             EXPECT_EQ(actual1, expected);
 
             auto inputs2 = kgraph2.control.getInputs(getTag(outputs.at(0)),
-                                                     KernelGraph::ControlGraph::Body{});
+                                                     Body{});
             ASSERT_EQ(1, inputs2.size());
 
             auto inputTags2 = kgraph2.control.getInputTags(getTag(outputs.at(0)),
-                                                           KernelGraph::ControlGraph::Body{});
+                                                           Body{});
 
             EXPECT_EQ(inputs2.size(), inputTags2.size());
             for(size_t i = 0; i < inputs2.size(); i++)
@@ -5406,15 +5404,15 @@ namespace KernelGraphTest
             auto actual2 = getTag(inputs2.at(0));
             EXPECT_EQ(actual1, actual2);
 
-            auto inputs3 = kgraph2.control.getInputs<KernelGraph::ControlGraph::Sequence>(
+            auto inputs3 = kgraph2.control.getInputs<Sequence>(
                 getTag(outputs.at(0)));
             EXPECT_EQ(0, inputs3.size());
 
-            auto inputs4 = kgraph2.control.getInputs<KernelGraph::ControlGraph::Initialize>(
+            auto inputs4 = kgraph2.control.getInputs<Initialize>(
                 getTag(outputs.at(0)));
             ASSERT_EQ(0, inputs4.size());
 
-            auto inputs5 = kgraph2.control.getInputs<KernelGraph::ControlGraph::ForLoopIncrement>(
+            auto inputs5 = kgraph2.control.getInputs<ForLoopIncrement>(
                 getTag(outputs.at(0)));
             ASSERT_EQ(0, inputs5.size());
         }
@@ -5700,7 +5698,7 @@ namespace KernelGraphTest
         auto params = std::make_shared<CommandParameters>();
         params->setManualKernelDimension(2);
 
-        auto mac_tile = KernelGraph::CoordGraph::MacroTile({m, n}, MemoryType::VGPR, {t_m, t_n});
+        auto mac_tile = MacroTile({m, n}, MemoryType::VGPR, {t_m, t_n});
         params->setDimensionInfo(4, mac_tile);
 
         params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
@@ -5776,7 +5774,7 @@ namespace KernelGraphTest
         auto params = std::make_shared<CommandParameters>();
         params->setManualKernelDimension(2);
 
-        auto mac_tile = KernelGraph::CoordGraph::MacroTile({m, n}, MemoryType::VGPR, {t_m, t_n});
+        auto mac_tile = MacroTile({m, n}, MemoryType::VGPR, {t_m, t_n});
         params->setDimensionInfo(4, mac_tile);
 
         params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
@@ -5875,9 +5873,8 @@ namespace KernelGraphTest
         params->setManualKernelDimension(2);
 
         // TODO: Add a "fill" operation on the kernel graph to propagate tile sizes where appropriate
-        auto mac_tile_lds = KernelGraph::CoordGraph::MacroTile({m, n}, MemoryType::LDS, {t_m, t_n});
-        auto mac_tile_vgpr
-            = KernelGraph::CoordGraph::MacroTile({m, n}, MemoryType::VGPR, {t_m, t_n});
+        auto mac_tile_lds  = MacroTile({m, n}, MemoryType::LDS, {t_m, t_n});
+        auto mac_tile_vgpr = MacroTile({m, n}, MemoryType::VGPR, {t_m, t_n});
 
         params->setDimensionInfo(4, mac_tile_lds);
         params->setDimensionInfo(11, mac_tile_vgpr);
@@ -5981,7 +5978,7 @@ namespace KernelGraphTest
         auto params = std::make_shared<CommandParameters>();
         params->setManualKernelDimension(2);
 
-        auto mac_tile = KernelGraph::CoordGraph::MacroTile(
+        auto mac_tile = MacroTile(
             {mac_m, mac_n}, LayoutType::MATRIX_ACCUMULATOR, {wave_m, wave_n, wave_k, wave_b});
 
         params->setDimensionInfo(4, mac_tile);
@@ -5994,9 +5991,9 @@ namespace KernelGraphTest
         auto two  = Expression::literal(2u);
         auto one  = Expression::literal(1u);
 
-        auto WF  = KernelGraph::CoordGraph::Wavefront(-1, four, one);
-        auto WFX = KernelGraph::CoordGraph::Wavefront(0, two, one);
-        auto WFY = KernelGraph::CoordGraph::Wavefront(1, two, one);
+        auto WF  = Wavefront(-1, four, one);
+        auto WFX = Wavefront(0, two, one);
+        auto WFY = Wavefront(1, two, one);
 
         auto postParams = std::make_shared<CommandParameters>();
         postParams->setDimensionInfo(38, WF);
@@ -6036,7 +6033,7 @@ namespace KernelGraphTest
         auto expr1 = a + b;
         auto expr2 = b * expr1;
 
-        auto clean_expr = rocRoller::KernelGraph::cleanArguments(expr2, m_context->kernel());
+        auto clean_expr = cleanArguments(expr2, m_context->kernel());
 
         EXPECT_EQ(Expression::toString(clean_expr),
                   "Multiply(user_Int32_Value_1, Add(user_Int32_Value_0, user_Int32_Value_1))");
@@ -6052,8 +6049,8 @@ namespace KernelGraphTest
         m_context->kernel()->setKernelDimensions(1);
         m_context->kernel()->setWorkgroupSize({64, 1, 1});
 
-        auto kgraph = KernelGraph::translate(command);
-        kgraph      = KernelGraph::cleanArguments(kgraph, m_context->kernel());
+        auto kgraph = translate(command);
+        kgraph      = cleanArguments(kgraph, m_context->kernel());
 
         auto dot = kgraph.toDOT();
         EXPECT_THAT(dot, Not(HasSubstr("SubDimension{0, CommandArgument(Load_Linear_0_size_0)}")));

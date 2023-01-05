@@ -119,11 +119,11 @@ namespace MatrixMultiplyTest
 
         // TODO: the translate step should figure out that there is a
         // T_Mul and do the right thing for the T_Load_Tiled commands
-        auto mac_tile_0 = KernelGraph::CoordGraph::MacroTile(
+        auto mac_tile_0 = KernelGraph::CoordinateGraph::MacroTile(
             {mac_m, mac_k}, LayoutType::MATRIX_A, {wave_m, wave_n, wave_k, wave_b});
-        auto mac_tile_1 = KernelGraph::CoordGraph::MacroTile(
+        auto mac_tile_1 = KernelGraph::CoordinateGraph::MacroTile(
             {mac_k, mac_n}, LayoutType::MATRIX_B, {wave_m, wave_n, wave_k, wave_b});
-        auto mac_tile_2 = KernelGraph::CoordGraph::MacroTile(
+        auto mac_tile_2 = KernelGraph::CoordinateGraph::MacroTile(
             {mac_m, mac_n}, LayoutType::MATRIX_ACCUMULATOR, {wave_m, wave_n, wave_k, wave_b});
 
         params->setDimensionInfo(4, mac_tile_0);
@@ -136,9 +136,9 @@ namespace MatrixMultiplyTest
         auto two  = Expression::literal(2u);
         auto one  = Expression::literal(1u);
 
-        auto WF  = KernelGraph::CoordGraph::Wavefront(-1, four, one);
-        auto WFX = KernelGraph::CoordGraph::Wavefront(0, two, one);
-        auto WFY = KernelGraph::CoordGraph::Wavefront(1, two, one);
+        auto WF  = KernelGraph::CoordinateGraph::Wavefront(-1, four, one);
+        auto WFX = KernelGraph::CoordinateGraph::Wavefront(0, two, one);
+        auto WFY = KernelGraph::CoordinateGraph::Wavefront(1, two, one);
 
         std::vector<int> wavefront_ids = {41, 74, 115};
         for(auto id : wavefront_ids)
@@ -259,11 +259,11 @@ namespace MatrixMultiplyTest
 
         // TODO: the translate step should figure out that there is a
         // T_Mul and do the right thing for the T_Load_Tiled commands
-        auto mac_tile_A = KernelGraph::CoordGraph::MacroTile(
+        auto mac_tile_A = KernelGraph::CoordinateGraph::MacroTile(
             {mac_m, mac_k}, LayoutType::MATRIX_A, {wave_m, wave_n, wave_k, wave_b});
-        auto mac_tile_B = KernelGraph::CoordGraph::MacroTile(
+        auto mac_tile_B = KernelGraph::CoordinateGraph::MacroTile(
             {mac_k, mac_n}, LayoutType::MATRIX_B, {wave_m, wave_n, wave_k, wave_b});
-        auto mac_tile_C = KernelGraph::CoordGraph::MacroTile(
+        auto mac_tile_C = KernelGraph::CoordinateGraph::MacroTile(
             {mac_m, mac_n}, LayoutType::MATRIX_ACCUMULATOR, {wave_m, wave_n, wave_k, wave_b});
 
         params->setDimensionInfo(4, mac_tile_A);
@@ -275,9 +275,9 @@ namespace MatrixMultiplyTest
         auto four = Expression::literal(4u);
         auto two  = Expression::literal(2u);
         auto one  = Expression::literal(1u);
-        auto WF   = KernelGraph::CoordGraph::Wavefront(-1, four, one);
-        auto WFX  = KernelGraph::CoordGraph::Wavefront(0, two, nullptr);
-        auto WFY  = KernelGraph::CoordGraph::Wavefront(1, two, nullptr);
+        auto WF   = KernelGraph::CoordinateGraph::Wavefront(-1, four, one);
+        auto WFX  = KernelGraph::CoordinateGraph::Wavefront(0, two, nullptr);
+        auto WFY  = KernelGraph::CoordinateGraph::Wavefront(1, two, nullptr);
 
         std::vector<int> wavefront_ids = {41, 74, 115};
         for(auto id : wavefront_ids)
@@ -412,11 +412,11 @@ namespace MatrixMultiplyTest
 
         // TODO: the translate step should figure out that there is a
         // T_Mul and do the right thing for the T_Load_Tiled commands
-        auto mac_tile_0 = KernelGraph::CoordGraph::MacroTile(
+        auto mac_tile_0 = KernelGraph::CoordinateGraph::MacroTile(
             {mac_m, mac_k}, LayoutType::MATRIX_A, {wave_m, wave_n, wave_k, wave_b});
-        auto mac_tile_1 = KernelGraph::CoordGraph::MacroTile(
+        auto mac_tile_1 = KernelGraph::CoordinateGraph::MacroTile(
             {mac_k, mac_n}, LayoutType::MATRIX_B, {wave_m, wave_n, wave_k, wave_b});
-        auto mac_tile_2 = KernelGraph::CoordGraph::MacroTile(
+        auto mac_tile_2 = KernelGraph::CoordinateGraph::MacroTile(
             {mac_m, mac_n}, LayoutType::MATRIX_ACCUMULATOR, {wave_m, wave_n, wave_k, wave_b});
 
         params->setDimensionInfo(4, mac_tile_0);
@@ -431,9 +431,9 @@ namespace MatrixMultiplyTest
         auto two  = Expression::literal(2u);
         auto one  = Expression::literal(1u);
 
-        auto WF  = KernelGraph::CoordGraph::Wavefront(-1, four, one);
-        auto WFX = KernelGraph::CoordGraph::Wavefront(0, two, one);
-        auto WFY = KernelGraph::CoordGraph::Wavefront(1, two, one);
+        auto WF  = KernelGraph::CoordinateGraph::Wavefront(-1, four, one);
+        auto WFX = KernelGraph::CoordinateGraph::Wavefront(0, two, one);
+        auto WFY = KernelGraph::CoordinateGraph::Wavefront(1, two, one);
 
         std::vector<int> wavefront_ids = {49, 82, 115, 168};
         for(auto id : wavefront_ids)

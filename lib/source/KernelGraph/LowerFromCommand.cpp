@@ -13,15 +13,17 @@ namespace rocRoller
     namespace KernelGraph
     {
         namespace Expression = rocRoller::Expression;
-        using namespace CoordGraph;
-        using namespace ControlHypergraph;
+        using namespace CoordinateGraph;
+        using namespace ControlGraph;
 
         /**
          * @brief Promote inputs to an appropriate output.
          *
          * For example, given VGPR and Linear inputs, output should be Linear.
          */
-        Dimension promoteDimensions(CoordinateHypergraph const& graph, std::vector<int> const& dims)
+        Dimension
+            promoteDimensions(rocRoller::KernelGraph::CoordinateGraph::CoordinateGraph const& graph,
+                              std::vector<int> const&                                         dims)
         {
             Dimension rv = VGPR();
             for(auto tag : dims)
@@ -433,7 +435,7 @@ namespace rocRoller
 
             void operator()(Operations::Nop const& x) {}
 
-            KernelHypergraph operator()(std::shared_ptr<Command> command)
+            KernelGraph operator()(std::shared_ptr<Command> command)
             {
                 m_command = command;
                 for(auto const& op : command->operations())
@@ -444,7 +446,7 @@ namespace rocRoller
             }
 
         private:
-            KernelHypergraph graph;
+            KernelGraph graph;
 
             // root/kernel tag
             int m_kernel;
@@ -458,7 +460,7 @@ namespace rocRoller
             std::shared_ptr<Command> m_command;
         };
 
-        KernelHypergraph translate(std::shared_ptr<Command> command)
+        KernelGraph translate(std::shared_ptr<Command> command)
         {
             TIMER(t, "KernelGraph::translate");
             rocRoller::Log::getLogger()->debug("KernelGraph::translate(); Command\n{}",

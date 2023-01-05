@@ -121,7 +121,8 @@ namespace TileTransposeAddTest
         auto params = std::make_shared<CommandParameters>();
         params->setManualKernelDimension(2);
 
-        auto mac_tile = KernelGraph::CoordGraph::MacroTile({m, n}, MemoryType::VGPR, {t_m, t_n});
+        auto mac_tile
+            = KernelGraph::CoordinateGraph::MacroTile({m, n}, MemoryType::VGPR, {t_m, t_n});
         params->setDimensionInfo(4, mac_tile);
         params->setDimensionInfo(11, mac_tile);
         params->setDimensionInfo(15, mac_tile);

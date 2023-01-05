@@ -8,6 +8,8 @@ namespace rocRoller
     namespace KernelGraph
     {
         namespace Expression = rocRoller::Expression;
+        using namespace ControlGraph;
+        using namespace CoordinateGraph;
         using namespace Expression;
 
         /**
@@ -122,8 +124,8 @@ namespace rocRoller
             {
             }
 
-            template <CoordGraph::CDimension T>
-            CoordGraph::Dimension visitDimension(int tag, T const& dim)
+            template <CDimension T>
+            Dimension visitDimension(int tag, T const& dim)
             {
                 auto d   = dim;
                 d.size   = m_clean_arguments(dim.size);
@@ -131,15 +133,15 @@ namespace rocRoller
                 return d;
             }
 
-            ControlHypergraph::Operation visitOperation(ControlHypergraph::ForLoopOp const& op)
+            Operation visitOperation(ForLoopOp const& op)
             {
                 auto forOp      = op;
                 forOp.condition = m_clean_arguments(op.condition);
                 return forOp;
             }
 
-            template <ControlHypergraph::COperation T>
-            ControlHypergraph::Operation visitOperation(T const& op)
+            template <COperation T>
+            Operation visitOperation(T const& op)
             {
                 return op;
             }
@@ -152,7 +154,7 @@ namespace rocRoller
          * Rewrite HyperGraph to make sure no more CommandArgument
          * values are present within the graph.
          */
-        KernelHypergraph cleanArguments(KernelHypergraph k, std::shared_ptr<AssemblyKernel> kernel)
+        KernelGraph cleanArguments(KernelGraph k, std::shared_ptr<AssemblyKernel> kernel)
         {
             TIMER(t, "KernelGraph::cleanArguments");
             rocRoller::Log::getLogger()->debug("KernelGraph::cleanArguments()");

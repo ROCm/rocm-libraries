@@ -6,8 +6,8 @@ namespace rocRoller
 {
     namespace KernelGraph
     {
-        using namespace CoordGraph;
-        using namespace ControlHypergraph;
+        using namespace CoordinateGraph;
+        using namespace ControlGraph;
 
         struct LowerLinearVisitor : public BaseGraphVisitor
         {
@@ -21,11 +21,11 @@ namespace rocRoller
 
             std::map<int, int> vgprs;
 
-            virtual void visitEdge(KernelHypergraph&       graph,
-                                   KernelHypergraph const& original,
-                                   GraphReindexer&         reindexer,
-                                   int                     tag,
-                                   DataFlow const&         df) override
+            virtual void visitEdge(KernelGraph&       graph,
+                                   KernelGraph const& original,
+                                   GraphReindexer&    reindexer,
+                                   int                tag,
+                                   DataFlow const&    df) override
             {
                 // Don't need DataFlow edges to/from Linear anymore
                 auto location = original.coordinates.getLocation(tag);
@@ -47,11 +47,11 @@ namespace rocRoller
                 }
             }
 
-            virtual void visitOperation(KernelHypergraph&       graph,
-                                        KernelHypergraph const& original,
-                                        GraphReindexer&         reindexer,
-                                        int                     tag,
-                                        ElementOp const&        op) override
+            virtual void visitOperation(KernelGraph&       graph,
+                                        KernelGraph const& original,
+                                        GraphReindexer&    reindexer,
+                                        int                tag,
+                                        ElementOp const&   op) override
             {
                 std::vector<int> coordinate_inputs, coordinate_outputs;
                 std::vector<int> control_inputs;
@@ -105,11 +105,11 @@ namespace rocRoller
                 vgprs.insert_or_assign(original_linear, vgpr);
             }
 
-            virtual void visitOperation(KernelHypergraph&       graph,
-                                        KernelHypergraph const& original,
-                                        GraphReindexer&         reindexer,
-                                        int                     tag,
-                                        LoadLinear const&       oload) override
+            virtual void visitOperation(KernelGraph&       graph,
+                                        KernelGraph const& original,
+                                        GraphReindexer&    reindexer,
+                                        int                tag,
+                                        LoadLinear const&  oload) override
             {
                 auto original_user   = original.mapper.get<User>(tag);
                 auto original_linear = original.mapper.get<Linear>(tag);
@@ -147,21 +147,21 @@ namespace rocRoller
                 reindexer.control.insert_or_assign(tag, load);
             }
 
-            virtual void visitOperation(KernelHypergraph&       graph,
-                                        KernelHypergraph const& original,
-                                        GraphReindexer&         reindexer,
-                                        int                     tag,
-                                        LoadVGPR const&         oload) override
+            virtual void visitOperation(KernelGraph&       graph,
+                                        KernelGraph const& original,
+                                        GraphReindexer&    reindexer,
+                                        int                tag,
+                                        LoadVGPR const&    oload) override
             {
                 copyOperation(graph, original, reindexer, tag);
                 auto vgpr = original.mapper.get<VGPR>(tag);
                 vgprs.insert_or_assign(vgpr, reindexer.coordinates.at(vgpr));
             }
 
-            virtual void visitOperation(KernelHypergraph&       graph,
-                                        KernelHypergraph const& original,
-                                        GraphReindexer&         reindexer,
-                                        int                     tag,
+            virtual void visitOperation(KernelGraph&       graph,
+                                        KernelGraph const& original,
+                                        GraphReindexer&    reindexer,
+                                        int                tag,
                                         StoreLinear const&) override
             {
                 auto original_user   = original.mapper.get<User>(tag);
@@ -200,7 +200,7 @@ namespace rocRoller
             }
         };
 
-        KernelHypergraph lowerLinear(KernelHypergraph k, std::shared_ptr<Context> context)
+        KernelGraph lowerLinear(KernelGraph k, std::shared_ptr<Context> context)
         {
             TIMER(t, "KernelGraph::lowerLinear");
             rocRoller::Log::getLogger()->debug("KernelGraph::lowerLinear()");

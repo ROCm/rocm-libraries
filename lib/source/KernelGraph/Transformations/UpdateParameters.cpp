@@ -7,8 +7,8 @@ namespace rocRoller
 {
     namespace KernelGraph
     {
-        using CoordGraph::MacroTile;
-        using namespace CoordGraph;
+        using namespace CoordinateGraph;
+        using namespace ControlGraph;
         namespace Expression = rocRoller::Expression;
 
         struct UpdateParametersVisitor
@@ -27,7 +27,7 @@ namespace rocRoller
             }
 
             template <typename T>
-            ControlHypergraph::Operation visitOperation(T const& op)
+            Operation visitOperation(T const& op)
             {
                 return op;
             }
@@ -36,8 +36,7 @@ namespace rocRoller
             std::map<int, Dimension> m_new_dimensions;
         };
 
-        KernelHypergraph updateParameters(KernelHypergraph                   k,
-                                          std::shared_ptr<CommandParameters> params)
+        KernelGraph updateParameters(KernelGraph k, std::shared_ptr<CommandParameters> params)
         {
             TIMER(t, "KernelGraph::updateParameters");
             rocRoller::Log::getLogger()->debug("KernelGraph::updateParameters()");

@@ -3,11 +3,11 @@
 #include <set>
 #include <variant>
 
+#include "ControlGraph/ControlGraph.hpp"
+#include "CoordinateGraph/CoordinateEdge_fwd.hpp"
+#include "CoordinateGraph/CoordinateGraph.hpp"
 #include "Graph/Hypergraph.hpp"
 #include "KernelGraph.hpp"
-#include "KernelGraph/ControlHypergraph/ControlHypergraph.hpp"
-#include "KernelGraph/CoordGraph/CoordinateHypergraph.hpp"
-#include "KernelGraph/CoordGraph/Edge_fwd.hpp"
 
 #include <rocRoller/AssemblyKernel.hpp>
 
@@ -15,24 +15,29 @@ namespace rocRoller
 {
     namespace KernelGraph
     {
+        using namespace ControlGraph;
+        using namespace CoordinateGraph;
+
+        using CTEdge = rocRoller::KernelGraph::CoordinateGraph::Edge;
+
         /***************************
          * KernelGraphs rewrite utils
          */
 
         template <typename T>
-        inline KernelHypergraph rewriteDimensions(KernelHypergraph const& k, T& visitor)
+        inline KernelGraph rewriteDimensions(KernelGraph const& k, T& visitor)
         {
-            KernelHypergraph graph = k;
+            KernelGraph graph = k;
             for(auto const& tag : k.coordinates.getNodes())
             {
-                auto x = std::get<CoordGraph::Dimension>(k.coordinates.getElement(tag));
+                auto x = std::get<Dimension>(k.coordinates.getElement(tag));
                 auto y
                     = std::visit([&](auto&& arg) { return visitor.visitDimension(tag, arg); }, x);
                 graph.coordinates.setElement(tag, y);
             }
             for(auto const& tag : k.control.getNodes())
             {
-                auto x = std::get<ControlHypergraph::Operation>(k.control.getElement(tag));
+                auto x = std::get<Operation>(k.control.getElement(tag));
                 auto y = std::visit([&](auto&& arg) { return visitor.visitOperation(arg); }, x);
                 graph.control.setElement(tag, y);
             }
@@ -47,24 +52,24 @@ namespace rocRoller
             std::map<int, int> control;
         };
 
-#define MAKE_EDGE_VISITOR(CLS)                                \
-    virtual void visitEdge(KernelHypergraph&       graph,     \
-                           KernelHypergraph const& original,  \
-                           GraphReindexer&         reindexer, \
-                           int                     tag,       \
-                           CoordGraph::CLS const&  edge)      \
-    {                                                         \
-        copyEdge(graph, original, reindexer, tag);            \
+#define MAKE_EDGE_VISITOR(CLS)                           \
+    virtual void visitEdge(KernelGraph&       graph,     \
+                           KernelGraph const& original,  \
+                           GraphReindexer&    reindexer, \
+                           int                tag,       \
+                           CLS const&         edge)      \
+    {                                                    \
+        copyEdge(graph, original, reindexer, tag);       \
     }
 
-#define MAKE_OPERATION_VISITOR(CLS)                                      \
-    virtual void visitOperation(KernelHypergraph&             graph,     \
-                                KernelHypergraph const&       original,  \
-                                GraphReindexer&               reindexer, \
-                                int                           tag,       \
-                                ControlHypergraph::CLS const& dst)       \
-    {                                                                    \
-        copyOperation(graph, original, reindexer, tag);                  \
+#define MAKE_OPERATION_VISITOR(CLS)                           \
+    virtual void visitOperation(KernelGraph&       graph,     \
+                                KernelGraph const& original,  \
+                                GraphReindexer&    reindexer, \
+                                int                tag,       \
+                                CLS const&         dst)       \
+    {                                                         \
+        copyOperation(graph, original, reindexer, tag);       \
     }
 
         /**
@@ -84,10 +89,10 @@ namespace rocRoller
             {
             }
 
-            void copyEdge(KernelHypergraph&       graph,
-                          KernelHypergraph const& original,
-                          GraphReindexer&         reindexer,
-                          int                     edge)
+            void copyEdge(KernelGraph&       graph,
+                          KernelGraph const& original,
+                          GraphReindexer&    reindexer,
+                          int                edge)
             {
                 auto             location = original.coordinates.getLocation(edge);
                 std::vector<int> inputs;
@@ -130,11 +135,11 @@ namespace rocRoller
             /**
              * @brief Reconnect inputs from original operation to new operation.
              */
-            void reconnectOperation(KernelHypergraph&       graph,
-                                    KernelHypergraph const& original,
-                                    GraphReindexer&         reindexer,
-                                    int                     new_tag,
-                                    int                     old_tag)
+            void reconnectOperation(KernelGraph&       graph,
+                                    KernelGraph const& original,
+                                    GraphReindexer&    reindexer,
+                                    int                new_tag,
+                                    int                old_tag)
             {
                 auto location = original.control.getLocation(old_tag);
 
@@ -177,11 +182,11 @@ namespace rocRoller
             /**
              * @brief Reconnect mappings from original operation to new operation.
              */
-            void reconnectMappings(KernelHypergraph&       graph,
-                                   KernelHypergraph const& original,
-                                   GraphReindexer&         reindexer,
-                                   int                     new_tag,
-                                   int                     old_tag)
+            void reconnectMappings(KernelGraph&       graph,
+                                   KernelGraph const& original,
+                                   GraphReindexer&    reindexer,
+                                   int                new_tag,
+                                   int                old_tag)
             {
                 if(m_rewriteCoordinates)
                 {
@@ -211,10 +216,10 @@ namespace rocRoller
              *
              * Inputs and mappings are preserved.
              */
-            void copyOperation(KernelHypergraph&       graph,
-                               KernelHypergraph const& original,
-                               GraphReindexer&         reindexer,
-                               int                     tag)
+            void copyOperation(KernelGraph&       graph,
+                               KernelGraph const& original,
+                               GraphReindexer&    reindexer,
+                               int                tag)
             {
                 auto op = graph.control.addElement(original.control.getElement(tag));
                 reconnectOperation(graph, original, reindexer, op, tag);
@@ -264,37 +269,36 @@ namespace rocRoller
                 return m_rewriteCoordinates;
             }
 
-            virtual void visitOperation(KernelHypergraph&                           graph,
-                                        KernelHypergraph const&                     original,
-                                        GraphReindexer&                             reindexer,
-                                        int                                         tag,
-                                        ControlHypergraph::TensorContraction const& op)
+            virtual void visitOperation(KernelGraph&             graph,
+                                        KernelGraph const&       original,
+                                        GraphReindexer&          reindexer,
+                                        int                      tag,
+                                        TensorContraction const& op)
             {
                 copyOperation(graph, original, reindexer, tag);
 
                 if(m_rewriteCoordinates)
                 {
                     auto new_tag = reindexer.control.at(tag);
-                    auto new_op
-                        = graph.control.getNode<ControlHypergraph::TensorContraction>(new_tag);
-                    new_op.a = reindexer.coordinates.at(op.a);
-                    new_op.b = reindexer.coordinates.at(op.b);
+                    auto new_op  = graph.control.getNode<TensorContraction>(new_tag);
+                    new_op.a     = reindexer.coordinates.at(op.a);
+                    new_op.b     = reindexer.coordinates.at(op.b);
                     graph.control.setElement(new_tag, new_op);
                 }
             }
 
-            virtual void visitOperation(KernelHypergraph&                      graph,
-                                        KernelHypergraph const&                original,
-                                        GraphReindexer&                        reindexer,
-                                        int                                    tag,
-                                        ControlHypergraph::ComputeIndex const& op)
+            virtual void visitOperation(KernelGraph&        graph,
+                                        KernelGraph const&  original,
+                                        GraphReindexer&     reindexer,
+                                        int                 tag,
+                                        ComputeIndex const& op)
             {
                 copyOperation(graph, original, reindexer, tag);
 
                 if(m_rewriteCoordinates)
                 {
                     auto new_tag  = reindexer.control.at(tag);
-                    auto new_op   = graph.control.getNode<ControlHypergraph::ComputeIndex>(new_tag);
+                    auto new_op   = graph.control.getNode<ComputeIndex>(new_tag);
                     new_op.target = op.target > 0 ? reindexer.coordinates.at(op.target) : op.target;
                     new_op.increment
                         = op.increment > 0 ? reindexer.coordinates.at(op.increment) : op.increment;
@@ -305,18 +309,18 @@ namespace rocRoller
                 }
             }
 
-            virtual void visitOperation(KernelHypergraph&                   graph,
-                                        KernelHypergraph const&             original,
-                                        GraphReindexer&                     reindexer,
-                                        int                                 tag,
-                                        ControlHypergraph::ElementOp const& op)
+            virtual void visitOperation(KernelGraph&       graph,
+                                        KernelGraph const& original,
+                                        GraphReindexer&    reindexer,
+                                        int                tag,
+                                        ElementOp const&   op)
             {
                 copyOperation(graph, original, reindexer, tag);
 
                 if(m_rewriteCoordinates)
                 {
                     auto new_tag = reindexer.control.at(tag);
-                    auto new_op  = graph.control.getNode<ControlHypergraph::ElementOp>(new_tag);
+                    auto new_op  = graph.control.getNode<ElementOp>(new_tag);
                     new_op.a     = op.a > 0 ? reindexer.coordinates.at(op.a) : op.a;
                     new_op.b     = op.b > 0 ? reindexer.coordinates.at(op.b) : op.b;
                     graph.control.setElement(new_tag, new_op);
@@ -355,30 +359,30 @@ namespace rocRoller
             MAKE_OPERATION_VISITOR(SetCoordinate);
             MAKE_OPERATION_VISITOR(Deallocate);
 
-            virtual void visitEdge(KernelHypergraph&                          graph,
-                                   KernelHypergraph const&                    original,
-                                   GraphReindexer&                            reindexer,
-                                   int                                        tag,
-                                   CoordGraph::CoordinateTransformEdge const& edge)
+            virtual void visitEdge(KernelGraph&                   graph,
+                                   KernelGraph const&             original,
+                                   GraphReindexer&                reindexer,
+                                   int                            tag,
+                                   CoordinateTransformEdge const& edge)
             {
                 std::visit([&](auto&& arg) { visitEdge(graph, original, reindexer, tag, arg); },
                            edge);
             }
 
-            virtual void visitEdge(KernelHypergraph&               graph,
-                                   KernelHypergraph const&         original,
-                                   GraphReindexer&                 reindexer,
-                                   int                             tag,
-                                   CoordGraph::DataFlowEdge const& edge)
+            virtual void visitEdge(KernelGraph&        graph,
+                                   KernelGraph const&  original,
+                                   GraphReindexer&     reindexer,
+                                   int                 tag,
+                                   DataFlowEdge const& edge)
             {
                 std::visit([&](auto&& arg) { visitEdge(graph, original, reindexer, tag, arg); },
                            edge);
             }
 
-            virtual void visitRoot(KernelHypergraph&       graph,
-                                   KernelHypergraph const& original,
-                                   GraphReindexer&         reindexer,
-                                   int                     tag)
+            virtual void visitRoot(KernelGraph&       graph,
+                                   KernelGraph const& original,
+                                   GraphReindexer&    reindexer,
+                                   int                tag)
             {
                 copyOperation(graph, original, reindexer, tag);
             }
@@ -399,10 +403,10 @@ namespace rocRoller
          * Internal convenience routine.
          */
         template <typename T>
-        inline KernelHypergraph rewrite(KernelHypergraph const& original, T& visitor)
+        inline KernelGraph rewrite(KernelGraph const& original, T& visitor)
         {
-            KernelHypergraph graph;
-            GraphReindexer   reindexer;
+            KernelGraph    graph;
+            GraphReindexer reindexer;
 
             if(visitor.rewriteCoordinates())
             {
@@ -417,9 +421,9 @@ namespace rocRoller
                 for(auto const& index : original.coordinates.topologicalSort())
                 {
                     auto element = original.coordinates.getElement(index);
-                    if(std::holds_alternative<CoordGraph::Edge>(element))
+                    if(std::holds_alternative<CTEdge>(element))
                     {
-                        auto edge = std::get<CoordGraph::Edge>(element);
+                        auto edge = std::get<CTEdge>(element);
                         std::visit(
                             [&](auto&& arg) {
                                 visitor.visitEdge(graph, original, reindexer, index, arg);
@@ -446,10 +450,10 @@ namespace rocRoller
                                         : original.control.reverseTopologicalSort())
             {
                 auto element = original.control.getElement(index);
-                if(std::holds_alternative<ControlHypergraph::Operation>(element))
+                if(std::holds_alternative<Operation>(element))
                 {
-                    auto node = std::get<ControlHypergraph::Operation>(element);
-                    if(std::holds_alternative<ControlHypergraph::Kernel>(node))
+                    auto node = std::get<Operation>(element);
+                    if(std::holds_alternative<Kernel>(node))
                         continue;
                     std::visit(
                         [&](auto&& arg) {

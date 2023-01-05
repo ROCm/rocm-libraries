@@ -1,9 +1,9 @@
-namespace rocRoller::KernelGraph::ControlHypergraph
+namespace rocRoller::KernelGraph::ControlGraph
 {
 
     template <typename T>
-    requires(std::constructible_from<ControlHypergraph::Element, T>) inline std::optional<
-        T> ControlHypergraph::get(int tag) const
+    requires(std::constructible_from<ControlGraph::Element,
+                                     T>) inline std::optional<T> ControlGraph::get(int tag) const
     {
         auto x = getElement(tag);
         if constexpr(std::constructible_from<ControlEdge, T>)

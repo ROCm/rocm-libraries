@@ -4,7 +4,7 @@
 
 namespace rocRoller
 {
-    namespace KernelGraph::ControlHypergraph
+    namespace KernelGraph::ControlGraph
     {
         struct Sequence;
         struct Body; // Of kernel, for loop, if, etc.

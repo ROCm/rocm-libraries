@@ -1,21 +1,22 @@
 #pragma once
 
-#include "CoordinateHypergraph.hpp"
-#include "EdgeVisitor.hpp"
-#include "Graph/Hypergraph.hpp"
 #include <vector>
+
+#include "CoordinateEdgeVisitor.hpp"
+#include "CoordinateGraph.hpp"
+#include "Graph/Hypergraph.hpp"
 
 namespace rocRoller
 {
 
-    namespace KernelGraph::CoordGraph
+    namespace KernelGraph::CoordinateGraph
     {
 
         inline std::vector<Expression::ExpressionPtr>
-            CoordinateHypergraph::forward(std::vector<Expression::ExpressionPtr> sdims,
-                                          std::vector<int> const&                srcs,
-                                          std::vector<int> const&                dsts,
-                                          Expression::ExpressionTransducer       transducer)
+            CoordinateGraph::forward(std::vector<Expression::ExpressionPtr> sdims,
+                                     std::vector<int> const&                srcs,
+                                     std::vector<int> const&                dsts,
+                                     Expression::ExpressionTransducer       transducer)
         {
             AssertFatal(sdims.size() == srcs.size(), ShowValue(sdims));
             auto visitor = ForwardEdgeVisitor();
@@ -23,10 +24,10 @@ namespace rocRoller
         }
 
         inline std::vector<Expression::ExpressionPtr>
-            CoordinateHypergraph::reverse(std::vector<Expression::ExpressionPtr> sdims,
-                                          std::vector<int> const&                srcs,
-                                          std::vector<int> const&                dsts,
-                                          Expression::ExpressionTransducer       transducer)
+            CoordinateGraph::reverse(std::vector<Expression::ExpressionPtr> sdims,
+                                     std::vector<int> const&                srcs,
+                                     std::vector<int> const&                dsts,
+                                     Expression::ExpressionTransducer       transducer)
         {
             AssertFatal(sdims.size() == dsts.size(), ShowValue(sdims));
             auto visitor = ReverseEdgeVisitor();
@@ -35,11 +36,11 @@ namespace rocRoller
 
         template <Graph::Direction Dir, typename Visitor>
         inline std::vector<Expression::ExpressionPtr>
-            CoordinateHypergraph::traverse(std::vector<Expression::ExpressionPtr> sdims,
-                                           std::vector<int> const&                srcs,
-                                           std::vector<int> const&                dsts,
-                                           Visitor&                               visitor,
-                                           Expression::ExpressionTransducer       transducer)
+            CoordinateGraph::traverse(std::vector<Expression::ExpressionPtr> sdims,
+                                      std::vector<int> const&                srcs,
+                                      std::vector<int> const&                dsts,
+                                      Visitor&                               visitor,
+                                      Expression::ExpressionTransducer       transducer)
         {
             bool const forward = Dir == Graph::Direction::Downstream;
 
@@ -128,7 +129,7 @@ namespace rocRoller
             return results;
         }
 
-        inline EdgeType CoordinateHypergraph::getEdgeType(int index)
+        inline EdgeType CoordinateGraph::getEdgeType(int index)
         {
             Element const& elem = getElement(index);
             if(std::holds_alternative<Edge>(elem))
@@ -147,8 +148,8 @@ namespace rocRoller
         }
 
         template <typename T>
-        requires(std::constructible_from<CoordinateHypergraph::Element, T>)
-            std::optional<T> CoordinateHypergraph::get(int tag)
+        requires(std::constructible_from<CoordinateGraph::Element, T>)
+            std::optional<T> CoordinateGraph::get(int tag)
         {
             auto x = getElement(tag);
             if constexpr(std::constructible_from<Edge, T>)

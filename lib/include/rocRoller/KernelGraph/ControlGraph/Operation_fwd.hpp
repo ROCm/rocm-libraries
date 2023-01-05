@@ -4,7 +4,7 @@
 
 namespace rocRoller
 {
-    namespace KernelGraph::ControlHypergraph
+    namespace KernelGraph::ControlGraph
     {
         struct Assign;
         struct Barrier;

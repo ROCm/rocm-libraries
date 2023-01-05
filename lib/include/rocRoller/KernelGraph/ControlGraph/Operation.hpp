@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-#include <rocRoller/KernelGraph/CoordGraph/Dimension.hpp>
+#include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
 #include <rocRoller/Operations/T_Execute.hpp>
 
 #include "Expression_fwd.hpp"
@@ -15,7 +15,7 @@
 
 namespace rocRoller
 {
-    namespace KernelGraph::ControlHypergraph
+    namespace KernelGraph::ControlGraph
     {
         /*
          * Control flow graph nodes.

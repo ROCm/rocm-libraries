@@ -7,6 +7,8 @@ namespace rocRoller
     namespace KernelGraph
     {
         namespace Expression = rocRoller::Expression;
+        using namespace ControlGraph;
+        using namespace CoordinateGraph;
         using namespace Expression;
 
         struct LoopDistributeVisitor : public BaseGraphVisitor
@@ -21,37 +23,35 @@ namespace rocRoller
             using BaseGraphVisitor::visitEdge;
             using BaseGraphVisitor::visitOperation;
 
-            int loopIndexDim(KernelHypergraph& graph)
+            int loopIndexDim(KernelGraph& graph)
             {
                 if(m_loopDimTag < 0)
                 {
-                    m_loopDimTag = graph.coordinates.addElement(
-                        CoordGraph::Linear(m_loopSize, m_loopStride));
+                    m_loopDimTag = graph.coordinates.addElement(Linear(m_loopSize, m_loopStride));
                 }
 
                 return m_loopDimTag;
             }
 
-            int getLoop(int localTag, KernelHypergraph& graph)
+            int getLoop(int localTag, KernelGraph& graph)
             {
                 if(m_loopDims.count(localTag))
                     return m_loopDims.at(localTag);
 
                 auto loopIndex = loopIndexDim(graph);
-                auto loop
-                    = graph.coordinates.addElement(CoordGraph::ForLoop(m_loopSize, m_loopStride));
-                graph.coordinates.addElement(CoordGraph::DataFlow(), {loopIndex}, {loop});
+                auto loop      = graph.coordinates.addElement(ForLoop(m_loopSize, m_loopStride));
+                graph.coordinates.addElement(DataFlow(), {loopIndex}, {loop});
 
                 m_loopDims.emplace(localTag, loop);
 
                 return loop;
             }
 
-            void addLoopDst(KernelHypergraph&                          graph,
-                            KernelHypergraph const&                    original,
-                            GraphReindexer&                            reindexer,
-                            int                                        tag,
-                            CoordGraph::CoordinateTransformEdge const& edge)
+            void addLoopDst(KernelGraph&                   graph,
+                            KernelGraph const&             original,
+                            GraphReindexer&                reindexer,
+                            int                            tag,
+                            CoordinateTransformEdge const& edge)
             {
                 auto new_tag = reindexer.coordinates.at(tag);
 
@@ -61,8 +61,8 @@ namespace rocRoller
                 auto dstTag = -1;
                 for(auto const& out : outgoing_nodes)
                 {
-                    auto odim = std::get<CoordGraph::Dimension>(graph.coordinates.getElement(out));
-                    if(CoordGraph::isDimension<CoordGraph::Workgroup>(odim))
+                    auto odim = std::get<Dimension>(graph.coordinates.getElement(out));
+                    if(isDimension<Workgroup>(odim))
                     {
                         dstTag = out;
                         break;
@@ -82,31 +82,31 @@ namespace rocRoller
                 graph.coordinates.addElement(new_tag, edge, incoming_nodes, outgoing_nodes);
             }
 
-            void visitEdge(KernelHypergraph&       graph,
-                           KernelHypergraph const& original,
-                           GraphReindexer&         reindexer,
-                           int                     tag,
-                           CoordGraph::Tile const& edge) override
+            void visitEdge(KernelGraph&       graph,
+                           KernelGraph const& original,
+                           GraphReindexer&    reindexer,
+                           int                tag,
+                           Tile const&        edge) override
             {
                 copyEdge(graph, original, reindexer, tag);
                 addLoopDst(graph, original, reindexer, tag, edge);
             }
 
-            void visitEdge(KernelHypergraph&          graph,
-                           KernelHypergraph const&    original,
-                           GraphReindexer&            reindexer,
-                           int                        tag,
-                           CoordGraph::Inherit const& edge) override
+            void visitEdge(KernelGraph&       graph,
+                           KernelGraph const& original,
+                           GraphReindexer&    reindexer,
+                           int                tag,
+                           Inherit const&     edge) override
             {
                 copyEdge(graph, original, reindexer, tag);
                 addLoopDst(graph, original, reindexer, tag, edge);
             }
 
-            void addLoopSrc(KernelHypergraph&                          graph,
-                            KernelHypergraph const&                    original,
-                            GraphReindexer&                            reindexer,
-                            int                                        tag,
-                            CoordGraph::CoordinateTransformEdge const& edge)
+            void addLoopSrc(KernelGraph&                   graph,
+                            KernelGraph const&             original,
+                            GraphReindexer&                reindexer,
+                            int                            tag,
+                            CoordinateTransformEdge const& edge)
             {
                 auto new_tag = reindexer.coordinates.at(tag);
                 auto incoming_nodes
@@ -115,8 +115,8 @@ namespace rocRoller
                 auto srcTag = -1;
                 for(auto const& in : incoming_nodes)
                 {
-                    auto idim = std::get<CoordGraph::Dimension>(graph.coordinates.getElement(in));
-                    if(CoordGraph::isDimension<CoordGraph::Workgroup>(idim))
+                    auto idim = std::get<Dimension>(graph.coordinates.getElement(in));
+                    if(isDimension<Workgroup>(idim))
                     {
                         srcTag = in;
                         break;
@@ -135,11 +135,11 @@ namespace rocRoller
                 graph.coordinates.addElement(new_tag, edge, incoming_nodes, outgoing_nodes);
             }
 
-            void visitEdge(KernelHypergraph&          graph,
-                           KernelHypergraph const&    original,
-                           GraphReindexer&            reindexer,
-                           int                        tag,
-                           CoordGraph::Flatten const& edge) override
+            void visitEdge(KernelGraph&       graph,
+                           KernelGraph const& original,
+                           GraphReindexer&    reindexer,
+                           int                tag,
+                           Flatten const&     edge) override
             {
                 copyEdge(graph, original, reindexer, tag);
 
@@ -150,36 +150,36 @@ namespace rocRoller
                     addLoopSrc(graph, original, reindexer, tag, edge);
             }
 
-            void visitEdge(KernelHypergraph&         graph,
-                           KernelHypergraph const&   original,
-                           GraphReindexer&           reindexer,
-                           int                       tag,
-                           CoordGraph::Forget const& edge) override
+            void visitEdge(KernelGraph&       graph,
+                           KernelGraph const& original,
+                           GraphReindexer&    reindexer,
+                           int                tag,
+                           Forget const&      edge) override
             {
                 copyEdge(graph, original, reindexer, tag);
                 addLoopSrc(graph, original, reindexer, tag, edge);
             }
 
-            virtual void visitOperation(KernelHypergraph&                   graph,
-                                        KernelHypergraph const&             original,
-                                        GraphReindexer&                     reindexer,
-                                        int                                 tag,
-                                        ControlHypergraph::ElementOp const& op) override
+            virtual void visitOperation(KernelGraph&       graph,
+                                        KernelGraph const& original,
+                                        GraphReindexer&    reindexer,
+                                        int                tag,
+                                        ElementOp const&   op) override
             {
                 copyOperation(graph, original, reindexer, tag);
 
                 auto new_tag = reindexer.control.at(tag);
-                auto new_op  = graph.control.getNode<ControlHypergraph::ElementOp>(new_tag);
+                auto new_op  = graph.control.getNode<ElementOp>(new_tag);
                 new_op.a     = op.a > 0 ? reindexer.coordinates.at(op.a) : op.a;
                 new_op.b     = op.b > 0 ? reindexer.coordinates.at(op.b) : op.b;
                 graph.control.setElement(new_tag, new_op);
             }
 
-            void visitOperation(KernelHypergraph&                  graph,
-                                KernelHypergraph const&            original,
-                                GraphReindexer&                    reindexer,
-                                int                                tag,
-                                ControlHypergraph::LoadVGPR const& op) override
+            void visitOperation(KernelGraph&       graph,
+                                KernelGraph const& original,
+                                GraphReindexer&    reindexer,
+                                int                tag,
+                                LoadVGPR const&    op) override
             {
                 copyOperation(graph, original, reindexer, tag);
 
@@ -197,10 +197,10 @@ namespace rocRoller
                                          std::vector<int>{new_tag});
             }
 
-            void visitRoot(KernelHypergraph&       graph,
-                           KernelHypergraph const& original,
-                           GraphReindexer&         reindexer,
-                           int                     tag) override
+            void visitRoot(KernelGraph&       graph,
+                           KernelGraph const& original,
+                           GraphReindexer&    reindexer,
+                           int                tag) override
             {
                 BaseGraphVisitor::visitRoot(graph, original, reindexer, tag);
 
@@ -210,25 +210,22 @@ namespace rocRoller
                 // create loopOp and attach with Kernel
                 auto loopVarExp = std::make_shared<Expression::Expression>(
                     DataFlowTag{iterTag, Register::Type::Scalar, DataType::Int32});
-                m_loopOp = graph.control.addElement(
-                    ControlHypergraph::ForLoopOp{loopVarExp < m_loopSize});
-                graph.control.addElement(ControlHypergraph::Body(), {new_tag}, {m_loopOp});
+                m_loopOp = graph.control.addElement(ForLoopOp{loopVarExp < m_loopSize});
+                graph.control.addElement(Body(), {new_tag}, {m_loopOp});
 
                 // create initOp and attach with the loopOp
                 auto zero   = Expression::literal(0);
-                auto initOp = graph.control.addElement(
-                    ControlHypergraph::Assign{Register::Type::Scalar, zero});
-                graph.control.addElement(ControlHypergraph::Initialize(), {m_loopOp}, {initOp});
+                auto initOp = graph.control.addElement(Assign{Register::Type::Scalar, zero});
+                graph.control.addElement(Initialize(), {m_loopOp}, {initOp});
 
                 // create incOp and attach with the loopOp
                 auto incOp = graph.control.addElement(
-                    ControlHypergraph::Assign{Register::Type::Scalar, loopVarExp + m_loopStride});
-                graph.control.addElement(
-                    ControlHypergraph::ForLoopIncrement(), {m_loopOp}, {incOp});
+                    Assign{Register::Type::Scalar, loopVarExp + m_loopStride});
+                graph.control.addElement(ForLoopIncrement(), {m_loopOp}, {incOp});
 
-                graph.mapper.connect<CoordGraph::Dimension>(m_loopOp, iterTag);
-                graph.mapper.connect<CoordGraph::Dimension>(initOp, iterTag);
-                graph.mapper.connect<CoordGraph::ForLoop>(incOp, iterTag);
+                graph.mapper.connect<Dimension>(m_loopOp, iterTag);
+                graph.mapper.connect<Dimension>(initOp, iterTag);
+                graph.mapper.connect<ForLoop>(incOp, iterTag);
             }
 
         private:
@@ -240,9 +237,9 @@ namespace rocRoller
             std::unordered_map<int, int> m_loopDims;
         };
 
-        KernelHypergraph lowerLinearLoop(KernelHypergraph const&  k,
-                                         ExpressionPtr            loopSize,
-                                         std::shared_ptr<Context> context)
+        KernelGraph lowerLinearLoop(KernelGraph const&       k,
+                                    ExpressionPtr            loopSize,
+                                    std::shared_ptr<Context> context)
         {
             TIMER(t, "KernelGraph::lowerLinearLoop");
             auto visitor = LoopDistributeVisitor(context, loopSize);

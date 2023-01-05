@@ -1,13 +1,13 @@
 #include <string>
 
 #include <rocRoller/Expression.hpp>
-#include <rocRoller/KernelGraph/CoordGraph/Dimension.hpp>
+#include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
 
 namespace rocRoller
 {
-    namespace KernelGraph::CoordGraph
+    namespace KernelGraph::CoordinateGraph
     {
         /*
          * Dimension methods
@@ -29,8 +29,7 @@ namespace rocRoller
 
         MacroTileNumber MacroTile::tileNumber(int sdim) const
         {
-            return CoordGraph::MacroTileNumber(
-                sdim, Expression::literal(1u), Expression::literal(1u));
+            return MacroTileNumber(sdim, Expression::literal(1u), Expression::literal(1u));
         }
 
         MacroTileIndex MacroTile::tileIndex(int sdim) const
@@ -42,16 +41,14 @@ namespace rocRoller
                 AssertFatal(sizes[d] > 0, "Invalid tile size: ", ShowValue(sizes[d]));
                 stride = stride * sizes[d];
             }
-            return CoordGraph::MacroTileIndex(
-                sdim,
-                Expression::literal(static_cast<uint>(sizes.at(sdim))),
-                Expression::literal(stride));
+            return MacroTileIndex(sdim,
+                                  Expression::literal(static_cast<uint>(sizes.at(sdim))),
+                                  Expression::literal(stride));
         }
 
         ThreadTileNumber ThreadTile::tileNumber(int sdim) const
         {
-            return CoordGraph::ThreadTileNumber(
-                sdim, Expression::literal(1u), Expression::literal(1u));
+            return ThreadTileNumber(sdim, Expression::literal(1u), Expression::literal(1u));
         }
 
         ThreadTileIndex ThreadTile::tileIndex(int sdim) const
@@ -63,16 +60,14 @@ namespace rocRoller
                 AssertFatal(sizes[d] > 0, "Invalid tile size: ", ShowValue(sizes[d]));
                 stride = stride * sizes[d];
             }
-            return CoordGraph::ThreadTileIndex(
-                sdim,
-                Expression::literal(static_cast<uint>(sizes.at(sdim))),
-                Expression::literal(stride));
+            return ThreadTileIndex(sdim,
+                                   Expression::literal(static_cast<uint>(sizes.at(sdim))),
+                                   Expression::literal(stride));
         }
 
         WaveTileNumber WaveTile::tileNumber(int sdim) const
         {
-            return CoordGraph::WaveTileNumber(
-                sdim, Expression::literal(1u), Expression::literal(1u));
+            return WaveTileNumber(sdim, Expression::literal(1u), Expression::literal(1u));
         }
 
         WaveTileIndex WaveTile::tileIndex(int sdim) const
@@ -84,9 +79,9 @@ namespace rocRoller
                 AssertFatal(sizes[d] > 0, "Invalid tile size: ", ShowValue(sizes[d]));
                 stride = stride * sizes[d];
             }
-            return CoordGraph::WaveTileIndex(sdim,
-                                             Expression::literal(static_cast<uint>(sizes.at(sdim))),
-                                             Expression::literal(stride));
+            return WaveTileIndex(sdim,
+                                 Expression::literal(static_cast<uint>(sizes.at(sdim))),
+                                 Expression::literal(stride));
         }
 
         int MacroTile::elements() const

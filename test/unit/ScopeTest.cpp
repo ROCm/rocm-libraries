@@ -11,8 +11,8 @@
 
 using namespace rocRoller;
 using namespace rocRoller::KernelGraph;
-using namespace rocRoller::KernelGraph::ControlHypergraph;
-using namespace rocRoller::KernelGraph::CoordGraph;
+using namespace rocRoller::KernelGraph::ControlGraph;
+using namespace rocRoller::KernelGraph::CoordinateGraph;
 
 namespace ScopeTest
 {
@@ -22,11 +22,11 @@ namespace ScopeTest
 
     TEST_F(ScopeTest, ScopeOperation)
     {
-        KernelHypergraph kgraph = KernelHypergraph();
+        auto kgraph = rocRoller::KernelGraph::KernelGraph();
 
-        int dst1 = kgraph.coordinates.addElement(CoordGraph::VGPR());
-        int dst2 = kgraph.coordinates.addElement(CoordGraph::VGPR());
-        int dst3 = kgraph.coordinates.addElement(CoordGraph::VGPR());
+        int dst1 = kgraph.coordinates.addElement(VGPR());
+        int dst2 = kgraph.coordinates.addElement(VGPR());
+        int dst3 = kgraph.coordinates.addElement(VGPR());
 
         int kernel = kgraph.control.addElement(Kernel());
 
@@ -42,10 +42,10 @@ namespace ScopeTest
         int assign4
             = kgraph.control.addElement(Assign{Register::Type::Vector, Expression::literal(44u)});
 
-        kgraph.mapper.connect<CoordGraph::VGPR>(assign1, dst1);
-        kgraph.mapper.connect<CoordGraph::VGPR>(assign2, dst2);
-        kgraph.mapper.connect<CoordGraph::VGPR>(assign3, dst3);
-        kgraph.mapper.connect<CoordGraph::VGPR>(assign4, dst1);
+        kgraph.mapper.connect<VGPR>(assign1, dst1);
+        kgraph.mapper.connect<VGPR>(assign2, dst2);
+        kgraph.mapper.connect<VGPR>(assign3, dst3);
+        kgraph.mapper.connect<VGPR>(assign4, dst1);
 
         // kernel(base scope):
         //   - assign vector: 11u

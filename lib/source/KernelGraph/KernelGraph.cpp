@@ -1,10 +1,10 @@
-#include <rocRoller/KernelGraph/KernelHypergraph.hpp>
+#include <rocRoller/KernelGraph/KernelGraph.hpp>
 
 namespace rocRoller
 {
     namespace KernelGraph
     {
-        std::string KernelHypergraph::toDOT(bool drawMappings) const
+        std::string KernelGraph::toDOT(bool drawMappings) const
         {
             std::stringstream ss;
             ss << "digraph {\n";

@@ -6,7 +6,7 @@
 #include <rocRoller/Graph/Hypergraph_fwd.hpp>
 
 #include "ControlEdge.hpp"
-#include "KernelGraph/ControlHypergraph/Operation_fwd.hpp"
+#include "KernelGraph/ControlGraph/Operation_fwd.hpp"
 #include "Operation.hpp"
 
 namespace rocRoller
@@ -19,7 +19,7 @@ namespace rocRoller
      * for loop).  Edges in the graph encode dependencies between nodes.
      *
      */
-    namespace KernelGraph::ControlHypergraph
+    namespace KernelGraph::ControlGraph
     {
         /**
          * Control flow graph.
@@ -27,10 +27,10 @@ namespace rocRoller
          * Nodes in the graph represent operations.  Edges describe
          * dependencies.
          */
-        class ControlHypergraph : public Graph::Hypergraph<Operation, ControlEdge, false>
+        class ControlGraph : public Graph::Hypergraph<Operation, ControlEdge, false>
         {
         public:
-            ControlHypergraph()
+            ControlGraph()
                 : Graph::Hypergraph<Operation, ControlEdge, false>()
             {
             }
@@ -44,7 +44,7 @@ namespace rocRoller
              * @param tag Graph tag/index.
              */
             template <typename T>
-            requires(std::constructible_from<ControlHypergraph::Element, T>) std::optional<T> get(
+            requires(std::constructible_from<ControlGraph::Element, T>) std::optional<T> get(
                 int tag)
             const;
 
@@ -66,4 +66,4 @@ namespace rocRoller
     }
 }
 
-#include "ControlHypergraph_impl.hpp"
+#include "ControlGraph_impl.hpp"
