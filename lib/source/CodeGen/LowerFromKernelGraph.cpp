@@ -386,7 +386,7 @@ namespace rocRoller
             {
                 co_yield Instruction::Comment("Begin Kernel");
                 auto scope = std::make_shared<ScopeManager>(m_context);
-                m_context->setScope(scope);
+                m_context->setScopeManager(scope);
 
                 scope->pushNewScope();
                 auto body = m_graph.control.getOutputNodeIndices<ControlHypergraph::Body>(tag)
@@ -394,7 +394,7 @@ namespace rocRoller
                 co_yield generate(body, coords);
                 scope->popAndReleaseScope();
 
-                m_context->setScope(nullptr);
+                m_context->setScopeManager(nullptr);
                 co_yield Instruction::Comment("End Kernel");
             }
 
@@ -403,7 +403,7 @@ namespace rocRoller
             {
                 rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::Scope({})", tag);
 
-                auto scope = m_context->getScope();
+                auto scope = m_context->getScopeManager();
                 scope->pushNewScope();
                 auto body = m_graph.control.getOutputNodeIndices<ControlHypergraph::Body>(tag)
                                 .to<std::set>();
@@ -508,7 +508,7 @@ namespace rocRoller
                 auto dest = m_context->registerTagManager()->getRegister(
                     dim_tag, assign.regType, varType, assign.valueCount);
 
-                auto scope = m_context->getScope();
+                auto scope = m_context->getScopeManager();
                 scope->addRegister(dim_tag);
 
                 co_yield Expression::generate(dest, assign.expression, m_context);
@@ -542,7 +542,7 @@ namespace rocRoller
                     ci.stride);
                 co_yield Instruction::Comment(concatenate("GEN: ComputeIndex ", tag));
 
-                auto scope    = m_context->getScope();
+                auto scope    = m_context->getScopeManager();
                 uint numBytes = DataTypeInfo::Get(ci.valueType).elementSize;
 
                 coords.setCoordinate(ci.increment, L(0u));

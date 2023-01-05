@@ -127,12 +127,12 @@ namespace rocRoller
         return stream << "Context " << ctx.get();
     }
 
-    std::shared_ptr<KernelGraph::ScopeManager> Context::getScope() const
+    std::shared_ptr<KernelGraph::ScopeManager> Context::getScopeManager() const
     {
         return m_scope;
     }
 
-    void Context::setScope(std::shared_ptr<KernelGraph::ScopeManager> scope)
+    void Context::setScopeManager(std::shared_ptr<KernelGraph::ScopeManager> scope)
     {
         m_scope = scope;
     }

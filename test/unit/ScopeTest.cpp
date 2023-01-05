@@ -47,14 +47,13 @@ namespace ScopeTest
         kgraph.mapper.connect<CoordGraph::VGPR>(assign3, dst3);
         kgraph.mapper.connect<CoordGraph::VGPR>(assign4, dst1);
 
-        // kernel:
-        // - assign vector: 11u
-        // - scope1:
-        //   - scope2:
-        //       - scope3:
+        // kernel(base scope):
+        //   - assign vector: 11u
+        //   - scope1:
+        //     - scope2:
         //         - assign vector: 33u
         //         - assign vector: 44u, using pre-existing vector
-        //   - assign vector: 22u
+        //     - assign vector: 22u
         kgraph.control.addElement(Body(), {kernel}, {assign1});
         kgraph.control.addElement(Sequence(), {assign1}, {scope1});
         kgraph.control.addElement(Body(), {scope1}, {scope2});

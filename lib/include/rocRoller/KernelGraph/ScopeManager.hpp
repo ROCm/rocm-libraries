@@ -1,7 +1,7 @@
 #pragma once
 
 #include <memory>
-#include <set>
+#include <unordered_set>
 #include <vector>
 
 #include <rocRoller/Context_fwd.hpp>
@@ -55,8 +55,8 @@ namespace rocRoller::KernelGraph
         void popAndReleaseScope();
 
     private:
-        std::shared_ptr<Context>   m_context;
-        std::vector<std::set<int>> m_tags;
+        std::shared_ptr<Context>             m_context;
+        std::vector<std::unordered_set<int>> m_tags;
     };
 
 }

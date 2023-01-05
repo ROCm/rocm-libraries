@@ -96,14 +96,14 @@ namespace rocRoller
         std::shared_ptr<RegisterHazardMap> getRegisterHazardMap() const;
 
         /**
-         * @brief Get register scope.
+         * @brief Get register scope manager.
          */
-        std::shared_ptr<KernelGraph::ScopeManager> getScope() const;
+        std::shared_ptr<KernelGraph::ScopeManager> getScopeManager() const;
 
         /**
-         * @brief Set register scope.
+         * @brief Set register scope manager.
          */
-        void setScope(std::shared_ptr<KernelGraph::ScopeManager>);
+        void setScopeManager(std::shared_ptr<KernelGraph::ScopeManager>);
 
     private:
         static ContextPtr
