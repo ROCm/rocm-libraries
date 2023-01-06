@@ -19,6 +19,8 @@ namespace rocRoller
                 return "Random";
             case SchedulerProcedure::Cooperative:
                 return "Cooperative";
+            case SchedulerProcedure::Priority:
+                return "Priority";
             case SchedulerProcedure::Count:
                 return "Count";
             }

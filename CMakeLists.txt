@@ -283,6 +283,7 @@ set(rocroller_src
  lib/source/Costs/UniformCost.cpp
  lib/source/Scheduler.cpp
  lib/source/Schedulers/CooperativeScheduler.cpp
+ lib/source/Schedulers/PriorityScheduler.cpp
  lib/source/Schedulers/RandomScheduler.cpp
  lib/source/Schedulers/RoundRobinScheduler.cpp
  lib/source/Schedulers/SequentialScheduler.cpp

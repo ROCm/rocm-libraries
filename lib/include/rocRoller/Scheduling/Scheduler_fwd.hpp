@@ -12,6 +12,7 @@ namespace rocRoller
             RoundRobin,
             Random,
             Cooperative,
+            Priority,
             Count
         };
 
