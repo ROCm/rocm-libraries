@@ -5,9 +5,11 @@ from pathlib import Path
 from typing import List, Union
 
 
-def top() -> Path:
+def top(loc: str = None) -> Path:
+    path_arg = ["-C", loc] if loc is not None else []
+    command = ["git"] + path_arg + ["rev-parse", "--show-toplevel"]
     p = subprocess.run(
-        ["git", "rev-parse", "--show-toplevel"],
+        command,
         check=True,
         capture_output=True,
         text=True,

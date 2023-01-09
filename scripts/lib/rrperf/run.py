@@ -19,8 +19,8 @@ def empty():
 
 def load_suite(suite: str):
     """Load performance suite from rrsuites.py."""
-
-    tdef = rrperf.git.top() / "scripts" / "rrsuites.py"
+    loc = os.path.dirname(os.path.realpath(__file__))
+    tdef = rrperf.git.top(loc) / "scripts" / "rrsuites.py"
     code, ns = compile(tdef.read_text(), str(tdef), "exec"), {}
     exec(code, ns)
     return ns[suite]()
@@ -150,7 +150,7 @@ def run(
     if token is not None:
         generator = chain(generator, from_token(token))
 
-    top = rrperf.git.top()
+    top = rrperf.git.top(os.path.dirname(os.path.realpath(__file__)))
     if build_dir is None:
         build_dir = get_build_dir()
 
