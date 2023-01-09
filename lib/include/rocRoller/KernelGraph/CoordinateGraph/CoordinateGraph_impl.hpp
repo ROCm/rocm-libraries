@@ -101,13 +101,13 @@ namespace rocRoller
                     {
                         visitor.setLocation(
                             einds, localSrcs, localDsts, localSrcTags, localDstTags);
-                        visitedExprs = visitor(edge);
+                        visitedExprs = visitor.call(edge);
                     }
                     else
                     {
                         visitor.setLocation(
                             einds, localSrcs, localDsts, localSrcTags, localDstTags);
-                        visitedExprs = visitor(edge);
+                        visitedExprs = visitor.call(edge);
                     }
 
                     AssertFatal(visitedExprs.size() == keys.size(), ShowValue(visitedExprs));

@@ -27,6 +27,6 @@ namespace rocRoller
                                        Nop>;
         struct Inputs;
         struct Outputs;
-        struct Tag;
+        struct TagVisitor;
     }
 }

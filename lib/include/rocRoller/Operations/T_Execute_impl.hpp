@@ -130,9 +130,9 @@ namespace rocRoller
             // Determine the inputs and outputs of the xop
             auto inputs_func         = rocRoller::Operations::Inputs();
             auto assign_outputs_func = rocRoller::Operations::AssignOutputs();
-            auto outputs             = assign_outputs_func(*xop, m_next_tag);
+            auto outputs             = assign_outputs_func.call(*xop, m_next_tag);
             m_next_tag++;
-            auto inputs = inputs_func(*xop);
+            auto inputs = inputs_func.call(*xop);
 
             // Add the outputs of the xop to the outputs of the
             // T_Execute operation.
@@ -164,10 +164,10 @@ namespace rocRoller
             for(auto input : m_inputs)
                 msg << " " << input;
 
-            auto func = rocRoller::Operations::ToString();
+            Operations::ToStringVisitor toStringVistor;
 
             for(auto const& xop : m_xops)
-                msg << std::endl << "  " << func(*xop);
+                msg << std::endl << "  " << toStringVistor.call(*xop);
 
             return msg.str();
         }

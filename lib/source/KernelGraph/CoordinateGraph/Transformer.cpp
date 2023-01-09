@@ -127,17 +127,21 @@ namespace rocRoller
                 Throw<FatalError>("Edge transform not defined.");
             }
 
-            template <CTEdgePassthrough T>
-            std::vector<ExpressionPtr> operator()(T const& e)
-            {
-                return std::visit(*this, e);
-            }
-
             template <typename T>
             std::vector<ExpressionPtr> operator()(T const& e)
             {
                 Throw<FatalError>("Forward derivative not implemented yet for: ",
                                   ShowValue(e.toString()));
+            }
+
+            std::vector<ExpressionPtr> call(Edge const& e)
+            {
+                return std::visit(
+                    [&](Edge const& edge) {
+                        return std::visit(
+                            [&](auto const& subEdge) { return std::visit(*this, subEdge); }, edge);
+                    },
+                    e);
             }
         };
 
@@ -223,17 +227,21 @@ namespace rocRoller
                 Throw<FatalError>("Edge transform not defined.");
             }
 
-            template <CTEdgePassthrough T>
-            std::vector<ExpressionPtr> operator()(T const& e)
-            {
-                return std::visit(*this, e);
-            }
-
             template <typename T>
             std::vector<ExpressionPtr> operator()(T const& e)
             {
                 Throw<FatalError>("Reverse derivative not implemented yet for: ",
                                   ShowValue(e.toString()));
+            }
+
+            std::vector<ExpressionPtr> call(Edge const& e)
+            {
+                return std::visit(
+                    [&](Edge const& edge) {
+                        return std::visit(
+                            [&](auto const& subEdge) { return std::visit(*this, subEdge); }, edge);
+                    },
+                    e);
             }
         };
 

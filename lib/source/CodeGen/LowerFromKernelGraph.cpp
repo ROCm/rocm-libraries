@@ -180,7 +180,7 @@ namespace rocRoller
                     for(auto const& tag : nodes)
                     {
                         auto op = std::get<Operation>(m_graph.control.getElement(tag));
-                        co_yield (*this)(tag, op, coords);
+                        co_yield call(tag, op, coords);
                     }
 
                     // Add output nodes to candidates.
@@ -263,7 +263,7 @@ namespace rocRoller
             }
 
             Generator<Instruction>
-                operator()(int tag, Operation const& operation, Transformer const& coords)
+                call(int tag, Operation const& operation, Transformer const& coords)
             {
                 auto opName = toString(operation);
                 rocRoller::Log::getLogger()->debug(
@@ -281,7 +281,7 @@ namespace rocRoller
                 m_completedControlNodes.insert(tag);
             }
 
-            Generator<Instruction> operator()(Operations::E_Neg, int tag, int a, int b)
+            Generator<Instruction> generateEOp(Operations::E_Neg, int tag, int a, int b)
             {
                 co_yield Instruction::Comment("GEN: E_Neg");
 
@@ -291,28 +291,28 @@ namespace rocRoller
                 co_yield generateOp<Expression::Negate>(dst, src);
             }
 
-            Generator<Instruction> operator()(Operations::E_Abs, int tag, int a, int b)
+            Generator<Instruction> generateEOp(Operations::E_Abs, int tag, int a, int b)
             {
                 co_yield Instruction::Comment("GEN: E_Abs");
                 // TODO: Finish codegen for E_Abs
                 Throw<FatalError>("Not implemented yet.");
             }
 
-            Generator<Instruction> operator()(Operations::E_Not, int tag, int a, int b)
+            Generator<Instruction> generateEOp(Operations::E_Not, int tag, int a, int b)
             {
                 co_yield Instruction::Comment("GEN: E_Not");
                 // TODO: Finish codegen for E_Not
                 Throw<FatalError>("Not implemented yet.");
             }
 
-            Generator<Instruction> operator()(Operations::E_Add, int tag, int a, int b)
+            Generator<Instruction> generateEOp(Operations::E_Add, int tag, int a, int b)
             {
                 co_yield Instruction::Comment("GEN: E_Add");
 
                 co_yield generateCommutativeBinaryOp<Expression::Add>(tag, a, b);
             }
 
-            Generator<Instruction> operator()(Operations::E_Sub, int tag, int a, int b)
+            Generator<Instruction> generateEOp(Operations::E_Sub, int tag, int a, int b)
             {
                 co_yield Instruction::Comment("GEN: E_Sub");
 
@@ -323,14 +323,14 @@ namespace rocRoller
                 co_yield generateOp<Expression::Subtract>(dst, lhs, rhs);
             }
 
-            Generator<Instruction> operator()(Operations::E_Mul, int tag, int a, int b)
+            Generator<Instruction> generateEOp(Operations::E_Mul, int tag, int a, int b)
             {
                 co_yield Instruction::Comment("GEN: E_Mul");
 
                 co_yield generateCommutativeBinaryOp<Expression::Multiply>(tag, a, b);
             }
 
-            Generator<Instruction> operator()(Operations::E_Div, int tag, int a, int b)
+            Generator<Instruction> generateEOp(Operations::E_Div, int tag, int a, int b)
             {
                 co_yield Instruction::Comment("GEN: E_Div");
 
@@ -341,14 +341,14 @@ namespace rocRoller
                 co_yield generateOp<Expression::Divide>(dst, lhs, rhs);
             }
 
-            Generator<Instruction> operator()(Operations::E_And, int tag, int a, int b)
+            Generator<Instruction> generateEOp(Operations::E_And, int tag, int a, int b)
             {
                 co_yield Instruction::Comment("GEN: E_And");
                 // TODO: Finish codegen for E_And
                 Throw<FatalError>("Not implemented yet.");
             }
 
-            Generator<Instruction> operator()(Operations::E_Or, int tag, int a, int b)
+            Generator<Instruction> generateEOp(Operations::E_Or, int tag, int a, int b)
             {
                 co_yield Instruction::Comment("GEN: E_Or");
                 // TODO: Finish codegen for E_Or
@@ -368,7 +368,7 @@ namespace rocRoller
                 int dest = connections[0].coordinate;
                 co_yield std::visit(
                     [&](auto&& arg) -> Generator<Instruction> {
-                        co_yield (*this)(arg, dest, eop.a, eop.b);
+                        co_yield generateEOp(arg, dest, eop.a, eop.b);
                     },
                     eop.op);
             }

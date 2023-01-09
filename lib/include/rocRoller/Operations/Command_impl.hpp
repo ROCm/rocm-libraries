@@ -28,7 +28,8 @@ namespace rocRoller
 
         AssertFatal(std::find(m_operations.begin(), m_operations.end(), op) == m_operations.end());
 
-        auto outputs = Operations::AssignOutputs()(*op, m_nextTagValue);
+        Operations::AssignOutputs assignOutputsVisitor;
+        auto                      outputs = assignOutputsVisitor.call(*op, m_nextTagValue);
 
         for(auto const& tag : outputs)
         {
@@ -42,10 +43,10 @@ namespace rocRoller
         m_operations.emplace_back(op);
 
         auto set = Operations::SetCommand(shared_from_this());
-        set(*op);
+        set.call(*op);
 
-        auto allocate = Operations::AllocateArguments();
-        allocate(*op);
+        Operations::AllocateArguments allocate;
+        allocate.call(*op);
     }
 
     // Allocate a single command argument by incrementing the most recent offset.
@@ -169,11 +170,11 @@ namespace rocRoller
     {
         std::string rv;
 
-        auto func = Operations::ToString();
+        Operations::ToStringVisitor toStringVisitor;
 
         for(auto const& op : m_operations)
         {
-            std::string op_string = func(*op, runtime_args);
+            std::string op_string = toStringVisitor.call(*op, runtime_args);
             if(op_string.size() > 0)
                 rv += op_string + "\n";
         }

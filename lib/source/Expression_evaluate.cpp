@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2021-2022 Advanced Micro Devices, Inc.
+ * Copyright 2021-2023 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -114,8 +114,8 @@ namespace rocRoller
                                   ").");
             }
 
-            CommandArgumentValue operator()(CommandArgumentValue const& lhs,
-                                            CommandArgumentValue const& rhs) const
+            CommandArgumentValue call(CommandArgumentValue const& lhs,
+                                      CommandArgumentValue const& rhs) const
             {
                 return std::visit(*this, lhs, rhs);
             }
@@ -200,7 +200,7 @@ namespace rocRoller
                                   typeid(UnaryExpr).name());
             }
 
-            CommandArgumentValue operator()(CommandArgumentValue const& arg) const
+            CommandArgumentValue call(CommandArgumentValue const& arg) const
             {
                 return std::visit(*this, arg);
             }
@@ -384,7 +384,7 @@ namespace rocRoller
                 auto lhs       = call(expr.lhs);
                 auto rhs       = call(expr.rhs);
                 auto evaluator = OperationEvaluatorVisitor<BinaryExp>();
-                return evaluator(lhs, rhs);
+                return evaluator.call(lhs, rhs);
             }
 
             template <CUnary UnaryExp>
@@ -392,7 +392,7 @@ namespace rocRoller
             {
                 auto arg       = call(expr.arg);
                 auto evaluator = OperationEvaluatorVisitor<UnaryExp>();
-                return evaluator(arg);
+                return evaluator.call(arg);
             }
 
             CommandArgumentValue operator()(MatrixMultiply const& expr)

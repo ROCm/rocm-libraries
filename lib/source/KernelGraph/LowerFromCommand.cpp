@@ -30,7 +30,7 @@ namespace rocRoller
             {
                 auto element = graph.getElement(tag);
 
-                visit(
+                std::visit(
                     rocRoller::overloaded{
                         [](VGPR const& op) {},
                         [&rv](Linear const& op) {
@@ -127,7 +127,8 @@ namespace rocRoller
                 graph.coordinates.addElement(Flatten(), dims, std::vector<int>{linear});
                 graph.coordinates.addElement(DataFlow(), {user}, {linear});
 
-                auto vtype = Operations::VariableTypeVisitor()(*m_command->findTag(tload.getTag()));
+                Operations::VariableTypeVisitor variableTypeVisitor;
+                auto vtype = variableTypeVisitor.call(*m_command->findTag(tload.getTag()));
                 auto load  = graph.control.addElement(LoadLinear(vtype));
                 graph.control.addElement(Body(), {m_kernel}, {load});
 
@@ -331,15 +332,16 @@ namespace rocRoller
                 {
                     auto sinputs = std::visit(
                         overloaded{
-                            [&](Operations::E_Binary const& op) {
+                            [](Operations::E_Binary const& op) {
                                 return std::vector<int>{op.a, op.b};
                             },
-                            [&](Operations::E_Unary const& op) { return std::vector<int>{op.a}; },
-                            [&](Operations::Nop const& op) { return std::vector<int>{}; },
+                            [](Operations::E_Unary const& op) { return std::vector<int>{op.a}; },
+                            [](Operations::Nop const& op) { return std::vector<int>{}; },
                         },
                         *xop);
 
-                    auto soutputs = Operations::Outputs()(*xop);
+                    Operations::Outputs outputsVisitor;
+                    auto                soutputs = outputsVisitor.call(*xop);
 
                     std::vector<int> coordinate_inputs, coordinate_outputs;
                     std::vector<int> control_inputs;
@@ -387,7 +389,8 @@ namespace rocRoller
                     else
                         graph.mapper.connect<Linear>(op, coordinate_outputs[0]);
 
-                    m_op.insert_or_assign(Operations::Tag()(*xop), op);
+                    Operations::TagVisitor tagVisitor;
+                    m_op.insert_or_assign(tagVisitor.call(*xop), op);
                 }
             }
 
@@ -435,7 +438,7 @@ namespace rocRoller
 
             void operator()(Operations::Nop const& x) {}
 
-            KernelGraph operator()(std::shared_ptr<Command> command)
+            KernelGraph call(std::shared_ptr<Command> command)
             {
                 m_command = command;
                 for(auto const& op : command->operations())
@@ -465,7 +468,8 @@ namespace rocRoller
             TIMER(t, "KernelGraph::translate");
             rocRoller::Log::getLogger()->debug("KernelGraph::translate(); Command\n{}",
                                                command->toString());
-            return TranslateVisitor()(command);
+            TranslateVisitor visitor;
+            return visitor.call(command);
         }
     }
 }

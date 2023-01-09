@@ -28,7 +28,7 @@ namespace rocRoller
 
         struct Inputs
         {
-            std::unordered_set<int> operator()(Operation const&);
+            std::unordered_set<int> call(Operation const&);
 
             std::unordered_set<int> operator()(T_Load_Linear const&);
             std::unordered_set<int> operator()(T_Load_Scalar const&);
@@ -38,7 +38,7 @@ namespace rocRoller
             std::unordered_set<int> operator()(T_Store_Tiled const&);
             std::unordered_set<int> operator()(T_Execute const&);
 
-            std::unordered_set<int> operator()(XOp const&);
+            std::unordered_set<int> call(XOp const&);
             std::unordered_set<int> operator()(E_Unary const&);
             std::unordered_set<int> operator()(E_Binary const&);
             std::unordered_set<int> operator()(Nop const&);
@@ -46,7 +46,7 @@ namespace rocRoller
 
         struct Outputs
         {
-            std::unordered_set<int> operator()(Operation const&);
+            std::unordered_set<int> call(Operation const&);
 
             std::unordered_set<int> operator()(T_Load_Linear const&);
             std::unordered_set<int> operator()(T_Load_Scalar const&);
@@ -56,22 +56,22 @@ namespace rocRoller
             std::unordered_set<int> operator()(T_Store_Tiled const&);
             std::unordered_set<int> operator()(T_Execute const&);
 
-            std::unordered_set<int> operator()(XOp const&);
+            std::unordered_set<int> call(XOp const&);
             std::unordered_set<int> operator()(E_Unary const&);
             std::unordered_set<int> operator()(E_Binary const&);
             std::unordered_set<int> operator()(Nop const&);
         };
 
-        struct Tag
+        struct TagVisitor
         {
-            int operator()(XOp const&);
+            int call(XOp const&);
             int operator()(E_Unary const&);
             int operator()(E_Binary const&);
         };
 
         struct AssignOutputs
         {
-            std::unordered_set<int> operator()(Operation&, int);
+            std::unordered_set<int> call(Operation&, int);
 
             std::unordered_set<int> operator()(T_Load_Linear&);
             std::unordered_set<int> operator()(T_Load_Scalar&);
@@ -81,19 +81,18 @@ namespace rocRoller
             std::unordered_set<int> operator()(T_Store_Tiled&);
             std::unordered_set<int> operator()(T_Execute&);
 
-            std::unordered_set<int> operator()(XOp&, int);
+            std::unordered_set<int> call(XOp&, int);
             std::unordered_set<int> operator()(E_Unary&);
             std::unordered_set<int> operator()(E_Binary&);
-
             std::unordered_set<int> operator()(Nop&);
 
         private:
             int m_nextTagValue = -1;
         };
 
-        struct ToString
+        struct ToStringVisitor
         {
-            std::string operator()(Operation const&, const unsigned char*);
+            std::string call(Operation const&, const unsigned char*);
 
             std::string operator()(T_Load_Linear const&);
             std::string operator()(T_Load_Scalar const&);
@@ -103,7 +102,7 @@ namespace rocRoller
             std::string operator()(T_Store_Tiled const&);
             std::string operator()(T_Execute const&);
 
-            std::string operator()(XOp const&);
+            std::string call(XOp const&);
             std::string operator()(E_Unary const&);
             std::string operator()(E_Binary const&);
             std::string operator()(Nop const&);
@@ -116,7 +115,7 @@ namespace rocRoller
         {
             SetCommand(std::shared_ptr<Command>);
 
-            void operator()(Operation&);
+            void call(Operation&);
 
             void operator()(T_Load_Linear&);
             void operator()(T_Load_Scalar&);
@@ -132,7 +131,7 @@ namespace rocRoller
 
         struct AllocateArguments
         {
-            void operator()(Operation&);
+            void call(Operation&);
 
             void operator()(T_Load_Linear&);
             void operator()(T_Load_Scalar&);
@@ -146,7 +145,7 @@ namespace rocRoller
 
         struct VariableTypeVisitor
         {
-            rocRoller::VariableType operator()(Operation&);
+            rocRoller::VariableType call(Operation&);
 
             rocRoller::VariableType operator()(T_Load_Linear&);
             rocRoller::VariableType operator()(T_Load_Scalar&);

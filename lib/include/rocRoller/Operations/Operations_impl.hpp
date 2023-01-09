@@ -12,7 +12,7 @@ namespace rocRoller
 {
     namespace Operations
     {
-        inline std::unordered_set<int> Inputs::operator()(Operation const& op)
+        inline std::unordered_set<int> Inputs::call(Operation const& op)
         {
             return std::visit(*this, op);
         }
@@ -52,7 +52,7 @@ namespace rocRoller
             return exec.getInputs();
         }
 
-        inline std::unordered_set<int> Inputs::operator()(XOp const& op)
+        inline std::unordered_set<int> Inputs::call(XOp const& op)
         {
             return std::visit(*this, op);
         }
@@ -72,7 +72,7 @@ namespace rocRoller
             return {};
         }
 
-        inline std::unordered_set<int> Outputs::operator()(Operation const& op)
+        inline std::unordered_set<int> Outputs::call(Operation const& op)
         {
             return std::visit(*this, op);
         }
@@ -112,7 +112,7 @@ namespace rocRoller
             return exec.getOutputs();
         }
 
-        inline std::unordered_set<int> Outputs::operator()(XOp const& op)
+        inline std::unordered_set<int> Outputs::call(XOp const& op)
         {
             return std::visit(*this, op);
         }
@@ -132,22 +132,22 @@ namespace rocRoller
             return {};
         }
 
-        inline int Tag::operator()(XOp const& op)
+        inline int TagVisitor::call(XOp const& op)
         {
             return std::visit(*this, op);
         }
 
-        inline int Tag::operator()(E_Unary const& unary)
+        inline int TagVisitor::operator()(E_Unary const& unary)
         {
             return unary.getTag();
         }
 
-        inline int Tag::operator()(E_Binary const& binary)
+        inline int TagVisitor::operator()(E_Binary const& binary)
         {
             return binary.getTag();
         }
 
-        inline std::unordered_set<int> AssignOutputs::operator()(Operation& op, int nextTagValue)
+        inline std::unordered_set<int> AssignOutputs::call(Operation& op, int nextTagValue)
         {
             m_nextTagValue = nextTagValue;
 
@@ -218,7 +218,7 @@ namespace rocRoller
             return {};
         }
 
-        inline std::unordered_set<int> AssignOutputs::operator()(XOp& op, int nextTagValue)
+        inline std::unordered_set<int> AssignOutputs::call(XOp& op, int nextTagValue)
         {
             m_nextTagValue = nextTagValue;
 
@@ -247,64 +247,64 @@ namespace rocRoller
             return {unary.getTag()};
         }
 
-        inline std::string ToString::operator()(Operation const&     op,
-                                                const unsigned char* runtime_args)
+        inline std::string ToStringVisitor::call(Operation const&     op,
+                                                 const unsigned char* runtime_args)
         {
             m_runtime_args = runtime_args;
             return std::visit(*this, op);
         }
 
-        inline std::string ToString::operator()(T_Load_Linear const& load)
+        inline std::string ToStringVisitor::operator()(T_Load_Linear const& load)
         {
             return load.toString(m_runtime_args);
         }
 
-        inline std::string ToString::operator()(T_Load_Scalar const& load)
+        inline std::string ToStringVisitor::operator()(T_Load_Scalar const& load)
         {
             return load.toString(m_runtime_args);
         }
 
-        inline std::string ToString::operator()(T_Load_Tiled const& load)
+        inline std::string ToStringVisitor::operator()(T_Load_Tiled const& load)
         {
             return load.toString(m_runtime_args);
         }
 
-        inline std::string ToString::operator()(T_Mul const& mul)
+        inline std::string ToStringVisitor::operator()(T_Mul const& mul)
         {
             return mul.toString();
         }
 
-        inline std::string ToString::operator()(T_Store_Linear const& store)
+        inline std::string ToStringVisitor::operator()(T_Store_Linear const& store)
         {
             return store.toString(m_runtime_args);
         }
 
-        inline std::string ToString::operator()(T_Store_Tiled const& store)
+        inline std::string ToStringVisitor::operator()(T_Store_Tiled const& store)
         {
             return store.toString(m_runtime_args);
         }
 
-        inline std::string ToString::operator()(T_Execute const& exec)
+        inline std::string ToStringVisitor::operator()(T_Execute const& exec)
         {
             return exec.toString();
         }
 
-        inline std::string ToString::operator()(XOp const& op)
+        inline std::string ToStringVisitor::call(XOp const& op)
         {
             return std::visit(*this, op);
         }
 
-        inline std::string ToString::operator()(E_Unary const& unary)
+        inline std::string ToStringVisitor::operator()(E_Unary const& unary)
         {
             return unary.toString();
         }
 
-        inline std::string ToString::operator()(E_Binary const& binary)
+        inline std::string ToStringVisitor::operator()(E_Binary const& binary)
         {
             return binary.toString();
         }
 
-        inline std::string ToString::operator()(Nop const& exec)
+        inline std::string ToStringVisitor::operator()(Nop const& exec)
         {
             return "";
         }
@@ -314,7 +314,7 @@ namespace rocRoller
         {
         }
 
-        inline void SetCommand::operator()(Operation& op)
+        inline void SetCommand::call(Operation& op)
         {
             std::visit(*this, op);
         }
@@ -356,7 +356,7 @@ namespace rocRoller
 
         inline void SetCommand::operator()(Nop& exec) {}
 
-        inline void AllocateArguments::operator()(Operation& op)
+        inline void AllocateArguments::call(Operation& op)
         {
             return std::visit(*this, op);
         }
@@ -393,7 +393,7 @@ namespace rocRoller
         inline void AllocateArguments::operator()(Nop& nop) {}
 
         inline rocRoller::VariableType
-            rocRoller::Operations::VariableTypeVisitor::operator()(Operation& op)
+            rocRoller::Operations::VariableTypeVisitor::call(Operation& op)
         {
             return std::visit(*this, op);
         }

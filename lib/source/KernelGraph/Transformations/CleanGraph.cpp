@@ -38,7 +38,7 @@ namespace rocRoller
                 Expr cpy = expr;
                 if(expr.arg)
                 {
-                    cpy.arg = (*this)(expr.arg);
+                    cpy.arg = call(expr.arg);
                 }
                 return std::make_shared<Expression::Expression>(cpy);
             }
@@ -49,11 +49,11 @@ namespace rocRoller
                 Expr cpy = expr;
                 if(expr.lhs)
                 {
-                    cpy.lhs = (*this)(expr.lhs);
+                    cpy.lhs = call(expr.lhs);
                 }
                 if(expr.rhs)
                 {
-                    cpy.rhs = (*this)(expr.rhs);
+                    cpy.rhs = call(expr.rhs);
                 }
                 return std::make_shared<Expression::Expression>(cpy);
             }
@@ -64,15 +64,15 @@ namespace rocRoller
                 Expr cpy = expr;
                 if(expr.lhs)
                 {
-                    cpy.lhs = (*this)(expr.lhs);
+                    cpy.lhs = call(expr.lhs);
                 }
                 if(expr.r1hs)
                 {
-                    cpy.r1hs = (*this)(expr.r1hs);
+                    cpy.r1hs = call(expr.r1hs);
                 }
                 if(expr.r2hs)
                 {
-                    cpy.r2hs = (*this)(expr.r2hs);
+                    cpy.r2hs = call(expr.r2hs);
                 }
                 return std::make_shared<Expression::Expression>(cpy);
             }
@@ -92,7 +92,7 @@ namespace rocRoller
                 return std::make_shared<Expression::Expression>(expr);
             }
 
-            ExpressionPtr operator()(ExpressionPtr expr) const
+            ExpressionPtr call(ExpressionPtr expr) const
             {
                 if(!expr)
                     return expr;
@@ -108,7 +108,7 @@ namespace rocRoller
         ExpressionPtr cleanArguments(ExpressionPtr expr, std::shared_ptr<AssemblyKernel> kernel)
         {
             auto visitor = CleanExpressionVisitor(kernel);
-            return visitor(expr);
+            return visitor.call(expr);
         }
 
         /**
@@ -128,15 +128,15 @@ namespace rocRoller
             Dimension visitDimension(int tag, T const& dim)
             {
                 auto d   = dim;
-                d.size   = m_clean_arguments(dim.size);
-                d.stride = m_clean_arguments(dim.stride);
+                d.size   = m_clean_arguments.call(dim.size);
+                d.stride = m_clean_arguments.call(dim.stride);
                 return d;
             }
 
             Operation visitOperation(ForLoopOp const& op)
             {
                 auto forOp      = op;
-                forOp.condition = m_clean_arguments(op.condition);
+                forOp.condition = m_clean_arguments.call(op.condition);
                 return forOp;
             }
 

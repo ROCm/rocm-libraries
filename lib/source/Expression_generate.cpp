@@ -279,7 +279,7 @@ namespace rocRoller
                                               CommandArgumentValue const& expr)
             {
                 auto regLiteral = Register::Value::Literal(expr);
-                co_yield (*this)(dest, regLiteral);
+                co_yield call(dest, regLiteral);
             }
 
             Generator<Instruction> operator()(Register::ValuePtr& dest, DataFlowTag const& expr)

@@ -12,10 +12,6 @@ namespace rocRoller
     namespace KernelGraph::CoordinateGraph
     {
         template <typename T>
-        concept CTEdgePassthrough = std::is_same<Edge, T>::value || std::is_same<DataFlowEdge, T>::
-            value || std::is_same<CoordinateTransformEdge, T>::value;
-
-        template <typename T>
         concept CTUndefinedEdge = std::is_same<ConstructMacroTile, T>::value || std::
             is_same<DestructMacroTile, T>::value || std::is_same<Forget, T>::value;
 
@@ -83,16 +79,20 @@ namespace rocRoller
                 Throw<FatalError>("Edge transform not defined.");
             }
 
-            template <CTEdgePassthrough T>
-            std::vector<Expression::ExpressionPtr> operator()(T const& e)
-            {
-                return std::visit(*this, e);
-            }
-
             template <typename T>
             std::vector<Expression::ExpressionPtr> operator()(T const& e)
             {
                 return indexes;
+            }
+
+            std::vector<Expression::ExpressionPtr> call(Edge const& e)
+            {
+                return std::visit(
+                    [&](Edge const& edge) {
+                        return std::visit(
+                            [&](auto const& subEdge) { return std::visit(*this, subEdge); }, edge);
+                    },
+                    e);
             }
         };
 
@@ -140,16 +140,20 @@ namespace rocRoller
                 Throw<FatalError>("Edge transform not defined.");
             }
 
-            template <CTEdgePassthrough T>
-            std::vector<Expression::ExpressionPtr> operator()(T const& e)
-            {
-                return std::visit(*this, e);
-            }
-
             template <typename T>
             std::vector<Expression::ExpressionPtr> operator()(T const& e)
             {
                 return indexes;
+            }
+
+            std::vector<Expression::ExpressionPtr> call(Edge const& e)
+            {
+                return std::visit(
+                    [&](Edge const& edge) {
+                        return std::visit(
+                            [&](auto const& subEdge) { return std::visit(*this, subEdge); }, edge);
+                    },
+                    e);
             }
         };
     }

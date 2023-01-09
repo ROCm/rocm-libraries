@@ -47,7 +47,7 @@ namespace rocRoller
             args->append(name, value);
         }
 
-        void operator()(CommandArgumentValue const& value)
+        void call(CommandArgumentValue const& value)
         {
             std::visit(*this, value);
         }
@@ -59,7 +59,7 @@ namespace rocRoller
         if constexpr(std::is_same<T, CommandArgumentValue>::value)
         {
             AppendKernelArgumentsVisitor visitor{this, name};
-            visitor(value);
+            visitor.call(value);
         }
         else
         {

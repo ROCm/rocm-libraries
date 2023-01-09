@@ -236,7 +236,7 @@ namespace rocRoller
 
             Result operator()(WaveTilePtr const& expr) const
             {
-                return (*this)(expr->vgpr);
+                return call(expr->vgpr);
             }
 
             Result call(Expression const& expr) const
@@ -287,29 +287,21 @@ namespace rocRoller
                 bool r1hs = false;
                 bool r2hs = false;
 
-                if(a.lhs != nullptr && b.lhs != nullptr)
-                {
-                    lhs = std::visit(*this, *a.lhs, *b.lhs);
-                }
-                else if(a.lhs == nullptr && b.lhs == nullptr)
+                lhs = call(a.lhs, b.lhs);
+                if(a.lhs == nullptr && b.lhs == nullptr)
                 {
                     lhs = true;
                 }
 
-                if(a.r1hs != nullptr && b.r1hs != nullptr)
-                {
-                    r1hs = std::visit(*this, *a.r1hs, *b.r1hs);
-                }
-                else if(a.r1hs == nullptr && b.r1hs == nullptr)
+                r1hs = call(a.r1hs, b.r1hs);
+                if(a.r1hs == nullptr && b.r1hs == nullptr)
                 {
                     r1hs = true;
                 }
 
-                if(a.r2hs != nullptr && b.r2hs != nullptr)
-                {
-                    r2hs = std::visit(*this, *a.r2hs, *b.r2hs);
-                }
-                else if(a.r2hs == nullptr && b.r2hs == nullptr)
+                r2hs = call(a.r2hs, b.r2hs);
+
+                if(a.r2hs == nullptr && b.r2hs == nullptr)
                 {
                     r2hs = true;
                 }
@@ -322,20 +314,14 @@ namespace rocRoller
                 bool lhs = false;
                 bool rhs = false;
 
-                if(a.lhs != nullptr && b.lhs != nullptr)
-                {
-                    lhs = std::visit(*this, *a.lhs, *b.lhs);
-                }
-                else if(a.lhs == nullptr && b.lhs == nullptr)
+                lhs = call(a.lhs, b.lhs);
+                if(a.lhs == nullptr && b.lhs == nullptr)
                 {
                     lhs = true;
                 }
 
-                if(a.rhs != nullptr && b.rhs != nullptr)
-                {
-                    rhs = std::visit(*this, *a.rhs, *b.rhs);
-                }
-                else if(a.rhs == nullptr && b.rhs == nullptr)
+                rhs = call(a.rhs, b.rhs);
+                if(a.rhs == nullptr && b.rhs == nullptr)
                 {
                     rhs = true;
                 }
@@ -346,11 +332,11 @@ namespace rocRoller
             template <CUnary T>
             bool operator()(T const& a, T const& b)
             {
-                if(a.arg != nullptr && b.arg != nullptr)
+                if(a.arg == nullptr && b.arg == nullptr)
                 {
-                    return std::visit(*this, *a.arg, *b.arg);
+                    return true;
                 }
-                return a.arg == nullptr && b.arg == nullptr;
+                return call(a.arg, b.arg);
             }
 
             bool operator()(CommandArgumentValue const& a, CommandArgumentValue const& b)
@@ -390,7 +376,7 @@ namespace rocRoller
                 return false;
             }
 
-            bool operator()(ExpressionPtr const& a, ExpressionPtr const& b)
+            bool call(ExpressionPtr const& a, ExpressionPtr const& b)
             {
                 if(a == nullptr)
                 {
@@ -407,7 +393,7 @@ namespace rocRoller
         bool identical(ExpressionPtr const& a, ExpressionPtr const& b)
         {
             auto visitor = ExpressionIdenticalVisitor();
-            return visitor(a, b);
+            return visitor.call(a, b);
         }
 
         /*

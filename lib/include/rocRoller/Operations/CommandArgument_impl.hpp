@@ -210,7 +210,7 @@ namespace rocRoller
             return value<Value>();
         }
 
-        VariableType operator()(CommandArgumentValue const& val) const
+        VariableType call(CommandArgumentValue const& val) const
         {
             return std::visit(*this, val);
         }
@@ -219,7 +219,7 @@ namespace rocRoller
     inline VariableType variableType(CommandArgumentValue const& val)
     {
         CommandArgumentValueVariableTypeVisitor visitor;
-        return visitor(val);
+        return visitor.call(val);
     }
 
     struct CommandArgumentValueNameVisitor
