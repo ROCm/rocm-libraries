@@ -27,7 +27,7 @@ if id "${_USER}" &>/dev/null; then
     echo "${_USER} already exists, skipping creation."
 else
     echo "Creating user ${_USER}."
-    useradd -m ${_USER} --uid ${_UID} --gid tty --gid video -s /bin/bash
+    useradd -o -m ${_USER} --uid ${_UID} --gid tty --gid video -s /bin/bash
     mkhomedir_helper ${_USER}
 
     echo "$_USER    ALL=(ALL:ALL) NOPASSWD: ALL" >> /etc/sudoers
