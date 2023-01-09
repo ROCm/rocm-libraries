@@ -29,7 +29,7 @@ namespace rocRoller
 
             Cost(ContextPtr);
 
-            static const std::string Name;
+            static const std::string Basename;
 
             virtual std::string name()                               = 0;
             virtual float       cost(const InstructionStatus&) const = 0;

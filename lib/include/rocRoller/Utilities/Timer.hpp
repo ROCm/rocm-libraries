@@ -87,7 +87,7 @@ namespace rocRoller
     {
     public:
         Timer() = delete;
-        Timer(std::string name);
+        explicit Timer(std::string name);
         virtual ~Timer();
 
         /**

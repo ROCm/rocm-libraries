@@ -26,7 +26,7 @@ namespace rocRoller
     {
     public:
         HIPTimer() = delete;
-        HIPTimer(std::string name);
+        explicit HIPTimer(std::string name);
         HIPTimer(std::string name, hipStream_t stream);
         virtual ~HIPTimer();
 

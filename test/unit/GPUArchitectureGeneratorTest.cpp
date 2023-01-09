@@ -20,6 +20,7 @@ TEST_F(GPUArchitectureGeneratorTest, BasicYAML)
     std::stringstream ss;
     ss << generated_source_file.rdbuf();
     std::string generated_source = ss.str();
+    EXPECT_NE(generated_source, "");
 
     auto readback = rocRoller::GPUArchitecture::readYaml("output.yaml");
     EXPECT_EQ(readback.size(), 14);
@@ -39,6 +40,7 @@ TEST_F(GPUArchitectureGeneratorTest, BasicMsgpack)
     std::stringstream ss;
     ss << generated_source_file.rdbuf();
     std::string generated_source = ss.str();
+    EXPECT_NE(generated_source, "");
 
     auto readback = rocRoller::GPUArchitecture::readMsgpack("output.msgpack");
     EXPECT_EQ(readback.size(), 14);

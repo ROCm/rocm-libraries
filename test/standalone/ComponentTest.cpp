@@ -21,7 +21,7 @@ struct Printer
 {
     using Argument = std::shared_ptr<TestArgument>;
 
-    static const std::string Name;
+    static const std::string Basename;
 
     virtual void print() = 0;
 };
@@ -34,7 +34,6 @@ struct APrinter : public Printer
 {
     using Base = Printer;
     static const std::string Name;
-    static const std::string Basename;
 
     static bool Match(Argument arg)
     {
@@ -59,7 +58,6 @@ struct BPrinter : public Printer
 {
     using Base = Printer;
     static const std::string Name;
-    static const std::string Basename;
 
     static bool Match(Argument arg)
     {

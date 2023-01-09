@@ -7,7 +7,7 @@ option(ROCROLLER_ENABLE_TIMERS         "Enable rocRoller timer code." OFF)
 option(ROCROLLER_TESTS_SKIP_GUIDEPOSTS "Skip compiling guidepost tests." OFF)
 option(ROCROLLER_TESTS_USE_YAML_CPP    "Use yaml-cpp in testing." ON)
 option(ROCROLLER_USE_HIP               "Use HIP within the rocRoller." ON)
-option(SKIP_CPPCHECK                    "Skip CPPCHECK." OFF)
+option(SKIP_CPPCHECK                   "Skip CPPCHECK." ON)
 
 option(CODE_COVERAGE                    "Build with code coverage flags (clang only)" OFF)
 
@@ -105,12 +105,17 @@ endif()
 target_compile_options(gtest PUBLIC ${EXTRA_COMPILE_OPTIONS})
 target_compile_options(gmock PUBLIC ${EXTRA_COMPILE_OPTIONS})
 
-if(NOT SKIP_CPPCHECK)
+if(SKIP_CPPCHECK)
+  unset(CMAKE_CXX_CPPCHECK CACHE)
+else()
   find_program(CMAKE_CXX_CPPCHECK NAMES cppcheck)
   if (CMAKE_CXX_CPPCHECK)
       list(
           APPEND CMAKE_CXX_CPPCHECK
               "--enable=warning"
+              "--enable=performance"
+              "--enable=portability"
+              "--enable=style"
               "--error-exitcode=10"
               "--inconclusive"
               "--force"

@@ -23,16 +23,19 @@ namespace rocRoller
          * @param kernelName The name of the kernel (default is "")
          * @return std::vector<char>
          */
-        std::vector<char> assembleMachineCode(std::string                  machineCode,
+        std::vector<char> assembleMachineCode(const std::string&           machineCode,
                                               const GPUArchitectureTarget& target,
-                                              std::string                  kernelName = "");
+                                              const std::string&           kernelName);
+
+        std::vector<char> assembleMachineCode(const std::string&           machineCode,
+                                              const GPUArchitectureTarget& target);
 
     private:
-        void assemble(const char* machineCode,
-                      const char* target,
-                      const char* features,
-                      const char* output);
-        void link(const char* input, const char* output);
+        static void assemble(const char* machineCode,
+                             const char* target,
+                             const char* featureString,
+                             const char* output);
+        static void link(const char* input, const char* output);
     };
 }
 

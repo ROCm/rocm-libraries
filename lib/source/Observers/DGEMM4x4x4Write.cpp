@@ -1,5 +1,7 @@
 #include <rocRoller/Scheduling/Observers/WaitState/DGEMM4x4x4Write.hpp>
 
+#include <rocRoller/CodeGen/InstructionRef.hpp>
+
 namespace rocRoller
 {
     namespace Scheduling

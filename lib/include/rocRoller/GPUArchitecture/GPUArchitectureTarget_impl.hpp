@@ -55,7 +55,7 @@ namespace rocRoller
         return m_string_rep;
     }
 
-    inline void GPUArchitectureTarget::parseString(std::string input)
+    inline void GPUArchitectureTarget::parseString(std::string const& input)
     {
         int         start = 3; //Skip gfx
         size_t      end   = input.find(":");
@@ -103,7 +103,7 @@ namespace rocRoller
         return m_version_rep;
     }
 
-    inline GPUArchitectureTarget::GPUArchitectureTarget(std::string input)
+    inline GPUArchitectureTarget::GPUArchitectureTarget(std::string const& input)
     {
         parseString(input);
     }

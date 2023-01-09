@@ -1,5 +1,5 @@
 /**
- * Copyright 2019-2022 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -113,7 +113,7 @@ namespace rocRoller
     }
 
     template <typename T>
-    inline std::string KernelArguments::stringForValue(T value, bool bound)
+    inline std::string KernelArguments::stringForValue(T value, bool bound) const
     {
         if(!m_log)
             return "";
@@ -131,13 +131,13 @@ namespace rocRoller
     {
         alignTo(alignof(T));
 
-        size_t offset = m_data.size();
-        size_t size   = sizeof(T);
+        size_t offset  = m_data.size();
+        size_t argSize = sizeof(T);
 
         if(m_log)
         {
             std::string valueString = stringForValue(value, bound);
-            appendRecord(name, Arg(offset, size, bound, valueString));
+            appendRecord(name, Arg(offset, argSize, bound, valueString));
         }
 
         m_data.insert(m_data.end(), sizeof(value), 0);

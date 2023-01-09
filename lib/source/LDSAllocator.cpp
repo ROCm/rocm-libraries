@@ -63,8 +63,8 @@ namespace rocRoller
 
         // If there are no free blocks that can hold size, allocate more memory from m_nextAvailable
         auto alignedOffset = RoundUpToMultiple(m_nextAvailable, alignment);
-        AssertRecoverable(alignedOffset + alignedSize <= m_maxAmount,
-                          "Attempting to allocate more Local Data than is available");
+        AssertFatal(alignedOffset + alignedSize <= m_maxAmount,
+                    "Attempting to allocate more Local Data than is available");
 
         if(alignedOffset > m_nextAvailable)
         {

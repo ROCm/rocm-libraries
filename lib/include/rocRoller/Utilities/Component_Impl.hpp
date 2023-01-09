@@ -149,7 +149,7 @@ namespace rocRoller
                     else
                     {
                         Log::warn("Multiple suitable components found for {}: {}, {}",
-                                  Base::Name,
+                                  Base::Basename,
                                   foundIter->name,
                                   iter->name);
                     }
@@ -157,7 +157,7 @@ namespace rocRoller
             }
 
             AssertFatal(foundIter != m_entries.end(),
-                        Base::Name,
+                        Base::Basename,
                         ": No valid component found: ",
                         ShowValue(arg));
 
@@ -179,8 +179,8 @@ namespace rocRoller
             for(auto const& entry : m_entries)
             {
                 if(entry.name == name)
-                    throw std::runtime_error(
-                        concatenate("Duplicate ", Base::Name, " component names: '", name, "'"));
+                    throw std::runtime_error(concatenate(
+                        "Duplicate ", Base::Basename, " component names: '", name, "'"));
             }
 
             RegisterBase(this);

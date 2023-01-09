@@ -10,8 +10,8 @@
 
 const std::string HELP_MESSAGE
     = "Usage: GPUArchitectureGenerator OUTPUT_FILE [ASSEMBLER_LOCATION]\n"
-      "OUTPUT_FLE:            Location to store generated file.\n"
-      "ASSEMBLER_LOCATION:    PAth to assembler executable.\n"
+      "OUTPUT_FILE:           Location to store generated file.\n"
+      "ASSEMBLER_LOCATION:    Path to assembler executable.\n"
       "\n"
       "Options:\n"
       "  -Y               output YAML (msgpack by default)\n"
@@ -19,46 +19,71 @@ const std::string HELP_MESSAGE
 
 const std::string YAML_ARG = "-Y";
 
-int main(int argc, char** argv)
+struct ProgramArgs
 {
+    std::string outputFile;
     std::string assembler = GPUArchitectureGenerator::DEFAULT_ASSEMBLER;
     bool        useYAML   = false;
 
-    if(argc < 2 || argc > 3 || strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0)
+    static ProgramArgs       ParseArgs(int argc, const char* argv[]);
+    [[noreturn]] static void Help(bool error = false);
+};
+
+ProgramArgs ProgramArgs::ParseArgs(int argc, const char* argv[])
+{
+    if(argc <= 1)
+        Help(true);
+
+    std::vector<std::string> args(argv + 1, argv + argc);
+    ProgramArgs              rv;
+
+    for(auto iter = args.begin(); iter != args.end(); iter++)
     {
-        fprintf(stderr, "%s\n", HELP_MESSAGE.c_str());
-        if(argc < 2 || argc > 3)
+        if(*iter == "-h" || *iter == "--help")
+            Help(false);
+        if(*iter == YAML_ARG)
         {
-            return 1;
+            rv.useYAML = true;
+            iter       = args.erase(iter);
+            iter--;
         }
-        return 0;
-    }
-    if(argc > 2 && strcmp(argv[2], YAML_ARG.c_str()) != 0)
-    {
-        assembler = argv[2];
-    }
-    else if(argc > 3 && strcmp(argv[3], YAML_ARG.c_str()) != 0)
-    {
-        assembler = argv[3];
     }
 
-    if((argc > 2 && strcmp(argv[2], YAML_ARG.c_str()) == 0)
-       || (argc > 3 && strcmp(argv[3], YAML_ARG.c_str()) == 0))
-    {
-        useYAML = true;
-    }
+    if(args.empty() || args.size() > 2)
+        Help(true);
 
-    if(!GPUArchitectureGenerator::CheckAssembler(assembler))
+    rv.outputFile = args[0];
+    if(args.size() > 1)
+        rv.assembler = args[1];
+
+    return rv;
+}
+
+[[noreturn]] void ProgramArgs::Help(bool error)
+{
+    fprintf(stderr, "%s\n", HELP_MESSAGE.c_str());
+
+    if(error)
+        exit(1);
+    else
+        exit(0);
+}
+
+int main(int argc, const char* argv[])
+{
+    auto args = ProgramArgs::ParseArgs(argc, argv);
+
+    if(!GPUArchitectureGenerator::CheckAssembler(args.assembler))
     {
-        fprintf(stderr, "Error using assembler:\n%s\n", assembler.c_str());
+        fprintf(stderr, "Error using assembler:\n%s\n", args.assembler.c_str());
         return 1;
     }
 
-    GPUArchitectureGenerator::FillArchitectures(assembler);
+    GPUArchitectureGenerator::FillArchitectures(args.assembler);
 
     try
     {
-        GPUArchitectureGenerator::GenerateFile(argv[1], useYAML);
+        GPUArchitectureGenerator::GenerateFile(args.outputFile, args.useYAML);
     }
     catch(std::exception& e)
     {

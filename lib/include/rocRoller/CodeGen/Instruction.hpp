@@ -90,22 +90,6 @@ namespace rocRoller
         int                    getLockValue() const;
         Scheduling::Dependency getDependency() const;
 
-        // Temporary functions to stub out testing. These were added as part
-        // of a proof of concept, and aren't intended to be functional.
-        // TODO: Remove once the test doesn't call this anymore.
-        //{
-
-        template <typename T>
-        static Instruction Allocate(T&&, std::string const& comment, int = 0)
-        {
-            return Comment("Allocate " + comment);
-        }
-
-        int stallCycles() const
-        {
-            return 0;
-        }
-
         std::string getOpCode() const;
 
         int getNopCount() const

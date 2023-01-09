@@ -13,7 +13,7 @@ namespace rocRoller
         RegisterComponentTemplateSpec(MatrixMultiplyGenerator, DataType::Float, DataType::Float);
         RegisterComponentTemplateSpec(MatrixMultiplyGenerator, DataType::Float, DataType::Halfx2);
 
-        const std::string MatrixMultiply::Name = "MatrixMultiply";
+        const std::string MatrixMultiply::Basename = "MatrixMultiply";
 
         template <DataType DATATYPE>
         std::string typeStr()

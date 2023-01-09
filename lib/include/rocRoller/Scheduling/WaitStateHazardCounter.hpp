@@ -1,6 +1,6 @@
 #pragma once
 
-#include <rocRoller/CodeGen/InstructionRef.hpp>
+#include <rocRoller/CodeGen/InstructionRef_fwd.hpp>
 
 #include <memory>
 
@@ -64,9 +64,9 @@ namespace rocRoller
             }
 
         private:
-            int                             m_counter;
+            int                             m_counter = 0;
             std::shared_ptr<InstructionRef> m_inst;
-            bool                            m_written;
+            bool                            m_written = false;
         };
     }
 }

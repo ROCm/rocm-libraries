@@ -18,7 +18,7 @@ namespace rocRollerTest
     {
         using Argument = std::shared_ptr<TestArgument>;
 
-        static const std::string Name;
+        static const std::string Basename;
 
         virtual std::string name() = 0;
     };
@@ -31,7 +31,6 @@ namespace rocRollerTest
     {
         using Base = Interface;
         static const std::string Name;
-        static const std::string Basename;
 
         static bool Match(Argument arg)
         {
@@ -56,7 +55,6 @@ namespace rocRollerTest
     {
         using Base = Interface;
         static const std::string Name;
-        static const std::string Basename;
 
         static bool Match(Argument arg)
         {

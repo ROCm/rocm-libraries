@@ -37,6 +37,7 @@ def build_rocroller(
             "-DCMAKE_BUILD_TYPE=Release",
             "-DROCROLLER_ENABLE_TIMERS=ON",
             "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache",
+            "-DSKIP_CPPCHECK=On",
             "../",
         ],
         cwd=str(build_dir),

@@ -102,7 +102,7 @@ namespace rocRollerTest
         // Try over allocating
         auto maxLDS = m_context->targetArchitecture().GetCapability(GPUCapability::MaxLdsSize);
         EXPECT_THROW(Register::Value::AllocateLDS(m_context, DataType::Int32, maxLDS / 4),
-                     RecoverableError);
+                     FatalError);
     }
 
     TEST_F(LDSTest, LDSAllocationDoubleFreeTest)

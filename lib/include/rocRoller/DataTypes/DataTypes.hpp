@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2019-2022 Advanced Micro Devices, Inc.
+ * Copyright 2019-2023 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -156,6 +156,7 @@ namespace rocRoller
             , pointerType(v.pointerType)
         {
         }
+        // cppcheck-suppress noExplicitConstructor
         constexpr VariableType(DataType d)
             : dataType(d)
             , pointerType(PointerType::Value)

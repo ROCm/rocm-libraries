@@ -20,11 +20,8 @@ namespace GPUArchitectureGenerator
                               rocRoller::GPUCapability const&         capability,
                               int                                     value)
     {
-        if(GPUArchitectures.find(isaVersion) == GPUArchitectures.end())
-        {
-            GPUArchitectures[isaVersion] = rocRoller::GPUArchitecture(isaVersion);
-        }
-        GPUArchitectures[isaVersion].AddCapability(capability, value);
+        auto [iter, _] = GPUArchitectures.try_emplace(isaVersion, isaVersion);
+        iter->second.AddCapability(capability, value);
     }
 
     inline int HasCapability(rocRoller::GPUArchitectureTarget const& isaVersion,
@@ -36,10 +33,8 @@ namespace GPUArchitectureGenerator
     inline void AddInstructionInfo(rocRoller::GPUArchitectureTarget const& isaVersion,
                                    rocRoller::GPUInstructionInfo const&    instruction_info)
     {
-        if(GPUArchitectures.find(isaVersion) == GPUArchitectures.end())
-        {
-            GPUArchitectures[isaVersion] = rocRoller::GPUArchitecture(isaVersion);
-        }
+        auto [iter, _] = GPUArchitectures.try_emplace(isaVersion, isaVersion);
+
         std::string instruction = instruction_info.getInstruction();
         bool        isBranch    = instruction_info.isBranch()
                         || (BranchInstructions.find(instruction) != BranchInstructions.end()
@@ -58,7 +53,7 @@ namespace GPUArchitectureGenerator
         if(instruction_info.isBranch() != isBranch
            || instruction_info.hasImplicitAccess() != isImplicit)
         {
-            GPUArchitectures[isaVersion].AddInstructionInfo(
+            iter->second.AddInstructionInfo(
                 rocRoller::GPUInstructionInfo(instruction,
                                               instruction_info.getWaitCount(),
                                               instruction_info.getWaitQueues(),
@@ -68,7 +63,7 @@ namespace GPUArchitectureGenerator
         }
         else
         {
-            GPUArchitectures[isaVersion].AddInstructionInfo(instruction_info);
+            iter->second.AddInstructionInfo(instruction_info);
         }
     }
 

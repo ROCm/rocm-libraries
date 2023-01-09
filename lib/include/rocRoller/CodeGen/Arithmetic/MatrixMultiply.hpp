@@ -45,7 +45,7 @@ namespace rocRoller
             using Argument = std::tuple<std::shared_ptr<Context>, DataType, DataType>;
             using Base     = MatrixMultiply;
 
-            static const std::string Name;
+            static const std::string Basename;
 
             /**
              * Performs matrix multiplication: DEST = LHS * R1HS + R2HS
@@ -75,7 +75,6 @@ namespace rocRoller
                 : m_context(context){};
 
             static const std::string Name;
-            static const std::string Basename;
 
             virtual ~MatrixMultiplyGenerator<ACC, INPUT>() = default;
 

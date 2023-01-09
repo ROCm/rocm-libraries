@@ -89,15 +89,16 @@ namespace rocRoller
         };
 
         GPUCapability() = default;
+        // cppcheck-suppress noExplicitConstructor
         constexpr GPUCapability(Value input)
             : m_value(input)
         {
         }
-        GPUCapability(std::string const& input)
+        explicit GPUCapability(std::string const& input)
             : m_value(GPUCapability::m_stringMap.at(input))
         {
         }
-        GPUCapability(int input)
+        explicit GPUCapability(int input)
             : m_value(static_cast<Value>(input))
         {
         }
@@ -140,7 +141,7 @@ namespace rocRoller
         friend struct rocRoller::Serialization::MappingTraits;
 
     private:
-        Value                                               m_value;
+        Value                                               m_value = Value::Count;
         static const std::unordered_map<std::string, Value> m_stringMap;
     };
 }

@@ -65,14 +65,11 @@ namespace rocRoller
         {
         }
 
-        virtual Generator<Instruction> generate(Register::ValuePtr dst, Register::ValuePtr arg)
-        {
-            Throw<FatalError>(concatenate("Generate function not implemented for ", Name));
-        }
+        virtual Generator<Instruction> generate(Register::ValuePtr dst, Register::ValuePtr arg) = 0;
 
         using Argument = std::tuple<std::shared_ptr<Context>, Register::Type, DataType>;
         using Base     = UnaryArithmeticGenerator<Operation>;
-        static const std::string Name;
+        static const std::string Basename;
 
         std::string name() const override
         {
@@ -81,7 +78,7 @@ namespace rocRoller
     };
 
     template <Expression::CUnary Operation>
-    const std::string UnaryArithmeticGenerator<Operation>::Name
+    const std::string UnaryArithmeticGenerator<Operation>::Basename
         = concatenate(Expression::ExpressionInfo<Operation>::name(), "Generator");
 
     // Binary Arithmetic Generator. Most binary generators should be derived from
@@ -96,14 +93,11 @@ namespace rocRoller
         }
 
         virtual Generator<Instruction>
-            generate(Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs)
-        {
-            Throw<FatalError>(concatenate("Generate function not implemented for ", Name));
-        }
+            generate(Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs) = 0;
 
         using Argument = std::tuple<std::shared_ptr<Context>, Register::Type, DataType>;
         using Base     = BinaryArithmeticGenerator<Operation>;
-        static const std::string Name;
+        static const std::string Basename;
 
         std::string name() const override
         {
@@ -112,7 +106,7 @@ namespace rocRoller
     };
 
     template <Expression::CBinary Operation>
-    const std::string BinaryArithmeticGenerator<Operation>::Name
+    const std::string BinaryArithmeticGenerator<Operation>::Basename
         = concatenate(Expression::ExpressionInfo<Operation>::name(), "Generator");
 
     // Ternary Arithmetic Generator. Most ternary generators should be derived from
@@ -130,13 +124,11 @@ namespace rocRoller
                                                 Register::ValuePtr arg1,
                                                 Register::ValuePtr arg2,
                                                 Register::ValuePtr arg3)
-        {
-            Throw<FatalError>(concatenate("Generate function not implemented for ", Name));
-        }
+            = 0;
 
         using Argument = std::tuple<std::shared_ptr<Context>, Register::Type, DataType>;
         using Base     = TernaryArithmeticGenerator<Operation>;
-        static const std::string Name;
+        static const std::string Basename;
 
         std::string name() const override
         {
@@ -145,7 +137,7 @@ namespace rocRoller
     };
 
     template <Expression::CTernary Operation>
-    const std::string TernaryArithmeticGenerator<Operation>::Name
+    const std::string TernaryArithmeticGenerator<Operation>::Basename
         = concatenate(Expression::ExpressionInfo<Operation>::name(), "Generator");
 
     // --------------------------------------------------

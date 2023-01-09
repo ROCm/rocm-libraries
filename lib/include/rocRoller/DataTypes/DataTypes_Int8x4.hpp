@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2019-2022 Advanced Micro Devices, Inc.
+ * Copyright 2019-2023 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -51,7 +51,7 @@ namespace rocRoller
         {
         }
 
-        Int8x4(uint32_t v)
+        explicit Int8x4(uint32_t v)
             : a(v & 0xff)
             , b((v << 8) & 0xff)
             , c((v << 16) & 0xff)

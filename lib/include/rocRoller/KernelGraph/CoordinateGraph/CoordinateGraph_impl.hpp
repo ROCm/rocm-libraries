@@ -122,7 +122,7 @@ namespace rocRoller
 
             for(int const key : (forward ? dsts : srcs))
             {
-                AssertRecoverable(exprMap.contains(key), "Path not found");
+                AssertFatal(exprMap.contains(key), "Path not found");
                 results.push_back(transducer ? transducer(exprMap.at(key)) : exprMap.at(key));
             }
 

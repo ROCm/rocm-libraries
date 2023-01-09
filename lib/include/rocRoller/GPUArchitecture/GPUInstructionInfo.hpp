@@ -35,15 +35,16 @@ namespace rocRoller
         };
 
         GPUWaitQueueType() = default;
+        // cppcheck-suppress noExplicitConstructor
         constexpr GPUWaitQueueType(Value input)
             : m_value(input)
         {
         }
-        GPUWaitQueueType(std::string const& input)
+        explicit GPUWaitQueueType(std::string const& input)
             : m_value(m_stringMap.at(input))
         {
         }
-        constexpr GPUWaitQueueType(uint8_t input)
+        explicit constexpr GPUWaitQueueType(uint8_t input)
             : m_value(static_cast<Value>(input))
         {
         }
@@ -72,7 +73,7 @@ namespace rocRoller
         friend struct rocRoller::Serialization::EnumTraits;
 
     private:
-        Value                                               m_value;
+        Value                                               m_value = Value::Count;
         static const std::unordered_map<std::string, Value> m_stringMap;
     };
 
@@ -90,18 +91,21 @@ namespace rocRoller
         };
 
         GPUWaitQueue() = default;
+        // cppcheck-suppress noExplicitConstructor
         constexpr GPUWaitQueue(Value input)
             : m_value(input)
         {
         }
-        GPUWaitQueue(std::string input)
+
+        explicit GPUWaitQueue(std::string const& input)
             : m_value(GPUWaitQueue::m_stringMap[input])
         {
         }
-        constexpr GPUWaitQueue(uint8_t input)
+        explicit constexpr GPUWaitQueue(uint8_t input)
             : m_value(static_cast<Value>(input))
         {
         }
+        // cppcheck-suppress noExplicitConstructor
         constexpr GPUWaitQueue(GPUWaitQueueType input)
         {
             switch(input)
@@ -143,7 +147,7 @@ namespace rocRoller
         };
 
     private:
-        Value                                         m_value;
+        Value                                         m_value = Value::Count;
         static std::unordered_map<std::string, Value> m_stringMap;
     };
 

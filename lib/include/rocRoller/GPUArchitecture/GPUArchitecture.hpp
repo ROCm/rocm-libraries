@@ -8,6 +8,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "GPUArchitectureTarget.hpp"
@@ -24,7 +25,7 @@ namespace rocRoller
     {
     public:
         GPUArchitecture();
-        GPUArchitecture(GPUArchitectureTarget const&);
+        explicit GPUArchitecture(GPUArchitectureTarget const&);
         GPUArchitecture(GPUArchitectureTarget const&,
                         std::map<GPUCapability, int> const&,
                         std::map<std::string, GPUInstructionInfo> const&);
@@ -87,6 +88,13 @@ namespace rocRoller
         GPUArchitectureTarget                     m_isaVersion;
         std::map<GPUCapability, int>              m_capabilities;
         std::map<std::string, GPUInstructionInfo> m_instruction_infos;
+
+        template <std::floating_point T>
+        // cppcheck-suppress functionStatic
+        std::unordered_set<T> supportedConstantValues() const;
+        template <std::integral T>
+        // cppcheck-suppress functionStatic
+        std::pair<T, T> supportedConstantRange() const;
     };
 
     //Used as a container for serialization.

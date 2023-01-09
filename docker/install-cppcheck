@@ -1,0 +1,14 @@
+#!/bin/bash -ex
+
+workspace=$(mktemp -d)
+cd -- "$workspace"
+wget --no-verbose https://github.com/danmar/cppcheck/archive/refs/tags/2.9.3.zip
+unzip 2.9.3.zip
+cd cppcheck-2.9.3
+mkdir build
+cd build
+cmake .. -D CMAKE_BUILD_TYPE=Release
+cmake --build . --target install -- -j
+
+cd /
+rm -r -- "$workspace"

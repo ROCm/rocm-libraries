@@ -21,7 +21,7 @@ namespace rocRoller
     {
     public:
         GPUArchitectureTarget() = default;
-        GPUArchitectureTarget(std::string);
+        explicit GPUArchitectureTarget(std::string const&);
 
         bool operator==(GPUArchitectureTarget a) const
         {
@@ -69,7 +69,7 @@ namespace rocRoller
 
         std::string ToString() const;
 
-        void parseString(std::string);
+        void parseString(std::string const&);
 
         // Return a string of features that can be provided as input to the LLVM Assembler.
         // These should have the ON/OFF symbol in front of each feature, and be comma
@@ -93,9 +93,9 @@ namespace rocRoller
         friend struct rocRoller::Serialization::MappingTraits;
 
     private:
-        int m_majorVersion;
-        int m_minorVersion;
-        int m_pointVersion;
+        int m_majorVersion = 0;
+        int m_minorVersion = 0;
+        int m_pointVersion = 0;
 
         bool m_sramecc = false;
         bool m_xnack   = false;

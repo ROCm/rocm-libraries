@@ -56,7 +56,6 @@ namespace rocRoller
             generate(Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs);
 
         inline static const std::string Name;
-        inline static const std::string Basename;
     };
 
     // Specializations for supported Register Type / DataType combinations

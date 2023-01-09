@@ -28,7 +28,7 @@ namespace rocRoller
     {
     public:
         WaitCount();
-        WaitCount(std::string const& message);
+        explicit WaitCount(std::string const& message);
         WaitCount(int vmcnt, int vscnt, int lgkmcnt, int expcnt);
         WaitCount(GPUWaitQueue, int count);
 

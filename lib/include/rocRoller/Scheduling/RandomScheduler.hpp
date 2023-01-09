@@ -27,7 +27,6 @@ namespace rocRoller
 
             using Base = Scheduler;
 
-            static const std::string Basename;
             static const std::string Name;
 
             /**

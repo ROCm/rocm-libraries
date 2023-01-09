@@ -86,6 +86,7 @@ namespace rocRollerTest
 
         EXPECT_EQ(2, *iter);
         ++iter;
+        EXPECT_EQ(3, *iter);
 
         fib = fibonacci<int>();
 
@@ -99,6 +100,8 @@ namespace rocRollerTest
 
         EXPECT_EQ(2, *iter);
         ++iter;
+
+        EXPECT_EQ(3, *iter);
     }
 
     template <std::integral T>
@@ -130,13 +133,11 @@ namespace rocRollerTest
         std::vector<int> v2({0, 1, 2, 3, 4});
         EXPECT_EQ(v2, v);
 
-        v  = {};
         r  = range(1, 5);
         v  = std::vector(r.begin(), r.end());
         v2 = {1, 2, 3, 4};
         EXPECT_EQ(v2, v);
 
-        v  = {};
         r  = range(7);
         v  = std::vector(r.begin(), r.end());
         v2 = {0, 1, 2, 3, 4, 5, 6};
@@ -154,7 +155,10 @@ namespace rocRollerTest
         std::vector<Generator<int>::iterator> iters;
         iters.reserve(gens.size());
         for(auto& g : gens)
+        {
+            // cppcheck-suppress useStlAlgorithm
             iters.push_back(g.begin());
+        }
 
         bool any = true;
         while(any)
@@ -189,7 +193,9 @@ namespace rocRollerTest
     {
         auto it = gen.begin();
         for(size_t i = 0; i < n && it != gen.end(); ++i, ++it)
+        {
             co_yield *it;
+        }
     }
 
     TEST(GeneratorTest, MergeLess)
@@ -216,7 +222,10 @@ namespace rocRollerTest
         auto func = [&]() {
             std::vector<int> values;
             for(auto v : Throws())
+            {
+                // cppcheck-suppress useStlAlgorithm
                 values.push_back(v);
+            }
         };
 
         EXPECT_THROW(func(), std::runtime_error);
@@ -250,7 +259,8 @@ namespace rocRollerTest
         }
     }
 
-    Generator<int> testWithoutRef(std::vector<int> const v)
+    // cppcheck-suppress passedByValue
+    Generator<int> testWithoutRef(std::vector<int> v)
     {
         for(int i = 0; i < v.size(); i++)
         {

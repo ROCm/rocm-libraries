@@ -18,7 +18,7 @@ namespace rocRoller
     std::string TimerPool::summary()
     {
         std::stringstream ss;
-        for(auto& kv : getInstance().m_elapsed)
+        for(auto const& kv : getInstance().m_elapsed)
         {
             ss << std::left << std::setw(60) << kv.first << std::right << std::setw(9)
                << milliseconds(kv.first) << "ms" << std::endl;
@@ -30,7 +30,7 @@ namespace rocRoller
     {
         std::stringstream ss;
         ss << "timer,nanoseconds" << std::endl;
-        for(auto& kv : getInstance().m_elapsed)
+        for(auto const& kv : getInstance().m_elapsed)
         {
             ss << kv.first << "," << nanoseconds(kv.first) << std::endl;
         }
@@ -39,7 +39,7 @@ namespace rocRoller
 
     size_t TimerPool::nanoseconds(std::string const& name)
     {
-        if(getInstance().m_elapsed.count(name) <= 0)
+        if(getInstance().m_elapsed.count(name) == 0)
             return 0;
         auto elapsed = getInstance().m_elapsed.at(name).load();
         return std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed).count();
@@ -47,7 +47,7 @@ namespace rocRoller
 
     size_t TimerPool::milliseconds(std::string const& name)
     {
-        if(getInstance().m_elapsed.count(name) <= 0)
+        if(getInstance().m_elapsed.count(name) == 0)
             return 0;
         auto elapsed = getInstance().m_elapsed.at(name).load();
         return std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
@@ -65,7 +65,7 @@ namespace rocRoller
     }
 
     Timer::Timer(std::string name)
-        : m_name(name)
+        : m_name(std::move(name))
         , m_elapsed(0)
     {
         Timer::tic();
@@ -86,11 +86,11 @@ namespace rocRoller
         if(m_start.time_since_epoch().count() <= 0)
             return;
 
-        auto elapsed = std::chrono::steady_clock::now() - m_start;
-        m_start      = {};
+        auto elapsedTime = std::chrono::steady_clock::now() - m_start;
+        m_start          = {};
 
-        m_elapsed += elapsed;
-        TimerPool::getInstance().accumulate(m_name, elapsed);
+        m_elapsed += elapsedTime;
+        TimerPool::getInstance().accumulate(m_name, elapsedTime);
     }
 
     std::chrono::steady_clock::duration Timer::elapsed() const

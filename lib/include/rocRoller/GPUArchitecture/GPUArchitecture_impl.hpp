@@ -133,14 +133,25 @@ namespace rocRoller
     template <std::integral T>
     requires(!std::same_as<bool, T>) bool GPUArchitecture::isSupportedConstantValue(T value) const
     {
+        auto range = supportedConstantRange<T>();
+        return value >= range.first && value <= range.second;
+    }
+
+    template <std::integral T>
+    std::pair<T, T> GPUArchitecture::supportedConstantRange() const
+    {
+        std::pair<T, T> rv;
+        rv.second = 64;
         if constexpr(std::signed_integral<T>)
-            return value >= -16 && value <= 64;
+            rv.first = -16;
         else
-            return value <= 64;
+            rv.first = 0;
+
+        return rv;
     }
 
     template <std::floating_point T>
-    std::unordered_set<T> supportedConstantValues()
+    std::unordered_set<T> GPUArchitecture::supportedConstantValues() const
     {
         static_assert(std::same_as<T, float> || std::same_as<T, double> || std::same_as<T, Half>,
                       "Unsupported floating point type");

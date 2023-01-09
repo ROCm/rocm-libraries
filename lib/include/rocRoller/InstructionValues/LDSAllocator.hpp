@@ -26,7 +26,7 @@ namespace rocRoller
          *
          * @param maxAmount The maximum amount of local data that can be allocated
          */
-        LDSAllocator(unsigned int maxAmount);
+        explicit LDSAllocator(unsigned int maxAmount);
 
         /**
          * @brief Allocates memory. Returns a LDSAllocation object if succesful.

@@ -64,7 +64,7 @@ namespace rocRoller
 
             Scheduler(ContextPtr);
 
-            static const std::string Name;
+            static const std::string Basename;
             static const bool        SingleUse = true;
 
             virtual std::string            name()                                           = 0;

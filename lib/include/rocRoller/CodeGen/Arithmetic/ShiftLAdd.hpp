@@ -51,6 +51,5 @@ namespace rocRoller
                                         std::shared_ptr<Register::Value> rhs);
 
         static const std::string Name;
-        static const std::string Basename;
     };
 }

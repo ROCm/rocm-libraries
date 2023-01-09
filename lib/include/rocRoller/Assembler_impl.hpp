@@ -8,9 +8,15 @@
 
 namespace rocRoller
 {
-    inline std::vector<char> Assembler::assembleMachineCode(std::string machineCode,
+    inline std::vector<char> Assembler::assembleMachineCode(const std::string& machineCode,
+                                                            const GPUArchitectureTarget& target)
+    {
+        return assembleMachineCode(machineCode, target, "");
+    }
+
+    inline std::vector<char> Assembler::assembleMachineCode(const std::string& machineCode,
                                                             const GPUArchitectureTarget& target,
-                                                            std::string                  kernelName)
+                                                            const std::string&           kernelName)
     {
         // Time assembleMachineCode function
         TIMER(t, "Assembler::assembleMachineCode");
@@ -39,7 +45,7 @@ namespace rocRoller
         {
             // Remove temporary directory if there were any errors.
             std::filesystem::remove_all(tmpFolder);
-            throw e;
+            throw;
         }
 
         // Read in shared object into vector

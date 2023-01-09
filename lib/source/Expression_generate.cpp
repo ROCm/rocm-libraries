@@ -194,10 +194,10 @@ namespace rocRoller
                 auto const btile = *std::get<WaveTilePtr>(*expr.r1hs);
                 AssertFatal(!atile.sizes.empty(), "WaveTile in invalid state.");
                 AssertFatal(!btile.sizes.empty(), "WaveTile in invalid state.");
-                AssertRecoverable(atile.sizes[1] == btile.sizes[0],
-                                  "MatrixMultiply WaveTile size mismatch.",
-                                  ShowValue(atile.sizes[1]),
-                                  ShowValue(btile.sizes[0]));
+                AssertFatal(atile.sizes[1] == btile.sizes[0],
+                            "MatrixMultiply WaveTile size mismatch.",
+                            ShowValue(atile.sizes[1]),
+                            ShowValue(btile.sizes[0]));
 
                 M    = atile.sizes[0];
                 N    = btile.sizes[1];

@@ -2,7 +2,7 @@
 
 /**
  * Compiler-specific tricks to get coroutines working
- * 
+ *
  *
  * Clang: Alias experimental objects to std space.
  * TODO: Remove when coroutine is moved out of experimental phase
@@ -59,7 +59,7 @@ namespace rocRoller
     template <typename T, typename TheRange>
     struct ConcreteRange : public Range<T>
     {
-        ConcreteRange(TheRange&& r);
+        explicit ConcreteRange(TheRange&& r);
 
         virtual std::optional<T> take_value() override;
         virtual void             increment() override;
@@ -78,8 +78,8 @@ namespace rocRoller
         public:
             Generator<T> get_return_object();
 
-            void return_void() noexcept {}
-            void unhandled_exception() noexcept;
+            static void return_void() noexcept {}
+            void        unhandled_exception() noexcept;
 
             void check_exception() const;
 
@@ -128,8 +128,10 @@ namespace rocRoller
             bool operator==(std::default_sentinel_t) const;
             bool operator!=(std::default_sentinel_t) const;
 
-            LazyIter(Handle coroutine);
             LazyIter();
+            // cppcheck-suppress noExplicitConstructor
+            LazyIter(Handle const& coroutine);
+            // cppcheck-suppress noExplicitConstructor
             LazyIter(T value);
 
         private:
@@ -142,7 +144,8 @@ namespace rocRoller
         using Handle     = std::coroutine_handle<promise_type>;
         using value_type = T;
 
-        explicit Generator(const Handle coroutine);
+        // cppcheck-suppress noExplicitConstructor
+        Generator(Handle const& coroutine);
         Generator() {}
         ~Generator();
 
@@ -152,7 +155,11 @@ namespace rocRoller
         Generator& operator=(const Generator&) = delete;
         Generator& operator                    =(Generator&& rhs) noexcept;
 
+        // cppcheck-suppress functionConst
+        // cppcheck-suppress functionStatic
         iterator begin();
+        // cppcheck-suppress functionConst
+        // cppcheck-suppress functionStatic
         iterator end();
 
         /**

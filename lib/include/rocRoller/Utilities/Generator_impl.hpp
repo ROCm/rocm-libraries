@@ -3,11 +3,9 @@
 #include <string>
 
 #include "Generator.hpp"
-// #include "Logging.hpp"
 
 namespace rocRoller
 {
-    // ConcreteRange
     template <typename T, typename TheRange>
     ConcreteRange<T, TheRange>::ConcreteRange(TheRange&& r)
         : m_range(std::move(r))
@@ -29,7 +27,6 @@ namespace rocRoller
         ++m_iter;
     }
 
-    // Generator<T>::promise_type
     template <std::movable T>
     auto Generator<T>::promise_type::get_return_object() -> Generator<T>
     {
@@ -204,7 +201,7 @@ namespace rocRoller
     }
 
     template <std::movable T>
-    Generator<T>::LazyIter::LazyIter(Handle coroutine)
+    Generator<T>::LazyIter::LazyIter(Handle const& coroutine)
         : m_coroutine{coroutine}
     {
         m_coroutine.resume();
@@ -222,9 +219,8 @@ namespace rocRoller
     {
     }
 
-    // Generator<T>
     template <std::movable T>
-    Generator<T>::Generator(const Handle coroutine)
+    Generator<T>::Generator(Handle const& coroutine)
         : m_coroutine{coroutine}
     {
     }

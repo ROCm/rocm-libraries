@@ -462,11 +462,11 @@ namespace rocRollerTest
 
         {
             EXPECT_THROW(ct.reverse({tile_x_index, i_index}, {A}, {tile_x, i}, fastArith),
-                         RecoverableError);
+                         FatalError);
             EXPECT_THROW(ct.reverse({tile_x_index, i_index}, {Aj}, {tile_x, i}, fastArith),
-                         RecoverableError);
+                         FatalError);
             EXPECT_THROW(ct.reverse({tile_x_index, i_index}, {Ai, Aj}, {tile_x, i}, fastArith),
-                         RecoverableError);
+                         FatalError);
         }
 
         exprs = ct.reverse(
@@ -587,7 +587,7 @@ namespace rocRollerTest
 
         // remove i, try again: should fail
         coords.removeCoordinate(i);
-        EXPECT_THROW(coords.reverse({A}), RecoverableError);
+        EXPECT_THROW(coords.reverse({A}), FatalError);
 
         // remove i and j, so only know workgroup and workitem
         coords.removeCoordinate(i);

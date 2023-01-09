@@ -1,5 +1,5 @@
 /**
- * Copyright 2019-2022 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -36,7 +36,7 @@ namespace rocRoller
     class KernelArguments
     {
     public:
-        KernelArguments(bool log = true);
+        explicit KernelArguments(bool log = true);
         virtual ~KernelArguments();
 
         void reserve(size_t bytes, size_t count);
@@ -72,7 +72,7 @@ namespace rocRoller
             using pointer           = ArgPair const*;
             using reference         = ArgPair const&;
 
-            const_iterator(KernelArguments const& args);
+            explicit const_iterator(KernelArguments const& args);
             const_iterator(KernelArguments const& args, std::string const& name);
             const_iterator(const const_iterator& other) = default;
             const_iterator& operator++();
@@ -88,8 +88,8 @@ namespace rocRoller
         private:
             void assignCurrentArg();
 
-            std::vector<std::string>::const_iterator m_currentArg;
             KernelArguments const&                   m_args;
+            std::vector<std::string>::const_iterator m_currentArg;
             ArgPair                                  m_value;
         };
 
@@ -115,9 +115,9 @@ namespace rocRoller
         void append(std::string const& name, T value, bool bound);
 
         template <typename T>
-        std::string stringForValue(T value, bool bound);
+        std::string stringForValue(T value, bool bound) const;
 
-        void appendRecord(std::string const& name, Arg info);
+        void appendRecord(std::string const& name, Arg record);
 
         template <typename T>
         void writeValue(size_t offset, T value);
@@ -129,9 +129,6 @@ namespace rocRoller
 
         bool m_log;
     };
-
-    KernelArguments::const_iterator begin(KernelArguments const&);
-    KernelArguments::const_iterator end(KernelArguments const&);
 
 } // namespace rocRoller
 

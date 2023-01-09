@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2019-2022 Advanced Micro Devices, Inc.
+ * Copyright 2019-2023 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -52,7 +52,7 @@ namespace rocRoller
         DistinctType()                          = default;
         DistinctType(DistinctType const& other) = default;
 
-        DistinctType(T const& v)
+        explicit DistinctType(T const& v)
             : value(v)
         {
         }
@@ -70,7 +70,7 @@ namespace rocRoller
             return value;
         }
 
-        T value;
+        T value = static_cast<T>(0);
     };
 
     template <typename T, typename Subclass>

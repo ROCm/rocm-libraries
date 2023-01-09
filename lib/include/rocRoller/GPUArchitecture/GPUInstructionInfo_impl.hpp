@@ -70,16 +70,15 @@ namespace rocRoller
         return GPUWaitQueue::ToString(m_value);
     }
 
-    inline std::string GPUWaitQueue::ToString(GPUWaitQueue::Value m_value)
+    inline std::string GPUWaitQueue::ToString(GPUWaitQueue::Value value)
     {
-        for(const auto& mapping : m_stringMap)
-        {
-            if(mapping.second == m_value)
-            {
-                return mapping.first;
-            }
-        }
-        return "";
+        auto it = std::find_if(m_stringMap.begin(),
+                               m_stringMap.end(),
+                               [&value](auto const& mapping) { return value == mapping.second; });
+
+        if(it == m_stringMap.end())
+            return "";
+        return it->first;
     }
 
     inline std::unordered_map<std::string, GPUWaitQueue::Value> GPUWaitQueue::m_stringMap = {
@@ -97,16 +96,15 @@ namespace rocRoller
         return GPUWaitQueueType::ToString(m_value);
     }
 
-    inline std::string GPUWaitQueueType::ToString(GPUWaitQueueType::Value m_value)
+    inline std::string GPUWaitQueueType::ToString(GPUWaitQueueType::Value value)
     {
-        for(const auto& mapping : m_stringMap)
-        {
-            if(mapping.second == m_value)
-            {
-                return mapping.first;
-            }
-        }
-        return "";
+        auto it = std::find_if(m_stringMap.begin(),
+                               m_stringMap.end(),
+                               [&value](auto const& mapping) { return value == mapping.second; });
+
+        if(it == m_stringMap.end())
+            return "";
+        return it->first;
     }
 
     inline const std::unordered_map<std::string, GPUWaitQueueType::Value>

@@ -67,6 +67,5 @@ namespace rocRoller
         Generator<Instruction> generate(Register::ValuePtr dst, Register::ValuePtr arg);
 
         inline static const std::string Name;
-        inline static const std::string Basename;
     };
 }

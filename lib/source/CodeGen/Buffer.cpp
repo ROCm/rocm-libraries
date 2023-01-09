@@ -46,7 +46,8 @@ namespace rocRoller
         case GFX9BufferDescriptorOptions::DFReserved:
             return "DFReserved";
         };
-        Throw<FatalError>("Invalid DataFormatValue ", ShowValue(static_cast<int>(val)));
+
+        Throw<FatalError>("Invalid DataFormatValue: " + ShowValue((int)(val)));
     }
 
     std::ostream& operator<<(std::ostream& stream, GFX9BufferDescriptorOptions::DataFormatValue val)

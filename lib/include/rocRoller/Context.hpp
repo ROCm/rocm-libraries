@@ -29,8 +29,9 @@
 #include "Utilities/Random_fwd.hpp"
 
 #include "DataTypes/DataTypes.hpp"
-#include "GPUArchitecture/GPUArchitecture.hpp"
 #include "KernelOptions.hpp"
+
+#include "GPUArchitecture/GPUArchitecture.hpp"
 #include "Scheduling/WaitStateHazardCounter.hpp"
 
 namespace rocRoller

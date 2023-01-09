@@ -1,5 +1,7 @@
 #include <rocRoller/Scheduling/Observers/WaitState/XDLWrite908.hpp>
 
+#include <rocRoller/CodeGen/InstructionRef.hpp>
+
 namespace rocRoller
 {
     namespace Scheduling

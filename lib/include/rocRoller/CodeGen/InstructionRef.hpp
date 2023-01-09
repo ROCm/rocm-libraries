@@ -12,69 +12,32 @@ namespace rocRoller
     class InstructionRef
     {
     public:
-        InstructionRef(Instruction const& inst);
+        explicit InstructionRef(Instruction const& inst);
 
-        std::string getOpCode() const
-        {
-            return m_opCode;
-        }
+        std::string getOpCode() const;
 
-        bool isDLOP() const
-        {
-            return m_opCode.rfind("v_dot", 0) == 0;
-        }
-
-        bool isMFMA() const
-        {
-            return m_opCode.rfind("v_mfma", 0) == 0;
-        }
-
-        bool isCMPX() const
-        {
-            return m_opCode.rfind("v_cmpx", 0) == 0;
-        }
+        bool isDLOP() const;
+        bool isMFMA() const;
+        bool isCMPX() const;
 
         /**
          * @brief Whether the instruction affects the VALU
          *
          * @return Starts with a "v_" and is a VALU instruction
          */
-        bool isVALU() const
-        {
-            return m_opCode.rfind("v_", 0) == 0;
-        }
+        bool isVALU() const;
+        bool isDGEMM() const;
+        bool isVMEM() const;
+        bool isFlat() const;
+        bool isLDS() const;
 
-        bool isDGEMM() const
-        {
-            return m_opCode.rfind("v_mfma_f64", 0) == 0;
-        }
+        bool isACCVGPRWrite() const;
 
-        bool isVMEM() const
-        {
-            return m_opCode.rfind("buffer_", 0) == 0;
-        }
-
-        bool isFlat() const
-        {
-            return m_opCode.rfind("flat_", 0) == 0;
-        }
-
-        bool isLDS() const
-        {
-            return m_opCode.rfind("ds_", 0) == 0;
-        }
-
-        bool isACCVGPRWrite() const
-        {
-            return m_opCode.rfind("v_accvgpr_write", 0) == 0;
-        }
-
-        bool isACCVGPRRead() const
-        {
-            return m_opCode.rfind("v_accvgpr_read", 0) == 0;
-        }
+        bool isACCVGPRRead() const;
 
     private:
         std::string m_opCode;
     };
 }
+
+#include "InstructionRef_impl.hpp"

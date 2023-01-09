@@ -1,7 +1,9 @@
 #pragma once
 
-#include <rocRoller/Context.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/WaitStateObserver.hpp>
+
+#include <rocRoller/CodeGen/InstructionRef.hpp>
+#include <rocRoller/Context.hpp>
 
 namespace rocRoller
 {

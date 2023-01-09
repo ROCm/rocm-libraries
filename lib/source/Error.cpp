@@ -6,7 +6,6 @@ namespace rocRoller
     [[noreturn]] void Crash()
     {
         auto will_be_null = GetNullPointer();
-        // cppcheck-suppress nullPointer
         if((*will_be_null = 0))
             throw std::runtime_error("Impossible 1");
 
