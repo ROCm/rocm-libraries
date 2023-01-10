@@ -583,4 +583,161 @@ namespace rocRollerTest
                                 )";
         EXPECT_EQ(NormalizedSource(output()), NormalizedSource(expected));
     }
+    class WaitCountObserverStateTest : public WaitCountObserverTest
+    {
+        void SetUp()
+        {
+            using namespace rocRoller;
+            Settings::getInstance()->set(Settings::LogLvl, rocRoller::LogLevel::Debug);
+            WaitCountObserverTest::SetUp();
+        }
+    };
+
+    TEST_F(WaitCountObserverStateTest, QueueStateTest)
+    {
+        rocRoller::Scheduling::InstructionStatus peeked;
+
+        auto src1 = std::make_shared<Register::Value>(
+            m_context, Register::Type::Scalar, DataType::Int32, 2);
+        src1->allocateNow();
+
+        auto src2 = src1->subset({1});
+
+        auto dst1 = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Float, 2);
+        dst1->allocateNow();
+
+        auto dst2 = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Float, 2);
+        dst2->allocateNow();
+
+        auto dst3 = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Float, 2);
+        dst3->allocateNow();
+
+        auto dst4 = dst1->subset({0});
+
+        auto dst5 = dst1->subset({1});
+
+        auto zero = Register::Value::Literal(0);
+
+        auto inst1 = Instruction("buffer_load_dwordx2", {dst1}, {src1, zero}, {}, "");
+        peeked     = m_context->observer()->peek(inst1);
+        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
+        m_context->schedule(inst1);
+
+        auto inst2 = Instruction("buffer_load_dwordx2", {dst2}, {src1, zero}, {}, "");
+        peeked     = m_context->observer()->peek(inst2);
+        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
+        m_context->schedule(inst2);
+
+        auto inst3 = Instruction("buffer_load_dwordx2", {dst3}, {src1, zero}, {}, "");
+        peeked     = m_context->observer()->peek(inst3);
+        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
+        m_context->schedule(inst3);
+
+        auto inst4 = Instruction("buffer_load_dword", {dst4}, {src1, zero}, {}, "");
+        peeked     = m_context->observer()->peek(inst4);
+        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount::VMCnt(2));
+        m_context->schedule(inst4);
+
+        auto inst_barrier = Instruction("s_barrier", {}, {}, {}, "");
+        peeked            = m_context->observer()->peek(inst_barrier);
+        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount::Zero(m_context->targetArchitecture()));
+        m_context->schedule(inst_barrier);
+
+        auto inst5 = Instruction("s_load_dwordx2", {dst1}, {src1, zero}, {}, "");
+        peeked     = m_context->observer()->peek(inst5);
+        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
+        m_context->schedule(inst5);
+
+        auto inst6 = Instruction("s_load_dwordx2", {dst2}, {src1, zero}, {}, "");
+        peeked     = m_context->observer()->peek(inst6);
+        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
+        m_context->schedule(inst6);
+
+        auto inst7 = Instruction("s_load_dword", {dst5}, {src2, zero}, {}, "");
+        peeked     = m_context->observer()->peek(inst7);
+        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount::LGKMCnt(0, ""));
+        m_context->schedule(inst7);
+
+        auto inst_end = Instruction("s_endpgm", {}, {}, {}, "");
+        peeked        = m_context->observer()->peek(inst_end);
+        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
+        m_context->schedule(inst_end);
+
+        std::string expected = R"(
+                                    buffer_load_dwordx2 v[0:1], s[0:1], 0
+                                    buffer_load_dwordx2 v[2:3], s[0:1], 0 // Wait Queue State:
+                                    // --Queue: VMQueue
+                                    // ----Needs Wait Zero: False
+                                    // ----Type In Queue : VMQueue
+                                    // ----Registers :
+                                    // ------Dst: {s[0:1], 0, }
+                                    // ------Src: {v[0:1], }
+                                    buffer_load_dwordx2 v[4:5], s[0:1], 0 // Wait Queue State:
+                                    // --Queue: VMQueue
+                                    // ----Needs Wait Zero: False
+                                    // ----Type In Queue : VMQueue
+                                    // ----Registers :
+                                    // ------Dst: {s[0:1], 0, }
+                                    // ------Src: {v[0:1], }
+                                    // ------Dst: {s[0:1], 0, }
+                                    // ------Src: {v[2:3], }
+                                    s_waitcnt vmcnt(2)
+                                    buffer_load_dword v0, s[0:1], 0 // WaitCnt Needed: Intersects with registers in 'VMQueue', at 0 and the queue size is 3, so a waitcnt of 2 is required.
+                                    // Wait Queue State:
+                                    // --Queue: VMQueue
+                                    // ----Needs Wait Zero: False
+                                    // ----Type In Queue : VMQueue
+                                    // ----Registers :
+                                    // ------Dst: {s[0:1], 0, }
+                                    // ------Src: {v[0:1], }
+                                    // ------Dst: {s[0:1], 0, }
+                                    // ------Src: {v[2:3], }
+                                    // ------Dst: {s[0:1], 0, }
+                                    // ------Src: {v[4:5], }
+                                    s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0) //
+                                    s_barrier // WaitCnt Needed: Always waitcnt zero before an s_barrier.
+                                    // Wait Queue State:
+                                    // --Queue: VMQueue
+                                    // ----Needs Wait Zero: False
+                                    // ----Type In Queue : VMQueue
+                                    // ----Registers :
+                                    // ------Dst: {s[0:1], 0, }
+                                    // ------Src: {v[2:3], }
+                                    // ------Dst: {s[0:1], 0, }
+                                    // ------Src: {v[4:5], }
+                                    // ------Dst: {s[0:1], 0, }
+                                    // ------Src: {v0, }
+                                    s_load_dwordx2 v[0:1], s[0:1], 0
+                                    s_load_dwordx2 v[2:3], s[0:1], 0 // Wait Queue State:
+                                    // --Queue: LGKMQueue
+                                    // ----Needs Wait Zero: True
+                                    // ----Type In Queue : LGKMDSQueue
+                                    // ----Registers :
+                                    // ------Dst: {s[0:1], 0, }
+                                    // ------Src: {v[0:1], }
+                                    s_waitcnt lgkmcnt(0)
+                                    s_load_dword v1, s1, 0 // WaitCnt Needed: Intersects with registers in 'LGKMQueue', which needs a wait zero.
+                                    // Wait Queue State:
+                                    // --Queue: LGKMQueue
+                                    // ----Needs Wait Zero: True
+                                    // ----Type In Queue : LGKMDSQueue
+                                    // ----Registers :
+                                    // ------Dst: {s[0:1], 0, }
+                                    // ------Src: {v[0:1], }
+                                    // ------Dst: {s[0:1], 0, }
+                                    // ------Src: {v[2:3], }
+                                    s_endpgm // Wait Queue State:
+                                    // --Queue: LGKMQueue
+                                    // ----Needs Wait Zero: True
+                                    // ----Type In Queue : LGKMDSQueue
+                                    // ----Registers :
+                                    // ------Dst: {s1, 0, }
+                                    // ------Src: {v1, }
+                                )";
+
+        EXPECT_EQ(NormalizedSource(output(), true), NormalizedSource(expected, true));
+    }
 }

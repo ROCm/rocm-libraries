@@ -1,5 +1,7 @@
 #pragma once
 
+#include <sstream>
+
 #include "../Scheduling.hpp"
 
 #include "../../Context.hpp"
@@ -17,11 +19,13 @@ namespace rocRoller
             WaitcntObserver(std::shared_ptr<Context> context)
                 : m_context(context)
             {
+                m_displayState = Settings::getInstance()->get(Settings::LogLvl) >= LogLevel::Debug;
                 for(uint8_t i = 0; i < static_cast<uint8_t>(GPUWaitQueue::Count); i++)
                 {
-                    instruction_queues[static_cast<GPUWaitQueue>(i)] = {};
-                    needs_wait_zero[static_cast<GPUWaitQueue>(i)]    = false;
-                    type_in_queue[static_cast<GPUWaitQueue>(i)]      = GPUWaitQueueType::None;
+                    GPUWaitQueue waitQueue        = static_cast<GPUWaitQueue>(i);
+                    instruction_queues[waitQueue] = {};
+                    needs_wait_zero[waitQueue]    = false;
+                    type_in_queue[waitQueue]      = GPUWaitQueueType::None;
                 }
 
                 AssertFatal(instruction_queues.size() == static_cast<uint8_t>(GPUWaitQueue::Count),
@@ -37,18 +41,24 @@ namespace rocRoller
 
             InstructionStatus peek(Instruction const& inst) const
             {
-                auto        context      = m_context.lock();
-                const auto& architecture = context->targetArchitecture();
-                return InstructionStatus::Wait(
-                    computeWaitCount(inst).getAsSaturatedWaitCount(architecture));
+                return InstructionStatus::Wait(computeWaitCount(inst));
             };
 
             void modify(Instruction& inst) const
             {
                 auto        context      = m_context.lock();
                 const auto& architecture = context->targetArchitecture();
-                inst.addWaitCount(computeWaitCount(inst));
-                inst.addWaitCount(inst.getWaitCount().getAsSaturatedWaitCount(architecture));
+                inst.addWaitCount(inst.getWaitCount().getAsSaturatedWaitCount(
+                    architecture)); // Handle if manually specified waitcnts are over the sat limits.
+
+                std::string explanation;
+                inst.addWaitCount(computeWaitCount(inst, &explanation));
+                inst.addComment(explanation);
+
+                if(m_displayState)
+                {
+                    inst.addComment(getWaitQueueState());
+                }
             }
 
             /**
@@ -120,6 +130,8 @@ namespace rocRoller
         private:
             std::weak_ptr<Context> m_context;
 
+            bool m_displayState;
+
             std::unordered_map<
                 GPUWaitQueue,
                 std::vector<std::tuple<
@@ -155,25 +167,37 @@ namespace rocRoller
                     if(instruction_queues[queue].size() == 0)
                     {
                         needs_wait_zero[queue] = false;
+                        type_in_queue[queue]   = GPUWaitQueueType::None;
                     }
                 }
             }
 
             /**
-             * This function determines if an instruction needs a wait count inserted before it.
+             * @brief This function determines if an instruction needs a wait count inserted before it and provides an explanation as to why it's needed.
+             *
              * It searches backwards through each wait queue looking for registers that intersect with the new instruction.
              * If an intersection is found a wait is inserted for the intersection location or 0 if the wait_zero flag is set for the queue.
-             **/
-            inline WaitCount computeWaitCount(Instruction const& inst) const
+             *
+             * @param inst
+             * @param[out] explanation is an output parameter for an explanation of the wait count required.
+             * @return WaitCount
+             */
+            inline WaitCount computeWaitCount(Instruction const& inst,
+                                              std::string*       explanation = nullptr) const
             {
-                WaitCount   retval;
                 auto        context      = m_context.lock();
                 const auto& architecture = context->targetArchitecture();
 
                 if(inst.getOpCode() == "s_barrier")
                 {
+                    if(explanation != nullptr)
+                    {
+                        *explanation = "WaitCnt Needed: Always waitcnt zero before an s_barrier.";
+                    }
                     return WaitCount::Zero(architecture);
                 }
+
+                WaitCount retval;
 
                 if(inst.getOpCode().size() > 0 && inst.hasRegisters())
                 {
@@ -190,20 +214,92 @@ namespace rocRoller
                                 if(needs_wait_zero.at(waitQueue))
                                 {
                                     retval.combine(WaitCount(waitQueue, 0));
+                                    if(explanation != nullptr)
+                                    {
+                                        *explanation
+                                            = "WaitCnt Needed: Intersects with registers in '"
+                                              + waitQueue.ToString()
+                                              + "', which needs a wait zero.";
+                                    }
                                 }
                                 else
                                 {
-                                    retval.combine(WaitCount(waitQueue,
-                                                             instruction_queues.at(waitQueue).size()
-                                                                 - (queue_i + 1)));
+                                    int waitval
+                                        = instruction_queues.at(waitQueue).size() - (queue_i + 1);
+                                    retval.combine(WaitCount(waitQueue, waitval));
+                                    if(explanation != nullptr)
+                                    {
+                                        *explanation
+                                            = "WaitCnt Needed: Intersects with registers in '"
+                                              + waitQueue.ToString() + "', at "
+                                              + std::to_string(queue_i) + " and the queue size is "
+                                              + std::to_string(
+                                                  instruction_queues.at(waitQueue).size())
+                                              + ", so a waitcnt of " + std::to_string(waitval)
+                                              + " is required.";
+                                    }
                                 }
                                 break;
                             }
                         }
                     }
                 }
-
                 return retval.getAsSaturatedWaitCount(architecture);
+            }
+
+            /**
+             * @brief Get a string representation of the state of the Wait Queues
+             *
+             * @return std::string
+             */
+            inline std::string getWaitQueueState() const
+            {
+                std::stringstream retval;
+                for(uint8_t i = 0; i < static_cast<uint8_t>(GPUWaitQueue::Count); i++)
+                {
+                    GPUWaitQueue waitQueue = static_cast<GPUWaitQueue>(i);
+
+                    // Only include state information for wait queues in a non-default state.
+                    if(needs_wait_zero.at(waitQueue)
+                       || type_in_queue.at(waitQueue) != GPUWaitQueueType::None
+                       || instruction_queues.at(waitQueue).size() > 0)
+                    {
+                        if(retval.rdbuf()->in_avail() == 0)
+                        {
+                            retval << "Wait Queue State:";
+                        }
+                        retval << "\n--Queue: " << waitQueue.ToString();
+                        retval << "\n----Needs Wait Zero: "
+                               << (needs_wait_zero.at(waitQueue) ? "True" : "False");
+                        retval << "\n----Type In Queue  : "
+                               << type_in_queue.at(waitQueue).ToString();
+                        retval << "\n----Registers      : ";
+
+                        for(int queue_i = 0; queue_i < instruction_queues.at(waitQueue).size();
+                            queue_i++)
+                        {
+                            retval << "\n------Dst: {";
+                            for(auto& reg : std::get<0>(instruction_queues.at(waitQueue)[queue_i]))
+                            {
+                                if(reg)
+                                {
+                                    retval << reg->toString() << ", ";
+                                }
+                            }
+                            retval << "}";
+                            retval << "\n------Src: {";
+                            for(auto& reg : std::get<1>(instruction_queues.at(waitQueue)[queue_i]))
+                            {
+                                if(reg)
+                                {
+                                    retval << reg->toString() << ", ";
+                                }
+                            }
+                            retval << "}";
+                        }
+                    }
+                }
+                return retval.str();
             }
         };
 
