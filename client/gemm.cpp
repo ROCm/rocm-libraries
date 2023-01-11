@@ -37,6 +37,9 @@ struct GEMMProblem
     int workgroup_size_x = 64;
     int workgroup_size_y = 1;
 
+    bool loadLDS_A = true;
+    bool loadLDS_B = true;
+
     // Datatype of inputs and outputs
     std::string type_A;
     std::string type_B;
@@ -92,6 +95,8 @@ struct rocRoller::Serialization::
         iot::mapRequired(io, "mac_k", result.mac_k);
         iot::mapRequired(io, "workgroup_size_x", result.workgroup_size_x);
         iot::mapRequired(io, "workgroup_size_y", result.workgroup_size_y);
+        iot::mapRequired(io, "loadLDS_A", result.loadLDS_A);
+        iot::mapRequired(io, "loadLDS_B", result.loadLDS_B);
         iot::mapRequired(io, "trans_A", result.trans_A);
         iot::mapRequired(io, "trans_B", result.trans_B);
         iot::mapRequired(io, "kernelGenerate", result.kernelGenerate);
@@ -264,9 +269,13 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult)
     auto mac_tile_A = KernelGraph::CoordinateGraph::MacroTile({result.mac_m, result.mac_k},
                                                               LayoutType::MATRIX_A,
                                                               {wave_m, wave_n, wave_k, wave_b},
-                                                              MemoryType::LDS);
-    auto mac_tile_B = KernelGraph::CoordinateGraph::MacroTile(
-        {result.mac_k, result.mac_n}, LayoutType::MATRIX_B, {wave_m, wave_n, wave_k, wave_b});
+                                                              result.loadLDS_A ? MemoryType::LDS
+                                                                               : MemoryType::WAVE);
+    auto mac_tile_B = KernelGraph::CoordinateGraph::MacroTile({result.mac_k, result.mac_n},
+                                                              LayoutType::MATRIX_B,
+                                                              {wave_m, wave_n, wave_k, wave_b},
+                                                              result.loadLDS_B ? MemoryType::LDS
+                                                                               : MemoryType::WAVE);
     auto mac_tile_C = KernelGraph::CoordinateGraph::MacroTile({result.mac_m, result.mac_n},
                                                               LayoutType::MATRIX_ACCUMULATOR,
                                                               {wave_m, wave_n, wave_k, wave_b});
@@ -392,6 +401,8 @@ int main(int argc, const char* argv[])
     po.addArg("yaml", Arg({"o", "yaml"}, "Results"));
     po.addArg("workgroup_size_x", Arg({"workgroup_size_x"}, "Workgroup size in the x dimension"));
     po.addArg("workgroup_size_y", Arg({"workgroup_size_y"}, "Workgroup size in the y dimension"));
+    po.addArg("loadLDS_A", Arg({"loadLDS_A"}, "Use LDS when loading A Matrix"));
+    po.addArg("loadLDS_B", Arg({"loadLDS_B"}, "Use LDS when loading A Matrix"));
     po.addArg("type_A", Arg({"type_A"}, "Datatype of A Matrix [float | half]"));
     po.addArg("type_B", Arg({"type_B"}, "Datatype of B Matrix [float | half]"));
     po.addArg("type_C", Arg({"type_C"}, "Datatype of C Matrix [float | half]"));
@@ -419,6 +430,8 @@ int main(int argc, const char* argv[])
     prob.mac_k            = po.get("mac_k", 64);
     prob.workgroup_size_x = po.get("workgroup_size_x", wavefront_size * 2);
     prob.workgroup_size_y = po.get("workgroup_size_y", 2);
+    prob.loadLDS_A        = po.get("loadLDS_A", true);
+    prob.loadLDS_B        = po.get("loadLDS_B", true);
     prob.type_A           = po.get("type_A", std::string("float"));
     prob.type_B           = po.get("type_B", std::string("float"));
     prob.type_C           = po.get("type_C", std::string("float"));

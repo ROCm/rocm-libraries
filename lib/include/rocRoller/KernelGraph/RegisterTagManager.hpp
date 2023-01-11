@@ -37,6 +37,16 @@ namespace rocRoller
 
         void deleteRegister(int tag);
 
+        /**
+         * @brief Returns whether or not a register has already been added to the
+         *        Register Manager.
+         *
+         * @param tag
+         * @return true
+         * @return false
+         */
+        bool hasRegister(int tag) const;
+
     private:
         std::weak_ptr<Context>                          m_context;
         std::map<int, std::shared_ptr<Register::Value>> m_registers;

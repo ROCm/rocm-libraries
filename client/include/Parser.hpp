@@ -201,7 +201,8 @@ bool ParseOptions::get<bool>(std::string name, bool const defaultVal)
     {
         if(m_parsed_args.find(flag) != m_parsed_args.end())
         {
-            return m_parsed_args.at(flag) == "1";
+            return m_parsed_args.at(flag) == "1" || m_parsed_args.at(flag) == "True"
+                   || m_parsed_args.at(flag) == "true";
         }
     }
     return defaultVal;

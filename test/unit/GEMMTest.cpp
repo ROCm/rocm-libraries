@@ -52,6 +52,9 @@ namespace GEMMDriverTest
         uint wavefront_size   = 64;
         uint workgroup_size_x = 2 * wavefront_size;
         uint workgroup_size_y = 2;
+
+        bool loadLDSA = true;
+        bool loadLDSB = true;
     };
 
     template <typename T>
@@ -183,9 +186,13 @@ namespace GEMMDriverTest
         auto mac_tile_A = KernelGraph::CoordinateGraph::MacroTile({mac_m, mac_k},
                                                                   LayoutType::MATRIX_A,
                                                                   {wave_m, wave_n, wave_k, wave_b},
-                                                                  MemoryType::LDS);
-        auto mac_tile_B = KernelGraph::CoordinateGraph::MacroTile(
-            {mac_k, mac_n}, LayoutType::MATRIX_B, {wave_m, wave_n, wave_k, wave_b});
+                                                                  gemm.loadLDSA ? MemoryType::LDS
+                                                                                : MemoryType::WAVE);
+        auto mac_tile_B = KernelGraph::CoordinateGraph::MacroTile({mac_k, mac_n},
+                                                                  LayoutType::MATRIX_B,
+                                                                  {wave_m, wave_n, wave_k, wave_b},
+                                                                  gemm.loadLDSB ? MemoryType::LDS
+                                                                                : MemoryType::WAVE);
         auto mac_tile_C = KernelGraph::CoordinateGraph::MacroTile(
             {mac_m, mac_n}, LayoutType::MATRIX_ACCUMULATOR, {wave_m, wave_n, wave_k, wave_b});
 
@@ -308,6 +315,10 @@ namespace GEMMDriverTest
     {
         GEMMProblem gemm;
         gemm.wave_k = 8;
+
+        gemm.loadLDSA = false;
+        gemm.loadLDSB = false;
+
         basicGEMM<Half>(m_context, gemm, 2.e-5);
     }
 
@@ -317,7 +328,7 @@ namespace GEMMDriverTest
 
         gemm.M = 256;
         gemm.N = 512;
-        gemm.K = 16;
+        gemm.K = 64;
 
         gemm.mac_m = 128;
         gemm.mac_n = 256;
@@ -328,6 +339,8 @@ namespace GEMMDriverTest
         gemm.workgroup_size_x = 2 * gemm.wavefront_size;
         gemm.workgroup_size_y = 4;
 
+        gemm.loadLDSA = false;
+
         basicGEMM<Half>(m_context, gemm, 2.e-5);
     }
 
@@ -337,7 +350,7 @@ namespace GEMMDriverTest
 
         gemm.M = 256;
         gemm.N = 512;
-        gemm.K = 16;
+        gemm.K = 64;
 
         gemm.mac_m = 128;
         gemm.mac_n = 256;
@@ -348,6 +361,8 @@ namespace GEMMDriverTest
         gemm.workgroup_size_x = 4 * gemm.wavefront_size;
         gemm.workgroup_size_y = 1;
 
+        gemm.loadLDSB = false;
+
         basicGEMM<Half>(m_context, gemm, 2.e-5);
     }
 
@@ -357,7 +372,7 @@ namespace GEMMDriverTest
 
         gemm.M = 256;
         gemm.N = 512;
-        gemm.K = 16;
+        gemm.K = 64;
 
         gemm.mac_m = 128;
         gemm.mac_n = 256;

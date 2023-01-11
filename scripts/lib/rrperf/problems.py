@@ -61,6 +61,9 @@ class GEMM:
     trans_A: str = "N"
     trans_B: str = "N"
 
+    loadLDS_A: bool = True
+    loadLDS_B: bool = True
+
     @property
     def token(self):
         return repr(GEMM(**field_dict(GEMM, self)))
@@ -97,6 +100,8 @@ class GEMMRun(GEMM):
             "--type_C=" + str(self.type_C),
             "--type_D=" + str(self.type_D),
             "--type_acc=" + str(self.type_acc),
+            "--loadLDS_A=" + str(self.loadLDS_A),
+            "--loadLDS_B=" + str(self.loadLDS_B),
             "--yaml=" + str(self.output),
             "--num_warmup=" + str(self.numWarmUp),
             "--num_outer=" + str(self.numOuter),

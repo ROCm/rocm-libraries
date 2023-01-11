@@ -1588,8 +1588,16 @@ namespace rocRoller
                 auto numElements = product(tile.subTileSizes) * product(m_workgroupSize);
                 // Allocate LDS memory, and store the offset of the beginning of the allocation
                 // into lds_offset.
-                auto ldsAllocation = Register::Value::AllocateLDS(m_context, vtype, numElements);
-                m_context->registerTagManager()->addRegister(lds_tag, ldsAllocation);
+                Register::ValuePtr ldsAllocation;
+                if(!m_context->registerTagManager()->hasRegister(lds_tag))
+                {
+                    ldsAllocation = Register::Value::AllocateLDS(m_context, vtype, numElements);
+                    m_context->registerTagManager()->addRegister(lds_tag, ldsAllocation);
+                }
+                else
+                {
+                    ldsAllocation = m_context->registerTagManager()->getRegister(lds_tag);
+                }
 
                 auto lds_offset = Register::Value::Placeholder(
                     m_context, Register::Type::Vector, DataType::Int32, 1);

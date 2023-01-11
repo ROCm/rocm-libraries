@@ -18,7 +18,7 @@ namespace rocRoller
 
     inline std::shared_ptr<Register::Value> RegisterTagManager::getRegister(int tag)
     {
-        AssertFatal(m_registers.count(tag) > 0, ShowValue(tag));
+        AssertFatal(hasRegister(tag), ShowValue(tag));
         return m_registers.at(tag);
     }
 
@@ -27,7 +27,7 @@ namespace rocRoller
                                                                             VariableType   varType,
                                                                             size_t valueCount)
     {
-        if(m_registers.count(tag) > 0)
+        if(hasRegister(tag))
         {
             auto reg = m_registers.at(tag);
             AssertFatal(reg->variableType() == varType);
@@ -54,5 +54,10 @@ namespace rocRoller
     inline void RegisterTagManager::deleteRegister(int tag)
     {
         m_registers.erase(tag);
+    }
+
+    inline bool RegisterTagManager::hasRegister(int tag) const
+    {
+        return m_registers.count(tag) > 0;
     }
 }
