@@ -98,6 +98,7 @@ def run(
     os.chdir(str(top))
 
     results = []
+    success = True
     for target in targets:
         project_dir = top / f"build_{target}"
         if target == "current":
@@ -108,9 +109,10 @@ def run(
             project_dir,
             target,
         )
-        _, result_dir = suite_run.run(
+        target_success, result_dir = suite_run.run(
             build_dir=build_dir, rundir=rundir, suite=suite, filter=filter
         )
+        success &= target_success
         results.append(result_dir)
 
     date = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
@@ -128,3 +130,6 @@ def run(
             plot_min=plot_min,
             plot_box=not exclude_boxplot,
         )
+
+    if not success:
+        raise RuntimeError("Some jobs failed.")
