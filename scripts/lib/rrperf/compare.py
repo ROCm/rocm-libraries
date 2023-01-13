@@ -28,24 +28,27 @@ class ComparisonResult:
 @dataclass
 class PlotData:
     timestamp: List[float] = field(default_factory=list)
+    commit: List[str] = field(default_factory=list)
     median: List[float] = field(default_factory=list)
     min: List[float] = field(default_factory=list)
     name: List[str] = field(default_factory=list)
     kernel: List[float] = field(default_factory=list)
     machine: List[int] = field(default_factory=list)
     box_data: pd.DataFrame = field(
-        default_factory=lambda: pd.DataFrame(columns=["timestamp", "runs"])
+        default_factory=lambda: pd.DataFrame(columns=["timestamp", "commit", "runs"])
     )
 
 
 class PerformanceRun:
     timestamp: float
+    commit: str
     directory: str
     machine_spec: MachineSpecs
     results: OrderedDict
 
-    def __init__(self, timestamp, directory, machine_spec, results):
+    def __init__(self, timestamp, commit, directory, machine_spec, results):
         self.timestamp = timestamp
+        self.commit = commit
         self.directory = directory
         self.machine_spec = machine_spec
         self.results = results
@@ -58,6 +61,7 @@ class PerformanceRun:
     def name(self):
         return os.path.basename(self.directory)
 
+    @staticmethod
     def get_comparable_tokens(ref, runs):
         # compute intersection
         common = set(ref.results.keys())
@@ -69,16 +73,19 @@ class PerformanceRun:
 
         return common
 
+    @staticmethod
     def get_all_tokens(runs):
         tests = list({token for run in runs for token in run.results})
         tests.sort()
         return tests
 
+    @staticmethod
     def get_all_specs(runs):
         configs = list({run.machine_spec for run in runs})
         configs.sort()
         return configs
 
+    @staticmethod
     def get_timestamp(wrkdir):
         try:
             return datetime.datetime.fromtimestamp(
@@ -90,6 +97,17 @@ class PerformanceRun:
             except Exception:
                 return datetime.datetime.fromtimestamp(0)
 
+    @staticmethod
+    def get_commit(wrkdir):
+        try:
+            return (wrkdir / "git-commit.txt").read_text().strip()[0:8]
+        except Exception:
+            try:
+                return wrkdir.stem[11:19]
+            except Exception:
+                return "XXXXXXXX"
+
+    @staticmethod
     def load_perf_runs(directories):
         perf_runs = list()
         for directory in directories:
@@ -109,7 +127,16 @@ class PerformanceRun:
                         results[element.token] = element
             spec = rrperf.specs.load_machine_specs(wrkdir / "machine-specs.txt")
             timestamp = PerformanceRun.get_timestamp(wrkdir)
-            perf_runs.append(PerformanceRun(timestamp, directory, spec, results))
+            commit = PerformanceRun.get_commit(wrkdir)
+            perf_runs.append(
+                PerformanceRun(
+                    timestamp=timestamp,
+                    commit=commit,
+                    directory=directory,
+                    machine_spec=spec,
+                    results=results,
+                )
+            )
 
         return perf_runs
 
@@ -276,6 +303,7 @@ def html_summary(  # noqa: C901
     plot_box=True,
     plot_median=False,
     plot_min=False,
+    x_value="timestamp",
 ):
     """Create HTML report of summary statistics."""
 
@@ -318,6 +346,7 @@ def html_summary(  # noqa: C901
             min = np.min(ka)
             for machine in ["all", run.machine_spec]:
                 machine_filtered_runs[machine].timestamp.append(run.timestamp)
+                machine_filtered_runs[machine].commit.append(run.commit)
                 machine_filtered_runs[machine].median.append(median)
                 machine_filtered_runs[machine].min.append(min)
                 machine_filtered_runs[machine].name.append(name)
@@ -328,7 +357,13 @@ def html_summary(  # noqa: C901
                 machine_filtered_runs[machine].box_data = pd.concat(
                     [
                         machine_filtered_runs[machine].box_data,
-                        pd.DataFrame({"timestamp": run.timestamp, "runs": ka}),
+                        pd.DataFrame(
+                            {
+                                "timestamp": run.timestamp,
+                                "commit": run.commit,
+                                "runs": ka,
+                            }
+                        ),
                     ]
                 )
 
@@ -352,12 +387,12 @@ def html_summary(  # noqa: C901
         plot = go.Figure()
         if plot_box:
             box = px.box(
-                machine_filtered_runs["all"].box_data, x="timestamp", y="runs"
+                machine_filtered_runs["all"].box_data, x=x_value, y="runs"
             ).select_traces()
             plot.add_trace(next(box))
         if plot_median:
             scatter = go.Scatter(
-                x=machine_filtered_runs["all"].timestamp,
+                x=getattr(machine_filtered_runs["all"], x_value),
                 y=machine_filtered_runs["all"].median,
                 name="Median",
                 text=machine_filtered_runs["all"].name,
@@ -367,7 +402,7 @@ def html_summary(  # noqa: C901
             plot.add_trace(scatter)
         if plot_min:
             scatter = go.Scatter(
-                x=machine_filtered_runs["all"].timestamp,
+                x=getattr(machine_filtered_runs["all"], x_value),
                 y=machine_filtered_runs["all"].min,
                 name="Min",
                 text=machine_filtered_runs["all"].name,
@@ -379,12 +414,12 @@ def html_summary(  # noqa: C901
         for i, config in enumerate(configs):
             if plot_box:
                 box = px.box(
-                    machine_filtered_runs[config].box_data, x="timestamp", y="runs"
+                    machine_filtered_runs[config].box_data, x=x_value, y="runs"
                 ).select_traces()
                 plot.add_trace(next(box))
             if plot_median:
                 scatter = go.Scatter(
-                    x=machine_filtered_runs[config].timestamp,
+                    x=getattr(machine_filtered_runs[config], x_value),
                     y=machine_filtered_runs[config].median,
                     visible=False,
                     name="Median",
@@ -394,7 +429,7 @@ def html_summary(  # noqa: C901
                 plot.add_trace(scatter)
             if plot_min:
                 scatter = go.Scatter(
-                    x=machine_filtered_runs[config].timestamp,
+                    x=getattr(machine_filtered_runs[config], x_value),
                     y=machine_filtered_runs[config].min,
                     visible=False,
                     name="Min",
@@ -427,7 +462,7 @@ def html_summary(  # noqa: C901
             ],
             xaxis=dict(
                 rangeslider=dict(visible=True),
-                type="date",
+                type="date" if x_value == "timestamp" else "category",
             ),
             yaxis=dict(
                 fixedrange=False,
@@ -518,6 +553,7 @@ def compare(
     plot_median=False,
     plot_min=False,
     exclude_boxplot=False,
+    x_value="timestamp",
     **kwargs,
 ):
     """Compare multiple run directories.
@@ -542,6 +578,7 @@ def compare(
             plot_median=plot_median,
             plot_min=plot_min,
             plot_box=not exclude_boxplot,
+            x_value=x_value,
         )
     elif format == "email_html":
         email_html_summary(output, perf_runs)

@@ -71,6 +71,7 @@ def run(
     plot_median=False,
     plot_min=False,
     exclude_boxplot=False,
+    x_value: str = "timestamp",
     **kwargs,
 ):
     orig_project_dir = git.top()
@@ -129,6 +130,7 @@ def run(
             plot_median=plot_median,
             plot_min=plot_min,
             plot_box=not exclude_boxplot,
+            x_value=x_value,
         )
 
     if not success:

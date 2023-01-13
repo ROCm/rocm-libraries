@@ -150,7 +150,6 @@ def run(
     if token is not None:
         generator = chain(generator, from_token(token))
 
-    top = rrperf.git.top(os.path.dirname(os.path.realpath(__file__)))
     if build_dir is None:
         build_dir = get_build_dir()
 
@@ -164,7 +163,7 @@ def run(
 
     # pts.create_git_info(str(wrkdir / "git-commit.txt"))
     git_commit = rundir / "git-commit.txt"
-    git_commit.write_text(rrperf.git.full_hash(top) + "\n")
+    git_commit.write_text(rrperf.git.full_hash(build_dir) + "\n")
     # pts.create_specs_info(str(wrkdir / "machine-specs.txt"))
     machine_specs = rundir / "machine-specs.txt"
     machine_specs.write_text(str(rrperf.specs.get_machine_specs(0, rocm_smi)) + "\n")

@@ -106,6 +106,12 @@ def main():
             action="store_true",
             help="Exclude the box plots when plotting in html.",
         )
+        cmd.add_argument(
+            "--x_value",
+            help="Choose which value to use for the x-axis.",
+            default="timestamp",
+            choices=["timestamp", "commit"],
+        )
 
     args = parser.parse_args()
     command = {
