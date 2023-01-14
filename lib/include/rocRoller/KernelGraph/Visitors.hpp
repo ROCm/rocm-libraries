@@ -9,6 +9,8 @@
 #include "Graph/Hypergraph.hpp"
 #include "KernelGraph.hpp"
 
+#include "Expression_fwd.hpp"
+
 #include <rocRoller/AssemblyKernel.hpp>
 
 namespace rocRoller
@@ -52,6 +54,100 @@ namespace rocRoller
             std::map<int, int> control;
         };
 
+        /**
+         * @brief Reindex coordinate tags in an Expression according to a reindexer.
+         *
+         * Expressions can contain references to tags within a coordinate graph.  For example, a
+         * DataFlowTag expression represents the value of a coordinate within a coordinate graph,
+         * and hence stores an explicit tag.
+         *
+         * After re-writing a coordinate graph, tag references need to be updated in all
+         * expressions.
+         */
+        struct ReindexExpressionVisitor
+        {
+            ReindexExpressionVisitor(GraphReindexer const& reindexer)
+                : reindexer(reindexer)
+            {
+            }
+
+            GraphReindexer const& reindexer;
+
+            template <Expression::CUnary Expr>
+            Expression::ExpressionPtr operator()(Expr const& expr) const
+            {
+                Expr cpy = expr;
+                if(expr.arg)
+                {
+                    cpy.arg = call(expr.arg);
+                }
+                return std::make_shared<Expression::Expression>(cpy);
+            }
+
+            template <Expression::CBinary Expr>
+            Expression::ExpressionPtr operator()(Expr const& expr) const
+            {
+                Expr cpy = expr;
+                if(expr.lhs)
+                {
+                    cpy.lhs = call(expr.lhs);
+                }
+                if(expr.rhs)
+                {
+                    cpy.rhs = call(expr.rhs);
+                }
+                return std::make_shared<Expression::Expression>(cpy);
+            }
+
+            template <Expression::CTernary Expr>
+            Expression::ExpressionPtr operator()(Expr const& expr) const
+            {
+                Expr cpy = expr;
+                if(expr.lhs)
+                {
+                    cpy.lhs = call(expr.lhs);
+                }
+                if(expr.r1hs)
+                {
+                    cpy.r1hs = call(expr.r1hs);
+                }
+                if(expr.r2hs)
+                {
+                    cpy.r2hs = call(expr.r2hs);
+                }
+                return std::make_shared<Expression::Expression>(cpy);
+            }
+
+            Expression::ExpressionPtr operator()(std::shared_ptr<CommandArgument> const& expr) const
+            {
+                return std::make_shared<Expression::Expression>(expr);
+            }
+
+            Expression::ExpressionPtr operator()(Expression::DataFlowTag const& expr) const
+            {
+                if(reindexer.coordinates.count(expr.tag) > 0)
+                {
+                    return std::make_shared<Expression::Expression>(Expression::DataFlowTag{
+                        reindexer.coordinates.at(expr.tag), expr.regType, expr.varType});
+                }
+                return std::make_shared<Expression::Expression>(expr);
+            }
+
+            template <Expression::CValue Value>
+            Expression::ExpressionPtr operator()(Value const& expr) const
+            {
+                return std::make_shared<Expression::Expression>(expr);
+            }
+
+            Expression::ExpressionPtr call(Expression::ExpressionPtr expr) const
+            {
+                if(!expr)
+                    return expr;
+
+                return std::visit(*this, *expr);
+            }
+        };
+
 #define MAKE_EDGE_VISITOR(CLS)                           \
     virtual void visitEdge(KernelGraph&       graph,     \
                            KernelGraph const& original,  \
@@ -87,6 +183,19 @@ namespace rocRoller
                 , m_controlGraphDirection(controlGraphOrder)
                 , m_rewriteCoordinates(rewriteCoordinates)
             {
+            }
+
+            virtual void visitOperation(KernelGraph&       graph,
+                                        KernelGraph const& original,
+                                        GraphReindexer&    reindexer,
+                                        int                tag,
+                                        Assign const&      assign)
+            {
+                copyOperation(graph, original, reindexer, tag);
+                ReindexExpressionVisitor visitor(reindexer);
+                auto                     new_assign
+                    = Assign{assign.regType, visitor.call(assign.expression), assign.valueCount};
+                graph.control.setElement(reindexer.control.at(tag), new_assign);
             }
 
             void copyEdge(KernelGraph&       graph,
@@ -309,24 +418,6 @@ namespace rocRoller
                 }
             }
 
-            virtual void visitOperation(KernelGraph&       graph,
-                                        KernelGraph const& original,
-                                        GraphReindexer&    reindexer,
-                                        int                tag,
-                                        ElementOp const&   op)
-            {
-                copyOperation(graph, original, reindexer, tag);
-
-                if(m_rewriteCoordinates)
-                {
-                    auto new_tag = reindexer.control.at(tag);
-                    auto new_op  = graph.control.getNode<ElementOp>(new_tag);
-                    new_op.a     = op.a > 0 ? reindexer.coordinates.at(op.a) : op.a;
-                    new_op.b     = op.b > 0 ? reindexer.coordinates.at(op.b) : op.b;
-                    graph.control.setElement(new_tag, new_op);
-                }
-            }
-
             MAKE_EDGE_VISITOR(ConstructMacroTile);
             MAKE_EDGE_VISITOR(DataFlow);
             MAKE_EDGE_VISITOR(Offset);
@@ -353,7 +444,6 @@ namespace rocRoller
             MAKE_OPERATION_VISITOR(StoreTiled);
             MAKE_OPERATION_VISITOR(StoreVGPR);
             MAKE_OPERATION_VISITOR(ForLoopOp);
-            MAKE_OPERATION_VISITOR(Assign);
             MAKE_OPERATION_VISITOR(UnrollOp);
             MAKE_OPERATION_VISITOR(Barrier);
             MAKE_OPERATION_VISITOR(SetCoordinate);

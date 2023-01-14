@@ -321,6 +321,16 @@ namespace rocRoller
             constexpr static inline auto EvalTimes = EvaluationTimes::All();
         };
 
+        /**
+         * @brief Register value from the coordinate graph.
+         *
+         * If the register associated with the `tag` hasn't been
+         * allocated yet, a new register is created based on `regType`
+         * and `varType`.
+         *
+         * If `varType` is `DataType::None`, the data type is
+         * "deferred".
+         */
         struct DataFlowTag
         {
             int tag;

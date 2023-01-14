@@ -1,7 +1,4 @@
 
-#include "DataTypes/DataTypes.hpp"
-#include "Utilities/Generator.hpp"
-#include "Utilities/Utils.hpp"
 #include <iostream>
 #include <memory>
 #include <set>
@@ -156,7 +153,7 @@ namespace rocRoller
             Generator<Instruction> generate(std::set<int> candidates, Transformer coords)
             {
                 rocRoller::Log::getLogger()->debug(
-                    concatenate("KernelGraph::CodeGeneratorVisitor::generate: ", candidates));
+                    concatenate("KernelGraph::CodeGenerator::generate: ", candidates));
 
                 co_yield Instruction::Comment(concatenate("generate(", candidates, ")"));
 
@@ -198,70 +195,6 @@ namespace rocRoller
                 }
             }
 
-            template <Expression::CBinary Operation>
-            Generator<Instruction> generateCommutativeBinaryOp(int dest, int a, int b)
-            {
-                auto lhs = m_context->registerTagManager()->getRegister(a);
-                auto rhs = m_context->registerTagManager()->getRegister(b);
-
-                auto const lhsInfo = DataTypeInfo::Get(lhs->variableType());
-                auto const rhsInfo = DataTypeInfo::Get(rhs->variableType());
-
-                AssertFatal(lhs->valueCount() * lhsInfo.packing
-                                    == rhs->valueCount() * rhsInfo.packing
-                                || lhs->valueCount() * lhsInfo.packing == 1
-                                || rhs->valueCount() * rhsInfo.packing == 1,
-                            "Commutative binary operation size mismatch.");
-
-                auto regType    = Register::Type::Vector;
-                auto varType    = VariableType::Promote(lhs->variableType(), rhs->variableType());
-                auto valueCount = std::max(lhs->valueCount() * lhsInfo.packing,
-                                           rhs->valueCount() * rhsInfo.packing);
-
-                co_yield m_context->copier()->ensureType(lhs, lhs, regType);
-                co_yield m_context->copier()->ensureType(rhs, rhs, regType);
-
-                auto dst = m_context->registerTagManager()->getRegister(
-                    dest, regType, varType, valueCount);
-                co_yield Register::AllocateIfNeeded(dst);
-
-                auto op = GetGenerator<Operation>(dst, lhs, rhs);
-
-                if(lhsInfo.packing != rhsInfo.packing)
-                {
-                    // If the packing values of the datatypes are different, we need to
-                    // convert the more packed value into the less packed value type.
-                    // We can then perform the operation.
-                    int packingRatio = std::max(lhsInfo.packing, rhsInfo.packing)
-                                       / std::min(lhsInfo.packing, rhsInfo.packing);
-
-                    if(rhsInfo.packing < lhsInfo.packing)
-                        std::swap(lhs, rhs);
-
-                    for(size_t i = 0; i < dst->valueCount(); i += packingRatio)
-                    {
-                        auto result = dst->element({i, i + packingRatio - 1});
-                        co_yield generateConvertOp(
-                            varType.dataType, result, rhs->element({i / packingRatio}));
-                        for(size_t j = 0; j < packingRatio; j++)
-                        {
-                            auto lhsVal = lhs->valueCount() == 1 ? lhs : lhs->element({i + j});
-                            co_yield op->generate(
-                                result->element({j}), lhsVal, result->element({j}));
-                        }
-                    }
-                }
-                else
-                {
-                    for(size_t k = 0; k < valueCount; ++k)
-                    {
-                        auto lhsVal = lhs->valueCount() == 1 ? lhs : lhs->element({k});
-                        auto rhsVal = rhs->valueCount() == 1 ? rhs : rhs->element({k});
-                        co_yield op->generate(dst->element({k}), lhsVal, rhsVal);
-                    }
-                }
-            }
-
             Generator<Instruction>
                 call(int tag, Operation const& operation, Transformer const& coords)
             {
@@ -281,101 +214,8 @@ namespace rocRoller
                 m_completedControlNodes.insert(tag);
             }
 
-            Generator<Instruction> generateEOp(Operations::E_Neg, int tag, int a, int b)
-            {
-                co_yield Instruction::Comment("GEN: E_Neg");
-
-                auto src = m_context->registerTagManager()->getRegister(a);
-                auto dst = m_context->registerTagManager()->getRegister(tag, src->placeholder());
-
-                co_yield generateOp<Expression::Negate>(dst, src);
-            }
-
-            Generator<Instruction> generateEOp(Operations::E_Abs, int tag, int a, int b)
-            {
-                co_yield Instruction::Comment("GEN: E_Abs");
-                // TODO: Finish codegen for E_Abs
-                Throw<FatalError>("Not implemented yet.");
-            }
-
-            Generator<Instruction> generateEOp(Operations::E_Not, int tag, int a, int b)
-            {
-                co_yield Instruction::Comment("GEN: E_Not");
-                // TODO: Finish codegen for E_Not
-                Throw<FatalError>("Not implemented yet.");
-            }
-
-            Generator<Instruction> generateEOp(Operations::E_Add, int tag, int a, int b)
-            {
-                co_yield Instruction::Comment("GEN: E_Add");
-
-                co_yield generateCommutativeBinaryOp<Expression::Add>(tag, a, b);
-            }
-
-            Generator<Instruction> generateEOp(Operations::E_Sub, int tag, int a, int b)
-            {
-                co_yield Instruction::Comment("GEN: E_Sub");
-
-                auto lhs = m_context->registerTagManager()->getRegister(a);
-                auto rhs = m_context->registerTagManager()->getRegister(b);
-                auto dst = m_context->registerTagManager()->getRegister(tag, lhs->placeholder());
-
-                co_yield generateOp<Expression::Subtract>(dst, lhs, rhs);
-            }
-
-            Generator<Instruction> generateEOp(Operations::E_Mul, int tag, int a, int b)
-            {
-                co_yield Instruction::Comment("GEN: E_Mul");
-
-                co_yield generateCommutativeBinaryOp<Expression::Multiply>(tag, a, b);
-            }
-
-            Generator<Instruction> generateEOp(Operations::E_Div, int tag, int a, int b)
-            {
-                co_yield Instruction::Comment("GEN: E_Div");
-
-                auto lhs = m_context->registerTagManager()->getRegister(a);
-                auto rhs = m_context->registerTagManager()->getRegister(b);
-                auto dst = m_context->registerTagManager()->getRegister(tag, lhs->placeholder());
-
-                co_yield generateOp<Expression::Divide>(dst, lhs, rhs);
-            }
-
-            Generator<Instruction> generateEOp(Operations::E_And, int tag, int a, int b)
-            {
-                co_yield Instruction::Comment("GEN: E_And");
-                // TODO: Finish codegen for E_And
-                Throw<FatalError>("Not implemented yet.");
-            }
-
-            Generator<Instruction> generateEOp(Operations::E_Or, int tag, int a, int b)
-            {
-                co_yield Instruction::Comment("GEN: E_Or");
-                // TODO: Finish codegen for E_Or
-                Throw<FatalError>("Not implemented yet.");
-            }
-
-            Generator<Instruction> operator()(int tag, ElementOp eop, Transformer coords)
-            {
-                rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::ElementOp({})",
-                                                   tag);
-                co_yield Instruction::Comment("GEN: ElementOp");
-
-                auto connections = m_graph.mapper.getConnections(tag);
-                AssertFatal(connections.size() == 1,
-                            "Output of element op must be a single dimension.");
-
-                int dest = connections[0].coordinate;
-                co_yield std::visit(
-                    [&](auto&& arg) -> Generator<Instruction> {
-                        co_yield generateEOp(arg, dest, eop.a, eop.b);
-                    },
-                    eop.op);
-            }
-
             Generator<Instruction> operator()(int tag, Kernel const& edge, Transformer coords)
             {
-                co_yield Instruction::Comment("Begin Kernel");
                 auto scope = std::make_shared<ScopeManager>(m_context);
                 m_context->setScopeManager(scope);
 
@@ -385,13 +225,10 @@ namespace rocRoller
                 scope->popAndReleaseScope();
 
                 m_context->setScopeManager(nullptr);
-                co_yield Instruction::Comment("End Kernel");
             }
 
             Generator<Instruction> operator()(int tag, Scope const&, Transformer coords)
             {
-                rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::Scope({})", tag);
-
                 auto scope = m_context->getScopeManager();
                 scope->pushNewScope();
                 auto body = m_graph.control.getOutputNodeIndices<Body>(tag).to<std::set>();
@@ -401,11 +238,6 @@ namespace rocRoller
 
             Generator<Instruction> operator()(int tag, ForLoopOp const& op, Transformer coords)
             {
-                // TODO: Logging level for these comments.
-                rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::ForLoopOp({})",
-                                                   tag);
-                co_yield Instruction::Comment("For Loop Begin");
-
                 auto topLabel = m_context->labelAllocator()->label("ForLoopTop");
                 auto botLabel = m_context->labelAllocator()->label("ForLoopBottom");
 
@@ -461,8 +293,6 @@ namespace rocRoller
                                 + " if true)"));
 
                 co_yield Instruction::Label(botLabel);
-
-                co_yield Instruction::Comment("For Loop End");
                 co_yield Instruction::Unlock("Unlock For Loop");
             }
 
@@ -473,31 +303,42 @@ namespace rocRoller
 
             Generator<Instruction> operator()(int tag, Assign const& assign, Transformer coords)
             {
-                rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::Assign({})", tag);
-                auto varType = resultVariableType(assign.expression);
-
                 auto connections = m_graph.mapper.getConnections(tag);
                 AssertFatal(connections.size() == 1,
                             "Invalid Assign operation; coordinate missing.");
                 auto dim_tag = connections[0].coordinate;
-                rocRoller::Log::getLogger()->debug(
-                    "KernelGraph::CodeGenerator::Assign({}): {}", tag, dim_tag);
 
-                auto dest = m_context->registerTagManager()->getRegister(
-                    dim_tag, assign.regType, varType, assign.valueCount);
+                rocRoller::Log::getLogger()->debug("  assigning dimension: {}", dim_tag);
 
                 auto scope = m_context->getScopeManager();
                 scope->addRegister(dim_tag);
 
+                auto deferred = resultVariableType(assign.expression).dataType == DataType::None
+                                && !m_context->registerTagManager()->hasRegister(dim_tag);
+
+                Register::ValuePtr dest;
+                if(!deferred)
+                {
+                    rocRoller::Log::getLogger()->debug("  immediate: count {}", assign.valueCount);
+                    dest = m_context->registerTagManager()->getRegister(
+                        dim_tag,
+                        assign.regType,
+                        resultVariableType(assign.expression),
+                        assign.valueCount);
+                }
                 co_yield Expression::generate(dest, assign.expression, m_context);
+
+                if(deferred)
+                {
+                    m_context->registerTagManager()->addRegister(dim_tag, dest);
+                }
             }
 
             Generator<Instruction>
                 operator()(int tag, Deallocate const& deallocate, Transformer coords)
             {
-                rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::Deallocate({})",
-                                                   tag);
                 auto dim_tag = m_graph.mapper.get<Dimension>(tag);
+                rocRoller::Log::getLogger()->debug("  deallocate dimension: {}", dim_tag);
                 m_context->registerTagManager()->deleteRegister(dim_tag);
                 co_return;
             }
@@ -514,7 +355,6 @@ namespace rocRoller
                     tag,
                     ci.offset,
                     ci.stride);
-                co_yield Instruction::Comment(concatenate("GEN: ComputeIndex ", tag));
 
                 auto scope    = m_context->getScopeManager();
                 uint numBytes = DataTypeInfo::Get(ci.valueType).elementSize;
@@ -668,7 +508,7 @@ namespace rocRoller
                 loadMacroTileVGPR(int tag, LoadTiled const& load, Transformer coords)
             {
                 rocRoller::Log::getLogger()->debug(
-                    "KernelGraph::CodeGenerator::loadMacroTileVGPR()");
+                    "KernelGraph::CodeGenerator::loadMacroTileVGPR({})", tag);
                 co_yield Instruction::Comment("GEN: loadMacroTileVGPR");
 
                 auto [user_tag, user]         = m_graph.getDimension<User>(tag);
@@ -694,6 +534,9 @@ namespace rocRoller
                 auto const n = mac_tile.subTileSizes[1];
 
                 AssertFatal(m > 0 && n > 0, "Invalid/unknown subtile size dimensions");
+
+                rocRoller::Log::getLogger()->debug(
+                    "  macro tile: {}; sub tile size: {}x{}", mac_tile_tag, m, n);
 
                 // TODO: multidimensional tiles
                 for(int i = 0; i < m; ++i)
@@ -1092,10 +935,6 @@ namespace rocRoller
 
             Generator<Instruction> operator()(int tag, LoadTiled const& load, Transformer coords)
             {
-                rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::LoadTiled({})",
-                                                   tag);
-                co_yield Instruction::Comment("GEN: LoadTiled");
-
                 auto [mac_tile_tag, mac_tile] = m_graph.getDimension<MacroTile>(tag);
 
                 switch(mac_tile.memoryType)
@@ -1142,10 +981,6 @@ namespace rocRoller
 
             Generator<Instruction> operator()(int tag, LoadLDSTile const& load, Transformer coords)
             {
-                rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::LoadLDSTile({})",
-                                                   tag);
-                co_yield Instruction::Comment("GEN: LoadLDSTile");
-
                 auto [mac_tile_tag, mac_tile] = m_graph.getDimension<MacroTile>(tag);
 
                 switch(mac_tile.memoryType)
@@ -1175,9 +1010,6 @@ namespace rocRoller
 
             Generator<Instruction> operator()(int tag, LoadVGPR const& load, Transformer coords)
             {
-                rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::LoadVGPR({})", tag);
-                co_yield Instruction::Comment("GEN: LoadVGPR");
-
                 auto [userTag, user] = m_graph.getDimension<User>(tag);
                 auto [vgprTag, vgpr] = m_graph.getDimension<VGPR>(tag);
 
@@ -1267,9 +1099,6 @@ namespace rocRoller
 
             Generator<Instruction> operator()(int tag, Multiply const& mult, Transformer coords)
             {
-                rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::Multiply({})", tag);
-                co_yield Instruction::Comment("GEN: Multiply");
-
                 auto loads = m_graph.control.getOutputNodeIndices<Body>(tag).to<std::vector>();
                 AssertFatal(loads.size() == 2, "Multiply op needs two operands");
 
@@ -1413,12 +1242,14 @@ namespace rocRoller
             Generator<Instruction>
                 storeMacroTileVGPR(int tag, StoreTiled const& store, Transformer coords)
             {
-                rocRoller::Log::getLogger()->debug(
-                    "KernelGraph::CodeGenerator::storeMacroTileVGPR()");
-                co_yield Instruction::Comment("GEN: storeMacroTileVGPR");
-
                 auto [user_tag, user]         = m_graph.getDimension<User>(tag);
                 auto [mac_tile_tag, mac_tile] = m_graph.getDimension<MacroTile>(tag);
+
+                rocRoller::Log::getLogger()->debug(
+                    "KernelGraph::CodeGenerator::storeMacroTileVGPR({})", tag);
+                co_yield Instruction::Comment("GEN: storeMacroTileVGPR");
+
+                rocRoller::Log::getLogger()->debug("  user {}; tile {}", user_tag, mac_tile_tag);
 
                 auto vgpr = m_context->registerTagManager()->getRegister(mac_tile_tag);
 
@@ -1548,9 +1379,6 @@ namespace rocRoller
 
             Generator<Instruction> operator()(int tag, StoreTiled const& store, Transformer coords)
             {
-                rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::StoreTiled()");
-                co_yield Instruction::Comment("GEN: StoreTiled");
-
                 auto [mac_tile_tag, mac_tile] = m_graph.getDimension<MacroTile>(tag);
 
                 switch(mac_tile.memoryType)
@@ -1569,10 +1397,6 @@ namespace rocRoller
             Generator<Instruction>
                 operator()(int tag, StoreLDSTile const& store, Transformer coords)
             {
-                rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::StoreLDSTiled({})",
-                                                   tag);
-                co_yield Instruction::Comment("GEN: StoreLDSTile");
-
                 auto [lds_tag, lds]   = m_graph.getDimension<LDS>(tag);
                 auto [tile_tag, tile] = m_graph.getDimension<MacroTile>(tag);
 

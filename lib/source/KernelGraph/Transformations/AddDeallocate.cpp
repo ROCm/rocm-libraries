@@ -11,6 +11,71 @@ namespace rocRoller::KernelGraph
     using namespace ControlGraph;
 
     /**
+     * @brief Collect all coordinate tags referenced in an Expression.
+     */
+    struct CollectDataFlowExpressionVisitor
+    {
+        std::vector<int> tags;
+
+        template <Expression::CUnary Expr>
+        void operator()(Expr const& expr)
+        {
+            if(expr.arg)
+            {
+                call(expr.arg);
+            }
+        }
+
+        template <Expression::CBinary Expr>
+        void operator()(Expr const& expr)
+        {
+            if(expr.lhs)
+            {
+                call(expr.lhs);
+            }
+            if(expr.rhs)
+            {
+                call(expr.rhs);
+            }
+        }
+
+        template <Expression::CTernary Expr>
+        void operator()(Expr const& expr)
+        {
+            if(expr.lhs)
+            {
+                call(expr.lhs);
+            }
+            if(expr.r1hs)
+            {
+                call(expr.r1hs);
+            }
+            if(expr.r2hs)
+            {
+                call(expr.r2hs);
+            }
+        }
+
+        void operator()(Expression::DataFlowTag const& expr)
+        {
+            tags.push_back(expr.tag);
+        }
+
+        template <Expression::CValue Value>
+        void operator()(Value const& expr)
+        {
+        }
+
+        void call(Expression::ExpressionPtr expr)
+        {
+            if(expr)
+            {
+                std::visit(*this, *expr);
+            }
+        }
+    };
+
+    /**
      * @brief Register read/write tracer.
      *
      * The tracer walks the control flow graph and records when
@@ -156,7 +221,15 @@ namespace rocRoller::KernelGraph
 
         void operator()(Assign const& op, int tag)
         {
-            // already in a scope
+            auto dst = m_graph.mapper.getConnections(tag)[0].coordinate;
+            trackRegister(tag, dst);
+
+            CollectDataFlowExpressionVisitor visitor;
+            visitor.call(op.expression);
+            for(auto src : visitor.tags)
+            {
+                trackRegister(tag, src);
+            }
         }
 
         void operator()(Barrier const& op, int tag) {}
@@ -168,20 +241,47 @@ namespace rocRoller::KernelGraph
 
         void operator()(Deallocate const& op, int tag) {}
 
-        void operator()(ElementOp const& op, int tag)
-        {
-            auto dst = m_graph.mapper.getConnections(tag)[0].coordinate;
-            trackRegister(tag, op.a);
-            trackRegister(tag, op.b);
-            trackRegister(tag, dst);
-        }
-
         void operator()(ForLoopOp const& op, int tag)
         {
             m_loop.push_back(tag);
 
-            auto init = m_graph.control.getOutputNodeIndices<Initialize>(tag).to<std::set>();
-            generate(init);
+            //
+            // Don't examine for loop intialize or increment operations.
+            //
+            // Assign operations within loop initialisation operations
+            // are scoped already.
+            //
+            // Assign operations within loop increment operations
+            // typically involve: incrementing loop counters and
+            // offsets.  Loop counters are scoped already.
+            //
+            // Offsets are created "inside" ComputeIndex nodes and are
+            // used in other nodes like LoadTiled.  These "inside"
+            // references do not explicitly appear in the graph.
+            //
+            // If we examine loop increment operations and "track" an
+            // offset increment, but don't track it during loads, then
+            // a Deallocate node would be mis-placed.
+            //
+            // A few solutions:
+            //
+            // 1. Don't examine loop increment operations.  They
+            // already appear in Scopes so are deallocated regardless.
+            // Fairly easy but perhaps we miss an opporunity to free
+            // up registers early.
+            //
+            // 2. Teach the tracker how to dig into all nodes.  Very
+            // tedious and not future-proof.
+            //
+            // 3. Expose all references in the grpah.  Ideal but we
+            // aren't there yet.
+            //
+
+            // auto init = m_graph.control.getOutputNodeIndices<Initialize>(tag).to<std::set>();
+            // generate(init);
+
+            // auto incr = m_graph.control.getOutputNodeIndices<ForLoopIncrement>(tag).to<std::set>();
+            // generate(incr);
 
             auto body = m_graph.control.getOutputNodeIndices<Body>(tag).to<std::set>();
             generate(body);

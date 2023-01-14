@@ -6,7 +6,6 @@
 #include <vector>
 
 #include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
-#include <rocRoller/Operations/T_Execute.hpp>
 
 #include "Expression_fwd.hpp"
 #include "InstructionValues/Register_fwd.hpp"
@@ -368,27 +367,6 @@ namespace rocRoller
             std::string toString() const override
             {
                 return "StoreLDSTile";
-            }
-        };
-
-        /**
-         * ElementOp - Elemental arithmetic operation.
-         */
-        struct ElementOp : public BaseOperation
-        {
-            ElementOp(Operations::XOp const& op, int const a, int const b)
-                : op(op)
-                , a(a)
-                , b(b)
-            {
-            }
-
-            Operations::XOp op;
-            int             a, b;
-
-            std::string toString() const override
-            {
-                return concatenate("ElementOp(", a, ", ", b, ")");
             }
         };
 

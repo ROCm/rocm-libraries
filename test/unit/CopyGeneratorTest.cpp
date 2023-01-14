@@ -7,6 +7,7 @@
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/ExecutableKernel.hpp>
 #include <rocRoller/KernelArguments.hpp>
+#include <rocRoller/Operations/Command.hpp>
 #include <rocRoller/Utilities/Generator.hpp>
 
 #include "GPUContextFixture.hpp"

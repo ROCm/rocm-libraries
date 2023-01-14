@@ -150,6 +150,7 @@ namespace rocRoller
         template <typename T>
         requires(std::constructible_from<CoordinateGraph::Element, T>)
             std::optional<T> CoordinateGraph::get(int tag)
+        const
         {
             auto x = getElement(tag);
             if constexpr(std::constructible_from<Edge, T>)

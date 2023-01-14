@@ -8,6 +8,7 @@
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Context.hpp>
+#include <rocRoller/Operations/Command.hpp>
 
 #include "GPUContextFixture.hpp"
 #include "Utilities.hpp"

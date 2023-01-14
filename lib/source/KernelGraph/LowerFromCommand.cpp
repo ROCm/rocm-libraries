@@ -7,6 +7,7 @@
 
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/Operations/Command.hpp>
 
 namespace rocRoller
 {
@@ -370,10 +371,62 @@ namespace rocRoller
 
                     graph.coordinates.addElement(DataFlow(), coordinate_inputs, coordinate_outputs);
 
-                    auto op = graph.control.addElement(
-                        ElementOp(*xop,
-                                  coordinate_inputs[0],
-                                  coordinate_inputs.size() > 1 ? coordinate_inputs[1] : -1));
+                    // Translate coodinate input tags to DataFlowTag expressions.  Each DataFlowTag
+                    // referes to the corresponding coordinate input tag, and uses DataType::None to
+                    // represent a "deferred" type.
+                    std::vector<Expression::ExpressionPtr> dflow(coordinate_inputs.size());
+                    std::transform(coordinate_inputs.cbegin(),
+                                   coordinate_inputs.cend(),
+                                   dflow.begin(),
+                                   [](int tag) {
+                                       return std::make_shared<Expression::Expression>(
+                                           Expression::DataFlowTag{
+                                               tag, Register::Type::Vector, DataType::None});
+                                   });
+
+                    // Translate XOp to an Expression
+                    auto expr = std::visit(
+                        rocRoller::overloaded{
+                            [&](Operations::E_Neg const& op) -> Expression::ExpressionPtr {
+                                return std::make_shared<Expression::Expression>(
+                                    Expression::Negate{dflow[0]});
+                            },
+                            [](Operations::E_Abs const& op) -> Expression::ExpressionPtr {
+                                // TODO Implement E_Abs XOp
+                                Throw<FatalError>("Not implemented yet.");
+                            },
+                            [](Operations::E_Not const& op) -> Expression::ExpressionPtr {
+                                // TODO Implement E_Not XOp
+                                Throw<FatalError>("Not implemented yet.");
+                            },
+                            [&](Operations::E_Add const& op) -> Expression::ExpressionPtr {
+                                return std::make_shared<Expression::Expression>(
+                                    Expression::Add{dflow[0], dflow[1]});
+                            },
+                            [&](Operations::E_Sub const& op) -> Expression::ExpressionPtr {
+                                return std::make_shared<Expression::Expression>(
+                                    Expression::Subtract{dflow[0], dflow[1]});
+                            },
+                            [&](Operations::E_Mul const& op) -> Expression::ExpressionPtr {
+                                return std::make_shared<Expression::Expression>(
+                                    Expression::Multiply{dflow[0], dflow[1]});
+                            },
+                            [&](Operations::E_Div const& op) -> Expression::ExpressionPtr {
+                                return std::make_shared<Expression::Expression>(
+                                    Expression::Divide{dflow[0], dflow[1]});
+                            },
+                            [](Operations::E_And const& op) -> Expression::ExpressionPtr {
+                                // TODO Implement E_And XOp
+                                Throw<FatalError>("Not implemented yet.");
+                            },
+                            [](Operations::E_Or const& op) -> Expression::ExpressionPtr {
+                                // TODO Implement E_Or XOp
+                                Throw<FatalError>("Not implemented yet.");
+                            },
+                        },
+                        *xop);
+
+                    auto op = graph.control.addElement(Assign{Register::Type::Vector, expr});
 
                     for(auto const& input : control_inputs)
                     {

@@ -19,8 +19,6 @@ namespace rocRoller
             {
             }
 
-            std::map<int, int> vgprs;
-
             virtual void visitEdge(KernelGraph&       graph,
                                    KernelGraph const& original,
                                    GraphReindexer&    reindexer,
@@ -51,58 +49,41 @@ namespace rocRoller
                                         KernelGraph const& original,
                                         GraphReindexer&    reindexer,
                                         int                tag,
-                                        ElementOp const&   op) override
+                                        Assign const&      assign) override
             {
-                std::vector<int> coordinate_inputs, coordinate_outputs;
-                std::vector<int> control_inputs;
-
                 // if destination isn't Linear, copy this operation
                 auto connections = original.mapper.getConnections(tag);
                 if(connections[0].tindex != typeid(Linear))
                 {
-                    copyOperation(graph, original, reindexer, tag);
-
-                    auto new_tag = reindexer.control.at(tag);
-                    auto new_op  = graph.control.getNode<ElementOp>(new_tag);
-                    new_op.a     = op.a > 0 ? reindexer.coordinates.at(op.a) : op.a;
-                    new_op.b     = op.b > 0 ? reindexer.coordinates.at(op.b) : op.b;
-                    graph.control.setElement(new_tag, new_op);
+                    BaseGraphVisitor::visitOperation(graph, original, reindexer, tag, assign);
                     return;
                 }
 
-                ElementOp newOp(op.op, -1, -1);
-                newOp.a = vgprs.at(op.a);
-                newOp.b = op.b > 0 ? vgprs.at(op.b) : -1;
+                ReindexExpressionVisitor visitor(reindexer);
+                auto                     new_assign
+                    = Assign{assign.regType, visitor.call(assign.expression), assign.valueCount};
 
                 auto original_linear = original.mapper.get<Linear>(tag);
                 auto vgpr            = graph.coordinates.addElement(VGPR());
 
-                if(newOp.b > 0)
-                    graph.coordinates.addElement(DataFlow(), {newOp.a, newOp.b}, {vgpr});
-                else
-                    graph.coordinates.addElement(DataFlow(), {newOp.a}, {vgpr});
+                std::vector<int> coordinate_inputs;
+                for(auto const& input : original.coordinates.parentNodes(original_linear))
+                {
+                    coordinate_inputs.push_back(reindexer.coordinates.at(input));
+                }
+                graph.coordinates.addElement(DataFlow(), coordinate_inputs, std::vector<int>{vgpr});
 
-                auto elementOp = graph.control.addElement(newOp);
+                auto new_tag = graph.control.addElement(new_assign);
 
                 for(auto const& input : original.control.parentNodes(tag))
                 {
-                    graph.control.addElement(
-                        Sequence(), {reindexer.control.at(input)}, {elementOp});
+                    graph.control.addElement(Sequence(), {reindexer.control.at(input)}, {new_tag});
                 }
 
-                rocRoller::Log::getLogger()->debug(
-                    "KernelGraph::lowerLinear(): ElementOp {} -> ElementOp {}: {} -> {}: {}/{}",
-                    tag,
-                    elementOp,
-                    original_linear,
-                    vgpr,
-                    op.a,
-                    newOp.a);
+                graph.mapper.connect<VGPR>(new_tag, vgpr);
 
-                graph.mapper.connect<VGPR>(elementOp, vgpr);
-
-                reindexer.control.insert_or_assign(tag, elementOp);
-                vgprs.insert_or_assign(original_linear, vgpr);
+                reindexer.control.insert_or_assign(tag, new_tag);
+                reindexer.coordinates.insert_or_assign(original_linear, vgpr);
             }
 
             virtual void visitOperation(KernelGraph&       graph,
@@ -143,19 +124,8 @@ namespace rocRoller
                 graph.mapper.connect<User>(load, user);
                 graph.mapper.connect<VGPR>(load, vgpr);
 
-                vgprs.insert_or_assign(original_linear, vgpr);
                 reindexer.control.insert_or_assign(tag, load);
-            }
-
-            virtual void visitOperation(KernelGraph&       graph,
-                                        KernelGraph const& original,
-                                        GraphReindexer&    reindexer,
-                                        int                tag,
-                                        LoadVGPR const&    oload) override
-            {
-                copyOperation(graph, original, reindexer, tag);
-                auto vgpr = original.mapper.get<VGPR>(tag);
-                vgprs.insert_or_assign(vgpr, reindexer.coordinates.at(vgpr));
+                reindexer.coordinates.insert_or_assign(original_linear, vgpr);
             }
 
             virtual void visitOperation(KernelGraph&       graph,
@@ -167,8 +137,18 @@ namespace rocRoller
                 auto original_user   = original.mapper.get<User>(tag);
                 auto original_linear = original.mapper.get<Linear>(tag);
                 auto user            = reindexer.coordinates.at(original_user);
-                auto linear          = reindexer.coordinates.at(original_linear);
-                auto vgpr            = vgprs.at(original_linear);
+                auto vgpr            = reindexer.coordinates.at(original_linear);
+
+                // look up from User to get connected Linear (which represents an index)
+                auto linear = *graph.coordinates
+                                   .findNodes(
+                                       user,
+                                       [&](int tag) -> bool {
+                                           auto linear = graph.coordinates.get<Linear>(tag);
+                                           return bool(linear);
+                                       },
+                                       Graph::Direction::Upstream)
+                                   .begin();
 
                 auto wg   = Workgroup();
                 wg.stride = workgroupSize()[0];

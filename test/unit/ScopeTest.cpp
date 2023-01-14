@@ -71,7 +71,6 @@ namespace ScopeTest
             // CodeGeneratorVisitor::generate() begin
             // generate(set{1})
             // Kernel BEGIN
-            // Begin Kernel
             // generate(set{4})
             // Assign VGPR 11j BEGIN
             // 11j
@@ -101,7 +100,6 @@ namespace ScopeTest
             // Freeing : 1 VGPR (Value: UInt32): v1
             // Scope END
             // Freeing : 1 VGPR (Value: UInt32): v0
-            // End Kernel
             // Kernel END
             // CodeGeneratorVisitor::generate() end
         )";

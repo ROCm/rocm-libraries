@@ -69,21 +69,6 @@ namespace rocRoller
                                         KernelGraph const& original,
                                         GraphReindexer&    reindexer,
                                         int                tag,
-                                        ElementOp const&   op) override
-            {
-                copyOperation(graph, original, reindexer, tag);
-
-                auto new_tag = reindexer.control.at(tag);
-                auto new_op  = graph.control.getNode<ElementOp>(new_tag);
-                new_op.a     = op.a > 0 ? reindexer.coordinates.at(op.a) : op.a;
-                new_op.b     = op.b > 0 ? reindexer.coordinates.at(op.b) : op.b;
-                graph.control.setElement(new_tag, new_op);
-            }
-
-            virtual void visitOperation(KernelGraph&       graph,
-                                        KernelGraph const& original,
-                                        GraphReindexer&    reindexer,
-                                        int                tag,
                                         LoadTiled const&   oload) override
             {
                 auto logger = rocRoller::Log::getLogger();
@@ -335,7 +320,7 @@ namespace rocRoller
             std::vector<int> loadA;
             std::vector<int> loadB;
             std::vector<int> stores;
-            std::vector<int> elemops;
+            std::vector<int> assigns;
             for(auto const index : graph.control.getNodes())
             {
                 auto elem = graph.control.getElement(index);
@@ -354,9 +339,9 @@ namespace rocRoller
                               if(reachable_from_tensor.find(index) != reachable_from_tensor.end())
                                   stores.push_back(index);
                           },
-                          [&](ElementOp const& op) {
+                          [&](Assign const& op) {
                               if(reachable_from_tensor.find(index) != reachable_from_tensor.end())
-                                  elemops.push_back(index);
+                                  assigns.push_back(index);
                           }},
                       std::get<Operation>(elem));
             }
@@ -461,7 +446,7 @@ namespace rocRoller
                         = rangeFor(graph, literal(wavetilesPerWorkgroup[1]));
                 }
 
-                // find other loadtiled ops from kernel that lead to elemops
+                // find other loadtiled ops from kernel that lead to assigns
                 auto kernel_outputs = graph.control.childNodes(kernel).to<std::vector>();
                 std::vector<int> otherLoads;
                 std::vector<int> otherOps;
@@ -474,9 +459,9 @@ namespace rocRoller
                             [&](LoadTiled const& load) {
                                 auto reachable_from_load
                                     = graph.control.depthFirstVisit(index).to<std::unordered_set>();
-                                for(auto const& elemop : elemops)
+                                for(auto const& assign : assigns)
                                 {
-                                    if(reachable_from_load.find(elemop)
+                                    if(reachable_from_load.find(assign)
                                        != reachable_from_load.end())
                                     {
                                         otherLoads.push_back(index);
@@ -490,7 +475,7 @@ namespace rocRoller
 
                 // Add edges from inner loop to some kernel outputs : forK and otherLoads
                 // need to leave other nodes attached with kernel
-                // ex: loadtiled ops that don't lead to elemops
+                // ex: loadtiled ops that don't lead to assigns
                 // ex : loadVGPRs for alpha and beta in GEMM
                 int lowerLoop, upperLoop;
                 if(wavetilesPerWorkgroup[0] > 1 && wavetilesPerWorkgroup[1] > 1)

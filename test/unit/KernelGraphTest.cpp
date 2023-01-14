@@ -15,6 +15,7 @@
 #include <rocRoller/KernelGraph/CoordinateGraph/CoordinateGraph.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Visitors.hpp>
+#include <rocRoller/Operations/Command.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Random.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
@@ -564,12 +565,12 @@ namespace KernelGraphTest
                 "cntrl3"[label="Body(3)",shape=box];
                 "cntrl4"[label="LoadLinear(4)"];
                 "cntrl5"[label="Body(5)",shape=box];
-                "cntrl6"[label="ElementOp(5, 10)(6)"];
+                "cntrl6"[label="Assign VGPR Add(DataFlowTag(5), DataFlowTag(10))(6)"];
                 "cntrl7"[label="Sequence(7)",shape=box];
                 "cntrl8"[label="Sequence(8)",shape=box];
-                "cntrl9"[label="ElementOp(13, -1)(9)"];
+                "cntrl9"[label="Assign VGPR Negate(DataFlowTag(13))(9)"];
                 "cntrl10"[label="Sequence(10)",shape=box];
-                "cntrl11"[label="ElementOp(13, 15)(11)"];
+                "cntrl11"[label="Assign VGPR Multiply(DataFlowTag(13), DataFlowTag(15))(11)"];
                 "cntrl12"[label="Sequence(12)",shape=box];
                 "cntrl13"[label="Sequence(13)",shape=box];
                 "cntrl14"[label="StoreLinear(14)"];
@@ -670,12 +671,12 @@ namespace KernelGraphTest
                 "cntrl3"[label="Body(3)",shape=box];
                 "cntrl4"[label="LoadLinear(4)"];
                 "cntrl5"[label="Body(5)",shape=box];
-                "cntrl6"[label="ElementOp(10, 4)(6)"];
+                "cntrl6"[label="Assign VGPR Add(DataFlowTag(10), DataFlowTag(4))(6)"];
                 "cntrl7"[label="Sequence(7)",shape=box];
                 "cntrl8"[label="Sequence(8)",shape=box];
-                "cntrl9"[label="ElementOp(13, -1)(9)"];
+                "cntrl9"[label="Assign VGPR Negate(DataFlowTag(13))(9)"];
                 "cntrl10"[label="Sequence(10)",shape=box];
-                "cntrl11"[label="ElementOp(13, 15)(11)"];
+                "cntrl11"[label="Assign VGPR Multiply(DataFlowTag(13), DataFlowTag(15))(11)"];
                 "cntrl12"[label="Sequence(12)",shape=box];
                 "cntrl13"[label="Sequence(13)",shape=box];
                 "cntrl14"[label="StoreLinear(14)"];
@@ -839,12 +840,12 @@ namespace KernelGraphTest
 		"cntrl3"[label="Body(3)",shape=box];
 		"cntrl4"[label="LoadVGPR(4)"];
 		"cntrl5"[label="Body(5)",shape=box];
-		"cntrl6"[label="ElementOp(16, 22)(6)"];
+		"cntrl6"[label="Assign VGPR Add(DataFlowTag(16), DataFlowTag(22))(6)"];
 		"cntrl7"[label="Sequence(7)",shape=box];
 		"cntrl8"[label="Sequence(8)",shape=box];
-		"cntrl9"[label="ElementOp(28, -1)(9)"];
+		"cntrl9"[label="Assign VGPR Negate(DataFlowTag(28))(9)"];
 		"cntrl10"[label="Sequence(10)",shape=box];
-		"cntrl11"[label="ElementOp(28, 30)(11)"];
+		"cntrl11"[label="Assign VGPR Multiply(DataFlowTag(28), DataFlowTag(30))(11)"];
 		"cntrl12"[label="Sequence(12)",shape=box];
 		"cntrl13"[label="Sequence(13)",shape=box];
 		"cntrl14"[label="StoreVGPR(14)"];
@@ -1038,12 +1039,12 @@ namespace KernelGraphTest
 		"cntrl9"[label="Body(9)",shape=box];
 		"cntrl10"[label="LoadVGPR(10)"];
 		"cntrl11"[label="Body(11)",shape=box];
-		"cntrl12"[label="ElementOp(13, 25)(12)"];
+		"cntrl12"[label="Assign VGPR Add(DataFlowTag(13), DataFlowTag(25))(12)"];
 		"cntrl13"[label="Sequence(13)",shape=box];
 		"cntrl14"[label="Sequence(14)",shape=box];
-		"cntrl15"[label="ElementOp(28, -1)(15)"];
+		"cntrl15"[label="Assign VGPR Negate(DataFlowTag(28))(15)"];
 		"cntrl16"[label="Sequence(16)",shape=box];
-		"cntrl17"[label="ElementOp(28, 30)(17)"];
+		"cntrl17"[label="Assign VGPR Multiply(DataFlowTag(28), DataFlowTag(30))(17)"];
 		"cntrl18"[label="Sequence(18)",shape=box];
 		"cntrl19"[label="Sequence(19)",shape=box];
 		"cntrl20"[label="StoreVGPR(20)"];
@@ -1312,12 +1313,12 @@ namespace KernelGraphTest
                 "cntrl3"[label="Body(3)",shape=box];
                 "cntrl4"[label="LoadVGPR(4)"];
                 "cntrl5"[label="Body(5)",shape=box];
-                "cntrl6"[label="ElementOp(5, 2)(6)"];
+                "cntrl6"[label="Assign VGPR Add(DataFlowTag(5), DataFlowTag(2))(6)"];
                 "cntrl7"[label="Sequence(7)",shape=box];
                 "cntrl8"[label="Sequence(8)",shape=box];
-                "cntrl9"[label="ElementOp(7, -1)(9)"];
+                "cntrl9"[label="Assign VGPR Negate(DataFlowTag(7))(9)"];
                 "cntrl10"[label="Sequence(10)",shape=box];
-                "cntrl11"[label="ElementOp(7, 9)(11)"];
+                "cntrl11"[label="Assign VGPR Multiply(DataFlowTag(7), DataFlowTag(9))(11)"];
                 "cntrl12"[label="Sequence(12)",shape=box];
                 "cntrl13"[label="Sequence(13)",shape=box];
                 "cntrl1" -> "cntrl3"
@@ -1544,13 +1545,13 @@ namespace KernelGraphTest
 		"cntrl12"[label="TensorContraction(4, 11)(12)"];
 		"cntrl13"[label="Sequence(13)",shape=box];
 		"cntrl14"[label="Sequence(14)",shape=box];
-		"cntrl15"[label="ElementOp(23, 28)(15)"];
+		"cntrl15"[label="Assign VGPR Multiply(DataFlowTag(23), DataFlowTag(28))(15)"];
 		"cntrl16"[label="Sequence(16)",shape=box];
 		"cntrl17"[label="Sequence(17)",shape=box];
-		"cntrl18"[label="ElementOp(26, 18)(18)"];
+		"cntrl18"[label="Assign VGPR Multiply(DataFlowTag(26), DataFlowTag(18))(18)"];
 		"cntrl19"[label="Sequence(19)",shape=box];
 		"cntrl20"[label="Sequence(20)",shape=box];
-		"cntrl21"[label="ElementOp(30, 32)(21)"];
+		"cntrl21"[label="Assign VGPR Add(DataFlowTag(30), DataFlowTag(32))(21)"];
 		"cntrl22"[label="Sequence(22)",shape=box];
 		"cntrl23"[label="Sequence(23)",shape=box];
 		"cntrl24"[label="StoreTiled(24)"];
@@ -2496,14 +2497,14 @@ namespace KernelGraphTest
                 "cntrl3"[label="Body(3)",shape=box];
                 "cntrl4"[label="LoadTiled(4)"];
                 "cntrl6"[label="LoadTiled(6)"];
-                "cntrl11"[label="ElementOp(6, 18)(11)"];
+                "cntrl11"[label="Assign VGPR Multiply(DataFlowTag(6), DataFlowTag(18))(11)"];
                 "cntrl12"[label="Sequence(12)",shape=box];
                 "cntrl14"[label="LoadVGPR(14)"];
                 "cntrl15"[label="Body(15)",shape=box];
                 "cntrl16"[label="LoadTiled(16)"];
-                "cntrl18"[label="ElementOp(22, 27)(18)"];
+                "cntrl18"[label="Assign VGPR Multiply(DataFlowTag(22), DataFlowTag(27))(18)"];
                 "cntrl19"[label="Sequence(19)",shape=box];
-                "cntrl21"[label="ElementOp(20, 29)(21)"];
+                "cntrl21"[label="Assign VGPR Add(DataFlowTag(20), DataFlowTag(29))(21)"];
                 "cntrl22"[label="Sequence(22)",shape=box];
                 "cntrl23"[label="Sequence(23)",shape=box];
                 "cntrl24"[label="StoreTiled(24)"];
@@ -2757,14 +2758,14 @@ namespace KernelGraphTest
 		"3"[label="Body(3)",shape=box];
 		"4"[label="LoadTiled(4)"];
 		"6"[label="LoadTiled(6)"];
-		"11"[label="ElementOp(6, 18)(11)"];
+		"11"[label="Assign VGPR Multiply(DataFlowTag(6), DataFlowTag(18))(11)"];
 		"12"[label="Sequence(12)",shape=box];
 		"14"[label="LoadVGPR(14)"];
 		"15"[label="Body(15)",shape=box];
 		"16"[label="LoadTiled(16)"];
-		"18"[label="ElementOp(22, 27)(18)"];
+		"18"[label="Assign VGPR Multiply(DataFlowTag(22), DataFlowTag(27))(18)"];
 		"19"[label="Sequence(19)",shape=box];
-		"21"[label="ElementOp(20, 29)(21)"];
+		"21"[label="Assign VGPR Add(DataFlowTag(20), DataFlowTag(29))(21)"];
 		"24"[label="StoreTiled(24)"];
 		"26"[label="ForLoopOp: LessThan(DataFlowTag(199), Divide(CommandArgument(Load_Tiled_0_size_1), 16j))(26)"];
 		"27"[label="Assign SGPR 0l(27)"];
@@ -3928,14 +3929,14 @@ namespace KernelGraphTest
 	    "cntrl3"[label="Body(3)",shape=box];
 	    "cntrl4"[label="LoadLDSTile(4)"];
 	    "cntrl6"[label="LoadTiled(6)"];
-	    "cntrl11"[label="ElementOp(6, 18)(11)"];
+	    "cntrl11"[label="Assign VGPR Multiply(DataFlowTag(6), DataFlowTag(18))(11)"];
 	    "cntrl12"[label="Sequence(12)",shape=box];
 	    "cntrl14"[label="LoadVGPR(14)"];
 	    "cntrl15"[label="Body(15)",shape=box];
 	    "cntrl16"[label="LoadTiled(16)"];
-	    "cntrl18"[label="ElementOp(22, 27)(18)"];
+	    "cntrl18"[label="Assign VGPR Multiply(DataFlowTag(22), DataFlowTag(27))(18)"];
 	    "cntrl19"[label="Sequence(19)",shape=box];
-	    "cntrl21"[label="ElementOp(20, 29)(21)"];
+	    "cntrl21"[label="Assign VGPR Add(DataFlowTag(20), DataFlowTag(29))(21)"];
 	    "cntrl22"[label="Sequence(22)",shape=box];
 	    "cntrl23"[label="Sequence(23)",shape=box];
 	    "cntrl24"[label="StoreTiled(24)"];
@@ -4609,13 +4610,13 @@ namespace KernelGraphTest
 		"cntrl3"[label="Body(3)",shape=box];
 		"cntrl4"[label="LoadTiled(4)"];
 		"cntrl5"[label="Body(5)",shape=box];
-		"cntrl6"[label="ElementOp(4, 4)(6)"];
+		"cntrl6"[label="Assign VGPR Add(DataFlowTag(4), DataFlowTag(4))(6)"];
 		"cntrl7"[label="Sequence(7)",shape=box];
 		"cntrl8"[label="Sequence(8)",shape=box];
-		"cntrl9"[label="ElementOp(11, 11)(9)"];
+		"cntrl9"[label="Assign VGPR Add(DataFlowTag(11), DataFlowTag(11))(9)"];
 		"cntrl10"[label="Sequence(10)",shape=box];
 		"cntrl11"[label="Sequence(11)",shape=box];
-		"cntrl12"[label="ElementOp(17, 15)(12)"];
+		"cntrl12"[label="Assign VGPR Add(DataFlowTag(17), DataFlowTag(15))(12)"];
 		"cntrl13"[label="Sequence(13)",shape=box];
 		"cntrl14"[label="Sequence(14)",shape=box];
 		"cntrl15"[label="StoreTiled(15)"];
@@ -5124,10 +5125,10 @@ namespace KernelGraphTest
 		}
 		subgraph clusterCF {"cntrl1"[label="Kernel(1)"];
 		"cntrl2"[label="LoadTiled(2)"];
-		"cntrl4"[label="ElementOp(6, 6)(4)"];
+		"cntrl4"[label="Assign VGPR Add(DataFlowTag(6), DataFlowTag(6))(4)"];
 		"cntrl7"[label="LoadTiled(7)"];
-		"cntrl9"[label="ElementOp(13, 13)(9)"];
-		"cntrl12"[label="ElementOp(8, 15)(12)"];
+		"cntrl9"[label="Assign VGPR Add(DataFlowTag(13), DataFlowTag(13))(9)"];
+		"cntrl12"[label="Assign VGPR Add(DataFlowTag(8), DataFlowTag(15))(12)"];
 		"cntrl13"[label="Sequence(13)",shape=box];
 		"cntrl14"[label="Sequence(14)",shape=box];
 		"cntrl15"[label="StoreTiled(15)"];

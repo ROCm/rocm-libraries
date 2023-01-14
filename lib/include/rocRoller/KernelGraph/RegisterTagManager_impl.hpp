@@ -30,9 +30,17 @@ namespace rocRoller
         if(hasRegister(tag))
         {
             auto reg = m_registers.at(tag);
-            AssertFatal(reg->variableType() == varType);
-            AssertFatal(reg->valueCount() == valueCount);
-            AssertFatal(reg->regType() == regType);
+            if(varType != DataType::None)
+            {
+                AssertFatal(reg->variableType() == varType,
+                            ShowValue(varType),
+                            ShowValue(reg->variableType()));
+                AssertFatal(reg->valueCount() == valueCount,
+                            ShowValue(valueCount),
+                            ShowValue(reg->valueCount()));
+                AssertFatal(
+                    reg->regType() == regType, ShowValue(regType), ShowValue(reg->regType()));
+            }
             return reg;
         }
         auto r = Register::Value::Placeholder(m_context.lock(), regType, varType, valueCount);

@@ -160,21 +160,6 @@ namespace rocRoller
                 addLoopSrc(graph, original, reindexer, tag, edge);
             }
 
-            virtual void visitOperation(KernelGraph&       graph,
-                                        KernelGraph const& original,
-                                        GraphReindexer&    reindexer,
-                                        int                tag,
-                                        ElementOp const&   op) override
-            {
-                copyOperation(graph, original, reindexer, tag);
-
-                auto new_tag = reindexer.control.at(tag);
-                auto new_op  = graph.control.getNode<ElementOp>(new_tag);
-                new_op.a     = op.a > 0 ? reindexer.coordinates.at(op.a) : op.a;
-                new_op.b     = op.b > 0 ? reindexer.coordinates.at(op.b) : op.b;
-                graph.control.setElement(new_tag, new_op);
-            }
-
             void visitOperation(KernelGraph&       graph,
                                 KernelGraph const& original,
                                 GraphReindexer&    reindexer,

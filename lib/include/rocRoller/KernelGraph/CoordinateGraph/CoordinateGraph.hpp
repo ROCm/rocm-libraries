@@ -116,7 +116,8 @@ namespace rocRoller
              */
             template <typename T>
             requires(std::constructible_from<CoordinateGraph::Element, T>) std::optional<T> get(
-                int tag);
+                int tag)
+            const;
         };
     }
 }

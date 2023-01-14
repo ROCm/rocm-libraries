@@ -22,6 +22,8 @@ namespace rocRoller
 
     namespace Register
     {
+        size_t constexpr bytesPerRegister = 4;
+
         inline std::string TypePrefix(Type t)
         {
             switch(t)
@@ -178,9 +180,8 @@ namespace rocRoller
         {
             AssertFatal(ctx != nullptr);
 
-            auto const   info             = DataTypeInfo::Get(variableType);
-            size_t const bytesPerRegister = 4;
-            m_allocationCoord             = std::vector<int>(
+            auto const info   = DataTypeInfo::Get(variableType);
+            m_allocationCoord = std::vector<int>(
                 count * std::max(static_cast<size_t>(1), info.elementSize / bytesPerRegister));
             std::iota(m_allocationCoord.begin(), m_allocationCoord.end(), 0);
         }
@@ -639,7 +640,10 @@ namespace rocRoller
 
         inline size_t Value::valueCount() const
         {
-            return m_allocationCoord.size() * 4 / DataTypeInfo::Get(m_varType).elementSize;
+            if(DataTypeInfo::Get(m_varType).elementSize < bytesPerRegister)
+                return m_allocationCoord.size();
+            return m_allocationCoord.size() * bytesPerRegister
+                   / DataTypeInfo::Get(m_varType).elementSize;
         }
 
         inline std::string Value::name() const
@@ -695,7 +699,6 @@ namespace rocRoller
         {
             AssertFatal(!m_allocationCoord.empty(), ShowValue(m_allocationCoord.size()));
             auto const   info                = DataTypeInfo::Get(m_varType);
-            size_t const bytesPerRegister    = 4;
             size_t const elementsPerRegister = info.elementSize / bytesPerRegister;
 
             std::vector<int> coords;
@@ -904,7 +907,9 @@ namespace rocRoller
         inline void Allocation::setRegisterCount()
         {
             // TODO: Register count oriented data in DataTypeInfo.
-            m_registerCount = m_valueCount * DataTypeInfo::Get(m_variableType).elementSize / 4;
+            m_registerCount
+                = m_valueCount
+                  * std::max(1LU, DataTypeInfo::Get(m_variableType).elementSize / bytesPerRegister);
         }
 
         inline Allocation::Options Allocation::options() const

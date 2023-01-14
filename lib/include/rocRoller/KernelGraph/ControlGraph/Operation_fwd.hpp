@@ -10,7 +10,6 @@ namespace rocRoller
         struct Barrier;
         struct ComputeIndex;
         struct Deallocate;
-        struct ElementOp;
         struct ForLoopOp;
         struct Kernel;
         struct LoadLDSTile;
@@ -30,7 +29,6 @@ namespace rocRoller
         using Operation = std::variant<Assign,
                                        Barrier,
                                        ComputeIndex,
-                                       ElementOp,
                                        Deallocate,
                                        ForLoopOp,
                                        Kernel,

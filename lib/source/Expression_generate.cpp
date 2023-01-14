@@ -20,7 +20,8 @@ namespace rocRoller
             using RegisterValue = std::variant<Register::ValuePtr>;
 
             Register::ValuePtr resultPlaceholder(ResultType const& resType,
-                                                 bool              allowSpecial = true)
+                                                 bool              allowSpecial = true,
+                                                 int               valueCount   = 1)
             {
                 if(resType.first == Register::Type::Special && resType.second == DataType::Bool)
                 {
@@ -28,18 +29,16 @@ namespace rocRoller
                         return m_context->getSCC();
                     else
                         return Register::Value::Placeholder(
-                            m_context, Register::Type::Scalar, resType.second, 1);
+                            m_context, Register::Type::Scalar, resType.second, valueCount);
                 }
                 else if(resType.first == Register::Type::Scalar
                         && resType.second == DataType::Bool32)
                 {
                     return Register::Value::WavefrontPlaceholder(m_context);
                 }
-                else
-                {
-                    return Register::Value::Placeholder(
-                        m_context, resType.first, resType.second, 1);
-                }
+
+                return Register::Value::Placeholder(
+                    m_context, resType.first, resType.second, valueCount);
             }
 
             /**
@@ -127,6 +126,113 @@ namespace rocRoller
                 }
             }
 
+            /*
+             * Generate code for a "deferred" binary operation.
+             *
+             * These are typically from element operations in Assign nodes where the result variable
+             * type is `DataType::None`.  That is, we have deferred determining the output type (and
+             * size) to code-gen time.
+             *
+             * We need to support, for example,
+             * 1. scalar * scalar
+             * 2. scalar * vector
+             * 3. vector * vector (element-wise product)
+             */
+            template <CBinary Operation>
+            Generator<Instruction> generateDeferredBinary(Register::ValuePtr& dest,
+                                                          Operation const&    expr,
+                                                          Register::ValuePtr  lhs,
+                                                          Register::ValuePtr  rhs)
+            {
+                auto const lhsInfo = DataTypeInfo::Get(lhs->variableType());
+                auto const rhsInfo = DataTypeInfo::Get(rhs->variableType());
+
+                auto regType = Register::PromoteType(lhs->regType(), rhs->regType());
+                auto varType = VariableType::Promote(lhs->variableType(), rhs->variableType());
+
+                // TODO: Delete once FastDivision uses only libdivide.
+                if constexpr(std::same_as<MultiplyHigh, Operation>)
+                    varType = DataType::Int32;
+
+                int valueCount;
+                if(dest)
+                {
+                    valueCount = dest->valueCount();
+                }
+                else
+                {
+                    valueCount = std::max(lhs->valueCount() * lhsInfo.packing,
+                                          rhs->valueCount() * rhsInfo.packing);
+                }
+
+                // TODO: Should this be pushed to arithmetic generators?
+                // If any sources were AGPRs, copy to VGPRs first.
+                if(valueCount > 1 && regType == Register::Type::Accumulator)
+                {
+                    regType = Register::Type::Vector;
+                    co_yield m_context->copier()->ensureType(lhs, lhs, regType);
+                    co_yield m_context->copier()->ensureType(rhs, rhs, regType);
+                }
+
+                if(!dest)
+                {
+                    dest = resultPlaceholder({regType, varType}, true, valueCount);
+                    co_yield dest->allocate();
+                }
+
+                if(lhsInfo.packing != rhsInfo.packing)
+                {
+                    // If the packing values of the datatypes are different, we need to
+                    // convert the more packed value into the less packed value type.
+                    // We can then perform the operation.
+                    int packingRatio = std::max(lhsInfo.packing, rhsInfo.packing)
+                                       / std::min(lhsInfo.packing, rhsInfo.packing);
+
+                    for(size_t i = 0; i < valueCount; i += packingRatio)
+                    {
+                        auto result = dest->element({i, i + packingRatio - 1});
+
+                        Register::ValuePtr lhsVal, rhsVal;
+                        if(lhsInfo.packing < rhsInfo.packing)
+                        {
+                            std::cout << "YERP." << std::endl;
+                            co_yield generateConvertOp(
+                                varType.dataType, result, rhs->element({i / packingRatio}));
+                        }
+                        else
+                        {
+                            co_yield generateConvertOp(
+                                varType.dataType, result, lhs->element({i / packingRatio}));
+                        }
+
+                        for(size_t j = 0; j < packingRatio; j++)
+                        {
+                            if(lhsInfo.packing < rhsInfo.packing)
+                            {
+                                lhsVal = lhs->valueCount() == 1 ? lhs : lhs->element({i + j});
+                                rhsVal = result->element({j});
+                            }
+                            else
+                            {
+                                lhsVal = result->element({j});
+                                rhsVal = rhs->valueCount() == 1 ? rhs : rhs->element({i + j});
+                            }
+
+                            co_yield generateOp<Operation>(result->element({j}), lhsVal, rhsVal);
+                        }
+                    }
+                }
+                else
+                {
+                    for(size_t k = 0; k < valueCount; ++k)
+                    {
+                        auto lhsVal = lhs->valueCount() == 1 ? lhs : lhs->element({k});
+                        auto rhsVal = rhs->valueCount() == 1 ? rhs : rhs->element({k});
+                        co_yield generateOp<Operation>(dest->element({k}), lhsVal, rhsVal);
+                    }
+                }
+            }
+
             template <CBinary Operation>
             requires CKernelExecuteTime<Operation> Generator<Instruction>
             operator()(Register::ValuePtr& dest, Operation const& expr)
@@ -137,10 +243,20 @@ namespace rocRoller
 
                 co_yield prepareSourceOperands(results, schedulerLocked, subExprs);
 
-                if(dest == nullptr)
-                    dest = resultPlaceholder(resultType(expr));
+                auto resType  = resultType(expr);
+                auto deferred = resType.second == DataType::None;
 
-                co_yield generateOp<Operation>(dest, results[0], results[1]);
+                if(deferred)
+                {
+                    co_yield generateDeferredBinary(dest, expr, results[0], results[1]);
+                }
+                else
+                {
+                    if(dest == nullptr)
+                        dest = resultPlaceholder(resType);
+
+                    co_yield generateOp<Operation>(dest, results[0], results[1]);
+                }
 
                 if(schedulerLocked)
                     co_yield Instruction::Unlock("Expression temporary in special register");

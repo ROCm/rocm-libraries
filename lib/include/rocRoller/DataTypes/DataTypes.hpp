@@ -68,6 +68,8 @@ namespace rocRoller
 
     /**
      * Data Type
+     *
+     * A value of `None` generically means any/unspecified/deferred.
      */
     enum class DataType : int
     {
@@ -88,7 +90,7 @@ namespace rocRoller
         Bool,
         Bool32,
         Count,
-        None = Count
+        None = Count /**< Represents: any, unknown/unspecified, or a deferred type. */
     };
 
     std::string   ToString(DataType d);

@@ -4,6 +4,7 @@
 
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Expression.hpp>
+#include <rocRoller/Operations/Command.hpp>
 #include <rocRoller/Serialization/YAML.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/HIPTimer.hpp>
