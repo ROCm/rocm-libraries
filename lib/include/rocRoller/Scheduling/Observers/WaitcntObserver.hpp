@@ -55,7 +55,7 @@ namespace rocRoller
                 inst.addWaitCount(computeWaitCount(inst, &explanation));
                 inst.addComment(explanation);
 
-                if(m_displayState)
+                if(m_displayState && !inst.isCommentOnly())
                 {
                     inst.addComment(getWaitQueueState());
                 }

@@ -5596,6 +5596,16 @@ namespace KernelGraphTest
         GPU_Translate04(false);
     }
 
+    TEST_F(KernelGraphTestGPU, GPU_Translate04Debug)
+    {
+        // Make sure Debug mode doesn't introduce bad pointer
+        // references in observers
+        auto settings = Settings::getInstance();
+        settings->set(Settings::LogLvl, LogLevel::Debug);
+        GPU_Translate04(false);
+        settings->reset();
+    }
+
     TEST_F(KernelGraphTestGPU, GPU_Translate04LoadAssembly)
     {
         GPU_Translate04(true);
