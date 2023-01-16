@@ -12,6 +12,65 @@ class MetaObserverTest : public ::testing::Test
 {
 };
 
+class TestFalseObserver
+{
+public:
+    TestFalseObserver() {}
+
+    TestFalseObserver(std::shared_ptr<Context> context)
+        : m_context(context){
+
+        };
+
+    Scheduling::InstructionStatus peek(Instruction const& inst) const
+    {
+        return Scheduling::InstructionStatus();
+    };
+
+    void modify(Instruction& inst) const {}
+
+    void observe(Instruction const& inst) {}
+
+    static bool required(std::shared_ptr<Context>)
+    {
+        return false;
+    }
+
+private:
+    std::weak_ptr<Context> m_context;
+};
+
+class TestTrueObserver
+{
+public:
+    TestTrueObserver() {}
+
+    TestTrueObserver(std::shared_ptr<Context> context)
+        : m_context(context){
+
+        };
+
+    Scheduling::InstructionStatus peek(Instruction const& inst) const
+    {
+        return Scheduling::InstructionStatus();
+    };
+
+    void modify(Instruction& inst) const {}
+
+    void observe(Instruction const& inst) {}
+
+    static bool required(std::shared_ptr<Context>)
+    {
+        return true;
+    }
+
+private:
+    std::weak_ptr<Context> m_context;
+};
+
+static_assert(Scheduling::CObserver<TestTrueObserver>);
+static_assert(Scheduling::CObserver<TestFalseObserver>);
+
 TEST_F(MetaObserverTest, MultipleObserverTest)
 {
     std::shared_ptr<rocRoller::Context> m_context = std::make_shared<Context>();
@@ -30,4 +89,19 @@ TEST_F(MetaObserverTest, MultipleObserverTest)
                                                 Scheduling::AllocatingObserver,
                                                 Scheduling::WaitcntObserver>;
     m_context->observer() = std::make_shared<MyObserver>(constructedObservers);
+}
+
+TEST_F(MetaObserverTest, Required)
+{
+    using FalseFalseObserver = Scheduling::MetaObserver<TestFalseObserver, TestFalseObserver>;
+    using TrueTrueObserver   = Scheduling::MetaObserver<TestTrueObserver, TestTrueObserver>;
+    using FalseTrueObserver  = Scheduling::MetaObserver<TestFalseObserver, TestTrueObserver>;
+    using TrueFalseObserver  = Scheduling::MetaObserver<TestTrueObserver, TestFalseObserver>;
+
+    std::shared_ptr<rocRoller::Context> m_context = std::make_shared<Context>();
+
+    EXPECT_TRUE(TrueTrueObserver::required(m_context));
+    EXPECT_FALSE(FalseFalseObserver::required(m_context));
+    EXPECT_FALSE(FalseTrueObserver::required(m_context));
+    EXPECT_FALSE(TrueFalseObserver::required(m_context));
 }

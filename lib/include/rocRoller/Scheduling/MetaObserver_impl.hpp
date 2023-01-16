@@ -119,6 +119,20 @@ namespace rocRoller
             std::apply([&inst](auto&&... args) { Detail::Observe(inst, args...); }, m_tuple);
         }
 
+        namespace Detail
+        {
+            template <CObserver T, CObserver... Rest>
+            bool Required(std::shared_ptr<Context> ctx, T const& obs, Rest const&... rest)
+            {
+                auto rv = obs.required(ctx);
+                if constexpr(sizeof...(rest) > 0)
+                {
+                    rv &= Required(ctx, rest...);
+                }
+                return rv;
+            }
+        }
+
         template <>
         inline bool MetaObserver<>::required(std::shared_ptr<Context>)
         {
@@ -128,12 +142,9 @@ namespace rocRoller
         template <CObserver... Types>
         inline bool MetaObserver<Types...>::required(std::shared_ptr<Context> ctx)
         {
-            bool result = true;
-            auto tup    = Tup();
-            std::apply(
-                [&ctx, &result]<CObserver T>(T obs, auto... rest) { result &= obs.required(ctx); },
-                tup);
-            return result;
+            auto tup = Tup();
+            return std::apply([&ctx](auto&&... args) { return Detail::Required(ctx, args...); },
+                              tup);
         }
     }
 }
