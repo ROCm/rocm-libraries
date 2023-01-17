@@ -59,10 +59,8 @@ namespace rocRoller
                 AssertFatal(srcs.size() == 1, ShowValue(srcs.size()));
                 std::vector<Expression::ExpressionPtr> rv(dsts.size());
 
-                // TODO: Is dividing by first stride necessary?
                 // TODO: Audit/test this for > 2 destinations
-                auto input = indexes[0] / getStride(srcs[0]);
-
+                auto input = indexes[0];
                 for(size_t i = 1; i < dsts.size(); i++)
                 {
                     rv[i - 1] = input / getSize(dsts[i]);
@@ -77,6 +75,12 @@ namespace rocRoller
             std::vector<Expression::ExpressionPtr> operator()(T const& e)
             {
                 Throw<FatalError>("Edge transform not defined.");
+            }
+
+            template <typename T>
+            std::vector<Expression::ExpressionPtr> operator()(Split const& e)
+            {
+                Throw<FatalError>("Split edge found in forward transform.");
             }
 
             template <typename T>

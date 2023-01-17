@@ -269,22 +269,34 @@ namespace rocRollerTest
         auto block_index  = std::make_shared<Expression::Expression>(2);
         auto thread_index = std::make_shared<Expression::Expression>(33);
 
+        // given indexes for the workgroup and wavefront, compute "u"
+        {
+            auto exprs = ct.reverse({block_index, thread_index}, {u}, {wg, wf}, fastArith);
+            auto sexpr = Expression::toString(exprs[0]);
+
+            auto uVal = std::get<int>(Expression::evaluate(exprs[0]));
+
+            EXPECT_EQ(322, uVal) << toString(exprs[0]);
+        }
+
         // given indexes for the workgroup and wavefront, compute "i"
-        auto exprs = ct.reverse({block_index, thread_index}, {u}, {wg, wf}, fastArith);
-        auto sexpr = Expression::toString(exprs[0]);
+        {
+            auto exprs = ct.reverse({block_index, thread_index}, {i}, {wg, wf}, fastArith);
+            auto sexpr = Expression::toString(exprs[0]);
 
-        auto iVal = std::get<int>(Expression::evaluate(exprs[0]));
+            auto iVal = std::get<int>(Expression::evaluate(exprs[0]));
 
-        EXPECT_EQ(322, iVal) << toString(exprs[0]);
+            EXPECT_EQ(161, iVal) << toString(exprs[0]);
 
-        auto iValExpr = std::make_shared<Expression::Expression>(iVal);
+            auto iValExpr = std::make_shared<Expression::Expression>(iVal);
 
-        // given "i", compute workgroup and wavefront
-        auto fwdExprs = ct.forward({iValExpr}, {u}, {wg, wf}, fastArith);
+            // given "i", compute workgroup and wavefront
+            auto fwdExprs = ct.forward({iValExpr}, {i}, {wg, wf}, fastArith);
 
-        EXPECT_EQ(2, fwdExprs.size());
-        EXPECT_EQ(2, std::get<int>(evaluate(fwdExprs[0]))) << toString(fwdExprs[0]);
-        EXPECT_EQ(33, std::get<int>(evaluate(fwdExprs[1]))) << toString(fwdExprs[1]);
+            EXPECT_EQ(2, fwdExprs.size());
+            EXPECT_EQ(2, std::get<int>(evaluate(fwdExprs[0]))) << toString(fwdExprs[0]);
+            EXPECT_EQ(33, std::get<int>(evaluate(fwdExprs[1]))) << toString(fwdExprs[1]);
+        }
     }
 
     TEST_F(CoordinateGraphTest, Basic1D02)
@@ -410,10 +422,6 @@ namespace rocRollerTest
 
         auto wavefront_size = Expression::literal(64);
         auto unit           = Expression::literal(1);
-
-        // auto M = Expression::literal(4096);
-        // auto N = Expression::literal(4096);
-        // auto K = Expression::literal(4096);
 
         auto M = Expression::literal(100);
         auto N = Expression::literal(200);
@@ -597,7 +605,7 @@ namespace rocRollerTest
         coords.setCoordinate(Ai, Expression::literal(17));
         exprs = coords.forward({i});
         sexpr = Expression::toString(exprs[0]);
-        EXPECT_EQ(sexpr, "Modulo(Divide(17i, 300i), 16j)");
+        EXPECT_EQ(sexpr, "Modulo(17i, 16j)");
     }
 
     TEST_F(CoordinateGraphTest, TensorTile2DLoadStore03)
