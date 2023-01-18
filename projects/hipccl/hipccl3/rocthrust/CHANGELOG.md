@@ -2,6 +2,10 @@
 
 Full documentation for rocThrust is available at [https://rocthrust.readthedocs.io/en/latest/](https://rocthrust.readthedocs.io/en/latest/)
 
+## (Unreleased) rocThrust 2.18.0 for ROCm 6.0
+### Fixed 
+- `lower_bound`, `upper_bound`, and `binary_search` failed to compile for certain types.
+
 ## (Unreleased) rocThrust 2.17.0 for ROCm 5.5
 ### Added
 - Updated to match upstream Thrust 1.17.2
