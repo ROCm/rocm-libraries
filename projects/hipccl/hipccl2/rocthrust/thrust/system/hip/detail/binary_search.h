@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2022, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -64,6 +64,8 @@ namespace __binary_search
         hipStream_t stream       = hip_rocprim::stream(policy);
         bool        debug_sync   = THRUST_HIP_DEBUG_SYNC_FLAG;
 
+        thrust::detail::wrapped_function<CompareOp, bool> wrapped_op(compare_op);
+
         // Determine temporary device storage requirements.
         hip_rocprim::throw_on_error(rocprim::lower_bound(NULL,
                                                          storage_size,
@@ -72,7 +74,7 @@ namespace __binary_search
                                                          result,
                                                          haystack_size,
                                                          needles_size,
-                                                         compare_op,
+                                                         wrapped_op,
                                                          stream,
                                                          debug_sync),
                                     "lower_bound: failed on 1st call");
@@ -89,7 +91,7 @@ namespace __binary_search
                                                          result,
                                                          haystack_size,
                                                          needles_size,
-                                                         compare_op,
+                                                         wrapped_op,
                                                          stream,
                                                          debug_sync),
                                     "lower_bound: failed on 2nt call");
@@ -124,6 +126,8 @@ namespace __binary_search
         hipStream_t stream       = hip_rocprim::stream(policy);
         bool        debug_sync   = THRUST_HIP_DEBUG_SYNC_FLAG;
 
+        thrust::detail::wrapped_function<CompareOp, bool> wrapped_op(compare_op);
+
         // Determine temporary device storage requirements.
         hip_rocprim::throw_on_error(rocprim::upper_bound(NULL,
                                                          storage_size,
@@ -132,7 +136,7 @@ namespace __binary_search
                                                          result,
                                                          haystack_size,
                                                          needles_size,
-                                                         compare_op,
+                                                         wrapped_op,
                                                          stream,
                                                          debug_sync),
                                     "upper_bound: failed on 1st call");
@@ -149,7 +153,7 @@ namespace __binary_search
                                                          result,
                                                          haystack_size,
                                                          needles_size,
-                                                         compare_op,
+                                                         wrapped_op,
                                                          stream,
                                                          debug_sync),
                                     "upper_bound: failed on 2nt call");
@@ -184,6 +188,8 @@ namespace __binary_search
         hipStream_t stream       = hip_rocprim::stream(policy);
         bool        debug_sync   = THRUST_HIP_DEBUG_SYNC_FLAG;
 
+        thrust::detail::wrapped_function<CompareOp, bool> wrapped_op(compare_op);
+
         // Determine temporary device storage requirements.
         hip_rocprim::throw_on_error(rocprim::binary_search(NULL,
                                                            storage_size,
@@ -192,7 +198,7 @@ namespace __binary_search
                                                            result,
                                                            haystack_size,
                                                            needles_size,
-                                                           compare_op,
+                                                           wrapped_op,
                                                            stream,
                                                            debug_sync),
                                     "binary_search: failed on 1st call");
@@ -209,7 +215,7 @@ namespace __binary_search
                                                            result,
                                                            haystack_size,
                                                            needles_size,
-                                                           compare_op,
+                                                           wrapped_op,
                                                            stream,
                                                            debug_sync),
                                     "binary_search: failed on 2nt call");

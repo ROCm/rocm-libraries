@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2022 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -20,10 +20,29 @@
 #include <thrust/iterator/retag.h>
 #include <thrust/sequence.h>
 #include <thrust/sort.h>
+#include <thrust/tuple.h>
 
 #include "test_header.hpp"
 
 TESTS_DEFINE(BinarySearchTestsInKernel, NumericalTestsParams);
+
+template <typename T>
+struct init_scalar
+{
+    T operator()(T t)
+    {
+        return t;
+    }
+};
+
+template <typename T>
+struct init_tuple
+{
+    thrust::tuple<T, T> operator()(T t)
+    {
+        return thrust::make_tuple(t, t);
+    }
+};
 
 struct custom_less
 {
@@ -198,32 +217,95 @@ TESTS_DEFINE(BinarySearchTests, FullTestsParams);
 
 THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_BEGIN
 
+// accepts device_vector and host_vector
+template <typename Vector, typename Policy, typename Initializer>
+void test_scalar_lower_bound_simple(Initializer init)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    Vector vec(5);
+
+    vec[0] = init(0);
+    vec[1] = init(2);
+    vec[2] = init(5);
+    vec[3] = init(7);
+    vec[4] = init(8);
+
+    ASSERT_EQ(thrust::lower_bound(Policy {}, vec.begin(), vec.end(), init(0)) - vec.begin(), 0);
+    ASSERT_EQ(thrust::lower_bound(Policy {}, vec.begin(), vec.end(), init(1)) - vec.begin(), 1);
+    ASSERT_EQ(thrust::lower_bound(Policy {}, vec.begin(), vec.end(), init(2)) - vec.begin(), 1);
+    ASSERT_EQ(thrust::lower_bound(Policy {}, vec.begin(), vec.end(), init(3)) - vec.begin(), 2);
+    ASSERT_EQ(thrust::lower_bound(Policy {}, vec.begin(), vec.end(), init(4)) - vec.begin(), 2);
+    ASSERT_EQ(thrust::lower_bound(Policy {}, vec.begin(), vec.end(), init(5)) - vec.begin(), 2);
+    ASSERT_EQ(thrust::lower_bound(Policy {}, vec.begin(), vec.end(), init(6)) - vec.begin(), 3);
+    ASSERT_EQ(thrust::lower_bound(Policy {}, vec.begin(), vec.end(), init(7)) - vec.begin(), 3);
+    ASSERT_EQ(thrust::lower_bound(Policy {}, vec.begin(), vec.end(), init(8)) - vec.begin(), 4);
+    ASSERT_EQ(thrust::lower_bound(Policy {}, vec.begin(), vec.end(), init(9)) - vec.begin(), 5);
+}
+
 TYPED_TEST(BinarySearchTests, TestScalarLowerBoundSimple)
 {
     using Vector = typename TestFixture::input_type;
     using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
+    test_scalar_lower_bound_simple<Vector, Policy>(init_scalar<T>());
+}
 
+TEST(BinarySearchTests, TestTupleLowerBoundSimple)
+{
+    {
+        using Policy = typename std::decay_t<decltype(thrust::hip::par)>;
+        using Vector = thrust::device_vector<thrust::tuple<int, int>>;
+        test_scalar_lower_bound_simple<Vector, Policy>(init_tuple<int>());
+    }
+    {
+        using Policy = typename thrust::detail::host_t;
+        using Vector = thrust::host_vector<thrust::tuple<int, int>>;
+        test_scalar_lower_bound_simple<Vector, Policy>(init_tuple<int>());
+    }
+}
+
+// accepts device_vector
+template <typename Vector, typename Initializer>
+void test_scalar_lower_bound_haystack(Initializer init)
+{
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    Vector vec(5);
+    Vector haystack(5);
 
-    vec[0] = 0;
-    vec[1] = 2;
-    vec[2] = 5;
-    vec[3] = 7;
-    vec[4] = 8;
+    haystack[0] = init(0);
+    haystack[1] = init(2);
+    haystack[2] = init(5);
+    haystack[3] = init(7);
+    haystack[4] = init(8);
 
-    ASSERT_EQ(thrust::lower_bound(Policy{}, vec.begin(), vec.end(), T(0)) - vec.begin(), 0);
-    ASSERT_EQ(thrust::lower_bound(Policy{}, vec.begin(), vec.end(), T(1)) - vec.begin(), 1);
-    ASSERT_EQ(thrust::lower_bound(Policy{}, vec.begin(), vec.end(), T(2)) - vec.begin(), 1);
-    ASSERT_EQ(thrust::lower_bound(Policy{}, vec.begin(), vec.end(), T(3)) - vec.begin(), 2);
-    ASSERT_EQ(thrust::lower_bound(Policy{}, vec.begin(), vec.end(), T(4)) - vec.begin(), 2);
-    ASSERT_EQ(thrust::lower_bound(Policy{}, vec.begin(), vec.end(), T(5)) - vec.begin(), 2);
-    ASSERT_EQ(thrust::lower_bound(Policy{}, vec.begin(), vec.end(), T(6)) - vec.begin(), 3);
-    ASSERT_EQ(thrust::lower_bound(Policy{}, vec.begin(), vec.end(), T(7)) - vec.begin(), 3);
-    ASSERT_EQ(thrust::lower_bound(Policy{}, vec.begin(), vec.end(), T(8)) - vec.begin(), 4);
-    ASSERT_EQ(thrust::lower_bound(Policy{}, vec.begin(), vec.end(), T(9)) - vec.begin(), 5);
+    Vector needles(2);
+
+    needles[0] = init(1);
+    needles[1] = init(6);
+
+    thrust::device_vector<int> indices(needles.size());
+
+    thrust::lower_bound(
+        haystack.begin(), haystack.end(), needles.begin(), needles.end(), indices.begin());
+
+    thrust::device_vector<int> expected(needles.size());
+    expected[0] = 1;
+    expected[1] = 3;
+
+    ASSERT_EQ(indices, expected);
+}
+
+TEST(BinarySearchTests, TestTupleLowerBoundHayStack)
+{
+    {
+        using Vector = thrust::device_vector<int>;
+        test_scalar_lower_bound_haystack<Vector>(init_scalar<int>());
+    }
+    {
+        using Vector = thrust::device_vector<thrust::tuple<int, int>>;
+        test_scalar_lower_bound_haystack<Vector>(init_tuple<int>());
+    }
 }
 
 template <typename ForwardIterator, typename LessThanComparable>
@@ -265,31 +347,95 @@ TEST(BinarySearchTests, TestScalarLowerBoundDispatchImplicit)
     ASSERT_EQ(13, vec.front());
 }
 
-TYPED_TEST(BinarySearchTests, TestScalarUpperBoundSimple)
+// accepts device_vector and host_vector
+template <typename Vector, typename Policy, typename Initializer>
+void test_scalar_upper_bound_simple(Initializer init)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
+    Vector vec(5);
+
+    vec[0] = init(0);
+    vec[1] = init(2);
+    vec[2] = init(5);
+    vec[3] = init(7);
+    vec[4] = init(8);
+
+    ASSERT_EQ(thrust::upper_bound(Policy {}, vec.begin(), vec.end(), init(0)) - vec.begin(), 1);
+    ASSERT_EQ(thrust::upper_bound(Policy {}, vec.begin(), vec.end(), init(1)) - vec.begin(), 1);
+    ASSERT_EQ(thrust::upper_bound(Policy {}, vec.begin(), vec.end(), init(2)) - vec.begin(), 2);
+    ASSERT_EQ(thrust::upper_bound(Policy {}, vec.begin(), vec.end(), init(3)) - vec.begin(), 2);
+    ASSERT_EQ(thrust::upper_bound(Policy {}, vec.begin(), vec.end(), init(4)) - vec.begin(), 2);
+    ASSERT_EQ(thrust::upper_bound(Policy {}, vec.begin(), vec.end(), init(5)) - vec.begin(), 3);
+    ASSERT_EQ(thrust::upper_bound(Policy {}, vec.begin(), vec.end(), init(6)) - vec.begin(), 3);
+    ASSERT_EQ(thrust::upper_bound(Policy {}, vec.begin(), vec.end(), init(7)) - vec.begin(), 4);
+    ASSERT_EQ(thrust::upper_bound(Policy {}, vec.begin(), vec.end(), init(8)) - vec.begin(), 5);
+    ASSERT_EQ(thrust::upper_bound(Policy {}, vec.begin(), vec.end(), init(9)) - vec.begin(), 5);
+}
+
+TYPED_TEST(BinarySearchTests, TestScalarUpperBoundSimple)
+{
     using Vector = typename TestFixture::input_type;
     using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
-    Vector vec(5);
+    test_scalar_upper_bound_simple<Vector, Policy>(init_scalar<T>());
+}
 
-    vec[0] = T(0);
-    vec[1] = T(2);
-    vec[2] = T(5);
-    vec[3] = T(7);
-    vec[4] = T(8);
+TEST(BinarySearchTests, TestTupleUpperBoundSimple)
+{
+    {
+        using Policy = typename std::decay_t<decltype(thrust::hip::par)>;
+        using Vector = thrust::device_vector<thrust::tuple<int, int>>;
+        test_scalar_upper_bound_simple<Vector, Policy>(init_tuple<int>());
+    }
+    {
+        using Policy = typename thrust::detail::host_t;
+        using Vector = thrust::host_vector<thrust::tuple<int, int>>;
+        test_scalar_upper_bound_simple<Vector, Policy>(init_tuple<int>());
+    }
+}
 
-    ASSERT_EQ(thrust::upper_bound(Policy{}, vec.begin(), vec.end(), T(0)) - vec.begin(), 1);
-    ASSERT_EQ(thrust::upper_bound(Policy{}, vec.begin(), vec.end(), T(1)) - vec.begin(), 1);
-    ASSERT_EQ(thrust::upper_bound(Policy{}, vec.begin(), vec.end(), T(2)) - vec.begin(), 2);
-    ASSERT_EQ(thrust::upper_bound(Policy{}, vec.begin(), vec.end(), T(3)) - vec.begin(), 2);
-    ASSERT_EQ(thrust::upper_bound(Policy{}, vec.begin(), vec.end(), T(4)) - vec.begin(), 2);
-    ASSERT_EQ(thrust::upper_bound(Policy{}, vec.begin(), vec.end(), T(5)) - vec.begin(), 3);
-    ASSERT_EQ(thrust::upper_bound(Policy{}, vec.begin(), vec.end(), T(6)) - vec.begin(), 3);
-    ASSERT_EQ(thrust::upper_bound(Policy{}, vec.begin(), vec.end(), T(7)) - vec.begin(), 4);
-    ASSERT_EQ(thrust::upper_bound(Policy{}, vec.begin(), vec.end(), T(8)) - vec.begin(), 5);
-    ASSERT_EQ(thrust::upper_bound(Policy{}, vec.begin(), vec.end(), T(9)) - vec.begin(), 5);
+// accepts device_vector
+template <typename Vector, typename Initializer>
+void test_scalar_upper_bound_haystack(Initializer init)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    Vector haystack(5);
+
+    haystack[0] = init(0);
+    haystack[1] = init(2);
+    haystack[2] = init(5);
+    haystack[3] = init(7);
+    haystack[4] = init(8);
+
+    Vector needles(2);
+
+    needles[0] = init(1);
+    needles[1] = init(6);
+
+    thrust::device_vector<int> indices(needles.size());
+
+    thrust::upper_bound(
+        haystack.begin(), haystack.end(), needles.begin(), needles.end(), indices.begin());
+
+    thrust::device_vector<int> expected(needles.size());
+    expected[0] = 1;
+    expected[1] = 3;
+
+    ASSERT_EQ(indices, expected);
+}
+
+TEST(BinarySearchTests, TestTupleUpperBoundHayStack)
+{
+    {
+        using Vector = thrust::device_vector<int>;
+        test_scalar_upper_bound_haystack<Vector>(init_scalar<int>());
+    }
+    {
+        using Vector = thrust::device_vector<thrust::tuple<int, int>>;
+        test_scalar_upper_bound_haystack<Vector>(init_tuple<int>());
+    }
 }
 
 template <typename ForwardIterator, typename LessThanComparable>
@@ -331,32 +477,95 @@ TEST(BinarySearchTests, TestScalarUpperBoundDispatchImplicit)
     ASSERT_EQ(13, vec.front());
 }
 
+// accepts device_vector and host_vector
+template <typename Vector, typename Policy, typename Initializer>
+void test_scalar_binary_search_simple(Initializer init)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    Vector vec(5);
+
+    vec[0] = init(0);
+    vec[1] = init(2);
+    vec[2] = init(5);
+    vec[3] = init(7);
+    vec[4] = init(8);
+
+    ASSERT_EQ(thrust::binary_search(Policy {}, vec.begin(), vec.end(), init(0)), true);
+    ASSERT_EQ(thrust::binary_search(Policy {}, vec.begin(), vec.end(), init(1)), false);
+    ASSERT_EQ(thrust::binary_search(Policy {}, vec.begin(), vec.end(), init(2)), true);
+    ASSERT_EQ(thrust::binary_search(Policy {}, vec.begin(), vec.end(), init(3)), false);
+    ASSERT_EQ(thrust::binary_search(Policy {}, vec.begin(), vec.end(), init(4)), false);
+    ASSERT_EQ(thrust::binary_search(Policy {}, vec.begin(), vec.end(), init(5)), true);
+    ASSERT_EQ(thrust::binary_search(Policy {}, vec.begin(), vec.end(), init(6)), false);
+    ASSERT_EQ(thrust::binary_search(Policy {}, vec.begin(), vec.end(), init(7)), true);
+    ASSERT_EQ(thrust::binary_search(Policy {}, vec.begin(), vec.end(), init(8)), true);
+    ASSERT_EQ(thrust::binary_search(Policy {}, vec.begin(), vec.end(), init(9)), false);
+}
+
 TYPED_TEST(BinarySearchTests, TestScalarBinarySearchSimple)
 {
     using Vector = typename TestFixture::input_type;
     using Policy = typename TestFixture::execution_policy;
     using T      = typename Vector::value_type;
+    test_scalar_binary_search_simple<Vector, Policy>(init_scalar<T>());
+}
 
+TEST(BinarySearchTests, TestTupleBinarySearchSimple)
+{
+    {
+        using Policy = typename std::decay_t<decltype(thrust::hip::par)>;
+        using Vector = thrust::device_vector<thrust::tuple<int, int>>;
+        test_scalar_binary_search_simple<Vector, Policy>(init_tuple<int>());
+    }
+    {
+        using Policy = typename thrust::detail::host_t;
+        using Vector = thrust::host_vector<thrust::tuple<int, int>>;
+        test_scalar_binary_search_simple<Vector, Policy>(init_tuple<int>());
+    }
+}
+
+// accepts device_vector
+template <typename Vector, typename Initializer>
+void test_scalar_binary_search_haystack(Initializer init)
+{
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-    Vector vec(5);
+    Vector haystack(5);
 
-    vec[0] = 0;
-    vec[1] = 2;
-    vec[2] = 5;
-    vec[3] = 7;
-    vec[4] = 8;
+    haystack[0] = init(0);
+    haystack[1] = init(2);
+    haystack[2] = init(5);
+    haystack[3] = init(7);
+    haystack[4] = init(8);
 
-    ASSERT_EQ(thrust::binary_search(Policy{}, vec.begin(), vec.end(), T(0)), true);
-    ASSERT_EQ(thrust::binary_search(Policy{}, vec.begin(), vec.end(), T(1)), false);
-    ASSERT_EQ(thrust::binary_search(Policy{}, vec.begin(), vec.end(), T(2)), true);
-    ASSERT_EQ(thrust::binary_search(Policy{}, vec.begin(), vec.end(), T(3)), false);
-    ASSERT_EQ(thrust::binary_search(Policy{}, vec.begin(), vec.end(), T(4)), false);
-    ASSERT_EQ(thrust::binary_search(Policy{}, vec.begin(), vec.end(), T(5)), true);
-    ASSERT_EQ(thrust::binary_search(Policy{}, vec.begin(), vec.end(), T(6)), false);
-    ASSERT_EQ(thrust::binary_search(Policy{}, vec.begin(), vec.end(), T(7)), true);
-    ASSERT_EQ(thrust::binary_search(Policy{}, vec.begin(), vec.end(), T(8)), true);
-    ASSERT_EQ(thrust::binary_search(Policy{}, vec.begin(), vec.end(), T(9)), false);
+    Vector needles(2);
+
+    needles[0] = init(3);
+    needles[1] = init(5);
+
+    thrust::device_vector<bool> indices(needles.size());
+
+    thrust::binary_search(
+        haystack.begin(), haystack.end(), needles.begin(), needles.end(), indices.begin());
+
+    thrust::device_vector<bool> expected(needles.size());
+    expected[0] = false;
+    expected[1] = true;
+
+    ASSERT_EQ(indices, expected);
+}
+
+TEST(BinarySearchTests, TestTupleBinarySearchHayStack)
+{
+    {
+        using Vector = thrust::device_vector<int>;
+        test_scalar_binary_search_haystack<Vector>(init_scalar<int>());
+    }
+    {
+        using Vector = thrust::device_vector<thrust::tuple<int, int>>;
+        test_scalar_binary_search_haystack<Vector>(init_tuple<int>());
+    }
 }
 
 template <typename ForwardIterator, typename LessThanComparable>
