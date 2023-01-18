@@ -14,6 +14,7 @@ namespace rocRoller
         , loadGlobalWidth(8)
         , storeLocalWidth(4)
         , storeGlobalWidth(4)
+        , fuseLoops(false) // TODO: Set default to true once register usage has been reduced
     {
     }
 
@@ -29,6 +30,7 @@ namespace rocRoller
         os << "  loadGlobalWidth:\t" << input.loadGlobalWidth << std::endl;
         os << "  storeLocalWidth:\t" << input.storeLocalWidth << std::endl;
         os << "  storeGlobalWidth:\t" << input.storeGlobalWidth << std::endl;
+        os << "  fuseLoops:\t" << input.fuseLoops << std::endl;
         return os;
     }
 

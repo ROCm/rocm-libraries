@@ -142,10 +142,12 @@ namespace rocRoller
     CommandKernel::CommandKernel(std::shared_ptr<Command>           command,
                                  std::string                        name,
                                  std::shared_ptr<CommandParameters> preParameters,
-                                 std::shared_ptr<CommandParameters> postParameters)
+                                 std::shared_ptr<CommandParameters> postParameters,
+                                 std::shared_ptr<KernelOptions>     kernelOptions)
         : m_command(command)
         , m_preParameters(preParameters)
         , m_postParameters(postParameters)
+        , m_kernelOptions(kernelOptions)
     {
         AssertFatal(m_preParameters);
 
@@ -183,6 +185,11 @@ namespace rocRoller
 
         m_context = Context::ForDefaultHipDevice(name);
 
+        if(m_kernelOptions)
+        {
+            m_context->setKernelOptions(*m_kernelOptions);
+        }
+
         // TODO: Determine the correct kernel dimensions
         if(m_preParameters->getManualKernelDimension() > 0)
             m_context->kernel()->setKernelDimensions(m_preParameters->getManualKernelDimension());
@@ -214,6 +221,9 @@ namespace rocRoller
         m_kernelGraph = KernelGraph::lowerTile(m_kernelGraph, m_preParameters, m_context);
 
         m_kernelGraph = KernelGraph::unrollLoops(m_kernelGraph, m_context);
+
+        if(m_context->kernelOptions().fuseLoops)
+            m_kernelGraph = KernelGraph::fuseLoops(m_kernelGraph, m_context);
 
         m_kernelGraph = KernelGraph::addComputeIndexOperations(m_kernelGraph);
 

@@ -56,6 +56,8 @@ namespace GEMMDriverTest
 
         bool loadLDSA = true;
         bool loadLDSB = true;
+
+        bool fuseLoops = false;
     };
 
     template <typename T>
@@ -179,6 +181,9 @@ namespace GEMMDriverTest
         runtimeArgs.append("d_d_stride_0", (size_t)1);
         runtimeArgs.append("d_d_stride_1", (size_t)M);
 
+        auto kernelOptions       = std::make_shared<KernelOptions>();
+        kernelOptions->fuseLoops = gemm.fuseLoops;
+
         auto params = std::make_shared<CommandParameters>();
         params->setManualKernelDimension(2);
         // TODO: Calculate these values internally based on workgroup sizes.
@@ -238,7 +243,7 @@ namespace GEMMDriverTest
             postParams->setDimensionInfo(id - 1, WFY);
         }
 
-        CommandKernel commandKernel(command, "GEMMTest", params, postParams);
+        CommandKernel commandKernel(command, "GEMMTest", params, postParams, kernelOptions);
         commandKernel.launchKernel(runtimeArgs.runtimeArguments());
         m_context = commandKernel.getContext();
 
@@ -317,9 +322,6 @@ namespace GEMMDriverTest
         GEMMProblem gemm;
         gemm.wave_k = 8;
 
-        gemm.loadLDSA = false;
-        gemm.loadLDSB = false;
-
         basicGEMM<Half>(m_context, gemm, 2.e-5);
     }
 
@@ -341,6 +343,30 @@ namespace GEMMDriverTest
         gemm.workgroup_size_y = 4;
 
         gemm.loadLDSA = false;
+
+        basicGEMM<Half>(m_context, gemm, 2.e-5);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Unroll2x4Fused)
+    {
+        GEMMProblem gemm;
+
+        gemm.M = 256;
+        gemm.N = 512;
+        gemm.K = 64;
+
+        gemm.mac_m = 128;
+        gemm.mac_n = 256;
+        gemm.mac_k = 16;
+
+        gemm.wave_k = 8;
+
+        gemm.workgroup_size_x = 2 * gemm.wavefront_size;
+        gemm.workgroup_size_y = 4;
+
+        gemm.loadLDSA  = false;
+        gemm.loadLDSB  = false;
+        gemm.fuseLoops = true;
 
         basicGEMM<Half>(m_context, gemm, 2.e-5);
     }
@@ -383,6 +409,12 @@ namespace GEMMDriverTest
 
         gemm.workgroup_size_x = 1 * gemm.wavefront_size;
         gemm.workgroup_size_y = 8;
+
+        gemm.fuseLoops = true;
+
+        // TODO: Turn on LDS usage once register usage has been reduced
+        gemm.loadLDSA = false;
+        gemm.loadLDSB = false;
 
         basicGEMM<Half>(m_context, gemm, 2.e-5);
     }

@@ -1645,7 +1645,20 @@ namespace KernelGraphTest
         kgraph0 = updateParameters(kgraph0, params);
 
         auto kgraph1 = lowerTile(kgraph0, params, m_context);
-        kgraph1      = addComputeIndexOperations(kgraph1);
+
+        auto kgraph_unrolled = unrollLoops(kgraph1, m_context);
+
+        // Verify that loops have been unrolled
+        auto unrolledForLoops = kgraph_unrolled.control.getNodes<ForLoopOp>().to<std::vector>();
+        EXPECT_EQ(unrolledForLoops.size(), 7);
+
+        auto kgraph_fused = fuseLoops(kgraph_unrolled, m_context);
+
+        // Verify that looks have been fused
+        auto fusedForLoops = kgraph_fused.control.getNodes<ForLoopOp>().to<std::vector>();
+        EXPECT_EQ(fusedForLoops.size(), 4);
+
+        kgraph1 = addComputeIndexOperations(kgraph1);
 
         std::string expected1 = R".(
             digraph {

@@ -1,4 +1,5 @@
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/KernelGraph/Utils.hpp>
 #include <rocRoller/KernelGraph/Visitors.hpp>
 
 namespace rocRoller
@@ -20,8 +21,8 @@ namespace rocRoller
          */
         std::vector<int> duplicateControlNodes(KernelGraph& graph, std::set<int> const& startNodes)
         {
-            std::vector<int>   newStartNodes;
-            std::map<int, int> reindexer;
+            std::vector<int> newStartNodes;
+            GraphReindexer   reindexer;
 
             // Create duplicates of all of the nodes downstream of the startNodes
             for(auto const& node :
@@ -30,12 +31,12 @@ namespace rocRoller
                 // Only do this step if element is a node
                 if(graph.control.getElementType(node) == Graph::ElementType::Node)
                 {
-                    auto op         = graph.control.addElement(graph.control.getElement(node));
-                    reindexer[node] = op;
+                    auto op = graph.control.addElement(graph.control.getElement(node));
+                    reindexer.control[node] = op;
                 }
             }
 
-            for(auto const& reindex : reindexer)
+            for(auto const& reindex : reindexer.control)
             {
                 // Create all edges within new sub-graph
                 auto location = graph.control.getLocation(reindex.first);
@@ -43,21 +44,51 @@ namespace rocRoller
                 {
                     int child = *graph.control.getNeighbours<Graph::Direction::Downstream>(output)
                                      .begin();
-                    graph.control.addElement(
-                        graph.control.getElement(output), {reindex.second}, {reindexer[child]});
+                    graph.control.addElement(graph.control.getElement(output),
+                                             {reindex.second},
+                                             {reindexer.control[child]});
                 }
 
                 // Use the same coordinate graph mappings
                 for(auto const& c : graph.mapper.getConnections(reindex.first))
                 {
-                    graph.mapper.connect(reindex.second, c.coordinate, c.tindex, c.subDimension);
+                    auto coord = c.coordinate;
+                    // If one of the mappings represents storage, duplicate it in the CoordinateGraph.
+                    // This will allow the RegisterTagManager to recognize that the nodes are pointing
+                    // to different data and to use different registers.
+                    // Note: no edges are being added, to there will be loose Dimensions within the
+                    // Coordinate graph.
+                    if(c.tindex == typeid(MacroTile))
+                    {
+                        if(reindexer.coordinates.count(c.coordinate) == 0)
+                        {
+                            auto dim = graph.coordinates.addElement(
+                                graph.coordinates.getElement(c.coordinate));
+                            reindexer.coordinates[c.coordinate] = dim;
+                        }
+                        coord = reindexer.coordinates[c.coordinate];
+                    }
+                    graph.mapper.connect(reindex.second, coord, c.tindex, c.subDimension);
+                }
+            }
+
+            // Change coordinate values in Expressions
+            for(auto const& reindex : reindexer.control)
+            {
+                auto elem = graph.control.getElement(reindex.first);
+                if(isOperation<Assign>(elem))
+                {
+                    auto new_assign = graph.control.getNode<Assign>(reindex.second);
+                    ReindexExpressionVisitor visitor(reindexer);
+                    new_assign.expression = visitor.call(new_assign.expression);
+                    graph.control.setElement(reindex.second, new_assign);
                 }
             }
 
             // Return the new start nodes
             for(auto const& startNode : startNodes)
             {
-                newStartNodes.push_back(reindexer[startNode]);
+                newStartNodes.push_back(reindexer.control[startNode]);
             }
 
             return newStartNodes;
@@ -165,20 +196,9 @@ namespace rocRoller
 
                 auto loopIncrementOp = graph.control.getNode<Assign>(loopIncrement[0]);
 
-                AssertFatal(std::holds_alternative<Expression::Add>(*loopIncrementOp.expression),
-                            "Loop increment expression must be an addition");
-                auto addExpr = std::get<Expression::Add>(*loopIncrementOp.expression);
+                auto [lhs, rhs] = getForLoopIncrement(graph, newTag);
 
-                auto connections = graph.mapper.getConnections(loopIncrement[0]);
-                AssertFatal(connections.size() == 1,
-                            "Invalid Assign operation; coordinate missing.");
-                auto dim_tag = connections[0].coordinate;
-                AssertFatal(std::holds_alternative<Expression::DataFlowTag>(*addExpr.lhs),
-                            "First argument in loop increment expression should be dataflow tag");
-                AssertFatal(std::get<Expression::DataFlowTag>(*addExpr.lhs).tag == dim_tag,
-                            "First argument in loop increment expression should be loop iterator "
-                            "data flow tag");
-                auto newAddExpr = addExpr.lhs + (addExpr.rhs * Expression::literal(UNROLL_AMOUNT));
+                auto newAddExpr            = lhs + (rhs * Expression::literal(UNROLL_AMOUNT));
                 loopIncrementOp.expression = newAddExpr;
 
                 graph.control.setElement(loopIncrement[0], loopIncrementOp);

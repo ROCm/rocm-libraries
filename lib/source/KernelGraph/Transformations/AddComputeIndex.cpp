@@ -15,38 +15,37 @@ namespace rocRoller
         /**
          * @brief Replace operation with a scope.  Does not delete the original operation.
          */
-        std::pair<int, KernelGraph> replaceWithScope(KernelGraph const& original, int op)
+        int replaceWithScope(KernelGraph& graph, int op)
         {
-            auto graph = original;
             auto scope = graph.control.addElement(Scope());
 
-            auto location = original.control.getLocation(op);
+            auto location = graph.control.getLocation(op);
             for(auto const& input : location.incoming)
             {
-                auto edge = original.control.getElement(input);
+                auto edge = graph.control.getElement(input);
                 int  parent
-                    = *original.control.getNeighbours<Graph::Direction::Upstream>(input).begin();
+                    = *graph.control.getNeighbours<Graph::Direction::Upstream>(input).begin();
                 graph.control.deleteElement(input);
                 graph.control.addElement(edge, {parent}, {scope});
             }
             for(auto const& output : location.outgoing)
             {
-                auto edge = original.control.getElement(output);
+                auto edge = graph.control.getElement(output);
                 if(std::holds_alternative<ControlEdge>(edge))
                 {
                     auto cedge = std::get<ControlEdge>(edge);
                     if(std::holds_alternative<Sequence>(cedge))
                     {
-                        graph.control.deleteElement(output);
                         int child
-                            = *original.control.getNeighbours<Graph::Direction::Downstream>(output)
+                            = *graph.control.getNeighbours<Graph::Direction::Downstream>(output)
                                    .begin();
+                        graph.control.deleteElement(output);
                         graph.control.addElement(edge, {scope}, {child});
                     }
                 }
             }
 
-            return {scope, graph};
+            return scope;
         }
 
         std::tuple<int, int, int>
@@ -299,54 +298,75 @@ namespace rocRoller
         /**
          * @brief Add ComputeIndex operations to graph for MATRIX_A and MATRIX_B loads.
          */
-        KernelGraph addComputeIndexAB(KernelGraph const& original,
-                                      int                op,
-                                      int                mulLoadA,
-                                      int                mulLoadB,
-                                      int                loadA,
-                                      int                storeLDSA,
-                                      int                loadB,
-                                      int                storeLDSB)
+        KernelGraph addComputeIndexAB(KernelGraph& graph,
+                                      int          op,
+                                      int          scope,
+                                      int          setCoord,
+                                      int          mulLoadA,
+                                      int          mulLoadB,
+                                      int          loadA,
+                                      int          storeLDSA,
+                                      int          loadB,
+                                      int          storeLDSB)
         {
             rocRoller::Log::getLogger()->debug(
                 "KernelGraph::addComputeIndexAB({}, {}, {})", op, mulLoadA, mulLoadB);
 
-            auto [scope, graph] = replaceWithScope(original, op);
+            int top = scope;
+
+            // If the loads are sitting under a SetCoordinate node inside the ForLoop,
+            // add the SetCoordinate node underneath the scope. All of the ComputeIndex
+            // operations should then be under the SetCoordinate node.
+            if(setCoord >= 0)
+            {
+                auto newSetCoord = graph.control.addElement(graph.control.getElement(setCoord));
+                graph.control.addElement(Body(), {scope}, {newSetCoord});
+                for(auto const& c : graph.mapper.getConnections(setCoord))
+                {
+                    graph.mapper.connect(newSetCoord, c.coordinate, c.tindex, c.subDimension);
+                }
+                top = newSetCoord;
+                graph.control.addElement(Sequence(), {newSetCoord}, {op});
+            }
 
             // MATRIX_A; y is summation
-            auto nodeA = original.control.getElement(mulLoadA);
+            auto nodeA = graph.control.getElement(mulLoadA);
             // LoadTiled A
             if(isOperation<LoadTiled>(nodeA))
             {
                 auto [topA, bottomA, updateA] = computeIndexMATRIXAB(graph, mulLoadA, 1);
-                graph.control.addElement(Body(), {scope}, {topA});
-                graph.control.addElement(Sequence(), {bottomA}, {op});
+                graph.control.addElement(Body(), {top}, {topA});
+                if(setCoord < 0)
+                    graph.control.addElement(Sequence(), {bottomA}, {op});
                 graph.control.addElement(ForLoopIncrement(), {op}, {updateA});
             }
             // LoadLDSTile A
             else if(isOperation<LoadLDSTile>(nodeA))
             {
                 auto [topA, bottomA] = computeIndexLDSMATRIXAB(graph, mulLoadA, 1);
-                graph.control.addElement(Body(), {scope}, {topA});
-                graph.control.addElement(Sequence(), {bottomA}, {op});
+                graph.control.addElement(Body(), {top}, {topA});
+                if(setCoord < 0)
+                    graph.control.addElement(Sequence(), {bottomA}, {op});
             }
 
             // MATRIX_B; x is summation
-            auto nodeB = original.control.getElement(mulLoadB);
+            auto nodeB = graph.control.getElement(mulLoadB);
             // LoadTiled B
             if(isOperation<LoadTiled>(nodeB))
             {
                 auto [topB, bottomB, updateB] = computeIndexMATRIXAB(graph, mulLoadB, 0);
-                graph.control.addElement(Body(), {scope}, {topB});
-                graph.control.addElement(Sequence(), {bottomB}, {op});
+                graph.control.addElement(Body(), {top}, {topB});
+                if(setCoord < 0)
+                    graph.control.addElement(Sequence(), {bottomB}, {op});
                 graph.control.addElement(ForLoopIncrement(), {op}, {updateB});
             }
             // LoadLDSTile B
             else if(isOperation<LoadLDSTile>(nodeB))
             {
                 auto [topB, bottomB] = computeIndexLDSMATRIXAB(graph, mulLoadB, 0);
-                graph.control.addElement(Body(), {scope}, {topB});
-                graph.control.addElement(Sequence(), {bottomB}, {op});
+                graph.control.addElement(Body(), {top}, {topB});
+                if(setCoord < 0)
+                    graph.control.addElement(Sequence(), {bottomB}, {op});
             }
 
             if(loadA > 0 && storeLDSA > 0)
@@ -354,16 +374,18 @@ namespace rocRoller
                 // LoadTiled A
                 auto user                     = graph.mapper.get<User>(loadA);
                 auto [topA, bottomA, updateA] = computeIndexVGPRMATRIXAB(graph, loadA, user, 1);
-                graph.control.addElement(Body(), {scope}, {topA});
-                graph.control.addElement(Sequence(), {bottomA}, {op});
+                graph.control.addElement(Body(), {top}, {topA});
+                if(setCoord < 0)
+                    graph.control.addElement(Sequence(), {bottomA}, {op});
                 graph.control.addElement(ForLoopIncrement(), {op}, {updateA});
 
                 // StoreLDSTile A
                 auto lds                          = graph.mapper.get<LDS>(storeLDSA);
                 auto [store_ci_row, store_ci_col] = computeIndexVGPR(graph, storeLDSA, lds, true);
-                graph.control.addElement(Body(), {scope}, {store_ci_row});
+                graph.control.addElement(Body(), {top}, {store_ci_row});
                 graph.control.addElement(Sequence(), {store_ci_row}, {store_ci_col});
-                graph.control.addElement(Sequence(), {store_ci_col}, {op});
+                if(setCoord < 0)
+                    graph.control.addElement(Sequence(), {store_ci_col}, {op});
             }
 
             if(loadB > 0 && storeLDSB > 0)
@@ -371,16 +393,18 @@ namespace rocRoller
                 // LoadTiled B
                 auto user                     = graph.mapper.get<User>(loadB);
                 auto [topB, bottomB, updateB] = computeIndexVGPRMATRIXAB(graph, loadB, user, 0);
-                graph.control.addElement(Body(), {scope}, {topB});
-                graph.control.addElement(Sequence(), {bottomB}, {op});
+                graph.control.addElement(Body(), {top}, {topB});
+                if(setCoord < 0)
+                    graph.control.addElement(Sequence(), {bottomB}, {op});
                 graph.control.addElement(ForLoopIncrement(), {op}, {updateB});
 
                 // StoreLDSTile B
                 auto lds                          = graph.mapper.get<LDS>(storeLDSB);
                 auto [store_ci_row, store_ci_col] = computeIndexVGPR(graph, storeLDSB, lds, true);
-                graph.control.addElement(Body(), {scope}, {store_ci_row});
+                graph.control.addElement(Body(), {top}, {store_ci_row});
                 graph.control.addElement(Sequence(), {store_ci_row}, {store_ci_col});
-                graph.control.addElement(Sequence(), {store_ci_col}, {op});
+                if(setCoord < 0)
+                    graph.control.addElement(Sequence(), {store_ci_col}, {op});
             }
 
             return graph;
@@ -389,13 +413,12 @@ namespace rocRoller
         /**
          * @brief Add ComputeIndex operations to graph for a MATRIX_ACCUM load/store.
          */
-        KernelGraph
-            addComputeIndexC(KernelGraph const& original, int op, int loadstore, bool forward)
+        KernelGraph addComputeIndexC(KernelGraph& graph, int op, int loadstore, bool forward)
         {
             rocRoller::Log::getLogger()->debug(
                 "KernelGraph::addComputeIndexC({}, {}, {})", op, loadstore, forward);
 
-            auto [scope, graph] = replaceWithScope(original, op);
+            auto scope = replaceWithScope(graph, op);
 
             auto user       = graph.mapper.get<User>(loadstore);
             auto vgpr_block = graph.mapper.get<VGPRBlockNumber>(loadstore);
@@ -461,15 +484,14 @@ namespace rocRoller
         /**
          * @brief Add ComputeIndex operations to graph for loads/stores.
          */
-        KernelGraph
-            addComputeIndexVGPR(KernelGraph const& original, int op, int loadstore, bool forward)
+        KernelGraph addComputeIndexVGPR(KernelGraph& graph, int op, int loadstore, bool forward)
         {
             rocRoller::Log::getLogger()->debug(
                 "KernelGraph::addComputeIndexVGPR({}, {}, {})", op, loadstore, forward);
 
-            auto [scope, graph] = replaceWithScope(original, op);
+            auto scope = replaceWithScope(graph, op);
 
-            auto node   = original.control.getElement(loadstore);
+            auto node   = graph.control.getElement(loadstore);
             auto source = -1;
             if(isOperation<LoadTiled>(node) || isOperation<StoreTiled>(node))
                 source = graph.mapper.get<User>(loadstore);
@@ -495,12 +517,18 @@ namespace rocRoller
             // MATRIX_A and MATRIX_B loads within a ForLoop
             auto multiplies = kgraph.control.getNodes<Multiply>().to<std::vector>();
 
-            std::vector<int> allForKs;
+            std::map<int, int> forKScopes;
             for(auto const& multiply : multiplies)
             {
-                auto forK = kgraph.control.getInputNodeIndices<Body>(multiply).to<std::vector>();
-                AssertFatal(forK.size() == 1, "Didn't find for loop.");
-                allForKs.push_back(forK[0]);
+                // Find the first ForLoop above the Multiply
+                auto allForLoops = kgraph.control.findNodes(
+                    multiply,
+                    [&](int tag) -> bool {
+                        return isOperation<ForLoopOp>(kgraph.control.getElement(tag));
+                    },
+                    Graph::Direction::Upstream);
+                auto forK  = *allForLoops.begin();
+                int  scope = -1;
                 auto mulLoads
                     = kgraph.control
                           .findNodes(
@@ -513,47 +541,83 @@ namespace rocRoller
                               Graph::Direction::Downstream)
                           .to<std::vector>();
                 AssertFatal(mulLoads.size() == 2, "More than one Multiply not supported yet.");
-                auto storesLDS
-                    = kgraph.control
-                          .findNodes(
-                              forK[0],
-                              [&](int tag) -> bool {
-                                  return isOperation<StoreLDSTile>(kgraph.control.getElement(tag));
-                              },
-                              Graph::Direction::Downstream)
-                          .to<std::vector>();
-                auto loads
-                    = kgraph.control
-                          .findNodes(
-                              forK[0],
-                              [&](int tag) -> bool {
-                                  if(isOperation<LoadTiled>(kgraph.control.getElement(tag)))
-                                  {
-                                      auto parents
-                                          = kgraph.control.parentNodes(tag).to<std::vector>();
-                                      AssertFatal(parents.size() == 1);
-                                      return parents[0] != multiply;
-                                  }
-                                  return false;
-                              },
-                              Graph::Direction::Downstream)
-                          .to<std::vector>();
+                // Find all of the nodes inbetween the ForLoop and the Multiply
+                auto pathToMultiply = kgraph.control
+                                          .path<Graph::Direction::Downstream>(
+                                              std::vector<int>{forK}, std::vector<int>{multiply})
+                                          .to<std::vector>();
+
+                // Find all of the StoreLDS nodes between the ForLoop and Multiply
+                std::vector<int> storesLDS;
+                std::copy_if(pathToMultiply.begin(),
+                             pathToMultiply.end(),
+                             std::back_inserter(storesLDS),
+                             [&](int tag) -> bool {
+                                 return isOperation<StoreLDSTile>(kgraph.control.getElement(tag));
+                             });
+
+                // Find all of the LoadTile nodes between the ForLoop and Multiply
+                std::vector<int> loads;
+                std::copy_if(pathToMultiply.begin(),
+                             pathToMultiply.end(),
+                             std::back_inserter(loads),
+                             [&](int tag) -> bool {
+                                 return isOperation<LoadTiled>(kgraph.control.getElement(tag));
+                             });
+
                 AssertFatal(storesLDS.size() == loads.size(),
                             "Either store LDS or load is missing");
+
+                // Find all of the SetCoordinate nodes between the ForLoop and Multiply
+                std::vector<int> setCoords;
+                std::copy_if(pathToMultiply.begin(),
+                             pathToMultiply.end(),
+                             std::back_inserter(setCoords),
+                             [&](int tag) -> bool {
+                                 return isOperation<SetCoordinate>(kgraph.control.getElement(tag));
+                             });
+                int setCoord = setCoords.empty() ? -1 : setCoords[0];
+
+                // If a scope doesn't exist yet above the ForLoop, create one
+                // and add scope to the forKScopes map.
+                if(forKScopes.count(forK) == 0)
+                {
+                    forKScopes[forK] = replaceWithScope(kgraph, forK);
+                }
+                scope = forKScopes[forK];
+
                 if(storesLDS.size() == 0)
                     kgraph = addComputeIndexAB(
-                        kgraph, forK[0], mulLoads[0], mulLoads[1], -1, -1, -1, -1);
+                        kgraph, forK, scope, setCoord, mulLoads[0], mulLoads[1], -1, -1, -1, -1);
                 else if(storesLDS.size() == 1
                         && isOperation<LoadLDSTile>(kgraph.control.getElement(mulLoads[0])))
-                    kgraph = addComputeIndexAB(
-                        kgraph, forK[0], mulLoads[0], mulLoads[1], loads[0], storesLDS[0], -1, -1);
+                    kgraph = addComputeIndexAB(kgraph,
+                                               forK,
+                                               scope,
+                                               setCoord,
+                                               mulLoads[0],
+                                               mulLoads[1],
+                                               loads[0],
+                                               storesLDS[0],
+                                               -1,
+                                               -1);
                 else if(storesLDS.size() == 1
                         && isOperation<LoadLDSTile>(kgraph.control.getElement(mulLoads[1])))
-                    kgraph = addComputeIndexAB(
-                        kgraph, forK[0], mulLoads[0], mulLoads[1], -1, -1, loads[0], storesLDS[0]);
+                    kgraph = addComputeIndexAB(kgraph,
+                                               forK,
+                                               scope,
+                                               setCoord,
+                                               mulLoads[0],
+                                               mulLoads[1],
+                                               -1,
+                                               -1,
+                                               loads[0],
+                                               storesLDS[0]);
                 else if(storesLDS.size() == 2)
                     kgraph = addComputeIndexAB(kgraph,
-                                               forK[0],
+                                               forK,
+                                               scope,
+                                               setCoord,
                                                mulLoads[0],
                                                mulLoads[1],
                                                loads[0],
@@ -586,6 +650,12 @@ namespace rocRoller
             }
 
             // VGPR/LDS loads anywhere
+
+            std::vector<int> allForKs;
+            for(auto const& forKScope : forKScopes)
+            {
+                allForKs.push_back(forKScope.first);
+            }
 
             auto reachable_from_forK
                 = kgraph.control.depthFirstVisit(allForKs).to<std::unordered_set>();

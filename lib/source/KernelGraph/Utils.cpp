@@ -800,5 +800,34 @@ namespace rocRoller
             graph.mapper.connect<WaveTile>(waveMult, waveA_tag, 0);
             graph.mapper.connect<WaveTile>(waveMult, waveB_tag, 1);
         }
+
+        std::pair<Expression::ExpressionPtr, Expression::ExpressionPtr>
+            getForLoopIncrement(KernelGraph const& graph, int forLoop)
+        {
+            // Find the ForLoopIcrement calculation
+            // TODO: Handle multiple ForLoopIncrement edges that might be in a different
+            // format, such as ones coming from ComputeIndex.
+            auto loopIncrement
+                = graph.control.getOutputNodeIndices<ForLoopIncrement>(forLoop).to<std::vector>();
+            AssertFatal(loopIncrement.size() == 1, "Should only have 1 loop increment edge");
+
+            auto loopIncrementOp = graph.control.getNode<Assign>(loopIncrement[0]);
+
+            AssertFatal(std::holds_alternative<Expression::Add>(*loopIncrementOp.expression),
+                        "Loop increment expression must be an addition");
+            auto addExpr = std::get<Expression::Add>(*loopIncrementOp.expression);
+
+            auto connections = graph.mapper.getConnections(loopIncrement[0]);
+            AssertFatal(connections.size() == 1, "Invalid Assign operation; coordinate missing.");
+            auto dim_tag = connections[0].coordinate;
+            AssertFatal(std::holds_alternative<Expression::DataFlowTag>(*addExpr.lhs),
+                        "First argument in loop increment expression should be dataflow tag");
+            AssertFatal(std::get<Expression::DataFlowTag>(*addExpr.lhs).tag == dim_tag,
+                        "First argument in loop increment expression should be loop iterator "
+                        "data flow tag");
+
+            return {addExpr.lhs, addExpr.rhs};
+        }
+
     }
 }

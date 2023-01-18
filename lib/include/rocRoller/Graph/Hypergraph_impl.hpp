@@ -510,6 +510,15 @@ namespace rocRoller
 
         template <typename Node, typename Edge, bool Hyper>
         template <Direction Dir, CForwardRangeOf<int> RangeStart, CForwardRangeOf<int> RangeEnd>
+        Generator<int> Hypergraph<Node, Edge, Hyper>::path(RangeStart const& starts,
+                                                           RangeEnd const&   ends) const
+        {
+            std::map<int, bool> visitedElements;
+            co_yield path<Dir>(starts, ends, visitedElements);
+        }
+
+        template <typename Node, typename Edge, bool Hyper>
+        template <Direction Dir, CForwardRangeOf<int> RangeStart, CForwardRangeOf<int> RangeEnd>
         Generator<int>
             Hypergraph<Node, Edge, Hyper>::path(RangeStart const&    starts,
                                                 RangeEnd const&      ends,

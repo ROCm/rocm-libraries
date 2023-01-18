@@ -195,7 +195,6 @@ namespace rocRoller
                         Register::ValuePtr lhsVal, rhsVal;
                         if(lhsInfo.packing < rhsInfo.packing)
                         {
-                            std::cout << "YERP." << std::endl;
                             co_yield generateConvertOp(
                                 varType.dataType, result, rhs->element({i / packingRatio}));
                         }

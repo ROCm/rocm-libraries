@@ -242,6 +242,7 @@ set(rocroller_src
  lib/source/KernelGraph/Transformations/AddComputeIndex.cpp
  lib/source/KernelGraph/Transformations/AddDeallocate.cpp
  lib/source/KernelGraph/Transformations/CleanGraph.cpp
+ lib/source/KernelGraph/Transformations/FuseLoops.cpp
  lib/source/KernelGraph/Transformations/KernelGraph_loop.cpp
  lib/source/KernelGraph/Transformations/KernelGraph_unrollKernel.cpp
  lib/source/KernelGraph/Transformations/LowerLinear.cpp

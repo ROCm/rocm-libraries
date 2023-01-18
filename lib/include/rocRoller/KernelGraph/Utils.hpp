@@ -77,5 +77,24 @@ namespace rocRoller
                                   std::array<unsigned int, 3> const& workgroupSizes);
 
         void addConnectionsMultiply(KernelGraph& graph, int waveMult);
+
+        /**
+         * @brief Get a pair of expressions representing a for loop increment
+         *
+         * This assumes that there is only a single for loop increment for a given loop.
+         *
+         * This also assumes that the increment is of the form: Add(DataFlowTag(N), Val),
+         * where N is the data tag associated with the for loop.
+         *
+         * The first item in the pair is the data flow tag associated with the for loop.
+         *
+         * The second item is the amount that it is being incremented by.
+         *
+         * @param graph
+         * @param forLoop
+         * @return std::pair<ExpressionPtr, ExpressionPtr>
+         */
+        std::pair<Expression::ExpressionPtr, Expression::ExpressionPtr>
+            getForLoopIncrement(KernelGraph const& graph, int forLoop);
     }
 }

@@ -123,7 +123,23 @@ namespace rocRoller
         Expression::ExpressionPtr cleanArguments(Expression::ExpressionPtr,
                                                  std::shared_ptr<AssemblyKernel>);
 
+        /**
+         * @brief Performs the Loop Unrolling transformation.
+         *
+         * Unrolls every loop that does not have a previous iteration dependency by a value of 2.
+         *
+         * @return KernelGraph
+         */
         KernelGraph unrollLoops(KernelGraph const&, ContextPtr);
+
+        /**
+         * @brief Performs the Loop Fusion transformation.
+         *
+         * Fuses multiple loops together if they iterate over the same length.
+         *
+         * @return KernelGraph
+         */
+        KernelGraph fuseLoops(KernelGraph const&, ContextPtr);
 
         /**
          * Rewrite KernelGraphs to set dimension/operation perameters.

@@ -206,6 +206,9 @@ namespace rocRoller
                                 RangeEnd const&      ends,
                                 std::map<int, bool>& visitedElements) const;
 
+            template <Direction Dir, CForwardRangeOf<int> RangeStart, CForwardRangeOf<int> RangeEnd>
+            Generator<int> path(RangeStart const& starts, RangeEnd const& ends) const;
+
             template <Direction Dir>
             Generator<int> getNeighbours(int const element) const;
 

@@ -114,7 +114,8 @@ namespace rocRoller
         CommandKernel(std::shared_ptr<Command>           command,
                       std::string                        name,
                       std::shared_ptr<CommandParameters> preParams,
-                      std::shared_ptr<CommandParameters> postParams = nullptr);
+                      std::shared_ptr<CommandParameters> postParams    = nullptr,
+                      std::shared_ptr<KernelOptions>     kernelOptions = nullptr);
 
         CommandKernel(std::shared_ptr<Command>        command,
                       std::shared_ptr<Context>        ctx,
@@ -146,6 +147,7 @@ namespace rocRoller
         std::shared_ptr<Context>           m_context;
         std::shared_ptr<ExecutableKernel>  m_executableKernel;
         std::shared_ptr<CommandParameters> m_preParameters, m_postParameters;
+        std::shared_ptr<KernelOptions>     m_kernelOptions;
 
         KernelArguments  getKernelArguments(RuntimeArguments const& args);
         KernelInvocation getKernelInvocation(RuntimeArguments const& args);

@@ -22,6 +22,8 @@ namespace rocRoller
         unsigned int storeLocalWidth;
         unsigned int storeGlobalWidth;
 
+        bool fuseLoops;
+
         std::string          toString() const;
         friend std::ostream& operator<<(std::ostream&, const KernelOptions&);
     };
