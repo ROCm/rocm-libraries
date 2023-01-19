@@ -26,7 +26,7 @@ def load_suite(suite: str):
     return ns[suite]()
 
 
-def get_work_dir(rundir: Path = None, build_dir: Path = None) -> Path:
+def get_work_dir(rundir: str = None, build_dir: Path = None) -> Path:
     """Return a new work directory path."""
 
     date = datetime.date.today().strftime("%Y-%m-%d")
@@ -48,10 +48,18 @@ def get_work_dir(rundir: Path = None, build_dir: Path = None) -> Path:
         commit = rrperf.git.short_hash(root)
 
     if rundir is not None:
-        root = rundir
+        root = Path(rundir)
 
     serial = len(list(Path(root).glob(f"{date}-{commit}-*")))
-    return Path(root) / Path(f"{date}-{commit}-{serial:03d}")
+    return root / Path(f"{date}-{commit}-{serial:03d}")
+
+
+def get_build_env(build_dir: Path) -> Dict[str, str]:
+    env = dict(os.environ)
+    if "ROCROLLER_ARCHITECTURE_FILE" not in env:
+        arch = build_dir / "source" / "rocRoller" / "GPUArchitecture_def.msgpack"
+        env["ROCROLLER_ARCHITECTURE_FILE"] = arch
+    return env
 
 
 def submit_directory(suite: str, wrkdir: Path, ptsdir: Path) -> None:
@@ -127,8 +135,8 @@ def run(
     suite: str = None,
     submit: bool = False,
     filter: str = None,
-    rundir: Path = None,
-    build_dir: Path = None,
+    rundir: str = None,
+    build_dir: str = None,
     rocm_smi: str = "rocm-smi",
     pin_clocks: bool = False,
     **kwargs,
@@ -152,11 +160,10 @@ def run(
 
     if build_dir is None:
         build_dir = get_build_dir()
+    else:
+        build_dir = Path(build_dir)
 
-    env = dict(os.environ)
-    if "ROCROLLER_ARCHITECTURE_FILE" not in env:
-        arch = build_dir / "source" / "rocRoller" / "GPUArchitecture_def.msgpack"
-        env["ROCROLLER_ARCHITECTURE_FILE"] = arch
+    env = get_build_env(build_dir)
 
     rundir = get_work_dir(rundir, build_dir)
     rundir.mkdir(parents=True, exist_ok=True)

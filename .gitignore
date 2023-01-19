@@ -6,3 +6,5 @@ doc_**
 202?-??-??-*
 .coverage
 Temporary
+results*.txt
+a.out*

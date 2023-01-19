@@ -2,7 +2,9 @@
 
 This project's performance can be compared to output from the [Tensile Library](https://github.com/ROCmSoftwarePlatform/Tensile).  This directory has examples of kernels that have been generated from Tensile and converted to RocRoller's C++ instruction format.
 
-The following steps are needed to generate a kernel from Tensile that can be run as a unit test:
+The following steps are needed to generate a kernel from Tensile that can be run as a unit test.
+
+## Running Tensile
 
 1. Create a [YAML benchmark config file](https://github.com/ROCmSoftwarePlatform/Tensile/wiki/Benchmark-Config-example). You can model off of one in this directory.
 
@@ -32,6 +34,8 @@ The following steps are needed to generate a kernel from Tensile that can be run
     ```
     <PathToWorkingDirectory>/1_BenchmarkProblems/<Identifier>/00_Final/source/build_tmp/SOURCE/assembly/<KernelIdentifier>.s
     ```
+
+## Generating A C++ Version
 
 6. Run the [remove_unused_macros](../../../scripts/remove_unused_macros.py) script and [assembly_to_instructions](../../../scripts/assembly_to_instructions.py) script on the assembly file to generate C++ for testing.  Don't forget to add the C++ file to the [CMakeLists.txt](../../../CMakeLists.txt).
 

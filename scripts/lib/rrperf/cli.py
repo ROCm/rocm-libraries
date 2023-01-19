@@ -113,10 +113,35 @@ def main():
             choices=["timestamp", "commit"],
         )
 
+    profile_cmd = subparsers.add_parser(
+        "profile",
+        help="Run Omniperf against a RocRoller kernel or a Tensile guidepost.",
+        description="""
+        Run Omniperf against a RocRoller kernel or a Tensile guidepost.
+        Specify a YAML config file to invoke Tensile to build a kernel to be profiled.
+        Alternatively, specify an rrperf suite to profile a RocRoller kernel.
+        These kernels are profiled with Omniperf.
+        """,
+    )
+    profile_cmd.add_argument("--config", help="Location of Tensile YAML config file.")
+    profile_cmd.add_argument("--suite", help="Benchmark suite to run.")
+    profile_cmd.add_argument(
+        "--output_dir",
+        help="Directory where the Omniperf results are written.",
+        default=".",
+    )
+    profile_cmd.add_argument(
+        "--tensile_repo",
+        help="Directory where Tensile repository is located.",
+        default="/home/tensile",
+    )
+
     args = parser.parse_args()
+
     command = {
         "run": rrperf.run.run,
         "compare": rrperf.compare.compare,
         "autoperf": rrperf.autoperf.run,
+        "profile": rrperf.profile.run,
     }[args.command]
     command(**args.__dict__)

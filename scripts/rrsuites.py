@@ -70,6 +70,18 @@ def sgemm():
     )
 
 
+def hgemm_tensile_guidepost():
+    yield GEMMRun(
+        **tensile_guidepost_HGEMM,
+        mac_m=64,
+        mac_n=64,
+        mac_k=64,
+        workgroup_size_x=128,
+        workgroup_size_y=2,
+        **fp16,
+    )
+
+
 def hgemm():
     yield GEMMRun(
         M=7680,
@@ -91,17 +103,7 @@ def hgemm():
         workgroup_size_y=8,
         **fp16,
     )
-
-    yield GEMMRun(
-        **tensile_guidepost_HGEMM,
-        mac_m=64,
-        mac_n=64,
-        mac_k=64,
-        workgroup_size_x=128,
-        workgroup_size_y=2,
-        **fp16,
-    )
-
+    yield from hgemm_tensile_guidepost()
     yield GEMMRun(
         **tensile_guidepost_HGEMM,
         mac_m=128,

@@ -3,7 +3,7 @@ GlobalParameters:
   EnqueuesPerSync: 10
   SyncsPerBenchmark: 1
   NumBenchmarks: 1
-  numWarmups: 1
+  NumWarmups: 1
   KernelTime: True
   SleepPercent: 50
   PrintWinnersOnly: True
