@@ -246,6 +246,16 @@ namespace rocRoller
         // clang-format on
     }
 
+    inline bool Instruction::isLabel() const
+    {
+        return !m_label.empty();
+    }
+
+    inline std::string Instruction::getLabel() const
+    {
+        return m_label;
+    }
+
     inline int Instruction::nopCount() const
     {
         return m_nopCount;

@@ -300,6 +300,7 @@ set(rocroller_src
  lib/source/Observers/DGEMM16x16x4Write.cpp
  lib/source/Observers/DLWrite.cpp
  lib/source/Observers/ObserverCreation.cpp
+ lib/source/Observers/RegisterLivenessObserver.cpp
  lib/source/Observers/RegisterMapObserver.cpp
  lib/source/Observers/VALUWrite.cpp
  lib/source/Observers/XDLReadSrcC90a.cpp
@@ -434,6 +435,7 @@ set(
   test/unit/RandomTest.cpp
   test/unit/RegisterAllocatorTest.cpp
   test/unit/RegisterTest.cpp
+  test/unit/RegisterLivenessObserverTest.cpp
   test/unit/CostTest.cpp
   test/unit/SchedulerTest.cpp
   test/unit/ScopeTest.cpp

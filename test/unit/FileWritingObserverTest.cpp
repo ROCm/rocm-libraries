@@ -25,8 +25,7 @@ namespace rocRollerTest
         void SetUp()
         {
             Settings::getInstance()->set(Settings::SaveAssembly, true);
-            Settings::getInstance()->set(Settings::AssemblyFile,
-                                         "FileWritingObserverTestSaveAssemblyFile_kernel_gfx90a.s");
+            Settings::getInstance()->set(Settings::AssemblyFile, testKernelName());
             GenericContextFixture::SetUp();
         }
     };
@@ -73,8 +72,7 @@ namespace rocRollerTest
         void SetUp()
         {
             Settings::getInstance()->set(Settings::SaveAssembly, false);
-            Settings::getInstance()->set(Settings::AssemblyFile,
-                                         "FileWritingObserverTestSaveAssemblyFile_kernel_gfx90a.s");
+            Settings::getInstance()->set(Settings::AssemblyFile, testKernelName());
             GenericContextFixture::SetUp();
         }
     };

@@ -110,7 +110,9 @@ namespace rocRoller
 
         int nopCount() const;
 
-        bool isCommentOnly() const;
+        bool        isCommentOnly() const;
+        bool        isLabel() const;
+        std::string getLabel() const;
 
         void allocateNow();
 

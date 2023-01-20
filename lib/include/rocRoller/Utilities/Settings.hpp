@@ -85,6 +85,12 @@ namespace rocRoller
                                                      std::numeric_limits<int>::min(),
                                                      -1};
 
+        static inline SettingsOption<bool> KernelAnalysis{
+            "ROCROLLER_KERNEL_ANALYSIS",
+            "Whether to track and report register liveness.",
+            false,
+            -1};
+
         /**
          * @brief Generate defaultValue for SettingsBitField based on other defaultValues.
          *
