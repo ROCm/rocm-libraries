@@ -331,7 +331,7 @@ namespace GEMMDriverTest
         basicGEMM<Half>(m_context, gemm, 2.e-5);
     }
 
-    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Unroll2x4)
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed2X2)
     {
         GEMMProblem gemm;
 
@@ -354,7 +354,7 @@ namespace GEMMDriverTest
         basicGEMM<Half>(m_context, gemm, 2.e-5);
     }
 
-    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Unroll2x4Fused)
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed2X2Fused)
     {
         GEMMProblem gemm;
 
@@ -379,7 +379,7 @@ namespace GEMMDriverTest
         basicGEMM<Half>(m_context, gemm, 2.e-5);
     }
 
-    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16UnrollFusedLDSX2Y1)
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed2X1)
     {
         GEMMProblem gemm;
 
@@ -401,7 +401,7 @@ namespace GEMMDriverTest
         basicGEMM<Half>(m_context, gemm, 2.e-5);
     }
 
-    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16UnrollFusedLDSX1Y2)
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed1X2)
     {
         GEMMProblem gemm;
 
@@ -428,7 +428,7 @@ namespace GEMMDriverTest
         basicGEMM<Half>(m_context, gemm, 2.e-5);
     }
 
-    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Unroll8x1)
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed1x8)
     {
         GEMMProblem gemm;
 
@@ -445,13 +445,17 @@ namespace GEMMDriverTest
         gemm.workgroup_size_x = 4 * gemm.wavefront_size;
         gemm.workgroup_size_y = 1;
 
+        // TODO: Turn on LDS usage once register usage has been reduced
+        gemm.loadLDSA  = false;
         gemm.loadLDSB  = false;
         gemm.storeLDSD = false;
+
+        gemm.fuseLoops = true;
 
         basicGEMM<Half>(m_context, gemm, 2.e-5);
     }
 
-    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Unroll1x8)
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed4x1)
     {
         GEMMProblem gemm;
 
@@ -468,11 +472,6 @@ namespace GEMMDriverTest
         gemm.workgroup_size_x = 1 * gemm.wavefront_size;
         gemm.workgroup_size_y = 8;
 
-        gemm.fuseLoops = true;
-
-        // TODO: Turn on LDS usage once register usage has been reduced
-        gemm.loadLDSA  = false;
-        gemm.loadLDSB  = false;
         gemm.storeLDSD = false;
 
         basicGEMM<Half>(m_context, gemm, 2.e-5);

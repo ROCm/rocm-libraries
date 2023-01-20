@@ -103,8 +103,8 @@ def hgemm():
         mac_m=128,
         mac_n=256,
         mac_k=16,
-        workgroup_size_x=64,
-        workgroup_size_y=8,
+        workgroup_size_x=256,
+        workgroup_size_y=1,
         **fp16,
     )
     yield from hgemm_tensile_guidepost()
@@ -113,8 +113,8 @@ def hgemm():
         mac_m=128,
         mac_n=256,
         mac_k=16,
-        workgroup_size_x=64,
-        workgroup_size_y=8,
+        workgroup_size_x=256,
+        workgroup_size_y=1,
         **fp16,
     )
 
