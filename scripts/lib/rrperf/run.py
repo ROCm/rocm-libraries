@@ -3,7 +3,9 @@
 import datetime
 import os
 import subprocess
+import importlib.util
 
+from dataclasses import fields
 from itertools import chain
 from pathlib import Path
 from typing import Dict, Tuple
@@ -130,6 +132,22 @@ def run_problems(
     return result
 
 
+def backcast(generator, build_dir):
+    """Reconstruct run objects from `generator` into run objects from previous rrperf version."""
+    pdef = build_dir.parent / "scripts" / "lib" / "rrperf" / "problems.py"
+    spec = importlib.util.spec_from_file_location("problems", str(pdef))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    for run in generator:
+        className = run.__class__.__name__
+        backClass = getattr(module, className, None)
+        if backClass is not None:
+            backObj = backClass(
+                **{f.name: getattr(run, f.name) for f in fields(backClass)}
+            )
+            yield backObj
+
+
 def run(
     token: str = None,
     suite: str = None,
@@ -139,6 +157,7 @@ def run(
     build_dir: str = None,
     rocm_smi: str = "rocm-smi",
     pin_clocks: bool = False,
+    recast: bool = False,
     **kwargs,
 ) -> Tuple[bool, Path]:
     """Run benchmarks!
@@ -157,6 +176,8 @@ def run(
         generator = chain(generator, load_suite(suite))
     if token is not None:
         generator = chain(generator, from_token(token))
+    if recast:
+        generator = backcast(generator, build_dir)
 
     if build_dir is None:
         build_dir = get_build_dir()

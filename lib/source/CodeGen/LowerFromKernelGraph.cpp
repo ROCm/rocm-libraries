@@ -592,10 +592,16 @@ namespace rocRoller
                     = Expression::literal(ldsAllocation->getLDSAllocation()->offset());
                 co_yield generate(lds_offset, lds_offset_expr);
 
-                auto vtype    = ldsAllocation->variableType();
-                auto numBytes = DataTypeInfo::Get(vtype).elementSize;
+                std::shared_ptr<Register::Value> tmpl;
+                if(load.vtype == DataType::Half)
+                    tmpl = MkVGPR(DataType::Halfx2, product(tile.subTileSizes));
+                else
+                    tmpl = MkVGPR(load.vtype, product(tile.subTileSizes));
 
-                auto vgpr = m_context->registerTagManager()->getRegister(tile_tag);
+                auto vgpr = m_context->registerTagManager()->getRegister(tile_tag, tmpl);
+                co_yield Register::AllocateIfNeeded(vgpr);
+
+                auto numBytes = DataTypeInfo::Get(load.vtype).elementSize;
 
                 auto const m = tile.subTileSizes[0];
                 auto const n = tile.subTileSizes[1];
@@ -608,8 +614,8 @@ namespace rocRoller
                     {
                         co_yield m_context->mem()->load(
                             MemoryInstructions::MemoryKind::Local,
-                            lds_offset,
                             vgpr->element({static_cast<int>(i * n + j)}),
+                            lds_offset,
                             col_offset_reg->subset({0}),
                             numBytes);
                         if(j < n - 1)
@@ -975,7 +981,7 @@ namespace rocRoller
                 }
                 break;
                 default:
-                    Throw<FatalError>("Tile affinity type not supported yet.");
+                    Throw<FatalError>("Tile affinity type not supported yet for LoadTiled.");
                 }
             }
 
@@ -985,6 +991,7 @@ namespace rocRoller
 
                 switch(mac_tile.memoryType)
                 {
+                case MemoryType::VGPR:
                 case MemoryType::LDS:
                     co_yield loadMacroTileLDS(tag, load, coords);
                     break;
@@ -1004,7 +1011,7 @@ namespace rocRoller
                 }
                 break;
                 default:
-                    Throw<FatalError>("Tile affinity type not supported yet.");
+                    Throw<FatalError>("Tile affinity type not supported yet for LoadLDSTile.");
                 }
             }
 
@@ -1240,6 +1247,84 @@ namespace rocRoller
             }
 
             Generator<Instruction>
+                storeMacroTileLDS(int tag, StoreLDSTile const& store, Transformer coords)
+            {
+                rocRoller::Log::getLogger()->debug(
+                    "KernelGraph::CodeGenerator::storeMacroTileLDS()");
+                co_yield_(Instruction::Comment("GEN: storeMacroTileLDS"));
+
+                auto [lds_tag, lds]   = m_graph.getDimension<LDS>(tag);
+                auto [tile_tag, tile] = m_graph.getDimension<MacroTile>(tag);
+
+                // Temporary register(s) that is used to copy the data from global memory to
+                // local memory.
+                auto vgpr     = m_context->registerTagManager()->getRegister(tile_tag);
+                auto vtype    = store.dataType;
+                auto numBytes = DataTypeInfo::Get(vtype).elementSize;
+
+                auto [row_offset_reg, row_stride_reg] = getOffsetAndStride(tag, 0);
+                auto [col_offset_reg, col_stride_reg] = getOffsetAndStride(tag, 1);
+
+                auto numElements = product(tile.subTileSizes) * product(m_workgroupSize);
+                // Allocate LDS memory, and store the offset of the beginning of the allocation
+                // into lds_offset.
+                Register::ValuePtr ldsAllocation;
+                if(!m_context->registerTagManager()->hasRegister(lds_tag))
+                {
+                    ldsAllocation = Register::Value::AllocateLDS(m_context, vtype, numElements);
+                    m_context->registerTagManager()->addRegister(lds_tag, ldsAllocation);
+                }
+                else
+                {
+                    ldsAllocation = m_context->registerTagManager()->getRegister(lds_tag);
+                }
+
+                auto lds_offset = Register::Value::Placeholder(
+                    m_context, Register::Type::Vector, DataType::Int32, 1);
+                auto lds_offset_expr
+                    = Expression::literal(ldsAllocation->getLDSAllocation()->offset());
+                co_yield generate(lds_offset, lds_offset_expr);
+
+                auto const m = tile.subTileSizes[0];
+                auto const n = tile.subTileSizes[1];
+
+                // saving the offsets to be restored for each macrotile in LDS
+                // TODO : Need more design thought (how to seed an offset register)
+                auto reset_offset = Register::Value::Placeholder(
+                    m_context, Register::Type::Vector, DataType::UInt32, 1);
+                co_yield copy(reset_offset, row_offset_reg);
+
+                for(int i = 0; i < m; ++i)
+                {
+                    co_yield copy(col_offset_reg, row_offset_reg);
+
+                    for(int j = 0; j < n; ++j)
+                    {
+                        co_yield m_context->mem()->store(
+                            MemoryInstructions::MemoryKind::Local,
+                            lds_offset,
+                            vgpr->element({static_cast<int>(i * n + j)}),
+                            col_offset_reg->subset({0}),
+                            numBytes);
+                        if(j < n - 1)
+                        {
+                            co_yield generate(col_offset_reg,
+                                              col_offset_reg->expression()
+                                                  + col_stride_reg->expression());
+                        }
+                    }
+
+                    if(i < m - 1)
+                    {
+                        co_yield generate(row_offset_reg,
+                                          row_offset_reg->expression()
+                                              + row_stride_reg->expression());
+                    }
+                }
+                co_yield copy(row_offset_reg, reset_offset);
+            }
+
+            Generator<Instruction>
                 storeMacroTileVGPR(int tag, StoreTiled const& store, Transformer coords)
             {
                 auto [user_tag, user]         = m_graph.getDimension<User>(tag);
@@ -1256,7 +1341,7 @@ namespace rocRoller
                 auto basePointer = MkSGPR(DataType::Int64);
                 co_yield m_context->argLoader()->getValue(user.argumentName(), basePointer);
 
-                auto numBytes = DataTypeInfo::Get(vgpr->variableType()).elementSize;
+                auto numBytes = DataTypeInfo::Get(store.dataType).elementSize;
 
                 auto const m = mac_tile.subTileSizes[0];
                 auto const n = mac_tile.subTileSizes[1];
@@ -1299,8 +1384,96 @@ namespace rocRoller
             }
 
             Generator<Instruction>
-                storeMacroTileWAVECI(int tag, StoreTiled const& store, Transformer coords)
+                storeMacroTileWAVELDS(int tag, StoreLDSTile const& store, Transformer coords)
+            {
+                rocRoller::Log::getLogger()->debug(
+                    "KernelGraph::CodeGenerator::storeMacroTileWAVELDS()");
+                co_yield_(Instruction::Comment("GEN: storeMacroTileWAVELDS"));
 
+                auto [lds_tag, lds]             = m_graph.getDimension<LDS>(tag);
+                auto [mac_tile_tag, mac_tile]   = m_graph.getDimension<MacroTile>(tag);
+                auto macrotileNumElements       = product(mac_tile.sizes);
+                auto [wave_tile_tag, wave_tile] = m_graph.getDimension<WaveTile>(tag);
+                uint wavetileNumElements        = wave_tile.sizes[0] * wave_tile.sizes[1];
+                auto vtype                      = store.dataType;
+
+                // Allocate LDS memory, and store the offset of the beginning of the allocation
+                // into lds_offset.
+                Register::ValuePtr ldsAllocation;
+                if(!m_context->registerTagManager()->hasRegister(lds_tag))
+                {
+                    ldsAllocation
+                        = Register::Value::AllocateLDS(m_context, vtype, macrotileNumElements);
+                    m_context->registerTagManager()->addRegister(lds_tag, ldsAllocation);
+                }
+                else
+                {
+                    ldsAllocation = m_context->registerTagManager()->getRegister(lds_tag);
+                }
+
+                auto lds_offset = Register::Value::Placeholder(
+                    m_context, Register::Type::Vector, DataType::Int32, 1);
+                co_yield generate(lds_offset,
+                                  Expression::literal(ldsAllocation->getLDSAllocation()->offset()));
+
+                uint wfs      = m_context->kernel()->wavefront_size();
+                uint num_vgpr = wavetileNumElements / wfs;
+                auto agpr     = m_context->registerTagManager()->getRegister(mac_tile_tag);
+                AssertFatal(agpr->registerCount() == num_vgpr);
+
+                auto [vgpr_block_offset_reg, vgpr_block_stride_reg] = getOffsetAndStride(tag, 0);
+                auto [vgpr_index_offset_reg, vgpr_index_stride_reg] = getOffsetAndStride(tag, 1);
+
+                AssertFatal(vgpr_block_offset_reg, "Invalid VGPR BLOCK offset register.");
+                AssertFatal(vgpr_block_stride_reg, "Invalid VGPR BLOCK stride register.");
+                AssertFatal(vgpr_index_stride_reg, "Invalid VGPR INDEX stride register.");
+
+                auto numBytes  = DataTypeInfo::Get(store.dataType).elementSize;
+                auto value     = MkVGPR(agpr->variableType());
+                auto converted = MkVGPR(store.dataType);
+
+                for(uint ablk = 0; ablk < num_vgpr / 4; ++ablk)
+                {
+                    co_yield copy(vgpr_index_offset_reg, vgpr_block_offset_reg);
+                    for(uint aidx = 0; aidx < 4; ++aidx)
+                    {
+                        uint a = ablk * 4 + aidx;
+                        if(value->variableType() != store.dataType)
+                        {
+                            co_yield m_context->copier()->copy(
+                                value, agpr->element({static_cast<int>(a)}));
+                            co_yield Expression::generate(
+                                converted,
+                                convert(store.dataType,
+                                        std::make_shared<Expression::Expression>(value)),
+                                m_context);
+                        }
+                        else
+                        {
+                            co_yield m_context->copier()->copy(
+                                converted, agpr->element({static_cast<int>(a)}));
+                        }
+
+                        co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Local,
+                                                         lds_offset,
+                                                         converted,
+                                                         vgpr_index_offset_reg->subset({0}),
+                                                         numBytes);
+
+                        if(aidx < 3)
+                            co_yield generate(vgpr_index_offset_reg,
+                                              vgpr_index_offset_reg->expression()
+                                                  + vgpr_index_stride_reg->expression());
+                    }
+                    if(ablk < num_vgpr / 4 - 1)
+                        co_yield generate(vgpr_block_offset_reg,
+                                          vgpr_block_offset_reg->expression()
+                                              + vgpr_block_stride_reg->expression());
+                }
+            }
+
+            Generator<Instruction>
+                storeMacroTileWAVECI(int tag, StoreTiled const& store, Transformer coords)
             {
                 rocRoller::Log::getLogger()->debug(
                     "KernelGraph::CodeGenerator::storeMacroTileWAVE()");
@@ -1390,82 +1563,40 @@ namespace rocRoller
                     co_yield storeMacroTileWAVECI(tag, store, coords);
                     break;
                 default:
-                    Throw<FatalError>("Tile affinity type not supported yet.");
+                    Throw<FatalError>("Tile affinity type not supported yet for StoreTiled.");
                 }
             }
 
             Generator<Instruction>
                 operator()(int tag, StoreLDSTile const& store, Transformer coords)
             {
-                auto [lds_tag, lds]   = m_graph.getDimension<LDS>(tag);
-                auto [tile_tag, tile] = m_graph.getDimension<MacroTile>(tag);
+                rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::StoreLDSTiled({})",
+                                                   tag);
+                co_yield Instruction::Comment("GEN: StoreLDSTile");
 
-                // Temporary register(s) that is used to copy the data from global memory to
-                // local memory.
-                auto vgpr     = m_context->registerTagManager()->getRegister(tile_tag);
-                auto vtype    = store.dataType;
-                auto numBytes = DataTypeInfo::Get(vtype).elementSize;
+                auto [mac_tile_tag, mac_tile] = m_graph.getDimension<MacroTile>(tag);
 
-                auto [row_offset_reg, row_stride_reg] = getOffsetAndStride(tag, 0);
-                auto [col_offset_reg, col_stride_reg] = getOffsetAndStride(tag, 1);
-
-                auto numElements = product(tile.subTileSizes) * product(m_workgroupSize);
-                // Allocate LDS memory, and store the offset of the beginning of the allocation
-                // into lds_offset.
-                Register::ValuePtr ldsAllocation;
-                if(!m_context->registerTagManager()->hasRegister(lds_tag))
+                switch(mac_tile.memoryType)
                 {
-                    ldsAllocation = Register::Value::AllocateLDS(m_context, vtype, numElements);
-                    m_context->registerTagManager()->addRegister(lds_tag, ldsAllocation);
-                }
-                else
+                case MemoryType::VGPR:
+                case MemoryType::LDS:
+                    co_yield storeMacroTileLDS(tag, store, coords);
+                    break;
+                case MemoryType::WAVE:
                 {
-                    ldsAllocation = m_context->registerTagManager()->getRegister(lds_tag);
-                }
-
-                auto lds_offset = Register::Value::Placeholder(
-                    m_context, Register::Type::Vector, DataType::Int32, 1);
-                auto lds_offset_expr
-                    = Expression::literal(ldsAllocation->getLDSAllocation()->offset());
-                co_yield generate(lds_offset, lds_offset_expr);
-
-                auto const m = tile.subTileSizes[0];
-                auto const n = tile.subTileSizes[1];
-
-                // saving the offsets to be restored for each macrotile in LDS
-                // TODO : Need more design thought (how to seed an offset register)
-                auto reset_offset = Register::Value::Placeholder(
-                    m_context, Register::Type::Vector, DataType::UInt32, 1);
-                co_yield copy(reset_offset, row_offset_reg);
-
-                for(int i = 0; i < m; ++i)
-                {
-                    co_yield copy(col_offset_reg, row_offset_reg);
-
-                    for(int j = 0; j < n; ++j)
+                    switch(mac_tile.layoutType)
                     {
-                        co_yield m_context->mem()->store(
-                            MemoryInstructions::MemoryKind::Local,
-                            lds_offset,
-                            vgpr->element({static_cast<int>(i * n + j)}),
-                            col_offset_reg->subset({0}),
-                            numBytes);
-                        if(j < n - 1)
-                        {
-                            co_yield generate(col_offset_reg,
-                                              col_offset_reg->expression()
-                                                  + col_stride_reg->expression());
-                        }
-                    }
-
-                    if(i < m - 1)
-                    {
-                        co_yield generate(row_offset_reg,
-                                          row_offset_reg->expression()
-                                              + row_stride_reg->expression());
+                    case LayoutType::MATRIX_ACCUMULATOR:
+                        co_yield storeMacroTileWAVELDS(tag, store, coords);
+                        break;
+                    default:
+                        Throw<FatalError>("Layout type not supported yet for StoreLDSTile.");
                     }
                 }
-                co_yield copy(row_offset_reg, reset_offset);
+                break;
+                default:
+                    Throw<FatalError>("Tile affinity type not supported yet for StoreLDSTile.");
+                }
             }
 
             Generator<Instruction> operator()(int tag, StoreVGPR const& store, Transformer coords)

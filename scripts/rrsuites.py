@@ -57,6 +57,7 @@ def sgemm():
         mac_m=64,
         mac_n=64,
         mac_k=64,
+        storeLDS_D=True,
         **fp32,
     )
     yield GEMMRun(
@@ -66,6 +67,7 @@ def sgemm():
         mac_m=128,
         mac_n=64,
         mac_k=16,
+        storeLDS_D=True,
         **fp32,
     )
 
@@ -78,6 +80,7 @@ def hgemm_tensile_guidepost():
         mac_k=64,
         workgroup_size_x=128,
         workgroup_size_y=2,
+        storeLDS_D=True,
         **fp16,
     )
 
@@ -90,6 +93,7 @@ def hgemm():
         mac_m=64,
         mac_n=64,
         mac_k=64,
+        storeLDS_D=True,
         **fp16,
     )
     yield GEMMRun(

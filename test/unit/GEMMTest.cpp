@@ -54,8 +54,9 @@ namespace GEMMDriverTest
         uint workgroup_size_x = 2 * wavefront_size;
         uint workgroup_size_y = 2;
 
-        bool loadLDSA = true;
-        bool loadLDSB = true;
+        bool loadLDSA  = true;
+        bool loadLDSB  = true;
+        bool storeLDSD = true;
 
         bool fuseLoops = false;
     };
@@ -201,6 +202,11 @@ namespace GEMMDriverTest
                                                                                 : MemoryType::WAVE);
         auto mac_tile_C = KernelGraph::CoordinateGraph::MacroTile(
             {mac_m, mac_n}, LayoutType::MATRIX_ACCUMULATOR, {wave_m, wave_n, wave_k, wave_b});
+        auto mac_tile_D = KernelGraph::CoordinateGraph::MacroTile(
+            {mac_m, mac_n},
+            LayoutType::MATRIX_ACCUMULATOR,
+            {wave_m, wave_n, wave_k, wave_b},
+            gemm.storeLDSD ? MemoryType::LDS : MemoryType::WAVE);
 
         params->setDimensionInfo(4, mac_tile_A);
         params->setDimensionInfo(11, mac_tile_B);
@@ -208,7 +214,7 @@ namespace GEMMDriverTest
         params->setDimensionInfo(28, mac_tile_C);
         params->setDimensionInfo(30, mac_tile_C);
         params->setDimensionInfo(32, mac_tile_C);
-        params->setDimensionInfo(34, mac_tile_C);
+        params->setDimensionInfo(34, mac_tile_D);
 
         params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
         params->setManualWorkitemCount({NX, NY, NZ});
@@ -228,11 +234,11 @@ namespace GEMMDriverTest
         auto WFY = KernelGraph::CoordinateGraph::Wavefront(1, wavefront_ny, one);
 
         std::vector<int> wavefront_ids = {59, 92, 125, 179};
-        if(wavetile_per_wavefront_m > 1 && wavetile_per_wavefront_n > 1)
+        if(wavetile_per_wavefront_m >= 1 && wavetile_per_wavefront_n >= 1)
         {
             wavefront_ids = {59, 94, 129, 184};
         }
-        else if(wavetile_per_wavefront_m > 1 || wavetile_per_wavefront_n > 1)
+        else if(wavetile_per_wavefront_m >= 1 || wavetile_per_wavefront_n >= 1)
         {
             wavefront_ids = {59, 93, 127, 181};
         }
@@ -342,7 +348,8 @@ namespace GEMMDriverTest
         gemm.workgroup_size_x = 2 * gemm.wavefront_size;
         gemm.workgroup_size_y = 4;
 
-        gemm.loadLDSA = false;
+        gemm.loadLDSA  = false;
+        gemm.storeLDSD = false;
 
         basicGEMM<Half>(m_context, gemm, 2.e-5);
     }
@@ -366,7 +373,57 @@ namespace GEMMDriverTest
 
         gemm.loadLDSA  = false;
         gemm.loadLDSB  = false;
+        gemm.storeLDSD = false;
         gemm.fuseLoops = true;
+
+        basicGEMM<Half>(m_context, gemm, 2.e-5);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16UnrollFusedLDSX2Y1)
+    {
+        GEMMProblem gemm;
+
+        gemm.M = 256;
+        gemm.N = 512;
+        gemm.K = 64;
+
+        gemm.mac_m = 128;
+        gemm.mac_n = 128;
+        gemm.mac_k = 16;
+
+        gemm.wave_k = 8;
+
+        gemm.workgroup_size_x = 2 * gemm.wavefront_size;
+        gemm.workgroup_size_y = 4;
+
+        gemm.fuseLoops = true;
+
+        basicGEMM<Half>(m_context, gemm, 2.e-5);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16UnrollFusedLDSX1Y2)
+    {
+        GEMMProblem gemm;
+
+        gemm.M = 256;
+        gemm.N = 512;
+        gemm.K = 64;
+
+        gemm.mac_m = 128;
+        gemm.mac_n = 128;
+        gemm.mac_k = 16;
+
+        gemm.wave_k = 8;
+
+        gemm.workgroup_size_x = 4 * gemm.wavefront_size;
+        gemm.workgroup_size_y = 2;
+
+        gemm.fuseLoops = true;
+
+        // TODO: Turn on LDS usage once register usage has been reduced
+        gemm.loadLDSA  = false;
+        gemm.loadLDSB  = false;
+        gemm.storeLDSD = false;
 
         basicGEMM<Half>(m_context, gemm, 2.e-5);
     }
@@ -388,7 +445,8 @@ namespace GEMMDriverTest
         gemm.workgroup_size_x = 4 * gemm.wavefront_size;
         gemm.workgroup_size_y = 1;
 
-        gemm.loadLDSB = false;
+        gemm.loadLDSB  = false;
+        gemm.storeLDSD = false;
 
         basicGEMM<Half>(m_context, gemm, 2.e-5);
     }
@@ -413,8 +471,9 @@ namespace GEMMDriverTest
         gemm.fuseLoops = true;
 
         // TODO: Turn on LDS usage once register usage has been reduced
-        gemm.loadLDSA = false;
-        gemm.loadLDSB = false;
+        gemm.loadLDSA  = false;
+        gemm.loadLDSB  = false;
+        gemm.storeLDSD = false;
 
         basicGEMM<Half>(m_context, gemm, 2.e-5);
     }

@@ -141,7 +141,7 @@ namespace MatrixMultiplyTest
         auto WFX = KernelGraph::CoordinateGraph::Wavefront(0, two, one);
         auto WFY = KernelGraph::CoordinateGraph::Wavefront(1, two, one);
 
-        std::vector<int> wavefront_ids = {41, 74, 115};
+        std::vector<int> wavefront_ids = {41, 76, 119};
         for(auto id : wavefront_ids)
         {
             postParams->setDimensionInfo(id, WF);
@@ -280,7 +280,7 @@ namespace MatrixMultiplyTest
         auto WFX  = KernelGraph::CoordinateGraph::Wavefront(0, two, nullptr);
         auto WFY  = KernelGraph::CoordinateGraph::Wavefront(1, two, nullptr);
 
-        std::vector<int> wavefront_ids = {41, 74, 115};
+        std::vector<int> wavefront_ids = {41, 76, 119};
         for(auto id : wavefront_ids)
         {
             postParams->setDimensionInfo(id, WF);
@@ -436,7 +436,7 @@ namespace MatrixMultiplyTest
         auto WFX = KernelGraph::CoordinateGraph::Wavefront(0, two, one);
         auto WFY = KernelGraph::CoordinateGraph::Wavefront(1, two, one);
 
-        std::vector<int> wavefront_ids = {49, 82, 115, 168};
+        std::vector<int> wavefront_ids = {49, 84, 119, 174};
         for(auto id : wavefront_ids)
         {
             postParams->setDimensionInfo(id, WF);

@@ -420,33 +420,56 @@ namespace rocRoller
 
             auto scope = replaceWithScope(graph, op);
 
-            auto user       = graph.mapper.get<User>(loadstore);
+            auto node   = graph.control.getElement(loadstore);
+            auto source = -1;
+            if(isOperation<LoadTiled>(node) || isOperation<StoreTiled>(node))
+                source = graph.mapper.get<User>(loadstore);
+            else if(isOperation<LoadLDSTile>(node) || isOperation<StoreLDSTile>(node))
+                source = graph.mapper.get<LDS>(loadstore);
+
+            AssertFatal(source > 0, "User or LDS dimension not found");
+
             auto vgpr_block = graph.mapper.get<VGPRBlockNumber>(loadstore);
             auto vgpr_index = graph.mapper.get<VGPRBlockIndex>(loadstore);
 
-            DataType dtype;
+            DataType dtype, offsettype = DataType::UInt64;
             {
-                auto l = graph.control.get<LoadTiled>(loadstore);
-                auto s = graph.control.get<StoreTiled>(loadstore);
-                dtype  = l ? l->vtype.dataType : s->dataType;
+                auto l  = graph.control.get<LoadTiled>(loadstore);
+                auto ll = graph.control.get<LoadLDSTile>(loadstore);
+                auto s  = graph.control.get<StoreTiled>(loadstore);
+                auto sl = graph.control.get<StoreLDSTile>(loadstore);
+                if(l)
+                    dtype = l->vtype.dataType;
+                if(ll)
+                {
+                    dtype      = ll->vtype.dataType;
+                    offsettype = DataType::UInt32;
+                }
+                if(s)
+                    dtype = s->dataType;
+                if(sl)
+                {
+                    dtype      = sl->dataType;
+                    offsettype = DataType::UInt32;
+                }
             }
 
             int offset_vgpr_block, stride_vgpr_block, offset_vgpr_index, stride_vgpr_index, buffer;
             if(forward)
             {
-                offset_vgpr_block = graph.coordinates.addElement(Offset(), {vgpr_block}, {user});
-                stride_vgpr_block = graph.coordinates.addElement(Stride(), {vgpr_block}, {user});
-                offset_vgpr_index = graph.coordinates.addElement(Offset(), {vgpr_index}, {user});
-                stride_vgpr_index = graph.coordinates.addElement(Stride(), {vgpr_index}, {user});
-                buffer            = graph.coordinates.addElement(Buffer(), {vgpr_block}, {user});
+                offset_vgpr_block = graph.coordinates.addElement(Offset(), {vgpr_block}, {source});
+                stride_vgpr_block = graph.coordinates.addElement(Stride(), {vgpr_block}, {source});
+                offset_vgpr_index = graph.coordinates.addElement(Offset(), {vgpr_index}, {source});
+                stride_vgpr_index = graph.coordinates.addElement(Stride(), {vgpr_index}, {source});
+                buffer            = graph.coordinates.addElement(Buffer(), {vgpr_block}, {source});
             }
             else
             {
-                offset_vgpr_block = graph.coordinates.addElement(Offset(), {user}, {vgpr_block});
-                stride_vgpr_block = graph.coordinates.addElement(Stride(), {user}, {vgpr_block});
-                offset_vgpr_index = graph.coordinates.addElement(Offset(), {user}, {vgpr_index});
-                stride_vgpr_index = graph.coordinates.addElement(Stride(), {user}, {vgpr_index});
-                buffer            = graph.coordinates.addElement(Buffer(), {user}, {vgpr_block});
+                offset_vgpr_block = graph.coordinates.addElement(Offset(), {source}, {vgpr_block});
+                stride_vgpr_block = graph.coordinates.addElement(Stride(), {source}, {vgpr_block});
+                offset_vgpr_index = graph.coordinates.addElement(Offset(), {source}, {vgpr_index});
+                stride_vgpr_index = graph.coordinates.addElement(Stride(), {source}, {vgpr_index});
+                buffer            = graph.coordinates.addElement(Buffer(), {source}, {vgpr_block});
             }
 
             graph.mapper.connect<Offset>(loadstore, offset_vgpr_block, 0);
@@ -455,7 +478,7 @@ namespace rocRoller
             graph.mapper.connect<Stride>(loadstore, stride_vgpr_index, 1);
             graph.mapper.connect<Buffer>(loadstore, buffer);
 
-            auto ci_vgpr_block = graph.control.addElement(ComputeIndex(user,
+            auto ci_vgpr_block = graph.control.addElement(ComputeIndex(source,
                                                                        vgpr_block,
                                                                        -1,
                                                                        offset_vgpr_block,
@@ -463,8 +486,10 @@ namespace rocRoller
                                                                        buffer,
                                                                        forward,
                                                                        dtype,
-                                                                       {vgpr_index}));
-            auto ci_vgpr_index = graph.control.addElement(ComputeIndex(user,
+                                                                       {vgpr_index},
+                                                                       offsettype,
+                                                                       offsettype));
+            auto ci_vgpr_index = graph.control.addElement(ComputeIndex(source,
                                                                        vgpr_index,
                                                                        offset_vgpr_block,
                                                                        offset_vgpr_index,
@@ -472,7 +497,9 @@ namespace rocRoller
                                                                        buffer,
                                                                        forward,
                                                                        dtype,
-                                                                       {vgpr_block}));
+                                                                       {vgpr_block},
+                                                                       offsettype,
+                                                                       offsettype));
 
             graph.control.addElement(Body(), {scope}, {ci_vgpr_block});
             graph.control.addElement(Sequence(), {ci_vgpr_block}, {ci_vgpr_index});
@@ -529,6 +556,7 @@ namespace rocRoller
                     Graph::Direction::Upstream);
                 auto forK  = *allForLoops.begin();
                 int  scope = -1;
+                // loads under Multiply
                 auto mulLoads
                     = kgraph.control
                           .findNodes(
@@ -540,32 +568,40 @@ namespace rocRoller
                               },
                               Graph::Direction::Downstream)
                           .to<std::vector>();
-                AssertFatal(mulLoads.size() == 2, "More than one Multiply not supported yet.");
+                AssertFatal(mulLoads.size() == 2,
+                            "Multiply doesn't support more than two operands.");
                 // Find all of the nodes inbetween the ForLoop and the Multiply
                 auto pathToMultiply = kgraph.control
                                           .path<Graph::Direction::Downstream>(
                                               std::vector<int>{forK}, std::vector<int>{multiply})
                                           .to<std::vector>();
 
-                // Find all of the StoreLDS nodes between the ForLoop and Multiply
-                std::vector<int> storesLDS;
+                // Find all of the StoreLDS nodes for A or B between the ForLoop and Multiply
+                std::vector<int> storesLDSAB;
                 std::copy_if(pathToMultiply.begin(),
                              pathToMultiply.end(),
-                             std::back_inserter(storesLDS),
+                             std::back_inserter(storesLDSAB),
                              [&](int tag) -> bool {
-                                 return isOperation<StoreLDSTile>(kgraph.control.getElement(tag));
+                                 auto storeLDS = kgraph.control.get<StoreLDSTile>(tag);
+                                 if(storeLDS)
+                                 {
+                                     auto [tile_tag, tile] = kgraph.getDimension<MacroTile>(tag);
+                                     if(tile.layoutType != LayoutType::MATRIX_ACCUMULATOR)
+                                         return true;
+                                 }
+                                 return false;
                              });
 
-                // Find all of the LoadTile nodes between the ForLoop and Multiply
-                std::vector<int> loads;
+                // Find all of the LoadTiled nodes for A or B between the ForLoop and Multiply
+                std::vector<int> loadsAB;
                 std::copy_if(pathToMultiply.begin(),
                              pathToMultiply.end(),
-                             std::back_inserter(loads),
+                             std::back_inserter(loadsAB),
                              [&](int tag) -> bool {
                                  return isOperation<LoadTiled>(kgraph.control.getElement(tag));
                              });
 
-                AssertFatal(storesLDS.size() == loads.size(),
+                AssertFatal(storesLDSAB.size() == loadsAB.size(),
                             "Either store LDS or load is missing");
 
                 // Find all of the SetCoordinate nodes between the ForLoop and Multiply
@@ -586,10 +622,10 @@ namespace rocRoller
                 }
                 scope = forKScopes[forK];
 
-                if(storesLDS.size() == 0)
+                if(storesLDSAB.size() == 0)
                     kgraph = addComputeIndexAB(
                         kgraph, forK, scope, setCoord, mulLoads[0], mulLoads[1], -1, -1, -1, -1);
-                else if(storesLDS.size() == 1
+                else if(storesLDSAB.size() == 1
                         && isOperation<LoadLDSTile>(kgraph.control.getElement(mulLoads[0])))
                     kgraph = addComputeIndexAB(kgraph,
                                                forK,
@@ -597,11 +633,11 @@ namespace rocRoller
                                                setCoord,
                                                mulLoads[0],
                                                mulLoads[1],
-                                               loads[0],
-                                               storesLDS[0],
+                                               loadsAB[0],
+                                               storesLDSAB[0],
                                                -1,
                                                -1);
-                else if(storesLDS.size() == 1
+                else if(storesLDSAB.size() == 1
                         && isOperation<LoadLDSTile>(kgraph.control.getElement(mulLoads[1])))
                     kgraph = addComputeIndexAB(kgraph,
                                                forK,
@@ -611,19 +647,19 @@ namespace rocRoller
                                                mulLoads[1],
                                                -1,
                                                -1,
-                                               loads[0],
-                                               storesLDS[0]);
-                else if(storesLDS.size() == 2)
+                                               loadsAB[0],
+                                               storesLDSAB[0]);
+                else if(storesLDSAB.size() == 2)
                     kgraph = addComputeIndexAB(kgraph,
                                                forK,
                                                scope,
                                                setCoord,
                                                mulLoads[0],
                                                mulLoads[1],
-                                               loads[0],
-                                               storesLDS[0],
-                                               loads[1],
-                                               storesLDS[1]);
+                                               loadsAB[0],
+                                               storesLDSAB[0],
+                                               loadsAB[1],
+                                               storesLDSAB[1]);
             }
 
             // MATRIX_ACCUMULATOR loads anywhere
@@ -649,8 +685,6 @@ namespace rocRoller
                 kgraph = addComputeIndexC(kgraph, tag, tag, false);
             }
 
-            // VGPR/LDS loads anywhere
-
             std::vector<int> allForKs;
             for(auto const& forKScope : forKScopes)
             {
@@ -660,6 +694,7 @@ namespace rocRoller
             auto reachable_from_forK
                 = kgraph.control.depthFirstVisit(allForKs).to<std::unordered_set>();
 
+            // VGPR/LDS loads anywhere other than under ForK(s)
             auto loadVGPR
                 = kgraph.control
                       .findNodes(
@@ -686,17 +721,19 @@ namespace rocRoller
                 kgraph = addComputeIndexVGPR(kgraph, tag, tag, false);
             }
 
-            // MATRIX_ACCUMULATOR stores anywhere
+            // MATRIX_ACCUMULATOR & WAVE stores anywhere
             auto storeAccums = kgraph.control
                                    .findNodes(
                                        kernel,
                                        [&](int tag) -> bool {
-                                           auto store = kgraph.control.get<StoreTiled>(tag);
-                                           if(store)
+                                           auto store    = kgraph.control.get<StoreTiled>(tag);
+                                           auto storeLDS = kgraph.control.get<StoreLDSTile>(tag);
+                                           if(store || storeLDS)
                                            {
                                                auto [tile_tag, tile]
                                                    = kgraph.getDimension<MacroTile>(tag);
-                                               if(tile.layoutType == LayoutType::MATRIX_ACCUMULATOR)
+                                               if(tile.layoutType == LayoutType::MATRIX_ACCUMULATOR
+                                                  && tile.memoryType == MemoryType::WAVE)
                                                    return true;
                                            }
                                            return false;

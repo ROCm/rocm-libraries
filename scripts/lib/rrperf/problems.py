@@ -63,6 +63,7 @@ class GEMM:
 
     loadLDS_A: bool = True
     loadLDS_B: bool = True
+    storeLDS_D: bool = False
 
     @property
     def token(self):
@@ -102,6 +103,7 @@ class GEMMRun(GEMM):
             "--type_acc=" + str(self.type_acc),
             "--loadLDS_A=" + str(self.loadLDS_A),
             "--loadLDS_B=" + str(self.loadLDS_B),
+            "--storeLDS_D=" + str(self.storeLDS_D),
             "--yaml=" + str(self.output),
             "--num_warmup=" + str(self.numWarmUp),
             "--num_outer=" + str(self.numOuter),

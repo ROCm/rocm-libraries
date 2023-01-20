@@ -195,17 +195,17 @@ namespace rocRoller
             }
         }
 
-        void addWaveLDSOps(KernelGraph&                       graph,
-                           std::shared_ptr<CommandParameters> params,
-                           std::shared_ptr<Context>           context,
-                           int                                tile,
-                           int                                load,
-                           int                                forK,
-                           int                                K,
-                           int                                waveMult)
+        void addLoadWaveLDSOps(KernelGraph&                       graph,
+                               std::shared_ptr<CommandParameters> params,
+                               std::shared_ptr<Context>           context,
+                               int                                tile,
+                               int                                load,
+                               int                                forK,
+                               int                                K,
+                               int                                waveMult)
         {
             rocRoller::Log::getLogger()->debug(
-                "KernelGraph::LowerTileVisitor::addWaveLDSOps: LoadTiled({})", load);
+                "KernelGraph::LowerTileVisitor::addLoadWaveLDSOps: LoadTiled({})", load);
 
             auto macrotile = graph.coordinates.getNode<MacroTile>(tile);
 
@@ -284,6 +284,92 @@ namespace rocRoller
                 graph.mapper.connect<LDS>(load, lds);
                 graph.mapper.connect<LDS>(load_macrotile_from_global, lds);
                 graph.mapper.connect<LDS>(store_macrotile_into_LDS, lds);
+            }
+        }
+
+        void addStoreWaveLDSOps(KernelGraph&                       graph,
+                                std::shared_ptr<CommandParameters> params,
+                                std::shared_ptr<Context>           context,
+                                int                                tile,
+                                int                                store,
+                                int                                upperLoop)
+        {
+            rocRoller::Log::getLogger()->debug(
+                "KernelGraph::LowerTileVisitor::addStoreWaveLDSOps: StoreTiled({})", store);
+
+            auto macrotile = graph.coordinates.getNode<MacroTile>(tile);
+
+            if(macrotile.memoryType == MemoryType::WAVE_LDS)
+            {
+                // change StoreTiled to StoreLDSTile
+                // and update its macrotile's memory type
+                auto dtype = graph.control.getNode<StoreTiled>(store).dataType;
+                graph.control.setElement(store, StoreLDSTile(dtype));
+                macrotile.memoryType = MemoryType::WAVE;
+                graph.coordinates.setElement(tile, macrotile);
+
+                auto user = graph.coordinates.getOutputNodeIndices(tile, CT::isEdge<DataFlow>)
+                                .to<std::vector>();
+                AssertFatal(user.size() == 1);
+                graph.coordinates.deleteElement(std::vector<int>{tile}, user, CT::isEdge<DataFlow>);
+                auto sdims = graph.coordinates.getInputNodeIndices(user[0], CT::isEdge<Join>)
+                                 .to<std::vector>();
+                AssertFatal(sdims.size() > 1);
+
+                auto lds = graph.coordinates.addElement(LDS());
+
+                // remove workgroups, macrotile numbers and tile edges from sdims
+                storeWaveMacroTileIntoLDS(graph, macrotile, store, sdims, lds);
+
+                // macrotile --DataFlow--> LDS
+                graph.coordinates.addElement(DataFlow(), {tile}, {lds});
+                graph.mapper.connect<LDS>(store, lds);
+
+                auto barrier = graph.control.addElement(Barrier());
+                graph.control.addElement(Sequence(), {store}, {barrier});
+
+                // add new loadLDSTile node to load a macrotile into VGPRs from LDS
+                auto load_macrotile_from_LDS
+                    = graph.control.addElement(LoadLDSTile(VariableType(dtype)));
+                graph.mapper.connect<LDS>(load_macrotile_from_LDS, lds);
+                graph.control.addElement(Sequence(), {upperLoop}, {load_macrotile_from_LDS});
+
+                // create an internal macrotile to be loaded by one workgroup
+                auto workgroupSizes = context->kernel()->workgroupSize();
+                auto numWorkitems   = product(workgroupSizes);
+                auto numElements    = product(macrotile.sizes);
+                auto numVGPRs       = static_cast<int>(numElements / numWorkitems);
+                // TODO : load the two Halfs into 1 VGPR
+                //if(vtype == DataType::Half)
+                //num_vgprs = num_vgprs / 2;
+                auto t_m          = numVGPRs;
+                auto t_n          = 1;
+                auto internalTile = graph.coordinates.addElement(
+                    MacroTile(macrotile.sizes, MemoryType::VGPR, {t_m, t_n}));
+                auto internalTileDim       = graph.coordinates.getNode<MacroTile>(internalTile);
+                internalTileDim.layoutType = macrotile.layoutType;
+                graph.coordinates.setElement(internalTile, internalTileDim);
+                graph.mapper.connect<MacroTile>(load_macrotile_from_LDS, internalTile);
+
+                // lower tile LoadLDSTile : load macrotile from LDS
+                loadMacroTileFromLDS(
+                    graph, load_macrotile_from_LDS, lds, internalTile, workgroupSizes);
+
+                // add store from VGPRs to global following this new loadLDSTile
+                auto store_macrotile_into_global = graph.control.addElement(StoreTiled(dtype));
+                graph.control.addElement(
+                    Sequence(), {load_macrotile_from_LDS}, {store_macrotile_into_global});
+                graph.mapper.connect<MacroTile>(store_macrotile_into_global, internalTile);
+                graph.mapper.connect<User>(store_macrotile_into_global, user[0]);
+                // internalTile --DataFlow--> user
+                graph.coordinates.addElement(DataFlow(), {internalTile}, {user[0]});
+
+                storeMacroTileForLDS(graph,
+                                     store_macrotile_into_global,
+                                     user[0],
+                                     internalTile,
+                                     sdims,
+                                     workgroupSizes);
             }
         }
 
@@ -431,138 +517,104 @@ namespace rocRoller
             auto wavetilesPerWorkgroup = params->getWaveTilesPerWorkgroup();
             AssertFatal(wavetilesPerWorkgroup.size() > 1);
 
-            auto WaveTilesX = -1, WaveTilesY = -1, forWaveTilesX = -1, forWaveTilesY = -1;
+            auto [WaveTilesX, forWaveTilesX] = rangeFor(graph, literal(wavetilesPerWorkgroup[0]));
+            auto [WaveTilesY, forWaveTilesY] = rangeFor(graph, literal(wavetilesPerWorkgroup[1]));
 
-            if(wavetilesPerWorkgroup[0] > 1 || wavetilesPerWorkgroup[1] > 1)
+            // find other loadtiled ops from kernel that lead to assigns
+            auto             kernel_outputs = graph.control.childNodes(kernel).to<std::vector>();
+            std::vector<int> otherLoads;
+            std::vector<int> otherOps;
+            for(auto const index : kernel_outputs)
             {
-                if(wavetilesPerWorkgroup[0] > 1)
-                {
-                    std::tie(WaveTilesX, forWaveTilesX)
-                        = rangeFor(graph, literal(wavetilesPerWorkgroup[0]));
-                }
-                if(wavetilesPerWorkgroup[1] > 1)
-                {
-                    std::tie(WaveTilesY, forWaveTilesY)
-                        = rangeFor(graph, literal(wavetilesPerWorkgroup[1]));
-                }
-
-                // find other loadtiled ops from kernel that lead to assigns
-                auto kernel_outputs = graph.control.childNodes(kernel).to<std::vector>();
-                std::vector<int> otherLoads;
-                std::vector<int> otherOps;
-                for(auto const index : kernel_outputs)
-                {
-                    auto elem = graph.control.getElement(index);
-                    visit(
-                        rocRoller::overloaded{
-                            [&](auto op) { otherOps.push_back(index); },
-                            [&](LoadTiled const& load) {
-                                auto reachable_from_load
-                                    = graph.control.depthFirstVisit(index).to<std::unordered_set>();
-                                for(auto const& assign : assigns)
-                                {
-                                    if(reachable_from_load.find(assign)
-                                       != reachable_from_load.end())
-                                    {
-                                        otherLoads.push_back(index);
-                                        break;
-                                    }
-                                }
-                            }},
-                        std::get<Operation>(elem));
-                }
-                AssertFatal(otherLoads.size() == 1);
-
-                // Add edges from inner loop to some kernel outputs : forK and otherLoads
-                // need to leave other nodes attached with kernel
-                // ex: loadtiled ops that don't lead to assigns
-                // ex : loadVGPRs for alpha and beta in GEMM
-                int lowerLoop, upperLoop;
-                if(wavetilesPerWorkgroup[0] > 1 && wavetilesPerWorkgroup[1] > 1)
-                {
-                    upperLoop = forWaveTilesX;
-                    lowerLoop = forWaveTilesY;
-                }
-                else if(wavetilesPerWorkgroup[0] > 1)
-                {
-                    lowerLoop = forWaveTilesX;
-                    upperLoop = forWaveTilesX;
-                }
-                else
-                {
-                    lowerLoop = forWaveTilesY;
-                    upperLoop = forWaveTilesY;
-                }
-
-                graph.control.addElement(Body(), {lowerLoop}, {initD});
-
-                for(auto const index : otherLoads)
-                {
-                    auto e = graph.control.getNeighbours<Graph::Direction::Upstream>(index)
-                                 .to<std::vector>()[0];
-                    auto elem = graph.control.getElement(e);
-                    graph.control.deleteElement(e);
-                    graph.control.addElement(
-                        e, elem, std::vector<int>{lowerLoop}, std::vector<int>{index});
-                }
-
-                for(auto const index : otherOps)
-                {
-                    auto e = graph.control.getNeighbours<Graph::Direction::Downstream>(index)
-                                 .to<std::vector>()[0];
-                    auto elem = graph.control.getElement(e);
-                    graph.control.deleteElement(e);
-                    graph.control.addElement(
-                        e, elem, std::vector<int>{index}, std::vector<int>{upperLoop});
-                }
-
-                // make nested inner loops (forWaveTilesY inside the forWaveTilesX loop)
-                if(wavetilesPerWorkgroup[0] > 1 && wavetilesPerWorkgroup[1] > 1)
-                    graph.control.addElement(Body(), {forWaveTilesX}, {forWaveTilesY});
-
-                // Add edges from Kernel to outer loop
-                graph.control.addElement(Body(), {kernel}, {upperLoop});
-
-                // Add edges from all JammedWaveTileNumber dimensions to the for loop
-                if(WaveTilesX != -1)
-                {
-                    auto a_jammed_x = graph.mapper.get<JammedWaveTileNumber>(loadA[0], 0);
-                    graph.coordinates.addElement(PassThrough(), {a_jammed_x}, {WaveTilesX});
-                    auto b_jammed_x = graph.mapper.get<JammedWaveTileNumber>(loadB[0], 0);
-                    graph.coordinates.addElement(PassThrough(), {b_jammed_x}, {WaveTilesX});
-                    auto c_jammed_x = graph.mapper.get<JammedWaveTileNumber>(otherLoads[0], 0);
-                    graph.coordinates.addElement(PassThrough(), {c_jammed_x}, {WaveTilesX});
-
-                    if(storeD > 0)
-                    {
-                        auto d_jammed_x = graph.mapper.get<JammedWaveTileNumber>(storeD, 0);
-                        graph.coordinates.addElement(PassThrough(), {WaveTilesX}, {d_jammed_x});
-                    }
-                }
-                if(WaveTilesY != -1)
-                {
-                    auto a_jammed_y = graph.mapper.get<JammedWaveTileNumber>(loadA[0], 1);
-                    graph.coordinates.addElement(PassThrough(), {a_jammed_y}, {WaveTilesY});
-                    auto b_jammed_y = graph.mapper.get<JammedWaveTileNumber>(loadB[0], 1);
-                    graph.coordinates.addElement(PassThrough(), {b_jammed_y}, {WaveTilesY});
-                    auto c_jammed_y = graph.mapper.get<JammedWaveTileNumber>(otherLoads[0], 1);
-                    graph.coordinates.addElement(PassThrough(), {c_jammed_y}, {WaveTilesY});
-
-                    if(storeD > 0)
-                    {
-                        auto d_jammed_y = graph.mapper.get<JammedWaveTileNumber>(storeD, 1);
-                        graph.coordinates.addElement(PassThrough(), {WaveTilesY}, {d_jammed_y});
-                    }
-                }
+                auto elem = graph.control.getElement(index);
+                visit(rocRoller::overloaded{
+                          [&](auto op) { otherOps.push_back(index); },
+                          [&](LoadTiled const& load) {
+                              auto reachable_from_load
+                                  = graph.control.depthFirstVisit(index).to<std::unordered_set>();
+                              for(auto const& assign : assigns)
+                              {
+                                  if(reachable_from_load.find(assign) != reachable_from_load.end())
+                                  {
+                                      otherLoads.push_back(index);
+                                      break;
+                                  }
+                              }
+                          }},
+                      std::get<Operation>(elem));
             }
-            else
+            AssertFatal(otherLoads.size() <= 1);
+
+            // Add edges from inner loop to some kernel outputs : forK and otherLoads
+            // need to leave other nodes attached with kernel
+            // ex: loadtiled ops that don't lead to assigns
+            // ex : loadVGPRs for alpha and beta in GEMM
+
+            graph.control.addElement(Body(), {forWaveTilesY}, {initD});
+
+            for(auto const index : otherLoads)
             {
-                graph.control.addElement(Body(), {kernel}, {initD});
+                auto e = graph.control.getNeighbours<Graph::Direction::Upstream>(index)
+                             .to<std::vector>()[0];
+                auto elem = graph.control.getElement(e);
+                graph.control.deleteElement(e);
+                graph.control.addElement(
+                    e, elem, std::vector<int>{forWaveTilesY}, std::vector<int>{index});
             }
 
-            // add LDSOps if needed
-            addWaveLDSOps(graph, params, context, a, loadA[0], forK, K, waveMult);
-            addWaveLDSOps(graph, params, context, b, loadB[0], forK, K, waveMult);
+            for(auto const index : otherOps)
+            {
+                auto e = graph.control.getNeighbours<Graph::Direction::Downstream>(index)
+                             .to<std::vector>()[0];
+                auto elem = graph.control.getElement(e);
+                graph.control.deleteElement(e);
+                graph.control.addElement(
+                    e, elem, std::vector<int>{index}, std::vector<int>{forWaveTilesX});
+            }
+
+            // make nested inner loops (forWaveTilesY inside the forWaveTilesX loop)
+            graph.control.addElement(Body(), {forWaveTilesX}, {forWaveTilesY});
+
+            // Add edges from Kernel to outer loop
+            graph.control.addElement(Body(), {kernel}, {forWaveTilesX});
+
+            // Add edges from all JammedWaveTileNumber dimensions to the for loop
+            auto a_jammed_x = graph.mapper.get<JammedWaveTileNumber>(loadA[0], 0);
+            graph.coordinates.addElement(PassThrough(), {a_jammed_x}, {WaveTilesX});
+            auto b_jammed_x = graph.mapper.get<JammedWaveTileNumber>(loadB[0], 0);
+            graph.coordinates.addElement(PassThrough(), {b_jammed_x}, {WaveTilesX});
+
+            auto a_jammed_y = graph.mapper.get<JammedWaveTileNumber>(loadA[0], 1);
+            graph.coordinates.addElement(PassThrough(), {a_jammed_y}, {WaveTilesY});
+            auto b_jammed_y = graph.mapper.get<JammedWaveTileNumber>(loadB[0], 1);
+            graph.coordinates.addElement(PassThrough(), {b_jammed_y}, {WaveTilesY});
+
+            if(otherLoads.size() > 0)
+            {
+                auto c_jammed_x = graph.mapper.get<JammedWaveTileNumber>(otherLoads[0], 0);
+                graph.coordinates.addElement(PassThrough(), {c_jammed_x}, {WaveTilesX});
+                auto c_jammed_y = graph.mapper.get<JammedWaveTileNumber>(otherLoads[0], 1);
+                graph.coordinates.addElement(PassThrough(), {c_jammed_y}, {WaveTilesY});
+            }
+
+            if(storeD > 0)
+            {
+                auto d_jammed_x = graph.mapper.get<JammedWaveTileNumber>(storeD, 0);
+                graph.coordinates.addElement(PassThrough(), {WaveTilesX}, {d_jammed_x});
+                auto d_jammed_y = graph.mapper.get<JammedWaveTileNumber>(storeD, 1);
+                graph.coordinates.addElement(PassThrough(), {WaveTilesY}, {d_jammed_y});
+            }
+
+            // add LDS Ops for A and/or B if needed
+            addLoadWaveLDSOps(graph, params, context, a, loadA[0], forK, K, waveMult);
+            addLoadWaveLDSOps(graph, params, context, b, loadB[0], forK, K, waveMult);
+
+            // add LDS Ops for D if needed
+            if(storeD > 0)
+            {
+                auto d = graph.mapper.get<MacroTile>(storeD);
+                addStoreWaveLDSOps(graph, params, context, d, storeD, forWaveTilesX);
+            }
 
             addConnectionsMultiply(graph, waveMult);
         }

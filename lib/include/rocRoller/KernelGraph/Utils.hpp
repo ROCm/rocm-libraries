@@ -64,6 +64,19 @@ namespace rocRoller
                                 int                               wavefrontSize,
                                 std::vector<unsigned int> const&  wavetilesPerWorkgroup);
 
+        void storeMacroTileForLDS(KernelGraph&                       graph,
+                                  int                                store_tag,
+                                  int                                user_tag,
+                                  int                                mac_tile_tag,
+                                  std::vector<int>&                  sdims,
+                                  std::array<unsigned int, 3> const& workgroupSizes);
+
+        void storeWaveMacroTileIntoLDS(KernelGraph&                      graph,
+                                       CoordinateGraph::MacroTile const& mac_tile,
+                                       int                               store_tag,
+                                       std::vector<int>&                 sdims,
+                                       int                               lds);
+
         void storeMacroTileIntoLDS(KernelGraph&                       graph,
                                    int                                store_tag,
                                    int                                lds_tag,

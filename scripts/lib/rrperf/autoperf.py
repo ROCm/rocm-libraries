@@ -111,7 +111,7 @@ def run(
             target,
         )
         target_success, result_dir = suite_run.run(
-            build_dir=build_dir, rundir=rundir, suite=suite, filter=filter
+            build_dir=build_dir, rundir=rundir, suite=suite, filter=filter, recast=True
         )
         success &= target_success
         results.append(result_dir)

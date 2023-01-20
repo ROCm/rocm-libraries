@@ -100,6 +100,11 @@ namespace rocRoller
          */
         bool performUnroll(KernelGraph& graph, int loopTag)
         {
+            auto dimTag = graph.mapper.get<Dimension>(loopTag);
+            auto dim    = std::get<Dimension>(graph.coordinates.getElement(dimTag));
+            if(identical(getSize(dim), Expression::literal(1u)))
+                return false;
+
             // TODO: Better loop dependency checker
             // Do not unroll loops that have a dependency between iterations.
             // At the moment, we are saying that if the first node in a loop's
