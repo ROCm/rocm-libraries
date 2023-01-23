@@ -48,10 +48,11 @@ namespace rocRoller
             return scope;
         }
 
-        std::tuple<int, int, int>
-            computeIndexVGPRMATRIXAB(KernelGraph& graph, int load, int user, int sdim)
+        std::tuple<int, int, int> computeIndexVGPRMATRIXAB(KernelGraph& graph, int load, int sdim)
         {
             AssertFatal(isOperation<LoadTiled>(graph.control.getElement(load)));
+
+            auto user    = graph.mapper.get<User>(load);
             auto mac     = graph.mapper.get<MacroTileNumber>(load, sdim);
             auto i_thr_x = graph.mapper.get<ThreadTileIndex>(load, 0);
             auto i_thr_y = graph.mapper.get<ThreadTileIndex>(load, 1);
@@ -298,16 +299,16 @@ namespace rocRoller
         /**
          * @brief Add ComputeIndex operations to graph for MATRIX_A and MATRIX_B loads.
          */
-        KernelGraph addComputeIndexAB(KernelGraph& graph,
-                                      int          op,
-                                      int          scope,
-                                      int          setCoord,
-                                      int          mulLoadA,
-                                      int          mulLoadB,
-                                      int          loadA,
-                                      int          storeLDSA,
-                                      int          loadB,
-                                      int          storeLDSB)
+        void addComputeIndexAB(KernelGraph& graph,
+                               int          op,
+                               int          scope,
+                               int          setCoord,
+                               int          mulLoadA,
+                               int          mulLoadB,
+                               int          loadA,
+                               int          storeLDSA,
+                               int          loadB,
+                               int          storeLDSB)
         {
             rocRoller::Log::getLogger()->debug(
                 "KernelGraph::addComputeIndexAB({}, {}, {})", op, mulLoadA, mulLoadB);
@@ -372,8 +373,7 @@ namespace rocRoller
             if(loadA > 0 && storeLDSA > 0)
             {
                 // LoadTiled A
-                auto user                     = graph.mapper.get<User>(loadA);
-                auto [topA, bottomA, updateA] = computeIndexVGPRMATRIXAB(graph, loadA, user, 1);
+                auto [topA, bottomA, updateA] = computeIndexVGPRMATRIXAB(graph, loadA, 1);
                 graph.control.addElement(Body(), {top}, {topA});
                 if(setCoord < 0)
                     graph.control.addElement(Sequence(), {bottomA}, {op});
@@ -391,8 +391,7 @@ namespace rocRoller
             if(loadB > 0 && storeLDSB > 0)
             {
                 // LoadTiled B
-                auto user                     = graph.mapper.get<User>(loadB);
-                auto [topB, bottomB, updateB] = computeIndexVGPRMATRIXAB(graph, loadB, user, 0);
+                auto [topB, bottomB, updateB] = computeIndexVGPRMATRIXAB(graph, loadB, 0);
                 graph.control.addElement(Body(), {top}, {topB});
                 if(setCoord < 0)
                     graph.control.addElement(Sequence(), {bottomB}, {op});
@@ -406,38 +405,36 @@ namespace rocRoller
                 if(setCoord < 0)
                     graph.control.addElement(Sequence(), {store_ci_col}, {op});
             }
-
-            return graph;
         }
 
         /**
          * @brief Add ComputeIndex operations to graph for a MATRIX_ACCUM load/store.
          */
-        KernelGraph addComputeIndexC(KernelGraph& graph, int op, int loadstore, bool forward)
+        void addComputeIndexC(KernelGraph& graph, int op, bool forward)
         {
             rocRoller::Log::getLogger()->debug(
-                "KernelGraph::addComputeIndexC({}, {}, {})", op, loadstore, forward);
+                "KernelGraph::addComputeIndexC({}, {})", op, forward);
 
             auto scope = replaceWithScope(graph, op);
 
-            auto node   = graph.control.getElement(loadstore);
+            auto node   = graph.control.getElement(op);
             auto source = -1;
             if(isOperation<LoadTiled>(node) || isOperation<StoreTiled>(node))
-                source = graph.mapper.get<User>(loadstore);
+                source = graph.mapper.get<User>(op);
             else if(isOperation<LoadLDSTile>(node) || isOperation<StoreLDSTile>(node))
-                source = graph.mapper.get<LDS>(loadstore);
+                source = graph.mapper.get<LDS>(op);
 
             AssertFatal(source > 0, "User or LDS dimension not found");
 
-            auto vgpr_block = graph.mapper.get<VGPRBlockNumber>(loadstore);
-            auto vgpr_index = graph.mapper.get<VGPRBlockIndex>(loadstore);
+            auto vgpr_block = graph.mapper.get<VGPRBlockNumber>(op);
+            auto vgpr_index = graph.mapper.get<VGPRBlockIndex>(op);
 
             DataType dtype, offsettype = DataType::UInt64;
             {
-                auto l  = graph.control.get<LoadTiled>(loadstore);
-                auto ll = graph.control.get<LoadLDSTile>(loadstore);
-                auto s  = graph.control.get<StoreTiled>(loadstore);
-                auto sl = graph.control.get<StoreLDSTile>(loadstore);
+                auto l  = graph.control.get<LoadTiled>(op);
+                auto ll = graph.control.get<LoadLDSTile>(op);
+                auto s  = graph.control.get<StoreTiled>(op);
+                auto sl = graph.control.get<StoreLDSTile>(op);
                 if(l)
                     dtype = l->vtype.dataType;
                 if(ll)
@@ -472,11 +469,11 @@ namespace rocRoller
                 buffer            = graph.coordinates.addElement(Buffer(), {source}, {vgpr_block});
             }
 
-            graph.mapper.connect<Offset>(loadstore, offset_vgpr_block, 0);
-            graph.mapper.connect<Offset>(loadstore, offset_vgpr_index, 1);
-            graph.mapper.connect<Stride>(loadstore, stride_vgpr_block, 0);
-            graph.mapper.connect<Stride>(loadstore, stride_vgpr_index, 1);
-            graph.mapper.connect<Buffer>(loadstore, buffer);
+            graph.mapper.connect<Offset>(op, offset_vgpr_block, 0);
+            graph.mapper.connect<Offset>(op, offset_vgpr_index, 1);
+            graph.mapper.connect<Stride>(op, stride_vgpr_block, 0);
+            graph.mapper.connect<Stride>(op, stride_vgpr_index, 1);
+            graph.mapper.connect<Buffer>(op, buffer);
 
             auto ci_vgpr_block = graph.control.addElement(ComputeIndex(source,
                                                                        vgpr_block,
@@ -504,36 +501,32 @@ namespace rocRoller
             graph.control.addElement(Body(), {scope}, {ci_vgpr_block});
             graph.control.addElement(Sequence(), {ci_vgpr_block}, {ci_vgpr_index});
             graph.control.addElement(Sequence(), {ci_vgpr_index}, {op});
-
-            return graph;
         }
 
         /**
          * @brief Add ComputeIndex operations to graph for loads/stores.
          */
-        KernelGraph addComputeIndexVGPR(KernelGraph& graph, int op, int loadstore, bool forward)
+        void addComputeIndexVGPR(KernelGraph& graph, int op, bool forward)
         {
             rocRoller::Log::getLogger()->debug(
-                "KernelGraph::addComputeIndexVGPR({}, {}, {})", op, loadstore, forward);
+                "KernelGraph::addComputeIndexVGPR({}, {})", op, forward);
 
             auto scope = replaceWithScope(graph, op);
 
-            auto node   = graph.control.getElement(loadstore);
+            auto node   = graph.control.getElement(op);
             auto source = -1;
             if(isOperation<LoadTiled>(node) || isOperation<StoreTiled>(node))
-                source = graph.mapper.get<User>(loadstore);
+                source = graph.mapper.get<User>(op);
             else if(isOperation<LoadLDSTile>(node) || isOperation<StoreLDSTile>(node))
-                source = graph.mapper.get<LDS>(loadstore);
+                source = graph.mapper.get<LDS>(op);
 
             AssertFatal(source > 0, "User or LDS dimension not found");
 
-            auto [ci_row, ci_col] = computeIndexVGPR(graph, loadstore, source, forward);
+            auto [ci_row, ci_col] = computeIndexVGPR(graph, op, source, forward);
 
             graph.control.addElement(Body(), {scope}, {ci_row});
             graph.control.addElement(Sequence(), {ci_row}, {ci_col});
             graph.control.addElement(Sequence(), {ci_col}, {op});
-
-            return graph;
         }
 
         KernelGraph addComputeIndexOperations(KernelGraph const& original)
@@ -623,43 +616,43 @@ namespace rocRoller
                 scope = forKScopes[forK];
 
                 if(storesLDSAB.size() == 0)
-                    kgraph = addComputeIndexAB(
+                    addComputeIndexAB(
                         kgraph, forK, scope, setCoord, mulLoads[0], mulLoads[1], -1, -1, -1, -1);
                 else if(storesLDSAB.size() == 1
                         && isOperation<LoadLDSTile>(kgraph.control.getElement(mulLoads[0])))
-                    kgraph = addComputeIndexAB(kgraph,
-                                               forK,
-                                               scope,
-                                               setCoord,
-                                               mulLoads[0],
-                                               mulLoads[1],
-                                               loadsAB[0],
-                                               storesLDSAB[0],
-                                               -1,
-                                               -1);
+                    addComputeIndexAB(kgraph,
+                                      forK,
+                                      scope,
+                                      setCoord,
+                                      mulLoads[0],
+                                      mulLoads[1],
+                                      loadsAB[0],
+                                      storesLDSAB[0],
+                                      -1,
+                                      -1);
                 else if(storesLDSAB.size() == 1
                         && isOperation<LoadLDSTile>(kgraph.control.getElement(mulLoads[1])))
-                    kgraph = addComputeIndexAB(kgraph,
-                                               forK,
-                                               scope,
-                                               setCoord,
-                                               mulLoads[0],
-                                               mulLoads[1],
-                                               -1,
-                                               -1,
-                                               loadsAB[0],
-                                               storesLDSAB[0]);
+                    addComputeIndexAB(kgraph,
+                                      forK,
+                                      scope,
+                                      setCoord,
+                                      mulLoads[0],
+                                      mulLoads[1],
+                                      -1,
+                                      -1,
+                                      loadsAB[0],
+                                      storesLDSAB[0]);
                 else if(storesLDSAB.size() == 2)
-                    kgraph = addComputeIndexAB(kgraph,
-                                               forK,
-                                               scope,
-                                               setCoord,
-                                               mulLoads[0],
-                                               mulLoads[1],
-                                               loadsAB[0],
-                                               storesLDSAB[0],
-                                               loadsAB[1],
-                                               storesLDSAB[1]);
+                    addComputeIndexAB(kgraph,
+                                      forK,
+                                      scope,
+                                      setCoord,
+                                      mulLoads[0],
+                                      mulLoads[1],
+                                      loadsAB[0],
+                                      storesLDSAB[0],
+                                      loadsAB[1],
+                                      storesLDSAB[1]);
             }
 
             // MATRIX_ACCUMULATOR loads anywhere
@@ -682,7 +675,7 @@ namespace rocRoller
 
             for(auto const tag : loadAccums)
             {
-                kgraph = addComputeIndexC(kgraph, tag, tag, false);
+                addComputeIndexC(kgraph, tag, false);
             }
 
             std::vector<int> allForKs;
@@ -718,7 +711,7 @@ namespace rocRoller
 
             for(auto const tag : loadVGPR)
             {
-                kgraph = addComputeIndexVGPR(kgraph, tag, tag, false);
+                addComputeIndexVGPR(kgraph, tag, false);
             }
 
             // MATRIX_ACCUMULATOR & WAVE stores anywhere
@@ -743,7 +736,7 @@ namespace rocRoller
 
             for(auto const tag : storeAccums)
             {
-                kgraph = addComputeIndexC(kgraph, tag, tag, true);
+                addComputeIndexC(kgraph, tag, true);
             }
 
             // VGPR/LDS stores anywhere
@@ -770,7 +763,7 @@ namespace rocRoller
 
             for(auto const tag : storeVGPR)
             {
-                kgraph = addComputeIndexVGPR(kgraph, tag, tag, true);
+                addComputeIndexVGPR(kgraph, tag, true);
             }
 
             return kgraph;

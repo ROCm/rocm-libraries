@@ -323,6 +323,33 @@ namespace GEMMDriverTest
         basicGEMM<float>(m_context, gemm, 1.e-6);
     }
 
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMNoLDSA)
+    {
+        GEMMProblem gemm;
+        gemm.loadLDSA  = false;
+        gemm.loadLDSB  = true;
+        gemm.fuseLoops = false;
+        basicGEMM<float>(m_context, gemm, 1.e-6);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMNoLDSB)
+    {
+        GEMMProblem gemm;
+        gemm.loadLDSA  = true;
+        gemm.loadLDSB  = false;
+        gemm.fuseLoops = false;
+        basicGEMM<float>(m_context, gemm, 1.e-6);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMNoLDSAB)
+    {
+        GEMMProblem gemm;
+        gemm.loadLDSA  = false;
+        gemm.loadLDSB  = false;
+        gemm.fuseLoops = false;
+        basicGEMM<float>(m_context, gemm, 1.e-6);
+    }
+
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16)
     {
         GEMMProblem gemm;
