@@ -673,17 +673,14 @@ namespace rocRollerTest
                                     // ----Needs Wait Zero: False
                                     // ----Type In Queue : VMQueue
                                     // ----Registers :
-                                    // ------Dst: {s[0:1], 0, }
-                                    // ------Src: {v[0:1], }
+                                    // ------Dst: {v[0:1], }
                                     buffer_load_dwordx2 v[4:5], s[0:1], 0 // Wait Queue State:
                                     // --Queue: VMQueue
                                     // ----Needs Wait Zero: False
                                     // ----Type In Queue : VMQueue
                                     // ----Registers :
-                                    // ------Dst: {s[0:1], 0, }
-                                    // ------Src: {v[0:1], }
-                                    // ------Dst: {s[0:1], 0, }
-                                    // ------Src: {v[2:3], }
+                                    // ------Dst: {v[0:1], }
+                                    // ------Dst: {v[2:3], }
                                     s_waitcnt vmcnt(2)
                                     buffer_load_dword v0, s[0:1], 0 // WaitCnt Needed: Intersects with registers in 'VMQueue', at 0 and the queue size is 3, so a waitcnt of 2 is required.
                                     // Wait Queue State:
@@ -691,12 +688,9 @@ namespace rocRollerTest
                                     // ----Needs Wait Zero: False
                                     // ----Type In Queue : VMQueue
                                     // ----Registers :
-                                    // ------Dst: {s[0:1], 0, }
-                                    // ------Src: {v[0:1], }
-                                    // ------Dst: {s[0:1], 0, }
-                                    // ------Src: {v[2:3], }
-                                    // ------Dst: {s[0:1], 0, }
-                                    // ------Src: {v[4:5], }
+                                    // ------Dst: {v[0:1], }
+                                    // ------Dst: {v[2:3], }
+                                    // ------Dst: {v[4:5], }
                                     s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0) //
                                     s_barrier // WaitCnt Needed: Always waitcnt zero before an s_barrier.
                                     // Wait Queue State:
@@ -704,20 +698,16 @@ namespace rocRollerTest
                                     // ----Needs Wait Zero: False
                                     // ----Type In Queue : VMQueue
                                     // ----Registers :
-                                    // ------Dst: {s[0:1], 0, }
-                                    // ------Src: {v[2:3], }
-                                    // ------Dst: {s[0:1], 0, }
-                                    // ------Src: {v[4:5], }
-                                    // ------Dst: {s[0:1], 0, }
-                                    // ------Src: {v0, }
+                                    // ------Dst: {v[2:3], }
+                                    // ------Dst: {v[4:5], }
+                                    // ------Dst: {v0, }
                                     s_load_dwordx2 v[0:1], s[0:1], 0
                                     s_load_dwordx2 v[2:3], s[0:1], 0 // Wait Queue State:
                                     // --Queue: LGKMQueue
                                     // ----Needs Wait Zero: True
                                     // ----Type In Queue : LGKMDSQueue
                                     // ----Registers :
-                                    // ------Dst: {s[0:1], 0, }
-                                    // ------Src: {v[0:1], }
+                                    // ------Dst: {v[0:1], }
                                     s_waitcnt lgkmcnt(0)
                                     s_load_dword v1, s1, 0 // WaitCnt Needed: Intersects with registers in 'LGKMQueue', which needs a wait zero.
                                     // Wait Queue State:
@@ -725,17 +715,14 @@ namespace rocRollerTest
                                     // ----Needs Wait Zero: True
                                     // ----Type In Queue : LGKMDSQueue
                                     // ----Registers :
-                                    // ------Dst: {s[0:1], 0, }
-                                    // ------Src: {v[0:1], }
-                                    // ------Dst: {s[0:1], 0, }
-                                    // ------Src: {v[2:3], }
+                                    // ------Dst: {v[0:1], }
+                                    // ------Dst: {v[2:3], }
                                     s_endpgm // Wait Queue State:
                                     // --Queue: LGKMQueue
                                     // ----Needs Wait Zero: True
                                     // ----Type In Queue : LGKMDSQueue
                                     // ----Registers :
-                                    // ------Dst: {s1, 0, }
-                                    // ------Src: {v1, }
+                                    // ------Dst: {v1, }
                                 )";
 
         EXPECT_EQ(NormalizedSource(output(), true), NormalizedSource(expected, true));

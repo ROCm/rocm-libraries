@@ -113,8 +113,7 @@ namespace rocRoller
                             }
                             for(int i = 0; i < instWaitCnt; i++)
                             {
-                                instruction_queues[waitQueue].push_back(
-                                    std::make_tuple(inst.getSrcs(), inst.getDsts()));
+                                instruction_queues[waitQueue].push_back(inst.getDsts());
                             }
                             type_in_queue[waitQueue] = queueType;
                         }
@@ -132,15 +131,13 @@ namespace rocRoller
 
             bool m_displayState;
 
-            std::unordered_map<
-                GPUWaitQueue,
-                std::vector<std::tuple<
-                    std::array<std::shared_ptr<Register::Value>, Instruction::MaxSrcRegisters>,
-                    std::array<std::shared_ptr<Register::Value>, Instruction::MaxDstRegisters>>>,
-                GPUWaitQueue::Hash>
+            std::unordered_map<GPUWaitQueue,
+                               std::vector<std::array<std::shared_ptr<Register::Value>,
+                                                      Instruction::MaxDstRegisters>>,
+                               GPUWaitQueue::Hash>
                 instruction_queues;
 
-            // This member tracks a flag for each queue which indicates that a waitcnt 0 is neded.
+            // This member tracks a flag for each queue which indicates that a waitcnt 0 is needed.
             std::unordered_map<GPUWaitQueue, bool, GPUWaitQueue::Hash> needs_wait_zero;
 
             // This member tracks the instruction type that is currently in a given queue.
@@ -207,9 +204,8 @@ namespace rocRoller
                         for(int queue_i = instruction_queues.at(waitQueue).size() - 1; queue_i >= 0;
                             queue_i--)
                         {
-                            if(inst.registersIntersect(
-                                   std::get<0>(instruction_queues.at(waitQueue)[queue_i]),
-                                   std::get<1>(instruction_queues.at(waitQueue)[queue_i])))
+                            if(inst.isAfterWriteDependency(
+                                   instruction_queues.at(waitQueue)[queue_i]))
                             {
                                 if(needs_wait_zero.at(waitQueue))
                                 {
@@ -279,16 +275,7 @@ namespace rocRoller
                             queue_i++)
                         {
                             retval << "\n------Dst: {";
-                            for(auto& reg : std::get<0>(instruction_queues.at(waitQueue)[queue_i]))
-                            {
-                                if(reg)
-                                {
-                                    retval << reg->toString() << ", ";
-                                }
-                            }
-                            retval << "}";
-                            retval << "\n------Src: {";
-                            for(auto& reg : std::get<1>(instruction_queues.at(waitQueue)[queue_i]))
+                            for(auto& reg : instruction_queues.at(waitQueue)[queue_i])
                             {
                                 if(reg)
                                 {

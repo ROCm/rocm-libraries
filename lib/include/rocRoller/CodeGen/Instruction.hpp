@@ -73,16 +73,14 @@ namespace rocRoller
         WaitCount getWaitCount() const;
 
         /**
-         * @brief Returns |a.src n b.dest| > 0 or |a.dest n (b.src u b.dest)| > 0
+         * @brief Returns |currentSrc n previousDest| > 0 or |currentDest n previousDest| > 0
          *
-         * @param src Source registers to compare against
-         * @param dst Destination registers to compare against
-         * @return whether the registers intersect
+         * @param previousDest Destination registers of previous instruction.
+         * @return Whether this instructions registers intersect with a past instructions destination registers.
          */
-        bool registersIntersect(
-            std::array<std::shared_ptr<Register::Value>, Instruction::MaxSrcRegisters> const& src,
-            std::array<std::shared_ptr<Register::Value>, Instruction::MaxDstRegisters> const& dst)
-            const;
+        bool isAfterWriteDependency(
+            std::array<std::shared_ptr<Register::Value>, Instruction::MaxDstRegisters> const&
+                previousDest) const;
 
         void        toStream(std::ostream&, LogLevel level) const;
         std::string toString(LogLevel level) const;

@@ -266,15 +266,15 @@ namespace rocRoller
         return m_waitCount;
     }
 
-    inline bool Instruction::registersIntersect(
-        std::array<std::shared_ptr<Register::Value>, Instruction::MaxSrcRegisters> const& src,
-        std::array<std::shared_ptr<Register::Value>, Instruction::MaxDstRegisters> const& dst) const
+    inline bool Instruction::isAfterWriteDependency(
+        std::array<std::shared_ptr<Register::Value>, Instruction::MaxDstRegisters> const&
+            previousDest) const
     {
         for(auto const& regA : m_src)
         {
             if(regA)
             {
-                for(auto const& regB : dst)
+                for(auto const& regB : previousDest)
                 {
                     if(regB && regA->intersects(regB))
                     {
@@ -287,14 +287,7 @@ namespace rocRoller
         {
             if(regA)
             {
-                for(auto const& regB : src)
-                {
-                    if(regB && regA->intersects(regB))
-                    {
-                        return true;
-                    }
-                }
-                for(auto const& regB : dst)
+                for(auto const& regB : previousDest)
                 {
                     if(regB && regA->intersects(regB))
                     {
