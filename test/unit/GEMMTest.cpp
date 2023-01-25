@@ -58,7 +58,7 @@ namespace GEMMDriverTest
         bool loadLDSB  = true;
         bool storeLDSD = true;
 
-        bool fuseLoops = false;
+        bool fuseLoops = true;
     };
 
     template <typename T>
@@ -377,6 +377,7 @@ namespace GEMMDriverTest
 
         gemm.loadLDSA  = false;
         gemm.storeLDSD = false;
+        gemm.fuseLoops = false;
 
         basicGEMM<Half>(m_context, gemm, 2.e-5);
     }
@@ -401,7 +402,6 @@ namespace GEMMDriverTest
         gemm.loadLDSA  = false;
         gemm.loadLDSB  = false;
         gemm.storeLDSD = false;
-        gemm.fuseLoops = true;
 
         basicGEMM<Half>(m_context, gemm, 2.e-5);
     }
@@ -423,8 +423,6 @@ namespace GEMMDriverTest
         gemm.workgroup_size_x = 2 * gemm.wavefront_size;
         gemm.workgroup_size_y = 4;
 
-        gemm.fuseLoops = true;
-
         basicGEMM<Half>(m_context, gemm, 2.e-5);
     }
 
@@ -444,13 +442,6 @@ namespace GEMMDriverTest
 
         gemm.workgroup_size_x = 4 * gemm.wavefront_size;
         gemm.workgroup_size_y = 2;
-
-        gemm.fuseLoops = true;
-
-        // TODO: Turn on LDS usage once register usage has been reduced
-        gemm.loadLDSA  = false;
-        gemm.loadLDSB  = false;
-        gemm.storeLDSD = false;
 
         basicGEMM<Half>(m_context, gemm, 2.e-5);
     }
@@ -472,12 +463,7 @@ namespace GEMMDriverTest
         gemm.workgroup_size_x = 4 * gemm.wavefront_size;
         gemm.workgroup_size_y = 1;
 
-        // TODO: Turn on LDS usage once register usage has been reduced
-        gemm.loadLDSA  = false;
-        gemm.loadLDSB  = false;
         gemm.storeLDSD = false;
-
-        gemm.fuseLoops = true;
 
         basicGEMM<Half>(m_context, gemm, 2.e-5);
     }

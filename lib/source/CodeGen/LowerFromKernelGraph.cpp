@@ -77,19 +77,40 @@ namespace rocRoller
                 return m_context->registerTagManager()->getRegister(offsetTag);
             }
 
-            std::pair<Register::ValuePtr, Register::ValuePtr> getOffsetAndStride(int tag,
-                                                                                 int dimension)
+            Register::ValuePtr getOffset(int tag, int dimension)
             {
-                Register::ValuePtr offset, stride;
+                Register::ValuePtr offset;
 
                 auto offsetTag = m_graph.mapper.get<Offset>(tag, dimension);
                 if(offsetTag >= 0)
                     offset = m_context->registerTagManager()->getRegister(offsetTag);
+
+                return offset;
+            }
+
+            Generator<Instruction>
+                generateStride(Register::ValuePtr& stride, int tag, int dimension)
+            {
                 auto strideTag = m_graph.mapper.get<Stride>(tag, dimension);
                 if(strideTag >= 0)
-                    stride = m_context->registerTagManager()->getRegister(strideTag);
+                {
+                    auto [strideExpr, strideDataType]
+                        = m_context->registerTagManager()->getExpression(strideTag);
+                    strideExpr = m_fastArith(strideExpr);
 
-                return {offset, stride};
+                    // If stride can be evaluated at compile time, return a literal. Otherwise,
+                    // create a new register.
+                    if(Expression::evaluationTimes(strideExpr)[EvaluationTime::Translate])
+                    {
+                        stride = Register::Value::Literal(Expression::evaluate(strideExpr));
+                    }
+                    else
+                    {
+                        stride = Register::Value::Placeholder(
+                            m_context, Register::Type::Scalar, strideDataType, 1);
+                        co_yield generate(stride, strideExpr);
+                    }
+                }
             }
 
             inline ExpressionPtr L(auto const& x)
@@ -339,7 +360,7 @@ namespace rocRoller
             {
                 auto dim_tag = m_graph.mapper.get<Dimension>(tag);
                 rocRoller::Log::getLogger()->debug("  deallocate dimension: {}", dim_tag);
-                m_context->registerTagManager()->deleteRegister(dim_tag);
+                m_context->registerTagManager()->deleteTag(dim_tag);
                 co_return;
             }
 
@@ -378,12 +399,6 @@ namespace rocRoller
                     co_yield generate(offsetReg, indexExpr * L(numBytes));
                 }
 
-                auto strideReg = m_context->registerTagManager()->getRegister(
-                    ci.stride, Register::Type::Scalar, ci.strideType, 1);
-                strideReg->setName(concatenate("stride", tag));
-                co_yield Register::AllocateIfNeeded(strideReg);
-                scope->addRegister(ci.stride);
-
                 if(ci.stride > 0)
                 {
                     auto indexExpr = ci.forward
@@ -391,7 +406,9 @@ namespace rocRoller
                                          : coords.reverseStride(ci.increment, L(1), {ci.target})[0];
                     rocRoller::Log::getLogger()->debug(
                         "  Stride({}): {}", ci.stride, toString(indexExpr));
-                    co_yield generate(strideReg, indexExpr * L(numBytes));
+                    m_context->registerTagManager()->addExpression(
+                        ci.stride, indexExpr * L(numBytes), ci.strideType);
+                    scope->addRegister(ci.stride);
                 }
 
                 auto user = m_graph.coordinates.get<User>(ci.target);
@@ -448,9 +465,9 @@ namespace rocRoller
 
                 auto bufOpt = BufferInstructionOptions();
 
-                auto [mac_offset_reg, mac_stride_reg] = getOffsetAndStride(tag, -1);
-                auto [row_offset_reg, row_stride_reg] = getOffsetAndStride(tag, 0);
-                auto [col_offset_reg, col_stride_reg] = getOffsetAndStride(tag, 1);
+                auto mac_offset_reg = getOffset(tag, -1);
+                auto row_offset_reg = getOffset(tag, 0);
+                auto col_offset_reg = getOffset(tag, 1);
 
                 auto bufferSrd = getBufferSrd(tag);
                 auto bufDesc   = BufferDescriptor(bufferSrd, m_context);
@@ -472,6 +489,10 @@ namespace rocRoller
                 AssertFatal(m > 0 && n > 0, "Invalid/unknown subtile size dimensions");
 
                 co_yield copy(row_offset_reg, mac_offset_reg);
+
+                Register::ValuePtr row_stride_reg, col_stride_reg;
+                co_yield generateStride(row_stride_reg, tag, 0);
+                co_yield generateStride(col_stride_reg, tag, 1);
 
                 // TODO: multidimensional tiles
                 for(int i = 0; i < m; ++i)
@@ -519,10 +540,10 @@ namespace rocRoller
 
                 auto bufOpt = BufferInstructionOptions();
 
-                auto [row_offset_reg, row_stride_reg] = getOffsetAndStride(tag, 0);
-                auto [col_offset_reg, col_stride_reg] = getOffsetAndStride(tag, 1);
-                auto bufferSrd                        = getBufferSrd(tag);
-                auto bufDesc                          = BufferDescriptor(bufferSrd, m_context);
+                auto row_offset_reg = getOffset(tag, 0);
+                auto col_offset_reg = getOffset(tag, 1);
+                auto bufferSrd      = getBufferSrd(tag);
+                auto bufDesc        = BufferDescriptor(bufferSrd, m_context);
 
                 auto tmpl = MkVGPR(load.vtype, product(mac_tile.subTileSizes));
                 auto vgpr = m_context->registerTagManager()->getRegister(mac_tile_tag, tmpl);
@@ -537,6 +558,10 @@ namespace rocRoller
 
                 rocRoller::Log::getLogger()->debug(
                     "  macro tile: {}; sub tile size: {}x{}", mac_tile_tag, m, n);
+
+                Register::ValuePtr row_stride_reg, col_stride_reg;
+                co_yield generateStride(row_stride_reg, tag, 0);
+                co_yield generateStride(col_stride_reg, tag, 1);
 
                 // TODO: multidimensional tiles
                 for(int i = 0; i < m; ++i)
@@ -579,8 +604,8 @@ namespace rocRoller
                 auto [lds_tag, lds]   = m_graph.getDimension<LDS>(tag);
                 auto [tile_tag, tile] = m_graph.getDimension<MacroTile>(tag);
 
-                auto [row_offset_reg, row_stride_reg] = getOffsetAndStride(tag, 0);
-                auto [col_offset_reg, col_stride_reg] = getOffsetAndStride(tag, 1);
+                auto row_offset_reg = getOffset(tag, 0);
+                auto col_offset_reg = getOffset(tag, 1);
 
                 // Find the LDS allocation that contains the tile and store
                 // the offset of the beginning of the allocation into lds_offset.
@@ -605,6 +630,10 @@ namespace rocRoller
 
                 auto const m = tile.subTileSizes[0];
                 auto const n = tile.subTileSizes[1];
+
+                Register::ValuePtr row_stride_reg, col_stride_reg;
+                co_yield generateStride(row_stride_reg, tag, 0);
+                co_yield generateStride(col_stride_reg, tag, 1);
 
                 for(int i = 0; i < m; ++i)
                 {
@@ -663,16 +692,20 @@ namespace rocRoller
 
                 auto n_wave_tag = m_graph.mapper.get<WaveTileNumber>(tag, sdim);
 
-                auto [wave_offset_reg, wave_stride_reg] = getOffsetAndStride(tag, 0);
-                auto [vgpr_offset_reg, vgpr_stride_reg] = getOffsetAndStride(tag, 1);
+                auto wave_offset_reg = getOffset(tag, 0);
+                auto vgpr_offset_reg = getOffset(tag, 1);
 
                 AssertFatal(wave_offset_reg, "Invalid WAVE offset register.");
                 AssertFatal(vgpr_offset_reg, "Invalid VGPR offset register.");
-                AssertFatal(vgpr_stride_reg, "Invalid VGPR stride register.");
 
                 uint num_elements = wave_tile.sizes[0] * wave_tile.sizes[1];
                 uint wfs          = m_context->kernel()->wavefront_size();
                 uint num_vgpr     = num_elements / wfs;
+
+                Register::ValuePtr vgpr_stride_reg;
+                co_yield generateStride(vgpr_stride_reg, tag, 1);
+
+                AssertFatal(vgpr_stride_reg, "Invalid VGPR stride register.");
 
                 if(load.vtype == DataType::Half)
                 {
@@ -750,20 +783,24 @@ namespace rocRoller
                 Register::ValuePtr basePointer;
                 co_yield m_context->argLoader()->getValue(user.argumentName(), basePointer);
 
-                auto [wave_offset_reg, wave_stride_reg] = getOffsetAndStride(tag, 0);
-                auto [vgpr_offset_reg, vgpr_stride_reg] = getOffsetAndStride(tag, 1);
-                auto bufferSrd                          = getBufferSrd(tag);
+                auto wave_offset_reg = getOffset(tag, 0);
+                auto vgpr_offset_reg = getOffset(tag, 1);
+                auto bufferSrd       = getBufferSrd(tag);
 
                 auto bufDesc = BufferDescriptor(bufferSrd, m_context);
                 auto bufOpt  = BufferInstructionOptions();
 
                 AssertFatal(wave_offset_reg, "Invalid WAVE offset register.");
                 AssertFatal(vgpr_offset_reg, "Invalid VGPR offset register.");
-                AssertFatal(vgpr_stride_reg, "Invalid VGPR stride register.");
 
                 uint num_elements = wave_tile.sizes[0] * wave_tile.sizes[1];
                 uint wfs          = m_context->kernel()->wavefront_size();
                 uint num_vgpr     = num_elements / wfs;
+
+                Register::ValuePtr vgpr_stride_reg;
+                co_yield generateStride(vgpr_stride_reg, tag, 1);
+
+                AssertFatal(vgpr_stride_reg, "Invalid VGPR stride register.");
 
                 if(load.vtype == DataType::Half)
                 {
@@ -844,20 +881,25 @@ namespace rocRoller
                 Register::ValuePtr s_ptr;
                 co_yield m_context->argLoader()->getValue(user.argumentName(), s_ptr);
 
-                auto [vgpr_block_offset_reg, vgpr_block_stride_reg] = getOffsetAndStride(tag, 0);
-                auto [vgpr_index_offset_reg, vgpr_index_stride_reg] = getOffsetAndStride(tag, 1);
-                auto bufferSrd                                      = getBufferSrd(tag);
+                auto vgpr_block_offset_reg = getOffset(tag, 0);
+                auto vgpr_index_offset_reg = getOffset(tag, 1);
+                auto bufferSrd             = getBufferSrd(tag);
 
                 auto bufDesc = BufferDescriptor(bufferSrd, m_context);
                 auto bufOpt  = BufferInstructionOptions();
 
                 AssertFatal(vgpr_block_offset_reg, "Invalid VGPR BLOCK offset register.");
-                AssertFatal(vgpr_block_stride_reg, "Invalid VGPR BLOCK stride register.");
-                AssertFatal(vgpr_index_stride_reg, "Invalid VGPR INDEX stride register.");
 
                 uint num_elements = wave_tile.sizes[0] * wave_tile.sizes[1];
                 uint wfs          = m_context->kernel()->wavefront_size();
                 uint num_vgpr     = num_elements / wfs;
+
+                Register::ValuePtr vgpr_block_stride_reg, vgpr_index_stride_reg;
+                co_yield generateStride(vgpr_block_stride_reg, tag, 0);
+                co_yield generateStride(vgpr_index_stride_reg, tag, 1);
+
+                AssertFatal(vgpr_block_stride_reg, "Invalid VGPR BLOCK stride register.");
+                AssertFatal(vgpr_index_stride_reg, "Invalid VGPR INDEX stride register.");
 
                 if(load.vtype == DataType::Half)
                 {
@@ -1158,11 +1200,11 @@ namespace rocRoller
 
                 auto loadAB = m_graph.control.getOutputNodeIndices<Body>(tag).to<std::set>();
 
-                auto [mac_offset_x_reg, mac_stride_x_reg]   = getOffsetAndStride(loads[0], -1);
-                auto [wave_offset_x_reg, wave_stride_x_reg] = getOffsetAndStride(loads[0], 0);
+                auto mac_offset_x_reg  = getOffset(loads[0], -1);
+                auto wave_offset_x_reg = getOffset(loads[0], 0);
 
-                auto [mac_offset_y_reg, mac_stride_y_reg]   = getOffsetAndStride(loads[1], -1);
-                auto [wave_offset_y_reg, wave_stride_y_reg] = getOffsetAndStride(loads[1], 0);
+                auto mac_offset_y_reg  = getOffset(loads[1], -1);
+                auto wave_offset_y_reg = getOffset(loads[1], 0);
 
                 AssertFatal(macA.sizes[1] == macB.sizes[0], "MacroTile size mismatch.");
 
@@ -1195,6 +1237,13 @@ namespace rocRoller
                     m_context, Register::Type::Vector, DataType::UInt32, 1);
                 if(isOperation<LoadLDSTile>(loadB))
                     co_yield copy(reset_offset_y, wave_offset_y_reg);
+
+                Register::ValuePtr wave_stride_x_reg, wave_stride_y_reg;
+                co_yield generateStride(wave_stride_x_reg, loads[0], 0);
+                co_yield generateStride(wave_stride_y_reg, loads[1], 0);
+
+                AssertFatal(wave_stride_x_reg, "Invalid WAVE X stride register.");
+                AssertFatal(wave_stride_y_reg, "Invalid WAVE Y stride register.");
 
                 uint const num_wave_tiles = macA.sizes[1] / waveA.sizes[1];
                 for(uint k = 0; k < num_wave_tiles; k++)
@@ -1262,8 +1311,8 @@ namespace rocRoller
                 auto vtype    = store.dataType;
                 auto numBytes = DataTypeInfo::Get(vtype).elementSize;
 
-                auto [row_offset_reg, row_stride_reg] = getOffsetAndStride(tag, 0);
-                auto [col_offset_reg, col_stride_reg] = getOffsetAndStride(tag, 1);
+                auto row_offset_reg = getOffset(tag, 0);
+                auto col_offset_reg = getOffset(tag, 1);
 
                 auto numElements = product(tile.subTileSizes) * product(m_workgroupSize);
                 // Allocate LDS memory, and store the offset of the beginning of the allocation
@@ -1293,6 +1342,10 @@ namespace rocRoller
                 auto reset_offset = Register::Value::Placeholder(
                     m_context, Register::Type::Vector, DataType::UInt32, 1);
                 co_yield copy(reset_offset, row_offset_reg);
+
+                Register::ValuePtr row_stride_reg, col_stride_reg;
+                co_yield generateStride(row_stride_reg, tag, 0);
+                co_yield generateStride(col_stride_reg, tag, 1);
 
                 for(int i = 0; i < m; ++i)
                 {
@@ -1346,12 +1399,16 @@ namespace rocRoller
                 auto const m = mac_tile.subTileSizes[0];
                 auto const n = mac_tile.subTileSizes[1];
 
-                auto [row_offset_reg, row_stride_reg] = getOffsetAndStride(tag, 0);
-                auto [col_offset_reg, col_stride_reg] = getOffsetAndStride(tag, 1);
+                auto row_offset_reg = getOffset(tag, 0);
+                auto col_offset_reg = getOffset(tag, 1);
 
                 auto bufferSrd = getBufferSrd(tag);
                 auto bufDesc   = BufferDescriptor(bufferSrd, m_context);
                 auto bufOpt    = BufferInstructionOptions();
+
+                Register::ValuePtr row_stride_reg, col_stride_reg;
+                co_yield generateStride(row_stride_reg, tag, 0);
+                co_yield generateStride(col_stride_reg, tag, 1);
 
                 // TODO multidimensional tiles
                 for(int i = 0; i < m; ++i)
@@ -1421,16 +1478,21 @@ namespace rocRoller
                 auto agpr     = m_context->registerTagManager()->getRegister(mac_tile_tag);
                 AssertFatal(agpr->registerCount() == num_vgpr);
 
-                auto [vgpr_block_offset_reg, vgpr_block_stride_reg] = getOffsetAndStride(tag, 0);
-                auto [vgpr_index_offset_reg, vgpr_index_stride_reg] = getOffsetAndStride(tag, 1);
+                auto vgpr_block_offset_reg = getOffset(tag, 0);
+                auto vgpr_index_offset_reg = getOffset(tag, 1);
 
                 AssertFatal(vgpr_block_offset_reg, "Invalid VGPR BLOCK offset register.");
-                AssertFatal(vgpr_block_stride_reg, "Invalid VGPR BLOCK stride register.");
-                AssertFatal(vgpr_index_stride_reg, "Invalid VGPR INDEX stride register.");
 
                 auto numBytes  = DataTypeInfo::Get(store.dataType).elementSize;
                 auto value     = MkVGPR(agpr->variableType());
                 auto converted = MkVGPR(store.dataType);
+
+                Register::ValuePtr vgpr_block_stride_reg, vgpr_index_stride_reg;
+                co_yield generateStride(vgpr_block_stride_reg, tag, 0);
+                co_yield generateStride(vgpr_index_stride_reg, tag, 1);
+
+                AssertFatal(vgpr_block_stride_reg, "Invalid VGPR BLOCK stride register.");
+                AssertFatal(vgpr_index_stride_reg, "Invalid VGPR INDEX stride register.");
 
                 for(uint ablk = 0; ablk < num_vgpr / 4; ++ablk)
                 {
@@ -1494,20 +1556,25 @@ namespace rocRoller
                 Register::ValuePtr s_ptr;
                 co_yield m_context->argLoader()->getValue(user.argumentName(), s_ptr);
 
-                auto [vgpr_block_offset_reg, vgpr_block_stride_reg] = getOffsetAndStride(tag, 0);
-                auto [vgpr_index_offset_reg, vgpr_index_stride_reg] = getOffsetAndStride(tag, 1);
-                auto bufferSrd                                      = getBufferSrd(tag);
+                auto vgpr_block_offset_reg = getOffset(tag, 0);
+                auto vgpr_index_offset_reg = getOffset(tag, 1);
+                auto bufferSrd             = getBufferSrd(tag);
 
                 auto bufDesc = BufferDescriptor(bufferSrd, m_context);
                 auto bufOpt  = BufferInstructionOptions();
 
                 AssertFatal(vgpr_block_offset_reg, "Invalid VGPR BLOCK offset register.");
-                AssertFatal(vgpr_block_stride_reg, "Invalid VGPR BLOCK stride register.");
-                AssertFatal(vgpr_index_stride_reg, "Invalid VGPR INDEX stride register.");
 
                 auto numBytes  = DataTypeInfo::Get(store.dataType).elementSize;
                 auto value     = MkVGPR(agpr->variableType());
                 auto converted = MkVGPR(store.dataType);
+
+                Register::ValuePtr vgpr_block_stride_reg, vgpr_index_stride_reg;
+                co_yield generateStride(vgpr_block_stride_reg, tag, 0);
+                co_yield generateStride(vgpr_index_stride_reg, tag, 1);
+
+                AssertFatal(vgpr_block_stride_reg, "Invalid VGPR BLOCK stride register.");
+                AssertFatal(vgpr_index_stride_reg, "Invalid VGPR INDEX stride register.");
 
                 for(uint ablk = 0; ablk < num_vgpr / 4; ++ablk)
                 {

@@ -14,7 +14,7 @@ namespace rocRoller
         , loadGlobalWidth(8)
         , storeLocalWidth(4)
         , storeGlobalWidth(4)
-        , fuseLoops(false) // TODO: Set default to true once register usage has been reduced
+        , fuseLoops(true)
     {
     }
 

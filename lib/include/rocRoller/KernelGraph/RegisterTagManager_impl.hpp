@@ -16,6 +16,13 @@ namespace rocRoller
 
     inline RegisterTagManager::~RegisterTagManager() = default;
 
+    inline std::pair<Expression::ExpressionPtr, DataType>
+        RegisterTagManager::getExpression(int tag) const
+    {
+        AssertFatal(hasExpression(tag), ShowValue(tag));
+        return m_expressions.at(tag);
+    }
+
     inline std::shared_ptr<Register::Value> RegisterTagManager::getRegister(int tag)
     {
         AssertFatal(hasRegister(tag), ShowValue(tag));
@@ -27,6 +34,7 @@ namespace rocRoller
                                                                             VariableType   varType,
                                                                             size_t valueCount)
     {
+        AssertFatal(!hasExpression(tag), "Tag already associated with an expression");
         if(hasRegister(tag))
         {
             auto reg = m_registers.at(tag);
@@ -56,16 +64,31 @@ namespace rocRoller
 
     inline void RegisterTagManager::addRegister(int tag, Register::ValuePtr value)
     {
+        AssertFatal(!hasExpression(tag), "Tag already associated with an expression");
         m_registers.insert(std::pair<int, Register::ValuePtr>(tag, value));
     }
 
-    inline void RegisterTagManager::deleteRegister(int tag)
+    inline void
+        RegisterTagManager::addExpression(int tag, Expression::ExpressionPtr value, DataType dt)
+    {
+        AssertFatal(!hasRegister(tag), "Tag already associated with a register");
+        m_expressions.insert(
+            std::pair<int, std::pair<Expression::ExpressionPtr, DataType>>(tag, {value, dt}));
+    }
+
+    inline void RegisterTagManager::deleteTag(int tag)
     {
         m_registers.erase(tag);
+        m_expressions.erase(tag);
     }
 
     inline bool RegisterTagManager::hasRegister(int tag) const
     {
         return m_registers.count(tag) > 0;
+    }
+
+    inline bool RegisterTagManager::hasExpression(int tag) const
+    {
+        return m_expressions.count(tag) > 0;
     }
 }

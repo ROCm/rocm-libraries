@@ -25,7 +25,7 @@ namespace rocRoller::KernelGraph
     {
         for(auto tag : m_tags.back())
         {
-            m_context->registerTagManager()->deleteRegister(tag);
+            m_context->registerTagManager()->deleteTag(tag);
         }
         m_tags.pop_back();
     }

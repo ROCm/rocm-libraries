@@ -399,13 +399,22 @@ namespace rocRoller
 
             Generator<Instruction> operator()(Register::ValuePtr& dest, DataFlowTag const& expr)
             {
-                auto tagReg = m_context->registerTagManager()->getRegister(
-                    expr.tag, expr.regType, expr.varType, 1);
-
-                if(dest == nullptr)
-                    dest = tagReg;
+                if(m_context->registerTagManager()->hasExpression(expr.tag))
+                {
+                    auto [tagExpr, tagDT]
+                        = m_context->registerTagManager()->getExpression(expr.tag);
+                    co_yield call(dest, tagExpr);
+                }
                 else
-                    co_yield m_context->copier()->copy(dest, tagReg);
+                {
+                    auto tagReg = m_context->registerTagManager()->getRegister(
+                        expr.tag, expr.regType, expr.varType, 1);
+
+                    if(dest == nullptr)
+                        dest = tagReg;
+                    else
+                        co_yield m_context->copier()->copy(dest, tagReg);
+                }
             }
 
             Generator<Instruction> call(Register::ValuePtr& dest, Expression const& expr)
