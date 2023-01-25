@@ -134,12 +134,19 @@ namespace rocRoller
                 // add store from VGPRs to LDS following this new loadTiled under the forK loop
                 auto store_macrotile_into_LDS
                     = graph.control.addElement(StoreLDSTile(vtype.dataType));
-                auto barrier = graph.control.addElement(Barrier());
-                graph.control.addElement(
-                    Sequence(), {load_macrotile_from_global}, {store_macrotile_into_LDS});
-                graph.control.addElement(Sequence(), {store_macrotile_into_LDS}, {barrier});
-                graph.control.addElement(Sequence(), {barrier}, {waveMult});
                 graph.mapper.connect<MacroTile>(store_macrotile_into_LDS, internalTile);
+
+                // iteration barrier (right before StoreLDSTile) to ensure that no worker could write into
+                // the same portion of LDS while another worker is reading from it in a previous iteration.
+                auto iteration_barrier = graph.control.addElement(Barrier());
+                graph.control.addElement(
+                    Sequence(), {load_macrotile_from_global}, {iteration_barrier});
+                graph.control.addElement(
+                    Sequence(), {iteration_barrier}, {store_macrotile_into_LDS});
+
+                auto store_barrier = graph.control.addElement(Barrier());
+                graph.control.addElement(Sequence(), {store_macrotile_into_LDS}, {store_barrier});
+                graph.control.addElement(Sequence(), {store_barrier}, {waveMult});
 
                 // lower tile StoreLDSTile : store macrotile into LDS
                 storeMacroTileIntoLDS(

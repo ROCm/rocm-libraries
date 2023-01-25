@@ -2976,7 +2976,7 @@ namespace KernelGraphTest
         kgraph_lds_lower      = addComputeIndexOperations(kgraph_lds_lower);
 
         std::string expected_lds = R".(
-        digraph {
+	digraph {
 	    "coord1"[label="User{NA}(1)"];
 	    "coord2"[label="User{NA}(2)"];
 	    "coord3"[label="User{NA}(3)"];
@@ -3978,53 +3978,55 @@ namespace KernelGraphTest
 	    "cntrl53"[label="Barrier(53)"];
 	    "cntrl54"[label="Sequence(54)",shape=box];
 	    "cntrl55"[label="Sequence(55)",shape=box];
-	    "cntrl56"[label="Sequence(56)",shape=box];
-	    "cntrl57"[label="Scope(57)"];
+	    "cntrl56"[label="Barrier(56)"];
+	    "cntrl57"[label="Sequence(57)",shape=box];
 	    "cntrl58"[label="Sequence(58)",shape=box];
-	    "cntrl59"[label="Sequence(59)",shape=box];
-	    "cntrl60"[label="ComputeIndex(60)"];
-	    "cntrl61"[label="ComputeIndex(61)"];
-	    "cntrl62"[label="Sequence(62)",shape=box];
-	    "cntrl63"[label="Body(63)",shape=box];
+	    "cntrl59"[label="Scope(59)"];
+	    "cntrl60"[label="Sequence(60)",shape=box];
+	    "cntrl61"[label="Sequence(61)",shape=box];
+	    "cntrl62"[label="ComputeIndex(62)"];
+	    "cntrl63"[label="ComputeIndex(63)"];
 	    "cntrl64"[label="Sequence(64)",shape=box];
-	    "cntrl65"[label="ComputeIndex(65)"];
-	    "cntrl66"[label="ComputeIndex(66)"];
+	    "cntrl65"[label="Body(65)",shape=box];
+	    "cntrl66"[label="Sequence(66)",shape=box];
 	    "cntrl67"[label="ComputeIndex(67)"];
-	    "cntrl68"[label="Sequence(68)",shape=box];
-	    "cntrl69"[label="Sequence(69)",shape=box];
-	    "cntrl70"[label="Assign VGPR Add(DataFlowTag(254), DataFlowTag(255))(70)"];
-	    "cntrl71"[label="Body(71)",shape=box];
-	    "cntrl72"[label="Sequence(72)",shape=box];
-	    "cntrl73"[label="ForLoopIncrement(73)",shape=box];
-	    "cntrl74"[label="ComputeIndex(74)"];
-	    "cntrl75"[label="ComputeIndex(75)"];
+	    "cntrl68"[label="ComputeIndex(68)"];
+	    "cntrl69"[label="ComputeIndex(69)"];
+	    "cntrl70"[label="Sequence(70)",shape=box];
+	    "cntrl71"[label="Sequence(71)",shape=box];
+	    "cntrl72"[label="Assign VGPR Add(DataFlowTag(254), DataFlowTag(255))(72)"];
+	    "cntrl73"[label="Body(73)",shape=box];
+	    "cntrl74"[label="Sequence(74)",shape=box];
+	    "cntrl75"[label="ForLoopIncrement(75)",shape=box];
 	    "cntrl76"[label="ComputeIndex(76)"];
-	    "cntrl77"[label="Sequence(77)",shape=box];
-	    "cntrl78"[label="Sequence(78)",shape=box];
-	    "cntrl79"[label="Assign VGPR Add(DataFlowTag(261), DataFlowTag(262))(79)"];
-	    "cntrl80"[label="Body(80)",shape=box];
-	    "cntrl81"[label="Sequence(81)",shape=box];
-	    "cntrl82"[label="ForLoopIncrement(82)",shape=box];
-	    "cntrl83"[label="ComputeIndex(83)"];
-	    "cntrl84"[label="ComputeIndex(84)"];
-	    "cntrl85"[label="Body(85)",shape=box];
-	    "cntrl86"[label="Sequence(86)",shape=box];
-	    "cntrl87"[label="Sequence(87)",shape=box];
-	    "cntrl88"[label="Scope(88)"];
-	    "cntrl89"[label="Body(89)",shape=box];
-	    "cntrl90"[label="Sequence(90)",shape=box];
-	    "cntrl91"[label="ComputeIndex(91)"];
-	    "cntrl92"[label="ComputeIndex(92)"];
-	    "cntrl93"[label="Body(93)",shape=box];
-	    "cntrl94"[label="Sequence(94)",shape=box];
-	    "cntrl95"[label="Sequence(95)",shape=box];
-	    "cntrl96"[label="Scope(96)"];
+	    "cntrl77"[label="ComputeIndex(77)"];
+	    "cntrl78"[label="ComputeIndex(78)"];
+	    "cntrl79"[label="Sequence(79)",shape=box];
+	    "cntrl80"[label="Sequence(80)",shape=box];
+	    "cntrl81"[label="Assign VGPR Add(DataFlowTag(261), DataFlowTag(262))(81)"];
+	    "cntrl82"[label="Body(82)",shape=box];
+	    "cntrl83"[label="Sequence(83)",shape=box];
+	    "cntrl84"[label="ForLoopIncrement(84)",shape=box];
+	    "cntrl85"[label="ComputeIndex(85)"];
+	    "cntrl86"[label="ComputeIndex(86)"];
+	    "cntrl87"[label="Body(87)",shape=box];
+	    "cntrl88"[label="Sequence(88)",shape=box];
+	    "cntrl89"[label="Sequence(89)",shape=box];
+	    "cntrl90"[label="Scope(90)"];
+	    "cntrl91"[label="Body(91)",shape=box];
+	    "cntrl92"[label="Sequence(92)",shape=box];
+	    "cntrl93"[label="ComputeIndex(93)"];
+	    "cntrl94"[label="ComputeIndex(94)"];
+	    "cntrl95"[label="Body(95)",shape=box];
+	    "cntrl96"[label="Sequence(96)",shape=box];
 	    "cntrl97"[label="Sequence(97)",shape=box];
-	    "cntrl98"[label="ComputeIndex(98)"];
-	    "cntrl99"[label="ComputeIndex(99)"];
-	    "cntrl100"[label="Body(100)",shape=box];
-	    "cntrl101"[label="Sequence(101)",shape=box];
-	    "cntrl102"[label="Sequence(102)",shape=box];
+	    "cntrl98"[label="Scope(98)"];
+	    "cntrl99"[label="Sequence(99)",shape=box];
+	    "cntrl100"[label="ComputeIndex(100)"];
+	    "cntrl101"[label="ComputeIndex(101)"];
+	    "cntrl102"[label="Body(102)",shape=box];
+	    "cntrl103"[label="Sequence(103)",shape=box];
+	    "cntrl104"[label="Sequence(104)",shape=box];
 	    "cntrl1" -> "cntrl3"
 	    "cntrl1" -> "cntrl15"
 	    "cntrl1" -> "cntrl49"
@@ -4036,20 +4038,20 @@ namespace KernelGraphTest
 	    "cntrl15" -> "cntrl14"
 	    "cntrl18" -> "cntrl23"
 	    "cntrl19" -> "cntrl37"
-	    "cntrl21" -> "cntrl97"
+	    "cntrl21" -> "cntrl99"
 	    "cntrl22" -> "cntrl21"
 	    "cntrl23" -> "cntrl21"
 	    "cntrl26" -> "cntrl29"
 	    "cntrl26" -> "cntrl30"
 	    "cntrl26" -> "cntrl34"
 	    "cntrl26" -> "cntrl51"
-	    "cntrl26" -> "cntrl73"
-	    "cntrl26" -> "cntrl82"
+	    "cntrl26" -> "cntrl75"
+	    "cntrl26" -> "cntrl84"
 	    "cntrl29" -> "cntrl27"
 	    "cntrl30" -> "cntrl28"
 	    "cntrl31" -> "cntrl35"
 	    "cntrl31" -> "cntrl36"
-	    "cntrl32" -> "cntrl58"
+	    "cntrl32" -> "cntrl60"
 	    "cntrl34" -> "cntrl31"
 	    "cntrl35" -> "cntrl4"
 	    "cntrl36" -> "cntrl6"
@@ -4061,7 +4063,7 @@ namespace KernelGraphTest
 	    "cntrl42" -> "cntrl45"
 	    "cntrl42" -> "cntrl46"
 	    "cntrl42" -> "cntrl47"
-	    "cntrl42" -> "cntrl89"
+	    "cntrl42" -> "cntrl91"
 	    "cntrl45" -> "cntrl43"
 	    "cntrl46" -> "cntrl44"
 	    "cntrl47" -> "cntrl32"
@@ -4069,60 +4071,62 @@ namespace KernelGraphTest
 	    "cntrl49" -> "cntrl37"
 	    "cntrl50" -> "cntrl54"
 	    "cntrl51" -> "cntrl50"
-	    "cntrl52" -> "cntrl55"
-	    "cntrl53" -> "cntrl56"
-	    "cntrl54" -> "cntrl52"
-	    "cntrl55" -> "cntrl53"
-	    "cntrl56" -> "cntrl31"
-	    "cntrl57" -> "cntrl59"
-	    "cntrl57" -> "cntrl63"
-	    "cntrl57" -> "cntrl71"
-	    "cntrl57" -> "cntrl80"
-	    "cntrl57" -> "cntrl85"
-	    "cntrl58" -> "cntrl57"
-	    "cntrl59" -> "cntrl11"
-	    "cntrl60" -> "cntrl62"
-	    "cntrl61" -> "cntrl64"
-	    "cntrl62" -> "cntrl61"
-	    "cntrl63" -> "cntrl60"
-	    "cntrl64" -> "cntrl26"
-	    "cntrl65" -> "cntrl68"
-	    "cntrl66" -> "cntrl69"
-	    "cntrl67" -> "cntrl72"
-	    "cntrl68" -> "cntrl66"
-	    "cntrl69" -> "cntrl67"
-	    "cntrl71" -> "cntrl65"
-	    "cntrl72" -> "cntrl26"
-	    "cntrl73" -> "cntrl70"
-	    "cntrl74" -> "cntrl77"
-	    "cntrl75" -> "cntrl78"
-	    "cntrl76" -> "cntrl81"
-	    "cntrl77" -> "cntrl75"
-	    "cntrl78" -> "cntrl76"
-	    "cntrl80" -> "cntrl74"
-	    "cntrl81" -> "cntrl26"
-	    "cntrl82" -> "cntrl79"
-	    "cntrl83" -> "cntrl86"
-	    "cntrl84" -> "cntrl87"
-	    "cntrl85" -> "cntrl83"
-	    "cntrl86" -> "cntrl84"
-	    "cntrl87" -> "cntrl26"
-	    "cntrl88" -> "cntrl90"
-	    "cntrl88" -> "cntrl93"
-	    "cntrl89" -> "cntrl88"
-	    "cntrl90" -> "cntrl18"
-	    "cntrl91" -> "cntrl94"
-	    "cntrl92" -> "cntrl95"
-	    "cntrl93" -> "cntrl91"
-	    "cntrl94" -> "cntrl92"
-	    "cntrl95" -> "cntrl16"
-	    "cntrl96" -> "cntrl100"
-	    "cntrl97" -> "cntrl96"
-	    "cntrl98" -> "cntrl101"
-	    "cntrl99" -> "cntrl102"
-	    "cntrl100" -> "cntrl98"
-	    "cntrl101" -> "cntrl99"
-	    "cntrl102" -> "cntrl24"
+	    "cntrl52" -> "cntrl57"
+	    "cntrl53" -> "cntrl55"
+	    "cntrl54" -> "cntrl53"
+	    "cntrl55" -> "cntrl52"
+	    "cntrl56" -> "cntrl58"
+	    "cntrl57" -> "cntrl56"
+	    "cntrl58" -> "cntrl31"
+	    "cntrl59" -> "cntrl61"
+	    "cntrl59" -> "cntrl65"
+	    "cntrl59" -> "cntrl73"
+	    "cntrl59" -> "cntrl82"
+	    "cntrl59" -> "cntrl87"
+	    "cntrl60" -> "cntrl59"
+	    "cntrl61" -> "cntrl11"
+	    "cntrl62" -> "cntrl64"
+	    "cntrl63" -> "cntrl66"
+	    "cntrl64" -> "cntrl63"
+	    "cntrl65" -> "cntrl62"
+	    "cntrl66" -> "cntrl26"
+	    "cntrl67" -> "cntrl70"
+	    "cntrl68" -> "cntrl71"
+	    "cntrl69" -> "cntrl74"
+	    "cntrl70" -> "cntrl68"
+	    "cntrl71" -> "cntrl69"
+	    "cntrl73" -> "cntrl67"
+	    "cntrl74" -> "cntrl26"
+	    "cntrl75" -> "cntrl72"
+	    "cntrl76" -> "cntrl79"
+	    "cntrl77" -> "cntrl80"
+	    "cntrl78" -> "cntrl83"
+	    "cntrl79" -> "cntrl77"
+	    "cntrl80" -> "cntrl78"
+	    "cntrl82" -> "cntrl76"
+	    "cntrl83" -> "cntrl26"
+	    "cntrl84" -> "cntrl81"
+	    "cntrl85" -> "cntrl88"
+	    "cntrl86" -> "cntrl89"
+	    "cntrl87" -> "cntrl85"
+	    "cntrl88" -> "cntrl86"
+	    "cntrl89" -> "cntrl26"
+	    "cntrl90" -> "cntrl92"
+	    "cntrl90" -> "cntrl95"
+	    "cntrl91" -> "cntrl90"
+	    "cntrl92" -> "cntrl18"
+	    "cntrl93" -> "cntrl96"
+	    "cntrl94" -> "cntrl97"
+	    "cntrl95" -> "cntrl93"
+	    "cntrl96" -> "cntrl94"
+	    "cntrl97" -> "cntrl16"
+	    "cntrl98" -> "cntrl102"
+	    "cntrl99" -> "cntrl98"
+	    "cntrl100" -> "cntrl103"
+	    "cntrl101" -> "cntrl104"
+	    "cntrl102" -> "cntrl100"
+	    "cntrl103" -> "cntrl101"
+	    "cntrl104" -> "cntrl24"
 	    }
 	    "coord4" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
 	    "coord6" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
@@ -4248,8 +4252,8 @@ namespace KernelGraphTest
 	    "coord270" -> "cntrl52" [style=dotted,weight=0,arrowsize=0]
 	    "coord271" -> "cntrl52" [style=dotted,weight=0,arrowsize=0]
 	    "coord272" -> "cntrl52" [style=dotted,weight=0,arrowsize=0]
-	    "coord254" -> "cntrl70" [style=dotted,weight=0,arrowsize=0]
-	    "coord261" -> "cntrl79" [style=dotted,weight=0,arrowsize=0]
+	    "coord254" -> "cntrl72" [style=dotted,weight=0,arrowsize=0]
+	    "coord261" -> "cntrl81" [style=dotted,weight=0,arrowsize=0]
 	    }).";
 
         EXPECT_EQ(NormalizedSource(expected_lds), NormalizedSource(kgraph_lds_lower.toDOT(true)));
