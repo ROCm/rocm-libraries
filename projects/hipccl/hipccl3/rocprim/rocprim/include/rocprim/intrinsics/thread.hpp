@@ -222,13 +222,10 @@ void syncthreads()
 ROCPRIM_DEVICE ROCPRIM_INLINE
 void wave_barrier()
 {
-    __atomic_work_item_fence(__CLK_LOCAL_MEM_FENCE,
-                             __memory_order_release,
-                             __memory_scope_sub_group);
+    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "wavefront");
     __builtin_amdgcn_wave_barrier();
-    __atomic_work_item_fence(__CLK_LOCAL_MEM_FENCE,
-                             __memory_order_acquire,
-                             __memory_scope_sub_group);
+    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "wavefront");
+
 }
 
 namespace detail
