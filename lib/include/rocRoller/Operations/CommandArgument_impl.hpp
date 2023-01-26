@@ -247,7 +247,7 @@ namespace rocRoller
             return value<Value>();
         }
 
-        std::string operator()(CommandArgumentValue const& val) const
+        std::string call(CommandArgumentValue const& val) const
         {
             return std::visit(*this, val);
         }
@@ -256,7 +256,7 @@ namespace rocRoller
     inline std::string name(CommandArgumentValue const& val)
     {
         CommandArgumentValueNameVisitor v;
-        return v(val);
+        return v.call(val);
     }
 
     inline std::string toString(CommandArgumentValue const& val)
