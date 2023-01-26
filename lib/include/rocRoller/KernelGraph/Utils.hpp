@@ -29,12 +29,12 @@ namespace rocRoller
                                  int                                K,
                                  std::array<unsigned int, 3> const& workgroupSizes);
 
-        void loadWaveMacroTileFromLDS(KernelGraph&                      graph,
-                                      CoordinateGraph::MacroTile const& mac_tile,
-                                      int                               load_tag,
-                                      std::vector<int>&                 sdims,
-                                      int                               K,
-                                      int                               lds);
+        void updateLoadLDSMacroTile(KernelGraph&                      graph,
+                                    CoordinateGraph::MacroTile const& mac_tile,
+                                    int                               load_tag,
+                                    std::vector<int>&                 sdims,
+                                    int                               K,
+                                    int                               lds);
 
         void loadWaveMacroTile(KernelGraph&                      graph,
                                CoordinateGraph::MacroTile const& mac_tile,
@@ -71,11 +71,11 @@ namespace rocRoller
                                   std::vector<int>&                  sdims,
                                   std::array<unsigned int, 3> const& workgroupSizes);
 
-        void storeWaveMacroTileIntoLDS(KernelGraph&                      graph,
-                                       CoordinateGraph::MacroTile const& mac_tile,
-                                       int                               store_tag,
-                                       std::vector<int>&                 sdims,
-                                       int                               lds);
+        void updateStoreLDSMacroTile(KernelGraph&                      graph,
+                                     CoordinateGraph::MacroTile const& mac_tile,
+                                     int                               store_tag,
+                                     std::vector<int>&                 sdims,
+                                     int                               lds);
 
         void storeMacroTileIntoLDS(KernelGraph&                       graph,
                                    int                                store_tag,

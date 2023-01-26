@@ -496,6 +496,7 @@ namespace rocRoller
 
             // -1 is used to represent a "to be determined" size.
             std::vector<int> sizes;
+            std::vector<int> wsizes;
 
             ThreadTile() = delete;
 
@@ -503,11 +504,16 @@ namespace rocRoller
              * Construct ThreadTile dimension with fully specified sizes
              * and memory type (ie, LDS vs VGPR).
              */
-            ThreadTile(std::vector<int> const& sizes)
+            ThreadTile(MacroTile const& mac_tile)
                 : BaseDimension()
-                , rank(sizes.size())
-                , sizes(sizes)
+                , rank(mac_tile.rank)
+                , sizes(mac_tile.subTileSizes)
             {
+                wsizes.resize(rank);
+                for(int i = 0; i < rank; ++i)
+                {
+                    wsizes[i] = mac_tile.sizes[i] / sizes[i];
+                }
             }
 
             std::string name() const override

@@ -26,39 +26,76 @@ namespace rocRoller
 
             if(tile.memoryType == MemoryType::LDS)
             {
+                // change loadTiled to LoadLDSTile
+                graph.control.setElement(tag, LoadLDSTile(load.vtype));
+
+                graph.coordinates.deleteElement(
+                    std::vector<int>{user_tag}, std::vector<int>{tile_tag}, CT::isEdge<DataFlow>);
+                auto sdims = graph.coordinates.getOutputNodeIndices(user_tag, CT::isEdge<Split>)
+                                 .to<std::vector>();
+
                 auto lds = graph.coordinates.addElement(LDS());
 
-                auto storeLDS = graph.control.addElement(StoreLDSTile(load.vtype.dataType));
-                auto barrier  = graph.control.addElement(Barrier());
-                auto loadLDS  = graph.control.addElement(LoadLDSTile(load.vtype));
+                // remove workgroups, macrotile numbers and tile edges from sdims
+                updateLoadLDSMacroTile(graph, tile, tag, sdims, -1, lds);
 
-                graph.mapper.connect<LDS>(storeLDS, lds);
-                graph.mapper.connect<MacroTile>(storeLDS, tile_tag);
+                // add new loadTiled node to load a macrotile into VGPRs from global memory
+                auto load_macrotile_from_global = graph.control.addElement(LoadTiled(load.vtype));
+                graph.mapper.connect<User>(load_macrotile_from_global, user_tag);
 
-                graph.mapper.connect<LDS>(loadLDS, lds);
-                graph.mapper.connect<MacroTile>(loadLDS, tile_tag);
-
-                auto workgroupSizes = context->kernel()->workgroupSize();
-                loadMacroTileFromLDS(graph, loadLDS, lds, tile_tag, workgroupSizes);
-                storeMacroTileIntoLDS(graph, storeLDS, lds, tile_tag, workgroupSizes);
-
-                graph.coordinates.addElement(DataFlow(), {user_tag}, {tile_tag});
-
-                // Find all edges leaving from load. Those should be changed to leave from loadLDS.
-                auto outgoing_edges = graph.control.getNeighbours<Graph::Direction::Downstream>(tag)
+                // Find all incoming edges into tag. Those should be changed to come into load_macrotile_from_global.
+                auto incoming_edges = graph.control.getNeighbours<Graph::Direction::Upstream>(tag)
                                           .to<std::vector>();
-                for(auto e : outgoing_edges)
+                for(auto e : incoming_edges)
                 {
                     auto elem = graph.control.getElement(e);
-                    auto dst  = graph.control.getNeighbours<Graph::Direction::Downstream>(e)
+                    auto src  = graph.control.getNeighbours<Graph::Direction::Upstream>(e)
                                    .to<std::vector>();
                     graph.control.deleteElement(e);
-                    graph.control.addElement(e, elem, std::vector<int>{loadLDS}, dst);
+                    graph.control.addElement(
+                        e, elem, src, std::vector<int>{load_macrotile_from_global});
                 }
 
-                graph.control.addElement(Sequence(), {tag}, {storeLDS});
-                graph.control.addElement(Sequence(), {storeLDS}, {barrier});
-                graph.control.addElement(Sequence(), {barrier}, {loadLDS});
+                // create an internal macrotile to be loaded by one workgroup
+                auto workgroupSizes = context->kernel()->workgroupSize();
+                auto internalTile   = graph.coordinates.addElement(
+                    MacroTile(tile.sizes, MemoryType::VGPR, tile.subTileSizes));
+                auto internalTileDim = graph.coordinates.getNode<MacroTile>(internalTile);
+                graph.coordinates.setElement(internalTile, internalTileDim);
+                graph.mapper.connect<MacroTile>(load_macrotile_from_global, internalTile);
+
+                // user --DataFlow--> internalTile
+                graph.coordinates.addElement(DataFlow(), {user_tag}, {internalTile});
+
+                // lower tile LoadTiled : load macrotile from global memory
+                loadMacroTileForLDS(graph,
+                                    load_macrotile_from_global,
+                                    user_tag,
+                                    internalTile,
+                                    sdims,
+                                    -1,
+                                    workgroupSizes);
+
+                // add store from VGPRs to LDS following this new loadTiled
+                auto store_macrotile_into_LDS
+                    = graph.control.addElement(StoreLDSTile(load.vtype.dataType));
+                auto barrier = graph.control.addElement(Barrier());
+                graph.control.addElement(
+                    Sequence(), {load_macrotile_from_global}, {store_macrotile_into_LDS});
+                graph.control.addElement(Sequence(), {store_macrotile_into_LDS}, {barrier});
+                graph.control.addElement(Sequence(), {barrier}, {tag});
+                graph.mapper.connect<MacroTile>(store_macrotile_into_LDS, internalTile);
+
+                // lower tile StoreLDSTile : store macrotile into LDS
+                storeMacroTileIntoLDS(
+                    graph, store_macrotile_into_LDS, lds, internalTile, workgroupSizes);
+
+                // LDS --DataFlow--> macrotile
+                graph.coordinates.addElement(DataFlow(), {lds}, {tile_tag});
+
+                graph.mapper.connect<LDS>(tag, lds);
+                graph.mapper.connect<LDS>(load_macrotile_from_global, lds);
+                graph.mapper.connect<LDS>(store_macrotile_into_LDS, lds);
             }
         }
 
@@ -95,7 +132,7 @@ namespace rocRoller
                 auto lds = graph.coordinates.addElement(LDS());
 
                 // remove workgroups, macrotile numbers and tile edges from sdims
-                loadWaveMacroTileFromLDS(graph, macrotile, load, sdims, K, lds);
+                updateLoadLDSMacroTile(graph, macrotile, load, sdims, K, lds);
 
                 // add new loadTiled node to load a macrotile into VGPRs from global memory under the forK loop
                 auto load_macrotile_from_global = graph.control.addElement(LoadTiled(vtype));
@@ -193,7 +230,7 @@ namespace rocRoller
                 auto lds = graph.coordinates.addElement(LDS());
 
                 // remove workgroups, macrotile numbers and tile edges from sdims
-                storeWaveMacroTileIntoLDS(graph, macrotile, store, sdims, lds);
+                updateStoreLDSMacroTile(graph, macrotile, store, sdims, lds);
 
                 // macrotile --DataFlow--> LDS
                 graph.coordinates.addElement(DataFlow(), {tile}, {lds});

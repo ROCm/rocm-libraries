@@ -48,14 +48,14 @@ namespace rocRoller
             return {dimK, forK};
         }
 
-        void loadWaveMacroTileFromLDS(KernelGraph&      graph,
-                                      MacroTile const&  mac_tile,
-                                      int               load_tag,
-                                      std::vector<int>& sdims,
-                                      int               K,
-                                      int               lds)
+        void updateLoadLDSMacroTile(KernelGraph&      graph,
+                                    MacroTile const&  mac_tile,
+                                    int               load_tag,
+                                    std::vector<int>& sdims,
+                                    int               K,
+                                    int               lds)
         {
-            // given that the loadWaveMacroTile has already lowered the macrotile for LoadTiled
+            // given that the loadMacroTile has already lowered the macrotile for LoadTiled
             // before it is transformed to LoadLDSTile
 
             if(mac_tile.layoutType == LayoutType::MATRIX_A)
@@ -75,8 +75,7 @@ namespace rocRoller
                 graph.coordinates.deleteElement(
                     std::vector<int>{a_tilenum_y}, std::vector<int>{K}, CT::isEdge<PassThrough>);
             }
-
-            if(mac_tile.layoutType == LayoutType::MATRIX_B)
+            else if(mac_tile.layoutType == LayoutType::MATRIX_B)
             {
                 // remove passthrough between B column block and y-workgroup
                 // remove y-workgroup
@@ -92,6 +91,24 @@ namespace rocRoller
                 auto b_tilenum_x = graph.mapper.get<MacroTileNumber>(load_tag, 0);
                 graph.coordinates.deleteElement(
                     std::vector<int>{b_tilenum_x}, std::vector<int>{K}, CT::isEdge<PassThrough>);
+            }
+            else
+            {
+                auto tilenum_x   = graph.mapper.get<MacroTileNumber>(load_tag, 0);
+                auto workgroup_x = graph.mapper.get<Workgroup>(load_tag, 0);
+                graph.mapper.disconnect<Workgroup>(load_tag, workgroup_x, 0);
+                graph.coordinates.deleteElement(std::vector<int>{tilenum_x},
+                                                std::vector<int>{workgroup_x},
+                                                CT::isEdge<PassThrough>);
+                graph.coordinates.deleteElement(workgroup_x);
+
+                auto tilenum_y   = graph.mapper.get<MacroTileNumber>(load_tag, 1);
+                auto workgroup_y = graph.mapper.get<Workgroup>(load_tag, 1);
+                graph.mapper.disconnect<Workgroup>(load_tag, workgroup_y, 1);
+                graph.coordinates.deleteElement(std::vector<int>{tilenum_y},
+                                                std::vector<int>{workgroup_y},
+                                                CT::isEdge<PassThrough>);
+                graph.coordinates.deleteElement(workgroup_y);
             }
 
             std::vector<int> i_mac;
@@ -294,7 +311,7 @@ namespace rocRoller
             auto workitem
                 = graph.coordinates.addElement(Workitem(0, literal(workgroupSizes.at(0))));
 
-            auto thr_tile     = ThreadTile(mac_tile.subTileSizes);
+            auto thr_tile     = ThreadTile(mac_tile);
             auto thr_tile_tag = graph.coordinates.addElement(thr_tile);
 
             auto i_thr_x = graph.coordinates.addElement(thr_tile.tileIndex(0));
@@ -352,7 +369,7 @@ namespace rocRoller
 
             graph.coordinates.addElement(Flatten(), {i_mac_x, i_mac_y}, {mac_tile_tag});
 
-            auto thr_tile     = ThreadTile(mac_tile.subTileSizes);
+            auto thr_tile     = ThreadTile(mac_tile);
             auto thr_tile_tag = graph.coordinates.addElement(thr_tile);
 
             auto n_thr_x = graph.coordinates.addElement(thr_tile.tileNumber(0));
@@ -365,14 +382,14 @@ namespace rocRoller
 
             graph.coordinates.addElement(Tile(), {thr_tile_tag}, {i_thr_x, i_thr_y});
 
-            auto workitem_x
-                = graph.coordinates.addElement(Workitem(0, literal(workgroupSizes.at(0))));
-            graph.coordinates.addElement(Flatten(), {n_thr_x, n_thr_y}, {workitem_x});
-
-            graph.coordinates.addElement(Tile(), {mac_tile_tag}, {thr_tile_tag, workitem_x});
-
             if(mac_tile.layoutType == LayoutType::MATRIX_A)
             {
+                auto workitem_x
+                    = graph.coordinates.addElement(Workitem(0, literal(workgroupSizes.at(0))));
+                graph.coordinates.addElement(Flatten(), {n_thr_x, n_thr_y}, {workitem_x});
+
+                graph.coordinates.addElement(Tile(), {mac_tile_tag}, {thr_tile_tag, workitem_x});
+
                 auto workgroup_x = graph.coordinates.addElement(Workgroup(0));
 
                 graph.mapper.connect<Workgroup>(load_tag, workgroup_x, 0);
@@ -380,14 +397,41 @@ namespace rocRoller
                 // A row block is x-workgroup, column block is for loop index
                 graph.coordinates.addElement(PassThrough(), {n_mac_y}, {K});
             }
-            else
+            else if(mac_tile.layoutType == LayoutType::MATRIX_B)
             {
+                auto workitem_x
+                    = graph.coordinates.addElement(Workitem(0, literal(workgroupSizes.at(0))));
+                graph.coordinates.addElement(Flatten(), {n_thr_x, n_thr_y}, {workitem_x});
+
+                graph.coordinates.addElement(Tile(), {mac_tile_tag}, {thr_tile_tag, workitem_x});
+
                 auto workgroup_y = graph.coordinates.addElement(Workgroup(1));
 
                 graph.mapper.connect<Workgroup>(load_tag, workgroup_y, 1);
                 // B row block is for loop index, column block is y-workgroup
                 graph.coordinates.addElement(PassThrough(), {n_mac_x}, {K});
                 graph.coordinates.addElement(PassThrough(), {n_mac_y}, {workgroup_y});
+            }
+            else
+            {
+                auto workitem_x
+                    = graph.coordinates.addElement(Workitem(0, literal(workgroupSizes.at(0))));
+                auto workitem_y
+                    = graph.coordinates.addElement(Workitem(1, literal(workgroupSizes.at(1))));
+
+                graph.coordinates.addElement(Tile(), {i_mac_x}, {i_thr_x, n_thr_x});
+                graph.coordinates.addElement(Tile(), {i_mac_y}, {i_thr_y, n_thr_y});
+
+                graph.coordinates.addElement(PassThrough(), {n_thr_x}, {workitem_x});
+                graph.coordinates.addElement(PassThrough(), {n_thr_y}, {workitem_y});
+
+                auto workgroup_x = graph.coordinates.addElement(Workgroup(0));
+                graph.coordinates.addElement(PassThrough(), {n_mac_x}, {workgroup_x});
+                graph.mapper.connect<Workgroup>(load_tag, workgroup_x, 0);
+
+                auto workgroup_y = graph.coordinates.addElement(Workgroup(1));
+                graph.coordinates.addElement(PassThrough(), {n_mac_y}, {workgroup_y});
+                graph.mapper.connect<Workgroup>(load_tag, workgroup_y, 1);
             }
         }
 
@@ -450,7 +494,7 @@ namespace rocRoller
                 auto workitem_x = graph.coordinates.addElement(Workitem(0));
                 auto workitem_y = graph.coordinates.addElement(Workitem(1));
 
-                auto thr_tile = ThreadTile(mac_tile.subTileSizes);
+                auto thr_tile = ThreadTile(mac_tile);
 
                 auto n_thr_x = graph.coordinates.addElement(thr_tile.tileNumber(0));
                 auto n_thr_y = graph.coordinates.addElement(thr_tile.tileNumber(1));
@@ -488,13 +532,13 @@ namespace rocRoller
             }
         }
 
-        void storeWaveMacroTileIntoLDS(KernelGraph&      graph,
-                                       MacroTile const&  mac_tile,
-                                       int               store_tag,
-                                       std::vector<int>& sdims,
-                                       int               lds)
+        void updateStoreLDSMacroTile(KernelGraph&      graph,
+                                     MacroTile const&  mac_tile,
+                                     int               store_tag,
+                                     std::vector<int>& sdims,
+                                     int               lds)
         {
-            // given that the storeWaveMacroTile has already lowered the macrotile for StoreTiled
+            // given that the storeMacroTile has already lowered the macrotile for StoreTiled
             // before it is transformed to StoreLDSTile
 
             // remove macrotile numbers and workgroups
@@ -648,10 +692,7 @@ namespace rocRoller
                 mac_tile.sizes[0],
                 mac_tile.sizes[1]);
 
-            auto workitem_x
-                = graph.coordinates.addElement(Workitem(0, literal(workgroupSizes.at(0))));
-
-            auto thr_tile     = ThreadTile(mac_tile.subTileSizes);
+            auto thr_tile     = ThreadTile(mac_tile);
             auto thr_tile_tag = graph.coordinates.addElement(thr_tile);
 
             auto i_thr_x = graph.coordinates.addElement(thr_tile.tileIndex(0));
@@ -662,9 +703,35 @@ namespace rocRoller
             graph.mapper.connect<ThreadTileIndex>(store_tag, i_thr_x, 0);
             graph.mapper.connect<ThreadTileIndex>(store_tag, i_thr_y, 1);
 
-            // each workitem and its vgpr contributes towards the offset calculation
-            graph.coordinates.addElement(Flatten(), {thr_tile_tag, workitem_x}, {mac_tile_tag});
-            graph.coordinates.addElement(PassThrough(), {mac_tile_tag}, {lds_tag});
+            if(mac_tile.layoutType == LayoutType::MATRIX_A
+               || mac_tile.layoutType == LayoutType::MATRIX_B)
+            {
+                auto workitem_x
+                    = graph.coordinates.addElement(Workitem(0, literal(workgroupSizes.at(0))));
+
+                // each workitem and its vgpr contributes towards the offset calculation
+                graph.coordinates.addElement(Flatten(), {thr_tile_tag, workitem_x}, {mac_tile_tag});
+                graph.coordinates.addElement(PassThrough(), {mac_tile_tag}, {lds_tag});
+            }
+            else
+            {
+                auto workitem_x
+                    = graph.coordinates.addElement(Workitem(0, literal(workgroupSizes.at(0))));
+                auto workitem_y
+                    = graph.coordinates.addElement(Workitem(1, literal(workgroupSizes.at(1))));
+                auto n_thr_x = graph.coordinates.addElement(thr_tile.tileNumber(0));
+                auto n_thr_y = graph.coordinates.addElement(thr_tile.tileNumber(1));
+                graph.coordinates.addElement(PassThrough(), {workitem_x}, {n_thr_x});
+                graph.coordinates.addElement(PassThrough(), {workitem_y}, {n_thr_y});
+
+                auto i_mac_x = graph.coordinates.addElement(mac_tile.tileIndex(0));
+                auto i_mac_y = graph.coordinates.addElement(mac_tile.tileIndex(1));
+
+                graph.coordinates.addElement(Flatten(), {i_thr_x, n_thr_x}, {i_mac_x});
+                graph.coordinates.addElement(Flatten(), {i_thr_y, n_thr_y}, {i_mac_y});
+
+                graph.coordinates.addElement(Flatten(), {i_mac_x, i_mac_y}, {lds_tag});
+            }
 
             //macrotile --DataFlow--> LDS
             graph.coordinates.addElement(DataFlow(), {mac_tile_tag}, {lds_tag});
@@ -716,7 +783,7 @@ namespace rocRoller
             auto workitem_x
                 = graph.coordinates.addElement(Workitem(0, literal(workgroupSizes.at(0))));
 
-            auto thr_tile     = ThreadTile(mac_tile.subTileSizes);
+            auto thr_tile     = ThreadTile(mac_tile);
             auto thr_tile_tag = graph.coordinates.addElement(thr_tile);
 
             auto i_thr_x = graph.coordinates.addElement(thr_tile.tileIndex(0));
@@ -792,7 +859,7 @@ namespace rocRoller
                 auto workitem_y
                     = graph.coordinates.addElement(Workitem(1, literal(workgroupSizes.at(1))));
 
-                auto thr_tile     = ThreadTile(mac_tile.subTileSizes);
+                auto thr_tile     = ThreadTile(mac_tile);
                 auto thr_tile_tag = graph.coordinates.addElement(thr_tile);
 
                 auto n_thr_x = graph.coordinates.addElement(thr_tile.tileNumber(0));

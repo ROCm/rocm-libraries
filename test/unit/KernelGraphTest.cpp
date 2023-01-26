@@ -3194,8 +3194,8 @@ namespace KernelGraphTest
 	    "coord227"[label="Tile(227)",shape=box];
 	    "coord228"[label="Flatten(228)",shape=box];
 	    "coord229"[label="ThreadTile{NA}(229)"];
-	    "coord230"[label="ThreadTileNumber{0, 1j}(230)"];
-	    "coord231"[label="ThreadTileNumber{1, 1j}(231)"];
+	    "coord230"[label="ThreadTileNumber{0, 0j}(230)"];
+	    "coord231"[label="ThreadTileNumber{1, 16j}(231)"];
 	    "coord232"[label="ThreadTileIndex{0, 2048j}(232)"];
 	    "coord233"[label="ThreadTileIndex{1, 1j}(233)"];
 	    "coord234"[label="Tile(234)",shape=box];
@@ -3205,11 +3205,11 @@ namespace KernelGraphTest
 	    "coord238"[label="Workgroup{0, NA}(238)"];
 	    "coord239"[label="PassThrough(239)",shape=box];
 	    "coord240"[label="PassThrough(240)",shape=box];
-	    "coord241"[label="Workitem{0, 1j}(241)"];
-	    "coord242"[label="ThreadTile{NA}(242)"];
-	    "coord243"[label="ThreadTileIndex{0, 2048j}(243)"];
-	    "coord244"[label="ThreadTileIndex{1, 1j}(244)"];
-	    "coord245"[label="Flatten(245)",shape=box];
+	    "coord241"[label="ThreadTile{NA}(241)"];
+	    "coord242"[label="ThreadTileIndex{0, 2048j}(242)"];
+	    "coord243"[label="ThreadTileIndex{1, 1j}(243)"];
+	    "coord244"[label="Flatten(244)",shape=box];
+	    "coord245"[label="Workitem{0, 1j}(245)"];
 	    "coord246"[label="Flatten(246)",shape=box];
 	    "coord247"[label="PassThrough(247)",shape=box];
 	    "coord248"[label="DataFlow(248)",shape=box];
@@ -3537,15 +3537,15 @@ namespace KernelGraphTest
 	    "coord239" -> "coord238"
 	    "coord240" -> "coord200"
 	    "coord241" -> "coord246"
-	    "coord242" -> "coord246"
-	    "coord243" -> "coord245"
-	    "coord243" -> "coord268"
-	    "coord243" -> "coord269"
-	    "coord243" -> "coord272"
-	    "coord244" -> "coord270"
-	    "coord244" -> "coord271"
-	    "coord244" -> "coord245"
-	    "coord245" -> "coord242"
+	    "coord242" -> "coord244"
+	    "coord242" -> "coord268"
+	    "coord242" -> "coord269"
+	    "coord242" -> "coord272"
+	    "coord243" -> "coord270"
+	    "coord243" -> "coord271"
+	    "coord243" -> "coord244"
+	    "coord244" -> "coord241"
+	    "coord245" -> "coord246"
 	    "coord246" -> "coord220"
 	    "coord247" -> "coord218"
 	    "coord248" -> "coord218"
@@ -3925,12 +3925,12 @@ namespace KernelGraphTest
 	    }
 	    {
 	    rank=same
-	    "coord243"->"coord244"[style=invis]
+	    "coord242"->"coord243"[style=invis]
 	    rankdir=LR
 	    }
 	    {
 	    rank=same
-	    "coord242"->"coord241"[style=invis]
+	    "coord241"->"coord245"[style=invis]
 	    rankdir=LR
 	    }
 	    subgraph clusterCF {"cntrl1"[label="Kernel(1)"];
@@ -4245,8 +4245,8 @@ namespace KernelGraphTest
 	    "coord267" -> "cntrl50" [style=dotted,weight=0,arrowsize=0]
 	    "coord218" -> "cntrl52" [style=dotted,weight=0,arrowsize=0]
 	    "coord220" -> "cntrl52" [style=dotted,weight=0,arrowsize=0]
+	    "coord242" -> "cntrl52" [style=dotted,weight=0,arrowsize=0]
 	    "coord243" -> "cntrl52" [style=dotted,weight=0,arrowsize=0]
-	    "coord244" -> "cntrl52" [style=dotted,weight=0,arrowsize=0]
 	    "coord268" -> "cntrl52" [style=dotted,weight=0,arrowsize=0]
 	    "coord269" -> "cntrl52" [style=dotted,weight=0,arrowsize=0]
 	    "coord270" -> "cntrl52" [style=dotted,weight=0,arrowsize=0]
@@ -4688,7 +4688,6 @@ namespace KernelGraphTest
 	    "coord11"[label="SubDimension{1, CommandArgument(Load_Tiled_0_size_1)}(11)"];
 	    "coord12"[label="Split(12)",shape=box];
 	    "coord13"[label="MacroTile{16,8}(13)"];
-	    "coord14"[label="DataFlow(14)",shape=box];
 	    "coord15"[label="MacroTile{16,8}(15)"];
 	    "coord16"[label="DataFlow(16)",shape=box];
 	    "coord17"[label="MacroTile{16,8}(17)"];
@@ -4711,29 +4710,21 @@ namespace KernelGraphTest
 	    "coord34"[label="PassThrough(34)",shape=box];
 	    "coord35"[label="Workitem{0, NA}(35)"];
 	    "coord36"[label="Workitem{1, NA}(36)"];
-	    "coord37"[label="ThreadTileNumber{0, 1j}(37)"];
-	    "coord38"[label="ThreadTileNumber{1, 1j}(38)"];
+	    "coord37"[label="ThreadTileNumber{0, 4j}(37)"];
+	    "coord38"[label="ThreadTileNumber{1, 4j}(38)"];
 	    "coord39"[label="ThreadTileIndex{0, 4j}(39)"];
 	    "coord40"[label="ThreadTileIndex{1, 2j}(40)"];
 	    "coord41"[label="Tile(41)",shape=box];
 	    "coord42"[label="Tile(42)",shape=box];
 	    "coord43"[label="PassThrough(43)",shape=box];
 	    "coord44"[label="PassThrough(44)",shape=box];
-	    "coord45"[label="MacroTileNumber{0, 1j}(45)"];
-	    "coord46"[label="MacroTileNumber{1, 1j}(46)"];
 	    "coord47"[label="MacroTileIndex{0, 16j}(47)"];
 	    "coord48"[label="MacroTileIndex{1, 8j}(48)"];
-	    "coord49"[label="Workgroup{0, NA}(49)"];
-	    "coord50"[label="Workgroup{1, NA}(50)"];
 	    "coord51"[label="Flatten(51)",shape=box];
-	    "coord52"[label="Tile(52)",shape=box];
-	    "coord53"[label="Tile(53)",shape=box];
-	    "coord54"[label="PassThrough(54)",shape=box];
-	    "coord55"[label="PassThrough(55)",shape=box];
 	    "coord56"[label="Workitem{0, NA}(56)"];
 	    "coord57"[label="Workitem{1, NA}(57)"];
-	    "coord58"[label="ThreadTileNumber{0, 1j}(58)"];
-	    "coord59"[label="ThreadTileNumber{1, 1j}(59)"];
+	    "coord58"[label="ThreadTileNumber{0, 4j}(58)"];
+	    "coord59"[label="ThreadTileNumber{1, 4j}(59)"];
 	    "coord60"[label="ThreadTileIndex{0, 4j}(60)"];
 	    "coord61"[label="ThreadTileIndex{1, 2j}(61)"];
 	    "coord62"[label="Tile(62)",shape=box];
@@ -4755,8 +4746,8 @@ namespace KernelGraphTest
 	    "coord78"[label="Workitem{0, 1j}(78)"];
 	    "coord79"[label="Workitem{1, 1j}(79)"];
 	    "coord80"[label="ThreadTile{NA}(80)"];
-	    "coord81"[label="ThreadTileNumber{0, 1j}(81)"];
-	    "coord82"[label="ThreadTileNumber{1, 1j}(82)"];
+	    "coord81"[label="ThreadTileNumber{0, 4j}(81)"];
+	    "coord82"[label="ThreadTileNumber{1, 4j}(82)"];
 	    "coord83"[label="ThreadTileIndex{0, 4j}(83)"];
 	    "coord84"[label="ThreadTileIndex{1, 2j}(84)"];
 	    "coord85"[label="Split(85)",shape=box];
@@ -4765,63 +4756,88 @@ namespace KernelGraphTest
 	    "coord88"[label="PassThrough(88)",shape=box];
 	    "coord89"[label="PassThrough(89)",shape=box];
 	    "coord90"[label="LDS{NA}(90)"];
-	    "coord91"[label="Workitem{0, 1j}(91)"];
-	    "coord92"[label="ThreadTile{NA}(92)"];
-	    "coord93"[label="ThreadTileIndex{0, 4j}(93)"];
-	    "coord94"[label="ThreadTileIndex{1, 2j}(94)"];
-	    "coord95"[label="Tile(95)",shape=box];
-	    "coord96"[label="Tile(96)",shape=box];
-	    "coord97"[label="PassThrough(97)",shape=box];
-	    "coord98"[label="DataFlow(98)",shape=box];
-	    "coord99"[label="Workitem{0, 1j}(99)"];
-	    "coord100"[label="ThreadTile{NA}(100)"];
-	    "coord101"[label="ThreadTileIndex{0, 4j}(101)"];
-	    "coord102"[label="ThreadTileIndex{1, 2j}(102)"];
-	    "coord103"[label="Flatten(103)",shape=box];
-	    "coord104"[label="Flatten(104)",shape=box];
-	    "coord105"[label="PassThrough(105)",shape=box];
-	    "coord106"[label="DataFlow(106)",shape=box];
-	    "coord107"[label="DataFlow(107)",shape=box];
-	    "coord108"[label="Offset(108)",shape=box];
-	    "coord109"[label="Stride(109)",shape=box];
-	    "coord110"[label="Offset(110)",shape=box];
-	    "coord111"[label="Stride(111)",shape=box];
-	    "coord112"[label="Buffer(112)",shape=box];
-	    "coord113"[label="Offset(113)",shape=box];
-	    "coord114"[label="Stride(114)",shape=box];
-	    "coord115"[label="Offset(115)",shape=box];
-	    "coord116"[label="Stride(116)",shape=box];
-	    "coord117"[label="Buffer(117)",shape=box];
-	    "coord118"[label="Offset(118)",shape=box];
-	    "coord119"[label="Stride(119)",shape=box];
-	    "coord120"[label="Offset(120)",shape=box];
-	    "coord121"[label="Stride(121)",shape=box];
-	    "coord122"[label="Buffer(122)",shape=box];
-	    "coord123"[label="Offset(123)",shape=box];
-	    "coord124"[label="Stride(124)",shape=box];
-	    "coord125"[label="Offset(125)",shape=box];
-	    "coord126"[label="Stride(126)",shape=box];
-	    "coord127"[label="Buffer(127)",shape=box];
-	    "coord128"[label="Offset(128)",shape=box];
-	    "coord129"[label="Stride(129)",shape=box];
-	    "coord130"[label="Offset(130)",shape=box];
-	    "coord131"[label="Stride(131)",shape=box];
-	    "coord132"[label="Buffer(132)",shape=box];
+	    "coord91"[label="Tile(91)",shape=box];
+	    "coord92"[label="MacroTile{16,8}(92)"];
+	    "coord93"[label="DataFlow(93)",shape=box];
+	    "coord94"[label="MacroTileNumber{0, 1j}(94)"];
+	    "coord95"[label="MacroTileNumber{1, 1j}(95)"];
+	    "coord96"[label="MacroTileIndex{0, 16j}(96)"];
+	    "coord97"[label="MacroTileIndex{1, 8j}(97)"];
+	    "coord98"[label="Tile(98)",shape=box];
+	    "coord99"[label="Tile(99)",shape=box];
+	    "coord100"[label="Flatten(100)",shape=box];
+	    "coord101"[label="ThreadTile{NA}(101)"];
+	    "coord102"[label="ThreadTileNumber{0, 4j}(102)"];
+	    "coord103"[label="ThreadTileNumber{1, 4j}(103)"];
+	    "coord104"[label="ThreadTileIndex{0, 4j}(104)"];
+	    "coord105"[label="ThreadTileIndex{1, 2j}(105)"];
+	    "coord106"[label="Tile(106)",shape=box];
+	    "coord107"[label="Workitem{0, 1j}(107)"];
+	    "coord108"[label="Workitem{1, 1j}(108)"];
+	    "coord109"[label="Tile(109)",shape=box];
+	    "coord110"[label="Tile(110)",shape=box];
+	    "coord111"[label="PassThrough(111)",shape=box];
+	    "coord112"[label="PassThrough(112)",shape=box];
+	    "coord113"[label="Workgroup{0, NA}(113)"];
+	    "coord114"[label="PassThrough(114)",shape=box];
+	    "coord115"[label="Workgroup{1, NA}(115)"];
+	    "coord116"[label="PassThrough(116)",shape=box];
+	    "coord117"[label="ThreadTile{NA}(117)"];
+	    "coord118"[label="ThreadTileIndex{0, 4j}(118)"];
+	    "coord119"[label="ThreadTileIndex{1, 2j}(119)"];
+	    "coord120"[label="Flatten(120)",shape=box];
+	    "coord121"[label="Workitem{0, 1j}(121)"];
+	    "coord122"[label="Workitem{1, 1j}(122)"];
+	    "coord123"[label="ThreadTileNumber{0, 4j}(123)"];
+	    "coord124"[label="ThreadTileNumber{1, 4j}(124)"];
+	    "coord125"[label="PassThrough(125)",shape=box];
+	    "coord126"[label="PassThrough(126)",shape=box];
+	    "coord127"[label="MacroTileIndex{0, 16j}(127)"];
+	    "coord128"[label="MacroTileIndex{1, 8j}(128)"];
+	    "coord129"[label="Flatten(129)",shape=box];
+	    "coord130"[label="Flatten(130)",shape=box];
+	    "coord131"[label="Flatten(131)",shape=box];
+	    "coord132"[label="DataFlow(132)",shape=box];
+	    "coord133"[label="DataFlow(133)",shape=box];
+	    "coord134"[label="Offset(134)",shape=box];
+	    "coord135"[label="Stride(135)",shape=box];
+	    "coord136"[label="Offset(136)",shape=box];
+	    "coord137"[label="Stride(137)",shape=box];
+	    "coord138"[label="Buffer(138)",shape=box];
+	    "coord139"[label="Offset(139)",shape=box];
+	    "coord140"[label="Stride(140)",shape=box];
+	    "coord141"[label="Offset(141)",shape=box];
+	    "coord142"[label="Stride(142)",shape=box];
+	    "coord143"[label="Buffer(143)",shape=box];
+	    "coord144"[label="Offset(144)",shape=box];
+	    "coord145"[label="Stride(145)",shape=box];
+	    "coord146"[label="Offset(146)",shape=box];
+	    "coord147"[label="Stride(147)",shape=box];
+	    "coord148"[label="Buffer(148)",shape=box];
+	    "coord149"[label="Offset(149)",shape=box];
+	    "coord150"[label="Stride(150)",shape=box];
+	    "coord151"[label="Offset(151)",shape=box];
+	    "coord152"[label="Stride(152)",shape=box];
+	    "coord153"[label="Buffer(153)",shape=box];
+	    "coord154"[label="Offset(154)",shape=box];
+	    "coord155"[label="Stride(155)",shape=box];
+	    "coord156"[label="Offset(156)",shape=box];
+	    "coord157"[label="Stride(157)",shape=box];
+	    "coord158"[label="Buffer(158)",shape=box];
 	    "coord1" -> "coord12"
-	    "coord1" -> "coord14"
-	    "coord1" -> "coord107"
-	    "coord1" -> "coord113"
-	    "coord1" -> "coord114"
-	    "coord1" -> "coord115"
-	    "coord1" -> "coord116"
-	    "coord1" -> "coord117"
+	    "coord1" -> "coord93"
+	    "coord1" -> "coord139"
+	    "coord1" -> "coord140"
+	    "coord1" -> "coord141"
+	    "coord1" -> "coord142"
+	    "coord1" -> "coord143"
 	    "coord2" -> "coord5"
 	    "coord2" -> "coord7"
-	    "coord2" -> "coord108"
-	    "coord2" -> "coord109"
-	    "coord2" -> "coord110"
-	    "coord2" -> "coord111"
-	    "coord2" -> "coord112"
+	    "coord2" -> "coord134"
+	    "coord2" -> "coord135"
+	    "coord2" -> "coord136"
+	    "coord2" -> "coord137"
+	    "coord2" -> "coord138"
 	    "coord3" -> "coord31"
 	    "coord4" -> "coord32"
 	    "coord5" -> "coord3"
@@ -4830,15 +4846,11 @@ namespace KernelGraphTest
 	    "coord7" -> "coord6"
 	    "coord8" -> "coord18"
 	    "coord9" -> "coord8"
-	    "coord10" -> "coord52"
-	    "coord11" -> "coord53"
+	    "coord10" -> "coord98"
+	    "coord11" -> "coord99"
 	    "coord12" -> "coord10"
 	    "coord12" -> "coord11"
 	    "coord13" -> "coord16"
-	    "coord13" -> "coord96"
-	    "coord13" -> "coord105"
-	    "coord13" -> "coord106"
-	    "coord14" -> "coord13"
 	    "coord15" -> "coord18"
 	    "coord16" -> "coord15"
 	    "coord17" -> "coord23"
@@ -4868,19 +4880,11 @@ namespace KernelGraphTest
 	    "coord42" -> "coord40"
 	    "coord43" -> "coord35"
 	    "coord44" -> "coord36"
-	    "coord45" -> "coord54"
-	    "coord46" -> "coord55"
 	    "coord47" -> "coord51"
 	    "coord47" -> "coord62"
 	    "coord48" -> "coord63"
 	    "coord48" -> "coord51"
 	    "coord51" -> "coord13"
-	    "coord52" -> "coord45"
-	    "coord52" -> "coord47"
-	    "coord53" -> "coord46"
-	    "coord53" -> "coord48"
-	    "coord54" -> "coord49"
-	    "coord55" -> "coord50"
 	    "coord58" -> "coord64"
 	    "coord59" -> "coord65"
 	    "coord62" -> "coord58"
@@ -4907,12 +4911,12 @@ namespace KernelGraphTest
 	    "coord80" -> "coord85"
 	    "coord81" -> "coord86"
 	    "coord82" -> "coord87"
-	    "coord83" -> "coord123"
-	    "coord83" -> "coord124"
-	    "coord83" -> "coord127"
+	    "coord83" -> "coord149"
+	    "coord83" -> "coord150"
+	    "coord83" -> "coord153"
 	    "coord83" -> "coord86"
-	    "coord84" -> "coord125"
-	    "coord84" -> "coord126"
+	    "coord84" -> "coord151"
+	    "coord84" -> "coord152"
 	    "coord84" -> "coord87"
 	    "coord85" -> "coord83"
 	    "coord85" -> "coord84"
@@ -4920,59 +4924,89 @@ namespace KernelGraphTest
 	    "coord87" -> "coord69"
 	    "coord88" -> "coord81"
 	    "coord89" -> "coord82"
-	    "coord90" -> "coord97"
-	    "coord90" -> "coord98"
-	    "coord90" -> "coord118"
-	    "coord90" -> "coord119"
-	    "coord90" -> "coord120"
-	    "coord90" -> "coord121"
-	    "coord90" -> "coord122"
-	    "coord92" -> "coord95"
-	    "coord95" -> "coord93"
-	    "coord95" -> "coord94"
-	    "coord96" -> "coord92"
-	    "coord96" -> "coord91"
-	    "coord97" -> "coord13"
-	    "coord98" -> "coord13"
-	    "coord99" -> "coord104"
-	    "coord100" -> "coord104"
-	    "coord101" -> "coord103"
-	    "coord101" -> "coord128"
-	    "coord101" -> "coord129"
-	    "coord101" -> "coord132"
-	    "coord102" -> "coord130"
-	    "coord102" -> "coord131"
-	    "coord102" -> "coord103"
-	    "coord103" -> "coord100"
-	    "coord104" -> "coord13"
-	    "coord105" -> "coord90"
-	    "coord106" -> "coord90"
-	    "coord107" -> "coord13"
-	    "coord108" -> "coord39"
-	    "coord109" -> "coord39"
-	    "coord110" -> "coord40"
-	    "coord111" -> "coord40"
-	    "coord112" -> "coord39"
-	    "coord113" -> "coord60"
-	    "coord114" -> "coord60"
-	    "coord115" -> "coord61"
-	    "coord116" -> "coord61"
-	    "coord117" -> "coord60"
-	    "coord118" -> "coord93"
-	    "coord119" -> "coord93"
-	    "coord120" -> "coord94"
-	    "coord121" -> "coord94"
-	    "coord122" -> "coord93"
-	    "coord123" -> "coord21"
-	    "coord124" -> "coord21"
-	    "coord125" -> "coord21"
-	    "coord126" -> "coord21"
-	    "coord127" -> "coord21"
-	    "coord128" -> "coord90"
-	    "coord129" -> "coord90"
-	    "coord130" -> "coord90"
+	    "coord90" -> "coord91"
+	    "coord90" -> "coord133"
+	    "coord90" -> "coord144"
+	    "coord90" -> "coord145"
+	    "coord90" -> "coord146"
+	    "coord90" -> "coord147"
+	    "coord90" -> "coord148"
+	    "coord91" -> "coord47"
+	    "coord91" -> "coord48"
+	    "coord92" -> "coord132"
+	    "coord93" -> "coord92"
+	    "coord94" -> "coord114"
+	    "coord95" -> "coord116"
+	    "coord96" -> "coord100"
+	    "coord96" -> "coord109"
+	    "coord97" -> "coord110"
+	    "coord97" -> "coord100"
+	    "coord98" -> "coord94"
+	    "coord98" -> "coord96"
+	    "coord99" -> "coord95"
+	    "coord99" -> "coord97"
+	    "coord100" -> "coord92"
+	    "coord101" -> "coord106"
+	    "coord102" -> "coord111"
+	    "coord103" -> "coord112"
+	    "coord106" -> "coord104"
+	    "coord106" -> "coord105"
+	    "coord109" -> "coord104"
+	    "coord109" -> "coord102"
+	    "coord110" -> "coord105"
+	    "coord110" -> "coord103"
+	    "coord111" -> "coord107"
+	    "coord112" -> "coord108"
+	    "coord114" -> "coord113"
+	    "coord116" -> "coord115"
+	    "coord118" -> "coord120"
+	    "coord118" -> "coord129"
+	    "coord118" -> "coord154"
+	    "coord118" -> "coord155"
+	    "coord118" -> "coord158"
+	    "coord119" -> "coord130"
+	    "coord119" -> "coord156"
+	    "coord119" -> "coord157"
+	    "coord119" -> "coord120"
+	    "coord120" -> "coord117"
+	    "coord121" -> "coord125"
+	    "coord122" -> "coord126"
+	    "coord123" -> "coord129"
+	    "coord124" -> "coord130"
+	    "coord125" -> "coord123"
+	    "coord126" -> "coord124"
+	    "coord127" -> "coord131"
+	    "coord128" -> "coord131"
+	    "coord129" -> "coord127"
+	    "coord130" -> "coord128"
 	    "coord131" -> "coord90"
 	    "coord132" -> "coord90"
+	    "coord133" -> "coord13"
+	    "coord134" -> "coord39"
+	    "coord135" -> "coord39"
+	    "coord136" -> "coord40"
+	    "coord137" -> "coord40"
+	    "coord138" -> "coord39"
+	    "coord139" -> "coord104"
+	    "coord140" -> "coord104"
+	    "coord141" -> "coord105"
+	    "coord142" -> "coord105"
+	    "coord143" -> "coord104"
+	    "coord144" -> "coord60"
+	    "coord145" -> "coord60"
+	    "coord146" -> "coord61"
+	    "coord147" -> "coord61"
+	    "coord148" -> "coord60"
+	    "coord149" -> "coord21"
+	    "coord150" -> "coord21"
+	    "coord151" -> "coord21"
+	    "coord152" -> "coord21"
+	    "coord153" -> "coord21"
+	    "coord154" -> "coord90"
+	    "coord155" -> "coord90"
+	    "coord156" -> "coord90"
+	    "coord157" -> "coord90"
+	    "coord158" -> "coord90"
 	    {
 	    rank=same
 	    "coord3"->"coord4"[style=invis]
@@ -5025,16 +5059,6 @@ namespace KernelGraphTest
 	    }
 	    {
 	    rank=same
-	    "coord45"->"coord47"[style=invis]
-	    rankdir=LR
-	    }
-	    {
-	    rank=same
-	    "coord46"->"coord48"[style=invis]
-	    rankdir=LR
-	    }
-	    {
-	    rank=same
 	    "coord58"->"coord60"[style=invis]
 	    rankdir=LR
 	    }
@@ -5075,36 +5099,71 @@ namespace KernelGraphTest
 	    }
 	    {
 	    rank=same
-	    "coord93"->"coord94"[style=invis]
+	    "coord47"->"coord48"[style=invis]
 	    rankdir=LR
 	    }
 	    {
 	    rank=same
-	    "coord92"->"coord91"[style=invis]
+	    "coord94"->"coord96"[style=invis]
 	    rankdir=LR
 	    }
 	    {
 	    rank=same
-	    "coord101"->"coord102"[style=invis]
+	    "coord95"->"coord97"[style=invis]
 	    rankdir=LR
 	    }
 	    {
 	    rank=same
-	    "coord100"->"coord99"[style=invis]
+	    "coord96"->"coord97"[style=invis]
+	    rankdir=LR
+	    }
+	    {
+	    rank=same
+	    "coord104"->"coord105"[style=invis]
+	    rankdir=LR
+	    }
+	    {
+	    rank=same
+	    "coord104"->"coord102"[style=invis]
+	    rankdir=LR
+	    }
+	    {
+	    rank=same
+	    "coord105"->"coord103"[style=invis]
+	    rankdir=LR
+	    }
+	    {
+	    rank=same
+	    "coord118"->"coord119"[style=invis]
+	    rankdir=LR
+	    }
+	    {
+	    rank=same
+	    "coord118"->"coord123"[style=invis]
+	    rankdir=LR
+	    }
+	    {
+	    rank=same
+	    "coord119"->"coord124"[style=invis]
+	    rankdir=LR
+	    }
+	    {
+	    rank=same
+	    "coord127"->"coord128"[style=invis]
 	    rankdir=LR
 	    }
 	    subgraph clusterCF {"cntrl1"[label="Kernel(1)"];
 	    "cntrl2"[label="LoadTiled(2)"];
 	    "cntrl4"[label="Assign VGPR Add(DataFlowTag(6), DataFlowTag(6))(4)"];
-	    "cntrl7"[label="LoadTiled(7)"];
+	    "cntrl7"[label="LoadLDSTile(7)"];
 	    "cntrl9"[label="Assign VGPR Add(DataFlowTag(13), DataFlowTag(13))(9)"];
 	    "cntrl12"[label="Assign VGPR Add(DataFlowTag(8), DataFlowTag(15))(12)"];
 	    "cntrl13"[label="Sequence(13)",shape=box];
 	    "cntrl14"[label="Sequence(14)",shape=box];
 	    "cntrl15"[label="StoreTiled(15)"];
-	    "cntrl17"[label="StoreLDSTile(17)"];
-	    "cntrl18"[label="Barrier(18)"];
-	    "cntrl19"[label="LoadLDSTile(19)"];
+	    "cntrl17"[label="LoadTiled(17)"];
+	    "cntrl18"[label="StoreLDSTile(18)"];
+	    "cntrl19"[label="Barrier(19)"];
 	    "cntrl23"[label="Scope(23)"];
 	    "cntrl24"[label="Body(24)",shape=box];
 	    "cntrl25"[label="Sequence(25)",shape=box];
@@ -5152,7 +5211,7 @@ namespace KernelGraphTest
 	    "cntrl12" -> "cntrl50"
 	    "cntrl13" -> "cntrl12"
 	    "cntrl14" -> "cntrl12"
-	    "cntrl18" -> "cntrl41"
+	    "cntrl19" -> "cntrl41"
 	    "cntrl23" -> "cntrl25"
 	    "cntrl23" -> "cntrl26"
 	    "cntrl23" -> "cntrl29"
@@ -5171,7 +5230,7 @@ namespace KernelGraphTest
 	    "cntrl36" -> "cntrl39"
 	    "cntrl37" -> "cntrl35"
 	    "cntrl38" -> "cntrl36"
-	    "cntrl39" -> "cntrl7"
+	    "cntrl39" -> "cntrl17"
 	    "cntrl40" -> "cntrl42"
 	    "cntrl40" -> "cntrl43"
 	    "cntrl40" -> "cntrl46"
@@ -5182,7 +5241,7 @@ namespace KernelGraphTest
 	    "cntrl45" -> "cntrl48"
 	    "cntrl46" -> "cntrl44"
 	    "cntrl47" -> "cntrl45"
-	    "cntrl48" -> "cntrl19"
+	    "cntrl48" -> "cntrl7"
 	    "cntrl49" -> "cntrl53"
 	    "cntrl50" -> "cntrl49"
 	    "cntrl51" -> "cntrl54"
@@ -5193,12 +5252,12 @@ namespace KernelGraphTest
 	    "cntrl56" -> "cntrl58"
 	    "cntrl56" -> "cntrl61"
 	    "cntrl57" -> "cntrl56"
-	    "cntrl58" -> "cntrl18"
+	    "cntrl58" -> "cntrl19"
 	    "cntrl59" -> "cntrl62"
 	    "cntrl60" -> "cntrl63"
 	    "cntrl61" -> "cntrl59"
 	    "cntrl62" -> "cntrl60"
-	    "cntrl63" -> "cntrl17"
+	    "cntrl63" -> "cntrl18"
 	    }
 	    "coord2" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
 	    "coord3" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
@@ -5210,27 +5269,24 @@ namespace KernelGraphTest
 	    "coord29" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
 	    "coord39" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
 	    "coord40" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
-	    "coord108" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
-	    "coord109" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
-	    "coord110" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
-	    "coord111" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
-	    "coord112" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
+	    "coord134" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
+	    "coord135" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
+	    "coord136" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
+	    "coord137" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
+	    "coord138" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
 	    "coord8" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
 	    "coord1" -> "cntrl7" [style=dotted,weight=0,arrowsize=0]
 	    "coord10" -> "cntrl7" [style=dotted,weight=0,arrowsize=0]
 	    "coord11" -> "cntrl7" [style=dotted,weight=0,arrowsize=0]
 	    "coord13" -> "cntrl7" [style=dotted,weight=0,arrowsize=0]
-	    "coord45" -> "cntrl7" [style=dotted,weight=0,arrowsize=0]
-	    "coord46" -> "cntrl7" [style=dotted,weight=0,arrowsize=0]
-	    "coord49" -> "cntrl7" [style=dotted,weight=0,arrowsize=0]
-	    "coord50" -> "cntrl7" [style=dotted,weight=0,arrowsize=0]
 	    "coord60" -> "cntrl7" [style=dotted,weight=0,arrowsize=0]
 	    "coord61" -> "cntrl7" [style=dotted,weight=0,arrowsize=0]
-	    "coord113" -> "cntrl7" [style=dotted,weight=0,arrowsize=0]
-	    "coord114" -> "cntrl7" [style=dotted,weight=0,arrowsize=0]
-	    "coord115" -> "cntrl7" [style=dotted,weight=0,arrowsize=0]
-	    "coord116" -> "cntrl7" [style=dotted,weight=0,arrowsize=0]
-	    "coord117" -> "cntrl7" [style=dotted,weight=0,arrowsize=0]
+	    "coord90" -> "cntrl7" [style=dotted,weight=0,arrowsize=0]
+	    "coord144" -> "cntrl7" [style=dotted,weight=0,arrowsize=0]
+	    "coord145" -> "cntrl7" [style=dotted,weight=0,arrowsize=0]
+	    "coord146" -> "cntrl7" [style=dotted,weight=0,arrowsize=0]
+	    "coord147" -> "cntrl7" [style=dotted,weight=0,arrowsize=0]
+	    "coord148" -> "cntrl7" [style=dotted,weight=0,arrowsize=0]
 	    "coord15" -> "cntrl9" [style=dotted,weight=0,arrowsize=0]
 	    "coord17" -> "cntrl12" [style=dotted,weight=0,arrowsize=0]
 	    "coord17" -> "cntrl15" [style=dotted,weight=0,arrowsize=0]
@@ -5241,29 +5297,36 @@ namespace KernelGraphTest
 	    "coord71" -> "cntrl15" [style=dotted,weight=0,arrowsize=0]
 	    "coord83" -> "cntrl15" [style=dotted,weight=0,arrowsize=0]
 	    "coord84" -> "cntrl15" [style=dotted,weight=0,arrowsize=0]
-	    "coord123" -> "cntrl15" [style=dotted,weight=0,arrowsize=0]
-	    "coord124" -> "cntrl15" [style=dotted,weight=0,arrowsize=0]
-	    "coord125" -> "cntrl15" [style=dotted,weight=0,arrowsize=0]
-	    "coord126" -> "cntrl15" [style=dotted,weight=0,arrowsize=0]
-	    "coord127" -> "cntrl15" [style=dotted,weight=0,arrowsize=0]
-	    "coord13" -> "cntrl17" [style=dotted,weight=0,arrowsize=0]
+	    "coord149" -> "cntrl15" [style=dotted,weight=0,arrowsize=0]
+	    "coord150" -> "cntrl15" [style=dotted,weight=0,arrowsize=0]
+	    "coord151" -> "cntrl15" [style=dotted,weight=0,arrowsize=0]
+	    "coord152" -> "cntrl15" [style=dotted,weight=0,arrowsize=0]
+	    "coord153" -> "cntrl15" [style=dotted,weight=0,arrowsize=0]
+	    "coord1" -> "cntrl17" [style=dotted,weight=0,arrowsize=0]
+	    "coord10" -> "cntrl17" [style=dotted,weight=0,arrowsize=0]
+	    "coord11" -> "cntrl17" [style=dotted,weight=0,arrowsize=0]
 	    "coord90" -> "cntrl17" [style=dotted,weight=0,arrowsize=0]
-	    "coord101" -> "cntrl17" [style=dotted,weight=0,arrowsize=0]
-	    "coord102" -> "cntrl17" [style=dotted,weight=0,arrowsize=0]
-	    "coord128" -> "cntrl17" [style=dotted,weight=0,arrowsize=0]
-	    "coord129" -> "cntrl17" [style=dotted,weight=0,arrowsize=0]
-	    "coord130" -> "cntrl17" [style=dotted,weight=0,arrowsize=0]
-	    "coord131" -> "cntrl17" [style=dotted,weight=0,arrowsize=0]
-	    "coord132" -> "cntrl17" [style=dotted,weight=0,arrowsize=0]
-	    "coord13" -> "cntrl19" [style=dotted,weight=0,arrowsize=0]
-	    "coord90" -> "cntrl19" [style=dotted,weight=0,arrowsize=0]
-	    "coord93" -> "cntrl19" [style=dotted,weight=0,arrowsize=0]
-	    "coord94" -> "cntrl19" [style=dotted,weight=0,arrowsize=0]
-	    "coord118" -> "cntrl19" [style=dotted,weight=0,arrowsize=0]
-	    "coord119" -> "cntrl19" [style=dotted,weight=0,arrowsize=0]
-	    "coord120" -> "cntrl19" [style=dotted,weight=0,arrowsize=0]
-	    "coord121" -> "cntrl19" [style=dotted,weight=0,arrowsize=0]
-	    "coord122" -> "cntrl19" [style=dotted,weight=0,arrowsize=0]
+	    "coord92" -> "cntrl17" [style=dotted,weight=0,arrowsize=0]
+	    "coord94" -> "cntrl17" [style=dotted,weight=0,arrowsize=0]
+	    "coord95" -> "cntrl17" [style=dotted,weight=0,arrowsize=0]
+	    "coord104" -> "cntrl17" [style=dotted,weight=0,arrowsize=0]
+	    "coord105" -> "cntrl17" [style=dotted,weight=0,arrowsize=0]
+	    "coord113" -> "cntrl17" [style=dotted,weight=0,arrowsize=0]
+	    "coord115" -> "cntrl17" [style=dotted,weight=0,arrowsize=0]
+	    "coord139" -> "cntrl17" [style=dotted,weight=0,arrowsize=0]
+	    "coord140" -> "cntrl17" [style=dotted,weight=0,arrowsize=0]
+	    "coord141" -> "cntrl17" [style=dotted,weight=0,arrowsize=0]
+	    "coord142" -> "cntrl17" [style=dotted,weight=0,arrowsize=0]
+	    "coord143" -> "cntrl17" [style=dotted,weight=0,arrowsize=0]
+	    "coord90" -> "cntrl18" [style=dotted,weight=0,arrowsize=0]
+	    "coord92" -> "cntrl18" [style=dotted,weight=0,arrowsize=0]
+	    "coord118" -> "cntrl18" [style=dotted,weight=0,arrowsize=0]
+	    "coord119" -> "cntrl18" [style=dotted,weight=0,arrowsize=0]
+	    "coord154" -> "cntrl18" [style=dotted,weight=0,arrowsize=0]
+	    "coord155" -> "cntrl18" [style=dotted,weight=0,arrowsize=0]
+	    "coord156" -> "cntrl18" [style=dotted,weight=0,arrowsize=0]
+	    "coord157" -> "cntrl18" [style=dotted,weight=0,arrowsize=0]
+	    "coord158" -> "cntrl18" [style=dotted,weight=0,arrowsize=0]
 	}).";
 
         EXPECT_EQ(NormalizedSource(expected1), NormalizedSource(kgraph1.toDOT(true)));
@@ -5782,7 +5845,7 @@ namespace KernelGraphTest
         ASSERT_LT(rnorm, 1.e-12);
     }
 
-    TEST_F(KernelGraphTestGPU, DISABLED_GPU_TensorTileAdd)
+    TEST_F(KernelGraphTestGPU, GPU_TensorTileAdd)
     {
         size_t nx  = 256; // tensor size x
         size_t ny  = 512; // tensor size y
