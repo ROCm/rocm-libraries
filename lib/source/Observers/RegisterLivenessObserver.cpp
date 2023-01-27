@@ -241,12 +241,14 @@ namespace rocRoller
             }
         }
 
-        std::string RegisterLivenessObserver::livenessString(size_t pointInHistory) const
+        std::string
+            RegisterLivenessObserver::livenessString(size_t pointInHistory,
+                                                     std::map<Register::Type, size_t> maxRegs) const
         {
             std::stringstream retval;
             for(auto& regType : SUPPORTED_REG_TYPES)
             {
-                size_t maxReg = getMaxRegisters(regType);
+                auto maxReg = maxRegs[regType];
                 if(maxReg > 0)
                 {
                     for(size_t i = 0; i < maxReg; i++)
@@ -264,16 +266,17 @@ namespace rocRoller
 
         std::string RegisterLivenessObserver::livenessString() const
         {
-            std::stringstream retval;
+            std::stringstream                retval;
+            std::map<Register::Type, size_t> maxRegs;
             for(auto& regType : SUPPORTED_REG_TYPES)
             {
-                size_t maxReg = getMaxRegisters(regType);
-                if(maxReg > 0)
+                maxRegs[regType] = getMaxRegisters(regType);
+                if(maxRegs[regType] > 0)
                 {
                     std::stringstream label;
                     label << regType;
                     retval << regType;
-                    for(size_t i = label.str().size(); i < maxReg; i++)
+                    for(size_t i = label.str().size(); i < maxRegs[regType]; i++)
                     {
                         retval << " ";
                     }
@@ -283,7 +286,7 @@ namespace rocRoller
             retval << "Instruction" << std::endl;
             for(size_t i = 0; i < m_history.size(); i++)
             {
-                retval << livenessString(i) << std::endl;
+                retval << livenessString(i, maxRegs) << std::endl;
             }
             return retval.str();
         }

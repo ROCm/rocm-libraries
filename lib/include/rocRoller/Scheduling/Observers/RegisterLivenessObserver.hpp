@@ -116,7 +116,8 @@ namespace rocRoller
              */
             void handleBranchLiveness();
 
-            std::string livenessString(size_t pointInHistory) const;
+            std::string livenessString(size_t                           pointInHistory,
+                                       std::map<Register::Type, size_t> maxRegs) const;
 
             std::string livenessString() const;
         };
