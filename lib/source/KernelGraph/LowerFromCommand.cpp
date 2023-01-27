@@ -465,7 +465,7 @@ namespace rocRoller
                 graph.coordinates.addElement(DataFlow(), {A, B}, {D});
 
                 // contraction dims are {1} and {0}, which is matrix multiplication
-                auto TC = graph.control.addElement(TensorContraction(A, B, {1}, {0}));
+                auto TC = graph.control.addElement(TensorContraction({1}, {0}));
                 m_op.insert_or_assign(mul.dest, TC);
 
                 auto loadA = m_op.at(mul.a);
@@ -474,7 +474,9 @@ namespace rocRoller
                 graph.control.addElement(Sequence(), {loadA}, {TC});
                 graph.control.addElement(Sequence(), {loadB}, {TC});
 
-                graph.mapper.connect<MacroTile>(TC, D);
+                graph.mapper.connect(TC, D, NaryArgument::DEST);
+                graph.mapper.connect(TC, A, NaryArgument::LHS);
+                graph.mapper.connect(TC, B, NaryArgument::RHS);
 
 #ifndef NDEBUG
                 auto parents = graph.control.parentNodes(TC).to<std::vector>();

@@ -53,7 +53,8 @@ namespace rocRoller
             {
                 // if destination isn't Linear, copy this operation
                 auto connections = original.mapper.getConnections(tag);
-                if(connections[0].tindex != typeid(Linear))
+                auto linear      = original.coordinates.get<Linear>(connections[0].coordinate);
+                if(!linear)
                 {
                     BaseGraphVisitor::visitOperation(graph, original, reindexer, tag, assign);
                     return;

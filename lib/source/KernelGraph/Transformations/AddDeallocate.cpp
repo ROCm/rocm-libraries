@@ -324,9 +324,12 @@ namespace rocRoller::KernelGraph
             auto body = m_graph.control.getOutputNodeIndices<Body>(tag).to<std::set>();
             generate(body);
 
-            auto a   = m_graph.mapper.get<MacroTile>(tag, 0);
-            auto b   = m_graph.mapper.get<MacroTile>(tag, 1);
-            auto dst = m_graph.mapper.get<MacroTile>(tag, 2);
+            auto a
+                = m_graph.mapper.get(tag, Connections::typeArgument<MacroTile>(NaryArgument::LHS));
+            auto b
+                = m_graph.mapper.get(tag, Connections::typeArgument<MacroTile>(NaryArgument::RHS));
+            auto dst
+                = m_graph.mapper.get(tag, Connections::typeArgument<MacroTile>(NaryArgument::DEST));
 
             trackRegister(tag, a);
             trackRegister(tag, b);

@@ -1218,7 +1218,7 @@ namespace KernelGraphTest
 		"cntrl3"[label="Body(3)",shape=box];
 		"cntrl4"[label="LoadTiled(4)"];
 		"cntrl5"[label="Body(5)",shape=box];
-		"cntrl6"[label="TensorContraction(4, 11)(6)"];
+		"cntrl6"[label="TensorContraction(6)"];
 		"cntrl7"[label="Sequence(7)",shape=box];
 		"cntrl8"[label="Sequence(8)",shape=box];
 		"cntrl9"[label="StoreTiled(9)"];
@@ -1238,6 +1238,8 @@ namespace KernelGraphTest
 		"coord4" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
 		"coord8" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
 		"coord11" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
+		"coord4" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
+		"coord11" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
 		"coord15" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
 		"coord15" -> "cntrl9" [style=dotted,weight=0,arrowsize=0]
 		"coord19" -> "cntrl9" [style=dotted,weight=0,arrowsize=0]
@@ -1542,7 +1544,7 @@ namespace KernelGraphTest
 		"cntrl9"[label="Body(9)",shape=box];
 		"cntrl10"[label="LoadVGPR(10)"];
 		"cntrl11"[label="Body(11)",shape=box];
-		"cntrl12"[label="TensorContraction(4, 11)(12)"];
+		"cntrl12"[label="TensorContraction(12)"];
 		"cntrl13"[label="Sequence(13)",shape=box];
 		"cntrl14"[label="Sequence(14)",shape=box];
 		"cntrl15"[label="Assign VGPR Multiply(DataFlowTag(23), DataFlowTag(28))(15)"];
@@ -1595,6 +1597,8 @@ namespace KernelGraphTest
 		"coord23" -> "cntrl8" [style=dotted,weight=0,arrowsize=0]
 		"coord25" -> "cntrl10" [style=dotted,weight=0,arrowsize=0]
 		"coord26" -> "cntrl10" [style=dotted,weight=0,arrowsize=0]
+		"coord4" -> "cntrl12" [style=dotted,weight=0,arrowsize=0]
+		"coord11" -> "cntrl12" [style=dotted,weight=0,arrowsize=0]
 		"coord28" -> "cntrl12" [style=dotted,weight=0,arrowsize=0]
 		"coord30" -> "cntrl15" [style=dotted,weight=0,arrowsize=0]
 		"coord32" -> "cntrl18" [style=dotted,weight=0,arrowsize=0]
@@ -2701,6 +2705,8 @@ namespace KernelGraphTest
 	    "coord229" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
 	    "coord230" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
 	    "coord231" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
+	    "coord11" -> "cntrl8" [style=dotted,weight=0,arrowsize=0]
+	    "coord16" -> "cntrl8" [style=dotted,weight=0,arrowsize=0]
 	    "coord18" -> "cntrl8" [style=dotted,weight=0,arrowsize=0]
 	    "coord20" -> "cntrl11" [style=dotted,weight=0,arrowsize=0]
 	    "coord5" -> "cntrl14" [style=dotted,weight=0,arrowsize=0]
@@ -2762,8 +2768,80 @@ namespace KernelGraphTest
 	    "coord207" -> "cntrl42" [style=dotted,weight=0,arrowsize=0]
 	    "coord207" -> "cntrl43" [style=dotted,weight=0,arrowsize=0]
 	    "coord207" -> "cntrl44" [style=dotted,weight=0,arrowsize=0]
+	    "coord1" -> "cntrl53" [style=dotted,weight=0,arrowsize=0]
+	    "coord39" -> "cntrl53" [style=dotted,weight=0,arrowsize=0]
+	    "coord52" -> "cntrl53" [style=dotted,weight=0,arrowsize=0]
+	    "coord61" -> "cntrl53" [style=dotted,weight=0,arrowsize=0]
+	    "coord218" -> "cntrl53" [style=dotted,weight=0,arrowsize=0]
+	    "coord219" -> "cntrl53" [style=dotted,weight=0,arrowsize=0]
+	    "coord224" -> "cntrl53" [style=dotted,weight=0,arrowsize=0]
+	    "coord1" -> "cntrl54" [style=dotted,weight=0,arrowsize=0]
+	    "coord39" -> "cntrl54" [style=dotted,weight=0,arrowsize=0]
+	    "coord52" -> "cntrl54" [style=dotted,weight=0,arrowsize=0]
+	    "coord61" -> "cntrl54" [style=dotted,weight=0,arrowsize=0]
+	    "coord218" -> "cntrl54" [style=dotted,weight=0,arrowsize=0]
+	    "coord220" -> "cntrl54" [style=dotted,weight=0,arrowsize=0]
+	    "coord221" -> "cntrl54" [style=dotted,weight=0,arrowsize=0]
+	    "coord224" -> "cntrl54" [style=dotted,weight=0,arrowsize=0]
+	    "coord1" -> "cntrl55" [style=dotted,weight=0,arrowsize=0]
+	    "coord39" -> "cntrl55" [style=dotted,weight=0,arrowsize=0]
+	    "coord52" -> "cntrl55" [style=dotted,weight=0,arrowsize=0]
+	    "coord61" -> "cntrl55" [style=dotted,weight=0,arrowsize=0]
+	    "coord220" -> "cntrl55" [style=dotted,weight=0,arrowsize=0]
+	    "coord222" -> "cntrl55" [style=dotted,weight=0,arrowsize=0]
+	    "coord223" -> "cntrl55" [style=dotted,weight=0,arrowsize=0]
+	    "coord224" -> "cntrl55" [style=dotted,weight=0,arrowsize=0]
 	    "coord218" -> "cntrl58" [style=dotted,weight=0,arrowsize=0]
+	    "coord2" -> "cntrl62" [style=dotted,weight=0,arrowsize=0]
+	    "coord73" -> "cntrl62" [style=dotted,weight=0,arrowsize=0]
+	    "coord86" -> "cntrl62" [style=dotted,weight=0,arrowsize=0]
+	    "coord96" -> "cntrl62" [style=dotted,weight=0,arrowsize=0]
+	    "coord225" -> "cntrl62" [style=dotted,weight=0,arrowsize=0]
+	    "coord226" -> "cntrl62" [style=dotted,weight=0,arrowsize=0]
+	    "coord231" -> "cntrl62" [style=dotted,weight=0,arrowsize=0]
+	    "coord2" -> "cntrl63" [style=dotted,weight=0,arrowsize=0]
+	    "coord73" -> "cntrl63" [style=dotted,weight=0,arrowsize=0]
+	    "coord86" -> "cntrl63" [style=dotted,weight=0,arrowsize=0]
+	    "coord96" -> "cntrl63" [style=dotted,weight=0,arrowsize=0]
+	    "coord225" -> "cntrl63" [style=dotted,weight=0,arrowsize=0]
+	    "coord227" -> "cntrl63" [style=dotted,weight=0,arrowsize=0]
+	    "coord228" -> "cntrl63" [style=dotted,weight=0,arrowsize=0]
+	    "coord231" -> "cntrl63" [style=dotted,weight=0,arrowsize=0]
+	    "coord2" -> "cntrl64" [style=dotted,weight=0,arrowsize=0]
+	    "coord73" -> "cntrl64" [style=dotted,weight=0,arrowsize=0]
+	    "coord86" -> "cntrl64" [style=dotted,weight=0,arrowsize=0]
+	    "coord96" -> "cntrl64" [style=dotted,weight=0,arrowsize=0]
+	    "coord227" -> "cntrl64" [style=dotted,weight=0,arrowsize=0]
+	    "coord229" -> "cntrl64" [style=dotted,weight=0,arrowsize=0]
+	    "coord230" -> "cntrl64" [style=dotted,weight=0,arrowsize=0]
+	    "coord231" -> "cntrl64" [style=dotted,weight=0,arrowsize=0]
 	    "coord225" -> "cntrl67" [style=dotted,weight=0,arrowsize=0]
+	    "coord3" -> "cntrl74" [style=dotted,weight=0,arrowsize=0]
+	    "coord139" -> "cntrl74" [style=dotted,weight=0,arrowsize=0]
+	    "coord140" -> "cntrl74" [style=dotted,weight=0,arrowsize=0]
+	    "coord232" -> "cntrl74" [style=dotted,weight=0,arrowsize=0]
+	    "coord233" -> "cntrl74" [style=dotted,weight=0,arrowsize=0]
+	    "coord236" -> "cntrl74" [style=dotted,weight=0,arrowsize=0]
+	    "coord3" -> "cntrl75" [style=dotted,weight=0,arrowsize=0]
+	    "coord139" -> "cntrl75" [style=dotted,weight=0,arrowsize=0]
+	    "coord140" -> "cntrl75" [style=dotted,weight=0,arrowsize=0]
+	    "coord232" -> "cntrl75" [style=dotted,weight=0,arrowsize=0]
+	    "coord234" -> "cntrl75" [style=dotted,weight=0,arrowsize=0]
+	    "coord235" -> "cntrl75" [style=dotted,weight=0,arrowsize=0]
+	    "coord236" -> "cntrl75" [style=dotted,weight=0,arrowsize=0]
+	    "coord35" -> "cntrl81" [style=dotted,weight=0,arrowsize=0]
+	    "coord173" -> "cntrl81" [style=dotted,weight=0,arrowsize=0]
+	    "coord174" -> "cntrl81" [style=dotted,weight=0,arrowsize=0]
+	    "coord237" -> "cntrl81" [style=dotted,weight=0,arrowsize=0]
+	    "coord238" -> "cntrl81" [style=dotted,weight=0,arrowsize=0]
+	    "coord241" -> "cntrl81" [style=dotted,weight=0,arrowsize=0]
+	    "coord35" -> "cntrl82" [style=dotted,weight=0,arrowsize=0]
+	    "coord173" -> "cntrl82" [style=dotted,weight=0,arrowsize=0]
+	    "coord174" -> "cntrl82" [style=dotted,weight=0,arrowsize=0]
+	    "coord237" -> "cntrl82" [style=dotted,weight=0,arrowsize=0]
+	    "coord239" -> "cntrl82" [style=dotted,weight=0,arrowsize=0]
+	    "coord240" -> "cntrl82" [style=dotted,weight=0,arrowsize=0]
+	    "coord241" -> "cntrl82" [style=dotted,weight=0,arrowsize=0]
 	}).";
 
         EXPECT_EQ(NormalizedSource(expected1), NormalizedSource(kgraph1.toDOT(true)));
@@ -4165,6 +4243,8 @@ namespace KernelGraphTest
 	    "coord258" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
 	    "coord259" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
 	    "coord260" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
+	    "coord11" -> "cntrl8" [style=dotted,weight=0,arrowsize=0]
+	    "coord16" -> "cntrl8" [style=dotted,weight=0,arrowsize=0]
 	    "coord18" -> "cntrl8" [style=dotted,weight=0,arrowsize=0]
 	    "coord20" -> "cntrl11" [style=dotted,weight=0,arrowsize=0]
 	    "coord5" -> "cntrl14" [style=dotted,weight=0,arrowsize=0]
@@ -4252,8 +4332,104 @@ namespace KernelGraphTest
 	    "coord270" -> "cntrl52" [style=dotted,weight=0,arrowsize=0]
 	    "coord271" -> "cntrl52" [style=dotted,weight=0,arrowsize=0]
 	    "coord272" -> "cntrl52" [style=dotted,weight=0,arrowsize=0]
+	    "coord52" -> "cntrl62" [style=dotted,weight=0,arrowsize=0]
+	    "coord61" -> "cntrl62" [style=dotted,weight=0,arrowsize=0]
+	    "coord218" -> "cntrl62" [style=dotted,weight=0,arrowsize=0]
+	    "coord250" -> "cntrl62" [style=dotted,weight=0,arrowsize=0]
+	    "coord251" -> "cntrl62" [style=dotted,weight=0,arrowsize=0]
+	    "coord52" -> "cntrl63" [style=dotted,weight=0,arrowsize=0]
+	    "coord61" -> "cntrl63" [style=dotted,weight=0,arrowsize=0]
+	    "coord218" -> "cntrl63" [style=dotted,weight=0,arrowsize=0]
+	    "coord250" -> "cntrl63" [style=dotted,weight=0,arrowsize=0]
+	    "coord252" -> "cntrl63" [style=dotted,weight=0,arrowsize=0]
+	    "coord253" -> "cntrl63" [style=dotted,weight=0,arrowsize=0]
+	    "coord2" -> "cntrl67" [style=dotted,weight=0,arrowsize=0]
+	    "coord73" -> "cntrl67" [style=dotted,weight=0,arrowsize=0]
+	    "coord86" -> "cntrl67" [style=dotted,weight=0,arrowsize=0]
+	    "coord96" -> "cntrl67" [style=dotted,weight=0,arrowsize=0]
+	    "coord254" -> "cntrl67" [style=dotted,weight=0,arrowsize=0]
+	    "coord255" -> "cntrl67" [style=dotted,weight=0,arrowsize=0]
+	    "coord260" -> "cntrl67" [style=dotted,weight=0,arrowsize=0]
+	    "coord2" -> "cntrl68" [style=dotted,weight=0,arrowsize=0]
+	    "coord73" -> "cntrl68" [style=dotted,weight=0,arrowsize=0]
+	    "coord86" -> "cntrl68" [style=dotted,weight=0,arrowsize=0]
+	    "coord96" -> "cntrl68" [style=dotted,weight=0,arrowsize=0]
+	    "coord254" -> "cntrl68" [style=dotted,weight=0,arrowsize=0]
+	    "coord256" -> "cntrl68" [style=dotted,weight=0,arrowsize=0]
+	    "coord257" -> "cntrl68" [style=dotted,weight=0,arrowsize=0]
+	    "coord260" -> "cntrl68" [style=dotted,weight=0,arrowsize=0]
+	    "coord2" -> "cntrl69" [style=dotted,weight=0,arrowsize=0]
+	    "coord73" -> "cntrl69" [style=dotted,weight=0,arrowsize=0]
+	    "coord86" -> "cntrl69" [style=dotted,weight=0,arrowsize=0]
+	    "coord96" -> "cntrl69" [style=dotted,weight=0,arrowsize=0]
+	    "coord256" -> "cntrl69" [style=dotted,weight=0,arrowsize=0]
+	    "coord258" -> "cntrl69" [style=dotted,weight=0,arrowsize=0]
+	    "coord259" -> "cntrl69" [style=dotted,weight=0,arrowsize=0]
+	    "coord260" -> "cntrl69" [style=dotted,weight=0,arrowsize=0]
 	    "coord254" -> "cntrl72" [style=dotted,weight=0,arrowsize=0]
+	    "coord1" -> "cntrl76" [style=dotted,weight=0,arrowsize=0]
+	    "coord223" -> "cntrl76" [style=dotted,weight=0,arrowsize=0]
+	    "coord232" -> "cntrl76" [style=dotted,weight=0,arrowsize=0]
+	    "coord233" -> "cntrl76" [style=dotted,weight=0,arrowsize=0]
+	    "coord261" -> "cntrl76" [style=dotted,weight=0,arrowsize=0]
+	    "coord262" -> "cntrl76" [style=dotted,weight=0,arrowsize=0]
+	    "coord267" -> "cntrl76" [style=dotted,weight=0,arrowsize=0]
+	    "coord1" -> "cntrl77" [style=dotted,weight=0,arrowsize=0]
+	    "coord223" -> "cntrl77" [style=dotted,weight=0,arrowsize=0]
+	    "coord223" -> "cntrl77" [style=dotted,weight=0,arrowsize=0]
+	    "coord232" -> "cntrl77" [style=dotted,weight=0,arrowsize=0]
+	    "coord233" -> "cntrl77" [style=dotted,weight=0,arrowsize=0]
+	    "coord263" -> "cntrl77" [style=dotted,weight=0,arrowsize=0]
+	    "coord264" -> "cntrl77" [style=dotted,weight=0,arrowsize=0]
+	    "coord267" -> "cntrl77" [style=dotted,weight=0,arrowsize=0]
+	    "coord1" -> "cntrl78" [style=dotted,weight=0,arrowsize=0]
+	    "coord223" -> "cntrl78" [style=dotted,weight=0,arrowsize=0]
+	    "coord232" -> "cntrl78" [style=dotted,weight=0,arrowsize=0]
+	    "coord232" -> "cntrl78" [style=dotted,weight=0,arrowsize=0]
+	    "coord233" -> "cntrl78" [style=dotted,weight=0,arrowsize=0]
+	    "coord265" -> "cntrl78" [style=dotted,weight=0,arrowsize=0]
+	    "coord266" -> "cntrl78" [style=dotted,weight=0,arrowsize=0]
+	    "coord267" -> "cntrl78" [style=dotted,weight=0,arrowsize=0]
 	    "coord261" -> "cntrl81" [style=dotted,weight=0,arrowsize=0]
+	    "coord218" -> "cntrl85" [style=dotted,weight=0,arrowsize=0]
+	    "coord242" -> "cntrl85" [style=dotted,weight=0,arrowsize=0]
+	    "coord243" -> "cntrl85" [style=dotted,weight=0,arrowsize=0]
+	    "coord268" -> "cntrl85" [style=dotted,weight=0,arrowsize=0]
+	    "coord269" -> "cntrl85" [style=dotted,weight=0,arrowsize=0]
+	    "coord272" -> "cntrl85" [style=dotted,weight=0,arrowsize=0]
+	    "coord218" -> "cntrl86" [style=dotted,weight=0,arrowsize=0]
+	    "coord242" -> "cntrl86" [style=dotted,weight=0,arrowsize=0]
+	    "coord242" -> "cntrl86" [style=dotted,weight=0,arrowsize=0]
+	    "coord243" -> "cntrl86" [style=dotted,weight=0,arrowsize=0]
+	    "coord270" -> "cntrl86" [style=dotted,weight=0,arrowsize=0]
+	    "coord271" -> "cntrl86" [style=dotted,weight=0,arrowsize=0]
+	    "coord272" -> "cntrl86" [style=dotted,weight=0,arrowsize=0]
+	    "coord3" -> "cntrl93" [style=dotted,weight=0,arrowsize=0]
+	    "coord139" -> "cntrl93" [style=dotted,weight=0,arrowsize=0]
+	    "coord140" -> "cntrl93" [style=dotted,weight=0,arrowsize=0]
+	    "coord273" -> "cntrl93" [style=dotted,weight=0,arrowsize=0]
+	    "coord274" -> "cntrl93" [style=dotted,weight=0,arrowsize=0]
+	    "coord277" -> "cntrl93" [style=dotted,weight=0,arrowsize=0]
+	    "coord3" -> "cntrl94" [style=dotted,weight=0,arrowsize=0]
+	    "coord139" -> "cntrl94" [style=dotted,weight=0,arrowsize=0]
+	    "coord140" -> "cntrl94" [style=dotted,weight=0,arrowsize=0]
+	    "coord273" -> "cntrl94" [style=dotted,weight=0,arrowsize=0]
+	    "coord275" -> "cntrl94" [style=dotted,weight=0,arrowsize=0]
+	    "coord276" -> "cntrl94" [style=dotted,weight=0,arrowsize=0]
+	    "coord277" -> "cntrl94" [style=dotted,weight=0,arrowsize=0]
+	    "coord35" -> "cntrl100" [style=dotted,weight=0,arrowsize=0]
+	    "coord173" -> "cntrl100" [style=dotted,weight=0,arrowsize=0]
+	    "coord174" -> "cntrl100" [style=dotted,weight=0,arrowsize=0]
+	    "coord278" -> "cntrl100" [style=dotted,weight=0,arrowsize=0]
+	    "coord279" -> "cntrl100" [style=dotted,weight=0,arrowsize=0]
+	    "coord282" -> "cntrl100" [style=dotted,weight=0,arrowsize=0]
+	    "coord35" -> "cntrl101" [style=dotted,weight=0,arrowsize=0]
+	    "coord173" -> "cntrl101" [style=dotted,weight=0,arrowsize=0]
+	    "coord174" -> "cntrl101" [style=dotted,weight=0,arrowsize=0]
+	    "coord278" -> "cntrl101" [style=dotted,weight=0,arrowsize=0]
+	    "coord280" -> "cntrl101" [style=dotted,weight=0,arrowsize=0]
+	    "coord281" -> "cntrl101" [style=dotted,weight=0,arrowsize=0]
+	    "coord282" -> "cntrl101" [style=dotted,weight=0,arrowsize=0]
 	    }).";
 
         EXPECT_EQ(NormalizedSource(expected_lds), NormalizedSource(kgraph_lds_lower.toDOT(true)));
@@ -4339,7 +4515,7 @@ namespace KernelGraphTest
 		"cntrl3"[label="Body(3)",shape=box];
 		"cntrl4"[label="LoadTiled(4)"];
 		"cntrl5"[label="Body(5)",shape=box];
-		"cntrl6"[label="TensorContraction(4, 11)(6)"];
+		"cntrl6"[label="TensorContraction(6)"];
 		"cntrl7"[label="Sequence(7)",shape=box];
 		"cntrl8"[label="Sequence(8)",shape=box];
 		"cntrl1" -> "cntrl3"
@@ -4355,6 +4531,8 @@ namespace KernelGraphTest
 		"coord4" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
 		"coord8" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
 		"coord11" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
+		"coord4" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
+		"coord11" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
 		"coord15" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
           }).";
 
@@ -4461,7 +4639,7 @@ namespace KernelGraphTest
 		"cntrl3"[label="Body(3)",shape=box];
 		"cntrl4"[label="LoadTiled(4)"];
 		"cntrl5"[label="Body(5)",shape=box];
-		"cntrl6"[label="TensorContraction(4, 11)(6)"];
+		"cntrl6"[label="TensorContraction(6)"];
 		"cntrl7"[label="Sequence(7)",shape=box];
 		"cntrl8"[label="Sequence(8)",shape=box];
 		"cntrl1" -> "cntrl3"
@@ -4477,6 +4655,8 @@ namespace KernelGraphTest
 		"coord4" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
 		"coord8" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
 		"coord11" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
+		"coord4" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
+		"coord11" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
 		"coord15" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
 		}
         ).";
@@ -5327,6 +5507,71 @@ namespace KernelGraphTest
 	    "coord156" -> "cntrl18" [style=dotted,weight=0,arrowsize=0]
 	    "coord157" -> "cntrl18" [style=dotted,weight=0,arrowsize=0]
 	    "coord158" -> "cntrl18" [style=dotted,weight=0,arrowsize=0]
+	    "coord2" -> "cntrl27" [style=dotted,weight=0,arrowsize=0]
+	    "coord39" -> "cntrl27" [style=dotted,weight=0,arrowsize=0]
+	    "coord40" -> "cntrl27" [style=dotted,weight=0,arrowsize=0]
+	    "coord134" -> "cntrl27" [style=dotted,weight=0,arrowsize=0]
+	    "coord135" -> "cntrl27" [style=dotted,weight=0,arrowsize=0]
+	    "coord138" -> "cntrl27" [style=dotted,weight=0,arrowsize=0]
+	    "coord2" -> "cntrl28" [style=dotted,weight=0,arrowsize=0]
+	    "coord39" -> "cntrl28" [style=dotted,weight=0,arrowsize=0]
+	    "coord39" -> "cntrl28" [style=dotted,weight=0,arrowsize=0]
+	    "coord40" -> "cntrl28" [style=dotted,weight=0,arrowsize=0]
+	    "coord136" -> "cntrl28" [style=dotted,weight=0,arrowsize=0]
+	    "coord137" -> "cntrl28" [style=dotted,weight=0,arrowsize=0]
+	    "coord138" -> "cntrl28" [style=dotted,weight=0,arrowsize=0]
+	    "coord1" -> "cntrl35" [style=dotted,weight=0,arrowsize=0]
+	    "coord104" -> "cntrl35" [style=dotted,weight=0,arrowsize=0]
+	    "coord105" -> "cntrl35" [style=dotted,weight=0,arrowsize=0]
+	    "coord139" -> "cntrl35" [style=dotted,weight=0,arrowsize=0]
+	    "coord140" -> "cntrl35" [style=dotted,weight=0,arrowsize=0]
+	    "coord143" -> "cntrl35" [style=dotted,weight=0,arrowsize=0]
+	    "coord1" -> "cntrl36" [style=dotted,weight=0,arrowsize=0]
+	    "coord104" -> "cntrl36" [style=dotted,weight=0,arrowsize=0]
+	    "coord104" -> "cntrl36" [style=dotted,weight=0,arrowsize=0]
+	    "coord105" -> "cntrl36" [style=dotted,weight=0,arrowsize=0]
+	    "coord141" -> "cntrl36" [style=dotted,weight=0,arrowsize=0]
+	    "coord142" -> "cntrl36" [style=dotted,weight=0,arrowsize=0]
+	    "coord143" -> "cntrl36" [style=dotted,weight=0,arrowsize=0]
+	    "coord60" -> "cntrl44" [style=dotted,weight=0,arrowsize=0]
+	    "coord61" -> "cntrl44" [style=dotted,weight=0,arrowsize=0]
+	    "coord90" -> "cntrl44" [style=dotted,weight=0,arrowsize=0]
+	    "coord144" -> "cntrl44" [style=dotted,weight=0,arrowsize=0]
+	    "coord145" -> "cntrl44" [style=dotted,weight=0,arrowsize=0]
+	    "coord148" -> "cntrl44" [style=dotted,weight=0,arrowsize=0]
+	    "coord60" -> "cntrl45" [style=dotted,weight=0,arrowsize=0]
+	    "coord60" -> "cntrl45" [style=dotted,weight=0,arrowsize=0]
+	    "coord61" -> "cntrl45" [style=dotted,weight=0,arrowsize=0]
+	    "coord90" -> "cntrl45" [style=dotted,weight=0,arrowsize=0]
+	    "coord146" -> "cntrl45" [style=dotted,weight=0,arrowsize=0]
+	    "coord147" -> "cntrl45" [style=dotted,weight=0,arrowsize=0]
+	    "coord148" -> "cntrl45" [style=dotted,weight=0,arrowsize=0]
+	    "coord21" -> "cntrl51" [style=dotted,weight=0,arrowsize=0]
+	    "coord83" -> "cntrl51" [style=dotted,weight=0,arrowsize=0]
+	    "coord84" -> "cntrl51" [style=dotted,weight=0,arrowsize=0]
+	    "coord149" -> "cntrl51" [style=dotted,weight=0,arrowsize=0]
+	    "coord150" -> "cntrl51" [style=dotted,weight=0,arrowsize=0]
+	    "coord153" -> "cntrl51" [style=dotted,weight=0,arrowsize=0]
+	    "coord21" -> "cntrl52" [style=dotted,weight=0,arrowsize=0]
+	    "coord83" -> "cntrl52" [style=dotted,weight=0,arrowsize=0]
+	    "coord83" -> "cntrl52" [style=dotted,weight=0,arrowsize=0]
+	    "coord84" -> "cntrl52" [style=dotted,weight=0,arrowsize=0]
+	    "coord151" -> "cntrl52" [style=dotted,weight=0,arrowsize=0]
+	    "coord152" -> "cntrl52" [style=dotted,weight=0,arrowsize=0]
+	    "coord153" -> "cntrl52" [style=dotted,weight=0,arrowsize=0]
+	    "coord90" -> "cntrl59" [style=dotted,weight=0,arrowsize=0]
+	    "coord118" -> "cntrl59" [style=dotted,weight=0,arrowsize=0]
+	    "coord119" -> "cntrl59" [style=dotted,weight=0,arrowsize=0]
+	    "coord154" -> "cntrl59" [style=dotted,weight=0,arrowsize=0]
+	    "coord155" -> "cntrl59" [style=dotted,weight=0,arrowsize=0]
+	    "coord158" -> "cntrl59" [style=dotted,weight=0,arrowsize=0]
+	    "coord90" -> "cntrl60" [style=dotted,weight=0,arrowsize=0]
+	    "coord118" -> "cntrl60" [style=dotted,weight=0,arrowsize=0]
+	    "coord118" -> "cntrl60" [style=dotted,weight=0,arrowsize=0]
+	    "coord119" -> "cntrl60" [style=dotted,weight=0,arrowsize=0]
+	    "coord156" -> "cntrl60" [style=dotted,weight=0,arrowsize=0]
+	    "coord157" -> "cntrl60" [style=dotted,weight=0,arrowsize=0]
+	    "coord158" -> "cntrl60" [style=dotted,weight=0,arrowsize=0]
 	}).";
 
         EXPECT_EQ(NormalizedSource(expected1), NormalizedSource(kgraph1.toDOT(true)));
@@ -6360,7 +6605,7 @@ namespace KernelGraphTest
 		"cntrl3"[label="Body(3)",shape=box];
 		"cntrl4"[label="LoadTiled(4)"];
 		"cntrl5"[label="Body(5)",shape=box];
-		"cntrl6"[label="TensorContraction(4, 11)(6)"];
+		"cntrl6"[label="TensorContraction(6)"];
 		"cntrl7"[label="Sequence(7)",shape=box];
 		"cntrl8"[label="Sequence(8)",shape=box];
 		"cntrl1" -> "cntrl3"
@@ -6459,7 +6704,7 @@ namespace KernelGraphTest
 		"cntrl3"[label="Body(3)",shape=box];
 		"cntrl4"[label="LoadTiled(4)"];
 		"cntrl5"[label="Body(5)",shape=box];
-		"cntrl6"[label="TensorContraction(4, 11)(6)"];
+		"cntrl6"[label="TensorContraction(6)"];
 		"cntrl7"[label="Sequence(7)",shape=box];
 		"cntrl8"[label="Sequence(8)",shape=box];
 		"cntrl1" -> "cntrl3"

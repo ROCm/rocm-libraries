@@ -141,6 +141,13 @@ namespace rocRoller
         None = Count
     };
 
+    enum class NaryArgument : int
+    {
+        DEST,
+        LHS,
+        RHS,
+    };
+
     std::string   ToString(LayoutType d);
     std::ostream& operator<<(std::ostream& stream, LayoutType v);
 
@@ -553,5 +560,4 @@ namespace std
                                            static_cast<size_t>(varType.pointerType));
         }
     };
-
 }

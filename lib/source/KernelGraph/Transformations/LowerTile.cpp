@@ -67,21 +67,6 @@ namespace rocRoller
                 // NOP: don't need this edge anymore
             }
 
-            virtual void visitOperation(KernelGraph&             graph,
-                                        KernelGraph const&       original,
-                                        GraphReindexer&          reindexer,
-                                        int                      tag,
-                                        TensorContraction const& op) override
-            {
-                copyOperation(graph, original, reindexer, tag);
-
-                auto new_tag = reindexer.control.at(tag);
-                auto new_op  = graph.control.getNode<TensorContraction>(new_tag);
-                new_op.a     = reindexer.coordinates.at(op.a);
-                new_op.b     = reindexer.coordinates.at(op.b);
-                graph.control.setElement(new_tag, new_op);
-            }
-
             virtual void visitOperation(KernelGraph&       graph,
                                         KernelGraph const& original,
                                         GraphReindexer&    reindexer,
@@ -269,8 +254,9 @@ namespace rocRoller
 
             // TODO : create helper functions to make this lowering modular and readable.
             auto waveMult = graph.control.addElement(Multiply());
-            // connections are: 0: lhs (A); 1: rhs (B); 2: dst (D)
-            graph.mapper.connect<MacroTile>(waveMult, d, 2);
+
+            graph.mapper.connect(
+                waveMult, d, Connections::typeArgument<MacroTile>(NaryArgument::DEST));
 
             auto [waveA_tag, waveA] = graph.getDimension<WaveTile>(loadA[0]);
             auto [waveB_tag, waveB] = graph.getDimension<WaveTile>(loadB[0]);
@@ -427,15 +413,15 @@ namespace rocRoller
 
             if(contractions.size() == 1)
             {
-                auto tag         = contractions[0];
-                auto op          = kgraph.control.getNode<TensorContraction>(tag);
-                auto macrotile_a = kgraph.coordinates.getNode<MacroTile>(op.a);
-                auto macrotile_b = kgraph.coordinates.getNode<MacroTile>(op.b);
-                auto d           = kgraph.mapper.get<MacroTile>(tag);
-                if(macrotile_a.rank == 2 && macrotile_b.rank == 2 && op.aDims == std::vector<int>{1}
+                auto tag            = contractions[0];
+                auto op             = kgraph.control.getNode<TensorContraction>(tag);
+                auto [a_tag, a_mac] = kgraph.getDimension<MacroTile>(tag, NaryArgument::LHS);
+                auto [b_tag, b_mac] = kgraph.getDimension<MacroTile>(tag, NaryArgument::RHS);
+                auto [d_tag, d_amc] = kgraph.getDimension<MacroTile>(tag, NaryArgument::DEST);
+                if(a_mac.rank == 2 && b_mac.rank == 2 && op.aDims == std::vector<int>{1}
                    && op.bDims == std::vector<int>{0})
                 {
-                    lowerMatrixMultiply(kgraph, tag, op.a, op.b, d, params, context);
+                    lowerMatrixMultiply(kgraph, tag, a_tag, b_tag, d_tag, params, context);
                 }
                 else
                 {

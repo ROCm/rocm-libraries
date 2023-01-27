@@ -953,11 +953,14 @@ namespace rocRoller
                          .to<std::vector>();
             AssertFatal(a.size() == 1 && b.size() == 1, a.size(), b.size());
 
-            // connections are: 0: lhs (A); 1: rhs (B); 2: dst (D)
-            graph.mapper.connect<MacroTile>(waveMult, a[0], 0);
-            graph.mapper.connect<MacroTile>(waveMult, b[0], 1);
-            graph.mapper.connect<WaveTile>(waveMult, waveA_tag, 0);
-            graph.mapper.connect<WaveTile>(waveMult, waveB_tag, 1);
+            graph.mapper.connect(
+                waveMult, a[0], Connections::typeArgument<MacroTile>(NaryArgument::LHS));
+            graph.mapper.connect(
+                waveMult, b[0], Connections::typeArgument<MacroTile>(NaryArgument::RHS));
+            graph.mapper.connect(
+                waveMult, waveA_tag, Connections::typeArgument<WaveTile>(NaryArgument::LHS));
+            graph.mapper.connect(
+                waveMult, waveB_tag, Connections::typeArgument<WaveTile>(NaryArgument::RHS));
         }
 
         std::pair<Expression::ExpressionPtr, Expression::ExpressionPtr>

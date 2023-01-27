@@ -4,21 +4,15 @@
 namespace rocRoller::KernelGraph
 {
 
-    void ControlToCoordinateMapper::connect(int             control,
-                                            int             coordinate,
-                                            std::type_index tindex,
-                                            int             subDimension)
+    void ControlToCoordinateMapper::connect(int control, int coordinate, ConnectionSpec conn)
     {
-        auto key = key_type{control, tindex, subDimension};
+        auto key = key_type{control, conn};
         m_map.insert_or_assign(key, coordinate);
     }
 
-    void ControlToCoordinateMapper::disconnect(int             control,
-                                               int             coordinate,
-                                               std::type_index tindex,
-                                               int             subDimension)
+    void ControlToCoordinateMapper::disconnect(int control, int coordinate, ConnectionSpec conn)
     {
-        auto key = key_type{control, tindex, subDimension};
+        auto key = key_type{control, conn};
         m_map.erase(key);
     }
 
@@ -30,10 +24,7 @@ namespace rocRoller::KernelGraph
         {
             if(std::get<0>(kv.first) == control)
             {
-                rv.push_back({std::get<0>(kv.first),
-                              std::get<1>(kv.first),
-                              std::get<2>(kv.first),
-                              kv.second});
+                rv.push_back({std::get<0>(kv.first), kv.second, std::get<1>(kv.first)});
             }
         }
         return rv;

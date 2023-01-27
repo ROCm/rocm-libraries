@@ -162,35 +162,18 @@ namespace rocRoller
             // to allow user to specify stride types instead of
             // forcing size_t.
             ComputeIndex() = default;
-            ComputeIndex(int                        target,
-                         int                        increment,
-                         int                        base,
-                         int                        offset,
-                         int                        stride,
-                         int                        buffer,
-                         bool                       forward,
-                         DataType                   valueType,
-                         std::initializer_list<int> zero       = {},
-                         DataType                   offsetType = DataType::UInt64,
-                         DataType                   strideType = DataType::UInt64)
-                : target(target)
-                , increment(increment)
-                , base(base)
-                , offset(offset)
-                , stride(stride)
-                , buffer(buffer)
-                , forward(forward)
-                , zero(zero)
+            ComputeIndex(bool     forward,
+                         DataType valueType,
+                         DataType offsetType = DataType::UInt64,
+                         DataType strideType = DataType::UInt64)
+                : forward(forward)
                 , valueType(valueType)
                 , offsetType(offsetType)
                 , strideType(strideType)
             {
             }
 
-            bool             forward;
-            int              target, increment, base, offset, stride, buffer;
-            std::vector<int> zero;
-
+            bool     forward;
             DataType valueType, offsetType, strideType;
 
             std::string toString() const
@@ -376,23 +359,18 @@ namespace rocRoller
         struct TensorContraction : public BaseOperation
         {
             TensorContraction() = delete;
-            TensorContraction(int const               a,
-                              int const               b,
-                              std::vector<int> const& aContractedDimensions,
+            TensorContraction(std::vector<int> const& aContractedDimensions,
                               std::vector<int> const& bContractedDimensions)
-                : a(a)
-                , b(b)
-                , aDims(aContractedDimensions)
+                : aDims(aContractedDimensions)
                 , bDims(bContractedDimensions)
             {
             }
 
-            int              a, b;
             std::vector<int> aDims, bDims; // contracted dimensions
 
             std::string toString() const override
             {
-                return concatenate("TensorContraction(", a, ", ", b, ")");
+                return "TensorContraction";
             }
         };
 

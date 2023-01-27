@@ -58,7 +58,8 @@ namespace rocRoller
                     // to different data and to use different registers.
                     // Note: no edges are being added, to there will be loose Dimensions within the
                     // Coordinate graph.
-                    if(c.tindex == typeid(MacroTile))
+                    auto mt = graph.coordinates.get<MacroTile>(c.coordinate);
+                    if(mt)
                     {
                         if(reindexer.coordinates.count(c.coordinate) == 0)
                         {
@@ -68,7 +69,7 @@ namespace rocRoller
                         }
                         coord = reindexer.coordinates[c.coordinate];
                     }
-                    graph.mapper.connect(reindex.second, coord, c.tindex, c.subDimension);
+                    graph.mapper.connect(reindex.second, coord, c.connection);
                 }
             }
 

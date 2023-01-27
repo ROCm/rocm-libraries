@@ -371,60 +371,83 @@ namespace rocRoller
 
             Generator<Instruction> operator()(int tag, ComputeIndex const& ci, Transformer coords)
             {
+                auto base = m_graph.mapper.get(
+                    tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::BASE});
+                auto offset = m_graph.mapper.get(
+                    tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::OFFSET});
+                auto stride = m_graph.mapper.get(
+                    tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::STRIDE});
+                auto target = m_graph.mapper.get(
+                    tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::TARGET});
+                auto increment = m_graph.mapper.get(
+                    tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::INCREMENT});
+
                 rocRoller::Log::getLogger()->debug(
-                    "KernelGraph::CodeGenerator::ComputeIndex({}): {}/{}",
-                    tag,
-                    ci.offset,
-                    ci.stride);
+                    "KernelGraph::CodeGenerator::ComputeIndex({}): {}/{}", tag, offset, stride);
 
                 auto scope    = m_context->getScopeManager();
                 uint numBytes = DataTypeInfo::Get(ci.valueType).elementSize;
 
-                coords.setCoordinate(ci.increment, L(0u));
-                for(auto const tag_ : ci.zero)
-                    coords.setCoordinate(tag_, L(0u));
+                coords.setCoordinate(increment, L(0u));
+                for(int idx = 0;; ++idx)
+                {
+                    auto zeroTag = m_graph.mapper.get(
+                        tag,
+                        Connections::ComputeIndex{Connections::ComputeIndexArgument::ZERO, idx});
+                    if(zeroTag < 0)
+                        break;
+                    coords.setCoordinate(zeroTag, L(0u));
+                }
 
                 auto offsetReg = m_context->registerTagManager()->getRegister(
-                    ci.offset, Register::Type::Vector, ci.offsetType, 1);
+                    offset, Register::Type::Vector, ci.offsetType, 1);
                 offsetReg->setName(concatenate("offset", tag));
                 co_yield Register::AllocateIfNeeded(offsetReg);
-                scope->addRegister(ci.offset);
+                scope->addRegister(offset);
 
-                if(ci.base < 0)
+                if(base < 0)
                 {
-                    auto indexExpr = ci.forward ? coords.forward({ci.target})[0]
-                                                : coords.reverse({ci.target})[0];
+                    auto indexExpr
+                        = ci.forward ? coords.forward({target})[0] : coords.reverse({target})[0];
                     rocRoller::Log::getLogger()->debug(
-                        "  Offset({}): {}", ci.offset, toString(indexExpr));
+                        "  Offset({}): {}", offset, toString(indexExpr));
                     co_yield generate(offsetReg, indexExpr * L(numBytes));
                 }
 
-                if(ci.stride > 0)
+                if(stride > 0)
                 {
                     auto indexExpr = ci.forward
-                                         ? coords.forwardStride(ci.increment, L(1), {ci.target})[0]
-                                         : coords.reverseStride(ci.increment, L(1), {ci.target})[0];
+                                         ? coords.forwardStride(increment, L(1), {target})[0]
+                                         : coords.reverseStride(increment, L(1), {target})[0];
                     rocRoller::Log::getLogger()->debug(
-                        "  Stride({}): {}", ci.stride, toString(indexExpr));
+                        "  Stride({}): {}", stride, toString(indexExpr));
                     m_context->registerTagManager()->addExpression(
-                        ci.stride, indexExpr * L(numBytes), ci.strideType);
-                    scope->addRegister(ci.stride);
+                        stride, indexExpr * L(numBytes), ci.strideType);
+                    scope->addRegister(stride);
                 }
 
-                auto user = m_graph.coordinates.get<User>(ci.target);
-                if(user)
+                auto buffer = m_graph.mapper.get(
+                    tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::BUFFER});
+                if(buffer > 0)
                 {
-                    VariableType bufferPointer{DataType::None, PointerType::Buffer};
-                    auto         bufferReg = m_context->registerTagManager()->getRegister(
-                        ci.buffer, Register::Type::Scalar, bufferPointer, 1);
-                    bufferReg->setName(concatenate("buffer", tag));
-                    co_yield Register::AllocateIfNeeded(bufferReg);
-                    auto basePointer = MkSGPR(DataType::Int64);
-                    auto bufDesc     = BufferDescriptor(bufferReg, m_context);
-                    co_yield m_context->argLoader()->getValue(user->argumentName(), basePointer);
-                    co_yield bufDesc.setBasePointer(basePointer);
-                    co_yield bufDesc.setDefaultOpts();
-                    scope->addRegister(ci.buffer);
+                    auto user = m_graph.coordinates.get<User>(target);
+                    if(user)
+                    {
+                        auto bufferReg = m_context->registerTagManager()->getRegister(
+                            buffer,
+                            Register::Type::Scalar,
+                            {DataType::None, PointerType::Buffer},
+                            1);
+                        bufferReg->setName(concatenate("buffer", tag));
+                        co_yield Register::AllocateIfNeeded(bufferReg);
+                        auto basePointer = MkSGPR(DataType::Int64);
+                        auto bufDesc     = BufferDescriptor(bufferReg, m_context);
+                        co_yield m_context->argLoader()->getValue(user->argumentName(),
+                                                                  basePointer);
+                        co_yield bufDesc.setBasePointer(basePointer);
+                        co_yield bufDesc.setDefaultOpts();
+                        scope->addRegister(buffer);
+                    }
                 }
             }
 
@@ -1168,11 +1191,15 @@ namespace rocRoller
 
                 AssertFatal(sourceA_tag > 0 && sourceB_tag > 0, "User or LDS dimensions not found");
 
-                auto [waveA_tag, waveA] = m_graph.getDimension<WaveTile>(tag, 0);
-                auto [waveB_tag, waveB] = m_graph.getDimension<WaveTile>(tag, 1);
+                auto [waveA_tag, waveA] = m_graph.getDimension<WaveTile>(
+                    tag, Connections::typeArgument<WaveTile>(NaryArgument::LHS));
+                auto [waveB_tag, waveB] = m_graph.getDimension<WaveTile>(
+                    tag, Connections::typeArgument<WaveTile>(NaryArgument::RHS));
 
-                auto [macA_tag, macA] = m_graph.getDimension<MacroTile>(tag, 0);
-                auto [macB_tag, macB] = m_graph.getDimension<MacroTile>(tag, 1);
+                auto [macA_tag, macA] = m_graph.getDimension<MacroTile>(
+                    tag, Connections::typeArgument<MacroTile>(NaryArgument::LHS));
+                auto [macB_tag, macB] = m_graph.getDimension<MacroTile>(
+                    tag, Connections::typeArgument<MacroTile>(NaryArgument::RHS));
 
                 auto n_waveA_y_tags
                     = m_graph.coordinates
@@ -1212,7 +1239,8 @@ namespace rocRoller
                 uint wfs          = m_context->kernel()->wavefront_size();
                 uint num_agpr     = num_elements / wfs;
 
-                auto [D_tag, _D] = m_graph.getDimension<MacroTile>(tag, 2);
+                auto [D_tag, _D] = m_graph.getDimension<MacroTile>(
+                    tag, Connections::typeArgument<MacroTile>(NaryArgument::DEST));
 
                 auto D = m_context->registerTagManager()->getRegister(
                     D_tag, Register::Type::Accumulator, DataType::Float, num_agpr);

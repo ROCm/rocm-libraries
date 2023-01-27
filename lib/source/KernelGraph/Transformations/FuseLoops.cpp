@@ -97,7 +97,7 @@ namespace rocRoller
                                                           std::vector<int>{child});
                     for(auto const& c : graph.mapper.getConnections(origSetCoord))
                     {
-                        graph.mapper.connect(setCoord, c.coordinate, c.tindex, c.subDimension);
+                        graph.mapper.connect(setCoord, c.coordinate, c.connection);
                     }
                 }
 

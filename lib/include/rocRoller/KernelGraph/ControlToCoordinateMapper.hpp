@@ -5,10 +5,85 @@
 #include <string>
 #include <tuple>
 #include <typeindex>
+#include <variant>
 #include <vector>
+
+#include <rocRoller/DataTypes/DataTypes.hpp>
+#include <rocRoller/Utilities/Comparison.hpp>
 
 namespace rocRoller::KernelGraph
 {
+
+    /**
+     * @brief Connection specifiers.
+     *
+     * Connections are used to uniquely connect a control flow graph
+     * node to a coordinate transform graph node.
+     */
+    namespace Connections
+    {
+        struct TypeAndSubDimension
+        {
+            std::type_index id;
+            int             subdimension;
+        };
+
+        bool inline operator<(TypeAndSubDimension const& a, TypeAndSubDimension const& b)
+        {
+            if(a.id == b.id)
+                return a.subdimension < b.subdimension;
+            return a.id < b.id;
+        }
+
+        struct TypeAndNaryArgument
+        {
+            std::type_index id;
+            NaryArgument    argument;
+        };
+
+        template <typename T>
+        TypeAndNaryArgument inline typeArgument(NaryArgument arg)
+        {
+            return TypeAndNaryArgument{typeid(T), arg};
+        }
+
+        bool inline operator<(TypeAndNaryArgument const& a, TypeAndNaryArgument const& b)
+        {
+            if(a.id == b.id)
+                return a.argument < b.argument;
+            return a.id < b.id;
+        }
+
+        enum class ComputeIndexArgument : int
+        {
+            TARGET,
+            INCREMENT,
+            BASE,
+            OFFSET,
+            STRIDE,
+            ZERO,
+            BUFFER
+        };
+
+        struct ComputeIndex
+        {
+            ComputeIndexArgument argument;
+            int                  index = 0;
+        };
+
+        bool inline operator<(ComputeIndex const& a, ComputeIndex const& b)
+        {
+            if(a.argument == b.argument)
+                return a.index < b.index;
+            return a.argument < b.argument;
+        }
+    }
+
+    using ConnectionSpec = std::variant<std::monostate,
+                                        NaryArgument,
+                                        Connections::ComputeIndex,
+                                        Connections::TypeAndSubDimension,
+                                        Connections::TypeAndNaryArgument>;
 
     /**
      * @brief Connects nodes in the control flow graph to nodes in the
@@ -19,28 +94,20 @@ namespace rocRoller::KernelGraph
      * in the coordinate graph.
      *
      * A single control flow node may be connected to multiple
-     * coordinates.  However, the combination of
-     *
-     * 1. control index,
-     * 2. coordinate type, and
-     * 3. coordinate subdimension
-     *
-     * must be unique.
+     * coordinates.  To accomplish this, connection specifiers (see
+     * ConnectionSpec) are used.
      */
     class ControlToCoordinateMapper
     {
         // key_type is:
-        //  control graph index,
-        //  dimension type index, and
-        //  sub-dimension number
-        using key_type = std::tuple<int, std::type_index, int>;
+        //  control graph index, connection specification
+        using key_type = std::tuple<int, ConnectionSpec>;
 
         struct Connection
         {
-            int             control;
-            std::type_index tindex;
-            int             subDimension;
-            int             coordinate;
+            int            control;
+            int            coordinate;
+            ConnectionSpec connection;
         };
 
     public:
@@ -48,7 +115,7 @@ namespace rocRoller::KernelGraph
          * @brief Connects the control flow node `control` to the
          * coorindate `coordinate`.
          */
-        void connect(int control, int coordinate, std::type_index tindex, int subDimension);
+        void connect(int control, int coordinate, ConnectionSpec conn);
 
         /**
          * @brief Connects the control flow node `control` to the
@@ -64,7 +131,7 @@ namespace rocRoller::KernelGraph
          * @brief Disconnects the control flow node `control` to the
          * coorindate `coordinate`.
          */
-        void disconnect(int control, int coordinate, std::type_index tindex, int subDimension);
+        void disconnect(int control, int coordinate, ConnectionSpec conn);
 
         /**
          * @brief Disconnects the control flow node `control` to the
@@ -82,6 +149,8 @@ namespace rocRoller::KernelGraph
          */
         template <typename T>
         int get(int control, int subDimension = 0) const;
+
+        int get(int control, ConnectionSpec conn = {}) const;
 
         /**
          * @brief Get all connections emanating from the control flow

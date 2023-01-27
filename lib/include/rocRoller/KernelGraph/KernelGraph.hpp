@@ -26,9 +26,9 @@ namespace rocRoller
             std::string toDOT(bool drawMappings = false) const;
 
             template <typename T>
-            std::pair<int, T> getDimension(int controlIndex, int subDimension = 0) const
+            std::pair<int, T> getDimension(int controlIndex, ConnectionSpec conn) const
             {
-                int  tag     = mapper.get<T>(controlIndex, subDimension);
+                int  tag     = mapper.get(controlIndex, conn);
                 auto element = coordinates.getElement(tag);
                 AssertFatal(std::holds_alternative<CoordinateGraph::Dimension>(element),
                             "Invalid connection: element isn't a Dimension.",
@@ -40,6 +40,13 @@ namespace rocRoller
                             ShowValue(typeid(T).name()),
                             ShowValue(dim));
                 return {tag, std::get<T>(dim)};
+            }
+
+            template <typename T>
+            std::pair<int, T> getDimension(int controlIndex, int subDimension = 0) const
+            {
+                return getDimension<T>(controlIndex,
+                                       Connections::TypeAndSubDimension{typeid(T), subDimension});
             }
         };
 

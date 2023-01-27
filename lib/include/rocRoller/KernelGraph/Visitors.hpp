@@ -305,17 +305,15 @@ namespace rocRoller
                                     "Missing mapped coordinate: ",
                                     ShowValue(old_tag),
                                     ShowValue(c.coordinate));
-                        graph.mapper.connect(new_tag,
-                                             reindexer.coordinates.at(c.coordinate),
-                                             c.tindex,
-                                             c.subDimension);
+                        graph.mapper.connect(
+                            new_tag, reindexer.coordinates.at(c.coordinate), c.connection);
                     }
                 }
                 else
                 {
                     for(auto const& c : original.mapper.getConnections(old_tag))
                     {
-                        graph.mapper.connect(new_tag, c.coordinate, c.tindex, c.subDimension);
+                        graph.mapper.connect(new_tag, c.coordinate, c.connection);
                     }
                 }
             }
@@ -378,46 +376,6 @@ namespace rocRoller
                 return m_rewriteCoordinates;
             }
 
-            virtual void visitOperation(KernelGraph&             graph,
-                                        KernelGraph const&       original,
-                                        GraphReindexer&          reindexer,
-                                        int                      tag,
-                                        TensorContraction const& op)
-            {
-                copyOperation(graph, original, reindexer, tag);
-
-                if(m_rewriteCoordinates)
-                {
-                    auto new_tag = reindexer.control.at(tag);
-                    auto new_op  = graph.control.getNode<TensorContraction>(new_tag);
-                    new_op.a     = reindexer.coordinates.at(op.a);
-                    new_op.b     = reindexer.coordinates.at(op.b);
-                    graph.control.setElement(new_tag, new_op);
-                }
-            }
-
-            virtual void visitOperation(KernelGraph&        graph,
-                                        KernelGraph const&  original,
-                                        GraphReindexer&     reindexer,
-                                        int                 tag,
-                                        ComputeIndex const& op)
-            {
-                copyOperation(graph, original, reindexer, tag);
-
-                if(m_rewriteCoordinates)
-                {
-                    auto new_tag  = reindexer.control.at(tag);
-                    auto new_op   = graph.control.getNode<ComputeIndex>(new_tag);
-                    new_op.target = op.target > 0 ? reindexer.coordinates.at(op.target) : op.target;
-                    new_op.increment
-                        = op.increment > 0 ? reindexer.coordinates.at(op.increment) : op.increment;
-                    new_op.base   = op.base > 0 ? reindexer.coordinates.at(op.base) : op.base;
-                    new_op.offset = op.offset > 0 ? reindexer.coordinates.at(op.offset) : op.offset;
-                    new_op.stride = op.stride > 0 ? reindexer.coordinates.at(op.stride) : op.stride;
-                    graph.control.setElement(new_tag, new_op);
-                }
-            }
-
             MAKE_EDGE_VISITOR(ConstructMacroTile);
             MAKE_EDGE_VISITOR(DataFlow);
             MAKE_EDGE_VISITOR(Offset);
@@ -432,6 +390,10 @@ namespace rocRoller
             MAKE_EDGE_VISITOR(Split);
             MAKE_EDGE_VISITOR(Tile);
 
+            MAKE_OPERATION_VISITOR(Barrier);
+            MAKE_OPERATION_VISITOR(ComputeIndex);
+            MAKE_OPERATION_VISITOR(Deallocate);
+            MAKE_OPERATION_VISITOR(ForLoopOp);
             MAKE_OPERATION_VISITOR(Kernel);
             MAKE_OPERATION_VISITOR(LoadLDSTile);
             MAKE_OPERATION_VISITOR(LoadLinear);
@@ -439,15 +401,13 @@ namespace rocRoller
             MAKE_OPERATION_VISITOR(LoadVGPR);
             MAKE_OPERATION_VISITOR(Multiply);
             MAKE_OPERATION_VISITOR(Scope);
+            MAKE_OPERATION_VISITOR(SetCoordinate);
             MAKE_OPERATION_VISITOR(StoreLDSTile);
             MAKE_OPERATION_VISITOR(StoreLinear);
             MAKE_OPERATION_VISITOR(StoreTiled);
             MAKE_OPERATION_VISITOR(StoreVGPR);
-            MAKE_OPERATION_VISITOR(ForLoopOp);
+            MAKE_OPERATION_VISITOR(TensorContraction);
             MAKE_OPERATION_VISITOR(UnrollOp);
-            MAKE_OPERATION_VISITOR(Barrier);
-            MAKE_OPERATION_VISITOR(SetCoordinate);
-            MAKE_OPERATION_VISITOR(Deallocate);
 
             virtual void visitEdge(KernelGraph&                   graph,
                                    KernelGraph const&             original,

@@ -48,6 +48,74 @@ namespace rocRoller
             return scope;
         }
 
+        /**
+         * Helper to make a ComputeIndex node and add connections.
+         */
+        int makeComputeIndex(KernelGraph&     graph,
+                             int              target,
+                             int              increment,
+                             int              base,
+                             int              offset,
+                             int              stride,
+                             int              buffer,
+                             bool             forward,
+                             DataType         valueType,
+                             std::vector<int> zero       = {},
+                             DataType         offsetType = DataType::UInt64,
+                             DataType         strideType = DataType::UInt64)
+        {
+            auto ci = graph.control.addElement(
+                ComputeIndex(forward, valueType, offsetType, strideType));
+            if(base > 0)
+            {
+                graph.mapper.connect(
+                    ci, base, Connections::ComputeIndex{Connections::ComputeIndexArgument::BASE});
+            }
+            if(buffer > 0)
+            {
+                graph.mapper.connect(
+                    ci,
+                    buffer,
+                    Connections::ComputeIndex{Connections::ComputeIndexArgument::BUFFER});
+            }
+            if(increment > 0)
+            {
+                graph.mapper.connect(
+                    ci,
+                    increment,
+                    Connections::ComputeIndex{Connections::ComputeIndexArgument::INCREMENT});
+            }
+            if(offset > 0)
+            {
+                graph.mapper.connect(
+                    ci,
+                    offset,
+                    Connections::ComputeIndex{Connections::ComputeIndexArgument::OFFSET});
+            }
+            if(stride > 0)
+            {
+                graph.mapper.connect(
+                    ci,
+                    stride,
+                    Connections::ComputeIndex{Connections::ComputeIndexArgument::STRIDE});
+            }
+            if(target > 0)
+            {
+                graph.mapper.connect(
+                    ci,
+                    target,
+                    Connections::ComputeIndex{Connections::ComputeIndexArgument::TARGET});
+            }
+            for(int i = 0; i < zero.size(); ++i)
+            {
+                graph.mapper.connect(
+                    ci,
+                    zero[i],
+                    Connections::ComputeIndex{Connections::ComputeIndexArgument::ZERO, i});
+            }
+            return ci;
+        }
+
         std::tuple<int, int, int> computeIndexVGPRMATRIXAB(KernelGraph& graph, int load, int sdim)
         {
             AssertFatal(isOperation<LoadTiled>(graph.control.getElement(load)));
@@ -75,19 +143,36 @@ namespace rocRoller
             graph.mapper.connect<Stride>(load, col_stride, 1);
             graph.mapper.connect<Buffer>(load, buffer);
 
-            auto ci_mac = graph.control.addElement(ComputeIndex(
-                user, mac, -1, offset_mac, stride_mac, buffer, false, dtype, {i_thr_x, i_thr_y}));
-            auto ci_row = graph.control.addElement(ComputeIndex(
-                user, i_thr_x, mac, row_offset, row_stride, buffer, false, dtype, {mac, i_thr_y}));
-            auto ci_col = graph.control.addElement(ComputeIndex(user,
-                                                                i_thr_y,
-                                                                i_thr_x,
-                                                                col_offset,
-                                                                col_stride,
-                                                                buffer,
-                                                                false,
-                                                                dtype,
-                                                                {mac, i_thr_x}));
+            auto ci_mac = makeComputeIndex(graph,
+                                           user,
+                                           mac,
+                                           -1,
+                                           offset_mac,
+                                           stride_mac,
+                                           buffer,
+                                           false,
+                                           dtype,
+                                           {i_thr_x, i_thr_y});
+            auto ci_row = makeComputeIndex(graph,
+                                           user,
+                                           i_thr_x,
+                                           mac,
+                                           row_offset,
+                                           row_stride,
+                                           buffer,
+                                           false,
+                                           dtype,
+                                           {mac, i_thr_y});
+            auto ci_col = makeComputeIndex(graph,
+                                           user,
+                                           i_thr_y,
+                                           i_thr_x,
+                                           col_offset,
+                                           col_stride,
+                                           buffer,
+                                           false,
+                                           dtype,
+                                           {mac, i_thr_x});
 
             graph.control.addElement(Sequence(), {ci_mac}, {ci_row});
             graph.control.addElement(Sequence(), {ci_row}, {ci_col});
@@ -156,28 +241,30 @@ namespace rocRoller
             graph.mapper.connect<Stride>(loadstore, col_stride, 1);
             graph.mapper.connect<Buffer>(loadstore, buffer);
 
-            auto ci_row = graph.control.addElement(ComputeIndex(source,
-                                                                i_thr_x,
-                                                                -1,
-                                                                row_offset,
-                                                                row_stride,
-                                                                buffer,
-                                                                forward,
-                                                                dtype,
-                                                                {i_thr_y},
-                                                                offsettype,
-                                                                offsettype));
-            auto ci_col = graph.control.addElement(ComputeIndex(source,
-                                                                i_thr_y,
-                                                                i_thr_x,
-                                                                col_offset,
-                                                                col_stride,
-                                                                buffer,
-                                                                forward,
-                                                                dtype,
-                                                                {i_thr_x},
-                                                                offsettype,
-                                                                offsettype));
+            auto ci_row = makeComputeIndex(graph,
+                                           source,
+                                           i_thr_x,
+                                           -1,
+                                           row_offset,
+                                           row_stride,
+                                           buffer,
+                                           forward,
+                                           dtype,
+                                           {i_thr_y},
+                                           offsettype,
+                                           offsettype);
+            auto ci_col = makeComputeIndex(graph,
+                                           source,
+                                           i_thr_y,
+                                           i_thr_x,
+                                           col_offset,
+                                           col_stride,
+                                           buffer,
+                                           forward,
+                                           dtype,
+                                           {i_thr_x},
+                                           offsettype,
+                                           offsettype);
 
             return {ci_row, ci_col};
         }
@@ -204,28 +291,30 @@ namespace rocRoller
             graph.mapper.connect<Stride>(load, stride_wave, 0);
             graph.mapper.connect<Stride>(load, stride_vgpr, 1);
 
-            auto ci_wave = graph.control.addElement(ComputeIndex(lds,
-                                                                 wave,
-                                                                 -1,
-                                                                 offset_wave,
-                                                                 stride_wave,
-                                                                 -1,
-                                                                 false,
-                                                                 dtype,
-                                                                 {vgpr},
-                                                                 DataType::UInt32,
-                                                                 DataType::UInt32));
-            auto ci_vgpr = graph.control.addElement(ComputeIndex(lds,
-                                                                 vgpr,
-                                                                 offset_wave,
-                                                                 offset_vgpr,
-                                                                 stride_vgpr,
-                                                                 -1,
-                                                                 false,
-                                                                 dtype,
-                                                                 {wave},
-                                                                 DataType::UInt32,
-                                                                 DataType::UInt32));
+            auto ci_wave = makeComputeIndex(graph,
+                                            lds,
+                                            wave,
+                                            -1,
+                                            offset_wave,
+                                            stride_wave,
+                                            -1,
+                                            false,
+                                            dtype,
+                                            {vgpr},
+                                            DataType::UInt32,
+                                            DataType::UInt32);
+            auto ci_vgpr = makeComputeIndex(graph,
+                                            lds,
+                                            vgpr,
+                                            offset_wave,
+                                            offset_vgpr,
+                                            stride_vgpr,
+                                            -1,
+                                            false,
+                                            dtype,
+                                            {wave},
+                                            DataType::UInt32,
+                                            DataType::UInt32);
 
             graph.control.addElement(Sequence(), {ci_wave}, {ci_vgpr});
 
@@ -260,26 +349,28 @@ namespace rocRoller
             graph.mapper.connect<Stride>(load, stride_vgpr, 1);
             graph.mapper.connect<Buffer>(load, buffer);
 
-            auto ci_mac  = graph.control.addElement(ComputeIndex(
-                user, mac, -1, offset_mac, stride_mac, buffer, false, dtype, {wave, vgpr}));
-            auto ci_wave = graph.control.addElement(ComputeIndex(user,
-                                                                 wave,
-                                                                 offset_mac,
-                                                                 offset_wave,
-                                                                 stride_wave,
-                                                                 buffer,
-                                                                 false,
-                                                                 dtype,
-                                                                 {mac, vgpr}));
-            auto ci_vgpr = graph.control.addElement(ComputeIndex(user,
-                                                                 vgpr,
-                                                                 offset_wave,
-                                                                 offset_vgpr,
-                                                                 stride_vgpr,
-                                                                 buffer,
-                                                                 false,
-                                                                 dtype,
-                                                                 {mac, wave}));
+            auto ci_mac = makeComputeIndex(
+                graph, user, mac, -1, offset_mac, stride_mac, buffer, false, dtype, {wave, vgpr});
+            auto ci_wave = makeComputeIndex(graph,
+                                            user,
+                                            wave,
+                                            offset_mac,
+                                            offset_wave,
+                                            stride_wave,
+                                            buffer,
+                                            false,
+                                            dtype,
+                                            {mac, vgpr});
+            auto ci_vgpr = makeComputeIndex(graph,
+                                            user,
+                                            vgpr,
+                                            offset_wave,
+                                            offset_vgpr,
+                                            stride_vgpr,
+                                            buffer,
+                                            false,
+                                            dtype,
+                                            {mac, wave});
 
             graph.control.addElement(Sequence(), {ci_mac}, {ci_wave});
             graph.control.addElement(Sequence(), {ci_wave}, {ci_vgpr});
@@ -324,7 +415,7 @@ namespace rocRoller
                 graph.control.addElement(Body(), {scope}, {newSetCoord});
                 for(auto const& c : graph.mapper.getConnections(setCoord))
                 {
-                    graph.mapper.connect(newSetCoord, c.coordinate, c.tindex, c.subDimension);
+                    graph.mapper.connect(newSetCoord, c.coordinate, c.connection);
                 }
                 top = newSetCoord;
                 graph.control.addElement(Sequence(), {newSetCoord}, {op});
@@ -475,28 +566,30 @@ namespace rocRoller
             graph.mapper.connect<Stride>(op, stride_vgpr_index, 1);
             graph.mapper.connect<Buffer>(op, buffer);
 
-            auto ci_vgpr_block = graph.control.addElement(ComputeIndex(source,
-                                                                       vgpr_block,
-                                                                       -1,
-                                                                       offset_vgpr_block,
-                                                                       stride_vgpr_block,
-                                                                       buffer,
-                                                                       forward,
-                                                                       dtype,
-                                                                       {vgpr_index},
-                                                                       offsettype,
-                                                                       offsettype));
-            auto ci_vgpr_index = graph.control.addElement(ComputeIndex(source,
-                                                                       vgpr_index,
-                                                                       offset_vgpr_block,
-                                                                       offset_vgpr_index,
-                                                                       stride_vgpr_index,
-                                                                       buffer,
-                                                                       forward,
-                                                                       dtype,
-                                                                       {vgpr_block},
-                                                                       offsettype,
-                                                                       offsettype));
+            auto ci_vgpr_block = makeComputeIndex(graph,
+                                                  source,
+                                                  vgpr_block,
+                                                  -1,
+                                                  offset_vgpr_block,
+                                                  stride_vgpr_block,
+                                                  buffer,
+                                                  forward,
+                                                  dtype,
+                                                  {vgpr_index},
+                                                  offsettype,
+                                                  offsettype);
+            auto ci_vgpr_index = makeComputeIndex(graph,
+                                                  source,
+                                                  vgpr_index,
+                                                  offset_vgpr_block,
+                                                  offset_vgpr_index,
+                                                  stride_vgpr_index,
+                                                  buffer,
+                                                  forward,
+                                                  dtype,
+                                                  {vgpr_block},
+                                                  offsettype,
+                                                  offsettype);
 
             graph.control.addElement(Body(), {scope}, {ci_vgpr_block});
             graph.control.addElement(Sequence(), {ci_vgpr_block}, {ci_vgpr_index});
