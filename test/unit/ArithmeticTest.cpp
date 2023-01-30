@@ -1173,6 +1173,8 @@ namespace ArithmeticTest
             command->allocateArgument({DataType::Float, PointerType::Value}));
         auto b_exp = std::make_shared<Expression::Expression>(
             command->allocateArgument({DataType::Float, PointerType::Value}));
+        auto c_exp = std::make_shared<Expression::Expression>(
+            command->allocateArgument({DataType::Float, PointerType::Value}));
 
         auto one  = std::make_shared<Expression::Expression>(1u);
         auto zero = std::make_shared<Expression::Expression>(0u);
@@ -1187,6 +1189,7 @@ namespace ArithmeticTest
                         cond_result_exp});
         k->addArgument({"a", DataType::Float, DataDirection::ReadOnly, a_exp});
         k->addArgument({"b", DataType::Float, DataDirection::ReadOnly, b_exp});
+        k->addArgument({"c", DataType::Float, DataDirection::ReadOnly, c_exp});
 
         k->setWorkgroupSize({1, 1, 1});
         k->setWorkitemCount({one, one, one});
@@ -1196,11 +1199,12 @@ namespace ArithmeticTest
         m_context->schedule(k->prolog());
 
         auto kb = [&]() -> Generator<Instruction> {
-            Register::ValuePtr s_result, s_cond_result, s_a, s_b;
+            Register::ValuePtr s_result, s_cond_result, s_a, s_b, s_c;
             co_yield m_context->argLoader()->getValue("result", s_result);
             co_yield m_context->argLoader()->getValue("cond_result", s_cond_result);
             co_yield m_context->argLoader()->getValue("a", s_a);
             co_yield m_context->argLoader()->getValue("b", s_b);
+            co_yield m_context->argLoader()->getValue("c", s_c);
 
             auto v_result = Register::Value::Placeholder(
                 m_context, Register::Type::Vector, DataType::Raw32, 2);
@@ -1217,13 +1221,17 @@ namespace ArithmeticTest
             auto v_c = Register::Value::Placeholder(
                 m_context, Register::Type::Vector, DataType::Float, 1);
 
-            auto s_c = Register::Value::Placeholder(
+            auto v_r = Register::Value::Placeholder(
+                m_context, Register::Type::Vector, DataType::Float, 1);
+
+            auto s_r = Register::Value::Placeholder(
                 m_context, Register::Type::Scalar, DataType::Raw32, 2);
 
             co_yield v_a->allocate();
             co_yield v_b->allocate();
             co_yield v_c->allocate();
-            co_yield s_c->allocate();
+            co_yield v_r->allocate();
+            co_yield s_r->allocate();
             co_yield v_result->allocate();
             co_yield v_cond_result->allocate();
 
@@ -1233,46 +1241,51 @@ namespace ArithmeticTest
 
             co_yield m_context->copier()->copy(v_a, s_a, "Move value");
             co_yield m_context->copier()->copy(v_b, s_b, "Move value");
+            co_yield m_context->copier()->copy(v_c, s_c, "Move value");
 
-            co_yield generateOp<Expression::Add>(v_c, v_a, v_b);
-            co_yield m_context->mem()->storeFlat(v_result, v_c, 0, 4);
+            co_yield generateOp<Expression::Add>(v_r, v_a, v_b);
+            co_yield m_context->mem()->storeFlat(v_result, v_r, 0, 4);
 
-            co_yield generateOp<Expression::Subtract>(v_c, v_a, v_b);
+            co_yield generateOp<Expression::Subtract>(v_r, v_a, v_b);
             co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(4), 4);
+                MemoryInstructions::Flat, v_result, v_r, Register::Value::Literal(4), 4);
 
-            co_yield generateOp<Expression::Multiply>(v_c, v_a, v_b);
+            co_yield generateOp<Expression::Multiply>(v_r, v_a, v_b);
             co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(8), 4);
+                MemoryInstructions::Flat, v_result, v_r, Register::Value::Literal(8), 4);
 
-            co_yield generateOp<Expression::Negate>(v_c, v_a);
+            co_yield generateOp<Expression::Negate>(v_r, v_a);
             co_yield m_context->mem()->store(
-                MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(12), 4);
+                MemoryInstructions::Flat, v_result, v_r, Register::Value::Literal(12), 4);
 
-            co_yield generateOp<Expression::GreaterThan>(s_c, v_a, v_b);
-            co_yield m_context->copier()->copy(
-                v_c, s_c->subset({0}), "Move result to vgpr to store.");
-            co_yield m_context->mem()->storeFlat(v_cond_result, v_c->subset({0}), 0, 4);
+            co_yield generateOp<Expression::MultiplyAdd>(v_r, v_a, v_b, v_c);
+            co_yield m_context->mem()->store(
+                MemoryInstructions::Flat, v_result, v_r, Register::Value::Literal(16), 4);
 
-            co_yield generateOp<Expression::GreaterThanEqual>(s_c, v_a, v_b);
+            co_yield generateOp<Expression::GreaterThan>(s_r, v_a, v_b);
             co_yield m_context->copier()->copy(
-                v_c, s_c->subset({0}), "Move result to vgpr to store.");
-            co_yield m_context->mem()->storeFlat(v_cond_result, v_c->subset({0}), 4, 4);
+                v_r, s_r->subset({0}), "Move result to vgpr to store.");
+            co_yield m_context->mem()->storeFlat(v_cond_result, v_r->subset({0}), 0, 4);
 
-            co_yield generateOp<Expression::LessThan>(s_c, v_a, v_b);
+            co_yield generateOp<Expression::GreaterThanEqual>(s_r, v_a, v_b);
             co_yield m_context->copier()->copy(
-                v_c, s_c->subset({0}), "Move result to vgpr to store.");
-            co_yield m_context->mem()->storeFlat(v_cond_result, v_c->subset({0}), 8, 4);
+                v_r, s_r->subset({0}), "Move result to vgpr to store.");
+            co_yield m_context->mem()->storeFlat(v_cond_result, v_r->subset({0}), 4, 4);
 
-            co_yield generateOp<Expression::LessThanEqual>(s_c, v_a, v_b);
+            co_yield generateOp<Expression::LessThan>(s_r, v_a, v_b);
             co_yield m_context->copier()->copy(
-                v_c, s_c->subset({0}), "Move result to vgpr to store.");
-            co_yield m_context->mem()->storeFlat(v_cond_result, v_c->subset({0}), 12, 4);
+                v_r, s_r->subset({0}), "Move result to vgpr to store.");
+            co_yield m_context->mem()->storeFlat(v_cond_result, v_r->subset({0}), 8, 4);
 
-            co_yield generateOp<Expression::Equal>(s_c, v_a, v_b);
+            co_yield generateOp<Expression::LessThanEqual>(s_r, v_a, v_b);
             co_yield m_context->copier()->copy(
-                v_c, s_c->subset({0}), "Move result to vgpr to store.");
-            co_yield m_context->mem()->storeFlat(v_cond_result, v_c->subset({0}), 16, 4);
+                v_r, s_r->subset({0}), "Move result to vgpr to store.");
+            co_yield m_context->mem()->storeFlat(v_cond_result, v_r->subset({0}), 12, 4);
+
+            co_yield generateOp<Expression::Equal>(s_r, v_a, v_b);
+            co_yield m_context->copier()->copy(
+                v_r, s_r->subset({0}), "Move result to vgpr to store.");
+            co_yield m_context->mem()->storeFlat(v_cond_result, v_r->subset({0}), 16, 4);
         };
 
         m_context->schedule(kb());
@@ -1290,45 +1303,54 @@ namespace ArithmeticTest
         {
             CommandKernel commandKernel(m_context);
 
-            auto d_result      = make_shared_device<float>(4);
+            auto d_result      = make_shared_device<float>(5);
             auto d_cond_result = make_shared_device<int>(5);
 
             for(float a : TestValues::floatValues)
             {
                 for(float b : TestValues::floatValues)
                 {
+                    for(float c : TestValues::floatValues)
+                    {
 
-                    KernelArguments runtimeArgs;
-                    runtimeArgs.append("result", d_result.get());
-                    runtimeArgs.append("cond_result", d_cond_result.get());
-                    runtimeArgs.append("a", a);
-                    runtimeArgs.append("b", b);
+                        KernelArguments runtimeArgs;
+                        runtimeArgs.append("result", d_result.get());
+                        runtimeArgs.append("cond_result", d_cond_result.get());
+                        runtimeArgs.append("a", a);
+                        runtimeArgs.append("b", b);
+                        runtimeArgs.append("c", c);
 
-                    commandKernel.launchKernel(runtimeArgs.runtimeArguments());
+                        commandKernel.launchKernel(runtimeArgs.runtimeArguments());
 
-                    std::vector<float> result(4);
-                    ASSERT_THAT(hipMemcpy(result.data(),
-                                          d_result.get(),
-                                          result.size() * sizeof(float),
-                                          hipMemcpyDefault),
-                                HasHipSuccess(0));
+                        std::vector<float> result(5);
+                        ASSERT_THAT(hipMemcpy(result.data(),
+                                              d_result.get(),
+                                              result.size() * sizeof(float),
+                                              hipMemcpyDefault),
+                                    HasHipSuccess(0));
 
-                    std::vector<int> cond_result(5);
-                    ASSERT_THAT(hipMemcpy(cond_result.data(),
-                                          d_cond_result.get(),
-                                          cond_result.size() * sizeof(int),
-                                          hipMemcpyDefault),
-                                HasHipSuccess(0));
+                        std::vector<int> cond_result(5);
+                        ASSERT_THAT(hipMemcpy(cond_result.data(),
+                                              d_cond_result.get(),
+                                              cond_result.size() * sizeof(int),
+                                              hipMemcpyDefault),
+                                    HasHipSuccess(0));
 
-                    EXPECT_EQ(result[0], a + b);
-                    EXPECT_EQ(result[1], a - b);
-                    EXPECT_EQ(result[2], a * b);
-                    EXPECT_EQ(result[3], -a);
-                    EXPECT_EQ(cond_result[0], (a > b ? 1 : 0));
-                    EXPECT_EQ(cond_result[1], (a >= b ? 1 : 0));
-                    EXPECT_EQ(cond_result[2], (a < b ? 1 : 0));
-                    EXPECT_EQ(cond_result[3], (a <= b ? 1 : 0));
-                    EXPECT_EQ(cond_result[4], (a == b ? 1 : 0));
+                        EXPECT_EQ(result[0], a + b);
+                        EXPECT_EQ(result[1], a - b);
+                        EXPECT_EQ(result[2], a * b);
+                        EXPECT_EQ(result[3], -a);
+                        float fma = a * b + c;
+                        if(fma != 0.0)
+                        {
+                            EXPECT_LT((result[4] - fma) / fma, 5.e-7);
+                        }
+                        EXPECT_EQ(cond_result[0], (a > b ? 1 : 0));
+                        EXPECT_EQ(cond_result[1], (a >= b ? 1 : 0));
+                        EXPECT_EQ(cond_result[2], (a < b ? 1 : 0));
+                        EXPECT_EQ(cond_result[3], (a <= b ? 1 : 0));
+                        EXPECT_EQ(cond_result[4], (a == b ? 1 : 0));
+                    }
                 }
             }
         }

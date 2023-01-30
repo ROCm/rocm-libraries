@@ -254,6 +254,7 @@ namespace rocRoller
 #include "LessThanEqual.hpp"
 #include "Modulo.hpp"
 #include "Multiply.hpp"
+#include "MultiplyAdd.hpp"
 #include "MultiplyHigh.hpp"
 #include "Negate.hpp"
 #include "ShiftL.hpp"

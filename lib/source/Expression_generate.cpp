@@ -271,6 +271,12 @@ namespace rocRoller
 
                 co_yield prepareSourceOperands(results, schedulerLocked, subExprs);
 
+                if(!dest)
+                {
+                    dest = resultPlaceholder(resultType(expr));
+                    co_yield dest->allocate();
+                }
+
                 co_yield generateOp<Operation>(dest, results[0], results[1], results[2]);
 
                 if(schedulerLocked)

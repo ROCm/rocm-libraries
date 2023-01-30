@@ -42,8 +42,9 @@ namespace rocRoller
     namespace Expression
     {
         /**
-         * Visitor for a specific Operation expression.  Performs that specific Operation (Add, subtract, etc).
-         * Does not walk the expression tree.
+         * Visitor for a specific Operation expression.  Performs that
+         * specific Operation (Add, subtract, etc).  Does not walk the
+         * expression tree.
          */
         template <typename T>
         struct OperationEvaluatorVisitor
@@ -51,8 +52,9 @@ namespace rocRoller
         };
 
         /**
-         * Visitor for an Expression.  Walks the expression tree, calling the
-         * OperationEvaluatorVisitor to perform actual operations.
+         * Visitor for an Expression.  Walks the expression tree,
+         * calling the OperationEvaluatorVisitor to perform actual
+         * operations.
          */
         struct EvaluateVisitor;
 
@@ -121,7 +123,68 @@ namespace rocRoller
             }
         };
 
-/**
+        template <typename TheEvaluator, typename LHS, typename R1HS, typename R2HS>
+        concept CCanEvaluateTernary = requires(TheEvaluator ev, LHS lhs, R1HS r1hs, R2HS r2hs)
+        {
+            requires CCommandArgumentValue<LHS>;
+            requires CCommandArgumentValue<R1HS>;
+            requires CCommandArgumentValue<R2HS>;
+
+            {
+                ev.evaluate(lhs, r1hs, r2hs)
+                } -> CCommandArgumentValue;
+        };
+
+        template <CTernary TernaryExpr>
+        struct TernaryEvaluatorVisitor
+        {
+            using TheEvaluator = OperationEvaluatorVisitor<TernaryExpr>;
+
+            template <CCommandArgumentValue T>
+            void assertNonNullPointer(T const& val) const
+            {
+                if constexpr(std::is_pointer<T>::value)
+                {
+                    AssertFatal(val, "Can't offset from nullptr!");
+                }
+            }
+
+            template <CCommandArgumentValue LHS,
+                      CCommandArgumentValue R1HS,
+                      CCommandArgumentValue R2HS>
+            requires CCanEvaluateTernary<TheEvaluator, LHS, R1HS, R2HS> CommandArgumentValue
+                operator()(LHS const& lhs, R1HS const& r1hs, R2HS const& r2hs) const
+            {
+                auto evaluator = static_cast<TheEvaluator const*>(this);
+                return evaluator->evaluate(lhs, r1hs, r2hs);
+            }
+
+            template <CCommandArgumentValue LHS,
+                      CCommandArgumentValue R1HS,
+                      CCommandArgumentValue R2HS>
+            requires(!CCanEvaluateTernary<TheEvaluator, LHS, R1HS, R2HS>) CommandArgumentValue
+                operator()(LHS const& lhs, R1HS const& r1hs, R2HS const& r2hs) const
+            {
+                Throw<FatalError>("Type mismatch for expression: ",
+                                  typeid(TernaryExpr).name(),
+                                  ". Incompatible arguments ",
+                                  ShowValue(LHS()),
+                                  " ",
+                                  ShowValue(R1HS()),
+                                  " ",
+                                  ShowValue(R2HS()),
+                                  ").");
+            }
+
+            CommandArgumentValue call(CommandArgumentValue const& lhs,
+                                      CommandArgumentValue const& r1hs,
+                                      CommandArgumentValue const& r2hs) const
+            {
+                return std::visit(*this, lhs, r1hs, r2hs);
+            }
+        };
+
+        /**
          * For example, CCanAdd which satisifes pairs of types that can be added.
          */
 #define CAN_OPERATE_CONCEPT(name, op)               \
@@ -131,7 +194,7 @@ namespace rocRoller
         lhs op rhs;                                 \
     }
 
-/**
+        /**
          * Declares a BinaryEvaluatorVisitor that can be defined solely by a single binary expression.
          */
 #define BINARY_EVALUATOR_VISITOR(name, op)                                                \
@@ -367,14 +430,56 @@ namespace rocRoller
             }
         };
 
+        template <>
+        struct OperationEvaluatorVisitor<AddShiftL> : public TernaryEvaluatorVisitor<AddShiftL>
+        {
+            template <typename T>
+            std::enable_if_t<std::is_integral_v<T> && !std::is_same_v<T, bool>, T>
+                evaluate(T const& lhs, T const& r1hs, T const& r2hs) const
+            {
+                auto shift = static_cast<typename std::make_unsigned<T>::type>(r2hs);
+                return (lhs + r1hs) << r2hs;
+            }
+        };
+
+        template <>
+        struct OperationEvaluatorVisitor<ShiftLAdd> : public TernaryEvaluatorVisitor<ShiftLAdd>
+        {
+            template <typename T>
+            std::enable_if_t<std::is_integral_v<T> && !std::is_same_v<T, bool>, T>
+                evaluate(T const& lhs, T const& r1hs, T const& r2hs) const
+            {
+                auto shift = static_cast<typename std::make_unsigned<T>::type>(r1hs);
+                return (lhs << shift) + r2hs;
+            }
+        };
+
+        template <>
+        struct OperationEvaluatorVisitor<MultiplyAdd> : public TernaryEvaluatorVisitor<MultiplyAdd>
+        {
+            template <typename T>
+            std::enable_if_t<(std::is_integral_v<T> && !std::is_same_v<T, bool>)
+                                 || std::is_floating_point_v<T>,
+                             T>
+                evaluate(T const& lhs, T const& r1hs, T const& r2hs) const
+            {
+                return lhs * r1hs + r2hs;
+            }
+        };
+
         struct EvaluateVisitor
         {
             RuntimeArguments args;
 
-            template <CTernary Expr>
-            CommandArgumentValue operator()(Expr const& expr)
+            template <CTernary TernaryExp>
+            CommandArgumentValue operator()(TernaryExp const& expr)
             {
-                Throw<FatalError>("Ternary evaluator not implemented yet.");
+                // TODO: Short-circuit logic
+                auto arg1      = call(expr.lhs);
+                auto arg2      = call(expr.r1hs);
+                auto arg3      = call(expr.r2hs);
+                auto evaluator = OperationEvaluatorVisitor<TernaryExp>();
+                return evaluator.call(arg1, arg2, arg3);
             }
 
             template <CBinary BinaryExp>

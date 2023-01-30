@@ -229,7 +229,7 @@ namespace rocRoller
         /*
          * AddShiftL performs a fusion of Add expression followed by
          * ShiftL expression, lowering to the fused instruction if possible.
-         * result = (lhs  + r1hs) << r2hs
+         * result = (lhs + r1hs) << r2hs
          */
         struct AddShiftL : Ternary
         {
@@ -273,6 +273,17 @@ namespace rocRoller
 
             constexpr static inline auto            Type = Category::Arithmetic;
             constexpr static inline EvaluationTimes EvalTimes{EvaluationTime::KernelExecute};
+        };
+
+        /**
+         * Represents DEST = LHS * R1HS + R2HS.
+         */
+        struct MultiplyAdd : Ternary
+        {
+            constexpr static inline auto Type        = Category::Arithmetic;
+            constexpr static inline auto EvalTimes   = EvaluationTimes::All();
+            constexpr static inline bool Associative = false;
+            constexpr static inline bool Commutative = false;
         };
 
         struct Unary

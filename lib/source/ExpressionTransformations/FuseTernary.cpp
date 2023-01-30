@@ -47,16 +47,16 @@ namespace rocRoller
                 bool eval_lhs = evaluationTimes(lhs)[EvaluationTime::Translate];
                 bool eval_rhs = evaluationTimes(rhs)[EvaluationTime::Translate];
 
-                ExpressionPtr rv;
                 if(eval_lhs && eval_rhs && std::holds_alternative<ShiftL>(*lhs))
                 {
                     auto shift = std::get<ShiftL>(*lhs);
                     return std::make_shared<Expression>(ShiftLAdd({shift.lhs, shift.rhs, rhs}));
                 }
 
-                if(rv != nullptr)
+                if(std::holds_alternative<Multiply>(*lhs))
                 {
-                    return rv;
+                    auto multiply = std::get<Multiply>(*lhs);
+                    return multiplyAdd(multiply.lhs, multiply.rhs, rhs);
                 }
 
                 return std::make_shared<Expression>(Add({lhs, rhs}));

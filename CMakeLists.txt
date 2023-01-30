@@ -224,6 +224,7 @@ set(rocroller_src
  lib/source/CodeGen/Arithmetic/MatrixMultiply.cpp
  lib/source/CodeGen/Arithmetic/Modulo.cpp
  lib/source/CodeGen/Arithmetic/Multiply.cpp
+ lib/source/CodeGen/Arithmetic/MultiplyAdd.cpp
  lib/source/CodeGen/Arithmetic/MultiplyHigh.cpp
  lib/source/CodeGen/Arithmetic/Negate.cpp
  lib/source/CodeGen/Arithmetic/BitwiseAnd.cpp

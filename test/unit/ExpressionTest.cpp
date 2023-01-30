@@ -266,6 +266,63 @@ namespace ExpressionTest
         EXPECT_EQ(NormalizedSource(output()), NormalizedSource(expected));
     }
 
+    TEST_F(ExpressionTest, BasicFMA)
+    {
+        auto ra = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Int32, 1);
+        ra->setName("ra");
+        ra->allocateNow();
+
+        auto rb = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Int32, 1);
+        rb->setName("rb");
+        rb->allocateNow();
+
+        auto rc = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Int32, 1);
+        rc->setName("rc");
+        rc->allocateNow();
+
+        auto a = ra->expression();
+        auto b = rb->expression();
+        auto c = rc->expression();
+
+        auto expr1 = multiplyAdd(a, b, c);
+
+        auto raf = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Float, 1);
+        raf->allocateNow();
+
+        auto rbf = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Float, 1);
+        rbf->allocateNow();
+
+        auto rcf = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Float, 1);
+        rcf->allocateNow();
+
+        auto af = raf->expression();
+        auto bf = rbf->expression();
+        auto cf = rcf->expression();
+
+        auto expr2 = multiplyAdd(af, bf, cf);
+
+        Register::ValuePtr dest1, dest2;
+        m_context->schedule(Expression::generate(dest1, expr1, m_context));
+        m_context->schedule(Expression::generate(dest2, expr2, m_context));
+
+        std::string expected = R"(
+            // Int32: a * x + y doesn't have FMA, so should see multiply then add
+            v_mul_lo_u32 v6, v0, v1
+            v_add_i32 v6, v6, v2
+
+            // Float: a * x + y has FMA
+            v_fma_f32 v7, v3, v4, v5
+        )";
+
+        EXPECT_EQ(NormalizedSource(output()), NormalizedSource(expected));
+    }
+
     TEST_F(ExpressionTest, ExpressionCommentsBasic)
     {
         auto ra = std::make_shared<Register::Value>(
@@ -1066,183 +1123,233 @@ namespace ExpressionTest
 
     class ARCH_ExpressionTest : public GPUContextFixture
     {
+    public:
+        template <typename TA, typename TB, typename TR>
+        void basicBinaryExpression(std::function<Expression::ExpressionPtr(
+                                       Expression::ExpressionPtr, Expression::ExpressionPtr)> f,
+                                   TA aValue,
+                                   TB bValue,
+                                   TR resultValue)
+        {
+            DataType aDType = TypeInfo<TA>::Var.dataType;
+            DataType bDType = TypeInfo<TB>::Var.dataType;
+            DataType rDType = TypeInfo<TR>::Var.dataType;
+
+            auto k    = m_context->kernel();
+            auto v_a  = Register::Value::Placeholder(m_context, Register::Type::Vector, aDType, 1);
+            auto v_b  = Register::Value::Placeholder(m_context, Register::Type::Vector, bDType, 1);
+            auto a    = v_a->expression();
+            auto b    = v_b->expression();
+            auto expr = f(a, b);
+
+            k->addArgument(
+                {"result", {rDType, PointerType::PointerGlobal}, DataDirection::WriteOnly});
+            k->addArgument({"a", aDType});
+            k->addArgument({"b", bDType});
+
+            m_context->schedule(k->preamble());
+            m_context->schedule(k->prolog());
+
+            auto kb = [&]() -> Generator<Instruction> {
+                Register::ValuePtr s_result, s_a, s_b;
+                co_yield m_context->argLoader()->getValue("result", s_result);
+                co_yield m_context->argLoader()->getValue("a", s_a);
+                co_yield m_context->argLoader()->getValue("b", s_b);
+
+                auto v_result = Register::Value::Placeholder(
+                    m_context, Register::Type::Vector, DataType::Raw32, 2);
+
+                co_yield v_a->allocate();
+                co_yield v_b->allocate();
+                co_yield v_result->allocate();
+
+                co_yield m_context->copier()->copy(v_result, s_result, "Move pointer");
+
+                co_yield m_context->copier()->copy(v_a, s_a, "Move pointer");
+                co_yield m_context->copier()->copy(v_b, s_b, "Move pointer");
+
+                Register::ValuePtr v_c;
+                co_yield Expression::generate(v_c, expr, m_context);
+
+                co_yield m_context->mem()->storeFlat(v_result, v_c, 0, sizeof(TR));
+            };
+
+            m_context->schedule(kb());
+            m_context->schedule(k->postamble());
+            m_context->schedule(k->amdgpu_metadata());
+
+            if(m_context->targetArchitecture().target().getMajorVersion() != 9)
+                GTEST_SKIP() << "Skipping GPU tests for " << GetParam();
+
+            // Only execute the kernels if running on the architecture that the kernel was built for,
+            // otherwise just assemble the instructions.
+            if(isLocalDevice())
+            {
+                std::shared_ptr<rocRoller::ExecutableKernel> executableKernel
+                    = m_context->instructions()->getExecutableKernel();
+
+                auto d_result = make_shared_device<TR>();
+
+                KernelArguments kargs;
+                kargs.append("result", d_result.get());
+                kargs.append("a", aValue);
+                kargs.append("b", bValue);
+                KernelInvocation invocation;
+
+                executableKernel->executeKernel(kargs, invocation);
+
+                std::vector<TR> result(1);
+                ASSERT_THAT(hipMemcpy(result.data(), d_result.get(), sizeof(TR), hipMemcpyDefault),
+                            HasHipSuccess(0));
+
+                EXPECT_EQ(result[0], resultValue);
+            }
+            else
+            {
+                std::vector<char> assembledKernel = m_context->instructions()->assemble();
+                EXPECT_GT(assembledKernel.size(), 0);
+            }
+        }
+
+        template <typename TA, typename TB, typename TC, typename TR>
+        void basicTernaryExpression(
+            std::function<Expression::ExpressionPtr(
+                Expression::ExpressionPtr, Expression::ExpressionPtr, Expression::ExpressionPtr)> f,
+            TA aValue,
+            TB bValue,
+            TC cValue,
+            TR resultValue)
+        {
+            DataType aDType = TypeInfo<TA>::Var.dataType;
+            DataType bDType = TypeInfo<TB>::Var.dataType;
+            DataType cDType = TypeInfo<TC>::Var.dataType;
+            DataType rDType = TypeInfo<TR>::Var.dataType;
+
+            auto k    = m_context->kernel();
+            auto v_a  = Register::Value::Placeholder(m_context, Register::Type::Vector, aDType, 1);
+            auto v_b  = Register::Value::Placeholder(m_context, Register::Type::Vector, bDType, 1);
+            auto v_c  = Register::Value::Placeholder(m_context, Register::Type::Vector, cDType, 1);
+            auto a    = v_a->expression();
+            auto b    = v_b->expression();
+            auto c    = v_c->expression();
+            auto expr = f(a, b, c);
+
+            k->addArgument(
+                {"result", {rDType, PointerType::PointerGlobal}, DataDirection::WriteOnly});
+            k->addArgument({"a", aDType});
+            k->addArgument({"b", bDType});
+            k->addArgument({"c", cDType});
+
+            m_context->schedule(k->preamble());
+            m_context->schedule(k->prolog());
+
+            auto kb = [&]() -> Generator<Instruction> {
+                Register::ValuePtr s_result, s_a, s_b, s_c;
+                co_yield m_context->argLoader()->getValue("result", s_result);
+                co_yield m_context->argLoader()->getValue("a", s_a);
+                co_yield m_context->argLoader()->getValue("b", s_b);
+                co_yield m_context->argLoader()->getValue("c", s_c);
+
+                auto v_result_ptr = Register::Value::Placeholder(
+                    m_context, Register::Type::Vector, DataType::Raw32, 2);
+
+                co_yield v_a->allocate();
+                co_yield v_b->allocate();
+                co_yield v_c->allocate();
+                co_yield v_result_ptr->allocate();
+
+                co_yield m_context->copier()->copy(v_result_ptr, s_result, "Move pointer");
+
+                co_yield m_context->copier()->copy(v_a, s_a, "Move value");
+                co_yield m_context->copier()->copy(v_b, s_b, "Move value");
+                co_yield m_context->copier()->copy(v_c, s_c, "Move value");
+
+                Register::ValuePtr v_r;
+                co_yield Expression::generate(v_r, expr, m_context);
+
+                co_yield m_context->mem()->storeFlat(v_result_ptr, v_r, 0, sizeof(TR));
+            };
+
+            m_context->schedule(kb());
+            m_context->schedule(k->postamble());
+            m_context->schedule(k->amdgpu_metadata());
+
+            if(m_context->targetArchitecture().target().getMajorVersion() != 9)
+                GTEST_SKIP() << "Skipping GPU tests for " << GetParam();
+
+            // Only execute the kernels if running on the architecture that the kernel was built for,
+            // otherwise just assemble the instructions.
+            if(isLocalDevice())
+            {
+                std::shared_ptr<rocRoller::ExecutableKernel> executableKernel
+                    = m_context->instructions()->getExecutableKernel();
+
+                auto d_result = make_shared_device<TR>();
+
+                KernelArguments kargs;
+                kargs.append("result", d_result.get());
+                kargs.append("a", aValue);
+                kargs.append("b", bValue);
+                kargs.append("c", cValue);
+                KernelInvocation invocation;
+
+                executableKernel->executeKernel(kargs, invocation);
+
+                std::vector<TR> result(1);
+                ASSERT_THAT(hipMemcpy(result.data(), d_result.get(), sizeof(TR), hipMemcpyDefault),
+                            HasHipSuccess(0));
+
+                EXPECT_EQ(result[0], resultValue);
+            }
+            else
+            {
+                std::vector<char> assembledKernel = m_context->instructions()->assemble();
+                EXPECT_GT(assembledKernel.size(), 0);
+            }
+        }
     };
 
-    TEST_P(ARCH_ExpressionTest, ExpressionTreeDouble)
+    TEST_P(ARCH_ExpressionTest, BasicExpression01)
     {
-        auto v_a
-            = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Double, 1);
+        double a = 192.0;
+        double b = 12981.0;
+        double r = -b * (a + b);
 
-        auto v_b
-            = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Double, 1);
+        auto expr
+            = [](Expression::ExpressionPtr a, Expression::ExpressionPtr b) { return -b * (a + b); };
 
-        auto a = v_a->expression();
-        auto b = v_b->expression();
-
-        auto expr = -b * (a + b);
-
-        auto k = m_context->kernel();
-
-        k->addArgument(
-            {"result", {DataType::Double, PointerType::PointerGlobal}, DataDirection::WriteOnly});
-        k->addArgument({"a", DataType::Double});
-        k->addArgument({"b", DataType::Double});
-
-        m_context->schedule(k->preamble());
-        m_context->schedule(k->prolog());
-
-        auto kb = [&]() -> Generator<Instruction> {
-            Register::ValuePtr s_result, s_a, s_b;
-            co_yield m_context->argLoader()->getValue("result", s_result);
-            co_yield m_context->argLoader()->getValue("a", s_a);
-            co_yield m_context->argLoader()->getValue("b", s_b);
-
-            auto v_result = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Raw32, 2);
-
-            co_yield v_a->allocate();
-            co_yield v_b->allocate();
-            co_yield v_result->allocate();
-
-            co_yield m_context->copier()->copy(v_result, s_result, "Move pointer");
-
-            co_yield m_context->copier()->copy(v_a, s_a, "Move pointer");
-            co_yield m_context->copier()->copy(v_b, s_b, "Move pointer");
-
-            Register::ValuePtr v_c;
-            co_yield Expression::generate(v_c, expr, m_context);
-
-            co_yield m_context->mem()->storeFlat(v_result, v_c, 0, 8);
-        };
-
-        m_context->schedule(kb());
-        m_context->schedule(k->postamble());
-        m_context->schedule(k->amdgpu_metadata());
-
-        if(m_context->targetArchitecture().target().getMajorVersion() != 9)
-            GTEST_SKIP() << "Skipping GPU tests for " << GetParam();
-
-        // Only execute the kernels if running on the architecture that the kernel was built for,
-        // otherwise just assemble the instructions.
-        if(isLocalDevice())
-        {
-            std::shared_ptr<rocRoller::ExecutableKernel> executableKernel
-                = m_context->instructions()->getExecutableKernel();
-
-            auto d_result = make_shared_device<double>();
-
-            double a = 192.0;
-            double b = 12981.0;
-
-            KernelArguments kargs;
-            kargs.append("result", d_result.get());
-            kargs.append("a", a);
-            kargs.append("b", b);
-            KernelInvocation invocation;
-
-            executableKernel->executeKernel(kargs, invocation);
-
-            std::vector<double> result(3);
-            ASSERT_THAT(hipMemcpy(result.data(), d_result.get(), sizeof(double), hipMemcpyDefault),
-                        HasHipSuccess(0));
-
-            EXPECT_EQ(result[0], -b * (a + b));
-        }
-        else
-        {
-            std::vector<char> assembledKernel = m_context->instructions()->assemble();
-            EXPECT_GT(assembledKernel.size(), 0);
-        }
+        basicBinaryExpression(expr, a, b, r);
     }
 
-    TEST_P(ARCH_ExpressionTest, ExpressionAddShiftL)
+    TEST_P(ARCH_ExpressionTest, BasicExpression02)
     {
-        auto v_a
-            = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Int32, 1);
+        int          a = 12;
+        unsigned int b = 2u;
+        int          r = (a + b) << b;
 
-        auto v_b
-            = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::UInt32, 1);
-
-        auto a = v_a->expression();
-        auto b = v_b->expression();
-
-        auto expr = Expression::fuseTernary((a + b) << b);
-
-        auto k = m_context->kernel();
-
-        k->addArgument(
-            {"result", {DataType::Int32, PointerType::PointerGlobal}, DataDirection::WriteOnly});
-        k->addArgument({"a", DataType::Int32});
-        k->addArgument({"b", DataType::UInt32});
-
-        m_context->schedule(k->preamble());
-        m_context->schedule(k->prolog());
-
-        auto kb = [&]() -> Generator<Instruction> {
-            Register::ValuePtr s_result, s_a, s_b;
-            co_yield m_context->argLoader()->getValue("result", s_result);
-            co_yield m_context->argLoader()->getValue("a", s_a);
-            co_yield m_context->argLoader()->getValue("b", s_b);
-
-            auto v_result = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Raw32, 2);
-
-            auto v_c = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Int32, 1);
-
-            co_yield v_a->allocate();
-            co_yield v_b->allocate();
-            co_yield v_c->allocate();
-            co_yield v_result->allocate();
-
-            co_yield m_context->copier()->copy(v_result, s_result, "Move pointer");
-
-            co_yield m_context->copier()->copy(v_a, s_a, "Move pointer");
-            co_yield m_context->copier()->copy(v_b, s_b, "Move pointer");
-
-            co_yield Expression::generate(v_c, expr, m_context);
-
-            co_yield m_context->mem()->storeFlat(v_result, v_c, 0, 4);
+        auto expr = [](Expression::ExpressionPtr a, Expression::ExpressionPtr b) {
+            return Expression::fuseTernary((a + b) << b);
         };
 
-        m_context->schedule(kb());
-        m_context->schedule(k->postamble());
-        m_context->schedule(k->amdgpu_metadata());
+        basicBinaryExpression(expr, a, b, r);
+    }
 
-        if(m_context->targetArchitecture().target().getMajorVersion() != 9)
-            GTEST_SKIP() << "Skipping GPU tests for " << GetParam();
+    TEST_P(ARCH_ExpressionTest, BasicExpression03)
+    {
+        float a     = 192.0;
+        float b     = -182.1;
+        float alpha = 0.5;
 
-        // Only execute the kernels if running on the architecture that the kernel was built for,
-        // otherwise just assemble the instructions.
-        if(isLocalDevice())
-        {
-            std::shared_ptr<rocRoller::ExecutableKernel> executableKernel
-                = m_context->instructions()->getExecutableKernel();
+        float r = alpha * a + b;
 
-            auto d_result = make_shared_device<int>();
+        auto expr = [](Expression::ExpressionPtr a,
+                       Expression::ExpressionPtr b,
+                       Expression::ExpressionPtr c) { return Expression::fuseTernary(a * b + c); };
 
-            int          a = 12;
-            unsigned int b = 2u;
+        basicTernaryExpression(expr, alpha, a, b, r);
 
-            KernelArguments kargs;
-            kargs.append("result", d_result.get());
-            kargs.append("a", a);
-            kargs.append("b", b);
-            KernelInvocation invocation;
-
-            executableKernel->executeKernel(kargs, invocation);
-
-            std::vector<int> result(3);
-            ASSERT_THAT(hipMemcpy(result.data(), d_result.get(), sizeof(int), hipMemcpyDefault),
-                        HasHipSuccess(0));
-
-            EXPECT_EQ(result[0], (a + b) << b);
-        }
-        else
-        {
-            std::vector<char> assembledKernel = m_context->instructions()->assemble();
-            EXPECT_GT(assembledKernel.size(), 0);
-        }
+        auto assembly = m_context->instructions()->toString();
+        EXPECT_THAT(assembly, testing::HasSubstr("v_fma_f32"));
     }
 
     TEST_P(ARCH_ExpressionTest, ComplexExpressionScalar)

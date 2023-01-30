@@ -134,6 +134,11 @@ namespace rocRoller
             return std::make_shared<Expression>(MultiplyHigh{a, b});
         }
 
+        inline ExpressionPtr multiplyAdd(ExpressionPtr a, ExpressionPtr b, ExpressionPtr c)
+        {
+            return std::make_shared<Expression>(MultiplyAdd{a, b, c});
+        }
+
         inline ExpressionPtr magicMultiple(ExpressionPtr a)
         {
             return std::make_shared<Expression>(MagicMultiple{a});
@@ -229,6 +234,7 @@ namespace rocRoller
         EXPRESSION_INFO(Subtract);
         EXPRESSION_INFO(MatrixMultiply);
         EXPRESSION_INFO(Multiply);
+        EXPRESSION_INFO(MultiplyAdd);
         EXPRESSION_INFO(MultiplyHigh);
 
         EXPRESSION_INFO(Divide);

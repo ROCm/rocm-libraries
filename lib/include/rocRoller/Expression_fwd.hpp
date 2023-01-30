@@ -21,6 +21,7 @@ namespace rocRoller
         struct Add;
         struct MatrixMultiply;
         struct Multiply;
+        struct MultiplyAdd;
         struct MultiplyHigh;
         struct Subtract;
         struct Divide;
@@ -81,6 +82,7 @@ namespace rocRoller
             AddShiftL,
             ShiftLAdd,
             MatrixMultiply,
+            MultiplyAdd,
 
             // --- Convert Operations ---
             Convert<DataType::Half>,
