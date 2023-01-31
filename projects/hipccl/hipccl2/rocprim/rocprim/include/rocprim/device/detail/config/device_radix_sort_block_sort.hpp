@@ -212,6 +212,171 @@ struct default_radix_sort_block_sort_config<
 {};
 
 template<>
+struct default_radix_sort_block_sort_config<static_cast<unsigned int>(target_arch::gfx90a), double>
+    : kernel_config<256, 15>
+{};
+
+template<>
+struct default_radix_sort_block_sort_config<static_cast<unsigned int>(target_arch::gfx90a), float>
+    : kernel_config<512, 31>
+{};
+
+template<>
+struct default_radix_sort_block_sort_config<static_cast<unsigned int>(target_arch::gfx90a),
+                                            int,
+                                            double> : kernel_config<256, 13>
+{};
+
+template<>
+struct default_radix_sort_block_sort_config<static_cast<unsigned int>(target_arch::gfx90a),
+                                            int,
+                                            double2> : kernel_config<256, 7>
+{};
+
+template<>
+struct default_radix_sort_block_sort_config<static_cast<unsigned int>(target_arch::gfx90a),
+                                            int,
+                                            float> : kernel_config<1024, 15>
+{};
+
+template<>
+struct default_radix_sort_block_sort_config<static_cast<unsigned int>(target_arch::gfx90a), int>
+    : kernel_config<512, 30>
+{};
+
+template<>
+struct default_radix_sort_block_sort_config<static_cast<unsigned int>(target_arch::gfx90a),
+                                            int64_t,
+                                            double> : kernel_config<256, 13>
+{};
+
+template<>
+struct default_radix_sort_block_sort_config<static_cast<unsigned int>(target_arch::gfx90a),
+                                            int64_t,
+                                            float> : kernel_config<256, 13>
+{};
+
+template<>
+struct default_radix_sort_block_sort_config<static_cast<unsigned int>(target_arch::gfx90a), int64_t>
+    : kernel_config<256, 15>
+{};
+
+template<>
+struct default_radix_sort_block_sort_config<static_cast<unsigned int>(target_arch::gfx90a),
+                                            int8_t,
+                                            int8_t> : kernel_config<1024, 20>
+{};
+
+template<>
+struct default_radix_sort_block_sort_config<static_cast<unsigned int>(target_arch::gfx90a), int8_t>
+    : kernel_config<1024, 25>
+{};
+
+template<>
+struct default_radix_sort_block_sort_config<static_cast<unsigned int>(target_arch::gfx90a),
+                                            rocprim::half> : kernel_config<256, 12>
+{};
+
+template<>
+struct default_radix_sort_block_sort_config<static_cast<unsigned int>(target_arch::gfx90a),
+                                            rocprim::half,
+                                            rocprim::half> : kernel_config<512, 6>
+{};
+
+template<>
+struct default_radix_sort_block_sort_config<static_cast<unsigned int>(target_arch::gfx90a), short>
+    : kernel_config<256, 32>
+{};
+
+template<>
+struct default_radix_sort_block_sort_config<static_cast<unsigned int>(target_arch::gfx90a),
+                                            uint8_t,
+                                            uint8_t> : kernel_config<1024, 20>
+{};
+
+// Based on key_type = double, value_type = rocprim::empty_type
+template<class key_type, class value_type>
+struct default_radix_sort_block_sort_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    key_type,
+    value_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                      && (sizeof(key_type) > 4)
+                      && (std::is_same<value_type, rocprim::empty_type>::value))>>
+    : kernel_config<256, 15>
+{};
+
+// Based on key_type = float, value_type = rocprim::empty_type
+template<class key_type, class value_type>
+struct default_radix_sort_block_sort_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    key_type,
+    value_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                      && (sizeof(key_type) > 2)
+                      && (std::is_same<value_type, rocprim::empty_type>::value))>>
+    : kernel_config<512, 31>
+{};
+
+// Based on key_type = rocprim::half, value_type = rocprim::empty_type
+template<class key_type, class value_type>
+struct default_radix_sort_block_sort_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    key_type,
+    value_type,
+    std::enable_if_t<(bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                      && (std::is_same<value_type, rocprim::empty_type>::value))>>
+    : kernel_config<256, 12>
+{};
+
+// Based on key_type = int64_t, value_type = rocprim::empty_type
+template<class key_type, class value_type>
+struct default_radix_sort_block_sort_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    key_type,
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 8)
+                      && (sizeof(key_type) > 4)
+                      && (std::is_same<value_type, rocprim::empty_type>::value))>>
+    : kernel_config<256, 15>
+{};
+
+// Based on key_type = int, value_type = rocprim::empty_type
+template<class key_type, class value_type>
+struct default_radix_sort_block_sort_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    key_type,
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 4)
+                      && (sizeof(key_type) > 2)
+                      && (std::is_same<value_type, rocprim::empty_type>::value))>>
+    : kernel_config<512, 30>
+{};
+
+// Based on key_type = short, value_type = rocprim::empty_type
+template<class key_type, class value_type>
+struct default_radix_sort_block_sort_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    key_type,
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 2)
+                      && (sizeof(key_type) > 1)
+                      && (std::is_same<value_type, rocprim::empty_type>::value))>>
+    : kernel_config<256, 32>
+{};
+
+// Based on key_type = int8_t, value_type = rocprim::empty_type
+template<class key_type, class value_type>
+struct default_radix_sort_block_sort_config<
+    static_cast<unsigned int>(target_arch::gfx90a),
+    key_type,
+    value_type,
+    std::enable_if_t<(!bool(rocprim::is_floating_point<key_type>::value) && (sizeof(key_type) <= 1)
+                      && (std::is_same<value_type, rocprim::empty_type>::value))>>
+    : kernel_config<1024, 25>
+{};
+
+template<>
 struct default_radix_sort_block_sort_config<static_cast<unsigned int>(target_arch::gfx1030), double>
     : kernel_config<256, 31>
 {};
