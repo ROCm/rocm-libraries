@@ -75,7 +75,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
          - ProblemSizes:
-           - Exact: [12544, 1024, 1, 256]            
+           - Exact: [12544, 1024, 1, 256]
 #########################################################################################
 LibraryLogic:
     ScheduleName: aldebaran

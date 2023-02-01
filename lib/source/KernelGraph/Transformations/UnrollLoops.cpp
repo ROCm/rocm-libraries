@@ -6,6 +6,8 @@ namespace rocRoller
 {
     namespace KernelGraph
     {
+        namespace CT = rocRoller::KernelGraph::CoordinateGraph;
+
         using namespace ControlGraph;
         using namespace CoordinateGraph;
 
@@ -56,8 +58,8 @@ namespace rocRoller
                     // If one of the mappings represents storage, duplicate it in the CoordinateGraph.
                     // This will allow the RegisterTagManager to recognize that the nodes are pointing
                     // to different data and to use different registers.
-                    // Note: no edges are being added, to there will be loose Dimensions within the
-                    // Coordinate graph.
+                    // Note: A PassThrough edge is added from any of the duplicate nodes to the original
+                    // node.
                     auto mt = graph.coordinates.get<MacroTile>(c.coordinate);
                     if(mt)
                     {
@@ -66,6 +68,14 @@ namespace rocRoller
                             auto dim = graph.coordinates.addElement(
                                 graph.coordinates.getElement(c.coordinate));
                             reindexer.coordinates[c.coordinate] = dim;
+                            auto duplicate
+                                = graph.coordinates
+                                      .getOutputNodeIndices(coord, CT::isEdge<PassThrough>)
+                                      .to<std::vector>();
+                            if(duplicate.empty())
+                                graph.coordinates.addElement(PassThrough(), {dim}, {coord});
+                            else
+                                graph.coordinates.addElement(PassThrough(), {dim}, {duplicate[0]});
                         }
                         coord = reindexer.coordinates[c.coordinate];
                     }

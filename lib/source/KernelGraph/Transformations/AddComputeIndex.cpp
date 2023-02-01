@@ -390,16 +390,8 @@ namespace rocRoller
         /**
          * @brief Add ComputeIndex operations to graph for MATRIX_A and MATRIX_B loads.
          */
-        void addComputeIndexAB(KernelGraph& graph,
-                               int          op,
-                               int          scope,
-                               int          setCoord,
-                               int          mulLoadA,
-                               int          mulLoadB,
-                               int          loadA,
-                               int          storeLDSA,
-                               int          loadB,
-                               int          storeLDSB)
+        void addComputeIndexAB(
+            KernelGraph& graph, int op, int scope, int setCoord, int mulLoadA, int mulLoadB)
         {
             rocRoller::Log::getLogger()->debug(
                 "KernelGraph::addComputeIndexAB({}, {}, {})", op, mulLoadA, mulLoadB);
@@ -460,42 +452,32 @@ namespace rocRoller
                 if(setCoord < 0)
                     graph.control.addElement(Sequence(), {bottomB}, {op});
             }
+        }
 
-            if(loadA > 0 && storeLDSA > 0)
-            {
-                // LoadTiled A
-                auto [topA, bottomA, updateA] = computeIndexVGPRMATRIXAB(graph, loadA, 1);
-                graph.control.addElement(Body(), {top}, {topA});
-                if(setCoord < 0)
-                    graph.control.addElement(Sequence(), {bottomA}, {op});
-                graph.control.addElement(ForLoopIncrement(), {op}, {updateA});
+        /**
+         * @brief Add ComputeIndex operations to graph for LoadTiled operations
+         * underneath a K For Loop that aren't directly connected to a Multiply
+         * node.
+         */
+        void addComputeIndexLoadInLoop(KernelGraph& graph, int load, int top, int loop, int arg)
+        {
+            auto [topLoad, bottomLoad, update] = computeIndexVGPRMATRIXAB(graph, load, arg);
+            graph.control.addElement(Body(), {top}, {topLoad});
+            graph.control.addElement(Sequence(), {bottomLoad}, {loop});
+            graph.control.addElement(ForLoopIncrement(), {loop}, {update});
+        }
 
-                // StoreLDSTile A
-                auto lds                          = graph.mapper.get<LDS>(storeLDSA);
-                auto [store_ci_row, store_ci_col] = computeIndexVGPR(graph, storeLDSA, lds, true);
-                graph.control.addElement(Body(), {top}, {store_ci_row});
-                graph.control.addElement(Sequence(), {store_ci_row}, {store_ci_col});
-                if(setCoord < 0)
-                    graph.control.addElement(Sequence(), {store_ci_col}, {op});
-            }
-
-            if(loadB > 0 && storeLDSB > 0)
-            {
-                // LoadTiled B
-                auto [topB, bottomB, updateB] = computeIndexVGPRMATRIXAB(graph, loadB, 0);
-                graph.control.addElement(Body(), {top}, {topB});
-                if(setCoord < 0)
-                    graph.control.addElement(Sequence(), {bottomB}, {op});
-                graph.control.addElement(ForLoopIncrement(), {op}, {updateB});
-
-                // StoreLDSTile B
-                auto lds                          = graph.mapper.get<LDS>(storeLDSB);
-                auto [store_ci_row, store_ci_col] = computeIndexVGPR(graph, storeLDSB, lds, true);
-                graph.control.addElement(Body(), {top}, {store_ci_row});
-                graph.control.addElement(Sequence(), {store_ci_row}, {store_ci_col});
-                if(setCoord < 0)
-                    graph.control.addElement(Sequence(), {store_ci_col}, {op});
-            }
+        /**
+         * @brief Add ComputeIndex operations to graph for StoreLDS operations
+         * underneath a K For Loop.
+         */
+        void addComputeIndexStoreLDSInLoop(KernelGraph& graph, int storeLDS, int top, int loop)
+        {
+            auto lds                          = graph.mapper.get<LDS>(storeLDS);
+            auto [store_ci_row, store_ci_col] = computeIndexVGPR(graph, storeLDS, lds, true);
+            graph.control.addElement(Body(), {top}, {store_ci_row});
+            graph.control.addElement(Sequence(), {store_ci_row}, {store_ci_col});
+            graph.control.addElement(Sequence(), {store_ci_col}, {loop});
         }
 
         /**
@@ -629,6 +611,7 @@ namespace rocRoller
 
             // MATRIX_A and MATRIX_B loads within a ForLoop
             auto multiplies = kgraph.control.getNodes<Multiply>().to<std::vector>();
+            std::unordered_set<int> alreadyAdded;
 
             std::map<int, int> forKScopes;
             for(auto const& multiply : multiplies)
@@ -656,39 +639,11 @@ namespace rocRoller
                           .to<std::vector>();
                 AssertFatal(mulLoads.size() == 2,
                             "Multiply doesn't support more than two operands.");
-                // Find all of the nodes inbetween the ForLoop and the Multiply
+                // Find all of the nodes in between the ForLoop and the Multiply
                 auto pathToMultiply = kgraph.control
                                           .path<Graph::Direction::Downstream>(
                                               std::vector<int>{forK}, std::vector<int>{multiply})
                                           .to<std::vector>();
-
-                // Find all of the StoreLDS nodes for A or B between the ForLoop and Multiply
-                std::vector<int> storesLDSAB;
-                std::copy_if(pathToMultiply.begin(),
-                             pathToMultiply.end(),
-                             std::back_inserter(storesLDSAB),
-                             [&](int tag) -> bool {
-                                 auto storeLDS = kgraph.control.get<StoreLDSTile>(tag);
-                                 if(storeLDS)
-                                 {
-                                     auto [tile_tag, tile] = kgraph.getDimension<MacroTile>(tag);
-                                     if(tile.layoutType != LayoutType::MATRIX_ACCUMULATOR)
-                                         return true;
-                                 }
-                                 return false;
-                             });
-
-                // Find all of the LoadTiled nodes for A or B between the ForLoop and Multiply
-                std::vector<int> loadsAB;
-                std::copy_if(pathToMultiply.begin(),
-                             pathToMultiply.end(),
-                             std::back_inserter(loadsAB),
-                             [&](int tag) -> bool {
-                                 return isOperation<LoadTiled>(kgraph.control.getElement(tag));
-                             });
-
-                AssertFatal(storesLDSAB.size() == loadsAB.size(),
-                            "Either store LDS or load is missing");
 
                 // Find all of the SetCoordinate nodes between the ForLoop and Multiply
                 std::vector<int> setCoords;
@@ -708,44 +663,52 @@ namespace rocRoller
                 }
                 scope = forKScopes[forK];
 
-                if(storesLDSAB.size() == 0)
-                    addComputeIndexAB(
-                        kgraph, forK, scope, setCoord, mulLoads[0], mulLoads[1], -1, -1, -1, -1);
-                else if(storesLDSAB.size() == 1
-                        && isOperation<LoadLDSTile>(kgraph.control.getElement(mulLoads[0])))
-                    addComputeIndexAB(kgraph,
-                                      forK,
-                                      scope,
-                                      setCoord,
-                                      mulLoads[0],
-                                      mulLoads[1],
-                                      loadsAB[0],
-                                      storesLDSAB[0],
-                                      -1,
-                                      -1);
-                else if(storesLDSAB.size() == 1
-                        && isOperation<LoadLDSTile>(kgraph.control.getElement(mulLoads[1])))
-                    addComputeIndexAB(kgraph,
-                                      forK,
-                                      scope,
-                                      setCoord,
-                                      mulLoads[0],
-                                      mulLoads[1],
-                                      -1,
-                                      -1,
-                                      loadsAB[0],
-                                      storesLDSAB[0]);
-                else if(storesLDSAB.size() == 2)
-                    addComputeIndexAB(kgraph,
-                                      forK,
-                                      scope,
-                                      setCoord,
-                                      mulLoads[0],
-                                      mulLoads[1],
-                                      loadsAB[0],
-                                      storesLDSAB[0],
-                                      loadsAB[1],
-                                      storesLDSAB[1]);
+                addComputeIndexAB(kgraph, forK, scope, setCoord, mulLoads[0], mulLoads[1]);
+                alreadyAdded.insert(mulLoads[0]);
+                alreadyAdded.insert(mulLoads[1]);
+            }
+
+            for(auto const& [loop, scope] : forKScopes)
+            {
+                // Find all of the LoadTile and StoreLDSTile nodes underneath a K loop
+                // and create ComputeIndex nodes for them.
+                auto bodies = kgraph.control.getOutputNodeIndices<Body>(loop).to<std::vector>();
+                auto nodesUnderLoop
+                    = kgraph.control.depthFirstVisit(bodies, Graph::Direction::Downstream)
+                          .to<std::vector>();
+                for(auto const& node : nodesUnderLoop)
+                {
+                    if(alreadyAdded.count(node) == 1)
+                        continue;
+
+                    auto storeLDS  = kgraph.control.get<StoreLDSTile>(node);
+                    auto loadTiled = kgraph.control.get<LoadTiled>(node);
+
+                    if(storeLDS)
+                    {
+                        auto [tile_tag, tile] = kgraph.getDimension<MacroTile>(node);
+                        if(tile.layoutType != LayoutType::MATRIX_ACCUMULATOR)
+                        {
+                            addComputeIndexStoreLDSInLoop(kgraph, node, scope, loop);
+                            alreadyAdded.insert(node);
+                        }
+                    }
+                    else if(loadTiled)
+                    {
+                        auto [tile_tag, tile] = kgraph.getDimension<MacroTile>(node);
+                        if(tile.layoutType == LayoutType::MATRIX_A
+                           || tile.layoutType == LayoutType::MATRIX_B)
+                        {
+                            addComputeIndexLoadInLoop(kgraph,
+                                                      node,
+                                                      scope,
+                                                      loop,
+                                                      tile.layoutType == LayoutType::MATRIX_A ? 1
+                                                                                              : 0);
+                            alreadyAdded.insert(node);
+                        }
+                    }
+                }
             }
 
             // MATRIX_ACCUMULATOR loads anywhere

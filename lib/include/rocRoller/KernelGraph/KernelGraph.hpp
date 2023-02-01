@@ -118,6 +118,18 @@ namespace rocRoller
         KernelGraph addDeallocate(KernelGraph const&);
 
         /**
+         * @brief Rewrite KernelGraph to add LDS operations for loading data
+         *
+         * Modies the coordinate and control graphs to add LDS information.
+         * This only adds nodes for loading data from global memory through LDS.
+         * Nodes for storing data to global memory using LDS are added
+         * in the lowerTile pass.
+         *
+         * @return KernelGraph
+         */
+        KernelGraph addLDS(KernelGraph const&, ContextPtr);
+
+        /**
          * Rewrite KernelGraphs to make sure no more CommandArgument
          * values are present within the graph.
          */

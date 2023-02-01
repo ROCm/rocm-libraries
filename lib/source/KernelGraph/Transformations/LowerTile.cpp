@@ -383,10 +383,6 @@ namespace rocRoller
                 graph.coordinates.addElement(PassThrough(), {WaveTilesY}, {d_jammed_y});
             }
 
-            // add LDS Ops for A and/or B if needed
-            addLoadWaveLDSOps(graph, params, context, a, loadA[0], forK, K, waveMult);
-            addLoadWaveLDSOps(graph, params, context, b, loadB[0], forK, K, waveMult);
-
             // add LDS Ops for D if needed
             if(storeD > 0)
             {

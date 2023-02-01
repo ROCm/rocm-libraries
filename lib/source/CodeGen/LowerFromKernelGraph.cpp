@@ -1181,13 +1181,13 @@ namespace rocRoller
                 if(isOperation<LoadTiled>(loadA))
                     sourceA_tag = m_graph.mapper.get<User>(tag, 0);
                 else if(isOperation<LoadLDSTile>(loadA))
-                    sourceA_tag = m_graph.mapper.get<LDS>(tag, 0);
+                    sourceA_tag = m_graph.mapper.get<LDS>(loads[0]);
 
                 int sourceB_tag = -1;
                 if(isOperation<LoadTiled>(loadB))
                     sourceB_tag = m_graph.mapper.get<User>(tag, 1);
                 else if(isOperation<LoadLDSTile>(loadB))
-                    sourceB_tag = m_graph.mapper.get<LDS>(tag, 1);
+                    sourceB_tag = m_graph.mapper.get<LDS>(loads[1]);
 
                 AssertFatal(sourceA_tag > 0 && sourceB_tag > 0, "User or LDS dimensions not found");
 

@@ -72,6 +72,8 @@ namespace rocRoller
             };
 
         public:
+            bool exists(int index) const;
+
             /**
              * @brief Returns whether `index` points to a node or an edge.
              */

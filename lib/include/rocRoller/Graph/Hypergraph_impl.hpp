@@ -31,6 +31,12 @@ namespace rocRoller
         }
 
         template <typename Node, typename Edge, bool Hyper>
+        bool Hypergraph<Node, Edge, Hyper>::exists(int index) const
+        {
+            return m_elements.count(index) == 1;
+        }
+
+        template <typename Node, typename Edge, bool Hyper>
         ElementType Hypergraph<Node, Edge, Hyper>::getElementType(int index) const
         {
             return getElementType(m_elements.at(index));

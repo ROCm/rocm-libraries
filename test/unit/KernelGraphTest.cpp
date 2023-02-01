@@ -1622,8 +1622,10 @@ namespace KernelGraphTest
         int wave_k = 8;
         int wave_b = 1;
 
-        auto mac_tile_A
-            = MacroTile({mac_m, mac_k}, LayoutType::MATRIX_A, {wave_m, wave_n, wave_k, wave_b});
+        auto mac_tile_A = MacroTile({mac_m, mac_k},
+                                    LayoutType::MATRIX_A,
+                                    {wave_m, wave_n, wave_k, wave_b},
+                                    MemoryType::LDS);
         auto mac_tile_B
             = MacroTile({mac_k, mac_n}, LayoutType::MATRIX_B, {wave_m, wave_n, wave_k, wave_b});
         auto mac_tile_C = MacroTile(
@@ -1661,6 +1663,16 @@ namespace KernelGraphTest
         // Verify that looks have been fused
         auto fusedForLoops = kgraph_fused.control.getNodes<ForLoopOp>().to<std::vector>();
         EXPECT_EQ(fusedForLoops.size(), 4);
+
+        // Verify that there is only a single StoreLDSTile node per K loop
+        auto unrolled_kgraph_lds = addLDS(kgraph_unrolled, m_context);
+        auto unrolledStoreLDS
+            = unrolled_kgraph_lds.control.getNodes<StoreLDSTile>().to<std::vector>();
+        EXPECT_EQ(unrolledStoreLDS.size(), 4);
+
+        unrolled_kgraph_lds = addLDS(kgraph_fused, m_context);
+        auto fusedStoreLDS = unrolled_kgraph_lds.control.getNodes<StoreLDSTile>().to<std::vector>();
+        EXPECT_EQ(fusedStoreLDS.size(), 2);
 
         kgraph1 = addComputeIndexOperations(kgraph1);
 
@@ -3051,6 +3063,7 @@ namespace KernelGraphTest
         auto kgraph_lds = updateParameters(kgraph0, params);
 
         auto kgraph_lds_lower = lowerTile(kgraph_lds, params, m_context);
+        kgraph_lds_lower      = addLDS(kgraph_lds_lower, m_context);
         kgraph_lds_lower      = addComputeIndexOperations(kgraph_lds_lower);
 
         std::string expected_lds = R".(
@@ -4051,8 +4064,8 @@ namespace KernelGraphTest
 	    "cntrl48"[label="Body(48)",shape=box];
 	    "cntrl49"[label="Body(49)",shape=box];
 	    "cntrl50"[label="LoadTiled(50)"];
-	    "cntrl51"[label="Body(51)",shape=box];
-	    "cntrl52"[label="StoreLDSTile(52)"];
+	    "cntrl51"[label="StoreLDSTile(51)"];
+	    "cntrl52"[label="Body(52)",shape=box];
 	    "cntrl53"[label="Barrier(53)"];
 	    "cntrl54"[label="Sequence(54)",shape=box];
 	    "cntrl55"[label="Sequence(55)",shape=box];
@@ -4122,7 +4135,7 @@ namespace KernelGraphTest
 	    "cntrl26" -> "cntrl29"
 	    "cntrl26" -> "cntrl30"
 	    "cntrl26" -> "cntrl34"
-	    "cntrl26" -> "cntrl51"
+	    "cntrl26" -> "cntrl52"
 	    "cntrl26" -> "cntrl75"
 	    "cntrl26" -> "cntrl84"
 	    "cntrl29" -> "cntrl27"
@@ -4148,11 +4161,11 @@ namespace KernelGraphTest
 	    "cntrl48" -> "cntrl42"
 	    "cntrl49" -> "cntrl37"
 	    "cntrl50" -> "cntrl54"
-	    "cntrl51" -> "cntrl50"
-	    "cntrl52" -> "cntrl57"
+	    "cntrl51" -> "cntrl57"
+	    "cntrl52" -> "cntrl50"
 	    "cntrl53" -> "cntrl55"
 	    "cntrl54" -> "cntrl53"
-	    "cntrl55" -> "cntrl52"
+	    "cntrl55" -> "cntrl51"
 	    "cntrl56" -> "cntrl58"
 	    "cntrl57" -> "cntrl56"
 	    "cntrl58" -> "cntrl31"
@@ -4292,13 +4305,13 @@ namespace KernelGraphTest
 	    "coord199" -> "cntrl26" [style=dotted,weight=0,arrowsize=0]
 	    "coord199" -> "cntrl27" [style=dotted,weight=0,arrowsize=0]
 	    "coord199" -> "cntrl28" [style=dotted,weight=0,arrowsize=0]
+	    "coord1" -> "cntrl31" [style=dotted,weight=0,arrowsize=0]
 	    "coord2" -> "cntrl31" [style=dotted,weight=0,arrowsize=0]
 	    "coord11" -> "cntrl31" [style=dotted,weight=0,arrowsize=0]
 	    "coord16" -> "cntrl31" [style=dotted,weight=0,arrowsize=0]
 	    "coord18" -> "cntrl31" [style=dotted,weight=0,arrowsize=0]
 	    "coord50" -> "cntrl31" [style=dotted,weight=0,arrowsize=0]
 	    "coord85" -> "cntrl31" [style=dotted,weight=0,arrowsize=0]
-	    "coord218" -> "cntrl31" [style=dotted,weight=0,arrowsize=0]
 	    "coord18" -> "cntrl32" [style=dotted,weight=0,arrowsize=0]
 	    "coord204" -> "cntrl37" [style=dotted,weight=0,arrowsize=0]
 	    "coord204" -> "cntrl38" [style=dotted,weight=0,arrowsize=0]
@@ -4323,15 +4336,15 @@ namespace KernelGraphTest
 	    "coord265" -> "cntrl50" [style=dotted,weight=0,arrowsize=0]
 	    "coord266" -> "cntrl50" [style=dotted,weight=0,arrowsize=0]
 	    "coord267" -> "cntrl50" [style=dotted,weight=0,arrowsize=0]
-	    "coord218" -> "cntrl52" [style=dotted,weight=0,arrowsize=0]
-	    "coord220" -> "cntrl52" [style=dotted,weight=0,arrowsize=0]
-	    "coord242" -> "cntrl52" [style=dotted,weight=0,arrowsize=0]
-	    "coord243" -> "cntrl52" [style=dotted,weight=0,arrowsize=0]
-	    "coord268" -> "cntrl52" [style=dotted,weight=0,arrowsize=0]
-	    "coord269" -> "cntrl52" [style=dotted,weight=0,arrowsize=0]
-	    "coord270" -> "cntrl52" [style=dotted,weight=0,arrowsize=0]
-	    "coord271" -> "cntrl52" [style=dotted,weight=0,arrowsize=0]
-	    "coord272" -> "cntrl52" [style=dotted,weight=0,arrowsize=0]
+	    "coord218" -> "cntrl51" [style=dotted,weight=0,arrowsize=0]
+	    "coord220" -> "cntrl51" [style=dotted,weight=0,arrowsize=0]
+	    "coord242" -> "cntrl51" [style=dotted,weight=0,arrowsize=0]
+	    "coord243" -> "cntrl51" [style=dotted,weight=0,arrowsize=0]
+	    "coord268" -> "cntrl51" [style=dotted,weight=0,arrowsize=0]
+	    "coord269" -> "cntrl51" [style=dotted,weight=0,arrowsize=0]
+	    "coord270" -> "cntrl51" [style=dotted,weight=0,arrowsize=0]
+	    "coord271" -> "cntrl51" [style=dotted,weight=0,arrowsize=0]
+	    "coord272" -> "cntrl51" [style=dotted,weight=0,arrowsize=0]
 	    "coord52" -> "cntrl62" [style=dotted,weight=0,arrowsize=0]
 	    "coord61" -> "cntrl62" [style=dotted,weight=0,arrowsize=0]
 	    "coord218" -> "cntrl62" [style=dotted,weight=0,arrowsize=0]

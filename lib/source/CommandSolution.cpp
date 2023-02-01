@@ -229,6 +229,8 @@ namespace rocRoller
             m_kernelGraph = KernelGraph::fuseLoops(m_kernelGraph, m_context);
         logger->debug("CommandKernel::generateKernelGraph: post fuse: {}", m_kernelGraph.toDOT());
 
+        m_kernelGraph = KernelGraph::addLDS(m_kernelGraph, m_context);
+
         m_kernelGraph = KernelGraph::addComputeIndexOperations(m_kernelGraph);
 
         m_kernelGraph = KernelGraph::addDeallocate(m_kernelGraph);

@@ -1,4 +1,4 @@
-# Additional Sizes for Guideposts. 
+# Additional Sizes for Guideposts.
 
 This project's performance can be compared to output from the [Tensile Library](https://github.com/ROCmSoftwarePlatform/Tensile).  This directory has examples of kernels that have been generated from Tensile and converted to RocRoller's C++ instruction format.
 
@@ -35,5 +35,5 @@ The following steps are needed to generate a kernel from Tensile that can be run
     <PathToWorkingDirectory>/1_BenchmarkProblems/<Identifier>/00_Final/source/build_tmp/SOURCE/assembly/<KernelIdentifier>.s
     ```
 
-6. These yaml files will produce the kernels Cijk_Ailk_Bjlk_HHS_H_MT128x512x16_MI16x16x4x4_SE_K1_TT8_32 for the size 12544 x 1024 x 1 x 256 and 
+6. These yaml files will produce the kernels Cijk_Ailk_Bjlk_HHS_H_MT128x512x16_MI16x16x4x4_SE_K1_TT8_32 for the size 12544 x 1024 x 1 x 256 and
 Cijk_Ailk_Bjlk_HHS_H_MT128x128x16_MI32x32x8x1_SE_K1_TT4_32 for the size 7680 x 128 x 1 x 2560.
