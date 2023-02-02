@@ -208,8 +208,6 @@ namespace rocRoller
             {
             case LayoutType::MATRIX_A:
             {
-                // TODO: not necessary here, but used for lookup in generator
-                graph.coordinates.addElement(Flatten(), {i_wave_y, i_wave_x}, {wave_tile_tag});
                 graph.coordinates.addElement(Tile(), {i_wave_y}, {block_number, vgpr});
                 graph.coordinates.addElement(PassThrough(), {i_wave_x}, {block_index});
 
@@ -222,8 +220,6 @@ namespace rocRoller
 
             case LayoutType::MATRIX_B:
             {
-                // TODO: not necessary here, but used for lookup in generator
-                graph.coordinates.addElement(Flatten(), {i_wave_x, i_wave_y}, {wave_tile_tag});
                 graph.coordinates.addElement(Tile(), {i_wave_x}, {block_number, vgpr});
                 graph.coordinates.addElement(PassThrough(), {i_wave_y}, {block_index});
 
@@ -300,11 +296,11 @@ namespace rocRoller
             auto mac_tile = graph.coordinates.getNode<MacroTile>(mac_tile_tag);
 
             rocRoller::Log::getLogger()->debug(
-                "KernelGraph::LowerTileVisitor::loadMacroTileFromLDS(): LDS({}), MacroTile({})",
+                "KernelGraph::Utils::loadMacroTileFromLDS(): LDS({}), MacroTile({})",
                 lds_tag,
                 mac_tile_tag);
             rocRoller::Log::getLogger()->debug(
-                "KernelGraph::LowerTileVisitor::loadMacroTileFromLDS(): MacroTile size: {}x{}",
+                "KernelGraph::Utils::loadMacroTileFromLDS(): MacroTile size: {}x{}",
                 mac_tile.sizes[0],
                 mac_tile.sizes[1]);
 
@@ -341,11 +337,11 @@ namespace rocRoller
             auto user     = graph.coordinates.getNode<User>(user_tag);
 
             rocRoller::Log::getLogger()->debug(
-                "KernelGraph::LowerTileVisitor::loadMacroTileForLDS(): User({}), MacroTile({})",
+                "KernelGraph::Utils::loadMacroTileForLDS(): User({}), MacroTile({})",
                 user_tag,
                 mac_tile_tag);
             rocRoller::Log::getLogger()->debug(
-                "KernelGraph::LowerTileVisitor::loadMacroTileForLDS(): MacroTile size: {}x{}",
+                "KernelGraph::Utils::loadMacroTileForLDS(): MacroTile size: {}x{}",
                 mac_tile.sizes[0],
                 mac_tile.sizes[1]);
 
@@ -367,10 +363,10 @@ namespace rocRoller
             graph.coordinates.addElement(Tile(), {sdim_x}, {n_mac_x, i_mac_x});
             graph.coordinates.addElement(Tile(), {sdim_y}, {n_mac_y, i_mac_y});
 
+            // TODO remove when below "tidy this" done
             graph.coordinates.addElement(Flatten(), {i_mac_x, i_mac_y}, {mac_tile_tag});
 
-            auto thr_tile     = ThreadTile(mac_tile);
-            auto thr_tile_tag = graph.coordinates.addElement(thr_tile);
+            auto thr_tile = ThreadTile(mac_tile);
 
             auto n_thr_x = graph.coordinates.addElement(thr_tile.tileNumber(0));
             auto n_thr_y = graph.coordinates.addElement(thr_tile.tileNumber(1));
@@ -380,14 +376,18 @@ namespace rocRoller
             graph.mapper.connect<ThreadTileIndex>(load_tag, i_thr_x, 0);
             graph.mapper.connect<ThreadTileIndex>(load_tag, i_thr_y, 1);
 
-            graph.coordinates.addElement(Tile(), {thr_tile_tag}, {i_thr_x, i_thr_y});
-
             if(mac_tile.layoutType == LayoutType::MATRIX_A)
             {
+                auto thr_tile_tag = graph.coordinates.addElement(thr_tile);
+
+                // TODO remove when below "tidy this" done
+                graph.coordinates.addElement(Tile(), {thr_tile_tag}, {i_thr_x, i_thr_y});
+
                 auto workitem_x
                     = graph.coordinates.addElement(Workitem(0, literal(workgroupSizes.at(0))));
                 graph.coordinates.addElement(Flatten(), {n_thr_x, n_thr_y}, {workitem_x});
 
+                // TODO tidy this
                 graph.coordinates.addElement(Tile(), {mac_tile_tag}, {thr_tile_tag, workitem_x});
 
                 auto workgroup_x = graph.coordinates.addElement(Workgroup(0));
@@ -399,10 +399,16 @@ namespace rocRoller
             }
             else if(mac_tile.layoutType == LayoutType::MATRIX_B)
             {
+                auto thr_tile_tag = graph.coordinates.addElement(thr_tile);
+
+                // TODO remove when below "tidy this" done
+                graph.coordinates.addElement(Tile(), {thr_tile_tag}, {i_thr_x, i_thr_y});
+
                 auto workitem_x
                     = graph.coordinates.addElement(Workitem(0, literal(workgroupSizes.at(0))));
                 graph.coordinates.addElement(Flatten(), {n_thr_x, n_thr_y}, {workitem_x});
 
+                // TODO tidy this
                 graph.coordinates.addElement(Tile(), {mac_tile_tag}, {thr_tile_tag, workitem_x});
 
                 auto workgroup_y = graph.coordinates.addElement(Workgroup(1));
@@ -449,11 +455,11 @@ namespace rocRoller
             auto user     = graph.coordinates.getNode<User>(user_tag);
 
             rocRoller::Log::getLogger()->debug(
-                "KernelGraph::LowerTileVisitor::loadMacroTile(): User({}), MacroTile({})",
+                "KernelGraph::Utils::loadMacroTile(): User({}), MacroTile({})",
                 user_tag,
                 mac_tile_tag);
             rocRoller::Log::getLogger()->debug(
-                "KernelGraph::LowerTileVisitor::loadMacroTile(): MacroTile size: {}x{}",
+                "KernelGraph::Utils::loadMacroTile(): MacroTile size: {}x{}",
                 mac_tile.sizes[0],
                 mac_tile.sizes[1]);
 
@@ -477,8 +483,6 @@ namespace rocRoller
 
             graph.mapper.connect<Workgroup>(load_tag, workgroup_x, 0);
             graph.mapper.connect<Workgroup>(load_tag, workgroup_y, 1);
-
-            graph.coordinates.addElement(Flatten(), {i_mac_x, i_mac_y}, {mac_tile_tag});
 
             graph.coordinates.addElement(Tile(), {sdim_x}, {n_mac_x, i_mac_x});
             graph.coordinates.addElement(Tile(), {sdim_y}, {n_mac_y, i_mac_y});
@@ -684,21 +688,18 @@ namespace rocRoller
         {
             auto mac_tile = graph.coordinates.getNode<MacroTile>(mac_tile_tag);
             rocRoller::Log::getLogger()->debug(
-                "KernelGraph::LowerTileVisitor::storeMacroTileIntoLDS(): LDS({}), MacroTile({})",
+                "KernelGraph::Utils::storeMacroTileIntoLDS(): LDS({}), MacroTile({})",
                 lds_tag,
                 mac_tile_tag);
             rocRoller::Log::getLogger()->debug(
-                "KernelGraph::LowerTileVisitor::storeMacroTileIntoLDS(): MacroTile size: {}x{}",
+                "KernelGraph::Utils::storeMacroTileIntoLDS(): MacroTile size: {}x{}",
                 mac_tile.sizes[0],
                 mac_tile.sizes[1]);
 
-            auto thr_tile     = ThreadTile(mac_tile);
-            auto thr_tile_tag = graph.coordinates.addElement(thr_tile);
+            auto thr_tile = ThreadTile(mac_tile);
 
             auto i_thr_x = graph.coordinates.addElement(thr_tile.tileIndex(0));
             auto i_thr_y = graph.coordinates.addElement(thr_tile.tileIndex(1));
-
-            graph.coordinates.addElement(Flatten(), {i_thr_x, i_thr_y}, {thr_tile_tag});
 
             graph.mapper.connect<ThreadTileIndex>(store_tag, i_thr_x, 0);
             graph.mapper.connect<ThreadTileIndex>(store_tag, i_thr_y, 1);
@@ -706,10 +707,16 @@ namespace rocRoller
             if(mac_tile.layoutType == LayoutType::MATRIX_A
                || mac_tile.layoutType == LayoutType::MATRIX_B)
             {
+                auto thr_tile_tag = graph.coordinates.addElement(thr_tile);
+
+                // TODO remove when "tidy this" done
+                graph.coordinates.addElement(Flatten(), {i_thr_x, i_thr_y}, {thr_tile_tag});
+
                 auto workitem_x
                     = graph.coordinates.addElement(Workitem(0, literal(workgroupSizes.at(0))));
 
                 // each workitem and its vgpr contributes towards the offset calculation
+                // TODO tidy this
                 graph.coordinates.addElement(Flatten(), {thr_tile_tag, workitem_x}, {mac_tile_tag});
                 graph.coordinates.addElement(PassThrough(), {mac_tile_tag}, {lds_tag});
             }
@@ -748,11 +755,11 @@ namespace rocRoller
             auto user     = graph.coordinates.getNode<User>(user_tag);
 
             rocRoller::Log::getLogger()->debug(
-                "KernelGraph::LowerTileVisitor::storeMacroTileForLDS(): User({}), MacroTile({})",
+                "KernelGraph::Utils::storeMacroTileForLDS(): User({}), MacroTile({})",
                 user_tag,
                 mac_tile_tag);
             rocRoller::Log::getLogger()->debug(
-                "KernelGraph::LowerTileVisitor::storeMacroTileForLDS(): MacroTile size: {}x{}",
+                "KernelGraph::Utils::storeMacroTileForLDS(): MacroTile size: {}x{}",
                 mac_tile.sizes[0],
                 mac_tile.sizes[1]);
 
@@ -789,13 +796,16 @@ namespace rocRoller
             auto i_thr_x = graph.coordinates.addElement(thr_tile.tileIndex(0));
             auto i_thr_y = graph.coordinates.addElement(thr_tile.tileIndex(1));
 
+            // TODO remove when below "tidy this" done
             graph.coordinates.addElement(Flatten(), {i_thr_x, i_thr_y}, {thr_tile_tag});
 
             graph.mapper.connect<ThreadTileIndex>(store_tag, i_thr_x, 0);
             graph.mapper.connect<ThreadTileIndex>(store_tag, i_thr_y, 1);
 
+            // TODO tidy this
             graph.coordinates.addElement(Flatten(), {thr_tile_tag, workitem_x}, {mac_tile_tag});
 
+            // TODO remove when above "tidy this" done
             graph.coordinates.addElement(Tile(), {mac_tile_tag}, {i_mac_x, i_mac_y});
         }
 
@@ -812,11 +822,11 @@ namespace rocRoller
             auto user     = graph.coordinates.getNode<User>(user_tag);
 
             rocRoller::Log::getLogger()->debug(
-                "KernelGraph::LowerTileVisitor::storeMacroTile(): User({}), MacroTile({})",
+                "KernelGraph::Utils::storeMacroTile(): User({}), MacroTile({})",
                 user_tag,
                 mac_tile_tag);
             rocRoller::Log::getLogger()->debug(
-                "KernelGraph::LowerTileVisitor::storeMacroTile(): MacroTile size: {}x{}",
+                "KernelGraph::Utils::storeMacroTile(): MacroTile size: {}x{}",
                 mac_tile.sizes[0],
                 mac_tile.sizes[1]);
 
@@ -837,11 +847,6 @@ namespace rocRoller
 
             graph.mapper.connect<Workgroup>(store_tag, workgroup_x, 0);
             graph.mapper.connect<Workgroup>(store_tag, workgroup_y, 1);
-
-            auto workitem
-                = graph.coordinates.addElement(Workitem(0, literal(workgroupSizes.at(0))));
-
-            graph.coordinates.addElement(Flatten(), {i_mac_x, i_mac_y}, {mac_tile_tag});
 
             graph.coordinates.addElement(Flatten(), {n_mac_x, i_mac_x}, {sdims[0]});
             graph.coordinates.addElement(Flatten(), {n_mac_y, i_mac_y}, {sdims[1]});
@@ -881,6 +886,10 @@ namespace rocRoller
 
             case MemoryType::WAVE:
             case MemoryType::WAVE_LDS:
+            {
+                auto workitem
+                    = graph.coordinates.addElement(Workitem(0, literal(workgroupSizes.at(0))));
+
                 storeWaveMacroTile(graph,
                                    mac_tile,
                                    store_tag,
@@ -890,7 +899,8 @@ namespace rocRoller
                                    user_tag,
                                    wavefrontSize,
                                    wavetilesPerWorkgroup);
-                break;
+            }
+            break;
 
             default:
                 Throw<FatalError>("Store : MacroTile memory type not supported yet.");
@@ -900,7 +910,7 @@ namespace rocRoller
         void addConnectionsMultiply(KernelGraph& graph, int waveMult)
         {
             rocRoller::Log::getLogger()->debug(
-                "KernelGraph::LowerTileVisitor::addConnectionsMultiply(): Multiply({})", waveMult);
+                "KernelGraph::Utils::addConnectionsMultiply(): Multiply({})", waveMult);
 
             auto loads = graph.control.getOutputNodeIndices<Body>(waveMult).to<std::vector>();
             AssertFatal(loads.size() == 2, "Multiply op needs two operands");

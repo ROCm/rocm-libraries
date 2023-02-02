@@ -313,15 +313,7 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult)
     auto WFX = KernelGraph::CoordinateGraph::Wavefront(0, wavefront_nx, one);
     auto WFY = KernelGraph::CoordinateGraph::Wavefront(1, wavefront_ny, one);
 
-    std::vector<int> wavefront_ids = {59, 92, 125, 179};
-    if(wavetile_per_wavefront_m >= 1 && wavetile_per_wavefront_n >= 1)
-    {
-        wavefront_ids = {59, 94, 129, 184};
-    }
-    else if(wavetile_per_wavefront_m >= 1 || wavetile_per_wavefront_n >= 1)
-    {
-        wavefront_ids = {59, 93, 127, 181};
-    }
+    std::vector<int> wavefront_ids = {58, 91, 124, 178};
     for(auto id : wavefront_ids)
     {
         postParams->setDimensionInfo(id, WF);

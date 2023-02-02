@@ -232,6 +232,14 @@ namespace rocRoller
 
             std::string toDOT(std::string const& prefix = "", bool standalone = true) const;
 
+            static bool identity(Edge const&)
+            {
+                return true;
+            }
+
+            template <std::predicate<Edge const&> Predicate>
+            std::string toDOT(Predicate edgePredicate = identity) const;
+
             template <typename T>
             requires(std::constructible_from<Node, T> || std::constructible_from<Edge, T>)
                 Generator<int> getElements()

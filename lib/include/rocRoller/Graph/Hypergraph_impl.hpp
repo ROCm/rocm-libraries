@@ -734,6 +734,63 @@ namespace rocRoller
         }
 
         template <typename Node, typename Edge, bool Hyper>
+        template <std::predicate<Edge const&> Predicate>
+        std::string Hypergraph<Node, Edge, Hyper>::toDOT(Predicate edgePredicate) const
+        {
+            std::ostringstream msg;
+
+            std::string const prefix = "";
+
+            msg << "digraph {" << std::endl;
+
+            for(auto const& pair : m_elements)
+            {
+                if(getElementType(pair.second) == ElementType::Node)
+                {
+                    auto x = std::get<Node>(pair.second);
+                    msg << '"' << prefix << pair.first << '"' << "[label=\"";
+                    msg << toString(x) << "(" << pair.first << ")\"";
+                    msg << "];" << std::endl;
+                }
+                else
+                {
+                    auto x = std::get<Edge>(pair.second);
+                    if(edgePredicate(x))
+                    {
+                        msg << '"' << prefix << pair.first << '"' << "[label=\"";
+                        msg << toString(x) << "(" << pair.first << ")\",shape=box";
+                        msg << "];" << std::endl;
+                    }
+                }
+            }
+
+            for(auto const& pair : m_elements)
+            {
+                if(getElementType(pair.second) == ElementType::Edge)
+                {
+                    auto x = std::get<Edge>(pair.second);
+                    if(edgePredicate(x))
+                    {
+                        for(auto y : getNeighbours<Direction::Upstream>(pair.first))
+                        {
+                            msg << '"' << prefix << y << "\" -> \"" << prefix << pair.first << '"'
+                                << std::endl;
+                        }
+                        for(auto y : getNeighbours<Direction::Downstream>(pair.first))
+                        {
+                            msg << '"' << prefix << pair.first << "\" -> \"" << prefix << y << '"'
+                                << std::endl;
+                        }
+                    }
+                }
+            }
+
+            msg << "}" << std::endl;
+
+            return msg.str();
+        }
+
+        template <typename Node, typename Edge, bool Hyper>
         template <typename T>
         requires(std::constructible_from<Node, T> || std::constructible_from<Edge, T>)
             Generator<int> Hypergraph<Node, Edge, Hyper>::getElements()

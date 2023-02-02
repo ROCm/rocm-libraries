@@ -70,37 +70,37 @@ namespace ScopeTest
         auto kexpected = R"(
             // CodeGeneratorVisitor::generate() begin
             // generate(set{1})
-            // Kernel BEGIN
+            // Kernel(1) BEGIN
             // generate(set{4})
-            // Assign VGPR 11j BEGIN
+            // Assign VGPR 11j(4) BEGIN
             // 11j
             // Allocated : 1 VGPR (Value: UInt32): v0
             v_mov_b32 v0, 11
-            // Assign VGPR 11j END
-            // Scope BEGIN
+            // Assign VGPR 11j(4) END
+            // Scope(2) BEGIN
             // generate(set{3})
-            // Scope BEGIN
+            // Scope(3) BEGIN
             // generate(set{6})
-            // Assign VGPR 33j BEGIN
+            // Assign VGPR 33j(6) BEGIN
             // 33j
             // Allocated : 1 VGPR (Value: UInt32): v1
             v_mov_b32 v1, 33
-            // Assign VGPR 33j END
-            // Assign VGPR 44j BEGIN
+            // Assign VGPR 33j(6) END
+            // Assign VGPR 44j(7) BEGIN
             // 44j
             v_mov_b32 v0, 44
-            // Assign VGPR 44j END
+            // Assign VGPR 44j(7) END
             // Freeing : 1 VGPR (Value: UInt32): v1
-            // Scope END
-            // Assign VGPR 22j BEGIN
+            // Scope(3) END
+            // Assign VGPR 22j(5) BEGIN
             // 22j
             // Allocated : 1 VGPR (Value: UInt32): v1
             v_mov_b32 v1, 22
-            // Assign VGPR 22j END
+            // Assign VGPR 22j(5) END
             // Freeing : 1 VGPR (Value: UInt32): v1
-            // Scope END
+            // Scope(2) END
             // Freeing : 1 VGPR (Value: UInt32): v0
-            // Kernel END
+            // Kernel(1) END
             // CodeGeneratorVisitor::generate() end
         )";
 

@@ -296,12 +296,26 @@ namespace rocRoller
                 CoordinateTransformEdge,
                 T> || std::constructible_from<DataFlowEdge, T>) inline bool isEdge(const Edge& x)
         {
-            if constexpr(std::constructible_from<DataFlowEdge, T>)
+            if constexpr(std::is_same_v<DataFlowEdge, T>)
+            {
+                if(std::holds_alternative<DataFlowEdge>(x))
+                {
+                    return true;
+                }
+            }
+            else if constexpr(std::constructible_from<DataFlowEdge, T>)
             {
                 if(std::holds_alternative<DataFlowEdge>(x))
                 {
                     if(std::holds_alternative<T>(std::get<DataFlowEdge>(x)))
                         return true;
+                }
+            }
+            else if constexpr(std::is_same_v<CoordinateTransformEdge, T>)
+            {
+                if(std::holds_alternative<CoordinateTransformEdge>(x))
+                {
+                    return true;
                 }
             }
             else if constexpr(std::constructible_from<CoordinateTransformEdge, T>)

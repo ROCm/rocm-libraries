@@ -222,7 +222,7 @@ namespace rocRoller
                 auto opName = toString(operation);
                 rocRoller::Log::getLogger()->debug(
                     "KernelGraph::CodeGenerator::{}({})", opName, tag);
-                co_yield Instruction::Comment(opName + " BEGIN");
+                co_yield Instruction::Comment(concatenate(opName, "(", tag, ") BEGIN"));
 
                 AssertFatal(m_completedControlNodes.find(tag) == m_completedControlNodes.end(),
                             ShowValue(operation));
@@ -230,7 +230,7 @@ namespace rocRoller
                 co_yield std::visit(
                     *this, std::variant<int>(tag), operation, std::variant<Transformer>(coords));
 
-                co_yield Instruction::Comment(opName + " END");
+                co_yield Instruction::Comment(concatenate(opName, "(", tag, ") END"));
 
                 m_completedControlNodes.insert(tag);
             }
@@ -380,7 +380,11 @@ namespace rocRoller
                     tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::INCREMENT});
 
                 rocRoller::Log::getLogger()->debug(
-                    "KernelGraph::CodeGenerator::ComputeIndex({}): {}/{}", tag, offset, stride);
+                    "KernelGraph::CodeGenerator::ComputeIndex({}): target {} offset {} stride {}",
+                    tag,
+                    target,
+                    offset,
+                    stride);
 
                 auto scope    = m_context->getScopeManager();
                 uint numBytes = DataTypeInfo::Get(ci.valueType).elementSize;
