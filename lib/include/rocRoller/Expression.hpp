@@ -540,7 +540,12 @@ namespace rocRoller
         VariableType   resultVariableType(ExpressionPtr const& expr);
         Register::Type resultRegisterType(ExpressionPtr const& expr);
 
-        using ResultType = std::pair<Register::Type, VariableType>;
+        struct ResultType
+        {
+            Register::Type regType;
+            VariableType   varType;
+            bool           operator==(ResultType const&) const = default;
+        };
         ResultType    resultType(ExpressionPtr const& expr);
         ResultType    resultType(Expression const& expr);
         std::ostream& operator<<(std::ostream&, ResultType const&);

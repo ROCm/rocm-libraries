@@ -42,8 +42,8 @@ namespace rocRoller
             graph.control.addElement(ForLoopIncrement(), {forK}, {incrementK});
 
             graph.mapper.connect<Dimension>(forK, rangeK);
-            graph.mapper.connect<Dimension>(initK, rangeK);
-            graph.mapper.connect<ForLoop>(incrementK, rangeK);
+            graph.mapper.connect(initK, rangeK, NaryArgument::DEST);
+            graph.mapper.connect(incrementK, rangeK, NaryArgument::DEST);
 
             return {dimK, forK};
         }

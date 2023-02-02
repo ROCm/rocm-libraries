@@ -222,6 +222,8 @@ namespace rocRoller
         logger->debug("CommandKernel::generateKernelGraph: post lowertile: {}",
                       m_kernelGraph.toDOT());
 
+        m_kernelGraph = KernelGraph::fuseExpressions(m_kernelGraph);
+
         m_kernelGraph = KernelGraph::unrollLoops(m_kernelGraph, m_context);
         logger->debug("CommandKernel::generateKernelGraph: post unroll: {}", m_kernelGraph.toDOT());
 

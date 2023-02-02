@@ -324,10 +324,7 @@ namespace rocRoller
 
             Generator<Instruction> operator()(int tag, Assign const& assign, Transformer coords)
             {
-                auto connections = m_graph.mapper.getConnections(tag);
-                AssertFatal(connections.size() == 1,
-                            "Invalid Assign operation; coordinate missing.");
-                auto dim_tag = connections[0].coordinate;
+                auto dim_tag = m_graph.mapper.get(tag, NaryArgument::DEST);
 
                 rocRoller::Log::getLogger()->debug("  assigning dimension: {}", dim_tag);
 

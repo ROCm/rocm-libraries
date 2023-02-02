@@ -267,7 +267,7 @@ namespace rocRoller
             auto initD = graph.control.addElement(
                 Assign{Register::Type::Accumulator, literal(0.f), num_agpr});
 
-            graph.mapper.connect<MacroTile>(initD, d);
+            graph.mapper.connect(initD, d, NaryArgument::DEST);
 
             graph.control.addElement(Sequence(), {initD}, {forK});
             graph.control.addElement(Body(), {forK}, {waveMult});

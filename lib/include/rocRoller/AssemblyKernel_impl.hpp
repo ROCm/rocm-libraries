@@ -228,7 +228,7 @@ namespace rocRoller
 
             std::string argName = concatenate("LAUNCH_WORKGROUPCOUNT_", index);
             auto        resType = Expression::resultType(exPtr);
-            addArgument({argName, resType.second, DataDirection::ReadOnly, exPtr});
+            addArgument({argName, resType.varType, DataDirection::ReadOnly, exPtr});
 
             m_workgroupCount[index] = std::make_shared<Expression::Expression>(
                 std::make_shared<AssemblyKernelArgument>(findArgument(argName)));

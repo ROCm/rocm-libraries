@@ -30,6 +30,22 @@ namespace rocRoller::KernelGraph
         return rv;
     }
 
+    void ControlToCoordinateMapper::purge(int control)
+    {
+        std::vector<ControlToCoordinateMapper::key_type> purge;
+        for(auto const& kv : m_map)
+        {
+            if(std::get<0>(kv.first) == control)
+            {
+                purge.push_back(kv.first);
+            }
+        }
+        for(auto const& k : purge)
+        {
+            m_map.erase(k);
+        }
+    }
+
     std::string ControlToCoordinateMapper::toDOT(std::string coord, std::string cntrl) const
     {
         std::stringstream ss;

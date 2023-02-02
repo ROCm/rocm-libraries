@@ -52,8 +52,8 @@ namespace rocRoller
                                         Assign const&      assign) override
             {
                 // if destination isn't Linear, copy this operation
-                auto connections = original.mapper.getConnections(tag);
-                auto linear      = original.coordinates.get<Linear>(connections[0].coordinate);
+                auto original_linear = original.mapper.get(tag, NaryArgument::DEST);
+                auto linear          = original.coordinates.get<Linear>(original_linear);
                 if(!linear)
                 {
                     BaseGraphVisitor::visitOperation(graph, original, reindexer, tag, assign);
@@ -64,8 +64,7 @@ namespace rocRoller
                 auto                     new_assign
                     = Assign{assign.regType, visitor.call(assign.expression), assign.valueCount};
 
-                auto original_linear = original.mapper.get<Linear>(tag);
-                auto vgpr            = graph.coordinates.addElement(VGPR());
+                auto vgpr = graph.coordinates.addElement(VGPR());
 
                 std::vector<int> coordinate_inputs;
                 for(auto const& input : original.coordinates.parentNodes(original_linear))
@@ -81,7 +80,7 @@ namespace rocRoller
                     graph.control.addElement(Sequence(), {reindexer.control.at(input)}, {new_tag});
                 }
 
-                graph.mapper.connect<VGPR>(new_tag, vgpr);
+                graph.mapper.connect(new_tag, vgpr, NaryArgument::DEST);
 
                 reindexer.control.insert_or_assign(tag, new_tag);
                 reindexer.coordinates.insert_or_assign(original_linear, vgpr);

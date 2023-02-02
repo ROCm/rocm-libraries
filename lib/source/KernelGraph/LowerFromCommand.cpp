@@ -435,12 +435,7 @@ namespace rocRoller
 
                     AssertFatal(coordinate_outputs.size() == 1,
                                 "Element op must have a single output.");
-                    auto odim
-                        = std::get<Dimension>(graph.coordinates.getElement(coordinate_outputs[0]));
-                    if(isDimension<MacroTile>(odim))
-                        graph.mapper.connect<MacroTile>(op, coordinate_outputs[0]);
-                    else
-                        graph.mapper.connect<Linear>(op, coordinate_outputs[0]);
+                    graph.mapper.connect(op, coordinate_outputs[0], NaryArgument::DEST);
 
                     Operations::TagVisitor tagVisitor;
                     m_op.insert_or_assign(tagVisitor.call(*xop), op);

@@ -1,5 +1,7 @@
 
 
+#include <algorithm>
+
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
 #include <rocRoller/CodeGen/Arithmetic/MatrixMultiply.hpp>
@@ -23,22 +25,61 @@ namespace rocRoller
                                                  bool              allowSpecial = true,
                                                  int               valueCount   = 1)
             {
-                if(resType.first == Register::Type::Special && resType.second == DataType::Bool)
+                if(resType.regType == Register::Type::Special && resType.varType == DataType::Bool)
                 {
                     if(allowSpecial)
                         return m_context->getSCC();
                     else
                         return Register::Value::Placeholder(
-                            m_context, Register::Type::Scalar, resType.second, valueCount);
+                            m_context, Register::Type::Scalar, resType.varType, valueCount);
                 }
-                else if(resType.first == Register::Type::Scalar
-                        && resType.second == DataType::Bool32)
+                else if(resType.regType == Register::Type::Scalar
+                        && resType.varType == DataType::Bool32)
                 {
                     return Register::Value::WavefrontPlaceholder(m_context);
                 }
 
                 return Register::Value::Placeholder(
-                    m_context, resType.first, resType.second, valueCount);
+                    m_context, resType.regType, resType.varType, valueCount);
+            }
+
+            int resultValueCount(Register::ValuePtr const&              dest,
+                                 std::vector<Register::ValuePtr> const& operands)
+
+            {
+                if(dest)
+                {
+                    return dest->valueCount();
+                }
+
+                std::vector<int> count;
+                std::transform(
+                    operands.cbegin(), operands.cend(), std::back_inserter(count), [](auto x) {
+                        return x->valueCount() * DataTypeInfo::Get(x->variableType()).packing;
+                    });
+                return *std::max_element(count.cbegin(), count.cend());
+            }
+
+            Register::Type promoteRegisterTypes(std::vector<Register::ValuePtr> const& regs)
+            {
+                AssertFatal(!regs.empty());
+                auto rtype = regs[0]->regType();
+                for(int i = 0; i < regs.size(); ++i)
+                {
+                    rtype = Register::PromoteType(rtype, regs[i]->regType());
+                }
+                return rtype;
+            }
+
+            VariableType promoteVarialbeTypes(std::vector<Register::ValuePtr> const& regs)
+            {
+                AssertFatal(!regs.empty());
+                auto vtype = regs[0]->variableType();
+                for(int i = 0; i < regs.size(); ++i)
+                {
+                    vtype = VariableType::Promote(vtype, regs[i]->variableType());
+                }
+                return vtype;
             }
 
             /**
@@ -64,7 +105,7 @@ namespace rocRoller
                 for(int i = 0; i < exprs.size(); i++)
                 {
                     resultTypes[i] = resultType(exprs[i]);
-                    if(resultTypes[i].first == Register::Type::Special)
+                    if(resultTypes[i].regType == Register::Type::Special)
                         specials++;
                 }
 
@@ -73,7 +114,7 @@ namespace rocRoller
                 {
                     for(int i = 0; i < exprs.size() && specials > 1; i++)
                     {
-                        if(resultTypes[i].first == Register::Type::Special)
+                        if(resultTypes[i].regType == Register::Type::Special)
                         {
                             results[i] = resultPlaceholder(resultTypes[i], false);
                             specials--;
@@ -86,7 +127,8 @@ namespace rocRoller
                     std::vector<Generator<Instruction>> schedulable;
                     for(int i = 0; i < exprs.size(); i++)
                     {
-                        if(resultTypes[i].first != Register::Type::Special || results[i] != nullptr)
+                        if(resultTypes[i].regType != Register::Type::Special
+                           || results[i] != nullptr)
                         {
                             schedulable.push_back(call(results[i], exprs[i]));
                             done[i] = true;
@@ -147,23 +189,14 @@ namespace rocRoller
                 auto const lhsInfo = DataTypeInfo::Get(lhs->variableType());
                 auto const rhsInfo = DataTypeInfo::Get(rhs->variableType());
 
-                auto regType = Register::PromoteType(lhs->regType(), rhs->regType());
-                auto varType = VariableType::Promote(lhs->variableType(), rhs->variableType());
+                auto regType = promoteRegisterTypes({lhs, rhs});
+                auto varType = promoteVarialbeTypes({lhs, rhs});
 
                 // TODO: Delete once FastDivision uses only libdivide.
                 if constexpr(std::same_as<MultiplyHigh, Operation>)
                     varType = DataType::Int32;
 
-                int valueCount;
-                if(dest)
-                {
-                    valueCount = dest->valueCount();
-                }
-                else
-                {
-                    valueCount = std::max(lhs->valueCount() * lhsInfo.packing,
-                                          rhs->valueCount() * rhsInfo.packing);
-                }
+                int valueCount = resultValueCount(dest, {lhs, rhs});
 
                 // TODO: Should this be pushed to arithmetic generators?
                 // If any sources were AGPRs, copy to VGPRs first.
@@ -243,7 +276,7 @@ namespace rocRoller
                 co_yield prepareSourceOperands(results, schedulerLocked, subExprs);
 
                 auto resType  = resultType(expr);
-                auto deferred = resType.second == DataType::None;
+                auto deferred = resType.varType == DataType::None;
 
                 if(deferred)
                 {
@@ -264,20 +297,43 @@ namespace rocRoller
             template <CTernary Operation>
             requires CKernelExecuteTime<Operation> Generator<Instruction>
             operator()(Register::ValuePtr& dest, Operation const& expr)
+
             {
                 bool                            schedulerLocked = false;
                 std::vector<Register::ValuePtr> results;
                 std::vector<ExpressionPtr>      subExprs{expr.lhs, expr.r1hs, expr.r2hs};
 
                 co_yield prepareSourceOperands(results, schedulerLocked, subExprs);
+                auto regType    = promoteRegisterTypes(results);
+                auto valueCount = resultValueCount(dest, results);
+
+                if(valueCount > 1 && regType == Register::Type::Accumulator)
+                {
+                    regType = Register::Type::Vector;
+                    for(int i = 0; i < results.size(); ++i)
+                    {
+                        co_yield m_context->copier()->ensureType(results[i], results[i], regType);
+                    }
+                }
+
+                auto varType = promoteVarialbeTypes(results);
 
                 if(!dest)
                 {
-                    dest = resultPlaceholder(resultType(expr));
+                    dest = resultPlaceholder({regType, varType}, true, valueCount);
                     co_yield dest->allocate();
                 }
 
-                co_yield generateOp<Operation>(dest, results[0], results[1], results[2]);
+                for(size_t k = 0; k < valueCount; ++k)
+                {
+                    auto lhsVal
+                        = results[0]->valueCount() == 1 ? results[0] : results[0]->element({k});
+                    auto r1hsVal
+                        = results[1]->valueCount() == 1 ? results[1] : results[1]->element({k});
+                    auto r2hsVal
+                        = results[2]->valueCount() == 1 ? results[2] : results[2]->element({k});
+                    co_yield generateOp<Operation>(dest->element({k}), lhsVal, r1hsVal, r2hsVal);
+                }
 
                 if(schedulerLocked)
                     co_yield Instruction::Unlock("Expression temporary in special register");
@@ -476,7 +532,7 @@ namespace rocRoller
             if(dest == nullptr)
             {
                 auto resType = resultType(expr);
-                if(resType.first == Register::Type::Special)
+                if(resType.regType == Register::Type::Special)
                     dest = v.resultPlaceholder(resType, false);
             }
 

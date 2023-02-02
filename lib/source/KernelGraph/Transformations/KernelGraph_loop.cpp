@@ -1,3 +1,4 @@
+#include "DataTypes/DataTypes.hpp"
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Visitors.hpp>
@@ -209,8 +210,8 @@ namespace rocRoller
                 graph.control.addElement(ForLoopIncrement(), {m_loopOp}, {incOp});
 
                 graph.mapper.connect<Dimension>(m_loopOp, iterTag);
-                graph.mapper.connect<Dimension>(initOp, iterTag);
-                graph.mapper.connect<ForLoop>(incOp, iterTag);
+                graph.mapper.connect(initOp, iterTag, NaryArgument::DEST);
+                graph.mapper.connect(incOp, iterTag, NaryArgument::DEST);
             }
 
         private:

@@ -184,7 +184,7 @@ namespace rocRoller
 
             auto offsetUpdate = graph.control.addElement(
                 Assign{Register::Type::Vector, offset_mac_expr + stride_mac_expr});
-            graph.mapper.connect<Dimension>(offsetUpdate, offset_mac);
+            graph.mapper.connect(offsetUpdate, offset_mac, NaryArgument::DEST);
 
             return {ci_mac, ci_col, offsetUpdate};
         }
@@ -382,7 +382,7 @@ namespace rocRoller
 
             auto offsetUpdate = graph.control.addElement(
                 Assign{Register::Type::Vector, offset_mac_expr + stride_mac_expr});
-            graph.mapper.connect<Dimension>(offsetUpdate, offset_mac);
+            graph.mapper.connect(offsetUpdate, offset_mac, NaryArgument::DEST);
 
             return {ci_mac, ci_vgpr, offsetUpdate};
         }

@@ -42,10 +42,10 @@ namespace ScopeTest
         int assign4
             = kgraph.control.addElement(Assign{Register::Type::Vector, Expression::literal(44u)});
 
-        kgraph.mapper.connect<VGPR>(assign1, dst1);
-        kgraph.mapper.connect<VGPR>(assign2, dst2);
-        kgraph.mapper.connect<VGPR>(assign3, dst3);
-        kgraph.mapper.connect<VGPR>(assign4, dst1);
+        kgraph.mapper.connect(assign1, dst1, NaryArgument::DEST);
+        kgraph.mapper.connect(assign2, dst2, NaryArgument::DEST);
+        kgraph.mapper.connect(assign3, dst3, NaryArgument::DEST);
+        kgraph.mapper.connect(assign4, dst1, NaryArgument::DEST);
 
         // kernel(base scope):
         //   - assign vector: 11u

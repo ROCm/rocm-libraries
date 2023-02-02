@@ -161,6 +161,15 @@ namespace rocRoller
         KernelGraph fuseLoops(KernelGraph const&, ContextPtr);
 
         /**
+         * @brief Performs the expression fusion transformation.
+         *
+         * Fuses neighbouring expressions where possible.
+         *
+         * @return KernelGraph
+         */
+        KernelGraph fuseExpressions(KernelGraph const&);
+
+        /**
          * Rewrite KernelGraphs to set dimension/operation perameters.
          */
         KernelGraph updateParameters(KernelGraph, std::shared_ptr<CommandParameters>);

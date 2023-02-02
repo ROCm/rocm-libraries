@@ -14,6 +14,7 @@
 #include <rocRoller/GPUArchitecture/GPUArchitectureLibrary.hpp>
 #include <rocRoller/KernelArguments.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/CoordinateGraph.hpp>
+#include <rocRoller/KernelGraph/RegisterTagManager.hpp>
 #include <rocRoller/Operations/Command.hpp>
 #include <rocRoller/Utilities/Generator.hpp>
 
@@ -976,6 +977,51 @@ namespace ExpressionTest
         EXPECT_EQ(std::get<float>(evaluate(exp4)), a);
         EXPECT_EQ(std::get<float>(evaluate(exp5)), static_cast<float>(b));
         EXPECT_EQ(std::get<float>(evaluate(exp6)), static_cast<float>(c));
+    }
+
+    TEST_F(ExpressionTest, GenerateDF)
+    {
+        auto ra = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Float, 4);
+        ra->allocateNow();
+        auto dfa = std::make_shared<Expression::Expression>(
+            Expression::DataFlowTag{1, Register::Type::Vector, DataType::None});
+        m_context->registerTagManager()->addRegister(1, ra);
+
+        auto rb = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Float, 4);
+        rb->allocateNow();
+        auto dfb = std::make_shared<Expression::Expression>(
+            Expression::DataFlowTag{2, Register::Type::Vector, DataType::None});
+        m_context->registerTagManager()->addRegister(2, rb);
+
+        auto rc = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Float, 4);
+        rc->allocateNow();
+        auto dfc = std::make_shared<Expression::Expression>(
+            Expression::DataFlowTag{3, Register::Type::Vector, DataType::None});
+        m_context->registerTagManager()->addRegister(3, rc);
+
+        Register::ValuePtr rr1;
+        m_context->schedule(Expression::generate(rr1, dfa * dfb, m_context));
+
+        Register::ValuePtr rr2;
+        m_context->schedule(
+            Expression::generate(rr2, Expression::fuseTernary(dfa * dfb + dfc), m_context));
+
+        auto result = R"(
+            v_mul_f32 v12, v0, v4
+            v_mul_f32 v13, v1, v5
+            v_mul_f32 v14, v2, v6
+            v_mul_f32 v15, v3, v7
+
+            v_fma_f32 v16, v0, v4, v8
+            v_fma_f32 v17, v1, v5, v9
+            v_fma_f32 v18, v2, v6, v10
+            v_fma_f32 v19, v3, v7, v11
+        )";
+
+        EXPECT_EQ(NormalizedSource(output()), NormalizedSource(result));
     }
 
     TEST_F(ExpressionTest, LiteralTest)

@@ -52,7 +52,7 @@ namespace rocRoller
                 // If no existing expressions matches:
                 std::string argName = concatenate("LAUNCH_", kernel->arguments().size());
                 auto        resType = resultType(expr);
-                kernel->addArgument({argName, resType.second, DataDirection::ReadOnly, exPtr});
+                kernel->addArgument({argName, resType.varType, DataDirection::ReadOnly, exPtr});
 
                 return std::make_shared<Expression>(
                     std::make_shared<AssemblyKernelArgument>(kernel->findArgument(argName)));

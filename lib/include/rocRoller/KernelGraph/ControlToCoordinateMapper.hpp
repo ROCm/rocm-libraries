@@ -144,6 +144,11 @@ namespace rocRoller::KernelGraph
         void disconnect(int control, int coordinate, int subDimension = 0);
 
         /**
+         * @brief Purges all connections out of control flow node `control`.
+         */
+        void purge(int control);
+
+        /**
          * @brief Get the coordinate index associated with the control
          * flow node `control`.
          */

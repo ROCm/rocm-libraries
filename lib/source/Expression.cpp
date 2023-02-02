@@ -117,17 +117,15 @@ namespace rocRoller
 
         struct ExpressionResultTypeVisitor
         {
-            using Result = std::pair<Register::Type, VariableType>;
-
             template <typename T>
-            requires(CBinary<T>&& CArithmetic<T>) Result operator()(T const& expr) const
+            requires(CBinary<T>&& CArithmetic<T>) ResultType operator()(T const& expr) const
             {
                 auto lhsVal = call(expr.lhs);
                 auto rhsVal = call(expr.rhs);
 
-                auto regType = Register::PromoteType(lhsVal.first, rhsVal.first);
+                auto regType = Register::PromoteType(lhsVal.regType, rhsVal.regType);
 
-                auto varType = VariableType::Promote(lhsVal.second, rhsVal.second);
+                auto varType = VariableType::Promote(lhsVal.varType, rhsVal.varType);
 
                 // TODO: Delete once FastDivision uses only libdivide.
                 if constexpr(std::same_as<MultiplyHigh, T>)
@@ -137,54 +135,54 @@ namespace rocRoller
             }
 
             template <typename T>
-            requires(CTernary<T>&& CArithmetic<T>) Result operator()(T const& expr) const
+            requires(CTernary<T>&& CArithmetic<T>) ResultType operator()(T const& expr) const
             {
                 auto lhsVal  = call(expr.lhs);
                 auto r1hsVal = call(expr.r1hs);
                 auto r2hsVal = call(expr.r2hs);
 
-                auto regType = Register::PromoteType(lhsVal.first, r1hsVal.first);
-                regType      = Register::PromoteType(regType, r2hsVal.first);
+                auto regType = Register::PromoteType(lhsVal.regType, r1hsVal.regType);
+                regType      = Register::PromoteType(regType, r2hsVal.regType);
 
-                auto varType = VariableType::Promote(lhsVal.second, r1hsVal.second);
-                varType      = VariableType::Promote(varType, r2hsVal.second);
+                auto varType = VariableType::Promote(lhsVal.varType, r1hsVal.varType);
+                varType      = VariableType::Promote(varType, r2hsVal.varType);
 
                 return {regType, varType};
             }
 
             template <typename T>
-            requires(CUnary<T>&& CArithmetic<T>) Result operator()(T const& expr) const
+            requires(CUnary<T>&& CArithmetic<T>) ResultType operator()(T const& expr) const
             {
                 auto argVal = call(expr.arg);
                 return argVal;
             }
 
             template <DataType DATATYPE>
-            Result operator()(Convert<DATATYPE> const& expr) const
+            ResultType operator()(Convert<DATATYPE> const& expr) const
             {
                 auto argVal = call(expr.arg);
-                return {argVal.first, DATATYPE};
+                return {argVal.regType, DATATYPE};
             }
 
             template <typename T>
-            requires(CBinary<T>&& CComparison<T>) Result operator()(T const& expr) const
+            requires(CBinary<T>&& CComparison<T>) ResultType operator()(T const& expr) const
             {
                 auto lhsVal = call(expr.lhs);
                 auto rhsVal = call(expr.rhs);
                 return comparison(lhsVal, rhsVal);
             }
 
-            Result comparison(Result const& lhsVal, Result const& rhsVal) const
+            ResultType comparison(ResultType const& lhsVal, ResultType const& rhsVal) const
             {
                 // Can't compare between two different types on the GPU.
-                AssertFatal(lhsVal.first == Register::Type::Literal
-                                || rhsVal.first == Register::Type::Literal
-                                || lhsVal.second == rhsVal.second,
-                            ShowValue(lhsVal.second),
-                            ShowValue(rhsVal.second));
+                AssertFatal(lhsVal.regType == Register::Type::Literal
+                                || rhsVal.regType == Register::Type::Literal
+                                || lhsVal.varType == rhsVal.varType,
+                            ShowValue(lhsVal.varType),
+                            ShowValue(rhsVal.varType));
 
-                auto inputRegType = Register::PromoteType(lhsVal.first, rhsVal.first);
-                auto inputVarType = VariableType::Promote(lhsVal.second, rhsVal.second);
+                auto inputRegType = Register::PromoteType(lhsVal.regType, rhsVal.regType);
+                auto inputVarType = VariableType::Promote(lhsVal.varType, rhsVal.varType);
 
                 switch(inputRegType)
                 {
@@ -202,49 +200,50 @@ namespace rocRoller
                 default:
                     break;
                 }
-                Throw<FatalError>(
-                    "Invalid register types: ", ShowValue(lhsVal.first), ShowValue(rhsVal.first));
+                Throw<FatalError>("Invalid register types: ",
+                                  ShowValue(lhsVal.regType),
+                                  ShowValue(rhsVal.regType));
             }
 
-            Result operator()(CommandArgumentPtr const& expr) const
+            ResultType operator()(CommandArgumentPtr const& expr) const
             {
                 AssertFatal(expr != nullptr, "Null subexpression!");
                 return {Register::Type::Literal, expr->variableType()};
             }
 
-            Result operator()(AssemblyKernelArgumentPtr const& expr) const
+            ResultType operator()(AssemblyKernelArgumentPtr const& expr) const
             {
                 AssertFatal(expr != nullptr, "Null subexpression!");
                 return {Register::Type::Scalar, expr->variableType};
             }
 
-            Result operator()(CommandArgumentValue const& expr) const
+            ResultType operator()(CommandArgumentValue const& expr) const
             {
                 return {Register::Type::Literal, variableType(expr)};
             }
 
-            Result operator()(Register::ValuePtr const& expr) const
+            ResultType operator()(Register::ValuePtr const& expr) const
             {
                 AssertFatal(expr != nullptr, "Null subexpression!");
                 return {expr->regType(), expr->variableType()};
             }
 
-            Result operator()(DataFlowTag const& expr) const
+            ResultType operator()(DataFlowTag const& expr) const
             {
                 return {expr.regType, expr.varType};
             }
 
-            Result operator()(WaveTilePtr const& expr) const
+            ResultType operator()(WaveTilePtr const& expr) const
             {
                 return call(expr->vgpr);
             }
 
-            Result call(Expression const& expr) const
+            ResultType call(Expression const& expr) const
             {
                 return std::visit(*this, expr);
             }
 
-            Result call(ExpressionPtr const& expr) const
+            ResultType call(ExpressionPtr const& expr) const
             {
                 return call(*expr);
             }
@@ -253,13 +252,13 @@ namespace rocRoller
         VariableType resultVariableType(ExpressionPtr const& expr)
         {
             ExpressionResultTypeVisitor v;
-            return v.call(expr).second;
+            return v.call(expr).varType;
         }
 
         Register::Type resultRegisterType(ExpressionPtr const& expr)
         {
             ExpressionResultTypeVisitor v;
-            return v.call(expr).first;
+            return v.call(expr).regType;
         }
 
         ResultType resultType(ExpressionPtr const& expr)
@@ -495,7 +494,7 @@ namespace rocRoller
 
         std::ostream& operator<<(std::ostream& stream, ResultType const& obj)
         {
-            return stream << "{" << obj.first << ", " << obj.second << "}";
+            return stream << "{" << obj.regType << ", " << obj.varType << "}";
         }
 
         std::ostream& operator<<(std::ostream& stream, ExpressionPtr const& expr)
