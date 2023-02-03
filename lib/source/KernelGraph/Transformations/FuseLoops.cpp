@@ -141,7 +141,7 @@ namespace rocRoller
                     {
                         auto path = pathToForLoop(graph, body);
                         if(!path.empty())
-                            setCoordPaths.push_back(pathToForLoop(graph, body));
+                            setCoordPaths.push_back(path);
                     }
 
                     paths[setCoord] = setCoordPaths;

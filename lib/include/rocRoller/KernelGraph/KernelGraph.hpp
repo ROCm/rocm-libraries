@@ -161,6 +161,14 @@ namespace rocRoller
         KernelGraph fuseLoops(KernelGraph const&, ContextPtr);
 
         /**
+         * @brief Performs the loop cleaning transformation
+         *
+         * Removes forloops that only contain a single iterations
+         * 
+         * @return KernelGraph
+         */
+        KernelGraph cleanLoops(KernelGraph const&);
+        /**
          * @brief Performs the expression fusion transformation.
          *
          * Fuses neighbouring expressions where possible.

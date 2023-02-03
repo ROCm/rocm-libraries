@@ -977,28 +977,42 @@ namespace rocRoller
             getForLoopIncrement(KernelGraph const& graph, int forLoop)
         {
             // Find the ForLoopIcrement calculation
-            // TODO: Handle multiple ForLoopIncrement edges that might be in a different
-            // format, such as ones coming from ComputeIndex.
-            auto loopIncrement
+
+            // Grab all for loop increments from current for loop.
+            // ForLoops coming from Compute Index may have more than one loop increment.
+            // The forLoopIncrement that satifies all of the following conditions will be the
+            // Increment that actually updates the iterator.
+            auto loopIncrements
                 = graph.control.getOutputNodeIndices<ForLoopIncrement>(forLoop).to<std::vector>();
-            AssertFatal(loopIncrement.size() == 1, "Should only have 1 loop increment edge");
+            for(auto const& increment : loopIncrements)
+            {
+                auto loopIncrementOp = graph.control.getNode<Assign>(increment);
 
-            auto loopIncrementOp = graph.control.getNode<Assign>(loopIncrement[0]);
+                //Ensure that the forLoopIncrement has an add expression
+                if(!(std::holds_alternative<Expression::Add>(*loopIncrementOp.expression)))
+                    continue;
+                auto addExpr = std::get<Expression::Add>(*loopIncrementOp.expression);
 
-            AssertFatal(std::holds_alternative<Expression::Add>(*loopIncrementOp.expression),
-                        "Loop increment expression must be an addition");
-            auto addExpr = std::get<Expression::Add>(*loopIncrementOp.expression);
-
-            auto connections = graph.mapper.getConnections(loopIncrement[0]);
-            AssertFatal(connections.size() == 1, "Invalid Assign operation; coordinate missing.");
-            auto dim_tag = connections[0].coordinate;
-            AssertFatal(std::holds_alternative<Expression::DataFlowTag>(*addExpr.lhs),
-                        "First argument in loop increment expression should be dataflow tag");
-            AssertFatal(std::get<Expression::DataFlowTag>(*addExpr.lhs).tag == dim_tag,
-                        "First argument in loop increment expression should be loop iterator "
-                        "data flow tag");
-
-            return {addExpr.lhs, addExpr.rhs};
+                auto connections = graph.mapper.getConnections(increment);
+                //Iterator should have one connection, if it doesn't it's not connected to coordinate.
+                if(connections.size() != 1)
+                    continue;
+                auto dim_tag = connections[0].coordinate;
+                //Iterator should have a DataFlow expression as its LHS
+                if(!(std::holds_alternative<Expression::DataFlowTag>(*addExpr.lhs)))
+                    continue;
+                //LHS should also be the loop iterator data flow tag.
+                if(std::get<Expression::DataFlowTag>(*addExpr.lhs).tag != dim_tag)
+                    continue;
+                //If all else is true and the first connection of the forLoop is the dim_tag
+                //Then we have the loopIncrement that we were searching for.
+                if(graph.mapper.getConnections(forLoop)[0].coordinate != dim_tag)
+                    continue;
+                return {addExpr.lhs, addExpr.rhs};
+            }
+            // There should be a loopIncrement that satisfies the above conditions
+            // if not then throw an error.
+            throw FatalError("No forLoopIncrement for supplied forLoop.");
         }
 
     }

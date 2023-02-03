@@ -235,10 +235,13 @@ namespace rocRoller
 
         m_kernelGraph = KernelGraph::addComputeIndexOperations(m_kernelGraph);
 
+        m_kernelGraph = KernelGraph::cleanLoops(m_kernelGraph);
+        logger->debug("CommandKernel::generateKernelGraph: post clean loops: {}",
+                      m_kernelGraph.toDOT());
+
         m_kernelGraph = KernelGraph::addDeallocate(m_kernelGraph);
 
         m_kernelGraph = KernelGraph::cleanArguments(m_kernelGraph, m_context->kernel());
-
         if(m_postParameters)
             m_kernelGraph = updateParameters(m_kernelGraph, m_postParameters);
     }
@@ -264,7 +267,6 @@ namespace rocRoller
 
         generators.push_back(m_context->kernel()->postamble());
         generators.push_back(m_context->kernel()->amdgpu_metadata());
-
         m_context->schedule((*scheduler)(generators));
     }
 
