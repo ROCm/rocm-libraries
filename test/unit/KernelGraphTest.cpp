@@ -5834,7 +5834,7 @@ namespace KernelGraphTest
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
             rocRoller::Operations::T_Load_Tiled(DataType::Int32, 2, 0)));
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Store_Tiled(DataType::Float, 2, 0)));
+            rocRoller::Operations::T_Store_Tiled(DataType::Int32, 2, 0)));
 
         KernelArguments runtimeArgs;
 
@@ -5910,7 +5910,7 @@ namespace KernelGraphTest
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
             rocRoller::Operations::T_Load_Tiled(DataType::Int32, 2, 0)));
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Store_Tiled(DataType::Float, 2, 0)));
+            rocRoller::Operations::T_Store_Tiled(DataType::Int32, 2, 0)));
 
         KernelArguments runtimeArgs;
 
@@ -6000,7 +6000,7 @@ namespace KernelGraphTest
 
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(execute));
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Store_Tiled(DataType::Float, 2, 4))); // c
+            rocRoller::Operations::T_Store_Tiled(DataType::Int32, 2, 4))); // c
 
         KernelArguments runtimeArgs;
 

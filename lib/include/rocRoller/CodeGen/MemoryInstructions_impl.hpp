@@ -13,13 +13,16 @@ namespace rocRoller
     {
     }
 
-    inline Generator<Instruction> MemoryInstructions::load(MemoryKind                       kind,
-                                                           std::shared_ptr<Register::Value> dest,
-                                                           std::shared_ptr<Register::Value> addr,
-                                                           std::shared_ptr<Register::Value> offset,
-                                                           int                numBytes,
-                                                           std::string const& comment,
-                                                           bool               high)
+    inline Generator<Instruction>
+        MemoryInstructions::load(MemoryKind                        kind,
+                                 std::shared_ptr<Register::Value>  dest,
+                                 std::shared_ptr<Register::Value>  addr,
+                                 std::shared_ptr<Register::Value>  offset,
+                                 int                               numBytes,
+                                 std::string const&                comment,
+                                 bool                              high,
+                                 std::shared_ptr<BufferDescriptor> bufDesc,
+                                 BufferInstructionOptions          buffOpts)
     {
         auto                             context    = m_context.lock();
         int                              offset_val = 0;
@@ -37,7 +40,6 @@ namespace rocRoller
             {
                 newAddr
                     = Register::Value::Placeholder(context, addr->regType(), DataType::Int64, 1);
-                co_yield newAddr->allocate();
                 co_yield generateOp<Expression::Add>(newAddr, addr, offset);
             }
 
@@ -51,7 +53,6 @@ namespace rocRoller
             {
                 newAddr
                     = Register::Value::Placeholder(context, addr->regType(), DataType::Int32, 1);
-                co_yield newAddr->allocate();
                 co_yield generateOp<Expression::Add>(newAddr, addr, offset);
             }
 
@@ -62,17 +63,35 @@ namespace rocRoller
             co_yield loadScalar(dest, newAddr, offset, numBytes);
             break;
 
+        case Buffer:
+            AssertFatal(bufDesc);
+            // If the provided offset is not a literal, create a new register that will store the value
+            // of addr + offset and pass it to loadLocal
+            if(offset && offset->regType() != Register::Type::Literal)
+            {
+                newAddr
+                    = Register::Value::Placeholder(context, addr->regType(), DataType::Int32, 1);
+                co_yield generateOp<Expression::Add>(newAddr, addr, offset);
+            }
+
+            co_yield loadBuffer(
+                dest, newAddr->subset({0}), offset_val, bufDesc, buffOpts, numBytes, high);
+            break;
+
         default:
             throw std::runtime_error("Load not supported for provided Memorykind");
         }
     }
 
-    inline Generator<Instruction> MemoryInstructions::store(MemoryKind                       kind,
-                                                            std::shared_ptr<Register::Value> addr,
-                                                            std::shared_ptr<Register::Value> data,
-                                                            std::shared_ptr<Register::Value> offset,
-                                                            int                numBytes,
-                                                            std::string const& comment)
+    inline Generator<Instruction>
+        MemoryInstructions::store(MemoryKind                        kind,
+                                  std::shared_ptr<Register::Value>  addr,
+                                  std::shared_ptr<Register::Value>  data,
+                                  std::shared_ptr<Register::Value>  offset,
+                                  int                               numBytes,
+                                  std::string const&                comment,
+                                  std::shared_ptr<BufferDescriptor> bufDesc,
+                                  BufferInstructionOptions          buffOpts)
     {
         auto                             context    = m_context.lock();
         int                              offset_val = 0;
@@ -90,7 +109,6 @@ namespace rocRoller
             {
                 newAddr
                     = Register::Value::Placeholder(context, addr->regType(), DataType::Int64, 1);
-                co_yield newAddr->allocate();
                 co_yield generateOp<Expression::Add>(newAddr, addr, offset);
             }
 
@@ -104,11 +122,23 @@ namespace rocRoller
             {
                 newAddr
                     = Register::Value::Placeholder(context, addr->regType(), DataType::Int32, 1);
-                co_yield newAddr->allocate();
                 co_yield generateOp<Expression::Add>(newAddr, addr, offset);
             }
 
             co_yield storeLocal(newAddr, data, offset_val, numBytes, comment);
+            break;
+
+        case Buffer:
+            // If the provided offset is not a literal, create a new register that will store the value
+            // of addr + offset and pass it to storeLocal
+            if(offset && offset->regType() != Register::Type::Literal)
+            {
+                newAddr
+                    = Register::Value::Placeholder(context, addr->regType(), DataType::Int32, 1);
+                co_yield generateOp<Expression::Add>(newAddr, addr, offset);
+            }
+
+            co_yield storeBuffer(data, newAddr, offset_val, bufDesc, buffOpts, numBytes);
             break;
 
         default:
@@ -432,13 +462,13 @@ namespace rocRoller
     }
 
     inline Generator<Instruction>
-        MemoryInstructions::loadBuffer(std::shared_ptr<Register::Value> dest,
-                                       std::shared_ptr<Register::Value> addr,
-                                       int                              offset,
-                                       BufferDescriptor                 buffDesc,
-                                       BufferInstructionOptions         buffOpts,
-                                       int                              numBytes,
-                                       bool                             high)
+        MemoryInstructions::loadBuffer(std::shared_ptr<Register::Value>  dest,
+                                       std::shared_ptr<Register::Value>  addr,
+                                       int                               offset,
+                                       std::shared_ptr<BufferDescriptor> buffDesc,
+                                       BufferInstructionOptions          buffOpts,
+                                       int                               numBytes,
+                                       bool                              high)
     {
         AssertFatal(dest != nullptr);
         AssertFatal(addr != nullptr);
@@ -473,7 +503,7 @@ namespace rocRoller
         {
             lds += "lds";
         }
-        auto sgprSrd = buffDesc.allRegisters();
+        auto sgprSrd = buffDesc->allRegisters();
         auto ctx     = m_context.lock();
 
         if(numBytes < wordSize)
@@ -522,12 +552,12 @@ namespace rocRoller
     }
 
     inline Generator<Instruction>
-        MemoryInstructions::storeBuffer(std::shared_ptr<Register::Value> data,
-                                        std::shared_ptr<Register::Value> addr,
-                                        int                              offset,
-                                        BufferDescriptor                 buffDesc,
-                                        BufferInstructionOptions         buffOpts,
-                                        int                              numBytes)
+        MemoryInstructions::storeBuffer(std::shared_ptr<Register::Value>  data,
+                                        std::shared_ptr<Register::Value>  addr,
+                                        int                               offset,
+                                        std::shared_ptr<BufferDescriptor> buffDesc,
+                                        BufferInstructionOptions          buffOpts,
+                                        int                               numBytes)
     {
         AssertFatal(addr != nullptr);
         AssertFatal(data != nullptr);
@@ -558,7 +588,7 @@ namespace rocRoller
         {
             lds += "lds";
         }
-        auto sgprSrd = buffDesc.allRegisters();
+        auto sgprSrd = buffDesc->allRegisters();
         auto ctx     = m_context.lock();
 
         if(numBytes < wordSize)

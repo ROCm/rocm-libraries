@@ -442,11 +442,11 @@ namespace rocRoller
                         bufferReg->setName(concatenate("buffer", tag));
                         co_yield Register::AllocateIfNeeded(bufferReg);
                         auto basePointer = MkSGPR(DataType::Int64);
-                        auto bufDesc     = BufferDescriptor(bufferReg, m_context);
+                        auto bufDesc     = std::make_shared<BufferDescriptor>(bufferReg, m_context);
                         co_yield m_context->argLoader()->getValue(user->argumentName(),
                                                                   basePointer);
-                        co_yield bufDesc.setBasePointer(basePointer);
-                        co_yield bufDesc.setDefaultOpts();
+                        co_yield bufDesc->setBasePointer(basePointer);
+                        co_yield bufDesc->setDefaultOpts();
                         scope->addRegister(buffer);
                     }
                 }
@@ -474,6 +474,121 @@ namespace rocRoller
                 Throw<FatalError>("LoadLinear present in kernel graph.");
             }
 
+            /**
+             * @brief Load a tile from memory into registers
+             *
+             * @param kind The kind of memory instruction to use
+             * @param m Number of rows in the tile
+             * @param n Number of columns in the tile
+             * @param dataType The type of the data being loaded
+             * @param pack Whether to pack smaller types into a single register
+             * @param tag The tag of the control graph node generating the load
+             * @param vgpr The registers to store the data in
+             * @param offset Offset from the starting index
+             * @return Generator<Instruction>
+             */
+            Generator<Instruction> loadTile(MemoryInstructions::MemoryKind kind,
+                                            uint64_t                       m,
+                                            uint64_t                       n,
+                                            VariableType                   dataType,
+                                            bool                           pack,
+                                            int                            tag,
+                                            Register::ValuePtr             vgpr,
+                                            Register::ValuePtr             offset)
+            {
+                // Get the values from the associated ComputeIndex node
+                auto row_offset_reg = getOffset(tag, 0);
+                auto col_offset_reg = getOffset(tag, 1);
+
+                std::shared_ptr<BufferDescriptor> bufDesc;
+                if(kind == MemoryInstructions::MemoryKind::Buffer)
+                {
+                    auto bufferSrd = getBufferSrd(tag);
+                    bufDesc        = std::make_shared<BufferDescriptor>(bufferSrd, m_context);
+                }
+
+                Register::ValuePtr row_stride_reg, col_stride_reg;
+                if(m > 1)
+                    co_yield generateStride(row_stride_reg, tag, 0);
+                co_yield generateStride(col_stride_reg, tag, 1);
+
+                // Load a tile of Half precision values where each register will hold
+                // two half precision values.
+                if(pack && vgpr->variableType() == DataType::Halfx2)
+                {
+                    auto offset1 = Register::Value::Placeholder(
+                        m_context, Register::Type::Vector, col_offset_reg->variableType(), 1);
+                    auto offset2 = Register::Value::Placeholder(
+                        m_context, Register::Type::Vector, col_offset_reg->variableType(), 1);
+
+                    for(uint i = 0; i < m; ++i)
+                    {
+                        co_yield copy(col_offset_reg, row_offset_reg);
+                        for(uint j = 0; j < n; j += 2)
+                        {
+                            uint a = i * n + j;
+
+                            co_yield copy(offset1, col_offset_reg);
+                            co_yield generate(col_offset_reg,
+                                              col_offset_reg->expression()
+                                                  + col_stride_reg->expression());
+                            co_yield copy(offset2, col_offset_reg);
+                            co_yield generate(col_offset_reg,
+                                              col_offset_reg->expression()
+                                                  + col_stride_reg->expression());
+
+                            co_yield m_context->mem()->loadAndPack(
+                                kind,
+                                vgpr->element({static_cast<int>(a / 2)}),
+                                offset1,
+                                offset,
+                                offset2,
+                                offset,
+                                "",
+                                bufDesc);
+                        }
+                        if(i < m - 1)
+                            co_yield generate(row_offset_reg,
+                                              row_offset_reg->expression()
+                                                  + row_stride_reg->expression());
+                    }
+                }
+                else
+                {
+                    auto elementSize = (uint)DataTypeInfo::Get(dataType).elementSize;
+                    for(int i = 0; i < m; ++i)
+                    {
+                        co_yield copy(col_offset_reg, row_offset_reg);
+
+                        for(int j = 0; j < n; ++j)
+                        {
+                            co_yield m_context->mem()->load(
+                                kind,
+                                vgpr->element({static_cast<int>(i * n + j)}),
+                                col_offset_reg->subset({0}),
+                                offset,
+                                elementSize,
+                                "",
+                                false,
+                                bufDesc);
+                            if(j < n - 1)
+                            {
+                                co_yield generate(col_offset_reg,
+                                                  col_offset_reg->expression()
+                                                      + col_stride_reg->expression());
+                            }
+                        }
+
+                        if(i < m - 1)
+                        {
+                            co_yield generate(row_offset_reg,
+                                              row_offset_reg->expression()
+                                                  + row_stride_reg->expression());
+                        }
+                    }
+                }
+            }
+
             Generator<Instruction>
                 loadMacroTileVGPRCI(int tag, LoadTiled const& load, Transformer coords, int sdim)
             {
@@ -487,14 +602,8 @@ namespace rocRoller
                 auto basePointer = MkSGPR(DataType::Int64);
                 co_yield m_context->argLoader()->getValue(user.argumentName(), basePointer);
 
-                auto bufOpt = BufferInstructionOptions();
-
                 auto mac_offset_reg = getOffset(tag, -1);
                 auto row_offset_reg = getOffset(tag, 0);
-                auto col_offset_reg = getOffset(tag, 1);
-
-                auto bufferSrd = getBufferSrd(tag);
-                auto bufDesc   = BufferDescriptor(bufferSrd, m_context);
 
                 std::shared_ptr<Register::Value> tmpl;
                 if(load.vtype == DataType::Half)
@@ -505,8 +614,6 @@ namespace rocRoller
                 auto vgpr = m_context->registerTagManager()->getRegister(mac_tile_tag, tmpl);
                 co_yield Register::AllocateIfNeeded(vgpr);
 
-                auto numBytes = DataTypeInfo::Get(load.vtype).elementSize;
-
                 auto const m = mac_tile.subTileSizes[0];
                 auto const n = mac_tile.subTileSizes[1];
 
@@ -514,39 +621,14 @@ namespace rocRoller
 
                 co_yield copy(row_offset_reg, mac_offset_reg);
 
-                Register::ValuePtr row_stride_reg, col_stride_reg;
-                co_yield generateStride(row_stride_reg, tag, 0);
-                co_yield generateStride(col_stride_reg, tag, 1);
-
-                // TODO: multidimensional tiles
-                for(int i = 0; i < m; ++i)
-                {
-                    co_yield copy(col_offset_reg, row_offset_reg);
-
-                    for(int j = 0; j < n; ++j)
-                    {
-                        co_yield m_context->mem()->loadBuffer(
-                            vgpr->element({static_cast<int>(i * n + j)}),
-                            col_offset_reg->subset({0}),
-                            0,
-                            bufDesc,
-                            bufOpt,
-                            numBytes);
-                        if(j < n - 1)
-                        {
-                            co_yield generate(col_offset_reg,
-                                              col_offset_reg->expression()
-                                                  + col_stride_reg->expression());
-                        }
-                    }
-
-                    if(i < m - 1)
-                    {
-                        co_yield generate(row_offset_reg,
-                                          row_offset_reg->expression()
-                                              + row_stride_reg->expression());
-                    }
-                }
+                co_yield loadTile(MemoryInstructions::MemoryKind::Buffer,
+                                  m,
+                                  n,
+                                  load.vtype,
+                                  false,
+                                  tag,
+                                  vgpr,
+                                  nullptr);
             }
 
             Generator<Instruction>
@@ -562,18 +644,9 @@ namespace rocRoller
                 auto basePointer = MkSGPR(DataType::Int64);
                 co_yield m_context->argLoader()->getValue(user.argumentName(), basePointer);
 
-                auto bufOpt = BufferInstructionOptions();
-
-                auto row_offset_reg = getOffset(tag, 0);
-                auto col_offset_reg = getOffset(tag, 1);
-                auto bufferSrd      = getBufferSrd(tag);
-                auto bufDesc        = BufferDescriptor(bufferSrd, m_context);
-
                 auto tmpl = MkVGPR(load.vtype, product(mac_tile.subTileSizes));
                 auto vgpr = m_context->registerTagManager()->getRegister(mac_tile_tag, tmpl);
                 co_yield Register::AllocateIfNeeded(vgpr);
-
-                auto numBytes = DataTypeInfo::Get(vgpr->variableType()).elementSize;
 
                 auto const m = mac_tile.subTileSizes[0];
                 auto const n = mac_tile.subTileSizes[1];
@@ -583,39 +656,14 @@ namespace rocRoller
                 rocRoller::Log::getLogger()->debug(
                     "  macro tile: {}; sub tile size: {}x{}", mac_tile_tag, m, n);
 
-                Register::ValuePtr row_stride_reg, col_stride_reg;
-                co_yield generateStride(row_stride_reg, tag, 0);
-                co_yield generateStride(col_stride_reg, tag, 1);
-
-                // TODO: multidimensional tiles
-                for(int i = 0; i < m; ++i)
-                {
-                    co_yield copy(col_offset_reg, row_offset_reg);
-
-                    for(int j = 0; j < n; ++j)
-                    {
-                        co_yield m_context->mem()->loadBuffer(
-                            vgpr->element({static_cast<int>(i * n + j)}),
-                            col_offset_reg->subset({0}),
-                            0,
-                            bufDesc,
-                            bufOpt,
-                            numBytes);
-                        if(j < n - 1)
-                        {
-                            co_yield generate(col_offset_reg,
-                                              col_offset_reg->expression()
-                                                  + col_stride_reg->expression());
-                        }
-                    }
-
-                    if(i < m - 1)
-                    {
-                        co_yield generate(row_offset_reg,
-                                          row_offset_reg->expression()
-                                              + row_stride_reg->expression());
-                    }
-                }
+                co_yield loadTile(MemoryInstructions::MemoryKind::Buffer,
+                                  m,
+                                  n,
+                                  vgpr->variableType(),
+                                  false,
+                                  tag,
+                                  vgpr,
+                                  nullptr);
             }
 
             Generator<Instruction>
@@ -627,9 +675,6 @@ namespace rocRoller
 
                 auto [lds_tag, lds]   = m_graph.getDimension<LDS>(tag);
                 auto [tile_tag, tile] = m_graph.getDimension<MacroTile>(tag);
-
-                auto row_offset_reg = getOffset(tag, 0);
-                auto col_offset_reg = getOffset(tag, 1);
 
                 // Find the LDS allocation that contains the tile and store
                 // the offset of the beginning of the allocation into lds_offset.
@@ -650,42 +695,17 @@ namespace rocRoller
                 auto vgpr = m_context->registerTagManager()->getRegister(tile_tag, tmpl);
                 co_yield Register::AllocateIfNeeded(vgpr);
 
-                auto numBytes = DataTypeInfo::Get(load.vtype).elementSize;
-
                 auto const m = tile.subTileSizes[0];
                 auto const n = tile.subTileSizes[1];
 
-                Register::ValuePtr row_stride_reg, col_stride_reg;
-                co_yield generateStride(row_stride_reg, tag, 0);
-                co_yield generateStride(col_stride_reg, tag, 1);
-
-                for(int i = 0; i < m; ++i)
-                {
-                    co_yield copy(col_offset_reg, row_offset_reg);
-
-                    for(int j = 0; j < n; ++j)
-                    {
-                        co_yield m_context->mem()->load(
-                            MemoryInstructions::MemoryKind::Local,
-                            vgpr->element({static_cast<int>(i * n + j)}),
-                            lds_offset,
-                            col_offset_reg->subset({0}),
-                            numBytes);
-                        if(j < n - 1)
-                        {
-                            co_yield generate(col_offset_reg,
-                                              col_offset_reg->expression()
-                                                  + col_stride_reg->expression());
-                        }
-                    }
-
-                    if(i < m - 1)
-                    {
-                        co_yield generate(row_offset_reg,
-                                          row_offset_reg->expression()
-                                              + row_stride_reg->expression());
-                    }
-                }
+                co_yield loadTile(MemoryInstructions::MemoryKind::Local,
+                                  m,
+                                  n,
+                                  load.vtype,
+                                  false,
+                                  tag,
+                                  vgpr,
+                                  lds_offset);
             }
 
             Generator<Instruction> loadMacroTileWAVELDSCI(int                tag,
@@ -711,85 +731,37 @@ namespace rocRoller
                     = Expression::literal(ldsAllocation->getLDSAllocation()->offset());
                 co_yield generate(lds_offset, lds_offset_expr);
 
-                auto vtype    = ldsAllocation->variableType();
-                auto numBytes = DataTypeInfo::Get(vtype).elementSize;
+                auto vtype = ldsAllocation->variableType();
 
                 auto n_wave_tag = m_graph.mapper.get<WaveTileNumber>(tag, sdim);
-
-                auto wave_offset_reg = getOffset(tag, 0);
-                auto vgpr_offset_reg = getOffset(tag, 1);
-
-                AssertFatal(wave_offset_reg, "Invalid WAVE offset register.");
-                AssertFatal(vgpr_offset_reg, "Invalid VGPR offset register.");
 
                 uint num_elements = wave_tile.sizes[0] * wave_tile.sizes[1];
                 uint wfs          = m_context->kernel()->wavefront_size();
                 uint num_vgpr     = num_elements / wfs;
 
-                Register::ValuePtr vgpr_stride_reg;
-                co_yield generateStride(vgpr_stride_reg, tag, 1);
-
-                AssertFatal(vgpr_stride_reg, "Invalid VGPR stride register.");
-
+                Register::ValuePtr tmpl;
                 if(load.vtype == DataType::Half)
                 {
-                    auto tmpl = Register::Value::Placeholder(
+                    tmpl = Register::Value::Placeholder(
                         m_context, Register::Type::Vector, DataType::Halfx2, num_vgpr / 2);
-
-                    auto vgpr = m_context->registerTagManager()->getRegister(mac_tile_tag, tmpl);
-                    co_yield Register::AllocateIfNeeded(vgpr);
-
-                    auto offset1 = Register::Value::Placeholder(
-                        m_context, Register::Type::Vector, DataType::Int32, 1);
-                    auto offset2 = Register::Value::Placeholder(
-                        m_context, Register::Type::Vector, DataType::Int32, 1);
-
-                    co_yield copy(vgpr_offset_reg, wave_offset_reg);
-
-                    for(uint a = 0; a < num_vgpr; a += 2)
-                    {
-                        co_yield copy(offset1, vgpr_offset_reg);
-                        co_yield generate(vgpr_offset_reg,
-                                          vgpr_offset_reg->expression()
-                                              + vgpr_stride_reg->expression());
-                        co_yield copy(offset2, vgpr_offset_reg);
-                        co_yield generate(vgpr_offset_reg,
-                                          vgpr_offset_reg->expression()
-                                              + vgpr_stride_reg->expression());
-
-                        co_yield m_context->mem()->loadAndPack(
-                            MemoryInstructions::MemoryKind::Local,
-                            vgpr->element({static_cast<int>(a / 2)}),
-                            lds_offset,
-                            offset1,
-                            lds_offset,
-                            offset2);
-                    }
                 }
                 else
                 {
-                    auto tmpl = Register::Value::Placeholder(
+                    tmpl = Register::Value::Placeholder(
                         m_context, Register::Type::Vector, load.vtype, num_vgpr);
-
-                    auto vgpr = m_context->registerTagManager()->getRegister(mac_tile_tag, tmpl);
-                    co_yield Register::AllocateIfNeeded(vgpr);
-
-                    co_yield copy(vgpr_offset_reg, wave_offset_reg);
-
-                    for(uint a = 0; a < num_vgpr; ++a)
-                    {
-                        co_yield m_context->mem()->load(MemoryInstructions::MemoryKind::Local,
-                                                        vgpr->element({static_cast<int>(a)}),
-                                                        lds_offset,
-                                                        vgpr_offset_reg->subset({0}),
-                                                        numBytes);
-
-                        if(a < num_vgpr - 1)
-                            co_yield generate(vgpr_offset_reg,
-                                              vgpr_offset_reg->expression()
-                                                  + vgpr_stride_reg->expression());
-                    }
                 }
+
+                auto vgpr = m_context->registerTagManager()->getRegister(mac_tile_tag, tmpl);
+                co_yield Register::AllocateIfNeeded(vgpr);
+
+                co_yield loadTile(MemoryInstructions::MemoryKind::Local,
+                                  1,
+                                  num_vgpr,
+                                  load.vtype,
+                                  true,
+                                  tag,
+                                  vgpr,
+                                  lds_offset);
             }
 
             // CI : compute index
@@ -807,86 +779,33 @@ namespace rocRoller
                 Register::ValuePtr basePointer;
                 co_yield m_context->argLoader()->getValue(user.argumentName(), basePointer);
 
-                auto wave_offset_reg = getOffset(tag, 0);
-                auto vgpr_offset_reg = getOffset(tag, 1);
-                auto bufferSrd       = getBufferSrd(tag);
-
-                auto bufDesc = BufferDescriptor(bufferSrd, m_context);
-                auto bufOpt  = BufferInstructionOptions();
-
-                AssertFatal(wave_offset_reg, "Invalid WAVE offset register.");
-                AssertFatal(vgpr_offset_reg, "Invalid VGPR offset register.");
-
                 uint num_elements = wave_tile.sizes[0] * wave_tile.sizes[1];
                 uint wfs          = m_context->kernel()->wavefront_size();
                 uint num_vgpr     = num_elements / wfs;
 
-                Register::ValuePtr vgpr_stride_reg;
-                co_yield generateStride(vgpr_stride_reg, tag, 1);
-
-                AssertFatal(vgpr_stride_reg, "Invalid VGPR stride register.");
-
+                Register::ValuePtr tmpl;
                 if(load.vtype == DataType::Half)
                 {
-                    auto tmpl = Register::Value::Placeholder(
+                    tmpl = Register::Value::Placeholder(
                         m_context, Register::Type::Vector, DataType::Halfx2, num_vgpr / 2);
-
-                    auto vgpr = m_context->registerTagManager()->getRegister(mac_tile_tag, tmpl);
-                    co_yield Register::AllocateIfNeeded(vgpr);
-
-                    auto offset1 = Register::Value::Placeholder(
-                        m_context, Register::Type::Vector, DataType::Int64, 1);
-                    auto offset2 = Register::Value::Placeholder(
-                        m_context, Register::Type::Vector, DataType::Int64, 1);
-
-                    co_yield copy(vgpr_offset_reg, wave_offset_reg);
-
-                    for(uint a = 0; a < num_vgpr; a += 2)
-                    {
-                        co_yield copy(offset1, vgpr_offset_reg);
-                        co_yield generate(vgpr_offset_reg,
-                                          vgpr_offset_reg->expression()
-                                              + vgpr_stride_reg->expression());
-                        co_yield copy(offset2, vgpr_offset_reg);
-                        co_yield generate(vgpr_offset_reg,
-                                          vgpr_offset_reg->expression()
-                                              + vgpr_stride_reg->expression());
-
-                        co_yield m_context->mem()->loadAndPackBuffer(
-                            vgpr->element({static_cast<int>(a / 2)}),
-                            offset1,
-                            offset2,
-                            bufDesc,
-                            bufOpt);
-                    }
                 }
                 else
                 {
-                    auto tmpl = Register::Value::Placeholder(
+                    tmpl = Register::Value::Placeholder(
                         m_context, Register::Type::Vector, load.vtype, num_vgpr);
-
-                    auto vgpr = m_context->registerTagManager()->getRegister(mac_tile_tag, tmpl);
-                    co_yield Register::AllocateIfNeeded(vgpr);
-
-                    auto numBytes = (uint)DataTypeInfo::Get(vgpr->variableType()).elementSize;
-
-                    co_yield copy(vgpr_offset_reg, wave_offset_reg);
-
-                    for(uint a = 0; a < num_vgpr; ++a)
-                    {
-                        co_yield m_context->mem()->loadBuffer(vgpr->element({static_cast<int>(a)}),
-                                                              vgpr_offset_reg->subset({0}),
-                                                              0,
-                                                              bufDesc,
-                                                              bufOpt,
-                                                              numBytes);
-
-                        if(a < num_vgpr - 1)
-                            co_yield generate(vgpr_offset_reg,
-                                              vgpr_offset_reg->expression()
-                                                  + vgpr_stride_reg->expression());
-                    }
                 }
+
+                auto vgpr = m_context->registerTagManager()->getRegister(mac_tile_tag, tmpl);
+                co_yield Register::AllocateIfNeeded(vgpr);
+
+                co_yield loadTile(MemoryInstructions::MemoryKind::Buffer,
+                                  1,
+                                  num_vgpr,
+                                  load.vtype,
+                                  true,
+                                  tag,
+                                  vgpr,
+                                  nullptr);
             }
 
             Generator<Instruction>
@@ -905,104 +824,33 @@ namespace rocRoller
                 Register::ValuePtr s_ptr;
                 co_yield m_context->argLoader()->getValue(user.argumentName(), s_ptr);
 
-                auto vgpr_block_offset_reg = getOffset(tag, 0);
-                auto vgpr_index_offset_reg = getOffset(tag, 1);
-                auto bufferSrd             = getBufferSrd(tag);
-
-                auto bufDesc = BufferDescriptor(bufferSrd, m_context);
-                auto bufOpt  = BufferInstructionOptions();
-
-                AssertFatal(vgpr_block_offset_reg, "Invalid VGPR BLOCK offset register.");
-
                 uint num_elements = wave_tile.sizes[0] * wave_tile.sizes[1];
                 uint wfs          = m_context->kernel()->wavefront_size();
                 uint num_vgpr     = num_elements / wfs;
 
-                Register::ValuePtr vgpr_block_stride_reg, vgpr_index_stride_reg;
-                co_yield generateStride(vgpr_block_stride_reg, tag, 0);
-                co_yield generateStride(vgpr_index_stride_reg, tag, 1);
-
-                AssertFatal(vgpr_block_stride_reg, "Invalid VGPR BLOCK stride register.");
-                AssertFatal(vgpr_index_stride_reg, "Invalid VGPR INDEX stride register.");
-
+                Register::ValuePtr tmpl;
                 if(load.vtype == DataType::Half)
                 {
-                    auto tmpl = Register::Value::Placeholder(
+                    tmpl = Register::Value::Placeholder(
                         m_context, Register::Type::Vector, DataType::Halfx2, num_vgpr / 2);
-
-                    auto vgpr = m_context->registerTagManager()->getRegister(mac_tile_tag, tmpl);
-                    co_yield Register::AllocateIfNeeded(vgpr);
-
-                    auto offset1 = Register::Value::Placeholder(
-                        m_context, Register::Type::Vector, DataType::Int64, 1);
-                    auto offset2 = Register::Value::Placeholder(
-                        m_context, Register::Type::Vector, DataType::Int64, 1);
-
-                    for(uint ablk = 0; ablk < num_vgpr / 4; ++ablk)
-                    {
-                        co_yield copy(vgpr_index_offset_reg, vgpr_block_offset_reg);
-                        for(uint aidx = 0; aidx < 4; aidx += 2)
-                        {
-                            uint a = ablk * 4 + aidx;
-
-                            co_yield copy(offset1, vgpr_index_offset_reg);
-                            co_yield generate(vgpr_index_offset_reg,
-                                              vgpr_index_offset_reg->expression()
-                                                  + vgpr_index_stride_reg->expression());
-                            co_yield copy(offset2, vgpr_index_offset_reg);
-                            co_yield generate(vgpr_index_offset_reg,
-                                              vgpr_index_offset_reg->expression()
-                                                  + vgpr_index_stride_reg->expression());
-
-                            co_yield m_context->mem()->loadAndPackBuffer(
-                                vgpr->element({static_cast<int>(a / 2)}),
-                                offset1,
-                                offset2,
-                                bufDesc,
-                                bufOpt);
-                        }
-                        if(ablk < num_vgpr / 4 - 1)
-                            co_yield generate(vgpr_block_offset_reg,
-                                              vgpr_block_offset_reg->expression()
-                                                  + vgpr_block_stride_reg->expression());
-                    }
                 }
                 else
                 {
-                    auto tmpl = Register::Value::Placeholder(
+                    tmpl = Register::Value::Placeholder(
                         m_context, Register::Type::Vector, load.vtype, num_vgpr);
-
-                    auto vgpr = m_context->registerTagManager()->getRegister(mac_tile_tag, tmpl);
-                    co_yield Register::AllocateIfNeeded(vgpr);
-
-                    auto numBytes = (uint)DataTypeInfo::Get(vgpr->variableType()).elementSize;
-
-                    for(uint ablk = 0; ablk < num_vgpr / 4; ++ablk)
-                    {
-                        co_yield copy(vgpr_index_offset_reg, vgpr_block_offset_reg);
-                        for(uint aidx = 0; aidx < 4; ++aidx)
-                        {
-                            uint a = ablk * 4 + aidx;
-
-                            co_yield m_context->mem()->loadBuffer(
-                                vgpr->element({static_cast<int>(a)}),
-                                vgpr_index_offset_reg->subset({0}),
-                                0,
-                                bufDesc,
-                                bufOpt,
-                                numBytes);
-
-                            if(aidx < 3)
-                                co_yield generate(vgpr_index_offset_reg,
-                                                  vgpr_index_offset_reg->expression()
-                                                      + vgpr_index_stride_reg->expression());
-                        }
-                        if(ablk < num_vgpr / 4 - 1)
-                            co_yield generate(vgpr_block_offset_reg,
-                                              vgpr_block_offset_reg->expression()
-                                                  + vgpr_block_stride_reg->expression());
-                    }
                 }
+
+                auto vgpr = m_context->registerTagManager()->getRegister(mac_tile_tag, tmpl);
+                co_yield Register::AllocateIfNeeded(vgpr);
+
+                co_yield loadTile(MemoryInstructions::MemoryKind::Buffer,
+                                  num_vgpr / 4,
+                                  4,
+                                  load.vtype,
+                                  true,
+                                  tag,
+                                  vgpr,
+                                  nullptr);
             }
 
             Generator<Instruction> operator()(int tag, LoadTiled const& load, Transformer coords)
@@ -1324,6 +1172,100 @@ namespace rocRoller
                 Throw<FatalError>("StoreLinear present in kernel graph.");
             }
 
+            /**
+             * @brief Store a tile from registers into memory
+             *
+             * @param kind The kind of memory instruction to use
+             * @param m Number of rows in the tile
+             * @param n Number of columns in the tile
+             * @param dataType The type of the data being stored
+             * @param tag The tag of the control graph node generating the store
+             * @param vgpr The registers containing the data
+             * @param offset Offset from the starting index
+             * @return Generator<Instruction>
+             */
+            Generator<Instruction> storeTile(MemoryInstructions::MemoryKind kind,
+                                             uint64_t                       m,
+                                             uint64_t                       n,
+                                             VariableType                   dataType,
+                                             int                            tag,
+                                             Register::ValuePtr             vgpr,
+                                             Register::ValuePtr             offset)
+            {
+                auto elementSize    = DataTypeInfo::Get(dataType).elementSize;
+                auto row_offset_reg = getOffset(tag, 0);
+                auto col_offset_reg = getOffset(tag, 1);
+
+                std::shared_ptr<BufferDescriptor> bufDesc;
+                if(kind == MemoryInstructions::MemoryKind::Buffer)
+                {
+                    auto bufferSrd = getBufferSrd(tag);
+                    bufDesc        = std::make_shared<BufferDescriptor>(bufferSrd, m_context);
+                }
+
+                Register::ValuePtr row_stride_reg, col_stride_reg;
+                co_yield generateStride(row_stride_reg, tag, 0);
+                co_yield generateStride(col_stride_reg, tag, 1);
+
+                for(int i = 0; i < m; ++i)
+                {
+                    co_yield copy(col_offset_reg, row_offset_reg);
+
+                    for(int j = 0; j < n; ++j)
+                    {
+                        uint a = i * n + j;
+
+                        Register::ValuePtr value;
+                        if(vgpr->regType() == Register::Type::Accumulator)
+                        {
+                            value = MkVGPR(vgpr->variableType());
+                            co_yield m_context->copier()->copy(
+                                value, vgpr->element({static_cast<int>(a)}));
+                        }
+                        else
+                        {
+                            value = vgpr->element({static_cast<int>(a)});
+                        }
+
+                        Register::ValuePtr converted;
+                        if(DataTypeInfo::Get(value->variableType()).segmentVariableType != dataType)
+                        {
+                            converted = MkVGPR(dataType);
+                            co_yield Expression::generate(
+                                converted,
+                                convert(dataType.dataType,
+                                        std::make_shared<Expression::Expression>(value)),
+                                m_context);
+                        }
+                        else
+                        {
+                            converted = value;
+                        }
+
+                        co_yield m_context->mem()->store(kind,
+                                                         col_offset_reg->subset({0}),
+                                                         converted,
+                                                         offset,
+                                                         elementSize,
+                                                         "",
+                                                         bufDesc);
+                        if(j < n - 1)
+                        {
+                            co_yield generate(col_offset_reg,
+                                              col_offset_reg->expression()
+                                                  + col_stride_reg->expression());
+                        }
+                    }
+
+                    if(i < m - 1)
+                    {
+                        co_yield generate(row_offset_reg,
+                                          row_offset_reg->expression()
+                                              + row_stride_reg->expression());
+                    }
+                }
+            }
+
             Generator<Instruction>
                 storeMacroTileLDS(int tag, StoreLDSTile const& store, Transformer coords)
             {
@@ -1336,12 +1278,10 @@ namespace rocRoller
 
                 // Temporary register(s) that is used to copy the data from global memory to
                 // local memory.
-                auto vgpr     = m_context->registerTagManager()->getRegister(tile_tag);
-                auto vtype    = store.dataType;
-                auto numBytes = DataTypeInfo::Get(vtype).elementSize;
+                auto vgpr  = m_context->registerTagManager()->getRegister(tile_tag);
+                auto vtype = store.dataType;
 
                 auto row_offset_reg = getOffset(tag, 0);
-                auto col_offset_reg = getOffset(tag, 1);
 
                 auto numElements = product(tile.subTileSizes) * product(m_workgroupSize);
                 // Allocate LDS memory, and store the offset of the beginning of the allocation
@@ -1372,37 +1312,9 @@ namespace rocRoller
                     m_context, Register::Type::Vector, DataType::UInt32, 1);
                 co_yield copy(reset_offset, row_offset_reg);
 
-                Register::ValuePtr row_stride_reg, col_stride_reg;
-                co_yield generateStride(row_stride_reg, tag, 0);
-                co_yield generateStride(col_stride_reg, tag, 1);
+                co_yield storeTile(
+                    MemoryInstructions::MemoryKind::Local, m, n, vtype, tag, vgpr, lds_offset);
 
-                for(int i = 0; i < m; ++i)
-                {
-                    co_yield copy(col_offset_reg, row_offset_reg);
-
-                    for(int j = 0; j < n; ++j)
-                    {
-                        co_yield m_context->mem()->store(
-                            MemoryInstructions::MemoryKind::Local,
-                            lds_offset,
-                            vgpr->element({static_cast<int>(i * n + j)}),
-                            col_offset_reg->subset({0}),
-                            numBytes);
-                        if(j < n - 1)
-                        {
-                            co_yield generate(col_offset_reg,
-                                              col_offset_reg->expression()
-                                                  + col_stride_reg->expression());
-                        }
-                    }
-
-                    if(i < m - 1)
-                    {
-                        co_yield generate(row_offset_reg,
-                                          row_offset_reg->expression()
-                                              + row_stride_reg->expression());
-                    }
-                }
                 co_yield copy(row_offset_reg, reset_offset);
             }
 
@@ -1423,50 +1335,16 @@ namespace rocRoller
                 auto basePointer = MkSGPR(DataType::Int64);
                 co_yield m_context->argLoader()->getValue(user.argumentName(), basePointer);
 
-                auto numBytes = DataTypeInfo::Get(store.dataType).elementSize;
-
                 auto const m = mac_tile.subTileSizes[0];
                 auto const n = mac_tile.subTileSizes[1];
 
-                auto row_offset_reg = getOffset(tag, 0);
-                auto col_offset_reg = getOffset(tag, 1);
-
-                auto bufferSrd = getBufferSrd(tag);
-                auto bufDesc   = BufferDescriptor(bufferSrd, m_context);
-                auto bufOpt    = BufferInstructionOptions();
-
-                Register::ValuePtr row_stride_reg, col_stride_reg;
-                co_yield generateStride(row_stride_reg, tag, 0);
-                co_yield generateStride(col_stride_reg, tag, 1);
-
-                // TODO multidimensional tiles
-                for(int i = 0; i < m; ++i)
-                {
-                    co_yield copy(col_offset_reg, row_offset_reg);
-
-                    for(int j = 0; j < n; ++j)
-                    {
-                        co_yield m_context->mem()->storeBuffer(
-                            vgpr->element({static_cast<int>(i * n + j)}),
-                            col_offset_reg->subset({0}),
-                            0,
-                            bufDesc,
-                            bufOpt,
-                            numBytes);
-                        if(j < n - 1)
-                        {
-                            co_yield generate(col_offset_reg,
-                                              col_offset_reg->expression()
-                                                  + col_stride_reg->expression());
-                        }
-                    }
-                    if(i < m - 1)
-                    {
-                        co_yield generate(row_offset_reg,
-                                          row_offset_reg->expression()
-                                              + row_stride_reg->expression());
-                    }
-                }
+                co_yield storeTile(MemoryInstructions::MemoryKind::Buffer,
+                                   m,
+                                   n,
+                                   store.dataType,
+                                   tag,
+                                   vgpr,
+                                   nullptr);
             }
 
             Generator<Instruction>
@@ -1507,60 +1385,13 @@ namespace rocRoller
                 auto agpr     = m_context->registerTagManager()->getRegister(mac_tile_tag);
                 AssertFatal(agpr->registerCount() == num_vgpr);
 
-                auto vgpr_block_offset_reg = getOffset(tag, 0);
-                auto vgpr_index_offset_reg = getOffset(tag, 1);
-
-                AssertFatal(vgpr_block_offset_reg, "Invalid VGPR BLOCK offset register.");
-
-                auto numBytes  = DataTypeInfo::Get(store.dataType).elementSize;
-                auto value     = MkVGPR(agpr->variableType());
-                auto converted = MkVGPR(store.dataType);
-
-                Register::ValuePtr vgpr_block_stride_reg, vgpr_index_stride_reg;
-                co_yield generateStride(vgpr_block_stride_reg, tag, 0);
-                co_yield generateStride(vgpr_index_stride_reg, tag, 1);
-
-                AssertFatal(vgpr_block_stride_reg, "Invalid VGPR BLOCK stride register.");
-                AssertFatal(vgpr_index_stride_reg, "Invalid VGPR INDEX stride register.");
-
-                for(uint ablk = 0; ablk < num_vgpr / 4; ++ablk)
-                {
-                    co_yield copy(vgpr_index_offset_reg, vgpr_block_offset_reg);
-                    for(uint aidx = 0; aidx < 4; ++aidx)
-                    {
-                        uint a = ablk * 4 + aidx;
-                        if(value->variableType() != store.dataType)
-                        {
-                            co_yield m_context->copier()->copy(
-                                value, agpr->element({static_cast<int>(a)}));
-                            co_yield Expression::generate(
-                                converted,
-                                convert(store.dataType,
-                                        std::make_shared<Expression::Expression>(value)),
-                                m_context);
-                        }
-                        else
-                        {
-                            co_yield m_context->copier()->copy(
-                                converted, agpr->element({static_cast<int>(a)}));
-                        }
-
-                        co_yield m_context->mem()->store(MemoryInstructions::MemoryKind::Local,
-                                                         lds_offset,
-                                                         converted,
-                                                         vgpr_index_offset_reg->subset({0}),
-                                                         numBytes);
-
-                        if(aidx < 3)
-                            co_yield generate(vgpr_index_offset_reg,
-                                              vgpr_index_offset_reg->expression()
-                                                  + vgpr_index_stride_reg->expression());
-                    }
-                    if(ablk < num_vgpr / 4 - 1)
-                        co_yield generate(vgpr_block_offset_reg,
-                                          vgpr_block_offset_reg->expression()
-                                              + vgpr_block_stride_reg->expression());
-                }
+                co_yield storeTile(MemoryInstructions::MemoryKind::Local,
+                                   num_vgpr / 4,
+                                   4,
+                                   vtype,
+                                   tag,
+                                   agpr,
+                                   lds_offset);
             }
 
             Generator<Instruction>
@@ -1585,65 +1416,13 @@ namespace rocRoller
                 Register::ValuePtr s_ptr;
                 co_yield m_context->argLoader()->getValue(user.argumentName(), s_ptr);
 
-                auto vgpr_block_offset_reg = getOffset(tag, 0);
-                auto vgpr_index_offset_reg = getOffset(tag, 1);
-                auto bufferSrd             = getBufferSrd(tag);
-
-                auto bufDesc = BufferDescriptor(bufferSrd, m_context);
-                auto bufOpt  = BufferInstructionOptions();
-
-                AssertFatal(vgpr_block_offset_reg, "Invalid VGPR BLOCK offset register.");
-
-                auto numBytes  = DataTypeInfo::Get(store.dataType).elementSize;
-                auto value     = MkVGPR(agpr->variableType());
-                auto converted = MkVGPR(store.dataType);
-
-                Register::ValuePtr vgpr_block_stride_reg, vgpr_index_stride_reg;
-                co_yield generateStride(vgpr_block_stride_reg, tag, 0);
-                co_yield generateStride(vgpr_index_stride_reg, tag, 1);
-
-                AssertFatal(vgpr_block_stride_reg, "Invalid VGPR BLOCK stride register.");
-                AssertFatal(vgpr_index_stride_reg, "Invalid VGPR INDEX stride register.");
-
-                for(uint ablk = 0; ablk < num_vgpr / 4; ++ablk)
-                {
-                    co_yield copy(vgpr_index_offset_reg, vgpr_block_offset_reg);
-                    for(uint aidx = 0; aidx < 4; ++aidx)
-                    {
-                        uint a = ablk * 4 + aidx;
-                        if(value->variableType() != store.dataType)
-                        {
-                            co_yield m_context->copier()->copy(
-                                value, agpr->element({static_cast<int>(a)}));
-                            co_yield Expression::generate(
-                                converted,
-                                convert(store.dataType,
-                                        std::make_shared<Expression::Expression>(value)),
-                                m_context);
-                        }
-                        else
-                        {
-                            co_yield m_context->copier()->copy(
-                                converted, agpr->element({static_cast<int>(a)}));
-                        }
-
-                        co_yield m_context->mem()->storeBuffer(converted,
-                                                               vgpr_index_offset_reg->subset({0}),
-                                                               0,
-                                                               bufDesc,
-                                                               bufOpt,
-                                                               numBytes);
-
-                        if(aidx < 3)
-                            co_yield generate(vgpr_index_offset_reg,
-                                              vgpr_index_offset_reg->expression()
-                                                  + vgpr_index_stride_reg->expression());
-                    }
-                    if(ablk < num_vgpr / 4 - 1)
-                        co_yield generate(vgpr_block_offset_reg,
-                                          vgpr_block_offset_reg->expression()
-                                              + vgpr_block_stride_reg->expression());
-                }
+                co_yield storeTile(MemoryInstructions::MemoryKind::Buffer,
+                                   num_vgpr / 4,
+                                   4,
+                                   store.dataType,
+                                   tag,
+                                   agpr,
+                                   nullptr);
             }
 
             Generator<Instruction> operator()(int tag, StoreTiled const& store, Transformer coords)

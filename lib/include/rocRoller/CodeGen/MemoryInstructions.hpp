@@ -29,6 +29,7 @@ namespace rocRoller
             Flat,
             Scalar,
             Local,
+            Buffer
         };
 
         /**
@@ -42,14 +43,18 @@ namespace rocRoller
          * @param numBytes The number of bytes to load.
          * @param comment Comment that will be generated along with the instructions. (Default = "")
          * @param high Whether the value will be loaded into the high bits of the register. (Default=false)
+         * @param buffDesc Buffer descriptor to use when `kind` is `Buffer`. (Default = nullptr)
+         * @param buffOpts Buffer options. (Default = BufferInstructionOptions())
          */
-        Generator<Instruction> load(MemoryKind                       kind,
-                                    std::shared_ptr<Register::Value> dest,
-                                    std::shared_ptr<Register::Value> addr,
-                                    std::shared_ptr<Register::Value> offset,
-                                    int                              numBytes,
-                                    std::string const&               comment = "",
-                                    bool                             high    = false);
+        Generator<Instruction> load(MemoryKind                        kind,
+                                    std::shared_ptr<Register::Value>  dest,
+                                    std::shared_ptr<Register::Value>  addr,
+                                    std::shared_ptr<Register::Value>  offset,
+                                    int                               numBytes,
+                                    std::string const&                comment  = "",
+                                    bool                              high     = false,
+                                    std::shared_ptr<BufferDescriptor> buffDesc = nullptr,
+                                    BufferInstructionOptions buffOpts = BufferInstructionOptions());
 
         /**
          * @brief Generate the instructions required to perform a store.
@@ -61,13 +66,18 @@ namespace rocRoller
          * @param offset Register containing an offset to be added to addr.
          * @param numBytes The number of bytes to load.
          * @param comment Comment that will be generated along with the instructions. (Default = "")
+         * @param buffDesc Buffer descriptor to use when `kind` is `Buffer`. (Default = nullptr)
+         * @param buffOpts Buffer options. (Default = BufferInstructionOptions())
          */
-        Generator<Instruction> store(MemoryKind                       kind,
-                                     std::shared_ptr<Register::Value> addr,
-                                     std::shared_ptr<Register::Value> data,
-                                     std::shared_ptr<Register::Value> offset,
-                                     int                              numBytes,
-                                     std::string const&               comment = "");
+        Generator<Instruction> store(MemoryKind                        kind,
+                                     std::shared_ptr<Register::Value>  addr,
+                                     std::shared_ptr<Register::Value>  data,
+                                     std::shared_ptr<Register::Value>  offset,
+                                     int                               numBytes,
+                                     std::string const&                comment  = "",
+                                     std::shared_ptr<BufferDescriptor> buffDesc = nullptr,
+                                     BufferInstructionOptions          buffOpts
+                                     = BufferInstructionOptions());
 
         /**
          * @brief Generate instructions that will load two 16bit values and pack them into
@@ -80,31 +90,19 @@ namespace rocRoller
          * @param addr2 The register containing the address of the second 16bit value to load the data from.
          * @param offset2 Register containing an offset to be added to addr2.
          * @param comment Comment that will be generated along with the instructions. (Default = "")
+         * @param buffDesc Buffer descriptor to use when `kind` is `Buffer`. (Default = nullptr)
+         * @param buffOpts Buffer options. (Default = BufferInstructionOptions())
          */
-        Generator<Instruction> loadAndPack(MemoryKind                       kind,
-                                           std::shared_ptr<Register::Value> dest,
-                                           std::shared_ptr<Register::Value> addr1,
-                                           std::shared_ptr<Register::Value> offset1,
-                                           std::shared_ptr<Register::Value> addr2,
-                                           std::shared_ptr<Register::Value> offset2,
-                                           std::string const&               comment = "");
-
-        /**
-         * @brief Generate instructions that will load two 16bit values and pack them into
-         *        a single register with MUBUF instructions.
-         *
-         * @param dest The register to store the loaded data in.
-         * @param offset1 The register containing the address of the first 16bit value to load the data from.
-         * @param offset2 The register containing the address of the second 16bit value to load the data from.
-         * @param buffDesc The buffer resource descriptor, contains the base address, size, buffer resource options
-         * @param buffOpts Struct containing the buffer options required by the buffer load
-         * @param comment Comment that will be generated along with the instructions. (Default = "")
-         */
-        Generator<Instruction> loadAndPackBuffer(std::shared_ptr<Register::Value> dest,
-                                                 std::shared_ptr<Register::Value> offset1,
-                                                 std::shared_ptr<Register::Value> offset2,
-                                                 BufferDescriptor                 buffDesc,
-                                                 BufferInstructionOptions         buffOpts);
+        Generator<Instruction> loadAndPack(MemoryKind                        kind,
+                                           std::shared_ptr<Register::Value>  dest,
+                                           std::shared_ptr<Register::Value>  addr1,
+                                           std::shared_ptr<Register::Value>  offset1,
+                                           std::shared_ptr<Register::Value>  addr2,
+                                           std::shared_ptr<Register::Value>  offset2,
+                                           std::string const&                comment  = "",
+                                           std::shared_ptr<BufferDescriptor> buffDesc = nullptr,
+                                           BufferInstructionOptions          buffOpts
+                                           = BufferInstructionOptions());
 
         /**
          * @brief Generate instructions that will pack 2 16bit values into a single 32bit register and store the value
@@ -209,32 +207,36 @@ namespace rocRoller
          * @param dest The register to store the loaded data in.
          * @param addr  The register containing the address to load the data from.
          * @param offset Offset to be added to addr.
+         * @param buffDesc Buffer descriptor to use.
+         * @param buffOpts Buffer options
          * @param numBytes The number of bytes to load.
          * @param high Whether the value will be loaded into the high bits of the register. (Default=false)
          */
-        Generator<Instruction> loadBuffer(std::shared_ptr<Register::Value> dest,
-                                          std::shared_ptr<Register::Value> addr,
-                                          int                              offset,
-                                          BufferDescriptor                 buffDesc,
-                                          BufferInstructionOptions         buffOpts,
-                                          int                              numBytes,
-                                          bool                             high = false);
+        Generator<Instruction> loadBuffer(std::shared_ptr<Register::Value>  dest,
+                                          std::shared_ptr<Register::Value>  addr,
+                                          int                               offset,
+                                          std::shared_ptr<BufferDescriptor> buffDesc,
+                                          BufferInstructionOptions          buffOpts,
+                                          int                               numBytes,
+                                          bool                              high = false);
 
         /**
          * @brief Generate the instructions required to perform a buffer store.
          *
          *
-         * @param addr The register containing the address to store the data.
          * @param data  The register containing the data to store.
+         * @param addr The register containing the address to store the data.
          * @param offset Offset to be added to addr.
+         * @param buffDesc Buffer descriptor to use
+         * @param buffOpts Buffer options
          * @param numBytes The number of bytes to load.
          */
-        Generator<Instruction> storeBuffer(std::shared_ptr<Register::Value> data,
-                                           std::shared_ptr<Register::Value> addr,
-                                           int                              offset,
-                                           BufferDescriptor                 buffDesc,
-                                           BufferInstructionOptions         buffOpts,
-                                           int                              numBytes);
+        Generator<Instruction> storeBuffer(std::shared_ptr<Register::Value>  data,
+                                           std::shared_ptr<Register::Value>  addr,
+                                           int                               offset,
+                                           std::shared_ptr<BufferDescriptor> buffDesc,
+                                           BufferInstructionOptions          buffOpts,
+                                           int                               numBytes);
 
         /**
          * @brief Generate the instructions required to add a memory barrier.

@@ -3,38 +3,16 @@
 
 namespace rocRoller
 {
-    Generator<Instruction> MemoryInstructions::loadAndPack(MemoryKind                       kind,
-                                                           std::shared_ptr<Register::Value> dest,
-                                                           std::shared_ptr<Register::Value> addr1,
-                                                           std::shared_ptr<Register::Value> offset1,
-                                                           std::shared_ptr<Register::Value> addr2,
-                                                           std::shared_ptr<Register::Value> offset2,
-                                                           std::string const&               comment)
-    {
-        AssertFatal(dest && dest->regType() == Register::Type::Vector
-                        && dest->variableType() == DataType::Halfx2,
-                    "loadAndPack destination must be a vector register of type Halfx2");
-
-        co_yield Register::AllocateIfNeeded(dest);
-
-        // Use the same register for the destination and the temporary val1
-        auto val1 = std::make_shared<Register::Value>(
-            dest->allocation(), Register::Type::Vector, DataType::Half, dest->allocationCoord());
-        auto val2 = Register::Value::Placeholder(
-            m_context.lock(), Register::Type::Vector, DataType::Half, 1);
-
-        co_yield load(kind, val1, addr1, offset1, 2, comment, false);
-        co_yield load(kind, val2, addr2, offset2, 2, comment, true);
-
-        co_yield generateOp<Expression::BitwiseOr>(dest, val1, val2);
-    }
-
     Generator<Instruction>
-        MemoryInstructions::loadAndPackBuffer(std::shared_ptr<Register::Value> dest,
-                                              std::shared_ptr<Register::Value> offset1,
-                                              std::shared_ptr<Register::Value> offset2,
-                                              BufferDescriptor                 buffDesc,
-                                              BufferInstructionOptions         buffOpts)
+        MemoryInstructions::loadAndPack(MemoryKind                        kind,
+                                        std::shared_ptr<Register::Value>  dest,
+                                        std::shared_ptr<Register::Value>  addr1,
+                                        std::shared_ptr<Register::Value>  offset1,
+                                        std::shared_ptr<Register::Value>  addr2,
+                                        std::shared_ptr<Register::Value>  offset2,
+                                        std::string const&                comment,
+                                        std::shared_ptr<BufferDescriptor> buffDesc,
+                                        BufferInstructionOptions          buffOpts)
     {
         AssertFatal(dest && dest->regType() == Register::Type::Vector
                         && dest->variableType() == DataType::Halfx2,
@@ -48,8 +26,8 @@ namespace rocRoller
         auto val2 = Register::Value::Placeholder(
             m_context.lock(), Register::Type::Vector, DataType::Half, 1);
 
-        co_yield loadBuffer(val1, offset1->subset({0}), 0, buffDesc, buffOpts, 2, false);
-        co_yield loadBuffer(val2, offset2->subset({0}), 0, buffDesc, buffOpts, 2, true);
+        co_yield load(kind, val1, addr1, offset1, 2, comment, false, buffDesc, buffOpts);
+        co_yield load(kind, val2, addr2, offset2, 2, comment, true, buffDesc, buffOpts);
 
         co_yield generateOp<Expression::BitwiseOr>(dest, val1, val2);
     }

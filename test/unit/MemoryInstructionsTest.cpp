@@ -392,16 +392,16 @@ namespace MemoryInstructionsTest
 
                 co_yield v_a->allocate();
 
-                auto bufDesc = rocRoller::BufferDescriptor(m_context);
-                co_yield bufDesc.setup();
-                co_yield bufDesc.setBasePointer(s_a);
-                co_yield bufDesc.setSize(Register::Value::Literal(N));
-                co_yield bufDesc.setOptions(Register::Value::Literal(131072)); //0x00020000
+                auto bufDesc = std::make_shared<rocRoller::BufferDescriptor>(m_context);
+                co_yield bufDesc->setup();
+                co_yield bufDesc->setBasePointer(s_a);
+                co_yield bufDesc->setSize(Register::Value::Literal(N));
+                co_yield bufDesc->setOptions(Register::Value::Literal(131072)); //0x00020000
 
                 auto bufInstOpts = rocRoller::BufferInstructionOptions();
 
                 co_yield m_context->mem()->loadBuffer(v_a, vgprSerial, 0, bufDesc, bufInstOpts, N);
-                co_yield bufDesc.setBasePointer(s_result);
+                co_yield bufDesc->setBasePointer(s_result);
                 co_yield m_context->mem()->storeBuffer(v_a, vgprSerial, 0, bufDesc, bufInstOpts, N);
             };
 

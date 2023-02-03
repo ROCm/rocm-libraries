@@ -245,6 +245,7 @@ namespace rocRoller
         static DataTypeInfo const& Get(std::string const& str);
 
         VariableType variableType;
+        VariableType segmentVariableType;
         std::string  name;
         std::string  abbrev;
 
@@ -281,6 +282,7 @@ namespace rocRoller
 
     template <typename T,
               DataType    T_DEnum,
+              DataType    T_SegmentType,
               PointerType T_PEnum,
               int         T_Packing,
               bool        T_IsComplex,
@@ -288,7 +290,8 @@ namespace rocRoller
               bool        T_IsSigned>
     struct BaseTypeInfo
     {
-        constexpr static VariableType Var = VariableType(T_DEnum, T_PEnum);
+        constexpr static VariableType Var                 = VariableType(T_DEnum, T_PEnum);
+        constexpr static VariableType SegmentVariableType = VariableType(T_SegmentType, T_PEnum);
 
         /// Bytes of one element.  May contain multiple segments.
         constexpr static size_t ElementSize = sizeof(T);
@@ -317,79 +320,145 @@ namespace rocRoller
 
     template <typename T,
               DataType    T_DEnum,
+              DataType    T_SegmentType,
               PointerType T_PEnum,
               int         T_Packing,
               bool        T_IsComplex,
               bool        T_IsIntegral,
               bool        T_IsSigned>
-    constexpr VariableType
-        BaseTypeInfo<T, T_DEnum, T_PEnum, T_Packing, T_IsComplex, T_IsIntegral, T_IsSigned>::Var;
+    constexpr VariableType BaseTypeInfo<T,
+                                        T_DEnum,
+                                        T_SegmentType,
+                                        T_PEnum,
+                                        T_Packing,
+                                        T_IsComplex,
+                                        T_IsIntegral,
+                                        T_IsSigned>::Var;
     template <typename T,
               DataType    T_DEnum,
+              DataType    T_SegmentType,
               PointerType T_PEnum,
               int         T_Packing,
               bool        T_IsComplex,
               bool        T_IsIntegral,
               bool        T_IsSigned>
-    constexpr size_t
-        BaseTypeInfo<T, T_DEnum, T_PEnum, T_Packing, T_IsComplex, T_IsIntegral, T_IsSigned>::
-            ElementSize;
+    constexpr VariableType BaseTypeInfo<T,
+                                        T_DEnum,
+                                        T_SegmentType,
+                                        T_PEnum,
+                                        T_Packing,
+                                        T_IsComplex,
+                                        T_IsIntegral,
+                                        T_IsSigned>::SegmentVariableType;
     template <typename T,
               DataType    T_DEnum,
+              DataType    T_SegmentType,
               PointerType T_PEnum,
               int         T_Packing,
               bool        T_IsComplex,
               bool        T_IsIntegral,
               bool        T_IsSigned>
-    constexpr size_t
-        BaseTypeInfo<T, T_DEnum, T_PEnum, T_Packing, T_IsComplex, T_IsIntegral, T_IsSigned>::
-            Packing;
+    constexpr size_t BaseTypeInfo<T,
+                                  T_DEnum,
+                                  T_SegmentType,
+                                  T_PEnum,
+                                  T_Packing,
+                                  T_IsComplex,
+                                  T_IsIntegral,
+                                  T_IsSigned>::ElementSize;
     template <typename T,
               DataType    T_DEnum,
+              DataType    T_SegmentType,
               PointerType T_PEnum,
               int         T_Packing,
               bool        T_IsComplex,
               bool        T_IsIntegral,
               bool        T_IsSigned>
-    constexpr size_t
-        BaseTypeInfo<T, T_DEnum, T_PEnum, T_Packing, T_IsComplex, T_IsIntegral, T_IsSigned>::
-            SegmentSize;
+    constexpr size_t BaseTypeInfo<T,
+                                  T_DEnum,
+                                  T_SegmentType,
+                                  T_PEnum,
+                                  T_Packing,
+                                  T_IsComplex,
+                                  T_IsIntegral,
+                                  T_IsSigned>::Packing;
+    template <typename T,
+              DataType    T_DEnum,
+              DataType    T_SegmentType,
+              PointerType T_PEnum,
+              int         T_Packing,
+              bool        T_IsComplex,
+              bool        T_IsIntegral,
+              bool        T_IsSigned>
+    constexpr size_t BaseTypeInfo<T,
+                                  T_DEnum,
+                                  T_SegmentType,
+                                  T_PEnum,
+                                  T_Packing,
+                                  T_IsComplex,
+                                  T_IsIntegral,
+                                  T_IsSigned>::SegmentSize;
 
     template <typename T,
               DataType    T_DEnum,
+              DataType    T_SegmentType,
               PointerType T_PEnum,
               int         T_Packing,
               bool        T_IsComplex,
               bool        T_IsIntegral,
               bool        T_IsSigned>
-    constexpr bool
-        BaseTypeInfo<T, T_DEnum, T_PEnum, T_Packing, T_IsComplex, T_IsIntegral, T_IsSigned>::
-            IsComplex;
+    constexpr bool BaseTypeInfo<T,
+                                T_DEnum,
+                                T_SegmentType,
+                                T_PEnum,
+                                T_Packing,
+                                T_IsComplex,
+                                T_IsIntegral,
+                                T_IsSigned>::IsComplex;
     template <typename T,
               DataType    T_DEnum,
+              DataType    T_SegmentType,
               PointerType T_PEnum,
               int         T_Packing,
               bool        T_IsComplex,
               bool        T_IsIntegral,
               bool        T_IsSigned>
-    constexpr bool
-        BaseTypeInfo<T, T_DEnum, T_PEnum, T_Packing, T_IsComplex, T_IsIntegral, T_IsSigned>::
-            IsIntegral;
+    constexpr bool BaseTypeInfo<T,
+                                T_DEnum,
+                                T_SegmentType,
+                                T_PEnum,
+                                T_Packing,
+                                T_IsComplex,
+                                T_IsIntegral,
+                                T_IsSigned>::IsIntegral;
 
     template <>
-    struct TypeInfo<float>
-        : public BaseTypeInfo<float, DataType::Float, PointerType::Value, 1, false, false, true>
+    struct TypeInfo<float> : public BaseTypeInfo<float,
+                                                 DataType::Float,
+                                                 DataType::Float,
+                                                 PointerType::Value,
+                                                 1,
+                                                 false,
+                                                 false,
+                                                 true>
     {
     };
 
     template <>
-    struct TypeInfo<double>
-        : public BaseTypeInfo<double, DataType::Double, PointerType::Value, 1, false, false, true>
+    struct TypeInfo<double> : public BaseTypeInfo<double,
+                                                  DataType::Double,
+                                                  DataType::Double,
+                                                  PointerType::Value,
+                                                  1,
+                                                  false,
+                                                  false,
+                                                  true>
     {
     };
 
     template <>
     struct TypeInfo<std::complex<float>> : public BaseTypeInfo<std::complex<float>,
+                                                               DataType::ComplexFloat,
                                                                DataType::ComplexFloat,
                                                                PointerType::Value,
                                                                1,
@@ -402,6 +471,7 @@ namespace rocRoller
     template <>
     struct TypeInfo<std::complex<double>> : public BaseTypeInfo<std::complex<double>,
                                                                 DataType::ComplexDouble,
+                                                                DataType::ComplexDouble,
                                                                 PointerType::Value,
                                                                 1,
                                                                 true,
@@ -411,26 +481,50 @@ namespace rocRoller
     };
 
     template <>
-    struct TypeInfo<Int8x4>
-        : public BaseTypeInfo<Int8x4, DataType::Int8x4, PointerType::Value, 4, false, true, true>
+    struct TypeInfo<Int8x4> : public BaseTypeInfo<Int8x4,
+                                                  DataType::Int8x4,
+                                                  DataType::Int8,
+                                                  PointerType::Value,
+                                                  4,
+                                                  false,
+                                                  true,
+                                                  true>
     {
     };
 
     template <>
-    struct TypeInfo<int32_t>
-        : public BaseTypeInfo<int32_t, DataType::Int32, PointerType::Value, 1, false, true, true>
+    struct TypeInfo<int32_t> : public BaseTypeInfo<int32_t,
+                                                   DataType::Int32,
+                                                   DataType::Int32,
+                                                   PointerType::Value,
+                                                   1,
+                                                   false,
+                                                   true,
+                                                   true>
     {
     };
 
     template <>
-    struct TypeInfo<int64_t>
-        : public BaseTypeInfo<int64_t, DataType::Int64, PointerType::Value, 1, false, true, true>
+    struct TypeInfo<int64_t> : public BaseTypeInfo<int64_t,
+                                                   DataType::Int64,
+                                                   DataType::Int64,
+                                                   PointerType::Value,
+                                                   1,
+                                                   false,
+                                                   true,
+                                                   true>
     {
     };
 
     template <>
-    struct TypeInfo<Half>
-        : public BaseTypeInfo<Half, DataType::Half, PointerType::Value, 1, false, false, true>
+    struct TypeInfo<Half> : public BaseTypeInfo<Half,
+                                                DataType::Half,
+                                                DataType::Half,
+                                                PointerType::Value,
+                                                1,
+                                                false,
+                                                false,
+                                                true>
     {
     };
 
@@ -439,13 +533,20 @@ namespace rocRoller
     };
 
     template <>
-    struct TypeInfo<Halfx2>
-        : public BaseTypeInfo<Halfx2, DataType::Halfx2, PointerType::Value, 2, false, false, true>
+    struct TypeInfo<Halfx2> : public BaseTypeInfo<Halfx2,
+                                                  DataType::Halfx2,
+                                                  DataType::Half,
+                                                  PointerType::Value,
+                                                  2,
+                                                  false,
+                                                  false,
+                                                  true>
     {
     };
 
     template <>
     struct TypeInfo<BFloat16> : public BaseTypeInfo<BFloat16,
+                                                    DataType::BFloat16,
                                                     DataType::BFloat16,
                                                     PointerType::Value,
                                                     1,
@@ -457,14 +558,26 @@ namespace rocRoller
 
     // Enum DataType::Int8 maps to int8_t, struct rocRoller::Int8 is only used for LogTensor now
     template <>
-    struct TypeInfo<int8_t>
-        : public BaseTypeInfo<int8_t, DataType::Int8, PointerType::Value, 1, false, true, true>
+    struct TypeInfo<int8_t> : public BaseTypeInfo<int8_t,
+                                                  DataType::Int8,
+                                                  DataType::Int8,
+                                                  PointerType::Value,
+                                                  1,
+                                                  false,
+                                                  true,
+                                                  true>
     {
     };
 
     template <>
-    struct TypeInfo<uint32_t>
-        : public BaseTypeInfo<uint32_t, DataType::UInt32, PointerType::Value, 1, false, true, false>
+    struct TypeInfo<uint32_t> : public BaseTypeInfo<uint32_t,
+                                                    DataType::UInt32,
+                                                    DataType::UInt32,
+                                                    PointerType::Value,
+                                                    1,
+                                                    false,
+                                                    true,
+                                                    false>
     {
     };
 
@@ -473,20 +586,38 @@ namespace rocRoller
     };
 
     template <>
-    struct TypeInfo<Raw32>
-        : public BaseTypeInfo<Raw32, DataType::Raw32, PointerType::Value, 1, false, true, false>
+    struct TypeInfo<Raw32> : public BaseTypeInfo<Raw32,
+                                                 DataType::Raw32,
+                                                 DataType::Raw32,
+                                                 PointerType::Value,
+                                                 1,
+                                                 false,
+                                                 true,
+                                                 false>
     {
     };
 
     template <>
-    struct TypeInfo<uint64_t>
-        : public BaseTypeInfo<uint64_t, DataType::UInt64, PointerType::Value, 1, false, true, false>
+    struct TypeInfo<uint64_t> : public BaseTypeInfo<uint64_t,
+                                                    DataType::UInt64,
+                                                    DataType::UInt64,
+                                                    PointerType::Value,
+                                                    1,
+                                                    false,
+                                                    true,
+                                                    false>
     {
     };
 
     template <>
-    struct TypeInfo<bool>
-        : public BaseTypeInfo<bool, DataType::Bool, PointerType::Value, 1, false, true, false>
+    struct TypeInfo<bool> : public BaseTypeInfo<bool,
+                                                DataType::Bool,
+                                                DataType::Bool,
+                                                PointerType::Value,
+                                                1,
+                                                false,
+                                                true,
+                                                false>
     {
     };
 
@@ -495,8 +626,14 @@ namespace rocRoller
     };
 
     template <>
-    struct TypeInfo<Bool32>
-        : public BaseTypeInfo<Bool32, DataType::Bool32, PointerType::Value, 1, false, false, false>
+    struct TypeInfo<Bool32> : public BaseTypeInfo<Bool32,
+                                                  DataType::Bool32,
+                                                  DataType::Bool32,
+                                                  PointerType::Value,
+                                                  1,
+                                                  false,
+                                                  false,
+                                                  false>
     {
     };
 
@@ -506,6 +643,7 @@ namespace rocRoller
 
     template <>
     struct TypeInfo<PointerLocal> : public BaseTypeInfo<PointerLocal,
+                                                        DataType::None,
                                                         DataType::None,
                                                         PointerType::PointerLocal,
                                                         1,
@@ -521,6 +659,7 @@ namespace rocRoller
 
     template <>
     struct TypeInfo<PointerGlobal> : public BaseTypeInfo<PointerGlobal,
+                                                         DataType::None,
                                                          DataType::None,
                                                          PointerType::PointerGlobal,
                                                          1,
@@ -539,8 +678,14 @@ namespace rocRoller
     };
 
     template <>
-    struct TypeInfo<Buffer>
-        : public BaseTypeInfo<Buffer, DataType::None, PointerType::Buffer, 1, false, true, false>
+    struct TypeInfo<Buffer> : public BaseTypeInfo<Buffer,
+                                                  DataType::None,
+                                                  DataType::None,
+                                                  PointerType::Buffer,
+                                                  1,
+                                                  false,
+                                                  true,
+                                                  false>
     {
     };
 

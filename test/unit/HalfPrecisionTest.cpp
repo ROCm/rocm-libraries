@@ -454,7 +454,7 @@ namespace rocRollerTest
         auto addr
             = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Int64, 1);
 
-        auto buff_desc = BufferDescriptor(m_context);
+        auto buff_desc = std::make_shared<BufferDescriptor>(m_context);
         auto buff_opts = BufferInstructionOptions();
 
         // copy
@@ -475,8 +475,15 @@ namespace rocRollerTest
                          MemoryInstructions::MemoryKind::Flat, vf32, addr, addr, addr, addr, "")),
                      FatalError);
 
-        EXPECT_THROW(m_context->schedule(m_context->mem()->loadAndPackBuffer(
-                         vf32, addr, addr, buff_desc, buff_opts)),
+        EXPECT_THROW(m_context->schedule(
+                         m_context->mem()->loadAndPack(MemoryInstructions::MemoryKind::Buffer,
+                                                       vf32,
+                                                       addr,
+                                                       addr,
+                                                       addr,
+                                                       addr,
+                                                       "",
+                                                       buff_desc)),
                      FatalError);
     }
 

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2019-2022 Advanced Micro Devices, Inc.
+ * Copyright 2019-2023 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -306,9 +306,10 @@ namespace rocRoller
 
         DataTypeInfo info;
 
-        info.variableType = T_Info::Var;
-        info.name         = T_Info::Name();
-        info.abbrev       = T_Info::Abbrev();
+        info.variableType        = T_Info::Var;
+        info.segmentVariableType = T_Info::SegmentVariableType;
+        info.name                = T_Info::Name();
+        info.abbrev              = T_Info::Abbrev();
 
         info.packing     = T_Info::Packing;
         info.elementSize = T_Info::ElementSize;
