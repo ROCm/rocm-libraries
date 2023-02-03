@@ -561,8 +561,7 @@ public:
     static std::string format_name(std::string string)
     {
         format     format = get_format();
-        std::regex r("([A-z0-9]*):\\s*((?:custom_type<[A-z0-9,]*>)|[A-z:().<>\\s0-9]*)(}*)");
-
+std::regex r("([A-z0-9]*):\\s*((?:custom_type<[A-z0-9,]*>)|[A-z:\\(\\)\\.<>\\s0-9]*)(\\}*)");
         // First we perform some checks
         bool checks[4] = {false};
         for(std::sregex_iterator i = std::sregex_iterator(string.begin(), string.end(), r);
