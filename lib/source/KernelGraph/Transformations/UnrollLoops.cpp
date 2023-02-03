@@ -106,31 +106,28 @@ namespace rocRoller
         }
 
         /**
-         * @brief Determine whether to unroll a specified loop
+         * @brief Determine how many times to unroll the loop.
+         *
+         * A value of 1 means do not unroll it.
          *
          */
-        bool performUnroll(KernelGraph& graph, int loopTag)
+        unsigned int getUnrollAmount(KernelGraph& graph, int loopTag)
         {
-            auto dimTag = graph.mapper.get<Dimension>(loopTag);
-            auto dim    = std::get<Dimension>(graph.coordinates.getElement(dimTag));
-            if(identical(getSize(dim), Expression::literal(1u)))
-                return false;
+            auto dimTag        = graph.mapper.get<Dimension>(loopTag);
+            auto forLoopLength = getSize(std::get<Dimension>(graph.coordinates.getElement(dimTag)));
+
+            // If loop length is a constant, unroll the loop by that amount
+            if(Expression::evaluationTimes(forLoopLength)[Expression::EvaluationTime::Translate])
+            {
+                auto length = Expression::evaluate(forLoopLength);
+                if(isInteger(length))
+                    return getUnsignedInt(length);
+            }
+
+            return 1u;
 
             // TODO: Better loop dependency checker
             // Do not unroll loops that have a dependency between iterations.
-            // At the moment, we are saying that if the first node in a loop's
-            // body is a Multiply, then we know it has a dependency. This should
-            // be improved in the future.
-            auto directBodyNodes = graph.control.getOutputNodeIndices<Body>(loopTag);
-
-            for(auto const& directBodyNode : directBodyNodes)
-            {
-                auto x = std::get<Operation>(graph.control.getElement(directBodyNode));
-                if(std::holds_alternative<Multiply>(x))
-                    return false;
-            }
-
-            return true;
         }
 
         struct UnrollLoopsVisitor : public BaseGraphVisitor
@@ -153,7 +150,9 @@ namespace rocRoller
                 auto newTag = reindexer.control.at(tag);
                 auto bodies = graph.control.getOutputNodeIndices<Body>(newTag).to<std::set>();
 
-                if(!performUnroll(graph, newTag))
+                auto unrollAmount = getUnrollAmount(graph, newTag);
+
+                if(unrollAmount == 1)
                     return;
 
                 // ---------------------------------
@@ -170,7 +169,7 @@ namespace rocRoller
                 // Find all incoming PassThrough edges to the ForLoop dimension and replace them with
                 // a Split edge with an Unroll dimension.
                 auto forLoopLocation = graph.coordinates.getLocation(forLoopDimension);
-                auto unrollDimension = graph.coordinates.addElement(Unroll(UNROLL_AMOUNT));
+                auto unrollDimension = graph.coordinates.addElement(Unroll(unrollAmount));
                 for(auto const& input : forLoopLocation.incoming)
                 {
                     if(isEdge<PassThrough>(std::get<Edge>(graph.coordinates.getElement(input))))
@@ -214,7 +213,7 @@ namespace rocRoller
 
                 auto [lhs, rhs] = getForLoopIncrement(graph, newTag);
 
-                auto newAddExpr            = lhs + (rhs * Expression::literal(UNROLL_AMOUNT));
+                auto newAddExpr            = lhs + (rhs * Expression::literal(unrollAmount));
                 loopIncrementOp.expression = newAddExpr;
 
                 graph.control.setElement(loopIncrement[0], loopIncrementOp);
@@ -251,16 +250,13 @@ namespace rocRoller
                 // ------------------------------
                 // Create duplicates of the loop body and add a setCoordinate node in between
                 // the ForLoopOp and the new bodies
-                for(unsigned int i = 1; i < UNROLL_AMOUNT; i++)
+                for(unsigned int i = 1; i < unrollAmount; i++)
                 {
                     auto newBodies = duplicateControlNodes(graph, bodies);
 
                     connectWithSetCoord(newBodies, i);
                 }
             }
-
-        private:
-            const unsigned int UNROLL_AMOUNT = 2;
         };
 
         KernelGraph unrollLoops(KernelGraph const& k, std::shared_ptr<Context> context)
