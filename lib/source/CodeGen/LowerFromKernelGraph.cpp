@@ -73,8 +73,8 @@ namespace rocRoller
 
             inline Register::ValuePtr getBufferSrd(int tag)
             {
-                auto offsetTag = m_graph.mapper.get<Buffer>(tag);
-                return m_context->registerTagManager()->getRegister(offsetTag);
+                auto bufferTag = m_graph.mapper.get<Buffer>(tag);
+                return m_context->registerTagManager()->getRegister(bufferTag);
             }
 
             Register::ValuePtr getOffset(int tag, int dimension)
@@ -440,13 +440,16 @@ namespace rocRoller
                             {DataType::None, PointerType::Buffer},
                             1);
                         bufferReg->setName(concatenate("buffer", tag));
-                        co_yield Register::AllocateIfNeeded(bufferReg);
-                        auto basePointer = MkSGPR(DataType::Int64);
-                        auto bufDesc     = std::make_shared<BufferDescriptor>(bufferReg, m_context);
-                        co_yield m_context->argLoader()->getValue(user->argumentName(),
-                                                                  basePointer);
-                        co_yield bufDesc->setBasePointer(basePointer);
-                        co_yield bufDesc->setDefaultOpts();
+                        if(bufferReg->allocationState() == Register::AllocationState::Unallocated)
+                        {
+                            co_yield Register::AllocateIfNeeded(bufferReg);
+                            auto basePointer = MkSGPR(DataType::Int64);
+                            auto bufDesc     = BufferDescriptor(bufferReg, m_context);
+                            co_yield m_context->argLoader()->getValue(user->argumentName(),
+                                                                      basePointer);
+                            co_yield bufDesc.setBasePointer(basePointer);
+                            co_yield bufDesc.setDefaultOpts();
+                        }
                         scope->addRegister(buffer);
                     }
                 }
