@@ -258,6 +258,10 @@ And the following gets the wait count for the `global_store_byte` instruction on
 GPUArchitectureLibrary::GetArch("GFX90a").GetInstructionInfo("global_store_byte").getWaitCount()
 ```
 
+## Doxygen documentation pages
+
+DoxygenLink
+
 ## Other Topics
 
 ### Components
