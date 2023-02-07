@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2021-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2021-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -101,7 +101,7 @@ void block_run_length_decode_kernel(
     const unsigned global_thread_idx = BlockSize * hipBlockIdx_x + hipThreadIdx_x;
     hipcub::LoadDirectBlocked(global_thread_idx, d_run_items, run_items);
     hipcub::LoadDirectBlocked(global_thread_idx, d_run_lengths, run_lengths);
-    
+
     unsigned total_decoded_size{};
     BlockRunLengthDecodeT block_run_length_decode(
         temp_storage,
@@ -140,7 +140,8 @@ TYPED_TEST(HipcubBlockRunLengthDecodeTest, TestDecode)
 
     for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
-        const unsigned seed_value = seed_index >= random_seeds_count ? seeds[seed_index] : rand();
+        const unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         const LengthT max_run_length = static_cast<LengthT>(
@@ -164,7 +165,7 @@ TYPED_TEST(HipcubBlockRunLengthDecodeTest, TestDecode)
         std::uniform_int_distribution<size_t> num_empty_runs_dist(1, 4);
         const size_t num_trailing_empty_runs = num_empty_runs_dist(prng);
         num_runs += num_trailing_empty_runs;
-        
+
         const auto empty_run_items = test_utils::get_random_data<ItemT>(
             num_trailing_empty_runs,
             std::numeric_limits<ItemT>::min(),
