@@ -29,7 +29,7 @@ namespace rocRoller
         std::shared_ptr<Register::Value> newAddr    = addr;
 
         if(offset && offset->regType() == Register::Type::Literal)
-            offset_val = std::get<int>(offset->getLiteralValue());
+            offset_val = getUnsignedInt(offset->getLiteralValue());
 
         switch(kind)
         {
@@ -98,7 +98,7 @@ namespace rocRoller
         std::shared_ptr<Register::Value> newAddr    = addr;
 
         if(offset && offset->regType() == Register::Type::Literal)
-            offset_val = std::get<int>(offset->getLiteralValue());
+            offset_val = getUnsignedInt(offset->getLiteralValue());
 
         switch(kind)
         {

@@ -698,8 +698,9 @@ namespace rocRoller
         inline std::shared_ptr<Value> Value::element(T const& indices) const
         {
             AssertFatal(!m_allocationCoord.empty(), ShowValue(m_allocationCoord.size()));
-            auto const   info                = DataTypeInfo::Get(m_varType);
-            size_t const elementsPerRegister = info.elementSize / bytesPerRegister;
+            auto const   info = DataTypeInfo::Get(m_varType);
+            size_t const elementsPerRegister
+                = std::max(info.elementSize / bytesPerRegister, (size_t)1);
 
             std::vector<int> coords;
             for(auto i : indices)

@@ -513,80 +513,142 @@ namespace rocRoller
                 Register::ValuePtr row_stride_reg, col_stride_reg;
                 if(m > 1)
                     co_yield generateStride(row_stride_reg, tag, 0);
+                else
+                    row_stride_reg = Register::Value::Literal(0u);
                 co_yield generateStride(col_stride_reg, tag, 1);
 
                 // Load a tile of Half precision values where each register will hold
                 // two half precision values.
                 if(pack && vgpr->variableType() == DataType::Halfx2)
                 {
-                    auto offset1 = Register::Value::Placeholder(
-                        m_context, Register::Type::Vector, col_offset_reg->variableType(), 1);
-                    auto offset2 = Register::Value::Placeholder(
-                        m_context, Register::Type::Vector, col_offset_reg->variableType(), 1);
-
-                    for(uint i = 0; i < m; ++i)
+                    if(row_stride_reg->regType() == Register::Type::Literal
+                       && col_stride_reg->regType() == Register::Type::Literal
+                       && offset->regType() == Register::Type::Literal)
                     {
-                        co_yield copy(col_offset_reg, row_offset_reg);
-                        for(uint j = 0; j < n; j += 2)
+                        // If all of the strides are literals, we can load everything using offsets
+                        // without using a runtime counter
+                        auto offset_value = getUnsignedInt(offset->getLiteralValue());
+                        auto row_stride   = getUnsignedInt(row_stride_reg->getLiteralValue());
+                        auto col_stride   = getUnsignedInt(col_stride_reg->getLiteralValue());
+                        for(uint i = 0; i < m; ++i)
                         {
-                            uint a = i * n + j;
+                            for(uint j = 0; j < n; j += 2)
+                            {
+                                uint a = i * n + j;
 
-                            co_yield copy(offset1, col_offset_reg);
-                            co_yield generate(col_offset_reg,
-                                              col_offset_reg->expression()
-                                                  + col_stride_reg->expression());
-                            co_yield copy(offset2, col_offset_reg);
-                            co_yield generate(col_offset_reg,
-                                              col_offset_reg->expression()
-                                                  + col_stride_reg->expression());
-
-                            co_yield m_context->mem()->loadAndPack(
-                                kind,
-                                vgpr->element({static_cast<int>(a / 2)}),
-                                offset1,
-                                offset,
-                                offset2,
-                                offset,
-                                "",
-                                bufDesc);
+                                co_yield m_context->mem()->loadAndPack(
+                                    kind,
+                                    vgpr->element({static_cast<int>(a / 2)}),
+                                    row_offset_reg,
+                                    Register::Value::Literal(offset_value + j * col_stride),
+                                    row_offset_reg,
+                                    Register::Value::Literal(offset_value + (j + 1) * col_stride),
+                                    "",
+                                    bufDesc);
+                            }
+                            offset_value += row_stride;
                         }
-                        if(i < m - 1)
-                            co_yield generate(row_offset_reg,
-                                              row_offset_reg->expression()
-                                                  + row_stride_reg->expression());
+                    }
+                    else
+                    {
+                        auto offset1 = Register::Value::Placeholder(
+                            m_context, Register::Type::Vector, col_offset_reg->variableType(), 1);
+                        auto offset2 = Register::Value::Placeholder(
+                            m_context, Register::Type::Vector, col_offset_reg->variableType(), 1);
+
+                        for(uint i = 0; i < m; ++i)
+                        {
+                            co_yield copy(col_offset_reg, row_offset_reg);
+                            for(uint j = 0; j < n; j += 2)
+                            {
+                                uint a = i * n + j;
+
+                                co_yield copy(offset1, col_offset_reg);
+                                co_yield generate(col_offset_reg,
+                                                  col_offset_reg->expression()
+                                                      + col_stride_reg->expression());
+                                co_yield copy(offset2, col_offset_reg);
+                                co_yield generate(col_offset_reg,
+                                                  col_offset_reg->expression()
+                                                      + col_stride_reg->expression());
+
+                                co_yield m_context->mem()->loadAndPack(
+                                    kind,
+                                    vgpr->element({static_cast<int>(a / 2)}),
+                                    offset1,
+                                    offset,
+                                    offset2,
+                                    offset,
+                                    "",
+                                    bufDesc);
+                            }
+                            if(i < m - 1)
+                                co_yield generate(row_offset_reg,
+                                                  row_offset_reg->expression()
+                                                      + row_stride_reg->expression());
+                        }
                     }
                 }
                 else
                 {
                     auto elementSize = (uint)DataTypeInfo::Get(dataType).elementSize;
-                    for(int i = 0; i < m; ++i)
+                    if(row_stride_reg->regType() == Register::Type::Literal
+                       && col_stride_reg->regType() == Register::Type::Literal
+                       && offset->regType() == Register::Type::Literal)
                     {
-                        co_yield copy(col_offset_reg, row_offset_reg);
-
-                        for(int j = 0; j < n; ++j)
+                        // If all of the strides are literals, we can load everything using offsets
+                        // without using a runtime counter
+                        auto offset_value = getUnsignedInt(offset->getLiteralValue());
+                        auto row_stride   = getUnsignedInt(row_stride_reg->getLiteralValue());
+                        auto col_stride   = getUnsignedInt(col_stride_reg->getLiteralValue());
+                        for(uint i = 0; i < m; ++i)
                         {
-                            co_yield m_context->mem()->load(
-                                kind,
-                                vgpr->element({static_cast<int>(i * n + j)}),
-                                col_offset_reg->subset({0}),
-                                offset,
-                                elementSize,
-                                "",
-                                false,
-                                bufDesc);
-                            if(j < n - 1)
+                            for(uint j = 0; j < n; ++j)
                             {
-                                co_yield generate(col_offset_reg,
-                                                  col_offset_reg->expression()
-                                                      + col_stride_reg->expression());
+                                co_yield m_context->mem()->load(
+                                    kind,
+                                    vgpr->element({static_cast<int>(i * n + j)}),
+                                    row_offset_reg,
+                                    Register::Value::Literal(offset_value + j * col_stride),
+                                    elementSize,
+                                    "",
+                                    false,
+                                    bufDesc);
                             }
+                            offset_value += row_stride;
                         }
-
-                        if(i < m - 1)
+                    }
+                    else
+                    {
+                        for(int i = 0; i < m; ++i)
                         {
-                            co_yield generate(row_offset_reg,
-                                              row_offset_reg->expression()
-                                                  + row_stride_reg->expression());
+                            co_yield copy(col_offset_reg, row_offset_reg);
+
+                            for(int j = 0; j < n; ++j)
+                            {
+                                co_yield m_context->mem()->load(
+                                    kind,
+                                    vgpr->element({static_cast<int>(i * n + j)}),
+                                    col_offset_reg->subset({0}),
+                                    offset,
+                                    elementSize,
+                                    "",
+                                    false,
+                                    bufDesc);
+                                if(j < n - 1)
+                                {
+                                    co_yield generate(col_offset_reg,
+                                                      col_offset_reg->expression()
+                                                          + col_stride_reg->expression());
+                                }
+                            }
+
+                            if(i < m - 1)
+                            {
+                                co_yield generate(row_offset_reg,
+                                                  row_offset_reg->expression()
+                                                      + row_stride_reg->expression());
+                            }
                         }
                     }
                 }
@@ -683,11 +745,8 @@ namespace rocRoller
                 // the offset of the beginning of the allocation into lds_offset.
                 auto ldsAllocation = m_context->registerTagManager()->getRegister(lds_tag);
 
-                auto lds_offset = Register::Value::Placeholder(
-                    m_context, Register::Type::Vector, DataType::Int32, 1);
-                auto lds_offset_expr
-                    = Expression::literal(ldsAllocation->getLDSAllocation()->offset());
-                co_yield generate(lds_offset, lds_offset_expr);
+                auto lds_offset
+                    = Register::Value::Literal(ldsAllocation->getLDSAllocation()->offset());
 
                 std::shared_ptr<Register::Value> tmpl;
                 if(load.vtype == DataType::Half)
@@ -728,11 +787,8 @@ namespace rocRoller
                 // the offset of the beginning of the allocation into lds_offset.
                 auto ldsAllocation = m_context->registerTagManager()->getRegister(lds_tag);
 
-                auto lds_offset = Register::Value::Placeholder(
-                    m_context, Register::Type::Vector, DataType::Int32, 1);
-                auto lds_offset_expr
-                    = Expression::literal(ldsAllocation->getLDSAllocation()->offset());
-                co_yield generate(lds_offset, lds_offset_expr);
+                auto lds_offset
+                    = Register::Value::Literal(ldsAllocation->getLDSAllocation()->offset());
 
                 auto vtype = ldsAllocation->variableType();
 
@@ -1209,62 +1265,87 @@ namespace rocRoller
                 Register::ValuePtr row_stride_reg, col_stride_reg;
                 co_yield generateStride(row_stride_reg, tag, 0);
                 co_yield generateStride(col_stride_reg, tag, 1);
+                co_yield m_context->copier()->ensureType(vgpr, vgpr, Register::Type::Vector);
 
-                for(int i = 0; i < m; ++i)
+                // Convert the data to the expected datatype
+                Register::ValuePtr converted;
+                if(DataTypeInfo::Get(vgpr->variableType()).segmentVariableType != dataType)
                 {
-                    co_yield copy(col_offset_reg, row_offset_reg);
-
-                    for(int j = 0; j < n; ++j)
+                    converted = MkVGPR(dataType, vgpr->valueCount());
+                    co_yield converted->allocate();
+                    for(int i = 0; i < vgpr->valueCount(); ++i)
                     {
-                        uint a = i * n + j;
-
-                        Register::ValuePtr value;
-                        if(vgpr->regType() == Register::Type::Accumulator)
-                        {
-                            value = MkVGPR(vgpr->variableType());
-                            co_yield m_context->copier()->copy(
-                                value, vgpr->element({static_cast<int>(a)}));
-                        }
-                        else
-                        {
-                            value = vgpr->element({static_cast<int>(a)});
-                        }
-
-                        Register::ValuePtr converted;
-                        if(DataTypeInfo::Get(value->variableType()).segmentVariableType != dataType)
-                        {
-                            converted = MkVGPR(dataType);
-                            co_yield Expression::generate(
-                                converted,
-                                convert(dataType.dataType,
-                                        std::make_shared<Expression::Expression>(value)),
-                                m_context);
-                        }
-                        else
-                        {
-                            converted = value;
-                        }
-
-                        co_yield m_context->mem()->store(kind,
-                                                         col_offset_reg->subset({0}),
-                                                         converted,
-                                                         offset,
-                                                         elementSize,
-                                                         "",
-                                                         bufDesc);
-                        if(j < n - 1)
-                        {
-                            co_yield generate(col_offset_reg,
-                                              col_offset_reg->expression()
-                                                  + col_stride_reg->expression());
-                        }
+                        Register::ValuePtr tmp = converted->element({i});
+                        co_yield Expression::generate(
+                            tmp,
+                            convert(dataType.dataType,
+                                    std::make_shared<Expression::Expression>(vgpr->element({i}))),
+                            m_context);
                     }
+                }
+                else
+                {
+                    converted = vgpr;
+                }
 
-                    if(i < m - 1)
+                if(row_stride_reg->regType() == Register::Type::Literal
+                   && col_stride_reg->regType() == Register::Type::Literal
+                   && offset->regType() == Register::Type::Literal)
+                {
+                    // If all of the strides are literals, we can store everything using offsets
+                    // without using a runtime counter
+                    auto offset_value = getUnsignedInt(offset->getLiteralValue());
+                    auto row_stride   = getUnsignedInt(row_stride_reg->getLiteralValue());
+                    auto col_stride   = getUnsignedInt(col_stride_reg->getLiteralValue());
+                    for(uint i = 0; i < m; ++i)
                     {
-                        co_yield generate(row_offset_reg,
-                                          row_offset_reg->expression()
-                                              + row_stride_reg->expression());
+                        for(uint j = 0; j < n; ++j)
+                        {
+                            uint a = i * n + j;
+                            co_yield m_context->mem()->store(
+                                kind,
+                                row_offset_reg,
+                                converted->element({static_cast<int>(a)}),
+                                Register::Value::Literal(offset_value + j * col_stride),
+                                elementSize,
+                                "",
+                                bufDesc);
+                        }
+                        offset_value += row_stride;
+                    }
+                }
+                else
+                {
+                    for(int i = 0; i < m; ++i)
+                    {
+                        co_yield copy(col_offset_reg, row_offset_reg);
+
+                        for(int j = 0; j < n; ++j)
+                        {
+                            uint a = i * n + j;
+
+                            co_yield m_context->mem()->store(
+                                kind,
+                                col_offset_reg->subset({0}),
+                                converted->element({static_cast<int>(a)}),
+                                offset,
+                                elementSize,
+                                "",
+                                bufDesc);
+                            if(j < n - 1)
+                            {
+                                co_yield generate(col_offset_reg,
+                                                  col_offset_reg->expression()
+                                                      + col_stride_reg->expression());
+                            }
+                        }
+
+                        if(i < m - 1)
+                        {
+                            co_yield generate(row_offset_reg,
+                                              row_offset_reg->expression()
+                                                  + row_stride_reg->expression());
+                        }
                     }
                 }
             }
@@ -1300,11 +1381,8 @@ namespace rocRoller
                     ldsAllocation = m_context->registerTagManager()->getRegister(lds_tag);
                 }
 
-                auto lds_offset = Register::Value::Placeholder(
-                    m_context, Register::Type::Vector, DataType::Int32, 1);
-                auto lds_offset_expr
-                    = Expression::literal(ldsAllocation->getLDSAllocation()->offset());
-                co_yield generate(lds_offset, lds_offset_expr);
+                auto lds_offset
+                    = Register::Value::Literal(ldsAllocation->getLDSAllocation()->offset());
 
                 auto const m = tile.subTileSizes[0];
                 auto const n = tile.subTileSizes[1];
@@ -1378,10 +1456,8 @@ namespace rocRoller
                     ldsAllocation = m_context->registerTagManager()->getRegister(lds_tag);
                 }
 
-                auto lds_offset = Register::Value::Placeholder(
-                    m_context, Register::Type::Vector, DataType::Int32, 1);
-                co_yield generate(lds_offset,
-                                  Expression::literal(ldsAllocation->getLDSAllocation()->offset()));
+                auto lds_offset
+                    = Register::Value::Literal(ldsAllocation->getLDSAllocation()->offset());
 
                 uint wfs      = m_context->kernel()->wavefront_size();
                 uint num_vgpr = wavetileNumElements / wfs;
