@@ -118,6 +118,45 @@ def hgemm():
         **fp16,
     )
 
+    yield GEMMRun(
+        M=7680,
+        N=8448,
+        K=8192,
+        mac_m=64,
+        mac_n=64,
+        mac_k=64,
+        storeLDS_D=True,
+        trans_A="T",
+        trans_B="N",
+        **fp16,
+    )
+
+    yield GEMMRun(
+        M=7680,
+        N=8448,
+        K=8192,
+        mac_m=64,
+        mac_n=64,
+        mac_k=64,
+        storeLDS_D=True,
+        trans_A="T",
+        trans_B="T",
+        **fp16,
+    )
+
+    yield GEMMRun(
+        M=7680,
+        N=8448,
+        K=8192,
+        mac_m=64,
+        mac_n=64,
+        mac_k=64,
+        storeLDS_D=True,
+        trans_A="N",
+        trans_B="T",
+        **fp16,
+    )
+
 
 def codegen():
     yield CodeGenRun(instCount=40000, instructions="comments")

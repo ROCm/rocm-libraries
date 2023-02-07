@@ -213,18 +213,17 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult)
     runtimeArgs.append("A", d_A.get());
     runtimeArgs.append("d_a_limit", (size_t)result.M * result.K);
 
+    runtimeArgs.append("d_a_size_0", (size_t)result.M);
+    runtimeArgs.append("d_a_size_1", (size_t)result.K);
+
     //TODO: Handle transposed matrices more elegantly
     if(result.trans_A == "T")
     {
-        runtimeArgs.append("d_a_size_0", (size_t)result.K);
-        runtimeArgs.append("d_a_size_1", (size_t)result.M);
-        runtimeArgs.append("d_a_stride_0", (size_t)result.M);
+        runtimeArgs.append("d_a_stride_0", (size_t)result.K);
         runtimeArgs.append("d_a_stride_1", (size_t)1);
     }
     else
     {
-        runtimeArgs.append("d_a_size_0", (size_t)result.M);
-        runtimeArgs.append("d_a_size_1", (size_t)result.K);
         runtimeArgs.append("d_a_stride_0", (size_t)1);
         runtimeArgs.append("d_a_stride_1", (size_t)result.M);
     }
@@ -232,18 +231,17 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult)
     runtimeArgs.append("B", d_B.get());
     runtimeArgs.append("d_b_limit", (size_t)result.K * result.N);
 
+    runtimeArgs.append("d_b_size_0", (size_t)result.K);
+    runtimeArgs.append("d_b_size_1", (size_t)result.N);
+
     //TODO: Handle transposed matrices more elegantly
     if(result.trans_B == "T")
     {
-        runtimeArgs.append("d_b_size_0", (size_t)result.N);
-        runtimeArgs.append("d_b_size_1", (size_t)result.K);
-        runtimeArgs.append("d_b_stride_0", (size_t)result.K);
+        runtimeArgs.append("d_b_stride_0", (size_t)result.N);
         runtimeArgs.append("d_b_stride_1", (size_t)1);
     }
     else
     {
-        runtimeArgs.append("d_b_size_0", (size_t)result.K);
-        runtimeArgs.append("d_b_size_1", (size_t)result.N);
         runtimeArgs.append("d_b_stride_0", (size_t)1);
         runtimeArgs.append("d_b_stride_1", (size_t)result.K);
     }
