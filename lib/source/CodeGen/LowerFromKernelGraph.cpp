@@ -503,6 +503,9 @@ namespace rocRoller
                 auto row_offset_reg = getOffset(tag, 0);
                 auto col_offset_reg = getOffset(tag, 1);
 
+                AssertFatal(row_offset_reg, "Invalid row offset register.");
+                AssertFatal(col_offset_reg, "Invalid col offset register.");
+
                 std::shared_ptr<BufferDescriptor> bufDesc;
                 if(kind == MemoryInstructions::MemoryKind::Buffer)
                 {
@@ -516,6 +519,9 @@ namespace rocRoller
                 else
                     row_stride_reg = Register::Value::Literal(0u);
                 co_yield generateStride(col_stride_reg, tag, 1);
+
+                AssertFatal(row_stride_reg, "Invalid row stride register.");
+                AssertFatal(col_stride_reg, "Invalid col stride register.");
 
                 // Load a tile of Half precision values where each register will hold
                 // two half precision values.
@@ -669,6 +675,9 @@ namespace rocRoller
 
                 auto mac_offset_reg = getOffset(tag, -1);
                 auto row_offset_reg = getOffset(tag, 0);
+
+                AssertFatal(mac_offset_reg, "Invalid mac offset register.");
+                AssertFatal(row_offset_reg, "Invalid row offset register.");
 
                 std::shared_ptr<Register::Value> tmpl;
                 if(load.vtype == DataType::Half)
@@ -1138,8 +1147,12 @@ namespace rocRoller
                 auto mac_offset_x_reg  = getOffset(loads[0], -1);
                 auto wave_offset_x_reg = getOffset(loads[0], 0);
 
+                AssertFatal(wave_offset_x_reg, "Invalid wave x offset register.");
+
                 auto mac_offset_y_reg  = getOffset(loads[1], -1);
                 auto wave_offset_y_reg = getOffset(loads[1], 0);
+
+                AssertFatal(wave_offset_y_reg, "Invalid wave y offset register.");
 
                 AssertFatal(macA.sizes[1] == macB.sizes[0], "MacroTile size mismatch.");
 
@@ -1255,6 +1268,9 @@ namespace rocRoller
                 auto row_offset_reg = getOffset(tag, 0);
                 auto col_offset_reg = getOffset(tag, 1);
 
+                AssertFatal(row_offset_reg, "Invalid row offset register.");
+                AssertFatal(col_offset_reg, "Invalid col offset register.");
+
                 std::shared_ptr<BufferDescriptor> bufDesc;
                 if(kind == MemoryInstructions::MemoryKind::Buffer)
                 {
@@ -1265,6 +1281,9 @@ namespace rocRoller
                 Register::ValuePtr row_stride_reg, col_stride_reg;
                 co_yield generateStride(row_stride_reg, tag, 0);
                 co_yield generateStride(col_stride_reg, tag, 1);
+
+                AssertFatal(row_stride_reg, "Invalid row stride register.");
+                AssertFatal(col_stride_reg, "Invalid col stride register.");
                 co_yield m_context->copier()->ensureType(vgpr, vgpr, Register::Type::Vector);
 
                 // Convert the data to the expected datatype
@@ -1366,6 +1385,7 @@ namespace rocRoller
                 auto vtype = store.dataType;
 
                 auto row_offset_reg = getOffset(tag, 0);
+                AssertFatal(row_offset_reg, "Invalid row offset register.");
 
                 auto numElements = product(tile.subTileSizes) * product(m_workgroupSize);
                 // Allocate LDS memory, and store the offset of the beginning of the allocation
