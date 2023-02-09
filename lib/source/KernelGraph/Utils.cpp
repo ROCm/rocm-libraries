@@ -916,50 +916,27 @@ namespace rocRoller
             AssertFatal(loads.size() == 2, "Multiply op needs two operands");
             auto loadA = graph.control.getElement(loads[0]);
             auto loadB = graph.control.getElement(loads[1]);
+            AssertFatal(isOperation<LoadTiled>(loadA) && isOperation<LoadTiled>(loadB),
+                        "Both operands should be LoadTiled");
 
-            int sourceA_tag = -1, sourceB_tag = -1;
             // LoadTiled A
-            if(isOperation<LoadTiled>(loadA))
-            {
-                auto userA_tag = graph.mapper.get<User>(loads[0]);
-                AssertFatal(userA_tag > 0, "User dimension not found");
-                graph.mapper.connect<User>(waveMult, userA_tag, 0);
-                sourceA_tag = userA_tag;
-            }
-            // LoadLDSTile A
-            else if(isOperation<LoadLDSTile>(loadA))
-            {
-                auto ldsA_tag = graph.mapper.get<LDS>(loads[0]);
-                AssertFatal(ldsA_tag > 0, "LDS dimension not found");
-                graph.mapper.connect<LDS>(waveMult, ldsA_tag, 0);
-                sourceA_tag = ldsA_tag;
-            }
+            auto userA_tag = graph.mapper.get<User>(loads[0]);
+            AssertFatal(userA_tag > 0, "User dimension not found");
+            graph.mapper.connect<User>(waveMult, userA_tag, 0);
 
             // LoadTiled B
-            if(isOperation<LoadTiled>(loadB))
-            {
-                auto userB_tag = graph.mapper.get<User>(loads[1]);
-                AssertFatal(userB_tag > 0, "User dimension not found");
-                graph.mapper.connect<User>(waveMult, userB_tag, 1);
-                sourceB_tag = userB_tag;
-            }
-            // LoadLDSTile B
-            else if(isOperation<LoadLDSTile>(loadB))
-            {
-                auto ldsB_tag = graph.mapper.get<LDS>(loads[1]);
-                AssertFatal(ldsB_tag > 0, "LDS dimension not found");
-                graph.mapper.connect<LDS>(waveMult, ldsB_tag, 1);
-                sourceB_tag = ldsB_tag;
-            }
+            auto userB_tag = graph.mapper.get<User>(loads[1]);
+            AssertFatal(userB_tag > 0, "User dimension not found");
+            graph.mapper.connect<User>(waveMult, userB_tag, 1);
 
-            AssertFatal(sourceA_tag > 0 && sourceB_tag > 0, "User or LDS dimensions not found");
+            AssertFatal(userA_tag > 0 && userB_tag > 0, "User dimensions not found");
 
             auto [waveA_tag, waveA] = graph.getDimension<WaveTile>(loads[0]);
             auto [waveB_tag, waveB] = graph.getDimension<WaveTile>(loads[1]);
 
-            auto a = graph.coordinates.getOutputNodeIndices(sourceA_tag, CT::isEdge<DataFlow>)
+            auto a = graph.coordinates.getOutputNodeIndices(userA_tag, CT::isEdge<DataFlow>)
                          .to<std::vector>();
-            auto b = graph.coordinates.getOutputNodeIndices(sourceB_tag, CT::isEdge<DataFlow>)
+            auto b = graph.coordinates.getOutputNodeIndices(userB_tag, CT::isEdge<DataFlow>)
                          .to<std::vector>();
             AssertFatal(a.size() == 1 && b.size() == 1, a.size(), b.size());
 
