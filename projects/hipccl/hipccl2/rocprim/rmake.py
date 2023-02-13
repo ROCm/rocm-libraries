@@ -38,7 +38,7 @@ def parse_args():
     parser.add_argument(      '--cmake-darg', required=False, dest='cmake_dargs', action='append', default=[],
                         help='List of additional cmake defines for builds (e.g. CMAKE_CXX_COMPILER_LAUNCHER=ccache)')
     parser.add_argument('-a', '--architecture', dest='gpu_architecture', required=False, default="gfx906;gfx1030;gfx1100;gfx1101;gfx1102", #:sramecc+:xnack-" ) #gfx1030" ) #gfx906" ) # gfx1030" )
-                        help='Set GPU architectures, e.g. all, gfx000, gfx803, gfx906:xnack-;gfx1030;gfx1100 (optional, default: all)')                        
+                        help='Set GPU architectures, e.g. all, gfx000, gfx803, gfx906:xnack-;gfx1030;gfx1100 (optional, default: all)')
     parser.add_argument('-v', '--verbose', required=False, default=False, action='store_true',
                         help='Verbose build (default: False)')
     return parser.parse_args()
@@ -79,8 +79,8 @@ def cmake_path(os_path):
     if OS_info["ID"] == "windows":
         return os_path.replace("\\", "/")
     else:
-        return os.path.realpath(os_path)     
-        
+        return os.path.realpath(os_path)
+
 def config_cmd():
     global args
     global OS_info
@@ -101,11 +101,13 @@ def config_cmd():
         #set CPACK_PACKAGING_INSTALL_PREFIX= defined as blank as it is appended to end of path for archive creation
         cmake_platform_opts.append( f"-DWIN32=ON -DCPACK_PACKAGING_INSTALL_PREFIX=") #" -DCPACK_PACKAGING_INSTALL_PREFIX={rocm_path}"
         cmake_platform_opts.append( f"-DCMAKE_INSTALL_PREFIX=\"C:/hipSDK\"" )
+        rocm_cmake_path = '"' + cmake_path(os.getenv("ROCM_CMAKE_PATH", "C:/hipSDK")) + '"'
         generator = f"-G Ninja"
         # "-G \"Visual Studio 16 2019\" -A x64"  #  -G NMake ")  #
         cmake_options.append( generator )
     else:
         rocm_path = os.getenv( 'ROCM_PATH', "/opt/rocm")
+        rocm_cmake_path = '"' + rocm_path + '"'
         if (OS_info["ID"] in ['centos', 'rhel']):
           cmake_executable = "cmake3"
         else:
@@ -135,7 +137,7 @@ def config_cmd():
         deps_dir = os.path.abspath(os.path.join(build_dir, 'deps')).replace('\\','/')
     else:
         deps_dir = args.deps_dir
-    cmake_base_options = f"-DROCM_PATH={rocm_path} -DCMAKE_PREFIX_PATH:PATH={rocm_path}" # -DCMAKE_INSTALL_PREFIX=rocmath-install" #-DCMAKE_INSTALL_LIBDIR=
+    cmake_base_options = f"-DROCM_PATH={rocm_path} -DCMAKE_PREFIX_PATH:PATH={rocm_path[:-1]};{rocm_cmake_path[1:]}" # -DCMAKE_INSTALL_PREFIX=rocmath-install" #-DCMAKE_INSTALL_LIBDIR=
     cmake_options.append( cmake_base_options )
 
     print( cmake_options )

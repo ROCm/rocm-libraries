@@ -175,14 +175,17 @@ if(BUILD_BENCHMARK)
 endif(BUILD_BENCHMARK)
 
 if(NOT DEPENDENCIES_FORCE_DOWNLOAD)
+  set(CMAKE_FIND_DEBUG_MODE TRUE)
   find_package(ROCM 0.7.3 CONFIG QUIET PATHS /opt/rocm)
+  set(CMAKE_FIND_DEBUG_MODE FALSE)
 endif()
 if(NOT ROCM_FOUND)
   if(NOT EXISTS "${FETCHCONTENT_BASE_DIR}/rocm-cmake-src")
     message(STATUS "ROCm CMake not found. Fetching...")
+    set(rocm_cmake_tag "master" CACHE STRING "rocm-cmake tag to download")
     FetchContent_Declare(
       rocm-cmake
-      URL  https://github.com/RadeonOpenCompute/rocm-cmake/archive/refs/tags/rocm-5.2.0.tar.gz
+      URL  https://github.com/RadeonOpenCompute/rocm-cmake/archive/${rocm_cmake_tag}.tar.gz
     )
     FetchContent_MakeAvailable(rocm-cmake)
   endif()
