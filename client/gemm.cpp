@@ -4,6 +4,7 @@
 
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Expression.hpp>
+#include <rocRoller/KernelOptions.hpp>
 #include <rocRoller/Operations/Command.hpp>
 #include <rocRoller/Serialization/YAML.hpp>
 #include <rocRoller/Utilities/Error.hpp>
@@ -41,6 +42,10 @@ struct GEMMProblem
     bool loadLDS_A  = true;
     bool loadLDS_B  = true;
     bool storeLDS_D = true;
+
+    // Unroll Options
+    unsigned int unroll_x = 0;
+    unsigned int unroll_y = 0;
 
     // Datatype of inputs and outputs
     std::string type_A;
@@ -97,6 +102,8 @@ struct rocRoller::Serialization::
         iot::mapRequired(io, "mac_k", result.mac_k);
         iot::mapRequired(io, "workgroup_size_x", result.workgroup_size_x);
         iot::mapRequired(io, "workgroup_size_y", result.workgroup_size_y);
+        iot::mapRequired(io, "unroll_x", result.unroll_x);
+        iot::mapRequired(io, "unroll_y", result.unroll_y);
         iot::mapRequired(io, "loadLDS_A", result.loadLDS_A);
         iot::mapRequired(io, "loadLDS_B", result.loadLDS_B);
         iot::mapRequired(io, "storeLDS_D", result.storeLDS_D);
@@ -319,8 +326,12 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult)
         postParams->setDimensionInfo(id - 1, WFY);
     }
 
+    auto kernelOptions     = std::make_shared<KernelOptions>();
+    kernelOptions->unrollX = result.unroll_x;
+    kernelOptions->unrollY = result.unroll_y;
+
     // Build GEMM kernel
-    CommandKernel commandKernel(command, "GEMM", params, postParams);
+    CommandKernel commandKernel(command, "GEMM", params, postParams, kernelOptions);
 
     // Warmup runs
     for(int i = 0; i < result.numWarmUp; ++i)
@@ -399,6 +410,8 @@ int main(int argc, const char* argv[])
     po.addArg("yaml", Arg({"o", "yaml"}, "Results"));
     po.addArg("workgroup_size_x", Arg({"workgroup_size_x"}, "Workgroup size in the x dimension"));
     po.addArg("workgroup_size_y", Arg({"workgroup_size_y"}, "Workgroup size in the y dimension"));
+    po.addArg("unroll_x", Arg({"unroll_x"}, "Unroll Size in X"));
+    po.addArg("unroll_y", Arg({"unroll_y"}, "Unroll Size in Y"));
     po.addArg("loadLDS_A", Arg({"loadLDS_A"}, "Use LDS when loading A Matrix"));
     po.addArg("loadLDS_B", Arg({"loadLDS_B"}, "Use LDS when loading B Matrix"));
     po.addArg("storeLDS_D", Arg({"storeLDS_D"}, "Use LDS when storing D Matrix"));
@@ -429,6 +442,8 @@ int main(int argc, const char* argv[])
     prob.mac_k            = po.get("mac_k", 64);
     prob.workgroup_size_x = po.get("workgroup_size_x", wavefront_size * 2);
     prob.workgroup_size_y = po.get("workgroup_size_y", 2);
+    prob.unroll_x         = po.get("unroll_x", 0);
+    prob.unroll_y         = po.get("unroll_y", 0);
     prob.loadLDS_A        = po.get("loadLDS_A", true);
     prob.loadLDS_B        = po.get("loadLDS_B", true);
     prob.storeLDS_D       = po.get("storeLDS_D", true);

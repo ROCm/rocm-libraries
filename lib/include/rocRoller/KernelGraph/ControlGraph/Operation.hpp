@@ -96,9 +96,10 @@ namespace rocRoller
         {
             Expression::ExpressionPtr condition;
 
+            std::string name;
             std::string toString() const
             {
-                return concatenate("ForLoopOp: ", condition);
+                return concatenate("ForLoopOp ", name, ": ", condition);
             }
         };
 

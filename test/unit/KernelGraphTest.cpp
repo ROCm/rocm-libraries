@@ -1029,7 +1029,7 @@ namespace KernelGraphTest
 		rankdir=LR
 		}
 		subgraph clusterCF {"cntrl1"[label="Kernel(1)"];
-		"cntrl2"[label="ForLoopOp: LessThan(DataFlowTag(10), 16i)(2)"];
+		"cntrl2"[label="ForLoopOp : LessThan(DataFlowTag(10), 16i)(2)"];
 		"cntrl3"[label="Body(3)",shape=box];
 		"cntrl4"[label="Assign SGPR 0i(4)"];
 		"cntrl5"[label="Initialize(5)",shape=box];
@@ -2488,7 +2488,7 @@ namespace KernelGraphTest
 	    "cntrl22"[label="Sequence(22)",shape=box];
 	    "cntrl23"[label="Sequence(23)",shape=box];
 	    "cntrl24"[label="StoreTiled(24)"];
-	    "cntrl26"[label="ForLoopOp: LessThan(DataFlowTag(193), Divide(CommandArgument(Load_Tiled_0_size_1), 16j))(26)"];
+	    "cntrl26"[label="ForLoopOp KLoop: LessThan(DataFlowTag(193), Divide(CommandArgument(Load_Tiled_0_size_1), 16j))(26)"];
 	    "cntrl27"[label="Assign SGPR 0l(27)"];
 	    "cntrl28"[label="Assign SGPR Add(DataFlowTag(193), 1j)(28)"];
 	    "cntrl29"[label="Initialize(29)",shape=box];
@@ -2498,12 +2498,12 @@ namespace KernelGraphTest
 	    "cntrl34"[label="Body(34)",shape=box];
 	    "cntrl35"[label="Body(35)",shape=box];
 	    "cntrl36"[label="Body(36)",shape=box];
-	    "cntrl37"[label="ForLoopOp: LessThan(DataFlowTag(198), 2j)(37)"];
+	    "cntrl37"[label="ForLoopOp XLoop: LessThan(DataFlowTag(198), 2j)(37)"];
 	    "cntrl38"[label="Assign SGPR 0j(38)"];
 	    "cntrl39"[label="Assign SGPR Add(DataFlowTag(198), 1j)(39)"];
 	    "cntrl40"[label="Initialize(40)",shape=box];
 	    "cntrl41"[label="ForLoopIncrement(41)",shape=box];
-	    "cntrl42"[label="ForLoopOp: LessThan(DataFlowTag(201), 2j)(42)"];
+	    "cntrl42"[label="ForLoopOp YLoop: LessThan(DataFlowTag(201), 2j)(42)"];
 	    "cntrl43"[label="Assign SGPR 0j(43)"];
 	    "cntrl44"[label="Assign SGPR Add(DataFlowTag(201), 1j)(44)"];
 	    "cntrl45"[label="Initialize(45)",shape=box];
@@ -2826,7 +2826,7 @@ namespace KernelGraphTest
 		"19"[label="Sequence(19)",shape=box];
 		"21"[label="Assign VGPR Add(DataFlowTag(20), DataFlowTag(29))(21)"];
 		"24"[label="StoreTiled(24)"];
-		"26"[label="ForLoopOp: LessThan(DataFlowTag(193), Divide(CommandArgument(Load_Tiled_0_size_1), 16j))(26)"];
+		"26"[label="ForLoopOp KLoop: LessThan(DataFlowTag(193), Divide(CommandArgument(Load_Tiled_0_size_1), 16j))(26)"];
 		"27"[label="Assign SGPR 0l(27)"];
 		"28"[label="Assign SGPR Add(DataFlowTag(193), 1j)(28)"];
 		"29"[label="Initialize(29)",shape=box];
@@ -2836,12 +2836,12 @@ namespace KernelGraphTest
 		"34"[label="Body(34)",shape=box];
 		"35"[label="Body(35)",shape=box];
 		"36"[label="Body(36)",shape=box];
-		"37"[label="ForLoopOp: LessThan(DataFlowTag(198), 2j)(37)"];
+		"37"[label="ForLoopOp XLoop: LessThan(DataFlowTag(198), 2j)(37)"];
 		"38"[label="Assign SGPR 0j(38)"];
 		"39"[label="Assign SGPR Add(DataFlowTag(198), 1j)(39)"];
 		"40"[label="Initialize(40)",shape=box];
 		"41"[label="ForLoopIncrement(41)",shape=box];
-		"42"[label="ForLoopOp: LessThan(DataFlowTag(201), 2j)(42)"];
+		"42"[label="ForLoopOp YLoop: LessThan(DataFlowTag(201), 2j)(42)"];
 		"43"[label="Assign SGPR 0j(43)"];
 		"44"[label="Assign SGPR Add(DataFlowTag(201), 1j)(44)"];
 		"45"[label="Initialize(45)",shape=box];
@@ -3937,7 +3937,7 @@ namespace KernelGraphTest
 	    "cntrl22"[label="Sequence(22)",shape=box];
 	    "cntrl23"[label="Sequence(23)",shape=box];
 	    "cntrl24"[label="StoreTiled(24)"];
-	    "cntrl26"[label="ForLoopOp: LessThan(DataFlowTag(193), Divide(CommandArgument(Load_Tiled_0_size_1), 16j))(26)"];
+	    "cntrl26"[label="ForLoopOp KLoop: LessThan(DataFlowTag(193), Divide(CommandArgument(Load_Tiled_0_size_1), 16j))(26)"];
 	    "cntrl27"[label="Assign SGPR 0l(27)"];
 	    "cntrl28"[label="Assign SGPR Add(DataFlowTag(193), 1j)(28)"];
 	    "cntrl29"[label="Initialize(29)",shape=box];
@@ -3947,12 +3947,12 @@ namespace KernelGraphTest
 	    "cntrl34"[label="Body(34)",shape=box];
 	    "cntrl35"[label="Body(35)",shape=box];
 	    "cntrl36"[label="Body(36)",shape=box];
-	    "cntrl37"[label="ForLoopOp: LessThan(DataFlowTag(198), 2j)(37)"];
+	    "cntrl37"[label="ForLoopOp XLoop: LessThan(DataFlowTag(198), 2j)(37)"];
 	    "cntrl38"[label="Assign SGPR 0j(38)"];
 	    "cntrl39"[label="Assign SGPR Add(DataFlowTag(198), 1j)(39)"];
 	    "cntrl40"[label="Initialize(40)",shape=box];
 	    "cntrl41"[label="ForLoopIncrement(41)",shape=box];
-	    "cntrl42"[label="ForLoopOp: LessThan(DataFlowTag(201), 2j)(42)"];
+	    "cntrl42"[label="ForLoopOp YLoop: LessThan(DataFlowTag(201), 2j)(42)"];
 	    "cntrl43"[label="Assign SGPR 0j(43)"];
 	    "cntrl44"[label="Assign SGPR Add(DataFlowTag(201), 1j)(44)"];
 	    "cntrl45"[label="Initialize(45)",shape=box];

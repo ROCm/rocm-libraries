@@ -106,16 +106,43 @@ namespace rocRoller
         }
 
         /**
+         * @brief Gets the name of the current for loop.
+         *
+         * @param graph
+         * @param start
+         * @return std::string
+         */
+        std::string getForLoopName(KernelGraph& graph, int start)
+        {
+            // Find the number of forLoops downstream from start
+            auto forLoop = graph.control.get<ForLoopOp>(start);
+            return forLoop->name;
+        }
+
+        /**
          * @brief Determine how many times to unroll the loop.
          *
          * A value of 1 means do not unroll it.
-         *
+         * Use getForLoopName to determine which forLoop we are attempting to unroll
+         * Checks unrollX(Y) value, 0 is default unroll it all if we can.
+         * Right now we don't unroll the K Loop.
          */
-        unsigned int getUnrollAmount(KernelGraph& graph, int loopTag)
+        unsigned int getUnrollAmount(KernelGraph& graph, int loopTag, KernelOptions& kernelOptions)
         {
             auto dimTag        = graph.mapper.get<Dimension>(loopTag);
             auto forLoopLength = getSize(std::get<Dimension>(graph.coordinates.getElement(dimTag)));
 
+            auto unrollX = kernelOptions.unrollX;
+            auto unrollY = kernelOptions.unrollY;
+            // Find the number of forLoops following this for loop.
+            auto name = getForLoopName(graph, loopTag);
+            if(name == "XLoop" && unrollX > 0)
+                return unrollX;
+            else if(name == "YLoop" && unrollY > 0)
+                return unrollY;
+            else if(name == "KLoop")
+                return 1u;
+            // Use default behavior if the above isn't true
             // If loop length is a constant, unroll the loop by that amount
             if(Expression::evaluationTimes(forLoopLength)[Expression::EvaluationTime::Translate])
             {
@@ -150,8 +177,7 @@ namespace rocRoller
                 auto newTag = reindexer.control.at(tag);
                 auto bodies = graph.control.getOutputNodeIndices<Body>(newTag).to<std::set>();
 
-                auto unrollAmount = getUnrollAmount(graph, newTag);
-
+                auto unrollAmount = getUnrollAmount(graph, newTag, m_context->kernelOptions());
                 if(unrollAmount == 1)
                     return;
 

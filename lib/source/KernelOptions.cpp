@@ -15,6 +15,8 @@ namespace rocRoller
         , storeLocalWidth(4)
         , storeGlobalWidth(4)
         , fuseLoops(true)
+        , unrollX(0)
+        , unrollY(0)
     {
     }
 
@@ -31,6 +33,8 @@ namespace rocRoller
         os << "  storeLocalWidth:\t" << input.storeLocalWidth << std::endl;
         os << "  storeGlobalWidth:\t" << input.storeGlobalWidth << std::endl;
         os << "  fuseLoops:\t" << input.fuseLoops << std::endl;
+        os << "  unrollX:\t" << input.unrollX << std::endl;
+        os << "  unrollY:\t" << input.unrollY << std::endl;
         return os;
     }
 

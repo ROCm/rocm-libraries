@@ -21,6 +21,8 @@ namespace rocRoller
         unsigned int loadGlobalWidth;
         unsigned int storeLocalWidth;
         unsigned int storeGlobalWidth;
+        unsigned int unrollX;
+        unsigned int unrollY;
 
         bool fuseLoops;
 

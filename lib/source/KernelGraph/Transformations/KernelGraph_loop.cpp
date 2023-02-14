@@ -196,7 +196,7 @@ namespace rocRoller
                 // create loopOp and attach with Kernel
                 auto loopVarExp = std::make_shared<Expression::Expression>(
                     DataFlowTag{iterTag, Register::Type::Scalar, DataType::Int32});
-                m_loopOp = graph.control.addElement(ForLoopOp{loopVarExp < m_loopSize});
+                m_loopOp = graph.control.addElement(ForLoopOp{loopVarExp < m_loopSize, ""});
                 graph.control.addElement(Body(), {new_tag}, {m_loopOp});
 
                 // create initOp and attach with the loopOp

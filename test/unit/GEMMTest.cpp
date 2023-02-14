@@ -54,6 +54,10 @@ namespace GEMMDriverTest
         uint workgroup_size_x = 2 * wavefront_size;
         uint workgroup_size_y = 2;
 
+        // Unroll Sizes
+        unsigned int unrollX = 0;
+        unsigned int unrollY = 0;
+
         bool loadLDSA  = true;
         bool loadLDSB  = true;
         bool storeLDSD = true;
@@ -184,6 +188,8 @@ namespace GEMMDriverTest
 
         auto kernelOptions       = std::make_shared<KernelOptions>();
         kernelOptions->fuseLoops = gemm.fuseLoops;
+        kernelOptions->unrollX   = gemm.unrollX;
+        kernelOptions->unrollY   = gemm.unrollY;
 
         auto params = std::make_shared<CommandParameters>();
         params->setManualKernelDimension(2);
@@ -346,6 +352,60 @@ namespace GEMMDriverTest
     {
         GEMMProblem gemm;
         gemm.wave_k = 8;
+
+        basicGEMM<Half>(m_context, gemm, 2.e-5);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed2X2UnrollX)
+    {
+        GEMMProblem gemm;
+
+        gemm.M = 256;
+        gemm.N = 512;
+        gemm.K = 64;
+
+        gemm.mac_m = 128;
+        gemm.mac_n = 256;
+        gemm.mac_k = 16;
+
+        gemm.wave_k = 8;
+
+        gemm.workgroup_size_x = 2 * gemm.wavefront_size;
+        gemm.workgroup_size_y = 4;
+
+        gemm.unrollX = 2;
+        gemm.unrollY = 1;
+
+        gemm.loadLDSA  = false;
+        gemm.storeLDSD = false;
+        gemm.fuseLoops = false;
+
+        basicGEMM<Half>(m_context, gemm, 2.e-5);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed2X2UnrollY)
+    {
+        GEMMProblem gemm;
+
+        gemm.M = 256;
+        gemm.N = 512;
+        gemm.K = 64;
+
+        gemm.mac_m = 128;
+        gemm.mac_n = 256;
+        gemm.mac_k = 16;
+
+        gemm.wave_k = 8;
+
+        gemm.workgroup_size_x = 2 * gemm.wavefront_size;
+        gemm.workgroup_size_y = 4;
+
+        gemm.unrollX = 1;
+        gemm.unrollY = 2;
+
+        gemm.loadLDSA  = false;
+        gemm.storeLDSD = false;
+        gemm.fuseLoops = false;
 
         basicGEMM<Half>(m_context, gemm, 2.e-5);
     }

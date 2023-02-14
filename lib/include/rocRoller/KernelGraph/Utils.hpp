@@ -10,7 +10,8 @@ namespace rocRoller
         /**
          * Create a range-based for loop.
          */
-        std::pair<int, int> rangeFor(KernelGraph& graph, Expression::ExpressionPtr size);
+        std::pair<int, int>
+            rangeFor(KernelGraph& graph, Expression::ExpressionPtr size, const std::string& name);
 
         void loadMacroTile(KernelGraph&                       graph,
                            int                                load_tag,

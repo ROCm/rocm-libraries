@@ -22,7 +22,9 @@ namespace rocRoller
         /**
          * Create a range-based for loop.
          */
-        std::pair<int, int> rangeFor(KernelGraph& graph, Expression::ExpressionPtr size)
+        std::pair<int, int> rangeFor(KernelGraph&              graph,
+                                     Expression::ExpressionPtr size,
+                                     const std::string&        loopName)
         {
             auto unit_stride  = Expression::literal(1u);
             auto rangeK       = graph.coordinates.addElement(Linear(size, unit_stride));
@@ -31,7 +33,7 @@ namespace rocRoller
             auto exprK        = std::make_shared<Expression::Expression>(
                 DataFlowTag{rangeK, Register::Type::Scalar, sizeDataType});
 
-            auto forK  = graph.control.addElement(ForLoopOp{exprK < size});
+            auto forK  = graph.control.addElement(ForLoopOp{exprK < size, loopName});
             auto initK = graph.control.addElement(
                 Assign{Register::Type::Scalar, Expression::literal(0, sizeDataType)});
             auto incrementK
