@@ -22,7 +22,6 @@
 #define ROCPRIM_DEVICE_DEVICE_MERGE_SORT_CONFIG_HPP_
 
 #include "config_types.hpp"
-#include "detail/config/device_merge_sort.hpp"
 #include "detail/config/device_merge_sort_block_merge.hpp"
 #include "detail/config/device_merge_sort_block_sort.hpp"
 #include "detail/device_config_helper.hpp"
@@ -35,39 +34,6 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<typename MergeSortConfig, typename, typename>
-struct wrapped_merge_sort_config
-{
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr merge_sort_config_params params = MergeSortConfig();
-    };
-};
-
-template<typename Key, typename Value>
-struct wrapped_merge_sort_config<default_config, Key, Value>
-{
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr merge_sort_config_params params
-            = default_merge_sort_config<static_cast<unsigned int>(Arch), Key, Value>();
-    };
-};
-
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
-template<typename MergeSortConfig, typename Key, typename Value>
-template<target_arch Arch>
-constexpr merge_sort_config_params
-    wrapped_merge_sort_config<MergeSortConfig, Key, Value>::architecture_config<Arch>::params;
-
-template<typename Key, typename Value>
-template<target_arch Arch>
-constexpr merge_sort_config_params
-    wrapped_merge_sort_config<default_config, Key, Value>::architecture_config<Arch>::params;
-#endif // DOXYGEN_SHOULD_SKIP_THIS
-
 // Sub algorithm block_merge:
 
 template<typename MergeSortBlockMergeConfig, typename, typename>
@@ -76,7 +42,6 @@ struct wrapped_merge_sort_block_merge_config
     template<target_arch Arch>
     struct architecture_config
     {
-        //using params = MergeSortBlockMergeConfig;
         static constexpr merge_sort_block_merge_config_params params = MergeSortBlockMergeConfig();
     };
 };
@@ -87,7 +52,6 @@ struct wrapped_merge_sort_block_merge_config<default_config, Key, Value>
     template<target_arch Arch>
     struct architecture_config
     {
-        //using params = default_merge_sort_config<static_cast<unsigned int>(Arch), Key, Value>;
         static constexpr merge_sort_block_merge_config_params params
             = default_merge_sort_block_merge_config<static_cast<unsigned int>(Arch), Key, Value>();
     };

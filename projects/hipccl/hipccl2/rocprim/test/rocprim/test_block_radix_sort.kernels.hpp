@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -219,6 +219,7 @@ auto test_block_radix_sort()
             dim3(grid_size), dim3(block_size), 0, 0,
             device_keys_output, to_striped, descending, start_bit, end_bit
         );
+        HIP_CHECK(hipGetLastError());
 
         // Getting results to host
         HIP_CHECK(
@@ -346,6 +347,7 @@ auto test_block_radix_sort()
             dim3(grid_size), dim3(block_size), 0, 0,
             device_keys_output, device_values_output, to_striped, descending, start_bit, end_bit
         );
+        HIP_CHECK(hipGetLastError());
 
         // Getting results to host
         HIP_CHECK(

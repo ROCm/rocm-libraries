@@ -29,7 +29,6 @@
 #include "../detail/temp_storage.hpp"
 #include "../detail/various.hpp"
 
-#include "detail/config/device_merge_sort.hpp"
 #include "detail/device_merge.hpp"
 #include "detail/device_merge_sort.hpp"
 #include "detail/device_merge_sort_mergepath.hpp"
@@ -528,6 +527,7 @@ ROCPRIM_KERNEL void device_merge_sort_compile_time_verifier()
                   "device_merge_sort merge_oddeven items_per_block must be power of two");
     static_assert(is_power_of_two(merge_mergepath_items_per_block),
                   "device_merge_sort merge_mergepath items_per_block must be power of two");
+
     (void)TAssertEqualGreater<sort_items_per_block, merge_oddeven_items_per_block>();
     (void)TAssertEqualGreater<sort_items_per_block, merge_mergepath_items_per_block>();
     static_assert(sort_items_per_block >= merge_oddeven_items_per_block,

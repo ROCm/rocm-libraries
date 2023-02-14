@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -47,6 +47,8 @@ constexpr const char* get_block_sort_method_name(rocprim::block_sort_algorithm a
         case rocprim::block_sort_algorithm::merge_sort: return "merge_sort";
         case rocprim::block_sort_algorithm::bitonic_sort:
             return "bitonic_sort";
+        case rocprim::block_sort_algorithm::stable_merge_sort:
+            return "stable_merge_sort";
             // Not using `default: ...` because it kills effectiveness of -Wswitch
     }
     return "unknown_algorithm";

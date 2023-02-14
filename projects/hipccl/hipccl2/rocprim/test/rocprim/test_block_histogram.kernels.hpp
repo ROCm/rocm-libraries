@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -152,6 +152,7 @@ void test_block_histogram_input_arrays()
             dim3(grid_size), dim3(block_size), 0, 0,
             device_output, device_output_bin
         );
+        HIP_CHECK(hipGetLastError());
 
         // Reading results back
         HIP_CHECK(

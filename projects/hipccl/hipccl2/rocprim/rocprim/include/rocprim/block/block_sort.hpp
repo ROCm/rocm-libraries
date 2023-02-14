@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -44,6 +44,8 @@ enum class block_sort_algorithm
     bitonic_sort,
     /// \brief A merge sort based algorithm.
     merge_sort,
+    /// \brief A merged sort based algorithm which sorts stably.
+    stable_merge_sort,
     /// \brief Default block_sort algorithm.
     default_algorithm = bitonic_sort,
 };
@@ -78,6 +80,19 @@ struct select_block_sort_impl<block_sort_algorithm::merge_sort>
              unsigned int ItemsPerThread,
              class Value>
     using type = block_sort_merge<Key, BlockSizeX, BlockSizeY, BlockSizeZ, ItemsPerThread, Value>;
+};
+
+template<>
+struct select_block_sort_impl<block_sort_algorithm::stable_merge_sort>
+{
+    template<class Key,
+             unsigned int BlockSizeX,
+             unsigned int BlockSizeY,
+             unsigned int BlockSizeZ,
+             unsigned int ItemsPerThread,
+             class Value>
+    using type
+        = block_sort_merge<Key, BlockSizeX, BlockSizeY, BlockSizeZ, ItemsPerThread, Value, true>;
 };
 
 } // end namespace detail
@@ -228,11 +243,10 @@ public:
         base_type::sort(thread_key, storage, compare_function);
     }
 
-    template <class BinaryFunction = ::rocprim::less<Key>>
-    ROCPRIM_DEVICE ROCPRIM_INLINE 
-    void sort(Key (&thread_keys)[ItemsPerThread],
-              storage_type&  storage,
-              BinaryFunction compare_function = BinaryFunction())
+    template<class BinaryFunction = ::rocprim::less<Key>>
+    ROCPRIM_DEVICE ROCPRIM_INLINE void sort(Key (&thread_keys)[ItemsPerThread],
+                                            storage_type&  storage,
+                                            BinaryFunction compare_function = BinaryFunction())
     {
         base_type::sort(thread_keys, storage, compare_function);
     }
@@ -353,6 +367,61 @@ public:
               BinaryFunction compare_function = BinaryFunction())
     {
         base_type::sort(thread_key, storage, size, compare_function);
+    }
+
+    /// \brief Block sort by key for any data type. This function sorts
+    /// up to \p size elements blocked across threads.
+    ///
+    /// \tparam BinaryFunction - type of binary function used for sort. Default type
+    /// is rocprim::less<T>.
+    ///
+    /// \remark Not implemented for \p block_sort_algorithm::merge_sort
+    /// and \p block_sort_algorithm::bitonic_sort
+    ///
+    /// \param [in, out] thread_keys - reference to keys provided by a thread.
+    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    /// \param [in] size - custom size of block to be sorted.
+    /// \param [in] compare_function - comparison function object which returns true if the
+    /// first argument is is ordered before the second.
+    /// The signature of the function should be equivalent to the following:
+    /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
+    /// <tt>const &</tt>, but function object must not modify the objects passed to it.
+    template<class BinaryFunction = ::rocprim::less<Key>>
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void sort(Key (&thread_keys)[ItemsPerThread],
+                                                  storage_type&      storage,
+                                                  const unsigned int size,
+                                                  BinaryFunction     compare_function
+                                                  = BinaryFunction())
+    {
+        base_type::sort(thread_keys, storage, size, compare_function);
+    }
+
+    /// \brief Block sort by key for any data type. This function sorts
+    /// up to \p size elements blocked across threads.
+    ///
+    /// \tparam BinaryFunction - type of binary function used for sort. Default type
+    /// is rocprim::less<T>.
+    ///
+    /// \remark Not implemented for \p block_sort_algorithm::merge_sort
+    /// and \p block_sort_algorithm::bitonic_sort
+    ///
+    /// \param [in, out] thread_keys - reference to keys provided by a thread.
+    /// \param [in, out] thread_values - reference to values provided by a thread.
+    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    /// \param [in] size - custom size of block to be sorted.
+    /// \param [in] compare_function - comparison function object which returns true if the
+    /// first argument is is ordered before the second.
+    /// The signature of the function should be equivalent to the following:
+    /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
+    /// <tt>const &</tt>, but function object must not modify the objects passed to it.
+    template<class BinaryFunction = ::rocprim::less<Key>>
+    ROCPRIM_DEVICE ROCPRIM_INLINE void sort(Key (&thread_keys)[ItemsPerThread],
+                                            Value (&thread_values)[ItemsPerThread],
+                                            storage_type&      storage,
+                                            const unsigned int size,
+                                            BinaryFunction     compare_function = BinaryFunction())
+    {
+        base_type::sort(thread_keys, thread_values, storage, size, compare_function);
     }
 };
 

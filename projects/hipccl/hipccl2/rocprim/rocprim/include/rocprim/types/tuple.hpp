@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2018-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -763,7 +763,7 @@ public:
 
     /// \brief Swaps the content of the tuple (\p *this) with the content \p other
     /// \param other tuple of values to swap
-    void swap(tuple& other) noexcept
+    ROCPRIM_HOST_DEVICE void swap(tuple& other) noexcept
     {
         base.swap(other.base);
     }

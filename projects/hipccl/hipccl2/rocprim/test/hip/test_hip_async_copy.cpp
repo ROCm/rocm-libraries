@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -154,11 +154,17 @@ TEST_F(HipAsyncCopyTests, AsyncCopyDepthFirst)
         const auto size_bytes = sizes[i] * sizeof(T);
         HIP_CHECK(hipMemcpyAsync(d_inputs[i], inputs[i].data(), size_bytes, hipMemcpyHostToDevice, streams[i]));
         const unsigned int grid_size = (sizes[i] + block_size - 1) / block_size;
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(increment_kernel),
-            dim3(grid_size), dim3(block_size), 0, streams[i],
-            d_inputs[i], sizes[i]
-        );
+        if(sizes[i] > 0)
+        {
+            hipLaunchKernelGGL(HIP_KERNEL_NAME(increment_kernel),
+                               dim3(grid_size),
+                               dim3(block_size),
+                               0,
+                               streams[i],
+                               d_inputs[i],
+                               sizes[i]);
+            HIP_CHECK(hipGetLastError());
+        }
         HIP_CHECK(hipMemcpyAsync(outputs[i].data(), d_inputs[i], size_bytes, hipMemcpyDeviceToHost, streams[i]));
     }
     HIP_CHECK(hipDeviceSynchronize());
@@ -175,11 +181,17 @@ TEST_F(HipAsyncCopyTests, AsyncCopyBreadthFirst)
     for(size_t i = 0; i < sizes.size(); i++)
     {
         const unsigned int grid_size = (sizes[i] + block_size - 1) / block_size;
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(increment_kernel),
-            dim3(grid_size), dim3(block_size), 0, streams[i],
-            d_inputs[i], sizes[i]
-        );
+        if(sizes[i] > 0)
+        {
+            hipLaunchKernelGGL(HIP_KERNEL_NAME(increment_kernel),
+                               dim3(grid_size),
+                               dim3(block_size),
+                               0,
+                               streams[i],
+                               d_inputs[i],
+                               sizes[i]);
+            HIP_CHECK(hipGetLastError());
+        }
     }
     for(size_t i = 0; i < sizes.size(); i++)
     {
@@ -224,6 +236,7 @@ TEST(HipAsyncCopyTestsExtra, StreamInStruct)
         dim3(grid_size), dim3(block_size), 0, stream_wrapper.stream,
         d_input, size
     );
+    HIP_CHECK(hipGetLastError());
 
     vector_type output(size);
     HIP_CHECK(hipMemcpyAsync(output.data(), d_input, size_bytes, hipMemcpyDeviceToHost, stream_wrapper.stream));

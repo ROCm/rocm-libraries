@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,7 @@
 #include "../../config.hpp"
 #include "../../detail/merge_path.hpp"
 #include "../../detail/various.hpp"
+#include "../../warp/detail/warp_sort_stable.hpp"
 #include "../../warp/warp_sort.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
@@ -36,17 +37,18 @@ template<class Key,
          unsigned int BlockSizeY,
          unsigned int BlockSizeZ,
          unsigned int ItemsPerThread,
-         class Value>
+         class Value,
+         bool Stable = false>
 class block_sort_merge
 {
     static constexpr const unsigned int BlockSize     = BlockSizeX * BlockSizeY * BlockSizeZ;
     static constexpr const unsigned int ItemsPerBlock = BlockSize * ItemsPerThread;
     static constexpr const unsigned int WarpSortSize  = std::min(BlockSize, 16u);
     static constexpr const bool with_values = !std::is_same<Value, rocprim::empty_type>::value;
-    using warp_sort_type                    = rocprim::warp_sort<Key, WarpSortSize, Value>;
-    static_assert(
-        std::is_same<typename warp_sort_type::storage_type, detail::empty_storage_type>::value,
-        "Update block_sort_merge to allocate shared memory for warp_sort.");
+    using warp_sort_type                            = std::conditional_t<
+        Stable,
+        rocprim::detail::warp_sort_stable<Key, BlockSize, WarpSortSize, ItemsPerThread, Value>,
+        rocprim::warp_sort<Key, WarpSortSize, Value>>;
 
     static_assert(rocprim::detail::is_power_of_two(BlockSize),
                   "BlockSize must be a power of two for block_sort_merge!");
@@ -55,16 +57,21 @@ class block_sort_merge
                   "ItemsPerThread must be a power of two for block_sort_merge!");
 
     template<bool with_values>
-    struct storage_type_
+    union storage_type_
     {
+        typename warp_sort_type::storage_type   warp_sort;
         detail::raw_storage<Key[ItemsPerBlock]> keys;
     };
 
     template<>
-    struct storage_type_<true>
+    union storage_type_<true>
     {
-        detail::raw_storage<Key[ItemsPerBlock]>   keys;
-        detail::raw_storage<Value[ItemsPerBlock]> values;
+        typename warp_sort_type::storage_type warp_sort;
+        struct
+        {
+            detail::raw_storage<Key[ItemsPerBlock]>   keys;
+            detail::raw_storage<Value[ItemsPerBlock]> values;
+        };
     };
 
 public:
@@ -159,6 +166,34 @@ public:
         this->sort(thread_keys, thread_values, storage, compare_function);
     }
 
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void sort(Key (&thread_keys)[ItemsPerThread],
+                                                  storage_type&  storage,
+                                                  unsigned int   size,
+                                                  BinaryFunction compare_function)
+    {
+        this->sort_impl(::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>(),
+                        size,
+                        storage,
+                        compare_function,
+                        thread_keys);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void sort(Key (&thread_keys)[ItemsPerThread],
+                                                  Value (&thread_values)[ItemsPerThread],
+                                                  storage_type&  storage,
+                                                  unsigned int   size,
+                                                  BinaryFunction compare_function)
+    {
+        this->sort_impl(::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>(),
+                        size,
+                        storage,
+                        compare_function,
+                        thread_keys,
+                        thread_values);
+    }
+
 private:
     ROCPRIM_DEVICE ROCPRIM_INLINE void
         copy_to_shared(Key& k, const unsigned int flat_tid, Key* keys_shared)
@@ -212,7 +247,7 @@ private:
             return;
         }
         warp_sort_type ws;
-        ws.sort(keys, compare_function);
+        ws.sort(keys, storage.warp_sort, compare_function);
         sort_merge_impl(flat_tid,
                         Size,
                         ItemsPerThread * WarpSortSize,
@@ -233,9 +268,45 @@ private:
             return;
         }
         warp_sort_type ws;
-        ws.sort(keys, values, compare_function);
+        ws.sort(keys, values, storage.warp_sort, compare_function);
         sort_merge_impl(flat_tid,
                         Size,
+                        ItemsPerThread * WarpSortSize,
+                        storage,
+                        compare_function,
+                        keys,
+                        values);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE void sort_impl(const unsigned int flat_tid,
+                                                 const unsigned int input_size,
+                                                 storage_type&      storage,
+                                                 BinaryFunction     compare_function,
+                                                 Key (&keys)[ItemsPerThread])
+    {
+        warp_sort_type ws;
+        ws.sort(keys, storage.warp_sort, input_size, compare_function);
+        sort_merge_impl(flat_tid,
+                        input_size,
+                        ItemsPerThread * WarpSortSize,
+                        storage,
+                        compare_function,
+                        keys);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE void sort_impl(const unsigned int flat_tid,
+                                                 const unsigned int input_size,
+                                                 storage_type&      storage,
+                                                 BinaryFunction     compare_function,
+                                                 Key (&keys)[ItemsPerThread],
+                                                 Value (&values)[ItemsPerThread])
+    {
+        warp_sort_type ws;
+        ws.sort(keys, values, storage.warp_sort, input_size, compare_function);
+        sort_merge_impl(flat_tid,
+                        input_size,
                         ItemsPerThread * WarpSortSize,
                         storage,
                         compare_function,

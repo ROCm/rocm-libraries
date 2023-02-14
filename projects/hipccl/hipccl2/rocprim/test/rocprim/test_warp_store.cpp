@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -199,7 +199,7 @@ TYPED_TEST(WarpStoreTest, WarpLoad)
         dim3(1), dim3(block_size), 0, 0,
         d_input, d_output
     );
-    HIP_CHECK(hipPeekAtLastError());
+    HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
 
     std::vector<T> output(items_count);
@@ -252,7 +252,7 @@ TYPED_TEST(WarpStoreTest, WarpStoreGuarded)
         dim3(1), dim3(block_size), 0, 0,
         d_input, d_output, valid_items
     );
-    HIP_CHECK(hipPeekAtLastError());
+    HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
 
     std::vector<T> output(items_count);

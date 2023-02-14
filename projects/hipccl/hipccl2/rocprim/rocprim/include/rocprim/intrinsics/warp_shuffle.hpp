@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -252,6 +252,33 @@ T warp_shuffle_xor(const T& input, const int lane_mask, const int width = device
             return __shfl_xor(v, lane_mask, width);
         }
     );
+}
+
+/// \brief Permute items across the threads in a warp.
+///
+/// The value from this thread in the warp is permuted to the <tt>dst_lane</tt>-th
+/// thread in the warp. If multiple warps write to the same destination, the result
+/// is undefined but will be a value from either of the source values. If no threads
+/// write to a particular thread then the value for that thread will be 0.
+/// The destination index is taken modulo the logical warp size, so any value larger
+/// than the logical warp size will wrap around.
+///
+/// Note: The optional \p width parameter must be a power of 2; results are
+/// undefined if it is not a power of 2, or it is greater than device_warp_size().
+///
+/// \param input - input to pass to other threads
+/// \param dst_lane - the destination lane to which the value from this thread is written.
+/// \param width - logical warp width
+template<typename T>
+ROCPRIM_DEVICE ROCPRIM_INLINE T warp_permute(const T&  input,
+                                             const int dst_lane,
+                                             const int width = device_warp_size())
+{
+    const int self  = lane_id();
+    const int index = (dst_lane + (self & ~(width - 1))) << 2;
+    return detail::warp_shuffle_op(input,
+                                   [=](int v) -> int
+                                   { return __builtin_amdgcn_ds_permute(index, v); });
 }
 
 END_ROCPRIM_NAMESPACE

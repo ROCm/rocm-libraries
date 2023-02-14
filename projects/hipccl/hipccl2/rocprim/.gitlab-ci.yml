@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -215,7 +215,7 @@ build:package:
 
 build:benchmark:
   stage: build
-  needs: 
+  needs:
     - job: "autotune:generate-config"
       optional: true
   tags:
@@ -385,7 +385,7 @@ benchmark:
     - .benchmark-base
   variables:
     BENCHMARK_FILENAME_REGEX: ^benchmark
-    BENCHMARK_ALGORITHM_REGEX: ""
+    BENCHMARK_ALGORITHM_REGEX: "benchmark_device_merge_sort_block_sort"
   script:
     - 'printf "CI Variables used in benchmarks:\nBENCHMARK_RESULT_DIR: %s\nBENCHMARK_FILENAME_REGEX: %s\nBENCHMARK_ALGORITHM_REGEX: %s \n" "$BENCHMARK_RESULT_DIR" "$BENCHMARK_FILENAME_REGEX" "$BENCHMARK_ALGORITHM_REGEX"'
     - cd "${CI_PROJECT_DIR}"
@@ -495,7 +495,7 @@ autotune:generate-config:
       if [ ! -z "${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}" ]; then
         AUTOTUNE_RESULT_CACHE_BRANCH_DIR="${AUTOTUNE_RESULT_CACHE_DIR}/${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME}"
         AUTOTUNE_RESULT_CACHE_TARGET_BRANCH_DIR="${AUTOTUNE_RESULT_CACHE_DIR}/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}"
-      else 
+      else
         AUTOTUNE_RESULT_CACHE_BRANCH_DIR="${AUTOTUNE_RESULT_CACHE_DIR}/${CI_COMMIT_BRANCH}"
       fi
     # If the global cache dir does not exist, create it
@@ -505,7 +505,7 @@ autotune:generate-config:
     # If there are no branch cache results, check TARGET branch cache
     # If there are TARGET branch cache results, cache them in the branch cache
     - >
-      if [ -d "$AUTOTUNE_RESULT_DIR" ]; then 
+      if [ -d "$AUTOTUNE_RESULT_DIR" ]; then
         mkdir -p $AUTOTUNE_RESULT_CACHE_BRANCH_DIR
         cp -R -u ${AUTOTUNE_RESULT_DIR}/*.json ${AUTOTUNE_RESULT_CACHE_BRANCH_DIR}
       elif [ -d "$AUTOTUNE_RESULT_CACHE_BRANCH_DIR" ]; then

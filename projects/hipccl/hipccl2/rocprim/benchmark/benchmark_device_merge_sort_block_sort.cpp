@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -106,6 +106,7 @@ int main(int argc, char* argv[])
     using custom_int2            = custom_type<int, int>;
     using custom_char_double     = custom_type<char, double>;
     using custom_longlong_double = custom_type<long long, double>;
+    using custom_char_short      = custom_type<char, short>;
 
     CREATE_BENCHMARK(int, float)
     CREATE_BENCHMARK(long long, double)
@@ -119,6 +120,7 @@ int main(int argc, char* argv[])
     CREATE_BENCHMARK(custom_int2, custom_double2)
     CREATE_BENCHMARK(custom_int2, custom_char_double)
     CREATE_BENCHMARK(custom_int2, custom_longlong_double)
+    CREATE_BENCHMARK(int, custom_char_short)
 #endif // BENCHMARK_CONFIG_TUNING
 
     // Use manual timing
