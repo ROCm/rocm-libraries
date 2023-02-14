@@ -90,6 +90,7 @@ namespace rocRoller
                                   std::shared_ptr<Register::Value>  offset,
                                   int                               numBytes,
                                   std::string const&                comment,
+                                  bool                              high,
                                   std::shared_ptr<BufferDescriptor> bufDesc,
                                   BufferInstructionOptions          buffOpts)
     {
@@ -112,7 +113,7 @@ namespace rocRoller
                 co_yield generateOp<Expression::Add>(newAddr, addr, offset);
             }
 
-            co_yield storeFlat(newAddr, data, offset_val, numBytes);
+            co_yield storeFlat(newAddr, data, offset_val, numBytes, high);
             break;
 
         case Local:
@@ -125,12 +126,12 @@ namespace rocRoller
                 co_yield generateOp<Expression::Add>(newAddr, addr, offset);
             }
 
-            co_yield storeLocal(newAddr, data, offset_val, numBytes, comment);
+            co_yield storeLocal(newAddr, data, offset_val, numBytes, comment, high);
             break;
 
         case Buffer:
             // If the provided offset is not a literal, create a new register that will store the value
-            // of addr + offset and pass it to storeLocal
+            // of addr + offset and pass it to storeBuffer
             if(offset && offset->regType() != Register::Type::Literal)
             {
                 newAddr
@@ -138,7 +139,7 @@ namespace rocRoller
                 co_yield generateOp<Expression::Add>(newAddr, addr, offset);
             }
 
-            co_yield storeBuffer(data, newAddr, offset_val, bufDesc, buffOpts, numBytes);
+            co_yield storeBuffer(data, newAddr, offset_val, bufDesc, buffOpts, numBytes, high);
             break;
 
         default:
@@ -244,7 +245,8 @@ namespace rocRoller
         MemoryInstructions::storeFlat(std::shared_ptr<Register::Value> addr,
                                       std::shared_ptr<Register::Value> data,
                                       int                              offset,
-                                      int                              numBytes)
+                                      int                              numBytes,
+                                      bool                             high)
     {
         AssertFatal(addr != nullptr);
         AssertFatal(data != nullptr);
@@ -268,8 +270,19 @@ namespace rocRoller
             }
             else if(numBytes == 2)
             {
-                co_yield_(Instruction(
-                    "flat_store_short", {}, {addr, data}, {offset_modifier}, "Store value"));
+                if(high)
+                {
+                    co_yield_(Instruction("flat_store_short_d16_hi",
+                                          {},
+                                          {addr, data},
+                                          {offset_modifier},
+                                          "Store value"));
+                }
+                else
+                {
+                    co_yield_(Instruction(
+                        "flat_store_short", {}, {addr, data}, {offset_modifier}, "Store value"));
+                }
             }
         }
         else
@@ -407,7 +420,8 @@ namespace rocRoller
                                        std::shared_ptr<Register::Value> data,
                                        int                              offset,
                                        int                              numBytes,
-                                       std::string const&               comment)
+                                       std::string const&               comment,
+                                       bool                             high)
     {
         AssertFatal(addr != nullptr);
         AssertFatal(data != nullptr);
@@ -426,11 +440,12 @@ namespace rocRoller
         if(numBytes < wordSize)
         {
             auto offset_modifier = genOffsetModifier(offset);
-            co_yield_(Instruction(concatenate("ds_write_b", std::to_string(numBytes * 8)),
-                                  {},
-                                  {newAddr, data},
-                                  {offset_modifier},
-                                  concatenate("Store local data ", comment)));
+            co_yield_(Instruction(
+                concatenate("ds_write_b", std::to_string(numBytes * 8), high ? "_d16_hi" : ""),
+                {},
+                {newAddr, data},
+                {offset_modifier},
+                concatenate("Store local data ", comment)));
         }
         else
         {
@@ -557,7 +572,8 @@ namespace rocRoller
                                         int                               offset,
                                         std::shared_ptr<BufferDescriptor> buffDesc,
                                         BufferInstructionOptions          buffOpts,
-                                        int                               numBytes)
+                                        int                               numBytes,
+                                        bool                              high)
     {
         AssertFatal(addr != nullptr);
         AssertFatal(data != nullptr);
@@ -602,6 +618,8 @@ namespace rocRoller
             else if(numBytes == 2)
             {
                 opEnd += "short";
+                if(high)
+                    opEnd += "_d16_hi";
             }
             co_yield_(Instruction("buffer_store_" + opEnd,
                                   {},

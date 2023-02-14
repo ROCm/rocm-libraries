@@ -256,7 +256,7 @@ namespace rocRoller
                 }
                 else
                 {
-                    for(size_t k = 0; k < valueCount; ++k)
+                    for(size_t k = 0; k < valueCount / lhsInfo.packing; ++k)
                     {
                         auto lhsVal = lhs->valueCount() == 1 ? lhs : lhs->element({k});
                         auto rhsVal = rhs->valueCount() == 1 ? rhs : rhs->element({k});

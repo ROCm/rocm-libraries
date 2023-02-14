@@ -704,7 +704,8 @@ namespace MemoryInstructionsTest
                 co_yield m_context->mem()->loadLocal(v_a->subset({0}), lds1_offset, 2, 2);
                 co_yield m_context->mem()->storeFlat(v_result, v_a->subset({0}), 2, 2);
                 co_yield m_context->mem()->loadLocal(v_a->subset({0}), lds1_offset, 4, 4);
-                co_yield m_context->mem()->storeFlat(v_result, v_a->subset({0}), 4, 4);
+                co_yield m_context->mem()->storeFlat(v_result, v_a->subset({0}), 4, 2);
+                co_yield m_context->mem()->storeFlat(v_result, v_a->subset({0}), 6, 2, true);
 
                 // Read 36 bytes from LDS2 and store to global data
                 co_yield m_context->mem()->loadLocal(

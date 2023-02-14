@@ -438,6 +438,124 @@ namespace rocRollerTest
         executeHalfPrecisionPack(m_context, 8);
     }
 
+    void AddTiles(size_t nx, // tensor size x
+                  size_t ny, // tensor size y
+                  int    m, // macro tile size x
+                  int    n, // macro tile size y
+                  int    t_m, // thread tile size x
+                  int    t_n) // thread tile size y
+    {
+        AssertFatal(m > 0 && n > 0 && t_m > 0 && t_n > 0, "Invalid Test Dimensions");
+
+        unsigned int workgroup_size_x = m / t_m;
+        unsigned int workgroup_size_y = n / t_n;
+
+        AssertFatal((size_t)m * n == t_m * t_n * workgroup_size_x * workgroup_size_y,
+                    "MacroTile size mismatch");
+
+        // TODO: Handle when thread tiles include out of range indices
+        AssertFatal(nx % t_m == 0, "Thread tile size must divide tensor size");
+        AssertFatal(ny % t_n == 0, "Thread tile size must divide tensor size");
+
+        // each workgroup will get one tile; since workgroup_size matches m * n
+        auto NX = std::make_shared<Expression::Expression>(nx / t_m); // number of work items x
+        auto NY = std::make_shared<Expression::Expression>(ny / t_n); // number of work items y
+        auto NZ = std::make_shared<Expression::Expression>(1u); // number of work items z
+
+        RandomGenerator random(129674u + nx + ny + m + n + t_m
+                               + t_n); //Use different seeds for the different sizes.
+        auto            a = random.vector<Half>(nx * ny, -100.0, 100.0);
+        auto            b = random.vector<Half>(nx * ny, -100.0, 100.0);
+        auto            r = random.vector<Half>(nx * ny, -100.0, 100.0);
+        auto            x = random.vector<Half>(nx * ny, -100.0, 100.0);
+
+        auto d_a = make_shared_device(a);
+        auto d_b = make_shared_device(b);
+        auto d_c = make_shared_device<Half>(nx * ny);
+
+        auto command  = std::make_shared<Command>();
+        auto dataType = DataType::Half;
+
+        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
+            rocRoller::Operations::T_Load_Tiled(dataType, 2, 0))); // a
+        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
+            rocRoller::Operations::T_Load_Tiled(dataType, 2, 1))); // b
+
+        auto execute = rocRoller::Operations::T_Execute();
+        execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
+            rocRoller::Operations::E_Add(2, 0, 0))); // a + a
+        execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
+            rocRoller::Operations::E_Add(3, 1, 1))); // b + b
+        execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
+            rocRoller::Operations::E_Add(4, 3, 2))); // 2a + 2b
+
+        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(execute));
+        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
+            rocRoller::Operations::T_Store_Tiled(dataType, 2, 4))); // c
+
+        KernelArguments runtimeArgs;
+
+        runtimeArgs.append("user0", d_a.get());
+        runtimeArgs.append("d_a_limit", (size_t)nx * ny);
+        runtimeArgs.append("d_a_size_0", (size_t)nx);
+        runtimeArgs.append("d_a_size_1", (size_t)ny);
+        runtimeArgs.append("d_a_stride_0", (size_t)(ny));
+        runtimeArgs.append("d_a_stride_1", (size_t)(1));
+
+        runtimeArgs.append("user1", d_b.get());
+        runtimeArgs.append("d_b_limit", (size_t)nx * ny);
+        runtimeArgs.append("d_b_size_0", (size_t)nx);
+        runtimeArgs.append("d_b_size_1", (size_t)ny);
+        runtimeArgs.append("d_b_stride_0", (size_t)(ny));
+        runtimeArgs.append("d_b_stride_1", (size_t)(1));
+
+        runtimeArgs.append("user2", d_c.get());
+        runtimeArgs.append("d_c_limit", (size_t)nx * ny);
+        runtimeArgs.append("d_c_stride_0", (size_t)(ny));
+        runtimeArgs.append("d_c_stride_1", (size_t)(1));
+
+        auto params = std::make_shared<CommandParameters>();
+        params->setManualKernelDimension(2);
+
+        auto mac_tile
+            = KernelGraph::CoordinateGraph::MacroTile({m, n}, MemoryType::VGPR, {t_m, t_n});
+        auto mac_tile_lds
+            = KernelGraph::CoordinateGraph::MacroTile({m, n}, MemoryType::LDS, {t_m, t_n});
+        params->setDimensionInfo(4, mac_tile_lds);
+        params->setDimensionInfo(11, mac_tile);
+        params->setDimensionInfo(15, mac_tile);
+        params->setDimensionInfo(17, mac_tile);
+        params->setDimensionInfo(19, mac_tile);
+
+        params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
+        params->setManualWorkitemCount({NX, NY, NZ});
+
+        CommandKernel commandKernel(command, "HalfPrecisionAdd", params);
+        commandKernel.launchKernel(runtimeArgs.runtimeArguments());
+
+        ASSERT_THAT(hipMemcpy(r.data(), d_c.get(), nx * ny * sizeof(Half), hipMemcpyDefault),
+                    HasHipSuccess(0));
+
+        // reference solution
+        for(size_t i = 0; i < nx; ++i)
+        {
+            for(size_t j = 0; j < ny; ++j)
+            {
+                x[(i * ny) + j]
+                    = a[(i * ny) + j] + a[(i * ny) + j] + b[(i * ny) + j] + b[(i * ny) + j];
+            }
+        }
+
+        double rnorm = relativeNorm(r, x);
+
+        ASSERT_LT(rnorm, 1.e-12);
+    }
+
+    TEST_F(HalfPrecisionTest, GPU_ExecuteHalfPrecisionAdd)
+    {
+        AddTiles(256, 512, 16, 8, 4, 4);
+    }
+
     TEST_F(HalfPrecisionTest, HalfPrecisionAsserts)
     {
 

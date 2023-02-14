@@ -494,11 +494,26 @@ namespace rocRoller
                                             uint64_t                       m,
                                             uint64_t                       n,
                                             VariableType                   dataType,
-                                            bool                           pack,
                                             int                            tag,
-                                            Register::ValuePtr             vgpr,
                                             Register::ValuePtr             offset)
             {
+                auto mac_tile_tag = m_graph.mapper.get<MacroTile>(tag);
+
+                Register::ValuePtr tmpl;
+                if(dataType == DataType::Half && n > 1)
+                {
+                    tmpl = Register::Value::Placeholder(
+                        m_context, Register::Type::Vector, DataType::Halfx2, m * n / 2);
+                }
+                else
+                {
+                    tmpl = Register::Value::Placeholder(
+                        m_context, Register::Type::Vector, dataType, m * n);
+                }
+
+                auto vgpr = m_context->registerTagManager()->getRegister(mac_tile_tag, tmpl);
+                co_yield Register::AllocateIfNeeded(vgpr);
+
                 // Get the values from the associated ComputeIndex node
                 auto row_offset_reg = getOffset(tag, 0);
                 auto col_offset_reg = getOffset(tag, 1);
@@ -525,7 +540,7 @@ namespace rocRoller
 
                 // Load a tile of Half precision values where each register will hold
                 // two half precision values.
-                if(pack && vgpr->variableType() == DataType::Halfx2)
+                if(vgpr->variableType() == DataType::Halfx2)
                 {
                     if(row_stride_reg->regType() == Register::Type::Literal
                        && col_stride_reg->regType() == Register::Type::Literal
@@ -679,15 +694,6 @@ namespace rocRoller
                 AssertFatal(mac_offset_reg, "Invalid mac offset register.");
                 AssertFatal(row_offset_reg, "Invalid row offset register.");
 
-                std::shared_ptr<Register::Value> tmpl;
-                if(load.vtype == DataType::Half)
-                    tmpl = MkVGPR(DataType::Halfx2, product(mac_tile.subTileSizes));
-                else
-                    tmpl = MkVGPR(load.vtype, product(mac_tile.subTileSizes));
-
-                auto vgpr = m_context->registerTagManager()->getRegister(mac_tile_tag, tmpl);
-                co_yield Register::AllocateIfNeeded(vgpr);
-
                 auto const m = mac_tile.subTileSizes[0];
                 auto const n = mac_tile.subTileSizes[1];
 
@@ -695,14 +701,8 @@ namespace rocRoller
 
                 co_yield copy(row_offset_reg, mac_offset_reg);
 
-                co_yield loadTile(MemoryInstructions::MemoryKind::Buffer,
-                                  m,
-                                  n,
-                                  load.vtype,
-                                  false,
-                                  tag,
-                                  vgpr,
-                                  nullptr);
+                co_yield loadTile(
+                    MemoryInstructions::MemoryKind::Buffer, m, n, load.vtype, tag, nullptr);
             }
 
             Generator<Instruction>
@@ -718,10 +718,6 @@ namespace rocRoller
                 auto basePointer = MkSGPR(DataType::Int64);
                 co_yield m_context->argLoader()->getValue(user.argumentName(), basePointer);
 
-                auto tmpl = MkVGPR(load.vtype, product(mac_tile.subTileSizes));
-                auto vgpr = m_context->registerTagManager()->getRegister(mac_tile_tag, tmpl);
-                co_yield Register::AllocateIfNeeded(vgpr);
-
                 auto const m = mac_tile.subTileSizes[0];
                 auto const n = mac_tile.subTileSizes[1];
 
@@ -730,14 +726,8 @@ namespace rocRoller
                 rocRoller::Log::getLogger()->debug(
                     "  macro tile: {}; sub tile size: {}x{}", mac_tile_tag, m, n);
 
-                co_yield loadTile(MemoryInstructions::MemoryKind::Buffer,
-                                  m,
-                                  n,
-                                  vgpr->variableType(),
-                                  false,
-                                  tag,
-                                  vgpr,
-                                  nullptr);
+                co_yield loadTile(
+                    MemoryInstructions::MemoryKind::Buffer, m, n, load.vtype, tag, nullptr);
             }
 
             Generator<Instruction>
@@ -757,26 +747,11 @@ namespace rocRoller
                 auto lds_offset
                     = Register::Value::Literal(ldsAllocation->getLDSAllocation()->offset());
 
-                std::shared_ptr<Register::Value> tmpl;
-                if(load.vtype == DataType::Half)
-                    tmpl = MkVGPR(DataType::Halfx2, product(tile.subTileSizes));
-                else
-                    tmpl = MkVGPR(load.vtype, product(tile.subTileSizes));
-
-                auto vgpr = m_context->registerTagManager()->getRegister(tile_tag, tmpl);
-                co_yield Register::AllocateIfNeeded(vgpr);
-
                 auto const m = tile.subTileSizes[0];
                 auto const n = tile.subTileSizes[1];
 
-                co_yield loadTile(MemoryInstructions::MemoryKind::Local,
-                                  m,
-                                  n,
-                                  load.vtype,
-                                  false,
-                                  tag,
-                                  vgpr,
-                                  lds_offset);
+                co_yield loadTile(
+                    MemoryInstructions::MemoryKind::Local, m, n, load.vtype, tag, lds_offset);
             }
 
             Generator<Instruction> loadMacroTileWAVELDSCI(int                tag,
@@ -789,7 +764,6 @@ namespace rocRoller
                 co_yield_(Instruction::Comment("GEN: loadMacroTileWAVELDSCI"));
 
                 auto [lds_tag, lds]             = m_graph.getDimension<LDS>(tag);
-                auto [mac_tile_tag, mac_tile]   = m_graph.getDimension<MacroTile>(tag);
                 auto [wave_tile_tag, wave_tile] = m_graph.getDimension<WaveTile>(tag);
 
                 // Find the LDS allocation that contains the tile and store
@@ -807,28 +781,11 @@ namespace rocRoller
                 uint wfs          = m_context->kernel()->wavefront_size();
                 uint num_vgpr     = num_elements / wfs;
 
-                Register::ValuePtr tmpl;
-                if(load.vtype == DataType::Half)
-                {
-                    tmpl = Register::Value::Placeholder(
-                        m_context, Register::Type::Vector, DataType::Halfx2, num_vgpr / 2);
-                }
-                else
-                {
-                    tmpl = Register::Value::Placeholder(
-                        m_context, Register::Type::Vector, load.vtype, num_vgpr);
-                }
-
-                auto vgpr = m_context->registerTagManager()->getRegister(mac_tile_tag, tmpl);
-                co_yield Register::AllocateIfNeeded(vgpr);
-
                 co_yield loadTile(MemoryInstructions::MemoryKind::Local,
                                   1,
                                   num_vgpr,
                                   load.vtype,
-                                  true,
                                   tag,
-                                  vgpr,
                                   lds_offset);
             }
 
@@ -842,7 +799,6 @@ namespace rocRoller
 
                 auto [user_tag, user]           = m_graph.getDimension<User>(tag);
                 auto [wave_tile_tag, wave_tile] = m_graph.getDimension<WaveTile>(tag);
-                auto [mac_tile_tag, mac_tile]   = m_graph.getDimension<MacroTile>(tag);
 
                 Register::ValuePtr basePointer;
                 co_yield m_context->argLoader()->getValue(user.argumentName(), basePointer);
@@ -851,29 +807,8 @@ namespace rocRoller
                 uint wfs          = m_context->kernel()->wavefront_size();
                 uint num_vgpr     = num_elements / wfs;
 
-                Register::ValuePtr tmpl;
-                if(load.vtype == DataType::Half)
-                {
-                    tmpl = Register::Value::Placeholder(
-                        m_context, Register::Type::Vector, DataType::Halfx2, num_vgpr / 2);
-                }
-                else
-                {
-                    tmpl = Register::Value::Placeholder(
-                        m_context, Register::Type::Vector, load.vtype, num_vgpr);
-                }
-
-                auto vgpr = m_context->registerTagManager()->getRegister(mac_tile_tag, tmpl);
-                co_yield Register::AllocateIfNeeded(vgpr);
-
-                co_yield loadTile(MemoryInstructions::MemoryKind::Buffer,
-                                  1,
-                                  num_vgpr,
-                                  load.vtype,
-                                  true,
-                                  tag,
-                                  vgpr,
-                                  nullptr);
+                co_yield loadTile(
+                    MemoryInstructions::MemoryKind::Buffer, 1, num_vgpr, load.vtype, tag, nullptr);
             }
 
             Generator<Instruction>
@@ -886,7 +821,6 @@ namespace rocRoller
 
                 auto [user_tag, user]           = m_graph.getDimension<User>(tag);
                 auto [wave_tile_tag, wave_tile] = m_graph.getDimension<WaveTile>(tag);
-                auto mac_tile_tag               = m_graph.mapper.get<MacroTile>(tag);
 
                 // Move the argument pointer into v_ptr
                 Register::ValuePtr s_ptr;
@@ -896,28 +830,11 @@ namespace rocRoller
                 uint wfs          = m_context->kernel()->wavefront_size();
                 uint num_vgpr     = num_elements / wfs;
 
-                Register::ValuePtr tmpl;
-                if(load.vtype == DataType::Half)
-                {
-                    tmpl = Register::Value::Placeholder(
-                        m_context, Register::Type::Vector, DataType::Halfx2, num_vgpr / 2);
-                }
-                else
-                {
-                    tmpl = Register::Value::Placeholder(
-                        m_context, Register::Type::Vector, load.vtype, num_vgpr);
-                }
-
-                auto vgpr = m_context->registerTagManager()->getRegister(mac_tile_tag, tmpl);
-                co_yield Register::AllocateIfNeeded(vgpr);
-
                 co_yield loadTile(MemoryInstructions::MemoryKind::Buffer,
                                   num_vgpr / 4,
                                   4,
                                   load.vtype,
-                                  true,
                                   tag,
-                                  vgpr,
                                   nullptr);
             }
 
@@ -1307,63 +1224,132 @@ namespace rocRoller
                     converted = vgpr;
                 }
 
-                if(row_stride_reg->regType() == Register::Type::Literal
-                   && col_stride_reg->regType() == Register::Type::Literal
-                   && offset->regType() == Register::Type::Literal)
+                // Load a tile of Half precision values where each register will hold
+                // two half precision values.
+                if(converted->variableType() == DataType::Halfx2)
                 {
-                    // If all of the strides are literals, we can store everything using offsets
-                    // without using a runtime counter
-                    auto offset_value = getUnsignedInt(offset->getLiteralValue());
-                    auto row_stride   = getUnsignedInt(row_stride_reg->getLiteralValue());
-                    auto col_stride   = getUnsignedInt(col_stride_reg->getLiteralValue());
-                    for(uint i = 0; i < m; ++i)
+                    if(row_stride_reg->regType() == Register::Type::Literal
+                       && col_stride_reg->regType() == Register::Type::Literal
+                       && offset->regType() == Register::Type::Literal)
                     {
-                        for(uint j = 0; j < n; ++j)
+                        // If all of the strides are literals, we can load everything using offsets
+                        // without using a runtime counter
+                        auto offset_value = getUnsignedInt(offset->getLiteralValue());
+                        auto row_stride   = getUnsignedInt(row_stride_reg->getLiteralValue());
+                        auto col_stride   = getUnsignedInt(col_stride_reg->getLiteralValue());
+                        for(uint i = 0; i < m; ++i)
                         {
-                            uint a = i * n + j;
-                            co_yield m_context->mem()->store(
-                                kind,
-                                row_offset_reg,
-                                converted->element({static_cast<int>(a)}),
-                                Register::Value::Literal(offset_value + j * col_stride),
-                                elementSize,
-                                "",
-                                bufDesc);
+                            for(uint j = 0; j < n; ++j)
+                            {
+                                uint a = (i * n + j) / 2;
+
+                                co_yield m_context->mem()->store(
+                                    kind,
+                                    row_offset_reg,
+                                    converted->element({static_cast<int>(a)}),
+                                    Register::Value::Literal(offset_value + j * col_stride),
+                                    elementSize,
+                                    "",
+                                    j % 2 == 1,
+                                    bufDesc);
+                            }
+                            offset_value += row_stride;
                         }
-                        offset_value += row_stride;
+                    }
+                    else
+                    {
+                        for(uint i = 0; i < m; ++i)
+                        {
+                            co_yield copy(col_offset_reg, row_offset_reg);
+                            for(uint j = 0; j < n; ++j)
+                            {
+                                uint a = (i * n + j) / 2;
+
+                                co_yield m_context->mem()->store(
+                                    kind,
+                                    col_offset_reg->subset({0}),
+                                    converted->element({static_cast<int>(a)}),
+                                    offset,
+                                    elementSize,
+                                    "",
+                                    j % 2 == 1,
+                                    bufDesc);
+
+                                if(j < n - 1)
+                                {
+                                    co_yield generate(col_offset_reg,
+                                                      col_offset_reg->expression()
+                                                          + col_stride_reg->expression());
+                                }
+                            }
+                            if(i < m - 1)
+                                co_yield generate(row_offset_reg,
+                                                  row_offset_reg->expression()
+                                                      + row_stride_reg->expression());
+                        }
                     }
                 }
                 else
                 {
-                    for(int i = 0; i < m; ++i)
+                    if(row_stride_reg->regType() == Register::Type::Literal
+                       && col_stride_reg->regType() == Register::Type::Literal
+                       && offset->regType() == Register::Type::Literal)
                     {
-                        co_yield copy(col_offset_reg, row_offset_reg);
-
-                        for(int j = 0; j < n; ++j)
+                        // If all of the strides are literals, we can store everything using offsets
+                        // without using a runtime counter
+                        auto offset_value = getUnsignedInt(offset->getLiteralValue());
+                        auto row_stride   = getUnsignedInt(row_stride_reg->getLiteralValue());
+                        auto col_stride   = getUnsignedInt(col_stride_reg->getLiteralValue());
+                        for(uint i = 0; i < m; ++i)
                         {
-                            uint a = i * n + j;
-
-                            co_yield m_context->mem()->store(
-                                kind,
-                                col_offset_reg->subset({0}),
-                                converted->element({static_cast<int>(a)}),
-                                offset,
-                                elementSize,
-                                "",
-                                bufDesc);
-                            if(j < n - 1)
+                            for(uint j = 0; j < n; ++j)
                             {
-                                co_yield generate(col_offset_reg,
-                                                  col_offset_reg->expression()
-                                                      + col_stride_reg->expression());
+                                uint a = i * n + j;
+                                co_yield m_context->mem()->store(
+                                    kind,
+                                    row_offset_reg,
+                                    converted->element({static_cast<int>(a)}),
+                                    Register::Value::Literal(offset_value + j * col_stride),
+                                    elementSize,
+                                    "",
+                                    false,
+                                    bufDesc);
                             }
+                            offset_value += row_stride;
                         }
-
-                        if(i < m - 1)
+                    }
+                    else
+                    {
+                        for(int i = 0; i < m; ++i)
                         {
-                            co_yield generate(row_offset_reg,
-                                              row_offset_reg->expression()
-                                                  + row_stride_reg->expression());
+                            co_yield copy(col_offset_reg, row_offset_reg);
+                            for(int j = 0; j < n; ++j)
+                            {
+                                uint a = i * n + j;
+
+                                co_yield m_context->mem()->store(
+                                    kind,
+                                    col_offset_reg->subset({0}),
+                                    converted->element({static_cast<int>(a)}),
+                                    offset,
+                                    elementSize,
+                                    "",
+                                    false,
+                                    bufDesc);
+                                if(j < n - 1)
+                                {
+                                    co_yield generate(col_offset_reg,
+                                                      col_offset_reg->expression()
+                                                          + col_stride_reg->expression());
+                                }
+                            }
+
+                            if(i < m - 1)
+                            {
+                                co_yield generate(row_offset_reg,
+                                                  row_offset_reg->expression()
+                                                      + row_stride_reg->expression());
+                            }
                         }
                     }
                 }

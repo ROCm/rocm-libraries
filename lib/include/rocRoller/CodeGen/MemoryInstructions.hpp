@@ -66,6 +66,7 @@ namespace rocRoller
          * @param offset Register containing an offset to be added to addr.
          * @param numBytes The number of bytes to load.
          * @param comment Comment that will be generated along with the instructions. (Default = "")
+         * @param high Whether the value will be loaded into the high bits of the register. (Default=false)
          * @param buffDesc Buffer descriptor to use when `kind` is `Buffer`. (Default = nullptr)
          * @param buffOpts Buffer options. (Default = BufferInstructionOptions())
          */
@@ -75,6 +76,7 @@ namespace rocRoller
                                      std::shared_ptr<Register::Value>  offset,
                                      int                               numBytes,
                                      std::string const&                comment  = "",
+                                     bool                              high     = false,
                                      std::shared_ptr<BufferDescriptor> buffDesc = nullptr,
                                      BufferInstructionOptions          buffOpts
                                      = BufferInstructionOptions());
@@ -146,11 +148,13 @@ namespace rocRoller
          * @param data  The register containing the data to store.
          * @param offset Offset to be added to addr.
          * @param numBytes The number of bytes to load.
+         * @param high Whether the value will be loaded into the high bits of the register. (Default=false)
          */
         Generator<Instruction> storeFlat(std::shared_ptr<Register::Value> addr,
                                          std::shared_ptr<Register::Value> data,
                                          int                              offset,
-                                         int                              numBytes);
+                                         int                              numBytes,
+                                         bool                             high = false);
 
         /**
          * @brief Generate the instructions required to load scalar data into a register from memory.
@@ -193,12 +197,14 @@ namespace rocRoller
          * @param offset Offset to be added to addr.
          * @param numBytes The number of bytes to load.
          * @param comment Comment that will be generated along with the instructions. (Default = "")
+         * @param high Whether the value will be loaded into the high bits of the register. (Default=false)
          */
         Generator<Instruction> storeLocal(std::shared_ptr<Register::Value> addr,
                                           std::shared_ptr<Register::Value> data,
                                           int                              offset,
                                           int                              numBytes,
-                                          std::string const&               comment = "");
+                                          std::string const&               comment = "",
+                                          bool                             high    = false);
 
         /**
          * @brief Generate the instructions required to perform a buffer load.
@@ -230,13 +236,15 @@ namespace rocRoller
          * @param buffDesc Buffer descriptor to use
          * @param buffOpts Buffer options
          * @param numBytes The number of bytes to load.
+         * @param high Whether the value will be loaded into the high bits of the register. (Default=false)
          */
         Generator<Instruction> storeBuffer(std::shared_ptr<Register::Value>  data,
                                            std::shared_ptr<Register::Value>  addr,
                                            int                               offset,
                                            std::shared_ptr<BufferDescriptor> buffDesc,
                                            BufferInstructionOptions          buffOpts,
-                                           int                               numBytes);
+                                           int                               numBytes,
+                                           bool                              high = false);
 
         /**
          * @brief Generate the instructions required to add a memory barrier.
