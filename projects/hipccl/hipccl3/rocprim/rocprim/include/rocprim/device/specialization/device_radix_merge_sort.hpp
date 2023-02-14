@@ -55,20 +55,15 @@ inline hipError_t radix_sort_merge_impl(
     using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
     const unsigned int current_radix_bits = end_bit - bit;
 
-    static constexpr bool with_custom_config = !std::is_same<Config, default_config>::value;
-
     // In device_radix_sort, we use this device_radix_sort_merge_sort specialization only
-    // for low input sizes (< 1M elements), so we hardcode a kernel configuration most
-    // suitable for this (maximum: <256u, 4u>).
-    // Use <256u, 4u>, unless smaller is needed to not exceed shared memory maximum.
-    using default_radix_sort_block_sort_config =
+    // for low input sizes (< 1M elements).
+    // We require the radix_sort_block_sort configuration to have an
+    // items_per_block that is a power of two, thus we cannot use
+    // any user-supplied or the autotuned configurations in the config directory!
+    using block_sort_config =
         typename rocprim::detail::radix_sort_block_sort_config_base<key_type, value_type>::type;
-    using block_sort_config
-        = kernel_config<rocprim::min(256u, default_radix_sort_block_sort_config::block_size),
-                        rocprim::min(4u, default_radix_sort_block_sort_config::items_per_thread)>;
 
-    using block_merge_config = typename std::
-        conditional<with_custom_config, typename Config::block_merge_config, default_config>::type;
+    using block_merge_config = typename Config::block_merge_config;
 
     // Wrap our radix_sort_block_sort kernel config in a merge_sort_block_sort_config
     // just so device_merge_sort_compile_time_verifier can check.

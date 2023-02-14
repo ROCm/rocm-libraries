@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -45,6 +45,20 @@ const size_t DEFAULT_N = 1024 * 1024 * 128;
         block_sort_benchmark<K, V, BS, IPT, rocprim::block_sort_algorithm::merge_sort, true>>();   \
     config_autotune_register::create<                                                              \
         block_sort_benchmark<K, V, BS, IPT, rocprim::block_sort_algorithm::merge_sort, false>>();  \
+    config_autotune_register::create<                                                              \
+        block_sort_benchmark<K,                                                                    \
+                             V,                                                                    \
+                             BS,                                                                   \
+                             IPT,                                                                  \
+                             rocprim::block_sort_algorithm::stable_merge_sort,                     \
+                             true>>();                                                             \
+    config_autotune_register::create<                                                              \
+        block_sort_benchmark<K,                                                                    \
+                             V,                                                                    \
+                             BS,                                                                   \
+                             IPT,                                                                  \
+                             rocprim::block_sort_algorithm::stable_merge_sort,                     \
+                             false>>();                                                            \
     config_autotune_register::create<                                                              \
         block_sort_benchmark<K, V, BS, IPT, rocprim::block_sort_algorithm::bitonic_sort, true>>(); \
     config_autotune_register::create<                                                              \

@@ -22,7 +22,6 @@
 #define ROCPRIM_DEVICE_DEVICE_RADIX_SORT_CONFIG_HPP_
 
 #include "config_types.hpp"
-#include "detail/config/device_radix_sort.hpp"
 #include "detail/config/device_radix_sort_block_sort.hpp"
 #include "detail/device_config_helper.hpp"
 

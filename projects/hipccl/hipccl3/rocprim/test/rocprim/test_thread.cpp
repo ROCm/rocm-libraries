@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -125,6 +125,7 @@ TYPED_TEST(RocprimThreadTests, FlatBlockThreadID)
             dim3(1), dim3(block_size_x, block_size_y, block_size_z), 0, 0,
             device_output
         );
+        HIP_CHECK(hipGetLastError());
 
         // Reading results from device
         HIP_CHECK(
@@ -202,6 +203,7 @@ TYPED_TEST(RocprimThreadTests, FlatBlockID)
             dim3(block_size_x, block_size_y, block_size_z), dim3(block_size_x, block_size_y, block_size_z), 0, 0,
             device_output
         );
+        HIP_CHECK(hipGetLastError());
 
         // Reading results from device
         HIP_CHECK(

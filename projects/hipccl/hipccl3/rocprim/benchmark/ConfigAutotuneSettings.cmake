@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -42,7 +42,7 @@ int,float int64_t,double int8_t,int8_t uint8_t,uint8_t rocprim::half,rocprim::ha
 int64_t int short int8_t double float rocprim::half \
 \
 int,float int64_t,double int8_t,int8_t uint8_t,uint8_t rocprim::half,rocprim::half short,short;\
-256 512 1024;rocprim::block_sort_algorithm::bitonic_sort rocprim::block_sort_algorithm::merge_sort" PARENT_SCOPE)
+256 512 1024;rocprim::block_sort_algorithm::stable_merge_sort rocprim::block_sort_algorithm::merge_sort rocprim::block_sort_algorithm::bitonic_sort" PARENT_SCOPE)
     set(output_pattern_suffix "@KeyType_ValueType@_@BlockSize@_@BlockSortMethod@" PARENT_SCOPE)
   elseif(file STREQUAL "benchmark_device_radix_sort_block_sort")
     set(list_across_names "KeyType_ValueType;BlockSize" PARENT_SCOPE)

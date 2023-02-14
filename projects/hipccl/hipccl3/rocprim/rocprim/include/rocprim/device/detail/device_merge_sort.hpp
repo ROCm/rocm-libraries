@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -40,118 +40,6 @@ BEGIN_ROCPRIM_NAMESPACE
 
 namespace detail
 {
-
-template<
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
-    class Key
->
-struct block_load_keys_impl {
-    using block_load_type = ::rocprim::block_load<Key,
-                                                  BlockSize,
-                                                  ItemsPerThread,
-                                                  rocprim::block_load_method::block_load_transpose>;
-
-    using storage_type = typename block_load_type::storage_type;
-
-    template <class KeysInputIterator, class OffsetT>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    void load(const OffsetT block_offset,
-              const unsigned int valid_in_last_block,
-              const bool is_incomplete_block,
-              KeysInputIterator keys_input,
-              Key (&keys)[ItemsPerThread],
-              storage_type& storage)
-    {
-        if(is_incomplete_block)
-        {
-            block_load_type().load(
-                keys_input + block_offset,
-                keys,
-                valid_in_last_block,
-                storage
-            );
-        }
-        else
-        {
-            block_load_type().load(
-                keys_input + block_offset,
-                keys,
-                storage
-            );
-        }
-
-    }
-};
-
-template <bool WithValues, unsigned int BlockSize, unsigned int ItemsPerThread, class Value>
-struct block_load_values_impl
-{
-    using storage_type = empty_storage_type;
-
-    template <class ValuesInputIterator, class OffsetT>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    void load(const unsigned int flat_id,
-              const unsigned int (&ranks)[ItemsPerThread],
-              const OffsetT block_offset,
-              const unsigned int valid_in_last_block,
-              const bool is_incomplete_block,
-              ValuesInputIterator values_input,
-              Value (&values)[ItemsPerThread],
-              storage_type& storage)
-    {
-        (void) flat_id;
-        (void) ranks;
-        (void) block_offset;
-        (void) valid_in_last_block;
-        (void) is_incomplete_block;
-        (void) values_input;
-        (void) values;
-        (void) storage;
-    }
-};
-
-template <unsigned int BlockSize, unsigned int ItemsPerThread, class Value>
-struct block_load_values_impl<true, BlockSize, ItemsPerThread, Value>
-{
-    using block_exchange = ::rocprim::block_exchange<Value, BlockSize, ItemsPerThread>;
-
-    using storage_type = typename block_exchange::storage_type;
-
-    template <class ValuesInputIterator, class OffsetT>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    void load(const unsigned int flat_id,
-              const unsigned int (&ranks)[ItemsPerThread],
-              const OffsetT block_offset,
-              const unsigned int valid_in_last_block,
-              const bool is_incomplete_block,
-              ValuesInputIterator values_input,
-              Value (&values)[ItemsPerThread],
-              storage_type& storage)
-    {
-        if(is_incomplete_block)
-        {
-            block_load_direct_striped<BlockSize>(
-                flat_id,
-                values_input + block_offset,
-                values,
-                valid_in_last_block
-            );
-        }
-        else
-        {
-            block_load_direct_striped<BlockSize>(
-                flat_id,
-                values_input + block_offset,
-                values
-            );
-        }
-
-        // Synchronize before reusing shared memory
-        ::rocprim::syncthreads();
-        block_exchange().gather_from_striped(values, values, ranks, storage);
-    }
-};
 
 template<
     bool WithValues,
@@ -265,45 +153,523 @@ struct block_store_impl<true, BlockSize, ItemsPerThread, Key, Value> {
     }
 };
 
-template<unsigned int BlockSize, unsigned int ItemsPerThread, block_sort_algorithm Algo, class Key>
+template<typename Value,
+         unsigned int BlockSize,
+         unsigned int ItemsPerThread,
+         typename Enable = void>
+struct block_permute_values_impl
+{
+    using values_exchange_type = block_exchange<Value, BlockSize, ItemsPerThread>;
+
+    using values_store_type
+        = block_store<Value, BlockSize, ItemsPerThread, block_store_method::block_store_transpose>;
+
+    union storage_type
+    {
+        typename values_exchange_type::storage_type exchange;
+        typename values_store_type::storage_type    store;
+    };
+
+    template<typename ValuesInputIterator, typename ValuesOutputIterator>
+    ROCPRIM_DEVICE void permute(unsigned int (&ranks)[ItemsPerThread],
+                                ValuesInputIterator  values_input,
+                                ValuesOutputIterator values_output,
+                                storage_type&        storage)
+    {
+        syncthreads();
+        const auto flat_id = block_thread_id<0>();
+        Value      values[ItemsPerThread];
+        block_load_direct_striped<BlockSize>(flat_id, values_input, values);
+        values_exchange_type().gather_from_striped(values, values, ranks, storage.exchange);
+        syncthreads();
+        values_store_type().store(values_output, values, storage.store);
+    }
+
+    template<typename ValuesOutputIterator, typename ValuesInputIterator>
+    ROCPRIM_DEVICE void permute(unsigned int (&ranks)[ItemsPerThread],
+                                ValuesInputIterator  values_input,
+                                ValuesOutputIterator values_output,
+                                const unsigned int   valid_in_last_block,
+                                storage_type&        storage)
+    {
+        syncthreads();
+        const auto flat_id = block_thread_id<0>();
+        Value      values[ItemsPerThread];
+        block_load_direct_striped<BlockSize>(flat_id, values_input, values, valid_in_last_block);
+        values_exchange_type().gather_from_striped(values, values, ranks, storage.exchange);
+        syncthreads();
+        values_store_type().store(values_output, values, valid_in_last_block, storage.store);
+    }
+};
+
+template<unsigned int BlockSize, unsigned int ItemsPerThread>
+struct block_permute_values_impl<rocprim::empty_type, BlockSize, ItemsPerThread>
+{
+    using storage_type = empty_storage_type;
+
+    template<typename ValuesInputIterator, typename ValuesOutputIterator>
+    ROCPRIM_DEVICE void permute(unsigned int (&ranks)[ItemsPerThread],
+                                ValuesInputIterator  values_input,
+                                ValuesOutputIterator values_output,
+                                storage_type&        storage)
+    {
+        (void)ranks;
+        (void)values_input;
+        (void)values_output;
+        (void)storage;
+    }
+
+    template<typename ValuesOutputIterator, typename ValuesInputIterator>
+    ROCPRIM_DEVICE void permute(unsigned int (&ranks)[ItemsPerThread],
+                                ValuesInputIterator  values_input,
+                                ValuesOutputIterator values_output,
+                                const unsigned int   valid_in_last_block,
+                                storage_type&        storage)
+    {
+        (void)ranks;
+        (void)values_input;
+        (void)values_output;
+        (void)valid_in_last_block;
+        (void)storage;
+    }
+};
+
+// The specialization below exists because the compiler creates slow code for
+// ValueTypes with misaligned datastructures in them (e.g. custom_char_double)
+// when storing/loading those ValueTypes to/from registers.
+// Thus this is a temporary workaround.
+// TODO: Check if also the case for small types like this.
+template<typename Value, unsigned int BlockSize, unsigned int ItemsPerThread>
+struct block_permute_values_impl<Value,
+                                 BlockSize,
+                                 ItemsPerThread,
+                                 std::enable_if_t<(std::is_trivially_copyable<Value>::value
+                                                   && !rocprim::is_floating_point<Value>::value
+                                                   && !std::is_integral<Value>::value)>>
+{
+    static constexpr unsigned int items_per_block = ItemsPerThread * BlockSize;
+
+    struct storage_type_
+    {
+        Value values[items_per_block];
+    };
+
+    using storage_type = raw_storage<storage_type_>;
+
+    template<typename ValuesInputIterator, typename ValuesOutputIterator>
+    ROCPRIM_DEVICE void permute(unsigned int (&ranks)[ItemsPerThread],
+                                ValuesInputIterator  values_input,
+                                ValuesOutputIterator values_output,
+                                storage_type&        storage_)
+    {
+        syncthreads();
+        auto&      values_shared = storage_.get().values;
+        const auto flat_id       = block_thread_id<0>();
+
+        ROCPRIM_UNROLL
+        for(unsigned int item = 0; item < ItemsPerThread; ++item)
+        {
+            const unsigned int idx = BlockSize * item + flat_id;
+            values_shared[idx]     = values_input[idx];
+        }
+
+        syncthreads();
+
+        ROCPRIM_UNROLL
+        for(unsigned int item = 0; item < ItemsPerThread; ++item)
+        {
+            values_output[ItemsPerThread * flat_id + item] = values_shared[ranks[item]];
+        }
+    }
+
+    template<typename ValuesOutputIterator, typename ValuesInputIterator>
+    ROCPRIM_DEVICE void permute(unsigned int (&ranks)[ItemsPerThread],
+                                ValuesInputIterator  values_input,
+                                ValuesOutputIterator values_output,
+                                const unsigned int   valid_in_last_block,
+                                storage_type&        storage_)
+    {
+        syncthreads();
+        auto&      values_shared = storage_.get().values;
+        const auto flat_id       = block_thread_id<0>();
+
+        ROCPRIM_UNROLL
+        for(unsigned int item = 0; item < ItemsPerThread; ++item)
+        {
+            const unsigned int idx = BlockSize * item + flat_id;
+            if(idx < valid_in_last_block)
+            {
+                values_shared[idx] = values_input[idx];
+            }
+        }
+
+        syncthreads();
+
+        ROCPRIM_UNROLL
+        for(unsigned int item = 0; item < ItemsPerThread; ++item)
+        {
+            if(flat_id * ItemsPerThread + item < valid_in_last_block)
+            {
+                values_output[ItemsPerThread * flat_id + item] = values_shared[ranks[item]];
+            }
+        }
+    }
+};
+
+template<typename Key,
+         typename Value,
+         unsigned int         BlockSize,
+         unsigned int         ItemsPerThread,
+         block_sort_algorithm Algo,
+         typename Enable = void>
 struct block_sort_impl
 {
     using stable_key_type = rocprim::tuple<Key, unsigned int>;
-    using block_sort_type = ::rocprim::
-        block_sort<stable_key_type, BlockSize, ItemsPerThread, rocprim::empty_type, Algo>;
 
-    using storage_type = typename block_sort_type::storage_type;
+    using keys_load_type
+        = block_load<Key, BlockSize, ItemsPerThread, block_load_method::block_load_transpose>;
 
-    template <class BinaryFunction>
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    void sort(stable_key_type (&keys)[ItemsPerThread],
-              storage_type& storage,
-              const unsigned int valid_in_last_block,
-              const bool is_incomplete_block,
-              BinaryFunction compare_function)
+    using sort_type
+        = block_sort<stable_key_type, BlockSize, ItemsPerThread, rocprim::empty_type, Algo>;
+
+    using keys_store_type
+        = block_store<Key, BlockSize, ItemsPerThread, block_store_method::block_store_transpose>;
+
+    using values_permute_type = block_permute_values_impl<Value, BlockSize, ItemsPerThread>;
+
+    union storage_type
     {
+        typename keys_load_type::storage_type      load_keys;
+        typename sort_type::storage_type           sort;
+        typename keys_store_type::storage_type     store_keys;
+        typename values_permute_type::storage_type permute_values;
+    };
+
+    template<typename KeysInputIterator,
+             typename KeysOutputIterator,
+             typename ValuesInputIterator,
+             typename ValuesOutputIterator,
+             typename BinaryFunction>
+    ROCPRIM_DEVICE void sort(const unsigned int   valid_in_last_block,
+                             const bool           is_incomplete_block,
+                             KeysInputIterator    keys_input,
+                             KeysOutputIterator   keys_output,
+                             ValuesInputIterator  values_input,
+                             ValuesOutputIterator values_output,
+                             BinaryFunction       compare_function,
+                             storage_type&        storage)
+    {
+        // By default, the block sort algorithm is not stable. We can make it stable
+        // by adding an index to each key.
+
+        Key keys[ItemsPerThread];
+
         if(is_incomplete_block)
         {
-            // Special comparison that sorts out of range values after any "valid" values
-            auto oor_compare
-                = [compare_function, valid_in_last_block](
-                      const stable_key_type& lhs, const stable_key_type& rhs) mutable -> bool {
-                const bool left_oor  = rocprim::get<1>(lhs) >= valid_in_last_block;
-                const bool right_oor = rocprim::get<1>(rhs) >= valid_in_last_block;
-                return (left_oor || right_oor) ? !left_oor : compare_function(lhs, rhs);
-            };
-            block_sort_type().sort(keys, // keys_input
-                                   storage,
-                                   oor_compare);
+            keys_load_type().load(keys_input, keys, valid_in_last_block, storage.load_keys);
         }
         else
         {
-            block_sort_type()
-                .sort(
-                    keys, // keys_input
-                    storage,
-                    compare_function
-                );
+            keys_load_type().load(keys_input, keys, storage.load_keys);
+        }
+
+        const auto flat_id = block_thread_id<0>();
+
+        stable_key_type stable_keys[ItemsPerThread];
+        ROCPRIM_UNROLL
+        for(unsigned int i = 0; i < ItemsPerThread; ++i)
+        {
+            stable_keys[i] = rocprim::make_tuple(keys[i], flat_id * ItemsPerThread + i);
+        }
+
+        syncthreads();
+
+        // Special compare function that enforces sorting is stable.
+        auto stable_compare_function
+            = [compare_function](const stable_key_type& a, const stable_key_type& b) mutable
+        {
+            const bool ab = compare_function(rocprim::get<0>(a), rocprim::get<0>(b));
+            return ab
+                   || (!compare_function(rocprim::get<0>(b), rocprim::get<0>(a))
+                       && (rocprim::get<1>(a) < rocprim::get<1>(b)));
+        };
+
+        if(is_incomplete_block)
+        {
+            // Special compare function that enforces sorting is stable, and that out-of-bounds elements
+            // are not compared.
+            auto stable_oob_compare_function
+                = [stable_compare_function, valid_in_last_block](const stable_key_type& a,
+                                                                 const stable_key_type& b) mutable
+            {
+                const bool a_oob = rocprim::get<1>(a) >= valid_in_last_block;
+                const bool b_oob = rocprim::get<1>(b) >= valid_in_last_block;
+                return a_oob || b_oob ? !a_oob : stable_compare_function(a, b);
+            };
+
+            // Note: rocprim::block_sort with an algorithm that is not stable_merge_sort does not implement sorting
+            // a misaligned amount of items.
+            sort_type().sort(stable_keys, storage.sort, stable_oob_compare_function);
+
+            unsigned int ranks[ItemsPerThread];
+            ROCPRIM_UNROLL
+            for(unsigned int i = 0; i < ItemsPerThread; ++i)
+            {
+                keys[i]  = rocprim::get<0>(stable_keys[i]);
+                ranks[i] = rocprim::get<1>(stable_keys[i]);
+            }
+
+            syncthreads();
+            keys_store_type().store(keys_output, keys, valid_in_last_block, storage.store_keys);
+            values_permute_type().permute(ranks,
+                                          values_input,
+                                          values_output,
+                                          valid_in_last_block,
+                                          storage.permute_values);
+        }
+        else
+        {
+            sort_type().sort(stable_keys, storage.sort, stable_compare_function);
+
+            unsigned int ranks[ItemsPerThread];
+            ROCPRIM_UNROLL
+            for(unsigned int i = 0; i < ItemsPerThread; ++i)
+            {
+                keys[i]  = rocprim::get<0>(stable_keys[i]);
+                ranks[i] = rocprim::get<1>(stable_keys[i]);
+            }
+
+            syncthreads();
+            keys_store_type().store(keys_output, keys, storage.store_keys);
+            values_permute_type().permute(ranks,
+                                          values_input,
+                                          values_output,
+                                          storage.permute_values);
+        }
+    }
+};
+
+template<typename Key, unsigned int BlockSize, unsigned int ItemsPerThread>
+struct block_sort_impl<Key,
+                       rocprim::empty_type,
+                       BlockSize,
+                       ItemsPerThread,
+                       block_sort_algorithm::stable_merge_sort>
+{
+    using keys_load_type
+        = block_load<Key, BlockSize, ItemsPerThread, block_load_method::block_load_transpose>;
+
+    using sort_type = block_sort<Key,
+                                 BlockSize,
+                                 ItemsPerThread,
+                                 rocprim::empty_type,
+                                 block_sort_algorithm::stable_merge_sort>;
+
+    using keys_store_type
+        = block_store<Key, BlockSize, ItemsPerThread, block_store_method::block_store_transpose>;
+
+    union storage_type
+    {
+        typename keys_load_type::storage_type  load_keys;
+        typename sort_type::storage_type       sort;
+        typename keys_store_type::storage_type store_keys;
+    };
+
+    template<typename KeysInputIterator,
+             typename KeysOutputIterator,
+             typename ValuesInputIterator,
+             typename ValuesOutputIterator,
+             typename BinaryFunction>
+    ROCPRIM_DEVICE void sort(unsigned int       valid_in_last_block,
+                             const bool         is_incomplete_block,
+                             KeysInputIterator  keys_input,
+                             KeysOutputIterator keys_output,
+                             ValuesInputIterator /*values_input*/,
+                             ValuesOutputIterator /*values_output*/,
+                             BinaryFunction compare_function,
+                             storage_type&  storage)
+    {
+        Key keys[ItemsPerThread];
+
+        if(is_incomplete_block)
+        {
+            keys_load_type().load(keys_input, keys, valid_in_last_block, storage.load_keys);
+            syncthreads();
+            sort_type().sort(keys, storage.sort, valid_in_last_block, compare_function);
+            syncthreads();
+            keys_store_type().store(keys_output, keys, valid_in_last_block, storage.store_keys);
+        }
+        else
+        {
+            keys_load_type().load(keys_input, keys, storage.load_keys);
+            syncthreads();
+            sort_type().sort(keys, storage.sort, compare_function);
+            syncthreads();
+            keys_store_type().store(keys_output, keys, storage.store_keys);
+        }
+    }
+};
+
+template<typename Key, typename Value, unsigned int BlockSize, unsigned int ItemsPerThread>
+struct block_sort_impl<Key,
+                       Value,
+                       BlockSize,
+                       ItemsPerThread,
+                       block_sort_algorithm::stable_merge_sort,
+                       std::enable_if_t<(sizeof(Value) <= sizeof(int))>>
+{
+    using keys_load_type
+        = block_load<Key, BlockSize, ItemsPerThread, block_load_method::block_load_transpose>;
+
+    using values_load_type
+        = block_load<Value, BlockSize, ItemsPerThread, block_load_method::block_load_transpose>;
+
+    using sort_type = block_sort<Key,
+                                 BlockSize,
+                                 ItemsPerThread,
+                                 Value,
+                                 block_sort_algorithm::stable_merge_sort>;
+
+    using keys_store_type
+        = block_store<Key, BlockSize, ItemsPerThread, block_store_method::block_store_transpose>;
+
+    using values_store_type
+        = block_store<Value, BlockSize, ItemsPerThread, block_store_method::block_store_transpose>;
+
+    union storage_type
+    {
+        typename keys_load_type::storage_type    load_keys;
+        typename values_load_type::storage_type  load_values;
+        typename sort_type::storage_type         sort;
+        typename keys_store_type::storage_type   store_keys;
+        typename values_store_type::storage_type store_values;
+    };
+
+    template<typename KeysInputIterator,
+             typename KeysOutputIterator,
+             typename ValuesInputIterator,
+             typename ValuesOutputIterator,
+             typename BinaryFunction>
+    ROCPRIM_DEVICE void sort(const unsigned int   valid_in_last_block,
+                             const bool           is_incomplete_block,
+                             KeysInputIterator    keys_input,
+                             KeysOutputIterator   keys_output,
+                             ValuesInputIterator  values_input,
+                             ValuesOutputIterator values_output,
+                             BinaryFunction       compare_function,
+                             storage_type&        storage)
+    {
+        Key   keys[ItemsPerThread];
+        Value values[ItemsPerThread];
+
+        if(is_incomplete_block)
+        {
+            keys_load_type().load(keys_input, keys, valid_in_last_block, storage.load_keys);
+            syncthreads();
+            values_load_type().load(values_input, values, valid_in_last_block, storage.load_values);
+            syncthreads();
+            sort_type().sort(keys, values, storage.sort, valid_in_last_block, compare_function);
+            syncthreads();
+            keys_store_type().store(keys_output, keys, valid_in_last_block, storage.store_keys);
+            syncthreads();
+            values_store_type().store(values_output,
+                                      values,
+                                      valid_in_last_block,
+                                      storage.store_values);
+        }
+        else
+        {
+            keys_load_type().load(keys_input, keys, storage.load_keys);
+            syncthreads();
+            values_load_type().load(values_input, values, storage.load_values);
+            syncthreads();
+            sort_type().sort(keys, values, storage.sort, compare_function);
+            syncthreads();
+            keys_store_type().store(keys_output, keys, storage.store_keys);
+            syncthreads();
+            values_store_type().store(values_output, values, storage.store_values);
+        }
+    }
+};
+
+template<typename Key, typename Value, unsigned int BlockSize, unsigned int ItemsPerThread>
+struct block_sort_impl<Key,
+                       Value,
+                       BlockSize,
+                       ItemsPerThread,
+                       block_sort_algorithm::stable_merge_sort,
+                       std::enable_if_t<(sizeof(Value) > sizeof(int))>>
+{
+    using keys_load_type
+        = block_load<Key, BlockSize, ItemsPerThread, block_load_method::block_load_transpose>;
+
+    using sort_type = block_sort<Key,
+                                 BlockSize,
+                                 ItemsPerThread,
+                                 unsigned int,
+                                 block_sort_algorithm::stable_merge_sort>;
+
+    using keys_store_type
+        = block_store<Key, BlockSize, ItemsPerThread, block_store_method::block_store_transpose>;
+
+    using values_permute_type = block_permute_values_impl<Value, BlockSize, ItemsPerThread>;
+
+    union storage_type
+    {
+        typename keys_load_type::storage_type      load_keys;
+        typename sort_type::storage_type           sort;
+        typename keys_store_type::storage_type     store_keys;
+        typename values_permute_type::storage_type permute_values;
+    };
+
+    template<typename KeysInputIterator,
+             typename KeysOutputIterator,
+             typename ValuesInputIterator,
+             typename ValuesOutputIterator,
+             typename BinaryFunction>
+    ROCPRIM_DEVICE void sort(const unsigned int   valid_in_last_block,
+                             const bool           is_incomplete_block,
+                             KeysInputIterator    keys_input,
+                             KeysOutputIterator   keys_output,
+                             ValuesInputIterator  values_input,
+                             ValuesOutputIterator values_output,
+                             BinaryFunction       compare_function,
+                             storage_type&        storage)
+    {
+        Key keys[ItemsPerThread];
+
+        const auto   flat_id = block_thread_id<0>();
+        unsigned int ranks[ItemsPerThread];
+        ROCPRIM_UNROLL
+        for(unsigned int item = 0; item < ItemsPerThread; ++item)
+        {
+            ranks[item] = flat_id * ItemsPerThread + item;
+        }
+
+        if(is_incomplete_block)
+        {
+            keys_load_type().load(keys_input, keys, valid_in_last_block, storage.load_keys);
+            syncthreads();
+            sort_type().sort(keys, ranks, storage.sort, valid_in_last_block, compare_function);
+            syncthreads();
+            keys_store_type().store(keys_output, keys, valid_in_last_block, storage.store_keys);
+            values_permute_type().permute(ranks,
+                                          values_input,
+                                          values_output,
+                                          valid_in_last_block,
+                                          storage.permute_values);
+        }
+        else
+        {
+            keys_load_type().load(keys_input, keys, storage.load_keys);
+            syncthreads();
+            sort_type().sort(keys, ranks, storage.sort, compare_function);
+            syncthreads();
+            keys_store_type().store(keys_output, keys, storage.store_keys);
+            values_permute_type().permute(ranks,
+                                          values_input,
+                                          values_output,
+                                          storage.permute_values);
         }
     }
 };
@@ -324,16 +690,10 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto block_sort_kernel_impl(KeysInputIterato
                                                                 ValuesOutputIterator values_output,
                                                                 const OffsetT        input_size,
                                                                 BinaryFunction compare_function)
-    -> std::enable_if_t<(!std::is_trivially_copyable<ValueType>::value
-                         || rocprim::is_floating_point<ValueType>::value
-                         || std::is_integral<ValueType>::value),
-                        void>
 {
-    using key_type             = typename std::iterator_traits<KeysInputIterator>::value_type;
-    using value_type           = typename std::iterator_traits<ValuesInputIterator>::value_type;
-    constexpr bool with_values = !std::is_same<value_type, ::rocprim::empty_type>::value;
+    using key_type   = typename std::iterator_traits<KeysInputIterator>::value_type;
+    using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
 
-    const unsigned int     flat_id         = block_thread_id<0>();
     const unsigned int     flat_block_id   = block_id<0>();
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
 
@@ -341,249 +701,18 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto block_sort_kernel_impl(KeysInputIterato
     const unsigned int valid_in_last_block = input_size - block_offset;
     const bool         is_incomplete_block = flat_block_id == (input_size / items_per_block);
 
-    key_type keys[ItemsPerThread];
+    using sort_impl = block_sort_impl<key_type, value_type, BlockSize, ItemsPerThread, Algo>;
 
-    using block_load_keys_impl = block_load_keys_impl<BlockSize, ItemsPerThread, key_type>;
-    using block_sort_impl      = block_sort_impl<BlockSize, ItemsPerThread, Algo, key_type>;
-    using block_load_values_impl
-        = block_load_values_impl<with_values, BlockSize, ItemsPerThread, value_type>;
-    using block_store_impl
-        = block_store_impl<with_values, BlockSize, ItemsPerThread, key_type, value_type>;
+    ROCPRIM_SHARED_MEMORY typename sort_impl::storage_type storage;
 
-    ROCPRIM_SHARED_MEMORY union
-    {
-        typename block_load_keys_impl::storage_type   load_keys;
-        typename block_sort_impl::storage_type        sort;
-        typename block_load_values_impl::storage_type load_values;
-        typename block_store_impl::storage_type       store;
-    } storage;
-
-    block_load_keys_impl().load(block_offset,
-                                valid_in_last_block,
-                                is_incomplete_block,
-                                keys_input,
-                                keys,
-                                storage.load_keys);
-
-    using stable_key_type = typename block_sort_impl::stable_key_type;
-
-    // Special comparison that preserves relative order of equal keys
-    auto stable_compare_function
-        = [compare_function](const stable_key_type& a, const stable_key_type& b) mutable -> bool
-    {
-        const bool ab = compare_function(rocprim::get<0>(a), rocprim::get<0>(b));
-        return ab
-               || (!compare_function(rocprim::get<0>(b), rocprim::get<0>(a))
-                   && (rocprim::get<1>(a) < rocprim::get<1>(b)));
-    };
-
-    stable_key_type stable_keys[ItemsPerThread];
-    ROCPRIM_UNROLL
-    for(unsigned int item = 0; item < ItemsPerThread; ++item)
-    {
-        stable_keys[item] = rocprim::make_tuple(keys[item], ItemsPerThread * flat_id + item);
-    }
-
-    // Synchronize before reusing shared memory
-    ::rocprim::syncthreads();
-
-    block_sort_impl().sort(stable_keys,
-                           storage.sort,
-                           valid_in_last_block,
-                           is_incomplete_block,
-                           stable_compare_function);
-
-    unsigned int ranks[ItemsPerThread];
-
-    ROCPRIM_UNROLL
-    for(unsigned int item = 0; item < ItemsPerThread; ++item)
-    {
-        keys[item]  = rocprim::get<0>(stable_keys[item]);
-        ranks[item] = rocprim::get<1>(stable_keys[item]);
-    }
-
-    value_type values[ItemsPerThread];
-    // Load the values with the already sorted indices
-    block_load_values_impl().load(flat_id,
-                                  ranks,
-                                  block_offset,
-                                  valid_in_last_block,
-                                  is_incomplete_block,
-                                  values_input,
-                                  values,
-                                  storage.load_values);
-
-    block_store_impl().store(block_offset,
-                             valid_in_last_block,
-                             is_incomplete_block,
-                             keys_output,
-                             values_output,
-                             keys,
-                             values,
-                             storage.store);
-}
-
-// The specialization below exists because the compiler creates slow code for
-// ValueTypes with misaligned datastructures in them (e.g. custom_char_double)
-// when storing/loading those ValueTypes to/from registers.
-// Thus this is a temporary workaround.
-template<unsigned int         BlockSize,
-         unsigned int         ItemsPerThread,
-         block_sort_algorithm Algo,
-         class KeysInputIterator,
-         class KeysOutputIterator,
-         class ValuesInputIterator,
-         class ValuesOutputIterator,
-         class OffsetT,
-         class BinaryFunction,
-         class ValueType = typename std::iterator_traits<ValuesInputIterator>::value_type>
-ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto block_sort_kernel_impl(KeysInputIterator    keys_input,
-                                                                KeysOutputIterator   keys_output,
-                                                                ValuesInputIterator  values_input,
-                                                                ValuesOutputIterator values_output,
-                                                                const OffsetT        input_size,
-                                                                BinaryFunction compare_function)
-    -> std::enable_if_t<(std::is_trivially_copyable<ValueType>::value
-                         && !rocprim::is_floating_point<ValueType>::value
-                         && !std::is_integral<ValueType>::value),
-                        void>
-{
-    using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
-    using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
-    constexpr bool with_values = !std::is_same<value_type, ::rocprim::empty_type>::value;
-
-    const unsigned int flat_id = block_thread_id<0>();
-    const unsigned int flat_block_id = block_id<0>();
-    constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
-
-    const OffsetT block_offset = flat_block_id * items_per_block;
-    const unsigned int valid_in_last_block = input_size - block_offset;
-    const bool is_incomplete_block = flat_block_id == (input_size / items_per_block);
-
-    key_type keys[ItemsPerThread];
-
-    using block_load_keys_impl = block_load_keys_impl<BlockSize, ItemsPerThread, key_type>;
-    using block_sort_impl      = block_sort_impl<BlockSize, ItemsPerThread, Algo, key_type>;
-    using block_store_impl
-        = block_store_impl<false, BlockSize, ItemsPerThread, key_type, rocprim::empty_type>;
-
-    using values_storage_ = value_type[items_per_block];
-    ROCPRIM_SHARED_MEMORY union {
-        typename block_load_keys_impl::storage_type   load_keys;
-        typename block_sort_impl::storage_type        sort;
-        detail::raw_storage<values_storage_>          load_values;
-        typename block_store_impl::storage_type       store;
-    } storage;
-
-    block_load_keys_impl().load(
-        block_offset,
-        valid_in_last_block,
-        is_incomplete_block,
-        keys_input,
-        keys,
-        storage.load_keys
-    );
-
-    using stable_key_type = typename block_sort_impl::stable_key_type;
-
-    // Special comparison that preserves relative order of equal keys
-    auto stable_compare_function = [compare_function](const stable_key_type& a, const stable_key_type& b) mutable -> bool
-    {
-        const bool ab = compare_function(rocprim::get<0>(a), rocprim::get<0>(b));
-        return ab
-               || (!compare_function(rocprim::get<0>(b), rocprim::get<0>(a))
-                   && (rocprim::get<1>(a) < rocprim::get<1>(b)));
-    };
-
-    stable_key_type stable_keys[ItemsPerThread];
-    ROCPRIM_UNROLL
-    for(unsigned int item = 0; item < ItemsPerThread; ++item) {
-        stable_keys[item] = rocprim::make_tuple(keys[item], ItemsPerThread * flat_id + item);
-    }
-
-    // Synchronize before reusing shared memory
-    ::rocprim::syncthreads();
-
-    block_sort_impl().sort(
-        stable_keys,
-        storage.sort,
-        valid_in_last_block,
-        is_incomplete_block,
-        stable_compare_function
-    );
-
-    unsigned int ranks[ItemsPerThread];
-
-    ROCPRIM_UNROLL
-    for(unsigned int item = 0; item < ItemsPerThread; ++item) {
-        keys[item]  = rocprim::get<0>(stable_keys[item]);
-        ranks[item] = rocprim::get<1>(stable_keys[item]);
-    }
-
-    rocprim::empty_type values[ItemsPerThread];
-    block_store_impl().store(
-        block_offset,
-        valid_in_last_block,
-        is_incomplete_block,
-        keys_output,
-        values_output,
-        keys,
-        values,
-        storage.store
-    );
-
-    if ROCPRIM_IF_CONSTEXPR(with_values)
-    {
-        ::rocprim::syncthreads();
-        auto& values_shared = storage.load_values.get();
-        if(is_incomplete_block)
-        {
-            ROCPRIM_UNROLL
-            for(unsigned int item = 0; item < ItemsPerThread; ++item)
-            {
-                const unsigned int idx = BlockSize * item + flat_id;
-                if(idx < valid_in_last_block)
-                {
-                    values_shared[idx] = values_input[block_offset + idx];
-                }
-            }
-        }
-        else
-        {
-            ROCPRIM_UNROLL
-            for(unsigned int item = 0; item < ItemsPerThread; ++item)
-            {
-                const unsigned int idx = BlockSize * item + flat_id;
-                values_shared[idx]     = values_input[block_offset + idx];
-            }
-        }
-
-        // Synchronize before reusing shared memory
-        ::rocprim::syncthreads();
-
-        const OffsetT thread_offset = block_offset + ItemsPerThread * flat_id;
-        if(is_incomplete_block)
-        {
-            ROCPRIM_UNROLL
-            for(unsigned int item = 0; item < ItemsPerThread; ++item)
-            {
-                if(flat_id * ItemsPerThread + item < valid_in_last_block)
-                {
-                    values_output[thread_offset + item] = values_shared[ranks[item]];
-                }
-            }
-        }
-        else
-        {
-            ROCPRIM_UNROLL
-            for(unsigned int item = 0; item < ItemsPerThread; ++item)
-            {
-                values_output[thread_offset + item] = values_shared[ranks[item]];
-            }
-        }
-
-        rocprim::syncthreads();
-    }
+    sort_impl().sort(valid_in_last_block,
+                     is_incomplete_block,
+                     keys_input + block_offset,
+                     keys_output + block_offset,
+                     values_input + block_offset,
+                     values_output + block_offset,
+                     compare_function,
+                     storage);
 }
 
 template<unsigned int BlockSize,

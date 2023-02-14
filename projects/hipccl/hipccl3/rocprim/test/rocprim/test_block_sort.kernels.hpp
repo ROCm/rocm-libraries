@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -30,6 +30,7 @@ constexpr bool is_buildable(unsigned int                  BlockSize,
     switch(algorithm)
     {
         case rocprim::block_sort_algorithm::merge_sort:
+        case rocprim::block_sort_algorithm::stable_merge_sort:
             return (rocprim::detail::is_power_of_two(ItemsPerThread)
                     && rocprim::detail::is_power_of_two(BlockSize));
         case rocprim::block_sort_algorithm::bitonic_sort:
@@ -43,15 +44,16 @@ constexpr bool is_buildable(unsigned int                  BlockSize,
 template<
     unsigned int BlockSize,
     unsigned int ItemsPerThread,
-    class key_type,
+    class KeyIterator,
     rocprim::block_sort_algorithm algorithm,
-    class BinaryOp = rocprim::less<key_type>,
+    class BinaryOp = rocprim::less<typename std::iterator_traits<KeyIterator>::value_type>,
     class OffsetT,
     std::enable_if_t<(ItemsPerThread == 1u && is_buildable(BlockSize, ItemsPerThread, algorithm)),
                      int> = 0>
-__global__ __launch_bounds__(BlockSize) void sort_keys_kernel(key_type* device_key_output,
-                                                              OffsetT   size)
+__global__ __launch_bounds__(BlockSize) void sort_keys_kernel(KeyIterator device_key_output,
+                                                              OffsetT     size)
 {
+    using key_type = typename std::iterator_traits<KeyIterator>::value_type;
     static constexpr const unsigned int ItemsPerBlock = ItemsPerThread * BlockSize;
     const unsigned int                  block_offset  = blockIdx.x * ItemsPerBlock;
     const unsigned int                  index         = block_offset + threadIdx.x;
@@ -78,18 +80,19 @@ __global__ __launch_bounds__(BlockSize) void sort_keys_kernel(key_type* device_k
     }
 }
 
-template<
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
-    class key_type,
-    rocprim::block_sort_algorithm algorithm,
-    class BinaryOp = rocprim::less<key_type>,
-    class OffsetT,
-    std::enable_if_t<(ItemsPerThread > 1u && is_buildable(BlockSize, ItemsPerThread, algorithm)),
-                     int> = 0>
-__global__ __launch_bounds__(BlockSize) void sort_keys_kernel(key_type* device_key_output,
+template<unsigned int BlockSize,
+         unsigned int ItemsPerThread,
+         class KeyIterator,
+         rocprim::block_sort_algorithm algorithm,
+         class BinaryOp = rocprim::less<typename std::iterator_traits<KeyIterator>::value_type>,
+         class OffsetT,
+         std::enable_if_t<(ItemsPerThread > 1u && is_buildable(BlockSize, ItemsPerThread, algorithm)
+                           && algorithm != rocprim::block_sort_algorithm::stable_merge_sort),
+                          int> = 0>
+__global__ __launch_bounds__(BlockSize) void sort_keys_kernel(KeyIterator device_key_output,
                                                               OffsetT /*size*/)
 {
+    using key_type = typename std::iterator_traits<KeyIterator>::value_type;
     static constexpr const unsigned int ItemsPerBlock = ItemsPerThread * BlockSize;
     const unsigned int                  lid           = threadIdx.x;
     const unsigned int                  block_offset  = blockIdx.x * ItemsPerBlock;
@@ -105,12 +108,51 @@ __global__ __launch_bounds__(BlockSize) void sort_keys_kernel(key_type* device_k
 
 template<unsigned int BlockSize,
          unsigned int ItemsPerThread,
-         class key_type,
+         class KeyIterator,
          rocprim::block_sort_algorithm algorithm,
-         class BinaryOp = rocprim::less<key_type>,
+         class BinaryOp = rocprim::less<typename std::iterator_traits<KeyIterator>::value_type>,
+         class OffsetT,
+         std::enable_if_t<(ItemsPerThread > 1u && is_buildable(BlockSize, ItemsPerThread, algorithm)
+                           && algorithm == rocprim::block_sort_algorithm::stable_merge_sort),
+                          int> = 0>
+__global__ __launch_bounds__(BlockSize) void sort_keys_kernel(KeyIterator device_key_output,
+                                                              OffsetT     size)
+{
+    using key_type = typename std::iterator_traits<KeyIterator>::value_type;
+    using bsort_type
+        = rocprim::block_sort<key_type, BlockSize, ItemsPerThread, rocprim::empty_type, algorithm>;
+
+    static constexpr const unsigned int ItemsPerBlock = ItemsPerThread * BlockSize;
+    const unsigned int                  lid           = threadIdx.x;
+    const unsigned int                  block_offset  = blockIdx.x * ItemsPerBlock;
+    key_type                            keys[ItemsPerThread];
+
+    rocprim::block_load_direct_blocked(lid, device_key_output + block_offset, keys);
+
+    if(size % ItemsPerBlock == 0)
+    {
+        bsort_type().sort(keys, BinaryOp());
+    }
+    else
+    {
+        ROCPRIM_SHARED_MEMORY typename bsort_type::storage_type storage;
+        bsort_type().sort(keys,
+                          storage,
+                          std::min(static_cast<size_t>(ItemsPerBlock), size - block_offset),
+                          BinaryOp());
+    }
+
+    rocprim::block_store_direct_blocked(lid, device_key_output + block_offset, keys);
+}
+
+template<unsigned int BlockSize,
+         unsigned int ItemsPerThread,
+         class KeyIterator,
+         rocprim::block_sort_algorithm algorithm,
+         class BinaryOp = rocprim::less<typename std::iterator_traits<KeyIterator>::value_type>,
          class OffsetT,
          std::enable_if_t<!is_buildable(BlockSize, ItemsPerThread, algorithm), int> = 0>
-__global__ __launch_bounds__(BlockSize) void sort_keys_kernel(key_type* /*device_key_output*/,
+__global__ __launch_bounds__(BlockSize) void sort_keys_kernel(KeyIterator /*device_key_output*/,
                                                               OffsetT /*size*/)
 {}
 

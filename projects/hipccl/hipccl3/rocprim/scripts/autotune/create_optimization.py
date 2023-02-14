@@ -285,15 +285,6 @@ the benchmark should also be valid C++ typenames. This is required as these name
 generated C++ code.
 """
 
-class AlgorithmDeviceMergeSort(Algorithm):
-    algorithm_name = 'device_merge_sort'
-    cpp_configuration_template_name = 'mergesort_config_template'
-    config_selection_types = [
-        SelectionType(name='key_type', is_optional=False),
-        SelectionType(name='value_type', is_optional=True)]
-    def __init__(self, fallback_entries):
-        Algorithm.__init__(self, fallback_entries)
-
 class AlgorithmDeviceMergeSortBlockSort(Algorithm):
     algorithm_name = 'device_merge_sort_block_sort'
     cpp_configuration_template_name = 'mergesort_block_sort_config_template'
@@ -331,15 +322,6 @@ class AlgorithmDeviceRadixSortOnesweep(Algorithm):
     def __init__(self, fallback_entries):
         Algorithm.__init__(self, fallback_entries)
 
-class AlgorithmDeviceRadixSort(Algorithm):
-    algorithm_name = 'device_radix_sort'
-    cpp_configuration_template_name = 'radixsort_config_template'
-    config_selection_types = [
-            SelectionType(name='key_type', is_optional=False),
-            SelectionType(name='value_type', is_optional=True)]
-    def __init__(self, fallback_entries):
-        Algorithm.__init__(self, fallback_entries)
-
 class AlgorithmDeviceReduce(Algorithm):
     algorithm_name = 'device_reduce'
     config_selection_types = [SelectionType(name='datatype', is_optional=False)]
@@ -364,9 +346,7 @@ class AlgorithmDeviceScanByKey(Algorithm):
         Algorithm.__init__(self, fallback_entries)
 
 def create_algorithm(algorithm_name: str, fallback_entries):
-    if algorithm_name == 'device_merge_sort':
-        return AlgorithmDeviceMergeSort(fallback_entries)
-    elif algorithm_name == 'device_merge_sort_block_sort':
+    if algorithm_name == 'device_merge_sort_block_sort':
         return AlgorithmDeviceMergeSortBlockSort(fallback_entries)
     elif algorithm_name == 'device_merge_sort_block_merge':
         return AlgorithmDeviceMergeSortBlockMerge(fallback_entries)
@@ -374,8 +354,6 @@ def create_algorithm(algorithm_name: str, fallback_entries):
         return AlgorithmDeviceRadixSortBlockSort(fallback_entries)
     elif algorithm_name == 'device_radix_sort_onesweep':
         return AlgorithmDeviceRadixSortOnesweep(fallback_entries)
-    elif algorithm_name == 'device_radix_sort':
-        return AlgorithmDeviceRadixSort(fallback_entries)
     elif algorithm_name == 'device_reduce':
         return AlgorithmDeviceReduce(fallback_entries)
     elif algorithm_name == 'device_scan': 

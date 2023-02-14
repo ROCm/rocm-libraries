@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -228,6 +228,7 @@ add_rocprim_test("rocprim.block_exchange" test_block_exchange.cpp)
 add_rocprim_test("rocprim.block_histogram" test_block_histogram.cpp)
 add_rocprim_test("rocprim.block_load_store" test_block_load_store.cpp)
 add_rocprim_test("rocprim.block_sort_merge" test_block_sort_merge.cpp)
+add_rocprim_test("rocprim.block_sort_merge_stable" test_block_sort_merge_stable.cpp)
 add_rocprim_test_parallel("rocprim.block_radix_rank" test_block_radix_rank.cpp.in)
 add_rocprim_test("rocprim.block_radix_sort" test_block_radix_sort.cpp)
 add_rocprim_test("rocprim.block_reduce" test_block_reduce.cpp)

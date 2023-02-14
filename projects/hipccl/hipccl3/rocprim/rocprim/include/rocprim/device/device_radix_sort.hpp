@@ -35,7 +35,6 @@
 #include "../functional.hpp"
 #include "../types.hpp"
 
-#include "detail/config/device_radix_sort.hpp"
 #include "detail/config/device_radix_sort_onesweep.hpp"
 #include "detail/device_radix_sort.hpp"
 #include "device_transform.hpp"
@@ -621,10 +620,10 @@ hipError_t radix_sort_impl(void * temporary_storage,
         "ValuesInputIterator and ValuesOutputIterator must have the same value_type"
     );
 
+    // dummy values, we are only interested in config::merge_size_limit_blocks
     using config = default_or_custom_config<
         Config,
-        default_radix_sort_config<ROCPRIM_TARGET_ARCH, key_type, value_type>
-    >;
+        rocprim::radix_sort_config<3, 4, kernel_config<256, 4>, kernel_config<256, 4>>>;
 
     // The following hardcoded radix_sort_block_sort kernel configuration provides
     // superior performance when input_size is small (< ~100000). This is because
@@ -632,13 +631,13 @@ hipError_t radix_sort_impl(void * temporary_storage,
     // Use <256u, 4u>, unless smaller is needed to not exceed shared memory maximum.
     using default_radix_sort_block_sort_config =
         typename rocprim::detail::radix_sort_block_sort_config_base<key_type, value_type>::type;
-    using low_sizes_block_sort_config
+    using small_sizes_block_sort_config
         = kernel_config<rocprim::min(256u, default_radix_sort_block_sort_config::block_size),
                         rocprim::min(4u, default_radix_sort_block_sort_config::items_per_thread)>;
 
     kernel_config_params single_sort_params;
     hipError_t           error
-        = get_radix_sort_block_sort_config<low_sizes_block_sort_config, key_type, value_type>(
+        = get_radix_sort_block_sort_config<small_sizes_block_sort_config, key_type, value_type>(
             stream,
             single_sort_params);
     if(error != hipSuccess)
@@ -662,7 +661,7 @@ hipError_t radix_sort_impl(void * temporary_storage,
             return hipSuccess;
         }
         is_result_in_output = true;
-        return radix_sort_block_sort<low_sizes_block_sort_config, Descending>(
+        return radix_sort_block_sort<small_sizes_block_sort_config, Descending>(
             keys_input,
             keys_output,
             values_input,
