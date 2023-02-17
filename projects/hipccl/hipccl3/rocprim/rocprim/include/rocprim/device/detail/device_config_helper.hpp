@@ -76,7 +76,7 @@ constexpr unsigned int merge_sort_items_per_thread(const unsigned int item_scale
 }
 constexpr unsigned int merge_sort_block_size(const unsigned int item_scale)
 {
-    if(item_scale <= 64)
+    if(item_scale <= 32)
     {
         return 128;
     }
