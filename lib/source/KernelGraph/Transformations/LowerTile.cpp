@@ -224,9 +224,9 @@ namespace rocRoller
                              graph.mapper.get<SubDimension>(loadA[0], 1)))
                             .size;
 
-            auto macK = literal(static_cast<uint>(macrotile_a.sizes[1])); // M x K
-            auto [K, forK]
-                = rangeFor(graph, matK / macK, "KLoop"); // num of loop iterations : matK / macK
+            auto macK      = literal(static_cast<uint>(macrotile_a.sizes[1])); // M x K
+            auto [K, forK] = rangeFor(
+                graph, matK / macK, rocRoller::KLOOP); // num of loop iterations : matK / macK
 
             // remove passthrough between A column block and y-workgroup
             auto a_tilenum_y   = graph.mapper.get<MacroTileNumber>(loadA[0], 1);
@@ -296,9 +296,9 @@ namespace rocRoller
             AssertFatal(wavetilesPerWorkgroup.size() > 1);
 
             auto [WaveTilesX, forWaveTilesX]
-                = rangeFor(graph, literal(wavetilesPerWorkgroup[0]), "XLoop");
+                = rangeFor(graph, literal(wavetilesPerWorkgroup[0]), rocRoller::XLOOP);
             auto [WaveTilesY, forWaveTilesY]
-                = rangeFor(graph, literal(wavetilesPerWorkgroup[1]), "YLoop");
+                = rangeFor(graph, literal(wavetilesPerWorkgroup[1]), rocRoller::YLOOP);
 
             // find other loadtiled ops from kernel that lead to assigns
             auto             kernel_outputs = graph.control.childNodes(kernel).to<std::vector>();

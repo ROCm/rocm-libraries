@@ -136,11 +136,11 @@ namespace rocRoller
             auto unrollY = kernelOptions.unrollY;
             // Find the number of forLoops following this for loop.
             auto name = getForLoopName(graph, loopTag);
-            if(name == "XLoop" && unrollX > 0)
+            if(name == rocRoller::XLOOP && unrollX > 0)
                 return unrollX;
-            else if(name == "YLoop" && unrollY > 0)
+            else if(name == rocRoller::YLOOP && unrollY > 0)
                 return unrollY;
-            else if(name == "KLoop")
+            else if(name == rocRoller::KLOOP)
                 return 1u;
             // Use default behavior if the above isn't true
             // If loop length is a constant, unroll the loop by that amount

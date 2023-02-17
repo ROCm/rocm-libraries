@@ -7,6 +7,10 @@
 
 namespace rocRoller
 {
+    const std::string XLOOP = "XLoop";
+    const std::string YLOOP = "YLoop";
+    const std::string KLOOP = "KLoop";
+
     struct KernelOptions
     {
         KernelOptions();
