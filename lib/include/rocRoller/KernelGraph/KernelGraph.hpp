@@ -23,7 +23,7 @@ namespace rocRoller
             CoordinateGraph::CoordinateGraph coordinates;
             ControlToCoordinateMapper        mapper;
 
-            std::string toDOT(bool drawMappings = false) const;
+            std::string toDOT(bool drawMappings = false, std::string title = "") const;
 
             template <typename T>
             std::pair<int, T> getDimension(int controlIndex, ConnectionSpec conn) const
@@ -164,7 +164,7 @@ namespace rocRoller
          * @brief Performs the loop cleaning transformation
          *
          * Removes forloops that only contain a single iterations
-         * 
+         *
          * @return KernelGraph
          */
         KernelGraph cleanLoops(KernelGraph const&);

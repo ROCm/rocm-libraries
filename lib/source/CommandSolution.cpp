@@ -213,31 +213,37 @@ namespace rocRoller
         m_context->kernel()->addCommandArguments(m_command->getArguments());
 
         m_kernelGraph = KernelGraph::translate(m_command);
-        logger->debug("CommandKernel::generateKernel: post translate: {}", m_kernelGraph.toDOT());
+        logger->debug("CommandKernel::generateKernel: post translate: {}",
+                      m_kernelGraph.toDOT(false, "CommandKernel::generateKernel: post translate"));
         m_kernelGraph = updateParameters(m_kernelGraph, m_preParameters);
 
         m_kernelGraph = KernelGraph::lowerLinear(m_kernelGraph, m_context);
 
         m_kernelGraph = KernelGraph::lowerTile(m_kernelGraph, m_preParameters, m_context);
-        logger->debug("CommandKernel::generateKernelGraph: post lowertile: {}",
-                      m_kernelGraph.toDOT());
+        logger->debug(
+            "CommandKernel::generateKernelGraph: post lowertile: {}",
+            m_kernelGraph.toDOT(false, "CommandKernel::generateKernelGraph: post lowertile"));
 
         m_kernelGraph = KernelGraph::fuseExpressions(m_kernelGraph);
 
         m_kernelGraph = KernelGraph::unrollLoops(m_kernelGraph, m_context);
-        logger->debug("CommandKernel::generateKernelGraph: post unroll: {}", m_kernelGraph.toDOT());
+        logger->debug(
+            "CommandKernel::generateKernelGraph: post unroll: {}",
+            m_kernelGraph.toDOT(false, "CommandKernel::generateKernelGraph: post unroll"));
 
         if(m_context->kernelOptions().fuseLoops)
             m_kernelGraph = KernelGraph::fuseLoops(m_kernelGraph, m_context);
-        logger->debug("CommandKernel::generateKernelGraph: post fuse: {}", m_kernelGraph.toDOT());
+        logger->debug("CommandKernel::generateKernelGraph: post fuse: {}",
+                      m_kernelGraph.toDOT(false, "CommandKernel::generateKernelGraph: post fuse"));
 
         m_kernelGraph = KernelGraph::addLDS(m_kernelGraph, m_context);
 
         m_kernelGraph = KernelGraph::addComputeIndexOperations(m_kernelGraph);
 
         m_kernelGraph = KernelGraph::cleanLoops(m_kernelGraph);
-        logger->debug("CommandKernel::generateKernelGraph: post clean loops: {}",
-                      m_kernelGraph.toDOT());
+        logger->debug(
+            "CommandKernel::generateKernelGraph: post clean loops: {}",
+            m_kernelGraph.toDOT(false, "CommandKernel::generateKernelGraph: post clean loops"));
 
         m_kernelGraph = KernelGraph::addDeallocate(m_kernelGraph);
 

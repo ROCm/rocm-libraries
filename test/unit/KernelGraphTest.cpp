@@ -560,7 +560,8 @@ namespace KernelGraphTest
                 "coord13"->"coord15"[style=invis]
                 rankdir=LR
                 }
-                subgraph clusterCF {"cntrl1"[label="Kernel(1)"];
+                subgraph clusterCF {label = "Control Graph";
+                "cntrl1"[label="Kernel(1)"];
                 "cntrl2"[label="LoadLinear(2)"];
                 "cntrl3"[label="Body(3)",shape=box];
                 "cntrl4"[label="LoadLinear(4)"];
@@ -666,7 +667,8 @@ namespace KernelGraphTest
                 "coord13"->"coord15"[style=invis]
                 rankdir=LR
                 }
-                subgraph clusterCF {"cntrl1"[label="Kernel(1)"];
+                subgraph clusterCF {label = "Control Graph";
+                "cntrl1"[label="Kernel(1)"];
                 "cntrl2"[label="LoadLinear(2)"];
                 "cntrl3"[label="Body(3)",shape=box];
                 "cntrl4"[label="LoadLinear(4)"];
@@ -835,7 +837,8 @@ namespace KernelGraphTest
 		"coord34"->"coord35"[style=invis]
 		rankdir=LR
 		}
-		subgraph clusterCF {"cntrl1"[label="Kernel(1)"];
+		subgraph clusterCF {label = "Control Graph";
+		"cntrl1"[label="Kernel(1)"];
 		"cntrl2"[label="LoadVGPR(2)"];
 		"cntrl3"[label="Body(3)",shape=box];
 		"cntrl4"[label="LoadVGPR(4)"];
@@ -1028,7 +1031,8 @@ namespace KernelGraphTest
 		"coord37"->"coord34"->"coord35"[style=invis]
 		rankdir=LR
 		}
-		subgraph clusterCF {"cntrl1"[label="Kernel(1)"];
+		subgraph clusterCF {label = "Control Graph";
+		"cntrl1"[label="Kernel(1)"];
 		"cntrl2"[label="ForLoopOp : LessThan(DataFlowTag(10), 16i)(2)"];
 		"cntrl3"[label="Body(3)",shape=box];
 		"cntrl4"[label="Assign SGPR 0i(4)"];
@@ -1213,7 +1217,8 @@ namespace KernelGraphTest
 		"coord17"->"coord18"[style=invis]
 		rankdir=LR
 		}
-		subgraph clusterCF {"cntrl1"[label="Kernel(1)"];
+		subgraph clusterCF {label = "Control Graph";
+		"cntrl1"[label="Kernel(1)"];
 		"cntrl2"[label="LoadTiled(2)"];
 		"cntrl3"[label="Body(3)",shape=box];
 		"cntrl4"[label="LoadTiled(4)"];
@@ -1310,7 +1315,8 @@ namespace KernelGraphTest
                 "coord7"->"coord9"[style=invis]
                 rankdir=LR
                 }
-                subgraph clusterCF {"cntrl1"[label="Kernel(1)"];
+                subgraph clusterCF {label = "Control Graph";
+                "cntrl1"[label="Kernel(1)"];
                 "cntrl2"[label="LoadVGPR(2)"];
                 "cntrl3"[label="Body(3)",shape=box];
                 "cntrl4"[label="LoadVGPR(4)"];
@@ -1533,7 +1539,8 @@ namespace KernelGraphTest
 		"coord36"->"coord37"[style=invis]
 		rankdir=LR
 		}
-		subgraph clusterCF {"cntrl1"[label="Kernel(1)"];
+		subgraph clusterCF {label = "Control Graph";
+		"cntrl1"[label="Kernel(1)"];
 		"cntrl2"[label="LoadTiled(2)"];
 		"cntrl3"[label="Body(3)",shape=box];
 		"cntrl4"[label="LoadTiled(4)"];
@@ -2472,7 +2479,8 @@ namespace KernelGraphTest
 	    "coord178"->"coord180"[style=invis]
 	    rankdir=LR
 	    }
-	    subgraph clusterCF {"cntrl1"[label="Kernel(1)"];
+	    subgraph clusterCF {label = "Control Graph";
+	    "cntrl1"[label="Kernel(1)"];
 	    "cntrl2"[label="LoadVGPR(2)"];
 	    "cntrl3"[label="Body(3)",shape=box];
 	    "cntrl4"[label="LoadTiled(4)"];
@@ -3921,7 +3929,8 @@ namespace KernelGraphTest
 	    "coord237"->"coord239"[style=invis]
 	    rankdir=LR
 	    }
-	    subgraph clusterCF {"cntrl1"[label="Kernel(1)"];
+	    subgraph clusterCF {label = "Control Graph";
+	    "cntrl1"[label="Kernel(1)"];
 	    "cntrl2"[label="LoadVGPR(2)"];
 	    "cntrl3"[label="Body(3)",shape=box];
 	    "cntrl4"[label="LoadLDSTile(4)"];
@@ -4420,7 +4429,8 @@ namespace KernelGraphTest
 		"coord4"->"coord11"[style=invis]
 		rankdir=LR
 		}
-		subgraph clusterCF {"cntrl1"[label="Kernel(1)"];
+		subgraph clusterCF {label = "Control Graph";
+		"cntrl1"[label="Kernel(1)"];
 		"cntrl2"[label="LoadTiled(2)"];
 		"cntrl3"[label="Body(3)",shape=box];
 		"cntrl4"[label="LoadTiled(4)"];
@@ -4544,7 +4554,8 @@ namespace KernelGraphTest
 		"coord4"->"coord11"[style=invis]
 		rankdir=LR
 		}
-		subgraph clusterCF {"cntrl1"[label="Kernel(1)"];
+		subgraph clusterCF {label = "Control Graph";
+		"cntrl1"[label="Kernel(1)"];
 		"cntrl2"[label="LoadTiled(2)"];
 		"cntrl3"[label="Body(3)",shape=box];
 		"cntrl4"[label="LoadTiled(4)"];
@@ -4712,7 +4723,8 @@ namespace KernelGraphTest
 		"coord21"->"coord22"[style=invis]
 		rankdir=LR
 		}
-		subgraph clusterCF {"cntrl1"[label="Kernel(1)"];
+		subgraph clusterCF {label = "Control Graph";
+		"cntrl1"[label="Kernel(1)"];
 		"cntrl2"[label="LoadTiled(2)"];
 		"cntrl3"[label="Body(3)",shape=box];
 		"cntrl4"[label="LoadTiled(4)"];
@@ -5194,7 +5206,8 @@ namespace KernelGraphTest
 	    "coord119"->"coord120"[style=invis]
 	    rankdir=LR
 	    }
-	    subgraph clusterCF {"cntrl1"[label="Kernel(1)"];
+	    subgraph clusterCF {label = "Control Graph";
+	    "cntrl1"[label="Kernel(1)"];
 	    "cntrl2"[label="LoadTiled(2)"];
 	    "cntrl4"[label="Assign VGPR Add(DataFlowTag(6), DataFlowTag(6))(4)"];
 	    "cntrl7"[label="LoadLDSTile(7)"];
@@ -6351,7 +6364,8 @@ namespace KernelGraphTest
 		    rankdir=LR
 		}
 
-		subgraph clusterCF {"cntrl1"[label="Kernel(1)"];
+		subgraph clusterCF {label = "Control Graph";
+		"cntrl1"[label="Kernel(1)"];
 		"cntrl2"[label="LoadLinear(2)"];
 		"cntrl3"[label="LoadLinear(3)"];
 		"cntrl4"[label="Body(4)",shape=box];
@@ -6464,7 +6478,8 @@ namespace KernelGraphTest
 		"coord4"->"coord11"[style=invis]
 		rankdir=LR
 		}
-		subgraph clusterCF {"cntrl1"[label="Kernel(1)"];
+		subgraph clusterCF {label = "Control Graph";
+		"cntrl1"[label="Kernel(1)"];
 		"cntrl2"[label="LoadTiled(2)"];
 		"cntrl3"[label="Body(3)",shape=box];
 		"cntrl4"[label="LoadTiled(4)"];
@@ -6563,7 +6578,8 @@ namespace KernelGraphTest
 		"coord4"->"coord11"[style=invis]
 		rankdir=LR
 		}
-		subgraph clusterCF {"cntrl1"[label="Kernel(1)"];
+		subgraph clusterCF {label = "Control Graph";
+		"cntrl1"[label="Kernel(1)"];
 		"cntrl2"[label="LoadTiled(2)"];
 		"cntrl3"[label="Body(3)",shape=box];
 		"cntrl4"[label="LoadTiled(4)"];
