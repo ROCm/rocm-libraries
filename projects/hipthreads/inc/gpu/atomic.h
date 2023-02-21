@@ -43,9 +43,6 @@ __cxx_atomic_assign_volatile(_Tp volatile &__a_value, _Tv volatile const &__val)
 }
 
 // Provides a base implementation that uses lock-free native operations.
-// For types without a native operation, we'll create a class that inherits from this, and overloads of the
-// __cxx_atomic_*** functions that accept the sub-class. The subclass will also use a second, internal instance of this
-// base class to implement a spinlock.
 template <typename _Tp>
 struct __cxx_atomic_base_impl {
 
@@ -57,163 +54,180 @@ struct __cxx_atomic_base_impl {
 // TODO: HIPIFY!
 #define __cxx_atomic_is_lock_free(__s) __c11_atomic_is_lock_free(__s)
 
-template<class _Tp>
-inline
-void __cxx_atomic_init(__cxx_atomic_base_impl<_Tp> volatile* __a, _Tp __val) noexcept {
+template <class _Tp>
+inline void __cxx_atomic_init(__cxx_atomic_base_impl<_Tp> volatile *__a, _Tp __val) noexcept {
     __hip_atomic_init(&__a->__a_value, __val);
 }
-template<class _Tp>
-inline
-void __cxx_atomic_init(__cxx_atomic_base_impl<_Tp> * __a, _Tp __val) noexcept {
+template <class _Tp>
+inline void __cxx_atomic_init(__cxx_atomic_base_impl<_Tp> *__a, _Tp __val) noexcept {
     __hip_atomic_init(&__a->__a_value, __val);
 }
 
-template<class _Tp>
-inline
-void __cxx_atomic_store(__cxx_atomic_base_impl<_Tp> volatile* __a, _Tp __val, memory_order __order) noexcept {
-    __hip_atomic_store(&__a->__a_value, __val, static_cast<__memory_order_underlying_t>(__order), __HIP_MEMORY_SCOPE_AGENT);
+template <class _Tp>
+inline void __cxx_atomic_store(__cxx_atomic_base_impl<_Tp> volatile *__a, _Tp __val, memory_order __order) noexcept {
+    __hip_atomic_store(&__a->__a_value, __val, static_cast<__memory_order_underlying_t>(__order),
+                       __HIP_MEMORY_SCOPE_AGENT);
 }
-template<class _Tp>
-inline
-void __cxx_atomic_store(__cxx_atomic_base_impl<_Tp> * __a, _Tp __val, memory_order __order) noexcept {
-    __hip_atomic_store(&__a->__a_value, __val, static_cast<__memory_order_underlying_t>(__order), __HIP_MEMORY_SCOPE_AGENT);
-}
-
-template<class _Tp>
-inline
-_Tp __cxx_atomic_load(__cxx_atomic_base_impl<_Tp> const volatile* __a, memory_order __order) noexcept {
-    using __ptr_type = std::remove_const_t<decltype(__a->__a_value)>*;
-    return __hip_atomic_load(const_cast<__ptr_type>(&__a->__a_value), static_cast<__memory_order_underlying_t>(__order), __HIP_MEMORY_SCOPE_AGENT);
-}
-template<class _Tp>
-inline
-_Tp __cxx_atomic_load(__cxx_atomic_base_impl<_Tp> const* __a, memory_order __order) noexcept {
-    using __ptr_type = std::remove_const_t<decltype(__a->__a_value)>*;
-    return __hip_atomic_load(const_cast<__ptr_type>(&__a->__a_value), static_cast<__memory_order_underlying_t>(__order), __HIP_MEMORY_SCOPE_AGENT);
+template <class _Tp>
+inline void __cxx_atomic_store(__cxx_atomic_base_impl<_Tp> *__a, _Tp __val, memory_order __order) noexcept {
+    __hip_atomic_store(&__a->__a_value, __val, static_cast<__memory_order_underlying_t>(__order),
+                       __HIP_MEMORY_SCOPE_AGENT);
 }
 
-template<class _Tp>
-inline
-_Tp __cxx_atomic_exchange(__cxx_atomic_base_impl<_Tp> volatile* __a, _Tp __value, memory_order __order) noexcept {
-    return __hip_atomic_exchange(&__a->__a_value, __value, static_cast<__memory_order_underlying_t>(__order), __HIP_MEMORY_SCOPE_AGENT);
+template <class _Tp>
+inline _Tp __cxx_atomic_load(__cxx_atomic_base_impl<_Tp> const volatile *__a, memory_order __order) noexcept {
+    using __ptr_type = std::remove_const_t<decltype(__a->__a_value)> *;
+    return __hip_atomic_load(const_cast<__ptr_type>(&__a->__a_value), static_cast<__memory_order_underlying_t>(__order),
+                             __HIP_MEMORY_SCOPE_AGENT);
 }
-template<class _Tp>
-inline
-_Tp __cxx_atomic_exchange(__cxx_atomic_base_impl<_Tp> * __a, _Tp __value, memory_order __order) noexcept {
-    return __hip_atomic_exchange(&__a->__a_value, __value, static_cast<__memory_order_underlying_t>(__order), __HIP_MEMORY_SCOPE_AGENT);
+template <class _Tp>
+inline _Tp __cxx_atomic_load(__cxx_atomic_base_impl<_Tp> const *__a, memory_order __order) noexcept {
+    using __ptr_type = std::remove_const_t<decltype(__a->__a_value)> *;
+    return __hip_atomic_load(const_cast<__ptr_type>(&__a->__a_value), static_cast<__memory_order_underlying_t>(__order),
+                             __HIP_MEMORY_SCOPE_AGENT);
+}
+
+template <class _Tp>
+inline _Tp __cxx_atomic_exchange(__cxx_atomic_base_impl<_Tp> volatile *__a, _Tp __value,
+                                 memory_order __order) noexcept {
+    return __hip_atomic_exchange(&__a->__a_value, __value, static_cast<__memory_order_underlying_t>(__order),
+                                 __HIP_MEMORY_SCOPE_AGENT);
+}
+template <class _Tp>
+inline _Tp __cxx_atomic_exchange(__cxx_atomic_base_impl<_Tp> *__a, _Tp __value, memory_order __order) noexcept {
+    return __hip_atomic_exchange(&__a->__a_value, __value, static_cast<__memory_order_underlying_t>(__order),
+                                 __HIP_MEMORY_SCOPE_AGENT);
 }
 
 inline constexpr memory_order __to_failure_order(memory_order __order) {
-  // Avoid switch statement to make this a constexpr.
-  return __order == memory_order_release ? memory_order_relaxed:
-         (__order == memory_order_acq_rel ? memory_order_acquire:
-             __order);
+    // Avoid switch statement to make this a constexpr.
+    return __order == memory_order_release ? memory_order_relaxed
+                                           : (__order == memory_order_acq_rel ? memory_order_acquire : __order);
 }
 
-template<class _Tp>
-inline
-bool __cxx_atomic_compare_exchange_strong(__cxx_atomic_base_impl<_Tp> volatile* __a, _Tp* __expected, _Tp __value, memory_order __success, memory_order __failure) noexcept {
-    return __hip_atomic_compare_exchange_strong(&__a->__a_value, __expected, __value, static_cast<__memory_order_underlying_t>(__success), static_cast<__memory_order_underlying_t>(__to_failure_order(__failure)), __HIP_MEMORY_SCOPE_AGENT);
+template <class _Tp>
+inline bool __cxx_atomic_compare_exchange_strong(__cxx_atomic_base_impl<_Tp> volatile *__a, _Tp *__expected,
+                                                 _Tp __value, memory_order __success, memory_order __failure) noexcept {
+    return __hip_atomic_compare_exchange_strong(
+        &__a->__a_value, __expected, __value, static_cast<__memory_order_underlying_t>(__success),
+        static_cast<__memory_order_underlying_t>(__to_failure_order(__failure)), __HIP_MEMORY_SCOPE_AGENT);
 }
-template<class _Tp>
-inline
-bool __cxx_atomic_compare_exchange_strong(__cxx_atomic_base_impl<_Tp> * __a, _Tp* __expected, _Tp __value, memory_order __success, memory_order __failure) noexcept {
-    return __hip_atomic_compare_exchange_strong(&__a->__a_value, __expected, __value, static_cast<__memory_order_underlying_t>(__success), static_cast<__memory_order_underlying_t>(__to_failure_order(__failure)), __HIP_MEMORY_SCOPE_AGENT);
-}
-
-template<class _Tp>
-inline
-bool __cxx_atomic_compare_exchange_weak(__cxx_atomic_base_impl<_Tp> volatile* __a, _Tp* __expected, _Tp __value, memory_order __success, memory_order __failure) noexcept {
-    return __hip_atomic_compare_exchange_weak(&__a->__a_value, __expected, __value, static_cast<__memory_order_underlying_t>(__success), static_cast<__memory_order_underlying_t>(__to_failure_order(__failure)), __HIP_MEMORY_SCOPE_AGENT);
-}
-template<class _Tp>
-inline
-bool __cxx_atomic_compare_exchange_weak(__cxx_atomic_base_impl<_Tp> * __a, _Tp* __expected, _Tp __value, memory_order __success, memory_order __failure) noexcept {
-    return __hip_atomic_compare_exchange_weak(&__a->__a_value, __expected, __value,  static_cast<__memory_order_underlying_t>(__success), static_cast<__memory_order_underlying_t>(__to_failure_order(__failure)), __HIP_MEMORY_SCOPE_AGENT);
+template <class _Tp>
+inline bool __cxx_atomic_compare_exchange_strong(__cxx_atomic_base_impl<_Tp> *__a, _Tp *__expected, _Tp __value,
+                                                 memory_order __success, memory_order __failure) noexcept {
+    return __hip_atomic_compare_exchange_strong(
+        &__a->__a_value, __expected, __value, static_cast<__memory_order_underlying_t>(__success),
+        static_cast<__memory_order_underlying_t>(__to_failure_order(__failure)), __HIP_MEMORY_SCOPE_AGENT);
 }
 
-template<class _Tp>
-inline
-_Tp __cxx_atomic_fetch_add(__cxx_atomic_base_impl<_Tp> volatile* __a, _Tp __delta, memory_order __order) noexcept {
-    return __hip_atomic_fetch_add(&__a->__a_value, __delta, static_cast<__memory_order_underlying_t>(__order), __HIP_MEMORY_SCOPE_AGENT);
+template <class _Tp>
+inline bool __cxx_atomic_compare_exchange_weak(__cxx_atomic_base_impl<_Tp> volatile *__a, _Tp *__expected, _Tp __value,
+                                               memory_order __success, memory_order __failure) noexcept {
+    return __hip_atomic_compare_exchange_weak(
+        &__a->__a_value, __expected, __value, static_cast<__memory_order_underlying_t>(__success),
+        static_cast<__memory_order_underlying_t>(__to_failure_order(__failure)), __HIP_MEMORY_SCOPE_AGENT);
 }
-template<class _Tp>
-inline
-_Tp __cxx_atomic_fetch_add(__cxx_atomic_base_impl<_Tp> * __a, _Tp __delta, memory_order __order) noexcept {
-    return __hip_atomic_fetch_add(&__a->__a_value, __delta, static_cast<__memory_order_underlying_t>(__order), __HIP_MEMORY_SCOPE_AGENT);
-}
-
-template<class _Tp>
-inline
-_Tp* __cxx_atomic_fetch_add(__cxx_atomic_base_impl<_Tp*> volatile* __a, ptrdiff_t __delta, memory_order __order) noexcept {
-    return __hip_atomic_fetch_add(&__a->__a_value, __delta, static_cast<__memory_order_underlying_t>(__order), __HIP_MEMORY_SCOPE_AGENT);
-}
-template<class _Tp>
-inline
-_Tp* __cxx_atomic_fetch_add(__cxx_atomic_base_impl<_Tp*> * __a, ptrdiff_t __delta, memory_order __order) noexcept {
-    return __hip_atomic_fetch_add(&__a->__a_value, __delta, static_cast<__memory_order_underlying_t>(__order), __HIP_MEMORY_SCOPE_AGENT);
+template <class _Tp>
+inline bool __cxx_atomic_compare_exchange_weak(__cxx_atomic_base_impl<_Tp> *__a, _Tp *__expected, _Tp __value,
+                                               memory_order __success, memory_order __failure) noexcept {
+    return __hip_atomic_compare_exchange_weak(
+        &__a->__a_value, __expected, __value, static_cast<__memory_order_underlying_t>(__success),
+        static_cast<__memory_order_underlying_t>(__to_failure_order(__failure)), __HIP_MEMORY_SCOPE_AGENT);
 }
 
-template<class _Tp>
-inline
-_Tp __cxx_atomic_fetch_sub(__cxx_atomic_base_impl<_Tp> volatile* __a, _Tp __delta, memory_order __order) noexcept {
-    return __hip_atomic_fetch_sub(&__a->__a_value, __delta, static_cast<__memory_order_underlying_t>(__order), __HIP_MEMORY_SCOPE_AGENT);
+template <class _Tp>
+inline _Tp __cxx_atomic_fetch_add(__cxx_atomic_base_impl<_Tp> volatile *__a, _Tp __delta,
+                                  memory_order __order) noexcept {
+    return __hip_atomic_fetch_add(&__a->__a_value, __delta, static_cast<__memory_order_underlying_t>(__order),
+                                  __HIP_MEMORY_SCOPE_AGENT);
 }
-template<class _Tp>
-inline
-_Tp __cxx_atomic_fetch_sub(__cxx_atomic_base_impl<_Tp> * __a, _Tp __delta, memory_order __order) noexcept {
-    return __hip_atomic_fetch_sub(&__a->__a_value, __delta, static_cast<__memory_order_underlying_t>(__order), __HIP_MEMORY_SCOPE_AGENT);
-}
-template<class _Tp>
-inline
-_Tp* __cxx_atomic_fetch_sub(__cxx_atomic_base_impl<_Tp*> volatile* __a, ptrdiff_t __delta, memory_order __order) noexcept {
-    return __hip_atomic_fetch_sub(&__a->__a_value, __delta, static_cast<__memory_order_underlying_t>(__order), __HIP_MEMORY_SCOPE_AGENT);
-}
-template<class _Tp>
-inline
-_Tp* __cxx_atomic_fetch_sub(__cxx_atomic_base_impl<_Tp*> * __a, ptrdiff_t __delta, memory_order __order) noexcept {
-    return __hip_atomic_fetch_sub(&__a->__a_value, __delta, static_cast<__memory_order_underlying_t>(__order), __HIP_MEMORY_SCOPE_AGENT);
+template <class _Tp>
+inline _Tp __cxx_atomic_fetch_add(__cxx_atomic_base_impl<_Tp> *__a, _Tp __delta, memory_order __order) noexcept {
+    return __hip_atomic_fetch_add(&__a->__a_value, __delta, static_cast<__memory_order_underlying_t>(__order),
+                                  __HIP_MEMORY_SCOPE_AGENT);
 }
 
-template<class _Tp>
-inline
-_Tp __cxx_atomic_fetch_and(__cxx_atomic_base_impl<_Tp> volatile* __a, _Tp __pattern, memory_order __order) noexcept {
-    return __hip_atomic_fetch_and(&__a->__a_value, __pattern, static_cast<__memory_order_underlying_t>(__order), __HIP_MEMORY_SCOPE_AGENT);
+template <class _Tp>
+inline _Tp *__cxx_atomic_fetch_add(__cxx_atomic_base_impl<_Tp *> volatile *__a, ptrdiff_t __delta,
+                                   memory_order __order) noexcept {
+    return __hip_atomic_fetch_add(&__a->__a_value, __delta, static_cast<__memory_order_underlying_t>(__order),
+                                  __HIP_MEMORY_SCOPE_AGENT);
 }
-template<class _Tp>
-inline
-_Tp __cxx_atomic_fetch_and(__cxx_atomic_base_impl<_Tp> * __a, _Tp __pattern, memory_order __order) noexcept {
-    return __hip_atomic_fetch_and(&__a->__a_value, __pattern, static_cast<__memory_order_underlying_t>(__order), __HIP_MEMORY_SCOPE_AGENT);
-}
-
-template<class _Tp>
-inline
-_Tp __cxx_atomic_fetch_or(__cxx_atomic_base_impl<_Tp> volatile* __a, _Tp __pattern, memory_order __order) noexcept {
-    return __hip_atomic_fetch_or(&__a->__a_value, __pattern, static_cast<__memory_order_underlying_t>(__order), __HIP_MEMORY_SCOPE_AGENT);
-}
-template<class _Tp>
-inline
-_Tp __cxx_atomic_fetch_or(__cxx_atomic_base_impl<_Tp> * __a, _Tp __pattern, memory_order __order) noexcept {
-    return __hip_atomic_fetch_or(&__a->__a_value, __pattern, static_cast<__memory_order_underlying_t>(__order), __HIP_MEMORY_SCOPE_AGENT);
+template <class _Tp>
+inline _Tp *__cxx_atomic_fetch_add(__cxx_atomic_base_impl<_Tp *> *__a, ptrdiff_t __delta,
+                                   memory_order __order) noexcept {
+    return __hip_atomic_fetch_add(&__a->__a_value, __delta, static_cast<__memory_order_underlying_t>(__order),
+                                  __HIP_MEMORY_SCOPE_AGENT);
 }
 
-template<class _Tp>
-inline
-_Tp __cxx_atomic_fetch_xor(__cxx_atomic_base_impl<_Tp> volatile* __a, _Tp __pattern, memory_order __order) noexcept {
-    return __hip_atomic_fetch_xor(&__a->__a_value, __pattern, static_cast<__memory_order_underlying_t>(__order), __HIP_MEMORY_SCOPE_AGENT);
+template <class _Tp>
+inline _Tp __cxx_atomic_fetch_sub(__cxx_atomic_base_impl<_Tp> volatile *__a, _Tp __delta,
+                                  memory_order __order) noexcept {
+    return __hip_atomic_fetch_sub(&__a->__a_value, __delta, static_cast<__memory_order_underlying_t>(__order),
+                                  __HIP_MEMORY_SCOPE_AGENT);
 }
-template<class _Tp>
-inline
-_Tp __cxx_atomic_fetch_xor(__cxx_atomic_base_impl<_Tp> * __a, _Tp __pattern, memory_order __order) noexcept {
-    return __hip_atomic_fetch_xor(&__a->__a_value, __pattern, static_cast<__memory_order_underlying_t>(__order), __HIP_MEMORY_SCOPE_AGENT);
+template <class _Tp>
+inline _Tp __cxx_atomic_fetch_sub(__cxx_atomic_base_impl<_Tp> *__a, _Tp __delta, memory_order __order) noexcept {
+    return __hip_atomic_fetch_sub(&__a->__a_value, __delta, static_cast<__memory_order_underlying_t>(__order),
+                                  __HIP_MEMORY_SCOPE_AGENT);
+}
+template <class _Tp>
+inline _Tp *__cxx_atomic_fetch_sub(__cxx_atomic_base_impl<_Tp *> volatile *__a, ptrdiff_t __delta,
+                                   memory_order __order) noexcept {
+    return __hip_atomic_fetch_sub(&__a->__a_value, __delta, static_cast<__memory_order_underlying_t>(__order),
+                                  __HIP_MEMORY_SCOPE_AGENT);
+}
+template <class _Tp>
+inline _Tp *__cxx_atomic_fetch_sub(__cxx_atomic_base_impl<_Tp *> *__a, ptrdiff_t __delta,
+                                   memory_order __order) noexcept {
+    return __hip_atomic_fetch_sub(&__a->__a_value, __delta, static_cast<__memory_order_underlying_t>(__order),
+                                  __HIP_MEMORY_SCOPE_AGENT);
+}
+
+template <class _Tp>
+inline _Tp __cxx_atomic_fetch_and(__cxx_atomic_base_impl<_Tp> volatile *__a, _Tp __pattern,
+                                  memory_order __order) noexcept {
+    return __hip_atomic_fetch_and(&__a->__a_value, __pattern, static_cast<__memory_order_underlying_t>(__order),
+                                  __HIP_MEMORY_SCOPE_AGENT);
+}
+template <class _Tp>
+inline _Tp __cxx_atomic_fetch_and(__cxx_atomic_base_impl<_Tp> *__a, _Tp __pattern, memory_order __order) noexcept {
+    return __hip_atomic_fetch_and(&__a->__a_value, __pattern, static_cast<__memory_order_underlying_t>(__order),
+                                  __HIP_MEMORY_SCOPE_AGENT);
+}
+
+template <class _Tp>
+inline _Tp __cxx_atomic_fetch_or(__cxx_atomic_base_impl<_Tp> volatile *__a, _Tp __pattern,
+                                 memory_order __order) noexcept {
+    return __hip_atomic_fetch_or(&__a->__a_value, __pattern, static_cast<__memory_order_underlying_t>(__order),
+                                 __HIP_MEMORY_SCOPE_AGENT);
+}
+template <class _Tp>
+inline _Tp __cxx_atomic_fetch_or(__cxx_atomic_base_impl<_Tp> *__a, _Tp __pattern, memory_order __order) noexcept {
+    return __hip_atomic_fetch_or(&__a->__a_value, __pattern, static_cast<__memory_order_underlying_t>(__order),
+                                 __HIP_MEMORY_SCOPE_AGENT);
+}
+
+template <class _Tp>
+inline _Tp __cxx_atomic_fetch_xor(__cxx_atomic_base_impl<_Tp> volatile *__a, _Tp __pattern,
+                                  memory_order __order) noexcept {
+    return __hip_atomic_fetch_xor(&__a->__a_value, __pattern, static_cast<__memory_order_underlying_t>(__order),
+                                  __HIP_MEMORY_SCOPE_AGENT);
+}
+template <class _Tp>
+inline _Tp __cxx_atomic_fetch_xor(__cxx_atomic_base_impl<_Tp> *__a, _Tp __pattern, memory_order __order) noexcept {
+    return __hip_atomic_fetch_xor(&__a->__a_value, __pattern, static_cast<__memory_order_underlying_t>(__order),
+                                  __HIP_MEMORY_SCOPE_AGENT);
 }
 
 template <class _Tp>
 struct __libcpp_is_always_lock_free {
-  // TODO: HIPIFY!
-  static const bool __value = __atomic_always_lock_free(sizeof(_Tp), nullptr);
+    // TODO: HIPIFY!
+    static const bool __value = __atomic_always_lock_free(sizeof(_Tp), nullptr);
 };
 
+// For types without a native operation, we'll provide overloads of the __cxx_atomic_*** functions that use a lock.
+// The lock is implemented using the native/base atomic operations on an unsigned int.
 template <typename _Tp>
 struct __cxx_atomic_lock_impl {
 
@@ -459,6 +473,10 @@ inline _Tp __cxx_atomic_fetch_xor(__cxx_atomic_lock_impl<_Tp> *__a, _Tp __patter
     return __old;
 }
 
+// This is how we'll decide which of the two overloads of the __cxx_atomic_*** functions we'll use.
+// __cxx_atomic_impl will conditionally inherit from base or lock, depending on whether the compilation target supports
+// native atomics for _Tp. So, calling __cxx_atomic_*** with a pointer to an __cxx_atomic_impl will call the correct
+// overload.
 template <typename _Tp,
           typename _Base = typename std::conditional_t<__libcpp_is_always_lock_free<_Tp>::__value,
                                                        __cxx_atomic_base_impl<_Tp>, __cxx_atomic_lock_impl<_Tp>>>
@@ -478,7 +496,7 @@ using __cxx_contention_t = int64_t;
 using __cxx_atomic_contention_t = __cxx_atomic_impl<__cxx_contention_t>;
 
 // general atomic<T>
-// For bool and non-integral types, we don't provide the arithmetic operations (e.g. fetch_add).
+// For bool and non-integral types, we don't provide the arithmetic operations (e.g. fetch_add and operator++).
 // We provide those using a partial template specialization of __atomic_base<_Tp, true> further down.
 template <class _Tp, bool = std::is_integral_v<_Tp> && !std::is_same_v<_Tp, bool>>
 struct __atomic_base // <_Tp, false>
