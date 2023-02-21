@@ -12,12 +12,14 @@ open it (via xdg-open), pass '-x'.
 
 import argparse
 import pathlib
+import re
 import subprocess
 
 import yaml
+from dot_diff import diff_dots
 
 
-def extract_dot(path):
+def extract_asm_dot(path: pathlib.Path):
     """Extract .kernel_graph meta data from assembly file."""
     source = path.read_text()
     start, end = source.find("---\n") + 4, source.find("...")
@@ -26,13 +28,21 @@ def extract_dot(path):
     return kernel[".name"], kernel[".kernel_graph"]
 
 
-def write_dot(dot, fname):
+def extract_log_dots(path: pathlib.Path):
+    source = path.read_text()
+    dots = []
+    for graph in re.finditer("digraph {", source):
+        dots.append(source[graph.start() :].partition("\n\n")[0])
+    return dots
+
+
+def write_dot(dot: str, fname: pathlib.Path):
     out_fname = fname.with_suffix(".dot")
     out_fname.write_text(dot)
     return out_fname
 
 
-def render_dot(fname, dot):
+def render_dot(fname: pathlib.Path, dot: str):
     """Render graph."""
     with fname.open("w") as out:
         subprocess.run(["dot", "-Tpdf"], input=dot.encode(), stdout=out)
@@ -46,9 +56,26 @@ def open_code(fname):
     subprocess.call(["code", str(fname)])
 
 
+def process_dot(
+    dot: str,
+    out_path: pathlib.Path,
+    code_open: bool,
+    dot_only: bool,
+    xdg_open: bool,
+):
+    dotfile = write_dot(dot, out_path)
+    if code_open:
+        open_code(dotfile)
+    if not dot_only:
+        rendered_fname = out_path.with_suffix(".pdf")
+        render_dot(rendered_fname, dot)
+        if xdg_open:
+            open_dot(rendered_fname)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Extract and render kernel graph.")
-    parser.add_argument("fname", type=str, help="Assembly file name")
+    parser.add_argument("fname", type=str, help="Assembly or log file name")
     parser.add_argument("-d", "--dot-only", default=False, action="store_true")
     parser.add_argument(
         "-x",
@@ -64,18 +91,48 @@ if __name__ == "__main__":
         action="store_true",
         help="Open .dot with VSCode after generating",
     )
+    parser.add_argument(
+        "-o",
+        "--output",
+        type=str,
+        help="Output file base name",
+    )
+    parser.add_argument(
+        "--omit_diff",
+        default=False,
+        action="store_true",
+        help="Omit dot diff coloring",
+    )
 
     args = parser.parse_args()
     path = pathlib.Path(args.fname)
 
-    _, dot = extract_dot(path)
-    dotfile = write_dot(dot, path)
+    foutput = path
+    if args.output is not None:
+        foutput = pathlib.Path(args.output)
 
-    if args.code_open:
-        open_code(dotfile)
-
-    if not args.dot_only:
-        rendered_fname = path.with_suffix(".pdf")
-        render_dot(rendered_fname, dot)
-        if args.xdg_open:
-            open_dot(rendered_fname)
+    if path.suffix == ".s":
+        _, dot = extract_asm_dot(path)
+        process_dot(
+            dot,
+            foutput,
+            args.code_open,
+            args.dot_only,
+            args.xdg_open,
+        )
+    elif path.suffix == ".log":
+        dots = extract_log_dots(path)
+        if not args.omit_diff:
+            dots = diff_dots(dots)
+        for i, dot in enumerate(dots):
+            serial_str = f"_{i:04d}"
+            foutput_serial = pathlib.Path(str(foutput) + serial_str)
+            process_dot(
+                dot,
+                foutput_serial,
+                args.code_open,
+                args.dot_only,
+                args.xdg_open,
+            )
+    else:
+        print("Unknown file extension")
