@@ -18,6 +18,21 @@ using std::memory_order_seq_cst;
 
 namespace internal {
 
+template <class T>
+struct is_hip_native
+    : std::integral_constant<bool,
+                             std::is_same<float, typename std::remove_cv<T>::type>::value ||
+                                 // std::is_same<double, typename std::remove_cv<T>::type>::value || // requires MI-200
+                                 std::is_same<int, typename std::remove_cv<T>::type>::value ||
+                                 std::is_same<long, typename std::remove_cv<T>::type>::value ||
+                                 std::is_same<long long, typename std::remove_cv<T>::type>::value ||
+                                 std::is_same<unsigned int, typename std::remove_cv<T>::type>::value ||
+                                 std::is_same<unsigned long, typename std::remove_cv<T>::type>::value ||
+                                 std::is_same<unsigned long long, typename std::remove_cv<T>::type>::value> {};
+
+template <class T>
+inline constexpr bool is_hip_native_v = is_hip_native<T>::value;
+
 //====================================================================================================================//
 //      Adapted from libc++ std::atomic
 //====================================================================================================================//
@@ -51,8 +66,8 @@ struct __cxx_atomic_base_impl {
     _Tp __a_value;
 };
 
-// TODO: HIPIFY!
-#define __cxx_atomic_is_lock_free(__s) __c11_atomic_is_lock_free(__s)
+// TODO: If/when __hip_atomic_is_lock_free gets implemented, uncomment this
+// #define __cxx_atomic_is_lock_free(__s) __hip_atomic_is_lock_free(__s)
 
 template <class _Tp>
 inline void __cxx_atomic_init(__cxx_atomic_base_impl<_Tp> volatile *__a, _Tp __val) noexcept {
@@ -222,8 +237,9 @@ inline _Tp __cxx_atomic_fetch_xor(__cxx_atomic_base_impl<_Tp> *__a, _Tp __patter
 
 template <class _Tp>
 struct __libcpp_is_always_lock_free {
-    // TODO: HIPIFY!
-    static const bool __value = __atomic_always_lock_free(sizeof(_Tp), nullptr);
+    // TODO: If/when HIP gets an equivalent to __atomic_always_lock_free uncomment this and remove the following line
+    // static const bool __value = __atomic_always_lock_free(sizeof(_Tp), nullptr);
+    static const bool __value = gpu::internal::is_hip_native_v<_Tp>;
 };
 
 // For types without a native operation, we'll provide overloads of the __cxx_atomic_*** functions that use a lock.
@@ -506,8 +522,9 @@ struct __atomic_base // <_Tp, false>
 #if defined(__cpp_lib_atomic_is_always_lock_free)
     static constexpr bool is_always_lock_free = __libcpp_is_always_lock_free<__cxx_atomic_impl<_Tp>>::__value;
 #endif
-
-    inline bool is_lock_free() const volatile noexcept { return __cxx_atomic_is_lock_free(sizeof(_Tp)); }
+    // TODO: If/when __hip_atomic_is_lock_free gets implemented, uncomment this and remove the following line
+    // inline bool is_lock_free() const volatile noexcept { return __cxx_atomic_is_lock_free(sizeof(_Tp)); }
+    inline bool is_lock_free() const volatile noexcept { return gpu::internal::is_hip_native_v<_Tp>; }
     inline bool is_lock_free() const noexcept {
         return static_cast<__atomic_base const volatile *>(this)->is_lock_free();
     }
