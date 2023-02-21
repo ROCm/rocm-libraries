@@ -434,30 +434,6 @@ namespace GEMMDriverTest
         basicGEMM<Half>(m_context, gemm, 2.e-5);
     }
 
-    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed2X2Fused)
-    {
-        GEMMProblem gemm;
-
-        gemm.M = 256;
-        gemm.N = 512;
-        gemm.K = 64;
-
-        gemm.mac_m = 128;
-        gemm.mac_n = 256;
-        gemm.mac_k = 16;
-
-        gemm.wave_k = 8;
-
-        gemm.workgroup_size_x = 2 * gemm.wavefront_size;
-        gemm.workgroup_size_y = 4;
-
-        gemm.loadLDSA  = false;
-        gemm.loadLDSB  = false;
-        gemm.storeLDSD = false;
-
-        basicGEMM<Half>(m_context, gemm, 2.e-5);
-    }
-
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed2X1)
     {
         GEMMProblem gemm;
@@ -520,7 +496,29 @@ namespace GEMMDriverTest
         basicGEMM<Half>(m_context, gemm, 2.e-5);
     }
 
-    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed4x1)
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed2x4)
+    {
+        GEMMProblem gemm;
+
+        gemm.M = 256;
+        gemm.N = 512;
+        gemm.K = 64;
+
+        gemm.mac_m = 128;
+        gemm.mac_n = 256;
+        gemm.mac_k = 16;
+
+        gemm.wave_k = 8;
+
+        gemm.workgroup_size_x = 2 * gemm.wavefront_size;
+        gemm.workgroup_size_y = 2;
+
+        gemm.storeLDSD = false;
+
+        basicGEMM<Half>(m_context, gemm, 2.e-5);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed4x2)
     {
         GEMMProblem gemm;
 
@@ -535,7 +533,7 @@ namespace GEMMDriverTest
         gemm.wave_k = 8;
 
         gemm.workgroup_size_x = 1 * gemm.wavefront_size;
-        gemm.workgroup_size_y = 8;
+        gemm.workgroup_size_y = 4;
 
         gemm.storeLDSD = false;
 

@@ -158,7 +158,7 @@ namespace rocRoller
          *
          * @return KernelGraph
          */
-        KernelGraph fuseLoops(KernelGraph const&, ContextPtr);
+        KernelGraph fuseLoops(KernelGraph const&);
 
         /**
          * @brief Performs the loop cleaning transformation

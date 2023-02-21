@@ -1665,16 +1665,16 @@ namespace KernelGraphTest
         auto unrolledForLoops = kgraph_unrolled.control.getNodes<ForLoopOp>().to<std::vector>();
         EXPECT_EQ(unrolledForLoops.size(), 7);
 
-        auto kgraph_fused = fuseLoops(kgraph_unrolled, m_context);
+        auto kgraph_fused = fuseLoops(kgraph_unrolled);
 
         // Verify that loops have been fused
         auto fusedForLoops = kgraph_fused.control.getNodes<ForLoopOp>().to<std::vector>();
-        EXPECT_EQ(fusedForLoops.size(), 4);
+        EXPECT_EQ(fusedForLoops.size(), 3);
 
         // Verify that single iteration loops have been removed.
         auto kgraph_clean    = cleanLoops(kgraph_fused);
         auto cleanedForLoops = kgraph_clean.control.getNodes<ForLoopOp>().to<std::vector>();
-        EXPECT_EQ(cleanedForLoops.size(), 2);
+        EXPECT_EQ(cleanedForLoops.size(), 1);
 
         // Verify that there is only a single StoreLDSTile node per K loop
         auto unrolled_kgraph_lds = addLDS(kgraph_unrolled, m_context);
@@ -1684,7 +1684,7 @@ namespace KernelGraphTest
 
         unrolled_kgraph_lds = addLDS(kgraph_fused, m_context);
         auto fusedStoreLDS = unrolled_kgraph_lds.control.getNodes<StoreLDSTile>().to<std::vector>();
-        EXPECT_EQ(fusedStoreLDS.size(), 2);
+        EXPECT_EQ(fusedStoreLDS.size(), 1);
 
         kgraph1 = addComputeIndexOperations(kgraph1);
 

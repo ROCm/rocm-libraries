@@ -242,7 +242,7 @@ namespace rocRoller
 
         if(m_context->kernelOptions().fuseLoops)
         {
-            m_kernelGraph = KernelGraph::fuseLoops(m_kernelGraph, m_context);
+            m_kernelGraph = KernelGraph::fuseLoops(m_kernelGraph);
             logger->debug(
                 "CommandKernel::generateKernelGraph: post fuse: {}",
                 m_kernelGraph.toDOT(false, "CommandKernel::generateKernelGraph: post fuse"));

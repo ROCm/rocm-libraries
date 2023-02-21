@@ -21,23 +21,12 @@ namespace rocRoller
          * If it finds it, it will fuse the lower loops into a single
          * loop, as long as they are the same size.
          */
-        struct FuseLoopsVisitor : public BaseGraphVisitor
+        namespace FuseLoops
         {
-            FuseLoopsVisitor(std::shared_ptr<Context> context)
-                : BaseGraphVisitor(context, Graph::Direction::Upstream, false)
-            {
-            }
-
-            using BaseGraphVisitor::visitEdge;
-            using BaseGraphVisitor::visitOperation;
-
             /**
              * @brief Find a path from a node to a ForLoopOp using only Sequence edges
              *
              * Returns an empty vector if no path is found.
-             *
-             * Only looks for a direct path, so if there are more than one Sequence
-             * edges leaving a node, it will not return a path.
              *
              * @param graph
              * @param start
@@ -45,26 +34,40 @@ namespace rocRoller
              */
             std::vector<int> pathToForLoop(KernelGraph& graph, int start)
             {
-                std::vector<int> result;
+                // Find the first ForLoop under the node
+                auto allForLoops
+                    = graph.control
+                          .findNodes(
+                              start,
+                              [&](int tag) -> bool {
+                                  return isOperation<ForLoopOp>(graph.control.getElement(tag));
+                              },
+                              Graph::Direction::Downstream)
+                          .to<std::vector>();
 
-                int currentNode = start;
-                while(currentNode >= 0)
-                {
-                    result.push_back(currentNode);
+                if(allForLoops.empty())
+                    return {};
 
-                    if(isOperation<ForLoopOp>(graph.control.getElement(currentNode)))
-                        return result;
+                auto firstForLoop = allForLoops[0];
 
-                    auto nextNodes = graph.control.getOutputNodeIndices<Sequence>(currentNode)
-                                         .to<std::vector>();
+                // Find all of the nodes in between the node and the first for loop
+                auto pathToLoopWithEdges
+                    = graph.control
+                          .path<Graph::Direction::Downstream>(std::vector<int>{start},
+                                                              std::vector<int>{firstForLoop})
+                          .to<std::vector>();
 
-                    if(nextNodes.size() != 1)
-                        currentNode = -1;
-                    else
-                        currentNode = nextNodes[0];
-                }
+                // Filter out only the nodes
+                std::vector<int> pathToLoop;
+                std::copy_if(pathToLoopWithEdges.begin(),
+                             pathToLoopWithEdges.end(),
+                             std::back_inserter(pathToLoop),
+                             [&](int tag) -> bool {
+                                 return graph.control.getElementType(tag)
+                                        == Graph::ElementType::Node;
+                             });
 
-                return {};
+                return pathToLoop;
             }
 
             /**
@@ -72,47 +75,60 @@ namespace rocRoller
              *
              * @tparam EdgeType
              * @param graph
-             * @param forLoopTag
+             * @param path
              * @param origSetCoord
              * @param fusedLoopTag
              */
             template <CControlEdge EdgeType>
-            std::vector<int> insertSetCoordinates(KernelGraph& graph,
-                                                  int          forLoopTag,
-                                                  int          origSetCoord,
-                                                  int          fusedLoopTag)
+            std::vector<int> insertSetCoordinates(KernelGraph&            graph,
+                                                  std::vector<int> const& path,
+                                                  int                     origSetCoord,
+                                                  int                     fusedLoopTag)
             {
+                auto forLoopTag = path.back();
+
                 auto children = graph.control.getOutputNodeIndices<EdgeType>(forLoopTag)
                                     .template to<std::vector>();
                 if(children.empty())
                     return {};
 
+                // Add the top SetCoord node
                 auto setCoord = graph.control.addElement(graph.control.getElement(origSetCoord));
                 graph.control.addElement(EdgeType(), {fusedLoopTag}, {setCoord});
+                for(auto const& c : graph.mapper.getConnections(origSetCoord))
+                {
+                    graph.mapper.connect(setCoord, c.coordinate, c.connection);
+                }
+
+                // Find any other SetCoord nodes within the path, and add them after the
+                // top one
+                for(auto const& node : path)
+                {
+                    if(isOperation<SetCoordinate>(graph.control.getElement(node)))
+                    {
+                        auto prevSetCoord = setCoord;
+                        setCoord = graph.control.addElement(graph.control.getElement(node));
+                        graph.control.addElement(Body(), {prevSetCoord}, {setCoord});
+                        for(auto const& c : graph.mapper.getConnections(node))
+                        {
+                            graph.mapper.connect(setCoord, c.coordinate, c.connection);
+                        }
+                    }
+                }
 
                 for(auto const& child : children)
                 {
                     graph.control.addElement(Body(), {setCoord}, {child});
                     graph.control.deleteElement<EdgeType>(std::vector<int>{forLoopTag},
                                                           std::vector<int>{child});
-                    for(auto const& c : graph.mapper.getConnections(origSetCoord))
-                    {
-                        graph.mapper.connect(setCoord, c.coordinate, c.connection);
-                    }
                 }
 
                 return children;
             }
 
-            virtual void visitOperation(KernelGraph&       graph,
-                                        KernelGraph const& original,
-                                        GraphReindexer&    reindexer,
-                                        int                tag,
-                                        ForLoopOp const&   op) override
+            void fuseLoops(KernelGraph& graph, int tag)
             {
-                copyOperation(graph, original, reindexer, tag);
-                auto newTag = reindexer.control.at(tag);
-                auto bodies = graph.control.getOutputNodeIndices<Body>(newTag).to<std::set>();
+                auto bodies = graph.control.getOutputNodeIndices<Body>(tag).to<std::set>();
 
                 // Find all of the SetCoordinate nodes that are at the top of
                 // one of the ForLoopOp bodies
@@ -152,42 +168,45 @@ namespace rocRoller
                 std::unordered_set<int>   forLoopsToFuse;
                 Expression::ExpressionPtr loopIncrement;
                 Expression::ExpressionPtr loopLength;
-                for(auto const& path : paths)
+                for(auto const& setCoordPaths : paths)
                 {
-                    if(path.second.size() != 1)
-                        return;
-
-                    auto forLoop = path.second[0].back();
-                    if(forLoopsToFuse.count(forLoop) != 0)
-                        return;
-
-                    // Check to see if loops are all the same length
-                    auto forLoopDim = getSize(std::get<Dimension>(
-                        graph.coordinates.getElement(graph.mapper.get<Dimension>(forLoop))));
-                    if(loopLength)
+                    for(auto const& path : setCoordPaths.second)
                     {
-                        if(!identical(forLoopDim, loopLength))
+                        auto forLoop = path.back();
+                        if(forLoopsToFuse.count(forLoop) != 0)
                             return;
-                    }
-                    else
-                    {
-                        loopLength = forLoopDim;
-                    }
 
-                    // Check to see if loops are incremented by the same value
-                    auto [dataTag, increment] = getForLoopIncrement(graph, forLoop);
-                    if(loopIncrement)
-                    {
-                        if(!identical(loopIncrement, increment))
-                            return;
-                    }
-                    else
-                    {
-                        loopIncrement = increment;
-                    }
+                        // Check to see if loops are all the same length
+                        auto forLoopDim = getSize(std::get<Dimension>(
+                            graph.coordinates.getElement(graph.mapper.get<Dimension>(forLoop))));
+                        if(loopLength)
+                        {
+                            if(!identical(forLoopDim, loopLength))
+                                return;
+                        }
+                        else
+                        {
+                            loopLength = forLoopDim;
+                        }
 
-                    forLoopsToFuse.insert(forLoop);
+                        // Check to see if loops are incremented by the same value
+                        auto [dataTag, increment] = getForLoopIncrement(graph, forLoop);
+                        if(loopIncrement)
+                        {
+                            if(!identical(loopIncrement, increment))
+                                return;
+                        }
+                        else
+                        {
+                            loopIncrement = increment;
+                        }
+
+                        forLoopsToFuse.insert(forLoop);
+                    }
                 }
+
+                if(forLoopsToFuse.size() <= 1)
+                    return;
 
                 // Insert SetCoord between each Body and Sequence Node
                 auto coordPath    = paths.begin();
@@ -200,34 +219,51 @@ namespace rocRoller
                 // Iterate through the rest of the for loops to be fused
                 for(; coordPath != paths.end(); ++coordPath)
                 {
-                    auto origSetCoord = coordPath->first;
-                    auto forLoopTag   = coordPath->second[0].back();
-
-                    // For each node (N) leaving for loop with Body or Sequence edge:
-                    // Delete edge from original for loop to N
-                    // Add edge from new for loop to SetCoord. Add edge from SetCoord to N
-                    auto sequenceNodes = insertSetCoordinates<Sequence>(
-                        graph, forLoopTag, origSetCoord, fusedLoopTag);
-                    insertSetCoordinates<Body>(graph, forLoopTag, origSetCoord, fusedLoopTag);
-
-                    // For each parent (N) of for loop
-                    // Delete edge from N to original for loop
-                    auto pathSize = coordPath->second[0].size();
-                    if(pathSize > 1)
+                    auto             origSetCoord = coordPath->first;
+                    std::vector<int> allSequenceNodes;
+                    for(auto const& path : coordPath->second)
                     {
-                        auto N = coordPath->second[0][pathSize - 2];
-                        graph.control.deleteElement<Sequence>(std::vector<int>{N},
+                        auto forLoopTag = path.back();
+
+                        // For each node (N) leaving for loop with Body or Sequence edge:
+                        // Delete edge from original for loop to N
+                        // Add edge from new for loop to SetCoord. Add edge from SetCoord to N
+                        auto sequenceNodes = insertSetCoordinates<Sequence>(
+                            graph, path, origSetCoord, fusedLoopTag);
+                        allSequenceNodes.insert(
+                            allSequenceNodes.end(), sequenceNodes.begin(), sequenceNodes.end());
+                        insertSetCoordinates<Body>(graph, path, origSetCoord, fusedLoopTag);
+
+                        // For each parent (N) of for loop
+                        // Delete edge from N to original for loop
+                        auto pathSize = path.size();
+                        if(pathSize > 1)
+                        {
+                            auto N = path[pathSize - 2];
+                            graph.control.deleteElement<Sequence>(std::vector<int>{N},
+                                                                  std::vector<int>{forLoopTag});
+                        }
+                        else
+                        {
+                            graph.control.deleteElement<Body>(std::vector<int>{coordPath->first},
                                                               std::vector<int>{forLoopTag});
-                    }
-                    else
-                    {
-                        graph.control.deleteElement<Body>(std::vector<int>{coordPath->first},
-                                                          std::vector<int>{forLoopTag});
+                        }
+
+                        if(fusedLoopTag != forLoopTag)
+                        {
+                            // Delete old For loop, as well as its initialize and increment nodes.
+                            auto forLoopChildren
+                                = graph.control.depthFirstVisit(forLoopTag).to<std::vector>();
+                            for(auto const& toDelete : forLoopChildren)
+                            {
+                                graph.control.deleteElement(toDelete);
+                            }
+                        }
                     }
 
                     // Delete all Sequence edges from children of SetCoord to children of fusedLoopTag
                     auto forLoopSequenceChildren
-                        = graph.control.depthFirstVisit(sequenceNodes).to<std::set>();
+                        = graph.control.depthFirstVisit(allSequenceNodes).to<std::set>();
                     auto setCoordChildren
                         = graph.control.depthFirstVisit(coordPath->first).to<std::set>();
 
@@ -238,14 +274,17 @@ namespace rocRoller
                             auto location = graph.control.getLocation(setCoordChild);
                             for(auto const& incomingEdge : location.incoming)
                             {
-                                int parent
-                                    = *graph.control
-                                           .getNeighbours<Graph::Direction::Upstream>(incomingEdge)
-                                           .begin();
-                                if(setCoordChildren.count(parent) == 1
-                                   && forLoopSequenceChildren.count(parent) == 0)
+                                auto parents
+                                    = graph.control
+                                          .getNeighbours<Graph::Direction::Upstream>(incomingEdge)
+                                          .to<std::vector>();
+                                for(auto const& parent : parents)
                                 {
-                                    graph.control.deleteElement(incomingEdge);
+                                    if(setCoordChildren.count(parent) == 1
+                                       && forLoopSequenceChildren.count(parent) == 0)
+                                    {
+                                        graph.control.deleteElement(incomingEdge);
+                                    }
                                 }
                             }
                         }
@@ -256,36 +295,35 @@ namespace rocRoller
                            .to<std::vector>()
                            .empty())
                     {
-                        graph.control.deleteElement<Body>(std::vector<int>{newTag},
+                        graph.control.deleteElement<Body>(std::vector<int>{tag},
                                                           std::vector<int>{coordPath->first});
                         graph.control.deleteElement(coordPath->first);
                         if(coordPath == paths.begin())
-                            graph.control.addElement(Body(), {newTag}, {fusedLoopTag});
+                            graph.control.addElement(Body(), {tag}, {fusedLoopTag});
                     }
                     else
                     {
                         graph.control.addElement(Sequence(), {coordPath->first}, {fusedLoopTag});
                     }
-
-                    if(coordPath != paths.begin())
-                    {
-                        // Delete old For loop, as well as its initialize and increment nodes.
-                        auto forLoopChildren
-                            = graph.control.depthFirstVisit(forLoopTag).to<std::vector>();
-                        for(auto const& toDelete : forLoopChildren)
-                        {
-                            graph.control.deleteElement(toDelete);
-                        }
-                    }
                 }
             }
-        };
+        }
 
-        KernelGraph fuseLoops(KernelGraph const& k, std::shared_ptr<Context> context)
+        KernelGraph fuseLoops(KernelGraph const& k)
         {
             TIMER(t, "KernelGraph::fuseLoops");
-            auto visitor = FuseLoopsVisitor(context);
-            return rewrite(k, visitor);
+            auto newGraph = k;
+
+            for(const auto node :
+                newGraph.control.depthFirstVisit(*newGraph.control.roots().begin()))
+            {
+                if(isOperation<ForLoopOp>(newGraph.control.getElement(node)))
+                {
+                    FuseLoops::fuseLoops(newGraph, node);
+                }
+            }
+
+            return newGraph;
         }
     }
 }

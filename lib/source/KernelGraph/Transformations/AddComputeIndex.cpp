@@ -390,8 +390,12 @@ namespace rocRoller
         /**
          * @brief Add ComputeIndex operations to graph for MATRIX_A and MATRIX_B loads.
          */
-        void addComputeIndexAB(
-            KernelGraph& graph, int op, int scope, int setCoord, int mulLoadA, int mulLoadB)
+        void addComputeIndexAB(KernelGraph&            graph,
+                               int                     op,
+                               int                     scope,
+                               std::vector<int> const& setCoords,
+                               int                     mulLoadA,
+                               int                     mulLoadB)
         {
             rocRoller::Log::getLogger()->debug(
                 "KernelGraph::addComputeIndexAB({}, {}, {})", op, mulLoadA, mulLoadB);
@@ -401,16 +405,17 @@ namespace rocRoller
             // If the loads are sitting under a SetCoordinate node inside the ForLoop,
             // add the SetCoordinate node underneath the scope. All of the ComputeIndex
             // operations should then be under the SetCoordinate node.
-            if(setCoord >= 0)
+            for(auto const& setCoord : setCoords)
             {
                 auto newSetCoord = graph.control.addElement(graph.control.getElement(setCoord));
-                graph.control.addElement(Body(), {scope}, {newSetCoord});
+                graph.control.addElement(Body(), {top}, {newSetCoord});
                 for(auto const& c : graph.mapper.getConnections(setCoord))
                 {
                     graph.mapper.connect(newSetCoord, c.coordinate, c.connection);
                 }
+                if(top == scope)
+                    graph.control.addElement(Sequence(), {newSetCoord}, {op});
                 top = newSetCoord;
-                graph.control.addElement(Sequence(), {newSetCoord}, {op});
             }
 
             // MATRIX_A; y is summation
@@ -420,7 +425,7 @@ namespace rocRoller
             {
                 auto [topA, bottomA, updateA] = computeIndexMATRIXAB(graph, mulLoadA, 1);
                 graph.control.addElement(Body(), {top}, {topA});
-                if(setCoord < 0)
+                if(setCoords.empty())
                     graph.control.addElement(Sequence(), {bottomA}, {op});
                 graph.control.addElement(ForLoopIncrement(), {op}, {updateA});
             }
@@ -429,7 +434,7 @@ namespace rocRoller
             {
                 auto [topA, bottomA] = computeIndexLDSMATRIXAB(graph, mulLoadA, 1);
                 graph.control.addElement(Body(), {top}, {topA});
-                if(setCoord < 0)
+                if(setCoords.empty())
                     graph.control.addElement(Sequence(), {bottomA}, {op});
             }
 
@@ -440,7 +445,7 @@ namespace rocRoller
             {
                 auto [topB, bottomB, updateB] = computeIndexMATRIXAB(graph, mulLoadB, 0);
                 graph.control.addElement(Body(), {top}, {topB});
-                if(setCoord < 0)
+                if(setCoords.empty())
                     graph.control.addElement(Sequence(), {bottomB}, {op});
                 graph.control.addElement(ForLoopIncrement(), {op}, {updateB});
             }
@@ -449,7 +454,7 @@ namespace rocRoller
             {
                 auto [topB, bottomB] = computeIndexLDSMATRIXAB(graph, mulLoadB, 0);
                 graph.control.addElement(Body(), {top}, {topB});
-                if(setCoord < 0)
+                if(setCoords.empty())
                     graph.control.addElement(Sequence(), {bottomB}, {op});
             }
         }
@@ -653,7 +658,6 @@ namespace rocRoller
                              [&](int tag) -> bool {
                                  return isOperation<SetCoordinate>(kgraph.control.getElement(tag));
                              });
-                int setCoord = setCoords.empty() ? -1 : setCoords[0];
 
                 // If a scope doesn't exist yet above the ForLoop, create one
                 // and add scope to the forKScopes map.
@@ -663,7 +667,7 @@ namespace rocRoller
                 }
                 scope = forKScopes[forK];
 
-                addComputeIndexAB(kgraph, forK, scope, setCoord, mulLoads[0], mulLoads[1]);
+                addComputeIndexAB(kgraph, forK, scope, setCoords, mulLoads[0], mulLoads[1]);
                 alreadyAdded.insert(mulLoads[0]);
                 alreadyAdded.insert(mulLoads[1]);
             }
