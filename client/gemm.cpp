@@ -377,8 +377,13 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult)
 
         double rnorm = relativeNorm(h_D, h_result);
 
-        std::string result = rnorm > 3e-5 ? "Incorrect" : "Correct";
-        std::cout << "Result : " << result << std::endl;
+        bool isCorrect = rnorm < 3e-5;
+        std::cout << "Result: " << (isCorrect ? "Correct" : "Incorrect") << std::endl;
+        std::cout << "RNorm: " << rnorm << std::endl;
+        if(!isCorrect)
+        {
+            std::cerr << "WARNING: Result incorrect. RNorm too large: " << rnorm << std::endl;
+        }
     }
 
     // TODO loop
