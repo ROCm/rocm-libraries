@@ -436,7 +436,7 @@ namespace MatrixMultiplyTest
         auto WFX = KernelGraph::CoordinateGraph::Wavefront(0, two, one);
         auto WFY = KernelGraph::CoordinateGraph::Wavefront(1, two, one);
 
-        std::vector<int> wavefront_ids = {48, 81, 114, 168};
+        std::vector<int> wavefront_ids = {48, 81, 114, 163};
         for(auto id : wavefront_ids)
         {
             postParams->setDimensionInfo(id, WF);

@@ -239,7 +239,7 @@ namespace GEMMDriverTest
         auto WFX = KernelGraph::CoordinateGraph::Wavefront(0, wavefront_nx, one);
         auto WFY = KernelGraph::CoordinateGraph::Wavefront(1, wavefront_ny, one);
 
-        std::vector<int> wavefront_ids = {58, 91, 124, 178};
+        std::vector<int> wavefront_ids = {58, 91, 124, 173};
         for(auto id : wavefront_ids)
         {
             postParams->setDimensionInfo(id, WF);

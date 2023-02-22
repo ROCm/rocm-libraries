@@ -43,6 +43,14 @@ for file in $files; do
         echo "Processing line endings in $file"
         sed -i -e 's/[[:space:]]*$//' "$file" # Remove whitespace at end of lines
         sed -i -e '$a\' "$file" # Add missing newline to end of file
+        
+        if grep -q $'\t' "$file"; then # Replace tabs with spaces.
+            echo "Removing tabs in $file"
+            tmpfile=$(mktemp /tmp/githook.XXXXXX)
+            expand -t 4 "${file}" > "${tmpfile}"
+            cat "${tmpfile}" > "${file}"
+            rm -rf "${tmpfile}"
+        fi
 
         echo "Converting non-ASCII characters to ASCII equivalents in $file"
         # Convert UTF8 non-ASCII to ASCII

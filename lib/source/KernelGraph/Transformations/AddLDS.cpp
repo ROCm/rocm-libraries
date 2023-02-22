@@ -196,7 +196,8 @@ namespace rocRoller
                                     internalTile,
                                     sdims,
                                     -1,
-                                    workgroupSizes);
+                                    workgroupSizes,
+                                    context);
 
                 // add store from VGPRs to LDS following this new loadTiled
                 auto store_macrotile_into_LDS
@@ -210,7 +211,7 @@ namespace rocRoller
 
                 // lower tile StoreLDSTile : store macrotile into LDS
                 storeMacroTileIntoLDS(
-                    graph, store_macrotile_into_LDS, lds, internalTile, workgroupSizes);
+                    graph, store_macrotile_into_LDS, lds, internalTile, workgroupSizes, context);
 
                 // LDS --DataFlow--> macrotile
                 graph.coordinates.addElement(DataFlow(), {lds}, {tile_tag});
@@ -402,7 +403,8 @@ namespace rocRoller
                                     localInfo.internalTile,
                                     sdims,
                                     K,
-                                    workgroupSizes);
+                                    workgroupSizes,
+                                    m_context);
 
                 localInfo.storeTileIntoLDS = graph.control.addElement(StoreLDSTile(vtype.dataType));
                 // lower tile StoreLDSTile : store macrotile into LDS
@@ -410,7 +412,8 @@ namespace rocRoller
                                       localInfo.storeTileIntoLDS,
                                       localInfo.lds,
                                       localInfo.internalTile,
-                                      workgroupSizes);
+                                      workgroupSizes,
+                                      m_context);
                 graph.coordinates.deleteElement(
                     std::vector<int>{user}, std::vector<int>{loadTile}, CT::isEdge<DataFlow>);
                 graph.coordinates.addElement(DataFlow(), {localInfo.lds}, {loadTile});

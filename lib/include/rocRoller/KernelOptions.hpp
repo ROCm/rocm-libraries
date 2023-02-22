@@ -30,6 +30,10 @@ namespace rocRoller
 
         bool fuseLoops;
 
+        bool transposeMemoryAccessA;
+        bool transposeMemoryAccessB;
+        bool transposeMemoryAccessOther;
+
         std::string          toString() const;
         friend std::ostream& operator<<(std::ostream&, const KernelOptions&);
     };

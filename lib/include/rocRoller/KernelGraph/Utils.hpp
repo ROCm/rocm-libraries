@@ -28,7 +28,8 @@ namespace rocRoller
                                  int                                mac_tile_tag,
                                  std::vector<int>&                  sdim,
                                  int                                K,
-                                 std::array<unsigned int, 3> const& workgroupSizes);
+                                 std::array<unsigned int, 3> const& workgroupSizes,
+                                 std::shared_ptr<Context>           context);
 
         void updateLoadLDSMacroTile(KernelGraph&                      graph,
                                     CoordinateGraph::MacroTile const& mac_tile,
@@ -82,7 +83,8 @@ namespace rocRoller
                                    int                                store_tag,
                                    int                                lds_tag,
                                    int                                mac_tile_tag,
-                                   std::array<unsigned int, 3> const& workgroupSizes);
+                                   std::array<unsigned int, 3> const& workgroupSizes,
+                                   std::shared_ptr<Context>           context);
 
         void loadMacroTileFromLDS(KernelGraph&                       graph,
                                   int                                load_tag,
