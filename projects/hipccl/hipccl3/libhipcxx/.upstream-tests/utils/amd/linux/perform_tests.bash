@@ -1,5 +1,23 @@
 #! /bin/bash
 
+# Modifications Copyright (c) 2025 Advanced Micro Devices, Inc.
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+
 function usage {
   echo "Usage: ${0} [flags...] <tests...>|all"
   echo
@@ -17,17 +35,17 @@ function usage {
   echo "                                 : Overrides \${LIBCUDACXX_SKIP_LIBCXX_TESTS}."
   echo "--skip-libcudacxx-tests          : Do not build (or run) any libcu++ tests."
   echo "                                 : Overrides \${LIBCUDACXX_SKIP_LIBCUDACXX_TESTS}."
-  echo "--skip-arch-detection            : Do not automatically detect the SM architecture"
-  echo "                                 : for tests runs."
-  echo "                                 : Overrides \${LIBCUDACXX_SKIP_ARCH_DETECTION}."
-  echo
-  echo "--compute-archs                  : Space-separated list of SM architectures"
-  echo "                                   (specified as integers) to target. If empty,"
-  echo "                                   either the architecture is automatically"
-  echo "                                   detected (for tests runs if detection isn't"
-  echo "                                   disabled) or all known SM architectures are"
-  echo "                                   targeted."
-  echo "                                 : Overrides \${LIBCUDACXX_COMPUTE_ARCHS}."
+#  echo "--skip-arch-detection            : Do not automatically detect the SM architecture"
+#  echo "                                 : for tests runs."
+#  echo "                                 : Overrides \${LIBCUDACXX_SKIP_ARCH_DETECTION}."
+#  echo
+#  echo "--compute-archs                  : Space-separated list of SM architectures"
+#  echo "                                   (specified as integers) to target. If empty,"
+#  echo "                                   either the architecture is automatically"
+#  echo "                                   detected (for tests runs if detection isn't"
+#  echo "                                   disabled) or all known SM architectures are"
+#  echo "                                   targeted."
+#  echo "                                 : Overrides \${LIBCUDACXX_COMPUTE_ARCHS}."
   echo
   echo "--libcxx-lit-site-config <file>     : Use <file> as the libc++ lit site config"
   echo "                                    : (default: \${LIBCUDACXX_PATH}/libcxx/build/test/lit.site.cfg)."
@@ -71,7 +89,7 @@ function section_separator {
 LIBCXX_LOG=$(mktemp)
 LIBCUDACXX_LOG=$(mktemp)
 
-KNOWN_COMPUTE_ARCHS="50 52 53 60 61 62 70 72 75 80 86 87 89 90"
+#KNOWN_COMPUTE_ARCHS="50 52 53 60 61 62 70 72 75 80 86 87 90"
 
 function report_and_exit {
   # If any of the lines searched for below aren't present in the log files, the
@@ -236,42 +254,43 @@ fi
 ################################################################################
 # SM Architecture Detection
 
-if [ "${LIBCUDACXX_SKIP_ARCH_DETECTION:-0}" == "0" ] && \
-   [ "${LIBCUDACXX_SKIP_TESTS_RUN:-0}" == "0" ] && \
-   [ ! -n "${LIBCUDACXX_COMPUTE_ARCHS}" ]
-then
-  section_separator
+# if [ "${LIBCUDACXX_SKIP_ARCH_DETECTION:-0}" == "0" ] && \
+#    [ "${LIBCUDACXX_SKIP_TESTS_RUN:-0}" == "0" ] && \
+#    [ ! -n "${LIBCUDACXX_COMPUTE_ARCHS}" ]
+# then
+#   section_separator
 
-  echo "# TEST SM Architecture Detection"
+#   echo "# TEST SM Architecture Detection"
 
-  ARCH_DETECTION_LOG=$(mktemp)
-  DETECTION_LIT_FLAGS="-vv -a"
-  if [ "${JSON_OUTPUT_TARGET}" != "0" ]
-  then
-    DETECTION_LIT_FLAGS="${DETECTION_LIT_FLAGS} -o ${JSON_OUTPUT_TARGET}/detect_sm.log"
-  fi
+#   ARCH_DETECTION_LOG=$(mktemp)
+#   DETECTION_LIT_FLAGS="-vv -a"
+#   if [ "${JSON_OUTPUT_TARGET}" != "0" ]
+#   then
+#     DETECTION_LIT_FLAGS="${DETECTION_LIT_FLAGS} -o ${JSON_OUTPUT_TARGET}/detect_sm.log"
+#   fi
 
-  LIBCUDACXX_SITE_CONFIG=${LIBCUDACXX_LIT_SITE_CONFIG} \
-  bash -c "lit ${DETECTION_LIT_FLAGS} ${LIBCUDACXX_PATH}/test/nothing_to_do.pass.cpp -Dcompute_archs=\"${KNOWN_COMPUTE_ARCHS}\"" \
-    > ${ARCH_DETECTION_LOG} 2>&1
 
-  if [ "${PIPESTATUS[0]}" != "0" ]
-  then
-    cat ${ARCH_DETECTION_LOG}
-    report_and_exit 1
-  fi
+#   LIBCUDACXX_SITE_CONFIG=${LIBCUDACXX_LIT_SITE_CONFIG} \
+#   bash -c "lit ${DETECTION_LIT_FLAGS} ${LIBCUDACXX_PATH}/test/nothing_to_do.pass.cpp -Dcompute_archs=\"${KNOWN_COMPUTE_ARCHS}\"" \
+#     > ${ARCH_DETECTION_LOG} 2>&1
 
-  DEVICE_0_COMPUTE_ARCH=$(egrep '^Device 0:' ${ARCH_DETECTION_LOG} | sed 's/^Device 0: ".*", Selected, SM\([0-9]\+\), [0-9]\+ \[bytes\]/\1/')
+#   if [ "${PIPESTATUS[0]}" != "0" ]
+#   then
+#     cat ${ARCH_DETECTION_LOG}
+#     report_and_exit 1
+#   fi
 
-  rm -f ${ARCH_DETECTION_LOG}
+#   DEVICE_0_COMPUTE_ARCH=$(egrep '^Device 0:' ${ARCH_DETECTION_LOG} | sed 's/^Device 0: ".*", Selected, SM\([0-9]\+\), [0-9]\+ \[bytes\]/\1/')
 
-  echo "# DETECTION SM Architecture : Device 0, ${DEVICE_0_COMPUTE_ARCH}"
+#   rm -f ${ARCH_DETECTION_LOG}
 
-  if (( 50 <= ${DEVICE_0_COMPUTE_ARCH:-0} ))
-  then
-    LIBCUDACXX_COMPUTE_ARCHS=${DEVICE_0_COMPUTE_ARCH}
-  fi
-fi
+#   echo "# DETECTION SM Architecture : Device 0, ${DEVICE_0_COMPUTE_ARCH}"
+
+#   if (( 50 <= ${DEVICE_0_COMPUTE_ARCH:-0} ))
+#   then
+#     LIBCUDACXX_COMPUTE_ARCHS=${DEVICE_0_COMPUTE_ARCH}
+#   fi
+# fi
 
 if [ -n "${LIBCUDACXX_COMPUTE_ARCHS}" ]
 then
@@ -356,7 +375,8 @@ then
   fi
 
   echo "# TEST libcu++"
-  TIMEFORMAT="# WALLTIME libcu++: %R [sec]" \
+  TIMEFORMAT="# WALLTIME libhip++: %R [sec]" \
+
   LIBCUDACXX_SITE_CONFIG=${LIBCUDACXX_LIT_SITE_CONFIG} \
   bash -c "${LIT_PREFIX} lit ${LIT_FLAGS} ${LIT_COMPUTE_ARCHS_FLAG}${LIBCUDACXX_COMPUTE_ARCHS}${LIT_COMPUTE_ARCHS_SUFFIX} ${LIBCUDACXX_TEST_TARGETS} ${OUTPUT_STREAM_FLAG}" \
   2>&1 | tee "${LIBCUDACXX_LOG}"

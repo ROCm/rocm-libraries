@@ -1,7 +1,25 @@
-# 3.15 is the minimum for including the project with add_subdirectory.
+# Modifications Copyright (c) 2025 Advanced Micro Devices, Inc.
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+# 3.15 is the minimum.
+# 3.17 for NVC++.
 # 3.18 for C++17 + CUDA and clang-cuda support.
-# 3.21 is the minimum for the developer build.
-cmake_minimum_required(VERSION 3.15)
+# 3.21 is for HIP
+cmake_minimum_required(VERSION 3.21)
 
 # Determine whether libcudacxx is the top-level project or included into
 # another project via add_subdirectory().
@@ -49,9 +67,18 @@ set(CMAKE_MODULE_PATH "${libcudacxx_SOURCE_DIR}/cmake")
 set(LLVM_PATH "${libcudacxx_SOURCE_DIR}" CACHE STRING "" FORCE)
 
 # Configuration options.
-option(LIBCUDACXX_ENABLE_CUDA "Enable the CUDA language support." ON)
+option(LIBCUDACXX_ENABLE_CUDA "Enable the CUDA language support." OFF)
+option(LIBCUDACXX_ENABLE_HIP "Enable the HIP language support." ON)
+
+#TODO: do not allow for HIP and CUDA to be used at the same time
+
 if (LIBCUDACXX_ENABLE_CUDA)
   enable_language(CUDA)
+endif ()
+
+if (LIBCUDACXX_ENABLE_HIP)
+  #enable_language(HIP)
+  find_package(hip REQUIRED)
 endif ()
 
 option(LIBCUDACXX_ENABLE_LIBCUDACXX_TESTS "Enable libcu++ tests." ON)

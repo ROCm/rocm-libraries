@@ -6,6 +6,23 @@
 #
 #===----------------------------------------------------------------------===##
 
+# Modifications Copyright (c) 2025 Advanced Micro Devices, Inc.
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
 import platform
 import os
 import libcudacxx.util
@@ -80,6 +97,11 @@ class CXXCompiler(object):
     def _initTypeAndVersion(self):
         # Get compiler type and version
         try:
+            #this is a workaround as hipcc won't set __HIPCC__ macro when not being compiled with -x hip
+            self.source_lang ='hip'
+            macros_for_hip = self.dumpMacros()
+            self.source_lang= 'c++'
+
             macros = self.dumpMacros()
             compiler_type = None
             major_ver = minor_ver = patchlevel = None
@@ -89,6 +111,11 @@ class CXXCompiler(object):
                 major_ver = macros['__CUDACC_VER_MAJOR__']
                 minor_ver = macros['__CUDACC_VER_MINOR__']
                 patchlevel = macros['__CUDACC_VER_BUILD__']
+            elif '__HIPCC__' in macros_for_hip.keys():
+              compiler_type = 'hipcc'
+              major_ver = macros['__clang_major__']
+              minor_ver = macros['__clang_minor__']
+              patchlevel = macros['__clang_patchlevel__']
             elif '__NVCOMPILER' in macros.keys():
                 compiler_type = 'nvhpc'
                 # NVHPC, unfortunately, adds an extra space between the macro name
@@ -165,6 +192,8 @@ class CXXCompiler(object):
         elif self.type == 'clang':
             # Treat C++ as clang-cuda when the compiler is Clang.
             self.source_lang = 'cu'
+        elif self.type == 'hipcc':
+            self.source_lang = 'hip'
 
     def _basicCmdCl(self, source_files, out, mode=CM_Default, flags=[],
                   input_is_cxx=False):

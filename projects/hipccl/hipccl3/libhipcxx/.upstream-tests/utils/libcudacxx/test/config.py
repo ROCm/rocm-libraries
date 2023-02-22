@@ -6,6 +6,23 @@
 #
 #===----------------------------------------------------------------------===##
 
+# Modifications Copyright (c) 2025 Advanced Micro Devices, Inc.
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
 import locale
 import os
 import platform
@@ -248,7 +265,7 @@ class Configuration(object):
                 # ValgrindExecutor is supposed to go. It is likely
                 # that the user wants it at the end, but we have no
                 # way of getting at that easily.
-                selt.lit_config.fatal("Cannot infer how to create a Valgrind "
+                self.lit_config.fatal("Cannot infer how to create a Valgrind "
                                       " executor.")
         else:
             te = LocalExecutor()
@@ -881,7 +898,7 @@ class Configuration(object):
             self.lit_config.note('using the system cxx headers')
             return
         # I don't think this is required, since removing it helps clang-cuda compile and libcudacxx only supports building in CUDA modes?
-        # if self.cxx.type != 'nvcc' and self.cxx.type != 'pgi':
+        # if self.cxx.type != 'nvcc' and self.cxx.type != 'pgi' and self.cxx.type != 'hipcc':
         #    self.cxx.compile_flags += ['-nostdinc++']
         if cxx_headers is None:
             cxx_headers = os.path.join(self.libcudacxx_src_root, 'include')

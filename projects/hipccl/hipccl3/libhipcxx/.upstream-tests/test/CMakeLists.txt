@@ -1,3 +1,20 @@
+# Modifications Copyright (c) 2025 Advanced Micro Devices, Inc.
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
 macro(pythonize_bool var)
   if (${var})
     set(${var} True)
@@ -33,10 +50,20 @@ if (LIBCUDACXX_TEST_WITH_NVRTC)
   # Use the NVRTCC utility to run the built test outputs
   set(LIBCUDACXX_EXECUTOR "PrefixExecutor(['${LIBCUDACXX_CUDA_COMPILER}'], LocalExecutor())")
 else() # NOT LIBCUDACXX_TEST_WITH_NVRTC
-  set(LIBCUDACXX_FORCE_INCLUDE "-include ${libcudacxx_SOURCE_DIR}/test/libcudacxx/force_include.h")
-  set(LIBCUDACXX_CUDA_COMPILER "${CMAKE_CUDA_COMPILER}")
-  set(LIBCUDACXX_CUDA_TEST_WITH_NVRTC "False")
-  set(LIBCUDACXX_TEST_COMPILER_FLAGS "-DLIBCUDACXX_ENABLE_EXPERIMENTAL_MEMORY_RESOURCE")
+  if (LIBCUDACXX_ENABLE_CUDA)
+    set(LIBCUDACXX_FORCE_INCLUDE "-include ${libcudacxx_SOURCE_DIR}/test/force_include_cuda.h")
+    set(LIBCUDACXX_CUDA_COMPILER "${CMAKE_CUDA_COMPILER}")
+    set(LIBCUDACXX_CUDA_TEST_WITH_NVRTC "False")
+    set(LIBCUDACXX_TEST_COMPILER_FLAGS "-DLIBCUDACXX_ENABLE_EXPERIMENTAL_MEMORY_RESOURCE")
+  elseif(LIBCUDACXX_ENABLE_HIP)
+    set(LIBCUDACXX_FORCE_INCLUDE "-include ${libcudacxx_SOURCE_DIR}/test/force_include_hip.h")
+    #temporary workaround until we've found a way to make cmake find hipcc
+    set(LIBCUDACXX_CUDA_COMPILER "${HIP_HIPCC_EXECUTABLE}")
+    set(CMAKE_CUDA_HOST_COMPILER ${CMAKE_CXX_COMPILER})
+    set(CMAKE_CUDA_COMPILER_ID "HIPCC")
+    set(LIBCUDACXX_CUDA_TEST_WITH_NVRTC "False")
+    set(LIBCUDACXX_TEST_COMPILER_FLAGS "-DLIBCUDACXX_ENABLE_EXPERIMENTAL_MEMORY_RESOURCE")
+  endif()
 endif()
 
 if (NOT MSVC AND NOT ${CMAKE_CUDA_COMPILER_ID} STREQUAL "Clang")
@@ -75,6 +102,14 @@ elseif (${CMAKE_CUDA_COMPILER_ID} STREQUAL "NVHPC")
     " -stdpar")
   string(APPEND LIBCUDACXX_TEST_LINKER_FLAGS
     " -stdpar")
+endif()
+
+if (${CMAKE_CUDA_COMPILER_ID} STREQUAL "HIPCC")
+  set(LIBCUDACXX_TEST_COMPILER_FLAGS
+    "${LIBCUDACXX_TEST_COMPILER_FLAGS} \
+    ${LIBCUDACXX_FORCE_INCLUDE} \
+    -I${CMAKE_SOURCE_DIR}/include"
+    CACHE INTERNAL "Flags for libcxx testing." FORCE)
 endif()
 
 set(LIBCUDACXX_COMPUTE_ARCHS_STRING "${CMAKE_CUDA_ARCHITECTURES}")
