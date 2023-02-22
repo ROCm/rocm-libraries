@@ -303,8 +303,17 @@ namespace rocRoller
 
         void Transformer::setCoordinate(int tag, ExpressionPtr index)
         {
-            rocRoller::Log::getLogger()->debug(
-                "Transformer::setCoordinate: setting {} to {}", tag, toString(index));
+            if(Log::getLogger()->should_log(spdlog::level::debug))
+            {
+                auto elemName = std::visit([](auto const& el) { return toString(el); },
+                                           m_graph->getElement(tag));
+
+                rocRoller::Log::getLogger()->debug(
+                    "Transformer::setCoordinate: setting {} ({}) to {}",
+                    tag,
+                    elemName,
+                    toString(index));
+            }
             m_indexes.insert_or_assign(tag, index);
         }
 

@@ -58,6 +58,15 @@ namespace rocRoller
         std::vector<std::shared_ptr<CommandArgument>> getArguments() const;
 
         /**
+         * NOTE: Debugging & testing purposes only.
+         * 
+         * Reads the values of each of the command arguments out of `args` and returns them in
+         * a map based on the name of each argument.
+         */
+        std::map<std::string, CommandArgumentValue>
+            readArguments(RuntimeArguments const& args) const;
+
+        /**
          * Returns the expected workItemCount for a command.
          * This is determined by finding the sizes for the first T_LOAD_LINEAR
          * command appearing in the command object.

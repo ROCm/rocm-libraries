@@ -14,6 +14,7 @@
 #include "../../test/unit/Utilities.hpp"
 
 #include "include/Parser.hpp"
+#include "include/visualize.hpp"
 
 using namespace rocRoller;
 
@@ -122,7 +123,7 @@ struct rocRoller::Serialization::
 
 // D (MxN) = alpha * A (MxK) X B (KxN) + beta * C (MxN)
 template <typename A, typename B, typename C, typename D>
-GEMMResult GEMM(GEMMProblem prob, bool checkResult)
+GEMMResult GEMM(GEMMProblem prob, bool checkResult, bool doVisualize)
 {
     GEMMResult result(prob);
 
@@ -333,6 +334,9 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult)
     // Build GEMM kernel
     CommandKernel commandKernel(command, "GEMM", params, postParams, kernelOptions);
 
+    if(doVisualize)
+        Client::visualize(command, commandKernel, runtimeArgs);
+
     // Warmup runs
     for(int i = 0; i < result.numWarmUp; ++i)
     {
@@ -433,6 +437,9 @@ int main(int argc, const char* argv[])
     po.addArg("trans_B",
               Arg({"trans_B"}, "N: B is not already transposed. T: B is already transposed."));
 
+    po.addArg("visualize",
+              Arg({"visualize"}, "Dump out volumes describing memory access patterns."));
+
     po.parse_args(argc, argv);
 
     GEMMProblem prob;
@@ -464,6 +471,8 @@ int main(int argc, const char* argv[])
     prob.numOuter  = po.get("num_outer", 5);
     prob.numInner  = po.get("num_inner", 2);
 
+    bool doVisualize = po.get("visualize", false);
+
     AssertFatal(prob.type_acc == "float");
 
     GEMMResult result(prob);
@@ -471,12 +480,12 @@ int main(int argc, const char* argv[])
     if(prob.type_A == "float" && prob.type_B == "float" && prob.type_C == "float"
        && prob.type_D == "float")
     {
-        result = GEMM<float, float, float, float>(prob, true);
+        result = GEMM<float, float, float, float>(prob, true, doVisualize);
     }
     else if(prob.type_A == "half" && prob.type_B == "half" && prob.type_C == "half"
             && prob.type_D == "half")
     {
-        result = GEMM<Half, Half, Half, Half>(prob, true);
+        result = GEMM<Half, Half, Half, Half>(prob, true, doVisualize);
     }
     else
     {

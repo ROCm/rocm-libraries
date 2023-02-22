@@ -194,6 +194,19 @@ namespace rocRoller
         return rv;
     }
 
+    inline std::map<std::string, CommandArgumentValue>
+        Command::readArguments(RuntimeArguments const& args) const
+    {
+        std::map<std::string, CommandArgumentValue> rv;
+
+        for(auto const& ca : m_command_args)
+        {
+            rv[ca->name()] = ca->getValue(args);
+        }
+
+        return rv;
+    }
+
     inline Command::OperationList const& Command::operations() const
     {
         return m_operations;

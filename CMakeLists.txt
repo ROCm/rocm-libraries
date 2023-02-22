@@ -350,6 +350,7 @@ if(ROCROLLER_USE_YAML_CPP)
   target_compile_definitions(rocroller PUBLIC ROCROLLER_USE_YAML_CPP)
   target_link_libraries(rocroller PUBLIC yaml-cpp)
   set_property(TARGET yaml-cpp PROPERTY POSITION_INDEPENDENT_CODE ON)
+  set_property(TARGET yaml-cpp APPEND PROPERTY COMPILE_OPTIONS "-Wno-shadow")
 
   target_compile_definitions(GPUArchitectureGenerator PUBLIC ROCROLLER_USE_YAML_CPP)
   target_link_libraries(GPUArchitectureGenerator PUBLIC yaml-cpp)

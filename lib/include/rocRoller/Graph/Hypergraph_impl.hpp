@@ -459,6 +459,20 @@ namespace rocRoller
         }
 
         template <typename Node, typename Edge, bool Hyper>
+        Generator<int> Hypergraph<Node, Edge, Hyper>::allElements() const
+        {
+            for(auto const& pair : m_elements)
+                co_yield pair.first;
+        }
+
+        template <typename Node, typename Edge, bool Hyper>
+        template <std::predicate<int> Predicate>
+        Generator<int> Hypergraph<Node, Edge, Hyper>::findElements(Predicate nodeSelector) const
+        {
+            co_yield filter(nodeSelector, allElements());
+        }
+
+        template <typename Node, typename Edge, bool Hyper>
         Generator<int> Hypergraph<Node, Edge, Hyper>::breadthFirstVisit(int start) const
         {
             // Only downstream is implemented for now.

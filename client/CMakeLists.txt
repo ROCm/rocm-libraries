@@ -13,7 +13,10 @@ if(BUILD_CLIENT)
   find_package(hip)
 
   add_executable(gemm
+    GraphInspector.cpp
+    Parser.cpp
     gemm.cpp
+    visualize.cpp
 
     ../test/unit/Utilities.cpp
   )
@@ -63,6 +66,7 @@ if(BUILD_CLIENT)
 
   add_executable(codegen_stress
     codegen_stress_test.cpp
+    Parser.cpp
 
     ../test/unit/Utilities.cpp
   )

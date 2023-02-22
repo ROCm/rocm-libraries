@@ -138,6 +138,15 @@ namespace rocRoller
 
         std::shared_ptr<Context> getContext();
 
+        /**
+         * Determines kernel arguments for a particular invocation.
+         */
+        KernelArguments getKernelArguments(RuntimeArguments const& args);
+        /**
+         * Determines launch bounds for a particular invocation.
+         */
+        KernelInvocation getKernelInvocation(RuntimeArguments const& args);
+
     private:
         std::shared_ptr<Command> m_command;
 
@@ -148,9 +157,6 @@ namespace rocRoller
         std::shared_ptr<ExecutableKernel>  m_executableKernel;
         std::shared_ptr<CommandParameters> m_preParameters, m_postParameters;
         std::shared_ptr<KernelOptions>     m_kernelOptions;
-
-        KernelArguments  getKernelArguments(RuntimeArguments const& args);
-        KernelInvocation getKernelInvocation(RuntimeArguments const& args);
 
         Generator<Instruction> commandComments();
 

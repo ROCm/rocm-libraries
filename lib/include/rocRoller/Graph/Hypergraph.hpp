@@ -157,6 +157,8 @@ namespace rocRoller
             */
             Generator<int> parentNodes(int child) const;
 
+            Generator<int> allElements() const;
+
             /**
              * @brief Yields node indices connected in the specified direction to start, in depth-first order
              */
@@ -169,6 +171,12 @@ namespace rocRoller
             Generator<int> findNodes(int       start,
                                      Predicate nodeSelector,
                                      Direction dir = Direction::Downstream) const;
+
+            /**
+             * @brief Yields node indices that satisfy the node selector.
+             */
+            template <std::predicate<int> Predicate>
+            Generator<int> findElements(Predicate nodeSelector) const;
 
             /**
              * @brief Yields node indices connected in the specified direction to starts, in depth-first order
@@ -324,6 +332,13 @@ namespace rocRoller
 
         template <typename Node, typename Edge, bool Hyper>
         std::ostream& operator<<(std::ostream& stream, Hypergraph<Node, Edge, Hyper> const& graph);
+
+        template <typename Cls>
+        std::string variantToString(Cls const& el)
+        {
+            return std::visit([](auto const& v) { return toString(v); }, el);
+        }
+
     }
 }
 

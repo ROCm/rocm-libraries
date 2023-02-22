@@ -122,7 +122,10 @@ namespace rocRoller
 
             for(int const key : (forward ? dsts : srcs))
             {
-                AssertFatal(exprMap.contains(key), "Path not found");
+                AssertFatal(exprMap.contains(key),
+                            "Path not found for ",
+                            Graph::variantToString(getElement(key)),
+                            ShowValue(key));
                 results.push_back(transducer ? transducer(exprMap.at(key)) : exprMap.at(key));
             }
 
