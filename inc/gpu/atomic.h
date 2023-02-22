@@ -6,6 +6,9 @@
 #include <cstddef>
 #include <cstring>
 
+#include "gpu/__clib/memcmp.h"
+#include "gpu/__clib/memcpy.h"
+
 namespace gpu {
 
 using std::memory_order;
@@ -43,12 +46,12 @@ typedef std::underlying_type_t<std::memory_order> __memory_order_underlying_t;
 // the default operator= in an object is not volatile, a byte-by-byte copy
 // is required.
 template <typename _Tp, typename _Tv>
-inline typename std::enable_if_t<std::is_assignable_v<_Tp &, _Tv>> __cxx_atomic_assign_volatile(_Tp &__a_value,
-                                                                                                _Tv const &__val) {
+inline __host__ __device__ typename std::enable_if_t<std::is_assignable_v<_Tp &, _Tv>>
+__cxx_atomic_assign_volatile(_Tp &__a_value, _Tv const &__val) {
     __a_value = __val;
 }
 template <typename _Tp, typename _Tv>
-inline typename std::enable_if_t<std::is_assignable_v<_Tp &, _Tv>>
+inline __host__ __device__ typename std::enable_if_t<std::is_assignable_v<_Tp &, _Tv>>
 __cxx_atomic_assign_volatile(_Tp volatile &__a_value, _Tv volatile const &__val) {
     volatile char *__to = reinterpret_cast<volatile char *>(&__a_value);
     volatile char *__end = __to + sizeof(_Tp);
@@ -61,7 +64,7 @@ __cxx_atomic_assign_volatile(_Tp volatile &__a_value, _Tv volatile const &__val)
 template <typename _Tp>
 struct __cxx_atomic_base_impl {
 
-    inline __cxx_atomic_base_impl() noexcept = default;
+    inline __host__ __device__ __cxx_atomic_base_impl() noexcept = default;
     constexpr explicit __cxx_atomic_base_impl(_Tp value) noexcept : __a_value(value) {}
     _Tp __a_value;
 };
@@ -70,167 +73,181 @@ struct __cxx_atomic_base_impl {
 // #define __cxx_atomic_is_lock_free(__s) __hip_atomic_is_lock_free(__s)
 
 template <class _Tp>
-inline void __cxx_atomic_init(__cxx_atomic_base_impl<_Tp> volatile *__a, _Tp __val) noexcept {
+inline __host__ __device__ void __cxx_atomic_init(__cxx_atomic_base_impl<_Tp> volatile *__a, _Tp __val) noexcept {
     __hip_atomic_init(&__a->__a_value, __val);
 }
 template <class _Tp>
-inline void __cxx_atomic_init(__cxx_atomic_base_impl<_Tp> *__a, _Tp __val) noexcept {
+inline __host__ __device__ void __cxx_atomic_init(__cxx_atomic_base_impl<_Tp> *__a, _Tp __val) noexcept {
     __hip_atomic_init(&__a->__a_value, __val);
 }
 
 template <class _Tp>
-inline void __cxx_atomic_store(__cxx_atomic_base_impl<_Tp> volatile *__a, _Tp __val, memory_order __order) noexcept {
+inline __host__ __device__ void __cxx_atomic_store(__cxx_atomic_base_impl<_Tp> volatile *__a, _Tp __val,
+                                                   memory_order __order) noexcept {
     __hip_atomic_store(&__a->__a_value, __val, static_cast<__memory_order_underlying_t>(__order),
                        __HIP_MEMORY_SCOPE_AGENT);
 }
 template <class _Tp>
-inline void __cxx_atomic_store(__cxx_atomic_base_impl<_Tp> *__a, _Tp __val, memory_order __order) noexcept {
+inline __host__ __device__ void __cxx_atomic_store(__cxx_atomic_base_impl<_Tp> *__a, _Tp __val,
+                                                   memory_order __order) noexcept {
     __hip_atomic_store(&__a->__a_value, __val, static_cast<__memory_order_underlying_t>(__order),
                        __HIP_MEMORY_SCOPE_AGENT);
 }
 
 template <class _Tp>
-inline _Tp __cxx_atomic_load(__cxx_atomic_base_impl<_Tp> const volatile *__a, memory_order __order) noexcept {
+inline __host__ __device__ _Tp __cxx_atomic_load(__cxx_atomic_base_impl<_Tp> const volatile *__a,
+                                                 memory_order __order) noexcept {
     using __ptr_type = std::remove_const_t<decltype(__a->__a_value)> *;
     return __hip_atomic_load(const_cast<__ptr_type>(&__a->__a_value), static_cast<__memory_order_underlying_t>(__order),
                              __HIP_MEMORY_SCOPE_AGENT);
 }
 template <class _Tp>
-inline _Tp __cxx_atomic_load(__cxx_atomic_base_impl<_Tp> const *__a, memory_order __order) noexcept {
+inline __host__ __device__ _Tp __cxx_atomic_load(__cxx_atomic_base_impl<_Tp> const *__a,
+                                                 memory_order __order) noexcept {
     using __ptr_type = std::remove_const_t<decltype(__a->__a_value)> *;
     return __hip_atomic_load(const_cast<__ptr_type>(&__a->__a_value), static_cast<__memory_order_underlying_t>(__order),
                              __HIP_MEMORY_SCOPE_AGENT);
 }
 
 template <class _Tp>
-inline _Tp __cxx_atomic_exchange(__cxx_atomic_base_impl<_Tp> volatile *__a, _Tp __value,
-                                 memory_order __order) noexcept {
+inline __host__ __device__ _Tp __cxx_atomic_exchange(__cxx_atomic_base_impl<_Tp> volatile *__a, _Tp __value,
+                                                     memory_order __order) noexcept {
     return __hip_atomic_exchange(&__a->__a_value, __value, static_cast<__memory_order_underlying_t>(__order),
                                  __HIP_MEMORY_SCOPE_AGENT);
 }
 template <class _Tp>
-inline _Tp __cxx_atomic_exchange(__cxx_atomic_base_impl<_Tp> *__a, _Tp __value, memory_order __order) noexcept {
+inline __host__ __device__ _Tp __cxx_atomic_exchange(__cxx_atomic_base_impl<_Tp> *__a, _Tp __value,
+                                                     memory_order __order) noexcept {
     return __hip_atomic_exchange(&__a->__a_value, __value, static_cast<__memory_order_underlying_t>(__order),
                                  __HIP_MEMORY_SCOPE_AGENT);
 }
 
-inline constexpr memory_order __to_failure_order(memory_order __order) {
+inline constexpr __host__ __device__ memory_order __to_failure_order(memory_order __order) {
     // Avoid switch statement to make this a constexpr.
     return __order == memory_order_release ? memory_order_relaxed
                                            : (__order == memory_order_acq_rel ? memory_order_acquire : __order);
 }
 
 template <class _Tp>
-inline bool __cxx_atomic_compare_exchange_strong(__cxx_atomic_base_impl<_Tp> volatile *__a, _Tp *__expected,
-                                                 _Tp __value, memory_order __success, memory_order __failure) noexcept {
+inline __host__ __device__ bool
+__cxx_atomic_compare_exchange_strong(__cxx_atomic_base_impl<_Tp> volatile *__a, _Tp *__expected, _Tp __value,
+                                     memory_order __success, memory_order __failure) noexcept {
     return __hip_atomic_compare_exchange_strong(
         &__a->__a_value, __expected, __value, static_cast<__memory_order_underlying_t>(__success),
         static_cast<__memory_order_underlying_t>(__to_failure_order(__failure)), __HIP_MEMORY_SCOPE_AGENT);
 }
 template <class _Tp>
-inline bool __cxx_atomic_compare_exchange_strong(__cxx_atomic_base_impl<_Tp> *__a, _Tp *__expected, _Tp __value,
-                                                 memory_order __success, memory_order __failure) noexcept {
+inline __host__ __device__ bool __cxx_atomic_compare_exchange_strong(__cxx_atomic_base_impl<_Tp> *__a, _Tp *__expected,
+                                                                     _Tp __value, memory_order __success,
+                                                                     memory_order __failure) noexcept {
     return __hip_atomic_compare_exchange_strong(
         &__a->__a_value, __expected, __value, static_cast<__memory_order_underlying_t>(__success),
         static_cast<__memory_order_underlying_t>(__to_failure_order(__failure)), __HIP_MEMORY_SCOPE_AGENT);
 }
 
 template <class _Tp>
-inline bool __cxx_atomic_compare_exchange_weak(__cxx_atomic_base_impl<_Tp> volatile *__a, _Tp *__expected, _Tp __value,
-                                               memory_order __success, memory_order __failure) noexcept {
+inline __host__ __device__ bool __cxx_atomic_compare_exchange_weak(__cxx_atomic_base_impl<_Tp> volatile *__a,
+                                                                   _Tp *__expected, _Tp __value, memory_order __success,
+                                                                   memory_order __failure) noexcept {
     return __hip_atomic_compare_exchange_weak(
         &__a->__a_value, __expected, __value, static_cast<__memory_order_underlying_t>(__success),
         static_cast<__memory_order_underlying_t>(__to_failure_order(__failure)), __HIP_MEMORY_SCOPE_AGENT);
 }
 template <class _Tp>
-inline bool __cxx_atomic_compare_exchange_weak(__cxx_atomic_base_impl<_Tp> *__a, _Tp *__expected, _Tp __value,
-                                               memory_order __success, memory_order __failure) noexcept {
+inline __host__ __device__ bool __cxx_atomic_compare_exchange_weak(__cxx_atomic_base_impl<_Tp> *__a, _Tp *__expected,
+                                                                   _Tp __value, memory_order __success,
+                                                                   memory_order __failure) noexcept {
     return __hip_atomic_compare_exchange_weak(
         &__a->__a_value, __expected, __value, static_cast<__memory_order_underlying_t>(__success),
         static_cast<__memory_order_underlying_t>(__to_failure_order(__failure)), __HIP_MEMORY_SCOPE_AGENT);
 }
 
 template <class _Tp>
-inline _Tp __cxx_atomic_fetch_add(__cxx_atomic_base_impl<_Tp> volatile *__a, _Tp __delta,
-                                  memory_order __order) noexcept {
+inline __host__ __device__ _Tp __cxx_atomic_fetch_add(__cxx_atomic_base_impl<_Tp> volatile *__a, _Tp __delta,
+                                                      memory_order __order) noexcept {
     return __hip_atomic_fetch_add(&__a->__a_value, __delta, static_cast<__memory_order_underlying_t>(__order),
                                   __HIP_MEMORY_SCOPE_AGENT);
 }
 template <class _Tp>
-inline _Tp __cxx_atomic_fetch_add(__cxx_atomic_base_impl<_Tp> *__a, _Tp __delta, memory_order __order) noexcept {
-    return __hip_atomic_fetch_add(&__a->__a_value, __delta, static_cast<__memory_order_underlying_t>(__order),
-                                  __HIP_MEMORY_SCOPE_AGENT);
-}
-
-template <class _Tp>
-inline _Tp *__cxx_atomic_fetch_add(__cxx_atomic_base_impl<_Tp *> volatile *__a, ptrdiff_t __delta,
-                                   memory_order __order) noexcept {
-    return __hip_atomic_fetch_add(&__a->__a_value, __delta, static_cast<__memory_order_underlying_t>(__order),
-                                  __HIP_MEMORY_SCOPE_AGENT);
-}
-template <class _Tp>
-inline _Tp *__cxx_atomic_fetch_add(__cxx_atomic_base_impl<_Tp *> *__a, ptrdiff_t __delta,
-                                   memory_order __order) noexcept {
+inline __host__ __device__ _Tp __cxx_atomic_fetch_add(__cxx_atomic_base_impl<_Tp> *__a, _Tp __delta,
+                                                      memory_order __order) noexcept {
     return __hip_atomic_fetch_add(&__a->__a_value, __delta, static_cast<__memory_order_underlying_t>(__order),
                                   __HIP_MEMORY_SCOPE_AGENT);
 }
 
 template <class _Tp>
-inline _Tp __cxx_atomic_fetch_sub(__cxx_atomic_base_impl<_Tp> volatile *__a, _Tp __delta,
-                                  memory_order __order) noexcept {
-    return __hip_atomic_fetch_sub(&__a->__a_value, __delta, static_cast<__memory_order_underlying_t>(__order),
+inline __host__ __device__ _Tp *__cxx_atomic_fetch_add(__cxx_atomic_base_impl<_Tp *> volatile *__a, ptrdiff_t __delta,
+                                                       memory_order __order) noexcept {
+    return __hip_atomic_fetch_add(&__a->__a_value, __delta, static_cast<__memory_order_underlying_t>(__order),
                                   __HIP_MEMORY_SCOPE_AGENT);
 }
 template <class _Tp>
-inline _Tp __cxx_atomic_fetch_sub(__cxx_atomic_base_impl<_Tp> *__a, _Tp __delta, memory_order __order) noexcept {
-    return __hip_atomic_fetch_sub(&__a->__a_value, __delta, static_cast<__memory_order_underlying_t>(__order),
-                                  __HIP_MEMORY_SCOPE_AGENT);
-}
-template <class _Tp>
-inline _Tp *__cxx_atomic_fetch_sub(__cxx_atomic_base_impl<_Tp *> volatile *__a, ptrdiff_t __delta,
-                                   memory_order __order) noexcept {
-    return __hip_atomic_fetch_sub(&__a->__a_value, __delta, static_cast<__memory_order_underlying_t>(__order),
-                                  __HIP_MEMORY_SCOPE_AGENT);
-}
-template <class _Tp>
-inline _Tp *__cxx_atomic_fetch_sub(__cxx_atomic_base_impl<_Tp *> *__a, ptrdiff_t __delta,
-                                   memory_order __order) noexcept {
-    return __hip_atomic_fetch_sub(&__a->__a_value, __delta, static_cast<__memory_order_underlying_t>(__order),
+inline __host__ __device__ _Tp *__cxx_atomic_fetch_add(__cxx_atomic_base_impl<_Tp *> *__a, ptrdiff_t __delta,
+                                                       memory_order __order) noexcept {
+    return __hip_atomic_fetch_add(&__a->__a_value, __delta, static_cast<__memory_order_underlying_t>(__order),
                                   __HIP_MEMORY_SCOPE_AGENT);
 }
 
 template <class _Tp>
-inline _Tp __cxx_atomic_fetch_and(__cxx_atomic_base_impl<_Tp> volatile *__a, _Tp __pattern,
-                                  memory_order __order) noexcept {
+inline __host__ __device__ _Tp __cxx_atomic_fetch_sub(__cxx_atomic_base_impl<_Tp> volatile *__a, _Tp __delta,
+                                                      memory_order __order) noexcept {
+    return __hip_atomic_fetch_add(&__a->__a_value, -__delta, static_cast<__memory_order_underlying_t>(__order),
+                                  __HIP_MEMORY_SCOPE_AGENT);
+}
+template <class _Tp>
+inline __host__ __device__ _Tp __cxx_atomic_fetch_sub(__cxx_atomic_base_impl<_Tp> *__a, _Tp __delta,
+                                                      memory_order __order) noexcept {
+    return __hip_atomic_fetch_add(&__a->__a_value, -__delta, static_cast<__memory_order_underlying_t>(__order),
+                                  __HIP_MEMORY_SCOPE_AGENT);
+}
+template <class _Tp>
+inline __host__ __device__ _Tp *__cxx_atomic_fetch_sub(__cxx_atomic_base_impl<_Tp *> volatile *__a, ptrdiff_t __delta,
+                                                       memory_order __order) noexcept {
+    return __hip_atomic_fetch_add(&__a->__a_value, -__delta, static_cast<__memory_order_underlying_t>(__order),
+                                  __HIP_MEMORY_SCOPE_AGENT);
+}
+template <class _Tp>
+inline __host__ __device__ _Tp *__cxx_atomic_fetch_sub(__cxx_atomic_base_impl<_Tp *> *__a, ptrdiff_t __delta,
+                                                       memory_order __order) noexcept {
+    return __hip_atomic_fetch_add(&__a->__a_value, -__delta, static_cast<__memory_order_underlying_t>(__order),
+                                  __HIP_MEMORY_SCOPE_AGENT);
+}
+
+template <class _Tp>
+inline __host__ __device__ _Tp __cxx_atomic_fetch_and(__cxx_atomic_base_impl<_Tp> volatile *__a, _Tp __pattern,
+                                                      memory_order __order) noexcept {
     return __hip_atomic_fetch_and(&__a->__a_value, __pattern, static_cast<__memory_order_underlying_t>(__order),
                                   __HIP_MEMORY_SCOPE_AGENT);
 }
 template <class _Tp>
-inline _Tp __cxx_atomic_fetch_and(__cxx_atomic_base_impl<_Tp> *__a, _Tp __pattern, memory_order __order) noexcept {
+inline __host__ __device__ _Tp __cxx_atomic_fetch_and(__cxx_atomic_base_impl<_Tp> *__a, _Tp __pattern,
+                                                      memory_order __order) noexcept {
     return __hip_atomic_fetch_and(&__a->__a_value, __pattern, static_cast<__memory_order_underlying_t>(__order),
                                   __HIP_MEMORY_SCOPE_AGENT);
 }
 
 template <class _Tp>
-inline _Tp __cxx_atomic_fetch_or(__cxx_atomic_base_impl<_Tp> volatile *__a, _Tp __pattern,
-                                 memory_order __order) noexcept {
+inline __host__ __device__ _Tp __cxx_atomic_fetch_or(__cxx_atomic_base_impl<_Tp> volatile *__a, _Tp __pattern,
+                                                     memory_order __order) noexcept {
     return __hip_atomic_fetch_or(&__a->__a_value, __pattern, static_cast<__memory_order_underlying_t>(__order),
                                  __HIP_MEMORY_SCOPE_AGENT);
 }
 template <class _Tp>
-inline _Tp __cxx_atomic_fetch_or(__cxx_atomic_base_impl<_Tp> *__a, _Tp __pattern, memory_order __order) noexcept {
+inline __host__ __device__ _Tp __cxx_atomic_fetch_or(__cxx_atomic_base_impl<_Tp> *__a, _Tp __pattern,
+                                                     memory_order __order) noexcept {
     return __hip_atomic_fetch_or(&__a->__a_value, __pattern, static_cast<__memory_order_underlying_t>(__order),
                                  __HIP_MEMORY_SCOPE_AGENT);
 }
 
 template <class _Tp>
-inline _Tp __cxx_atomic_fetch_xor(__cxx_atomic_base_impl<_Tp> volatile *__a, _Tp __pattern,
-                                  memory_order __order) noexcept {
+inline __host__ __device__ _Tp __cxx_atomic_fetch_xor(__cxx_atomic_base_impl<_Tp> volatile *__a, _Tp __pattern,
+                                                      memory_order __order) noexcept {
     return __hip_atomic_fetch_xor(&__a->__a_value, __pattern, static_cast<__memory_order_underlying_t>(__order),
                                   __HIP_MEMORY_SCOPE_AGENT);
 }
 template <class _Tp>
-inline _Tp __cxx_atomic_fetch_xor(__cxx_atomic_base_impl<_Tp> *__a, _Tp __pattern, memory_order __order) noexcept {
+inline __host__ __device__ _Tp __cxx_atomic_fetch_xor(__cxx_atomic_base_impl<_Tp> *__a, _Tp __pattern,
+                                                      memory_order __order) noexcept {
     return __hip_atomic_fetch_xor(&__a->__a_value, __pattern, static_cast<__memory_order_underlying_t>(__order),
                                   __HIP_MEMORY_SCOPE_AGENT);
 }
@@ -247,30 +264,35 @@ struct __libcpp_is_always_lock_free {
 template <typename _Tp>
 struct __cxx_atomic_lock_impl {
 
-    inline __cxx_atomic_lock_impl() noexcept : __a_value(), __a_lock(0) {}
-    inline constexpr explicit __cxx_atomic_lock_impl(_Tp value) noexcept : __a_value(value), __a_lock(0) {}
+    inline __host__ __device__ __cxx_atomic_lock_impl() noexcept : __a_value(), __a_lock(0) {}
+    inline constexpr __host__ __device__ explicit __cxx_atomic_lock_impl(_Tp value) noexcept
+        : __a_value(value), __a_lock(0) {}
 
     _Tp __a_value;
     mutable __cxx_atomic_base_impl<unsigned int> __a_lock;
 
-    inline void __lock() const volatile {
+    inline __host__ __device__ void __lock() const volatile {
         while (1 == __cxx_atomic_exchange(&__a_lock, unsigned(true), memory_order_acquire))
             /*spin*/;
     }
-    inline void __lock() const {
+    inline __host__ __device__ void __lock() const {
         while (1 == __cxx_atomic_exchange(&__a_lock, unsigned(true), memory_order_acquire))
             /*spin*/;
     }
-    inline void __unlock() const volatile { __cxx_atomic_store(&__a_lock, unsigned(false), memory_order_release); }
-    inline void __unlock() const { __cxx_atomic_store(&__a_lock, unsigned(false), memory_order_release); }
-    inline _Tp __read() const volatile {
+    inline __host__ __device__ void __unlock() const volatile {
+        __cxx_atomic_store(&__a_lock, unsigned(false), memory_order_release);
+    }
+    inline __host__ __device__ void __unlock() const {
+        __cxx_atomic_store(&__a_lock, unsigned(false), memory_order_release);
+    }
+    inline __host__ __device__ _Tp __read() const volatile {
         __lock();
         _Tp __old;
         __cxx_atomic_assign_volatile(__old, __a_value);
         __unlock();
         return __old;
     }
-    inline _Tp __read() const {
+    inline __host__ __device__ _Tp __read() const {
         __lock();
         _Tp __old = __a_value;
         __unlock();
@@ -279,38 +301,39 @@ struct __cxx_atomic_lock_impl {
 };
 
 template <typename _Tp>
-inline void __cxx_atomic_init(volatile __cxx_atomic_lock_impl<_Tp> *__a, _Tp __val) {
+inline __host__ __device__ void __cxx_atomic_init(volatile __cxx_atomic_lock_impl<_Tp> *__a, _Tp __val) {
     __cxx_atomic_assign_volatile(__a->__a_value, __val);
 }
 template <typename _Tp>
-inline void __cxx_atomic_init(__cxx_atomic_lock_impl<_Tp> *__a, _Tp __val) {
+inline __host__ __device__ void __cxx_atomic_init(__cxx_atomic_lock_impl<_Tp> *__a, _Tp __val) {
     __a->__a_value = __val;
 }
 
 template <typename _Tp>
-inline void __cxx_atomic_store(volatile __cxx_atomic_lock_impl<_Tp> *__a, _Tp __val, memory_order) {
+inline __host__ __device__ void __cxx_atomic_store(volatile __cxx_atomic_lock_impl<_Tp> *__a, _Tp __val, memory_order) {
     __a->__lock();
     __cxx_atomic_assign_volatile(__a->__a_value, __val);
     __a->__unlock();
 }
 template <typename _Tp>
-inline void __cxx_atomic_store(__cxx_atomic_lock_impl<_Tp> *__a, _Tp __val, memory_order) {
+inline __host__ __device__ void __cxx_atomic_store(__cxx_atomic_lock_impl<_Tp> *__a, _Tp __val, memory_order) {
     __a->__lock();
     __a->__a_value = __val;
     __a->__unlock();
 }
 
 template <typename _Tp>
-inline _Tp __cxx_atomic_load(const volatile __cxx_atomic_lock_impl<_Tp> *__a, memory_order) {
+inline __host__ __device__ _Tp __cxx_atomic_load(const volatile __cxx_atomic_lock_impl<_Tp> *__a, memory_order) {
     return __a->__read();
 }
 template <typename _Tp>
-inline _Tp __cxx_atomic_load(const __cxx_atomic_lock_impl<_Tp> *__a, memory_order) {
+inline __host__ __device__ _Tp __cxx_atomic_load(const __cxx_atomic_lock_impl<_Tp> *__a, memory_order) {
     return __a->__read();
 }
 
 template <typename _Tp>
-inline _Tp __cxx_atomic_exchange(volatile __cxx_atomic_lock_impl<_Tp> *__a, _Tp __value, memory_order) {
+inline __host__ __device__ _Tp __cxx_atomic_exchange(volatile __cxx_atomic_lock_impl<_Tp> *__a, _Tp __value,
+                                                     memory_order) {
     __a->__lock();
     _Tp __old;
     __cxx_atomic_assign_volatile(__old, __a->__a_value);
@@ -319,7 +342,7 @@ inline _Tp __cxx_atomic_exchange(volatile __cxx_atomic_lock_impl<_Tp> *__a, _Tp 
     return __old;
 }
 template <typename _Tp>
-inline _Tp __cxx_atomic_exchange(__cxx_atomic_lock_impl<_Tp> *__a, _Tp __value, memory_order) {
+inline __host__ __device__ _Tp __cxx_atomic_exchange(__cxx_atomic_lock_impl<_Tp> *__a, _Tp __value, memory_order) {
     __a->__lock();
     _Tp __old = __a->__a_value;
     __a->__a_value = __value;
@@ -328,12 +351,13 @@ inline _Tp __cxx_atomic_exchange(__cxx_atomic_lock_impl<_Tp> *__a, _Tp __value, 
 }
 
 template <typename _Tp>
-inline bool __cxx_atomic_compare_exchange_strong(volatile __cxx_atomic_lock_impl<_Tp> *__a, _Tp *__expected,
-                                                 _Tp __value, memory_order, memory_order) {
+inline __host__ __device__ bool __cxx_atomic_compare_exchange_strong(volatile __cxx_atomic_lock_impl<_Tp> *__a,
+                                                                     _Tp *__expected, _Tp __value, memory_order,
+                                                                     memory_order) {
     _Tp __temp;
     __a->__lock();
     __cxx_atomic_assign_volatile(__temp, __a->__a_value);
-    bool __ret = (std::memcmp(&__temp, __expected, sizeof(_Tp)) == 0);
+    bool __ret = (gpu::memcmp(&__temp, __expected, sizeof(_Tp)) == 0);
     if (__ret)
         __cxx_atomic_assign_volatile(__a->__a_value, __value);
     else
@@ -342,25 +366,26 @@ inline bool __cxx_atomic_compare_exchange_strong(volatile __cxx_atomic_lock_impl
     return __ret;
 }
 template <typename _Tp>
-inline bool __cxx_atomic_compare_exchange_strong(__cxx_atomic_lock_impl<_Tp> *__a, _Tp *__expected, _Tp __value,
-                                                 memory_order, memory_order) {
+inline __host__ __device__ bool __cxx_atomic_compare_exchange_strong(__cxx_atomic_lock_impl<_Tp> *__a, _Tp *__expected,
+                                                                     _Tp __value, memory_order, memory_order) {
     __a->__lock();
-    bool __ret = (std::memcmp(&__a->__a_value, __expected, sizeof(_Tp)) == 0);
+    bool __ret = (gpu::memcmp(&__a->__a_value, __expected, sizeof(_Tp)) == 0);
     if (__ret)
-        std::memcpy(&__a->__a_value, &__value, sizeof(_Tp));
+        gpu::memcpy(&__a->__a_value, &__value, sizeof(_Tp));
     else
-        std::memcpy(__expected, &__a->__a_value, sizeof(_Tp));
+        gpu::memcpy(__expected, &__a->__a_value, sizeof(_Tp));
     __a->__unlock();
     return __ret;
 }
 
 template <typename _Tp>
-inline bool __cxx_atomic_compare_exchange_weak(volatile __cxx_atomic_lock_impl<_Tp> *__a, _Tp *__expected, _Tp __value,
-                                               memory_order, memory_order) {
+inline __host__ __device__ bool __cxx_atomic_compare_exchange_weak(volatile __cxx_atomic_lock_impl<_Tp> *__a,
+                                                                   _Tp *__expected, _Tp __value, memory_order,
+                                                                   memory_order) {
     _Tp __temp;
     __a->__lock();
     __cxx_atomic_assign_volatile(__temp, __a->__a_value);
-    bool __ret = (std::memcmp(&__temp, __expected, sizeof(_Tp)) == 0);
+    bool __ret = (gpu::memcmp(&__temp, __expected, sizeof(_Tp)) == 0);
     if (__ret)
         __cxx_atomic_assign_volatile(__a->__a_value, __value);
     else
@@ -369,20 +394,21 @@ inline bool __cxx_atomic_compare_exchange_weak(volatile __cxx_atomic_lock_impl<_
     return __ret;
 }
 template <typename _Tp>
-inline bool __cxx_atomic_compare_exchange_weak(__cxx_atomic_lock_impl<_Tp> *__a, _Tp *__expected, _Tp __value,
-                                               memory_order, memory_order) {
+inline __host__ __device__ bool __cxx_atomic_compare_exchange_weak(__cxx_atomic_lock_impl<_Tp> *__a, _Tp *__expected,
+                                                                   _Tp __value, memory_order, memory_order) {
     __a->__lock();
-    bool __ret = (std::memcmp(&__a->__a_value, __expected, sizeof(_Tp)) == 0);
+    bool __ret = (gpu::memcmp(&__a->__a_value, __expected, sizeof(_Tp)) == 0);
     if (__ret)
-        std::memcpy(&__a->__a_value, &__value, sizeof(_Tp));
+        gpu::memcpy(&__a->__a_value, &__value, sizeof(_Tp));
     else
-        std::memcpy(__expected, &__a->__a_value, sizeof(_Tp));
+        gpu::memcpy(__expected, &__a->__a_value, sizeof(_Tp));
     __a->__unlock();
     return __ret;
 }
 
 template <typename _Tp, typename _Td>
-inline _Tp __cxx_atomic_fetch_add(volatile __cxx_atomic_lock_impl<_Tp> *__a, _Td __delta, memory_order) {
+inline __host__ __device__ _Tp __cxx_atomic_fetch_add(volatile __cxx_atomic_lock_impl<_Tp> *__a, _Td __delta,
+                                                      memory_order) {
     __a->__lock();
     _Tp __old;
     __cxx_atomic_assign_volatile(__old, __a->__a_value);
@@ -391,7 +417,7 @@ inline _Tp __cxx_atomic_fetch_add(volatile __cxx_atomic_lock_impl<_Tp> *__a, _Td
     return __old;
 }
 template <typename _Tp, typename _Td>
-inline _Tp __cxx_atomic_fetch_add(__cxx_atomic_lock_impl<_Tp> *__a, _Td __delta, memory_order) {
+inline __host__ __device__ _Tp __cxx_atomic_fetch_add(__cxx_atomic_lock_impl<_Tp> *__a, _Td __delta, memory_order) {
     __a->__lock();
     _Tp __old = __a->__a_value;
     __a->__a_value += __delta;
@@ -400,7 +426,8 @@ inline _Tp __cxx_atomic_fetch_add(__cxx_atomic_lock_impl<_Tp> *__a, _Td __delta,
 }
 
 template <typename _Tp, typename _Td>
-inline _Tp *__cxx_atomic_fetch_add(volatile __cxx_atomic_lock_impl<_Tp *> *__a, ptrdiff_t __delta, memory_order) {
+inline __host__ __device__ _Tp *__cxx_atomic_fetch_add(volatile __cxx_atomic_lock_impl<_Tp *> *__a, ptrdiff_t __delta,
+                                                       memory_order) {
     __a->__lock();
     _Tp *__old;
     __cxx_atomic_assign_volatile(__old, __a->__a_value);
@@ -409,7 +436,8 @@ inline _Tp *__cxx_atomic_fetch_add(volatile __cxx_atomic_lock_impl<_Tp *> *__a, 
     return __old;
 }
 template <typename _Tp, typename _Td>
-inline _Tp *__cxx_atomic_fetch_add(__cxx_atomic_lock_impl<_Tp *> *__a, ptrdiff_t __delta, memory_order) {
+inline __host__ __device__ _Tp *__cxx_atomic_fetch_add(__cxx_atomic_lock_impl<_Tp *> *__a, ptrdiff_t __delta,
+                                                       memory_order) {
     __a->__lock();
     _Tp *__old = __a->__a_value;
     __a->__a_value += __delta;
@@ -418,7 +446,8 @@ inline _Tp *__cxx_atomic_fetch_add(__cxx_atomic_lock_impl<_Tp *> *__a, ptrdiff_t
 }
 
 template <typename _Tp, typename _Td>
-inline _Tp __cxx_atomic_fetch_sub(volatile __cxx_atomic_lock_impl<_Tp> *__a, _Td __delta, memory_order) {
+inline __host__ __device__ _Tp __cxx_atomic_fetch_sub(volatile __cxx_atomic_lock_impl<_Tp> *__a, _Td __delta,
+                                                      memory_order) {
     __a->__lock();
     _Tp __old;
     __cxx_atomic_assign_volatile(__old, __a->__a_value);
@@ -427,7 +456,7 @@ inline _Tp __cxx_atomic_fetch_sub(volatile __cxx_atomic_lock_impl<_Tp> *__a, _Td
     return __old;
 }
 template <typename _Tp, typename _Td>
-inline _Tp __cxx_atomic_fetch_sub(__cxx_atomic_lock_impl<_Tp> *__a, _Td __delta, memory_order) {
+inline __host__ __device__ _Tp __cxx_atomic_fetch_sub(__cxx_atomic_lock_impl<_Tp> *__a, _Td __delta, memory_order) {
     __a->__lock();
     _Tp __old = __a->__a_value;
     __a->__a_value -= __delta;
@@ -436,7 +465,8 @@ inline _Tp __cxx_atomic_fetch_sub(__cxx_atomic_lock_impl<_Tp> *__a, _Td __delta,
 }
 
 template <typename _Tp>
-inline _Tp __cxx_atomic_fetch_and(volatile __cxx_atomic_lock_impl<_Tp> *__a, _Tp __pattern, memory_order) {
+inline __host__ __device__ _Tp __cxx_atomic_fetch_and(volatile __cxx_atomic_lock_impl<_Tp> *__a, _Tp __pattern,
+                                                      memory_order) {
     __a->__lock();
     _Tp __old;
     __cxx_atomic_assign_volatile(__old, __a->__a_value);
@@ -445,7 +475,7 @@ inline _Tp __cxx_atomic_fetch_and(volatile __cxx_atomic_lock_impl<_Tp> *__a, _Tp
     return __old;
 }
 template <typename _Tp>
-inline _Tp __cxx_atomic_fetch_and(__cxx_atomic_lock_impl<_Tp> *__a, _Tp __pattern, memory_order) {
+inline __host__ __device__ _Tp __cxx_atomic_fetch_and(__cxx_atomic_lock_impl<_Tp> *__a, _Tp __pattern, memory_order) {
     __a->__lock();
     _Tp __old = __a->__a_value;
     __a->__a_value &= __pattern;
@@ -454,7 +484,8 @@ inline _Tp __cxx_atomic_fetch_and(__cxx_atomic_lock_impl<_Tp> *__a, _Tp __patter
 }
 
 template <typename _Tp>
-inline _Tp __cxx_atomic_fetch_or(volatile __cxx_atomic_lock_impl<_Tp> *__a, _Tp __pattern, memory_order) {
+inline __host__ __device__ _Tp __cxx_atomic_fetch_or(volatile __cxx_atomic_lock_impl<_Tp> *__a, _Tp __pattern,
+                                                     memory_order) {
     __a->__lock();
     _Tp __old;
     __cxx_atomic_assign_volatile(__old, __a->__a_value);
@@ -463,7 +494,7 @@ inline _Tp __cxx_atomic_fetch_or(volatile __cxx_atomic_lock_impl<_Tp> *__a, _Tp 
     return __old;
 }
 template <typename _Tp>
-inline _Tp __cxx_atomic_fetch_or(__cxx_atomic_lock_impl<_Tp> *__a, _Tp __pattern, memory_order) {
+inline __host__ __device__ _Tp __cxx_atomic_fetch_or(__cxx_atomic_lock_impl<_Tp> *__a, _Tp __pattern, memory_order) {
     __a->__lock();
     _Tp __old = __a->__a_value;
     __a->__a_value |= __pattern;
@@ -472,7 +503,8 @@ inline _Tp __cxx_atomic_fetch_or(__cxx_atomic_lock_impl<_Tp> *__a, _Tp __pattern
 }
 
 template <typename _Tp>
-inline _Tp __cxx_atomic_fetch_xor(volatile __cxx_atomic_lock_impl<_Tp> *__a, _Tp __pattern, memory_order) {
+inline __host__ __device__ _Tp __cxx_atomic_fetch_xor(volatile __cxx_atomic_lock_impl<_Tp> *__a, _Tp __pattern,
+                                                      memory_order) {
     __a->__lock();
     _Tp __old;
     __cxx_atomic_assign_volatile(__old, __a->__a_value);
@@ -481,7 +513,7 @@ inline _Tp __cxx_atomic_fetch_xor(volatile __cxx_atomic_lock_impl<_Tp> *__a, _Tp
     return __old;
 }
 template <typename _Tp>
-inline _Tp __cxx_atomic_fetch_xor(__cxx_atomic_lock_impl<_Tp> *__a, _Tp __pattern, memory_order) {
+inline __host__ __device__ _Tp __cxx_atomic_fetch_xor(__cxx_atomic_lock_impl<_Tp> *__a, _Tp __pattern, memory_order) {
     __a->__lock();
     _Tp __old = __a->__a_value;
     __a->__a_value ^= __pattern;
@@ -499,8 +531,8 @@ template <typename _Tp,
 struct __cxx_atomic_impl : public _Base {
     static_assert(std::is_trivially_copyable_v<_Tp>, "std::atomic<T> requires that 'T' be a trivially copyable type");
 
-    inline __cxx_atomic_impl() noexcept = default;
-    inline constexpr explicit __cxx_atomic_impl(_Tp __value) noexcept : _Base(__value) {}
+    inline __host__ __device__ __cxx_atomic_impl() noexcept = default;
+    inline constexpr __host__ __device__ explicit __cxx_atomic_impl(_Tp __value) noexcept : _Base(__value) {}
 };
 
 #if defined(__linux__) || (defined(_AIX) && !defined(__64BIT__))
@@ -522,60 +554,70 @@ struct __atomic_base // <_Tp, false>
 #if defined(__cpp_lib_atomic_is_always_lock_free)
     static constexpr bool is_always_lock_free = __libcpp_is_always_lock_free<__cxx_atomic_impl<_Tp>>::__value;
 #endif
-    // TODO: If/when __hip_atomic_is_lock_free gets implemented, uncomment this and remove the following line
-    // inline bool is_lock_free() const volatile noexcept { return __cxx_atomic_is_lock_free(sizeof(_Tp)); }
-    inline bool is_lock_free() const volatile noexcept { return gpu::internal::is_hip_native_v<_Tp>; }
-    inline bool is_lock_free() const noexcept {
+    inline __host__ __device__ bool is_lock_free() const volatile noexcept {
+        // TODO: If/when __hip_atomic_is_lock_free gets implemented, uncomment this and remove the following line
+        // return __cxx_atomic_is_lock_free(sizeof(_Tp));
+        return gpu::internal::is_hip_native_v<_Tp>;
+    }
+    inline __host__ __device__ bool is_lock_free() const noexcept {
         return static_cast<__atomic_base const volatile *>(this)->is_lock_free();
     }
-    inline void store(_Tp __d, memory_order __m = memory_order_seq_cst) volatile noexcept {
+    inline __host__ __device__ void store(_Tp __d, memory_order __m = memory_order_seq_cst) volatile noexcept {
         gpu::internal::__cxx_atomic_store(&__a_, __d, __m);
     }
-    inline void store(_Tp __d, memory_order __m = memory_order_seq_cst) noexcept {
+    inline __host__ __device__ void store(_Tp __d, memory_order __m = memory_order_seq_cst) noexcept {
         gpu::internal::__cxx_atomic_store(&__a_, __d, __m);
     }
-    inline _Tp load(memory_order __m = memory_order_seq_cst) const volatile noexcept {
+    inline __host__ __device__ _Tp load(memory_order __m = memory_order_seq_cst) const volatile noexcept {
         return gpu::internal::__cxx_atomic_load(&__a_, __m);
     }
-    inline _Tp load(memory_order __m = memory_order_seq_cst) const noexcept {
+    inline __host__ __device__ _Tp load(memory_order __m = memory_order_seq_cst) const noexcept {
         return gpu::internal::__cxx_atomic_load(&__a_, __m);
     }
-    inline operator _Tp() const volatile noexcept { return load(); }
-    inline operator _Tp() const noexcept { return load(); }
-    inline _Tp exchange(_Tp __d, memory_order __m = memory_order_seq_cst) volatile noexcept {
+    inline __host__ __device__ operator _Tp() const volatile noexcept { return load(); }
+    inline __host__ __device__ operator _Tp() const noexcept { return load(); }
+    inline __host__ __device__ _Tp exchange(_Tp __d, memory_order __m = memory_order_seq_cst) volatile noexcept {
         return gpu::internal::__cxx_atomic_exchange(&__a_, __d, __m);
     }
-    inline _Tp exchange(_Tp __d, memory_order __m = memory_order_seq_cst) noexcept {
+    inline __host__ __device__ _Tp exchange(_Tp __d, memory_order __m = memory_order_seq_cst) noexcept {
         return gpu::internal::__cxx_atomic_exchange(&__a_, __d, __m);
     }
-    inline bool compare_exchange_weak(_Tp &__e, _Tp __d, memory_order __s, memory_order __f) volatile noexcept {
+    inline __host__ __device__ bool compare_exchange_weak(_Tp &__e, _Tp __d, memory_order __s,
+                                                          memory_order __f) volatile noexcept {
         return gpu::internal::__cxx_atomic_compare_exchange_weak(&__a_, &__e, __d, __s, __f);
     }
-    inline bool compare_exchange_weak(_Tp &__e, _Tp __d, memory_order __s, memory_order __f) noexcept {
+    inline __host__ __device__ bool compare_exchange_weak(_Tp &__e, _Tp __d, memory_order __s,
+                                                          memory_order __f) noexcept {
         return gpu::internal::__cxx_atomic_compare_exchange_weak(&__a_, &__e, __d, __s, __f);
     }
-    inline bool compare_exchange_strong(_Tp &__e, _Tp __d, memory_order __s, memory_order __f) volatile noexcept {
+    inline __host__ __device__ bool compare_exchange_strong(_Tp &__e, _Tp __d, memory_order __s,
+                                                            memory_order __f) volatile noexcept {
         return gpu::internal::__cxx_atomic_compare_exchange_strong(&__a_, &__e, __d, __s, __f);
     }
-    inline bool compare_exchange_strong(_Tp &__e, _Tp __d, memory_order __s, memory_order __f) noexcept {
+    inline __host__ __device__ bool compare_exchange_strong(_Tp &__e, _Tp __d, memory_order __s,
+                                                            memory_order __f) noexcept {
         return gpu::internal::__cxx_atomic_compare_exchange_strong(&__a_, &__e, __d, __s, __f);
     }
-    inline bool compare_exchange_weak(_Tp &__e, _Tp __d, memory_order __m = memory_order_seq_cst) volatile noexcept {
+    inline __host__ __device__ bool compare_exchange_weak(_Tp &__e, _Tp __d,
+                                                          memory_order __m = memory_order_seq_cst) volatile noexcept {
         return gpu::internal::__cxx_atomic_compare_exchange_weak(&__a_, &__e, __d, __m, __m);
     }
-    inline bool compare_exchange_weak(_Tp &__e, _Tp __d, memory_order __m = memory_order_seq_cst) noexcept {
+    inline __host__ __device__ bool compare_exchange_weak(_Tp &__e, _Tp __d,
+                                                          memory_order __m = memory_order_seq_cst) noexcept {
         return gpu::internal::__cxx_atomic_compare_exchange_weak(&__a_, &__e, __d, __m, __m);
     }
-    inline bool compare_exchange_strong(_Tp &__e, _Tp __d, memory_order __m = memory_order_seq_cst) volatile noexcept {
+    inline __host__ __device__ bool compare_exchange_strong(_Tp &__e, _Tp __d,
+                                                            memory_order __m = memory_order_seq_cst) volatile noexcept {
         return gpu::internal::__cxx_atomic_compare_exchange_strong(&__a_, &__e, __d, __m, __m);
     }
-    inline bool compare_exchange_strong(_Tp &__e, _Tp __d, memory_order __m = memory_order_seq_cst) noexcept {
+    inline __host__ __device__ bool compare_exchange_strong(_Tp &__e, _Tp __d,
+                                                            memory_order __m = memory_order_seq_cst) noexcept {
         return gpu::internal::__cxx_atomic_compare_exchange_strong(&__a_, &__e, __d, __m, __m);
     }
 
-    inline __atomic_base() noexcept = default;
+    inline __host__ __device__ __atomic_base() noexcept = default;
 
-    inline constexpr __atomic_base(_Tp __d) noexcept : __a_(__d) {}
+    inline constexpr __host__ __device__ __atomic_base(_Tp __d) noexcept : __a_(__d) {}
 
     __atomic_base(const __atomic_base &) = delete;
 };
@@ -592,59 +634,59 @@ template <class _Tp>
 struct __atomic_base<_Tp, true> : public __atomic_base<_Tp, false> {
     typedef __atomic_base<_Tp, false> __base;
 
-    inline __atomic_base() noexcept = default;
+    inline __host__ __device__ __atomic_base() noexcept = default;
 
-    inline constexpr __atomic_base(_Tp __d) noexcept : __base(__d) {}
+    inline constexpr __host__ __device__ __atomic_base(_Tp __d) noexcept : __base(__d) {}
 
-    inline _Tp fetch_add(_Tp __op, memory_order __m = memory_order_seq_cst) volatile noexcept {
+    inline __host__ __device__ _Tp fetch_add(_Tp __op, memory_order __m = memory_order_seq_cst) volatile noexcept {
         return gpu::internal::__cxx_atomic_fetch_add(&this->__a_, __op, __m);
     }
-    inline _Tp fetch_add(_Tp __op, memory_order __m = memory_order_seq_cst) noexcept {
+    inline __host__ __device__ _Tp fetch_add(_Tp __op, memory_order __m = memory_order_seq_cst) noexcept {
         return gpu::internal::__cxx_atomic_fetch_add(&this->__a_, __op, __m);
     }
-    inline _Tp fetch_sub(_Tp __op, memory_order __m = memory_order_seq_cst) volatile noexcept {
+    inline __host__ __device__ _Tp fetch_sub(_Tp __op, memory_order __m = memory_order_seq_cst) volatile noexcept {
         return gpu::internal::__cxx_atomic_fetch_sub(&this->__a_, __op, __m);
     }
-    inline _Tp fetch_sub(_Tp __op, memory_order __m = memory_order_seq_cst) noexcept {
+    inline __host__ __device__ _Tp fetch_sub(_Tp __op, memory_order __m = memory_order_seq_cst) noexcept {
         return gpu::internal::__cxx_atomic_fetch_sub(&this->__a_, __op, __m);
     }
-    inline _Tp fetch_and(_Tp __op, memory_order __m = memory_order_seq_cst) volatile noexcept {
+    inline __host__ __device__ _Tp fetch_and(_Tp __op, memory_order __m = memory_order_seq_cst) volatile noexcept {
         return gpu::internal::__cxx_atomic_fetch_and(&this->__a_, __op, __m);
     }
-    inline _Tp fetch_and(_Tp __op, memory_order __m = memory_order_seq_cst) noexcept {
+    inline __host__ __device__ _Tp fetch_and(_Tp __op, memory_order __m = memory_order_seq_cst) noexcept {
         return gpu::internal::__cxx_atomic_fetch_and(&this->__a_, __op, __m);
     }
-    inline _Tp fetch_or(_Tp __op, memory_order __m = memory_order_seq_cst) volatile noexcept {
+    inline __host__ __device__ _Tp fetch_or(_Tp __op, memory_order __m = memory_order_seq_cst) volatile noexcept {
         return gpu::internal::__cxx_atomic_fetch_or(&this->__a_, __op, __m);
     }
-    inline _Tp fetch_or(_Tp __op, memory_order __m = memory_order_seq_cst) noexcept {
+    inline __host__ __device__ _Tp fetch_or(_Tp __op, memory_order __m = memory_order_seq_cst) noexcept {
         return gpu::internal::__cxx_atomic_fetch_or(&this->__a_, __op, __m);
     }
-    inline _Tp fetch_xor(_Tp __op, memory_order __m = memory_order_seq_cst) volatile noexcept {
+    inline __host__ __device__ _Tp fetch_xor(_Tp __op, memory_order __m = memory_order_seq_cst) volatile noexcept {
         return gpu::internal::__cxx_atomic_fetch_xor(&this->__a_, __op, __m);
     }
-    inline _Tp fetch_xor(_Tp __op, memory_order __m = memory_order_seq_cst) noexcept {
+    inline __host__ __device__ _Tp fetch_xor(_Tp __op, memory_order __m = memory_order_seq_cst) noexcept {
         return gpu::internal::__cxx_atomic_fetch_xor(&this->__a_, __op, __m);
     }
 
-    inline _Tp operator++(int) volatile noexcept        { return fetch_add(_Tp(1)); }
-    inline _Tp operator++(int) noexcept                 { return fetch_add(_Tp(1)); }
-    inline _Tp operator--(int) volatile noexcept        { return fetch_sub(_Tp(1)); }
-    inline _Tp operator--(int) noexcept                 { return fetch_sub(_Tp(1)); }
-    inline _Tp operator++() volatile noexcept           { return fetch_add(_Tp(1)) + _Tp(1); }
-    inline _Tp operator++() noexcept                    { return fetch_add(_Tp(1)) + _Tp(1); }
-    inline _Tp operator--() volatile noexcept           { return fetch_sub(_Tp(1)) - _Tp(1); }
-    inline _Tp operator--() noexcept                    { return fetch_sub(_Tp(1)) - _Tp(1); }
-    inline _Tp operator+=(_Tp __op) volatile noexcept   { return fetch_add(__op) + __op; }
-    inline _Tp operator+=(_Tp __op) noexcept            { return fetch_add(__op) + __op; }
-    inline _Tp operator-=(_Tp __op) volatile noexcept   { return fetch_sub(__op) - __op; }
-    inline _Tp operator-=(_Tp __op) noexcept            { return fetch_sub(__op) - __op; }
-    inline _Tp operator&=(_Tp __op) volatile noexcept   { return fetch_and(__op) & __op; }
-    inline _Tp operator&=(_Tp __op) noexcept            { return fetch_and(__op) & __op; }
-    inline _Tp operator|=(_Tp __op) volatile noexcept   { return fetch_or(__op) | __op; }
-    inline _Tp operator|=(_Tp __op) noexcept            { return fetch_or(__op) | __op; }
-    inline _Tp operator^=(_Tp __op) volatile noexcept   { return fetch_xor(__op) ^ __op; }
-    inline _Tp operator^=(_Tp __op) noexcept            { return fetch_xor(__op) ^ __op; }
+    inline __host__ __device__ _Tp operator++(int) volatile noexcept        { return fetch_add(_Tp(1)); }
+    inline __host__ __device__ _Tp operator++(int) noexcept                 { return fetch_add(_Tp(1)); }
+    inline __host__ __device__ _Tp operator--(int) volatile noexcept        { return fetch_sub(_Tp(1)); }
+    inline __host__ __device__ _Tp operator--(int) noexcept                 { return fetch_sub(_Tp(1)); }
+    inline __host__ __device__ _Tp operator++() volatile noexcept           { return fetch_add(_Tp(1)) + _Tp(1); }
+    inline __host__ __device__ _Tp operator++() noexcept                    { return fetch_add(_Tp(1)) + _Tp(1); }
+    inline __host__ __device__ _Tp operator--() volatile noexcept           { return fetch_sub(_Tp(1)) - _Tp(1); }
+    inline __host__ __device__ _Tp operator--() noexcept                    { return fetch_sub(_Tp(1)) - _Tp(1); }
+    inline __host__ __device__ _Tp operator+=(_Tp __op) volatile noexcept   { return fetch_add(__op) + __op; }
+    inline __host__ __device__ _Tp operator+=(_Tp __op) noexcept            { return fetch_add(__op) + __op; }
+    inline __host__ __device__ _Tp operator-=(_Tp __op) volatile noexcept   { return fetch_sub(__op) - __op; }
+    inline __host__ __device__ _Tp operator-=(_Tp __op) noexcept            { return fetch_sub(__op) - __op; }
+    inline __host__ __device__ _Tp operator&=(_Tp __op) volatile noexcept   { return fetch_and(__op) & __op; }
+    inline __host__ __device__ _Tp operator&=(_Tp __op) noexcept            { return fetch_and(__op) & __op; }
+    inline __host__ __device__ _Tp operator|=(_Tp __op) volatile noexcept   { return fetch_or(__op) | __op; }
+    inline __host__ __device__ _Tp operator|=(_Tp __op) noexcept            { return fetch_or(__op) | __op; }
+    inline __host__ __device__ _Tp operator^=(_Tp __op) volatile noexcept   { return fetch_xor(__op) ^ __op; }
+    inline __host__ __device__ _Tp operator^=(_Tp __op) noexcept            { return fetch_xor(__op) ^ __op; }
 };
 
 } // namespace internal
@@ -658,15 +700,15 @@ struct atomic : public gpu::internal::__atomic_base<_Tp> {
     typedef _Tp value_type;
     typedef value_type difference_type;
 
-    inline atomic() noexcept = default;
+    inline __host__ __device__ atomic() noexcept = default;
 
-    inline constexpr atomic(_Tp __d) noexcept : __base(__d) {}
+    inline constexpr __host__ __device__ atomic(_Tp __d) noexcept : __base(__d) {}
 
-    inline _Tp operator=(_Tp __d) volatile noexcept {
+    inline __host__ __device__ _Tp operator=(_Tp __d) volatile noexcept {
         __base::store(__d);
         return __d;
     }
-    inline _Tp operator=(_Tp __d) noexcept {
+    inline __host__ __device__ _Tp operator=(_Tp __d) noexcept {
         __base::store(__d);
         return __d;
     }
@@ -683,58 +725,60 @@ struct atomic<_Tp *> : public gpu::internal::__atomic_base<_Tp *> {
     typedef _Tp *value_type;
     typedef ptrdiff_t difference_type;
 
-    inline atomic() noexcept = default;
+    inline __host__ __device__ atomic() noexcept = default;
 
-    inline constexpr atomic(_Tp *__d) noexcept : __base(__d) {}
+    inline constexpr __host__ __device__ atomic(_Tp *__d) noexcept : __base(__d) {}
 
-    inline _Tp *operator=(_Tp *__d) volatile noexcept {
+    inline __host__ __device__ _Tp *operator=(_Tp *__d) volatile noexcept {
         __base::store(__d);
         return __d;
     }
-    inline _Tp *operator=(_Tp *__d) noexcept {
+    inline __host__ __device__ _Tp *operator=(_Tp *__d) noexcept {
         __base::store(__d);
         return __d;
     }
 
-    inline _Tp *fetch_add(ptrdiff_t __op, memory_order __m = memory_order_seq_cst) volatile noexcept {
+    inline __host__ __device__ _Tp *fetch_add(ptrdiff_t __op,
+                                              memory_order __m = memory_order_seq_cst) volatile noexcept {
         // __atomic_fetch_add accepts function pointers, guard against them.
         static_assert(!std::is_function_v<std::remove_pointer_t<_Tp>>, "Pointer to function isn't allowed");
         return gpu::internal::__cxx_atomic_fetch_add(&this->__a_, __op, __m);
     }
 
-    inline _Tp *fetch_add(ptrdiff_t __op, memory_order __m = memory_order_seq_cst) noexcept {
+    inline __host__ __device__ _Tp *fetch_add(ptrdiff_t __op, memory_order __m = memory_order_seq_cst) noexcept {
         // __atomic_fetch_add accepts function pointers, guard against them.
         static_assert(!std::is_function_v<std::remove_pointer_t<_Tp>>, "Pointer to function isn't allowed");
         return gpu::internal::__cxx_atomic_fetch_add(&this->__a_, __op, __m);
     }
 
-    inline _Tp *fetch_sub(ptrdiff_t __op, memory_order __m = memory_order_seq_cst) volatile noexcept {
+    inline __host__ __device__ _Tp *fetch_sub(ptrdiff_t __op,
+                                              memory_order __m = memory_order_seq_cst) volatile noexcept {
         // __atomic_fetch_add accepts function pointers, guard against them.
         static_assert(!std::is_function_v<std::remove_pointer_t<_Tp>>, "Pointer to function isn't allowed");
         return gpu::internal::__cxx_atomic_fetch_sub(&this->__a_, __op, __m);
     }
 
-    inline _Tp *fetch_sub(ptrdiff_t __op, memory_order __m = memory_order_seq_cst) noexcept {
+    inline __host__ __device__ _Tp *fetch_sub(ptrdiff_t __op, memory_order __m = memory_order_seq_cst) noexcept {
         // __atomic_fetch_add accepts function pointers, guard against them.
         static_assert(!std::is_function_v<std::remove_pointer_t<_Tp>>, "Pointer to function isn't allowed");
         return gpu::internal::__cxx_atomic_fetch_sub(&this->__a_, __op, __m);
     }
 
-    inline _Tp *operator++(int) volatile noexcept               { return fetch_add(1); }
-    inline _Tp *operator++(int) noexcept                        { return fetch_add(1); }
-    inline _Tp *operator--(int) volatile noexcept               { return fetch_sub(1); }
-    inline _Tp *operator--(int) noexcept                        { return fetch_sub(1); }
-    inline _Tp *operator++() volatile noexcept                  { return fetch_add(1) + 1; }
-    inline _Tp *operator++() noexcept                           { return fetch_add(1) + 1; }
-    inline _Tp *operator--() volatile noexcept                  { return fetch_sub(1) - 1; }
-    inline _Tp *operator--() noexcept                           { return fetch_sub(1) - 1; }
-    inline _Tp *operator+=(ptrdiff_t __op) volatile noexcept    { return fetch_add(__op) + __op; }
-    inline _Tp *operator+=(ptrdiff_t __op) noexcept             { return fetch_add(__op) + __op; }
-    inline _Tp *operator-=(ptrdiff_t __op) volatile noexcept    { return fetch_sub(__op) - __op; }
-    inline _Tp *operator-=(ptrdiff_t __op) noexcept             { return fetch_sub(__op) - __op; }
+    inline __host__ __device__ _Tp *operator++(int) volatile noexcept               { return fetch_add(1); }
+    inline __host__ __device__ _Tp *operator++(int) noexcept                        { return fetch_add(1); }
+    inline __host__ __device__ _Tp *operator--(int) volatile noexcept               { return fetch_sub(1); }
+    inline __host__ __device__ _Tp *operator--(int) noexcept                        { return fetch_sub(1); }
+    inline __host__ __device__ _Tp *operator++() volatile noexcept                  { return fetch_add(1) + 1; }
+    inline __host__ __device__ _Tp *operator++() noexcept                           { return fetch_add(1) + 1; }
+    inline __host__ __device__ _Tp *operator--() volatile noexcept                  { return fetch_sub(1) - 1; }
+    inline __host__ __device__ _Tp *operator--() noexcept                           { return fetch_sub(1) - 1; }
+    inline __host__ __device__ _Tp *operator+=(ptrdiff_t __op) volatile noexcept    { return fetch_add(__op) + __op; }
+    inline __host__ __device__ _Tp *operator+=(ptrdiff_t __op) noexcept             { return fetch_add(__op) + __op; }
+    inline __host__ __device__ _Tp *operator-=(ptrdiff_t __op) volatile noexcept    { return fetch_sub(__op) - __op; }
+    inline __host__ __device__ _Tp *operator-=(ptrdiff_t __op) noexcept             { return fetch_sub(__op) - __op; }
 
-    atomic &operator=(const atomic &) = delete;
-    atomic &operator=(const atomic &) volatile = delete;
+    __host__ __device__ atomic &operator=(const atomic &) = delete;
+    __host__ __device__ atomic &operator=(const atomic &) volatile = delete;
 };
 
 } // namespace gpu
