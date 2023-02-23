@@ -70,13 +70,13 @@ set(LLVM_PATH "${libcudacxx_SOURCE_DIR}" CACHE STRING "" FORCE)
 option(LIBCUDACXX_ENABLE_CUDA "Enable the CUDA language support." OFF)
 option(LIBCUDACXX_ENABLE_HIP "Enable the HIP language support." ON)
 
-#TODO: do not allow for HIP and CUDA to be used at the same time
+if (LIBCUDACXX_ENABLE_CUDA AND LIBCUDACXX_ENABLE_HIP)
+  message( FATAL_ERROR "HIP and CUDA compilers cannot be used at the same time, CMake will exit." )    
+endif()
 
 if (LIBCUDACXX_ENABLE_CUDA)
   enable_language(CUDA)
-endif ()
-
-if (LIBCUDACXX_ENABLE_HIP)
+elseif (LIBCUDACXX_ENABLE_HIP)
   #enable_language(HIP)
   find_package(hip REQUIRED)
 endif ()
