@@ -1,7 +1,8 @@
 
-#include "DataTypes/DataTypes.hpp"
+#include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/KernelGraph/Utils.hpp>
 
 namespace rocRoller
 {
@@ -11,42 +12,6 @@ namespace rocRoller
         using namespace ControlGraph;
         namespace Expression = rocRoller::Expression;
         using namespace Expression;
-
-        /**
-         * @brief Replace operation with a scope.  Does not delete the original operation.
-         */
-        int replaceWithScope(KernelGraph& graph, int op)
-        {
-            auto scope = graph.control.addElement(Scope());
-
-            auto location = graph.control.getLocation(op);
-            for(auto const& input : location.incoming)
-            {
-                auto edge = graph.control.getElement(input);
-                int  parent
-                    = *graph.control.getNeighbours<Graph::Direction::Upstream>(input).begin();
-                graph.control.deleteElement(input);
-                graph.control.addElement(edge, {parent}, {scope});
-            }
-            for(auto const& output : location.outgoing)
-            {
-                auto edge = graph.control.getElement(output);
-                if(std::holds_alternative<ControlEdge>(edge))
-                {
-                    auto cedge = std::get<ControlEdge>(edge);
-                    if(std::holds_alternative<Sequence>(cedge))
-                    {
-                        int child
-                            = *graph.control.getNeighbours<Graph::Direction::Downstream>(output)
-                                   .begin();
-                        graph.control.deleteElement(output);
-                        graph.control.addElement(edge, {scope}, {child});
-                    }
-                }
-            }
-
-            return scope;
-        }
 
         /**
          * Helper to make a ComputeIndex node and add connections.
@@ -493,7 +458,7 @@ namespace rocRoller
             rocRoller::Log::getLogger()->debug(
                 "KernelGraph::addComputeIndexC({}, {})", op, forward);
 
-            auto scope = replaceWithScope(graph, op);
+            auto scope = replaceWithScope(graph, op, false);
 
             auto node   = graph.control.getElement(op);
             auto source = -1;
@@ -591,7 +556,7 @@ namespace rocRoller
             rocRoller::Log::getLogger()->debug(
                 "KernelGraph::addComputeIndexVGPR({}, {})", op, forward);
 
-            auto scope = replaceWithScope(graph, op);
+            auto scope = replaceWithScope(graph, op, false);
 
             auto node   = graph.control.getElement(op);
             auto source = -1;
@@ -663,7 +628,7 @@ namespace rocRoller
                 // and add scope to the forKScopes map.
                 if(forKScopes.count(forK) == 0)
                 {
-                    forKScopes[forK] = replaceWithScope(kgraph, forK);
+                    forKScopes[forK] = replaceWithScope(kgraph, forK, false);
                 }
                 scope = forKScopes[forK];
 

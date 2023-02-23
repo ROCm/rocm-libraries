@@ -468,6 +468,9 @@ namespace rocRoller
                             "Invalid SetCoordinate operation; coordinate missing.");
                 coords.setCoordinate(connections[0].coordinate, setCoordinate.value);
 
+                auto init = m_graph.control.getOutputNodeIndices<Initialize>(tag).to<std::set>();
+                co_yield generate(init, coords);
+
                 auto body = m_graph.control.getOutputNodeIndices<Body>(tag).to<std::set>();
                 co_yield generate(body, coords);
             }

@@ -30,6 +30,20 @@ namespace rocRoller::KernelGraph
         return rv;
     }
 
+    std::vector<ControlToCoordinateMapper::Connection>
+        ControlToCoordinateMapper::getCoordinateConnections(int coordinate) const
+    {
+        std::vector<Connection> rv;
+        for(auto const& kv : m_map)
+        {
+            if(kv.second == coordinate)
+            {
+                rv.push_back({std::get<0>(kv.first), kv.second, std::get<1>(kv.first)});
+            }
+        }
+        return rv;
+    }
+
     void ControlToCoordinateMapper::purge(int control)
     {
         std::vector<ControlToCoordinateMapper::key_type> purge;

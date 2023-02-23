@@ -227,7 +227,7 @@ namespace rocRoller
                                               int              forK,
                                               std::vector<int> loopBodies)
         {
-            rocRoller::Log::getLogger()->debug("KernelGrap::addLoadWaveLDSOps: For({})", forK);
+            rocRoller::Log::getLogger()->debug("KernelGraph::addLoadWaveLDSOps: For({})", forK);
 
             int user = graph.mapper.get<User>(loads[0]);
 

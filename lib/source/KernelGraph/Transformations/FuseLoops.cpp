@@ -251,13 +251,7 @@ namespace rocRoller
 
                         if(fusedLoopTag != forLoopTag)
                         {
-                            // Delete old For loop, as well as its initialize and increment nodes.
-                            auto forLoopChildren
-                                = graph.control.depthFirstVisit(forLoopTag).to<std::vector>();
-                            for(auto const& toDelete : forLoopChildren)
-                            {
-                                graph.control.deleteElement(toDelete);
-                            }
+                            purgeFor(graph, forLoopTag);
                         }
                     }
 

@@ -1,8 +1,5 @@
-#include <rocRoller/AssemblyKernel.hpp>
-#include <rocRoller/CommandSolution.hpp>
-#include <rocRoller/Expression.hpp>
-#include <rocRoller/InstructionValues/Register.hpp>
-#include <rocRoller/KernelGraph/KernelGraph.hpp>
+
+#include <rocRoller/KernelGraph/Utils.hpp>
 
 namespace rocRoller
 {
@@ -997,6 +994,72 @@ namespace rocRoller
             // There should be a loopIncrement that satisfies the above conditions
             // if not then throw an error.
             throw FatalError("No forLoopIncrement for supplied forLoop.");
+        }
+
+        /**
+         * @brief Replace operation with a scope.  Does not delete the original operation.
+         */
+        int replaceWithScope(KernelGraph& graph, int op, bool includeBody)
+        {
+            auto scope = graph.control.addElement(Scope());
+
+            auto location = graph.control.getLocation(op);
+            for(auto const& input : location.incoming)
+            {
+                auto edge = graph.control.getElement(input);
+                int  parent
+                    = *graph.control.getNeighbours<Graph::Direction::Upstream>(input).begin();
+                graph.control.deleteElement(input);
+                graph.control.addElement(edge, {parent}, {scope});
+            }
+            for(auto const& output : location.outgoing)
+            {
+                auto edge = graph.control.getElement(output);
+                if(std::holds_alternative<ControlEdge>(edge))
+                {
+                    auto cedge = std::get<ControlEdge>(edge);
+                    if(std::holds_alternative<Sequence>(cedge)
+                       || (includeBody && std::holds_alternative<Body>(cedge)))
+                    {
+                        int child
+                            = *graph.control.getNeighbours<Graph::Direction::Downstream>(output)
+                                   .begin();
+                        graph.control.deleteElement(output);
+                        graph.control.addElement(edge, {scope}, {child});
+                    }
+                }
+            }
+
+            return scope;
+        }
+
+        void purgeFor(KernelGraph& kgraph, int loop)
+        {
+            // Purge loop dimension and iterator
+            for(auto const& c : kgraph.mapper.getConnections(loop))
+            {
+                int iterator = c.coordinate;
+                // TODO THIS IS A FRAGILE WAY OF DETECTING "NO MORE REFERENCES"
+                if(kgraph.mapper.getCoordinateConnections(iterator).size() <= 3)
+                {
+                    auto dataflow = *only(
+                        kgraph.coordinates.getNeighbours<Graph::Direction::Downstream>(iterator));
+                    auto forLoop = *only(
+                        kgraph.coordinates.getNeighbours<Graph::Direction::Downstream>(dataflow));
+                    kgraph.coordinates.deleteElement(iterator);
+                    kgraph.coordinates.deleteElement(dataflow);
+                    kgraph.coordinates.deleteElement(forLoop);
+                }
+                // XXX THIS LEAVES SOME DANGLING COORDS; IS THIS STILL TRUE?
+            }
+
+            // Purge loop
+            for(auto const& reap : kgraph.control.depthFirstVisit(loop).to<std::vector>())
+            {
+                kgraph.control.deleteElement(reap);
+                kgraph.mapper.purge(reap);
+            }
+            kgraph.mapper.purge(loop);
         }
 
     }

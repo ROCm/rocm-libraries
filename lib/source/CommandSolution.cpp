@@ -253,16 +253,16 @@ namespace rocRoller
             "CommandKernel::generateKernelGraph: post addLDS: {}",
             m_kernelGraph.toDOT(false, "CommandKernel::generateKernelGraph: post addLDS"));
 
+        m_kernelGraph = KernelGraph::cleanLoops(m_kernelGraph);
+        logger->debug(
+            "CommandKernel::generateKernelGraph: post clean loops: {}",
+            m_kernelGraph.toDOT(false, "CommandKernel::generateKernelGraph: post clean loops"));
+
         m_kernelGraph = KernelGraph::addComputeIndexOperations(m_kernelGraph);
         logger->debug(
             "CommandKernel::generateKernelGraph: post addComputeIndexOperations: {}",
             m_kernelGraph.toDOT(
                 false, "CommandKernel::generateKernelGraph: post addComputeIndexOperations"));
-
-        m_kernelGraph = KernelGraph::cleanLoops(m_kernelGraph);
-        logger->debug(
-            "CommandKernel::generateKernelGraph: post clean loops: {}",
-            m_kernelGraph.toDOT(false, "CommandKernel::generateKernelGraph: post clean loops"));
 
         m_kernelGraph = KernelGraph::addDeallocate(m_kernelGraph);
         logger->debug(

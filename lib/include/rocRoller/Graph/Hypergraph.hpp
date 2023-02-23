@@ -185,6 +185,9 @@ namespace rocRoller
             Generator<int> depthFirstVisit(Range const& starts,
                                            Direction    dir = Direction::Downstream) const;
 
+            template <std::predicate<int> Predicate>
+            Generator<int> depthFirstVisit(int start, Predicate edgePredicate, Direction dir) const;
+
             /**
              * @brief Yields node indices connected in the specified direction to start, in depth-first order.
              *
@@ -193,6 +196,11 @@ namespace rocRoller
              */
             template <Direction Dir>
             Generator<int> depthFirstVisit(int start, std::unordered_set<int>& visitedNodes) const;
+
+            template <Direction Dir, std::predicate<int> Predicate>
+            Generator<int> depthFirstVisit(int                      start,
+                                           Predicate                edgePredicate,
+                                           std::unordered_set<int>& visitedNodes) const;
 
             /**
              * @brief Yields node indices connected downstream of start, in breadth-first order.
@@ -221,6 +229,8 @@ namespace rocRoller
 
             template <Direction Dir>
             Generator<int> getNeighbours(int const element) const;
+
+            Generator<int> getNeighbours(int const element, Direction Dir) const;
 
             /**
              * @brief Return edges in topological order.

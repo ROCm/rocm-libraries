@@ -7,33 +7,11 @@
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/ControlToCoordinateMapper.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/KernelGraph/Utils.hpp>
 
 namespace rocRoller::KernelGraph
 {
     using namespace ControlGraph;
-
-    /**
-     * @brief Return first entry of vector.
-     *
-     * If vector does not contain a single result, return empty.
-     */
-    template <typename T>
-    std::optional<T> only(std::vector<T> v)
-    {
-        if(v.size() == 1)
-            return v[0];
-        return {};
-    }
-
-    /**
-     * @brief Return first result of generator.
-     *
-     * If generator does not return a single result, return empty.
-     */
-    std::optional<int> only(Generator<int> g)
-    {
-        return only(g.to<std::vector>());
-    }
 
     /**
      * @brief Look for {Assign Multiply(., .)} --Sequence--> {Assign Add(., .)}.

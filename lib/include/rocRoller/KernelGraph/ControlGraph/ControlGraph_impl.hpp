@@ -30,7 +30,7 @@ namespace rocRoller::KernelGraph::ControlGraph
     }
 
     template <typename T>
-    inline bool isOperation(auto x)
+    inline bool isOperation(auto const& x)
     {
         if constexpr(std::constructible_from<Operation, T>)
         {
@@ -44,7 +44,7 @@ namespace rocRoller::KernelGraph::ControlGraph
     }
 
     template <typename T>
-    inline bool isEdge(auto x)
+    inline bool isEdge(auto const& x)
     {
         if constexpr(std::constructible_from<ControlEdge, T>)
         {

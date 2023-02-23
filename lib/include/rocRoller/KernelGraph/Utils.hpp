@@ -1,7 +1,10 @@
 
-#include <rocRoller/Expression.hpp>
+#pragma once
 
-#include "KernelGraph/KernelGraph.hpp"
+#include <optional>
+
+#include <rocRoller/Expression.hpp>
+#include <rocRoller/KernelGraph/KernelGraph.hpp>
 
 namespace rocRoller
 {
@@ -12,6 +15,13 @@ namespace rocRoller
          */
         std::pair<int, int>
             rangeFor(KernelGraph& graph, Expression::ExpressionPtr size, const std::string& name);
+
+        void purgeFor(KernelGraph& graph, int tag);
+
+        /**
+         * Replace operation with a scope.  Does not delete the original operation.
+         */
+        int replaceWithScope(KernelGraph& graph, int op, bool includeBody = true);
 
         void loadMacroTile(KernelGraph&                       graph,
                            int                                load_tag,
@@ -112,5 +122,23 @@ namespace rocRoller
          */
         std::pair<Expression::ExpressionPtr, Expression::ExpressionPtr>
             getForLoopIncrement(KernelGraph const& graph, int forLoop);
+
+        /**
+         * @brief Return first entry of vector.
+         *
+         * If vector does not contain a single result, return empty.
+         */
+        template <typename T>
+        inline std::optional<T> only(std::vector<T> v);
+
+        /**
+         * @brief Return first result of generator.
+         *
+         * If generator does not return a single result, return empty.
+         */
+        inline std::optional<int> only(Generator<int> g);
+
     }
 }
+
+#include "Utils_impl.hpp"

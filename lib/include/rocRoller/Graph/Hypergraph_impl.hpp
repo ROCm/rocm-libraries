@@ -442,6 +442,23 @@ namespace rocRoller
         }
 
         template <typename Node, typename Edge, bool Hyper>
+        template <std::predicate<int> Predicate>
+        Generator<int> Hypergraph<Node, Edge, Hyper>::depthFirstVisit(int       start,
+                                                                      Predicate edgePredicate,
+                                                                      Direction dir) const
+        {
+            std::unordered_set<int> visitedNodes;
+            if(dir == Direction::Downstream)
+            {
+                co_yield depthFirstVisit<Direction::Downstream>(start, edgePredicate, visitedNodes);
+            }
+            else
+            {
+                co_yield depthFirstVisit<Direction::Upstream>(start, edgePredicate, visitedNodes);
+            }
+        }
+
+        template <typename Node, typename Edge, bool Hyper>
         Generator<int> Hypergraph<Node, Edge, Hyper>::depthFirstVisit(int       start,
                                                                       Direction dir) const
         {
@@ -525,6 +542,31 @@ namespace rocRoller
             for(auto const element : getNeighbours<Dir>(start))
             {
                 co_yield depthFirstVisit<Dir>(element, visitedNodes);
+            }
+        }
+
+        template <typename Node, typename Edge, bool Hyper>
+        template <Direction Dir, std::predicate<int> Predicate>
+        Generator<int> Hypergraph<Node, Edge, Hyper>::depthFirstVisit(
+            int start, Predicate edgePredicate, std::unordered_set<int>& visitedElements) const
+        {
+            if(visitedElements.count(start))
+                co_return;
+
+            visitedElements.insert(start);
+
+            co_yield start;
+
+            for(auto const tag : getNeighbours<Dir>(start))
+            {
+                visitedElements.insert(tag);
+                if(edgePredicate(tag))
+                {
+                    for(auto const child : getNeighbours<Dir>(tag))
+                    {
+                        co_yield depthFirstVisit<Dir>(child, edgePredicate, visitedElements);
+                    }
+                }
             }
         }
 
@@ -649,6 +691,20 @@ namespace rocRoller
                 {
                     co_yield iter->src;
                 }
+            }
+        }
+
+        template <typename Node, typename Edge, bool Hyper>
+        Generator<int> Hypergraph<Node, Edge, Hyper>::getNeighbours(int const element,
+                                                                    Direction Dir) const
+        {
+            if(Dir == Direction::Downstream)
+            {
+                co_yield getNeighbours<Direction::Downstream>(element);
+            }
+            else
+            {
+                co_yield getNeighbours<Direction::Upstream>(element);
             }
         }
 

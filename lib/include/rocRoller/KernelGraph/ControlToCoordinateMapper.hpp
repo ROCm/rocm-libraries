@@ -164,6 +164,11 @@ namespace rocRoller::KernelGraph
         std::vector<Connection> getConnections(int control) const;
 
         /**
+         * @brief Get all connections incoming to the coordinate `coordinate`.
+         */
+        std::vector<Connection> getCoordinateConnections(int coordinate) const;
+
+        /**
          * @brief Emit DOT representation of connections.
          */
         std::string toDOT(std::string coord, std::string cntrl) const;
