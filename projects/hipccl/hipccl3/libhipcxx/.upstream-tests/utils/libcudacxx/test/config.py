@@ -1143,7 +1143,7 @@ class Configuration(object):
         if libcxx_experimental:
             self.config.available_features.add('c++experimental')
             self.cxx.link_flags += ['-lc++experimental']
-        if self.link_shared:
+        if self.link_shared and self.cxx.type != 'hipcc':
             self.cxx.link_flags += ['-lc++']
     def configure_link_flags_abi_library(self):
         cxx_abi = self.get_lit_conf('cxx_abi', 'libcxxabi')
