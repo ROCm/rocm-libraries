@@ -1201,12 +1201,18 @@ namespace rocRoller
 
                 AssertFatal(row_stride_reg, "Invalid row stride register.");
                 AssertFatal(col_stride_reg, "Invalid col stride register.");
-                co_yield m_context->copier()->ensureType(vgpr, vgpr, Register::Type::Vector);
+
+                if(!m_context->targetArchitecture().HasCapability(
+                       GPUCapability::ArchAccUnifiedRegs))
+                {
+                    co_yield m_context->copier()->ensureType(vgpr, vgpr, Register::Type::Vector);
+                }
 
                 // Convert the data to the expected datatype
                 Register::ValuePtr converted;
                 if(DataTypeInfo::Get(vgpr->variableType()).segmentVariableType != dataType)
                 {
+                    co_yield m_context->copier()->ensureType(vgpr, vgpr, Register::Type::Vector);
                     converted = MkVGPR(dataType, vgpr->valueCount());
                     co_yield converted->allocate();
                     for(int i = 0; i < vgpr->valueCount(); ++i)
