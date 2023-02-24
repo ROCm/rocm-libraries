@@ -180,14 +180,14 @@ def summary_statistics(perf_runs):
 
 header = [
     "Problem",
-    "Run A (ref)",
-    "Run B",
+    "Median Diff %",
+    "Moods p-val",
     "Mean A",
     "Mean B",
     "Median A",
     "Median B",
-    "Median Diff %",
-    "Moods p-val",
+    "Run A (ref)",
+    "Run B",
 ]
 
 
@@ -196,28 +196,52 @@ def markdown_summary(md, perf_runs):
 
     summary = summary_statistics(perf_runs)
 
-    print(" | ".join(header), file=md)
-    print(" | ".join(["---"] * len(header)), file=md)
-
+    result_table = ""
+    result_diff = ""
     for run in summary:
         for result in summary[run]:
             token, comparison = summary[run][result]
             A, B = comparison.results
+            percent = (
+                (comparison.median[1] - comparison.median[0]) * 100.0
+            ) / comparison.median[0]
             row_str = [
                 f"{token}",
+                f"{(percent):.2f}%",
+                f"{comparison.moods_pval:0.4e}",
+                f"{comparison.mean[0]:,}",
+                f"{comparison.mean[1]:,}",
+                f"{comparison.median[0]:,.0f}",
+                f"{comparison.median[1]:,.0f}",
                 f"{A.path.parent.stem}",
                 f"{B.path.parent.stem}",
-                f"{comparison.mean[0]}",
-                f"{comparison.mean[1]}",
-                f"{comparison.median[0]}",
-                f"{comparison.median[1]}",
-                f"{(((comparison.median[1] - comparison.median[0]) * 100.0)/comparison.median[0]):.2f}%",
-                f"{comparison.moods_pval:0.4e}",
             ]
-            print(
-                " | ".join(row_str),
-                file=md,
-            )
+            result_table += " | ".join(row_str) + "\n"
+            if comparison.moods_pval < 0.05:
+                sign = "+" if percent < 0 else "-"
+                result_diff += f"{sign} {(abs(percent)):.2f}% | {token}\n"
+
+    if len(result_diff) > 0:
+        print("```diff", file=md)
+        print(
+            "@@            Significant (p-val <0.05) Performance Diffs             @@",
+            file=md,
+        )
+        print("=" * 100, file=md)
+        print(result_diff, file=md)
+        print("```\n\n", file=md)
+    else:
+        print(
+            ":heavy_check_mark: **_No Statistically Significant Performance Difference_** :heavy_check_mark:\n\n",
+            file=md,
+        )
+
+    print("<details><summary>Full table of results</summary>\n", file=md)
+
+    print(" | ".join(header), file=md)
+    print(" | ".join(["---"] * len(header)), file=md)
+    print(result_table, file=md)
+    print("\n</details>", file=md)
 
     perf_runs.sort()
 
@@ -227,11 +251,13 @@ def markdown_summary(md, perf_runs):
             machines[run.machine_spec] = list()
         machines[run.machine_spec].append(run.name())
 
-    print("\n\n## Machines\n", file=md)
+    print("\n\n<details><summary>Machines</summary>\n", file=md)
     for machine in machines:
         print("### Machine for {}:\n".format(", ".join(machines[machine])), file=md)
+        print("```", file=md)
         print(machine.pretty_string(), file=md)
-        print("\n")
+        print("```", file=md)
+    print("</details>\n", file=md)
 
 
 def html_overview_table(html_file, summary):
