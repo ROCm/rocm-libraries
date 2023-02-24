@@ -35,17 +35,17 @@ function usage {
   echo "                                 : Overrides \${LIBCUDACXX_SKIP_LIBCXX_TESTS}."
   echo "--skip-libcudacxx-tests          : Do not build (or run) any libcu++ tests."
   echo "                                 : Overrides \${LIBCUDACXX_SKIP_LIBCUDACXX_TESTS}."
-#  echo "--skip-arch-detection            : Do not automatically detect the SM architecture"
-#  echo "                                 : for tests runs."
-#  echo "                                 : Overrides \${LIBCUDACXX_SKIP_ARCH_DETECTION}."
-#  echo
-#  echo "--compute-archs                  : Space-separated list of SM architectures"
-#  echo "                                   (specified as integers) to target. If empty,"
-#  echo "                                   either the architecture is automatically"
-#  echo "                                   detected (for tests runs if detection isn't"
-#  echo "                                   disabled) or all known SM architectures are"
-#  echo "                                   targeted."
-#  echo "                                 : Overrides \${LIBCUDACXX_COMPUTE_ARCHS}."
+  echo "--skip-arch-detection            : Do not automatically detect the CDNA architecture"
+  echo "                                 : for tests runs."
+  echo "                                 : Overrides \${LIBCUDACXX_SKIP_ARCH_DETECTION}."
+  echo
+  echo "--compute-archs                  : Space-separated list of CDNA architectures"
+  echo "                                   (specified as string) to target. If empty,"
+  echo "                                   either the architecture is automatically"
+  echo "                                   detected (for tests runs if detection isn't"
+  echo "                                   disabled) or all known SM architectures are"
+  echo "                                   targeted."
+  echo "                                 : Overrides \${LIBCUDACXX_COMPUTE_ARCHS}."
   echo
   echo "--libcxx-lit-site-config <file>     : Use <file> as the libc++ lit site config"
   echo "                                    : (default: \${LIBCUDACXX_PATH}/libcxx/build/test/lit.site.cfg)."
@@ -89,7 +89,7 @@ function section_separator {
 LIBCXX_LOG=$(mktemp)
 LIBCUDACXX_LOG=$(mktemp)
 
-#KNOWN_COMPUTE_ARCHS="50 52 53 60 61 62 70 72 75 80 86 87 90"
+KNOWN_COMPUTE_ARCHS="gfx90a gfx908"
 
 function report_and_exit {
   # If any of the lines searched for below aren't present in the log files, the
@@ -252,45 +252,41 @@ then
 fi
 
 ################################################################################
-# SM Architecture Detection
+# CDNA Architecture Detection
 
-# if [ "${LIBCUDACXX_SKIP_ARCH_DETECTION:-0}" == "0" ] && \
-#    [ "${LIBCUDACXX_SKIP_TESTS_RUN:-0}" == "0" ] && \
-#    [ ! -n "${LIBCUDACXX_COMPUTE_ARCHS}" ]
-# then
-#   section_separator
+if [ "${LIBCUDACXX_SKIP_ARCH_DETECTION:-0}" == "0" ] && \
+   [ "${LIBCUDACXX_SKIP_TESTS_RUN:-0}" == "0" ] && \
+   [ ! -n "${LIBCUDACXX_COMPUTE_ARCHS}" ]
+then
+  section_separator
 
-#   echo "# TEST SM Architecture Detection"
+  echo "# TEST CDNA Architecture Detection"
 
-#   ARCH_DETECTION_LOG=$(mktemp)
-#   DETECTION_LIT_FLAGS="-vv -a"
-#   if [ "${JSON_OUTPUT_TARGET}" != "0" ]
-#   then
-#     DETECTION_LIT_FLAGS="${DETECTION_LIT_FLAGS} -o ${JSON_OUTPUT_TARGET}/detect_sm.log"
-#   fi
+  ARCH_DETECTION_LOG=$(mktemp)
+  DETECTION_LIT_FLAGS="-vv -a"
+  if [ "${JSON_OUTPUT_TARGET}" != "0" ]
+  then
+    DETECTION_LIT_FLAGS="${DETECTION_LIT_FLAGS} -o ${JSON_OUTPUT_TARGET}/detect_gfx.log"
+  fi
 
 
-#   LIBCUDACXX_SITE_CONFIG=${LIBCUDACXX_LIT_SITE_CONFIG} \
-#   bash -c "lit ${DETECTION_LIT_FLAGS} ${LIBCUDACXX_PATH}/test/nothing_to_do.pass.cpp -Dcompute_archs=\"${KNOWN_COMPUTE_ARCHS}\"" \
-#     > ${ARCH_DETECTION_LOG} 2>&1
+  LIBCUDACXX_SITE_CONFIG=${LIBCUDACXX_LIT_SITE_CONFIG} \
+  bash -c "lit ${DETECTION_LIT_FLAGS} ${LIBCUDACXX_PATH}/test/nothing_to_do.pass.cpp -Dcompute_archs=\"${KNOWN_COMPUTE_ARCHS}\"" \
+    > ${ARCH_DETECTION_LOG} 2>&1
 
-#   if [ "${PIPESTATUS[0]}" != "0" ]
-#   then
-#     cat ${ARCH_DETECTION_LOG}
-#     report_and_exit 1
-#   fi
+  if [ "${PIPESTATUS[0]}" != "0" ]
+  then
+    cat ${ARCH_DETECTION_LOG}
+    report_and_exit 1
+  fi
 
-#   DEVICE_0_COMPUTE_ARCH=$(egrep '^Device 0:' ${ARCH_DETECTION_LOG} | sed 's/^Device 0: ".*", Selected, SM\([0-9]\+\), [0-9]\+ \[bytes\]/\1/')
+  DEVICE_0_COMPUTE_ARCH=$(egrep '^Device 0:' ${ARCH_DETECTION_LOG} | sed 's/^Device 0: ".*", Selected, CDNA \(gfx[0-9a-f]\{3\}\).*/\1/')
 
-#   rm -f ${ARCH_DETECTION_LOG}
+  rm -f ${ARCH_DETECTION_LOG}
 
-#   echo "# DETECTION SM Architecture : Device 0, ${DEVICE_0_COMPUTE_ARCH}"
-
-#   if (( 50 <= ${DEVICE_0_COMPUTE_ARCH:-0} ))
-#   then
-#     LIBCUDACXX_COMPUTE_ARCHS=${DEVICE_0_COMPUTE_ARCH}
-#   fi
-# fi
+  echo "# DETECTION CDNA Architecture : Device 0, ${DEVICE_0_COMPUTE_ARCH}"
+  LIBCUDACXX_COMPUTE_ARCHS=${DEVICE_0_COMPUTE_ARCH}
+fi
 
 if [ -n "${LIBCUDACXX_COMPUTE_ARCHS}" ]
 then
@@ -374,7 +370,7 @@ then
     LIT_FLAGS="${LIT_FLAGS} -j${par}"
   fi
 
-  echo "# TEST libcu++"
+  echo "# TEST libhip++"
   TIMEFORMAT="# WALLTIME libhip++: %R [sec]" \
 
   LIBCUDACXX_SITE_CONFIG=${LIBCUDACXX_LIT_SITE_CONFIG} \
@@ -382,7 +378,7 @@ then
   2>&1 | tee "${LIBCUDACXX_LOG}"
   if [ "${PIPESTATUS[0]}" != "0" ]; then report_and_exit 1; fi
 else
-  echo "# TEST libcu++ : Skipped"
+  echo "# TEST libhip++ : Skipped"
 fi
 
 ################################################################################

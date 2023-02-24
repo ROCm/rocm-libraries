@@ -35,7 +35,7 @@ void list_devices()
 {
     int device_count;
     hipGetDeviceCount(&device_count);
-    printf("CUDA devices found: %d\n", device_count);
+    printf("HIP devices found: %d\n", device_count);
 
     int selected_device;
     hipGetDevice(&selected_device);
@@ -51,6 +51,7 @@ void list_devices()
         else
             printf("Unused, ");
 
+        printf("CDNA %s\n", device_prop.gcnArchName);
         printf("SM%d%d, %zu [bytes]\n",
             device_prop.major, device_prop.minor,
             device_prop.totalGlobalMem);
