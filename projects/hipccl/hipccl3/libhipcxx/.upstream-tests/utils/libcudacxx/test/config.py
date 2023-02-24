@@ -462,8 +462,9 @@ class Configuration(object):
             "inferred use_system_cxx_lib as: %r" % self.use_system_cxx_lib)
 
     def configure_cxx_stdlib_under_test(self):
+        default_stdlib_under_test = 'libstdc++' if self.cxx.type=='hipcc' else 'libc++'
         self.cxx_stdlib_under_test = self.get_lit_conf(
-            'cxx_stdlib_under_test', 'libc++')
+            'cxx_stdlib_under_test',  default_stdlib_under_test)
         if self.cxx_stdlib_under_test not in \
                 ['libc++', 'libstdc++', 'msvc', 'cxx_default']:
             self.lit_config.fatal(
