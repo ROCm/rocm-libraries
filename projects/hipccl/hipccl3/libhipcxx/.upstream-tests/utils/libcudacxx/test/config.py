@@ -691,7 +691,11 @@ class Configuration(object):
         pre_sm_80 = True
         pre_sm_90 = True
         pre_sm_90a = True
+        pre_gfx90a = True
+        pre_gfx908 = True
         if compute_archs and (self.cxx.type == 'nvcc' or self.cxx.type == 'clang' or self.cxx.type == 'nvrtcc'):
+            pre_gfx90a = False
+            pre_gfx908 = False
             pre_sm_32 = False
             pre_sm_60 = False
             pre_sm_70 = False
@@ -724,6 +728,27 @@ class Configuration(object):
                 if mode.count("virtual"):
                     arch_flag = virt_arch_format.format(str(arch) + subarchitecture)
                 self.cxx.compile_flags += [arch_flag]
+        elif compute_archs and self.cxx.type == 'hipcc':
+            pre_gfx90a = False
+            pre_gfx908 = False
+            pre_sm_32  = False
+            pre_sm_60  = False
+            pre_sm_70  = False
+            pre_sm_80  = False
+            pre_sm_90  = False
+            compute_archs = [a for a in sorted(shlex.split(compute_archs))]
+            for arch in compute_archs:
+                print("ARCH:", arch)
+                if arch == "gfx908": pre_gfx90a = True
+                elif arch != "gfx90a":
+                    pre_gfx908 = True
+                if arch == "gfx908" or arch == "gfx90a":
+                  arch_flag = '--offload-arch={0}'.format(arch)
+                  self.cxx.compile_flags += [arch_flag]
+        if pre_gfx908:
+            self.config.available_features.add("pre-gfx908")
+        if pre_gfx90a:
+            self.config.available_features.add("pre-gfx90a")
         if pre_sm_32:
             self.config.available_features.add("pre-sm-32")
         if pre_sm_60:
