@@ -38,6 +38,8 @@ namespace rocRoller
          */
         struct CodeGeneratorVisitor
         {
+            std::map<int, int> m_baseOffsets;
+
             CodeGeneratorVisitor(KernelGraph graph, std::shared_ptr<AssemblyKernel> kernel)
                 : m_graph(graph)
                 , m_kernel(kernel)
@@ -77,15 +79,29 @@ namespace rocRoller
                 return m_context->registerTagManager()->getRegister(bufferTag);
             }
 
-            Register::ValuePtr getOffset(int tag, int dimension)
+            Generator<Instruction> getOffset(Register::ValuePtr& dst, int tag, int dimension)
             {
-                Register::ValuePtr offset;
-
                 auto offsetTag = m_graph.mapper.get<Offset>(tag, dimension);
-                if(offsetTag >= 0)
-                    offset = m_context->registerTagManager()->getRegister(offsetTag);
+                if(offsetTag < 0)
+                    co_return;
 
-                return offset;
+                if(m_context->registerTagManager()->hasRegister(offsetTag))
+                {
+                    dst = m_context->registerTagManager()->getRegister(offsetTag);
+                    co_return;
+                }
+
+                if(m_baseOffsets.count(offsetTag) > 0)
+                {
+                    auto baseTag = m_baseOffsets[offsetTag];
+                    auto base    = m_context->registerTagManager()->getRegister(baseTag);
+
+                    dst = base->placeholder();
+                    co_yield copy(dst, base);
+
+                    m_context->getScopeManager()->addRegister(offsetTag);
+                    m_context->registerTagManager()->addRegister(offsetTag, dst);
+                }
             }
 
             Generator<Instruction>
@@ -368,6 +384,8 @@ namespace rocRoller
 
             Generator<Instruction> operator()(int tag, ComputeIndex const& ci, Transformer coords)
             {
+                auto tagger = m_context->registerTagManager();
+
                 auto base = m_graph.mapper.get(
                     tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::BASE});
                 auto offset = m_graph.mapper.get(
@@ -400,19 +418,26 @@ namespace rocRoller
                     coords.setCoordinate(zeroTag, L(0u));
                 }
 
-                auto offsetReg = m_context->registerTagManager()->getRegister(
-                    offset, Register::Type::Vector, ci.offsetType, 1);
-                offsetReg->setName(concatenate("offset", tag));
-                co_yield Register::AllocateIfNeeded(offsetReg);
-                scope->addRegister(offset);
-
                 if(base < 0)
                 {
+                    // no base coordinate to copy offset from, so need
+                    // to explicity compute our own offset
+
+                    auto offsetReg
+                        = tagger->getRegister(offset, Register::Type::Vector, ci.offsetType, 1);
+                    offsetReg->setName(concatenate("offset", tag));
+                    scope->addRegister(offset);
+
                     auto indexExpr
                         = ci.forward ? coords.forward({target})[0] : coords.reverse({target})[0];
                     rocRoller::Log::getLogger()->debug(
                         "  Offset({}): {}", offset, toString(indexExpr));
+
                     co_yield generate(offsetReg, indexExpr * L(numBytes));
+                }
+                else
+                {
+                    m_baseOffsets.insert_or_assign(offset, base);
                 }
 
                 if(stride > 0)
@@ -422,8 +447,7 @@ namespace rocRoller
                                          : coords.reverseStride(increment, L(1), {target})[0];
                     rocRoller::Log::getLogger()->debug(
                         "  Stride({}): {}", stride, toString(indexExpr));
-                    m_context->registerTagManager()->addExpression(
-                        stride, indexExpr * L(numBytes), ci.strideType);
+                    tagger->addExpression(stride, indexExpr * L(numBytes), ci.strideType);
                     scope->addRegister(stride);
                 }
 
@@ -432,13 +456,12 @@ namespace rocRoller
                 if(buffer > 0)
                 {
                     auto user = m_graph.coordinates.get<User>(target);
-                    if(user)
+                    if(user && !tagger->hasRegister(buffer))
                     {
-                        auto bufferReg = m_context->registerTagManager()->getRegister(
-                            buffer,
-                            Register::Type::Scalar,
-                            {DataType::None, PointerType::Buffer},
-                            1);
+                        auto bufferReg = tagger->getRegister(buffer,
+                                                             Register::Type::Scalar,
+                                                             {DataType::None, PointerType::Buffer},
+                                                             1);
                         bufferReg->setName(concatenate("buffer", tag));
                         if(bufferReg->allocationState() == Register::AllocationState::Unallocated)
                         {
@@ -500,6 +523,8 @@ namespace rocRoller
                                             int                            tag,
                                             Register::ValuePtr             offset)
             {
+                rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::loadTile()");
+
                 auto mac_tile_tag = m_graph.mapper.get<MacroTile>(tag);
 
                 Register::ValuePtr tmpl;
@@ -518,8 +543,9 @@ namespace rocRoller
                 co_yield Register::AllocateIfNeeded(vgpr);
 
                 // Get the values from the associated ComputeIndex node
-                auto row_offset_reg = getOffset(tag, 0);
-                auto col_offset_reg = getOffset(tag, 1);
+                Register::ValuePtr row_offset_reg;
+                co_yield getOffset(row_offset_reg, tag, 0);
+                auto col_offset_reg = row_offset_reg->placeholder();
 
                 AssertFatal(row_offset_reg, "Invalid row offset register.");
                 AssertFatal(col_offset_reg, "Invalid col offset register.");
@@ -691,8 +717,9 @@ namespace rocRoller
                 auto basePointer = MkSGPR(DataType::Int64);
                 co_yield m_context->argLoader()->getValue(user.argumentName(), basePointer);
 
-                auto mac_offset_reg = getOffset(tag, -1);
-                auto row_offset_reg = getOffset(tag, 0);
+                Register::ValuePtr mac_offset_reg, row_offset_reg;
+                co_yield getOffset(mac_offset_reg, tag, -1);
+                co_yield getOffset(row_offset_reg, tag, 0);
 
                 AssertFatal(mac_offset_reg, "Invalid mac offset register.");
                 AssertFatal(row_offset_reg, "Invalid row offset register.");
@@ -701,8 +728,6 @@ namespace rocRoller
                 auto const n = mac_tile.subTileSizes[1];
 
                 AssertFatal(m > 0 && n > 0, "Invalid/unknown subtile size dimensions");
-
-                co_yield copy(row_offset_reg, mac_offset_reg);
 
                 co_yield loadTile(
                     MemoryInstructions::MemoryKind::Buffer, m, n, load.vtype, tag, nullptr);
@@ -800,11 +825,7 @@ namespace rocRoller
                     "KernelGraph::CodeGenerator::loadMacroTileWAVECI({})", tag);
                 co_yield Instruction::Comment("GEN: loadMacroTileWAVECI");
 
-                auto [user_tag, user]           = m_graph.getDimension<User>(tag);
                 auto [wave_tile_tag, wave_tile] = m_graph.getDimension<WaveTile>(tag);
-
-                Register::ValuePtr basePointer;
-                co_yield m_context->argLoader()->getValue(user.argumentName(), basePointer);
 
                 uint num_elements = wave_tile.sizes[0] * wave_tile.sizes[1];
                 uint wfs          = m_context->kernel()->wavefront_size();
@@ -1064,14 +1085,14 @@ namespace rocRoller
 
                 auto loadAB = m_graph.control.getOutputNodeIndices<Body>(tag).to<std::set>();
 
-                auto mac_offset_x_reg  = getOffset(loads[0], -1);
-                auto wave_offset_x_reg = getOffset(loads[0], 0);
-
+                Register::ValuePtr mac_offset_x_reg, wave_offset_x_reg;
+                co_yield getOffset(mac_offset_x_reg, loads[0], -1);
+                co_yield getOffset(wave_offset_x_reg, loads[0], 0);
                 AssertFatal(wave_offset_x_reg, "Invalid wave x offset register.");
 
-                auto mac_offset_y_reg  = getOffset(loads[1], -1);
-                auto wave_offset_y_reg = getOffset(loads[1], 0);
-
+                Register::ValuePtr mac_offset_y_reg, wave_offset_y_reg;
+                co_yield getOffset(mac_offset_y_reg, loads[1], -1);
+                co_yield getOffset(wave_offset_y_reg, loads[1], 0);
                 AssertFatal(wave_offset_y_reg, "Invalid wave y offset register.");
 
                 AssertFatal(macA.sizes[1] == macB.sizes[0], "MacroTile size mismatch.");
@@ -1102,6 +1123,7 @@ namespace rocRoller
                 if(isOperation<LoadLDSTile>(loadA))
                     co_yield copy(reset_offset_x, wave_offset_x_reg);
 
+                // TODO : Need more design thought (how to seed an offset register)
                 auto reset_offset_y = Register::Value::Placeholder(
                     m_context, Register::Type::Vector, DataType::UInt32, 1);
                 if(isOperation<LoadLDSTile>(loadB))
@@ -1147,8 +1169,10 @@ namespace rocRoller
                                           + wave_stride_y_reg->expression());
                 }
 
+                // TODO : Need more design thought (how to seed an offset register)
                 if(isOperation<LoadLDSTile>(loadA))
                     co_yield copy(wave_offset_x_reg, reset_offset_x);
+                // TODO : Need more design thought (how to seed an offset register)
                 if(isOperation<LoadLDSTile>(loadB))
                     co_yield copy(wave_offset_y_reg, reset_offset_y);
             }
@@ -1184,9 +1208,11 @@ namespace rocRoller
                                              Register::ValuePtr             vgpr,
                                              Register::ValuePtr             offset)
             {
-                auto elementSize    = DataTypeInfo::Get(dataType).elementSize;
-                auto row_offset_reg = getOffset(tag, 0);
-                auto col_offset_reg = getOffset(tag, 1);
+                auto elementSize = DataTypeInfo::Get(dataType).elementSize;
+
+                Register::ValuePtr row_offset_reg;
+                co_yield getOffset(row_offset_reg, tag, 0);
+                auto col_offset_reg = row_offset_reg->placeholder();
 
                 AssertFatal(row_offset_reg, "Invalid row offset register.");
                 AssertFatal(col_offset_reg, "Invalid col offset register.");
@@ -1379,7 +1405,8 @@ namespace rocRoller
                 auto vgpr  = m_context->registerTagManager()->getRegister(tile_tag);
                 auto vtype = store.dataType;
 
-                auto row_offset_reg = getOffset(tag, 0);
+                Register::ValuePtr row_offset_reg;
+                co_yield getOffset(row_offset_reg, tag, 0);
                 AssertFatal(row_offset_reg, "Invalid row offset register.");
 
                 auto numElements = product(tile.subTileSizes) * product(m_workgroupSize);
@@ -1411,6 +1438,7 @@ namespace rocRoller
                 co_yield storeTile(
                     MemoryInstructions::MemoryKind::Local, m, n, vtype, tag, vgpr, lds_offset);
 
+                // TODO : Need more design thought (how to seed an offset register)
                 co_yield copy(row_offset_reg, reset_offset);
             }
 
