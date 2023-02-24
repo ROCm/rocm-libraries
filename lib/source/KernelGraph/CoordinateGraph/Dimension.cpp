@@ -46,34 +46,6 @@ namespace rocRoller
                                   Expression::literal(stride));
         }
 
-        ThreadTileNumber ThreadTile::tileNumber(int sdim) const
-        {
-            AssertFatal(!wsizes.empty(), "ThreadTile doesn't have workitem sizes set.");
-            int stride = 1;
-            for(int d = wsizes.size() - 1; d > sdim; --d)
-            {
-                AssertFatal(wsizes[d] > 0, "Invalid tile size: ", ShowValue(wsizes[d]));
-                stride = stride * wsizes[d];
-            }
-            return ThreadTileNumber(sdim,
-                                    Expression::literal(static_cast<uint>(wsizes.at(sdim))),
-                                    Expression::literal(stride));
-        }
-
-        ThreadTileIndex ThreadTile::tileIndex(int sdim) const
-        {
-            AssertFatal(!sizes.empty(), "ThreadTile doesn't have sizes set.");
-            int stride = 1;
-            for(int d = sizes.size() - 1; d > sdim; --d)
-            {
-                AssertFatal(sizes[d] > 0, "Invalid tile size: ", ShowValue(sizes[d]));
-                stride = stride * sizes[d];
-            }
-            return ThreadTileIndex(sdim,
-                                   Expression::literal(static_cast<uint>(sizes.at(sdim))),
-                                   Expression::literal(stride));
-        }
-
         WaveTileNumber WaveTile::tileNumber(int sdim) const
         {
             return WaveTileNumber(sdim, Expression::literal(1u), Expression::literal(1u));

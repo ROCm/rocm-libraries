@@ -59,7 +59,7 @@ namespace rocRoller
 
         /**
          * NOTE: Debugging & testing purposes only.
-         * 
+         *
          * Reads the values of each of the command arguments out of `args` and returns them in
          * a map based on the name of each argument.
          */

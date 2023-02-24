@@ -128,7 +128,7 @@ namespace rocRoller
 
         /**
          * T must be a subclass of SubDimension
-         * 
+         *
          * Returns a predicate `pred(int elem) -> bool` which will return true if elem refers to:
          *  - a node of type T in `coords`
          *  - the `dim` field of the node must be equal to `dim`.

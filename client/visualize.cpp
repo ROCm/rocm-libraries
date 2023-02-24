@@ -72,9 +72,9 @@ namespace rocRoller
         }
 
         /**
-         * Write a volume where the value is the linear workgroup ID which reads the A matrix, 
+         * Write a volume where the value is the linear workgroup ID which reads the A matrix,
          * for all workgroups, for one iteration of the K loop.
-         * 
+         *
          * Skips the second workgroup dimension since that is associated with the B matrix.
          */
         void writeKIterAByWorkitem(std::ostream&   vfile,

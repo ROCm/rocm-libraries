@@ -85,20 +85,20 @@ namespace rocRoller
         {
             AssertFatal(isOperation<LoadTiled>(graph.control.getElement(load)));
 
-            auto user    = graph.mapper.get<User>(load);
-            auto mac     = graph.mapper.get<MacroTileNumber>(load, sdim);
-            auto i_thr_x = graph.mapper.get<ThreadTileIndex>(load, 0);
-            auto i_thr_y = graph.mapper.get<ThreadTileIndex>(load, 1);
+            auto user   = graph.mapper.get<User>(load);
+            auto mac    = graph.mapper.get<MacroTileNumber>(load, sdim);
+            auto elem_x = graph.mapper.get<ElementNumber>(load, 0);
+            auto elem_y = graph.mapper.get<ElementNumber>(load, 1);
 
             auto dtype = graph.control.get<LoadTiled>(load)->vtype.dataType;
 
             auto offset_mac = graph.coordinates.addElement(Offset(), {user}, {mac});
             auto stride_mac = graph.coordinates.addElement(Stride(), {user}, {mac});
-            auto row_offset = graph.coordinates.addElement(Offset(), {user}, {i_thr_x});
-            auto row_stride = graph.coordinates.addElement(Stride(), {user}, {i_thr_x});
-            auto col_offset = graph.coordinates.addElement(Offset(), {user}, {i_thr_y});
-            auto col_stride = graph.coordinates.addElement(Stride(), {user}, {i_thr_y});
-            auto buffer     = graph.coordinates.addElement(Buffer(), {user}, {i_thr_x});
+            auto row_offset = graph.coordinates.addElement(Offset(), {user}, {elem_x});
+            auto row_stride = graph.coordinates.addElement(Stride(), {user}, {elem_x});
+            auto col_offset = graph.coordinates.addElement(Offset(), {user}, {elem_y});
+            auto col_stride = graph.coordinates.addElement(Stride(), {user}, {elem_y});
+            auto buffer     = graph.coordinates.addElement(Buffer(), {user}, {elem_x});
 
             graph.mapper.connect<Offset>(load, offset_mac, -1);
             graph.mapper.connect<Offset>(load, row_offset, 0);
@@ -117,27 +117,27 @@ namespace rocRoller
                                            buffer,
                                            false,
                                            dtype,
-                                           {i_thr_x, i_thr_y});
+                                           {elem_x, elem_y});
             auto ci_row = makeComputeIndex(graph,
                                            user,
-                                           i_thr_x,
+                                           elem_x,
                                            mac,
                                            row_offset,
                                            row_stride,
                                            buffer,
                                            false,
                                            dtype,
-                                           {mac, i_thr_y});
+                                           {mac, elem_y});
             auto ci_col = makeComputeIndex(graph,
                                            user,
-                                           i_thr_y,
-                                           i_thr_x,
+                                           elem_y,
+                                           elem_x,
                                            col_offset,
                                            col_stride,
                                            buffer,
                                            false,
                                            dtype,
-                                           {mac, i_thr_x});
+                                           {mac, elem_x});
 
             graph.control.addElement(Sequence(), {ci_mac}, {ci_row});
             graph.control.addElement(Sequence(), {ci_row}, {ci_col});
@@ -157,8 +157,8 @@ namespace rocRoller
         std::tuple<int, int>
             computeIndexVGPR(KernelGraph& graph, int loadstore, int source, bool forward)
         {
-            auto i_thr_x = graph.mapper.get<ThreadTileIndex>(loadstore, 0);
-            auto i_thr_y = graph.mapper.get<ThreadTileIndex>(loadstore, 1);
+            auto elem_x = graph.mapper.get<ElementNumber>(loadstore, 0);
+            auto elem_y = graph.mapper.get<ElementNumber>(loadstore, 1);
 
             DataType dtype, offsettype = DataType::UInt64;
             {
@@ -185,19 +185,19 @@ namespace rocRoller
             int row_offset, row_stride, col_offset, col_stride, buffer;
             if(forward)
             {
-                row_offset = graph.coordinates.addElement(Offset(), {i_thr_x}, {source});
-                row_stride = graph.coordinates.addElement(Stride(), {i_thr_x}, {source});
-                col_offset = graph.coordinates.addElement(Offset(), {i_thr_y}, {source});
-                col_stride = graph.coordinates.addElement(Stride(), {i_thr_y}, {source});
-                buffer     = graph.coordinates.addElement(Buffer(), {i_thr_x}, {source});
+                row_offset = graph.coordinates.addElement(Offset(), {elem_x}, {source});
+                row_stride = graph.coordinates.addElement(Stride(), {elem_x}, {source});
+                col_offset = graph.coordinates.addElement(Offset(), {elem_y}, {source});
+                col_stride = graph.coordinates.addElement(Stride(), {elem_y}, {source});
+                buffer     = graph.coordinates.addElement(Buffer(), {elem_x}, {source});
             }
             else
             {
-                row_offset = graph.coordinates.addElement(Offset(), {source}, {i_thr_x});
-                row_stride = graph.coordinates.addElement(Stride(), {source}, {i_thr_x});
-                col_offset = graph.coordinates.addElement(Offset(), {source}, {i_thr_y});
-                col_stride = graph.coordinates.addElement(Stride(), {source}, {i_thr_y});
-                buffer     = graph.coordinates.addElement(Buffer(), {source}, {i_thr_x});
+                row_offset = graph.coordinates.addElement(Offset(), {source}, {elem_x});
+                row_stride = graph.coordinates.addElement(Stride(), {source}, {elem_x});
+                col_offset = graph.coordinates.addElement(Offset(), {source}, {elem_y});
+                col_stride = graph.coordinates.addElement(Stride(), {source}, {elem_y});
+                buffer     = graph.coordinates.addElement(Buffer(), {source}, {elem_x});
             }
 
             graph.mapper.connect<Offset>(loadstore, row_offset, 0);
@@ -208,26 +208,26 @@ namespace rocRoller
 
             auto ci_row = makeComputeIndex(graph,
                                            source,
-                                           i_thr_x,
+                                           elem_x,
                                            -1,
                                            row_offset,
                                            row_stride,
                                            buffer,
                                            forward,
                                            dtype,
-                                           {i_thr_y},
+                                           {elem_y},
                                            offsettype,
                                            offsettype);
             auto ci_col = makeComputeIndex(graph,
                                            source,
-                                           i_thr_y,
-                                           i_thr_x,
+                                           elem_y,
+                                           elem_x,
                                            col_offset,
                                            col_stride,
                                            buffer,
                                            forward,
                                            dtype,
-                                           {i_thr_x},
+                                           {elem_x},
                                            offsettype,
                                            offsettype);
 

@@ -218,7 +218,7 @@ namespace rocRoller
          */
         struct Workitem : public SubDimension
         {
-            Workitem(int const dim = 0, Expression::ExpressionPtr size = nullptr)
+            Workitem(int const dim, Expression::ExpressionPtr size = nullptr)
                 : SubDimension(dim, size, Expression::literal(1u))
             {
             }
@@ -459,11 +459,14 @@ namespace rocRoller
         };
 
         /**
-         * ThreadTileIndex - sub-dimension of a tile.  See ThreadTile.
+         * ThreadTileIndex - sub-dimension of a tile (fast-moving).
          */
         struct ThreadTileIndex : public SubDimension
         {
-            using SubDimension::SubDimension;
+            ThreadTileIndex(int const dim, Expression::ExpressionPtr size = nullptr)
+                : SubDimension(dim, size, Expression::literal(1u))
+            {
+            }
 
             std::string name() const override
             {
@@ -472,11 +475,14 @@ namespace rocRoller
         };
 
         /**
-         * ThreadTileNumber.  See ThreadTile.
+         * ThreadTileNumber - sub-dimension of a tile (slow-moving).
          */
         struct ThreadTileNumber : public SubDimension
         {
-            using SubDimension::SubDimension;
+            ThreadTileNumber(int const dim, Expression::ExpressionPtr size = nullptr)
+                : SubDimension(dim, size, Expression::literal(1u))
+            {
+            }
 
             std::string name() const override
             {
@@ -520,16 +526,6 @@ namespace rocRoller
             {
                 return "ThreadTile";
             }
-
-            /**
-             * Return ThreadTileNumber cooresponding to sub-dimension `sdim` of this tile.
-             */
-            ThreadTileNumber tileNumber(int const sdim) const;
-
-            /**
-             * Return ThreadTileIndex cooresponding to sub-dimension `sdim` of this tile.
-             */
-            ThreadTileIndex tileIndex(int const sdim) const;
         };
 
         /**
@@ -631,6 +627,22 @@ namespace rocRoller
             std::string name() const override
             {
                 return "WaveTilePerWorkGroup";
+            }
+        };
+
+        /**
+         * ElementNumber - represents the value(s) from a ThreadTile to be stored in the VGPR(s).
+         */
+        struct ElementNumber : public SubDimension
+        {
+            ElementNumber(int const dim, Expression::ExpressionPtr size = nullptr)
+                : SubDimension(dim, size, Expression::literal(1u))
+            {
+            }
+
+            std::string name() const override
+            {
+                return "ElementNumber";
             }
         };
 

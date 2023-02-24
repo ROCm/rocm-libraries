@@ -12,6 +12,7 @@ namespace rocRoller
 
         struct ForLoop;
         struct Adhoc;
+        struct ElementNumber;
         struct Lane;
         struct Linear;
         struct LDS;
@@ -37,6 +38,7 @@ namespace rocRoller
 
         using Dimension = std::variant<ForLoop,
                                        Adhoc,
+                                       ElementNumber,
                                        Lane,
                                        LDS,
                                        Linear,
