@@ -36,6 +36,9 @@ namespace rocRollerTest
             std::tie(m_procedure, m_randomSeed) = GetParam();
             CurrentGPUContextFixture::SetUp();
             m_context->setRandomSeed(m_randomSeed);
+            KernelOptions options;
+            options.assertWaitCntState = false;
+            m_context->setKernelOptions(options);
         }
     };
 

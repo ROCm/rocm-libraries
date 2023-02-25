@@ -2,6 +2,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <rocRoller/CodeGen/BranchGenerator.hpp>
 #include <rocRoller/CodeGen/Instruction.hpp>
 #include <rocRoller/InstructionValues/Register.hpp>
 
@@ -726,5 +727,136 @@ namespace rocRollerTest
                                 )";
 
         EXPECT_EQ(NormalizedSource(output(), true), NormalizedSource(expected, true));
+    }
+
+    TEST_F(WaitCountObserverTest, LoopWaitCntStateAssertFailCase)
+    {
+        KernelOptions options;
+        options.assertWaitCntState = true;
+        m_context->setKernelOptions(options);
+        EXPECT_TRUE(m_context->kernelOptions().assertWaitCntState);
+
+        rocRoller::Scheduling::InstructionStatus peeked;
+
+        auto src1 = std::make_shared<Register::Value>(
+            m_context, Register::Type::Scalar, DataType::Int32, 2);
+        src1->allocateNow();
+
+        auto src2 = src1->subset({1});
+
+        auto dst1 = std::make_shared<Register::Value>(
+            m_context, Register::Type::Scalar, DataType::Float, 2);
+        dst1->allocateNow();
+
+        auto dst2 = std::make_shared<Register::Value>(
+            m_context, Register::Type::Scalar, DataType::Float, 2);
+        dst2->allocateNow();
+
+        auto dst3 = dst1->subset({1});
+
+        auto zero = Register::Value::Literal(0);
+
+        auto inst1 = Instruction("s_load_dwordx2", {dst1}, {src1, zero}, {}, "");
+        peeked     = m_context->observer()->peek(inst1);
+        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
+        m_context->schedule(inst1);
+
+        auto inst2 = Instruction("s_load_dwordx2", {dst2}, {src1, zero}, {}, "");
+        peeked     = m_context->observer()->peek(inst2);
+        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
+        m_context->schedule(inst2);
+
+        //An wait LGKMCnt 0 is needed at this label.
+        auto instlabel = Instruction::Label("test_label");
+        peeked         = m_context->observer()->peek(instlabel);
+        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
+        m_context->schedule(instlabel);
+
+        //This instruction causes  wait, which clears the queue states.
+        auto inst3 = Instruction("s_load_dword", {dst3}, {src2, zero}, {}, "");
+        peeked     = m_context->observer()->peek(inst3);
+        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount::LGKMCnt(0, ""));
+        m_context->schedule(inst3);
+
+        //That means that here, the queue state is different from when the label was encountered.
+        m_context->schedule(m_context->brancher()->branch(Register::Value::Label("test_label")));
+
+        auto inst_end = Instruction("s_endpgm", {}, {}, {}, "");
+        peeked        = m_context->observer()->peek(inst_end);
+        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
+
+        EXPECT_THROW(m_context->schedule(inst_end), FatalError);
+    }
+
+    TEST_F(WaitCountObserverTest, LoopWaitCntStateAssertGoodCase)
+    {
+        KernelOptions options;
+        options.assertWaitCntState = true;
+        m_context->setKernelOptions(options);
+        EXPECT_TRUE(m_context->kernelOptions().assertWaitCntState);
+
+        rocRoller::Scheduling::InstructionStatus peeked;
+
+        auto src1 = std::make_shared<Register::Value>(
+            m_context, Register::Type::Scalar, DataType::Int32, 2);
+        src1->allocateNow();
+
+        auto src2 = src1->subset({1});
+
+        auto dst1 = std::make_shared<Register::Value>(
+            m_context, Register::Type::Scalar, DataType::Float, 2);
+        dst1->allocateNow();
+
+        auto dst2 = std::make_shared<Register::Value>(
+            m_context, Register::Type::Scalar, DataType::Float, 2);
+        dst2->allocateNow();
+
+        auto dst3 = dst1->subset({1});
+
+        auto zero = Register::Value::Literal(0);
+
+        auto inst1 = Instruction("s_load_dwordx2", {dst1}, {src1, zero}, {}, "");
+        peeked     = m_context->observer()->peek(inst1);
+        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
+        m_context->schedule(inst1);
+
+        auto inst2 = Instruction("s_load_dwordx2", {dst2}, {src1, zero}, {}, "");
+        peeked     = m_context->observer()->peek(inst2);
+        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
+        m_context->schedule(inst2);
+
+        //An wait LGKMCnt 0 is needed at this label.
+        auto instlabel = Instruction::Label("test_label");
+        peeked         = m_context->observer()->peek(instlabel);
+        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
+        m_context->schedule(instlabel);
+
+        //This instruction causes  wait, which clears the queue states.
+        auto inst3 = Instruction("s_add", {dst3}, {src2, zero}, {}, "");
+        peeked     = m_context->observer()->peek(inst3);
+        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount::LGKMCnt(0, ""));
+        m_context->schedule(inst3);
+
+        //These 2 instructions recreate the same queue state.
+        auto inst4 = Instruction("s_load_dwordx2", {dst1}, {src1, zero}, {}, "");
+        peeked     = m_context->observer()->peek(inst4);
+        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
+        m_context->schedule(inst4);
+
+        auto inst5 = Instruction("s_load_dwordx2", {dst2}, {src1, zero}, {}, "");
+        peeked     = m_context->observer()->peek(inst5);
+        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
+        m_context->schedule(inst5);
+
+        //That means that here, the queue state is the same as when the label was encountered.
+        auto instbranch
+            = Instruction("s_branch", {}, {Register::Value::Label("test_label")}, {}, "");
+        m_context->schedule(instbranch);
+
+        auto inst_end = Instruction("s_endpgm", {}, {}, {}, "");
+        peeked        = m_context->observer()->peek(inst_end);
+        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
+
+        m_context->schedule(inst_end); //Now this shouldn't fail.
     }
 }

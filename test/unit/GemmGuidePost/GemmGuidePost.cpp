@@ -83,6 +83,7 @@ namespace rocRollerTest
         KernelOptions options;
         //options.logLevel               = LogLevel::Debug;
         options.preloadKernelArguments = true;
+        options.assertWaitCntState     = false;
         m_context->setKernelOptions(options);
         auto command = std::make_shared<Command>();
 
@@ -565,6 +566,7 @@ namespace rocRollerTest
         KernelOptions options;
         options.logLevel               = LogLevel::Debug;
         options.preloadKernelArguments = false;
+        options.assertWaitCntState     = false;
         m_context->setKernelOptions(options);
         auto command = std::make_shared<Command>();
 
@@ -1061,6 +1063,7 @@ namespace rocRollerTest
         KernelOptions options;
         options.logLevel               = LogLevel::Debug;
         options.preloadKernelArguments = false;
+        options.assertWaitCntState     = false;
         m_context->setKernelOptions(options);
         auto command = std::make_shared<Command>();
 
@@ -1497,6 +1500,7 @@ namespace rocRollerTest
         KernelOptions options;
         options.logLevel               = LogLevel::Debug;
         options.preloadKernelArguments = false;
+        options.assertWaitCntState     = false;
         m_context->setKernelOptions(options);
         auto command = std::make_shared<Command>();
 

@@ -11,6 +11,71 @@ namespace rocRoller
 {
     namespace Scheduling
     {
+        template <typename T>
+        using WaitQueueMap  = std::unordered_map<GPUWaitQueue, T, GPUWaitQueue::Hash>;
+        using WaitCntQueues = WaitQueueMap<std::vector<
+            std::array<std::shared_ptr<Register::Value>, Instruction::MaxDstRegisters>>>;
+
+        /**
+         * @brief This struct is used to store the _unallocated_ state of the waitcnt queues.
+         *
+         */
+        struct WaitcntState
+        {
+        public:
+            WaitcntState() {}
+
+            WaitcntState(WaitQueueMap<bool> const&             needs_wait_zero,
+                         WaitQueueMap<GPUWaitQueueType> const& type_in_queue,
+                         WaitCntQueues const&                  instruction_queues_with_alloc)
+                : needs_wait_zero(needs_wait_zero)
+                , type_in_queue(type_in_queue)
+            {
+                // Here we're iterating through all of the std::shared_ptr<Register::Value>s and
+                // converting them to RegisterIDs
+                for(auto& queue : instruction_queues_with_alloc)
+                {
+                    if(instruction_queues.find(queue.first) == instruction_queues.end())
+                    {
+                        instruction_queues[queue.first] = {};
+                    }
+                    for(auto& dsts : queue.second)
+                    {
+                        instruction_queues[queue.first].emplace_back(
+                            std::vector<Register::RegisterId>{});
+                        for(auto& dst : dsts)
+                        {
+                            if(dst)
+                            {
+                                for(auto& regid : dst->getRegisterIds())
+                                {
+                                    instruction_queues[queue.first]
+                                                      [instruction_queues[queue.first].size() - 1]
+                                                          .emplace_back(regid);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            inline bool operator==(const WaitcntState& rhs) const
+            {
+                return needs_wait_zero == rhs.needs_wait_zero && type_in_queue == rhs.type_in_queue
+                       && instruction_queues == rhs.instruction_queues;
+            }
+
+        private:
+            // These members are duplicates of the waitcntobserver members, except we're storing a
+            // std::vector<Register::RegisterId> for the registers instead of
+            // std::array<std::shared_ptr<Register::Value>, Instruction::MaxDstRegisters>
+            // so that we don't maintain the allocations.
+            WaitQueueMap<std::vector<std::vector<Register::RegisterId>>> instruction_queues;
+
+            WaitQueueMap<bool>             needs_wait_zero;
+            WaitQueueMap<GPUWaitQueueType> type_in_queue;
+        };
+
         class WaitcntObserver
         {
         public:
@@ -74,6 +139,18 @@ namespace rocRoller
                 auto const&        architecture = context->targetArchitecture();
                 GPUInstructionInfo info         = architecture.GetInstructionInfo(inst.getOpCode());
 
+                if(context->kernelOptions().assertWaitCntState)
+                {
+                    if(info.isBranch())
+                    {
+                        addBranchState(inst.getSrcs()[0]->toString());
+                    }
+                    else if(inst.isLabel())
+                    {
+                        addLabelState(inst.getLabel());
+                    }
+                }
+
                 auto instWaitQueues = info.getWaitQueues();
 
                 WaitCount waiting = inst.getWaitCount();
@@ -84,6 +161,11 @@ namespace rocRoller
                    != instWaitQueues.end())
                 {
                     waiting = WaitCount::Zero(context->targetArchitecture());
+
+                    if(context->kernelOptions().assertWaitCntState)
+                    {
+                        assertLabelConsistency();
+                    }
                 }
 
                 for(uint8_t i = 0; i < static_cast<uint8_t>(GPUWaitQueue::Count); i++)
@@ -129,21 +211,23 @@ namespace rocRoller
         private:
             std::weak_ptr<Context> m_context;
 
-            bool m_displayState;
-
-            std::unordered_map<GPUWaitQueue,
-                               std::vector<std::array<std::shared_ptr<Register::Value>,
-                                                      Instruction::MaxDstRegisters>>,
-                               GPUWaitQueue::Hash>
-                instruction_queues;
+            WaitCntQueues instruction_queues;
 
             // This member tracks a flag for each queue which indicates that a waitcnt 0 is needed.
-            std::unordered_map<GPUWaitQueue, bool, GPUWaitQueue::Hash> needs_wait_zero;
+            WaitQueueMap<bool> needs_wait_zero;
 
             // This member tracks the instruction type that is currently in a given queue.
             // If there are ever multiple instruction types in a queue, and a register intersection occurs,
             // a waitcnt 0 is required.
-            std::unordered_map<GPUWaitQueue, GPUWaitQueueType, GPUWaitQueue::Hash> type_in_queue;
+            WaitQueueMap<GPUWaitQueueType> type_in_queue;
+
+            bool m_displayState;
+
+            // This member tracks, for every label, what the waitcnt state was when that label was encountered.
+            std::unordered_map<std::string, WaitcntState> label_states;
+
+            // This member tracks, for every label, what the waitcnt state is everywhere a branch instruction targets that label.
+            std::unordered_map<std::string, std::vector<WaitcntState>> branch_states;
 
             /**
              * This function updates the given wait queue by applying the given waitcnt.
@@ -287,6 +371,55 @@ namespace rocRoller
                     }
                 }
                 return retval.str();
+            }
+
+            /**
+             * @brief Add the current waitcnt state to the label state tracker.
+             *
+             * @param label the currently encountered label.
+             */
+            inline void addLabelState(std::string const& label)
+            {
+                label_states[label]
+                    = WaitcntState(needs_wait_zero, type_in_queue, instruction_queues);
+            }
+
+            /**
+             * @brief Add the current waitcnt state to the branch state tracker.
+             *
+             * @param label the label currently being branched to.
+             */
+            inline void addBranchState(std::string const& label)
+            {
+                if(branch_states.find(label) == branch_states.end())
+                {
+                    branch_states[label] = {};
+                }
+
+                branch_states[label].emplace_back(
+                    WaitcntState(needs_wait_zero, type_in_queue, instruction_queues));
+            }
+
+            /**
+             * @brief Assert that all branch and label waitcnt states are consistent.
+             *
+             * This function checks that the waitcnt state at every branch to a label is the same
+             * as the waitcnt state when that label was encountered.
+             */
+            inline void assertLabelConsistency()
+            {
+                for(auto label_state : label_states)
+                {
+                    if(branch_states.find(label_state.first) != branch_states.end())
+                    {
+                        for(auto branch_state : branch_states[label_state.first])
+                        {
+                            AssertFatal(label_state.second == branch_state,
+                                        "Branching to label '" + label_state.first
+                                            + "' with a different waitcnt state.");
+                        }
+                    }
+                }
             }
         };
 

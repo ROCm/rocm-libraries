@@ -20,6 +20,7 @@ namespace rocRoller
         , transposeMemoryAccessA(true)
         , transposeMemoryAccessB(true)
         , transposeMemoryAccessOther(false)
+        , assertWaitCntState(true)
     {
     }
 
@@ -41,6 +42,7 @@ namespace rocRoller
         os << "  transposeMemoryAccessA:\t" << input.transposeMemoryAccessA << std::endl;
         os << "  transposeMemoryAccessB:\t" << input.transposeMemoryAccessB << std::endl;
         os << "  transposeMemoryAccessOther:\t" << input.transposeMemoryAccessOther << std::endl;
+        os << "  assertWaitCntState:\t\t" << input.assertWaitCntState << std::endl;
         return os;
     }
 

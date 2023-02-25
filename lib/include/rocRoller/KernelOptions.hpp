@@ -34,6 +34,8 @@ namespace rocRoller
         bool transposeMemoryAccessB;
         bool transposeMemoryAccessOther;
 
+        bool assertWaitCntState;
+
         std::string          toString() const;
         friend std::ostream& operator<<(std::ostream&, const KernelOptions&);
     };
