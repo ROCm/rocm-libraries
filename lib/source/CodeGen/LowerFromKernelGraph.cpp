@@ -611,22 +611,26 @@ namespace rocRoller
                 AssertFatal(row_stride_reg, "Invalid row stride register.");
                 AssertFatal(col_stride_reg, "Invalid col stride register.");
 
+                auto elementSize        = (uint)DataTypeInfo::Get(dataType).elementSize;
+                bool colStrideIsLiteral = (col_stride_reg->regType() == Register::Type::Literal);
+                bool colStrideIsOne
+                    = colStrideIsLiteral
+                      && (getUnsignedInt(col_stride_reg->getLiteralValue()) == elementSize);
                 // Load a tile of Half precision values where each register will hold
                 // two half precision values.
-                if(vgpr->variableType() == DataType::Halfx2)
+                if(vgpr->variableType() == DataType::Halfx2 && !colStrideIsOne)
                 {
-                    if(row_stride_reg->regType() == Register::Type::Literal
-                       && col_stride_reg->regType() == Register::Type::Literal
-                       && offset->regType() == Register::Type::Literal)
+                    if(row_stride_reg->regType() == Register::Type::Literal && colStrideIsLiteral
+                       && offset && offset->regType() == Register::Type::Literal)
                     {
                         // If all of the strides are literals, we can load everything using offsets
                         // without using a runtime counter
                         auto offset_value = getUnsignedInt(offset->getLiteralValue());
                         auto row_stride   = getUnsignedInt(row_stride_reg->getLiteralValue());
                         auto col_stride   = getUnsignedInt(col_stride_reg->getLiteralValue());
-                        for(uint i = 0; i < m; ++i)
+                        for(uint64_t i = 0; i < m; ++i)
                         {
-                            for(uint j = 0; j < n; j += 2)
+                            for(uint64_t j = 0; j < n; j += 2)
                             {
                                 uint a = i * n + j;
 
@@ -650,10 +654,10 @@ namespace rocRoller
                         auto offset2 = Register::Value::Placeholder(
                             m_context, Register::Type::Vector, col_offset_reg->variableType(), 1);
 
-                        for(uint i = 0; i < m; ++i)
+                        for(uint64_t i = 0; i < m; ++i)
                         {
                             co_yield copy(col_offset_reg, row_offset_reg);
-                            for(uint j = 0; j < n; j += 2)
+                            for(uint64_t j = 0; j < n; j += 2)
                             {
                                 uint a = i * n + j;
 
@@ -685,63 +689,117 @@ namespace rocRoller
                 }
                 else
                 {
-                    auto elementSize = (uint)DataTypeInfo::Get(dataType).elementSize;
-                    if(row_stride_reg->regType() == Register::Type::Literal
-                       && col_stride_reg->regType() == Register::Type::Literal
-                       && offset->regType() == Register::Type::Literal)
+                    if(row_stride_reg->regType() == Register::Type::Literal && colStrideIsLiteral
+                       && offset && offset->regType() == Register::Type::Literal)
                     {
                         // If all of the strides are literals, we can load everything using offsets
                         // without using a runtime counter
                         auto offset_value = getUnsignedInt(offset->getLiteralValue());
                         auto row_stride   = getUnsignedInt(row_stride_reg->getLiteralValue());
                         auto col_stride   = getUnsignedInt(col_stride_reg->getLiteralValue());
-                        for(uint i = 0; i < m; ++i)
+                        if(colStrideIsOne)
                         {
-                            for(uint j = 0; j < n; ++j)
+                            for(uint64_t i = 0; i < m; ++i)
                             {
+                                auto start = (dataType == DataType::Half && n != 1)
+                                                 ? static_cast<int>((i * n) / 2)
+                                                 : i * n;
+                                auto stop  = (dataType == DataType::Half && n != 1)
+                                                 ? static_cast<int>((i * n + n) / 2)
+                                                 : i * n + n;
                                 co_yield m_context->mem()->load(
                                     kind,
-                                    vgpr->element({static_cast<int>(i * n + j)}),
+                                    vgpr->element(Generated(iota(start, stop))),
                                     row_offset_reg,
-                                    Register::Value::Literal(offset_value + j * col_stride),
-                                    elementSize,
+                                    Register::Value::Literal(offset_value),
+                                    elementSize * n,
                                     "",
                                     false,
                                     bufDesc);
+                                offset_value += row_stride;
                             }
-                            offset_value += row_stride;
+                        }
+                        else
+                        {
+                            for(uint64_t i = 0; i < m; ++i)
+                            {
+                                for(uint64_t j = 0; j < n; ++j)
+                                {
+                                    co_yield m_context->mem()->load(
+                                        kind,
+                                        vgpr->element({static_cast<int>(i * n + j)}),
+                                        row_offset_reg,
+                                        Register::Value::Literal(offset_value + j * col_stride),
+                                        elementSize,
+                                        "",
+                                        false,
+                                        bufDesc);
+                                }
+                                offset_value += row_stride;
+                            }
                         }
                     }
                     else
                     {
-                        for(int i = 0; i < m; ++i)
+                        if(colStrideIsOne)
                         {
-                            co_yield copy(col_offset_reg, row_offset_reg);
-
-                            for(int j = 0; j < n; ++j)
+                            for(uint64_t i = 0; i < m; ++i)
                             {
+                                auto start = (dataType == DataType::Half && n != 1)
+                                                 ? static_cast<int>((i * n) / 2)
+                                                 : i * n;
+                                auto stop  = (dataType == DataType::Half && n != 1)
+                                                 ? static_cast<int>((i * n + n) / 2)
+                                                 : i * n + n;
                                 co_yield m_context->mem()->load(
                                     kind,
-                                    vgpr->element({static_cast<int>(i * n + j)}),
-                                    col_offset_reg->subset({0}),
+                                    vgpr->element(Generated(iota(start, stop))),
+                                    row_offset_reg->subset({0}),
                                     offset,
-                                    elementSize,
+                                    elementSize * n,
                                     "",
                                     false,
                                     bufDesc);
-                                if(j < n - 1)
+
+                                if(i < m - 1)
                                 {
-                                    co_yield generate(col_offset_reg,
-                                                      col_offset_reg->expression()
-                                                          + col_stride_reg->expression());
+                                    co_yield generate(row_offset_reg,
+                                                      row_offset_reg->expression()
+                                                          + row_stride_reg->expression());
                                 }
                             }
-
-                            if(i < m - 1)
+                        }
+                        else
+                        {
+                            for(uint64_t i = 0; i < m; ++i)
                             {
-                                co_yield generate(row_offset_reg,
-                                                  row_offset_reg->expression()
-                                                      + row_stride_reg->expression());
+                                co_yield copy(col_offset_reg, row_offset_reg);
+
+                                for(uint64_t j = 0; j < n; ++j)
+                                {
+                                    co_yield m_context->mem()->load(
+                                        kind,
+                                        vgpr->element({static_cast<int>(i * n + j)}),
+                                        col_offset_reg->subset({0}),
+                                        offset,
+                                        elementSize,
+                                        "",
+                                        false,
+                                        bufDesc);
+                                    if(j < n - 1)
+                                    {
+                                        co_yield generate(col_offset_reg,
+                                                          col_offset_reg->expression()
+                                                              + col_stride_reg->expression());
+                                    }
+                                }
+
+                                if(i < m - 1)
+                                {
+                                    co_yield generate(row_offset_reg,
+                                                      row_offset_reg->expression()
+                                                          + row_stride_reg->expression());
+                                }
                             }
                         }
                     }
@@ -1301,22 +1359,25 @@ namespace rocRoller
                     converted = vgpr;
                 }
 
+                bool colStrideIsLiteral = (col_stride_reg->regType() == Register::Type::Literal);
+                bool colStrideIsOne
+                    = colStrideIsLiteral
+                      && (getUnsignedInt(col_stride_reg->getLiteralValue()) == elementSize);
                 // Load a tile of Half precision values where each register will hold
                 // two half precision values.
-                if(converted->variableType() == DataType::Halfx2)
+                if(converted->variableType() == DataType::Halfx2 && !colStrideIsOne)
                 {
-                    if(row_stride_reg->regType() == Register::Type::Literal
-                       && col_stride_reg->regType() == Register::Type::Literal
-                       && offset->regType() == Register::Type::Literal)
+                    if(row_stride_reg->regType() == Register::Type::Literal && colStrideIsLiteral
+                       && offset && offset->regType() == Register::Type::Literal)
                     {
                         // If all of the strides are literals, we can load everything using offsets
                         // without using a runtime counter
                         auto offset_value = getUnsignedInt(offset->getLiteralValue());
                         auto row_stride   = getUnsignedInt(row_stride_reg->getLiteralValue());
                         auto col_stride   = getUnsignedInt(col_stride_reg->getLiteralValue());
-                        for(uint i = 0; i < m; ++i)
+                        for(uint64_t i = 0; i < m; ++i)
                         {
-                            for(uint j = 0; j < n; ++j)
+                            for(uint64_t j = 0; j < n; ++j)
                             {
                                 uint a = (i * n + j) / 2;
 
@@ -1335,10 +1396,10 @@ namespace rocRoller
                     }
                     else
                     {
-                        for(uint i = 0; i < m; ++i)
+                        for(uint64_t i = 0; i < m; ++i)
                         {
                             co_yield copy(col_offset_reg, row_offset_reg);
-                            for(uint j = 0; j < n; ++j)
+                            for(uint64_t j = 0; j < n; ++j)
                             {
                                 uint a = (i * n + j) / 2;
 
@@ -1368,64 +1429,119 @@ namespace rocRoller
                 }
                 else
                 {
-                    if(row_stride_reg->regType() == Register::Type::Literal
-                       && col_stride_reg->regType() == Register::Type::Literal
-                       && offset->regType() == Register::Type::Literal)
+                    if(row_stride_reg->regType() == Register::Type::Literal && colStrideIsLiteral
+                       && offset && offset->regType() == Register::Type::Literal)
                     {
                         // If all of the strides are literals, we can store everything using offsets
                         // without using a runtime counter
                         auto offset_value = getUnsignedInt(offset->getLiteralValue());
                         auto row_stride   = getUnsignedInt(row_stride_reg->getLiteralValue());
                         auto col_stride   = getUnsignedInt(col_stride_reg->getLiteralValue());
-                        for(uint i = 0; i < m; ++i)
+                        if(colStrideIsOne)
                         {
-                            for(uint j = 0; j < n; ++j)
+                            for(uint64_t i = 0; i < m; ++i)
                             {
-                                uint a = i * n + j;
+                                auto start = (dataType == DataType::Half && n != 1)
+                                                 ? static_cast<int>((i * n) / 2)
+                                                 : i * n;
+                                auto stop  = (dataType == DataType::Half && n != 1)
+                                                 ? static_cast<int>((i * n + n) / 2)
+                                                 : i * n + n;
                                 co_yield m_context->mem()->store(
                                     kind,
                                     row_offset_reg,
-                                    converted->element({static_cast<int>(a)}),
-                                    Register::Value::Literal(offset_value + j * col_stride),
-                                    elementSize,
+                                    converted->element(Generated(iota(start, stop))),
+                                    Register::Value::Literal(offset_value),
+                                    elementSize * n,
                                     "",
                                     false,
                                     bufDesc);
+                                offset_value += row_stride;
                             }
-                            offset_value += row_stride;
+                        }
+                        else
+                        {
+                            for(uint64_t i = 0; i < m; ++i)
+                            {
+                                for(uint64_t j = 0; j < n; ++j)
+                                {
+                                    uint a = i * n + j;
+                                    co_yield m_context->mem()->store(
+                                        kind,
+                                        row_offset_reg,
+                                        converted->element({static_cast<int>(a)}),
+                                        Register::Value::Literal(offset_value + j * col_stride),
+                                        elementSize,
+                                        "",
+                                        false,
+                                        bufDesc);
+                                }
+                                offset_value += row_stride;
+                            }
                         }
                     }
                     else
                     {
-                        for(int i = 0; i < m; ++i)
+                        if(colStrideIsOne)
                         {
-                            co_yield copy(col_offset_reg, row_offset_reg);
-                            for(int j = 0; j < n; ++j)
+                            for(uint64_t i = 0; i < m; ++i)
                             {
-                                uint a = i * n + j;
-
+                                auto start = (dataType == DataType::Half && n != 1)
+                                                 ? static_cast<int>((i * n) / 2)
+                                                 : i * n;
+                                auto stop  = (dataType == DataType::Half && n != 1)
+                                                 ? static_cast<int>((i * n + n) / 2)
+                                                 : i * n + n;
                                 co_yield m_context->mem()->store(
                                     kind,
-                                    col_offset_reg->subset({0}),
-                                    converted->element({static_cast<int>(a)}),
+                                    row_offset_reg->subset({0}),
+                                    converted->element(Generated(iota(start, stop))),
                                     offset,
-                                    elementSize,
+                                    elementSize * n,
                                     "",
                                     false,
                                     bufDesc);
-                                if(j < n - 1)
+
+                                if(i < m - 1)
                                 {
-                                    co_yield generate(col_offset_reg,
-                                                      col_offset_reg->expression()
-                                                          + col_stride_reg->expression());
+                                    co_yield generate(row_offset_reg,
+                                                      row_offset_reg->expression()
+                                                          + row_stride_reg->expression());
                                 }
                             }
-
-                            if(i < m - 1)
+                        }
+                        else
+                        {
+                            for(uint64_t i = 0; i < m; ++i)
                             {
-                                co_yield generate(row_offset_reg,
-                                                  row_offset_reg->expression()
-                                                      + row_stride_reg->expression());
+                                co_yield copy(col_offset_reg, row_offset_reg);
+                                for(int j = 0; j < n; ++j)
+                                {
+                                    uint a = i * n + j;
+
+                                    co_yield m_context->mem()->store(
+                                        kind,
+                                        col_offset_reg->subset({0}),
+                                        converted->element({static_cast<int>(a)}),
+                                        offset,
+                                        elementSize,
+                                        "",
+                                        false,
+                                        bufDesc);
+                                    if(j < n - 1)
+                                    {
+                                        co_yield generate(col_offset_reg,
+                                                          col_offset_reg->expression()
+                                                              + col_stride_reg->expression());
+                                    }
+                                }
+
+                                if(i < m - 1)
+                                {
+                                    co_yield generate(row_offset_reg,
+                                                      row_offset_reg->expression()
+                                                          + row_stride_reg->expression());
+                                }
                             }
                         }
                     }

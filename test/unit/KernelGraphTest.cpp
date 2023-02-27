@@ -2480,7 +2480,8 @@ namespace KernelGraphTest
         ASSERT_LT(rnorm, 1.e-12);
     }
 
-    TEST_F(KernelGraphTestGPU, GPU_TensorTileCopy)
+    template <typename T>
+    void CopyStrideOverride(bool colOverride = false)
     {
         size_t nx  = 256; // tensor size x
         size_t ny  = 128; // tensor size y
@@ -2491,6 +2492,8 @@ namespace KernelGraphTest
 
         unsigned int workgroup_size_x = 4;
         unsigned int workgroup_size_y = 2;
+        auto         dataType         = TypeInfo<T>::Var.dataType;
+        auto         typeName         = TypeInfo<T>::Name();
 
         AssertFatal(m > 0 && n > 0 && t_m > 0 && t_n > 0
                         && (size_t)m * n == t_m * t_n * workgroup_size_x * workgroup_size_y,
@@ -2502,19 +2505,22 @@ namespace KernelGraphTest
         auto NZ = std::make_shared<Expression::Expression>(1u); // number of work items z
 
         RandomGenerator random(193674u);
-        auto            a = random.vector<int>(nx * ny, -100, 100);
-        auto            r = random.vector<int>(nx * ny, -100, 100);
-        auto            x = random.vector<int>(nx * ny, -100, 100);
+        auto            ax = static_cast<T>(-100.);
+        auto            ay = static_cast<T>(100.);
+        auto            a  = random.vector<T>(nx * ny, ax, ay);
+
+        std::vector<T> r(nx * ny, 0.);
+        std::vector<T> x(nx * ny, 0.);
 
         auto d_a = make_shared_device(a);
-        auto d_b = make_shared_device<int>(nx * ny);
+        auto d_b = make_shared_device<T>(nx * ny);
 
         auto command = std::make_shared<Command>();
 
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(DataType::Int32, 2, 0)));
+            rocRoller::Operations::T_Load_Tiled(dataType, 2, 0)));
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Store_Tiled(DataType::Int32, 2, 0)));
+            rocRoller::Operations::T_Store_Tiled(dataType, 2, 0)));
 
         KernelArguments runtimeArgs;
 
@@ -2536,13 +2542,27 @@ namespace KernelGraphTest
         auto mac_tile = MacroTile({m, n}, MemoryType::VGPR, {t_m, t_n});
         params->setDimensionInfo(4, mac_tile);
 
+        if(colOverride)
+        {
+            auto loadColStrideOverride   = SubDimension(1);
+            loadColStrideOverride.stride = Expression::literal(1u);
+            params->setDimensionInfo(3, loadColStrideOverride);
+
+            auto storeColStrideOverride   = SubDimension(1);
+            storeColStrideOverride.stride = Expression::literal(1u);
+            params->setDimensionInfo(9, storeColStrideOverride);
+        }
+
         params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
         params->setManualWorkitemCount({NX, NY, NZ});
 
-        CommandKernel commandKernel(command, "TensorTileCopy", params);
+        std::string colName    = (colOverride) ? "ColOverride" : "";
+        std::string kernelName = "TensorTileCopy" + colName + typeName;
+
+        CommandKernel commandKernel(command, kernelName, params);
         commandKernel.launchKernel(runtimeArgs.runtimeArguments());
 
-        ASSERT_THAT(hipMemcpy(r.data(), d_b.get(), nx * ny * sizeof(int), hipMemcpyDefault),
+        ASSERT_THAT(hipMemcpy(r.data(), d_b.get(), nx * ny * sizeof(T), hipMemcpyDefault),
                     HasHipSuccess(0));
 
         // reference solution
@@ -2554,6 +2574,26 @@ namespace KernelGraphTest
         double rnorm = relativeNorm(r, x);
 
         ASSERT_LT(rnorm, 1.e-12);
+    }
+
+    TEST_F(KernelGraphTestGPU, GPU_TensorTileCopy)
+    {
+        CopyStrideOverride<int>();
+    }
+
+    TEST_F(KernelGraphTestGPU, GPU_TensorTileCopyColStrideHalf)
+    {
+        CopyStrideOverride<Half>(true);
+    }
+
+    TEST_F(KernelGraphTestGPU, GPU_TensorTileCopyColStrideFloat)
+    {
+        CopyStrideOverride<float>(true);
+    }
+
+    TEST_F(KernelGraphTestGPU, GPU_TensorTileCopyColStrideDouble)
+    {
+        CopyStrideOverride<double>(true);
     }
 
     TEST_F(KernelGraphTestGPU, GPU_TensorTileCopyLDS)
