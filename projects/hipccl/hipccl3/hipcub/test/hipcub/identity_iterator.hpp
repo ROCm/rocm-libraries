@@ -26,7 +26,7 @@
 namespace test_utils
 {
 
-// Output iterator used in tests to check situtations when
+// Output iterator used in tests to check situations when
 // value_type of output iterator is void
 template<class T>
 class identity_iterator

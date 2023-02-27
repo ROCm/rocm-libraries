@@ -20,10 +20,10 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-# Find HIP package and verify that correct C++ compiler was selected for available
-# platfrom. On ROCm platform host and device code is compiled by the same compiler:
-# hcc. On CUDA host can be compiled by any C++ compiler while device code is compiled
-# by nvcc compiler (CMake's CUDA package handles this).
+# Find the HIP package and verify that the correct C++ compiler was selected.
+# On the ROCm platform, both host and device code is compiled by the same
+# compiler: clang. On CUDA, host code can be compiled by any C++ compiler
+# while device code is compiled by the nvcc compiler.
 
 # A function for automatic detection of the CC of the installed NV GPUs
 function(hip_cuda_detect_cc out_variable)

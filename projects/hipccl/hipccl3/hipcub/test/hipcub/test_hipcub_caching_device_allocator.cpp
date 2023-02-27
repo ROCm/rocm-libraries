@@ -73,7 +73,7 @@ TEST(HipcubCachingDeviceAllocatorTests, Test1)
     // Allocate another 999 bytes in stream 0
     HIP_CHECK(allocator.DeviceAllocate((void **) &d_999B_stream0_b, 999, 0));
 
-    // Check that that we have 1 live block on the initial GPU
+    // Check that we have 1 live block on the initial GPU
     ASSERT_EQ(allocator.live_blocks.size(), 1u);
 
     // Check that that we have no cached block on the initial GPU

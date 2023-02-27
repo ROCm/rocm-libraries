@@ -71,7 +71,7 @@ struct custom_flag_op2
     }
 };
 
-// Host (CPU) implementaions of the wrapping function that allows to pass 3 args
+// Host (CPU) implementations of the wrapping function that allows to pass 3 args
 template<class T, class FlagType, class FlagOp>
 typename std::enable_if<hipcub::detail::WithBIndexArg<T, FlagOp>::value, FlagType>::type
 apply(FlagOp flag_op, const T& a, const T& b, unsigned int b_index)

@@ -53,7 +53,7 @@ HIPCUB_DEVICE __forceinline__ T AsmThreadLoad(void * ptr)
 #if HIPCUB_THREAD_LOAD_USE_CACHE_MODIFIERS == 1
 
 // Important for syncing. Check section 9.2.2 or 7.3 in the following document
-// http://developer.amd.com/wordpress/media/2013/12/AMD_GCN3_Instruction_Set_Architecture_rev1.1.pdf
+// https://developer.amd.com/wordpress/media/2013/12/AMD_GCN3_Instruction_Set_Architecture_rev1.1.pdf
 #define HIPCUB_ASM_THREAD_LOAD(cache_modifier,                                                                \
                                llvm_cache_modifier,                                                           \
                                type,                                                                          \

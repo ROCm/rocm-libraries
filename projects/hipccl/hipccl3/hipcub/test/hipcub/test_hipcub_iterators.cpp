@@ -445,7 +445,7 @@ TYPED_TEST(HipcubIteratorTests, TestTexRef)
         IteratorType d_ref_itr;
         d_ref_itr.BindTexture((CastT*) d_data, sizeof(T) * TEST_VALUES);
 
-        // Create and bind dummy iterator of same type to check with interferance
+        // Create and bind dummy iterator of same type to check with interference
         IteratorType d_ref_itr2;
         d_ref_itr2.BindTexture((CastT*) d_dummy, sizeof(T) * DUMMY_TEST_VALUES);
 
