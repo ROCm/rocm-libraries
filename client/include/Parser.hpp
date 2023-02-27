@@ -12,8 +12,8 @@ public:
 
     ~Arg() = default;
 
-    std::vector<std::string> flags();
-    std::string              usage();
+    std::vector<std::string> flags() const;
+    std::string              usage() const;
 
 private:
     std::vector<std::string> m_flags;
@@ -34,7 +34,7 @@ public:
     void print_help();
 
     template <typename T>
-    T get(std::string name, T const& defaultVal);
+    T get(std::string const& name, T const& defaultVal) const;
 
 private:
     std::map<std::string, std::string> m_parsed_args;

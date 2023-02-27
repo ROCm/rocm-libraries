@@ -192,7 +192,8 @@ namespace rocRoller
                 rocRoller::Log::getLogger()->debug(
                     concatenate("KernelGraph::CodeGenerator::generate: ", candidates));
 
-                co_yield Instruction::Comment(concatenate("generate(", candidates, ")"));
+                auto message = concatenate("generate(", candidates, ")");
+                co_yield Instruction::Comment(message);
 
                 while(!candidates.empty())
                 {
@@ -211,15 +212,32 @@ namespace rocRoller
 
                     // Generate code for all the nodes we found.
 
-                    for(auto const& tag : nodes)
+                    std::vector<Generator<Instruction>> generators;
+                    for(auto tag : nodes)
                     {
                         auto op = std::get<Operation>(m_graph.control.getElement(tag));
-                        co_yield call(tag, op, coords);
+                        generators.push_back(call(tag, op, coords));
+                    }
+
+                    if(generators.size() == 1)
+                    {
+                        co_yield generators[0];
+                    }
+                    else
+                    {
+                        co_yield Instruction::Comment(
+                            concatenate("BEGIN Scheduler for operations ", nodes));
+                        auto proc      = Settings::getInstance()->get(Settings::Scheduler);
+                        auto scheduler = Component::GetNew<Scheduling::Scheduler>(
+                            proc, Scheduling::CostProcedure::MinNops, m_context);
+                        co_yield (*scheduler)(generators);
+                        co_yield Instruction::Comment(
+                            concatenate("END Scheduler for operations ", nodes));
                     }
 
                     // Add output nodes to candidates.
 
-                    for(auto const& tag : nodes)
+                    for(auto tag : nodes)
                     {
                         auto outTags = m_graph.control.getOutputNodeIndices<Sequence>(tag);
                         candidates.insert(outTags.begin(), outTags.end());
@@ -227,13 +245,19 @@ namespace rocRoller
 
                     // Delete generated nodes from candidates.
 
-                    for(auto const& node : nodes)
+                    for(auto node : nodes)
                         candidates.erase(node);
                 }
+
+                co_yield Instruction::Comment("end: " + message);
             }
 
-            Generator<Instruction>
-                call(int tag, Operation const& operation, Transformer const& coords)
+            /**
+             * Note that `operation` must be passed by value (not by reference) to avoid a
+             * dangling reference issue if call() is sent into a scheduler instead of being
+             * yielded directly.
+             */
+            Generator<Instruction> call(int tag, Operation operation, Transformer const& coords)
             {
                 auto opName = toString(operation);
                 rocRoller::Log::getLogger()->debug(
@@ -266,11 +290,24 @@ namespace rocRoller
 
             Generator<Instruction> operator()(int tag, Scope const&, Transformer coords)
             {
-                auto scope = m_context->getScopeManager();
+                auto scope   = m_context->getScopeManager();
+                auto message = concatenate("Scope ", tag);
+
+                // Under the current implementation,
+                //  - All new DataFlow allocations are associated with the top scope
+                //    regardless of if this is correct
+                //  - When the scope is popped, all DataFlow registers in that are freed.
+                //
+                // Until this is changed, we need to lock the scheduler here.
+
+                co_yield Instruction::Lock(Scheduling::Dependency::Branch, "Lock " + message);
                 scope->pushNewScope();
+
                 auto body = m_graph.control.getOutputNodeIndices<Body>(tag).to<std::set>();
                 co_yield generate(body, coords);
+
                 scope->popAndReleaseScope();
+                co_yield Instruction::Unlock("Unlock " + message);
             }
 
             Generator<Instruction> operator()(int tag, ForLoopOp const& op, Transformer coords)
@@ -343,6 +380,8 @@ namespace rocRoller
                 auto dim_tag = m_graph.mapper.get(tag, NaryArgument::DEST);
 
                 rocRoller::Log::getLogger()->debug("  assigning dimension: {}", dim_tag);
+                co_yield Instruction::Comment(
+                    concatenate("Assign dim(", dim_tag, ") = ", assign.expression));
 
                 auto scope = m_context->getScopeManager();
                 scope->addRegister(dim_tag);
@@ -359,12 +398,16 @@ namespace rocRoller
                         assign.regType,
                         resultVariableType(assign.expression),
                         assign.valueCount);
+                    if(dest->name().empty())
+                        dest->setName(concatenate("DataFlowTag", dim_tag));
                 }
                 co_yield Expression::generate(dest, assign.expression, m_context);
 
                 if(deferred)
                 {
                     m_context->registerTagManager()->addRegister(dim_tag, dest);
+                    if(dest->name().empty())
+                        dest->setName(concatenate("DataFlowTag", dim_tag));
                 }
             }
 
@@ -373,6 +416,7 @@ namespace rocRoller
             {
                 auto dim_tag = m_graph.mapper.get<Dimension>(tag);
                 rocRoller::Log::getLogger()->debug("  deallocate dimension: {}", dim_tag);
+                co_yield Instruction::Comment(concatenate("Deallocate ", dim_tag));
                 m_context->registerTagManager()->deleteTag(dim_tag);
                 co_return;
             }
@@ -466,8 +510,8 @@ namespace rocRoller
                         if(bufferReg->allocationState() == Register::AllocationState::Unallocated)
                         {
                             co_yield Register::AllocateIfNeeded(bufferReg);
-                            auto basePointer = MkSGPR(DataType::Int64);
-                            auto bufDesc     = BufferDescriptor(bufferReg, m_context);
+                            Register::ValuePtr basePointer;
+                            auto               bufDesc = BufferDescriptor(bufferReg, m_context);
                             co_yield m_context->argLoader()->getValue(user->argumentName(),
                                                                       basePointer);
                             co_yield bufDesc.setBasePointer(basePointer);
@@ -714,9 +758,6 @@ namespace rocRoller
                 auto [user_tag, user]         = m_graph.getDimension<User>(tag);
                 auto [mac_tile_tag, mac_tile] = m_graph.getDimension<MacroTile>(tag);
 
-                auto basePointer = MkSGPR(DataType::Int64);
-                co_yield m_context->argLoader()->getValue(user.argumentName(), basePointer);
-
                 Register::ValuePtr mac_offset_reg, row_offset_reg;
                 co_yield getOffset(mac_offset_reg, tag, -1);
                 co_yield getOffset(row_offset_reg, tag, 0);
@@ -742,9 +783,6 @@ namespace rocRoller
 
                 auto [user_tag, user]         = m_graph.getDimension<User>(tag);
                 auto [mac_tile_tag, mac_tile] = m_graph.getDimension<MacroTile>(tag);
-
-                auto basePointer = MkSGPR(DataType::Int64);
-                co_yield m_context->argLoader()->getValue(user.argumentName(), basePointer);
 
                 auto const m = mac_tile.subTileSizes[0];
                 auto const n = mac_tile.subTileSizes[1];
@@ -847,8 +885,6 @@ namespace rocRoller
                 auto [wave_tile_tag, wave_tile] = m_graph.getDimension<WaveTile>(tag);
 
                 // Move the argument pointer into v_ptr
-                Register::ValuePtr s_ptr;
-                co_yield m_context->argLoader()->getValue(user.argumentName(), s_ptr);
 
                 uint num_elements = wave_tile.sizes[0] * wave_tile.sizes[1];
                 uint wfs          = m_context->kernel()->wavefront_size();
@@ -990,10 +1026,8 @@ namespace rocRoller
                 Register::ValuePtr s_ptr;
                 co_yield m_context->argLoader()->getValue(user.argumentName(), s_ptr);
 
-                auto v_ptr = s_ptr->placeholder(Register::Type::Vector);
-                co_yield v_ptr->allocate();
-
-                co_yield m_context->copier()->copy(v_ptr, s_ptr, "Move pointer");
+                Register::ValuePtr v_ptr;
+                co_yield m_context->copier()->ensureType(v_ptr, s_ptr, Register::Type::Vector);
 
                 auto numBytes = DataTypeInfo::Get(vgpr->variableType()).elementSize;
                 co_yield m_context->mem()->load(
@@ -1007,7 +1041,6 @@ namespace rocRoller
             {
                 auto offset = Register::Value::Placeholder(
                     m_context, Register::Type::Vector, DataType::Int64, 1);
-                co_yield offset->allocate();
 
                 co_yield Instruction::Comment("GEN: LoadVGPR; user index");
 
@@ -1017,10 +1050,8 @@ namespace rocRoller
                 Register::ValuePtr s_ptr;
                 co_yield m_context->argLoader()->getValue(user.argumentName(), s_ptr);
 
-                auto v_ptr = s_ptr->placeholder(Register::Type::Vector);
-                co_yield v_ptr->allocate();
-
-                co_yield m_context->copier()->copy(v_ptr, s_ptr, "Move pointer");
+                Register::ValuePtr v_ptr;
+                co_yield m_context->copier()->ensureType(v_ptr, s_ptr, Register::Type::Vector);
 
                 auto numBytes = DataTypeInfo::Get(vgpr->variableType()).elementSize;
                 co_yield m_context->mem()->load(
@@ -1118,14 +1149,12 @@ namespace rocRoller
 
                 // saving the offsets to be restored for each macrotile in LDS
                 // TODO : Need more design thought (how to seed an offset register)
-                auto reset_offset_x = Register::Value::Placeholder(
-                    m_context, Register::Type::Vector, DataType::UInt32, 1);
+                auto reset_offset_x = wave_offset_x_reg->placeholder();
                 if(isOperation<LoadLDSTile>(loadA))
                     co_yield copy(reset_offset_x, wave_offset_x_reg);
 
                 // TODO : Need more design thought (how to seed an offset register)
-                auto reset_offset_y = Register::Value::Placeholder(
-                    m_context, Register::Type::Vector, DataType::UInt32, 1);
+                auto reset_offset_y = wave_offset_y_reg->placeholder();
                 if(isOperation<LoadLDSTile>(loadB))
                     co_yield copy(reset_offset_y, wave_offset_y_reg);
 
@@ -1156,25 +1185,38 @@ namespace rocRoller
                     Expression::ExpressionPtr B = std::make_shared<Expression::Expression>(
                         std::make_shared<WaveTile>(waveB));
 
-                    co_yield generate(D,
-                                      std::make_shared<Expression::Expression>(
-                                          Expression::MatrixMultiply(A, B, D->expression())));
+                    std::vector<Generator<Instruction>> generators;
+                    generators.push_back(
+                        generate(D,
+                                 std::make_shared<Expression::Expression>(
+                                     Expression::MatrixMultiply(A, B, D->expression()))));
 
-                    co_yield generate(wave_offset_x_reg,
-                                      wave_offset_x_reg->expression()
-                                          + wave_stride_x_reg->expression());
+                    if((k + 1) < num_wave_tiles)
+                    {
+                        generators.push_back(generate(wave_offset_x_reg,
+                                                      wave_offset_x_reg->expression()
+                                                          + wave_stride_x_reg->expression()));
 
-                    co_yield generate(wave_offset_y_reg,
-                                      wave_offset_y_reg->expression()
-                                          + wave_stride_y_reg->expression());
+                        generators.push_back(generate(wave_offset_y_reg,
+                                                      wave_offset_y_reg->expression()
+                                                          + wave_stride_y_reg->expression()));
+                    }
+                    else
+                    {
+                        // Last iteration.  Restoring the offset registers just needs to happen after the load from LDS.
+                        // TODO : Need more design thought (how to seed an offset register)
+                        if(isOperation<LoadLDSTile>(loadA))
+                            generators.push_back(copy(wave_offset_x_reg, reset_offset_x));
+                        // TODO : Need more design thought (how to seed an offset register)
+                        if(isOperation<LoadLDSTile>(loadB))
+                            generators.push_back(copy(wave_offset_y_reg, reset_offset_y));
+                    }
+
+                    auto proc      = Settings::getInstance()->get(Settings::Scheduler);
+                    auto scheduler = Component::GetNew<Scheduling::Scheduler>(
+                        proc, Scheduling::CostProcedure::MinNops, m_context);
+                    co_yield (*scheduler)(generators);
                 }
-
-                // TODO : Need more design thought (how to seed an offset register)
-                if(isOperation<LoadLDSTile>(loadA))
-                    co_yield copy(wave_offset_x_reg, reset_offset_x);
-                // TODO : Need more design thought (how to seed an offset register)
-                if(isOperation<LoadLDSTile>(loadB))
-                    co_yield copy(wave_offset_y_reg, reset_offset_y);
             }
 
             Generator<Instruction>
@@ -1395,7 +1437,7 @@ namespace rocRoller
             {
                 rocRoller::Log::getLogger()->debug(
                     "KernelGraph::CodeGenerator::storeMacroTileLDS()");
-                co_yield_(Instruction::Comment("GEN: storeMacroTileLDS"));
+                co_yield Instruction::Comment("GEN: storeMacroTileLDS");
 
                 auto [lds_tag, lds]   = m_graph.getDimension<LDS>(tag);
                 auto [tile_tag, tile] = m_graph.getDimension<MacroTile>(tag);
@@ -1456,9 +1498,6 @@ namespace rocRoller
 
                 auto vgpr = m_context->registerTagManager()->getRegister(mac_tile_tag);
 
-                auto basePointer = MkSGPR(DataType::Int64);
-                co_yield m_context->argLoader()->getValue(user.argumentName(), basePointer);
-
                 auto const m = mac_tile.subTileSizes[0];
                 auto const n = mac_tile.subTileSizes[1];
 
@@ -1476,7 +1515,7 @@ namespace rocRoller
             {
                 rocRoller::Log::getLogger()->debug(
                     "KernelGraph::CodeGenerator::storeMacroTileWAVELDS()");
-                co_yield_(Instruction::Comment("GEN: storeMacroTileWAVELDS"));
+                co_yield Instruction::Comment("GEN: storeMacroTileWAVELDS");
 
                 auto [lds_tag, lds]             = m_graph.getDimension<LDS>(tag);
                 auto [mac_tile_tag, mac_tile]   = m_graph.getDimension<MacroTile>(tag);
@@ -1534,9 +1573,6 @@ namespace rocRoller
                 auto agpr = m_context->registerTagManager()->getRegister(mac_tile_tag);
 
                 AssertFatal(agpr->registerCount() == num_vgpr);
-
-                Register::ValuePtr s_ptr;
-                co_yield m_context->argLoader()->getValue(user.argumentName(), s_ptr);
 
                 co_yield storeTile(MemoryInstructions::MemoryKind::Buffer,
                                    num_vgpr / 4,
@@ -1617,11 +1653,8 @@ namespace rocRoller
                 Register::ValuePtr s_ptr;
                 co_yield m_context->argLoader()->getValue(user.argumentName(), s_ptr);
 
-                auto v_ptr = Register::Value::Placeholder(
-                    m_context, Register::Type::Vector, src->variableType().getPointer(), 1);
-                co_yield v_ptr->allocate();
-
-                co_yield m_context->copier()->copy(v_ptr, s_ptr, "Move pointer");
+                Register::ValuePtr v_ptr;
+                co_yield m_context->copier()->ensureType(v_ptr, s_ptr, Register::Type::Vector);
 
                 auto numBytes = DataTypeInfo::Get(src->variableType()).elementSize;
                 co_yield m_context->mem()->store(

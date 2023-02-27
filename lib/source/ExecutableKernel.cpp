@@ -97,7 +97,7 @@ namespace rocRoller
         size_t argsSize = args.size();
 
         void* hipLaunchParams[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER,
-                                   (void*)args.data(),
+                                   const_cast<void*>(args.data()),
                                    HIP_LAUNCH_PARAM_BUFFER_SIZE,
                                    &argsSize,
                                    HIP_LAUNCH_PARAM_END};

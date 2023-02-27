@@ -61,6 +61,8 @@ struct GEMMProblem
 
     std::string trans_A; // N or T
     std::string trans_B; // N or T
+
+    std::string scheduler;
 };
 
 struct GEMMResult : GEMMProblem
@@ -90,14 +92,15 @@ struct rocRoller::Serialization::
         iot::mapRequired(io, "K", result.K);
         iot::mapRequired(io, "alpha", result.alpha);
         iot::mapRequired(io, "beta", result.beta);
-        iot::mapRequired(io, "numWarmUp", result.numWarmUp);
-        iot::mapRequired(io, "numOuter", result.numOuter);
-        iot::mapRequired(io, "numInner", result.numInner);
+        iot::mapRequired(io, "trans_A", result.trans_A);
+        iot::mapRequired(io, "trans_B", result.trans_B);
+
         iot::mapRequired(io, "type_A", result.type_A);
         iot::mapRequired(io, "type_B", result.type_B);
         iot::mapRequired(io, "type_C", result.type_C);
         iot::mapRequired(io, "type_D", result.type_D);
         iot::mapRequired(io, "type_acc", result.type_acc);
+
         iot::mapRequired(io, "mac_m", result.mac_m);
         iot::mapRequired(io, "mac_n", result.mac_n);
         iot::mapRequired(io, "mac_k", result.mac_k);
@@ -108,8 +111,12 @@ struct rocRoller::Serialization::
         iot::mapRequired(io, "loadLDS_A", result.loadLDS_A);
         iot::mapRequired(io, "loadLDS_B", result.loadLDS_B);
         iot::mapRequired(io, "storeLDS_D", result.storeLDS_D);
-        iot::mapRequired(io, "trans_A", result.trans_A);
-        iot::mapRequired(io, "trans_B", result.trans_B);
+        iot::mapRequired(io, "scheduler", result.scheduler);
+
+        iot::mapRequired(io, "numWarmUp", result.numWarmUp);
+        iot::mapRequired(io, "numOuter", result.numOuter);
+        iot::mapRequired(io, "numInner", result.numInner);
+
         iot::mapRequired(io, "kernelGenerate", result.kernelGenerate);
         iot::mapRequired(io, "kernelAssemble", result.kernelAssemble);
         iot::mapRequired(io, "kernelExecute", result.kernelExecute);
@@ -304,6 +311,10 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult, bool doVisualize)
     params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
     params->setManualWorkitemCount({NX, NY, NZ});
 
+    auto schedulerValue = fromString<Scheduling::SchedulerProcedure>(result.scheduler);
+    if(result.scheduler != "")
+        Settings::getInstance()->set(Settings::Scheduler, schedulerValue);
+
     auto postParams = std::make_shared<CommandParameters>();
 
     auto one         = Expression::literal(1u);
@@ -390,9 +401,10 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult, bool doVisualize)
         }
     }
 
-    // TODO loop
-    double totalTime   = result.kernelExecute[0] / 1.e9;
-    double averageTime = totalTime / result.numInner;
+    double totalTime = 0;
+    for(auto ke : result.kernelExecute)
+        totalTime += static_cast<double>(ke) / 1.e9;
+    double averageTime = totalTime / (result.numInner * result.numOuter);
 
     std::cout << "Average runtime (s): " << averageTime << std::endl;
     std::cout << "Average GFLOPS: "
@@ -408,15 +420,26 @@ int main(int argc, const char* argv[])
 {
     ParseOptions po("GEMM Driver: D (MxN) = alpha * A (MxK) * B (KxN) + beta * C (MxN)");
 
+    // Problem definition
     po.addArg("M", Arg({"M"}, "Tensor Size M"));
     po.addArg("N", Arg({"N"}, "Tensor Size N"));
     po.addArg("K", Arg({"K"}, "Tensor Size K"));
+    po.addArg("trans_A",
+              Arg({"trans_A"}, "N: A is not to be transposed. T: A is to be transposed."));
+    po.addArg("trans_B",
+              Arg({"trans_B"}, "N: B is not to be transposed. T: B is to be transposed."));
+    po.addArg("alpha", Arg({"a", "alpha"}, "Alpha scalar"));
+    po.addArg("beta", Arg({"b", "beta"}, "Beta scalar"));
+    po.addArg("type_A", Arg({"type_A"}, "Datatype of A Matrix [float | half]"));
+    po.addArg("type_B", Arg({"type_B"}, "Datatype of B Matrix [float | half]"));
+    po.addArg("type_C", Arg({"type_C"}, "Datatype of C Matrix [float | half]"));
+    po.addArg("type_D", Arg({"type_D"}, "Datatype of D Matrix [float | half]"));
+    po.addArg("type_acc", Arg({"type_acc"}, "Datatype of accumulation [float]"));
+
+    // Kernel options
     po.addArg("mac_m", Arg({"mac_m"}, "Macro Tile Size M"));
     po.addArg("mac_n", Arg({"mac_n"}, "Macro Tile Size N"));
     po.addArg("mac_k", Arg({"mac_k"}, "Macro Tile Size K"));
-    po.addArg("alpha", Arg({"a", "alpha"}, "Alpha scalar"));
-    po.addArg("beta", Arg({"b", "beta"}, "Beta scalar"));
-    po.addArg("yaml", Arg({"o", "yaml"}, "Results"));
     po.addArg("workgroup_size_x", Arg({"workgroup_size_x"}, "Workgroup size in the x dimension"));
     po.addArg("workgroup_size_y", Arg({"workgroup_size_y"}, "Workgroup size in the y dimension"));
     po.addArg("unroll_x", Arg({"unroll_x"}, "Unroll Size in X"));
@@ -424,19 +447,13 @@ int main(int argc, const char* argv[])
     po.addArg("loadLDS_A", Arg({"loadLDS_A"}, "Use LDS when loading A Matrix"));
     po.addArg("loadLDS_B", Arg({"loadLDS_B"}, "Use LDS when loading B Matrix"));
     po.addArg("storeLDS_D", Arg({"storeLDS_D"}, "Use LDS when storing D Matrix"));
-    po.addArg("type_A", Arg({"type_A"}, "Datatype of A Matrix [float | half]"));
-    po.addArg("type_B", Arg({"type_B"}, "Datatype of B Matrix [float | half]"));
-    po.addArg("type_C", Arg({"type_C"}, "Datatype of C Matrix [float | half]"));
-    po.addArg("type_D", Arg({"type_D"}, "Datatype of D Matrix [float | half]"));
-    po.addArg("type_acc", Arg({"type_acc"}, "Datatype of accumulation [float]"));
+    po.addArg("scheduler", Arg({"scheduler"}, "Which scheduler to use."));
+
+    // Benchmarking options
+    po.addArg("yaml", Arg({"o", "yaml"}, "Results"));
     po.addArg("num_warmup", Arg({"num_warmup"}, "Number of warm-up runs."));
     po.addArg("num_outer", Arg({"num_outer"}, "Number of outer runs."));
     po.addArg("num_inner", Arg({"num_inner"}, "Number of inner runs."));
-    po.addArg("trans_A",
-              Arg({"trans_A"}, "N: A is not already transposed. T: A is already transposed."));
-    po.addArg("trans_B",
-              Arg({"trans_B"}, "N: B is not already transposed. T: B is already transposed."));
-
     po.addArg("visualize",
               Arg({"visualize"}, "Dump out volumes describing memory access patterns."));
 
@@ -466,6 +483,7 @@ int main(int argc, const char* argv[])
     prob.type_acc         = po.get("type_acc", std::string("float"));
     prob.trans_A          = po.get("trans_A", std::string("N"));
     prob.trans_B          = po.get("trans_B", std::string("N"));
+    prob.scheduler        = po.get("scheduler", std::string("Priority"));
 
     prob.numWarmUp = po.get("num_warmup", 3);
     prob.numOuter  = po.get("num_outer", 5);

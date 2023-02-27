@@ -17,6 +17,8 @@ namespace rocRoller
 
         template <typename Ta, typename Tb, typename... Ts>
         Error(Ta const&, Tb const&, Ts const&...);
+
+        static bool BreakOnThrow();
     };
 
     struct FatalError : public Error

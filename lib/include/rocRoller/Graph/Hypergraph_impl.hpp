@@ -137,13 +137,13 @@ namespace rocRoller
                 {
                     m_incidence.insert({src, index, incidentOrder++});
                 }
-                AssertFatal(Hyper || (!Hyper && incidentOrder <= 1));
+                AssertFatal(Hyper || incidentOrder <= 1);
                 incidentOrder = 0;
                 for(int dst : outputs)
                 {
                     m_incidence.insert({index, dst, incidentOrder++});
                 }
-                AssertFatal(Hyper || (!Hyper && incidentOrder <= 1));
+                AssertFatal(Hyper || incidentOrder <= 1);
             }
             else
             {
@@ -158,7 +158,7 @@ namespace rocRoller
                     if(lastSrcIter != bySrc.end() && lastSrcIter->src == src)
                         incidentOrder = lastSrcIter->edgeOrder + 1;
 
-                    AssertFatal(Hyper || (!Hyper && incidentOrder == 0));
+                    AssertFatal(Hyper || incidentOrder == 0);
                     m_incidence.insert({src, index, incidentOrder});
                 }
 
@@ -173,7 +173,7 @@ namespace rocRoller
                     if(lastDstIter != byDst.end() && lastDstIter->dst == dst)
                         incidentOrder = lastDstIter->edgeOrder + 1;
 
-                    AssertFatal(Hyper || (!Hyper && incidentOrder == 0));
+                    AssertFatal(Hyper || incidentOrder == 0);
                     m_incidence.insert({index, dst, incidentOrder});
                 }
             }

@@ -60,7 +60,8 @@ namespace rocRoller::KernelGraph
         }
     }
 
-    std::string ControlToCoordinateMapper::toDOT(std::string coord, std::string cntrl) const
+    std::string ControlToCoordinateMapper::toDOT(std::string const& coord,
+                                                 std::string const& cntrl) const
     {
         std::stringstream ss;
 

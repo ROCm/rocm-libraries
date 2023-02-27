@@ -144,9 +144,9 @@ namespace rocRoller
     LDSAllocation::LDSAllocation(std::shared_ptr<LDSAllocator> allocator,
                                  unsigned int                  size,
                                  unsigned int                  offset)
-        : m_allocator(allocator)
-        , m_size(size)
+        : m_size(size)
         , m_offset(offset)
+        , m_allocator(allocator)
     {
     }
 

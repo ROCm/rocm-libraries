@@ -71,13 +71,15 @@ namespace rocRoller
     inline void
         RegisterTagManager::addExpression(int tag, Expression::ExpressionPtr value, DataType dt)
     {
-        AssertFatal(!hasRegister(tag), "Tag already associated with a register");
+        AssertFatal(!hasRegister(tag), "Tag ", tag, " already associated with a register");
         m_expressions.insert(
             std::pair<int, std::pair<Expression::ExpressionPtr, DataType>>(tag, {value, dt}));
     }
 
     inline void RegisterTagManager::deleteTag(int tag)
     {
+        auto inst = Instruction::Comment(concatenate("Deleting tag ", tag));
+        m_context.lock()->schedule(inst);
         m_registers.erase(tag);
         m_expressions.erase(tag);
     }

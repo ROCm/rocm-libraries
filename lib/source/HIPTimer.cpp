@@ -9,18 +9,16 @@
 namespace rocRoller
 {
     HIPTimer::HIPTimer(std::string name)
-        : HIPTimer(name, 0)
+        : HIPTimer(std::move(name), 0)
     {
     }
 
     HIPTimer::HIPTimer(std::string name, hipStream_t stream)
-        : Timer(name)
+        : Timer(std::move(name))
         , m_hip_stream(stream)
     {
         HIP_CHECK(hipEventCreate(&m_hip_start));
         HIP_CHECK(hipEventCreate(&m_hip_stop));
-
-        tic();
     }
 
     HIPTimer::~HIPTimer()

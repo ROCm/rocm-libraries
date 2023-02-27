@@ -1,6 +1,8 @@
 
 #include "Utilities/Error.hpp"
 
+#include "Utilities/Settings.hpp"
+
 namespace rocRoller
 {
     [[noreturn]] void Crash()
@@ -15,6 +17,11 @@ namespace rocRoller
     int* GetNullPointer()
     {
         return nullptr;
+    }
+
+    bool Error::BreakOnThrow()
+    {
+        return Settings::getInstance()->get(Settings::BreakOnThrow);
     }
 
 }

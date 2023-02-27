@@ -237,7 +237,6 @@ namespace rocRoller
         }
         throw std::runtime_error(
             concatenate("Invalid pointer type: ", static_cast<int>(pointerType)));
-        return 0;
     }
 
     VariableType VariableType::Promote(VariableType lhs, VariableType rhs)

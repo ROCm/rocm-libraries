@@ -84,6 +84,25 @@ namespace rocRollerTest
         return std::move(inst);
     }
 
+    TEST_F(SchedulerTest, Enum)
+    {
+        using namespace rocRoller::Scheduling;
+        EXPECT_EQ(ToString(SchedulerProcedure::Sequential), "Sequential");
+        EXPECT_EQ(ToString(SchedulerProcedure::RoundRobin), "RoundRobin");
+        EXPECT_EQ(ToString(SchedulerProcedure::Random), "Random");
+        EXPECT_EQ(ToString(SchedulerProcedure::Cooperative), "Cooperative");
+        EXPECT_EQ(ToString(SchedulerProcedure::Priority), "Priority");
+        EXPECT_EQ(ToString(SchedulerProcedure::Count), "Count");
+
+        EXPECT_EQ(fromString<SchedulerProcedure>("Sequential"), SchedulerProcedure::Sequential);
+        EXPECT_EQ(fromString<SchedulerProcedure>("RoundRobin"), SchedulerProcedure::RoundRobin);
+        EXPECT_EQ(fromString<SchedulerProcedure>("Random"), SchedulerProcedure::Random);
+        EXPECT_EQ(fromString<SchedulerProcedure>("Cooperative"), SchedulerProcedure::Cooperative);
+        EXPECT_EQ(fromString<SchedulerProcedure>("Priority"), SchedulerProcedure::Priority);
+        EXPECT_ANY_THROW(fromString<SchedulerProcedure>("Count"));
+        EXPECT_ANY_THROW(fromString<SchedulerProcedure>("fjdksl"));
+    }
+
     TEST_F(SchedulerTest, ConsumeCommentsTest)
     {
         using namespace rocRoller::Scheduling;

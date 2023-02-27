@@ -19,6 +19,7 @@ namespace rocRoller
          */
         struct Sequence
         {
+            // cppcheck-suppress functionStatic
             std::string toString() const
             {
                 return "Sequence";
@@ -32,6 +33,7 @@ namespace rocRoller
          */
         struct Body
         {
+            // cppcheck-suppress functionStatic
             std::string toString() const
             {
                 return "Body";
@@ -44,6 +46,7 @@ namespace rocRoller
          */
         struct Initialize
         {
+            // cppcheck-suppress functionStatic
             std::string toString() const
             {
                 return "Initialize";
@@ -55,6 +58,7 @@ namespace rocRoller
          */
         struct ForLoopIncrement
         {
+            // cppcheck-suppress functionStatic
             std::string toString() const
             {
                 return "ForLoopIncrement";

@@ -89,14 +89,14 @@ namespace rocRoller
         template <typename T>
         std::shared_ptr<Base> ComponentFactory<Base>::get(T&& arg) const
         {
-            auto iter = m_instanceCache.find(std::forward<T>(arg));
+            auto iter = m_instanceCache.find(arg);
 
             if(iter != m_instanceCache.end())
             {
                 return iter->second;
             }
 
-            auto newInstance                      = getNew(std::forward<T>(arg));
+            auto newInstance                      = getNew(arg);
             m_instanceCache[std::forward<T>(arg)] = newInstance;
 
             return newInstance;
@@ -106,7 +106,7 @@ namespace rocRoller
         template <typename T>
         std::shared_ptr<Base> ComponentFactory<Base>::getNew(T&& arg) const
         {
-            auto const& entry = getEntry(std::forward<T>(arg));
+            auto const& entry = getEntry(arg);
 
             return entry.builder(std::forward<T>(arg));
         }
@@ -116,14 +116,14 @@ namespace rocRoller
         typename ComponentFactory<Base>::Entry const&
             ComponentFactory<Base>::getEntry(T&& arg) const
         {
-            auto iter = m_entryCache.find(std::forward<T>(arg));
+            auto iter = m_entryCache.find(arg);
 
             if(iter != m_entryCache.end())
             {
                 return iter->second;
             }
 
-            Entry const& e = findEntry<T, Debug>(std::forward<T>(arg));
+            Entry const& e = findEntry<T, Debug>(arg);
 
             return m_entryCache[std::forward<T>(arg)] = e;
         }
@@ -176,12 +176,10 @@ namespace rocRoller
                                                        Matcher<Base>      matcher,
                                                        Builder<Base>      builder)
         {
-            for(auto const& entry : m_entries)
-            {
-                if(entry.name == name)
-                    throw std::runtime_error(concatenate(
-                        "Duplicate ", Base::Basename, " component names: '", name, "'"));
-            }
+            auto sameName = [&name](auto const& entry) { return entry.name == name; };
+            if(std::any_of(m_entries.begin(), m_entries.end(), sameName))
+                throw std::runtime_error(
+                    concatenate("Duplicate ", Base::Basename, " component names: '", name, "'"));
 
             RegisterBase(this);
 
@@ -194,8 +192,8 @@ namespace rocRoller
         template <typename T>
         void ComponentFactory<Base>::emptyCache(T&& arg)
         {
-            m_entryCache.erase(std::forward<T>(arg));
-            m_instanceCache.erase(std::forward<T>(arg));
+            m_entryCache.erase(arg);
+            m_instanceCache.erase(arg);
         }
 
         template <ComponentBase Base>

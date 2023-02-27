@@ -29,6 +29,9 @@ namespace rocRoller
         int         bit = -1;
     };
 
+    std::string ToString(LogLevel level);
+    std::string toString(LogLevel level);
+
     /**
      * @brief Settings class is derived from lazy singleton class and handles options
      * that are defined through environment variables or developer defined options.
@@ -151,16 +154,6 @@ namespace rocRoller
          */
         template <typename Option>
         inline void set(Option const& opt, char const* val);
-
-        /**
-         * @brief Stringify Settings variables
-         *
-         * @tparam T Settings variable type to stringify. Supported: LogLevel.
-         * @param var The Settings varaible being stringified.
-         * @return std::string The string conversion of var.
-         */
-        template <typename T>
-        std::string toString(T const& var) const;
 
     private:
         friend rocRoller::LazySingleton<Settings>;

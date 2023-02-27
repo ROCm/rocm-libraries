@@ -477,12 +477,30 @@ namespace rocRoller
             m_contiguousIndices = true;
         }
 
+        inline bool Value::canUseAsOperand() const
+        {
+            if(m_regType == Type::Accumulator || m_regType == Type::Scalar
+               || m_regType == Type::Vector)
+            {
+                return m_allocation != nullptr
+                       && m_allocation->allocationState() == AllocationState::Allocated
+                       && !m_allocationCoord.empty();
+            }
+
+            return true;
+        }
+
+        inline void Value::assertCanUseAsOperand() const
+        {
+            AssertFatal(canUseAsOperand(), "Tried to use unallocated register value!");
+        }
+
         inline void Value::gprString(std::ostream& os) const
         {
-            AssertFatal(m_allocation != nullptr
-                            && m_allocation->allocationState() == AllocationState::Allocated
-                            && !m_allocationCoord.empty(),
-                        "Tried to use unallocated register value!");
+            AssertFatal(m_regType == Type::Accumulator || m_regType == Type::Scalar
+                            || m_regType == Type::Vector,
+                        "gprString is only applicable for actual GPRs.");
+            assertCanUseAsOperand();
 
             auto prefix = TypePrefix(m_regType);
 

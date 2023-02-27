@@ -57,98 +57,28 @@ namespace rocRoller
     template <typename T>
     inline T Settings::getTypeValue(std::string const& var) const
     {
-        std::istringstream stream(var);
-        T                  value;
-        stream >> value;
-        return value;
-    }
-
-    template <>
-    inline Scheduling::SchedulerProcedure
-        Settings::getTypeValue<Scheduling::SchedulerProcedure>(std::string const& proc) const
-    {
-        if(proc == Scheduling::toString(Scheduling::SchedulerProcedure::Sequential))
+        if constexpr(CCountedEnum<T>)
         {
-            return Scheduling::SchedulerProcedure::Sequential;
+            return fromString<T>(var);
         }
-        else if(proc == Scheduling::toString(Scheduling::SchedulerProcedure::RoundRobin))
+        else if constexpr(std::same_as<Settings::bitFieldType, T>)
         {
-            return Scheduling::SchedulerProcedure::RoundRobin;
+            return bitFieldType{var};
         }
-        else if(proc == Scheduling::toString(Scheduling::SchedulerProcedure::Random))
+        else if constexpr(std::same_as<bool, T>)
         {
-            return Scheduling::SchedulerProcedure::Random;
+            return var != "0";
         }
-        else if(proc == Scheduling::toString(Scheduling::SchedulerProcedure::Cooperative))
+        else if constexpr(std::same_as<std::string, T>)
         {
-            return Scheduling::SchedulerProcedure::Cooperative;
-        }
-        else if(proc == Scheduling::toString(Scheduling::SchedulerProcedure::Priority))
-        {
-            return Scheduling::SchedulerProcedure::Priority;
+            return var;
         }
         else
         {
-            Throw<FatalError>("Trying to get unsupported/invalid scheduling procedure.");
-        }
-    }
-
-    template <>
-    inline Settings::bitFieldType
-        Settings::getTypeValue<Settings::bitFieldType>(std::string const& var) const
-    {
-        bitFieldType res{var};
-        return res;
-    }
-
-    template <>
-    inline int Settings::getTypeValue<int>(std::string const& var) const
-    {
-        return std::stoi(var, nullptr, 0);
-    }
-
-    template <>
-    inline bool Settings::getTypeValue<bool>(std::string const& var) const
-    {
-        return var != "0";
-    }
-
-    template <>
-    inline std::string Settings::getTypeValue<std::string>(std::string const& var) const
-    {
-        return var;
-    }
-
-    template <>
-    inline LogLevel Settings::getTypeValue<LogLevel>(std::string const& var) const
-    {
-        if(var == "None")
-        {
-            return LogLevel::None;
-        }
-        else if(var == "Error")
-        {
-            return LogLevel::Error;
-        }
-        else if(var == "Warning")
-        {
-            return LogLevel::Warning;
-        }
-        else if(var == "Terse")
-        {
-            return LogLevel::Terse;
-        }
-        else if(var == "Verbose")
-        {
-            return LogLevel::Verbose;
-        }
-        else if(var == "Debug")
-        {
-            return LogLevel::Debug;
-        }
-        else
-        {
-            Throw<FatalError>("Trying to get invalid LogLevel.");
+            std::istringstream stream(var);
+            T                  value;
+            stream >> value;
+            return value;
         }
     }
 
@@ -207,53 +137,38 @@ namespace rocRoller
         }
     }
 
-    template <typename T>
-    inline std::string Settings::toString(T const& var) const
+    inline std::string toString(LogLevel logLevel)
     {
-        Throw<FatalError>("Unsupported type for Settings::toString()");
-    }
-
-    template <>
-    inline std::string Settings::toString(LogLevel const& logLevel) const
-    {
-        std::string rv = "";
-
         switch(logLevel)
         {
         case LogLevel::None:
-            rv = "None";
-            break;
+            return "None";
         case LogLevel::Error:
-            rv = "Error";
-            break;
+            return "Error";
         case LogLevel::Warning:
-            rv = "Warning";
-            break;
+            return "Warning";
         case LogLevel::Terse:
-            rv = "Terse";
-            break;
+            return "Terse";
         case LogLevel::Verbose:
-            rv = "Verbose";
-            break;
+            return "Verbose";
         case LogLevel::Debug:
-            rv = "Debug";
+            return "Debug";
             break;
         case LogLevel::Count:
-            rv = "LogLevel Count (";
-            rv += std::to_string(static_cast<int>(LogLevel::Count));
-            rv += ")";
-            break;
-        default:
-            Throw<FatalError>("Unsupported LogLevel for Settings::toString().");
+            return "Count";
         }
 
-        return rv;
+        Throw<FatalError>("Unsupported LogLevel.");
+    }
+
+    inline std::string ToString(LogLevel level)
+    {
+        return toString(level);
     }
 
     inline std::ostream& operator<<(std::ostream& os, const LogLevel& input)
     {
-        os << Settings::getInstance()->toString(input);
-        return os;
+        return os << toString(input);
     }
 
     inline Settings::Settings() {}

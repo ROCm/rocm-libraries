@@ -1,5 +1,5 @@
 import pathlib
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field, fields, asdict
 from typing import List
 
 import yaml
@@ -68,6 +68,10 @@ class GEMM:
     loadLDS_B: bool = True
     storeLDS_D: bool = False
 
+    scheduler: str = "Priority"
+
+    visualize: bool = False
+
     @property
     def token(self):
         return repr(GEMM(**field_dict(GEMM, self)))
@@ -87,35 +91,23 @@ class GEMMRun(GEMM):
         self.output = path
 
     def command(self):
-        retval = [
-            "client/gemm",
-            "--M=" + str(self.M),
-            "--N=" + str(self.N),
-            "--K=" + str(self.K),
-            "--mac_m=" + str(self.mac_m),
-            "--mac_n=" + str(self.mac_n),
-            "--mac_k=" + str(self.mac_k),
-            "--workgroup_size_x=" + str(self.workgroup_size_x),
-            "--workgroup_size_y=" + str(self.workgroup_size_y),
-            "--unroll_x=" + str(self.unroll_x),
-            "--unroll_y=" + str(self.unroll_y),
-            "--alpha=" + str(self.alpha),
-            "--beta=" + str(self.beta),
-            "--type_A=" + str(self.type_A),
-            "--type_B=" + str(self.type_B),
-            "--type_C=" + str(self.type_C),
-            "--type_D=" + str(self.type_D),
-            "--type_acc=" + str(self.type_acc),
-            "--loadLDS_A=" + str(self.loadLDS_A),
-            "--loadLDS_B=" + str(self.loadLDS_B),
-            "--storeLDS_D=" + str(self.storeLDS_D),
-            "--yaml=" + str(self.output),
-            "--num_warmup=" + str(self.numWarmUp),
-            "--num_outer=" + str(self.numOuter),
-            "--num_inner=" + str(self.numInner),
-            "--trans_A=" + str(self.trans_A),
-            "--trans_B=" + str(self.trans_B),
-        ]
+        specialNames = {"output": "yaml",
+                        "numWarmUp": "num_warmup",
+                        "numOuter": "num_outer",
+                        "numInner": "num_inner",
+                        }
+
+        command = "client/gemm"
+
+        def argName(key):
+            if key in specialNames:
+                return specialNames[key]
+            return key
+
+        args = list([f"--{argName(key)}={value}"
+                     for key, value in asdict(self).items()])
+        retval = [command] + args
+
         print(" ".join(retval))
         return retval
 

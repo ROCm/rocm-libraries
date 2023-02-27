@@ -48,7 +48,16 @@ namespace rocRoller
             }
             std::string operator()(std::shared_ptr<Register::Value> const& expr) const
             {
-                return expr->toString() + ":" + TypeAbbrev(expr->variableType());
+                // This allows an unallocated register value to be rendered into a string which
+                // improves debugging by allowing the string representation of that expression
+                // to be put into the source file as a comment.
+                // Trying to generate the code for the expression will throw an exception.
+
+                std::string tostr = "UNALLOCATED";
+                if(expr->canUseAsOperand())
+                    tostr = expr->toString();
+
+                return tostr + ":" + TypeAbbrev(expr->variableType());
             }
             std::string operator()(std::shared_ptr<CommandArgument> const& expr) const
             {

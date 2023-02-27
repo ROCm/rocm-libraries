@@ -103,10 +103,10 @@ namespace rocRoller
          * May be the same object from one call to the next.
          */
         template <ComponentBase Base>
-        requires(!CSingleUse<Base>) std::shared_ptr<Base> Get(typename Base::Argument const& ctx);
+        requires(!CSingleUse<Base>) std::shared_ptr<Base> Get(typename Base::Argument const& arg);
 
         template <ComponentBase Base>
-        requires(!CSingleUse<Base>) std::shared_ptr<Base> Get(typename Base::Argument&& ctx);
+        requires(!CSingleUse<Base>) std::shared_ptr<Base> Get(typename Base::Argument&& arg);
 
         /**
          * @brief Convenience function which will construct a tuple and call the above implementation of
@@ -125,10 +125,10 @@ namespace rocRoller
          * on `ctx`.
          */
         template <ComponentBase Base>
-        std::shared_ptr<Base> GetNew(typename Base::Argument const& ctx);
+        std::shared_ptr<Base> GetNew(typename Base::Argument const& arg);
 
         template <ComponentBase Base>
-        std::shared_ptr<Base> GetNew(typename Base::Argument&& ctx);
+        std::shared_ptr<Base> GetNew(typename Base::Argument&& arg);
 
         // clang-format off
         template <ComponentBase Base, typename Arg0, typename... Args>

@@ -138,6 +138,12 @@ namespace rocRoller
             bool isExec() const;
 
             /**
+             * Asserts that `this` is in a valid state to be used as an operand to an instruction.
+             */
+            void assertCanUseAsOperand() const;
+            bool canUseAsOperand() const;
+
+            /**
              * Returns a new unallocated RegisterValue with the same characteristics (register type,
              * data type, count, etc.)
              */

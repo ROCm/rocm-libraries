@@ -10,6 +10,7 @@
 #include <string>
 
 #include <rocRoller/Utilities/Settings.hpp>
+#include <rocRoller/Utilities/Timer.hpp>
 
 namespace rocRoller
 {

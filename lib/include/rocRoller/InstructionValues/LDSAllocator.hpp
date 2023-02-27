@@ -132,7 +132,7 @@ namespace rocRoller
          *
          * @param size
          */
-        void setOffset(unsigned int size);
+        void setOffset(unsigned int offset);
 
         unsigned int                m_size;
         unsigned int                m_offset;

@@ -99,16 +99,16 @@ namespace rocRollerTest
         out << LogLevel::Terse << std::endl;
         out << LogLevel::Verbose << std::endl;
         out << LogLevel::Debug << std::endl;
-        out << LogLevel::Count;
+        out << LogLevel::Count << std::endl;
 
         std::string stringify = "";
-        stringify += settings->toString(LogLevel::None) + '\n';
-        stringify += settings->toString(LogLevel::Error) + '\n';
-        stringify += settings->toString(LogLevel::Warning) + '\n';
-        stringify += settings->toString(LogLevel::Terse) + '\n';
-        stringify += settings->toString(LogLevel::Verbose) + '\n';
-        stringify += settings->toString(LogLevel::Debug) + '\n';
-        stringify += settings->toString(LogLevel::Count) + '\n';
+        stringify += toString(LogLevel::None) + '\n';
+        stringify += toString(LogLevel::Error) + '\n';
+        stringify += toString(LogLevel::Warning) + '\n';
+        stringify += toString(LogLevel::Terse) + '\n';
+        stringify += toString(LogLevel::Verbose) + '\n';
+        stringify += toString(LogLevel::Debug) + '\n';
+        stringify += toString(LogLevel::Count) + '\n';
 
         std::string expected = R"(
             None
@@ -117,11 +117,19 @@ namespace rocRollerTest
             Terse
             Verbose
             Debug
-            LogLevel Count (6)
+            Count
             )";
 
         EXPECT_EQ(NormalizedSource(expected), NormalizedSource(out.str()));
         EXPECT_EQ(NormalizedSource(expected), NormalizedSource(stringify));
+
+        EXPECT_EQ(fromString<LogLevel>("None"), LogLevel::None);
+        EXPECT_EQ(fromString<LogLevel>("Error"), LogLevel::Error);
+        EXPECT_EQ(fromString<LogLevel>("Warning"), LogLevel::Warning);
+        EXPECT_EQ(fromString<LogLevel>("Terse"), LogLevel::Terse);
+        EXPECT_EQ(fromString<LogLevel>("Verbose"), LogLevel::Verbose);
+        EXPECT_EQ(fromString<LogLevel>("Debug"), LogLevel::Debug);
+        EXPECT_ANY_THROW(fromString<LogLevel>("Count"));
     }
 
     TEST_F(GenericSettings, InvalidValueTest)

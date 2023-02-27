@@ -374,6 +374,12 @@ namespace rocRoller
     };
     // clang-format on
 
+    /**
+     * Converts a string value to an enum by comparing against each ToString conversion.
+     */
+    template <CCountedEnum T>
+    T fromString(std::string const& str);
+
     template <typename Range, typename Of>
     concept CForwardRangeOf = requires
     {
@@ -403,3 +409,5 @@ namespace std
         return stream << "]";
     }
 }
+
+#include "Utils_impl.hpp"

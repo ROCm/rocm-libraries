@@ -8,7 +8,7 @@
 ParseOptions::ParseOptions() {}
 
 ParseOptions::ParseOptions(std::string helpMessage)
-    : m_helpMessage(helpMessage)
+    : m_helpMessage(std::move(helpMessage))
 {
 }
 
@@ -76,7 +76,6 @@ void ParseOptions::parse_args(int argc, const char* argv[])
             exit(EXIT_FAILURE);
         }
 
-        std::string dash  = match[1];
         std::string flag  = match[2];
         std::string value = match[3];
 
@@ -112,11 +111,12 @@ void ParseOptions::validateArgs()
 
 void ParseOptions::addArg(std::string name, Arg const& arg)
 {
-    m_valid_args.insert({name, arg});
+    m_valid_args.insert({std::move(name), arg});
 }
 
 template <>
-std::string ParseOptions::get<std::string>(std::string name, std::string const& defaultVal)
+std::string ParseOptions::get<std::string>(std::string const& name,
+                                           std::string const& defaultVal) const
 {
     auto flags = m_valid_args.at(name).flags();
     for(auto flag : flags)
@@ -130,7 +130,7 @@ std::string ParseOptions::get<std::string>(std::string name, std::string const& 
 }
 
 template <>
-int ParseOptions::get<int>(std::string name, int const& defaultVal)
+int ParseOptions::get<int>(std::string const& name, int const& defaultVal) const
 {
     auto flags = m_valid_args.at(name).flags();
     for(auto flag : flags)
@@ -144,7 +144,7 @@ int ParseOptions::get<int>(std::string name, int const& defaultVal)
 }
 
 template <>
-float ParseOptions::get<float>(std::string name, float const& defaultVal)
+float ParseOptions::get<float>(std::string const& name, float const& defaultVal) const
 {
     auto flags = m_valid_args.at(name).flags();
     for(auto flag : flags)
@@ -158,7 +158,7 @@ float ParseOptions::get<float>(std::string name, float const& defaultVal)
 }
 
 template <>
-bool ParseOptions::get<bool>(std::string name, bool const& defaultVal)
+bool ParseOptions::get<bool>(std::string const& name, bool const& defaultVal) const
 {
     auto flags = m_valid_args.at(name).flags();
     for(auto flag : flags)
@@ -173,17 +173,17 @@ bool ParseOptions::get<bool>(std::string name, bool const& defaultVal)
 }
 
 Arg::Arg(std::vector<std::string> flags, std::string usage)
-    : m_flags(flags)
-    , m_usage(usage)
+    : m_flags(std::move(flags))
+    , m_usage(std::move(usage))
 {
 }
 
-std::vector<std::string> Arg::flags()
+std::vector<std::string> Arg::flags() const
 {
     return m_flags;
 }
 
-std::string Arg::usage()
+std::string Arg::usage() const
 {
     return m_usage;
 }

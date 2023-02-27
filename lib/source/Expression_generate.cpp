@@ -403,13 +403,10 @@ namespace rocRoller
                         m_context, Register::Type::Accumulator, accType, accRegCount);
                 }
 
-                co_yield Register::AllocateIfNeeded(dest);
-
                 auto mm = Component::Get<rocRoller::InstructionGenerators::MatrixMultiply>(
                     m_context, accType, lhs->variableType().dataType);
 
                 r2hs = std::get<Register::ValuePtr>(*expr.r2hs);
-                co_yield Register::AllocateIfNeeded(r2hs);
                 co_yield mm->mul(dest, lhs, r1hs, r2hs, M, N, K, B);
             }
 

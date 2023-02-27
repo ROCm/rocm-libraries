@@ -98,6 +98,7 @@ namespace VectorAddBenchmark
         runtimeArgs.append("d_c_stride", (size_t)1);
 
         HIP_TIMER(t_kernel, "VectorAddKernel_Graph");
+        HIP_TIC(t_kernel);
         commandKernel.launchKernel(runtimeArgs.runtimeArguments());
         HIP_TOC(t_kernel);
         HIP_SYNC(t_kernel);
@@ -112,6 +113,7 @@ namespace VectorAddBenchmark
         double rnorm = relativeNorm(r, x);
 
         ASSERT_LT(rnorm, 1.e-12);
+        EXPECT_GT(t_kernel.elapsed(), std::chrono::steady_clock::duration(0));
     }
 
     TEST_P(VectorAddBenchmarkGPU, VectorAddBenchmark_GPU_Graph)

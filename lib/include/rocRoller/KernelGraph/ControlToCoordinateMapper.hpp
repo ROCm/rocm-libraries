@@ -171,7 +171,7 @@ namespace rocRoller::KernelGraph
         /**
          * @brief Emit DOT representation of connections.
          */
-        std::string toDOT(std::string coord, std::string cntrl) const;
+        std::string toDOT(std::string const& coord, std::string const& cntrl) const;
 
     private:
         std::map<key_type, int> m_map;

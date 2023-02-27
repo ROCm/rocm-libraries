@@ -558,6 +558,17 @@ namespace rocRoller
 
     inline void Instruction::allocateNow()
     {
+        // Before allocating the destination register(s), assert that the source register(s)
+        // are allocated. This prevents us from accidentally using an unallocated register as
+        // both a source and a destination:
+        for(auto& s : m_src)
+        {
+            if(s)
+            {
+                s->assertCanUseAsOperand();
+            }
+        }
+
         for(auto& a : m_allocations)
         {
             if(a)

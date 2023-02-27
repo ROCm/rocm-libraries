@@ -148,8 +148,8 @@ namespace rocRoller
         RHS,
     };
 
-    std::string   ToString(LayoutType d);
-    std::ostream& operator<<(std::ostream& stream, LayoutType v);
+    std::string   ToString(LayoutType l);
+    std::ostream& operator<<(std::ostream& stream, LayoutType l);
 
     /**
      * VariableType
@@ -225,7 +225,7 @@ namespace rocRoller
         static VariableType Promote(VariableType lhs, VariableType rhs);
     };
 
-    std::string   ToString(PointerType const& v);
+    std::string   ToString(PointerType const& p);
     std::ostream& operator<<(std::ostream& stream, PointerType const& p);
 
     std::string   ToString(VariableType const& v);

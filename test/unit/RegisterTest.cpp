@@ -21,7 +21,11 @@ TEST_F(RegisterTest, Simple)
 {
     auto r
         = std::make_shared<Register::Value>(m_context, Register::Type::Vector, DataType::Float, 1);
+    EXPECT_EQ(false, r->canUseAsOperand());
+    EXPECT_ANY_THROW(r->assertCanUseAsOperand());
     r->allocateNow();
+    EXPECT_EQ(true, r->canUseAsOperand());
+    EXPECT_NO_THROW(r->assertCanUseAsOperand());
 }
 
 TEST_F(RegisterTest, Promote)
@@ -117,9 +121,11 @@ TEST_F(RegisterTest, Literal)
 {
     auto r = Register::Value::Literal(5);
     EXPECT_EQ("5", r->toString());
+    EXPECT_EQ(true, r->canUseAsOperand());
 
     r = Register::Value::Literal(100.0f);
     EXPECT_EQ("100.000", r->toString());
+    EXPECT_EQ(true, r->canUseAsOperand());
 
     r = Register::Value::Literal(3.14159f);
     EXPECT_EQ("3.14159", r->toString());
@@ -165,6 +171,10 @@ TEST_F(RegisterTest, Name)
 
     r->allocation()->setName("D2");
     EXPECT_EQ("D2", r->allocation()->name());
+    EXPECT_EQ("D0", r->name());
+
+    r->setName("D3");
+    EXPECT_EQ("D2", r->allocation()->name());
 }
 
 /**
@@ -174,7 +184,8 @@ TEST_F(RegisterTest, LabelRegister)
 {
     {
         auto label = m_context->labelAllocator()->label("main_loop");
-        auto inst  = Instruction::Label(label);
+        EXPECT_EQ(true, label->canUseAsOperand());
+        auto inst = Instruction::Label(label);
         m_context->schedule(inst);
     }
 
