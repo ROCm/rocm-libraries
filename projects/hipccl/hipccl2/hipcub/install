@@ -117,7 +117,7 @@ if [[ "${build_relocatable}" == true ]]; then
     fi
 fi
 
-# Instal the pre-commit hook
+# Install the pre-commit hook
 bash .githooks/install
 
 

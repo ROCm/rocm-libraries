@@ -641,7 +641,7 @@ struct CooMatrix
 
     /**
      * Builds a square 3D grid COO sparse matrix.  Interior num_vertices have degree 7 when including
-     * a self-loop.  Values are unintialized, coo_tuples are sorted.
+     * a self-loop.  Values are uninitialized, coo_tuples are sorted.
      */
     int InitGrid3d(OffsetT width, bool self_loop, ValueT default_value = 1.0)
     {
