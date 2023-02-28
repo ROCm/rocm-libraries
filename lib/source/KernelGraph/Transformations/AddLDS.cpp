@@ -14,6 +14,7 @@ namespace rocRoller
         using namespace ControlGraph;
         using namespace CoordinateGraph;
         using namespace Expression;
+        using namespace Register;
 
         struct AddLDSVisitor
         {
@@ -377,15 +378,22 @@ namespace rocRoller
                 updateLoadLDSMacroTile(graph, macrotile, load, sdims, K, localInfo.lds);
 
                 // create an internal macrotile to be loaded by one workgroup
-                auto workgroupSizes = m_context->kernel()->workgroupSize();
-                auto numWorkitems   = product(workgroupSizes);
-                auto numElements    = product(macrotile.sizes);
-                auto numVGPRs       = static_cast<int>(numElements / numWorkitems);
-                // TODO : load the two Halfs into 1 VGPR
-                //if(vtype == DataType::Half)
-                //num_vgprs = num_vgprs / 2;
-                auto t_m               = numVGPRs;
-                auto t_n               = 1;
+                auto workgroupSizes         = m_context->kernel()->workgroupSize();
+                auto numWorkitems           = product(workgroupSizes);
+                auto numElements            = product(macrotile.sizes);
+                auto numElementsPerWorkitem = static_cast<int>(numElements / numWorkitems);
+                auto t_m                    = numElementsPerWorkitem;
+                auto t_n                    = 1;
+
+                // load multiple smaller-precision(< 32-bit) elements into 1 VGPR
+                auto factor = bytesPerRegister / DataTypeInfo::Get(vtype).elementSize;
+                if(m_context->kernelOptions().packMultipleElementsInto1VGPR && factor > 1
+                   && t_m % factor == 0)
+                {
+                    t_m = t_m / factor;
+                    t_n = factor;
+                }
+
                 localInfo.internalTile = graph.coordinates.addElement(
                     MacroTile(macrotile.sizes, MemoryType::VGPR, {t_m, t_n}));
                 auto internalTileDim = graph.coordinates.getNode<MacroTile>(localInfo.internalTile);
@@ -470,15 +478,22 @@ namespace rocRoller
                 graph.control.addElement(Sequence(), {upperLoop}, {load_macrotile_from_LDS});
 
                 // create an internal macrotile to be loaded by one workgroup
-                auto workgroupSizes = context->kernel()->workgroupSize();
-                auto numWorkitems   = product(workgroupSizes);
-                auto numElements    = product(macrotile.sizes);
-                auto numVGPRs       = static_cast<int>(numElements / numWorkitems);
-                // TODO : load the two Halfs into 1 VGPR
-                //if(vtype == DataType::Half)
-                //num_vgprs = num_vgprs / 2;
-                auto t_m          = numVGPRs;
-                auto t_n          = 1;
+                auto workgroupSizes         = context->kernel()->workgroupSize();
+                auto numWorkitems           = product(workgroupSizes);
+                auto numElements            = product(macrotile.sizes);
+                auto numElementsPerWorkitem = static_cast<int>(numElements / numWorkitems);
+                auto t_m                    = numElementsPerWorkitem;
+                auto t_n                    = 1;
+
+                // load multiple smaller-precision(< 32-bit) elements into 1 VGPR
+                auto factor = bytesPerRegister / DataTypeInfo::Get(dtype).elementSize;
+                if(context->kernelOptions().packMultipleElementsInto1VGPR && factor > 1
+                   && t_m % factor == 0)
+                {
+                    t_m = t_m / factor;
+                    t_n = factor;
+                }
+
                 auto internalTile = graph.coordinates.addElement(
                     MacroTile(macrotile.sizes, MemoryType::VGPR, {t_m, t_n}));
                 auto internalTileDim       = graph.coordinates.getNode<MacroTile>(internalTile);

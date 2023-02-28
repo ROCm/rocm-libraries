@@ -315,11 +315,11 @@ namespace rocRoller
             auto i_mac_x = graph.coordinates.addElement(mac_tile.tileIndex(0));
             auto i_mac_y = graph.coordinates.addElement(mac_tile.tileIndex(1));
             auto n_thr_x
-                = graph.coordinates.addElement(ThreadTileNumber(0, literal(thr_tile.wsizes.at(0))));
+                = graph.coordinates.addElement(ThreadTileNumber(0, literal(thr_tile.sizes.at(0))));
             auto n_thr_y
                 = graph.coordinates.addElement(ThreadTileNumber(1, literal(thr_tile.wsizes.at(1))));
             auto i_thr_x
-                = graph.coordinates.addElement(ThreadTileIndex(0, literal(thr_tile.sizes.at(0))));
+                = graph.coordinates.addElement(ThreadTileIndex(0, literal(thr_tile.wsizes.at(0))));
             auto i_thr_y
                 = graph.coordinates.addElement(ThreadTileIndex(1, literal(thr_tile.sizes.at(1))));
 
@@ -328,14 +328,14 @@ namespace rocRoller
             graph.coordinates.addElement(Tile(), {i_mac_x}, {n_thr_x, i_thr_x});
             graph.coordinates.addElement(Tile(), {i_mac_y}, {n_thr_y, i_thr_y});
 
-            graph.coordinates.addElement(Flatten(), {n_thr_y, n_thr_x}, {workitem_x});
+            graph.coordinates.addElement(Flatten(), {n_thr_y, i_thr_x}, {workitem_x});
 
             auto element_number_x
                 = graph.coordinates.addElement(ElementNumber(0, literal(thr_tile.sizes.at(0))));
             auto element_number_y
                 = graph.coordinates.addElement(ElementNumber(1, literal(thr_tile.sizes.at(1))));
 
-            graph.coordinates.addElement(PassThrough(), {i_thr_x}, {element_number_x});
+            graph.coordinates.addElement(PassThrough(), {n_thr_x}, {element_number_x});
             graph.coordinates.addElement(PassThrough(), {i_thr_y}, {element_number_y});
 
             graph.mapper.connect<ElementNumber>(load_tag, element_number_x, 0);
@@ -404,21 +404,21 @@ namespace rocRoller
                 n_thr_x = graph.coordinates.addElement(
                     ThreadTileNumber(0, literal(thr_tile.sizes.at(0))));
                 n_thr_y = graph.coordinates.addElement(
-                    ThreadTileNumber(1, literal(thr_tile.sizes.at(1))));
+                    ThreadTileNumber(1, literal(thr_tile.wsizes.at(1))));
                 i_thr_x = graph.coordinates.addElement(
                     ThreadTileIndex(0, literal(thr_tile.wsizes.at(0))));
                 i_thr_y = graph.coordinates.addElement(
-                    ThreadTileIndex(1, literal(thr_tile.wsizes.at(1))));
+                    ThreadTileIndex(1, literal(thr_tile.sizes.at(1))));
 
                 graph.coordinates.addElement(PassThrough(), {n_thr_x}, {element_number_x});
-                graph.coordinates.addElement(PassThrough(), {n_thr_y}, {element_number_y});
+                graph.coordinates.addElement(PassThrough(), {i_thr_y}, {element_number_y});
 
                 auto workitem_x
                     = graph.coordinates.addElement(Workitem(0, literal(workgroupSizes.at(0))));
                 if(mac_tile.layoutType == LayoutType::MATRIX_A
                    || mac_tile.layoutType == LayoutType::MATRIX_B)
                 {
-                    graph.coordinates.addElement(Flatten(), {i_thr_y, i_thr_x}, {workitem_x});
+                    graph.coordinates.addElement(Flatten(), {n_thr_y, i_thr_x}, {workitem_x});
                 }
                 else
                 {
@@ -426,7 +426,7 @@ namespace rocRoller
 
                     auto workitem_y
                         = graph.coordinates.addElement(Workitem(1, literal(workgroupSizes.at(1))));
-                    graph.coordinates.addElement(PassThrough(), {i_thr_y}, {workitem_y});
+                    graph.coordinates.addElement(PassThrough(), {n_thr_y}, {workitem_y});
                 }
             }
             else
@@ -782,14 +782,14 @@ namespace rocRoller
                 n_thr_x = graph.coordinates.addElement(
                     ThreadTileNumber(0, literal(thr_tile.sizes.at(0))));
                 n_thr_y = graph.coordinates.addElement(
-                    ThreadTileNumber(1, literal(thr_tile.sizes.at(1))));
+                    ThreadTileNumber(1, literal(thr_tile.wsizes.at(1))));
                 i_thr_x = graph.coordinates.addElement(
                     ThreadTileIndex(0, literal(thr_tile.wsizes.at(0))));
                 i_thr_y = graph.coordinates.addElement(
-                    ThreadTileIndex(1, literal(thr_tile.wsizes.at(1))));
+                    ThreadTileIndex(1, literal(thr_tile.sizes.at(1))));
 
                 graph.coordinates.addElement(PassThrough(), {element_number_x}, {n_thr_x});
-                graph.coordinates.addElement(PassThrough(), {element_number_y}, {n_thr_y});
+                graph.coordinates.addElement(PassThrough(), {element_number_y}, {i_thr_y});
 
                 auto workitem_x
                     = graph.coordinates.addElement(Workitem(0, literal(workgroupSizes.at(0))));
@@ -797,7 +797,7 @@ namespace rocRoller
                 if(mac_tile.layoutType == LayoutType::MATRIX_A
                    || mac_tile.layoutType == LayoutType::MATRIX_B)
                 {
-                    graph.coordinates.addElement(Tile(), {workitem_x}, {i_thr_y, i_thr_x});
+                    graph.coordinates.addElement(Tile(), {workitem_x}, {n_thr_y, i_thr_x});
                 }
                 else
                 {
@@ -805,7 +805,7 @@ namespace rocRoller
                         = graph.coordinates.addElement(Workitem(1, literal(workgroupSizes.at(1))));
 
                     graph.coordinates.addElement(PassThrough(), {workitem_x}, {i_thr_x});
-                    graph.coordinates.addElement(PassThrough(), {workitem_y}, {i_thr_y});
+                    graph.coordinates.addElement(PassThrough(), {workitem_y}, {n_thr_y});
                 }
             }
             else
@@ -898,11 +898,11 @@ namespace rocRoller
             auto thr_tile = ThreadTile(mac_tile);
 
             auto n_thr_x
-                = graph.coordinates.addElement(ThreadTileNumber(0, literal(thr_tile.wsizes.at(0))));
+                = graph.coordinates.addElement(ThreadTileNumber(0, literal(thr_tile.sizes.at(0))));
             auto n_thr_y
                 = graph.coordinates.addElement(ThreadTileNumber(1, literal(thr_tile.wsizes.at(1))));
             auto i_thr_x
-                = graph.coordinates.addElement(ThreadTileIndex(0, literal(thr_tile.sizes.at(0))));
+                = graph.coordinates.addElement(ThreadTileIndex(0, literal(thr_tile.wsizes.at(0))));
             auto i_thr_y
                 = graph.coordinates.addElement(ThreadTileIndex(1, literal(thr_tile.sizes.at(1))));
 
@@ -914,13 +914,13 @@ namespace rocRoller
             auto element_number_y
                 = graph.coordinates.addElement(ElementNumber(1, literal(thr_tile.sizes.at(1))));
 
-            graph.coordinates.addElement(PassThrough(), {element_number_x}, {i_thr_x});
+            graph.coordinates.addElement(PassThrough(), {element_number_x}, {n_thr_x});
             graph.coordinates.addElement(PassThrough(), {element_number_y}, {i_thr_y});
 
             graph.mapper.connect<ElementNumber>(store_tag, element_number_x, 0);
             graph.mapper.connect<ElementNumber>(store_tag, element_number_y, 1);
 
-            graph.coordinates.addElement(Tile(), {workitem_x}, {n_thr_y, n_thr_x});
+            graph.coordinates.addElement(Tile(), {workitem_x}, {n_thr_y, i_thr_x});
         }
 
         void storeMacroTile(KernelGraph&                       graph,

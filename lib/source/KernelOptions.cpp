@@ -21,6 +21,7 @@ namespace rocRoller
         , transposeMemoryAccessB(true)
         , transposeMemoryAccessOther(false)
         , assertWaitCntState(true)
+        , packMultipleElementsInto1VGPR(false)
     {
     }
 
@@ -43,6 +44,8 @@ namespace rocRoller
         os << "  transposeMemoryAccessB:\t" << input.transposeMemoryAccessB << std::endl;
         os << "  transposeMemoryAccessOther:\t" << input.transposeMemoryAccessOther << std::endl;
         os << "  assertWaitCntState:\t\t" << input.assertWaitCntState << std::endl;
+        os << "  packMultipleElementsInto1VGPR:\t\t" << input.packMultipleElementsInto1VGPR
+           << std::endl;
         return os;
     }
 
