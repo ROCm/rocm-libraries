@@ -341,8 +341,9 @@ def html_summary(  # noqa: C901
 
     plots = []
 
-    # Get all unique test tokens and sort them for consistent results.
-    tests = PerformanceRun.get_all_tokens(perf_runs)
+    # Get test tokens from the most recent run and sort them for consistent results.
+    tests = list(perf_runs[-1].results.keys())
+    tests.sort()
 
     # Get all unique machine specs and sort them for consistent results.
     configs = PerformanceRun.get_all_specs(perf_runs)
