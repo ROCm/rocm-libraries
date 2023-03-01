@@ -11,12 +11,66 @@ namespace rocRoller
     namespace KernelGraph
     {
         /**
-         * Create a range-based for loop.
+         * @brief Create a range-based for loop.
          */
         std::pair<int, int>
             rangeFor(KernelGraph& graph, Expression::ExpressionPtr size, const std::string& name);
 
+        /**
+         * @brief Remove a range-based for loop created by rangeFor.
+         */
         void purgeFor(KernelGraph& graph, int tag);
+
+        bool isHardwareCoordinate(int tag, KernelGraph const& kgraph);
+        bool isLoopishCoordinate(int tag, KernelGraph const& kgraph);
+        bool isStorageCoordinate(int tag, KernelGraph const& kgraph);
+
+        /**
+         * @brief Filter coordinates by type.
+         */
+        template <typename T>
+        std::unordered_set<int> filterCoordinates(std::vector<int>   candidates,
+                                                  KernelGraph const& kgraph);
+
+        /**
+         * @brief Find storage neighbour in either direction.
+         *
+         * Looks upstream and downstream for a neighbour that
+         * satisfies isStorageCoordinate.
+         *
+         * If found, returns the neighbour tag, and the direction to
+         * search for required coordinates.
+         *
+         * Tries upstream first.
+         */
+        std::optional<std::pair<int, Graph::Direction>>
+            findStorageNeighbour(int tag, KernelGraph const& kgraph);
+
+        /**
+         * @brief Return target coordinate for load/store operation.
+         *
+         * For loads, the target is the source (User or LDS) of the
+         * load.
+         *
+         * For stores, the target is the destination (User or LDS) of
+         * the store.
+         */
+        std::pair<int, Graph::Direction> getOperationTarget(int tag, KernelGraph const& kgraph);
+
+        /**
+         * @brief Find all required coordintes needed to compute
+         * indexes for the target dimension.
+         */
+        std::vector<int> findRequiredCoordinates(int                target,
+                                                 Graph::Direction   direction,
+                                                 KernelGraph const& kgraph);
+
+        /**
+         * @brief Find the operation of type T that contains the
+         * candidate load/store operation.
+         */
+        template <typename T>
+        std::optional<int> findContainingOperation(int candidate, KernelGraph const& kgraph);
 
         /**
          * Replace operation with a scope.  Does not delete the original operation.

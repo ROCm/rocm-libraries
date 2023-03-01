@@ -317,6 +317,11 @@ namespace rocRoller
             m_indexes.insert_or_assign(tag, index);
         }
 
+        ExpressionPtr Transformer::getCoordinate(int tag) const
+        {
+            return m_indexes.at(tag);
+        }
+
         void Transformer::removeCoordinate(int tag)
         {
             m_indexes.erase(tag);

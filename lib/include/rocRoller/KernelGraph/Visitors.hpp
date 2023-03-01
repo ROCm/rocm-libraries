@@ -214,8 +214,6 @@ namespace rocRoller
                         reindexer.coordinates.emplace(input, newInput);
                     }
                     inputs.push_back(reindexer.coordinates.at(input));
-                    rocRoller::Log::getLogger()->debug(
-                        "KernelGraph::copyEdge(): input {} -> {}", input, inputs.back());
                 }
 
                 std::vector<int> outputs;
@@ -228,17 +226,12 @@ namespace rocRoller
                         reindexer.coordinates.emplace(output, newOutput);
                     }
                     outputs.push_back(reindexer.coordinates.at(output));
-                    rocRoller::Log::getLogger()->debug(
-                        "KernelGraph::copyEdge(): output {} -> {}", output, outputs.back());
                 }
 
                 auto newEdge = graph.coordinates.addElement(
                     original.coordinates.getElement(edge), inputs, outputs);
 
                 reindexer.coordinates.emplace(edge, newEdge);
-
-                rocRoller::Log::getLogger()->debug(
-                    "KernelGraph::copyEdge(): Edge {} -> Edge {}", edge, newEdge);
             }
 
             /**

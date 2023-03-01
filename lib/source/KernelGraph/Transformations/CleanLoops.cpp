@@ -15,7 +15,6 @@ namespace rocRoller
         KernelGraph cleanLoops(KernelGraph const& original)
         {
             TIMER(t, "KernelGraph::cleanLoops");
-
             rocRoller::Log::getLogger()->debug("KernelGraph::cleanLoops()");
 
             auto k = original;

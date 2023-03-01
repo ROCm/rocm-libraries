@@ -1,3 +1,7 @@
+#pragma once
+
+#include "ControlGraph.hpp"
+
 namespace rocRoller::KernelGraph::ControlGraph
 {
 

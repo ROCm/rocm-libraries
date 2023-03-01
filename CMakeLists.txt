@@ -238,8 +238,13 @@ set(rocroller_src
  lib/source/CodeGen/InstructionRef.cpp
  lib/source/CodeGen/MemoryInstructions.cpp
 
+ lib/source/KernelGraph/ControlFlowRWTracer.cpp
+ lib/source/KernelGraph/ControlToCoordinateMapper.cpp
  lib/source/KernelGraph/CoordinateGraph/Dimension.cpp
  lib/source/KernelGraph/CoordinateGraph/Transformer.cpp
+ lib/source/KernelGraph/KernelGraph.cpp
+ lib/source/KernelGraph/LowerFromCommand.cpp
+ lib/source/KernelGraph/ScopeManager.cpp
  lib/source/KernelGraph/Transformations/AddComputeIndex.cpp
  lib/source/KernelGraph/Transformations/AddDeallocate.cpp
  lib/source/KernelGraph/Transformations/AddLDS.cpp
@@ -253,10 +258,6 @@ set(rocroller_src
  lib/source/KernelGraph/Transformations/LowerTile.cpp
  lib/source/KernelGraph/Transformations/UnrollLoops.cpp
  lib/source/KernelGraph/Transformations/UpdateParameters.cpp
- lib/source/KernelGraph/ControlToCoordinateMapper.cpp
- lib/source/KernelGraph/KernelGraph.cpp
- lib/source/KernelGraph/LowerFromCommand.cpp
- lib/source/KernelGraph/ScopeManager.cpp
  lib/source/KernelGraph/Utils.cpp
 
  lib/source/Assembler.cpp

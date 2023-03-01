@@ -128,6 +128,7 @@ namespace rocRoller
 
             void fuseLoops(KernelGraph& graph, int tag)
             {
+                rocRoller::Log::getLogger()->debug("KernelGraph::fuseLoops({})", tag);
                 auto bodies = graph.control.getOutputNodeIndices<Body>(tag).to<std::set>();
 
                 // Find all of the SetCoordinate nodes that are at the top of
@@ -306,6 +307,8 @@ namespace rocRoller
         KernelGraph fuseLoops(KernelGraph const& k)
         {
             TIMER(t, "KernelGraph::fuseLoops");
+            rocRoller::Log::getLogger()->debug("KernelGraph::fuseLoops()");
+
             auto newGraph = k;
 
             for(const auto node :

@@ -110,6 +110,8 @@ namespace rocRoller
         KernelGraph addLDS(KernelGraph const& original, std::shared_ptr<Context> context)
         {
             TIMER(t, "KernelGraph::addLDS");
+            rocRoller::Log::getLogger()->debug("KernelGraph::addLDS()");
+
             auto k       = original;
             auto visitor = AddLDSVisitor(context);
 

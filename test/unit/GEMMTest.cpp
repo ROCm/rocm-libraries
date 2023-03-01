@@ -57,6 +57,7 @@ namespace GEMMDriverTest
         // Unroll Sizes
         unsigned int unrollX = 0;
         unsigned int unrollY = 0;
+        unsigned int unrollK = 0;
 
         bool loadLDSA  = true;
         bool loadLDSB  = true;
@@ -91,6 +92,11 @@ namespace GEMMDriverTest
 
         AssertFatal(M % mac_m == 0, "MacroTile size mismatch (M)");
         AssertFatal(N % mac_n == 0, "MacroTile size mismatch (N)");
+
+        if(gemm.unrollK > 0)
+        {
+            AssertFatal(K % (mac_k * gemm.unrollK) == 0, "MacroTile size mismatch (K unroll)");
+        }
 
         AssertFatal(gemm.workgroup_size_x % gemm.wavefront_size == 0,
                     "Workgroup Size X must be multiply of wave front size");
@@ -190,6 +196,7 @@ namespace GEMMDriverTest
         kernelOptions->fuseLoops = gemm.fuseLoops;
         kernelOptions->unrollX   = gemm.unrollX;
         kernelOptions->unrollY   = gemm.unrollY;
+        kernelOptions->unrollK   = gemm.unrollK;
 
         auto params = std::make_shared<CommandParameters>();
         params->setManualKernelDimension(2);
@@ -345,6 +352,18 @@ namespace GEMMDriverTest
         gemm.loadLDSA  = false;
         gemm.loadLDSB  = false;
         gemm.fuseLoops = false;
+        basicGEMM<float>(m_context, gemm, 1.e-6);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMUnrollK)
+    {
+        GEMMProblem gemm;
+        gemm.K         = 64 * 4 * 2;
+        gemm.loadLDSA  = false;
+        gemm.loadLDSB  = false;
+        gemm.storeLDSD = false;
+        gemm.fuseLoops = false;
+        gemm.unrollK   = 4;
         basicGEMM<float>(m_context, gemm, 1.e-6);
     }
 

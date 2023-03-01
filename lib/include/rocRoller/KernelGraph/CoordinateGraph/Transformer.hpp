@@ -36,6 +36,8 @@ namespace rocRoller
              */
             void setCoordinate(int, Expression::ExpressionPtr);
 
+            Expression::ExpressionPtr getCoordinate(int) const;
+
             /**
              * Remove the index expression for the dimension.
              */

@@ -8,6 +8,8 @@ namespace rocRoller
         namespace Expression = rocRoller::Expression;
         namespace CT         = rocRoller::KernelGraph::CoordinateGraph;
 
+        using GD = Graph::Direction;
+
         using namespace CoordinateGraph;
         using namespace ControlGraph;
         using namespace Expression;
@@ -1180,6 +1182,119 @@ namespace rocRoller
                 kgraph.mapper.purge(reap);
             }
             kgraph.mapper.purge(loop);
+        }
+
+        bool isHardwareCoordinate(int tag, KernelGraph const& kgraph)
+        {
+            return kgraph.coordinates.get<VGPR>(tag) || kgraph.coordinates.get<Workitem>(tag)
+                   || kgraph.coordinates.get<Workgroup>(tag);
+        }
+
+        bool isLoopishCoordinate(int tag, KernelGraph const& kgraph)
+        {
+            return kgraph.coordinates.get<ForLoop>(tag) || kgraph.coordinates.get<Unroll>(tag);
+        }
+
+        bool isStorageCoordinate(int tag, KernelGraph const& kgraph)
+        {
+            return kgraph.coordinates.get<LDS>(tag) || kgraph.coordinates.get<User>(tag);
+        }
+
+        std::pair<int, Graph::Direction> getOperationTarget(int tag, KernelGraph const& kgraph)
+        {
+            auto elem = kgraph.control.getElement(tag);
+            return std::visit(
+                rocRoller::overloaded{
+                    [&](StoreTiled const& op) -> std::pair<int, Graph::Direction> {
+                        return {kgraph.mapper.get<User>(tag), GD::Upstream};
+                    },
+                    [&](LoadTiled const& op) -> std::pair<int, Graph::Direction> {
+                        return {kgraph.mapper.get<User>(tag), GD::Downstream};
+                    },
+                    [&](StoreLDSTile const& op) -> std::pair<int, Graph::Direction> {
+                        return {kgraph.mapper.get<LDS>(tag), GD::Upstream};
+                    },
+                    [&](LoadLDSTile const& op) -> std::pair<int, Graph::Direction> {
+                        return {kgraph.mapper.get<LDS>(tag), GD::Downstream};
+                    },
+                    [&](Assign const& op) -> std::pair<int, Graph::Direction> {
+                        return {kgraph.mapper.getConnections(tag)[0].coordinate, GD::Downstream};
+                    },
+                    [&](auto const& op) -> std::pair<int, Graph::Direction> {
+                        Throw<FatalError>(
+                            "Operation is not a load, store, or assign: ", tag, " ", toString(op));
+                        return {0, GD::Downstream};
+                    }},
+                std::get<Operation>(elem));
+        }
+
+        std::vector<int> findRequiredCoordinates(int                target,
+                                                 Graph::Direction   direction,
+                                                 KernelGraph const& kgraph)
+        {
+            namespace CT      = rocRoller::KernelGraph::CoordinateGraph;
+            auto lookBackward = direction == GD::Downstream ? GD::Upstream : GD::Downstream;
+
+            auto dontWalkPastLoopOrStorageNodes = [&](int tag) -> bool {
+                auto element = kgraph.coordinates.getElement(tag);
+                auto edge    = std::get<CT::Edge>(element);
+
+                bool isCT   = std::holds_alternative<CT::CoordinateTransformEdge>(edge);
+                bool follow = true;
+                for(auto neighbour : kgraph.coordinates.getNeighbours(tag, lookBackward))
+                {
+                    if(neighbour == target)
+                        continue;
+                    if(isLoopishCoordinate(neighbour, kgraph))
+                        follow = false;
+                    if(isStorageCoordinate(neighbour, kgraph))
+                        follow = false;
+                }
+                return isCT && follow;
+            };
+
+            // From the target coordinate, walk the graph but stop at loop
+            // or storage nodes.  This will result in a list of nodes that
+            // are used in the coordinate transform to compute indexes for
+            // the target coordinate.
+            auto candidates
+                = kgraph.coordinates
+                      .depthFirstVisit(target, dontWalkPastLoopOrStorageNodes, direction)
+                      .to<std::vector>();
+
+            // Internal nodes in the coordinate transform are computed as
+            // part of the transform, so just keep leaf nodes and/or
+            // hardware/loop coordinates.
+            std::vector<int> required;
+            std::copy_if(
+                candidates.cbegin(), candidates.cend(), std::back_inserter(required), [&](int tag) {
+                    bool isLeaf = kgraph.coordinates.getNeighbours(tag, direction)
+                                      .to<std::vector>()
+                                      .empty();
+                    bool isLeafy
+                        = isHardwareCoordinate(tag, kgraph) || isLoopishCoordinate(tag, kgraph);
+                    return isLeaf || isLeafy;
+                });
+
+            return required;
+        }
+
+        std::optional<std::pair<int, Graph::Direction>>
+            findStorageNeighbour(int tag, KernelGraph const& graph)
+        {
+            using rt = std::pair<int, Graph::Direction>;
+            auto neighbourTag
+                = only(graph.coordinates.getNeighbours(tag, Graph::Direction::Upstream));
+            if(neighbourTag && isStorageCoordinate(*neighbourTag, graph))
+            {
+                return rt{*neighbourTag, Graph::Direction::Downstream};
+            }
+            neighbourTag = only(graph.coordinates.getNeighbours(tag, Graph::Direction::Downstream));
+            if(neighbourTag && isStorageCoordinate(*neighbourTag, graph))
+            {
+                return rt{*neighbourTag, Graph::Direction::Upstream};
+            }
+            return {};
         }
 
     }

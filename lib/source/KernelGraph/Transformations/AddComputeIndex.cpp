@@ -43,37 +43,6 @@ namespace rocRoller::KernelGraph
     }
 
     /**
-     * @brief Return target coordinate for load/store operation.
-     *
-     * For loads, the target is the source (User or LDS) of the load.
-     *
-     * For stores, the target is the destination (User or LDS) of the
-     * store.
-     */
-    std::pair<int, Graph::Direction> getOperationTarget(int tag, KernelGraph const& kgraph)
-    {
-        auto elem = kgraph.control.getElement(tag);
-        return std::visit(
-            rocRoller::overloaded{[&](StoreTiled const& op) -> std::pair<int, Graph::Direction> {
-                                      return {kgraph.mapper.get<User>(tag), GD::Upstream};
-                                  },
-                                  [&](LoadTiled const& op) -> std::pair<int, Graph::Direction> {
-                                      return {kgraph.mapper.get<User>(tag), GD::Downstream};
-                                  },
-                                  [&](StoreLDSTile const& op) -> std::pair<int, Graph::Direction> {
-                                      return {kgraph.mapper.get<LDS>(tag), GD::Upstream};
-                                  },
-                                  [&](LoadLDSTile const& op) -> std::pair<int, Graph::Direction> {
-                                      return {kgraph.mapper.get<LDS>(tag), GD::Downstream};
-                                  },
-                                  [](auto const& op) -> std::pair<int, Graph::Direction> {
-                                      Throw<FatalError>("Invalid candidate for ComputeIndex.");
-                                      return {0, GD::Downstream};
-                                  }},
-            std::get<Operation>(elem));
-    }
-
-    /**
      * @brief Add a ComputeIndex node and add mapper connections.
      */
     int makeComputeIndex(KernelGraph&     graph,
@@ -130,7 +99,8 @@ namespace rocRoller::KernelGraph
     /**
      * @brief Add ComputeIndexes for VGPR MATRIX_A/B from global.
      */
-    ComputeIndexChain computeIndexVGPRMATRIXAB(KernelGraph& graph, int load, int sdim)
+    ComputeIndexChain
+        computeIndexVGPRMATRIXAB(KernelGraph& graph, int load, int sdim, ExpressionPtr step)
     {
         AssertFatal(isOperation<LoadTiled>(graph.control.getElement(load)));
 
@@ -189,7 +159,7 @@ namespace rocRoller::KernelGraph
             Expression::DataFlowTag{stride_mac, Register::Type::Scalar, DataType::UInt64});
 
         auto offsetUpdate = graph.control.addElement(
-            Assign{Register::Type::Vector, offset_mac_expr + stride_mac_expr});
+            Assign{Register::Type::Vector, offset_mac_expr + step * stride_mac_expr});
         graph.mapper.connect(offsetUpdate, offset_mac, NaryArgument::DEST);
 
         return {ci_mac, ci_col, offsetUpdate};
@@ -334,7 +304,8 @@ namespace rocRoller::KernelGraph
     /**
      * @brief Add ComputeIndexes for WAVE MATRIX_A/B from global.
      */
-    ComputeIndexChain computeIndexWAVEMATRIXAB(KernelGraph& graph, int load, int sdim)
+    ComputeIndexChain
+        computeIndexWAVEMATRIXAB(KernelGraph& graph, int load, int sdim, ExpressionPtr step)
     {
         auto user = graph.mapper.get<User>(load);
         auto mac  = graph.mapper.get<MacroTileNumber>(load, sdim);
@@ -391,7 +362,7 @@ namespace rocRoller::KernelGraph
             Expression::DataFlowTag{stride_mac, Register::Type::Scalar, DataType::UInt64});
 
         auto offsetUpdate = graph.control.addElement(
-            Assign{Register::Type::Vector, offset_mac_expr + stride_mac_expr});
+            Assign{Register::Type::Vector, offset_mac_expr + step * stride_mac_expr});
         graph.mapper.connect(offsetUpdate, offset_mac, NaryArgument::DEST);
 
         return {ci_mac, ci_vgpr, offsetUpdate};
@@ -486,37 +457,6 @@ namespace rocRoller::KernelGraph
         return {ci_vgpr_block, ci_vgpr_index};
     }
 
-    /*
-     * Helpers for finding things in the graphs.
-     */
-
-    bool isHardwareCoordinate(int tag, KernelGraph const& kgraph)
-    {
-        return kgraph.coordinates.get<VGPR>(tag) || kgraph.coordinates.get<Workitem>(tag)
-               || kgraph.coordinates.get<Workgroup>(tag);
-    }
-
-    bool isLoopishCoordinate(int tag, KernelGraph const& kgraph)
-    {
-        return kgraph.coordinates.get<ForLoop>(tag) || kgraph.coordinates.get<Unroll>(tag);
-    }
-
-    bool isStorageCoordinate(int tag, KernelGraph const& kgraph)
-    {
-        return kgraph.coordinates.get<LDS>(tag).has_value();
-    }
-
-    template <typename T>
-    std::unordered_set<int> filterCoordinates(std::vector<int>   candidates,
-                                              KernelGraph const& kgraph)
-    {
-        std::unordered_set<int> rv;
-        for(auto candidate : candidates)
-            if(kgraph.coordinates.get<T>(candidate))
-                rv.insert(candidate);
-        return rv;
-    }
-
     bool needsComputeIndex(Operation const& op)
     {
         if(std::holds_alternative<StoreTiled>(op) || std::holds_alternative<StoreLDSTile>(op)
@@ -546,77 +486,6 @@ namespace rocRoller::KernelGraph
                 },
                 GD::Downstream)
             .to<std::vector>();
-    }
-
-    /**
-     * @brief Find all required coordintes needed to compute indexes
-     * for the target dimension.
-     */
-    std::vector<int>
-        findRequiredCoordinates(int target, Graph::Direction direction, KernelGraph const& kgraph)
-    {
-        namespace CT      = rocRoller::KernelGraph::CoordinateGraph;
-        auto lookBackward = direction == GD::Downstream ? GD::Upstream : GD::Downstream;
-
-        auto dontWalkPastLoopOrStorageNodes = [&](int tag) -> bool {
-            auto element = kgraph.coordinates.getElement(tag);
-            auto edge    = std::get<CT::Edge>(element);
-
-            bool isCT   = std::holds_alternative<CT::CoordinateTransformEdge>(edge);
-            bool follow = true;
-            for(auto neighbour : kgraph.coordinates.getNeighbours(tag, lookBackward))
-            {
-                if(neighbour == target)
-                    continue;
-                if(isLoopishCoordinate(neighbour, kgraph))
-                    follow = false;
-                if(isStorageCoordinate(neighbour, kgraph))
-                    follow = false;
-            }
-            return isCT && follow;
-        };
-
-        // From the target coordinate, walk the graph but stop at loop
-        // or storage nodes.  This will result in a list of nodes that
-        // are used in the coordinate transform to compute indexes for
-        // the target coordinate.
-        auto candidates
-            = kgraph.coordinates.depthFirstVisit(target, dontWalkPastLoopOrStorageNodes, direction)
-                  .to<std::vector>();
-
-        // Internal nodes in the coordinate transform are computed as
-        // part of the transform, so just keep leaf nodes and/or
-        // hardware/loop coordinates.
-        std::vector<int> required;
-        std::copy_if(
-            candidates.cbegin(), candidates.cend(), std::back_inserter(required), [&](int tag) {
-                bool isLeaf
-                    = kgraph.coordinates.getNeighbours(tag, direction).to<std::vector>().empty();
-                bool isLeafy
-                    = isHardwareCoordinate(tag, kgraph) || isLoopishCoordinate(tag, kgraph);
-                return isLeaf || isLeafy;
-            });
-
-        return required;
-    }
-
-    /**
-     * @brief Find the ForLoop operation that contains the candidate
-     * load/store operation.
-     */
-    std::optional<int> findContainingForLoop(int candidate, KernelGraph const& kgraph)
-    {
-        int lastTag = -1;
-        for(auto parent : kgraph.control.depthFirstVisit(candidate, GD::Upstream))
-        {
-            bool containing = lastTag != -1 && kgraph.control.get<Body>(lastTag);
-            lastTag         = parent;
-
-            auto forLoop = kgraph.control.get<ForLoopOp>(parent);
-            if(forLoop && containing)
-                return parent;
-        }
-        return {};
     }
 
     /**
@@ -718,7 +587,7 @@ namespace rocRoller::KernelGraph
      * @param kgraph Kernel graph to add ComputeIndex operations to.
      * @param tag Load/store operation that needs ComputeIndex operations.
      */
-    ComputeIndexChain addComputeIndex(KernelGraph& kgraph, int tag)
+    ComputeIndexChain addComputeIndex(KernelGraph& kgraph, int tag, ExpressionPtr step)
     {
         auto log = rocRoller::Log::getLogger();
 
@@ -748,7 +617,7 @@ namespace rocRoller::KernelGraph
                    || tile.layoutType == LayoutType::MATRIX_B))
             {
                 int sdim = tile.layoutType == LayoutType::MATRIX_A ? 1 : 0;
-                return computeIndexVGPRMATRIXAB(kgraph, tag, sdim);
+                return computeIndexVGPRMATRIXAB(kgraph, tag, sdim, step);
             }
             if(tile.memoryType == MemoryType::VGPR)
             {
@@ -762,7 +631,7 @@ namespace rocRoller::KernelGraph
             if(tile.layoutType == LayoutType::MATRIX_A || tile.layoutType == LayoutType::MATRIX_B)
             {
                 int sdim = tile.layoutType == LayoutType::MATRIX_A ? 1 : 0;
-                return computeIndexWAVEMATRIXAB(kgraph, tag, sdim);
+                return computeIndexWAVEMATRIXAB(kgraph, tag, sdim, step);
             }
         }
 
@@ -839,17 +708,24 @@ namespace rocRoller::KernelGraph
                 kgraph.control.addElement(Initialize(), {target}, {chain.top});
             };
 
-            auto chain = addComputeIndex(kgraph, candidate);
-
             auto [target, direction] = getOperationTarget(candidate, kgraph);
             auto required            = findRequiredCoordinates(target, direction, kgraph);
             auto forLoopCoordinates  = filterCoordinates<ForLoop>(required, kgraph);
             auto unrollCoordinates   = filterCoordinates<Unroll>(required, kgraph);
 
-            auto maybeForLoop = findContainingForLoop(candidate, kgraph);
+            auto maybeForLoop = findContainingOperation<ForLoopOp>(candidate, kgraph);
 
             auto hasForLoop = !forLoopCoordinates.empty();
             auto hasUnroll  = !unrollCoordinates.empty();
+
+            ExpressionPtr step = Expression::literal(1u);
+            if(maybeForLoop)
+            {
+                auto [lhs, rhs] = getForLoopIncrement(kgraph, *maybeForLoop);
+                step            = simplify(rhs);
+            }
+
+            auto chain = addComputeIndex(kgraph, candidate, step);
 
             // TODO: Handle ACCUMULATOR inside loops properly
             {

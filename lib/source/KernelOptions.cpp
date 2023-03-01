@@ -17,6 +17,7 @@ namespace rocRoller
         , fuseLoops(true)
         , unrollX(0)
         , unrollY(0)
+        , unrollK(0)
         , transposeMemoryAccessA(true)
         , transposeMemoryAccessB(true)
         , transposeMemoryAccessOther(false)
@@ -40,6 +41,7 @@ namespace rocRoller
         os << "  fuseLoops:\t\t\t" << input.fuseLoops << std::endl;
         os << "  unrollX:\t\t\t" << input.unrollX << std::endl;
         os << "  unrollY:\t\t\t" << input.unrollY << std::endl;
+        os << "  unrollK:\t\t\t" << input.unrollK << std::endl;
         os << "  transposeMemoryAccessA:\t" << input.transposeMemoryAccessA << std::endl;
         os << "  transposeMemoryAccessB:\t" << input.transposeMemoryAccessB << std::endl;
         os << "  transposeMemoryAccessOther:\t" << input.transposeMemoryAccessOther << std::endl;

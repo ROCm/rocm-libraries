@@ -181,7 +181,6 @@ namespace rocRoller
 
             if(auto ptr = m_command.lock())
             {
-                rocRoller::Log::getLogger()->debug("T_Load_Tiled::allocateArguments");
                 std::string base = concatenate("Load_Tiled_", m_tag);
 
                 m_pointer = ptr->allocateArgument({m_data_type, PointerType::PointerGlobal},
@@ -194,7 +193,6 @@ namespace rocRoller
                     DataType::Int64, m_dims, DataDirection::ReadOnly, base + "_size");
                 m_strides = ptr->allocateArgumentVector(
                     DataType::Int64, m_dims, DataDirection::ReadOnly, base + "_stride");
-                rocRoller::Log::getLogger()->debug("T_Load_Tiled::allocateArguments done");
             }
         }
 

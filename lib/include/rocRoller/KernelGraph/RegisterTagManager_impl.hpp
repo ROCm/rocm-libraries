@@ -3,9 +3,10 @@
 #include <map>
 #include <memory>
 
-#include "Context_fwd.hpp"
+#include <rocRoller/Expression_fwd.hpp>
+#include <rocRoller/Utilities/Error.hpp>
 
-#include "InstructionValues/Register.hpp"
+#include "RegisterTagManager.hpp"
 
 namespace rocRoller
 {

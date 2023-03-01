@@ -42,6 +42,8 @@ namespace rocRoller
             Count
         };
 
+        Direction opposite(Direction);
+
         namespace mi = boost::multi_index;
 
         template <typename Node, typename Edge, bool Hyper = true>

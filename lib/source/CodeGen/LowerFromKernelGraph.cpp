@@ -21,6 +21,7 @@
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/RegisterTagManager.hpp>
 #include <rocRoller/KernelGraph/ScopeManager.hpp>
+#include <rocRoller/KernelGraph/Utils.hpp>
 #include <rocRoller/Scheduling/Scheduler.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 
@@ -79,7 +80,90 @@ namespace rocRoller
                 return m_context->registerTagManager()->getRegister(bufferTag);
             }
 
-            Generator<Instruction> getOffset(Register::ValuePtr& dst, int tag, int dimension)
+            /**
+             * @brief Build unrolled offset expression.
+             * 
+             * Offsets inside unrolled loops look like:
+             *
+             *    offset = offset + unroll-iteration * stride
+             *
+             * where the additional piece is a local/independent
+             * expression.
+             *
+             * When requesting an Offset register, this routines looks
+             * nearby for Stride expressions connected to Unroll
+             * coordinates, and returns the
+             *
+             *     + unroll-iteration * stride
+             *
+             * part of the offset above.
+             */
+            ExpressionPtr getOffsetExpr(int offsetTag, Transformer const& coords)
+            {
+                // Find storage node connected to Offset edge.
+                auto maybeTargetTag = findStorageNeighbour(offsetTag, m_graph);
+                if(!maybeTargetTag)
+                    return nullptr;
+                auto [targetTag, direction] = *maybeTargetTag;
+
+                // Find all required coordinates for the storage node,
+                // and filter out Unroll coordinates.
+                auto required = findRequiredCoordinates(targetTag, direction, m_graph);
+                auto unrolls  = filterCoordinates<Unroll>(required, m_graph);
+                if(unrolls.size() != 1)
+                    return nullptr;
+                auto unroll = *unrolls.cbegin();
+
+                std::unordered_set<int> path;
+                if(direction == Graph::Direction::Downstream)
+                {
+                    path = m_graph.coordinates
+                               .path<Graph::Direction::Upstream>(required,
+                                                                 std::vector<int>{targetTag})
+                               .to<std::unordered_set>();
+                }
+                else
+                {
+                    path = m_graph.coordinates
+                               .path<Graph::Direction::Downstream>(required,
+                                                                   std::vector<int>{targetTag})
+                               .to<std::unordered_set>();
+                }
+
+                // Find the parent of the Unroll that:
+                // 1. is in the load/store coordinate transform path
+                // 2. has a Stride edge connected to it
+                std::optional<int> maybeStrideTag;
+                auto               parents = m_graph.coordinates.parentNodes(unroll);
+                for(auto p : parents)
+                {
+                    if(path.contains(p))
+                    {
+                        auto neighbours
+                            = m_graph.coordinates.getNeighbours(p, Graph::opposite(direction));
+                        for(auto neighbour : neighbours)
+                        {
+                            auto maybeStride = m_graph.coordinates.get<Stride>(neighbour);
+                            if(maybeStride)
+                                maybeStrideTag = neighbour;
+                        }
+                    }
+                }
+
+                if(!maybeStrideTag)
+                    return nullptr;
+
+                auto [strideExpr, _dtype]
+                    = m_context->registerTagManager()->getExpression(*maybeStrideTag);
+
+                return coords.getCoordinate(unroll) * strideExpr;
+            }
+
+            Generator<Instruction> getOffset(Register::ValuePtr& dst,
+                                             ExpressionPtr&      expr,
+                                             Transformer         coords,
+                                             int                 tag,
+                                             int                 dimension)
             {
                 auto offsetTag = m_graph.mapper.get<Offset>(tag, dimension);
                 if(offsetTag < 0)
@@ -87,7 +171,8 @@ namespace rocRoller
 
                 if(m_context->registerTagManager()->hasRegister(offsetTag))
                 {
-                    dst = m_context->registerTagManager()->getRegister(offsetTag);
+                    dst  = m_context->registerTagManager()->getRegister(offsetTag);
+                    expr = getOffsetExpr(offsetTag, coords);
                     co_return;
                 }
 
@@ -98,9 +183,11 @@ namespace rocRoller
 
                     dst = base->placeholder();
                     co_yield copy(dst, base);
+                    dst->setName(concatenate("offset", offsetTag));
 
                     m_context->getScopeManager()->addRegister(offsetTag);
                     m_context->registerTagManager()->addRegister(offsetTag, dst);
+                    co_return;
                 }
             }
 
@@ -565,7 +652,8 @@ namespace rocRoller
                                             uint64_t                       n,
                                             VariableType                   dataType,
                                             int                            tag,
-                                            Register::ValuePtr             offset)
+                                            Register::ValuePtr             offset,
+                                            Transformer&                   coords)
             {
                 rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::loadTile()");
 
@@ -588,8 +676,18 @@ namespace rocRoller
 
                 // Get the values from the associated ComputeIndex node
                 Register::ValuePtr row_offset_reg;
-                co_yield getOffset(row_offset_reg, tag, 0);
+                ExpressionPtr      row_offset_expr;
+                co_yield getOffset(row_offset_reg, row_offset_expr, coords, tag, 0);
                 auto col_offset_reg = row_offset_reg->placeholder();
+
+                if(row_offset_expr)
+                {
+                    auto unrolled_row_offset_expr
+                        = simplify(row_offset_reg->expression() + row_offset_expr);
+                    auto tmp = row_offset_reg->placeholder();
+                    co_yield generate(tmp, unrolled_row_offset_expr);
+                    row_offset_reg = tmp;
+                }
 
                 AssertFatal(row_offset_reg, "Invalid row offset register.");
                 AssertFatal(col_offset_reg, "Invalid col offset register.");
@@ -813,15 +911,7 @@ namespace rocRoller
                     "KernelGraph::CodeGenerator::loadMacroTileVGPRCI()");
                 co_yield Instruction::Comment("GEN: loadMacroTileVGPRCI");
 
-                auto [user_tag, user]         = m_graph.getDimension<User>(tag);
                 auto [mac_tile_tag, mac_tile] = m_graph.getDimension<MacroTile>(tag);
-
-                Register::ValuePtr mac_offset_reg, row_offset_reg;
-                co_yield getOffset(mac_offset_reg, tag, -1);
-                co_yield getOffset(row_offset_reg, tag, 0);
-
-                AssertFatal(mac_offset_reg, "Invalid mac offset register.");
-                AssertFatal(row_offset_reg, "Invalid row offset register.");
 
                 auto const m = mac_tile.subTileSizes[0];
                 auto const n = mac_tile.subTileSizes[1];
@@ -829,7 +919,7 @@ namespace rocRoller
                 AssertFatal(m > 0 && n > 0, "Invalid/unknown subtile size dimensions");
 
                 co_yield loadTile(
-                    MemoryInstructions::MemoryKind::Buffer, m, n, load.vtype, tag, nullptr);
+                    MemoryInstructions::MemoryKind::Buffer, m, n, load.vtype, tag, nullptr, coords);
             }
 
             Generator<Instruction>
@@ -851,7 +941,7 @@ namespace rocRoller
                     "  macro tile: {}; sub tile size: {}x{}", mac_tile_tag, m, n);
 
                 co_yield loadTile(
-                    MemoryInstructions::MemoryKind::Buffer, m, n, load.vtype, tag, nullptr);
+                    MemoryInstructions::MemoryKind::Buffer, m, n, load.vtype, tag, nullptr, coords);
             }
 
             Generator<Instruction>
@@ -874,8 +964,13 @@ namespace rocRoller
                 auto const m = tile.subTileSizes[0];
                 auto const n = tile.subTileSizes[1];
 
-                co_yield loadTile(
-                    MemoryInstructions::MemoryKind::Local, m, n, load.vtype, tag, lds_offset);
+                co_yield loadTile(MemoryInstructions::MemoryKind::Local,
+                                  m,
+                                  n,
+                                  load.vtype,
+                                  tag,
+                                  lds_offset,
+                                  coords);
             }
 
             Generator<Instruction> loadMacroTileWAVELDSCI(int                tag,
@@ -910,7 +1005,8 @@ namespace rocRoller
                                   num_vgpr,
                                   load.vtype,
                                   tag,
-                                  lds_offset);
+                                  lds_offset,
+                                  coords);
             }
 
             // CI : compute index
@@ -927,8 +1023,13 @@ namespace rocRoller
                 uint wfs          = m_context->kernel()->wavefront_size();
                 uint num_vgpr     = num_elements / wfs;
 
-                co_yield loadTile(
-                    MemoryInstructions::MemoryKind::Buffer, 1, num_vgpr, load.vtype, tag, nullptr);
+                co_yield loadTile(MemoryInstructions::MemoryKind::Buffer,
+                                  1,
+                                  num_vgpr,
+                                  load.vtype,
+                                  tag,
+                                  nullptr,
+                                  coords);
             }
 
             Generator<Instruction>
@@ -953,7 +1054,8 @@ namespace rocRoller
                                   4,
                                   load.vtype,
                                   tag,
-                                  nullptr);
+                                  nullptr,
+                                  coords);
             }
 
             Generator<Instruction> operator()(int tag, LoadTiled const& load, Transformer coords)
@@ -1175,13 +1277,15 @@ namespace rocRoller
                 auto loadAB = m_graph.control.getOutputNodeIndices<Body>(tag).to<std::set>();
 
                 Register::ValuePtr mac_offset_x_reg, wave_offset_x_reg;
-                co_yield getOffset(mac_offset_x_reg, loads[0], -1);
-                co_yield getOffset(wave_offset_x_reg, loads[0], 0);
+                ExpressionPtr      mac_offset_x_expr, wave_offset_x_expr;
+                co_yield getOffset(mac_offset_x_reg, mac_offset_x_expr, coords, loads[0], -1);
+                co_yield getOffset(wave_offset_x_reg, wave_offset_x_expr, coords, loads[0], 0);
                 AssertFatal(wave_offset_x_reg, "Invalid wave x offset register.");
 
                 Register::ValuePtr mac_offset_y_reg, wave_offset_y_reg;
-                co_yield getOffset(mac_offset_y_reg, loads[1], -1);
-                co_yield getOffset(wave_offset_y_reg, loads[1], 0);
+                ExpressionPtr      mac_offset_y_expr, wave_offset_y_expr;
+                co_yield getOffset(mac_offset_y_reg, mac_offset_y_expr, coords, loads[1], -1);
+                co_yield getOffset(wave_offset_y_reg, wave_offset_y_expr, coords, loads[1], 0);
                 AssertFatal(wave_offset_y_reg, "Invalid wave y offset register.");
 
                 AssertFatal(macA.sizes[1] == macB.sizes[0], "MacroTile size mismatch.");
@@ -1306,12 +1410,14 @@ namespace rocRoller
                                              VariableType                   dataType,
                                              int                            tag,
                                              Register::ValuePtr             vgpr,
-                                             Register::ValuePtr             offset)
+                                             Register::ValuePtr             offset,
+                                             Transformer&                   coords)
             {
                 auto elementSize = DataTypeInfo::Get(dataType).elementSize;
 
                 Register::ValuePtr row_offset_reg;
-                co_yield getOffset(row_offset_reg, tag, 0);
+                ExpressionPtr      row_offset_expr;
+                co_yield getOffset(row_offset_reg, row_offset_expr, coords, tag, 0);
                 auto col_offset_reg = row_offset_reg->placeholder();
 
                 AssertFatal(row_offset_reg, "Invalid row offset register.");
@@ -1564,7 +1670,8 @@ namespace rocRoller
                 auto vtype = store.dataType;
 
                 Register::ValuePtr row_offset_reg;
-                co_yield getOffset(row_offset_reg, tag, 0);
+                ExpressionPtr      row_offset_expr;
+                co_yield getOffset(row_offset_reg, row_offset_expr, coords, tag, 0);
                 AssertFatal(row_offset_reg, "Invalid row offset register.");
 
                 auto numElements = product(tile.subTileSizes) * product(m_workgroupSize);
@@ -1593,8 +1700,14 @@ namespace rocRoller
                     m_context, Register::Type::Vector, DataType::UInt32, 1);
                 co_yield copy(reset_offset, row_offset_reg);
 
-                co_yield storeTile(
-                    MemoryInstructions::MemoryKind::Local, m, n, vtype, tag, vgpr, lds_offset);
+                co_yield storeTile(MemoryInstructions::MemoryKind::Local,
+                                   m,
+                                   n,
+                                   vtype,
+                                   tag,
+                                   vgpr,
+                                   lds_offset,
+                                   coords);
 
                 // TODO : Need more design thought (how to seed an offset register)
                 co_yield copy(row_offset_reg, reset_offset);
@@ -1623,7 +1736,8 @@ namespace rocRoller
                                    store.dataType,
                                    tag,
                                    vgpr,
-                                   nullptr);
+                                   nullptr,
+                                   coords);
             }
 
             Generator<Instruction>
@@ -1668,7 +1782,8 @@ namespace rocRoller
                                    vtype,
                                    tag,
                                    agpr,
-                                   lds_offset);
+                                   lds_offset,
+                                   coords);
             }
 
             Generator<Instruction>
@@ -1696,7 +1811,8 @@ namespace rocRoller
                                    store.dataType,
                                    tag,
                                    agpr,
-                                   nullptr);
+                                   nullptr,
+                                   coords);
             }
 
             Generator<Instruction> operator()(int tag, StoreTiled const& store, Transformer coords)

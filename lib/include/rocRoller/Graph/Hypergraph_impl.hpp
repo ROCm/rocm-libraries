@@ -18,6 +18,11 @@ namespace rocRoller
 {
     namespace Graph
     {
+        inline Direction opposite(Direction d)
+        {
+            return d == Direction::Downstream ? Direction::Upstream : Direction::Downstream;
+        }
+
         template <typename Node, typename Edge, bool Hyper>
         constexpr inline bool
             Hypergraph<Node, Edge, Hyper>::Location::operator==(Location const& rhs) const
