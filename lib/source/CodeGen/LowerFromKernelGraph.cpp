@@ -660,10 +660,12 @@ namespace rocRoller
                 auto mac_tile_tag = m_graph.mapper.get<MacroTile>(tag);
 
                 Register::ValuePtr tmpl;
+                unsigned int       packedAmount = 1;
                 if(dataType == DataType::Half && n > 1)
                 {
                     tmpl = Register::Value::Placeholder(
                         m_context, Register::Type::Vector, DataType::Halfx2, m * n / 2);
+                    packedAmount = 2;
                 }
                 else
                 {
@@ -799,12 +801,8 @@ namespace rocRoller
                         {
                             for(uint64_t i = 0; i < m; ++i)
                             {
-                                auto start = (dataType == DataType::Half && n != 1)
-                                                 ? static_cast<int>((i * n) / 2)
-                                                 : i * n;
-                                auto stop  = (dataType == DataType::Half && n != 1)
-                                                 ? static_cast<int>((i * n + n) / 2)
-                                                 : i * n + n;
+                                auto start = (i * n) / packedAmount;
+                                auto stop  = (i * n + n) / packedAmount;
                                 co_yield m_context->mem()->load(
                                     kind,
                                     vgpr->element(Generated(iota(start, stop))),
@@ -843,12 +841,8 @@ namespace rocRoller
                         {
                             for(uint64_t i = 0; i < m; ++i)
                             {
-                                auto start = (dataType == DataType::Half && n != 1)
-                                                 ? static_cast<int>((i * n) / 2)
-                                                 : i * n;
-                                auto stop  = (dataType == DataType::Half && n != 1)
-                                                 ? static_cast<int>((i * n + n) / 2)
-                                                 : i * n + n;
+                                auto start = (i * n) / packedAmount;
+                                auto stop  = (i * n + n) / packedAmount;
                                 co_yield m_context->mem()->load(
                                     kind,
                                     vgpr->element(Generated(iota(start, stop))),
@@ -1465,6 +1459,8 @@ namespace rocRoller
                     converted = vgpr;
                 }
 
+                unsigned int packedAmount = DataTypeInfo::Get(converted->variableType()).packing;
+
                 bool colStrideIsLiteral = (col_stride_reg->regType() == Register::Type::Literal);
                 bool colStrideIsOne
                     = colStrideIsLiteral
@@ -1547,12 +1543,8 @@ namespace rocRoller
                         {
                             for(uint64_t i = 0; i < m; ++i)
                             {
-                                auto start = (dataType == DataType::Half && n != 1)
-                                                 ? static_cast<int>((i * n) / 2)
-                                                 : i * n;
-                                auto stop  = (dataType == DataType::Half && n != 1)
-                                                 ? static_cast<int>((i * n + n) / 2)
-                                                 : i * n + n;
+                                auto start = (i * n) / packedAmount;
+                                auto stop  = (i * n + n) / packedAmount;
                                 co_yield m_context->mem()->store(
                                     kind,
                                     row_offset_reg,
@@ -1592,12 +1584,8 @@ namespace rocRoller
                         {
                             for(uint64_t i = 0; i < m; ++i)
                             {
-                                auto start = (dataType == DataType::Half && n != 1)
-                                                 ? static_cast<int>((i * n) / 2)
-                                                 : i * n;
-                                auto stop  = (dataType == DataType::Half && n != 1)
-                                                 ? static_cast<int>((i * n + n) / 2)
-                                                 : i * n + n;
+                                auto start = (i * n) / packedAmount;
+                                auto stop  = (i * n + n) / packedAmount;
                                 co_yield m_context->mem()->store(
                                     kind,
                                     row_offset_reg->subset({0}),

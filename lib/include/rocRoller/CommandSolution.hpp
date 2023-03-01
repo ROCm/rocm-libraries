@@ -136,6 +136,8 @@ namespace rocRoller
 
         KernelGraph::KernelGraph getKernelGraph() const;
 
+        std::string getInstructions() const;
+
         std::shared_ptr<Context> getContext();
 
         /**

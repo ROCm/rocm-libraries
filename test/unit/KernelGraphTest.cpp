@@ -2481,7 +2481,7 @@ namespace KernelGraphTest
     }
 
     template <typename T>
-    void CopyStrideOverride(bool colOverride = false)
+    void CopyStrideOverride(std::shared_ptr<CommandKernel>& commandKernel, bool override = false)
     {
         size_t nx  = 256; // tensor size x
         size_t ny  = 128; // tensor size y
@@ -2542,7 +2542,7 @@ namespace KernelGraphTest
         auto mac_tile = MacroTile({m, n}, MemoryType::VGPR, {t_m, t_n});
         params->setDimensionInfo(4, mac_tile);
 
-        if(colOverride)
+        if(override)
         {
             auto loadColStrideOverride   = SubDimension(1);
             loadColStrideOverride.stride = Expression::literal(1u);
@@ -2556,11 +2556,11 @@ namespace KernelGraphTest
         params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
         params->setManualWorkitemCount({NX, NY, NZ});
 
-        std::string colName    = (colOverride) ? "ColOverride" : "";
+        std::string colName    = (override) ? "ColOverride" : "";
         std::string kernelName = "TensorTileCopy" + colName + typeName;
 
-        CommandKernel commandKernel(command, kernelName, params);
-        commandKernel.launchKernel(runtimeArgs.runtimeArguments());
+        commandKernel = std::make_shared<CommandKernel>(command, kernelName, params);
+        commandKernel->launchKernel(runtimeArgs.runtimeArguments());
 
         ASSERT_THAT(hipMemcpy(r.data(), d_b.get(), nx * ny * sizeof(T), hipMemcpyDefault),
                     HasHipSuccess(0));
@@ -2578,22 +2578,83 @@ namespace KernelGraphTest
 
     TEST_F(KernelGraphTestGPU, GPU_TensorTileCopy)
     {
-        CopyStrideOverride<int>();
+        std::shared_ptr<CommandKernel> commandKernel;
+        CopyStrideOverride<int>(commandKernel);
     }
 
     TEST_F(KernelGraphTestGPU, GPU_TensorTileCopyColStrideHalf)
     {
-        CopyStrideOverride<Half>(true);
+        std::shared_ptr<CommandKernel> commandKernel;
+        CopyStrideOverride<Half>(commandKernel, true);
+
+        auto instructions = NormalizedSourceLines(commandKernel->getInstructions(), false);
+
+        int numRead  = 0;
+        int numWrite = 0;
+        for(auto const& instruction : instructions)
+        {
+            if(instruction.starts_with("buffer_load_dword "))
+            {
+                numRead++;
+            }
+            else if(instruction.starts_with("buffer_store_dword "))
+            {
+                numWrite++;
+            }
+        }
+
+        EXPECT_EQ(numRead, 4);
+        EXPECT_EQ(numWrite, 4);
     }
 
     TEST_F(KernelGraphTestGPU, GPU_TensorTileCopyColStrideFloat)
     {
-        CopyStrideOverride<float>(true);
+        std::shared_ptr<CommandKernel> commandKernel;
+        CopyStrideOverride<float>(commandKernel, true);
+
+        auto instructions = NormalizedSourceLines(commandKernel->getInstructions(), false);
+
+        int numRead  = 0;
+        int numWrite = 0;
+        for(auto const& instruction : instructions)
+        {
+            if(instruction.starts_with("buffer_load_dwordx2"))
+            {
+                numRead++;
+            }
+            else if(instruction.starts_with("buffer_store_dwordx2"))
+            {
+                numWrite++;
+            }
+        }
+
+        EXPECT_EQ(numRead, 4);
+        EXPECT_EQ(numWrite, 4);
     }
 
     TEST_F(KernelGraphTestGPU, GPU_TensorTileCopyColStrideDouble)
     {
-        CopyStrideOverride<double>(true);
+        std::shared_ptr<CommandKernel> commandKernel;
+        CopyStrideOverride<double>(commandKernel, true);
+
+        auto instructions = NormalizedSourceLines(commandKernel->getInstructions(), false);
+
+        int numRead  = 0;
+        int numWrite = 0;
+        for(auto const& instruction : instructions)
+        {
+            if(instruction.starts_with("buffer_load_dwordx4"))
+            {
+                numRead++;
+            }
+            else if(instruction.starts_with("buffer_store_dwordx4"))
+            {
+                numWrite++;
+            }
+        }
+
+        EXPECT_EQ(numRead, 4);
+        EXPECT_EQ(numWrite, 4);
     }
 
     TEST_F(KernelGraphTestGPU, GPU_TensorTileCopyLDS)

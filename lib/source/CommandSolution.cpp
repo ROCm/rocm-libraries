@@ -171,6 +171,11 @@ namespace rocRoller
         return m_kernelGraph;
     }
 
+    std::string CommandKernel::getInstructions() const
+    {
+        return m_context->instructions()->toString();
+    }
+
     Generator<Instruction> CommandKernel::commandComments()
     {
         co_yield Instruction::Comment(m_command->toString());

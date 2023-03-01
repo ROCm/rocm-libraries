@@ -36,12 +36,13 @@ namespace MatrixMultiplyTest
     };
 
     template <typename T>
-    void matrixMultiplyMacroTile(std::shared_ptr<Context> m_context,
-                                 int                      wave_m,
-                                 int                      wave_n,
-                                 int                      wave_k,
-                                 int                      wave_b,
-                                 double                   acceptableError)
+    void matrixMultiplyMacroTile(std::shared_ptr<Context>        m_context,
+                                 int                             wave_m,
+                                 int                             wave_n,
+                                 int                             wave_k,
+                                 int                             wave_b,
+                                 double                          acceptableError,
+                                 std::shared_ptr<CommandKernel>& commandKernel)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
 
@@ -113,6 +114,9 @@ namespace MatrixMultiplyTest
         runtimeArgs.append("d_d_stride_0", (size_t)1);
         runtimeArgs.append("d_d_stride_1", (size_t)M);
 
+        auto kernelOptions                           = std::make_shared<KernelOptions>();
+        kernelOptions->packMultipleElementsInto1VGPR = true;
+
         auto params = std::make_shared<CommandParameters>();
         params->setManualKernelDimension(2);
         params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
@@ -120,8 +124,10 @@ namespace MatrixMultiplyTest
 
         // TODO: the translate step should figure out that there is a
         // T_Mul and do the right thing for the T_Load_Tiled commands
-        auto mac_tile_0 = KernelGraph::CoordinateGraph::MacroTile(
-            {mac_m, mac_k}, LayoutType::MATRIX_A, {wave_m, wave_n, wave_k, wave_b});
+        auto mac_tile_0 = KernelGraph::CoordinateGraph::MacroTile({mac_m, mac_k},
+                                                                  LayoutType::MATRIX_A,
+                                                                  {wave_m, wave_n, wave_k, wave_b},
+                                                                  MemoryType::LDS);
         auto mac_tile_1 = KernelGraph::CoordinateGraph::MacroTile(
             {mac_k, mac_n}, LayoutType::MATRIX_B, {wave_m, wave_n, wave_k, wave_b});
         auto mac_tile_2 = KernelGraph::CoordinateGraph::MacroTile(
@@ -149,8 +155,9 @@ namespace MatrixMultiplyTest
             postParams->setDimensionInfo(id - 1, WFY);
         }
 
-        CommandKernel commandKernel(command, "MatrixMultiplyMacroTile", params, postParams);
-        commandKernel.launchKernel(runtimeArgs.runtimeArguments());
+        commandKernel = std::make_shared<CommandKernel>(
+            command, "MatrixMultiplyMacroTile", params, postParams, kernelOptions);
+        commandKernel->launchKernel(runtimeArgs.runtimeArguments());
 
         std::vector<T> D(M * N);
         ASSERT_THAT(hipMemcpy(D.data(), d_D.get(), M * N * sizeof(T), hipMemcpyDefault),
@@ -166,12 +173,38 @@ namespace MatrixMultiplyTest
 
     TEST_F(MatrixMultiplyTestGPU, GPU_MatrixMultiplyMacroTile)
     {
-        matrixMultiplyMacroTile<float>(m_context, 32, 32, 2, 1, 2.e-6);
+        std::shared_ptr<CommandKernel> commandKernel;
+        matrixMultiplyMacroTile<float>(m_context, 32, 32, 2, 1, 2.e-6, commandKernel);
     }
 
     TEST_F(MatrixMultiplyTestGPU, GPU_MatrixMultiplyMacroTileFP16)
     {
-        matrixMultiplyMacroTile<Half>(m_context, 32, 32, 8, 1, 2.e-6);
+        std::shared_ptr<CommandKernel> commandKernel;
+        matrixMultiplyMacroTile<Half>(m_context, 32, 32, 8, 1, 2.e-6, commandKernel);
+
+        auto instructions = NormalizedSourceLines(commandKernel->getInstructions(), false);
+
+        int expectedLocalWriteOffset = 0;
+        int numLocalRead             = 0;
+        for(auto const& instruction : instructions)
+        {
+            // Count the number of ds_write_b32 instructions and make sure they have
+            // the expected offset values
+            if(instruction.starts_with("ds_write_b32"))
+            {
+                if(expectedLocalWriteOffset > 0)
+                    EXPECT_TRUE(instruction.ends_with("offset:"
+                                                      + std::to_string(expectedLocalWriteOffset)));
+                expectedLocalWriteOffset += 256;
+            }
+
+            if(instruction.starts_with("ds_read_b64"))
+            {
+                numLocalRead++;
+            }
+        }
+        EXPECT_EQ(expectedLocalWriteOffset, 2048);
+        EXPECT_EQ(numLocalRead, 4);
     }
 
     template <typename T>
