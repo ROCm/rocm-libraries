@@ -186,7 +186,7 @@ namespace rocRoller
         }
 
         /**
-         * @brief Container to describe a loop-carried dependency. 
+         * @brief Container to describe a loop-carried dependency.
          */
         struct LoopCarriedDependency
         {
@@ -196,7 +196,7 @@ namespace rocRoller
 
         /**
          * @brief Find loop-carried dependencies.
-         *  
+         *
          * If a coordinate:
          *
          * 1. is written to only once

@@ -82,7 +82,7 @@ namespace rocRoller
 
             /**
              * @brief Build unrolled offset expression.
-             * 
+             *
              * Offsets inside unrolled loops look like:
              *
              *    offset = offset + unroll-iteration * stride

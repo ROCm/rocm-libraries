@@ -64,8 +64,15 @@ namespace rocRoller
         unsigned int m_nextAvailable      = 0;
         unsigned int m_currentUsed        = 0;
         unsigned int m_consolidationDepth = 0;
+        unsigned int m_maxUsed            = 0;
 
-        std::list<std::shared_ptr<LDSAllocation>> freeBlocks;
+        std::list<std::shared_ptr<LDSAllocation>> m_freeBlocks;
+
+        /**
+         * @brief Updates the max LDS used
+         *
+         */
+        void updateMaxUsed();
     };
 
     /**

@@ -14,7 +14,7 @@ namespace rocRoller
 
     unsigned int LDSAllocator::maxUsed() const
     {
-        return m_nextAvailable;
+        return m_maxUsed;
     }
 
     unsigned int LDSAllocator::currentUsed() const
@@ -22,13 +22,26 @@ namespace rocRoller
         return m_currentUsed;
     }
 
+    void LDSAllocator::updateMaxUsed()
+    {
+        if(m_maxUsed < m_nextAvailable)
+        {
+            m_maxUsed = m_nextAvailable;
+        }
+    }
+
     std::shared_ptr<LDSAllocation> LDSAllocator::allocate(unsigned int size, unsigned int alignment)
     {
         unsigned int                   alignedSize = RoundUpToMultiple(size, alignment);
         std::shared_ptr<LDSAllocation> result;
 
+        AssertFatal(size == alignedSize,
+                    "Can only allocate aligned sizes\n",
+                    ShowValue(size),
+                    ShowValue(alignedSize));
+
         // Look for available free blocks that can hold the requested amount of memory.
-        for(auto it = freeBlocks.begin(); it != freeBlocks.end(); it++)
+        for(auto it = m_freeBlocks.begin(); it != m_freeBlocks.end(); it++)
         {
             auto block = *it;
 
@@ -42,12 +55,12 @@ namespace rocRoller
                 result = std::make_shared<LDSAllocation>(
                     shared_from_this(), alignedSize, block->offset());
 
-                // If block is the exact amount requested, it can be removed from the freeBlocks list.
+                // If block is the exact amount requested, it can be removed from the m_freeBlocks list.
                 // Otherwise, the correct amount of space should be taken from the block.
                 if(block->size() == alignedSize)
                 {
                     m_consolidationDepth++;
-                    freeBlocks.erase(it);
+                    m_freeBlocks.erase(it);
                     m_consolidationDepth--;
                 }
                 else
@@ -57,6 +70,7 @@ namespace rocRoller
                 }
 
                 m_currentUsed += alignedSize;
+                updateMaxUsed();
                 return result;
             }
         }
@@ -64,13 +78,16 @@ namespace rocRoller
         // If there are no free blocks that can hold size, allocate more memory from m_nextAvailable
         auto alignedOffset = RoundUpToMultiple(m_nextAvailable, alignment);
         AssertFatal(alignedOffset + alignedSize <= m_maxAmount,
-                    "Attempting to allocate more Local Data than is available");
+                    "Attempting to allocate more Local Data than is available",
+                    ShowValue(alignedOffset),
+                    ShowValue(alignedSize),
+                    ShowValue(m_maxAmount));
 
         if(alignedOffset > m_nextAvailable)
         {
             auto gap = std::make_shared<LDSAllocation>(
                 shared_from_this(), alignedOffset - m_nextAvailable, m_nextAvailable);
-            freeBlocks.push_back(gap);
+            m_freeBlocks.push_back(gap);
         }
 
         auto allocation
@@ -79,6 +96,7 @@ namespace rocRoller
         m_nextAvailable = alignedOffset + alignedSize;
         m_currentUsed += alignedSize;
 
+        updateMaxUsed();
         return allocation;
     }
 
@@ -88,25 +106,31 @@ namespace rocRoller
         bool         deallocated    = false;
 
         // Blocks should be returned in sorted order.
-        auto it = freeBlocks.begin();
-        while(it != freeBlocks.end() && !deallocated)
+        auto it = m_freeBlocks.begin();
+        while(it != m_freeBlocks.end() && !deallocated)
         {
             auto block = *it;
             // Make sure block hasn't already been deallocated
             AssertFatal(
                 !(allocation->offset() <= block->offset() && allocation_end > block->offset()),
-                "Local memory allocation has already been freed.");
+                ShowValue(allocation->offset()),
+                ShowValue(allocation_end),
+                ShowValue(block->offset()),
+                ShowValue(allocation->size()),
+                allocation->toString(),
+                "\nLocal memory allocation has already been freed.");
+
             // Can allocation be added to the end of the current block?
             if(block->offset() + block->size() == allocation->offset())
             {
                 // Can allocation also be added to the beginning of the next block as well?
                 // If so, block and the next block can be merged together.
                 auto next = std::next(it);
-                if(next != freeBlocks.end() && allocation_end == (*next)->offset())
+                if(next != m_freeBlocks.end() && allocation_end == (*next)->offset())
                 {
                     block->setSize(block->size() + allocation->size() + (*next)->size());
                     m_consolidationDepth++;
-                    freeBlocks.erase(next);
+                    m_freeBlocks.erase(next);
                     m_consolidationDepth--;
                 }
                 else
@@ -126,19 +150,35 @@ namespace rocRoller
             // Should new block be added
             else if(allocation->offset() < block->offset())
             {
-                freeBlocks.insert(it, allocation);
+                m_freeBlocks.insert(it, allocation);
                 deallocated = true;
             }
 
             it++;
         }
 
-        // If allocation wasn't added to freeBlocks, insert it at the end
+        // If allocation wasn't added to m_freeBlocks, insert it at the end
         if(!deallocated)
-            freeBlocks.push_back(allocation);
+            m_freeBlocks.push_back(allocation);
 
         if(m_consolidationDepth == 0)
+        {
+            AssertFatal(m_currentUsed >= allocation->size(),
+                        ShowValue(m_currentUsed),
+                        ShowValue(allocation->size()));
+
             m_currentUsed -= allocation->size();
+
+            // Remove last block if it's on the edge of free memory
+            if(!m_freeBlocks.empty()
+               && m_nextAvailable == m_freeBlocks.back()->offset() + m_freeBlocks.back()->size())
+            {
+                m_consolidationDepth += 1;
+                m_nextAvailable -= m_freeBlocks.back()->size();
+                m_freeBlocks.pop_back();
+                m_consolidationDepth -= 1;
+            }
+        }
     }
 
     LDSAllocation::LDSAllocation(std::shared_ptr<LDSAllocator> allocator,

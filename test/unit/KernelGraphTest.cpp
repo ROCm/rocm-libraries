@@ -3308,5 +3308,4 @@ namespace KernelGraphTest
 
         EXPECT_EQ(NormalizedSource(expected1), NormalizedSource(kgraph0.toDOT()));
     }
-
 }

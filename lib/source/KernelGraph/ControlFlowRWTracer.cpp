@@ -135,11 +135,15 @@ namespace rocRoller::KernelGraph
 
     void ControlFlowRWTracer::trackRegister(int control, int coordinate, ReadWrite rw)
     {
-        m_trace.push_back({static_cast<int>(m_loop.size()),
-                           m_loop.empty() ? -1 : m_loop.back(),
-                           control,
-                           coordinate,
-                           rw});
+        // Ignore invalid tags
+        if(control >= 0 && coordinate >= 0)
+        {
+            m_trace.push_back({static_cast<int>(m_loop.size()),
+                               m_loop.empty() ? -1 : m_loop.back(),
+                               control,
+                               coordinate,
+                               rw});
+        }
     }
 
     bool ControlFlowRWTracer::hasGeneratedInputs(int const& tag)
@@ -250,7 +254,7 @@ namespace rocRoller::KernelGraph
         // 2. Teach the tracker how to dig into all nodes.  Very
         // tedious and not future-proof.
         //
-        // 3. Expose all references in the grpah.  Ideal but we
+        // 3. Expose all references in the graph.  Ideal but we
         // aren't there yet.
         //
 
@@ -276,6 +280,7 @@ namespace rocRoller::KernelGraph
     {
         auto dst = m_graph.mapper.get<MacroTile>(tag);
         trackRegister(tag, dst, ReadWrite::WRITE);
+        trackRegister(tag, m_graph.mapper.get<LDS>(tag), ReadWrite::READ);
     }
 
     void ControlFlowRWTracer::operator()(LoadLinear const& op, int tag)
@@ -298,6 +303,8 @@ namespace rocRoller::KernelGraph
 
     void ControlFlowRWTracer::operator()(Multiply const& op, int tag)
     {
+        m_loop.push_back(tag);
+
         auto body = m_graph.control.getOutputNodeIndices<Body>(tag).to<std::set>();
         generate(body);
 
@@ -309,6 +316,8 @@ namespace rocRoller::KernelGraph
         trackRegister(tag, a, ReadWrite::READ);
         trackRegister(tag, b, ReadWrite::READ);
         trackRegister(tag, dst, ReadWrite::READWRITE);
+
+        m_loop.pop_back();
     }
 
     void ControlFlowRWTracer::operator()(Scope const& op, int tag)
@@ -333,6 +342,7 @@ namespace rocRoller::KernelGraph
     {
         auto dst = m_graph.mapper.get<MacroTile>(tag);
         trackRegister(tag, dst, ReadWrite::READ);
+        trackRegister(tag, m_graph.mapper.get<LDS>(tag), ReadWrite::WRITE);
     }
 
     void ControlFlowRWTracer::operator()(StoreLinear const& op, int tag)
