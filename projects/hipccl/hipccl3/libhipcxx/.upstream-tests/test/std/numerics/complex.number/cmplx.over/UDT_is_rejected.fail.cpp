@@ -45,7 +45,7 @@ struct UDT
 __host__ __device__ UDT<float> ft;
 __host__ __device__ UDT<double> dt;
 // CUDA treats long double as double
-// UDT<long double> ldt;
+__host__ __device__ UDT<long double> ldt;
 __host__ __device__ UDT<int> it;
 __host__ __device__ UDT<unsigned long> uit;
 #else
@@ -62,42 +62,54 @@ int main(int, char**)
   {
     cuda::std::real(ft); // expected-error {{no matching function}}
     cuda::std::real(dt); // expected-error {{no matching function}}
-    // cuda::std::real(ldt); // expected-error {{no matching function}}
+    #if defined(__HIP_PLATFORM_AMD__)
+    cuda::std::real(ldt); // expected-error {{no matching function}}
+    #endif
     cuda::std::real(it); // expected-error {{no matching function}}
     cuda::std::real(uit); // expected-error {{no matching function}}
   }
   {
     cuda::std::imag(ft); // expected-error {{no matching function}}
     cuda::std::imag(dt); // expected-error {{no matching function}}
-    // cuda::std::imag(ldt); // expected-error {{no matching function}}
+    #if defined(__HIP_PLATFORM_AMD__)
+    cuda::std::imag(ldt); // expected-error {{no matching function}}
+    #endif
     cuda::std::imag(it); // expected-error {{no matching function}}
     cuda::std::imag(uit); // expected-error {{no matching function}}
   }
   {
     cuda::std::arg(ft); // expected-error {{no matching function}}
     cuda::std::arg(dt); // expected-error {{no matching function}}
-    // cuda::std::arg(ldt); // expected-error {{no matching function}}
+    #if defined(__HIP_PLATFORM_AMD__)
+    cuda::std::arg(ldt); // expected-error {{no matching function}}
+    #endif
     cuda::std::arg(it); // expected-error {{no matching function}}
     cuda::std::arg(uit); // expected-error {{no matching function}}
   }
   {
     cuda::std::norm(ft); // expected-error {{no matching function}}
     cuda::std::norm(dt); // expected-error {{no matching function}}
-    // cuda::std::norm(ldt); // expected-error {{no matching function}}
+    #if defined(__HIP_PLATFORM_AMD__)
+    cuda::std::norm(ldt); // expected-error {{no matching function}}
+    #endif
     cuda::std::norm(it); // expected-error {{no matching function}}
     cuda::std::norm(uit); // expected-error {{no matching function}}
   }
   {
     cuda::std::conj(ft); // expected-error {{no matching function}}
     cuda::std::conj(dt); // expected-error {{no matching function}}
-    // cuda::std::conj(ldt); // expected-error {{no matching function}}
+    #if defined(__HIP_PLATFORM_AMD__)
+    cuda::std::conj(ldt); // expected-error {{no matching function}}
+    #endif
     cuda::std::conj(it); // expected-error {{no matching function}}
     cuda::std::conj(uit); // expected-error {{no matching function}}
   }
   {
     cuda::std::proj(ft); // expected-error {{no matching function}}
     cuda::std::proj(dt); // expected-error {{no matching function}}
-    // cuda::std::proj(ldt); // expected-error {{no matching function}}
+    #if defined(__HIP_PLATFORM_AMD__)
+    cuda::std::proj(ldt); // expected-error {{no matching function}}
+    #endif
     cuda::std::proj(it); // expected-error {{no matching function}}
     cuda::std::proj(uit); // expected-error {{no matching function}}
   }

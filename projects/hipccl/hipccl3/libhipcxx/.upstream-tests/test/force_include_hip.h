@@ -30,20 +30,31 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#define CUDA_CALL(err, ...) \
+    do { \
+        err = __VA_ARGS__; \
+        if (err != hipSuccess) \
+        { \
+            printf("CUDA ERROR, line %d: %s: %s\n", __LINE__,\
+                   hipGetErrorName(err), hipGetErrorString(err)); \
+            exit(1); \
+        } \
+    } while (false)
 
 void list_devices()
 {
+    hipError_t err;
     int device_count;
-    hipGetDeviceCount(&device_count);
+    CUDA_CALL(err, hipGetDeviceCount(&device_count));
     printf("HIP devices found: %d\n", device_count);
 
     int selected_device;
-    hipGetDevice(&selected_device);
+    CUDA_CALL(err, hipGetDevice(&selected_device));
 
     for (int dev = 0; dev < device_count; ++dev)
     {
         hipDeviceProp_t device_prop;
-        hipGetDeviceProperties(&device_prop, dev);
+        CUDA_CALL(err, hipGetDeviceProperties(&device_prop, dev));
 
         printf("Device %d: \"%s\", ", dev, device_prop.name);
         if(dev == selected_device)
@@ -69,17 +80,6 @@ void fake_main_kernel(int * ret)
 {
    *ret = fake_main(0, NULL);
 }
-
-#define CUDA_CALL(err, ...) \
-    do { \
-        err = __VA_ARGS__; \
-        if (err != hipSuccess) \
-        { \
-            printf("CUDA ERROR, line %d: %s: %s\n", __LINE__,\
-                   hipGetErrorName(err), hipGetErrorString(err)); \
-            exit(1); \
-        } \
-    } while (false)
 
 int main(int argc, char** argv)
 {
