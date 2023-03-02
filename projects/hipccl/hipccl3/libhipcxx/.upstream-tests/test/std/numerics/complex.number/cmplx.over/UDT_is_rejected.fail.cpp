@@ -24,7 +24,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-// UNSUPPORTED: hipcc
 // <cuda/std/complex>
 
 // Test that UDT's convertible to an integral or floating point type do not
@@ -42,13 +41,21 @@ struct UDT
     return 1;
   }
 };
-
+#if defined(__HIP_PLATFORM_AMD__)
+__host__ __device__ UDT<float> ft;
+__host__ __device__ UDT<double> dt;
+// CUDA treats long double as double
+// UDT<long double> ldt;
+__host__ __device__ UDT<int> it;
+__host__ __device__ UDT<unsigned long> uit;
+#else
 UDT<float> ft;
 UDT<double> dt;
 // CUDA treats long double as double
 // UDT<long double> ldt;
 UDT<int> it;
 UDT<unsigned long> uit;
+#endif
 
 int main(int, char**)
 {

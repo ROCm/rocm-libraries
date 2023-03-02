@@ -24,9 +24,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-// UNSUPPORTED: hipcc
-// <cuda/std/complex>
-
 // template<class T>
 //   T
 //   imag(const complex<T>& x);
