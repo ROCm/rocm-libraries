@@ -176,6 +176,18 @@ namespace rocRoller
         {
         }
 
+        inline T_Load_Tiled::T_Load_Tiled(DataType                   dataType,
+                                          int                        dims,
+                                          int                        dest,
+                                          std::vector<size_t> const& literalStrides)
+            : Load_Store_Operation(dataType, dims, dest)
+            , m_variable_type(dataType)
+            , m_literalStrides(literalStrides)
+        {
+            AssertFatal(literalStrides.size() <= dims,
+                        "Cannot specify more literal strides than dimensions.");
+        }
+
         inline void T_Load_Tiled::allocateArguments()
         {
 
@@ -209,6 +221,11 @@ namespace rocRoller
         inline VariableType T_Load_Tiled::variableType() const
         {
             return m_variable_type;
+        }
+
+        inline std::vector<size_t> T_Load_Tiled::literalStrides() const
+        {
+            return m_literalStrides;
         }
 
         inline std::ostream& operator<<(std::ostream& stream, T_Load_Tiled const& val)

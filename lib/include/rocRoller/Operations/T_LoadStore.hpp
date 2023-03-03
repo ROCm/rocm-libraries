@@ -26,11 +26,11 @@ namespace rocRoller
             int  getTag() const;
             void setTag(int tag);
 
-            std::vector<std::shared_ptr<CommandArgument>> strides() const
+            std::vector<CommandArgumentPtr> strides() const
             {
                 return m_strides;
             }
-            std::vector<std::shared_ptr<CommandArgument>> sizes() const
+            std::vector<CommandArgumentPtr> sizes() const
             {
                 return m_sizes;
             }
@@ -38,7 +38,7 @@ namespace rocRoller
             {
                 return m_data_type;
             }
-            std::shared_ptr<CommandArgument> data() const
+            CommandArgumentPtr data() const
             {
                 return m_pointer;
             }
@@ -53,11 +53,11 @@ namespace rocRoller
 
             std::weak_ptr<Command> m_command;
 
-            std::shared_ptr<CommandArgument> m_pointer;
-            std::shared_ptr<CommandArgument> m_extent;
+            CommandArgumentPtr m_pointer;
+            CommandArgumentPtr m_extent;
 
-            std::vector<std::shared_ptr<CommandArgument>> m_sizes;
-            std::vector<std::shared_ptr<CommandArgument>> m_strides;
+            std::vector<CommandArgumentPtr> m_sizes;
+            std::vector<CommandArgumentPtr> m_strides;
         };
 
         class T_Load_Linear : public Load_Store_Operation
@@ -93,14 +93,22 @@ namespace rocRoller
         public:
             T_Load_Tiled();
             T_Load_Tiled(DataType dataType, int dims, int dest);
+            T_Load_Tiled(DataType                   dataType,
+                         int                        dims,
+                         int                        dest,
+                         std::vector<size_t> const& literalStrides);
             std::string  toString() const;
             std::string  toString(const unsigned char*) const;
             void         allocateArguments();
             VariableType variableType() const;
 
+            std::vector<size_t> literalStrides() const;
+
         private:
             VariableType m_variable_type;
             int          m_rank;
+
+            std::vector<size_t> m_literalStrides;
         };
 
         std::ostream& operator<<(std::ostream& stream, T_Load_Tiled const& val);

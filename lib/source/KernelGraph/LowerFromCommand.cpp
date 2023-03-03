@@ -200,17 +200,26 @@ namespace rocRoller
                 rocRoller::Log::getLogger()->debug("KernelGraph::TranslateVisitor::T_Load_Tiled");
 
                 // TODO: offsets and limits
-                auto const tag     = tload.getTag();
-                auto const sizes   = tload.sizes();
-                auto const strides = tload.strides();
+                auto const tag             = tload.getTag();
+                auto const sizes           = tload.sizes();
+                auto const strides         = tload.strides();
+                auto const literal_strides = tload.literalStrides();
 
                 auto user = graph.coordinates.addElement(User(tload.data()->name()));
 
                 std::vector<int> dims;
                 for(size_t i = 0; i < sizes.size(); ++i)
                 {
-                    auto size_expr   = std::make_shared<Expression::Expression>(sizes[i]);
-                    auto stride_expr = std::make_shared<Expression::Expression>(strides[i]);
+                    auto size_expr = std::make_shared<Expression::Expression>(sizes[i]);
+                    std::shared_ptr<Expression::Expression> stride_expr;
+                    if(literal_strides.size() > i && literal_strides[i] > 0)
+                    {
+                        stride_expr = std::make_shared<Expression::Expression>(literal_strides[i]);
+                    }
+                    else
+                    {
+                        stride_expr = std::make_shared<Expression::Expression>(strides[i]);
+                    }
 
                     auto dim
                         = graph.coordinates.addElement(SubDimension(i, size_expr, stride_expr));

@@ -573,6 +573,8 @@ namespace rocRoller
         CommandArgumentValue evaluate(ExpressionPtr const& expr);
         CommandArgumentValue evaluate(Expression const& expr);
 
+        bool canEvaluateTo(CommandArgumentValue val, ExpressionPtr const& expr);
+
         /**
          * Evaluate an expression whose evaluationTime is Translate or KernelLaunch.  Will throw an exception if it contains any Register values.
          */

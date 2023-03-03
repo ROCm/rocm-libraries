@@ -326,12 +326,18 @@ namespace rocRoller
 
                 for(size_t k = 0; k < valueCount; ++k)
                 {
-                    auto lhsVal
-                        = results[0]->valueCount() == 1 ? results[0] : results[0]->element({k});
-                    auto r1hsVal
-                        = results[1]->valueCount() == 1 ? results[1] : results[1]->element({k});
-                    auto r2hsVal
-                        = results[2]->valueCount() == 1 ? results[2] : results[2]->element({k});
+                    auto lhsVal  = results[0]->regType() == Register::Type::Literal
+                                          || results[0]->valueCount() == 1
+                                       ? results[0]
+                                       : results[0]->element({k});
+                    auto r1hsVal = results[1]->regType() == Register::Type::Literal
+                                           || results[1]->valueCount() == 1
+                                       ? results[1]
+                                       : results[1]->element({k});
+                    auto r2hsVal = results[2]->regType() == Register::Type::Literal
+                                           || results[2]->valueCount() == 1
+                                       ? results[2]
+                                       : results[2]->element({k});
                     co_yield generateOp<Operation>(dest->element({k}), lhsVal, r1hsVal, r2hsVal);
                 }
 

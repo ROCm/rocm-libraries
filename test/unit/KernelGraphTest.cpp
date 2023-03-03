@@ -2517,8 +2517,16 @@ namespace KernelGraphTest
 
         auto command = std::make_shared<Command>();
 
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(dataType, 2, 0)));
+        if(override)
+        {
+            command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
+                rocRoller::Operations::T_Load_Tiled(dataType, 2, 0, {(size_t)0, (size_t)1})));
+        }
+        else
+        {
+            command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
+                rocRoller::Operations::T_Load_Tiled(dataType, 2, 0)));
+        }
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
             rocRoller::Operations::T_Store_Tiled(dataType, 2, 0)));
 
@@ -2544,10 +2552,6 @@ namespace KernelGraphTest
 
         if(override)
         {
-            auto loadColStrideOverride   = SubDimension(1);
-            loadColStrideOverride.stride = Expression::literal(1u);
-            params->setDimensionInfo(3, loadColStrideOverride);
-
             auto storeColStrideOverride   = SubDimension(1);
             storeColStrideOverride.stride = Expression::literal(1u);
             params->setDimensionInfo(9, storeColStrideOverride);

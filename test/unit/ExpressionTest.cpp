@@ -569,6 +569,8 @@ namespace ExpressionTest
         auto expectedTimes = Expression::EvaluationTimes::All();
         EXPECT_EQ(expectedTimes, Expression::evaluationTimes(expr2));
 
+        EXPECT_TRUE(Expression::canEvaluateTo(3.0, expr1));
+        EXPECT_TRUE(Expression::canEvaluateTo(6.0, expr2));
         EXPECT_EQ(3.0, std::get<double>(Expression::evaluate(expr1)));
         EXPECT_EQ(6.0, std::get<double>(Expression::evaluate(expr2)));
     }
@@ -604,6 +606,7 @@ namespace ExpressionTest
         args.b = 1.5;
         EXPECT_EQ(5.25, std::get<double>(Expression::evaluate(expr2, runtimeArgs)));
 
+        EXPECT_FALSE(Expression::canEvaluateTo(5.25, expr2));
         // Don't send in the runtimeArgs, can't evaluate the arguments.
         EXPECT_THROW(Expression::evaluate(expr2), std::runtime_error);
 

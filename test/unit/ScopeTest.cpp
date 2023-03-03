@@ -133,11 +133,11 @@ namespace ScopeTest
     /**
      * This is a regression test that will fail if codegen for the Scope operation doesn't
      * lock the scheduler.
-     * 
+     *
      * For the bug to appear, we need the following to happen:
      * Scope A and B are under separate locations of the graph.
-     * 
-     * - Begin Scope A                
+     *
+     * - Begin Scope A
      *                                         - Begin Scope B
      * - Allocate a DataFlow register (df1)
      *   (this goes into scope B)

@@ -197,12 +197,38 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult, bool doVisualize)
 
     auto command = std::make_shared<Command>();
 
+    //TODO: Handle transposed matrices more elegantly
+    if(result.trans_A == "T")
+    {
+        command->addOperation(
+            std::make_shared<rocRoller::Operations::Operation>(rocRoller::Operations::T_Load_Tiled(
+                TypeInfo<A>::Var.dataType, 2, 0, {(size_t)0, (size_t)1}))); // A
+    }
+    else
+    {
+        command->addOperation(
+            std::make_shared<rocRoller::Operations::Operation>(rocRoller::Operations::T_Load_Tiled(
+                TypeInfo<A>::Var.dataType, 2, 0, {(size_t)1}))); // A
+    }
+    //TODO: Handle transposed matrices more elegantly
+    if(result.trans_B == "T")
+    {
+        command->addOperation(
+            std::make_shared<rocRoller::Operations::Operation>(rocRoller::Operations::T_Load_Tiled(
+                TypeInfo<B>::Var.dataType, 2, 1, {(size_t)0, (size_t)1}))); // B
+    }
+    else
+    {
+        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
+            rocRoller::Operations::T_Load_Tiled(TypeInfo<B>::Var.dataType,
+                                                2,
+                                                1,
+                                                {
+                                                    (size_t)1,
+                                                }))); // B
+    }
     command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-        rocRoller::Operations::T_Load_Tiled(TypeInfo<A>::Var.dataType, 2, 0))); // A
-    command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-        rocRoller::Operations::T_Load_Tiled(TypeInfo<B>::Var.dataType, 2, 1))); // B
-    command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-        rocRoller::Operations::T_Load_Tiled(TypeInfo<C>::Var.dataType, 2, 2))); // C
+        rocRoller::Operations::T_Load_Tiled(TypeInfo<C>::Var.dataType, 2, 2, {(size_t)1}))); // C
     command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
         rocRoller::Operations::T_Load_Scalar(DataType::Float, 3))); // alpha
     command->addOperation(std::make_shared<rocRoller::Operations::Operation>(

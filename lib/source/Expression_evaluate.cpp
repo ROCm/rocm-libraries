@@ -584,6 +584,15 @@ namespace rocRoller
             return EvaluateVisitor().call(expr);
         }
 
+        bool canEvaluateTo(CommandArgumentValue val, ExpressionPtr const& expr)
+        {
+            if(evaluationTimes(expr)[EvaluationTime::Translate])
+            {
+                return evaluate(expr) == val;
+            }
+            return false;
+        }
+
         static_assert(CCanEvaluateBinary<OperationEvaluatorVisitor<Add>, double, double>);
         static_assert(!CCanEvaluateBinary<OperationEvaluatorVisitor<Add>, double, int*>);
         static_assert(CCanEvaluateBinary<OperationEvaluatorVisitor<Add>, float*, int>);

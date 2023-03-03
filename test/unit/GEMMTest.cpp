@@ -64,6 +64,10 @@ namespace GEMMDriverTest
         bool storeLDSD = true;
 
         bool fuseLoops = true;
+
+        bool literalStrides = true;
+
+        bool packMultipleElementsInto1VGPR = false;
     };
 
     template <typename T>
@@ -134,12 +138,15 @@ namespace GEMMDriverTest
         auto command  = std::make_shared<Command>();
         auto dataType = TypeInfo<T>::Var.dataType;
 
+        std::vector<size_t> oneSrides
+            = gemm.literalStrides ? std::vector<size_t>({(size_t)1}) : std::vector<size_t>({});
+
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(dataType, 2, 0))); // A
+            rocRoller::Operations::T_Load_Tiled(dataType, 2, 0, oneSrides))); // A
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(dataType, 2, 1))); // B
+            rocRoller::Operations::T_Load_Tiled(dataType, 2, 1, oneSrides))); // B
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(dataType, 2, 2))); // C
+            rocRoller::Operations::T_Load_Tiled(dataType, 2, 2, oneSrides))); // C
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
             rocRoller::Operations::T_Load_Scalar(DataType::Float, 3))); // alpha
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
@@ -192,11 +199,12 @@ namespace GEMMDriverTest
         runtimeArgs.append("d_d_stride_0", (size_t)1);
         runtimeArgs.append("d_d_stride_1", (size_t)M);
 
-        auto kernelOptions       = std::make_shared<KernelOptions>();
-        kernelOptions->fuseLoops = gemm.fuseLoops;
-        kernelOptions->unrollX   = gemm.unrollX;
-        kernelOptions->unrollY   = gemm.unrollY;
-        kernelOptions->unrollK   = gemm.unrollK;
+        auto kernelOptions                           = std::make_shared<KernelOptions>();
+        kernelOptions->fuseLoops                     = gemm.fuseLoops;
+        kernelOptions->unrollX                       = gemm.unrollX;
+        kernelOptions->unrollY                       = gemm.unrollY;
+        kernelOptions->unrollK                       = gemm.unrollK;
+        kernelOptions->packMultipleElementsInto1VGPR = gemm.packMultipleElementsInto1VGPR;
 
         auto params = std::make_shared<CommandParameters>();
         params->setManualKernelDimension(2);
@@ -557,6 +565,49 @@ namespace GEMMDriverTest
         gemm.storeLDSD = false;
 
         basicGEMM<Half>(m_context, gemm, 2.e-5);
+    }
+
+    int countSubstring(const std::string& str, const std::string& sub)
+    {
+        if(sub.length() == 0)
+            return 0;
+        int count = 0;
+        for(size_t offset = str.find(sub); offset != std::string::npos;
+            offset        = str.find(sub, offset + sub.length()))
+        {
+            ++count;
+        }
+        return count;
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMLiteralStrides)
+    {
+        GEMMProblem gemm;
+        gemm.packMultipleElementsInto1VGPR = true;
+
+        gemm.literalStrides = true;
+        basicGEMM<float>(m_context, gemm, 1.e-6);
+        std::string output_literalStrides = m_context->instructions()->toString();
+
+        gemm.literalStrides = false;
+        basicGEMM<float>(m_context, gemm, 1.e-6);
+        std::string output_noLiteralStrides = m_context->instructions()->toString();
+
+        //Since we're setting the first dimension to a literal 1, there will be less occurrences of Load_Tiled_0_stride_0.
+        EXPECT_LT(countSubstring(output_literalStrides, "Load_Tiled_0_stride_0"),
+                  countSubstring(output_noLiteralStrides, "Load_Tiled_0_stride_0"));
+        EXPECT_LT(countSubstring(output_literalStrides, "Load_Tiled_1_stride_0"),
+                  countSubstring(output_noLiteralStrides, "Load_Tiled_1_stride_0"));
+        EXPECT_LT(countSubstring(output_literalStrides, "Load_Tiled_2_stride_0"),
+                  countSubstring(output_noLiteralStrides, "Load_Tiled_2_stride_0"));
+
+        //Since we're not setting the second dimension to a literal, there will be the same occurrences of Load_Tiled_X_stride_1.
+        EXPECT_EQ(countSubstring(output_literalStrides, "Load_Tiled_0_stride_1"),
+                  countSubstring(output_noLiteralStrides, "Load_Tiled_0_stride_1"));
+        EXPECT_EQ(countSubstring(output_literalStrides, "Load_Tiled_1_stride_1"),
+                  countSubstring(output_noLiteralStrides, "Load_Tiled_1_stride_1"));
+        EXPECT_EQ(countSubstring(output_literalStrides, "Load_Tiled_2_stride_1"),
+                  countSubstring(output_noLiteralStrides, "Load_Tiled_2_stride_1"));
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16AllLDS)
