@@ -194,6 +194,23 @@ def hgemm():
             **fp16,
         )
 
+    yield GEMMRun(
+        M=7680,
+        N=8448,
+        K=8192,
+        mac_m=128,
+        mac_n=256,
+        mac_k=16,
+        workgroup_size_x=256,
+        workgroup_size_y=1,
+        trans_A="T",
+        trans_B="N",
+        visualize=False,
+        scheduler=sched,
+        match_memory_access=True,
+        **fp16,
+    )
+
 
 def codegen():
     yield CodeGenRun(instCount=40000, instructions="comments")

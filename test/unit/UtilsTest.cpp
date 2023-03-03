@@ -81,4 +81,9 @@ TEST(EnumBitsetTest, LargeEnum)
     EXPECT_EQ(combined, a1 | a33);
     EXPECT_TRUE(combined[TestEnum::A1]);
     EXPECT_TRUE(combined[TestEnum::A33]);
+
+    a1[TestEnum::A33] = true;
+    a1[TestEnum::A1]  = false;
+    EXPECT_FALSE(a1[TestEnum::A1]);
+    EXPECT_TRUE(a1[TestEnum::A33]);
 }

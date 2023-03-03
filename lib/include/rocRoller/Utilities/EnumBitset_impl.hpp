@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2022 Advanced Micro Devices, Inc.
+ * Copyright 2022-2023 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -66,6 +66,12 @@ namespace rocRoller
 
     template <typename Enum>
     inline constexpr bool EnumBitset<Enum>::operator[](Enum val) const
+    {
+        return (*this)[static_cast<size_t>(val)];
+    }
+
+    template <typename Enum>
+    inline typename EnumBitset<Enum>::Base::reference EnumBitset<Enum>::operator[](Enum val)
     {
         return (*this)[static_cast<size_t>(val)];
     }

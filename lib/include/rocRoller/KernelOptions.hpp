@@ -3,6 +3,9 @@
 #include <ostream>
 #include <string>
 
+#include <rocRoller/DataTypes/DataTypes.hpp>
+
+#include "Utilities/EnumBitset.hpp"
 #include "Utilities/Settings_fwd.hpp"
 
 namespace rocRoller
@@ -31,9 +34,7 @@ namespace rocRoller
 
         bool fuseLoops;
 
-        bool transposeMemoryAccessA;
-        bool transposeMemoryAccessB;
-        bool transposeMemoryAccessOther;
+        EnumBitset<LayoutType> transposeMemoryAccess;
 
         bool assertWaitCntState;
 

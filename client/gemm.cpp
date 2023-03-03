@@ -63,6 +63,7 @@ struct GEMMProblem
     std::string trans_B; // N or T
 
     std::string scheduler;
+    bool        match_memory_access;
 };
 
 struct GEMMResult : GEMMProblem
@@ -368,6 +369,12 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult, bool doVisualize)
     kernelOptions->unrollX = result.unroll_x;
     kernelOptions->unrollY = result.unroll_y;
 
+    if(result.match_memory_access)
+    {
+        kernelOptions->transposeMemoryAccess[LayoutType::MATRIX_A] = result.trans_A == "T";
+        kernelOptions->transposeMemoryAccess[LayoutType::MATRIX_B] = result.trans_B == "T";
+    }
+
     // Build GEMM kernel
     CommandKernel commandKernel(command, "GEMM", params, postParams, kernelOptions);
 
@@ -474,6 +481,10 @@ int main(int argc, const char* argv[])
     po.addArg("loadLDS_B", Arg({"loadLDS_B"}, "Use LDS when loading B Matrix"));
     po.addArg("storeLDS_D", Arg({"storeLDS_D"}, "Use LDS when storing D Matrix"));
     po.addArg("scheduler", Arg({"scheduler"}, "Which scheduler to use."));
+    po.addArg("match_memory_access",
+              Arg({"match_memory_access"},
+                  "Match memory access to transpose. "
+                  "Currently decreases performance."));
 
     // Benchmarking options
     po.addArg("yaml", Arg({"o", "yaml"}, "Results"));
@@ -486,30 +497,31 @@ int main(int argc, const char* argv[])
     po.parse_args(argc, argv);
 
     GEMMProblem prob;
-    prob.name             = "GEMMv00";
-    prob.M                = po.get("M", 3072);
-    prob.N                = po.get("N", 4096);
-    prob.K                = po.get("K", 4096);
-    prob.alpha            = po.get("alpha", 2.0f);
-    prob.beta             = po.get("beta", 0.5f);
-    prob.mac_m            = po.get("mac_m", 64);
-    prob.mac_n            = po.get("mac_n", 64);
-    prob.mac_k            = po.get("mac_k", 64);
-    prob.workgroup_size_x = po.get("workgroup_size_x", wavefront_size * 2);
-    prob.workgroup_size_y = po.get("workgroup_size_y", 2);
-    prob.unroll_x         = po.get("unroll_x", 0);
-    prob.unroll_y         = po.get("unroll_y", 0);
-    prob.loadLDS_A        = po.get("loadLDS_A", true);
-    prob.loadLDS_B        = po.get("loadLDS_B", true);
-    prob.storeLDS_D       = po.get("storeLDS_D", true);
-    prob.type_A           = po.get("type_A", std::string("float"));
-    prob.type_B           = po.get("type_B", std::string("float"));
-    prob.type_C           = po.get("type_C", std::string("float"));
-    prob.type_D           = po.get("type_D", std::string("float"));
-    prob.type_acc         = po.get("type_acc", std::string("float"));
-    prob.trans_A          = po.get("trans_A", std::string("N"));
-    prob.trans_B          = po.get("trans_B", std::string("N"));
-    prob.scheduler        = po.get("scheduler", std::string("Priority"));
+    prob.name                = "GEMMv00";
+    prob.M                   = po.get("M", 3072);
+    prob.N                   = po.get("N", 4096);
+    prob.K                   = po.get("K", 4096);
+    prob.alpha               = po.get("alpha", 2.0f);
+    prob.beta                = po.get("beta", 0.5f);
+    prob.mac_m               = po.get("mac_m", 64);
+    prob.mac_n               = po.get("mac_n", 64);
+    prob.mac_k               = po.get("mac_k", 64);
+    prob.workgroup_size_x    = po.get("workgroup_size_x", wavefront_size * 2);
+    prob.workgroup_size_y    = po.get("workgroup_size_y", 2);
+    prob.unroll_x            = po.get("unroll_x", 0);
+    prob.unroll_y            = po.get("unroll_y", 0);
+    prob.loadLDS_A           = po.get("loadLDS_A", true);
+    prob.loadLDS_B           = po.get("loadLDS_B", true);
+    prob.storeLDS_D          = po.get("storeLDS_D", true);
+    prob.type_A              = po.get("type_A", std::string("float"));
+    prob.type_B              = po.get("type_B", std::string("float"));
+    prob.type_C              = po.get("type_C", std::string("float"));
+    prob.type_D              = po.get("type_D", std::string("float"));
+    prob.type_acc            = po.get("type_acc", std::string("float"));
+    prob.trans_A             = po.get("trans_A", std::string("N"));
+    prob.trans_B             = po.get("trans_B", std::string("N"));
+    prob.scheduler           = po.get("scheduler", std::string("Priority"));
+    prob.match_memory_access = po.get("match_memory_access", false);
 
     prob.numWarmUp = po.get("num_warmup", 3);
     prob.numOuter  = po.get("num_outer", 5);

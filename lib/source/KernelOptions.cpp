@@ -18,13 +18,14 @@ namespace rocRoller
         , unrollX(0)
         , unrollY(0)
         , unrollK(0)
-        , transposeMemoryAccessA(true)
-        , transposeMemoryAccessB(true)
-        , transposeMemoryAccessOther(false)
         , assertWaitCntState(true)
         , packMultipleElementsInto1VGPR(false)
         , enableLongDwordInstructions(false)
     {
+        transposeMemoryAccess.set(0);
+        transposeMemoryAccess[LayoutType::MATRIX_A]           = false;
+        transposeMemoryAccess[LayoutType::MATRIX_B]           = true;
+        transposeMemoryAccess[LayoutType::MATRIX_ACCUMULATOR] = true;
     }
 
     std::ostream& operator<<(std::ostream& os, const KernelOptions& input)
@@ -43,9 +44,11 @@ namespace rocRoller
         os << "  unrollX:\t\t\t" << input.unrollX << std::endl;
         os << "  unrollY:\t\t\t" << input.unrollY << std::endl;
         os << "  unrollK:\t\t\t" << input.unrollK << std::endl;
-        os << "  transposeMemoryAccessA:\t" << input.transposeMemoryAccessA << std::endl;
-        os << "  transposeMemoryAccessB:\t" << input.transposeMemoryAccessB << std::endl;
-        os << "  transposeMemoryAccessOther:\t" << input.transposeMemoryAccessOther << std::endl;
+
+        for(int i = 0; i < static_cast<int>(LayoutType::Count); i++)
+            os << "transposeMemoryAccess[" << static_cast<LayoutType>(i)
+               << "]: " << input.transposeMemoryAccess[i] << std::endl;
+
         os << "  assertWaitCntState:\t\t" << input.assertWaitCntState << std::endl;
         os << "  packMultipleElementsInto1VGPR:\t\t" << input.packMultipleElementsInto1VGPR
            << std::endl;

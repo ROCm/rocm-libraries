@@ -72,6 +72,8 @@ class GEMM:
 
     visualize: bool = False
 
+    match_memory_access: bool = False
+
     @property
     def token(self):
         return repr(GEMM(**field_dict(GEMM, self)))
@@ -91,11 +93,12 @@ class GEMMRun(GEMM):
         self.output = path
 
     def command(self):
-        specialNames = {"output": "yaml",
-                        "numWarmUp": "num_warmup",
-                        "numOuter": "num_outer",
-                        "numInner": "num_inner",
-                        }
+        specialNames = {
+            "output": "yaml",
+            "numWarmUp": "num_warmup",
+            "numOuter": "num_outer",
+            "numInner": "num_inner",
+        }
 
         command = "client/gemm"
 
@@ -104,8 +107,9 @@ class GEMMRun(GEMM):
                 return specialNames[key]
             return key
 
-        args = list([f"--{argName(key)}={value}"
-                     for key, value in asdict(self).items()])
+        args = list(
+            [f"--{argName(key)}={value}" for key, value in asdict(self).items()]
+        )
         retval = [command] + args
 
         print(" ".join(retval))

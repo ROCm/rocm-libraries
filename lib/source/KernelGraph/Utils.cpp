@@ -368,7 +368,8 @@ namespace rocRoller
                 mac_tile.sizes[0],
                 mac_tile.sizes[1]);
 
-            AssertFatal(mac_tile.rank == 2, "Rank /= 2 not implemented yet.");
+            AssertFatal(
+                mac_tile.rank == 2, "Rank != 2 not implemented yet.", ShowValue(mac_tile.rank));
 
             auto sdim_x = sdim[0];
             auto sdim_y = sdim[1];
@@ -397,11 +398,14 @@ namespace rocRoller
             graph.mapper.connect<ElementNumber>(load_tag, element_number_y, 1);
 
             int n_thr_x, n_thr_y, i_thr_x, i_thr_y;
-            if((mac_tile.layoutType == LayoutType::MATRIX_A
-                && context->kernelOptions().transposeMemoryAccessA)
-               || (mac_tile.layoutType == LayoutType::MATRIX_B
-                   && context->kernelOptions().transposeMemoryAccessB)
-               || context->kernelOptions().transposeMemoryAccessOther)
+
+            bool useSwappedAccess
+                = context->kernelOptions().transposeMemoryAccess[mac_tile.layoutType];
+
+            if(mac_tile.layoutType == LayoutType::MATRIX_A)
+                useSwappedAccess = !useSwappedAccess;
+
+            if(useSwappedAccess)
             {
                 n_thr_x = graph.coordinates.addElement(
                     ThreadTileNumber(0, literal(thr_tile.sizes.at(0))));
@@ -774,12 +778,14 @@ namespace rocRoller
             graph.mapper.connect<ElementNumber>(store_tag, element_number_x, 0);
             graph.mapper.connect<ElementNumber>(store_tag, element_number_y, 1);
 
+            bool useSwappedAccess
+                = context->kernelOptions().transposeMemoryAccess[mac_tile.layoutType];
+
+            if(mac_tile.layoutType == LayoutType::MATRIX_A)
+                useSwappedAccess = !useSwappedAccess;
+
             int n_thr_x, n_thr_y, i_thr_x, i_thr_y;
-            if((mac_tile.layoutType == LayoutType::MATRIX_A
-                && context->kernelOptions().transposeMemoryAccessA)
-               || (mac_tile.layoutType == LayoutType::MATRIX_B
-                   && context->kernelOptions().transposeMemoryAccessB)
-               || context->kernelOptions().transposeMemoryAccessOther)
+            if(useSwappedAccess)
             {
                 n_thr_x = graph.coordinates.addElement(
                     ThreadTileNumber(0, literal(thr_tile.sizes.at(0))));
