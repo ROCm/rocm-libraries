@@ -1297,5 +1297,28 @@ namespace rocRoller
             return {};
         }
 
+        void
+            updateThreadTileForLongDwords(int& t_m, int& t_n, int maxWidth, int numDwordsPerElement)
+        {
+            auto numDwordsPerWorkitem = t_m * numDwordsPerElement;
+
+            std::vector<int> potentialFactors = {4, 3, 2, 1};
+
+            auto start      = potentialFactors.begin();
+            auto end        = potentialFactors.end();
+            auto factorPred = [numDwordsPerWorkitem, maxWidth](int factor) {
+                return factor <= maxWidth && numDwordsPerWorkitem % factor == 0;
+            };
+            auto it = std::find_if(start, end, factorPred);
+
+            if(it != potentialFactors.end())
+            {
+                auto dwordFactor = *it / numDwordsPerElement;
+                AssertFatal(dwordFactor >= 1, "dword factor can't be less than 1");
+
+                t_m = t_m / dwordFactor;
+                t_n = t_n * dwordFactor;
+            }
+        }
     }
 }

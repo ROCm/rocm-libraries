@@ -192,6 +192,13 @@ namespace rocRoller
          */
         inline std::optional<int> only(Generator<int> g);
 
+        /**
+         * Updates the threadtile size for enabling the use of long dword instructions
+         */
+        void updateThreadTileForLongDwords(int& t_m,
+                                           int& t_n,
+                                           int  maxWidth,
+                                           int  numDwordsPerElement);
     }
 }
 

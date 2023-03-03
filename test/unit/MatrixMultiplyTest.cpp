@@ -116,6 +116,7 @@ namespace MatrixMultiplyTest
 
         auto kernelOptions                           = std::make_shared<KernelOptions>();
         kernelOptions->packMultipleElementsInto1VGPR = true;
+        kernelOptions->enableLongDwordInstructions   = true;
 
         auto params = std::make_shared<CommandParameters>();
         params->setManualKernelDimension(2);
@@ -190,12 +191,12 @@ namespace MatrixMultiplyTest
         {
             // Count the number of ds_write_b32 instructions and make sure they have
             // the expected offset values
-            if(instruction.starts_with("ds_write_b32"))
+            if(instruction.starts_with("ds_write_b128"))
             {
                 if(expectedLocalWriteOffset > 0)
                     EXPECT_TRUE(instruction.ends_with("offset:"
                                                       + std::to_string(expectedLocalWriteOffset)));
-                expectedLocalWriteOffset += 256;
+                expectedLocalWriteOffset += 1024;
             }
 
             if(instruction.starts_with("ds_read_b64"))

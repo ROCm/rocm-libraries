@@ -23,6 +23,7 @@ namespace rocRoller
         , transposeMemoryAccessOther(false)
         , assertWaitCntState(true)
         , packMultipleElementsInto1VGPR(false)
+        , enableLongDwordInstructions(false)
     {
     }
 
@@ -47,6 +48,8 @@ namespace rocRoller
         os << "  transposeMemoryAccessOther:\t" << input.transposeMemoryAccessOther << std::endl;
         os << "  assertWaitCntState:\t\t" << input.assertWaitCntState << std::endl;
         os << "  packMultipleElementsInto1VGPR:\t\t" << input.packMultipleElementsInto1VGPR
+           << std::endl;
+        os << "  enableLongDwordInstructions:\t\t" << input.enableLongDwordInstructions
            << std::endl;
         return os;
     }

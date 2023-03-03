@@ -388,12 +388,28 @@ namespace rocRoller
                 auto t_n                    = 1;
 
                 // load multiple smaller-precision(< 32-bit) elements into 1 VGPR
-                auto factor = bytesPerRegister / DataTypeInfo::Get(vtype).elementSize;
-                if(m_context->kernelOptions().packMultipleElementsInto1VGPR && factor > 1
-                   && t_m % factor == 0)
+                auto packFactor = bytesPerRegister / DataTypeInfo::Get(vtype).elementSize;
+                bool packed     = false;
+                if(m_context->kernelOptions().packMultipleElementsInto1VGPR && packFactor > 1
+                   && t_m % packFactor == 0)
                 {
-                    t_m = t_m / factor;
-                    t_n = factor;
+                    t_m = t_m / packFactor;
+                    t_n = packFactor;
+
+                    packed = true;
+                }
+
+                // enable the use of longer word instructions if possible
+                if(m_context->kernelOptions().enableLongDwordInstructions
+                   && (packed || packFactor <= 1))
+                {
+                    auto maxWidth = std::min(m_context->kernelOptions().loadGlobalWidth,
+                                             m_context->kernelOptions().storeLocalWidth);
+
+                    auto numDwordsPerElement
+                        = std::max(1LU, DataTypeInfo::Get(vtype).elementSize / bytesPerRegister);
+
+                    updateThreadTileForLongDwords(t_m, t_n, maxWidth, numDwordsPerElement);
                 }
 
                 localInfo.internalTile = graph.coordinates.addElement(
@@ -453,6 +469,21 @@ namespace rocRoller
                 macrotile.memoryType = MemoryType::WAVE;
                 graph.coordinates.setElement(tile, macrotile);
 
+                auto storeDBarrierRW = graph.control.addElement(Barrier());
+                // Find all incoming edges into StoreLDSTile.
+                // Those should be changed to come into Barrier to avoid RW hazard.
+                auto incoming_edges = graph.control.getNeighbours<Graph::Direction::Upstream>(store)
+                                          .to<std::vector>();
+                for(auto e : incoming_edges)
+                {
+                    auto elem = graph.control.getElement(e);
+                    auto src  = graph.control.getNeighbours<Graph::Direction::Upstream>(e)
+                                   .to<std::vector>();
+                    graph.control.deleteElement(e);
+                    graph.control.addElement(e, elem, src, std::vector<int>{storeDBarrierRW});
+                }
+                graph.control.addElement(Sequence(), {storeDBarrierRW}, {store});
+
                 auto user = graph.coordinates.getOutputNodeIndices(tile, CT::isEdge<DataFlow>)
                                 .to<std::vector>();
                 AssertFatal(user.size() == 1);
@@ -488,12 +519,28 @@ namespace rocRoller
                 auto t_n                    = 1;
 
                 // load multiple smaller-precision(< 32-bit) elements into 1 VGPR
-                auto factor = bytesPerRegister / DataTypeInfo::Get(dtype).elementSize;
-                if(context->kernelOptions().packMultipleElementsInto1VGPR && factor > 1
-                   && t_m % factor == 0)
+                auto packFactor = bytesPerRegister / DataTypeInfo::Get(dtype).elementSize;
+                bool packed     = false;
+                if(context->kernelOptions().packMultipleElementsInto1VGPR && packFactor > 1
+                   && t_m % packFactor == 0)
                 {
-                    t_m = t_m / factor;
-                    t_n = factor;
+                    t_m = t_m / packFactor;
+                    t_n = packFactor;
+
+                    packed = true;
+                }
+
+                // enable the use of longer word instructions if possible
+                if(context->kernelOptions().enableLongDwordInstructions
+                   && (packed || packFactor <= 1))
+                {
+                    auto maxWidth = std::min(context->kernelOptions().storeGlobalWidth,
+                                             context->kernelOptions().loadLocalWidth);
+
+                    auto numDwordsPerElement
+                        = std::max(1LU, DataTypeInfo::Get(dtype).elementSize / bytesPerRegister);
+
+                    updateThreadTileForLongDwords(t_m, t_n, maxWidth, numDwordsPerElement);
                 }
 
                 auto internalTile = graph.coordinates.addElement(

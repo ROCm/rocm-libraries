@@ -38,6 +38,7 @@ namespace rocRoller
         bool assertWaitCntState;
 
         bool packMultipleElementsInto1VGPR;
+        bool enableLongDwordInstructions;
 
         std::string          toString() const;
         friend std::ostream& operator<<(std::ostream&, const KernelOptions&);
