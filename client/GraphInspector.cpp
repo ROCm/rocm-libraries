@@ -65,7 +65,7 @@ namespace rocRoller
             };
 
             auto coords = m_coords->findElements(predicate).to<std::vector>();
-            AssertFatal(coords.size() == 1);
+            AssertFatal(coords.size() == 1, ShowValue(coords.size()), ShowValue(argName));
 
             return coords[0];
         }
@@ -82,11 +82,8 @@ namespace rocRoller
 
         void GraphInspector::inventExecutionCoordinates()
         {
-            setCoordinate<KernelGraph::CoordinateGraph::ThreadTileIndex>(0);
-            setCoordinate<KernelGraph::CoordinateGraph::WaveTileIndex>(3);
-            setCoordinate<KernelGraph::CoordinateGraph::ForLoop>(4);
-            setCoordinate<KernelGraph::CoordinateGraph::Workgroup>(5);
-            setCoordinate<KernelGraph::CoordinateGraph::Workitem>(6);
+            setCoordinate<KernelGraph::CoordinateGraph::ForLoop>(5);
+            setCoordinate<KernelGraph::CoordinateGraph::Workgroup>(0);
         }
 
         size_t GraphInspector::getLoadIndex(int coord)
@@ -95,7 +92,17 @@ namespace rocRoller
             auto             exps = m_tx.reverse(coords);
             AssertFatal(exps.size() == 1);
 
-            auto exp = exps[0];
+            auto val = Expression::evaluate(exps[0]);
+
+            return std::visit(to_size_t, val);
+        }
+
+        size_t GraphInspector::getStoreIndex(int coord)
+        {
+            std::vector<int> coords{coord};
+            auto             exps = m_tx.forward(coords);
+            AssertFatal(exps.size() == 1);
+
             auto val = Expression::evaluate(exps[0]);
 
             return std::visit(to_size_t, val);

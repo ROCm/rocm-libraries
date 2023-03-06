@@ -78,6 +78,13 @@ namespace rocRoller
             size_t getLoadIndex(int coord);
 
             /**
+             * Determines and then evaluates the expression for a given store dimension in the coordinate
+             * graph. All dependent dimensions must have values via a combination of
+             * assignLiteralSizesAndStrides(), inventExecutionCoordinates(), and setCoordinate().
+             */
+            size_t getStoreIndex(int coord);
+
+            /**
              * Get launch bounds for the given arguments.
              */
             KernelInvocation const& kernelInvocation() const;

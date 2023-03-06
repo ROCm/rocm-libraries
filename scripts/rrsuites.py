@@ -246,6 +246,26 @@ def hgemm():
         **fp16,
     )
 
+    yield from visualizer()
+
+
+def visualizer():
+    yield GEMMRun(
+        M=512,
+        N=768,
+        K=512,
+        mac_m=128,
+        mac_n=256,
+        mac_k=16,
+        alpha=2.0,
+        beta=0.5,
+        workgroup_size_x=256,
+        workgroup_size_y=1,
+        trans_A="N",
+        trans_B="T",
+        **fp16,
+    )
+
 
 def codegen():
     yield CodeGenRun(instCount=40000, instructions="comments")

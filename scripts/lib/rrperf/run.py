@@ -112,7 +112,11 @@ def run_problems(
         cmd = list(map(str, problem.command()))
         scmd = " ".join(cmd)
         log = yaml.with_suffix(".log")
+        rr_env = {k: str(v) for k, v in env.items() if k.startswith("ROC")}
+        rr_env_str = " ".join([f"{k}={v}" for k, v in rr_env.items()])
+
         with log.open("w") as f:
+            print(f"# env: {rr_env_str}", file=f, flush=True)
             print(f"# command: {scmd}", file=f, flush=True)
             print(f"# token: {repr(problem)}", file=f, flush=True)
             print("running:")

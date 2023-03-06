@@ -14,16 +14,27 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
 
     parser.add_argument("--verbose", "-v", action="count", default=0)
-    parser.add_argument("input", help="Input file")
-    parser.add_argument("output", nargs="?", help="Output file")
+    parser.add_argument("input", nargs="+", help="Input file")
+    parser.add_argument("--output", default=[], nargs="+", help="Output file")
 
     args = parser.parse_args()
-    if args.output is None:
-        (base, _) = os.path.splitext(args.input)
-        args.output = base + ".png"
 
-    if args.verbose > 0:
-        print(args)
+    if len(args.output) == 0:
+        def makeOutput(inFile):
+            (base, _) = os.path.splitext(inFile)
+            return base + ".png"
+        args.output = list(map(makeOutput, args.input))
 
-    fig = matrix_utils.showMatrix(args.input)
-    fig.savefig(args.output)
+    if len(args.output) != len(args.input):
+        print("If specified, number of output arguments must equal "
+              "number of input arguments")
+        exit(-1)
+
+    for (inFile, outFile) in zip(args.input, args.output):
+
+        if args.verbose > 0:
+            print(args)
+
+        fig = matrix_utils.showMatrix(inFile)
+        fig.savefig(outFile)
+        print(f"Wrote {outFile}")
