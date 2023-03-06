@@ -25,9 +25,9 @@ namespace rocRoller
                                      Expression::ExpressionPtr size,
                                      const std::string&        loopName)
         {
-            auto unit_stride  = Expression::literal(1u);
-            auto rangeK       = graph.coordinates.addElement(Linear(size, unit_stride));
-            auto dimK         = graph.coordinates.addElement(ForLoop(size, unit_stride));
+            auto unitStride   = Expression::literal(1u);
+            auto rangeK       = graph.coordinates.addElement(Linear(size, unitStride));
+            auto dimK         = graph.coordinates.addElement(ForLoop(size, unitStride));
             auto sizeDataType = Expression::resultVariableType(size);
             auto exprK        = std::make_shared<Expression::Expression>(
                 DataFlowTag{rangeK, Register::Type::Scalar, sizeDataType});
@@ -36,7 +36,7 @@ namespace rocRoller
             auto initK = graph.control.addElement(
                 Assign{Register::Type::Scalar, Expression::literal(0, sizeDataType)});
             auto incrementK
-                = graph.control.addElement(Assign{Register::Type::Scalar, exprK + unit_stride});
+                = graph.control.addElement(Assign{Register::Type::Scalar, exprK + unitStride});
 
             graph.coordinates.addElement(DataFlow(), {rangeK}, {dimK});
             graph.control.addElement(Initialize(), {forK}, {initK});
@@ -50,8 +50,8 @@ namespace rocRoller
         }
 
         void updateLoadLDSMacroTile(KernelGraph&      graph,
-                                    MacroTile const&  mac_tile,
-                                    int               load_tag,
+                                    MacroTile const&  macTile,
+                                    int               loadTag,
                                     std::vector<int>& sdims,
                                     int               K,
                                     int               lds)
@@ -59,182 +59,182 @@ namespace rocRoller
             // given that the loadMacroTile has already lowered the macrotile for LoadTiled
             // before it is transformed to LoadLDSTile
 
-            if(mac_tile.layoutType == LayoutType::MATRIX_A)
+            if(macTile.layoutType == LayoutType::MATRIX_A)
             {
                 // remove passthrough between A row block and x-workgroup
                 // remove x-workgroup
-                auto a_tilenum_x   = graph.mapper.get<MacroTileNumber>(load_tag, 0);
-                auto a_workgroup_x = graph.mapper.get<Workgroup>(load_tag, 0);
-                graph.coordinates.deleteElement(std::vector<int>{a_tilenum_x},
-                                                std::vector<int>{a_workgroup_x},
+                auto aTileNumX   = graph.mapper.get<MacroTileNumber>(loadTag, 0);
+                auto aWorkgroupX = graph.mapper.get<Workgroup>(loadTag, 0);
+                graph.coordinates.deleteElement(std::vector<int>{aTileNumX},
+                                                std::vector<int>{aWorkgroupX},
                                                 CT::isEdge<PassThrough>);
-                graph.mapper.disconnect<Workgroup>(load_tag, a_workgroup_x, 0);
-                graph.coordinates.deleteElement(a_workgroup_x);
+                graph.mapper.disconnect<Workgroup>(loadTag, aWorkgroupX, 0);
+                graph.coordinates.deleteElement(aWorkgroupX);
 
                 // remove passthrough between A column block and K
-                auto a_tilenum_y = graph.mapper.get<MacroTileNumber>(load_tag, 1);
+                auto aTileNumY = graph.mapper.get<MacroTileNumber>(loadTag, 1);
                 graph.coordinates.deleteElement(
-                    std::vector<int>{a_tilenum_y}, std::vector<int>{K}, CT::isEdge<PassThrough>);
+                    std::vector<int>{aTileNumY}, std::vector<int>{K}, CT::isEdge<PassThrough>);
             }
-            else if(mac_tile.layoutType == LayoutType::MATRIX_B)
+            else if(macTile.layoutType == LayoutType::MATRIX_B)
             {
                 // remove passthrough between B column block and y-workgroup
                 // remove y-workgroup
-                auto b_tilenum_y   = graph.mapper.get<MacroTileNumber>(load_tag, 1);
-                auto b_workgroup_y = graph.mapper.get<Workgroup>(load_tag, 1);
-                graph.coordinates.deleteElement(std::vector<int>{b_tilenum_y},
-                                                std::vector<int>{b_workgroup_y},
+                auto bTileNumY   = graph.mapper.get<MacroTileNumber>(loadTag, 1);
+                auto bWorkgroupY = graph.mapper.get<Workgroup>(loadTag, 1);
+                graph.coordinates.deleteElement(std::vector<int>{bTileNumY},
+                                                std::vector<int>{bWorkgroupY},
                                                 CT::isEdge<PassThrough>);
-                graph.mapper.disconnect<Workgroup>(load_tag, b_workgroup_y, 1);
-                graph.coordinates.deleteElement(b_workgroup_y);
+                graph.mapper.disconnect<Workgroup>(loadTag, bWorkgroupY, 1);
+                graph.coordinates.deleteElement(bWorkgroupY);
 
                 // remove passthrough between B row block and K
-                auto b_tilenum_x = graph.mapper.get<MacroTileNumber>(load_tag, 0);
+                auto bTileNumX = graph.mapper.get<MacroTileNumber>(loadTag, 0);
                 graph.coordinates.deleteElement(
-                    std::vector<int>{b_tilenum_x}, std::vector<int>{K}, CT::isEdge<PassThrough>);
+                    std::vector<int>{bTileNumX}, std::vector<int>{K}, CT::isEdge<PassThrough>);
             }
             else
             {
-                auto tilenum_x   = graph.mapper.get<MacroTileNumber>(load_tag, 0);
-                auto workgroup_x = graph.mapper.get<Workgroup>(load_tag, 0);
-                graph.mapper.disconnect<Workgroup>(load_tag, workgroup_x, 0);
-                graph.coordinates.deleteElement(std::vector<int>{tilenum_x},
-                                                std::vector<int>{workgroup_x},
+                auto tileNumX   = graph.mapper.get<MacroTileNumber>(loadTag, 0);
+                auto workgroupX = graph.mapper.get<Workgroup>(loadTag, 0);
+                graph.mapper.disconnect<Workgroup>(loadTag, workgroupX, 0);
+                graph.coordinates.deleteElement(std::vector<int>{tileNumX},
+                                                std::vector<int>{workgroupX},
                                                 CT::isEdge<PassThrough>);
-                graph.coordinates.deleteElement(workgroup_x);
+                graph.coordinates.deleteElement(workgroupX);
 
-                auto tilenum_y   = graph.mapper.get<MacroTileNumber>(load_tag, 1);
-                auto workgroup_y = graph.mapper.get<Workgroup>(load_tag, 1);
-                graph.mapper.disconnect<Workgroup>(load_tag, workgroup_y, 1);
-                graph.coordinates.deleteElement(std::vector<int>{tilenum_y},
-                                                std::vector<int>{workgroup_y},
+                auto tileNumY   = graph.mapper.get<MacroTileNumber>(loadTag, 1);
+                auto workgroupY = graph.mapper.get<Workgroup>(loadTag, 1);
+                graph.mapper.disconnect<Workgroup>(loadTag, workgroupY, 1);
+                graph.coordinates.deleteElement(std::vector<int>{tileNumY},
+                                                std::vector<int>{workgroupY},
                                                 CT::isEdge<PassThrough>);
-                graph.coordinates.deleteElement(workgroup_y);
+                graph.coordinates.deleteElement(workgroupY);
             }
 
-            std::vector<int> i_mac;
+            std::vector<int> iMac;
             for(size_t i = 0; i < sdims.size(); ++i)
             {
                 auto mac = graph.coordinates.getOutputNodeIndices(sdims[i], CT::isEdge<Tile>)
                                .to<std::vector>();
-                i_mac.push_back(mac[1]);
+                iMac.push_back(mac[1]);
                 graph.coordinates.deleteElement(std::vector<int>{sdims[i]}, mac, CT::isEdge<Tile>);
-                graph.mapper.disconnect<MacroTileNumber>(load_tag, mac[0], i);
+                graph.mapper.disconnect<MacroTileNumber>(loadTag, mac[0], i);
                 graph.coordinates.deleteElement(mac[0]);
             }
 
-            graph.coordinates.addElement(Tile(), {lds}, {i_mac[0], i_mac[1]});
+            graph.coordinates.addElement(Tile(), {lds}, {iMac[0], iMac[1]});
         }
 
         void loadWaveMacroTile(KernelGraph&                     graph,
-                               MacroTile const&                 mac_tile,
-                               int                              load_tag,
-                               int                              i_mac_x,
-                               int                              i_mac_y,
-                               int                              user_tag,
+                               MacroTile const&                 macTile,
+                               int                              loadTag,
+                               int                              iMacX,
+                               int                              iMacY,
+                               int                              userTag,
                                int                              wavefrontSize,
                                std::vector<unsigned int> const& wavetilesPerWorkgroup)
         {
-            AssertFatal(mac_tile.subTileSizes.size() == 4, "Invalid tile specification.");
+            AssertFatal(macTile.subTileSizes.size() == 4, "Invalid tile specification.");
 
-            auto m = mac_tile.subTileSizes[0];
-            auto n = mac_tile.subTileSizes[1];
-            auto k = mac_tile.subTileSizes[2];
+            auto m = macTile.subTileSizes[0];
+            auto n = macTile.subTileSizes[1];
+            auto k = macTile.subTileSizes[2];
 
             std::vector<int> tileSize;
-            if(mac_tile.layoutType == LayoutType::MATRIX_A)
+            if(macTile.layoutType == LayoutType::MATRIX_A)
                 tileSize = {m, k};
-            if(mac_tile.layoutType == LayoutType::MATRIX_B)
+            if(macTile.layoutType == LayoutType::MATRIX_B)
                 tileSize = {k, n};
-            if(mac_tile.layoutType == LayoutType::MATRIX_ACCUMULATOR)
+            if(macTile.layoutType == LayoutType::MATRIX_ACCUMULATOR)
                 tileSize = {m, n};
 
-            auto workitem      = graph.coordinates.addElement(Workitem(0));
-            auto wave_tile     = WaveTile(tileSize, mac_tile.layoutType);
-            auto wave_tile_tag = graph.coordinates.addElement(wave_tile);
-            graph.mapper.connect<WaveTile>(load_tag, wave_tile_tag);
+            auto workitem    = graph.coordinates.addElement(Workitem(0));
+            auto waveTile    = WaveTile(tileSize, macTile.layoutType);
+            auto waveTileTag = graph.coordinates.addElement(waveTile);
+            graph.mapper.connect<WaveTile>(loadTag, waveTileTag);
 
-            auto n_wave_x = graph.coordinates.addElement(wave_tile.tileNumber(0));
-            auto n_wave_y = graph.coordinates.addElement(wave_tile.tileNumber(1));
-            auto i_wave_x = graph.coordinates.addElement(wave_tile.tileIndex(0));
-            auto i_wave_y = graph.coordinates.addElement(wave_tile.tileIndex(1));
+            auto nWaveX = graph.coordinates.addElement(waveTile.tileNumber(0));
+            auto nWaveY = graph.coordinates.addElement(waveTile.tileNumber(1));
+            auto iWaveX = graph.coordinates.addElement(waveTile.tileIndex(0));
+            auto iWaveY = graph.coordinates.addElement(waveTile.tileIndex(1));
 
-            graph.coordinates.addElement(Tile(), {i_mac_x}, {n_wave_x, i_wave_x});
-            graph.coordinates.addElement(Tile(), {i_mac_y}, {n_wave_y, i_wave_y});
+            graph.coordinates.addElement(Tile(), {iMacX}, {nWaveX, iWaveX});
+            graph.coordinates.addElement(Tile(), {iMacY}, {nWaveY, iWaveY});
 
-            graph.mapper.connect<WaveTileNumber>(load_tag, n_wave_x, 0);
-            graph.mapper.connect<WaveTileNumber>(load_tag, n_wave_y, 1);
+            graph.mapper.connect<WaveTileNumber>(loadTag, nWaveX, 0);
+            graph.mapper.connect<WaveTileNumber>(loadTag, nWaveY, 1);
 
-            auto wave_x = graph.coordinates.addElement(Wavefront(0));
-            auto wave_y = graph.coordinates.addElement(Wavefront(1));
-            auto wave   = graph.coordinates.addElement(Wavefront(-1));
+            auto waveX = graph.coordinates.addElement(Wavefront(0));
+            auto waveY = graph.coordinates.addElement(Wavefront(1));
+            auto wave  = graph.coordinates.addElement(Wavefront(-1));
 
-            uint num_elements = product(tileSize);
-            uint wfs          = static_cast<uint>(wavefrontSize);
-            uint num_vgpr     = num_elements / wfs;
+            uint numElements = product(tileSize);
+            uint wfs         = static_cast<uint>(wavefrontSize);
+            uint numVgpr     = numElements / wfs;
 
-            auto wavefront_size = Expression::literal(wfs);
+            auto wavefrontSizeLiteral = Expression::literal(wfs);
 
-            auto lane = graph.coordinates.addElement(Lane(wavefront_size, nullptr));
-            auto vgpr = graph.coordinates.addElement(VGPR(literal(num_vgpr), nullptr));
+            auto lane = graph.coordinates.addElement(Lane(wavefrontSizeLiteral, nullptr));
+            auto vgpr = graph.coordinates.addElement(VGPR(literal(numVgpr), nullptr));
 
-            graph.coordinates.addElement(Flatten(), {wave_x, wave_y}, {wave});
+            graph.coordinates.addElement(Flatten(), {waveX, waveY}, {wave});
             graph.coordinates.addElement(Flatten(), {wave, lane}, {workitem});
 
-            graph.mapper.connect<VGPR>(load_tag, vgpr);
+            graph.mapper.connect<VGPR>(loadTag, vgpr);
 
-            int jammed_wavetile_x = -1;
+            int jammedWavetileX = -1;
             if(wavetilesPerWorkgroup[0] >= 1)
             {
-                jammed_wavetile_x = graph.coordinates.addElement(
+                jammedWavetileX = graph.coordinates.addElement(
                     JammedWaveTileNumber(0, literal(wavetilesPerWorkgroup[0]), literal(1)));
-                graph.mapper.connect<JammedWaveTileNumber>(load_tag, jammed_wavetile_x, 0);
+                graph.mapper.connect<JammedWaveTileNumber>(loadTag, jammedWavetileX, 0);
             }
-            int jammed_wavetile_y = -1;
+            int jammedWavetileY = -1;
             if(wavetilesPerWorkgroup[1] >= 1)
             {
-                jammed_wavetile_y = graph.coordinates.addElement(
+                jammedWavetileY = graph.coordinates.addElement(
                     JammedWaveTileNumber(1, literal(wavetilesPerWorkgroup[1]), literal(1)));
-                graph.mapper.connect<JammedWaveTileNumber>(load_tag, jammed_wavetile_y, 1);
+                graph.mapper.connect<JammedWaveTileNumber>(loadTag, jammedWavetileY, 1);
             }
 
-            switch(wave_tile.layout)
+            switch(waveTile.layout)
             {
             case LayoutType::MATRIX_A:
             {
-                auto block_number = graph.coordinates.addElement(
+                auto blockNumber = graph.coordinates.addElement(
                     Adhoc("BlockNumber", literal(static_cast<uint>(wfs / m)), nullptr));
-                auto block_index = graph.coordinates.addElement(
+                auto blockIndex = graph.coordinates.addElement(
                     Adhoc("BlockIndex", literal(static_cast<uint>(m)), nullptr));
 
-                graph.coordinates.addElement(Flatten(), {block_number, block_index}, {lane});
+                graph.coordinates.addElement(Flatten(), {blockNumber, blockIndex}, {lane});
 
-                graph.coordinates.addElement(Tile(), {i_wave_y}, {block_number, vgpr});
-                graph.coordinates.addElement(PassThrough(), {i_wave_x}, {block_index});
+                graph.coordinates.addElement(Tile(), {iWaveY}, {blockNumber, vgpr});
+                graph.coordinates.addElement(PassThrough(), {iWaveX}, {blockIndex});
 
                 if(wavetilesPerWorkgroup[0] > 1)
-                    graph.coordinates.addElement(Tile(), {n_wave_x}, {wave_x, jammed_wavetile_x});
+                    graph.coordinates.addElement(Tile(), {nWaveX}, {waveX, jammedWavetileX});
                 else
-                    graph.coordinates.addElement(PassThrough(), {n_wave_x}, {wave_x});
+                    graph.coordinates.addElement(PassThrough(), {nWaveX}, {waveX});
             }
             break;
 
             case LayoutType::MATRIX_B:
             {
-                auto block_number = graph.coordinates.addElement(
+                auto blockNumber = graph.coordinates.addElement(
                     Adhoc("BlockNumber", literal(static_cast<uint>(wfs / m)), nullptr));
-                auto block_index = graph.coordinates.addElement(
+                auto blockIndex = graph.coordinates.addElement(
                     Adhoc("BlockIndex", literal(static_cast<uint>(m)), nullptr));
 
-                graph.coordinates.addElement(Flatten(), {block_number, block_index}, {lane});
+                graph.coordinates.addElement(Flatten(), {blockNumber, blockIndex}, {lane});
 
-                graph.coordinates.addElement(Tile(), {i_wave_x}, {block_number, vgpr});
-                graph.coordinates.addElement(PassThrough(), {i_wave_y}, {block_index});
+                graph.coordinates.addElement(Tile(), {iWaveX}, {blockNumber, vgpr});
+                graph.coordinates.addElement(PassThrough(), {iWaveY}, {blockIndex});
 
                 if(wavetilesPerWorkgroup[1] > 1)
-                    graph.coordinates.addElement(Tile(), {n_wave_y}, {wave_y, jammed_wavetile_y});
+                    graph.coordinates.addElement(Tile(), {nWaveY}, {waveY, jammedWavetileY});
                 else
-                    graph.coordinates.addElement(PassThrough(), {n_wave_y}, {wave_y});
+                    graph.coordinates.addElement(PassThrough(), {nWaveY}, {waveY});
             }
             break;
 
@@ -243,47 +243,47 @@ namespace rocRoller
                 // MFMA accumulator tile size
                 uint mts            = 4u;
                 auto mfma_tile_size = literal(mts);
-                auto unit_stride    = literal(1u);
+                auto unitStride     = literal(1u);
 
-                auto n_row_blocks = literal(wave_tile.sizes[0] / mts);
-                auto n_col_blocks = literal(wave_tile.sizes[1] / mts);
+                auto nRowBlocks = literal(waveTile.sizes[0] / mts);
+                auto nColBlocks = literal(waveTile.sizes[1] / mts);
 
-                auto n_vblk = graph.coordinates.addElement(
-                    VGPRBlockNumber(literal(num_vgpr / mts), unit_stride));
-                auto i_vblk
-                    = graph.coordinates.addElement(VGPRBlockIndex(mfma_tile_size, unit_stride));
-                auto n_lblk = graph.coordinates.addElement(
-                    Adhoc("LANEBlockNumber", literal(wfs / mts), unit_stride));
-                auto i_lblk = graph.coordinates.addElement(
-                    Adhoc("LANEBlockIndex", mfma_tile_size, unit_stride));
+                auto nVblk = graph.coordinates.addElement(
+                    VGPRBlockNumber(literal(numVgpr / mts), unitStride));
+                auto iVblk
+                    = graph.coordinates.addElement(VGPRBlockIndex(mfma_tile_size, unitStride));
+                auto nLblk = graph.coordinates.addElement(
+                    Adhoc("LANEBlockNumber", literal(wfs / mts), unitStride));
+                auto iLblk = graph.coordinates.addElement(
+                    Adhoc("LANEBlockIndex", mfma_tile_size, unitStride));
                 auto block = graph.coordinates.addElement(
-                    Adhoc("LinearBlock", literal(num_elements / 16u), unit_stride));
-                auto row_block
-                    = graph.coordinates.addElement(Adhoc("RowBlock", n_row_blocks, unit_stride));
-                auto col_block
-                    = graph.coordinates.addElement(Adhoc("ColBlock", n_col_blocks, unit_stride));
+                    Adhoc("LinearBlock", literal(numElements / 16u), unitStride));
+                auto rowBlock
+                    = graph.coordinates.addElement(Adhoc("RowBlock", nRowBlocks, unitStride));
+                auto colBlock
+                    = graph.coordinates.addElement(Adhoc("ColBlock", nColBlocks, unitStride));
 
-                graph.mapper.connect<VGPRBlockNumber>(load_tag, n_vblk);
-                graph.mapper.connect<VGPRBlockIndex>(load_tag, i_vblk);
+                graph.mapper.connect<VGPRBlockNumber>(loadTag, nVblk);
+                graph.mapper.connect<VGPRBlockIndex>(loadTag, iVblk);
 
-                graph.coordinates.addElement(Tile(), {i_wave_x}, {row_block, i_vblk});
-                graph.coordinates.addElement(Tile(), {i_wave_y}, {col_block, i_lblk});
+                graph.coordinates.addElement(Tile(), {iWaveX}, {rowBlock, iVblk});
+                graph.coordinates.addElement(Tile(), {iWaveY}, {colBlock, iLblk});
 
-                graph.coordinates.addElement(Flatten(), {row_block, col_block}, {block});
-                graph.coordinates.addElement(Tile(), {block}, {n_vblk, n_lblk});
+                graph.coordinates.addElement(Flatten(), {rowBlock, colBlock}, {block});
+                graph.coordinates.addElement(Tile(), {block}, {nVblk, nLblk});
 
-                graph.coordinates.addElement(Flatten(), {n_vblk, i_vblk}, {vgpr});
-                graph.coordinates.addElement(Flatten(), {n_lblk, i_lblk}, {lane});
+                graph.coordinates.addElement(Flatten(), {nVblk, iVblk}, {vgpr});
+                graph.coordinates.addElement(Flatten(), {nLblk, iLblk}, {lane});
 
                 if(wavetilesPerWorkgroup[0] > 1)
-                    graph.coordinates.addElement(Tile(), {n_wave_x}, {wave_x, jammed_wavetile_x});
+                    graph.coordinates.addElement(Tile(), {nWaveX}, {waveX, jammedWavetileX});
                 else
-                    graph.coordinates.addElement(PassThrough(), {n_wave_x}, {wave_x});
+                    graph.coordinates.addElement(PassThrough(), {nWaveX}, {waveX});
 
                 if(wavetilesPerWorkgroup[1] > 1)
-                    graph.coordinates.addElement(Tile(), {n_wave_y}, {wave_y, jammed_wavetile_y});
+                    graph.coordinates.addElement(Tile(), {nWaveY}, {waveY, jammedWavetileY});
                 else
-                    graph.coordinates.addElement(PassThrough(), {n_wave_y}, {wave_y});
+                    graph.coordinates.addElement(PassThrough(), {nWaveY}, {waveY});
             }
             break;
 
@@ -293,296 +293,296 @@ namespace rocRoller
         }
 
         void loadMacroTileFromLDS(KernelGraph&                       graph,
-                                  int                                load_tag,
-                                  int                                lds_tag,
-                                  int                                mac_tile_tag,
+                                  int                                loadTag,
+                                  int                                ldsTag,
+                                  int                                macTileTag,
                                   std::array<unsigned int, 3> const& workgroupSizes)
         {
-            auto mac_tile = graph.coordinates.getNode<MacroTile>(mac_tile_tag);
+            auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
 
             rocRoller::Log::getLogger()->debug(
                 "KernelGraph::Utils::loadMacroTileFromLDS(): LDS({}), MacroTile({})",
-                lds_tag,
-                mac_tile_tag);
+                ldsTag,
+                macTileTag);
             rocRoller::Log::getLogger()->debug(
                 "KernelGraph::Utils::loadMacroTileFromLDS(): MacroTile size: {}x{}",
-                mac_tile.sizes[0],
-                mac_tile.sizes[1]);
+                macTile.sizes[0],
+                macTile.sizes[1]);
 
-            auto workitem_x
+            auto workitemX
                 = graph.coordinates.addElement(Workitem(0, literal(workgroupSizes.at(0))));
 
-            auto thr_tile = ThreadTile(mac_tile);
+            auto thrTile = ThreadTile(macTile);
 
-            auto i_mac_x = graph.coordinates.addElement(mac_tile.tileIndex(0));
-            auto i_mac_y = graph.coordinates.addElement(mac_tile.tileIndex(1));
-            auto n_thr_x
-                = graph.coordinates.addElement(ThreadTileNumber(0, literal(thr_tile.sizes.at(0))));
-            auto n_thr_y
-                = graph.coordinates.addElement(ThreadTileNumber(1, literal(thr_tile.wsizes.at(1))));
-            auto i_thr_x
-                = graph.coordinates.addElement(ThreadTileIndex(0, literal(thr_tile.wsizes.at(0))));
-            auto i_thr_y
-                = graph.coordinates.addElement(ThreadTileIndex(1, literal(thr_tile.sizes.at(1))));
+            auto iMacX = graph.coordinates.addElement(macTile.tileIndex(0));
+            auto iMacY = graph.coordinates.addElement(macTile.tileIndex(1));
+            auto nThrX
+                = graph.coordinates.addElement(ThreadTileNumber(0, literal(thrTile.sizes.at(0))));
+            auto nThrY
+                = graph.coordinates.addElement(ThreadTileNumber(1, literal(thrTile.wsizes.at(1))));
+            auto iThrX
+                = graph.coordinates.addElement(ThreadTileIndex(0, literal(thrTile.wsizes.at(0))));
+            auto iThrY
+                = graph.coordinates.addElement(ThreadTileIndex(1, literal(thrTile.sizes.at(1))));
 
-            graph.coordinates.addElement(Tile(), {lds_tag}, {i_mac_x, i_mac_y});
+            graph.coordinates.addElement(Tile(), {ldsTag}, {iMacX, iMacY});
 
-            graph.coordinates.addElement(Tile(), {i_mac_x}, {n_thr_x, i_thr_x});
-            graph.coordinates.addElement(Tile(), {i_mac_y}, {n_thr_y, i_thr_y});
+            graph.coordinates.addElement(Tile(), {iMacX}, {nThrX, iThrX});
+            graph.coordinates.addElement(Tile(), {iMacY}, {nThrY, iThrY});
 
-            graph.coordinates.addElement(Flatten(), {n_thr_y, i_thr_x}, {workitem_x});
+            graph.coordinates.addElement(Flatten(), {nThrY, iThrX}, {workitemX});
 
-            auto element_number_x
-                = graph.coordinates.addElement(ElementNumber(0, literal(thr_tile.sizes.at(0))));
-            auto element_number_y
-                = graph.coordinates.addElement(ElementNumber(1, literal(thr_tile.sizes.at(1))));
+            auto elementNumberX
+                = graph.coordinates.addElement(ElementNumber(0, literal(thrTile.sizes.at(0))));
+            auto elementNumberY
+                = graph.coordinates.addElement(ElementNumber(1, literal(thrTile.sizes.at(1))));
 
-            graph.coordinates.addElement(PassThrough(), {n_thr_x}, {element_number_x});
-            graph.coordinates.addElement(PassThrough(), {i_thr_y}, {element_number_y});
+            graph.coordinates.addElement(PassThrough(), {nThrX}, {elementNumberX});
+            graph.coordinates.addElement(PassThrough(), {iThrY}, {elementNumberY});
 
-            graph.mapper.connect<ElementNumber>(load_tag, element_number_x, 0);
-            graph.mapper.connect<ElementNumber>(load_tag, element_number_y, 1);
+            graph.mapper.connect<ElementNumber>(loadTag, elementNumberX, 0);
+            graph.mapper.connect<ElementNumber>(loadTag, elementNumberY, 1);
 
             // LDS --DataFlow--> macrotile
-            graph.coordinates.addElement(DataFlow(), {lds_tag}, {mac_tile_tag});
+            graph.coordinates.addElement(DataFlow(), {ldsTag}, {macTileTag});
         }
 
         void loadMacroTileForLDS(KernelGraph&                       graph,
-                                 int                                load_tag,
-                                 int                                user_tag,
-                                 int                                mac_tile_tag,
+                                 int                                loadTag,
+                                 int                                userTag,
+                                 int                                macTileTag,
                                  std::vector<int>&                  sdim,
                                  int                                K,
                                  std::array<unsigned int, 3> const& workgroupSizes,
                                  std::shared_ptr<Context>           context)
         {
-            auto mac_tile = graph.coordinates.getNode<MacroTile>(mac_tile_tag);
-            auto user     = graph.coordinates.getNode<User>(user_tag);
+            auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
+            auto user    = graph.coordinates.getNode<User>(userTag);
 
             rocRoller::Log::getLogger()->debug(
                 "KernelGraph::Utils::loadMacroTileForLDS(): User({}), MacroTile({})",
-                user_tag,
-                mac_tile_tag);
+                userTag,
+                macTileTag);
             rocRoller::Log::getLogger()->debug(
                 "KernelGraph::Utils::loadMacroTileForLDS(): MacroTile size: {}x{}",
-                mac_tile.sizes[0],
-                mac_tile.sizes[1]);
+                macTile.sizes[0],
+                macTile.sizes[1]);
 
             AssertFatal(
-                mac_tile.rank == 2, "Rank != 2 not implemented yet.", ShowValue(mac_tile.rank));
+                macTile.rank == 2, "Rank != 2 not implemented yet.", ShowValue(macTile.rank));
 
-            auto sdim_x = sdim[0];
-            auto sdim_y = sdim[1];
-            graph.mapper.connect<SubDimension>(load_tag, sdim_x, 0);
-            graph.mapper.connect<SubDimension>(load_tag, sdim_y, 1);
+            auto sdimX = sdim[0];
+            auto sdimY = sdim[1];
+            graph.mapper.connect<SubDimension>(loadTag, sdimX, 0);
+            graph.mapper.connect<SubDimension>(loadTag, sdimY, 1);
 
-            auto n_mac_x = graph.coordinates.addElement(mac_tile.tileNumber(0));
-            auto n_mac_y = graph.coordinates.addElement(mac_tile.tileNumber(1));
-            auto i_mac_x = graph.coordinates.addElement(mac_tile.tileIndex(0));
-            auto i_mac_y = graph.coordinates.addElement(mac_tile.tileIndex(1));
+            auto nMacX = graph.coordinates.addElement(macTile.tileNumber(0));
+            auto nMacY = graph.coordinates.addElement(macTile.tileNumber(1));
+            auto iMacX = graph.coordinates.addElement(macTile.tileIndex(0));
+            auto iMacY = graph.coordinates.addElement(macTile.tileIndex(1));
 
-            graph.mapper.connect<MacroTileNumber>(load_tag, n_mac_x, 0);
-            graph.mapper.connect<MacroTileNumber>(load_tag, n_mac_y, 1);
+            graph.mapper.connect<MacroTileNumber>(loadTag, nMacX, 0);
+            graph.mapper.connect<MacroTileNumber>(loadTag, nMacY, 1);
 
-            graph.coordinates.addElement(Tile(), {sdim_x}, {n_mac_x, i_mac_x});
-            graph.coordinates.addElement(Tile(), {sdim_y}, {n_mac_y, i_mac_y});
+            graph.coordinates.addElement(Tile(), {sdimX}, {nMacX, iMacX});
+            graph.coordinates.addElement(Tile(), {sdimY}, {nMacY, iMacY});
 
-            auto thr_tile = ThreadTile(mac_tile);
+            auto thrTile = ThreadTile(macTile);
 
-            auto element_number_x
-                = graph.coordinates.addElement(ElementNumber(0, literal(thr_tile.sizes.at(0))));
-            auto element_number_y
-                = graph.coordinates.addElement(ElementNumber(1, literal(thr_tile.sizes.at(1))));
+            auto elementNumberX
+                = graph.coordinates.addElement(ElementNumber(0, literal(thrTile.sizes.at(0))));
+            auto elementNumberY
+                = graph.coordinates.addElement(ElementNumber(1, literal(thrTile.sizes.at(1))));
 
-            graph.mapper.connect<ElementNumber>(load_tag, element_number_x, 0);
-            graph.mapper.connect<ElementNumber>(load_tag, element_number_y, 1);
+            graph.mapper.connect<ElementNumber>(loadTag, elementNumberX, 0);
+            graph.mapper.connect<ElementNumber>(loadTag, elementNumberY, 1);
 
-            int n_thr_x, n_thr_y, i_thr_x, i_thr_y;
+            int nThrX, nThrY, iThrX, iThrY;
 
             bool useSwappedAccess
-                = context->kernelOptions().transposeMemoryAccess[mac_tile.layoutType];
+                = context->kernelOptions().transposeMemoryAccess[macTile.layoutType];
 
-            if(mac_tile.layoutType == LayoutType::MATRIX_A)
+            if(macTile.layoutType == LayoutType::MATRIX_A)
                 useSwappedAccess = !useSwappedAccess;
 
             if(useSwappedAccess)
             {
-                n_thr_x = graph.coordinates.addElement(
-                    ThreadTileNumber(0, literal(thr_tile.sizes.at(0))));
-                n_thr_y = graph.coordinates.addElement(
-                    ThreadTileNumber(1, literal(thr_tile.wsizes.at(1))));
-                i_thr_x = graph.coordinates.addElement(
-                    ThreadTileIndex(0, literal(thr_tile.wsizes.at(0))));
-                i_thr_y = graph.coordinates.addElement(
-                    ThreadTileIndex(1, literal(thr_tile.sizes.at(1))));
+                nThrX = graph.coordinates.addElement(
+                    ThreadTileNumber(0, literal(thrTile.sizes.at(0))));
+                nThrY = graph.coordinates.addElement(
+                    ThreadTileNumber(1, literal(thrTile.wsizes.at(1))));
+                iThrX = graph.coordinates.addElement(
+                    ThreadTileIndex(0, literal(thrTile.wsizes.at(0))));
+                iThrY = graph.coordinates.addElement(
+                    ThreadTileIndex(1, literal(thrTile.sizes.at(1))));
 
-                graph.coordinates.addElement(PassThrough(), {n_thr_x}, {element_number_x});
-                graph.coordinates.addElement(PassThrough(), {i_thr_y}, {element_number_y});
+                graph.coordinates.addElement(PassThrough(), {nThrX}, {elementNumberX});
+                graph.coordinates.addElement(PassThrough(), {iThrY}, {elementNumberY});
 
-                auto workitem_x
+                auto workitemX
                     = graph.coordinates.addElement(Workitem(0, literal(workgroupSizes.at(0))));
-                if(mac_tile.layoutType == LayoutType::MATRIX_A
-                   || mac_tile.layoutType == LayoutType::MATRIX_B)
+                if(macTile.layoutType == LayoutType::MATRIX_A
+                   || macTile.layoutType == LayoutType::MATRIX_B)
                 {
-                    graph.coordinates.addElement(Flatten(), {n_thr_y, i_thr_x}, {workitem_x});
+                    graph.coordinates.addElement(Flatten(), {nThrY, iThrX}, {workitemX});
                 }
                 else
                 {
-                    graph.coordinates.addElement(PassThrough(), {i_thr_x}, {workitem_x});
+                    graph.coordinates.addElement(PassThrough(), {iThrX}, {workitemX});
 
-                    auto workitem_y
+                    auto workitemY
                         = graph.coordinates.addElement(Workitem(1, literal(workgroupSizes.at(1))));
-                    graph.coordinates.addElement(PassThrough(), {n_thr_y}, {workitem_y});
+                    graph.coordinates.addElement(PassThrough(), {nThrY}, {workitemY});
                 }
             }
             else
             {
-                n_thr_x = graph.coordinates.addElement(
-                    ThreadTileNumber(0, literal(thr_tile.wsizes.at(0))));
-                n_thr_y = graph.coordinates.addElement(
-                    ThreadTileNumber(1, literal(thr_tile.wsizes.at(1))));
-                i_thr_x = graph.coordinates.addElement(
-                    ThreadTileIndex(0, literal(thr_tile.sizes.at(0))));
-                i_thr_y = graph.coordinates.addElement(
-                    ThreadTileIndex(1, literal(thr_tile.sizes.at(1))));
+                nThrX = graph.coordinates.addElement(
+                    ThreadTileNumber(0, literal(thrTile.wsizes.at(0))));
+                nThrY = graph.coordinates.addElement(
+                    ThreadTileNumber(1, literal(thrTile.wsizes.at(1))));
+                iThrX = graph.coordinates.addElement(
+                    ThreadTileIndex(0, literal(thrTile.sizes.at(0))));
+                iThrY = graph.coordinates.addElement(
+                    ThreadTileIndex(1, literal(thrTile.sizes.at(1))));
 
-                graph.coordinates.addElement(PassThrough(), {i_thr_x}, {element_number_x});
-                graph.coordinates.addElement(PassThrough(), {i_thr_y}, {element_number_y});
+                graph.coordinates.addElement(PassThrough(), {iThrX}, {elementNumberX});
+                graph.coordinates.addElement(PassThrough(), {iThrY}, {elementNumberY});
 
-                auto workitem_x
+                auto workitemX
                     = graph.coordinates.addElement(Workitem(0, literal(workgroupSizes.at(0))));
-                if(mac_tile.layoutType == LayoutType::MATRIX_A
-                   || mac_tile.layoutType == LayoutType::MATRIX_B)
+                if(macTile.layoutType == LayoutType::MATRIX_A
+                   || macTile.layoutType == LayoutType::MATRIX_B)
                 {
-                    graph.coordinates.addElement(Flatten(), {n_thr_y, n_thr_x}, {workitem_x});
+                    graph.coordinates.addElement(Flatten(), {nThrY, nThrX}, {workitemX});
                 }
                 else
                 {
-                    graph.coordinates.addElement(PassThrough(), {n_thr_x}, {workitem_x});
+                    graph.coordinates.addElement(PassThrough(), {nThrX}, {workitemX});
 
-                    auto workitem_y
+                    auto workitemY
                         = graph.coordinates.addElement(Workitem(1, literal(workgroupSizes.at(1))));
-                    graph.coordinates.addElement(PassThrough(), {n_thr_y}, {workitem_y});
+                    graph.coordinates.addElement(PassThrough(), {nThrY}, {workitemY});
                 }
             }
 
-            graph.coordinates.addElement(Tile(), {i_mac_x}, {n_thr_x, i_thr_x});
-            graph.coordinates.addElement(Tile(), {i_mac_y}, {n_thr_y, i_thr_y});
+            graph.coordinates.addElement(Tile(), {iMacX}, {nThrX, iThrX});
+            graph.coordinates.addElement(Tile(), {iMacY}, {nThrY, iThrY});
 
-            if(mac_tile.layoutType == LayoutType::MATRIX_A)
+            if(macTile.layoutType == LayoutType::MATRIX_A)
             {
-                auto workgroup_x = graph.coordinates.addElement(Workgroup(0));
-                graph.mapper.connect<Workgroup>(load_tag, workgroup_x, 0);
-                graph.coordinates.addElement(PassThrough(), {n_mac_x}, {workgroup_x});
+                auto workgroupX = graph.coordinates.addElement(Workgroup(0));
+                graph.mapper.connect<Workgroup>(loadTag, workgroupX, 0);
+                graph.coordinates.addElement(PassThrough(), {nMacX}, {workgroupX});
                 // A row block is x-workgroup, column block is for loop index
-                graph.coordinates.addElement(PassThrough(), {n_mac_y}, {K});
+                graph.coordinates.addElement(PassThrough(), {nMacY}, {K});
             }
-            else if(mac_tile.layoutType == LayoutType::MATRIX_B)
+            else if(macTile.layoutType == LayoutType::MATRIX_B)
             {
-                auto workgroup_y = graph.coordinates.addElement(Workgroup(1));
-                graph.mapper.connect<Workgroup>(load_tag, workgroup_y, 1);
+                auto workgroupY = graph.coordinates.addElement(Workgroup(1));
+                graph.mapper.connect<Workgroup>(loadTag, workgroupY, 1);
                 // B row block is for loop index, column block is y-workgroup
-                graph.coordinates.addElement(PassThrough(), {n_mac_x}, {K});
-                graph.coordinates.addElement(PassThrough(), {n_mac_y}, {workgroup_y});
+                graph.coordinates.addElement(PassThrough(), {nMacX}, {K});
+                graph.coordinates.addElement(PassThrough(), {nMacY}, {workgroupY});
             }
             else
             {
-                auto workgroup_x = graph.coordinates.addElement(Workgroup(0));
-                graph.coordinates.addElement(PassThrough(), {n_mac_x}, {workgroup_x});
-                graph.mapper.connect<Workgroup>(load_tag, workgroup_x, 0);
+                auto workgroupX = graph.coordinates.addElement(Workgroup(0));
+                graph.coordinates.addElement(PassThrough(), {nMacX}, {workgroupX});
+                graph.mapper.connect<Workgroup>(loadTag, workgroupX, 0);
 
-                auto workgroup_y = graph.coordinates.addElement(Workgroup(1));
-                graph.coordinates.addElement(PassThrough(), {n_mac_y}, {workgroup_y});
-                graph.mapper.connect<Workgroup>(load_tag, workgroup_y, 1);
+                auto workgroupY = graph.coordinates.addElement(Workgroup(1));
+                graph.coordinates.addElement(PassThrough(), {nMacY}, {workgroupY});
+                graph.mapper.connect<Workgroup>(loadTag, workgroupY, 1);
             }
         }
 
         void loadMacroTile(KernelGraph&                       graph,
-                           int                                load_tag,
-                           int                                user_tag,
-                           int                                mac_tile_tag,
+                           int                                loadTag,
+                           int                                userTag,
+                           int                                macTileTag,
                            std::vector<int>&                  sdim,
                            std::array<unsigned int, 3> const& workgroupSizes,
                            int                                wavefrontSize,
                            std::vector<unsigned int> const&   wavetilesPerWorkgroup)
 
         {
-            auto mac_tile = graph.coordinates.getNode<MacroTile>(mac_tile_tag);
-            auto user     = graph.coordinates.getNode<User>(user_tag);
+            auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
+            auto user    = graph.coordinates.getNode<User>(userTag);
 
             rocRoller::Log::getLogger()->debug(
                 "KernelGraph::Utils::loadMacroTile(): User({}), MacroTile({})",
-                user_tag,
-                mac_tile_tag);
+                userTag,
+                macTileTag);
             rocRoller::Log::getLogger()->debug(
                 "KernelGraph::Utils::loadMacroTile(): MacroTile size: {}x{}",
-                mac_tile.sizes[0],
-                mac_tile.sizes[1]);
+                macTile.sizes[0],
+                macTile.sizes[1]);
 
-            AssertFatal(mac_tile.rank == 2, "Rank /= 2 not implemented yet.");
+            AssertFatal(macTile.rank == 2, "Rank /= 2 not implemented yet.");
 
-            auto sdim_x = sdim[0];
-            auto sdim_y = sdim[1];
-            graph.mapper.connect<SubDimension>(load_tag, sdim_x, 0);
-            graph.mapper.connect<SubDimension>(load_tag, sdim_y, 1);
+            auto sdimX = sdim[0];
+            auto sdimY = sdim[1];
+            graph.mapper.connect<SubDimension>(loadTag, sdimX, 0);
+            graph.mapper.connect<SubDimension>(loadTag, sdimY, 1);
 
-            auto n_mac_x = graph.coordinates.addElement(mac_tile.tileNumber(0));
-            auto n_mac_y = graph.coordinates.addElement(mac_tile.tileNumber(1));
-            auto i_mac_x = graph.coordinates.addElement(mac_tile.tileIndex(0));
-            auto i_mac_y = graph.coordinates.addElement(mac_tile.tileIndex(1));
+            auto nMacX = graph.coordinates.addElement(macTile.tileNumber(0));
+            auto nMacY = graph.coordinates.addElement(macTile.tileNumber(1));
+            auto iMacX = graph.coordinates.addElement(macTile.tileIndex(0));
+            auto iMacY = graph.coordinates.addElement(macTile.tileIndex(1));
 
-            graph.mapper.connect<MacroTileNumber>(load_tag, n_mac_x, 0);
-            graph.mapper.connect<MacroTileNumber>(load_tag, n_mac_y, 1);
+            graph.mapper.connect<MacroTileNumber>(loadTag, nMacX, 0);
+            graph.mapper.connect<MacroTileNumber>(loadTag, nMacY, 1);
 
-            auto workgroup_x = graph.coordinates.addElement(Workgroup(0));
-            auto workgroup_y = graph.coordinates.addElement(Workgroup(1));
+            auto workgroupX = graph.coordinates.addElement(Workgroup(0));
+            auto workgroupY = graph.coordinates.addElement(Workgroup(1));
 
-            graph.mapper.connect<Workgroup>(load_tag, workgroup_x, 0);
-            graph.mapper.connect<Workgroup>(load_tag, workgroup_y, 1);
+            graph.mapper.connect<Workgroup>(loadTag, workgroupX, 0);
+            graph.mapper.connect<Workgroup>(loadTag, workgroupY, 1);
 
-            graph.coordinates.addElement(Tile(), {sdim_x}, {n_mac_x, i_mac_x});
-            graph.coordinates.addElement(Tile(), {sdim_y}, {n_mac_y, i_mac_y});
+            graph.coordinates.addElement(Tile(), {sdimX}, {nMacX, iMacX});
+            graph.coordinates.addElement(Tile(), {sdimY}, {nMacY, iMacY});
 
-            graph.coordinates.addElement(PassThrough(), {n_mac_x}, {workgroup_x});
-            graph.coordinates.addElement(PassThrough(), {n_mac_y}, {workgroup_y});
+            graph.coordinates.addElement(PassThrough(), {nMacX}, {workgroupX});
+            graph.coordinates.addElement(PassThrough(), {nMacY}, {workgroupY});
 
-            switch(mac_tile.memoryType)
+            switch(macTile.memoryType)
             {
             case MemoryType::VGPR:
             case MemoryType::LDS:
             {
-                auto thr_tile = ThreadTile(mac_tile);
+                auto thrTile = ThreadTile(macTile);
 
-                auto n_thr_x = graph.coordinates.addElement(
-                    ThreadTileNumber(0, literal(thr_tile.wsizes.at(0))));
-                auto n_thr_y = graph.coordinates.addElement(
-                    ThreadTileNumber(1, literal(thr_tile.wsizes.at(1))));
-                auto i_thr_x = graph.coordinates.addElement(
-                    ThreadTileIndex(0, literal(thr_tile.sizes.at(0))));
-                auto i_thr_y = graph.coordinates.addElement(
-                    ThreadTileIndex(1, literal(thr_tile.sizes.at(1))));
+                auto nThrX = graph.coordinates.addElement(
+                    ThreadTileNumber(0, literal(thrTile.wsizes.at(0))));
+                auto nThrY = graph.coordinates.addElement(
+                    ThreadTileNumber(1, literal(thrTile.wsizes.at(1))));
+                auto iThrX = graph.coordinates.addElement(
+                    ThreadTileIndex(0, literal(thrTile.sizes.at(0))));
+                auto iThrY = graph.coordinates.addElement(
+                    ThreadTileIndex(1, literal(thrTile.sizes.at(1))));
 
-                auto workitem_x
-                    = graph.coordinates.addElement(Workitem(0, literal(thr_tile.wsizes.at(0))));
-                auto workitem_y
-                    = graph.coordinates.addElement(Workitem(1, literal(thr_tile.wsizes.at(1))));
+                auto workitemX
+                    = graph.coordinates.addElement(Workitem(0, literal(thrTile.wsizes.at(0))));
+                auto workitemY
+                    = graph.coordinates.addElement(Workitem(1, literal(thrTile.wsizes.at(1))));
 
-                auto element_number_x
-                    = graph.coordinates.addElement(ElementNumber(0, literal(thr_tile.sizes.at(0))));
-                auto element_number_y
-                    = graph.coordinates.addElement(ElementNumber(1, literal(thr_tile.sizes.at(1))));
+                auto elementNumberX
+                    = graph.coordinates.addElement(ElementNumber(0, literal(thrTile.sizes.at(0))));
+                auto elementNumberY
+                    = graph.coordinates.addElement(ElementNumber(1, literal(thrTile.sizes.at(1))));
 
-                graph.mapper.connect<ElementNumber>(load_tag, element_number_x, 0);
-                graph.mapper.connect<ElementNumber>(load_tag, element_number_y, 1);
+                graph.mapper.connect<ElementNumber>(loadTag, elementNumberX, 0);
+                graph.mapper.connect<ElementNumber>(loadTag, elementNumberY, 1);
 
-                graph.coordinates.addElement(Tile(), {i_mac_x}, {n_thr_x, i_thr_x});
-                graph.coordinates.addElement(Tile(), {i_mac_y}, {n_thr_y, i_thr_y});
+                graph.coordinates.addElement(Tile(), {iMacX}, {nThrX, iThrX});
+                graph.coordinates.addElement(Tile(), {iMacY}, {nThrY, iThrY});
 
-                graph.coordinates.addElement(PassThrough(), {n_thr_x}, {workitem_x});
-                graph.coordinates.addElement(PassThrough(), {n_thr_y}, {workitem_y});
+                graph.coordinates.addElement(PassThrough(), {nThrX}, {workitemX});
+                graph.coordinates.addElement(PassThrough(), {nThrY}, {workitemY});
 
-                graph.coordinates.addElement(PassThrough(), {i_thr_x}, {element_number_x});
-                graph.coordinates.addElement(PassThrough(), {i_thr_y}, {element_number_y});
+                graph.coordinates.addElement(PassThrough(), {iThrX}, {elementNumberX});
+                graph.coordinates.addElement(PassThrough(), {iThrY}, {elementNumberY});
 
                 // User -> DataFlow() -> LDS gets added in addLDSOps
             }
@@ -591,11 +591,11 @@ namespace rocRoller
             case MemoryType::WAVE:
             case MemoryType::WAVE_LDS:
                 loadWaveMacroTile(graph,
-                                  mac_tile,
-                                  load_tag,
-                                  i_mac_x,
-                                  i_mac_y,
-                                  user_tag,
+                                  macTile,
+                                  loadTag,
+                                  iMacX,
+                                  iMacY,
+                                  userTag,
                                   wavefrontSize,
                                   wavetilesPerWorkgroup);
                 // User -> DataFlow() -> LDS gets added in addWaveLDSOps
@@ -607,8 +607,8 @@ namespace rocRoller
         }
 
         void updateStoreLDSMacroTile(KernelGraph&      graph,
-                                     MacroTile const&  mac_tile,
-                                     int               store_tag,
+                                     MacroTile const&  macTile,
+                                     int               storeTag,
                                      std::vector<int>& sdims,
                                      int               lds)
         {
@@ -616,403 +616,399 @@ namespace rocRoller
             // before it is transformed to StoreLDSTile
 
             // remove macrotile numbers and workgroups
-            auto tilenum_x   = graph.mapper.get<MacroTileNumber>(store_tag, 0);
-            auto workgroup_x = graph.mapper.get<Workgroup>(store_tag, 0);
-            graph.mapper.disconnect<Workgroup>(store_tag, workgroup_x, 0);
-            graph.coordinates.deleteElement(std::vector<int>{workgroup_x},
-                                            std::vector<int>{tilenum_x},
-                                            CT::isEdge<PassThrough>);
-            graph.coordinates.deleteElement(workgroup_x);
+            auto tileNumX   = graph.mapper.get<MacroTileNumber>(storeTag, 0);
+            auto workgroupX = graph.mapper.get<Workgroup>(storeTag, 0);
+            graph.mapper.disconnect<Workgroup>(storeTag, workgroupX, 0);
+            graph.coordinates.deleteElement(
+                std::vector<int>{workgroupX}, std::vector<int>{tileNumX}, CT::isEdge<PassThrough>);
+            graph.coordinates.deleteElement(workgroupX);
 
-            auto tilenum_y   = graph.mapper.get<MacroTileNumber>(store_tag, 1);
-            auto workgroup_y = graph.mapper.get<Workgroup>(store_tag, 1);
-            graph.mapper.disconnect<Workgroup>(store_tag, workgroup_y, 1);
-            graph.coordinates.deleteElement(std::vector<int>{workgroup_y},
-                                            std::vector<int>{tilenum_y},
-                                            CT::isEdge<PassThrough>);
-            graph.coordinates.deleteElement(workgroup_y);
+            auto tileNumY   = graph.mapper.get<MacroTileNumber>(storeTag, 1);
+            auto workgroupY = graph.mapper.get<Workgroup>(storeTag, 1);
+            graph.mapper.disconnect<Workgroup>(storeTag, workgroupY, 1);
+            graph.coordinates.deleteElement(
+                std::vector<int>{workgroupY}, std::vector<int>{tileNumY}, CT::isEdge<PassThrough>);
+            graph.coordinates.deleteElement(workgroupY);
 
-            std::vector<int> i_mac;
+            std::vector<int> iMac;
             for(size_t i = 0; i < sdims.size(); ++i)
             {
                 auto mac = graph.coordinates.getInputNodeIndices(sdims[i], CT::isEdge<Flatten>)
                                .to<std::vector>();
-                i_mac.push_back(mac[1]);
+                iMac.push_back(mac[1]);
                 graph.coordinates.deleteElement(
                     mac, std::vector<int>{sdims[i]}, CT::isEdge<Flatten>);
-                graph.mapper.disconnect<MacroTileNumber>(store_tag, mac[0], i);
+                graph.mapper.disconnect<MacroTileNumber>(storeTag, mac[0], i);
                 graph.coordinates.deleteElement(mac[0]);
             }
 
-            graph.coordinates.addElement(Flatten(), {i_mac[0], i_mac[1]}, {lds});
+            graph.coordinates.addElement(Flatten(), {iMac[0], iMac[1]}, {lds});
         }
 
         void storeWaveMacroTile(KernelGraph&                     graph,
-                                MacroTile const&                 mac_tile,
-                                int                              store_tag,
-                                int                              i_mac_x,
-                                int                              i_mac_y,
+                                MacroTile const&                 macTile,
+                                int                              storeTag,
+                                int                              iMacX,
+                                int                              iMacY,
                                 int                              workitem,
-                                int                              user_tag,
+                                int                              userTag,
                                 int                              wavefrontSize,
                                 std::vector<unsigned int> const& wavetilesPerWorkgroup)
         {
-            AssertFatal(mac_tile.layoutType == LayoutType::MATRIX_ACCUMULATOR,
+            AssertFatal(macTile.layoutType == LayoutType::MATRIX_ACCUMULATOR,
                         "Store must be from accumulator.");
 
-            auto wave_tile     = WaveTile(mac_tile.subTileSizes, LayoutType::MATRIX_ACCUMULATOR);
-            auto wave_tile_tag = graph.coordinates.addElement(wave_tile);
+            auto waveTile    = WaveTile(macTile.subTileSizes, LayoutType::MATRIX_ACCUMULATOR);
+            auto waveTileTag = graph.coordinates.addElement(waveTile);
 
-            uint num_elements = wave_tile.sizes[0] * wave_tile.sizes[1];
-            uint wfs          = static_cast<uint>(wavefrontSize);
-            uint num_agpr     = num_elements / wfs;
+            uint numElements = waveTile.sizes[0] * waveTile.sizes[1];
+            uint wfs         = static_cast<uint>(wavefrontSize);
+            uint num_agpr    = numElements / wfs;
 
             // MFMA accumulator tile size
             uint mts            = 4u;
             auto mfma_tile_size = literal(mts);
 
-            auto n_row_blocks = literal(wave_tile.sizes[0] / mts);
-            auto n_col_blocks = literal(wave_tile.sizes[1] / mts);
+            auto nRowBlocks = literal(waveTile.sizes[0] / mts);
+            auto nColBlocks = literal(waveTile.sizes[1] / mts);
 
-            auto n_wave_x = graph.coordinates.addElement(wave_tile.tileNumber(0));
-            auto n_wave_y = graph.coordinates.addElement(wave_tile.tileNumber(1));
-            auto i_wave_x = graph.coordinates.addElement(wave_tile.tileIndex(0));
-            auto i_wave_y = graph.coordinates.addElement(wave_tile.tileIndex(1));
+            auto nWaveX = graph.coordinates.addElement(waveTile.tileNumber(0));
+            auto nWaveY = graph.coordinates.addElement(waveTile.tileNumber(1));
+            auto iWaveX = graph.coordinates.addElement(waveTile.tileIndex(0));
+            auto iWaveY = graph.coordinates.addElement(waveTile.tileIndex(1));
 
-            auto wavefront_size = Expression::literal(static_cast<uint>(wavefrontSize));
-            auto unit_stride    = literal(1u);
+            auto wavefrontSizeLiteral = literal(static_cast<uint>(wavefrontSize));
+            auto unitStride           = literal(1u);
 
-            auto n_vblk = graph.coordinates.addElement(
-                VGPRBlockNumber(literal(num_agpr / mts), unit_stride));
-            auto i_vblk = graph.coordinates.addElement(VGPRBlockIndex(mfma_tile_size, unit_stride));
-            auto n_lblk = graph.coordinates.addElement(
-                Adhoc("LANEBlockNumber", literal(wfs / mts), unit_stride));
-            auto i_lblk = graph.coordinates.addElement(
-                Adhoc("LANEBlockIndex", mfma_tile_size, unit_stride));
+            auto nVblk = graph.coordinates.addElement(
+                VGPRBlockNumber(literal(num_agpr / mts), unitStride));
+            auto iVblk = graph.coordinates.addElement(VGPRBlockIndex(mfma_tile_size, unitStride));
+            auto nLblk = graph.coordinates.addElement(
+                Adhoc("LANEBlockNumber", literal(wfs / mts), unitStride));
+            auto iLblk
+                = graph.coordinates.addElement(Adhoc("LANEBlockIndex", mfma_tile_size, unitStride));
             auto block = graph.coordinates.addElement(
-                Adhoc("LinearBlock", literal(num_elements / 16u), unit_stride));
-            auto row_block
-                = graph.coordinates.addElement(Adhoc("RowBlock", n_row_blocks, unit_stride));
-            auto col_block
-                = graph.coordinates.addElement(Adhoc("ColBlock", n_col_blocks, unit_stride));
+                Adhoc("LinearBlock", literal(numElements / 16u), unitStride));
+            auto rowBlock = graph.coordinates.addElement(Adhoc("RowBlock", nRowBlocks, unitStride));
+            auto colBlock = graph.coordinates.addElement(Adhoc("ColBlock", nColBlocks, unitStride));
 
-            graph.coordinates.addElement(Flatten(), {n_wave_x, i_wave_x}, {i_mac_x});
-            graph.coordinates.addElement(Flatten(), {n_wave_y, i_wave_y}, {i_mac_y});
+            graph.coordinates.addElement(Flatten(), {nWaveX, iWaveX}, {iMacX});
+            graph.coordinates.addElement(Flatten(), {nWaveY, iWaveY}, {iMacY});
 
-            auto wave_x = graph.coordinates.addElement(Wavefront(0));
-            auto wave_y = graph.coordinates.addElement(Wavefront(1));
-            auto wave   = graph.coordinates.addElement(Wavefront(-1));
+            auto waveX = graph.coordinates.addElement(Wavefront(0));
+            auto waveY = graph.coordinates.addElement(Wavefront(1));
+            auto wave  = graph.coordinates.addElement(Wavefront(-1));
 
-            graph.coordinates.addElement(Tile(), {wave}, {wave_x, wave_y});
+            graph.coordinates.addElement(Tile(), {wave}, {waveX, waveY});
 
-            auto lane = graph.coordinates.addElement(Lane(wavefront_size, unit_stride));
-            auto vgpr = graph.coordinates.addElement(VGPR(literal(num_agpr), unit_stride));
+            auto lane = graph.coordinates.addElement(Lane(wavefrontSizeLiteral, unitStride));
+            auto vgpr = graph.coordinates.addElement(VGPR(literal(num_agpr), unitStride));
 
-            graph.mapper.connect<WaveTile>(store_tag, wave_tile_tag);
-            graph.mapper.connect<VGPRBlockNumber>(store_tag, n_vblk);
-            graph.mapper.connect<VGPRBlockIndex>(store_tag, i_vblk);
-            graph.mapper.connect<VGPR>(store_tag, vgpr);
+            graph.mapper.connect<WaveTile>(storeTag, waveTileTag);
+            graph.mapper.connect<VGPRBlockNumber>(storeTag, nVblk);
+            graph.mapper.connect<VGPRBlockIndex>(storeTag, iVblk);
+            graph.mapper.connect<VGPR>(storeTag, vgpr);
 
-            graph.coordinates.addElement(Tile(), {vgpr}, {n_vblk, i_vblk});
-            graph.coordinates.addElement(Tile(), {lane}, {n_lblk, i_lblk});
-            graph.coordinates.addElement(Flatten(), {n_vblk, n_lblk}, {block});
-            graph.coordinates.addElement(Tile(), {block}, {row_block, col_block});
+            graph.coordinates.addElement(Tile(), {vgpr}, {nVblk, iVblk});
+            graph.coordinates.addElement(Tile(), {lane}, {nLblk, iLblk});
+            graph.coordinates.addElement(Flatten(), {nVblk, nLblk}, {block});
+            graph.coordinates.addElement(Tile(), {block}, {rowBlock, colBlock});
 
-            int jammed_wavetile_x = -1;
+            int jammedWavetileX = -1;
             if(wavetilesPerWorkgroup[0] >= 1)
             {
-                jammed_wavetile_x = graph.coordinates.addElement(
+                jammedWavetileX = graph.coordinates.addElement(
                     JammedWaveTileNumber(0, literal(wavetilesPerWorkgroup[0]), literal(1)));
-                graph.mapper.connect<JammedWaveTileNumber>(store_tag, jammed_wavetile_x, 0);
+                graph.mapper.connect<JammedWaveTileNumber>(storeTag, jammedWavetileX, 0);
             }
-            int jammed_wavetile_y = -1;
+            int jammedWavetileY = -1;
             if(wavetilesPerWorkgroup[1] >= 1)
             {
-                jammed_wavetile_y = graph.coordinates.addElement(
+                jammedWavetileY = graph.coordinates.addElement(
                     JammedWaveTileNumber(1, literal(wavetilesPerWorkgroup[1]), literal(1)));
-                graph.mapper.connect<JammedWaveTileNumber>(store_tag, jammed_wavetile_y, 1);
+                graph.mapper.connect<JammedWaveTileNumber>(storeTag, jammedWavetileY, 1);
             }
 
             if(wavetilesPerWorkgroup[0] > 1)
-                graph.coordinates.addElement(Flatten(), {wave_x, jammed_wavetile_x}, {n_wave_x});
+                graph.coordinates.addElement(Flatten(), {waveX, jammedWavetileX}, {nWaveX});
             else
-                graph.coordinates.addElement(PassThrough(), {wave_x}, {n_wave_x});
+                graph.coordinates.addElement(PassThrough(), {waveX}, {nWaveX});
             if(wavetilesPerWorkgroup[1] > 1)
-                graph.coordinates.addElement(Flatten(), {wave_y, jammed_wavetile_y}, {n_wave_y});
+                graph.coordinates.addElement(Flatten(), {waveY, jammedWavetileY}, {nWaveY});
             else
-                graph.coordinates.addElement(PassThrough(), {wave_y}, {n_wave_y});
+                graph.coordinates.addElement(PassThrough(), {waveY}, {nWaveY});
 
-            graph.coordinates.addElement(Flatten(), {row_block, i_vblk}, {i_wave_x});
-            graph.coordinates.addElement(Flatten(), {col_block, i_lblk}, {i_wave_y});
+            graph.coordinates.addElement(Flatten(), {rowBlock, iVblk}, {iWaveX});
+            graph.coordinates.addElement(Flatten(), {colBlock, iLblk}, {iWaveY});
 
             graph.coordinates.addElement(Tile(), {workitem}, {wave, lane});
         }
 
         void storeMacroTileIntoLDS(KernelGraph&                       graph,
-                                   int                                store_tag,
-                                   int                                lds_tag,
-                                   int                                mac_tile_tag,
+                                   int                                storeTag,
+                                   int                                ldsTag,
+                                   int                                macTileTag,
                                    std::array<unsigned int, 3> const& workgroupSizes,
                                    std::shared_ptr<Context>           context)
         {
-            auto mac_tile = graph.coordinates.getNode<MacroTile>(mac_tile_tag);
+            auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
             rocRoller::Log::getLogger()->debug(
                 "KernelGraph::Utils::storeMacroTileIntoLDS(): LDS({}), MacroTile({})",
-                lds_tag,
-                mac_tile_tag);
+                ldsTag,
+                macTileTag);
             rocRoller::Log::getLogger()->debug(
                 "KernelGraph::Utils::storeMacroTileIntoLDS(): MacroTile size: {}x{}",
-                mac_tile.sizes[0],
-                mac_tile.sizes[1]);
+                macTile.sizes[0],
+                macTile.sizes[1]);
 
-            auto thr_tile = ThreadTile(mac_tile);
+            auto thrTile = ThreadTile(macTile);
 
-            auto i_mac_x = graph.coordinates.addElement(mac_tile.tileIndex(0));
-            auto i_mac_y = graph.coordinates.addElement(mac_tile.tileIndex(1));
+            auto iMacX = graph.coordinates.addElement(macTile.tileIndex(0));
+            auto iMacY = graph.coordinates.addElement(macTile.tileIndex(1));
 
-            auto element_number_x
-                = graph.coordinates.addElement(ElementNumber(0, literal(thr_tile.sizes.at(0))));
-            auto element_number_y
-                = graph.coordinates.addElement(ElementNumber(1, literal(thr_tile.sizes.at(1))));
+            auto elementNumberX
+                = graph.coordinates.addElement(ElementNumber(0, literal(thrTile.sizes.at(0))));
+            auto elementNumberY
+                = graph.coordinates.addElement(ElementNumber(1, literal(thrTile.sizes.at(1))));
 
-            graph.mapper.connect<ElementNumber>(store_tag, element_number_x, 0);
-            graph.mapper.connect<ElementNumber>(store_tag, element_number_y, 1);
+            graph.mapper.connect<ElementNumber>(storeTag, elementNumberX, 0);
+            graph.mapper.connect<ElementNumber>(storeTag, elementNumberY, 1);
 
             bool useSwappedAccess
-                = context->kernelOptions().transposeMemoryAccess[mac_tile.layoutType];
+                = context->kernelOptions().transposeMemoryAccess[macTile.layoutType];
 
-            if(mac_tile.layoutType == LayoutType::MATRIX_A)
+            if(macTile.layoutType == LayoutType::MATRIX_A)
                 useSwappedAccess = !useSwappedAccess;
 
-            int n_thr_x, n_thr_y, i_thr_x, i_thr_y;
+            int nThrX, nThrY, iThrX, iThrY;
             if(useSwappedAccess)
             {
-                n_thr_x = graph.coordinates.addElement(
-                    ThreadTileNumber(0, literal(thr_tile.sizes.at(0))));
-                n_thr_y = graph.coordinates.addElement(
-                    ThreadTileNumber(1, literal(thr_tile.wsizes.at(1))));
-                i_thr_x = graph.coordinates.addElement(
-                    ThreadTileIndex(0, literal(thr_tile.wsizes.at(0))));
-                i_thr_y = graph.coordinates.addElement(
-                    ThreadTileIndex(1, literal(thr_tile.sizes.at(1))));
+                nThrX = graph.coordinates.addElement(
+                    ThreadTileNumber(0, literal(thrTile.sizes.at(0))));
+                nThrY = graph.coordinates.addElement(
+                    ThreadTileNumber(1, literal(thrTile.wsizes.at(1))));
+                iThrX = graph.coordinates.addElement(
+                    ThreadTileIndex(0, literal(thrTile.wsizes.at(0))));
+                iThrY = graph.coordinates.addElement(
+                    ThreadTileIndex(1, literal(thrTile.sizes.at(1))));
 
-                graph.coordinates.addElement(PassThrough(), {element_number_x}, {n_thr_x});
-                graph.coordinates.addElement(PassThrough(), {element_number_y}, {i_thr_y});
+                graph.coordinates.addElement(PassThrough(), {elementNumberX}, {nThrX});
+                graph.coordinates.addElement(PassThrough(), {elementNumberY}, {iThrY});
 
-                auto workitem_x
+                auto workitemX
                     = graph.coordinates.addElement(Workitem(0, literal(workgroupSizes.at(0))));
 
-                if(mac_tile.layoutType == LayoutType::MATRIX_A
-                   || mac_tile.layoutType == LayoutType::MATRIX_B)
+                if(macTile.layoutType == LayoutType::MATRIX_A
+                   || macTile.layoutType == LayoutType::MATRIX_B)
                 {
-                    graph.coordinates.addElement(Tile(), {workitem_x}, {n_thr_y, i_thr_x});
+                    graph.coordinates.addElement(Tile(), {workitemX}, {nThrY, iThrX});
                 }
                 else
                 {
-                    auto workitem_y
+                    auto workitemY
                         = graph.coordinates.addElement(Workitem(1, literal(workgroupSizes.at(1))));
 
-                    graph.coordinates.addElement(PassThrough(), {workitem_x}, {i_thr_x});
-                    graph.coordinates.addElement(PassThrough(), {workitem_y}, {n_thr_y});
+                    graph.coordinates.addElement(PassThrough(), {workitemX}, {iThrX});
+                    graph.coordinates.addElement(PassThrough(), {workitemY}, {nThrY});
                 }
             }
             else
             {
-                n_thr_x = graph.coordinates.addElement(
-                    ThreadTileNumber(0, literal(thr_tile.wsizes.at(0))));
-                n_thr_y = graph.coordinates.addElement(
-                    ThreadTileNumber(1, literal(thr_tile.wsizes.at(1))));
-                i_thr_x = graph.coordinates.addElement(
-                    ThreadTileIndex(0, literal(thr_tile.sizes.at(0))));
-                i_thr_y = graph.coordinates.addElement(
-                    ThreadTileIndex(1, literal(thr_tile.sizes.at(1))));
+                nThrX = graph.coordinates.addElement(
+                    ThreadTileNumber(0, literal(thrTile.wsizes.at(0))));
+                nThrY = graph.coordinates.addElement(
+                    ThreadTileNumber(1, literal(thrTile.wsizes.at(1))));
+                iThrX = graph.coordinates.addElement(
+                    ThreadTileIndex(0, literal(thrTile.sizes.at(0))));
+                iThrY = graph.coordinates.addElement(
+                    ThreadTileIndex(1, literal(thrTile.sizes.at(1))));
 
-                graph.coordinates.addElement(PassThrough(), {element_number_x}, {i_thr_x});
-                graph.coordinates.addElement(PassThrough(), {element_number_y}, {i_thr_y});
+                graph.coordinates.addElement(PassThrough(), {elementNumberX}, {iThrX});
+                graph.coordinates.addElement(PassThrough(), {elementNumberY}, {iThrY});
 
-                auto workitem_x
+                auto workitemX
                     = graph.coordinates.addElement(Workitem(0, literal(workgroupSizes.at(0))));
 
-                if(mac_tile.layoutType == LayoutType::MATRIX_A
-                   || mac_tile.layoutType == LayoutType::MATRIX_B)
+                if(macTile.layoutType == LayoutType::MATRIX_A
+                   || macTile.layoutType == LayoutType::MATRIX_B)
                 {
-                    graph.coordinates.addElement(Tile(), {workitem_x}, {n_thr_y, n_thr_x});
+                    graph.coordinates.addElement(Tile(), {workitemX}, {nThrY, nThrX});
                 }
                 else
                 {
-                    auto workitem_y
+                    auto workitemY
                         = graph.coordinates.addElement(Workitem(1, literal(workgroupSizes.at(1))));
 
-                    graph.coordinates.addElement(PassThrough(), {workitem_x}, {n_thr_x});
-                    graph.coordinates.addElement(PassThrough(), {workitem_y}, {n_thr_y});
+                    graph.coordinates.addElement(PassThrough(), {workitemX}, {nThrX});
+                    graph.coordinates.addElement(PassThrough(), {workitemY}, {nThrY});
                 }
             }
 
-            graph.coordinates.addElement(Flatten(), {n_thr_x, i_thr_x}, {i_mac_x});
-            graph.coordinates.addElement(Flatten(), {n_thr_y, i_thr_y}, {i_mac_y});
+            graph.coordinates.addElement(Flatten(), {nThrX, iThrX}, {iMacX});
+            graph.coordinates.addElement(Flatten(), {nThrY, iThrY}, {iMacY});
 
-            graph.coordinates.addElement(Flatten(), {i_mac_x, i_mac_y}, {lds_tag});
+            graph.coordinates.addElement(Flatten(), {iMacX, iMacY}, {ldsTag});
 
             //macrotile --DataFlow--> LDS
-            graph.coordinates.addElement(DataFlow(), {mac_tile_tag}, {lds_tag});
+            graph.coordinates.addElement(DataFlow(), {macTileTag}, {ldsTag});
         }
 
         void storeMacroTileForLDS(KernelGraph&                       graph,
-                                  int                                store_tag,
-                                  int                                user_tag,
-                                  int                                mac_tile_tag,
+                                  int                                storeTag,
+                                  int                                userTag,
+                                  int                                macTileTag,
                                   std::vector<int>&                  sdims,
                                   std::array<unsigned int, 3> const& workgroupSizes)
         {
-            auto mac_tile = graph.coordinates.getNode<MacroTile>(mac_tile_tag);
-            auto user     = graph.coordinates.getNode<User>(user_tag);
+            auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
+            auto user    = graph.coordinates.getNode<User>(userTag);
 
             rocRoller::Log::getLogger()->debug(
                 "KernelGraph::Utils::storeMacroTileForLDS(): User({}), MacroTile({})",
-                user_tag,
-                mac_tile_tag);
+                userTag,
+                macTileTag);
             rocRoller::Log::getLogger()->debug(
                 "KernelGraph::Utils::storeMacroTileForLDS(): MacroTile size: {}x{}",
-                mac_tile.sizes[0],
-                mac_tile.sizes[1]);
+                macTile.sizes[0],
+                macTile.sizes[1]);
 
-            AssertRecoverable(mac_tile.rank >= 0 && sdims.size() == (size_t)mac_tile.rank,
+            AssertRecoverable(macTile.rank >= 0 && sdims.size() == (size_t)macTile.rank,
                               "Tensor size mismatch.");
-            AssertRecoverable(mac_tile.rank == 2, "Rank /= 2 not implemented yet.");
+            AssertRecoverable(macTile.rank == 2, "Rank /= 2 not implemented yet.");
 
-            auto n_mac_x = graph.coordinates.addElement(mac_tile.tileNumber(0));
-            auto n_mac_y = graph.coordinates.addElement(mac_tile.tileNumber(1));
-            auto i_mac_x = graph.coordinates.addElement(mac_tile.tileIndex(0));
-            auto i_mac_y = graph.coordinates.addElement(mac_tile.tileIndex(1));
+            auto nMacX = graph.coordinates.addElement(macTile.tileNumber(0));
+            auto nMacY = graph.coordinates.addElement(macTile.tileNumber(1));
+            auto iMacX = graph.coordinates.addElement(macTile.tileIndex(0));
+            auto iMacY = graph.coordinates.addElement(macTile.tileIndex(1));
 
-            graph.mapper.connect<MacroTileNumber>(store_tag, n_mac_x, 0);
-            graph.mapper.connect<MacroTileNumber>(store_tag, n_mac_y, 1);
+            graph.mapper.connect<MacroTileNumber>(storeTag, nMacX, 0);
+            graph.mapper.connect<MacroTileNumber>(storeTag, nMacY, 1);
 
-            auto workgroup_x = graph.coordinates.addElement(Workgroup(0));
-            auto workgroup_y = graph.coordinates.addElement(Workgroup(1));
+            auto workgroupX = graph.coordinates.addElement(Workgroup(0));
+            auto workgroupY = graph.coordinates.addElement(Workgroup(1));
 
-            graph.mapper.connect<Workgroup>(store_tag, workgroup_x, 0);
-            graph.mapper.connect<Workgroup>(store_tag, workgroup_y, 1);
+            graph.mapper.connect<Workgroup>(storeTag, workgroupX, 0);
+            graph.mapper.connect<Workgroup>(storeTag, workgroupY, 1);
 
-            graph.coordinates.addElement(Flatten(), {n_mac_x, i_mac_x}, {sdims[0]});
-            graph.coordinates.addElement(Flatten(), {n_mac_y, i_mac_y}, {sdims[1]});
+            graph.coordinates.addElement(Flatten(), {nMacX, iMacX}, {sdims[0]});
+            graph.coordinates.addElement(Flatten(), {nMacY, iMacY}, {sdims[1]});
 
-            graph.coordinates.addElement(PassThrough(), {workgroup_x}, {n_mac_x});
-            graph.coordinates.addElement(PassThrough(), {workgroup_y}, {n_mac_y});
+            graph.coordinates.addElement(PassThrough(), {workgroupX}, {nMacX});
+            graph.coordinates.addElement(PassThrough(), {workgroupY}, {nMacY});
 
-            auto workitem_x
+            auto workitemX
                 = graph.coordinates.addElement(Workitem(0, literal(workgroupSizes.at(0))));
 
-            auto thr_tile = ThreadTile(mac_tile);
+            auto thrTile = ThreadTile(macTile);
 
-            auto n_thr_x
-                = graph.coordinates.addElement(ThreadTileNumber(0, literal(thr_tile.sizes.at(0))));
-            auto n_thr_y
-                = graph.coordinates.addElement(ThreadTileNumber(1, literal(thr_tile.wsizes.at(1))));
-            auto i_thr_x
-                = graph.coordinates.addElement(ThreadTileIndex(0, literal(thr_tile.wsizes.at(0))));
-            auto i_thr_y
-                = graph.coordinates.addElement(ThreadTileIndex(1, literal(thr_tile.sizes.at(1))));
+            auto nThrX
+                = graph.coordinates.addElement(ThreadTileNumber(0, literal(thrTile.sizes.at(0))));
+            auto nThrY
+                = graph.coordinates.addElement(ThreadTileNumber(1, literal(thrTile.wsizes.at(1))));
+            auto iThrX
+                = graph.coordinates.addElement(ThreadTileIndex(0, literal(thrTile.wsizes.at(0))));
+            auto iThrY
+                = graph.coordinates.addElement(ThreadTileIndex(1, literal(thrTile.sizes.at(1))));
 
-            graph.coordinates.addElement(Flatten(), {n_thr_x, i_thr_x}, {i_mac_x});
-            graph.coordinates.addElement(Flatten(), {n_thr_y, i_thr_y}, {i_mac_y});
+            graph.coordinates.addElement(Flatten(), {nThrX, iThrX}, {iMacX});
+            graph.coordinates.addElement(Flatten(), {nThrY, iThrY}, {iMacY});
 
-            auto element_number_x
-                = graph.coordinates.addElement(ElementNumber(0, literal(thr_tile.sizes.at(0))));
-            auto element_number_y
-                = graph.coordinates.addElement(ElementNumber(1, literal(thr_tile.sizes.at(1))));
+            auto elementNumberX
+                = graph.coordinates.addElement(ElementNumber(0, literal(thrTile.sizes.at(0))));
+            auto elementNumberY
+                = graph.coordinates.addElement(ElementNumber(1, literal(thrTile.sizes.at(1))));
 
-            graph.coordinates.addElement(PassThrough(), {element_number_x}, {n_thr_x});
-            graph.coordinates.addElement(PassThrough(), {element_number_y}, {i_thr_y});
+            graph.coordinates.addElement(PassThrough(), {elementNumberX}, {nThrX});
+            graph.coordinates.addElement(PassThrough(), {elementNumberY}, {iThrY});
 
-            graph.mapper.connect<ElementNumber>(store_tag, element_number_x, 0);
-            graph.mapper.connect<ElementNumber>(store_tag, element_number_y, 1);
+            graph.mapper.connect<ElementNumber>(storeTag, elementNumberX, 0);
+            graph.mapper.connect<ElementNumber>(storeTag, elementNumberY, 1);
 
-            graph.coordinates.addElement(Tile(), {workitem_x}, {n_thr_y, i_thr_x});
+            graph.coordinates.addElement(Tile(), {workitemX}, {nThrY, iThrX});
         }
 
         void storeMacroTile(KernelGraph&                       graph,
-                            int                                store_tag,
-                            int                                user_tag,
-                            int                                mac_tile_tag,
+                            int                                storeTag,
+                            int                                userTag,
+                            int                                macTileTag,
                             std::vector<int>&                  sdims,
                             std::array<unsigned int, 3> const& workgroupSizes,
                             int                                wavefrontSize,
                             std::vector<unsigned int> const&   wavetilesPerWorkgroup)
         {
-            auto mac_tile = graph.coordinates.getNode<MacroTile>(mac_tile_tag);
-            auto user     = graph.coordinates.getNode<User>(user_tag);
+            auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
+            auto user    = graph.coordinates.getNode<User>(userTag);
 
             rocRoller::Log::getLogger()->debug(
                 "KernelGraph::Utils::storeMacroTile(): User({}), MacroTile({})",
-                user_tag,
-                mac_tile_tag);
+                userTag,
+                macTileTag);
             rocRoller::Log::getLogger()->debug(
                 "KernelGraph::Utils::storeMacroTile(): MacroTile size: {}x{}",
-                mac_tile.sizes[0],
-                mac_tile.sizes[1]);
+                macTile.sizes[0],
+                macTile.sizes[1]);
 
-            AssertRecoverable(mac_tile.rank >= 0 && sdims.size() == (size_t)mac_tile.rank,
+            AssertRecoverable(macTile.rank >= 0 && sdims.size() == (size_t)macTile.rank,
                               "Tensor size mismatch.");
-            AssertRecoverable(mac_tile.rank == 2, "Rank /= 2 not implemented yet.");
+            AssertRecoverable(macTile.rank == 2, "Rank /= 2 not implemented yet.");
 
-            auto n_mac_x = graph.coordinates.addElement(mac_tile.tileNumber(0));
-            auto n_mac_y = graph.coordinates.addElement(mac_tile.tileNumber(1));
-            auto i_mac_x = graph.coordinates.addElement(mac_tile.tileIndex(0));
-            auto i_mac_y = graph.coordinates.addElement(mac_tile.tileIndex(1));
+            auto nMacX = graph.coordinates.addElement(macTile.tileNumber(0));
+            auto nMacY = graph.coordinates.addElement(macTile.tileNumber(1));
+            auto iMacX = graph.coordinates.addElement(macTile.tileIndex(0));
+            auto iMacY = graph.coordinates.addElement(macTile.tileIndex(1));
 
-            graph.mapper.connect<MacroTileNumber>(store_tag, n_mac_x, 0);
-            graph.mapper.connect<MacroTileNumber>(store_tag, n_mac_y, 1);
+            graph.mapper.connect<MacroTileNumber>(storeTag, nMacX, 0);
+            graph.mapper.connect<MacroTileNumber>(storeTag, nMacY, 1);
 
-            auto workgroup_x = graph.coordinates.addElement(Workgroup(0));
-            auto workgroup_y = graph.coordinates.addElement(Workgroup(1));
+            auto workgroupX = graph.coordinates.addElement(Workgroup(0));
+            auto workgroupY = graph.coordinates.addElement(Workgroup(1));
 
-            graph.mapper.connect<Workgroup>(store_tag, workgroup_x, 0);
-            graph.mapper.connect<Workgroup>(store_tag, workgroup_y, 1);
+            graph.mapper.connect<Workgroup>(storeTag, workgroupX, 0);
+            graph.mapper.connect<Workgroup>(storeTag, workgroupY, 1);
 
-            graph.coordinates.addElement(Flatten(), {n_mac_x, i_mac_x}, {sdims[0]});
-            graph.coordinates.addElement(Flatten(), {n_mac_y, i_mac_y}, {sdims[1]});
+            graph.coordinates.addElement(Flatten(), {nMacX, iMacX}, {sdims[0]});
+            graph.coordinates.addElement(Flatten(), {nMacY, iMacY}, {sdims[1]});
 
-            graph.coordinates.addElement(PassThrough(), {workgroup_x}, {n_mac_x});
-            graph.coordinates.addElement(PassThrough(), {workgroup_y}, {n_mac_y});
+            graph.coordinates.addElement(PassThrough(), {workgroupX}, {nMacX});
+            graph.coordinates.addElement(PassThrough(), {workgroupY}, {nMacY});
 
-            switch(mac_tile.memoryType)
+            switch(macTile.memoryType)
             {
             case MemoryType::VGPR:
             case MemoryType::LDS:
             {
-                auto thr_tile = ThreadTile(mac_tile);
+                auto thrTile = ThreadTile(macTile);
 
-                auto n_thr_x = graph.coordinates.addElement(
-                    ThreadTileNumber(0, literal(thr_tile.wsizes.at(0))));
-                auto n_thr_y = graph.coordinates.addElement(
-                    ThreadTileNumber(1, literal(thr_tile.wsizes.at(1))));
-                auto i_thr_x = graph.coordinates.addElement(
-                    ThreadTileIndex(0, literal(thr_tile.sizes.at(0))));
-                auto i_thr_y = graph.coordinates.addElement(
-                    ThreadTileIndex(1, literal(thr_tile.sizes.at(1))));
+                auto nThrX = graph.coordinates.addElement(
+                    ThreadTileNumber(0, literal(thrTile.wsizes.at(0))));
+                auto nThrY = graph.coordinates.addElement(
+                    ThreadTileNumber(1, literal(thrTile.wsizes.at(1))));
+                auto iThrX = graph.coordinates.addElement(
+                    ThreadTileIndex(0, literal(thrTile.sizes.at(0))));
+                auto iThrY = graph.coordinates.addElement(
+                    ThreadTileIndex(1, literal(thrTile.sizes.at(1))));
 
-                auto workitem_x
-                    = graph.coordinates.addElement(Workitem(0, literal(thr_tile.wsizes.at(0))));
-                auto workitem_y
-                    = graph.coordinates.addElement(Workitem(1, literal(thr_tile.wsizes.at(1))));
+                auto workitemX
+                    = graph.coordinates.addElement(Workitem(0, literal(thrTile.wsizes.at(0))));
+                auto workitemY
+                    = graph.coordinates.addElement(Workitem(1, literal(thrTile.wsizes.at(1))));
 
-                auto element_number_x
-                    = graph.coordinates.addElement(ElementNumber(0, literal(thr_tile.sizes.at(0))));
-                auto element_number_y
-                    = graph.coordinates.addElement(ElementNumber(1, literal(thr_tile.sizes.at(1))));
+                auto elementNumberX
+                    = graph.coordinates.addElement(ElementNumber(0, literal(thrTile.sizes.at(0))));
+                auto elementNumberY
+                    = graph.coordinates.addElement(ElementNumber(1, literal(thrTile.sizes.at(1))));
 
-                graph.mapper.connect<ElementNumber>(store_tag, element_number_x, 0);
-                graph.mapper.connect<ElementNumber>(store_tag, element_number_y, 1);
+                graph.mapper.connect<ElementNumber>(storeTag, elementNumberX, 0);
+                graph.mapper.connect<ElementNumber>(storeTag, elementNumberY, 1);
 
-                graph.coordinates.addElement(Flatten(), {n_thr_x, i_thr_x}, {i_mac_x});
-                graph.coordinates.addElement(Flatten(), {n_thr_y, i_thr_y}, {i_mac_y});
+                graph.coordinates.addElement(Flatten(), {nThrX, iThrX}, {iMacX});
+                graph.coordinates.addElement(Flatten(), {nThrY, iThrY}, {iMacY});
 
-                graph.coordinates.addElement(PassThrough(), {workitem_x}, {n_thr_x});
-                graph.coordinates.addElement(PassThrough(), {workitem_y}, {n_thr_y});
+                graph.coordinates.addElement(PassThrough(), {workitemX}, {nThrX});
+                graph.coordinates.addElement(PassThrough(), {workitemY}, {nThrY});
 
-                graph.coordinates.addElement(PassThrough(), {element_number_x}, {i_thr_x});
-                graph.coordinates.addElement(PassThrough(), {element_number_y}, {i_thr_y});
+                graph.coordinates.addElement(PassThrough(), {elementNumberX}, {iThrX});
+                graph.coordinates.addElement(PassThrough(), {elementNumberY}, {iThrY});
             }
             break;
 
@@ -1023,12 +1019,12 @@ namespace rocRoller
                     = graph.coordinates.addElement(Workitem(0, literal(workgroupSizes.at(0))));
 
                 storeWaveMacroTile(graph,
-                                   mac_tile,
-                                   store_tag,
-                                   i_mac_x,
-                                   i_mac_y,
+                                   macTile,
+                                   storeTag,
+                                   iMacX,
+                                   iMacY,
                                    workitem,
-                                   user_tag,
+                                   userTag,
                                    wavefrontSize,
                                    wavetilesPerWorkgroup);
             }
@@ -1052,23 +1048,23 @@ namespace rocRoller
                         "Both operands should be LoadTiled");
 
             // LoadTiled A
-            auto userA_tag = graph.mapper.get<User>(loads[0]);
-            AssertFatal(userA_tag > 0, "User dimension not found");
-            graph.mapper.connect<User>(waveMult, userA_tag, 0);
+            auto userATag = graph.mapper.get<User>(loads[0]);
+            AssertFatal(userATag > 0, "User dimension not found");
+            graph.mapper.connect<User>(waveMult, userATag, 0);
 
             // LoadTiled B
-            auto userB_tag = graph.mapper.get<User>(loads[1]);
-            AssertFatal(userB_tag > 0, "User dimension not found");
-            graph.mapper.connect<User>(waveMult, userB_tag, 1);
+            auto userBTag = graph.mapper.get<User>(loads[1]);
+            AssertFatal(userBTag > 0, "User dimension not found");
+            graph.mapper.connect<User>(waveMult, userBTag, 1);
 
-            AssertFatal(userA_tag > 0 && userB_tag > 0, "User dimensions not found");
+            AssertFatal(userATag > 0 && userBTag > 0, "User dimensions not found");
 
-            auto [waveA_tag, waveA] = graph.getDimension<WaveTile>(loads[0]);
-            auto [waveB_tag, waveB] = graph.getDimension<WaveTile>(loads[1]);
+            auto [waveATag, waveA] = graph.getDimension<WaveTile>(loads[0]);
+            auto [waveBTag, waveB] = graph.getDimension<WaveTile>(loads[1]);
 
-            auto a = graph.coordinates.getOutputNodeIndices(userA_tag, CT::isEdge<DataFlow>)
+            auto a = graph.coordinates.getOutputNodeIndices(userATag, CT::isEdge<DataFlow>)
                          .to<std::vector>();
-            auto b = graph.coordinates.getOutputNodeIndices(userB_tag, CT::isEdge<DataFlow>)
+            auto b = graph.coordinates.getOutputNodeIndices(userBTag, CT::isEdge<DataFlow>)
                          .to<std::vector>();
             AssertFatal(a.size() == 1 && b.size() == 1, a.size(), b.size());
 
@@ -1077,9 +1073,9 @@ namespace rocRoller
             graph.mapper.connect(
                 waveMult, b[0], Connections::typeArgument<MacroTile>(NaryArgument::RHS));
             graph.mapper.connect(
-                waveMult, waveA_tag, Connections::typeArgument<WaveTile>(NaryArgument::LHS));
+                waveMult, waveATag, Connections::typeArgument<WaveTile>(NaryArgument::LHS));
             graph.mapper.connect(
-                waveMult, waveB_tag, Connections::typeArgument<WaveTile>(NaryArgument::RHS));
+                waveMult, waveBTag, Connections::typeArgument<WaveTile>(NaryArgument::RHS));
         }
 
         std::pair<Expression::ExpressionPtr, Expression::ExpressionPtr>

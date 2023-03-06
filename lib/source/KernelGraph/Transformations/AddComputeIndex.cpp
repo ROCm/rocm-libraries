@@ -155,66 +155,66 @@ namespace rocRoller::KernelGraph
     {
         AssertFatal(isOperation<LoadTiled>(graph.control.getElement(load)));
 
-        auto user   = graph.mapper.get<User>(load);
-        auto mac    = graph.mapper.get<MacroTileNumber>(load, sdim);
-        auto elem_x = graph.mapper.get<ElementNumber>(load, 0);
-        auto elem_y = graph.mapper.get<ElementNumber>(load, 1);
+        auto user  = graph.mapper.get<User>(load);
+        auto mac   = graph.mapper.get<MacroTileNumber>(load, sdim);
+        auto elemX = graph.mapper.get<ElementNumber>(load, 0);
+        auto elemY = graph.mapper.get<ElementNumber>(load, 1);
 
         auto dtype = graph.control.get<LoadTiled>(load)->vtype.dataType;
 
-        auto offset_mac = graph.coordinates.addElement(Offset(), {user}, {mac});
-        auto stride_mac = graph.coordinates.addElement(Stride(), {user}, {mac});
-        auto row_offset = graph.coordinates.addElement(Offset(), {user}, {elem_x});
-        auto row_stride = graph.coordinates.addElement(Stride(), {user}, {elem_x});
-        auto col_offset = graph.coordinates.addElement(Offset(), {user}, {elem_y});
-        auto col_stride = graph.coordinates.addElement(Stride(), {user}, {elem_y});
-        auto buffer     = getBuffer(graph, user, mac);
+        auto offsetMac = graph.coordinates.addElement(Offset(), {user}, {mac});
+        auto strideMac = graph.coordinates.addElement(Stride(), {user}, {mac});
+        auto rowOffset = graph.coordinates.addElement(Offset(), {user}, {elemX});
+        auto rowStride = graph.coordinates.addElement(Stride(), {user}, {elemX});
+        auto colOffset = graph.coordinates.addElement(Offset(), {user}, {elemY});
+        auto colStride = graph.coordinates.addElement(Stride(), {user}, {elemY});
+        auto buffer    = getBuffer(graph, user, mac);
 
         std::vector<DeferredConnection> connections;
-        connections.push_back(DC<Offset>(offset_mac, -1));
-        connections.push_back(DC<Offset>(row_offset, 0));
-        connections.push_back(DC<Offset>(col_offset, 1));
-        connections.push_back(DC<Stride>(stride_mac, -1));
-        connections.push_back(DC<Stride>(row_stride, 0));
-        connections.push_back(DC<Stride>(col_stride, 1));
+        connections.push_back(DC<Offset>(offsetMac, -1));
+        connections.push_back(DC<Offset>(rowOffset, 0));
+        connections.push_back(DC<Offset>(colOffset, 1));
+        connections.push_back(DC<Stride>(strideMac, -1));
+        connections.push_back(DC<Stride>(rowStride, 0));
+        connections.push_back(DC<Stride>(colStride, 1));
         connections.push_back(DC<Buffer>(buffer));
 
-        auto ci_mac = makeComputeIndex(
-            graph, user, mac, -1, offset_mac, stride_mac, buffer, false, dtype, {elem_x, elem_y});
-        auto ci_row = makeComputeIndex(graph,
-                                       user,
-                                       elem_x,
-                                       offset_mac,
-                                       row_offset,
-                                       row_stride,
-                                       buffer,
-                                       false,
-                                       dtype,
-                                       {mac, elem_y});
-        auto ci_col = makeComputeIndex(graph,
-                                       user,
-                                       elem_y,
-                                       row_offset,
-                                       col_offset,
-                                       col_stride,
-                                       buffer,
-                                       false,
-                                       dtype,
-                                       {mac, elem_x});
+        auto ciMac = makeComputeIndex(
+            graph, user, mac, -1, offsetMac, strideMac, buffer, false, dtype, {elemX, elemY});
+        auto ciRow = makeComputeIndex(graph,
+                                      user,
+                                      elemX,
+                                      offsetMac,
+                                      rowOffset,
+                                      rowStride,
+                                      buffer,
+                                      false,
+                                      dtype,
+                                      {mac, elemY});
+        auto ciCol = makeComputeIndex(graph,
+                                      user,
+                                      elemY,
+                                      rowOffset,
+                                      colOffset,
+                                      colStride,
+                                      buffer,
+                                      false,
+                                      dtype,
+                                      {mac, elemX});
 
-        graph.control.addElement(Sequence(), {ci_mac}, {ci_row});
-        graph.control.addElement(Sequence(), {ci_row}, {ci_col});
+        graph.control.addElement(Sequence(), {ciMac}, {ciRow});
+        graph.control.addElement(Sequence(), {ciRow}, {ciCol});
 
-        auto offset_mac_expr = std::make_shared<Expression::Expression>(
-            Expression::DataFlowTag{offset_mac, Register::Type::Vector, DataType::UInt64});
-        auto stride_mac_expr = std::make_shared<Expression::Expression>(
-            Expression::DataFlowTag{stride_mac, Register::Type::Scalar, DataType::UInt64});
+        auto offsetMacExpr = std::make_shared<Expression::Expression>(
+            Expression::DataFlowTag{offsetMac, Register::Type::Vector, DataType::UInt64});
+        auto strideMacExpr = std::make_shared<Expression::Expression>(
+            Expression::DataFlowTag{strideMac, Register::Type::Scalar, DataType::UInt64});
 
         auto offsetUpdate = graph.control.addElement(
-            Assign{Register::Type::Vector, offset_mac_expr + step * stride_mac_expr});
-        graph.mapper.connect(offsetUpdate, offset_mac, NaryArgument::DEST);
+            Assign{Register::Type::Vector, offsetMacExpr + step * strideMacExpr});
+        graph.mapper.connect(offsetUpdate, offsetMac, NaryArgument::DEST);
 
-        return {ci_mac, ci_col, connections, offsetUpdate};
+        return {ciMac, ciCol, connections, offsetUpdate};
     }
 
     /**
@@ -223,8 +223,8 @@ namespace rocRoller::KernelGraph
     ComputeIndexChain
         computeIndexElementMatrix(KernelGraph& graph, int loadstore, int source, bool forward)
     {
-        auto elem_x = graph.mapper.get<ElementNumber>(loadstore, 0);
-        auto elem_y = graph.mapper.get<ElementNumber>(loadstore, 1);
+        auto elemX = graph.mapper.get<ElementNumber>(loadstore, 0);
+        auto elemY = graph.mapper.get<ElementNumber>(loadstore, 1);
 
         DataType dtype, offsettype = DataType::UInt64;
         {
@@ -248,59 +248,59 @@ namespace rocRoller::KernelGraph
             }
         }
 
-        int row_offset, row_stride, col_offset, col_stride, buffer;
+        int rowOffset, rowStride, colOffset, colStride, buffer;
         if(forward)
         {
-            row_offset = graph.coordinates.addElement(Offset(), {elem_x}, {source});
-            row_stride = graph.coordinates.addElement(Stride(), {elem_x}, {source});
-            col_offset = graph.coordinates.addElement(Offset(), {elem_y}, {source});
-            col_stride = graph.coordinates.addElement(Stride(), {elem_y}, {source});
-            buffer     = getBuffer(graph, elem_x, source);
+            rowOffset = graph.coordinates.addElement(Offset(), {elemX}, {source});
+            rowStride = graph.coordinates.addElement(Stride(), {elemX}, {source});
+            colOffset = graph.coordinates.addElement(Offset(), {elemY}, {source});
+            colStride = graph.coordinates.addElement(Stride(), {elemY}, {source});
+            buffer    = getBuffer(graph, elemX, source);
         }
         else
         {
-            row_offset = graph.coordinates.addElement(Offset(), {source}, {elem_x});
-            row_stride = graph.coordinates.addElement(Stride(), {source}, {elem_x});
-            col_offset = graph.coordinates.addElement(Offset(), {source}, {elem_y});
-            col_stride = graph.coordinates.addElement(Stride(), {source}, {elem_y});
-            buffer     = getBuffer(graph, source, elem_x);
+            rowOffset = graph.coordinates.addElement(Offset(), {source}, {elemX});
+            rowStride = graph.coordinates.addElement(Stride(), {source}, {elemX});
+            colOffset = graph.coordinates.addElement(Offset(), {source}, {elemY});
+            colStride = graph.coordinates.addElement(Stride(), {source}, {elemY});
+            buffer    = getBuffer(graph, source, elemX);
         }
 
         std::vector<DeferredConnection> connections;
-        connections.push_back(DC<Offset>(row_offset, 0));
-        connections.push_back(DC<Offset>(col_offset, 1));
-        connections.push_back(DC<Stride>(row_stride, 0));
-        connections.push_back(DC<Stride>(col_stride, 1));
+        connections.push_back(DC<Offset>(rowOffset, 0));
+        connections.push_back(DC<Offset>(colOffset, 1));
+        connections.push_back(DC<Stride>(rowStride, 0));
+        connections.push_back(DC<Stride>(colStride, 1));
         connections.push_back(DC<Buffer>(buffer));
 
-        auto ci_row = makeComputeIndex(graph,
-                                       source,
-                                       elem_x,
-                                       -1,
-                                       row_offset,
-                                       row_stride,
-                                       buffer,
-                                       forward,
-                                       dtype,
-                                       {elem_y},
-                                       offsettype,
-                                       offsettype);
-        auto ci_col = makeComputeIndex(graph,
-                                       source,
-                                       elem_y,
-                                       row_offset,
-                                       col_offset,
-                                       col_stride,
-                                       buffer,
-                                       forward,
-                                       dtype,
-                                       {elem_x},
-                                       offsettype,
-                                       offsettype);
+        auto ciRow = makeComputeIndex(graph,
+                                      source,
+                                      elemX,
+                                      -1,
+                                      rowOffset,
+                                      rowStride,
+                                      buffer,
+                                      forward,
+                                      dtype,
+                                      {elemY},
+                                      offsettype,
+                                      offsettype);
+        auto ciCol = makeComputeIndex(graph,
+                                      source,
+                                      elemY,
+                                      rowOffset,
+                                      colOffset,
+                                      colStride,
+                                      buffer,
+                                      forward,
+                                      dtype,
+                                      {elemX},
+                                      offsettype,
+                                      offsettype);
 
-        graph.control.addElement(Sequence(), {ci_row}, {ci_col});
+        graph.control.addElement(Sequence(), {ciRow}, {ciCol});
 
-        return {ci_row, ci_col, connections};
+        return {ciRow, ciCol, connections};
     }
 
     /**
@@ -315,45 +315,45 @@ namespace rocRoller::KernelGraph
 
         auto dtype = graph.control.get<LoadLDSTile>(load)->vtype.dataType;
 
-        auto offset_wave = graph.coordinates.addElement(Offset(), {lds}, {wave});
-        auto stride_wave = graph.coordinates.addElement(Stride(), {lds}, {wave});
-        auto offset_vgpr = graph.coordinates.addElement(Offset(), {lds}, {vgpr});
-        auto stride_vgpr = graph.coordinates.addElement(Stride(), {lds}, {vgpr});
+        auto offsetWave = graph.coordinates.addElement(Offset(), {lds}, {wave});
+        auto strideWave = graph.coordinates.addElement(Stride(), {lds}, {wave});
+        auto offsetVgpr = graph.coordinates.addElement(Offset(), {lds}, {vgpr});
+        auto strideVgpr = graph.coordinates.addElement(Stride(), {lds}, {vgpr});
 
         std::vector<DeferredConnection> connections;
-        connections.push_back(DC<Offset>(offset_wave, 0));
-        connections.push_back(DC<Offset>(offset_vgpr, 1));
-        connections.push_back(DC<Stride>(stride_wave, 0));
-        connections.push_back(DC<Stride>(stride_vgpr, 1));
+        connections.push_back(DC<Offset>(offsetWave, 0));
+        connections.push_back(DC<Offset>(offsetVgpr, 1));
+        connections.push_back(DC<Stride>(strideWave, 0));
+        connections.push_back(DC<Stride>(strideVgpr, 1));
 
-        auto ci_wave = makeComputeIndex(graph,
-                                        lds,
-                                        wave,
-                                        -1,
-                                        offset_wave,
-                                        stride_wave,
-                                        -1,
-                                        false,
-                                        dtype,
-                                        {vgpr},
-                                        DataType::UInt32,
-                                        DataType::UInt32);
-        auto ci_vgpr = makeComputeIndex(graph,
-                                        lds,
-                                        vgpr,
-                                        offset_wave,
-                                        offset_vgpr,
-                                        stride_vgpr,
-                                        -1,
-                                        false,
-                                        dtype,
-                                        {wave},
-                                        DataType::UInt32,
-                                        DataType::UInt32);
+        auto ciWave = makeComputeIndex(graph,
+                                       lds,
+                                       wave,
+                                       -1,
+                                       offsetWave,
+                                       strideWave,
+                                       -1,
+                                       false,
+                                       dtype,
+                                       {vgpr},
+                                       DataType::UInt32,
+                                       DataType::UInt32);
+        auto ciVgpr = makeComputeIndex(graph,
+                                       lds,
+                                       vgpr,
+                                       offsetWave,
+                                       offsetVgpr,
+                                       strideVgpr,
+                                       -1,
+                                       false,
+                                       dtype,
+                                       {wave},
+                                       DataType::UInt32,
+                                       DataType::UInt32);
 
-        graph.control.addElement(Sequence(), {ci_wave}, {ci_vgpr});
+        graph.control.addElement(Sequence(), {ciWave}, {ciVgpr});
 
-        return {ci_wave, ci_vgpr, connections};
+        return {ciWave, ciVgpr, connections};
     }
 
     /**
@@ -369,59 +369,59 @@ namespace rocRoller::KernelGraph
 
         auto dtype = graph.control.get<LoadTiled>(load)->vtype.dataType;
 
-        auto offset_mac  = graph.coordinates.addElement(Offset(), {user}, {mac});
-        auto stride_mac  = graph.coordinates.addElement(Stride(), {user}, {mac});
-        auto offset_wave = graph.coordinates.addElement(Offset(), {user}, {wave});
-        auto stride_wave = graph.coordinates.addElement(Stride(), {user}, {wave});
-        auto offset_vgpr = graph.coordinates.addElement(Offset(), {user}, {vgpr});
-        auto stride_vgpr = graph.coordinates.addElement(Stride(), {user}, {vgpr});
-        auto buffer      = getBuffer(graph, user, mac);
+        auto offsetMac  = graph.coordinates.addElement(Offset(), {user}, {mac});
+        auto strideMac  = graph.coordinates.addElement(Stride(), {user}, {mac});
+        auto offsetWave = graph.coordinates.addElement(Offset(), {user}, {wave});
+        auto strideWave = graph.coordinates.addElement(Stride(), {user}, {wave});
+        auto offsetVgpr = graph.coordinates.addElement(Offset(), {user}, {vgpr});
+        auto strideVgpr = graph.coordinates.addElement(Stride(), {user}, {vgpr});
+        auto buffer     = getBuffer(graph, user, mac);
 
         std::vector<DeferredConnection> connections;
-        connections.push_back(DC<Offset>(offset_mac, -1));
-        connections.push_back(DC<Offset>(offset_wave, 0));
-        connections.push_back(DC<Offset>(offset_vgpr, 1));
-        connections.push_back(DC<Stride>(stride_mac, -1));
-        connections.push_back(DC<Stride>(stride_wave, 0));
-        connections.push_back(DC<Stride>(stride_vgpr, 1));
+        connections.push_back(DC<Offset>(offsetMac, -1));
+        connections.push_back(DC<Offset>(offsetWave, 0));
+        connections.push_back(DC<Offset>(offsetVgpr, 1));
+        connections.push_back(DC<Stride>(strideMac, -1));
+        connections.push_back(DC<Stride>(strideWave, 0));
+        connections.push_back(DC<Stride>(strideVgpr, 1));
         connections.push_back(DC<Buffer>(buffer));
 
-        auto ci_mac = makeComputeIndex(
-            graph, user, mac, -1, offset_mac, stride_mac, buffer, false, dtype, {wave, vgpr});
-        auto ci_wave = makeComputeIndex(graph,
-                                        user,
-                                        wave,
-                                        offset_mac,
-                                        offset_wave,
-                                        stride_wave,
-                                        buffer,
-                                        false,
-                                        dtype,
-                                        {mac, vgpr});
-        auto ci_vgpr = makeComputeIndex(graph,
-                                        user,
-                                        vgpr,
-                                        offset_wave,
-                                        offset_vgpr,
-                                        stride_vgpr,
-                                        buffer,
-                                        false,
-                                        dtype,
-                                        {mac, wave});
+        auto ciMac = makeComputeIndex(
+            graph, user, mac, -1, offsetMac, strideMac, buffer, false, dtype, {wave, vgpr});
+        auto ciWave = makeComputeIndex(graph,
+                                       user,
+                                       wave,
+                                       offsetMac,
+                                       offsetWave,
+                                       strideWave,
+                                       buffer,
+                                       false,
+                                       dtype,
+                                       {mac, vgpr});
+        auto ciVgpr = makeComputeIndex(graph,
+                                       user,
+                                       vgpr,
+                                       offsetWave,
+                                       offsetVgpr,
+                                       strideVgpr,
+                                       buffer,
+                                       false,
+                                       dtype,
+                                       {mac, wave});
 
-        graph.control.addElement(Sequence(), {ci_mac}, {ci_wave});
-        graph.control.addElement(Sequence(), {ci_wave}, {ci_vgpr});
+        graph.control.addElement(Sequence(), {ciMac}, {ciWave});
+        graph.control.addElement(Sequence(), {ciWave}, {ciVgpr});
 
-        auto offset_mac_expr = std::make_shared<Expression::Expression>(
-            Expression::DataFlowTag{offset_mac, Register::Type::Vector, DataType::UInt64});
-        auto stride_mac_expr = std::make_shared<Expression::Expression>(
-            Expression::DataFlowTag{stride_mac, Register::Type::Scalar, DataType::UInt64});
+        auto offsetMacExpr = std::make_shared<Expression::Expression>(
+            Expression::DataFlowTag{offsetMac, Register::Type::Vector, DataType::UInt64});
+        auto strideMacExpr = std::make_shared<Expression::Expression>(
+            Expression::DataFlowTag{strideMac, Register::Type::Scalar, DataType::UInt64});
 
         auto offsetUpdate = graph.control.addElement(
-            Assign{Register::Type::Vector, offset_mac_expr + step * stride_mac_expr});
-        graph.mapper.connect(offsetUpdate, offset_mac, NaryArgument::DEST);
+            Assign{Register::Type::Vector, offsetMacExpr + step * strideMacExpr});
+        graph.mapper.connect(offsetUpdate, offsetMac, NaryArgument::DEST);
 
-        return {ci_mac, ci_vgpr, connections, offsetUpdate};
+        return {ciMac, ciVgpr, connections, offsetUpdate};
     }
 
     /**
@@ -434,8 +434,8 @@ namespace rocRoller::KernelGraph
         auto [source, _d] = getOperationTarget(op, graph);
         AssertFatal(source > 0, "User or LDS dimension not found");
 
-        auto vgpr_block = graph.mapper.get<VGPRBlockNumber>(op);
-        auto vgpr_index = graph.mapper.get<VGPRBlockIndex>(op);
+        auto vgprBlock = graph.mapper.get<VGPRBlockNumber>(op);
+        auto vgprIndex = graph.mapper.get<VGPRBlockIndex>(op);
 
         DataType dtype, offsettype = DataType::UInt64;
         {
@@ -459,59 +459,59 @@ namespace rocRoller::KernelGraph
             }
         }
 
-        int offset_vgpr_block, stride_vgpr_block, offset_vgpr_index, stride_vgpr_index, buffer;
+        int offsetVgprBlock, strideVgprBlock, offsetVgprIndex, strideVgprIndex, buffer;
         if(forward)
         {
-            offset_vgpr_block = graph.coordinates.addElement(Offset(), {vgpr_block}, {source});
-            stride_vgpr_block = graph.coordinates.addElement(Stride(), {vgpr_block}, {source});
-            offset_vgpr_index = graph.coordinates.addElement(Offset(), {vgpr_index}, {source});
-            stride_vgpr_index = graph.coordinates.addElement(Stride(), {vgpr_index}, {source});
-            buffer            = getBuffer(graph, vgpr_index, source);
+            offsetVgprBlock = graph.coordinates.addElement(Offset(), {vgprBlock}, {source});
+            strideVgprBlock = graph.coordinates.addElement(Stride(), {vgprBlock}, {source});
+            offsetVgprIndex = graph.coordinates.addElement(Offset(), {vgprIndex}, {source});
+            strideVgprIndex = graph.coordinates.addElement(Stride(), {vgprIndex}, {source});
+            buffer          = getBuffer(graph, vgprIndex, source);
         }
         else
         {
-            offset_vgpr_block = graph.coordinates.addElement(Offset(), {source}, {vgpr_block});
-            stride_vgpr_block = graph.coordinates.addElement(Stride(), {source}, {vgpr_block});
-            offset_vgpr_index = graph.coordinates.addElement(Offset(), {source}, {vgpr_index});
-            stride_vgpr_index = graph.coordinates.addElement(Stride(), {source}, {vgpr_index});
-            buffer            = getBuffer(graph, source, vgpr_index);
+            offsetVgprBlock = graph.coordinates.addElement(Offset(), {source}, {vgprBlock});
+            strideVgprBlock = graph.coordinates.addElement(Stride(), {source}, {vgprBlock});
+            offsetVgprIndex = graph.coordinates.addElement(Offset(), {source}, {vgprIndex});
+            strideVgprIndex = graph.coordinates.addElement(Stride(), {source}, {vgprIndex});
+            buffer          = getBuffer(graph, source, vgprIndex);
         }
 
         std::vector<DeferredConnection> connections;
-        connections.push_back(DC<Offset>(offset_vgpr_block, 0));
-        connections.push_back(DC<Offset>(offset_vgpr_index, 1));
-        connections.push_back(DC<Stride>(stride_vgpr_block, 0));
-        connections.push_back(DC<Stride>(stride_vgpr_index, 1));
+        connections.push_back(DC<Offset>(offsetVgprBlock, 0));
+        connections.push_back(DC<Offset>(offsetVgprIndex, 1));
+        connections.push_back(DC<Stride>(strideVgprBlock, 0));
+        connections.push_back(DC<Stride>(strideVgprIndex, 1));
         connections.push_back(DC<Buffer>(buffer));
 
-        auto ci_vgpr_block = makeComputeIndex(graph,
-                                              source,
-                                              vgpr_block,
-                                              -1,
-                                              offset_vgpr_block,
-                                              stride_vgpr_block,
-                                              buffer,
-                                              forward,
-                                              dtype,
-                                              {vgpr_index},
-                                              offsettype,
-                                              offsettype);
-        auto ci_vgpr_index = makeComputeIndex(graph,
-                                              source,
-                                              vgpr_index,
-                                              offset_vgpr_block,
-                                              offset_vgpr_index,
-                                              stride_vgpr_index,
-                                              buffer,
-                                              forward,
-                                              dtype,
-                                              {vgpr_block},
-                                              offsettype,
-                                              offsettype);
+        auto ciVgprBlock = makeComputeIndex(graph,
+                                            source,
+                                            vgprBlock,
+                                            -1,
+                                            offsetVgprBlock,
+                                            strideVgprBlock,
+                                            buffer,
+                                            forward,
+                                            dtype,
+                                            {vgprIndex},
+                                            offsettype,
+                                            offsettype);
+        auto ciVgprIndex = makeComputeIndex(graph,
+                                            source,
+                                            vgprIndex,
+                                            offsetVgprBlock,
+                                            offsetVgprIndex,
+                                            strideVgprIndex,
+                                            buffer,
+                                            forward,
+                                            dtype,
+                                            {vgprBlock},
+                                            offsettype,
+                                            offsettype);
 
-        graph.control.addElement(Sequence(), {ci_vgpr_block}, {ci_vgpr_index});
+        graph.control.addElement(Sequence(), {ciVgprBlock}, {ciVgprIndex});
 
-        return {ci_vgpr_block, ci_vgpr_index, connections};
+        return {ciVgprBlock, ciVgprIndex, connections};
     }
 
     bool needsComputeIndex(Operation const& op)
@@ -649,7 +649,7 @@ namespace rocRoller::KernelGraph
         auto storeLDS = kgraph.control.get<StoreLDSTile>(tag);
         if(store || storeLDS)
         {
-            auto [tile_tag, tile] = kgraph.getDimension<MacroTile>(tag);
+            auto [tileTag, tile] = kgraph.getDimension<MacroTile>(tag);
             if(tile.memoryType == MemoryType::VGPR || tile.memoryType == MemoryType::LDS)
             {
                 return STORE_ELEM;
@@ -664,7 +664,7 @@ namespace rocRoller::KernelGraph
         auto load = kgraph.control.get<LoadTiled>(tag);
         if(load)
         {
-            auto [tile_tag, tile] = kgraph.getDimension<MacroTile>(tag);
+            auto [tileTag, tile] = kgraph.getDimension<MacroTile>(tag);
             if(tile.memoryType == MemoryType::VGPR && tile.layoutType == LayoutType::MATRIX_A)
             {
                 return LOAD_ELEM_MATRIX_A;
@@ -694,7 +694,7 @@ namespace rocRoller::KernelGraph
         auto loadLDS = kgraph.control.get<LoadLDSTile>(tag);
         if(loadLDS)
         {
-            auto [tile_tag, tile] = kgraph.getDimension<MacroTile>(tag);
+            auto [tileTag, tile] = kgraph.getDimension<MacroTile>(tag);
             if(tile.memoryType == MemoryType::VGPR || tile.memoryType == MemoryType::LDS)
             {
                 return LOAD_ELEM;
@@ -843,7 +843,7 @@ namespace rocRoller::KernelGraph
 
             // TODO: Handle ACCUMULATOR inside loops properly
             {
-                auto [tile_tag, tile] = kgraph.getDimension<MacroTile>(candidate);
+                auto [tileTag, tile] = kgraph.getDimension<MacroTile>(candidate);
                 if(hasForLoop && tile.layoutType == LayoutType::MATRIX_ACCUMULATOR)
                 {
                     log->debug("KernelGraph::addComputeIndex({}): immediate", candidate);
