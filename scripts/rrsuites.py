@@ -138,6 +138,41 @@ def hgemm():
         **fp16,
     )
 
+    for sched in ["Priority", "Cooperative", "Sequential"]:
+        yield GEMMRun(
+            M=3840,
+            N=4224,
+            K=4224,
+            mac_m=128,
+            mac_n=128,
+            mac_k=32,
+            storeLDS_D=True,
+            workgroup_size_x=128,
+            workgroup_size_y=2,
+            trans_A="N",
+            trans_B="T",
+            visualize=False,
+            scheduler=sched,
+            **fp16,
+        )
+
+        yield GEMMRun(
+            M=1024,
+            N=50304,
+            K=8192,
+            mac_m=128,
+            mac_n=128,
+            mac_k=32,
+            workgroup_size_x=128,
+            workgroup_size_y=2,
+            storeLDS_D=True,
+            trans_A="N",
+            trans_B="T",
+            visualize=False,
+            scheduler=sched,
+            **fp16,
+        )
+
     yield GEMMRun(
         M=7680,
         N=8448,
