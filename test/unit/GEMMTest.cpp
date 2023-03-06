@@ -138,15 +138,15 @@ namespace GEMMDriverTest
         auto command  = std::make_shared<Command>();
         auto dataType = TypeInfo<T>::Var.dataType;
 
-        std::vector<size_t> oneSrides
+        std::vector<size_t> oneStrides
             = gemm.literalStrides ? std::vector<size_t>({(size_t)1}) : std::vector<size_t>({});
 
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(dataType, 2, 0, oneSrides))); // A
+            rocRoller::Operations::T_Load_Tiled(dataType, 2, 0, oneStrides))); // A
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(dataType, 2, 1, oneSrides))); // B
+            rocRoller::Operations::T_Load_Tiled(dataType, 2, 1, oneStrides))); // B
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(dataType, 2, 2, oneSrides))); // C
+            rocRoller::Operations::T_Load_Tiled(dataType, 2, 2, oneStrides))); // C
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
             rocRoller::Operations::T_Load_Scalar(DataType::Float, 3))); // alpha
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
