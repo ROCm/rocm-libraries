@@ -39,6 +39,7 @@ def extract_log_dots(path: pathlib.Path):
 def write_dot(dot: str, fname: pathlib.Path):
     out_fname = fname.with_suffix(".dot")
     out_fname.write_text(dot)
+    print(f"Wrote {out_fname}")
     return out_fname
 
 
@@ -46,6 +47,7 @@ def render_dot(fname: pathlib.Path, dot: str):
     """Render graph."""
     with fname.open("w") as out:
         subprocess.run(["dot", "-Tpdf"], input=dot.encode(), stdout=out)
+    print(f"Wrote {fname}")
 
 
 def open_dot(fname):

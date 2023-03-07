@@ -79,7 +79,7 @@ namespace rocRoller
     {
         TIMER(t, "CommandKernel::getKernelArguments");
 
-        bool            log = m_context->kernelOptions().logLevel >= LogLevel::Debug;
+        bool            log = Log::getLogger()->should_log(spdlog::level::debug);
         KernelArguments rv(log);
 
         auto const& argStructs = m_context->kernel()->arguments();

@@ -120,7 +120,8 @@ def run(
     output_dir = top / f"doc_{date}"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    with open(output_dir / f"comparison_{date}.html", "w+") as f:
+    output_file = output_dir / f"comparison_{date}.html"
+    with open(output_file, "w+") as f:
         compare.compare(
             results,
             format="html",
@@ -132,6 +133,7 @@ def run(
             plot_box=not exclude_boxplot,
             x_value=x_value,
         )
+    print(f"Wrote {output_file}")
 
     if not success:
         raise RuntimeError("Some jobs failed.")

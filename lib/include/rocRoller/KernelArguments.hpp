@@ -58,6 +58,8 @@ namespace rocRoller
         std::vector<uint8_t> const& dataVector() const;
         RuntimeArguments            runtimeArguments() const;
 
+        std::string toString() const;
+
         friend std::ostream& operator<<(std::ostream& stream, const KernelArguments& t);
         friend class const_iterator;
 
@@ -129,6 +131,8 @@ namespace rocRoller
 
         bool m_log;
     };
+
+    std::ostream& operator<<(std::ostream& stream, const KernelArguments& t);
 
 } // namespace rocRoller
 

@@ -129,6 +129,33 @@ struct rocRoller::Serialization::
     }
 };
 
+std::string gemmKernelName(GEMMResult const& result, std::shared_ptr<KernelOptions> const& options)
+{
+    std::ostringstream rv;
+    rv << "GEMM_" << result.trans_A << result.trans_B;
+
+    rv << "_";
+    for(auto const& t :
+        {result.type_A, result.type_B, result.type_C, result.type_D, result.type_acc})
+        rv << t.substr(0, 1);
+
+    rv << "_MT";
+    streamJoin(rv, std::vector{result.mac_m, result.mac_n, result.mac_k}, "x");
+
+    rv << "_WG";
+    streamJoin(rv, std::vector{result.workgroup_size_x, result.workgroup_size_y}, "x");
+
+    rv << "_LDS";
+    streamJoin(rv, std::vector{result.loadLDS_A, result.loadLDS_B, result.storeLDS_D}, "");
+
+    rv << "_UNROLL";
+    streamJoin(rv, std::vector{result.unroll_x, result.unroll_y}, "x");
+
+    rv << "_" << result.scheduler;
+
+    return rv.str();
+}
+
 // D (MxN) = alpha * A (MxK) X B (KxN) + beta * C (MxN)
 template <typename A, typename B, typename C, typename D>
 GEMMResult GEMM(GEMMProblem prob, bool checkResult, bool doVisualize)
@@ -169,9 +196,15 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult, bool doVisualize)
     uint wavetile_per_wavefront_n = result.mac_n / wave_n / result.workgroup_size_y;
 
     AssertFatal(result.mac_m % (wave_m * wavetile_per_wavefront_m) == 0,
-                "WaveTile size mismatch (M)");
+                "WaveTile size mismatch (M)",
+                ShowValue(result.mac_m),
+                ShowValue(wave_m),
+                ShowValue(wavetile_per_wavefront_m));
     AssertFatal(result.mac_n % (wave_n * wavetile_per_wavefront_n) == 0,
-                "WaveTile size mismatch (N)");
+                "WaveTile size mismatch (N)",
+                ShowValue(result.mac_n),
+                ShowValue(wave_n),
+                ShowValue(wavetile_per_wavefront_n));
 
     uint workgroup_size_x = result.workgroup_size_x * result.workgroup_size_y;
     uint workgroup_size_y = 1;
@@ -250,7 +283,8 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult, bool doVisualize)
     command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
         rocRoller::Operations::T_Store_Tiled(TypeInfo<D>::Var.dataType, 2, 8))); // D
 
-    KernelArguments runtimeArgs;
+    bool            logArgs = Log::getLogger()->should_log(spdlog::level::debug);
+    KernelArguments runtimeArgs(logArgs);
 
     runtimeArgs.append("A", d_A.get());
     runtimeArgs.append("d_a_limit", (size_t)result.M * result.K);
@@ -303,6 +337,9 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult, bool doVisualize)
     runtimeArgs.append("d_d_limit", (size_t)result.M * result.N);
     runtimeArgs.append("d_d_stride_0", (size_t)1);
     runtimeArgs.append("d_d_stride_1", (size_t)result.M);
+
+    if(logArgs)
+        Log::getLogger()->debug(runtimeArgs.toString());
 
     auto params = std::make_shared<CommandParameters>();
     params->setManualKernelDimension(2);
@@ -369,6 +406,8 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult, bool doVisualize)
     kernelOptions->unrollX = result.unroll_x;
     kernelOptions->unrollY = result.unroll_y;
 
+    auto kernelName = gemmKernelName(result, kernelOptions);
+
     if(result.match_memory_access)
     {
         kernelOptions->transposeMemoryAccess[LayoutType::MATRIX_A] = result.trans_A == "T";
@@ -376,7 +415,7 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult, bool doVisualize)
     }
 
     // Build GEMM kernel
-    CommandKernel commandKernel(command, "GEMM", params, postParams, kernelOptions);
+    CommandKernel commandKernel(command, kernelName, params, postParams, kernelOptions);
 
     if(doVisualize)
         Client::visualize(command, commandKernel, runtimeArgs);

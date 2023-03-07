@@ -757,7 +757,7 @@ namespace rocRoller::KernelGraph
 
     /**
      * @brief Add ComputeIndex operations.
-     * 
+     *
      * Adding ComputeIndex operations to the control graph is done in
      * two phases: staging and committing.
      *

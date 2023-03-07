@@ -178,23 +178,22 @@ def summary_statistics(perf_runs):
     return stats
 
 
-header = [
-    "Problem",
-    "Median Diff %",
-    "Moods p-val",
-    "Mean A",
-    "Mean B",
-    "Median A",
-    "Median B",
-    "Run A (ref)",
-    "Run B",
-]
-
-
 def markdown_summary(md, perf_runs):
     """Create Markdown report of summary statistics."""
 
     summary = summary_statistics(perf_runs)
+
+    header = [
+        "Problem",
+        "Median Diff %",
+        "Moods p-val",
+        "Mean A",
+        "Mean B",
+        "Median A",
+        "Median B",
+        "Run A (ref)",
+        "Run B",
+    ]
 
     result_table = ""
     result_diff = ""
@@ -265,6 +264,17 @@ def html_overview_table(html_file, summary):
 
     print("<table><tr><td>", file=html_file)
 
+    header = ["Problem",
+              "Mean A",
+              "Mean B",
+              "Median A",
+              "Median B",
+              "Median Diff %",
+              "Moods p-val",
+              "Run A (ref)",
+              "Run B",
+              ]
+
     print("</td><td> ".join(header), file=html_file)
     print("</td></tr>", file=html_file)
 
@@ -272,18 +282,21 @@ def html_overview_table(html_file, summary):
         for i, result in enumerate(summary[run]):
             token, comparison = summary[run][result]
             A, B = comparison.results
+            relative_diff = ((comparison.median[1] - comparison.median[0])
+                             / comparison.median[0])
             print(
-                f"""<tr>
-                <td><a href="#plot{i}"> {token} </a></td>
-                <td> {A.path.parent.stem} </td>
-                <td> {B.path.parent.stem}</td>
-                <td> {comparison.mean[0]} </td>
-                <td> {comparison.mean[1]} </td>
-                <td> {comparison.median[0]} </td>
-                <td>{comparison.median[1]} </td>
-                <td>{(((comparison.median[1] - comparison.median[0]) * 100.0)/comparison.median[0]):.2f}% </td>
-                <td> {comparison.moods_pval:0.4e}</td>
-                <tr>""",
+                f"""
+                <tr>
+                    <td><a href="#plot{i}"> {token} </a></td>
+                    <td> {comparison.mean[0]:,} </td>
+                    <td> {comparison.mean[1]:,} </td>
+                    <td> {comparison.median[0]:,} </td>
+                    <td> {comparison.median[1]:,} </td>
+                    <td> {relative_diff:.2%} </td>
+                    <td> {comparison.moods_pval:0.4e} </td>
+                    <td> {A.path.parent.stem} </td>
+                    <td> {B.path.parent.stem} </td>
+                </tr>""",
                 file=html_file,
             )
 

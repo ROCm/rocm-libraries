@@ -31,7 +31,7 @@
 #include "rocRoller/Utilities/Settings.hpp"
 
 #include <spdlog/cfg/helpers.h>
-#include <spdlog/sinks/rotating_file_sink.h>
+#include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 
 namespace rocRoller
@@ -46,15 +46,14 @@ namespace rocRoller
 
             if(settings->get(Settings::LogConsole))
             {
-                auto consoleSink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+                auto consoleSink = std::make_shared<spdlog::sinks::stdout_color_sink_st>();
                 sinks.push_back(consoleSink);
             }
 
             std::string logFile = settings->get(Settings::LogFile);
             if(!logFile.empty())
             {
-                auto fileSink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
-                    logFile, 5 * 1024 * 1024, 5);
+                auto fileSink = std::make_shared<spdlog::sinks::basic_file_sink_st>(logFile, true);
                 sinks.push_back(fileSink);
             }
 
@@ -75,7 +74,7 @@ namespace rocRoller
 
         std::shared_ptr<spdlog::logger> getLogger()
         {
-            bool doneInit = initLogger();
+            static bool doneInit = initLogger();
             AssertFatal(doneInit, "Logger failed to initialize");
 
             auto defaultLog = spdlog::get("rocRollerLog");

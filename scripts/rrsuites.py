@@ -263,6 +263,7 @@ def visualizer():
         workgroup_size_y=1,
         trans_A="N",
         trans_B="T",
+        visualize=True,
         **fp16,
     )
 

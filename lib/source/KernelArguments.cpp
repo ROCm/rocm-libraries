@@ -245,4 +245,11 @@ namespace rocRoller
         return const_iterator(*this, "");
     }
 
+    std::string KernelArguments::toString() const
+    {
+        std::ostringstream msg;
+        msg << *this;
+        return msg.str();
+    }
+
 } // namespace Tensile

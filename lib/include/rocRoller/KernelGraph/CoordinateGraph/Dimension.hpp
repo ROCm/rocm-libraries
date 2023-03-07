@@ -355,6 +355,13 @@ namespace rocRoller
             std::vector<int> sizes;
 
             /**
+             * Size of thread tiles.
+             *
+             * Sizes of -1 represent a "to be determined size".
+             */
+            std::vector<int> subTileSizes;
+
+            /**
              * Construct MacroTile dimension with deferred rank etc.
              */
             MacroTile()
@@ -449,13 +456,6 @@ namespace rocRoller
              * Return total number of elements.
              */
             int elements() const;
-
-            /**
-             * Size of thread tiles.
-             *
-             * Sizes of -1 represent a "to be determined size".
-             */
-            std::vector<int> subTileSizes;
         };
 
         /**
