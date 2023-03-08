@@ -4,6 +4,7 @@
 #include <algorithm>
 
 #include "include/GraphInspector.hpp"
+#include "include/visualize.hpp"
 
 namespace rocRoller
 {
@@ -184,13 +185,21 @@ namespace rocRoller
         void writeLDSByWorkitem(std::ostream&      vfile,
                                 GraphInspector&    gi,
                                 int                ldsDim,
-                                size_t             size0,
-                                size_t             size1,
                                 std::string const& matName)
         {
+            AssertFatal(matName == "A" || matName == "B");
+
             using namespace KernelGraph::CoordinateGraph;
             auto invocation = gi.kernelInvocation();
             auto coords     = gi.coords();
+
+            auto [macM, macN, macK] = gi.getMacroTileSizes();
+            auto size1              = macK;
+            auto size0              = macM;
+            if(matName == "B")
+            {
+                size0 = macN;
+            }
 
             auto fixedElements = findElementNumberNodes(coords, ldsDim, Graph::Direction::Upstream);
             size_t totalElements = 1;
@@ -331,16 +340,22 @@ namespace rocRoller
                              GraphInspector&    gi,
                              int                loadDim,
                              int                hipWorkgroupIndex,
-                             int                tileSizeK,
                              std::string const& argPrefix,
                              std::string const& matName)
         {
+            AssertFatal(matName == "A" || matName == "B");
+
+            auto invocation = gi.kernelInvocation();
+
+            auto [macM, macN, macK] = gi.getMacroTileSizes();
+            auto tileSizeK          = macK;
             AssertFatal(tileSizeK > 0, ShowValue(tileSizeK));
 
-            auto invocation     = gi.kernelInvocation();
             auto workgroupCount = invocation.workitemCount;
             for(int i = 0; i < 3; i++)
+            {
                 workgroupCount[i] = invocation.workitemCount[i] / invocation.workgroupSize[i];
+            }
             vfile << "Workgroups: " << workgroupCount[0] << "x" << workgroupCount[1] << "x"
                   << workgroupCount[2] << std::endl;
 
@@ -367,7 +382,9 @@ namespace rocRoller
             // dimension that is associated with this matrix.
             // Set all of them to 0 beforehand.
             for(int i = 0; i < 3; i++)
+            {
                 gi.setCoordinate(workgroupIndices[i], 0);
+            }
 
             auto forLoopIndices
                 = gi.coords()
@@ -415,12 +432,16 @@ namespace rocRoller
         {
             return [coords, size](int idx) -> bool {
                 if(coords->getElementType(idx) != Graph::ElementType::Node)
+                {
                     return false;
+                }
 
                 auto const& node
                     = std::get<KernelGraph::CoordinateGraph::Dimension>(coords->getElement(idx));
                 if(!std::holds_alternative<KernelGraph::CoordinateGraph::ElementNumber>(node))
+                {
                     return false;
+                }
 
                 auto const& tt = std::get<KernelGraph::CoordinateGraph::ElementNumber>(node);
 
@@ -429,14 +450,14 @@ namespace rocRoller
         }
 
         void visualize(std::shared_ptr<Command> command,
-                       CommandKernel&           kc,
+                       CommandKernel&           commandKernel,
                        KernelArguments const&   commandArgs)
         {
             auto filename = Settings::getInstance()->get(Settings::LogFile) + "gemm.vis";
             std::cout << "Visualizing to " << filename << std::endl;
             std::ofstream vfile(filename);
 
-            GraphInspector gi(command, kc, commandArgs);
+            GraphInspector gi(command, commandKernel, commandArgs);
             gi.inventExecutionCoordinates();
 
             auto coords = gi.coords();
@@ -452,28 +473,30 @@ namespace rocRoller
             writeMacrotileByWorkitem(vfile, gi, loadA, "Load_Tiled_0", "A");
             writeMacrotileByWorkitem(vfile, gi, loadB, "Load_Tiled_1", "B");
 
-            writeLDSByWorkitem(vfile, gi, ldsA, 128, 16, "A");
-            writeLDSByWorkitem(vfile, gi, ldsB, 256, 16, "B");
+            writeLDSByWorkitem(vfile, gi, ldsA, "A");
+            writeLDSByWorkitem(vfile, gi, ldsB, "B");
 
             writeKIterByWorkitem(vfile, gi, loadA, 0, "Load_Tiled_0", "A");
             writeKIterByWorkitem(vfile, gi, loadB, 1, "Load_Tiled_1", "B");
 
-            // NOTE: The last argument here needs to be changed to match the MacroTile K dimension.
-            // It's currently set for the Guidepost value of 16.
-            writeMatByKIter(vfile, gi, loadA, 0, 16, "Load_Tiled_0", "A");
-            writeMatByKIter(vfile, gi, loadB, 1, 16, "Load_Tiled_1", "B");
+            writeMatByKIter(vfile, gi, loadA, 0, "Load_Tiled_0", "A");
+            writeMatByKIter(vfile, gi, loadB, 1, "Load_Tiled_1", "B");
 
             auto cElemNodes = findElementNumberNodes(coords, loadC, Graph::Direction::Downstream);
             auto dElemNodes = findElementNumberNodes(coords, storeD, Graph::Direction::Upstream);
 
             vfile << "C Element Numbers:";
             for(auto const& tup : cElemNodes)
+            {
                 vfile << " {" << std::get<0>(tup) << ", " << std::get<1>(tup) << "}";
+            }
             vfile << std::endl;
 
             vfile << "D Element Numbers:";
             for(auto const& tup : dElemNodes)
+            {
                 vfile << " {" << std::get<0>(tup) << ", " << std::get<1>(tup) << "}";
+            }
             vfile << std::endl;
         }
 

@@ -418,7 +418,9 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult, bool doVisualize)
     CommandKernel commandKernel(command, kernelName, params, postParams, kernelOptions);
 
     if(doVisualize)
+    {
         Client::visualize(command, commandKernel, runtimeArgs);
+    }
 
     // Warmup runs
     for(int i = 0; i < result.numWarmUp; ++i)

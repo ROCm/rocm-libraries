@@ -85,6 +85,13 @@ namespace rocRoller
             size_t getStoreIndex(int coord);
 
             /**
+             * @brief Get the MacroTileSizes
+             *
+             * @return std::tuple<int, int, int> {M, N, K}
+             */
+            std::tuple<int, int, int> getMacroTileSizes() const;
+
+            /**
              * Get launch bounds for the given arguments.
              */
             KernelInvocation const& kernelInvocation() const;

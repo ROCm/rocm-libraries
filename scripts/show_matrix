@@ -3,10 +3,8 @@
 """
 Render a matrix stored in a msgpack file as an image.
 """
-
 import argparse
 import os
-import sys
 
 from lib import matrix_utils
 

@@ -359,5 +359,4 @@ namespace rocRoller
     {
         return m_context;
     }
-
 }

@@ -108,5 +108,43 @@ namespace rocRoller
             return std::visit(to_size_t, val);
         }
 
+        std::tuple<int, int, int> GraphInspector::getMacroTileSizes() const
+        {
+            int macM = -1;
+            int macN = -1;
+            int macK = -1;
+
+            for(auto const& macroTileTag :
+                m_kernel.getKernelGraph()
+                    .coordinates.getNodes<KernelGraph::CoordinateGraph::MacroTile>()
+                    .to<std::vector>())
+            {
+                auto macroTile = m_kernel.getKernelGraph()
+                                     .coordinates.getNode<KernelGraph::CoordinateGraph::MacroTile>(
+                                         macroTileTag);
+                if(macroTile.layoutType == LayoutType::MATRIX_A)
+                {
+                    macM = macroTile.sizes[0];
+                    AssertFatal(macK == macroTile.sizes[1] || macK == -1);
+                    macK = macroTile.sizes[1];
+                }
+                else if(macroTile.layoutType == LayoutType::MATRIX_B)
+                {
+                    macN = macroTile.sizes[1];
+                    AssertFatal(macK == macroTile.sizes[0] || macK == -1);
+                    macK = macroTile.sizes[0];
+                }
+                if(macM > 0 && macK > 0 && macN > 0)
+                {
+                    break;
+                }
+            }
+            AssertFatal(macM > 0);
+            AssertFatal(macN > 0);
+            AssertFatal(macK > 0);
+
+            return std::tuple<int, int, int>{macM, macN, macK};
+        }
+
     }
 }
