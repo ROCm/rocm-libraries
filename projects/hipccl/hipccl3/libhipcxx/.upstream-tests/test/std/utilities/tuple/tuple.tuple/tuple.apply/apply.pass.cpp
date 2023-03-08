@@ -23,7 +23,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-// UNSUPPORTED: hipcc
 // UNSUPPORTED: c++98, c++03, c++11, c++14
 // UNSUPPORTED: nvrtc
 // UNSUPPORTED: gcc-6
@@ -271,7 +270,7 @@ __host__ __device__ void test_noexcept()
 
 namespace ReturnTypeTest
 {
-#ifdef __CUDA_ARCH__
+#ifdef __CUDA_ARCH__ || defined(__HIP_DEVICE_COMPILE__)
 __constant__ int my_int = 42;
 #else
 static int my_int = 42;

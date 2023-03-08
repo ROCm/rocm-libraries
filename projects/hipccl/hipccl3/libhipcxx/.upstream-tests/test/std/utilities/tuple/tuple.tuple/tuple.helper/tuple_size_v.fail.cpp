@@ -23,7 +23,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-// UNSUPPORTED: hipcc
 // UNSUPPORTED: c++98, c++03, c++11, c++14
 
 // <cuda/std/tuple>
@@ -36,10 +35,10 @@
 
 int main(int, char**)
 {
-  (void) cuda::std::tuple_size_v<cuda::std::tuple<>&>; // expected-note {{requested here}}
-  (void) cuda::std::tuple_size_v<int>; // expected-note {{requested here}}
-  (void) cuda::std::tuple_size_v<cuda::std::tuple<>*>; // expected-note {{requested here}}
-  // expected-error@tuple:* 3 {{implicit instantiation of undefined template}}
+  (void) cuda::std::tuple_size_v<cuda::std::tuple<>&>; // nvcc-lit-note {{requested here}}
+  (void) cuda::std::tuple_size_v<int>; // nvcc-lit-note {{requested here}}
+  (void) cuda::std::tuple_size_v<cuda::std::tuple<>*>; // nvcc-lit-note {{requested here}}
+  // nvcc-lit-error@tuple:* 3 {{implicit instantiation of undefined template}}
 
   return 0;
 }

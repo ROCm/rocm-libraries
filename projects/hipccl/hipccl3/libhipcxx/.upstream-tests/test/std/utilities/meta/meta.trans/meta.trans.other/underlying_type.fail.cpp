@@ -24,7 +24,6 @@
 // THE SOFTWARE.
 
 // UNSUPPORTED: c++98, c++03, c++11, C++14, c++17
-// UNSUPPORTED: hipcc
 // type_traits
 
 // underlying_type
@@ -40,7 +39,7 @@ enum E1
   E1Zero,
   E1One,
   E1Two = sizeof(cuda::std::underlying_type<E1>::type)
-}; // expected-error@type_traits:* {{cannot determine underlying type of incomplete enumeration type 'E1'}}
+}; // nvcc-lit-error@type_traits:* {{cannot determine underlying type of incomplete enumeration type 'E1'}}
 
 //  None of these are incomplete.
 //  Scoped enums have an underlying type of 'int' unless otherwise specified
@@ -54,13 +53,13 @@ enum E1
 // These error messages will have to change if clang ever gets fixed. But at least they're being rejected.
 enum E7 : cuda::std::underlying_type_t<E7>
 {
-}; // expected-error {{use of undeclared identifier 'E7'}}
+}; // nvcc-lit-error {{use of undeclared identifier 'E7'}}
 enum class E8 : cuda::std::underlying_type_t<E8>
 {
-}; // expected-error {{use of undeclared identifier 'E8'}}
+}; // nvcc-lit-error {{use of undeclared identifier 'E8'}}
 enum struct E9 : cuda::std::underlying_type_t<E9>
 {
-}; // expected-error {{use of undeclared identifier 'E9'}}
+}; // nvcc-lit-error {{use of undeclared identifier 'E9'}}
 
 int main(int, char**)
 {

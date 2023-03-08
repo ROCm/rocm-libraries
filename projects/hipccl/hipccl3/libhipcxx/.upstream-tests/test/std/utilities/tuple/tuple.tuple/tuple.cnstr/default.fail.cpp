@@ -23,7 +23,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-// UNSUPPORTED: hipcc
 // UNSUPPORTED: c++98, c++03
 
 // Before GCC 6, aggregate initialization kicks in.
@@ -60,7 +59,7 @@ __host__ __device__ cuda::std::tuple<Implicit> test2()
 __host__ __device__ cuda::std::tuple<Explicit> test3()
 {
   return {};
-} // expected-error 1 {{chosen constructor is explicit in copy-initialization}}
+} // nvcc-lit-error 1 {{chosen constructor is explicit in copy-initialization}}
 
 __host__ __device__ cuda::std::tuple<Implicit, Implicit> test4()
 {
@@ -69,15 +68,15 @@ __host__ __device__ cuda::std::tuple<Implicit, Implicit> test4()
 __host__ __device__ cuda::std::tuple<Explicit, Implicit> test5()
 {
   return {};
-} // expected-error 1 {{chosen constructor is explicit in copy-initialization}}
+} // nvcc-lit-error 1 {{chosen constructor is explicit in copy-initialization}}
 __host__ __device__ cuda::std::tuple<Implicit, Explicit> test6()
 {
   return {};
-} // expected-error 1 {{chosen constructor is explicit in copy-initialization}}
+} // nvcc-lit-error 1 {{chosen constructor is explicit in copy-initialization}}
 __host__ __device__ cuda::std::tuple<Explicit, Explicit> test7()
 {
   return {};
-} // expected-error 1 {{chosen constructor is explicit in copy-initialization}}
+} // nvcc-lit-error 1 {{chosen constructor is explicit in copy-initialization}}
 
 __host__ __device__ cuda::std::tuple<Implicit, Implicit, Implicit> test8()
 {
@@ -86,31 +85,31 @@ __host__ __device__ cuda::std::tuple<Implicit, Implicit, Implicit> test8()
 __host__ __device__ cuda::std::tuple<Implicit, Implicit, Explicit> test9()
 {
   return {};
-} // expected-error 1 {{chosen constructor is explicit in copy-initialization}}
+} // nvcc-lit-error 1 {{chosen constructor is explicit in copy-initialization}}
 __host__ __device__ cuda::std::tuple<Implicit, Explicit, Implicit> test10()
 {
   return {};
-} // expected-error 1 {{chosen constructor is explicit in copy-initialization}}
+} // nvcc-lit-error 1 {{chosen constructor is explicit in copy-initialization}}
 __host__ __device__ cuda::std::tuple<Implicit, Explicit, Explicit> test11()
 {
   return {};
-} // expected-error 1 {{chosen constructor is explicit in copy-initialization}}
+} // nvcc-lit-error 1 {{chosen constructor is explicit in copy-initialization}}
 __host__ __device__ cuda::std::tuple<Explicit, Implicit, Implicit> test12()
 {
   return {};
-} // expected-error 1 {{chosen constructor is explicit in copy-initialization}}
+} // nvcc-lit-error 1 {{chosen constructor is explicit in copy-initialization}}
 __host__ __device__ cuda::std::tuple<Explicit, Implicit, Explicit> test13()
 {
   return {};
-} // expected-error 1 {{chosen constructor is explicit in copy-initialization}}
+} // nvcc-lit-error 1 {{chosen constructor is explicit in copy-initialization}}
 __host__ __device__ cuda::std::tuple<Explicit, Explicit, Implicit> test14()
 {
   return {};
-} // expected-error 1 {{chosen constructor is explicit in copy-initialization}}
+} // nvcc-lit-error 1 {{chosen constructor is explicit in copy-initialization}}
 __host__ __device__ cuda::std::tuple<Explicit, Explicit, Explicit> test15()
 {
   return {};
-} // expected-error 1 {{chosen constructor is explicit in copy-initialization}}
+} // nvcc-lit-error 1 {{chosen constructor is explicit in copy-initialization}}
 
 int main(int, char**)
 {

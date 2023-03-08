@@ -24,7 +24,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-// UNSUPPORTED: hipcc
 // UNSUPPORTED: c++03, c++11
 
 // <span>
@@ -41,7 +40,7 @@
 
 int main(int, char**)
 {
-  cuda::std::span<int, 2> s; // expected-error {{no matching constructor for initialization of 'std::span<int, 2>'}}
+  cuda::std::span<int, 2> s; // nvcc-lit-error {{no matching constructor for initialization of 'std::span<int, 2>'}}
 
   return 0;
 }

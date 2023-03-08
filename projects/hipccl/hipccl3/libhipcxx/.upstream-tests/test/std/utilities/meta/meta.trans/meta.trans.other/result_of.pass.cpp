@@ -119,7 +119,7 @@ __host__ __device__ void test_no_result()
 #endif
 }
 
-#if defined(__NVCC__)
+#if defined(__NVCC__) || defined(__HIPCC__)
 template <class Ret, class Fn>
 __host__ __device__ void test_lambda(Fn&&)
 {

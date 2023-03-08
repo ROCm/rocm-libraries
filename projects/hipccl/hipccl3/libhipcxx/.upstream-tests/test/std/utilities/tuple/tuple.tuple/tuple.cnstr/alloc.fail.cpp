@@ -23,7 +23,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-// UNSUPPORTED: hipcc
 // UNSUPPORTED: c++98, c++03
 
 // <cuda/std/tuple>
@@ -45,7 +44,7 @@ struct ExplicitDefault
 
 __host__ __device__ std::tuple<ExplicitDefault> explicit_default_test()
 {
-  return {cuda::std::allocator_arg, cuda::std::allocator<int>()}; // expected-error {{chosen constructor is explicit in
+  return {cuda::std::allocator_arg, cuda::std::allocator<int>()}; // nvcc-lit-error {{chosen constructor is explicit in
                                                                   // copy-initialization}}
 }
 

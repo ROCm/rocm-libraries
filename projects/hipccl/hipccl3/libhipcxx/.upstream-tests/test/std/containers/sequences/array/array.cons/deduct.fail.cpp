@@ -24,7 +24,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-// UNSUPPORTED: hipcc
 // <cuda/std/array>
 // UNSUPPORTED: c++03, c++11, c++14
 
@@ -42,7 +41,7 @@
 int main(int, char**)
 {
   {
-    cuda::std::array arr{1, 2, 3L}; // expected-error {{no viable constructor or deduction guide for deduction of
+    cuda::std::array arr{1, 2, 3L}; // nvcc-lit-error {{no viable constructor or deduction guide for deduction of
                                     // template arguments of 'array'}}
   }
 

@@ -23,7 +23,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-// UNSUPPORTED: hipcc
 // <cuda/std/tuple>
 
 // template <class... Types> class tuple;
@@ -42,10 +41,10 @@
 int main(int, char**)
 {
   using T  = cuda::std::tuple<int, long, void*>;
-  using E1 = typename cuda::std::tuple_element<1, T&>::type; // expected-error{{undefined template}}
+  using E1 = typename cuda::std::tuple_element<1, T&>::type; // nvcc-lit-error{{undefined template}}
   using E2 = typename cuda::std::tuple_element<3, T>::type;
   using E3 = typename cuda::std::tuple_element<4, T const>::type;
-  // expected-error@*:* 2 {{{{(static_assert|static assertion)}} failed}}
+  // nvcc-lit-error@*:* 2 {{{{(static_assert|static assertion)}} failed}}
 
   return 0;
 }

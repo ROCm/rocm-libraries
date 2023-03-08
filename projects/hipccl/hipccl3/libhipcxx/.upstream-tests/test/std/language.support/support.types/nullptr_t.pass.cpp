@@ -23,7 +23,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-// UNSUPPORTED: hipcc
 #include <cuda/std/cassert>
 #include <cuda/std/cstddef>
 #include <cuda/std/type_traits>
@@ -87,7 +86,7 @@ __host__ __device__ void test_nullptr_conversions()
 {
 // GCC does not accept this due to CWG Defect #1423
 // http://www.open-std.org/jtc1/sc22/wg21/docs/cwg_defects.html#1423
-#if defined(TEST_COMPILER_CLANG) && !defined(TEST_COMPILER_NVCC) && !defined(TEST_COMPILER_CLANG_CUDA)
+#if defined(TEST_COMPILER_CLANG) && !defined(TEST_COMPILER_NVCC) && !defined(TEST_COMPILER_CLANG_CUDA) && !defined(TEST_COMPILER_HIPCC)
   {
     bool b = nullptr;
     assert(!b);

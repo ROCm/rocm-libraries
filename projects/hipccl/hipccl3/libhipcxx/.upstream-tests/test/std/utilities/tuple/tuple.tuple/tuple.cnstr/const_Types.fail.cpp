@@ -23,7 +23,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-// UNSUPPORTED: hipcc
 // <cuda/std/tuple>
 
 // template <class... Types> class tuple;
@@ -45,21 +44,21 @@ __host__ __device__ std::tuple<ExplicitCopy> const_explicit_copy()
 {
   const ExplicitCopy e(42);
   return {e};
-  // expected-error@-1 {{chosen constructor is explicit in copy-initialization}}
+  // nvcc-lit-error@-1 {{chosen constructor is explicit in copy-initialization}}
 }
 
 __host__ __device__ std::tuple<ExplicitCopy> non_const_explicit_copy()
 {
   ExplicitCopy e(42);
   return {e};
-  // expected-error@-1 {{chosen constructor is explicit in copy-initialization}}
+  // nvcc-lit-error@-1 {{chosen constructor is explicit in copy-initialization}}
 }
 
 __host__ __device__ std::tuple<ExplicitCopy> const_explicit_copy_no_brace()
 {
   const ExplicitCopy e(42);
   return e;
-  // expected-error@-1 {{no viable conversion}}
+  // nvcc-lit-error@-1 {{no viable conversion}}
 }
 
 int main(int, char**)
