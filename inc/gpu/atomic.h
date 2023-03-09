@@ -1,7 +1,7 @@
 #ifndef __GPU_ATOMIC_H__
 #define __GPU_ATOMIC_H__
 
-#include "hip/hip_runtime.h"
+#include "hip/hip_runtime_api.h"
 #include <atomic>
 #include <cstddef>
 #include <cstring>
