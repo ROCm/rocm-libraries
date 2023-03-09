@@ -1,4 +1,5 @@
 #include "gpu/atomic.h"
+#include "hip/hip_runtime.h"
 #include <iostream>
 
 #define CHECK(cmd)                                                                                 \
