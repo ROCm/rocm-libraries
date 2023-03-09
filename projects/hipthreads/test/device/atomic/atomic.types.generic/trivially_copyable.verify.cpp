@@ -27,5 +27,5 @@ struct NotTriviallyCopyable {
 
 void f() {
   NotTriviallyCopyable x(42);
-  std::atomic<NotTriviallyCopyable> a(x); // expected-error@*:* {{std::atomic<T> requires that 'T' be a trivially copyable type}}
+  std::atomic<NotTriviallyCopyable> a(x); // expected-error@*:* {{std::atomic requires a trivially copyable type}}
 }
