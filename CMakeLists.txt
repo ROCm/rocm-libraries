@@ -209,56 +209,6 @@ ADD_CUSTOM_TARGET(
 
 # rocRoller library
 set(rocroller_src
- lib/source/CodeGen/LowerFromKernelGraph.cpp
- lib/source/CodeGen/Arithmetic/Add.cpp
- lib/source/CodeGen/Arithmetic/AddShiftL.cpp
- lib/source/CodeGen/Arithmetic/ArithmeticGenerator.cpp
- lib/source/CodeGen/Arithmetic/BitwiseOr.cpp
- lib/source/CodeGen/Arithmetic/Convert.cpp
- lib/source/CodeGen/Arithmetic/Divide.cpp
- lib/source/CodeGen/Arithmetic/Equal.cpp
- lib/source/CodeGen/Arithmetic/GreaterThan.cpp
- lib/source/CodeGen/Arithmetic/GreaterThanEqual.cpp
- lib/source/CodeGen/Arithmetic/LessThan.cpp
- lib/source/CodeGen/Arithmetic/LessThanEqual.cpp
- lib/source/CodeGen/Arithmetic/MatrixMultiply.cpp
- lib/source/CodeGen/Arithmetic/Modulo.cpp
- lib/source/CodeGen/Arithmetic/Multiply.cpp
- lib/source/CodeGen/Arithmetic/MultiplyAdd.cpp
- lib/source/CodeGen/Arithmetic/MultiplyHigh.cpp
- lib/source/CodeGen/Arithmetic/Negate.cpp
- lib/source/CodeGen/Arithmetic/BitwiseAnd.cpp
- lib/source/CodeGen/Arithmetic/BitwiseXor.cpp
- lib/source/CodeGen/Arithmetic/ShiftL.cpp
- lib/source/CodeGen/Arithmetic/ShiftLAdd.cpp
- lib/source/CodeGen/Arithmetic/ShiftR.cpp
- lib/source/CodeGen/Arithmetic/SignedShiftR.cpp
- lib/source/CodeGen/Arithmetic/Subtract.cpp
- lib/source/CodeGen/Buffer.cpp
- lib/source/CodeGen/InstructionRef.cpp
- lib/source/CodeGen/MemoryInstructions.cpp
-
- lib/source/KernelGraph/ControlFlowRWTracer.cpp
- lib/source/KernelGraph/ControlToCoordinateMapper.cpp
- lib/source/KernelGraph/CoordinateGraph/Dimension.cpp
- lib/source/KernelGraph/CoordinateGraph/Transformer.cpp
- lib/source/KernelGraph/KernelGraph.cpp
- lib/source/KernelGraph/LowerFromCommand.cpp
- lib/source/KernelGraph/ScopeManager.cpp
- lib/source/KernelGraph/Transformations/AddComputeIndex.cpp
- lib/source/KernelGraph/Transformations/AddDeallocate.cpp
- lib/source/KernelGraph/Transformations/AddLDS.cpp
- lib/source/KernelGraph/Transformations/CleanGraph.cpp
- lib/source/KernelGraph/Transformations/CleanLoops.cpp
- lib/source/KernelGraph/Transformations/FuseExpressions.cpp
- lib/source/KernelGraph/Transformations/FuseLoops.cpp
- lib/source/KernelGraph/Transformations/KernelGraph_loop.cpp
- lib/source/KernelGraph/Transformations/KernelGraph_unrollKernel.cpp
- lib/source/KernelGraph/Transformations/LowerLinear.cpp
- lib/source/KernelGraph/Transformations/LowerTile.cpp
- lib/source/KernelGraph/Transformations/UnrollLoops.cpp
- lib/source/KernelGraph/Transformations/UpdateParameters.cpp
- lib/source/KernelGraph/Utils.cpp
 
  lib/source/Assembler.cpp
  lib/source/AssemblyKernel.cpp
@@ -288,31 +238,89 @@ set(rocroller_src
  lib/source/Random.cpp
  lib/source/Register.cpp
  lib/source/ScheduledInstructions.cpp
- lib/source/Cost.cpp
+ lib/source/Scheduler.cpp
+ lib/source/Timer.cpp
+
+ lib/source/CodeGen/Arithmetic/Add.cpp
+ lib/source/CodeGen/Arithmetic/AddShiftL.cpp
+ lib/source/CodeGen/Arithmetic/ArithmeticGenerator.cpp
+ lib/source/CodeGen/Arithmetic/BitwiseAnd.cpp
+ lib/source/CodeGen/Arithmetic/BitwiseOr.cpp
+ lib/source/CodeGen/Arithmetic/BitwiseXor.cpp
+ lib/source/CodeGen/Arithmetic/Convert.cpp
+ lib/source/CodeGen/Arithmetic/Divide.cpp
+ lib/source/CodeGen/Arithmetic/Equal.cpp
+ lib/source/CodeGen/Arithmetic/GreaterThan.cpp
+ lib/source/CodeGen/Arithmetic/GreaterThanEqual.cpp
+ lib/source/CodeGen/Arithmetic/LessThan.cpp
+ lib/source/CodeGen/Arithmetic/LessThanEqual.cpp
+ lib/source/CodeGen/Arithmetic/MatrixMultiply.cpp
+ lib/source/CodeGen/Arithmetic/Modulo.cpp
+ lib/source/CodeGen/Arithmetic/Multiply.cpp
+ lib/source/CodeGen/Arithmetic/MultiplyAdd.cpp
+ lib/source/CodeGen/Arithmetic/MultiplyHigh.cpp
+ lib/source/CodeGen/Arithmetic/Negate.cpp
+ lib/source/CodeGen/Arithmetic/ShiftL.cpp
+ lib/source/CodeGen/Arithmetic/ShiftLAdd.cpp
+ lib/source/CodeGen/Arithmetic/ShiftR.cpp
+ lib/source/CodeGen/Arithmetic/SignedShiftR.cpp
+ lib/source/CodeGen/Arithmetic/Subtract.cpp
+ lib/source/CodeGen/Buffer.cpp
+ lib/source/CodeGen/InstructionRef.cpp
+ lib/source/CodeGen/LowerFromKernelGraph.cpp
+ lib/source/CodeGen/MemoryInstructions.cpp
+ lib/source/CodeGen/WaitCount.cpp
+
+ lib/source/Costs/Cost.cpp
  lib/source/Costs/MinNopsCost.cpp
  lib/source/Costs/NoneCost.cpp
  lib/source/Costs/UniformCost.cpp
- lib/source/Scheduler.cpp
- lib/source/Schedulers/CooperativeScheduler.cpp
- lib/source/Schedulers/PriorityScheduler.cpp
- lib/source/Schedulers/RandomScheduler.cpp
- lib/source/Schedulers/RoundRobinScheduler.cpp
- lib/source/Schedulers/SequentialScheduler.cpp
+
+ lib/source/KernelGraph/ControlFlowRWTracer.cpp
+ lib/source/KernelGraph/ControlToCoordinateMapper.cpp
+ lib/source/KernelGraph/KernelGraph.cpp
+ lib/source/KernelGraph/LowerFromCommand.cpp
+ lib/source/KernelGraph/ScopeManager.cpp
+ lib/source/KernelGraph/Utils.cpp
+
+ lib/source/KernelGraph/CoordinateGraph/Dimension.cpp
+ lib/source/KernelGraph/CoordinateGraph/Transformer.cpp
+
+ lib/source/KernelGraph/Transformations/AddComputeIndex.cpp
+ lib/source/KernelGraph/Transformations/AddDeallocate.cpp
+ lib/source/KernelGraph/Transformations/AddLDS.cpp
+ lib/source/KernelGraph/Transformations/CleanGraph.cpp
+ lib/source/KernelGraph/Transformations/CleanLoops.cpp
+ lib/source/KernelGraph/Transformations/FuseExpressions.cpp
+ lib/source/KernelGraph/Transformations/FuseLoops.cpp
+ lib/source/KernelGraph/Transformations/KernelGraph_loop.cpp
+ lib/source/KernelGraph/Transformations/KernelGraph_unrollKernel.cpp
+ lib/source/KernelGraph/Transformations/LowerLinear.cpp
+ lib/source/KernelGraph/Transformations/LowerTile.cpp
+ lib/source/KernelGraph/Transformations/UnrollLoops.cpp
+ lib/source/KernelGraph/Transformations/UpdateParameters.cpp
+
  lib/source/Observers/ACCVGPRReadWrite.cpp
  lib/source/Observers/ACCVGPRWriteWrite.cpp
  lib/source/Observers/CMPXWriteExec.cpp
- lib/source/Observers/DGEMM4x4x4Write.cpp
  lib/source/Observers/DGEMM16x16x4Write.cpp
+ lib/source/Observers/DGEMM4x4x4Write.cpp
  lib/source/Observers/DLWrite.cpp
  lib/source/Observers/ObserverCreation.cpp
  lib/source/Observers/RegisterLivenessObserver.cpp
  lib/source/Observers/RegisterMapObserver.cpp
  lib/source/Observers/VALUWrite.cpp
- lib/source/Observers/XDLReadSrcC90a.cpp
+ lib/source/Observers/WaitcntObserver.cpp
  lib/source/Observers/XDLReadSrcC908.cpp
- lib/source/Observers/XDLWrite90a.cpp
+ lib/source/Observers/XDLReadSrcC90a.cpp
  lib/source/Observers/XDLWrite908.cpp
- lib/source/Timer.cpp
+ lib/source/Observers/XDLWrite90a.cpp
+
+ lib/source/Schedulers/CooperativeScheduler.cpp
+ lib/source/Schedulers/PriorityScheduler.cpp
+ lib/source/Schedulers/RandomScheduler.cpp
+ lib/source/Schedulers/RoundRobinScheduler.cpp
+ lib/source/Schedulers/SequentialScheduler.cpp
 )
 
 if(ROCROLLER_USE_HIP)

@@ -19,10 +19,13 @@ namespace rocRoller
         KernelOptions();
 
         LogLevel logLevel;
-        bool     alwaysWaitAfterLoad;
-        bool     alwaysWaitAfterStore;
-        bool     alwaysWaitBeforeBranch;
-        bool     preloadKernelArguments;
+
+        bool alwaysWaitAfterLoad;
+        bool alwaysWaitAfterStore;
+        bool alwaysWaitBeforeBranch;
+        bool alwaysWaitZeroBeforeBarrier;
+
+        bool preloadKernelArguments;
 
         unsigned int loadLocalWidth;
         unsigned int loadGlobalWidth;

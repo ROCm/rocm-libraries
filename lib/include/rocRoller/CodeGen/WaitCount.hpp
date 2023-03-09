@@ -103,6 +103,8 @@ namespace rocRoller
 
         std::vector<std::string> m_comments;
     };
+
+    std::ostream& operator<<(std::ostream& stream, WaitCount const& wait);
 }
 
 #include "WaitCount_Impl.hpp"

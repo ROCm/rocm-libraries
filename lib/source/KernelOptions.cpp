@@ -9,6 +9,7 @@ namespace rocRoller
         , alwaysWaitAfterLoad(false)
         , alwaysWaitAfterStore(false)
         , alwaysWaitBeforeBranch(true)
+        , alwaysWaitZeroBeforeBarrier(false)
         , preloadKernelArguments(true)
         , loadLocalWidth(4)
         , loadGlobalWidth(8)

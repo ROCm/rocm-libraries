@@ -584,19 +584,26 @@ namespace rocRollerTest
                                 )";
         EXPECT_EQ(NormalizedSource(output()), NormalizedSource(expected));
     }
-    class WaitCountObserverStateTest : public WaitCountObserverTest
+    class WaitCountObserverStateTest
+        : public WaitCountObserverTest,
+          public ::testing::WithParamInterface<std::tuple<bool, LogLevel>>
     {
         void SetUp()
         {
             using namespace rocRoller;
-            Settings::getInstance()->set(Settings::LogLvl, rocRoller::LogLevel::Debug);
+            auto [waitBeforeBarrier, logLevel] = GetParam();
+            Settings::getInstance()->set(Settings::LogLvl, logLevel);
+
             WaitCountObserverTest::SetUp();
+
+            m_context->kernelOptions().alwaysWaitZeroBeforeBarrier = waitBeforeBarrier;
         }
     };
 
-    TEST_F(WaitCountObserverStateTest, QueueStateTest)
+    TEST_P(WaitCountObserverStateTest, QueueStateTest)
     {
-        rocRoller::Scheduling::InstructionStatus peeked;
+        auto [waitBeforeBarrier, logLevel] = GetParam();
+        auto const& arch                   = m_context->targetArchitecture();
 
         auto src1 = std::make_shared<Register::Value>(
             m_context, Register::Type::Scalar, DataType::Int32, 2);
@@ -617,117 +624,341 @@ namespace rocRollerTest
         dst3->allocateNow();
 
         auto dst4 = dst1->subset({0});
-
         auto dst5 = dst1->subset({1});
 
         auto zero = Register::Value::Literal(0);
 
-        auto inst1 = Instruction("buffer_load_dwordx2", {dst1}, {src1, zero}, {}, "");
-        peeked     = m_context->observer()->peek(inst1);
-        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
-        m_context->schedule(inst1);
+        auto prevOutput = output();
 
-        auto inst2 = Instruction("buffer_load_dwordx2", {dst2}, {src1, zero}, {}, "");
-        peeked     = m_context->observer()->peek(inst2);
-        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
-        m_context->schedule(inst2);
+        auto getNewOutput = [&]() -> std::string {
+            auto prevSize  = prevOutput.size();
+            auto curOutput = output();
+            EXPECT_EQ(prevOutput, curOutput.substr(0, prevSize));
 
-        auto inst3 = Instruction("buffer_load_dwordx2", {dst3}, {src1, zero}, {}, "");
-        peeked     = m_context->observer()->peek(inst3);
-        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
-        m_context->schedule(inst3);
+            auto rv    = curOutput.substr(prevSize, -1);
+            prevOutput = curOutput;
 
-        auto inst4 = Instruction("buffer_load_dword", {dst4}, {src1, zero}, {}, "");
-        peeked     = m_context->observer()->peek(inst4);
-        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount::VMCnt(2));
-        m_context->schedule(inst4);
+            return rv;
+        };
 
-        auto inst_barrier = Instruction("s_barrier", {}, {}, {}, "");
-        peeked            = m_context->observer()->peek(inst_barrier);
-        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount::Zero(m_context->targetArchitecture()));
-        m_context->schedule(inst_barrier);
+        {
+            auto inst   = Instruction("buffer_load_dwordx2", {dst1}, {src1, zero}, {}, "");
+            auto peeked = m_context->observer()->peek(inst);
+            EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
+            m_context->schedule(inst);
 
-        auto inst5 = Instruction("s_load_dwordx2", {dst1}, {src1, zero}, {}, "");
-        peeked     = m_context->observer()->peek(inst5);
-        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
-        m_context->schedule(inst5);
+            auto        newOutput = getNewOutput();
+            std::string expected  = R"(
+                buffer_load_dwordx2 v[0:1], s[0:1], 0
+            )";
+            EXPECT_EQ(NormalizedSource(expected, true), NormalizedSource(newOutput, true));
+        }
 
-        auto inst6 = Instruction("s_load_dwordx2", {dst2}, {src1, zero}, {}, "");
-        peeked     = m_context->observer()->peek(inst6);
-        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
-        m_context->schedule(inst6);
+        {
+            auto inst   = Instruction("buffer_load_dwordx2", {dst2}, {src1, zero}, {}, "");
+            auto peeked = m_context->observer()->peek(inst);
+            EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
+            m_context->schedule(inst);
 
-        auto inst7 = Instruction("s_load_dword", {dst5}, {src2, zero}, {}, "");
-        peeked     = m_context->observer()->peek(inst7);
-        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount::LGKMCnt(0, ""));
-        m_context->schedule(inst7);
+            auto        newOutput = getNewOutput();
+            std::string expected  = R"(
+                buffer_load_dwordx2 v[2:3], s[0:1], 0 )";
+            if(logLevel >= LogLevel::Debug)
+            {
+                expected += R"(//
+                    // Wait Queue State:
+                    // --Queue: VMQueue
+                    // ----Needs Wait Zero: False
+                    // ----Type In Queue : VMQueue
+                    // ----Registers :
+                    // ------Dst: {v[0:1], }
+                )";
+            }
+            ASSERT_EQ(NormalizedSource(expected, true), NormalizedSource(newOutput, true));
+        }
 
-        auto inst_end = Instruction("s_endpgm", {}, {}, {}, "");
-        peeked        = m_context->observer()->peek(inst_end);
-        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
-        m_context->schedule(inst_end);
+        {
+            auto inst   = Instruction("buffer_load_dwordx2", {dst3}, {src1, zero}, {}, "");
+            auto peeked = m_context->observer()->peek(inst);
+            EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
+            m_context->schedule(inst);
 
-        std::string expected = R"(
-                                    buffer_load_dwordx2 v[0:1], s[0:1], 0
-                                    buffer_load_dwordx2 v[2:3], s[0:1], 0 // Wait Queue State:
-                                    // --Queue: VMQueue
-                                    // ----Needs Wait Zero: False
-                                    // ----Type In Queue : VMQueue
-                                    // ----Registers :
-                                    // ------Dst: {v[0:1], }
-                                    buffer_load_dwordx2 v[4:5], s[0:1], 0 // Wait Queue State:
-                                    // --Queue: VMQueue
-                                    // ----Needs Wait Zero: False
-                                    // ----Type In Queue : VMQueue
-                                    // ----Registers :
-                                    // ------Dst: {v[0:1], }
-                                    // ------Dst: {v[2:3], }
-                                    s_waitcnt vmcnt(2)
-                                    buffer_load_dword v0, s[0:1], 0 // WaitCnt Needed: Intersects with registers in 'VMQueue', at 0 and the queue size is 3, so a waitcnt of 2 is required.
-                                    // Wait Queue State:
-                                    // --Queue: VMQueue
-                                    // ----Needs Wait Zero: False
-                                    // ----Type In Queue : VMQueue
-                                    // ----Registers :
-                                    // ------Dst: {v[0:1], }
-                                    // ------Dst: {v[2:3], }
-                                    // ------Dst: {v[4:5], }
-                                    s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0) //
-                                    s_barrier // WaitCnt Needed: Always waitcnt zero before an s_barrier.
-                                    // Wait Queue State:
-                                    // --Queue: VMQueue
-                                    // ----Needs Wait Zero: False
-                                    // ----Type In Queue : VMQueue
-                                    // ----Registers :
-                                    // ------Dst: {v[2:3], }
-                                    // ------Dst: {v[4:5], }
-                                    // ------Dst: {v0, }
-                                    s_load_dwordx2 v[0:1], s[0:1], 0
-                                    s_load_dwordx2 v[2:3], s[0:1], 0 // Wait Queue State:
-                                    // --Queue: LGKMQueue
-                                    // ----Needs Wait Zero: True
-                                    // ----Type In Queue : LGKMDSQueue
-                                    // ----Registers :
-                                    // ------Dst: {v[0:1], }
-                                    s_waitcnt lgkmcnt(0)
-                                    s_load_dword v1, s1, 0 // WaitCnt Needed: Intersects with registers in 'LGKMQueue', which needs a wait zero.
-                                    // Wait Queue State:
-                                    // --Queue: LGKMQueue
-                                    // ----Needs Wait Zero: True
-                                    // ----Type In Queue : LGKMDSQueue
-                                    // ----Registers :
-                                    // ------Dst: {v[0:1], }
-                                    // ------Dst: {v[2:3], }
-                                    s_endpgm // Wait Queue State:
-                                    // --Queue: LGKMQueue
-                                    // ----Needs Wait Zero: True
-                                    // ----Type In Queue : LGKMDSQueue
-                                    // ----Registers :
-                                    // ------Dst: {v1, }
-                                )";
+            auto        newOutput = getNewOutput();
+            std::string expected  = R"(
+                buffer_load_dwordx2 v[4:5], s[0:1], 0 )";
+            if(logLevel >= LogLevel::Debug)
+            {
+                expected += R"(//
+                    // Wait Queue State:
+                    // --Queue: VMQueue
+                    // ----Needs Wait Zero: False
+                    // ----Type In Queue : VMQueue
+                    // ----Registers :
+                    // ------Dst: {v[0:1], }
+                    // ------Dst: {v[2:3], }
+                )";
+            }
+            ASSERT_EQ(NormalizedSource(expected, true), NormalizedSource(newOutput, true));
+        }
 
-        EXPECT_EQ(NormalizedSource(output(), true), NormalizedSource(expected, true));
+        {
+            auto inst   = Instruction("buffer_load_dword", {dst4}, {src1, zero}, {}, "");
+            auto peeked = m_context->observer()->peek(inst);
+            EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount::VMCnt(2));
+            m_context->schedule(inst);
+
+            auto        newOutput = getNewOutput();
+            std::string expected  = R"(
+                s_waitcnt vmcnt(2)
+                buffer_load_dword v0, s[0:1], 0 )";
+
+            if(logLevel >= LogLevel::Verbose)
+            {
+                expected += "// WaitCnt Needed: Intersects with registers in 'VMQueue', at 0 and "
+                            "the queue size is 3, so a waitcnt of 2 is required.";
+            }
+            if(logLevel >= LogLevel::Debug)
+            {
+                expected += R"(
+                    //
+                    // Wait Queue State:
+                    // --Queue: VMQueue
+                    // ----Needs Wait Zero: False
+                    // ----Type In Queue : VMQueue
+                    // ----Registers :
+                    // ------Dst: {v[0:1], }
+                    // ------Dst: {v[2:3], }
+                    // ------Dst: {v[4:5], }
+                )";
+            }
+            ASSERT_EQ(NormalizedSource(expected, true), NormalizedSource(newOutput, true));
+        }
+
+        {
+            auto inst_barrier = Instruction("s_barrier", {}, {}, {}, "");
+            auto peeked       = m_context->observer()->peek(inst_barrier);
+            if(waitBeforeBarrier)
+            {
+                EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount::Zero(arch));
+            }
+            else
+            {
+                EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
+            }
+
+            m_context->schedule(inst_barrier);
+
+            auto        newOutput = getNewOutput();
+            std::string expected;
+            if(waitBeforeBarrier)
+                expected += "s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0) //\n";
+
+            expected += "s_barrier ";
+
+            if(waitBeforeBarrier && logLevel >= LogLevel::Verbose)
+            {
+                expected += "// WaitCnt Needed: alwaysWaitZeroBeforeBarrier is set.\n";
+            }
+
+            if(logLevel >= LogLevel::Debug)
+            {
+                expected += R"( //
+                    // Wait Queue State:
+                    // --Queue: VMQueue
+                    // ----Needs Wait Zero: False
+                    // ----Type In Queue : VMQueue
+                    // ----Registers :
+                    // ------Dst: {v[2:3], }
+                    // ------Dst: {v[4:5], }
+                    // ------Dst: {v0, }
+                )";
+            }
+            ASSERT_EQ(NormalizedSource(expected, true), NormalizedSource(newOutput, true));
+        }
+
+        {
+            auto inst   = Instruction("s_load_dwordx2", {dst1}, {src1, zero}, {}, "");
+            auto peeked = m_context->observer()->peek(inst);
+            if(waitBeforeBarrier)
+            {
+                EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
+            }
+            else
+            {
+                EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount::VMCnt(0));
+            }
+            m_context->schedule(inst);
+
+            auto        newOutput = getNewOutput();
+            std::string expected;
+
+            // Since the barrier didn't add a waitcnt, we now need one here.
+            if(!waitBeforeBarrier)
+            {
+                expected += "s_waitcnt vmcnt(0)\n";
+            }
+
+            expected += "s_load_dwordx2 v[0:1], s[0:1], 0";
+
+            if(!waitBeforeBarrier)
+            {
+                if(logLevel >= LogLevel::Verbose)
+                {
+                    expected += " // WaitCnt Needed: Intersects with registers in 'VMQueue', at 2 "
+                                "and the queue size is 3, so a waitcnt of 0 is required.\n";
+                }
+
+                if(logLevel >= LogLevel::Debug)
+                {
+                    expected += R"( //
+                    // Wait Queue State:
+                    // --Queue: VMQueue
+                    // ----Needs Wait Zero: False
+                    // ----Type In Queue : VMQueue
+                    // ----Registers :
+                    // ------Dst: {v[2:3], }
+                    // ------Dst: {v[4:5], }
+                    // ------Dst: {v0, }
+                )";
+                }
+            }
+            ASSERT_EQ(NormalizedSource(expected, true), NormalizedSource(newOutput, true));
+        }
+
+        {
+            auto inst = Instruction::Wait(WaitCount::Zero(arch));
+            m_context->schedule(inst);
+
+            std::string expected = "s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0) //";
+
+            if(logLevel >= LogLevel::Debug)
+            {
+                expected += R"(
+                    //
+                    // Wait Queue State:
+                    // --Queue: LGKMQueue
+                    // ----Needs Wait Zero: True
+                    // ----Type In Queue : LGKMDSQueue
+                    // ----Registers :
+                    // ------Dst: {v[0:1], }
+                )";
+            }
+            auto newOutput = getNewOutput();
+
+            ASSERT_EQ(NormalizedSource(expected, true), NormalizedSource(newOutput, true));
+        }
+
+        {
+            auto inst   = Instruction("ds_read_b64", {dst2}, {src1, zero}, {}, "");
+            auto peeked = m_context->observer()->peek(inst);
+            EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
+            m_context->schedule(inst);
+
+            std::string expected  = "ds_read_b64 v[2:3], s[0:1], 0";
+            auto        newOutput = getNewOutput();
+
+            ASSERT_EQ(NormalizedSource(expected, true), NormalizedSource(newOutput, true));
+        }
+
+        {
+            auto inst_barrier = Instruction("s_barrier", {}, {}, {}, "");
+            auto peeked       = m_context->observer()->peek(inst_barrier);
+            if(waitBeforeBarrier)
+            {
+                EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount::Zero(arch));
+            }
+            else
+            {
+                EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount::LGKMCnt(0));
+            }
+
+            m_context->schedule(inst_barrier);
+
+            auto        newOutput = getNewOutput();
+            std::string expected;
+
+            if(waitBeforeBarrier)
+            {
+                expected += "s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0) //\n";
+            }
+            else
+            {
+                expected += "s_waitcnt lgkmcnt(0)\n";
+            }
+
+            expected += "s_barrier ";
+
+            if(logLevel >= LogLevel::Verbose)
+            {
+                if(waitBeforeBarrier)
+                {
+                    expected += "// WaitCnt Needed: alwaysWaitZeroBeforeBarrier is set.\n";
+                }
+                else
+                {
+                    expected += "// WaitCnt Needed: lgkmcnt(0) before an s_barrier since the lgkm "
+                                "queue is not empty.\n";
+                }
+            }
+
+            if(logLevel >= LogLevel::Debug)
+            {
+                expected += R"( //
+                    // Wait Queue State:
+                    // --Queue: LGKMQueue
+                    // ----Needs Wait Zero: False
+                    // ----Type In Queue : LGKMDSQueue
+                    // ----Registers :
+                    // ------Dst: {v[2:3], }
+                )";
+            }
+            ASSERT_EQ(NormalizedSource(expected, true), NormalizedSource(newOutput, true));
+        }
+
+        {
+            auto inst   = Instruction("s_load_dword", {dst5}, {src2, zero}, {}, "");
+            auto peeked = m_context->observer()->peek(inst);
+            EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
+            m_context->schedule(inst);
+
+            auto        newOutput = getNewOutput();
+            std::string expected  = "s_load_dword v1, s1, 0";
+            ASSERT_EQ(NormalizedSource(expected, true), NormalizedSource(newOutput, true));
+        }
+
+        {
+            auto inst_end = Instruction("s_endpgm", {}, {}, {}, "");
+            auto peeked   = m_context->observer()->peek(inst_end);
+            EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
+            m_context->schedule(inst_end);
+
+            auto        newOutput = getNewOutput();
+            std::string expected  = "s_endpgm";
+
+            if(logLevel >= LogLevel::Debug)
+            {
+                expected += R"( //
+                    // Wait Queue State:
+                    // --Queue: LGKMQueue
+                    // ----Needs Wait Zero: True
+                    // ----Type In Queue : LGKMDSQueue
+                    // ----Registers :
+                    // ------Dst: {v1, }
+                )";
+            }
+
+            ASSERT_EQ(NormalizedSource(expected, true), NormalizedSource(newOutput, true));
+        }
     }
+
+    INSTANTIATE_TEST_SUITE_P(WaitCountObserverStateTest,
+                             WaitCountObserverStateTest,
+                             ::testing::ValuesIn({std::make_tuple(false, LogLevel::None),
+                                                  std::make_tuple(false, LogLevel::Verbose),
+                                                  std::make_tuple(false, LogLevel::Debug),
+                                                  std::make_tuple(true, LogLevel::None),
+                                                  std::make_tuple(true, LogLevel::Verbose),
+                                                  std::make_tuple(true, LogLevel::Debug)}));
 
     TEST_F(WaitCountObserverTest, LoopWaitCntStateAssertFailCase)
     {
