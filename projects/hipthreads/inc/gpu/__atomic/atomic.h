@@ -9,6 +9,7 @@
 #include "gpu/__atomic/atomic_base.h"
 #include "gpu/__atomic/cxx_atomic_impl.h"
 #include "gpu/__atomic/memory_order.h"
+#include "gpu/__memory/addressof.h"
 
 namespace gpu {
 
@@ -67,26 +68,26 @@ struct atomic<_Tp *> : public gpu::internal::__atomic_base<_Tp *> {
                                               memory_order __m = memory_order_seq_cst) volatile noexcept {
         // __atomic_fetch_add accepts function pointers, guard against them.
         static_assert(!std::is_function_v<std::remove_pointer_t<_Tp>>, "Pointer to function isn't allowed");
-        return gpu::internal::__cxx_atomic_fetch_add(&this->__a_, __op, __m);
+        return gpu::internal::__cxx_atomic_fetch_add(gpu::addressof(this->__a_), __op, __m);
     }
 
     inline __host__ __device__ _Tp *fetch_add(ptrdiff_t __op, memory_order __m = memory_order_seq_cst) noexcept {
         // __atomic_fetch_add accepts function pointers, guard against them.
         static_assert(!std::is_function_v<std::remove_pointer_t<_Tp>>, "Pointer to function isn't allowed");
-        return gpu::internal::__cxx_atomic_fetch_add(&this->__a_, __op, __m);
+        return gpu::internal::__cxx_atomic_fetch_add(gpu::addressof(this->__a_), __op, __m);
     }
 
     inline __host__ __device__ _Tp *fetch_sub(ptrdiff_t __op,
                                               memory_order __m = memory_order_seq_cst) volatile noexcept {
         // __atomic_fetch_add accepts function pointers, guard against them.
         static_assert(!std::is_function_v<std::remove_pointer_t<_Tp>>, "Pointer to function isn't allowed");
-        return gpu::internal::__cxx_atomic_fetch_sub(&this->__a_, __op, __m);
+        return gpu::internal::__cxx_atomic_fetch_sub(gpu::addressof(this->__a_), __op, __m);
     }
 
     inline __host__ __device__ _Tp *fetch_sub(ptrdiff_t __op, memory_order __m = memory_order_seq_cst) noexcept {
         // __atomic_fetch_add accepts function pointers, guard against them.
         static_assert(!std::is_function_v<std::remove_pointer_t<_Tp>>, "Pointer to function isn't allowed");
-        return gpu::internal::__cxx_atomic_fetch_sub(&this->__a_, __op, __m);
+        return gpu::internal::__cxx_atomic_fetch_sub(gpu::addressof(this->__a_), __op, __m);
     }
 
     inline __host__ __device__ _Tp *operator++(int) volatile noexcept               { return fetch_add(1); }
