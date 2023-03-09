@@ -6,6 +6,7 @@
 #include "gpu/__atomic/cxx_atomic_impl.h"
 #include "gpu/__atomic/is_always_lock_free.h"
 #include "gpu/__atomic/memory_order.h"
+#include "gpu/__memory/addressof.h"
 
 namespace gpu::internal {
 
@@ -33,56 +34,64 @@ struct __atomic_base // <_Tp, false>
         return static_cast<__atomic_base const volatile *>(this)->is_lock_free();
     }
     inline __host__ __device__ void store(_Tp __d, memory_order __m = memory_order_seq_cst) volatile noexcept {
-        gpu::internal::__cxx_atomic_store(&__a_, __d, __m);
+        gpu::internal::__cxx_atomic_store(gpu::addressof(__a_), __d, __m);
     }
     inline __host__ __device__ void store(_Tp __d, memory_order __m = memory_order_seq_cst) noexcept {
-        gpu::internal::__cxx_atomic_store(&__a_, __d, __m);
+        gpu::internal::__cxx_atomic_store(gpu::addressof(__a_), __d, __m);
     }
     inline __host__ __device__ _Tp load(memory_order __m = memory_order_seq_cst) const volatile noexcept {
-        return gpu::internal::__cxx_atomic_load(&__a_, __m);
+        return gpu::internal::__cxx_atomic_load(gpu::addressof(__a_), __m);
     }
     inline __host__ __device__ _Tp load(memory_order __m = memory_order_seq_cst) const noexcept {
-        return gpu::internal::__cxx_atomic_load(&__a_, __m);
+        return gpu::internal::__cxx_atomic_load(gpu::addressof(__a_), __m);
     }
     inline __host__ __device__ operator _Tp() const volatile noexcept { return load(); }
     inline __host__ __device__ operator _Tp() const noexcept { return load(); }
     inline __host__ __device__ _Tp exchange(_Tp __d, memory_order __m = memory_order_seq_cst) volatile noexcept {
-        return gpu::internal::__cxx_atomic_exchange(&__a_, __d, __m);
+        return gpu::internal::__cxx_atomic_exchange(gpu::addressof(__a_), __d, __m);
     }
     inline __host__ __device__ _Tp exchange(_Tp __d, memory_order __m = memory_order_seq_cst) noexcept {
-        return gpu::internal::__cxx_atomic_exchange(&__a_, __d, __m);
+        return gpu::internal::__cxx_atomic_exchange(gpu::addressof(__a_), __d, __m);
     }
     inline __host__ __device__ bool compare_exchange_weak(_Tp &__e, _Tp __d, memory_order __s,
                                                           memory_order __f) volatile noexcept {
-        return gpu::internal::__cxx_atomic_compare_exchange_weak(&__a_, &__e, __d, __s, __f);
+        return gpu::internal::__cxx_atomic_compare_exchange_weak(gpu::addressof(__a_), gpu::addressof(__e), __d, __s,
+                                                                 __f);
     }
     inline __host__ __device__ bool compare_exchange_weak(_Tp &__e, _Tp __d, memory_order __s,
                                                           memory_order __f) noexcept {
-        return gpu::internal::__cxx_atomic_compare_exchange_weak(&__a_, &__e, __d, __s, __f);
+        return gpu::internal::__cxx_atomic_compare_exchange_weak(gpu::addressof(__a_), gpu::addressof(__e), __d, __s,
+                                                                 __f);
     }
     inline __host__ __device__ bool compare_exchange_strong(_Tp &__e, _Tp __d, memory_order __s,
                                                             memory_order __f) volatile noexcept {
-        return gpu::internal::__cxx_atomic_compare_exchange_strong(&__a_, &__e, __d, __s, __f);
+        return gpu::internal::__cxx_atomic_compare_exchange_strong(gpu::addressof(__a_), gpu::addressof(__e), __d, __s,
+                                                                   __f);
     }
     inline __host__ __device__ bool compare_exchange_strong(_Tp &__e, _Tp __d, memory_order __s,
                                                             memory_order __f) noexcept {
-        return gpu::internal::__cxx_atomic_compare_exchange_strong(&__a_, &__e, __d, __s, __f);
+        return gpu::internal::__cxx_atomic_compare_exchange_strong(gpu::addressof(__a_), gpu::addressof(__e), __d, __s,
+                                                                   __f);
     }
     inline __host__ __device__ bool compare_exchange_weak(_Tp &__e, _Tp __d,
                                                           memory_order __m = memory_order_seq_cst) volatile noexcept {
-        return gpu::internal::__cxx_atomic_compare_exchange_weak(&__a_, &__e, __d, __m, __m);
+        return gpu::internal::__cxx_atomic_compare_exchange_weak(gpu::addressof(__a_), gpu::addressof(__e), __d, __m,
+                                                                 __m);
     }
     inline __host__ __device__ bool compare_exchange_weak(_Tp &__e, _Tp __d,
                                                           memory_order __m = memory_order_seq_cst) noexcept {
-        return gpu::internal::__cxx_atomic_compare_exchange_weak(&__a_, &__e, __d, __m, __m);
+        return gpu::internal::__cxx_atomic_compare_exchange_weak(gpu::addressof(__a_), gpu::addressof(__e), __d, __m,
+                                                                 __m);
     }
     inline __host__ __device__ bool compare_exchange_strong(_Tp &__e, _Tp __d,
                                                             memory_order __m = memory_order_seq_cst) volatile noexcept {
-        return gpu::internal::__cxx_atomic_compare_exchange_strong(&__a_, &__e, __d, __m, __m);
+        return gpu::internal::__cxx_atomic_compare_exchange_strong(gpu::addressof(__a_), gpu::addressof(__e), __d, __m,
+                                                                   __m);
     }
     inline __host__ __device__ bool compare_exchange_strong(_Tp &__e, _Tp __d,
                                                             memory_order __m = memory_order_seq_cst) noexcept {
-        return gpu::internal::__cxx_atomic_compare_exchange_strong(&__a_, &__e, __d, __m, __m);
+        return gpu::internal::__cxx_atomic_compare_exchange_strong(gpu::addressof(__a_), gpu::addressof(__e), __d, __m,
+                                                                   __m);
     }
 
     inline __host__ __device__ __atomic_base() noexcept = default;
@@ -109,34 +118,34 @@ struct __atomic_base<_Tp, true> : public __atomic_base<_Tp, false> {
     inline constexpr __host__ __device__ __atomic_base(_Tp __d) noexcept : __base(__d) {}
 
     inline __host__ __device__ _Tp fetch_add(_Tp __op, memory_order __m = memory_order_seq_cst) volatile noexcept {
-        return gpu::internal::__cxx_atomic_fetch_add(&this->__a_, __op, __m);
+        return gpu::internal::__cxx_atomic_fetch_add(gpu::addressof(this->__a_), __op, __m);
     }
     inline __host__ __device__ _Tp fetch_add(_Tp __op, memory_order __m = memory_order_seq_cst) noexcept {
-        return gpu::internal::__cxx_atomic_fetch_add(&this->__a_, __op, __m);
+        return gpu::internal::__cxx_atomic_fetch_add(gpu::addressof(this->__a_), __op, __m);
     }
     inline __host__ __device__ _Tp fetch_sub(_Tp __op, memory_order __m = memory_order_seq_cst) volatile noexcept {
-        return gpu::internal::__cxx_atomic_fetch_sub(&this->__a_, __op, __m);
+        return gpu::internal::__cxx_atomic_fetch_sub(gpu::addressof(this->__a_), __op, __m);
     }
     inline __host__ __device__ _Tp fetch_sub(_Tp __op, memory_order __m = memory_order_seq_cst) noexcept {
-        return gpu::internal::__cxx_atomic_fetch_sub(&this->__a_, __op, __m);
+        return gpu::internal::__cxx_atomic_fetch_sub(gpu::addressof(this->__a_), __op, __m);
     }
     inline __host__ __device__ _Tp fetch_and(_Tp __op, memory_order __m = memory_order_seq_cst) volatile noexcept {
-        return gpu::internal::__cxx_atomic_fetch_and(&this->__a_, __op, __m);
+        return gpu::internal::__cxx_atomic_fetch_and(gpu::addressof(this->__a_), __op, __m);
     }
     inline __host__ __device__ _Tp fetch_and(_Tp __op, memory_order __m = memory_order_seq_cst) noexcept {
-        return gpu::internal::__cxx_atomic_fetch_and(&this->__a_, __op, __m);
+        return gpu::internal::__cxx_atomic_fetch_and(gpu::addressof(this->__a_), __op, __m);
     }
     inline __host__ __device__ _Tp fetch_or(_Tp __op, memory_order __m = memory_order_seq_cst) volatile noexcept {
-        return gpu::internal::__cxx_atomic_fetch_or(&this->__a_, __op, __m);
+        return gpu::internal::__cxx_atomic_fetch_or(gpu::addressof(this->__a_), __op, __m);
     }
     inline __host__ __device__ _Tp fetch_or(_Tp __op, memory_order __m = memory_order_seq_cst) noexcept {
-        return gpu::internal::__cxx_atomic_fetch_or(&this->__a_, __op, __m);
+        return gpu::internal::__cxx_atomic_fetch_or(gpu::addressof(this->__a_), __op, __m);
     }
     inline __host__ __device__ _Tp fetch_xor(_Tp __op, memory_order __m = memory_order_seq_cst) volatile noexcept {
-        return gpu::internal::__cxx_atomic_fetch_xor(&this->__a_, __op, __m);
+        return gpu::internal::__cxx_atomic_fetch_xor(gpu::addressof(this->__a_), __op, __m);
     }
     inline __host__ __device__ _Tp fetch_xor(_Tp __op, memory_order __m = memory_order_seq_cst) noexcept {
-        return gpu::internal::__cxx_atomic_fetch_xor(&this->__a_, __op, __m);
+        return gpu::internal::__cxx_atomic_fetch_xor(gpu::addressof(this->__a_), __op, __m);
     }
 
     inline __host__ __device__ _Tp operator++(int) volatile noexcept        { return fetch_add(_Tp(1)); }
