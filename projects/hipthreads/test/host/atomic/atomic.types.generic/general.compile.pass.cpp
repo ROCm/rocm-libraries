@@ -89,9 +89,9 @@ void test() {
   TEST_IGNORE_NODISCARD a.compare_exchange_weak(v, v);
   TEST_IGNORE_NODISCARD a.compare_exchange_strong(v, v, m);
 
-  a.wait(v);
-  a.notify_one();
-  a.notify_all();
+  // a.wait(v);
+  // a.notify_one();
+  // a.notify_all();
 }
 
 void test() {

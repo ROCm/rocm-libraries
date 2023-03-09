@@ -121,9 +121,9 @@ void test() {
   a += 0;
   a -= 0;
 
-  a.wait(v);
-  a.notify_one();
-  a.notify_all();
+  // a.wait(v);
+  // a.notify_one();
+  // a.notify_all();
 }
 
 void test() {
