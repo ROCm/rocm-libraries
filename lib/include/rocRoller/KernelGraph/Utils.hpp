@@ -156,7 +156,7 @@ namespace rocRoller
                                   int                                mac_tile_tag,
                                   std::array<unsigned int, 3> const& workgroupSizes);
 
-        void addConnectionsMultiply(KernelGraph& graph, int waveMult);
+        void addConnectionsMultiply(KernelGraph& graph, int waveMult, int loadA, int loadB);
 
         /**
          * @brief Get a pair of expressions representing a for loop increment
@@ -191,6 +191,8 @@ namespace rocRoller
          * If generator does not return a single result, return empty.
          */
         inline std::optional<int> only(Generator<int> g);
+
+        int duplicateControlNode(KernelGraph& graph, int tag);
 
         /**
          * Updates the threadtile size for enabling the use of long dword instructions

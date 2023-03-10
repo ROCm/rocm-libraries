@@ -303,11 +303,6 @@ namespace rocRoller::KernelGraph
 
     void ControlFlowRWTracer::operator()(Multiply const& op, int tag)
     {
-        m_loop.push_back(tag);
-
-        auto body = m_graph.control.getOutputNodeIndices<Body>(tag).to<std::set>();
-        generate(body);
-
         auto a = m_graph.mapper.get(tag, Connections::typeArgument<MacroTile>(NaryArgument::LHS));
         auto b = m_graph.mapper.get(tag, Connections::typeArgument<MacroTile>(NaryArgument::RHS));
         auto dst
@@ -316,8 +311,6 @@ namespace rocRoller::KernelGraph
         trackRegister(tag, a, ReadWrite::READ);
         trackRegister(tag, b, ReadWrite::READ);
         trackRegister(tag, dst, ReadWrite::READWRITE);
-
-        m_loop.pop_back();
     }
 
     void ControlFlowRWTracer::operator()(Scope const& op, int tag)

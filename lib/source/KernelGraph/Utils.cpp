@@ -1035,43 +1035,38 @@ namespace rocRoller
             }
         }
 
-        void addConnectionsMultiply(KernelGraph& graph, int waveMult)
+        void addConnectionsMultiply(KernelGraph& graph, int waveMult, int loadATag, int loadBTag)
         {
             rocRoller::Log::getLogger()->debug(
                 "KernelGraph::Utils::addConnectionsMultiply(): Multiply({})", waveMult);
 
-            auto loads = graph.control.getOutputNodeIndices<Body>(waveMult).to<std::vector>();
-            AssertFatal(loads.size() == 2, "Multiply op needs two operands");
-            auto loadA = graph.control.getElement(loads[0]);
-            auto loadB = graph.control.getElement(loads[1]);
+            auto loadA = graph.control.getElement(loadATag);
+            auto loadB = graph.control.getElement(loadBTag);
             AssertFatal(isOperation<LoadTiled>(loadA) && isOperation<LoadTiled>(loadB),
                         "Both operands should be LoadTiled");
 
             // LoadTiled A
-            auto userATag = graph.mapper.get<User>(loads[0]);
+            auto userATag = graph.mapper.get<User>(loadATag);
             AssertFatal(userATag > 0, "User dimension not found");
             graph.mapper.connect<User>(waveMult, userATag, 0);
 
             // LoadTiled B
-            auto userBTag = graph.mapper.get<User>(loads[1]);
+            auto userBTag = graph.mapper.get<User>(loadBTag);
             AssertFatal(userBTag > 0, "User dimension not found");
             graph.mapper.connect<User>(waveMult, userBTag, 1);
 
             AssertFatal(userATag > 0 && userBTag > 0, "User dimensions not found");
 
-            auto [waveATag, waveA] = graph.getDimension<WaveTile>(loads[0]);
-            auto [waveBTag, waveB] = graph.getDimension<WaveTile>(loads[1]);
+            auto [waveATag, waveA] = graph.getDimension<WaveTile>(loadATag);
+            auto [waveBTag, waveB] = graph.getDimension<WaveTile>(loadBTag);
 
-            auto a = graph.coordinates.getOutputNodeIndices(userATag, CT::isEdge<DataFlow>)
-                         .to<std::vector>();
-            auto b = graph.coordinates.getOutputNodeIndices(userBTag, CT::isEdge<DataFlow>)
-                         .to<std::vector>();
-            AssertFatal(a.size() == 1 && b.size() == 1, a.size(), b.size());
+            auto macroTileA = graph.mapper.get<MacroTile>(loadATag);
+            auto macroTileB = graph.mapper.get<MacroTile>(loadBTag);
 
             graph.mapper.connect(
-                waveMult, a[0], Connections::typeArgument<MacroTile>(NaryArgument::LHS));
+                waveMult, macroTileA, Connections::typeArgument<MacroTile>(NaryArgument::LHS));
             graph.mapper.connect(
-                waveMult, b[0], Connections::typeArgument<MacroTile>(NaryArgument::RHS));
+                waveMult, macroTileB, Connections::typeArgument<MacroTile>(NaryArgument::RHS));
             graph.mapper.connect(
                 waveMult, waveATag, Connections::typeArgument<WaveTile>(NaryArgument::LHS));
             graph.mapper.connect(
@@ -1297,6 +1292,17 @@ namespace rocRoller
                 return rt{*neighbourTag, Graph::Direction::Upstream};
             }
             return {};
+        }
+
+        int duplicateControlNode(KernelGraph& graph, int tag)
+        {
+            auto op = graph.control.addElement(graph.control.getElement(tag));
+            for(auto const& c : graph.mapper.getConnections(tag))
+            {
+                graph.mapper.connect(op, c.coordinate, c.connection);
+            }
+
+            return op;
         }
 
         void

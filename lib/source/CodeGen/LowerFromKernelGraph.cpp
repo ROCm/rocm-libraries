@@ -110,53 +110,64 @@ namespace rocRoller
                 // and filter out Unroll coordinates.
                 auto required = findRequiredCoordinates(targetTag, direction, m_graph);
                 auto unrolls  = filterCoordinates<Unroll>(required, m_graph);
-                if(unrolls.size() != 1)
+
+                if(unrolls.size() == 0)
                     return nullptr;
-                auto unroll = *unrolls.cbegin();
 
-                std::unordered_set<int> path;
-                if(direction == Graph::Direction::Downstream)
-                {
-                    path = m_graph.coordinates
-                               .path<Graph::Direction::Upstream>(required,
-                                                                 std::vector<int>{targetTag})
-                               .to<std::unordered_set>();
-                }
-                else
-                {
-                    path = m_graph.coordinates
-                               .path<Graph::Direction::Downstream>(required,
-                                                                   std::vector<int>{targetTag})
-                               .to<std::unordered_set>();
-                }
+                ExpressionPtr result = Expression::literal(0u);
 
-                // Find the parent of the Unroll that:
-                // 1. is in the load/store coordinate transform path
-                // 2. has a Stride edge connected to it
-                std::optional<int> maybeStrideTag;
-                auto               parents = m_graph.coordinates.parentNodes(unroll);
-                for(auto p : parents)
+                for(auto const& unroll : unrolls)
                 {
-                    if(path.contains(p))
+
+                    std::unordered_set<int> path;
+                    if(direction == Graph::Direction::Downstream)
                     {
-                        auto neighbours
-                            = m_graph.coordinates.getNeighbours(p, Graph::opposite(direction));
-                        for(auto neighbour : neighbours)
+                        path = m_graph.coordinates
+                                   .path<Graph::Direction::Upstream>(required,
+                                                                     std::vector<int>{targetTag})
+                                   .to<std::unordered_set>();
+                    }
+                    else
+                    {
+                        path = m_graph.coordinates
+                                   .path<Graph::Direction::Downstream>(required,
+                                                                       std::vector<int>{targetTag})
+                                   .to<std::unordered_set>();
+                    }
+
+                    // Find the parent of the Unroll that:
+                    // 1. is in the load/store coordinate transform path
+                    // 2. has a Stride edge connected to it
+                    std::optional<int> maybeStrideTag;
+                    auto               parents = m_graph.coordinates.parentNodes(unroll);
+                    for(auto p : parents)
+                    {
+                        if(path.contains(p))
                         {
-                            auto maybeStride = m_graph.coordinates.get<Stride>(neighbour);
-                            if(maybeStride)
-                                maybeStrideTag = neighbour;
+                            auto neighbours
+                                = m_graph.coordinates.getNeighbours(p, Graph::opposite(direction));
+                            for(auto neighbour : neighbours)
+                            {
+                                auto maybeStride = m_graph.coordinates.get<Stride>(neighbour);
+                                if(maybeStride
+                                   && m_context->registerTagManager()->hasExpression(neighbour))
+                                {
+                                    maybeStrideTag = neighbour;
+                                }
+                            }
                         }
                     }
+
+                    if(!maybeStrideTag)
+                        continue;
+
+                    auto [strideExpr, _dtype]
+                        = m_context->registerTagManager()->getExpression(*maybeStrideTag);
+
+                    result = result + coords.getCoordinate(unroll) * strideExpr;
                 }
 
-                if(!maybeStrideTag)
-                    return nullptr;
-
-                auto [strideExpr, _dtype]
-                    = m_context->registerTagManager()->getExpression(*maybeStrideTag);
-
-                return coords.getCoordinate(unroll) * strideExpr;
+                return result;
             }
 
             Generator<Instruction> getOffset(Register::ValuePtr& dst,
@@ -187,6 +198,7 @@ namespace rocRoller
 
                     m_context->getScopeManager()->addRegister(offsetTag);
                     m_context->registerTagManager()->addRegister(offsetTag, dst);
+                    expr = getOffsetExpr(offsetTag, coords);
                     co_return;
                 }
             }
@@ -1214,27 +1226,7 @@ namespace rocRoller
 
             Generator<Instruction> operator()(int tag, Multiply const& mult, Transformer coords)
             {
-                auto loads = m_graph.control.getOutputNodeIndices<Body>(tag).to<std::vector>();
-                AssertFatal(loads.size() == 2, "Multiply op needs two operands");
-
-                auto loadA = m_graph.control.getElement(loads[0]);
-                auto loadB = m_graph.control.getElement(loads[1]);
-
-                int sourceATag = -1;
-                if(isOperation<LoadTiled>(loadA))
-                    sourceATag = m_graph.mapper.get<User>(tag, 0);
-                else if(isOperation<LoadLDSTile>(loadA))
-                    sourceATag = m_graph.mapper.get<LDS>(loads[0]);
-
-                int sourceBTag = -1;
-                if(isOperation<LoadTiled>(loadB))
-                    sourceBTag = m_graph.mapper.get<User>(tag, 1);
-                else if(isOperation<LoadLDSTile>(loadB))
-                    sourceBTag = m_graph.mapper.get<LDS>(loads[1]);
-
-                AssertFatal(sourceATag > 0 && sourceBTag > 0, "User or LDS dimensions not found");
-
-                auto [waveATag, waveA] = m_graph.getDimension<WaveTile>(
+                auto [waveA_tag, waveA] = m_graph.getDimension<WaveTile>(
                     tag, Connections::typeArgument<WaveTile>(NaryArgument::LHS));
                 auto [waveBTag, waveB] = m_graph.getDimension<WaveTile>(
                     tag, Connections::typeArgument<WaveTile>(NaryArgument::RHS));
@@ -1243,44 +1235,6 @@ namespace rocRoller
                     tag, Connections::typeArgument<MacroTile>(NaryArgument::LHS));
                 auto [macBTag, macB] = m_graph.getDimension<MacroTile>(
                     tag, Connections::typeArgument<MacroTile>(NaryArgument::RHS));
-
-                auto nWaveAYTags
-                    = m_graph.coordinates
-                          .findNodes(sourceATag,
-                                     [&](int index) -> bool {
-                                         auto node = m_graph.coordinates.get<WaveTileNumber>(index);
-                                         if(node)
-                                             return node->dim == 1;
-                                         return false;
-                                     })
-                          .to<std::vector>();
-                AssertFatal(nWaveAYTags.size() == 1);
-
-                auto nWaveBXTags
-                    = m_graph.coordinates
-                          .findNodes(sourceBTag,
-                                     [&](int index) -> bool {
-                                         auto node = m_graph.coordinates.get<WaveTileNumber>(index);
-                                         if(node)
-                                             return node->dim == 0;
-                                         return false;
-                                     })
-                          .to<std::vector>();
-                AssertFatal(nWaveBXTags.size() == 1);
-
-                auto loadAB = m_graph.control.getOutputNodeIndices<Body>(tag).to<std::set>();
-
-                Register::ValuePtr macOffsetXReg, waveOffsetXReg;
-                ExpressionPtr      macOffsetXExpr, waveOffsetXExpr;
-                co_yield getOffset(macOffsetXReg, macOffsetXExpr, coords, loads[0], -1);
-                co_yield getOffset(waveOffsetXReg, waveOffsetXExpr, coords, loads[0], 0);
-                AssertFatal(waveOffsetXReg, "Invalid wave x offset register.");
-
-                Register::ValuePtr macOffsetYReg, waveOffsetYReg;
-                ExpressionPtr      macOffsetYExpr, waveOffsetYExpr;
-                co_yield getOffset(macOffsetYReg, macOffsetYExpr, coords, loads[1], -1);
-                co_yield getOffset(waveOffsetYReg, waveOffsetYExpr, coords, loads[1], 0);
-                AssertFatal(waveOffsetYReg, "Invalid wave y offset register.");
 
                 AssertFatal(macA.sizes[1] == macB.sizes[0], "MacroTile size mismatch.");
 
@@ -1294,85 +1248,17 @@ namespace rocRoller
                 auto D = m_context->registerTagManager()->getRegister(
                     DTag, Register::Type::Accumulator, DataType::Float, num_agpr);
 
-                auto completed = m_completedControlNodes;
+                waveA.vgpr = m_context->registerTagManager()->getRegister(macATag);
+                waveB.vgpr = m_context->registerTagManager()->getRegister(macBTag);
 
-                // D is not initialized here
+                Expression::ExpressionPtr A
+                    = std::make_shared<Expression::Expression>(std::make_shared<WaveTile>(waveA));
+                Expression::ExpressionPtr B
+                    = std::make_shared<Expression::Expression>(std::make_shared<WaveTile>(waveB));
 
-                if(macOffsetXReg)
-                    co_yield copy(waveOffsetXReg, macOffsetXReg);
-                if(macOffsetYReg)
-                    co_yield copy(waveOffsetYReg, macOffsetYReg);
-
-                // saving the offsets to be restored for each macrotile in LDS
-                // TODO : Need more design thought (how to seed an offset register)
-                auto resetOffsetX = waveOffsetXReg->placeholder();
-                if(isOperation<LoadLDSTile>(loadA))
-                    co_yield copy(resetOffsetX, waveOffsetXReg);
-
-                // TODO : Need more design thought (how to seed an offset register)
-                auto resetOffsetY = waveOffsetYReg->placeholder();
-                if(isOperation<LoadLDSTile>(loadB))
-                    co_yield copy(resetOffsetY, waveOffsetYReg);
-
-                Register::ValuePtr waveStrideXReg, waveStrideYReg;
-                co_yield generateStride(waveStrideXReg, loads[0], 0);
-                co_yield generateStride(waveStrideYReg, loads[1], 0);
-
-                AssertFatal(waveStrideXReg, "Invalid WAVE X stride register.");
-                AssertFatal(waveStrideYReg, "Invalid WAVE Y stride register.");
-
-                uint const numWaveTiles = macA.sizes[1] / waveA.sizes[1];
-                for(uint k = 0; k < numWaveTiles; k++)
-                {
-                    m_completedControlNodes = completed; // TODO: remove this?
-
-                    // A WaveTile number; tall-skinny column block
-                    coords.setCoordinate(nWaveAYTags.front(), literal(k));
-                    // B WaveTile number; short-fat row block
-                    coords.setCoordinate(nWaveBXTags.front(), literal(k));
-
-                    co_yield generate(loadAB, coords);
-
-                    waveA.vgpr = m_context->registerTagManager()->getRegister(macATag);
-                    waveB.vgpr = m_context->registerTagManager()->getRegister(macBTag);
-
-                    Expression::ExpressionPtr A = std::make_shared<Expression::Expression>(
-                        std::make_shared<WaveTile>(waveA));
-                    Expression::ExpressionPtr B = std::make_shared<Expression::Expression>(
-                        std::make_shared<WaveTile>(waveB));
-
-                    std::vector<Generator<Instruction>> generators;
-                    generators.push_back(
-                        generate(D,
-                                 std::make_shared<Expression::Expression>(
-                                     Expression::MatrixMultiply(A, B, D->expression()))));
-
-                    if((k + 1) < numWaveTiles)
-                    {
-                        generators.push_back(
-                            generate(waveOffsetXReg,
-                                     waveOffsetXReg->expression() + waveStrideXReg->expression()));
-
-                        generators.push_back(
-                            generate(waveOffsetYReg,
-                                     waveOffsetYReg->expression() + waveStrideYReg->expression()));
-                    }
-                    else
-                    {
-                        // Last iteration.  Restoring the offset registers just needs to happen after the load from LDS.
-                        // TODO : Need more design thought (how to seed an offset register)
-                        if(isOperation<LoadLDSTile>(loadA))
-                            generators.push_back(copy(waveOffsetXReg, resetOffsetX));
-                        // TODO : Need more design thought (how to seed an offset register)
-                        if(isOperation<LoadLDSTile>(loadB))
-                            generators.push_back(copy(waveOffsetYReg, resetOffsetY));
-                    }
-
-                    auto proc      = Settings::getInstance()->get(Settings::Scheduler);
-                    auto scheduler = Component::GetNew<Scheduling::Scheduler>(
-                        proc, Scheduling::CostProcedure::MinNops, m_context);
-                    co_yield (*scheduler)(generators);
-                }
+                co_yield generate(D,
+                                  std::make_shared<Expression::Expression>(
+                                      Expression::MatrixMultiply(A, B, D->expression())));
             }
 
             Generator<Instruction>

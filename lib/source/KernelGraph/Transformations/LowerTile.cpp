@@ -17,14 +17,6 @@ namespace rocRoller
 
         // These functions are declared in AddLDS.cpp
         void addLDSOps(KernelGraph& graph, std::shared_ptr<Context> context, int tag);
-        void addLoadWaveLDSOps(KernelGraph&                       graph,
-                               std::shared_ptr<CommandParameters> params,
-                               std::shared_ptr<Context>           context,
-                               int                                tile,
-                               int                                load,
-                               int                                forK,
-                               int                                K,
-                               int                                waveMult);
         void addStoreWaveLDSOps(KernelGraph&                       graph,
                                 std::shared_ptr<CommandParameters> params,
                                 std::shared_ptr<Context>           context,
@@ -150,6 +142,16 @@ namespace rocRoller
             std::shared_ptr<CommandParameters> m_params;
         };
 
+        void duplicateMacroTile(KernelGraph& graph, int load)
+        {
+            auto original = graph.mapper.get<MacroTile>(load);
+            auto newMacroTile
+                = graph.coordinates.addElement(graph.coordinates.getElement(original));
+            graph.coordinates.addElement(PassThrough(), {newMacroTile}, {original});
+            graph.mapper.disconnect<MacroTile>(load, original);
+            graph.mapper.connect<MacroTile>(load, newMacroTile);
+        }
+
         /**
          * Lower rank-2 TensorContraction into a matrix multiply.
          */
@@ -253,10 +255,6 @@ namespace rocRoller
             graph.coordinates.addElement(PassThrough(), {b_tilenum_x}, {K});
 
             // TODO : create helper functions to make this lowering modular and readable.
-            auto waveMult = graph.control.addElement(Multiply());
-
-            graph.mapper.connect(
-                waveMult, d, Connections::typeArgument<MacroTile>(NaryArgument::DEST));
 
             auto [waveA_tag, waveA] = graph.getDimension<WaveTile>(loadA[0]);
             auto [waveB_tag, waveB] = graph.getDimension<WaveTile>(loadB[0]);
@@ -270,9 +268,68 @@ namespace rocRoller
             graph.mapper.connect(initD, d, NaryArgument::DEST);
 
             graph.control.addElement(Sequence(), {initD}, {forK});
-            graph.control.addElement(Body(), {forK}, {waveMult});
-            graph.control.addElement(Body(), {waveMult}, {loadA[0]});
-            graph.control.addElement(Body(), {waveMult}, {loadB[0]});
+
+            auto waveTileNumYA
+                = graph.coordinates
+                      .findNodes(graph.mapper.get<User>(loadA[0]),
+                                 [&](int index) -> bool {
+                                     auto node = graph.coordinates.get<WaveTileNumber>(index);
+                                     if(node)
+                                         return node->dim == 1;
+                                     return false;
+                                 })
+                      .to<std::vector>();
+            AssertFatal(waveTileNumYA.size() == 1);
+
+            auto waveTileNumXB
+                = graph.coordinates
+                      .findNodes(graph.mapper.get<User>(loadB[0]),
+                                 [&](int index) -> bool {
+                                     auto node = graph.coordinates.get<WaveTileNumber>(index);
+                                     if(node)
+                                         return node->dim == 0;
+                                     return false;
+                                 })
+                      .to<std::vector>();
+            AssertFatal(waveTileNumXB.size() == 1);
+
+            // Add an unroll dimension that connects to both A's WaveTileNumber[1] and B's
+            // WaveTileNumber[0]. This is because we are unrolling the "small k" loop.
+            uint const num_wave_tiles = macrotile_a.sizes[1] / waveA.sizes[1];
+            auto       smallKUnroll   = graph.coordinates.addElement(Unroll(num_wave_tiles));
+            graph.coordinates.addElement(PassThrough(), {waveTileNumYA[0]}, {smallKUnroll});
+            graph.coordinates.addElement(PassThrough(), {waveTileNumXB[0]}, {smallKUnroll});
+
+            int lastWaveMult = -1;
+            for(uint k = 0; k < num_wave_tiles; k++)
+            {
+                auto setCoord = graph.control.addElement(SetCoordinate(literal(k)));
+                graph.mapper.connect<Unroll>(setCoord, smallKUnroll);
+                graph.control.addElement(Body(), {forK}, {setCoord});
+
+                auto newLoadA = duplicateControlNode(graph, loadA[0]);
+                if(k != 0)
+                    duplicateMacroTile(graph, newLoadA);
+                graph.control.addElement(Body(), {setCoord}, {newLoadA});
+
+                auto newLoadB = duplicateControlNode(graph, loadB[0]);
+                if(k != 0)
+                    duplicateMacroTile(graph, newLoadB);
+                graph.control.addElement(Body(), {setCoord}, {newLoadB});
+
+                auto waveMult = graph.control.addElement(Multiply());
+                graph.mapper.connect(
+                    waveMult, d, Connections::typeArgument<MacroTile>(NaryArgument::DEST));
+
+                graph.control.addElement(Sequence(), {setCoord}, {waveMult});
+
+                addConnectionsMultiply(graph, waveMult, newLoadA, newLoadB);
+
+                if(lastWaveMult >= 0)
+                    graph.control.addElement(Sequence(), {lastWaveMult}, {waveMult});
+
+                lastWaveMult = waveMult;
+            }
 
             // connect ops after contraction to for loop, remove contraction and its incoming edges
             auto tensor_outgoing_edges
@@ -392,7 +449,9 @@ namespace rocRoller
                 addStoreWaveLDSOps(graph, params, context, d, storeD, forWaveTilesX);
             }
 
-            addConnectionsMultiply(graph, waveMult);
+            // Delete original loadA and loadB.
+            graph.control.deleteElement(loadA[0]);
+            graph.control.deleteElement(loadB[0]);
         }
 
         KernelGraph lowerTile(KernelGraph                        graph,

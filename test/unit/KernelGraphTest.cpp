@@ -1659,6 +1659,10 @@ namespace KernelGraphTest
 
         auto kgraph1 = lowerTile(kgraph0, params, m_context);
 
+        // Verify the number of Multiply nodes in the graph after lowerTile
+        auto multiplyNodes = kgraph1.control.getNodes<Multiply>().to<std::vector>();
+        EXPECT_EQ(multiplyNodes.size(), mac_k / wave_k);
+
         auto kgraph_unrolled = unrollLoops(kgraph1, m_context);
 
         // Verify that loops have been unrolled
@@ -1690,7 +1694,7 @@ namespace KernelGraphTest
         // Verify number of Deallocates
         auto kgraph2        = addDeallocate(kgraph1);
         auto addDeallocates = kgraph2.control.getNodes<Deallocate>().to<std::vector>();
-        EXPECT_EQ(addDeallocates.size(), 9);
+        EXPECT_EQ(addDeallocates.size(), 11);
 
         unrolled_kgraph_lds = addLDS(kgraph_fused, m_context);
         auto fusedStoreLDS = unrolled_kgraph_lds.control.getNodes<StoreLDSTile>().to<std::vector>();

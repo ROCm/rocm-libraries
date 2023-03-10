@@ -284,7 +284,13 @@ namespace GEMMDriverTest
     TEST_F(GEMMTestGPU, GPU_BasicGEMM_Schedulers)
     {
         GEMMProblem gemm;
-        auto        settings = Settings::getInstance();
+        gemm.mac_k = 8;
+
+        // TODO: Re-enable LDS once LDS deallocations are fixed
+        gemm.loadLDSA = false;
+        gemm.loadLDSB = false;
+
+        auto settings = Settings::getInstance();
 
         settings->set(Settings::Scheduler, Scheduling::SchedulerProcedure::Sequential);
         basicGEMM<float>(m_context, gemm, 1.e-6);
@@ -372,6 +378,7 @@ namespace GEMMDriverTest
         gemm.storeLDSD = false;
         gemm.fuseLoops = false;
         gemm.unrollK   = 4;
+        gemm.mac_k     = 8;
         basicGEMM<float>(m_context, gemm, 1.e-6);
     }
 

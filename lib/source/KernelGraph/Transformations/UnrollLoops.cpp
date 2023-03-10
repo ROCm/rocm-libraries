@@ -36,7 +36,7 @@ namespace rocRoller
          */
         std::vector<int> duplicateControlNodes(KernelGraph&                   graph,
                                                GraphReindexer&                reindexer,
-                                               std::set<int> const&           startNodes,
+                                               std::vector<int> const&        startNodes,
                                                std::unordered_set<int> const& dontDuplicate)
 
         {
@@ -206,17 +206,21 @@ namespace rocRoller
          *
          * then we take a giant leap of faith and say that it
          * doesn't have loop-carried-dependencies.
+         *
+         * Returns a map with a coordinate node as a key and a list of
+         * every control node that uses that coordinate node as its value.
          */
-        std::optional<std::vector<LoopCarriedDependency>>
-            findLoopCarriedDependencies(KernelGraph const& kgraph, int forLoop)
+        std::map<int, std::vector<int>> findLoopCarriedDependencies(KernelGraph const& kgraph,
+                                                                    int                forLoop)
         {
             using RW = ControlFlowRWTracer::ReadWrite;
+            std::map<int, std::vector<int>> result;
 
             rocRoller::Log::getLogger()->debug("KernelGraph::findLoopDependencies({})", forLoop);
 
             auto maybeTopForLoopCoord = getForLoopCoordinate(kgraph, forLoop);
             if(!maybeTopForLoopCoord)
-                return {};
+                return result;
             auto topForLoopCoord = *maybeTopForLoopCoord;
 
             ControlFlowRWTracer tracer(kgraph, true);
@@ -304,7 +308,6 @@ namespace rocRoller
             }
 
             // For the loop-carried-depencies, find the write operation.
-            std::vector<LoopCarriedDependency> rv;
             for(auto coordinate : loopCarriedDependencies)
             {
                 for(auto x : readwrite)
@@ -312,11 +315,11 @@ namespace rocRoller
                     if(x.coordinate != coordinate)
                         continue;
                     if(x.rw == RW::WRITE || x.rw == RW::READWRITE)
-                        rv.push_back({coordinate, x.control});
+                        result[coordinate].push_back(x.control);
                 }
             }
 
-            return rv;
+            return result;
         }
 
         /**
@@ -344,33 +347,15 @@ namespace rocRoller
          *     OperA       OperB
          *
          */
-        void makeSequential(KernelGraph& graph, std::vector<int>& sequentialOperations)
+        void makeSequential(KernelGraph&                         graph,
+                            const std::vector<std::vector<int>>& sequentialOperations)
         {
-            std::vector<int> setCoordinateChain;
-            for(auto op : sequentialOperations)
+            for(int i = 0; i < sequentialOperations.size() - 1; i++)
             {
-                auto maybeSetCoordinate = findContainingOperation<SetCoordinate>(op, graph);
-                AssertFatal(maybeSetCoordinate, "Can't find containing SetCoordinate");
-
-                auto setCoordinate  = *maybeSetCoordinate;
-                auto destCoordinate = graph.mapper.get<Unroll>(setCoordinate);
-                auto incomingEdge   = *only(graph.control.getNeighbours<GD::Upstream>(op));
-
-                graph.control.deleteElement(incomingEdge);
-
-                auto setCoordinateNode = *graph.control.get<SetCoordinate>(setCoordinate);
-                auto newSetCoordinate  = graph.control.addElement(setCoordinateNode);
-                graph.mapper.connect<Unroll>(newSetCoordinate, destCoordinate);
-
-                graph.control.addElement(Sequence(), {setCoordinate}, {newSetCoordinate});
-                graph.control.addElement(Body(), {newSetCoordinate}, {op});
-
-                setCoordinateChain.push_back(newSetCoordinate);
+                graph.control.addElement(Sequence(),
+                                         {sequentialOperations[i].back()},
+                                         {sequentialOperations[i + 1].front()});
             }
-
-            for(int i = 1; i < setCoordinateChain.size(); ++i)
-                graph.control.addElement(
-                    Sequence(), {setCoordinateChain[i - 1]}, {setCoordinateChain[i]});
         }
 
         struct UnrollLoopsVisitor : public BaseGraphVisitor
@@ -391,17 +376,15 @@ namespace rocRoller
             {
                 copyOperation(graph, original, reindexer, tag);
                 auto newTag = reindexer.control.at(tag);
-                auto bodies = graph.control.getOutputNodeIndices<Body>(newTag).to<std::set>();
+                auto bodies = graph.control.getOutputNodeIndices<Body>(newTag).to<std::vector>();
 
                 auto unrollAmount = getUnrollAmount(graph, newTag, m_context->kernelOptions());
                 if(unrollAmount == 1)
                     return;
 
-                auto maybeLoopCarriedDependencies = findLoopCarriedDependencies(original, tag);
-                if(!maybeLoopCarriedDependencies)
+                auto loopCarriedDependencies = findLoopCarriedDependencies(original, tag);
+                if(loopCarriedDependencies.empty())
                     return;
-
-                auto loopCarriedDependencies = *maybeLoopCarriedDependencies;
 
                 // TODO: Iron out storage node duplication
                 //
@@ -424,9 +407,9 @@ namespace rocRoller
                 }
 
                 std::unordered_set<int> dontDuplicate;
-                for(auto const& dep : loopCarriedDependencies)
+                for(auto const& [coord, controls] : loopCarriedDependencies)
                 {
-                    dontDuplicate.insert(dep.coordinate);
+                    dontDuplicate.insert(coord);
                 }
 
                 // ---------------------------------
@@ -497,7 +480,8 @@ namespace rocRoller
 
                 // Delete edges between original ForLoopOp and original loop body
                 for(auto const& child :
-                    graph.control.getNeighbours<Graph::Direction::Downstream>(newTag))
+                    graph.control.getNeighbours<Graph::Direction::Downstream>(newTag)
+                        .to<std::vector>())
                 {
                     if(isEdge<Body>(graph.control.getElement(child)))
                     {
@@ -507,46 +491,101 @@ namespace rocRoller
 
                 // Function for adding a SetCoordinate node inbetween the ForLoop
                 // and a list of nodes.
-                auto connectWithSetCoord = [&](auto const& toConnect, unsigned int coordValue) {
-                    auto setCoord
-                        = graph.control.addElement(SetCoordinate(Expression::literal(coordValue)));
-                    graph.mapper.connect<Unroll>(setCoord, unrollDimension);
-                    graph.control.addElement(Body(), {newTag}, {setCoord});
+                auto connectWithSetCoord = [&](const auto& toConnect, unsigned int coordValue) {
+                    int sharedSetCoord = -1;
                     for(auto const& body : toConnect)
                     {
-                        graph.control.addElement(Body(), {setCoord}, {body});
+                        if(!graph.control.get<SetCoordinate>(body))
+                        {
+                            // Only add a new SetCoordinate node if none of the nodes in toConnect
+                            // are SetCoordinate nodes.
+                            sharedSetCoord = graph.control.addElement(
+                                SetCoordinate(Expression::literal(coordValue)));
+                            graph.mapper.connect<Unroll>(sharedSetCoord, unrollDimension);
+                            graph.control.addElement(Body(), {newTag}, {sharedSetCoord});
+                            break;
+                        }
+                    }
+
+                    for(auto const& body : toConnect)
+                    {
+                        if(!graph.control.get<SetCoordinate>(body))
+                        {
+                            // If the node is not a SetCoordinate, connect it to the sharedSetCoord
+                            graph.control.addElement(Body(), {sharedSetCoord}, {body});
+                        }
+                        else
+                        {
+                            // If body is a SetCoordinate, Move all Sequence edges that were originally leaving
+                            // from body to be leaving from the new setCoord instead
+                            auto setCoord = graph.control.addElement(
+                                SetCoordinate(Expression::literal(coordValue)));
+                            graph.mapper.connect<Unroll>(setCoord, unrollDimension);
+                            graph.control.addElement(Body(), {newTag}, {setCoord});
+                            graph.control.addElement(Body(), {setCoord}, {body});
+
+                            for(auto const& child :
+                                graph.control.getOutputNodeIndices<Sequence>(body)
+                                    .template to<std::vector>())
+                            {
+                                graph.control.addElement(Sequence(), {setCoord}, {child});
+                                graph.control.deleteElement<Sequence>(std::vector<int>{body},
+                                                                      std::vector<int>{child});
+                            }
+                        }
                     }
                 };
 
-                // Add setCoordinate nodes to original body
-                connectWithSetCoord(bodies, 0u);
+                std::vector<std::vector<int>> duplicatedBodies;
 
                 // ------------------------------
-                // Create duplicates of the loop body and add a setCoordinate node in between
-                // the ForLoopOp and the new bodies
-
-                std::map<int, std::vector<int>> sequentialOperations;
-                for(unsigned int i = 1; i < unrollAmount; i++)
+                // Create duplicates of the loop body and populate the sequentialOperations
+                // data structure. sequentialOperations is a map that uses a coordinate with
+                // a loop carried dependency as a key and contains a vector of vectors
+                // with every control node that uses that coordinate in each new body of the loop.
+                std::map<int, std::vector<std::vector<int>>> sequentialOperations;
+                for(unsigned int i = 0; i < unrollAmount; i++)
                 {
                     GraphReindexer unrollReindexer;
 
-                    auto newBodies
-                        = duplicateControlNodes(graph, unrollReindexer, bodies, dontDuplicate);
-                    connectWithSetCoord(newBodies, i);
+                    if(i == 0)
+                        duplicatedBodies.push_back(bodies);
+                    else
+                        duplicatedBodies.push_back(
+                            duplicateControlNodes(graph, unrollReindexer, bodies, dontDuplicate));
 
-                    for(auto const& dep : loopCarriedDependencies)
+                    for(auto const& [coord, controls] : loopCarriedDependencies)
                     {
-                        auto newOp = reindexer.control.at(dep.control);
-                        auto dupOp = unrollReindexer.control.at(newOp);
-                        sequentialOperations[newOp].push_back(dupOp);
+                        std::vector<int> dupControls;
+                        for(auto const& control : controls)
+                        {
+                            auto newOp = reindexer.control.at(control);
+                            if(i == 0)
+                            {
+                                dupControls.push_back(newOp);
+                            }
+                            else
+                            {
+                                auto dupOp = unrollReindexer.control.at(newOp);
+                                dupControls.push_back(dupOp);
+                            }
+                        }
+                        sequentialOperations[coord].emplace_back(std::move(dupControls));
                     }
                 }
 
-                for(auto [first, remaining] : sequentialOperations)
+                // Connect the duplicated bodies to the loop, adding SetCoordinate nodes
+                // as needed.
+                for(int i = 0; i < unrollAmount; i++)
                 {
-                    std::vector<int> operations = {first};
-                    std::copy(remaining.cbegin(), remaining.cend(), std::back_inserter(operations));
-                    makeSequential(graph, operations);
+                    connectWithSetCoord(duplicatedBodies[i], i);
+                }
+
+                // If there are any loop carried dependencies, add Sequence nodes
+                // between the control nodes with dependencies.
+                for(auto [coord, allControls] : sequentialOperations)
+                {
+                    makeSequential(graph, allControls);
                 }
             }
         };

@@ -76,11 +76,32 @@ namespace rocRoller
                     bodiesWithMultiply.push_back(body);
 
                     auto loads
-                        = graph.control.getOutputNodeIndices<Body>(firstMultiply).to<std::vector>();
-                    AssertFatal(loads.size() == 2, "Multiply op needs two operands");
+                        = graph.control
+                              .findNodes(
+                                  body,
+                                  [&](int tag) -> bool {
+                                      return isOperation<LoadTiled>(graph.control.getElement(tag));
+                                  },
+                                  Graph::Direction::Downstream)
+                              .to<std::vector>();
 
-                    loadAs.push_back(loads[0]);
-                    loadBs.push_back(loads[1]);
+                    for(auto const& load : loads)
+                    {
+                        auto macroTileTag = graph.mapper.get<MacroTile>(load);
+                        auto macroTile    = graph.coordinates.getNode<MacroTile>(macroTileTag);
+                        if(macroTile.layoutType == LayoutType::MATRIX_A)
+                        {
+                            loadAs.push_back(load);
+                        }
+                        else if(macroTile.layoutType == LayoutType::MATRIX_B)
+                        {
+                            loadBs.push_back(load);
+                        }
+                        else
+                        {
+                            Throw<FatalError>("Unsupported layout type for matrix multiply loads");
+                        }
+                    }
                 }
 
                 if(bodiesWithMultiply.empty())
