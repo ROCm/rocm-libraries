@@ -73,9 +73,12 @@ class CXXCompiler(object):
             self.verify_supported = self.hasCompileFlag(['-Xclang',
                                         '-verify-ignore-unexpected'])
             if self.verify_supported:
+                ignore_unexpected_types='note'
+                if self.type=='hipcc':
+                    ignore_unexpected_types+=',error'
                 self.verify_flags = [
                     '-Xclang', '-verify',
-                    '-Xclang', '-verify-ignore-unexpected=note',
+                    '-Xclang', '-verify-ignore-unexpected='+ignore_unexpected_types,
                     '-ferror-limit=1024'
                 ]
         return self.verify_supported

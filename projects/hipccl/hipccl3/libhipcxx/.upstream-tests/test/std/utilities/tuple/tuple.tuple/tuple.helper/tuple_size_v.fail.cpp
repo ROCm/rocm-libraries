@@ -38,7 +38,7 @@ int main(int, char**)
   (void) cuda::std::tuple_size_v<cuda::std::tuple<>&>; // nvcc-lit-note {{requested here}}
   (void) cuda::std::tuple_size_v<int>; // nvcc-lit-note {{requested here}}
   (void) cuda::std::tuple_size_v<cuda::std::tuple<>*>; // nvcc-lit-note {{requested here}}
-  // nvcc-lit-error@tuple:* 3 {{implicit instantiation of undefined template}}
+  // expected-error@tuple:* 3 {{implicit instantiation of undefined template}}
 
   return 0;
 }
