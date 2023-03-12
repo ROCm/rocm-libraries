@@ -83,7 +83,7 @@
 //     integral operator^=(integral op);
 // };
 
-#include <atomic>
+#include "gpu/atomic"
 #include <new>
 #include <cassert>
 
@@ -101,13 +101,13 @@ do_test()
     ((void)b0); // mark as unused
     obj.store(T(0));
     assert(obj == T(0));
-    obj.store(T(1), std::memory_order_release);
+    obj.store(T(1), gpu::memory_order_release);
     assert(obj == T(1));
     assert(obj.load() == T(1));
-    assert(obj.load(std::memory_order_acquire) == T(1));
+    assert(obj.load(gpu::memory_order_acquire) == T(1));
     assert(obj.exchange(T(2)) == T(1));
     assert(obj == T(2));
-    assert(obj.exchange(T(3), std::memory_order_relaxed) == T(2));
+    assert(obj.exchange(T(3), gpu::memory_order_relaxed) == T(2));
     assert(obj == T(3));
     T x = obj;
     assert(cmpxchg_weak_loop(obj, x, T(2)) == true);
@@ -163,60 +163,60 @@ void test()
 
 int main(int, char**)
 {
-    test<std::atomic_char, char>();
-    test<std::atomic_schar, signed char>();
-    test<std::atomic_uchar, unsigned char>();
-    test<std::atomic_short, short>();
-    test<std::atomic_ushort, unsigned short>();
-    test<std::atomic_int, int>();
-    test<std::atomic_uint, unsigned int>();
-    test<std::atomic_long, long>();
-    test<std::atomic_ulong, unsigned long>();
-    test<std::atomic_llong, long long>();
-    test<std::atomic_ullong, unsigned long long>();
+    test<gpu::atomic_char, char>();
+    test<gpu::atomic_schar, signed char>();
+    test<gpu::atomic_uchar, unsigned char>();
+    test<gpu::atomic_short, short>();
+    test<gpu::atomic_ushort, unsigned short>();
+    test<gpu::atomic_int, int>();
+    test<gpu::atomic_uint, unsigned int>();
+    test<gpu::atomic_long, long>();
+    test<gpu::atomic_ulong, unsigned long>();
+    test<gpu::atomic_llong, long long>();
+    test<gpu::atomic_ullong, unsigned long long>();
 #if TEST_STD_VER > 17 && defined(__cpp_char8_t)
-    test<std::atomic_char8_t, char8_t>();
+    test<gpu::atomic_char8_t, char8_t>();
 #endif
-    test<std::atomic_char16_t, char16_t>();
-    test<std::atomic_char32_t, char32_t>();
+    test<gpu::atomic_char16_t, char16_t>();
+    test<gpu::atomic_char32_t, char32_t>();
 #ifndef TEST_HAS_NO_WIDE_CHARACTERS
-    test<std::atomic_wchar_t, wchar_t>();
+    test<gpu::atomic_wchar_t, wchar_t>();
 #endif
 
-    test<std::atomic_int8_t,    int8_t>();
-    test<std::atomic_uint8_t,  uint8_t>();
-    test<std::atomic_int16_t,   int16_t>();
-    test<std::atomic_uint16_t, uint16_t>();
-    test<std::atomic_int32_t,   int32_t>();
-    test<std::atomic_uint32_t, uint32_t>();
-    test<std::atomic_int64_t,   int64_t>();
-    test<std::atomic_uint64_t, uint64_t>();
+    test<gpu::atomic_int8_t,    int8_t>();
+    test<gpu::atomic_uint8_t,  uint8_t>();
+    test<gpu::atomic_int16_t,   int16_t>();
+    test<gpu::atomic_uint16_t, uint16_t>();
+    test<gpu::atomic_int32_t,   int32_t>();
+    test<gpu::atomic_uint32_t, uint32_t>();
+    test<gpu::atomic_int64_t,   int64_t>();
+    test<gpu::atomic_uint64_t, uint64_t>();
 
-    test<volatile std::atomic_char, char>();
-    test<volatile std::atomic_schar, signed char>();
-    test<volatile std::atomic_uchar, unsigned char>();
-    test<volatile std::atomic_short, short>();
-    test<volatile std::atomic_ushort, unsigned short>();
-    test<volatile std::atomic_int, int>();
-    test<volatile std::atomic_uint, unsigned int>();
-    test<volatile std::atomic_long, long>();
-    test<volatile std::atomic_ulong, unsigned long>();
-    test<volatile std::atomic_llong, long long>();
-    test<volatile std::atomic_ullong, unsigned long long>();
-    test<volatile std::atomic_char16_t, char16_t>();
-    test<volatile std::atomic_char32_t, char32_t>();
+    test<volatile gpu::atomic_char, char>();
+    test<volatile gpu::atomic_schar, signed char>();
+    test<volatile gpu::atomic_uchar, unsigned char>();
+    test<volatile gpu::atomic_short, short>();
+    test<volatile gpu::atomic_ushort, unsigned short>();
+    test<volatile gpu::atomic_int, int>();
+    test<volatile gpu::atomic_uint, unsigned int>();
+    test<volatile gpu::atomic_long, long>();
+    test<volatile gpu::atomic_ulong, unsigned long>();
+    test<volatile gpu::atomic_llong, long long>();
+    test<volatile gpu::atomic_ullong, unsigned long long>();
+    test<volatile gpu::atomic_char16_t, char16_t>();
+    test<volatile gpu::atomic_char32_t, char32_t>();
 #ifndef TEST_HAS_NO_WIDE_CHARACTERS
-    test<volatile std::atomic_wchar_t, wchar_t>();
+    test<volatile gpu::atomic_wchar_t, wchar_t>();
 #endif
 
-    test<volatile std::atomic_int8_t,    int8_t>();
-    test<volatile std::atomic_uint8_t,  uint8_t>();
-    test<volatile std::atomic_int16_t,   int16_t>();
-    test<volatile std::atomic_uint16_t, uint16_t>();
-    test<volatile std::atomic_int32_t,   int32_t>();
-    test<volatile std::atomic_uint32_t, uint32_t>();
-    test<volatile std::atomic_int64_t,   int64_t>();
-    test<volatile std::atomic_uint64_t, uint64_t>();
+    test<volatile gpu::atomic_int8_t,    int8_t>();
+    test<volatile gpu::atomic_uint8_t,  uint8_t>();
+    test<volatile gpu::atomic_int16_t,   int16_t>();
+    test<volatile gpu::atomic_uint16_t, uint16_t>();
+    test<volatile gpu::atomic_int32_t,   int32_t>();
+    test<volatile gpu::atomic_uint32_t, uint32_t>();
+    test<volatile gpu::atomic_int64_t,   int64_t>();
+    test<volatile gpu::atomic_uint64_t, uint64_t>();
 
   return 0;
 }

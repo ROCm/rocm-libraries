@@ -11,7 +11,7 @@
 
 // <atomic>
 
-#include <atomic>
+#include "gpu/atomic"
 #include <cassert>
 
 struct throwing {
@@ -20,7 +20,7 @@ struct throwing {
 
 int main(int, char**) {
   try {
-    [[maybe_unused]] std::atomic<throwing> a;
+    [[maybe_unused]] gpu::atomic<throwing> a;
     assert(false);
   } catch (int x) {
     assert(x == 42);
