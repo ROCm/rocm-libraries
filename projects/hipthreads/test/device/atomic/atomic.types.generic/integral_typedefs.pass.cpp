@@ -40,8 +40,9 @@
 #include <type_traits>
 
 #include "test_macros.h"
+#include "kernel_launcher.h"
 
-int main(int, char**)
+__global__ void gmain()
 {
     static_assert((std::is_same<gpu::atomic<char>, gpu::atomic_char>::value), "");
     static_assert((std::is_same<gpu::atomic<signed char>, gpu::atomic_schar>::value), "");
@@ -75,6 +76,4 @@ int main(int, char**)
     static_assert((std::is_same<gpu::atomic<uint32_t>,  gpu::atomic_uint32_t>::value), "");
     static_assert((std::is_same<gpu::atomic<int64_t>,   gpu::atomic_int64_t>::value), "");
     static_assert((std::is_same<gpu::atomic<uint64_t>,  gpu::atomic_uint64_t>::value), "");
-
-  return 0;
 }

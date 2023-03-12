@@ -38,8 +38,9 @@
 #include <cstdint>
 
 #include "test_macros.h"
+#include "kernel_launcher.h"
 
-int main(int, char**)
+__global__ void gmain()
 {
     static_assert((std::is_same<gpu::atomic<  std::int_least8_t>,   gpu::atomic_int_least8_t>::value), "");
     static_assert((std::is_same<gpu::atomic< std::uint_least8_t>,  gpu::atomic_uint_least8_t>::value), "");
@@ -65,6 +66,4 @@ int main(int, char**)
     static_assert((std::is_same<gpu::atomic<std::ptrdiff_t>, gpu::atomic_ptrdiff_t>::value), "");
     static_assert((std::is_same<gpu::atomic< std::intmax_t>,  gpu::atomic_intmax_t>::value), "");
     static_assert((std::is_same<gpu::atomic<std::uintmax_t>, gpu::atomic_uintmax_t>::value), "");
-
-  return 0;
 }

@@ -55,8 +55,9 @@
 #include <cmpxchg_loop.h>
 
 #include "test_macros.h"
+#include "kernel_launcher.h"
 
-int main(int, char**)
+__global__ void gmain()
 {
     {
         volatile gpu::atomic<bool> obj(true);
@@ -218,6 +219,4 @@ int main(int, char**)
         assert(zero == false);
         zero.~A();
     }
-
-  return 0;
 }

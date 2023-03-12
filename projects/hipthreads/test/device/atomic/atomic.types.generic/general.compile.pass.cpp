@@ -58,13 +58,14 @@
 //  };
 
 #include "gpu/atomic"
+#include "hip/hip_runtime.h"
 #include <type_traits>
 
 #include "operator_hijacker.h"
 #include "test_macros.h"
 
 template <class T>
-void test() {
+__device__ void test() {
   T a;
   typename T::value_type v;
 #if TEST_STD_VER >= 20
@@ -94,7 +95,7 @@ void test() {
   // a.notify_all();
 }
 
-void test() {
+__global__ void test() {
   test<gpu::atomic<operator_hijacker>>();
   test<volatile gpu::atomic<operator_hijacker>>();
 }

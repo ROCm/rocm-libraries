@@ -72,9 +72,10 @@
 #include <cmpxchg_loop.h>
 
 #include "test_macros.h"
+#include "kernel_launcher.h"
 
 template <class A, class T>
-void
+__device__ void
 do_test()
 {
     typedef typename std::remove_pointer<T>::type X;
@@ -123,15 +124,13 @@ do_test()
 }
 
 template <class A, class T>
-void test()
+__device__ void test()
 {
     do_test<A, T>();
     do_test<volatile A, T>();
 }
 
-int main(int, char**)
+__global__ void gmain()
 {
     test<gpu::atomic<int*>, int*>();
-
-  return 0;
 }
