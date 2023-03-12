@@ -10,7 +10,7 @@
 
 // <atomic>
 
-#include <atomic>
+#include "gpu/atomic"
 #include <type_traits>
 #include <cassert>
 
@@ -20,7 +20,7 @@
 template <class Tp>
 struct CheckStandardLayout {
   void operator()() const {
-    typedef std::atomic<Tp> Atomic;
+    typedef gpu::atomic<Tp> Atomic;
     static_assert(std::is_standard_layout<Atomic>::value, "");
   }
 };

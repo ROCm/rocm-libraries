@@ -64,7 +64,7 @@
 //     T* operator-=(ptrdiff_t op);
 // };
 
-#include <atomic>
+#include "gpu/atomic"
 #include <new>
 #include <type_traits>
 #include <cassert>
@@ -84,13 +84,13 @@ do_test()
     ((void)b0); // mark as unused
     obj.store(T(0));
     assert(obj == T(0));
-    obj.store(T(1), std::memory_order_release);
+    obj.store(T(1), gpu::memory_order_release);
     assert(obj == T(1));
     assert(obj.load() == T(1));
-    assert(obj.load(std::memory_order_acquire) == T(1));
+    assert(obj.load(gpu::memory_order_acquire) == T(1));
     assert(obj.exchange(T(2)) == T(1));
     assert(obj == T(2));
-    assert(obj.exchange(T(3), std::memory_order_relaxed) == T(2));
+    assert(obj.exchange(T(3), gpu::memory_order_relaxed) == T(2));
     assert(obj == T(3));
     T x = obj;
     assert(cmpxchg_weak_loop(obj, x, T(2)) == true);
@@ -131,7 +131,7 @@ void test()
 
 int main(int, char**)
 {
-    test<std::atomic<int*>, int*>();
+    test<gpu::atomic<int*>, int*>();
 
   return 0;
 }

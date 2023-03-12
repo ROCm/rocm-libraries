@@ -48,7 +48,7 @@
 //
 // typedef atomic<bool> atomic_bool;
 
-#include <atomic>
+#include "gpu/atomic"
 #include <new>
 #include <cassert>
 
@@ -59,33 +59,33 @@
 int main(int, char**)
 {
     {
-        volatile std::atomic<bool> obj(true);
+        volatile gpu::atomic<bool> obj(true);
         assert(obj == true);
         bool b0 = obj.is_lock_free();
         (void)b0; // to placate scan-build
         obj.store(false);
         assert(obj == false);
-        obj.store(true, std::memory_order_release);
+        obj.store(true, gpu::memory_order_release);
         assert(obj == true);
         assert(obj.load() == true);
-        assert(obj.load(std::memory_order_acquire) == true);
+        assert(obj.load(gpu::memory_order_acquire) == true);
         assert(obj.exchange(false) == true);
         assert(obj == false);
-        assert(obj.exchange(true, std::memory_order_relaxed) == false);
+        assert(obj.exchange(true, gpu::memory_order_relaxed) == false);
         assert(obj == true);
         bool x = obj;
         assert(cmpxchg_weak_loop(obj, x, false) == true);
         assert(obj == false);
         assert(x == true);
         assert(obj.compare_exchange_weak(x, true,
-                                         std::memory_order_seq_cst) == false);
+                                         gpu::memory_order_seq_cst) == false);
         assert(obj == false);
         assert(x == false);
         obj.store(true);
         x = true;
         assert(cmpxchg_weak_loop(obj, x, false,
-                                 std::memory_order_seq_cst,
-                                 std::memory_order_seq_cst) == true);
+                                 gpu::memory_order_seq_cst,
+                                 gpu::memory_order_seq_cst) == true);
         assert(obj == false);
         assert(x == true);
         x = true;
@@ -94,14 +94,14 @@ int main(int, char**)
         assert(obj == false);
         assert(x == true);
         assert(obj.compare_exchange_strong(x, true,
-                                         std::memory_order_seq_cst) == false);
+                                         gpu::memory_order_seq_cst) == false);
         assert(obj == false);
         assert(x == false);
         x = true;
         obj.store(true);
         assert(obj.compare_exchange_strong(x, false,
-                                           std::memory_order_seq_cst,
-                                           std::memory_order_seq_cst) == true);
+                                           gpu::memory_order_seq_cst,
+                                           gpu::memory_order_seq_cst) == true);
         assert(obj == false);
         assert(x == true);
         assert((obj = false) == false);
@@ -110,33 +110,33 @@ int main(int, char**)
         assert(obj == true);
     }
     {
-        std::atomic<bool> obj(true);
+        gpu::atomic<bool> obj(true);
         assert(obj == true);
         bool b0 = obj.is_lock_free();
         (void)b0; // to placate scan-build
         obj.store(false);
         assert(obj == false);
-        obj.store(true, std::memory_order_release);
+        obj.store(true, gpu::memory_order_release);
         assert(obj == true);
         assert(obj.load() == true);
-        assert(obj.load(std::memory_order_acquire) == true);
+        assert(obj.load(gpu::memory_order_acquire) == true);
         assert(obj.exchange(false) == true);
         assert(obj == false);
-        assert(obj.exchange(true, std::memory_order_relaxed) == false);
+        assert(obj.exchange(true, gpu::memory_order_relaxed) == false);
         assert(obj == true);
         bool x = obj;
         assert(cmpxchg_weak_loop(obj, x, false) == true);
         assert(obj == false);
         assert(x == true);
         assert(obj.compare_exchange_weak(x, true,
-                                         std::memory_order_seq_cst) == false);
+                                         gpu::memory_order_seq_cst) == false);
         assert(obj == false);
         assert(x == false);
         obj.store(true);
         x = true;
         assert(cmpxchg_weak_loop(obj, x, false,
-                                 std::memory_order_seq_cst,
-                                 std::memory_order_seq_cst) == true);
+                                 gpu::memory_order_seq_cst,
+                                 gpu::memory_order_seq_cst) == true);
         assert(obj == false);
         assert(x == true);
         x = true;
@@ -145,14 +145,14 @@ int main(int, char**)
         assert(obj == false);
         assert(x == true);
         assert(obj.compare_exchange_strong(x, true,
-                                         std::memory_order_seq_cst) == false);
+                                         gpu::memory_order_seq_cst) == false);
         assert(obj == false);
         assert(x == false);
         x = true;
         obj.store(true);
         assert(obj.compare_exchange_strong(x, false,
-                                           std::memory_order_seq_cst,
-                                           std::memory_order_seq_cst) == true);
+                                           gpu::memory_order_seq_cst,
+                                           gpu::memory_order_seq_cst) == true);
         assert(obj == false);
         assert(x == true);
         assert((obj = false) == false);
@@ -161,33 +161,33 @@ int main(int, char**)
         assert(obj == true);
     }
     {
-        std::atomic_bool obj(true);
+        gpu::atomic_bool obj(true);
         assert(obj == true);
         bool b0 = obj.is_lock_free();
         (void)b0; // to placate scan-build
         obj.store(false);
         assert(obj == false);
-        obj.store(true, std::memory_order_release);
+        obj.store(true, gpu::memory_order_release);
         assert(obj == true);
         assert(obj.load() == true);
-        assert(obj.load(std::memory_order_acquire) == true);
+        assert(obj.load(gpu::memory_order_acquire) == true);
         assert(obj.exchange(false) == true);
         assert(obj == false);
-        assert(obj.exchange(true, std::memory_order_relaxed) == false);
+        assert(obj.exchange(true, gpu::memory_order_relaxed) == false);
         assert(obj == true);
         bool x = obj;
         assert(cmpxchg_weak_loop(obj, x, false) == true);
         assert(obj == false);
         assert(x == true);
         assert(obj.compare_exchange_weak(x, true,
-                                         std::memory_order_seq_cst) == false);
+                                         gpu::memory_order_seq_cst) == false);
         assert(obj == false);
         assert(x == false);
         obj.store(true);
         x = true;
         assert(cmpxchg_weak_loop(obj, x, false,
-                                 std::memory_order_seq_cst,
-                                 std::memory_order_seq_cst) == true);
+                                 gpu::memory_order_seq_cst,
+                                 gpu::memory_order_seq_cst) == true);
         assert(obj == false);
         assert(x == true);
         x = true;
@@ -196,14 +196,14 @@ int main(int, char**)
         assert(obj == false);
         assert(x == true);
         assert(obj.compare_exchange_strong(x, true,
-                                         std::memory_order_seq_cst) == false);
+                                         gpu::memory_order_seq_cst) == false);
         assert(obj == false);
         assert(x == false);
         x = true;
         obj.store(true);
         assert(obj.compare_exchange_strong(x, false,
-                                           std::memory_order_seq_cst,
-                                           std::memory_order_seq_cst) == true);
+                                           gpu::memory_order_seq_cst,
+                                           gpu::memory_order_seq_cst) == true);
         assert(obj == false);
         assert(x == true);
         assert((obj = false) == false);
@@ -212,7 +212,7 @@ int main(int, char**)
         assert(obj == true);
     }
     {
-        typedef std::atomic<bool> A;
+        typedef gpu::atomic<bool> A;
         TEST_ALIGNAS_TYPE(A) char storage[sizeof(A)] = {1};
         A& zero = *new (storage) A();
         assert(zero == false);

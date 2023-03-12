@@ -8,7 +8,7 @@
 
 // UNSUPPORTED: c++03, c++11, c++14, c++17
 
-#include <atomic>
+#include "gpu/atomic"
 #include <type_traits>
 
 #include "test_macros.h"
@@ -30,12 +30,13 @@ struct trivial {
 };
 
 void test() {
-  static_assert(test<std::atomic<bool>>());
-  static_assert(test<std::atomic<int>>());
-  static_assert(test<std::atomic<int*>>());
-  static_assert(test<std::atomic<trivial>>());
-  static_assert(test<std::atomic_flag>());
+  static_assert(test<gpu::atomic<bool>>());
+  static_assert(test<gpu::atomic<int>>());
+  static_assert(test<gpu::atomic<int*>>());
+  static_assert(test<gpu::atomic<trivial>>());
+  // TODO: uncomment after implementing gpu::atomic_flag
+  // static_assert(test<gpu::atomic_flag>());
 
-  static_assert(!std::is_nothrow_constructible_v<std::atomic<throwing>>);
-  ASSERT_NOT_NOEXCEPT(std::atomic<throwing>{});
+  static_assert(!std::is_nothrow_constructible_v<gpu::atomic<throwing>>);
+  ASSERT_NOT_NOEXCEPT(gpu::atomic<throwing>{});
 }

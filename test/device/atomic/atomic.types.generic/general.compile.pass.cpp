@@ -57,7 +57,7 @@
 //    void notify_all() noexcept;
 //  };
 
-#include <atomic>
+#include "gpu/atomic"
 #include <type_traits>
 
 #include "operator_hijacker.h"
@@ -68,9 +68,9 @@ void test() {
   T a;
   typename T::value_type v;
 #if TEST_STD_VER >= 20
-  std::memory_order m = std::memory_order::seq_cst;
+  gpu::memory_order m = gpu::memory_order::seq_cst;
 #else
-  std::memory_order m = std::memory_order_seq_cst;
+  gpu::memory_order m = gpu::memory_order_seq_cst;
 #endif
 
   TEST_IGNORE_NODISCARD a.is_lock_free();
@@ -95,6 +95,6 @@ void test() {
 }
 
 void test() {
-  test<std::atomic<operator_hijacker>>();
-  test<volatile std::atomic<operator_hijacker>>();
+  test<gpu::atomic<operator_hijacker>>();
+  test<volatile gpu::atomic<operator_hijacker>>();
 }

@@ -11,13 +11,13 @@
 // template <class T>
 // struct atomic;
 
-// This test checks that we static_assert inside std::atomic<T> when T
+// This test checks that we static_assert inside gpu::atomic<T> when T
 // is not trivially copyable, however Clang will sometimes emit additional
-// errors while trying to instantiate the rest of std::atomic<T>.
+// errors while trying to instantiate the rest of gpu::atomic<T>.
 // We silence those to make the test more robust.
 // ADDITIONAL_COMPILE_FLAGS: -Xclang -verify-ignore-unexpected=error
 
-#include <atomic>
+#include "gpu/atomic"
 
 struct NotTriviallyCopyable {
   explicit NotTriviallyCopyable(int i) : i_(i) { }
@@ -27,5 +27,5 @@ struct NotTriviallyCopyable {
 
 void f() {
   NotTriviallyCopyable x(42);
-  std::atomic<NotTriviallyCopyable> a(x); // expected-error@*:* {{std::atomic requires a trivially copyable type}}
+  gpu::atomic<NotTriviallyCopyable> a(x); // expected-error@*:* {{std::atomic<T> requires that 'T' be a trivially copyable type}}
 }

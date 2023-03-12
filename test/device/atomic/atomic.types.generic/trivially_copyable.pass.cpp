@@ -13,7 +13,7 @@
 
 // Make sure atomic<TriviallyCopyable> can be instantiated.
 
-#include <atomic>
+#include "gpu/atomic"
 #include <new>
 #include <cassert>
 #include <chrono> // for nanoseconds
@@ -31,7 +31,7 @@ struct TriviallyCopyable {
 
 template <class T>
 void test(T t) {
-  std::atomic<T> t0(t);
+  gpu::atomic<T> t0(t);
 }
 
 int main(int, char**) {
