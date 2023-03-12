@@ -9,6 +9,7 @@
 #ifndef ATOMIC_HELPERS_H
 #define ATOMIC_HELPERS_H
 
+#include "hip/hip_runtime_api.h"
 #include <cassert>
 
 #include "test_macros.h"
@@ -16,9 +17,9 @@
 struct UserAtomicType {
   int i;
 
-  explicit UserAtomicType(int d = 0) TEST_NOEXCEPT : i(d) {}
+  __host__ __device__ explicit UserAtomicType(int d = 0) TEST_NOEXCEPT : i(d) {}
 
-  friend bool operator==(const UserAtomicType& x, const UserAtomicType& y) { return x.i == y.i; }
+  __host__ __device__ friend bool operator==(const UserAtomicType& x, const UserAtomicType& y) { return x.i == y.i; }
 };
 
 /*
@@ -50,12 +51,12 @@ struct PaddedUserAtomicType
 struct LargeUserAtomicType {
   int a[128]; /* decidedly not lock-free */
 
-  LargeUserAtomicType(int d = 0) TEST_NOEXCEPT {
+  __host__ __device__ LargeUserAtomicType(int d = 0) TEST_NOEXCEPT {
     for (auto&& e : a)
       e = d++;
   }
 
-  friend bool operator==(LargeUserAtomicType const& x, LargeUserAtomicType const& y) TEST_NOEXCEPT {
+  __host__ __device__ friend bool operator==(LargeUserAtomicType const& x, LargeUserAtomicType const& y) TEST_NOEXCEPT {
     for (int i = 0; i < 128; ++i)
       if (x.a[i] != y.a[i])
         return false;
@@ -65,7 +66,7 @@ struct LargeUserAtomicType {
 
 template <template <class TestArg> class TestFunctor>
 struct TestEachIntegralType {
-  void operator()() const {
+  __host__ __device__ void operator()() const {
     TestFunctor<char>()();
     TestFunctor<signed char>()();
     TestFunctor<unsigned char>()();
@@ -96,7 +97,7 @@ struct TestEachIntegralType {
 
 template <template <class TestArg> class TestFunctor>
 struct TestEachFloatingPointType {
-  void operator()() const {
+  __host__ __device__ void operator()() const {
     TestFunctor<float>()();
     TestFunctor<double>()();
     TestFunctor<long double>()();
@@ -105,7 +106,7 @@ struct TestEachFloatingPointType {
 
 template <template <class TestArg> class TestFunctor>
 struct TestEachPointerType {
-  void operator()() const {
+  __host__ __device__ void operator()() const {
     TestFunctor<int*>()();
     TestFunctor<const int*>()();
   }
@@ -113,7 +114,7 @@ struct TestEachPointerType {
 
 template <template <class TestArg> class TestFunctor>
 struct TestEachAtomicType {
-  void operator()() const {
+  __host__ __device__ void operator()() const {
     TestEachIntegralType<TestFunctor>()();
     TestFunctor<UserAtomicType>()();
     /*
