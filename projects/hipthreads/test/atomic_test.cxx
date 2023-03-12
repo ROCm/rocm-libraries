@@ -1,4 +1,4 @@
-#include "gpu/atomic.h"
+#include "gpu/atomic"
 #include "hip/hip_runtime.h"
 #include <iostream>
 

@@ -1,4 +1,4 @@
-#include "gpu/atomic.h"
+#include "gpu/atomic"
 
 int main() {
     return 0;
