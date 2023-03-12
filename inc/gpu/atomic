@@ -5,6 +5,7 @@
 //      Adapted from libc++ std::atomic
 //====================================================================================================================//
 
+#include "gpu/__atomic/aliases.h"
 #include "gpu/__atomic/atomic.h"
 #include "gpu/__atomic/atomic_base.h"
 #include "gpu/__atomic/cxx_atomic_impl.h"
