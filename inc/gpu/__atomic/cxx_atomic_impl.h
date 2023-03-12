@@ -86,7 +86,8 @@ inline __host__ __device__ _Tp __cxx_atomic_load(__cxx_atomic_base_impl<_Tp> con
 template <class _Tp>
 inline __host__ __device__ _Tp __cxx_atomic_exchange(__cxx_atomic_base_impl<_Tp> volatile *__a, _Tp __value,
                                                      memory_order __order) noexcept {
-    return __hip_atomic_exchange(gpu::addressof(__a->__a_value), __value,
+    // Note the cast to non-volatile - __hip_atomic_* chokes up on some volatile types
+    return __hip_atomic_exchange(const_cast<_Tp *>(gpu::addressof(__a->__a_value)), __value,
                                  static_cast<__memory_order_underlying_t>(__order), __HIP_MEMORY_SCOPE_AGENT);
 }
 template <class _Tp>
@@ -106,8 +107,9 @@ template <class _Tp>
 inline __host__ __device__ bool
 __cxx_atomic_compare_exchange_strong(__cxx_atomic_base_impl<_Tp> volatile *__a, _Tp *__expected, _Tp __value,
                                      memory_order __success, memory_order __failure) noexcept {
+    // Note the cast to non-volatile - __hip_atomic_* chokes up on some volatile types
     return __hip_atomic_compare_exchange_strong(
-        gpu::addressof(__a->__a_value), __expected, __value, static_cast<__memory_order_underlying_t>(__success),
+        const_cast<_Tp *>(gpu::addressof(__a->__a_value)), __expected, __value, static_cast<__memory_order_underlying_t>(__success),
         static_cast<__memory_order_underlying_t>(__to_failure_order(__failure)), __HIP_MEMORY_SCOPE_AGENT);
 }
 template <class _Tp>
@@ -123,8 +125,9 @@ template <class _Tp>
 inline __host__ __device__ bool __cxx_atomic_compare_exchange_weak(__cxx_atomic_base_impl<_Tp> volatile *__a,
                                                                    _Tp *__expected, _Tp __value, memory_order __success,
                                                                    memory_order __failure) noexcept {
+    // Note the cast to non-volatile - __hip_atomic_* chokes up on some volatile types
     return __hip_atomic_compare_exchange_weak(
-        gpu::addressof(__a->__a_value), __expected, __value, static_cast<__memory_order_underlying_t>(__success),
+        const_cast<_Tp *>(gpu::addressof(__a->__a_value)), __expected, __value, static_cast<__memory_order_underlying_t>(__success),
         static_cast<__memory_order_underlying_t>(__to_failure_order(__failure)), __HIP_MEMORY_SCOPE_AGENT);
 }
 template <class _Tp>
@@ -139,7 +142,8 @@ inline __host__ __device__ bool __cxx_atomic_compare_exchange_weak(__cxx_atomic_
 template <class _Tp>
 inline __host__ __device__ _Tp __cxx_atomic_fetch_add(__cxx_atomic_base_impl<_Tp> volatile *__a, _Tp __delta,
                                                       memory_order __order) noexcept {
-    return __hip_atomic_fetch_add(gpu::addressof(__a->__a_value), __delta,
+    // Note the cast to non-volatile - __hip_atomic_* chokes up on some volatile types
+    return __hip_atomic_fetch_add(const_cast<_Tp *>(gpu::addressof(__a->__a_value)), __delta,
                                   static_cast<__memory_order_underlying_t>(__order), __HIP_MEMORY_SCOPE_AGENT);
 }
 template <class _Tp>
@@ -152,7 +156,8 @@ inline __host__ __device__ _Tp __cxx_atomic_fetch_add(__cxx_atomic_base_impl<_Tp
 template <class _Tp>
 inline __host__ __device__ _Tp *__cxx_atomic_fetch_add(__cxx_atomic_base_impl<_Tp *> volatile *__a, ptrdiff_t __delta,
                                                        memory_order __order) noexcept {
-    return __hip_atomic_fetch_add(gpu::addressof(__a->__a_value), __delta,
+    // Note the cast to non-volatile - __hip_atomic_* chokes up on some volatile types
+    return __hip_atomic_fetch_add(const_cast<_Tp *>(gpu::addressof(__a->__a_value)), __delta,
                                   static_cast<__memory_order_underlying_t>(__order), __HIP_MEMORY_SCOPE_AGENT);
 }
 template <class _Tp>
@@ -165,7 +170,8 @@ inline __host__ __device__ _Tp *__cxx_atomic_fetch_add(__cxx_atomic_base_impl<_T
 template <class _Tp>
 inline __host__ __device__ _Tp __cxx_atomic_fetch_sub(__cxx_atomic_base_impl<_Tp> volatile *__a, _Tp __delta,
                                                       memory_order __order) noexcept {
-    return __hip_atomic_fetch_add(gpu::addressof(__a->__a_value), -__delta,
+    // Note the cast to non-volatile - __hip_atomic_* chokes up on some volatile types
+    return __hip_atomic_fetch_add(const_cast<_Tp *>(gpu::addressof(__a->__a_value)), -__delta,
                                   static_cast<__memory_order_underlying_t>(__order), __HIP_MEMORY_SCOPE_AGENT);
 }
 template <class _Tp>
@@ -177,7 +183,8 @@ inline __host__ __device__ _Tp __cxx_atomic_fetch_sub(__cxx_atomic_base_impl<_Tp
 template <class _Tp>
 inline __host__ __device__ _Tp *__cxx_atomic_fetch_sub(__cxx_atomic_base_impl<_Tp *> volatile *__a, ptrdiff_t __delta,
                                                        memory_order __order) noexcept {
-    return __hip_atomic_fetch_add(gpu::addressof(__a->__a_value), -__delta,
+    // Note the cast to non-volatile - __hip_atomic_* chokes up on some volatile types
+    return __hip_atomic_fetch_add(const_cast<_Tp *>(gpu::addressof(__a->__a_value)), -__delta,
                                   static_cast<__memory_order_underlying_t>(__order), __HIP_MEMORY_SCOPE_AGENT);
 }
 template <class _Tp>
@@ -190,7 +197,8 @@ inline __host__ __device__ _Tp *__cxx_atomic_fetch_sub(__cxx_atomic_base_impl<_T
 template <class _Tp>
 inline __host__ __device__ _Tp __cxx_atomic_fetch_and(__cxx_atomic_base_impl<_Tp> volatile *__a, _Tp __pattern,
                                                       memory_order __order) noexcept {
-    return __hip_atomic_fetch_and(gpu::addressof(__a->__a_value), __pattern,
+    // Note the cast to non-volatile - __hip_atomic_* chokes up on some volatile types
+    return __hip_atomic_fetch_and(const_cast<_Tp *>(gpu::addressof(__a->__a_value)), __pattern,
                                   static_cast<__memory_order_underlying_t>(__order), __HIP_MEMORY_SCOPE_AGENT);
 }
 template <class _Tp>
@@ -203,7 +211,8 @@ inline __host__ __device__ _Tp __cxx_atomic_fetch_and(__cxx_atomic_base_impl<_Tp
 template <class _Tp>
 inline __host__ __device__ _Tp __cxx_atomic_fetch_or(__cxx_atomic_base_impl<_Tp> volatile *__a, _Tp __pattern,
                                                      memory_order __order) noexcept {
-    return __hip_atomic_fetch_or(gpu::addressof(__a->__a_value), __pattern,
+    // Note the cast to non-volatile - __hip_atomic_* chokes up on some volatile types
+    return __hip_atomic_fetch_or(const_cast<_Tp *>(gpu::addressof(__a->__a_value)), __pattern,
                                  static_cast<__memory_order_underlying_t>(__order), __HIP_MEMORY_SCOPE_AGENT);
 }
 template <class _Tp>
@@ -216,7 +225,8 @@ inline __host__ __device__ _Tp __cxx_atomic_fetch_or(__cxx_atomic_base_impl<_Tp>
 template <class _Tp>
 inline __host__ __device__ _Tp __cxx_atomic_fetch_xor(__cxx_atomic_base_impl<_Tp> volatile *__a, _Tp __pattern,
                                                       memory_order __order) noexcept {
-    return __hip_atomic_fetch_xor(gpu::addressof(__a->__a_value), __pattern,
+    // Note the cast to non-volatile - __hip_atomic_* chokes up on some volatile types
+    return __hip_atomic_fetch_xor(const_cast<_Tp *>(gpu::addressof(__a->__a_value)), __pattern,
                                   static_cast<__memory_order_underlying_t>(__order), __HIP_MEMORY_SCOPE_AGENT);
 }
 template <class _Tp>
