@@ -5,6 +5,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstring>
+#include <type_traits>
 
 #include "gpu/__atomic/atomic_base.h"
 #include "gpu/__atomic/cxx_atomic_impl.h"
@@ -106,6 +107,313 @@ struct atomic<_Tp *> : public gpu::internal::__atomic_base<_Tp *> {
     __host__ __device__ atomic &operator=(const atomic &) = delete;
     __host__ __device__ atomic &operator=(const atomic &) volatile = delete;
 };
+
+// atomic_is_lock_free
+
+template <class _Tp>
+__host__ __device__ inline bool atomic_is_lock_free(const volatile atomic<_Tp> *__o) noexcept {
+    return __o->is_lock_free();
+}
+
+template <class _Tp>
+__host__ __device__ inline bool atomic_is_lock_free(const atomic<_Tp> *__o) noexcept {
+    return __o->is_lock_free();
+}
+
+// atomic_init
+
+template <class _Tp>
+__host__ __device__ inline void atomic_init(volatile atomic<_Tp> *__o, typename atomic<_Tp>::value_type __d) noexcept {
+    gpu::internal::__cxx_atomic_init(gpu::addressof(__o->__a_), __d);
+}
+
+template <class _Tp>
+__host__ __device__ inline void atomic_init(atomic<_Tp> *__o, typename atomic<_Tp>::value_type __d) noexcept {
+    gpu::internal::__cxx_atomic_init(gpu::addressof(__o->__a_), __d);
+}
+
+// atomic_store
+
+template <class _Tp>
+__host__ __device__ inline void atomic_store(volatile atomic<_Tp> *__o, typename atomic<_Tp>::value_type __d) noexcept {
+    __o->store(__d);
+}
+
+template <class _Tp>
+__host__ __device__ inline void atomic_store(atomic<_Tp> *__o, typename atomic<_Tp>::value_type __d) noexcept {
+    __o->store(__d);
+}
+
+// atomic_store_explicit
+
+template <class _Tp>
+__host__ __device__ inline void atomic_store_explicit(volatile atomic<_Tp> *__o, typename atomic<_Tp>::value_type __d,
+                                                      memory_order __m) noexcept {
+    __o->store(__d, __m);
+}
+
+template <class _Tp>
+__host__ __device__ inline void atomic_store_explicit(atomic<_Tp> *__o, typename atomic<_Tp>::value_type __d,
+                                                      memory_order __m) noexcept {
+    __o->store(__d, __m);
+}
+
+// atomic_load
+
+template <class _Tp>
+__host__ __device__ inline _Tp atomic_load(const volatile atomic<_Tp> *__o) noexcept {
+    return __o->load();
+}
+
+template <class _Tp>
+__host__ __device__ inline _Tp atomic_load(const atomic<_Tp> *__o) noexcept {
+    return __o->load();
+}
+
+// atomic_load_explicit
+
+template <class _Tp>
+__host__ __device__ inline _Tp atomic_load_explicit(const volatile atomic<_Tp> *__o, memory_order __m) noexcept {
+    return __o->load(__m);
+}
+
+template <class _Tp>
+__host__ __device__ inline _Tp atomic_load_explicit(const atomic<_Tp> *__o, memory_order __m) noexcept {
+    return __o->load(__m);
+}
+
+// atomic_exchange
+
+template <class _Tp>
+__host__ __device__ inline _Tp atomic_exchange(volatile atomic<_Tp> *__o,
+                                               typename atomic<_Tp>::value_type __d) noexcept {
+    return __o->exchange(__d);
+}
+
+template <class _Tp>
+__host__ __device__ inline _Tp atomic_exchange(atomic<_Tp> *__o, typename atomic<_Tp>::value_type __d) noexcept {
+    return __o->exchange(__d);
+}
+
+// atomic_exchange_explicit
+
+template <class _Tp>
+__host__ __device__ inline _Tp atomic_exchange_explicit(volatile atomic<_Tp> *__o, typename atomic<_Tp>::value_type __d,
+                                                        memory_order __m) noexcept {
+    return __o->exchange(__d, __m);
+}
+
+template <class _Tp>
+__host__ __device__ inline _Tp atomic_exchange_explicit(atomic<_Tp> *__o, typename atomic<_Tp>::value_type __d,
+                                                        memory_order __m) noexcept {
+    return __o->exchange(__d, __m);
+}
+
+// atomic_compare_exchange_weak
+
+template <class _Tp>
+__host__ __device__ inline bool atomic_compare_exchange_weak(volatile atomic<_Tp> *__o,
+                                                             typename atomic<_Tp>::value_type *__e,
+                                                             typename atomic<_Tp>::value_type __d) noexcept {
+    return __o->compare_exchange_weak(*__e, __d);
+}
+
+template <class _Tp>
+__host__ __device__ inline bool atomic_compare_exchange_weak(atomic<_Tp> *__o, typename atomic<_Tp>::value_type *__e,
+                                                             typename atomic<_Tp>::value_type __d) noexcept {
+    return __o->compare_exchange_weak(*__e, __d);
+}
+
+// atomic_compare_exchange_strong
+
+template <class _Tp>
+__host__ __device__ inline bool atomic_compare_exchange_strong(volatile atomic<_Tp> *__o,
+                                                               typename atomic<_Tp>::value_type *__e,
+                                                               typename atomic<_Tp>::value_type __d) noexcept {
+    return __o->compare_exchange_strong(*__e, __d);
+}
+
+template <class _Tp>
+__host__ __device__ inline bool atomic_compare_exchange_strong(atomic<_Tp> *__o, typename atomic<_Tp>::value_type *__e,
+                                                               typename atomic<_Tp>::value_type __d) noexcept {
+    return __o->compare_exchange_strong(*__e, __d);
+}
+
+// atomic_compare_exchange_weak_explicit
+
+template <class _Tp>
+__host__ __device__ inline bool atomic_compare_exchange_weak_explicit(volatile atomic<_Tp> *__o,
+                                                                      typename atomic<_Tp>::value_type *__e,
+                                                                      typename atomic<_Tp>::value_type __d,
+                                                                      memory_order __s, memory_order __f) noexcept {
+    return __o->compare_exchange_weak(*__e, __d, __s, __f);
+}
+
+template <class _Tp>
+__host__ __device__ inline bool atomic_compare_exchange_weak_explicit(atomic<_Tp> *__o,
+                                                                      typename atomic<_Tp>::value_type *__e,
+                                                                      typename atomic<_Tp>::value_type __d,
+                                                                      memory_order __s, memory_order __f) noexcept {
+    return __o->compare_exchange_weak(*__e, __d, __s, __f);
+}
+
+// atomic_compare_exchange_strong_explicit
+
+template <class _Tp>
+__host__ __device__ inline bool atomic_compare_exchange_strong_explicit(volatile atomic<_Tp> *__o,
+                                                                        typename atomic<_Tp>::value_type *__e,
+                                                                        typename atomic<_Tp>::value_type __d,
+                                                                        memory_order __s, memory_order __f) noexcept {
+    return __o->compare_exchange_strong(*__e, __d, __s, __f);
+}
+
+template <class _Tp>
+__host__ __device__ inline bool atomic_compare_exchange_strong_explicit(atomic<_Tp> *__o,
+                                                                        typename atomic<_Tp>::value_type *__e,
+                                                                        typename atomic<_Tp>::value_type __d,
+                                                                        memory_order __s, memory_order __f) noexcept {
+    return __o->compare_exchange_strong(*__e, __d, __s, __f);
+}
+
+// atomic_fetch_add
+
+template <class _Tp>
+__host__ __device__ inline _Tp atomic_fetch_add(volatile atomic<_Tp> *__o,
+                                                typename atomic<_Tp>::difference_type __op) noexcept {
+    return __o->fetch_add(__op);
+}
+
+template <class _Tp>
+__host__ __device__ inline _Tp atomic_fetch_add(atomic<_Tp> *__o, typename atomic<_Tp>::difference_type __op) noexcept {
+    return __o->fetch_add(__op);
+}
+
+// atomic_fetch_add_explicit
+
+template <class _Tp>
+__host__ __device__ inline _Tp atomic_fetch_add_explicit(volatile atomic<_Tp> *__o,
+                                                         typename atomic<_Tp>::difference_type __op,
+                                                         memory_order __m) noexcept {
+    return __o->fetch_add(__op, __m);
+}
+
+template <class _Tp>
+__host__ __device__ inline _Tp atomic_fetch_add_explicit(atomic<_Tp> *__o, typename atomic<_Tp>::difference_type __op,
+                                                         memory_order __m) noexcept {
+    return __o->fetch_add(__op, __m);
+}
+
+// atomic_fetch_sub
+
+template <class _Tp>
+__host__ __device__ inline _Tp atomic_fetch_sub(volatile atomic<_Tp> *__o,
+                                                typename atomic<_Tp>::difference_type __op) noexcept {
+    return __o->fetch_sub(__op);
+}
+
+template <class _Tp>
+__host__ __device__ inline _Tp atomic_fetch_sub(atomic<_Tp> *__o, typename atomic<_Tp>::difference_type __op) noexcept {
+    return __o->fetch_sub(__op);
+}
+
+// atomic_fetch_sub_explicit
+
+template <class _Tp>
+__host__ __device__ inline _Tp atomic_fetch_sub_explicit(volatile atomic<_Tp> *__o,
+                                                         typename atomic<_Tp>::difference_type __op,
+                                                         memory_order __m) noexcept {
+    return __o->fetch_sub(__op, __m);
+}
+
+template <class _Tp>
+__host__ __device__ inline _Tp atomic_fetch_sub_explicit(atomic<_Tp> *__o, typename atomic<_Tp>::difference_type __op,
+                                                         memory_order __m) noexcept {
+    return __o->fetch_sub(__op, __m);
+}
+
+// atomic_fetch_and
+
+template <class _Tp>
+__host__ __device__ inline typename std::enable_if_t<std::is_integral_v<_Tp> && !std::is_same_v<_Tp, bool>, _Tp>
+atomic_fetch_and(volatile atomic<_Tp> *__o, typename atomic<_Tp>::value_type __op) noexcept {
+    return __o->fetch_and(__op);
+}
+
+template <class _Tp>
+__host__ __device__ inline typename std::enable_if_t<std::is_integral_v<_Tp> && !std::is_same_v<_Tp, bool>, _Tp>
+atomic_fetch_and(atomic<_Tp> *__o, typename atomic<_Tp>::value_type __op) noexcept {
+    return __o->fetch_and(__op);
+}
+
+// atomic_fetch_and_explicit
+
+template <class _Tp>
+__host__ __device__ inline typename std::enable_if_t<std::is_integral_v<_Tp> && !std::is_same_v<_Tp, bool>, _Tp>
+atomic_fetch_and_explicit(volatile atomic<_Tp> *__o, typename atomic<_Tp>::value_type __op, memory_order __m) noexcept {
+    return __o->fetch_and(__op, __m);
+}
+
+template <class _Tp>
+__host__ __device__ inline typename std::enable_if_t<std::is_integral_v<_Tp> && !std::is_same_v<_Tp, bool>, _Tp>
+atomic_fetch_and_explicit(atomic<_Tp> *__o, typename atomic<_Tp>::value_type __op, memory_order __m) noexcept {
+    return __o->fetch_and(__op, __m);
+}
+
+// atomic_fetch_or
+
+template <class _Tp>
+__host__ __device__ inline typename std::enable_if_t<std::is_integral_v<_Tp> && !std::is_same_v<_Tp, bool>, _Tp>
+atomic_fetch_or(volatile atomic<_Tp> *__o, typename atomic<_Tp>::value_type __op) noexcept {
+    return __o->fetch_or(__op);
+}
+
+template <class _Tp>
+__host__ __device__ inline typename std::enable_if_t<std::is_integral_v<_Tp> && !std::is_same_v<_Tp, bool>, _Tp>
+atomic_fetch_or(atomic<_Tp> *__o, typename atomic<_Tp>::value_type __op) noexcept {
+    return __o->fetch_or(__op);
+}
+
+// atomic_fetch_or_explicit
+
+template <class _Tp>
+__host__ __device__ inline typename std::enable_if_t<std::is_integral_v<_Tp> && !std::is_same_v<_Tp, bool>, _Tp>
+atomic_fetch_or_explicit(volatile atomic<_Tp> *__o, typename atomic<_Tp>::value_type __op, memory_order __m) noexcept {
+    return __o->fetch_or(__op, __m);
+}
+
+template <class _Tp>
+__host__ __device__ inline typename std::enable_if_t<std::is_integral_v<_Tp> && !std::is_same_v<_Tp, bool>, _Tp>
+atomic_fetch_or_explicit(atomic<_Tp> *__o, typename atomic<_Tp>::value_type __op, memory_order __m) noexcept {
+    return __o->fetch_or(__op, __m);
+}
+
+// atomic_fetch_xor
+
+template <class _Tp>
+__host__ __device__ inline typename std::enable_if_t<std::is_integral_v<_Tp> && !std::is_same_v<_Tp, bool>, _Tp>
+atomic_fetch_xor(volatile atomic<_Tp> *__o, typename atomic<_Tp>::value_type __op) noexcept {
+    return __o->fetch_xor(__op);
+}
+
+template <class _Tp>
+__host__ __device__ inline typename std::enable_if_t<std::is_integral_v<_Tp> && !std::is_same_v<_Tp, bool>, _Tp>
+atomic_fetch_xor(atomic<_Tp> *__o, typename atomic<_Tp>::value_type __op) noexcept {
+    return __o->fetch_xor(__op);
+}
+
+// atomic_fetch_xor_explicit
+
+template <class _Tp>
+__host__ __device__ inline typename std::enable_if_t<std::is_integral_v<_Tp> && !std::is_same_v<_Tp, bool>, _Tp>
+atomic_fetch_xor_explicit(volatile atomic<_Tp> *__o, typename atomic<_Tp>::value_type __op, memory_order __m) noexcept {
+    return __o->fetch_xor(__op, __m);
+}
+
+template <class _Tp>
+__host__ __device__ inline typename std::enable_if_t<std::is_integral_v<_Tp> && !std::is_same_v<_Tp, bool>, _Tp>
+atomic_fetch_xor_explicit(atomic<_Tp> *__o, typename atomic<_Tp>::value_type __op, memory_order __m) noexcept {
+    return __o->fetch_xor(__op, __m);
+}
 
 } // namespace gpu
 
