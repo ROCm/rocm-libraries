@@ -9,12 +9,13 @@
 // UNSUPPORTED: c++03, c++11, c++14, c++17
 
 #include "gpu/atomic"
+#include "hip/hip_runtime.h"
 #include <type_traits>
 
 #include "test_macros.h"
 
 template <typename T>
-constexpr bool test() {
+__device__ constexpr bool test() {
   [[maybe_unused]] constexpr T a;
   static_assert(std::is_nothrow_constructible_v<T>);
   ASSERT_NOEXCEPT(T{});
@@ -22,14 +23,14 @@ constexpr bool test() {
 }
 
 struct throwing {
-  throwing() {}
+  __device__ throwing() {}
 };
 
 struct trivial {
   int a;
 };
 
-void test() {
+__global__ void test() {
   static_assert(test<gpu::atomic<bool>>());
   static_assert(test<gpu::atomic<int>>());
   static_assert(test<gpu::atomic<int*>>());

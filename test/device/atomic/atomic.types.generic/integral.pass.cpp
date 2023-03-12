@@ -84,17 +84,17 @@
 // };
 
 #include "gpu/atomic"
-#include <new>
+#include "hip/hip_runtime.h"
 #include <cassert>
+#include <new>
 
 #include <cmpxchg_loop.h>
 
+#include "hip_helpers.h"
 #include "test_macros.h"
 
 template <class A, class T>
-void
-do_test()
-{
+__device__ void do_test() {
     A obj(T(0));
     assert(obj == T(0));
     bool b0 = obj.is_lock_free();
@@ -147,76 +147,116 @@ do_test()
 
     {
         TEST_ALIGNAS_TYPE(A) char storage[sizeof(A)] = {23};
-        A& zero = *new (storage) A();
+        A &zero = *new (storage) A();
         assert(zero == 0);
         zero.~A();
     }
 }
 
 template <class A, class T>
-void test()
-{
+__device__ void test() {
     do_test<A, T>();
     do_test<volatile A, T>();
 }
 
+__global__ void gmain() {
+    // This is a very long test, so we break it up a bit to speed things up
+    switch (blockIdx.x) {
+    case 0:
+        test<gpu::atomic_char, char>();
+        test<gpu::atomic_schar, signed char>();
+        test<gpu::atomic_uchar, unsigned char>();
+        break;
 
-int main(int, char**)
-{
-    test<gpu::atomic_char, char>();
-    test<gpu::atomic_schar, signed char>();
-    test<gpu::atomic_uchar, unsigned char>();
-    test<gpu::atomic_short, short>();
-    test<gpu::atomic_ushort, unsigned short>();
-    test<gpu::atomic_int, int>();
-    test<gpu::atomic_uint, unsigned int>();
-    test<gpu::atomic_long, long>();
-    test<gpu::atomic_ulong, unsigned long>();
-    test<gpu::atomic_llong, long long>();
-    test<gpu::atomic_ullong, unsigned long long>();
+    case 1:
+        test<gpu::atomic_short, short>();
+        test<gpu::atomic_ushort, unsigned short>();
+        test<gpu::atomic_int, int>();
+        test<gpu::atomic_uint, unsigned int>();
+        break;
+
+    case 2:
+        test<gpu::atomic_long, long>();
+        test<gpu::atomic_ulong, unsigned long>();
+        test<gpu::atomic_llong, long long>();
+        test<gpu::atomic_ullong, unsigned long long>();
+        break;
+
+    case 3:
 #if TEST_STD_VER > 17 && defined(__cpp_char8_t)
-    test<gpu::atomic_char8_t, char8_t>();
+        test<gpu::atomic_char8_t, char8_t>();
 #endif
-    test<gpu::atomic_char16_t, char16_t>();
-    test<gpu::atomic_char32_t, char32_t>();
+        test<gpu::atomic_char16_t, char16_t>();
+        test<gpu::atomic_char32_t, char32_t>();
 #ifndef TEST_HAS_NO_WIDE_CHARACTERS
-    test<gpu::atomic_wchar_t, wchar_t>();
+        test<gpu::atomic_wchar_t, wchar_t>();
 #endif
+        break;
 
-    test<gpu::atomic_int8_t,    int8_t>();
-    test<gpu::atomic_uint8_t,  uint8_t>();
-    test<gpu::atomic_int16_t,   int16_t>();
-    test<gpu::atomic_uint16_t, uint16_t>();
-    test<gpu::atomic_int32_t,   int32_t>();
-    test<gpu::atomic_uint32_t, uint32_t>();
-    test<gpu::atomic_int64_t,   int64_t>();
-    test<gpu::atomic_uint64_t, uint64_t>();
+    case 4:
+        test<gpu::atomic_int8_t, int8_t>();
+        test<gpu::atomic_uint8_t, uint8_t>();
+        test<gpu::atomic_int16_t, int16_t>();
+        test<gpu::atomic_uint16_t, uint16_t>();
+        break;
 
-    test<volatile gpu::atomic_char, char>();
-    test<volatile gpu::atomic_schar, signed char>();
-    test<volatile gpu::atomic_uchar, unsigned char>();
-    test<volatile gpu::atomic_short, short>();
-    test<volatile gpu::atomic_ushort, unsigned short>();
-    test<volatile gpu::atomic_int, int>();
-    test<volatile gpu::atomic_uint, unsigned int>();
-    test<volatile gpu::atomic_long, long>();
-    test<volatile gpu::atomic_ulong, unsigned long>();
-    test<volatile gpu::atomic_llong, long long>();
-    test<volatile gpu::atomic_ullong, unsigned long long>();
-    test<volatile gpu::atomic_char16_t, char16_t>();
-    test<volatile gpu::atomic_char32_t, char32_t>();
+    case 5:
+        test<gpu::atomic_int32_t, int32_t>();
+        test<gpu::atomic_uint32_t, uint32_t>();
+        test<gpu::atomic_int64_t, int64_t>();
+        test<gpu::atomic_uint64_t, uint64_t>();
+        break;
+
+    case 6:
+        test<volatile gpu::atomic_char, char>();
+        test<volatile gpu::atomic_schar, signed char>();
+        test<volatile gpu::atomic_uchar, unsigned char>();
+        break;
+
+    case 7:
+        test<volatile gpu::atomic_short, short>();
+        test<volatile gpu::atomic_ushort, unsigned short>();
+        test<volatile gpu::atomic_int, int>();
+        test<volatile gpu::atomic_uint, unsigned int>();
+        break;
+
+    case 8:
+        test<volatile gpu::atomic_long, long>();
+        test<volatile gpu::atomic_ulong, unsigned long>();
+        test<volatile gpu::atomic_llong, long long>();
+        test<volatile gpu::atomic_ullong, unsigned long long>();
+        break;
+
+    case 9:
+        test<volatile gpu::atomic_char16_t, char16_t>();
+        test<volatile gpu::atomic_char32_t, char32_t>();
 #ifndef TEST_HAS_NO_WIDE_CHARACTERS
-    test<volatile gpu::atomic_wchar_t, wchar_t>();
+        test<volatile gpu::atomic_wchar_t, wchar_t>();
 #endif
+        break;
 
-    test<volatile gpu::atomic_int8_t,    int8_t>();
-    test<volatile gpu::atomic_uint8_t,  uint8_t>();
-    test<volatile gpu::atomic_int16_t,   int16_t>();
-    test<volatile gpu::atomic_uint16_t, uint16_t>();
-    test<volatile gpu::atomic_int32_t,   int32_t>();
-    test<volatile gpu::atomic_uint32_t, uint32_t>();
-    test<volatile gpu::atomic_int64_t,   int64_t>();
-    test<volatile gpu::atomic_uint64_t, uint64_t>();
+    case 10:
+        test<volatile gpu::atomic_int8_t, int8_t>();
+        test<volatile gpu::atomic_uint8_t, uint8_t>();
+        test<volatile gpu::atomic_int16_t, int16_t>();
+        test<volatile gpu::atomic_uint16_t, uint16_t>();
+        break;
 
-  return 0;
+    case 11:
+        test<volatile gpu::atomic_int32_t, int32_t>();
+        test<volatile gpu::atomic_uint32_t, uint32_t>();
+        test<volatile gpu::atomic_int64_t, int64_t>();
+        test<volatile gpu::atomic_uint64_t, uint64_t>();
+        break;
+
+    default:
+        break;
+    }
+}
+
+int main(int, char **) {
+    hipLaunchKernelGGL(gmain, dim3(12), dim3(1), 0, nullptr);
+    __HIP_CHECK__(hipGetLastError());
+    __HIP_CHECK__(hipDeviceSynchronize());
+    return 0;
 }

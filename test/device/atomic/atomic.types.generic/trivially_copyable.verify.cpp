@@ -18,14 +18,15 @@
 // ADDITIONAL_COMPILE_FLAGS: -Xclang -verify-ignore-unexpected=error
 
 #include "gpu/atomic"
+#include "hip/hip_runtime.h"
 
 struct NotTriviallyCopyable {
-  explicit NotTriviallyCopyable(int i) : i_(i) { }
-  NotTriviallyCopyable(const NotTriviallyCopyable &rhs) : i_(rhs.i_) { }
+  __device__ explicit NotTriviallyCopyable(int i) : i_(i) { }
+  __device__ NotTriviallyCopyable(const NotTriviallyCopyable &rhs) : i_(rhs.i_) { }
   int i_;
 };
 
-void f() {
+__global__ void f() {
   NotTriviallyCopyable x(42);
   gpu::atomic<NotTriviallyCopyable> a(x); // expected-error@*:* {{std::atomic<T> requires that 'T' be a trivially copyable type}}
 }

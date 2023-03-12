@@ -14,17 +14,17 @@
 #include "gpu/atomic"
 #include <cassert>
 
+#include "kernel_launcher.h"
+
 struct throwing {
-  throwing() { throw 42; }
+  __device__ throwing() { throw 42; }
 };
 
-int main(int, char**) {
+__global__ void gmain() {
   try {
     [[maybe_unused]] gpu::atomic<throwing> a;
     assert(false);
   } catch (int x) {
     assert(x == 42);
   }
-
-  return 0;
 }

@@ -29,10 +29,12 @@
 #include "gpu/atomic"
 #include <type_traits>
 
+#include "kernel_launcher.h"
+
 template <typename T>
 using is_volatile_copy_assignable = std::is_assignable<volatile T&, const T&>;
 
-int main(int, char**)
+__global__ void gmain()
 {
     static_assert(!std::is_copy_constructible<gpu::atomic<int> >::value, "");
     static_assert(!std::is_copy_assignable<gpu::atomic<int> >::value, "");
@@ -40,6 +42,4 @@ int main(int, char**)
     static_assert(!std::is_copy_constructible<gpu::atomic<int*> >::value, "");
     static_assert(!std::is_copy_assignable<gpu::atomic<int*> >::value, "");
     static_assert(!is_volatile_copy_assignable<gpu::atomic<int*> >::value, "");
-
-    return 0;
 }
