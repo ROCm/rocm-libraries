@@ -25,7 +25,13 @@ namespace rocRoller
         {
         public:
             using Argument = std::tuple<CostProcedure, std::shared_ptr<rocRoller::Context>>;
-            using Result   = std::vector<std::tuple<int, float>>;
+
+            /**
+             * @brief Collection of Tuples where the first member is the index of the generator
+             * and the second member is the cost next instruction for the given iteration
+             *
+             */
+            using Result = std::vector<std::tuple<int, float>>;
 
             Cost(ContextPtr);
 
@@ -34,8 +40,21 @@ namespace rocRoller
             virtual std::string name()                               = 0;
             virtual float       cost(const InstructionStatus&) const = 0;
 
+            /**
+             * @brief Gets the sorted costs for the collection of generator iterators
+             *
+             * @return Sorted collection of Tuples  based on lowest cost where
+             * the first member is the index of the generator
+             * and the second member is the cost next instruction for the given iteration
+             */
             Result operator()(std::vector<Generator<Instruction>::iterator>&) const;
-            float  operator()(Generator<Instruction>::iterator&) const;
+
+            /**
+             * @brief Gets the cost of one generator for the given iteration
+             *
+             * @return float
+             */
+            float operator()(Generator<Instruction>::iterator&) const;
 
         protected:
             std::weak_ptr<rocRoller::Context> m_ctx;

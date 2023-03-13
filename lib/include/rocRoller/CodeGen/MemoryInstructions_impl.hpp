@@ -19,7 +19,7 @@ namespace rocRoller
                                  std::shared_ptr<Register::Value>  addr,
                                  std::shared_ptr<Register::Value>  offset,
                                  int                               numBytes,
-                                 std::string const&                comment,
+                                 std::string const                 comment,
                                  bool                              high,
                                  std::shared_ptr<BufferDescriptor> bufDesc,
                                  BufferInstructionOptions          buffOpts)
@@ -89,7 +89,7 @@ namespace rocRoller
                                   std::shared_ptr<Register::Value>  data,
                                   std::shared_ptr<Register::Value>  offset,
                                   int                               numBytes,
-                                  std::string const&                comment,
+                                  std::string const                 comment,
                                   bool                              high,
                                   std::shared_ptr<BufferDescriptor> bufDesc,
                                   BufferInstructionOptions          buffOpts)
@@ -357,7 +357,7 @@ namespace rocRoller
                                       std::shared_ptr<Register::Value> addr,
                                       int                              offset,
                                       int                              numBytes,
-                                      std::string const&               comment,
+                                      std::string const                comment,
                                       bool                             high)
     {
         AssertFatal(dest != nullptr);
@@ -420,7 +420,7 @@ namespace rocRoller
                                        std::shared_ptr<Register::Value> data,
                                        int                              offset,
                                        int                              numBytes,
-                                       std::string const&               comment,
+                                       std::string const                comment,
                                        bool                             high)
     {
         AssertFatal(addr != nullptr);

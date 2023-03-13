@@ -51,7 +51,7 @@ namespace rocRoller
                                     std::shared_ptr<Register::Value>  addr,
                                     std::shared_ptr<Register::Value>  offset,
                                     int                               numBytes,
-                                    std::string const&                comment  = "",
+                                    std::string                       comment  = "",
                                     bool                              high     = false,
                                     std::shared_ptr<BufferDescriptor> buffDesc = nullptr,
                                     BufferInstructionOptions buffOpts = BufferInstructionOptions());
@@ -75,7 +75,7 @@ namespace rocRoller
                                      std::shared_ptr<Register::Value>  data,
                                      std::shared_ptr<Register::Value>  offset,
                                      int                               numBytes,
-                                     std::string const&                comment  = "",
+                                     std::string const                 comment  = "",
                                      bool                              high     = false,
                                      std::shared_ptr<BufferDescriptor> buffDesc = nullptr,
                                      BufferInstructionOptions          buffOpts
@@ -101,7 +101,7 @@ namespace rocRoller
                                            std::shared_ptr<Register::Value>  offset1,
                                            std::shared_ptr<Register::Value>  addr2,
                                            std::shared_ptr<Register::Value>  offset2,
-                                           std::string const&                comment  = "",
+                                           std::string const                 comment  = "",
                                            std::shared_ptr<BufferDescriptor> buffDesc = nullptr,
                                            BufferInstructionOptions          buffOpts
                                            = BufferInstructionOptions());
@@ -122,7 +122,7 @@ namespace rocRoller
                                             std::shared_ptr<Register::Value> data1,
                                             std::shared_ptr<Register::Value> data2,
                                             std::shared_ptr<Register::Value> offset,
-                                            std::string const&               comment = "");
+                                            std::string const                comment = "");
 
         /**
          * @brief Generate the instructions required to perform a flat load.
@@ -185,7 +185,7 @@ namespace rocRoller
                                          std::shared_ptr<Register::Value> addr,
                                          int                              offset,
                                          int                              numBytes,
-                                         std::string const&               comment = "",
+                                         std::string const                comment = "",
                                          bool                             high    = false);
 
         /**
@@ -203,7 +203,7 @@ namespace rocRoller
                                           std::shared_ptr<Register::Value> data,
                                           int                              offset,
                                           int                              numBytes,
-                                          std::string const&               comment = "",
+                                          std::string const                comment = "",
                                           bool                             high    = false);
 
         /**

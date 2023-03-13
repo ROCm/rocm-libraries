@@ -264,16 +264,17 @@ def html_overview_table(html_file, summary):
 
     print("<table><tr><td>", file=html_file)
 
-    header = ["Problem",
-              "Mean A",
-              "Mean B",
-              "Median A",
-              "Median B",
-              "Median Diff %",
-              "Moods p-val",
-              "Run A (ref)",
-              "Run B",
-              ]
+    header = [
+        "Problem",
+        "Mean A",
+        "Mean B",
+        "Median A",
+        "Median B",
+        "Median Diff %",
+        "Moods p-val",
+        "Run A (ref)",
+        "Run B",
+    ]
 
     print("</td><td> ".join(header), file=html_file)
     print("</td></tr>", file=html_file)
@@ -282,8 +283,9 @@ def html_overview_table(html_file, summary):
         for i, result in enumerate(summary[run]):
             token, comparison = summary[run][result]
             A, B = comparison.results
-            relative_diff = ((comparison.median[1] - comparison.median[0])
-                             / comparison.median[0])
+            relative_diff = (
+                comparison.median[1] - comparison.median[0]
+            ) / comparison.median[0]
             print(
                 f"""
                 <tr>

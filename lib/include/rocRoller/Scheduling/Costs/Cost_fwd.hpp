@@ -11,6 +11,7 @@ namespace rocRoller
             None = 0,
             Uniform,
             MinNops,
+            WaitCntNop,
             Count
         };
 

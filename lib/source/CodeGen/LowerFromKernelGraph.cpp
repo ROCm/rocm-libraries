@@ -697,7 +697,7 @@ namespace rocRoller
                 if(rowOffsetExpr)
                 {
                     auto unrolledRowOffsetExpr
-                        = simplify(rowOffsetReg->expression() + rowOffsetExpr);
+                        = m_fastArith(rowOffsetReg->expression() + rowOffsetExpr);
                     auto tmp = rowOffsetReg->placeholder();
                     co_yield generate(tmp, unrolledRowOffsetExpr);
                     rowOffsetReg = tmp;
@@ -728,6 +728,12 @@ namespace rocRoller
                 bool colStrideIsOne
                     = colStrideIsLiteral
                       && (getUnsignedInt(colStrideReg->getLiteralValue()) == elementSize);
+
+                auto proc      = Settings::getInstance()->get(Settings::Scheduler);
+                auto scheduler = Component::GetNew<Scheduling::Scheduler>(
+                    proc, Scheduling::CostProcedure::WaitCntNop, m_context);
+                std::vector<Generator<Instruction>> generators;
+
                 // Load a tile of Half precision values where each register will hold
                 // two half precision values.
                 if(vgpr->variableType() == DataType::Halfx2 && !colStrideIsOne)
@@ -746,7 +752,7 @@ namespace rocRoller
                             {
                                 uint a = i * n + j;
 
-                                co_yield m_context->mem()->loadAndPack(
+                                generators.push_back(m_context->mem()->loadAndPack(
                                     kind,
                                     vgpr->element({static_cast<int>(a / 2)}),
                                     rowOffsetReg,
@@ -754,48 +760,63 @@ namespace rocRoller
                                     rowOffsetReg,
                                     Register::Value::Literal(offsetValue + (j + 1) * colStride),
                                     "",
-                                    bufDesc);
+                                    bufDesc));
                             }
                             offsetValue += rowStride;
                         }
+                        co_yield (*scheduler)(generators);
                     }
                     else
                     {
-                        auto offset1 = Register::Value::Placeholder(
-                            m_context, Register::Type::Vector, colOffsetReg->variableType(), 1);
-                        auto offset2 = Register::Value::Placeholder(
-                            m_context, Register::Type::Vector, colOffsetReg->variableType(), 1);
+                        auto gen
+                            = [ctx = m_context,
+                               rowOffsetReg,
+                               rowStrideReg,
+                               colStrideReg,
+                               vgpr,
+                               kind,
+                               offset,
+                               bufDesc](uint64_t i, uint64_t j, uint a) -> Generator<Instruction> {
+                            FastArithmetic     fa(ctx);
+                            Register::ValuePtr offset1;
+                            Register::ValuePtr offset2;
+
+                            co_yield Expression::generate(
+                                offset1,
+                                fa(rowOffsetReg->expression()
+                                   + colStrideReg->expression() * Expression::literal(j)),
+                                ctx);
+                            co_yield Expression::generate(
+                                offset2,
+                                fa(offset1->expression() + colStrideReg->expression()),
+                                ctx);
+
+                            co_yield ctx->mem()->loadAndPack(
+                                kind,
+                                vgpr->element({static_cast<int>(a / 2)}),
+                                offset1,
+                                offset,
+                                offset2,
+                                offset,
+                                "",
+                                bufDesc);
+                        };
 
                         for(uint64_t i = 0; i < m; ++i)
                         {
-                            co_yield copy(colOffsetReg, rowOffsetReg);
                             for(uint64_t j = 0; j < n; j += 2)
                             {
                                 uint a = i * n + j;
-
-                                co_yield copy(offset1, colOffsetReg);
-                                co_yield generate(colOffsetReg,
-                                                  colOffsetReg->expression()
-                                                      + colStrideReg->expression());
-                                co_yield copy(offset2, colOffsetReg);
-                                co_yield generate(colOffsetReg,
-                                                  colOffsetReg->expression()
-                                                      + colStrideReg->expression());
-
-                                co_yield m_context->mem()->loadAndPack(
-                                    kind,
-                                    vgpr->element({static_cast<int>(a / 2)}),
-                                    offset1,
-                                    offset,
-                                    offset2,
-                                    offset,
-                                    "",
-                                    bufDesc);
+                                generators.push_back(gen(i, j, a));
                             }
+                            co_yield (*scheduler)(generators);
+                            generators.clear();
                             if(i < m - 1)
+                            {
                                 co_yield generate(rowOffsetReg,
                                                   rowOffsetReg->expression()
                                                       + rowStrideReg->expression());
+                            }
                         }
                     }
                 }

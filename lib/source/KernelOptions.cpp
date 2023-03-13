@@ -20,8 +20,8 @@ namespace rocRoller
         , unrollY(0)
         , unrollK(0)
         , assertWaitCntState(true)
-        , packMultipleElementsInto1VGPR(false)
-        , enableLongDwordInstructions(false)
+        , packMultipleElementsInto1VGPR(true)
+        , enableLongDwordInstructions(true)
     {
         transposeMemoryAccess.set(0);
         transposeMemoryAccess[LayoutType::MATRIX_A]           = false;

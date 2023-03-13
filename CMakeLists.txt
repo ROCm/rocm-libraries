@@ -275,6 +275,7 @@ set(rocroller_src
  lib/source/Costs/MinNopsCost.cpp
  lib/source/Costs/NoneCost.cpp
  lib/source/Costs/UniformCost.cpp
+ lib/source/Costs/WaitCntNopCost.cpp
 
  lib/source/KernelGraph/ControlFlowRWTracer.cpp
  lib/source/KernelGraph/ControlToCoordinateMapper.cpp

@@ -17,6 +17,8 @@ namespace rocRoller
                 return "Uniform";
             case CostProcedure::MinNops:
                 return "MinNops";
+            case CostProcedure::WaitCntNop:
+                return "WaitCntNop";
             case CostProcedure::Count:
                 return "Count";
             }
