@@ -1225,12 +1225,10 @@ namespace rocRoller
                 std::get<Operation>(elem));
         }
 
-        std::vector<int> findRequiredCoordinates(int                target,
-                                                 Graph::Direction   direction,
-                                                 KernelGraph const& kgraph)
+        std::pair<std::vector<int>, std::unordered_set<int>> findRequiredCoordinates(
+            int target, Graph::Direction direction, KernelGraph const& kgraph)
         {
-            namespace CT      = rocRoller::KernelGraph::CoordinateGraph;
-            auto lookBackward = direction == GD::Downstream ? GD::Upstream : GD::Downstream;
+            namespace CT = rocRoller::KernelGraph::CoordinateGraph;
 
             auto dontWalkPastLoopOrStorageNodes = [&](int tag) -> bool {
                 auto element = kgraph.coordinates.getElement(tag);
@@ -1238,7 +1236,7 @@ namespace rocRoller
 
                 bool isCT   = std::holds_alternative<CT::CoordinateTransformEdge>(edge);
                 bool follow = true;
-                for(auto neighbour : kgraph.coordinates.getNeighbours(tag, lookBackward))
+                for(auto neighbour : kgraph.coordinates.getNeighbours(tag, opposite(direction)))
                 {
                     if(neighbour == target)
                         continue;
@@ -1273,7 +1271,21 @@ namespace rocRoller
                     return isLeaf || isLeafy;
                 });
 
-            return required;
+            std::unordered_set<int> path;
+            if(direction == Graph::Direction::Downstream)
+            {
+                path = kgraph.coordinates
+                           .path<Graph::Direction::Upstream>(required, std::vector<int>{target})
+                           .to<std::unordered_set>();
+            }
+            else
+            {
+                path = kgraph.coordinates
+                           .path<Graph::Direction::Downstream>(required, std::vector<int>{target})
+                           .to<std::unordered_set>();
+            }
+
+            return {required, path};
         }
 
         std::optional<std::pair<int, Graph::Direction>>

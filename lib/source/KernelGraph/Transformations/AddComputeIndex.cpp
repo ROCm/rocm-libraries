@@ -38,16 +38,19 @@ namespace rocRoller::KernelGraph
 
     struct ComputeIndexChainSpecification
     {
-        int                   target;
-        ComputeIndexChainType type;
-        int                   location;
-        Graph::Direction      direction;
-        int                   forLoop = -1;
-
-        friend auto operator<=>(const ComputeIndexChainSpecification&,
-                                const ComputeIndexChainSpecification&)
-            = default;
+        int                     target;
+        ComputeIndexChainType   type;
+        int                     location;
+        Graph::Direction        direction;
+        int                     forLoop = -1;
+        std::unordered_set<int> zeros;
     };
+
+    bool operator<(const ComputeIndexChainSpecification& a, const ComputeIndexChainSpecification& b)
+    {
+        return std::tie(a.target, a.type, a.location, a.direction)
+               < std::tie(b.target, b.type, b.location, b.direction);
+    }
 
     struct DeferredConnection
     {
@@ -67,6 +70,29 @@ namespace rocRoller::KernelGraph
     /*
      * Helpers
      */
+
+    /**
+     * @brief Get ForLoop dimension assciated with ForLoopOp.
+     */
+    int getForLoop(int forLoopOp, KernelGraph const& kgraph)
+    {
+        namespace CG = rocRoller::KernelGraph::CoordinateGraph;
+
+        auto range = kgraph.mapper.getConnections(forLoopOp)[0].coordinate;
+        auto forLoop
+            = only(kgraph.coordinates.getOutputNodeIndices(range, CG::isEdge<CG::DataFlow>));
+        return *forLoop;
+    }
+
+    /**
+     * @brief Append elements of b onto a.
+     */
+    std::vector<int> addZeros(std::vector<int> const& a, std::unordered_set<int> const& b)
+    {
+        std::vector<int> rv = a;
+        std::copy(b.cbegin(), b.cend(), std::back_inserter(rv));
+        return rv;
+    }
 
     /**
      * @brief Return existing Buffer edge between src and dst, or
@@ -306,7 +332,10 @@ namespace rocRoller::KernelGraph
     /**
      * @brief Add ComputeIndexes for WAVE MATRIX_A/B from LDS.
      */
-    ComputeIndexChain computeIndexWaveMatrixABLDS(KernelGraph& graph, int load, int sdim)
+    ComputeIndexChain computeIndexWaveMatrixABLDS(KernelGraph&            graph,
+                                                  int                     load,
+                                                  int                     sdim,
+                                                  std::unordered_set<int> zeros)
     {
         AssertFatal(isOperation<LoadLDSTile>(graph.control.getElement(load)));
         auto lds  = graph.mapper.get<LDS>(load);
@@ -326,41 +355,75 @@ namespace rocRoller::KernelGraph
         connections.push_back(DC<Stride>(strideWave, 0));
         connections.push_back(DC<Stride>(strideVgpr, 1));
 
-        auto ciWave = makeComputeIndex(graph,
-                                       lds,
-                                       wave,
-                                       -1,
-                                       offsetWave,
-                                       strideWave,
-                                       -1,
-                                       false,
-                                       dtype,
-                                       {vgpr},
-                                       DataType::UInt32,
-                                       DataType::UInt32);
-        auto ciVgpr = makeComputeIndex(graph,
-                                       lds,
-                                       vgpr,
-                                       offsetWave,
-                                       offsetVgpr,
-                                       strideVgpr,
-                                       -1,
-                                       false,
-                                       dtype,
-                                       {wave},
-                                       DataType::UInt32,
-                                       DataType::UInt32);
+        auto waveZeros = addZeros({vgpr}, zeros);
+        auto vgprZeros = addZeros({wave}, zeros);
 
-        graph.control.addElement(Sequence(), {ciWave}, {ciVgpr});
+        std::vector<int> ciOperations;
 
-        return {ciWave, ciVgpr, connections};
+        auto [required, path] = findRequiredCoordinates(lds, Graph::Direction::Downstream, graph);
+        auto unrolls          = filterCoordinates<Unroll>(required, graph);
+        for(auto unroll : unrolls)
+        {
+            auto unrollZeros = addZeros({wave, vgpr}, zeros);
+            auto parents     = graph.coordinates.parentNodes(unroll);
+            for(auto parent : parents)
+            {
+                if(path.contains(parent))
+                {
+                    auto strideUnroll = graph.coordinates.addElement(Stride(), {lds}, {parent});
+
+                    ciOperations.push_back(makeComputeIndex(graph,
+                                                            lds,
+                                                            parent,
+                                                            -1,
+                                                            -1,
+                                                            strideUnroll,
+                                                            -1,
+                                                            false,
+                                                            dtype,
+                                                            unrollZeros,
+                                                            DataType::Int64,
+                                                            DataType::Int64));
+                }
+            }
+        }
+
+        ciOperations.push_back(makeComputeIndex(graph,
+                                                lds,
+                                                wave,
+                                                -1,
+                                                offsetWave,
+                                                strideWave,
+                                                -1,
+                                                false,
+                                                dtype,
+                                                waveZeros,
+                                                DataType::UInt32,
+                                                DataType::UInt32));
+        ciOperations.push_back(makeComputeIndex(graph,
+                                                lds,
+                                                vgpr,
+                                                offsetWave,
+                                                offsetVgpr,
+                                                strideVgpr,
+                                                -1,
+                                                false,
+                                                dtype,
+                                                vgprZeros,
+                                                DataType::UInt32,
+                                                DataType::UInt32));
+
+        for(int i = 1; i < ciOperations.size(); ++i)
+            graph.control.addElement(Sequence(), {ciOperations[i - 1]}, {ciOperations[i]});
+
+        return {ciOperations.front(), ciOperations.back(), connections};
     }
 
     /**
      * @brief Add ComputeIndexes for WAVE MATRIX_A/B from global.
      */
-    ComputeIndexChain
-        computeIndexWaveMatrixAB(KernelGraph& graph, int load, int sdim, ExpressionPtr step)
+    ComputeIndexChain computeIndexWaveMatrixAB(
+        KernelGraph& graph, int load, int sdim, ExpressionPtr step, std::unordered_set<int> zeros)
     {
         auto user = graph.mapper.get<User>(load);
         auto mac  = graph.mapper.get<MacroTileNumber>(load, sdim);
@@ -386,31 +449,54 @@ namespace rocRoller::KernelGraph
         connections.push_back(DC<Stride>(strideVgpr, 1));
         connections.push_back(DC<Buffer>(buffer));
 
-        auto ciMac = makeComputeIndex(
-            graph, user, mac, -1, offsetMac, strideMac, buffer, false, dtype, {wave, vgpr});
-        auto ciWave = makeComputeIndex(graph,
-                                       user,
-                                       wave,
-                                       offsetMac,
-                                       offsetWave,
-                                       strideWave,
-                                       buffer,
-                                       false,
-                                       dtype,
-                                       {mac, vgpr});
-        auto ciVgpr = makeComputeIndex(graph,
-                                       user,
-                                       vgpr,
-                                       offsetWave,
-                                       offsetVgpr,
-                                       strideVgpr,
-                                       buffer,
-                                       false,
-                                       dtype,
-                                       {mac, wave});
+        auto macZeros    = addZeros({wave, vgpr}, zeros);
+        auto waveZeros   = addZeros({mac, vgpr}, zeros);
+        auto vgprZeros   = addZeros({mac, wave}, zeros);
+        auto unrollZeros = addZeros({mac, wave, vgpr}, zeros);
 
-        graph.control.addElement(Sequence(), {ciMac}, {ciWave});
-        graph.control.addElement(Sequence(), {ciWave}, {ciVgpr});
+        std::vector<int> ciOperations;
+
+        auto [required, path] = findRequiredCoordinates(user, Graph::Direction::Downstream, graph);
+        auto unrolls          = filterCoordinates<Unroll>(required, graph);
+        for(auto unroll : unrolls)
+        {
+            auto parents = graph.coordinates.parentNodes(unroll);
+            for(auto parent : parents)
+            {
+                if(path.contains(parent))
+                {
+                    auto strideUnroll = graph.coordinates.addElement(Stride(), {user}, {parent});
+
+                    ciOperations.push_back(makeComputeIndex(graph,
+                                                            user,
+                                                            parent,
+                                                            -1,
+                                                            -1,
+                                                            strideUnroll,
+                                                            -1,
+                                                            false,
+                                                            dtype,
+                                                            unrollZeros,
+                                                            DataType::Int64,
+                                                            DataType::Int64));
+                }
+            }
+        }
+
+        ciOperations.push_back(makeComputeIndex(
+            graph, user, mac, -1, offsetMac, strideMac, buffer, false, dtype, macZeros));
+        ciOperations.push_back(makeComputeIndex(
+            graph, user, wave, offsetMac, offsetWave, strideWave, buffer, false, dtype, waveZeros));
+        ciOperations.push_back(makeComputeIndex(graph,
+                                                user,
+                                                vgpr,
+                                                offsetWave,
+                                                offsetVgpr,
+                                                strideVgpr,
+                                                buffer,
+                                                false,
+                                                dtype,
+                                                vgprZeros));
 
         auto offsetMacExpr = std::make_shared<Expression::Expression>(
             Expression::DataFlowTag{offsetMac, Register::Type::Vector, DataType::UInt64});
@@ -421,15 +507,22 @@ namespace rocRoller::KernelGraph
             Assign{Register::Type::Vector, offsetMacExpr + step * strideMacExpr});
         graph.mapper.connect(offsetUpdate, offsetMac, NaryArgument::DEST);
 
-        return {ciMac, ciVgpr, connections, offsetUpdate};
+        for(int i = 1; i < ciOperations.size(); ++i)
+            graph.control.addElement(Sequence(), {ciOperations[i - 1]}, {ciOperations[i]});
+
+        return {ciOperations.front(), ciOperations.back(), connections, offsetUpdate};
     }
 
     /**
      * @brief Add ComputeIndexes for VGPR MATRIX_ACCUMULATOR from global or LDS.
      */
-    ComputeIndexChain computeIndexMatrixAccumulator(KernelGraph& graph, int op, bool forward)
+    ComputeIndexChain computeIndexMatrixAccumulator(KernelGraph&                   graph,
+                                                    int                            op,
+                                                    bool                           forward,
+                                                    std::unordered_set<int> const& zeros)
     {
-        rocRoller::Log::getLogger()->debug("KernelGraph::addComputeIndexC({}, {})", op, forward);
+        rocRoller::Log::getLogger()->debug(
+            "KernelGraph::addComputeIndexMatrixAccumulator({}, {})", op, forward);
 
         auto [source, _d] = getOperationTarget(op, graph);
         AssertFatal(source > 0, "User or LDS dimension not found");
@@ -484,34 +577,131 @@ namespace rocRoller::KernelGraph
         connections.push_back(DC<Stride>(strideVgprIndex, 1));
         connections.push_back(DC<Buffer>(buffer));
 
-        auto ciVgprBlock = makeComputeIndex(graph,
-                                            source,
-                                            vgprBlock,
-                                            -1,
-                                            offsetVgprBlock,
-                                            strideVgprBlock,
-                                            buffer,
-                                            forward,
-                                            dtype,
-                                            {vgprIndex},
-                                            offsettype,
-                                            offsettype);
-        auto ciVgprIndex = makeComputeIndex(graph,
-                                            source,
-                                            vgprIndex,
-                                            offsetVgprBlock,
-                                            offsetVgprIndex,
-                                            strideVgprIndex,
-                                            buffer,
-                                            forward,
-                                            dtype,
-                                            {vgprBlock},
-                                            offsettype,
-                                            offsettype);
+        std::vector<int> ciOperations;
 
-        graph.control.addElement(Sequence(), {ciVgprBlock}, {ciVgprIndex});
+        auto vgprBlockZeros = addZeros({vgprIndex}, zeros);
+        auto vgprIndexZeros = addZeros({vgprBlock}, zeros);
+        auto unrollZeros    = addZeros({vgprIndex, vgprBlock}, zeros);
 
-        return {ciVgprBlock, ciVgprIndex, connections};
+        auto [required, path]
+            = findRequiredCoordinates(source, forward ? GD::Upstream : GD::Downstream, graph);
+
+        int baseFor    = -1;
+        int baseUpdate = -1;
+
+        auto maybeForLoop = findContainingOperation<ForLoopOp>(op, graph);
+        if(maybeForLoop)
+        {
+            auto forLoop = getForLoop(*maybeForLoop, graph);
+
+            int offset, stride;
+            if(forward)
+            {
+                offset = graph.coordinates.addElement(Offset(), {forLoop}, {source});
+                stride = graph.coordinates.addElement(Stride(), {forLoop}, {source});
+            }
+            else
+            {
+                offset = graph.coordinates.addElement(Offset(), {source}, {forLoop});
+                stride = graph.coordinates.addElement(Stride(), {source}, {forLoop});
+            }
+            connections.push_back(DC<Offset>(offset, -1));
+            connections.push_back(DC<Stride>(stride, -1));
+
+            auto offsetExpr = std::make_shared<Expression::Expression>(
+                Expression::DataFlowTag{offset, Register::Type::Vector, DataType::UInt64});
+            auto strideExpr = std::make_shared<Expression::Expression>(
+                Expression::DataFlowTag{stride, Register::Type::Scalar, DataType::UInt64});
+
+            baseUpdate
+                = graph.control.addElement(Assign{Register::Type::Vector, offsetExpr + strideExpr});
+            graph.mapper.connect(baseUpdate, offset, NaryArgument::DEST);
+
+            baseFor = offset;
+
+            ciOperations.push_back(makeComputeIndex(graph,
+                                                    source,
+                                                    forLoop,
+                                                    -1,
+                                                    offset,
+                                                    stride,
+                                                    -1,
+                                                    forward,
+                                                    dtype,
+                                                    unrollZeros,
+                                                    DataType::UInt64,
+                                                    DataType::UInt64));
+
+            vgprBlockZeros.push_back(forLoop);
+            vgprIndexZeros.push_back(forLoop);
+            unrollZeros.push_back(forLoop);
+        }
+
+        auto unrolls = filterCoordinates<Unroll>(required, graph);
+        for(auto unroll : unrolls)
+        {
+            std::vector<int> neighbourNodes;
+            if(forward)
+                neighbourNodes = graph.coordinates.childNodes(unroll).to<std::vector>();
+            else
+                neighbourNodes = graph.coordinates.parentNodes(unroll).to<std::vector>();
+            for(auto neighbourNode : neighbourNodes)
+            {
+                if(path.contains(neighbourNode))
+                {
+                    int strideUnroll;
+                    if(forward)
+                        strideUnroll
+                            = graph.coordinates.addElement(Stride(), {neighbourNode}, {source});
+                    else
+                        strideUnroll
+                            = graph.coordinates.addElement(Stride(), {source}, {neighbourNode});
+
+                    ciOperations.push_back(makeComputeIndex(graph,
+                                                            source,
+                                                            neighbourNode,
+                                                            baseFor,
+                                                            -1,
+                                                            strideUnroll,
+                                                            -1,
+                                                            forward,
+                                                            dtype,
+                                                            unrollZeros,
+                                                            DataType::Int64,
+                                                            DataType::Int64));
+                }
+            }
+        }
+
+        ciOperations.push_back(makeComputeIndex(graph,
+                                                source,
+                                                vgprBlock,
+                                                baseFor,
+                                                offsetVgprBlock,
+                                                strideVgprBlock,
+                                                buffer,
+                                                forward,
+                                                dtype,
+                                                vgprBlockZeros,
+                                                offsettype,
+                                                offsettype));
+        ciOperations.push_back(makeComputeIndex(graph,
+                                                source,
+                                                vgprIndex,
+                                                offsetVgprBlock,
+                                                offsetVgprIndex,
+                                                strideVgprIndex,
+                                                buffer,
+                                                forward,
+                                                dtype,
+                                                vgprIndexZeros,
+                                                offsettype,
+                                                offsettype));
+
+        for(int i = 1; i < ciOperations.size(); ++i)
+            graph.control.addElement(Sequence(), {ciOperations[i - 1]}, {ciOperations[i]});
+
+        return {ciOperations.front(), ciOperations.back(), connections, baseUpdate};
     }
 
     bool needsComputeIndex(Operation const& op)
@@ -543,97 +733,6 @@ namespace rocRoller::KernelGraph
                 },
                 GD::Downstream)
             .to<std::vector>();
-    }
-
-    /**
-     * @brief Get required Unroll coordinate values.
-     *
-     * For each Unroll coordinate required by the candidate operation,
-     * query the Control Flow graph (upstream) for SetCoordinate
-     * operations and record the Unroll coordinate values.
-     *
-     * @param candidate Candidate operation in the Control Flow graph:
-     * look upstream from here.
-     * @param unrollCoordinates Required Unroll coordinates.
-     * @param kgraph Kernel Graph.
-     * @return Map from Unroll coordinate to set value (ExpressionPtr).
-     */
-    std::map<int, ExpressionPtr> getUnrollCoordinateValues(
-        int candidate, std::unordered_set<int> unrollCoordinates, KernelGraph const& kgraph)
-    {
-        auto burnDown = unrollCoordinates;
-
-        std::map<int, ExpressionPtr> rv;
-        for(auto tag : kgraph.control.depthFirstVisit(candidate, GD::Upstream))
-        {
-            auto maybeSetCoordinate = kgraph.control.get<SetCoordinate>(tag);
-            if(!maybeSetCoordinate)
-                continue;
-
-            auto coordinate = kgraph.mapper.get<Unroll>(tag);
-
-            if(burnDown.contains(coordinate))
-            {
-                rv[coordinate] = maybeSetCoordinate->value;
-                burnDown.erase(coordinate);
-            }
-
-            if(burnDown.empty())
-                return rv;
-        }
-
-        return rv;
-    }
-
-    /**
-     * @brief Find earliest possible set of SetCoordinate operations
-     * that set Unroll coordinates to specific values.
-     *
-     * From the root (Kernel) of the Control Flow graph, follow the
-     * path to the candidate operation.  When a SetCoordinate node is
-     * visited, check to see if it is setting one of the Unroll
-     * dimensions of interest to the exact value required.  When the
-     * list of required Unroll values is exhausted, return the current
-     * SetCoordinate operation.
-     *
-     * @param candidate Candidate load/store operation.
-     * @param values Map of Unroll dimension tag to required Unroll value.
-     * @param kgraph Kernel Graph
-     */
-    std::optional<int> findEarliestMatchingSetCoordinate(int                           candidate,
-                                                         std::map<int, ExpressionPtr>& values,
-                                                         KernelGraph const&            kgraph)
-    {
-        std::unordered_set<int> burnDown;
-        for(auto const& kv : values)
-            burnDown.insert(kv.first);
-
-        auto kernel = *kgraph.control.roots().begin();
-        auto path   = kgraph.control
-                        .path<GD::Downstream>(std::vector<int>{kernel}, std::vector<int>{candidate})
-                        .to<std::vector>();
-
-        for(auto tag : path)
-        {
-            auto maybeSetCoordinate = kgraph.control.get<SetCoordinate>(tag);
-            if(!maybeSetCoordinate)
-                continue;
-
-            auto coordinate = kgraph.mapper.get<Unroll>(tag);
-
-            if(burnDown.contains(coordinate))
-            {
-                if(Expression::identical(maybeSetCoordinate->value, values[coordinate]))
-                {
-                    burnDown.erase(coordinate);
-                }
-            }
-
-            if(burnDown.empty())
-                return tag;
-        }
-
-        return {};
     }
 
     /**
@@ -719,10 +818,11 @@ namespace rocRoller::KernelGraph
      * @param kgraph Kernel graph to add ComputeIndex operations to.
      * @param tag Load/store operation that needs ComputeIndex operations.
      */
-    ComputeIndexChain addComputeIndex(KernelGraph&          kgraph,
-                                      int                   tag,
-                                      ComputeIndexChainType chainType,
-                                      ExpressionPtr         step)
+    ComputeIndexChain addComputeIndex(KernelGraph&            kgraph,
+                                      int                     tag,
+                                      ComputeIndexChainType   chainType,
+                                      ExpressionPtr           step,
+                                      std::unordered_set<int> zeros)
     {
         auto [source, _d] = getOperationTarget(tag, kgraph);
 
@@ -731,7 +831,7 @@ namespace rocRoller::KernelGraph
         case STORE_ELEM:
             return computeIndexElementMatrix(kgraph, tag, source, true);
         case STORE_WAVE_MATRIX_ACCUMULATOR:
-            return computeIndexMatrixAccumulator(kgraph, tag, true);
+            return computeIndexMatrixAccumulator(kgraph, tag, true, zeros);
         case LOAD_ELEM_MATRIX_A:
             return computeIndexElementMatrixAB(kgraph, tag, 1, step);
         case LOAD_ELEM_MATRIX_B:
@@ -739,15 +839,15 @@ namespace rocRoller::KernelGraph
         case LOAD_ELEM:
             return computeIndexElementMatrix(kgraph, tag, source, false);
         case LOAD_WAVE_MATRIX_ACCUMULATOR:
-            return computeIndexMatrixAccumulator(kgraph, tag, false);
+            return computeIndexMatrixAccumulator(kgraph, tag, false, zeros);
         case LOAD_WAVE_MATRIX_A:
-            return computeIndexWaveMatrixAB(kgraph, tag, 1, step);
+            return computeIndexWaveMatrixAB(kgraph, tag, 1, step, zeros);
         case LOAD_WAVE_MATRIX_B:
-            return computeIndexWaveMatrixAB(kgraph, tag, 0, step);
+            return computeIndexWaveMatrixAB(kgraph, tag, 0, step, zeros);
         case LOAD_LDS_MATRIX_A:
-            return computeIndexWaveMatrixABLDS(kgraph, tag, 1);
+            return computeIndexWaveMatrixABLDS(kgraph, tag, 1, zeros);
         case LOAD_LDS_MATRIX_B:
-            return computeIndexWaveMatrixABLDS(kgraph, tag, 0);
+            return computeIndexWaveMatrixABLDS(kgraph, tag, 0, zeros);
         default:
             Throw<FatalError>("Not implemented yet.");
         }
@@ -812,25 +912,26 @@ namespace rocRoller::KernelGraph
      */
     struct AddComputeIndex
     {
-        void stageChain(int                   target,
-                        int                   candidate,
-                        int                   location,
-                        ComputeIndexChainType type,
-                        Graph::Direction      direction,
-                        int                   forLoop = -1)
+        void stageChain(int                     target,
+                        int                     candidate,
+                        int                     location,
+                        ComputeIndexChainType   type,
+                        Graph::Direction        direction,
+                        int                     forLoop = -1,
+                        std::unordered_set<int> zeros   = {})
         {
-            ComputeIndexChainSpecification spec{target, type, location, direction, forLoop};
+            ComputeIndexChainSpecification spec{target, type, location, direction, forLoop, zeros};
             m_chains[spec].push_back(candidate);
         }
 
-        void stage(KernelGraph const& kgraph, int candidate) // make kgraph const
+        void stage(KernelGraph const& kgraph, int candidate)
         {
             auto log = rocRoller::Log::getLogger();
 
             log->debug("KernelGraph::addComputeIndex({}): ", candidate);
 
             auto [target, direction] = getOperationTarget(candidate, kgraph);
-            auto required            = findRequiredCoordinates(target, direction, kgraph);
+            auto [required, path]    = findRequiredCoordinates(target, direction, kgraph);
             auto forLoopCoordinates  = filterCoordinates<ForLoop>(required, kgraph);
             auto unrollCoordinates   = filterCoordinates<Unroll>(required, kgraph);
 
@@ -841,48 +942,23 @@ namespace rocRoller::KernelGraph
 
             auto type = computeIndexChainType(kgraph, candidate);
 
-            // TODO: Handle ACCUMULATOR inside loops properly
-            {
-                auto [tileTag, tile] = kgraph.getDimension<MacroTile>(candidate);
-                if(hasForLoop && tile.layoutType == LayoutType::MATRIX_ACCUMULATOR)
-                {
-                    log->debug("KernelGraph::addComputeIndex({}): immediate", candidate);
-                    stageChain(target, candidate, candidate, type, GD::Upstream);
-                    return;
-                }
-            }
-
-            if(hasUnroll)
-            {
-                log->debug("KernelGraph::addComputeIndex({}): hasUnroll", candidate);
-
-                auto unrollCoordinateValues
-                    = getUnrollCoordinateValues(candidate, unrollCoordinates, kgraph);
-                auto maybeSetCoordinate
-                    = findEarliestMatchingSetCoordinate(candidate, unrollCoordinateValues, kgraph);
-
-                AssertFatal(maybeSetCoordinate, "Missing SetCoordinate operation.");
-                auto setCoordinate = *maybeSetCoordinate;
-
-                if(hasForLoop && maybeForLoop)
-                {
-                    auto forLoop = *maybeForLoop;
-                    stageChain(target, candidate, forLoop, type, GD::Upstream, forLoop);
-                }
-                else
-                {
-                    stageChain(target, candidate, setCoordinate, type, GD::Downstream);
-                }
-                return;
-            }
-
             if(hasForLoop)
             {
                 log->debug("KernelGraph::addComputeIndex({}): forLoop", candidate);
                 AssertFatal(maybeForLoop, "Missing ForLoop operation.");
 
                 auto forLoop = *maybeForLoop;
-                stageChain(target, candidate, forLoop, type, GD::Upstream, forLoop);
+                stageChain(
+                    target, candidate, forLoop, type, GD::Upstream, forLoop, unrollCoordinates);
+                return;
+            }
+
+            if(hasUnroll)
+            {
+                log->debug("KernelGraph::addComputeIndex({}): hasUnroll", candidate);
+
+                auto kernel = *kgraph.control.roots().begin();
+                stageChain(target, candidate, kernel, type, GD::Downstream, -1, unrollCoordinates);
                 return;
             }
 
@@ -914,7 +990,9 @@ namespace rocRoller::KernelGraph
                 }
 
                 // Use first candidate to compute indexes
-                auto chain = addComputeIndex(kgraph, candidates[0], spec.type, step);
+                rocRoller::Log::getLogger()->debug("KernelGraph::addComputeIndex()::commit(): {}",
+                                                   candidates[0]);
+                auto chain = addComputeIndex(kgraph, candidates[0], spec.type, step, spec.zeros);
 
                 if(spec.direction == GD::Downstream)
                 {
@@ -937,6 +1015,7 @@ namespace rocRoller::KernelGraph
                 if(chain.update > 0)
                     kgraph.control.addElement(ForLoopIncrement(), {spec.forLoop}, {chain.update});
 
+                // Add deferred connections
                 for(auto candidate : candidates)
                 {
                     for(auto const& dc : chain.connections)

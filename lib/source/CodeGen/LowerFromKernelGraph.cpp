@@ -108,8 +108,8 @@ namespace rocRoller
 
                 // Find all required coordinates for the storage node,
                 // and filter out Unroll coordinates.
-                auto required = findRequiredCoordinates(targetTag, direction, m_graph);
-                auto unrolls  = filterCoordinates<Unroll>(required, m_graph);
+                auto [required, path] = findRequiredCoordinates(targetTag, direction, m_graph);
+                auto unrolls          = filterCoordinates<Unroll>(required, m_graph);
 
                 if(unrolls.size() == 0)
                     return nullptr;
@@ -118,41 +118,28 @@ namespace rocRoller
 
                 for(auto const& unroll : unrolls)
                 {
-
-                    std::unordered_set<int> path;
-                    if(direction == Graph::Direction::Downstream)
-                    {
-                        path = m_graph.coordinates
-                                   .path<Graph::Direction::Upstream>(required,
-                                                                     std::vector<int>{targetTag})
-                                   .to<std::unordered_set>();
-                    }
-                    else
-                    {
-                        path = m_graph.coordinates
-                                   .path<Graph::Direction::Downstream>(required,
-                                                                       std::vector<int>{targetTag})
-                                   .to<std::unordered_set>();
-                    }
-
-                    // Find the parent of the Unroll that:
+                    // Find the neighbour of the Unroll that:
                     // 1. is in the load/store coordinate transform path
                     // 2. has a Stride edge connected to it
                     std::optional<int> maybeStrideTag;
-                    auto               parents = m_graph.coordinates.parentNodes(unroll);
-                    for(auto p : parents)
+                    std::vector<int>   neighbourNodes;
+                    if(direction == Graph::Direction::Downstream)
+                        neighbourNodes = m_graph.coordinates.parentNodes(unroll).to<std::vector>();
+                    else
+                        neighbourNodes = m_graph.coordinates.childNodes(unroll).to<std::vector>();
+                    for(auto neighbourNode : neighbourNodes)
                     {
-                        if(path.contains(p))
+                        if(path.contains(neighbourNode))
                         {
-                            auto neighbours
-                                = m_graph.coordinates.getNeighbours(p, Graph::opposite(direction));
-                            for(auto neighbour : neighbours)
+                            auto neighbourEdges = m_graph.coordinates.getNeighbours(
+                                neighbourNode, Graph::opposite(direction));
+                            for(auto neighbourEdge : neighbourEdges)
                             {
-                                auto maybeStride = m_graph.coordinates.get<Stride>(neighbour);
+                                auto maybeStride = m_graph.coordinates.get<Stride>(neighbourEdge);
                                 if(maybeStride
-                                   && m_context->registerTagManager()->hasExpression(neighbour))
+                                   && m_context->registerTagManager()->hasExpression(neighbourEdge))
                                 {
-                                    maybeStrideTag = neighbour;
+                                    maybeStrideTag = neighbourEdge;
                                 }
                             }
                         }
@@ -380,6 +367,8 @@ namespace rocRoller
                 m_context->setScopeManager(scope);
 
                 scope->pushNewScope();
+                auto init = m_graph.control.getOutputNodeIndices<Initialize>(tag).to<std::set>();
+                co_yield generate(init, coords);
                 auto body = m_graph.control.getOutputNodeIndices<Body>(tag).to<std::set>();
                 co_yield generate(body, coords);
                 scope->popAndReleaseScope();
@@ -541,9 +530,12 @@ namespace rocRoller
                     tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::INCREMENT});
 
                 rocRoller::Log::getLogger()->debug(
-                    "KernelGraph::CodeGenerator::ComputeIndex({}): target {} offset {} stride {}",
+                    "KernelGraph::CodeGenerator::ComputeIndex({}): "
+                    "target {} increment {} base {} offset {} stride {}",
                     tag,
                     target,
+                    increment,
+                    base,
                     offset,
                     stride);
 
@@ -573,6 +565,7 @@ namespace rocRoller
 
                     auto indexExpr
                         = ci.forward ? coords.forward({target})[0] : coords.reverse({target})[0];
+
                     rocRoller::Log::getLogger()->debug(
                         "  Offset({}): {}", offset, toString(indexExpr));
 
@@ -1323,6 +1316,15 @@ namespace rocRoller
 
                 AssertFatal(rowOffsetReg, "Invalid row offset register.");
                 AssertFatal(colOffsetReg, "Invalid col offset register.");
+
+                if(rowOffsetExpr)
+                {
+                    auto unrolledRowOffsetExpr
+                        = simplify(rowOffsetReg->expression() + rowOffsetExpr);
+                    auto tmp = rowOffsetReg->placeholder();
+                    co_yield generate(tmp, unrolledRowOffsetExpr);
+                    rowOffsetReg = tmp;
+                }
 
                 std::shared_ptr<BufferDescriptor> bufDesc;
                 if(kind == MemoryInstructions::MemoryKind::Buffer)

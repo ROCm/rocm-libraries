@@ -294,7 +294,7 @@ namespace rocRoller
                 // operation contain the loop iteration?
 
                 auto [target, direction] = getOperationTarget(*writeOperation, kgraph);
-                auto required            = findRequiredCoordinates(target, direction, kgraph);
+                auto [required, path]    = findRequiredCoordinates(target, direction, kgraph);
                 if(required.size() == 0)
                 {
                     // Local variable

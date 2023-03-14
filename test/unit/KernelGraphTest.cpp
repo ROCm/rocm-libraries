@@ -1686,10 +1686,10 @@ namespace KernelGraphTest
             = unrolled_kgraph_lds.control.getNodes<StoreLDSTile>().to<std::vector>();
         EXPECT_EQ(unrolledStoreLDS.size(), 4);
 
-        // Verify number of ComputeIndexes: 2 A/B loads; C load; D store: 2 * 3 + 2 + 2 = 10.
+        // Verify number of ComputeIndexes: 2 A/B loads; C load; D store: 2 * 3 + 4 + 4 = 14.
         kgraph1             = addComputeIndexOperations(kgraph1);
         auto computeIndexes = kgraph1.control.getNodes<ComputeIndex>().to<std::vector>();
-        EXPECT_EQ(computeIndexes.size(), 10);
+        EXPECT_EQ(computeIndexes.size(), 14);
 
         // Verify number of Deallocates
         auto kgraph2        = addDeallocate(kgraph1);

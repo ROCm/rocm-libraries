@@ -60,10 +60,12 @@ namespace rocRoller
         /**
          * @brief Find all required coordintes needed to compute
          * indexes for the target dimension.
+         *
+         * @return Pair of: vector required coordinates; set of
+         * coordinates in the connecting path.
          */
-        std::vector<int> findRequiredCoordinates(int                target,
-                                                 Graph::Direction   direction,
-                                                 KernelGraph const& kgraph);
+        std::pair<std::vector<int>, std::unordered_set<int>> findRequiredCoordinates(
+            int target, Graph::Direction direction, KernelGraph const& kgraph);
 
         /**
          * @brief Find the operation of type T that contains the

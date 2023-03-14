@@ -78,6 +78,8 @@ namespace ScopeTest
             // CodeGeneratorVisitor::generate() begin
             // generate(set{1})
             // Kernel(1) BEGIN
+            // generate(set{})
+            // end: generate(set{})
             // generate(set{4})
             // Assign VGPR 11j(4) BEGIN
             // Assign dim(1) = 11j
