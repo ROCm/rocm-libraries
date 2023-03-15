@@ -30,12 +30,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define CUDA_CALL(err, ...) \
+#define HIP_CALL(err, ...) \
     do { \
         err = __VA_ARGS__; \
         if (err != hipSuccess) \
         { \
-            printf("CUDA ERROR, line %d: %s: %s\n", __LINE__,\
+            printf("HIP ERROR, line %d: %s: %s\n", __LINE__,\
                    hipGetErrorName(err), hipGetErrorString(err)); \
             exit(1); \
         } \
@@ -45,16 +45,16 @@ void list_devices()
 {
     hipError_t err;
     int device_count;
-    CUDA_CALL(err, hipGetDeviceCount(&device_count));
+    HIP_CALL(err, hipGetDeviceCount(&device_count));
     printf("HIP devices found: %d\n", device_count);
 
     int selected_device;
-    CUDA_CALL(err, hipGetDevice(&selected_device));
+    HIP_CALL(err, hipGetDevice(&selected_device));
 
     for (int dev = 0; dev < device_count; ++dev)
     {
         hipDeviceProp_t device_prop;
-        CUDA_CALL(err, hipGetDeviceProperties(&device_prop, dev));
+        HIP_CALL(err, hipGetDeviceProperties(&device_prop, dev));
 
         printf("Device %d: \"%s\", ", dev, device_prop.name);
         if(dev == selected_device)
@@ -83,9 +83,9 @@ void fake_main_kernel(int * ret)
 
 int main(int argc, char** argv)
 {
-    // Check if the CUDA driver/runtime are installed and working for sanity.
+    // Check if the HIP driver/runtime are installed and working for sanity.
     hipError_t err;
-    CUDA_CALL(err, hipDeviceSynchronize());
+    HIP_CALL(err, hipDeviceSynchronize());
 
     list_devices();
 
@@ -95,16 +95,15 @@ int main(int argc, char** argv)
         return ret;
     }
 
-    int * cuda_ret = 0;
-    CUDA_CALL(err, hipMalloc(&cuda_ret, sizeof(int)));
+    int * hip_ret = 0;
+    HIP_CALL(err, hipMalloc(&hip_ret, sizeof(int)));
 
-    fake_main_kernel<<<1, cuda_thread_count>>>(cuda_ret);
-    //hipLaunchKernel(static_cast<void*> (fake_main_kernel), 1, cuda_thread_count, 0, 0, cuda_ret);
-    
-    CUDA_CALL(err, hipGetLastError());
-    CUDA_CALL(err, hipDeviceSynchronize());
-    CUDA_CALL(err, hipMemcpy(&ret, cuda_ret, sizeof(int), hipMemcpyDeviceToHost));
-    CUDA_CALL(err, hipFree(cuda_ret));
+    fake_main_kernel<<<1, cuda_thread_count>>>(hip_ret);
+     
+    HIP_CALL(err, hipGetLastError());
+    HIP_CALL(err, hipDeviceSynchronize());
+    HIP_CALL(err, hipMemcpy(&ret, hip_ret, sizeof(int), hipMemcpyDeviceToHost));
+    HIP_CALL(err, hipFree(hip_ret));
 
     return ret;
 }
