@@ -5,6 +5,8 @@
 #include <cstdint>
 #include <cstddef>
 
+#include "gpu/__config"
+
 namespace gpu {
 
 //====================================================================================================================//
@@ -23,9 +25,12 @@ using atomic_long   = atomic<long>;
 using atomic_ulong  = atomic<unsigned long>;
 using atomic_llong  = atomic<long long>;
 using atomic_ullong = atomic<unsigned long long>;
+#ifndef _LIBGPU_HAS_NO_CHAR8_T
+using atomic_char8_t = atomic<char8_t>;
+#endif
 using atomic_char16_t = atomic<char16_t>;
 using atomic_char32_t = atomic<char32_t>;
-#ifndef _LIBCPP_HAS_NO_WIDE_CHARACTERS
+#ifndef _LIBGPU_HAS_NO_WIDE_CHARACTERS
 using atomic_wchar_t = atomic<wchar_t>;
 #endif
 
