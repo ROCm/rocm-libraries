@@ -39,7 +39,7 @@ template <typename _Tp>
 struct __cxx_atomic_base_impl {
 
     inline __host__ __device__ __cxx_atomic_base_impl() noexcept = default;
-    constexpr explicit __cxx_atomic_base_impl(_Tp value) noexcept : __a_value(value) {}
+    constexpr __host__ __device__ explicit __cxx_atomic_base_impl(_Tp value) noexcept : __a_value(value) {}
     _Tp __a_value;
 };
 
