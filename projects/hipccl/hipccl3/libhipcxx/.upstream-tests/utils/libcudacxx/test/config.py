@@ -738,7 +738,6 @@ class Configuration(object):
             pre_sm_90  = False
             compute_archs = [a for a in sorted(shlex.split(compute_archs))]
             for arch in compute_archs:
-                print("ARCH:", arch)
                 if arch == "gfx908": pre_gfx90a = True
                 elif arch != "gfx90a":
                     pre_gfx908 = True

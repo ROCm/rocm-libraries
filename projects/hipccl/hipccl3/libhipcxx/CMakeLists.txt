@@ -77,7 +77,6 @@ endif()
 if (LIBCUDACXX_ENABLE_CUDA)
   enable_language(CUDA)
 elseif (LIBCUDACXX_ENABLE_HIP)
-  #enable_language(HIP)
   find_package(hip REQUIRED)
 endif ()
 
