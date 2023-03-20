@@ -16,49 +16,49 @@
 #include "deleter_types.h"
 
 struct A {
-  static int count;
-  TEST_CONSTEXPR_CXX23 A() {
+  static __device__ int count;
+  __device__ TEST_CONSTEXPR_CXX23 A() {
     if (!TEST_IS_CONSTANT_EVALUATED)
       ++count;
   }
-  TEST_CONSTEXPR_CXX23 A(const A&) {
+  __device__ TEST_CONSTEXPR_CXX23 A(const A&) {
     if (!TEST_IS_CONSTANT_EVALUATED)
       ++count;
   }
-  TEST_CONSTEXPR_CXX23 virtual ~A() {
+  __device__ TEST_CONSTEXPR_CXX23 virtual ~A() {
     if (!TEST_IS_CONSTANT_EVALUATED)
       --count;
   }
 };
 
-int A::count = 0;
+__device__ int A::count = 0;
 
 struct B : public A {
-  static int count;
-  TEST_CONSTEXPR_CXX23 B() {
+  static __device__ int count;
+  __device__ TEST_CONSTEXPR_CXX23 B() {
     if (!TEST_IS_CONSTANT_EVALUATED)
       ++count;
   }
-  TEST_CONSTEXPR_CXX23 B(const B& other) : A(other) {
+  __device__ TEST_CONSTEXPR_CXX23 B(const B& other) : A(other) {
     if (!TEST_IS_CONSTANT_EVALUATED)
       ++count;
   }
-  TEST_CONSTEXPR_CXX23 virtual ~B() {
+  __device__ TEST_CONSTEXPR_CXX23 virtual ~B() {
     if (!TEST_IS_CONSTANT_EVALUATED)
       --count;
   }
 };
 
-int B::count = 0;
+__device__ int B::count = 0;
 
 template <class T>
-TEST_CONSTEXPR_CXX23 typename std::enable_if<!std::is_array<T>::value, T*>::type newValue(int num_elements) {
+__device__ TEST_CONSTEXPR_CXX23 typename std::enable_if<!std::is_array<T>::value, T*>::type newValue(int num_elements) {
   assert(num_elements == 1);
   return new T;
 }
 
 template <class T>
-TEST_CONSTEXPR_CXX23 typename std::enable_if<std::is_array<T>::value, typename std::remove_all_extents<T>::type*>::type
+__device__ TEST_CONSTEXPR_CXX23 typename std::enable_if<std::is_array<T>::value, typename std::remove_all_extents<T>::type*>::type
 newValue(int num_elements) {
   typedef typename std::remove_all_extents<T>::type VT;
   assert(num_elements >= 1);
@@ -67,10 +67,10 @@ newValue(int num_elements) {
 
 struct IncompleteType;
 
-void checkNumIncompleteTypeAlive(int i);
-int getNumIncompleteTypeAlive();
-IncompleteType* getNewIncomplete();
-IncompleteType* getNewIncompleteArray(int size);
+__device__ void checkNumIncompleteTypeAlive(int i);
+__device__ int getNumIncompleteTypeAlive();
+__device__ IncompleteType* getNewIncomplete();
+__device__ IncompleteType* getNewIncompleteArray(int size);
 
 #if TEST_STD_VER >= 11
 template <class ThisT, class... Args>
@@ -80,39 +80,39 @@ template <class ThisT, class A1>
 struct args_is_this_type<ThisT, A1> : std::is_same<ThisT, typename std::decay<A1>::type> {};
 #endif
 
-template <class IncompleteT = IncompleteType, class Del = std::default_delete<IncompleteT> >
+template <class IncompleteT = IncompleteType, class Del = gpu::default_delete<IncompleteT> >
 struct StoresIncomplete {
   static_assert(
       (std::is_same<IncompleteT, IncompleteType>::value || std::is_same<IncompleteT, IncompleteType[]>::value), "");
 
-  std::unique_ptr<IncompleteT, Del> m_ptr;
+  gpu::unique_ptr<IncompleteT, Del> m_ptr;
 
 #if TEST_STD_VER >= 11
-  StoresIncomplete(StoresIncomplete const&) = delete;
-  StoresIncomplete(StoresIncomplete&&)      = default;
+  __device__ StoresIncomplete(StoresIncomplete const&) = delete;
+  __device__ StoresIncomplete(StoresIncomplete&&)      = default;
 
   template <class... Args>
-  StoresIncomplete(Args&&... args) : m_ptr(std::forward<Args>(args)...) {
+  __device__ StoresIncomplete(Args&&... args) : m_ptr(std::forward<Args>(args)...) {
     static_assert(!args_is_this_type<StoresIncomplete, Args...>::value, "");
   }
 #else
 
 private:
-  StoresIncomplete();
-  StoresIncomplete(StoresIncomplete const&);
+  __device__ StoresIncomplete();
+  __device__ StoresIncomplete(StoresIncomplete const&);
 
 public:
 #endif
 
-  ~StoresIncomplete();
+  __device__ ~StoresIncomplete();
 
-  IncompleteType* get() const { return m_ptr.get(); }
-  Del& get_deleter() { return m_ptr.get_deleter(); }
+  __device__ IncompleteType* get() const { return m_ptr.get(); }
+  __device__ Del& get_deleter() { return m_ptr.get_deleter(); }
 };
 
 #if TEST_STD_VER >= 11
-template <class IncompleteT = IncompleteType, class Del = std::default_delete<IncompleteT>, class... Args>
-void doIncompleteTypeTest(int expect_alive, Args&&... ctor_args) {
+template <class IncompleteT = IncompleteType, class Del = gpu::default_delete<IncompleteT>, class... Args>
+__device__ void doIncompleteTypeTest(int expect_alive, Args&&... ctor_args) {
   checkNumIncompleteTypeAlive(expect_alive);
   {
     StoresIncomplete<IncompleteT, Del> sptr(std::forward<Args>(ctor_args)...);
@@ -127,32 +127,32 @@ void doIncompleteTypeTest(int expect_alive, Args&&... ctor_args) {
 #endif
 
 #define INCOMPLETE_TEST_EPILOGUE()                                                                                     \
-  int is_incomplete_test_anchor = is_incomplete_test();                                                                \
+  int is_incomplete_test_anchor = [](){ hipLaunchKernelGGL(is_incomplete_test, dim3(1), dim3(1), 0, nullptr); return 0; }(); \
                                                                                                                        \
   struct IncompleteType {                                                                                              \
-    static int count;                                                                                                  \
-    IncompleteType() { ++count; }                                                                                      \
-    ~IncompleteType() { --count; }                                                                                     \
+    static __device__ int count;                                                                                       \
+    __device__ IncompleteType() { ++count; }                                                                           \
+    __device__ ~IncompleteType() { --count; }                                                                          \
   };                                                                                                                   \
                                                                                                                        \
   int IncompleteType::count = 0;                                                                                       \
                                                                                                                        \
-  void checkNumIncompleteTypeAlive(int i) { assert(IncompleteType::count == i); }                                      \
-  int getNumIncompleteTypeAlive() { return IncompleteType::count; }                                                    \
-  IncompleteType* getNewIncomplete() { return new IncompleteType; }                                                    \
-  IncompleteType* getNewIncompleteArray(int size) { return new IncompleteType[size]; }                                 \
+  __device__ void checkNumIncompleteTypeAlive(int i) { assert(IncompleteType::count == i); }                           \
+  __device__ int getNumIncompleteTypeAlive() { return IncompleteType::count; }                                         \
+  __device__ IncompleteType* getNewIncomplete() { return new IncompleteType; }                                         \
+  __device__ IncompleteType* getNewIncompleteArray(int size) { return new IncompleteType[size]; }                      \
                                                                                                                        \
   template <class IncompleteT, class Del>                                                                              \
-  StoresIncomplete<IncompleteT, Del>::~StoresIncomplete() {}
+  __device__ StoresIncomplete<IncompleteT, Del>::~StoresIncomplete() {}
 #
 
 #if TEST_STD_VER >= 11
 #  define DEFINE_AND_RUN_IS_INCOMPLETE_TEST(...)                                                                       \
-    static int is_incomplete_test() { __VA_ARGS__ return 0; }                                                          \
+    __global__ static void is_incomplete_test() { __VA_ARGS__ return; }                                                \
     INCOMPLETE_TEST_EPILOGUE()
 #else
 #  define DEFINE_AND_RUN_IS_INCOMPLETE_TEST(...)                                                                       \
-    static int is_incomplete_test() { return 0; }                                                                      \
+    __global__ static void is_incomplete_test() { return; }                                                            \
     INCOMPLETE_TEST_EPILOGUE()
 #endif
 
