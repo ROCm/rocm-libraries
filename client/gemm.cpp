@@ -562,7 +562,7 @@ int main(int argc, const char* argv[])
     prob.trans_A             = po.get("trans_A", std::string("N"));
     prob.trans_B             = po.get("trans_B", std::string("N"));
     prob.scheduler           = po.get("scheduler", std::string("Priority"));
-    prob.match_memory_access = po.get("match_memory_access", false);
+    prob.match_memory_access = po.get("match_memory_access", true);
 
     prob.numWarmUp = po.get("num_warmup", 3);
     prob.numOuter  = po.get("num_outer", 5);

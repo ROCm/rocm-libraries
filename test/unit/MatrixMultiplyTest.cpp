@@ -82,7 +82,7 @@ namespace MatrixMultiplyTest
         auto dataType = TypeInfo<T>::Var.dataType;
 
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(dataType, 2, 0))); // A
+            rocRoller::Operations::T_Load_Tiled(dataType, 2, 0, {(size_t)1}))); // A
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
             rocRoller::Operations::T_Load_Tiled(dataType, 2, 1))); // B
 
@@ -189,23 +189,23 @@ namespace MatrixMultiplyTest
         int numLocalRead             = 0;
         for(auto const& instruction : instructions)
         {
-            // Count the number of ds_write_b32 instructions and make sure they have
+            // Count the number of ds_write_b128 instructions and make sure they have
             // the expected offset values
             if(instruction.starts_with("ds_write_b128"))
             {
                 if(expectedLocalWriteOffset > 0)
                     EXPECT_TRUE(instruction.ends_with("offset:"
                                                       + std::to_string(expectedLocalWriteOffset)));
-                expectedLocalWriteOffset += 1024;
+                expectedLocalWriteOffset += 64;
             }
 
-            if(instruction.starts_with("ds_read_b64"))
+            if(instruction.starts_with("ds_read_u16"))
             {
                 numLocalRead++;
             }
         }
-        EXPECT_EQ(expectedLocalWriteOffset, 2048);
-        EXPECT_EQ(numLocalRead, 4);
+        EXPECT_EQ(expectedLocalWriteOffset, 128);
+        EXPECT_EQ(numLocalRead, 16);
     }
 
     template <typename T>

@@ -67,7 +67,7 @@ namespace GEMMDriverTest
 
         bool literalStrides = true;
 
-        bool packMultipleElementsInto1VGPR = false;
+        bool packMultipleElementsInto1VGPR = true;
     };
 
     template <typename T>

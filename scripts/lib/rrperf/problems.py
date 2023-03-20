@@ -72,7 +72,7 @@ class GEMM:
 
     visualize: bool = False
 
-    match_memory_access: bool = False
+    match_memory_access: bool = True
 
     @property
     def token(self):

@@ -95,14 +95,15 @@ namespace rocRoller
                                  std::vector<int>&                  sdim,
                                  int                                K,
                                  std::array<unsigned int, 3> const& workgroupSizes,
-                                 std::shared_ptr<Context>           context);
+                                 bool                               useSwappedAccess);
 
         void updateLoadLDSMacroTile(KernelGraph&                      graph,
                                     CoordinateGraph::MacroTile const& mac_tile,
                                     int                               load_tag,
                                     std::vector<int>&                 sdims,
                                     int                               K,
-                                    int                               lds);
+                                    int                               lds,
+                                    bool                              useSwappedAccess);
 
         void loadWaveMacroTile(KernelGraph&                      graph,
                                CoordinateGraph::MacroTile const& mac_tile,
@@ -150,7 +151,7 @@ namespace rocRoller
                                    int                                lds_tag,
                                    int                                mac_tile_tag,
                                    std::array<unsigned int, 3> const& workgroupSizes,
-                                   std::shared_ptr<Context>           context);
+                                   bool                               useSwappedAccess);
 
         void loadMacroTileFromLDS(KernelGraph&                       graph,
                                   int                                load_tag,

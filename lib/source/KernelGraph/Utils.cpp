@@ -54,7 +54,8 @@ namespace rocRoller
                                     int               loadTag,
                                     std::vector<int>& sdims,
                                     int               K,
-                                    int               lds)
+                                    int               lds,
+                                    bool              useSwappedAccess)
         {
             // given that the loadMacroTile has already lowered the macrotile for LoadTiled
             // before it is transformed to LoadLDSTile
@@ -123,7 +124,10 @@ namespace rocRoller
                 graph.coordinates.deleteElement(mac[0]);
             }
 
-            graph.coordinates.addElement(Tile(), {lds}, {iMac[0], iMac[1]});
+            if(useSwappedAccess)
+                graph.coordinates.addElement(Tile(), {lds}, {iMac[0], iMac[1]});
+            else
+                graph.coordinates.addElement(Tile(), {lds}, {iMac[1], iMac[0]});
         }
 
         void loadWaveMacroTile(KernelGraph&                     graph,
@@ -354,7 +358,7 @@ namespace rocRoller
                                  std::vector<int>&                  sdim,
                                  int                                K,
                                  std::array<unsigned int, 3> const& workgroupSizes,
-                                 std::shared_ptr<Context>           context)
+                                 bool                               useSwappedAccess)
         {
             auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
             auto user    = graph.coordinates.getNode<User>(userTag);
@@ -387,48 +391,41 @@ namespace rocRoller
             graph.coordinates.addElement(Tile(), {sdimX}, {nMacX, iMacX});
             graph.coordinates.addElement(Tile(), {sdimY}, {nMacY, iMacY});
 
+            auto workitemX
+                = graph.coordinates.addElement(Workitem(0, literal(workgroupSizes.at(0))));
+
             auto thrTile = ThreadTile(macTile);
 
-            auto elementNumberX
-                = graph.coordinates.addElement(ElementNumber(0, literal(thrTile.sizes.at(0))));
-            auto elementNumberY
-                = graph.coordinates.addElement(ElementNumber(1, literal(thrTile.sizes.at(1))));
-
-            graph.mapper.connect<ElementNumber>(loadTag, elementNumberX, 0);
-            graph.mapper.connect<ElementNumber>(loadTag, elementNumberY, 1);
-
-            int nThrX, nThrY, iThrX, iThrY;
-
-            bool useSwappedAccess
-                = context->kernelOptions().transposeMemoryAccess[macTile.layoutType];
-
-            if(macTile.layoutType == LayoutType::MATRIX_A)
-                useSwappedAccess = !useSwappedAccess;
+            auto nThrX
+                = graph.coordinates.addElement(ThreadTileNumber(0, literal(thrTile.wsizes.at(0))));
+            auto nThrY
+                = graph.coordinates.addElement(ThreadTileNumber(1, literal(thrTile.wsizes.at(1))));
+            auto iThrX
+                = graph.coordinates.addElement(ThreadTileIndex(0, literal(thrTile.sizes.at(0))));
+            auto iThrY
+                = graph.coordinates.addElement(ThreadTileIndex(1, literal(thrTile.sizes.at(1))));
 
             if(useSwappedAccess)
             {
-                nThrX = graph.coordinates.addElement(
-                    ThreadTileNumber(0, literal(thrTile.sizes.at(0))));
-                nThrY = graph.coordinates.addElement(
-                    ThreadTileNumber(1, literal(thrTile.wsizes.at(1))));
-                iThrX = graph.coordinates.addElement(
-                    ThreadTileIndex(0, literal(thrTile.wsizes.at(0))));
-                iThrY = graph.coordinates.addElement(
-                    ThreadTileIndex(1, literal(thrTile.sizes.at(1))));
+                auto elementNumberX
+                    = graph.coordinates.addElement(ElementNumber(0, literal(thrTile.sizes.at(0))));
+                auto elementNumberY
+                    = graph.coordinates.addElement(ElementNumber(1, literal(thrTile.sizes.at(1))));
 
-                graph.coordinates.addElement(PassThrough(), {nThrX}, {elementNumberX});
+                graph.coordinates.addElement(PassThrough(), {iThrX}, {elementNumberX});
                 graph.coordinates.addElement(PassThrough(), {iThrY}, {elementNumberY});
 
-                auto workitemX
-                    = graph.coordinates.addElement(Workitem(0, literal(workgroupSizes.at(0))));
+                graph.mapper.connect<ElementNumber>(loadTag, elementNumberX, 0);
+                graph.mapper.connect<ElementNumber>(loadTag, elementNumberY, 1);
+
                 if(macTile.layoutType == LayoutType::MATRIX_A
                    || macTile.layoutType == LayoutType::MATRIX_B)
                 {
-                    graph.coordinates.addElement(Flatten(), {nThrY, iThrX}, {workitemX});
+                    graph.coordinates.addElement(Flatten(), {nThrX, nThrY}, {workitemX});
                 }
                 else
                 {
-                    graph.coordinates.addElement(PassThrough(), {iThrX}, {workitemX});
+                    graph.coordinates.addElement(PassThrough(), {nThrX}, {workitemX});
 
                     auto workitemY
                         = graph.coordinates.addElement(Workitem(1, literal(workgroupSizes.at(1))));
@@ -437,20 +434,17 @@ namespace rocRoller
             }
             else
             {
-                nThrX = graph.coordinates.addElement(
-                    ThreadTileNumber(0, literal(thrTile.wsizes.at(0))));
-                nThrY = graph.coordinates.addElement(
-                    ThreadTileNumber(1, literal(thrTile.wsizes.at(1))));
-                iThrX = graph.coordinates.addElement(
-                    ThreadTileIndex(0, literal(thrTile.sizes.at(0))));
-                iThrY = graph.coordinates.addElement(
-                    ThreadTileIndex(1, literal(thrTile.sizes.at(1))));
+                auto elementNumberX
+                    = graph.coordinates.addElement(ElementNumber(0, literal(thrTile.sizes.at(1))));
+                auto elementNumberY
+                    = graph.coordinates.addElement(ElementNumber(1, literal(thrTile.sizes.at(0))));
 
-                graph.coordinates.addElement(PassThrough(), {iThrX}, {elementNumberX});
-                graph.coordinates.addElement(PassThrough(), {iThrY}, {elementNumberY});
+                graph.coordinates.addElement(PassThrough(), {iThrX}, {elementNumberY});
+                graph.coordinates.addElement(PassThrough(), {iThrY}, {elementNumberX});
 
-                auto workitemX
-                    = graph.coordinates.addElement(Workitem(0, literal(workgroupSizes.at(0))));
+                graph.mapper.connect<ElementNumber>(loadTag, elementNumberX, 0);
+                graph.mapper.connect<ElementNumber>(loadTag, elementNumberY, 1);
+
                 if(macTile.layoutType == LayoutType::MATRIX_A
                    || macTile.layoutType == LayoutType::MATRIX_B)
                 {
@@ -749,7 +743,7 @@ namespace rocRoller
                                    int                                ldsTag,
                                    int                                macTileTag,
                                    std::array<unsigned int, 3> const& workgroupSizes,
-                                   std::shared_ptr<Context>           context)
+                                   bool                               useSwappedAccess)
         {
             auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
             rocRoller::Log::getLogger()->debug(
@@ -761,73 +755,64 @@ namespace rocRoller
                 macTile.sizes[0],
                 macTile.sizes[1]);
 
+            auto workitemX
+                = graph.coordinates.addElement(Workitem(0, literal(workgroupSizes.at(0))));
+
             auto thrTile = ThreadTile(macTile);
 
             auto iMacX = graph.coordinates.addElement(macTile.tileIndex(0));
             auto iMacY = graph.coordinates.addElement(macTile.tileIndex(1));
 
-            auto elementNumberX
-                = graph.coordinates.addElement(ElementNumber(0, literal(thrTile.sizes.at(0))));
-            auto elementNumberY
-                = graph.coordinates.addElement(ElementNumber(1, literal(thrTile.sizes.at(1))));
+            auto nThrX
+                = graph.coordinates.addElement(ThreadTileNumber(0, literal(thrTile.wsizes.at(0))));
+            auto nThrY
+                = graph.coordinates.addElement(ThreadTileNumber(1, literal(thrTile.wsizes.at(1))));
+            auto iThrX
+                = graph.coordinates.addElement(ThreadTileIndex(0, literal(thrTile.sizes.at(0))));
+            auto iThrY
+                = graph.coordinates.addElement(ThreadTileIndex(1, literal(thrTile.sizes.at(1))));
 
-            graph.mapper.connect<ElementNumber>(storeTag, elementNumberX, 0);
-            graph.mapper.connect<ElementNumber>(storeTag, elementNumberY, 1);
-
-            bool useSwappedAccess
-                = context->kernelOptions().transposeMemoryAccess[macTile.layoutType];
-
-            if(macTile.layoutType == LayoutType::MATRIX_A)
-                useSwappedAccess = !useSwappedAccess;
-
-            int nThrX, nThrY, iThrX, iThrY;
             if(useSwappedAccess)
             {
-                nThrX = graph.coordinates.addElement(
-                    ThreadTileNumber(0, literal(thrTile.sizes.at(0))));
-                nThrY = graph.coordinates.addElement(
-                    ThreadTileNumber(1, literal(thrTile.wsizes.at(1))));
-                iThrX = graph.coordinates.addElement(
-                    ThreadTileIndex(0, literal(thrTile.wsizes.at(0))));
-                iThrY = graph.coordinates.addElement(
-                    ThreadTileIndex(1, literal(thrTile.sizes.at(1))));
+                auto elementNumberX
+                    = graph.coordinates.addElement(ElementNumber(0, literal(thrTile.sizes.at(0))));
+                auto elementNumberY
+                    = graph.coordinates.addElement(ElementNumber(1, literal(thrTile.sizes.at(1))));
 
-                graph.coordinates.addElement(PassThrough(), {elementNumberX}, {nThrX});
+                graph.coordinates.addElement(PassThrough(), {elementNumberX}, {iThrX});
                 graph.coordinates.addElement(PassThrough(), {elementNumberY}, {iThrY});
 
-                auto workitemX
-                    = graph.coordinates.addElement(Workitem(0, literal(workgroupSizes.at(0))));
+                graph.mapper.connect<ElementNumber>(storeTag, elementNumberX, 0);
+                graph.mapper.connect<ElementNumber>(storeTag, elementNumberY, 1);
 
                 if(macTile.layoutType == LayoutType::MATRIX_A
                    || macTile.layoutType == LayoutType::MATRIX_B)
                 {
-                    graph.coordinates.addElement(Tile(), {workitemX}, {nThrY, iThrX});
+                    graph.coordinates.addElement(Tile(), {workitemX}, {nThrX, nThrY});
                 }
                 else
                 {
                     auto workitemY
                         = graph.coordinates.addElement(Workitem(1, literal(workgroupSizes.at(1))));
 
-                    graph.coordinates.addElement(PassThrough(), {workitemX}, {iThrX});
+                    graph.coordinates.addElement(PassThrough(), {workitemX}, {nThrX});
                     graph.coordinates.addElement(PassThrough(), {workitemY}, {nThrY});
                 }
+
+                graph.coordinates.addElement(Flatten(), {iMacX, iMacY}, {ldsTag});
             }
             else
             {
-                nThrX = graph.coordinates.addElement(
-                    ThreadTileNumber(0, literal(thrTile.wsizes.at(0))));
-                nThrY = graph.coordinates.addElement(
-                    ThreadTileNumber(1, literal(thrTile.wsizes.at(1))));
-                iThrX = graph.coordinates.addElement(
-                    ThreadTileIndex(0, literal(thrTile.sizes.at(0))));
-                iThrY = graph.coordinates.addElement(
-                    ThreadTileIndex(1, literal(thrTile.sizes.at(1))));
+                auto elementNumberX
+                    = graph.coordinates.addElement(ElementNumber(0, literal(thrTile.sizes.at(1))));
+                auto elementNumberY
+                    = graph.coordinates.addElement(ElementNumber(1, literal(thrTile.sizes.at(0))));
 
-                graph.coordinates.addElement(PassThrough(), {elementNumberX}, {iThrX});
-                graph.coordinates.addElement(PassThrough(), {elementNumberY}, {iThrY});
+                graph.coordinates.addElement(PassThrough(), {elementNumberY}, {iThrX});
+                graph.coordinates.addElement(PassThrough(), {elementNumberX}, {iThrY});
 
-                auto workitemX
-                    = graph.coordinates.addElement(Workitem(0, literal(workgroupSizes.at(0))));
+                graph.mapper.connect<ElementNumber>(storeTag, elementNumberX, 0);
+                graph.mapper.connect<ElementNumber>(storeTag, elementNumberY, 1);
 
                 if(macTile.layoutType == LayoutType::MATRIX_A
                    || macTile.layoutType == LayoutType::MATRIX_B)
@@ -842,12 +827,12 @@ namespace rocRoller
                     graph.coordinates.addElement(PassThrough(), {workitemX}, {nThrX});
                     graph.coordinates.addElement(PassThrough(), {workitemY}, {nThrY});
                 }
+
+                graph.coordinates.addElement(Flatten(), {iMacY, iMacX}, {ldsTag});
             }
 
             graph.coordinates.addElement(Flatten(), {nThrX, iThrX}, {iMacX});
             graph.coordinates.addElement(Flatten(), {nThrY, iThrY}, {iMacY});
-
-            graph.coordinates.addElement(Flatten(), {iMacX, iMacY}, {ldsTag});
 
             //macrotile --DataFlow--> LDS
             graph.coordinates.addElement(DataFlow(), {macTileTag}, {ldsTag});

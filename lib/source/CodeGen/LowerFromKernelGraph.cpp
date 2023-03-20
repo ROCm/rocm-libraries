@@ -933,8 +933,10 @@ namespace rocRoller
 
                 auto [macTileTag, macTile] = m_graph.getDimension<MacroTile>(tag);
 
-                auto const m = macTile.subTileSizes[0];
-                auto const n = macTile.subTileSizes[1];
+                auto [elemXTag, elemX] = m_graph.getDimension<ElementNumber>(tag, 0);
+                auto [elemYTag, elemY] = m_graph.getDimension<ElementNumber>(tag, 1);
+                auto const m           = getUnsignedInt(evaluate(elemX.size));
+                auto const n           = getUnsignedInt(evaluate(elemY.size));
 
                 AssertFatal(m > 0 && n > 0, "Invalid/unknown subtile size dimensions");
 
@@ -1589,8 +1591,10 @@ namespace rocRoller
                 auto ldsOffset
                     = Register::Value::Literal(ldsAllocation->getLDSAllocation()->offset());
 
-                auto const m = tile.subTileSizes[0];
-                auto const n = tile.subTileSizes[1];
+                auto [elemXTag, elemX] = m_graph.getDimension<ElementNumber>(tag, 0);
+                auto [elemYTag, elemY] = m_graph.getDimension<ElementNumber>(tag, 1);
+                auto const m           = getUnsignedInt(evaluate(elemX.size));
+                auto const n           = getUnsignedInt(evaluate(elemY.size));
 
                 // saving the offsets to be restored for each macrotile in LDS
                 // TODO : Need more design thought (how to seed an offset register)

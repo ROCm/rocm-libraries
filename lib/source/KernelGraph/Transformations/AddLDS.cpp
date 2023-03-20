@@ -183,7 +183,7 @@ namespace rocRoller
                 auto lds = graph.coordinates.addElement(LDS());
 
                 // remove workgroups, macrotile numbers and tile edges from sdims
-                updateLoadLDSMacroTile(graph, tile, tag, sdims, -1, lds);
+                updateLoadLDSMacroTile(graph, tile, tag, sdims, -1, lds, true);
 
                 // add new loadTiled node to load a macrotile into VGPRs from global memory
                 auto loadMacroTileFromGlobal = graph.control.addElement(LoadTiled(load.vtype));
@@ -221,7 +221,7 @@ namespace rocRoller
                                     sdims,
                                     -1,
                                     workgroupSizes,
-                                    context);
+                                    true);
 
                 // add store from VGPRs to LDS following this new loadTiled
                 auto storeMacroTileIntoLDSNode
@@ -235,7 +235,7 @@ namespace rocRoller
 
                 // lower tile StoreLDSTile : store macrotile into LDS
                 storeMacroTileIntoLDS(
-                    graph, storeMacroTileIntoLDSNode, lds, internalTile, workgroupSizes, context);
+                    graph, storeMacroTileIntoLDSNode, lds, internalTile, workgroupSizes, true);
 
                 // LDS --DataFlow--> macrotile
                 graph.coordinates.addElement(DataFlow(), {lds}, {tileTag});
@@ -397,8 +397,12 @@ namespace rocRoller
                 AssertFatal(loopDims.size() == 1);
                 auto K = loopDims[0];
 
+                auto useSwappedAccess
+                    = m_context->kernelOptions().transposeMemoryAccess[macrotile.layoutType];
+
                 // remove workgroups, macrotile numbers and tile edges from sdims
-                updateLoadLDSMacroTile(graph, macrotile, load, sdims, K, localInfo.lds);
+                updateLoadLDSMacroTile(
+                    graph, macrotile, load, sdims, K, localInfo.lds, useSwappedAccess);
 
                 // create an internal macrotile to be loaded by one workgroup
                 auto workgroupSizes         = m_context->kernel()->workgroupSize();
@@ -434,6 +438,9 @@ namespace rocRoller
                         thrTileM, thrTileN, maxWidth, numDwordsPerElement);
                 }
 
+                if(!useSwappedAccess)
+                    std::swap(thrTileM, thrTileN);
+
                 localInfo.internalTile = graph.coordinates.addElement(
                     MacroTile(macrotile.sizes, MemoryType::VGPR, {thrTileM, thrTileN}));
                 auto internalTileDim = graph.coordinates.getNode<MacroTile>(localInfo.internalTile);
@@ -452,7 +459,7 @@ namespace rocRoller
                                     sdims,
                                     K,
                                     workgroupSizes,
-                                    m_context);
+                                    useSwappedAccess);
 
                 localInfo.storeTileIntoLDS = graph.control.addElement(StoreLDSTile(vtype.dataType));
                 // lower tile StoreLDSTile : store macrotile into LDS
@@ -461,7 +468,7 @@ namespace rocRoller
                                       localInfo.lds,
                                       localInfo.internalTile,
                                       workgroupSizes,
-                                      m_context);
+                                      useSwappedAccess);
                 graph.coordinates.deleteElement(
                     std::vector<int>{user}, std::vector<int>{loadTile}, CT::isEdge<DataFlow>);
                 graph.coordinates.addElement(DataFlow(), {localInfo.lds}, {loadTile});

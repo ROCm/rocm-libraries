@@ -25,8 +25,8 @@ namespace rocRoller
     {
         transposeMemoryAccess.set(0);
         transposeMemoryAccess[LayoutType::MATRIX_A]           = false;
-        transposeMemoryAccess[LayoutType::MATRIX_B]           = true;
-        transposeMemoryAccess[LayoutType::MATRIX_ACCUMULATOR] = true;
+        transposeMemoryAccess[LayoutType::MATRIX_B]           = false;
+        transposeMemoryAccess[LayoutType::MATRIX_ACCUMULATOR] = false;
     }
 
     std::ostream& operator<<(std::ostream& os, const KernelOptions& input)
