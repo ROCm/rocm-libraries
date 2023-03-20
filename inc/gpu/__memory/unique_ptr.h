@@ -102,6 +102,7 @@ class _LIBGPU_UNIQUE_PTR_TRIVIAL_ABI _LIBGPU_TEMPLATE_VIS unique_ptr {
                   "the specified deleter type cannot be an rvalue reference");
 
   private:
+    // Use Empty Base Optimization to eliminate any padding from an empty deleter class
     __compressed_pair<pointer, deleter_type> __ptr_;
 
     struct __nat {

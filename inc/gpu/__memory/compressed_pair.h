@@ -11,6 +11,11 @@ namespace gpu {
 //      Adapted from libc++ __compressed_pair
 //====================================================================================================================//
 
+// A custom pair that enables the use of Empty Base Optimization (https://en.cppreference.com/w/cpp/language/ebo) to
+// reduce the size of the pair when one of the elements is an empty class.
+// Note that the standard requires std::pair to contain its objects as MEMBER sub-objects instead of as a base class,
+// thus preventing std::pair from performing this optimization.
+
 // Tag used to default initialize one or both of the pair's elements.
 struct __default_init_tag {};
 struct __value_init_tag {};
