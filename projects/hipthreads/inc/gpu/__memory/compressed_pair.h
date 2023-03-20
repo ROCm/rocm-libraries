@@ -4,6 +4,7 @@
 #include <type_traits>
 #include "gpu/__config"
 #include "gpu/__type_traits/dependent_type.h"
+#include "gpu/__utility/swap.h"
 
 namespace gpu {
 
@@ -148,7 +149,7 @@ public:
   __host__ __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14
   void swap(__compressed_pair& __x)
       _NOEXCEPT_(std::is_nothrow_swappable<_T1>::value && std::is_nothrow_swappable<_T2>::value) {
-    using std::swap;
+    using gpu::swap;
     swap(first(), __x.first());
     swap(second(), __x.second());
   }
