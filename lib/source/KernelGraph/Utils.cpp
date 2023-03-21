@@ -1103,9 +1103,9 @@ namespace rocRoller
         /**
          * @brief Replace operation with a scope.  Does not delete the original operation.
          */
-        int replaceWithScope(KernelGraph& graph, int op, bool includeBody)
+        int replaceWith(KernelGraph& graph, int op, Operation newOp, bool includeBody)
         {
-            auto scope = graph.control.addElement(Scope());
+            auto scope = graph.control.addElement(newOp);
 
             auto location = graph.control.getLocation(op);
             for(auto const& input : location.incoming)
@@ -1135,6 +1135,32 @@ namespace rocRoller
             }
 
             return scope;
+        }
+
+        bool needsComputeIndex(Operation const& op)
+        {
+            if(std::holds_alternative<StoreTiled>(op) || std::holds_alternative<StoreLDSTile>(op)
+               || std::holds_alternative<LoadTiled>(op) || std::holds_alternative<LoadLDSTile>(op))
+                return true;
+            return false;
+        }
+
+        std::vector<int> findComputeIndexCandidates(KernelGraph const& kgraph, int start)
+        {
+            std::vector<int> rv;
+
+            return kgraph.control
+                .findNodes(
+                    start,
+                    [&](int tag) -> bool {
+                        auto elem = kgraph.control.getElement(tag);
+                        if(!std::holds_alternative<Operation>(elem))
+                            return false;
+                        auto op = std::get<Operation>(elem);
+                        return needsComputeIndex(op);
+                    },
+                    GD::Downstream)
+                .to<std::vector>();
         }
 
         void purgeFor(KernelGraph& kgraph, int loop)

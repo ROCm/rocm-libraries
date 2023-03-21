@@ -704,37 +704,6 @@ namespace rocRoller::KernelGraph
         return {ciOperations.front(), ciOperations.back(), connections, baseUpdate};
     }
 
-    bool needsComputeIndex(Operation const& op)
-    {
-        if(std::holds_alternative<StoreTiled>(op) || std::holds_alternative<StoreLDSTile>(op)
-           || std::holds_alternative<LoadTiled>(op) || std::holds_alternative<LoadLDSTile>(op))
-            return true;
-        return false;
-    }
-
-    /**
-     * @brief Find load/store operations that need their indexes
-     * precomputed by ComputeIndex.
-     */
-    std::vector<int> findComputeIndexCandidates(KernelGraph const& kgraph)
-    {
-        std::vector<int> rv;
-
-        auto kernel = *kgraph.control.roots().begin();
-        return kgraph.control
-            .findNodes(
-                kernel,
-                [&](int tag) -> bool {
-                    auto elem = kgraph.control.getElement(tag);
-                    if(!std::holds_alternative<Operation>(elem))
-                        return false;
-                    auto op = std::get<Operation>(elem);
-                    return needsComputeIndex(op);
-                },
-                GD::Downstream)
-            .to<std::vector>();
-    }
-
     /**
      * @brief Generic routine to create a ComputeIndex chain for a
      * load/store operation.
@@ -1004,7 +973,7 @@ namespace rocRoller::KernelGraph
                     // Add ComputeIndexes in a Scope above target
                     if(!scopes.contains(spec.location))
                     {
-                        scopes[spec.location] = replaceWithScope(kgraph, spec.location, false);
+                        scopes[spec.location] = replaceWith(kgraph, spec.location, Scope(), false);
                     }
                     auto scope = scopes[spec.location];
                     kgraph.control.addElement(Body(), {scope}, {chain.top});
@@ -1035,7 +1004,8 @@ namespace rocRoller::KernelGraph
     KernelGraph addComputeIndexOperations(KernelGraph const& original)
     {
         AddComputeIndex indexer;
-        for(auto candidate : findComputeIndexCandidates(original))
+        for(auto candidate :
+            findComputeIndexCandidates(original, *original.control.roots().begin()))
             indexer.stage(original, candidate);
         return indexer.commit(original);
     }

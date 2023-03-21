@@ -303,25 +303,30 @@ namespace rocRoller
             int lastWaveMult = -1;
             for(uint k = 0; k < num_wave_tiles; k++)
             {
-                auto setCoord = graph.control.addElement(SetCoordinate(literal(k)));
-                graph.mapper.connect<Unroll>(setCoord, smallKUnroll);
-                graph.control.addElement(Body(), {forK}, {setCoord});
+                auto setCoordA = graph.control.addElement(SetCoordinate(literal(k)));
+                graph.mapper.connect<Unroll>(setCoordA, smallKUnroll);
+                graph.control.addElement(Body(), {forK}, {setCoordA});
 
                 auto newLoadA = duplicateControlNode(graph, loadA[0]);
                 if(k != 0)
                     duplicateMacroTile(graph, newLoadA);
-                graph.control.addElement(Body(), {setCoord}, {newLoadA});
+                graph.control.addElement(Body(), {setCoordA}, {newLoadA});
+
+                auto setCoordB = graph.control.addElement(SetCoordinate(literal(k)));
+                graph.mapper.connect<Unroll>(setCoordB, smallKUnroll);
+                graph.control.addElement(Body(), {forK}, {setCoordB});
 
                 auto newLoadB = duplicateControlNode(graph, loadB[0]);
                 if(k != 0)
                     duplicateMacroTile(graph, newLoadB);
-                graph.control.addElement(Body(), {setCoord}, {newLoadB});
+                graph.control.addElement(Body(), {setCoordB}, {newLoadB});
 
                 auto waveMult = graph.control.addElement(Multiply());
                 graph.mapper.connect(
                     waveMult, d, Connections::typeArgument<MacroTile>(NaryArgument::DEST));
 
-                graph.control.addElement(Sequence(), {setCoord}, {waveMult});
+                graph.control.addElement(Sequence(), {setCoordA}, {waveMult});
+                graph.control.addElement(Sequence(), {setCoordB}, {waveMult});
 
                 addConnectionsMultiply(graph, waveMult, newLoadA, newLoadB);
 
@@ -395,8 +400,12 @@ namespace rocRoller
                              .to<std::vector>()[0];
                 auto elem = graph.control.getElement(e);
                 graph.control.deleteElement(e);
-                graph.control.addElement(
-                    e, elem, std::vector<int>{forWaveTilesY}, std::vector<int>{index});
+                // TODO: This explicitly puts the + beta * C portion of a GEMM after the
+                //       forK loop. We might want to remove this after the dynamic
+                //       scheduling has been implemented.
+                //graph.control.addElement(
+                //    e, elem, std::vector<int>{forWaveTilesY}, std::vector<int>{index});
+                graph.control.addElement(Sequence(), {forK}, {index});
             }
 
             for(auto const index : otherOps)

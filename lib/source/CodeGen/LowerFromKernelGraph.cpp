@@ -281,14 +281,24 @@ namespace rocRoller
                 auto message = concatenate("generate(", candidates, ")");
                 co_yield Instruction::Comment(message);
 
+                // TODO: Remove this once dynamic scheduler is implemented
+                //       Right now, we run out of registers without this.
+                int MAX_NODES_TO_GENERATE = 4;
+
                 while(!candidates.empty())
                 {
                     std::set<int> nodes;
 
                     // Find all candidate nodes whose inputs have been satisfied
                     for(auto const& tag : candidates)
+                    {
                         if(hasGeneratedInputs(tag))
+                        {
                             nodes.insert(tag);
+                            if(nodes.size() >= MAX_NODES_TO_GENERATE)
+                                break;
+                        }
+                    }
 
                     // If there are none, we have a problem.
                     AssertFatal(!nodes.empty(),

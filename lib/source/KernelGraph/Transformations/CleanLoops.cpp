@@ -33,7 +33,7 @@ namespace rocRoller
                     continue;
 
                 // Replace ForLoop with Scope; ideally would reconnect but OK for now
-                auto scope = replaceWithScope(k, loop);
+                auto scope = replaceWith(k, loop, Scope());
 
                 purgeFor(k, loop);
             }

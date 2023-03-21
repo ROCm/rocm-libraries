@@ -489,49 +489,19 @@ namespace rocRoller
                     }
                 }
 
-                // Function for adding a SetCoordinate node inbetween the ForLoop
-                // and a list of nodes.
+                // Function for adding a SetCoordinate nodes around all load and
+                // store operations.
                 auto connectWithSetCoord = [&](const auto& toConnect, unsigned int coordValue) {
-                    int sharedSetCoord = -1;
                     for(auto const& body : toConnect)
                     {
-                        if(!graph.control.get<SetCoordinate>(body))
+                        graph.control.addElement(Body(), {newTag}, {body});
+                        for(auto const& op : findComputeIndexCandidates(graph, body))
                         {
-                            // Only add a new SetCoordinate node if none of the nodes in toConnect
-                            // are SetCoordinate nodes.
-                            sharedSetCoord = graph.control.addElement(
-                                SetCoordinate(Expression::literal(coordValue)));
-                            graph.mapper.connect<Unroll>(sharedSetCoord, unrollDimension);
-                            graph.control.addElement(Body(), {newTag}, {sharedSetCoord});
-                            break;
-                        }
-                    }
-
-                    for(auto const& body : toConnect)
-                    {
-                        if(!graph.control.get<SetCoordinate>(body))
-                        {
-                            // If the node is not a SetCoordinate, connect it to the sharedSetCoord
-                            graph.control.addElement(Body(), {sharedSetCoord}, {body});
-                        }
-                        else
-                        {
-                            // If body is a SetCoordinate, Move all Sequence edges that were originally leaving
-                            // from body to be leaving from the new setCoord instead
-                            auto setCoord = graph.control.addElement(
-                                SetCoordinate(Expression::literal(coordValue)));
+                            auto setCoord = replaceWith(
+                                graph, op, SetCoordinate(Expression::literal(coordValue)), false);
                             graph.mapper.connect<Unroll>(setCoord, unrollDimension);
-                            graph.control.addElement(Body(), {newTag}, {setCoord});
-                            graph.control.addElement(Body(), {setCoord}, {body});
 
-                            for(auto const& child :
-                                graph.control.getOutputNodeIndices<Sequence>(body)
-                                    .template to<std::vector>())
-                            {
-                                graph.control.addElement(Sequence(), {setCoord}, {child});
-                                graph.control.deleteElement<Sequence>(std::vector<int>{body},
-                                                                      std::vector<int>{child});
-                            }
+                            graph.control.addElement(Body(), {setCoord}, {op});
                         }
                     }
                 };

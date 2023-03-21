@@ -75,9 +75,18 @@ namespace rocRoller
         std::optional<int> findContainingOperation(int candidate, KernelGraph const& kgraph);
 
         /**
-         * Replace operation with a scope.  Does not delete the original operation.
+         * Replace operation with a new operation.  Does not delete the original operation.
          */
-        int replaceWithScope(KernelGraph& graph, int op, bool includeBody = true);
+        int replaceWith(KernelGraph& graph,
+                        int          op,
+                        ControlGraph::Operation,
+                        bool includeBody = true);
+
+        /**
+         * @brief Find load/store operations that need their indexes
+         * precomputed by ComputeIndex.
+         */
+        std::vector<int> findComputeIndexCandidates(KernelGraph const& kgraph, int start);
 
         void loadMacroTile(KernelGraph&                       graph,
                            int                                load_tag,
