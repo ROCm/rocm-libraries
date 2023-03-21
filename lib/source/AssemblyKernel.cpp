@@ -159,7 +159,10 @@ namespace rocRoller
         co_yield Instruction::Directive(concatenate(".amdhsa_kernel ", kernelName()));
         co_yield Instruction::Comment("Resource limits");
 
-        co_yield Instruction::Directive(concatenate("  .amdhsa_next_free_vgpr ", total_vgprs()));
+        auto const& kernelOpts = m_context.lock()->kernelOptions();
+        int nextFreeVGPR = kernelOpts.setNextFreeVGPRToMax ? kernelOpts.maxVGPRs : total_vgprs();
+
+        co_yield Instruction::Directive(concatenate("  .amdhsa_next_free_vgpr ", nextFreeVGPR));
         co_yield Instruction::Directive("  .amdhsa_next_free_sgpr .amdgcn.next_free_sgpr");
 
         if(dynamicSharedMemBytes() != nullptr)

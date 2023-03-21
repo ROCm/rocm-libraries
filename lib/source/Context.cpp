@@ -18,31 +18,37 @@ namespace rocRoller
 {
     Context::Context() {}
 
-    ContextPtr Context::ForDefaultHipDevice(std::string const& kernelName)
+    ContextPtr Context::ForDefaultHipDevice(std::string const&   kernelName,
+                                            KernelOptions const& kernelOpts)
     {
         int  idx  = -1;
         auto arch = GPUArchitectureLibrary::GetDefaultHipDeviceArch(idx);
 
-        return Create(idx, arch, kernelName);
+        return Create(idx, arch, kernelName, kernelOpts);
     }
 
-    ContextPtr Context::ForHipDevice(int deviceIdx, std::string const& kernelName)
+    ContextPtr Context::ForHipDevice(int                  deviceIdx,
+                                     std::string const&   kernelName,
+                                     KernelOptions const& kernelOpts)
     {
         auto arch = GPUArchitectureLibrary::GetHipDeviceArch(deviceIdx);
 
-        return Create(deviceIdx, arch, kernelName);
+        return Create(deviceIdx, arch, kernelName, kernelOpts);
     }
 
     ContextPtr Context::ForTarget(GPUArchitectureTarget const& target,
-                                  std::string const&           kernelName)
+                                  std::string const&           kernelName,
+                                  KernelOptions const&         kernelOpts)
     {
         auto arch = GPUArchitectureLibrary::GetArch(target);
-        return ForTarget(arch, kernelName);
+        return ForTarget(arch, kernelName, kernelOpts);
     }
 
-    ContextPtr Context::ForTarget(GPUArchitecture const& arch, std::string const& kernelName)
+    ContextPtr Context::ForTarget(GPUArchitecture const& arch,
+                                  std::string const&     kernelName,
+                                  KernelOptions const&   kernelOpts)
     {
-        return Create(-1, arch, kernelName);
+        return Create(-1, arch, kernelName, kernelOpts);
     }
 
     void Context::setRandomSeed(int seed)
@@ -50,18 +56,40 @@ namespace rocRoller
         m_random = std::make_shared<RandomGenerator>(seed);
     }
 
-    ContextPtr
-        Context::Create(int deviceIdx, GPUArchitecture const& arch, std::string const& kernelName)
+    ContextPtr Context::Create(int                    deviceIdx,
+                               GPUArchitecture const& arch,
+                               std::string const&     kernelName,
+                               KernelOptions const&   kernelOpts)
     {
         auto rv = std::make_shared<Context>();
+
+        rv->m_kernelOptions = kernelOpts;
 
         rv->m_hipDeviceIdx = deviceIdx;
         rv->m_targetArch   = arch;
 
         for(size_t i = 0; i < rv->m_allocators.size(); i++)
         {
-            auto regType        = static_cast<Register::Type>(i);
-            rv->m_allocators[i] = std::make_shared<Register::Allocator>(regType, 256);
+            auto regType = static_cast<Register::Type>(i);
+            switch(regType)
+            {
+            case Register::Type::Accumulator:
+                rv->m_allocators[i]
+                    = std::make_shared<Register::Allocator>(regType, kernelOpts.maxACCVGPRs);
+                break;
+            case Register::Type::Vector:
+                rv->m_allocators[i]
+                    = std::make_shared<Register::Allocator>(regType, kernelOpts.maxVGPRs);
+                break;
+            case Register::Type::Scalar:
+                rv->m_allocators[i]
+                    = std::make_shared<Register::Allocator>(regType, kernelOpts.maxSGPRs);
+                break;
+            default:
+                // We do not allocate other types of register representation
+                rv->m_allocators[i] = std::make_shared<Register::Allocator>(regType, 0);
+                break;
+            }
         }
 
         rv->m_kernel       = std::make_shared<AssemblyKernel>(rv, kernelName);

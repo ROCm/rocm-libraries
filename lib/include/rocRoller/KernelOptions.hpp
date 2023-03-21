@@ -27,6 +27,9 @@ namespace rocRoller
 
         bool preloadKernelArguments;
 
+        unsigned int maxACCVGPRs;
+        unsigned int maxSGPRs;
+        unsigned int maxVGPRs;
         unsigned int loadLocalWidth;
         unsigned int loadGlobalWidth;
         unsigned int storeLocalWidth;
@@ -43,6 +46,7 @@ namespace rocRoller
 
         bool packMultipleElementsInto1VGPR;
         bool enableLongDwordInstructions;
+        bool setNextFreeVGPRToMax;
 
         std::string          toString() const;
         friend std::ostream& operator<<(std::ostream&, const KernelOptions&);

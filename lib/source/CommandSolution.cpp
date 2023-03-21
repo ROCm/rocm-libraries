@@ -188,12 +188,12 @@ namespace rocRoller
 
         auto logger = rocRoller::Log::getLogger();
 
-        m_context = Context::ForDefaultHipDevice(name);
-
-        if(m_kernelOptions)
+        if(!m_kernelOptions)
         {
-            m_context->setKernelOptions(*m_kernelOptions);
+            m_kernelOptions = std::make_shared<KernelOptions>();
         }
+
+        m_context = Context::ForDefaultHipDevice(name, *m_kernelOptions);
 
         // TODO: Determine the correct kernel dimensions
         if(m_preParameters->getManualKernelDimension() > 0)

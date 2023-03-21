@@ -406,13 +406,15 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult, bool doVisualize)
     kernelOptions->unrollX = result.unroll_x;
     kernelOptions->unrollY = result.unroll_y;
 
-    auto kernelName = gemmKernelName(result, kernelOptions);
-
     if(result.match_memory_access)
     {
         kernelOptions->transposeMemoryAccess[LayoutType::MATRIX_A] = result.trans_A == "T";
         kernelOptions->transposeMemoryAccess[LayoutType::MATRIX_B] = result.trans_B == "T";
     }
+
+    kernelOptions->setNextFreeVGPRToMax = false;
+
+    auto kernelName = gemmKernelName(result, kernelOptions);
 
     // Build GEMM kernel
     CommandKernel commandKernel(command, kernelName, params, postParams, kernelOptions);

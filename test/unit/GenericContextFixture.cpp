@@ -17,7 +17,7 @@ rocRoller::ContextPtr GenericContextFixture::createContext()
     using namespace rocRoller;
 
     GPUArchitectureTarget target(targetArchitecture());
-    return Context::ForTarget(target, testKernelName());
+    return Context::ForTarget(target, testKernelName(), m_kernelOptions);
 }
 
 std::string GenericContextFixture::targetArchitecture()

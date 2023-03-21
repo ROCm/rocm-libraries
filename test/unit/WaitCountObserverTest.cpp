@@ -16,7 +16,13 @@ namespace rocRollerTest
     class WaitCountObserverTest : public GenericContextFixture
     {
     protected:
-        std::string targetArchitecture()
+        void SetUp() override
+        {
+            m_kernelOptions.assertWaitCntState = true;
+            GenericContextFixture::SetUp();
+        }
+
+        std::string targetArchitecture() override
         {
             return "gfx90a";
         }
@@ -588,15 +594,13 @@ namespace rocRollerTest
         : public WaitCountObserverTest,
           public ::testing::WithParamInterface<std::tuple<bool, LogLevel>>
     {
-        void SetUp()
+        void SetUp() override
         {
-            using namespace rocRoller;
             auto [waitBeforeBarrier, logLevel] = GetParam();
             Settings::getInstance()->set(Settings::LogLvl, logLevel);
 
+            m_kernelOptions.alwaysWaitZeroBeforeBarrier = waitBeforeBarrier;
             WaitCountObserverTest::SetUp();
-
-            m_context->kernelOptions().alwaysWaitZeroBeforeBarrier = waitBeforeBarrier;
         }
     };
 
@@ -962,9 +966,6 @@ namespace rocRollerTest
 
     TEST_F(WaitCountObserverTest, LoopWaitCntStateAssertFailCase)
     {
-        KernelOptions options;
-        options.assertWaitCntState = true;
-        m_context->setKernelOptions(options);
         EXPECT_TRUE(m_context->kernelOptions().assertWaitCntState);
 
         rocRoller::Scheduling::InstructionStatus peeked;
@@ -1021,9 +1022,6 @@ namespace rocRollerTest
 
     TEST_F(WaitCountObserverTest, LoopWaitCntStateAssertGoodCase)
     {
-        KernelOptions options;
-        options.assertWaitCntState = true;
-        m_context->setKernelOptions(options);
         EXPECT_TRUE(m_context->kernelOptions().assertWaitCntState);
 
         rocRoller::Scheduling::InstructionStatus peeked;

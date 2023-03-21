@@ -28,8 +28,7 @@ namespace rocRoller
         {
             auto registers = findFree(alloc->registerCount(), alloc->options());
 
-            if(registers.empty())
-                throw std::runtime_error("No more registers!");
+            AssertFatal(!registers.empty(), "No more registers!\n", ShowValue(ToString(m_regType)));
 
             allocate(alloc, std::move(registers));
         }

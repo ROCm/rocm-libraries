@@ -18,6 +18,15 @@ namespace RegisterAllocatorTest
 {
     class RegisterAllocatorTest : public GenericContextFixture
     {
+    protected:
+        void SetUp() override
+        {
+            m_kernelOptions.maxACCVGPRs = 50;
+            m_kernelOptions.maxSGPRs    = 50;
+            m_kernelOptions.maxVGPRs    = 50;
+
+            GenericContextFixture::SetUp();
+        }
     };
 
     TEST_F(RegisterAllocatorTest, WeakPtrBehaviour)
@@ -102,6 +111,25 @@ namespace RegisterAllocatorTest
         EXPECT_EQ(true, allocator->isFree(3));
         EXPECT_EQ(5, allocator->maxUsed());
         EXPECT_EQ(6, allocator->useCount());
+    }
+
+    TEST_F(RegisterAllocatorTest, MaxReg)
+    {
+        std::vector<Register::Type> regTypes = {
+            Register::Type::Accumulator,
+            Register::Type::Vector,
+            Register::Type::Scalar,
+        };
+
+        ASSERT_LE(m_context->kernelOptions().maxACCVGPRs, 50);
+        ASSERT_LE(m_context->kernelOptions().maxVGPRs, 50);
+        ASSERT_LE(m_context->kernelOptions().maxSGPRs, 50);
+
+        for(auto regType : regTypes)
+        {
+            EXPECT_NO_THROW({ createRegisters(regType, DataType::Float, 5); });
+            EXPECT_THROW({ createRegisters(regType, DataType::Float, 55); }, FatalError);
+        }
     }
 
     class ARCH_RegisterAllocatorTest : public GPUContextFixture

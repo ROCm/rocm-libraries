@@ -33,10 +33,16 @@ namespace ExpressionTest
 
     struct ExpressionTest : public GenericContextFixture
     {
-        virtual std::string targetArchitecture() override
+        std::string targetArchitecture() override
         {
             // MFMA, 64 lanes per wavefront
             return "gfx90a";
+        }
+
+        void SetUp() override
+        {
+            m_kernelOptions.preloadKernelArguments = false;
+            GenericContextFixture::SetUp();
         }
 
         void testSerialization(Expression::ExpressionPtr expr);
@@ -385,7 +391,6 @@ namespace ExpressionTest
     {
         Register::ValuePtr result;
 
-        m_context->kernelOptions().preloadKernelArguments = false;
         m_context->schedule(m_context->kernel()->preamble());
         m_context->schedule(m_context->kernel()->prolog());
 

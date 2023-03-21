@@ -150,7 +150,8 @@ namespace rocRoller
          * Use getForLoopName to determine which forLoop we are attempting to unroll
          * Checks unrollX(Y) value, 0 is default unroll it all if we can.
          */
-        unsigned int getUnrollAmount(KernelGraph& graph, int loopTag, KernelOptions& kernelOptions)
+        unsigned int
+            getUnrollAmount(KernelGraph& graph, int loopTag, KernelOptions const& kernelOptions)
         {
             auto dimTag        = graph.mapper.get<Dimension>(loopTag);
             auto forLoopLength = getSize(std::get<Dimension>(graph.coordinates.getElement(dimTag)));

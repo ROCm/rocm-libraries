@@ -45,6 +45,16 @@ namespace rocRollerTest
 
     class GPU_GemmGuidePostTest : public CurrentGPUContextFixture
     {
+    protected:
+        void SetUp() override
+        {
+            // m_kernelOptions.logLevel               = LogLevel::Debug;
+            m_kernelOptions.preloadKernelArguments
+                = false; // Disabled due to kernels exceeding register limits
+            m_kernelOptions.assertWaitCntState = false;
+
+            CurrentGPUContextFixture::SetUp();
+        }
     };
 
     void doMinimalMM(std::shared_ptr<rocRoller::Context> m_context,
@@ -80,11 +90,6 @@ namespace rocRollerTest
                      unsigned int                        padding,
                      bool                                hasBeta = true)
     {
-        KernelOptions options;
-        //options.logLevel               = LogLevel::Debug;
-        options.preloadKernelArguments = true;
-        options.assertWaitCntState     = false;
-        m_context->setKernelOptions(options);
         auto command = std::make_shared<Command>();
 
         VariableType floatPtr{DataType::Float, PointerType::PointerGlobal};
@@ -563,11 +568,6 @@ namespace rocRollerTest
               unsigned int                        padding,
               bool                                hasBeta = true)
     {
-        KernelOptions options;
-        options.logLevel               = LogLevel::Debug;
-        options.preloadKernelArguments = false;
-        options.assertWaitCntState     = false;
-        m_context->setKernelOptions(options);
         auto command = std::make_shared<Command>();
 
         VariableType floatPtr{DataType::Float, PointerType::PointerGlobal};
@@ -1060,11 +1060,6 @@ namespace rocRollerTest
                            unsigned int                        sizeLDS,
                            bool                                hasBeta = true)
     {
-        KernelOptions options;
-        options.logLevel               = LogLevel::Debug;
-        options.preloadKernelArguments = false;
-        options.assertWaitCntState     = false;
-        m_context->setKernelOptions(options);
         auto command = std::make_shared<Command>();
 
         VariableType floatPtr{DataType::Float, PointerType::PointerGlobal};
@@ -1497,11 +1492,6 @@ namespace rocRollerTest
                     unsigned int                        sizeLDS,
                     bool                                hasBeta = true)
     {
-        KernelOptions options;
-        options.logLevel               = LogLevel::Debug;
-        options.preloadKernelArguments = false;
-        options.assertWaitCntState     = false;
-        m_context->setKernelOptions(options);
         auto command = std::make_shared<Command>();
 
         VariableType floatPtr{DataType::Float, PointerType::PointerGlobal};

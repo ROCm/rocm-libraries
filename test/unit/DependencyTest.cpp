@@ -24,22 +24,24 @@ using namespace rocRoller;
 
 namespace rocRollerTest
 {
-    struct DependencyTest
+    class DependencyTest
         : public CurrentGPUContextFixture,
           public ::testing::WithParamInterface<std::tuple<Scheduling::SchedulerProcedure, int>>
     {
+    public:
         Scheduling::SchedulerProcedure m_procedure;
-        int                            m_randomSeed;
 
+    protected:
         void SetUp() override
         {
+            m_kernelOptions.assertWaitCntState = false;
+
             std::tie(m_procedure, m_randomSeed) = GetParam();
             CurrentGPUContextFixture::SetUp();
             m_context->setRandomSeed(m_randomSeed);
-            KernelOptions options;
-            options.assertWaitCntState = false;
-            m_context->setKernelOptions(options);
         }
+
+        int m_randomSeed;
     };
 
     /**

@@ -126,11 +126,6 @@ namespace rocRoller
         return m_kernelOptions;
     }
 
-    inline void Context::setKernelOptions(KernelOptions input)
-    {
-        m_kernelOptions = input;
-    }
-
     inline std::string Context::assemblyFileName() const
     {
         return m_assemblyFileName;

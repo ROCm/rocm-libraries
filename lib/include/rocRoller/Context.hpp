@@ -46,14 +46,20 @@ namespace rocRoller
         Context();
         ~Context();
 
-        static ContextPtr ForDefaultHipDevice(std::string const& kernelName);
+        static ContextPtr ForDefaultHipDevice(std::string const&   kernelName,
+                                              KernelOptions const& kernelOpts = {});
 
-        static ContextPtr ForHipDevice(int deviceIdx, std::string const& kernelName);
+        static ContextPtr ForHipDevice(int                  deviceIdx,
+                                       std::string const&   kernelName,
+                                       KernelOptions const& kernelOpts = {});
 
         static ContextPtr ForTarget(GPUArchitectureTarget const& arch,
-                                    std::string const&           kernelName);
+                                    std::string const&           kernelName,
+                                    KernelOptions const&         kernelOpts = {});
 
-        static ContextPtr ForTarget(GPUArchitecture const& arch, std::string const& kernelName);
+        static ContextPtr ForTarget(GPUArchitecture const& arch,
+                                    std::string const&     kernelName,
+                                    KernelOptions const&   kernelOpts = {});
 
         Scheduling::InstructionStatus peek(Instruction const& inst);
 
@@ -86,8 +92,6 @@ namespace rocRoller
 
         std::string assemblyFileName() const;
 
-        void setKernelOptions(KernelOptions input);
-
         std::shared_ptr<LabelAllocator> labelAllocator() const;
         std::shared_ptr<LDSAllocator>   ldsAllocator() const;
         RegTagManPtr                    registerTagManager() const;
@@ -107,8 +111,10 @@ namespace rocRoller
         void setScopeManager(std::shared_ptr<KernelGraph::ScopeManager>);
 
     private:
-        static ContextPtr
-            Create(int deviceIndex, GPUArchitecture const& arch, std::string const& kernelName);
+        static ContextPtr Create(int                    deviceIndex,
+                                 GPUArchitecture const& arch,
+                                 std::string const&     kernelName,
+                                 KernelOptions const&   kernelOpts);
 
         // If we are generating code for a real Hip device, refers to its
         // device index.

@@ -32,4 +32,6 @@ protected:
                         rocRoller::DataType const       dataType,
                         size_t const                    amount,
                         int const                       regCount = 1);
+
+    rocRoller::KernelOptions m_kernelOptions;
 };

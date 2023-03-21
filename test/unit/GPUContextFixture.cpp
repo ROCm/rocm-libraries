@@ -11,7 +11,7 @@
 
 rocRoller::ContextPtr BaseGPUContextFixture::createContextLocalDevice()
 {
-    return rocRoller::Context::ForDefaultHipDevice(testKernelName());
+    return rocRoller::Context::ForDefaultHipDevice(testKernelName(), m_kernelOptions);
 }
 
 void BaseGPUContextFixture::SetUp()
@@ -42,11 +42,11 @@ rocRoller::ContextPtr BaseGPUContextFixture::createContextForArch(std::string co
 
     if(localDevice)
     {
-        return Context::ForDefaultHipDevice(testKernelName());
+        return Context::ForDefaultHipDevice(testKernelName(), m_kernelOptions);
     }
     else
     {
-        return Context::ForTarget(target, testKernelName());
+        return Context::ForTarget(target, testKernelName(), m_kernelOptions);
     }
 }
 

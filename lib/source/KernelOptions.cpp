@@ -11,6 +11,9 @@ namespace rocRoller
         , alwaysWaitBeforeBranch(true)
         , alwaysWaitZeroBeforeBarrier(false)
         , preloadKernelArguments(true)
+        , maxACCVGPRs(256)
+        , maxSGPRs(102)
+        , maxVGPRs(256)
         , loadLocalWidth(4)
         , loadGlobalWidth(8)
         , storeLocalWidth(4)
@@ -19,14 +22,12 @@ namespace rocRoller
         , unrollX(0)
         , unrollY(0)
         , unrollK(0)
+        , transposeMemoryAccess({})
         , assertWaitCntState(true)
         , packMultipleElementsInto1VGPR(true)
         , enableLongDwordInstructions(true)
+        , setNextFreeVGPRToMax(false)
     {
-        transposeMemoryAccess.set(0);
-        transposeMemoryAccess[LayoutType::MATRIX_A]           = false;
-        transposeMemoryAccess[LayoutType::MATRIX_B]           = false;
-        transposeMemoryAccess[LayoutType::MATRIX_ACCUMULATOR] = false;
     }
 
     std::ostream& operator<<(std::ostream& os, const KernelOptions& input)
@@ -37,6 +38,9 @@ namespace rocRoller
         os << "  alwaysWaitAfterStore:\t\t" << input.alwaysWaitAfterStore << std::endl;
         os << "  alwaysWaitBeforeBranch:\t" << input.alwaysWaitBeforeBranch << std::endl;
         os << "  preloadKernelArguments:\t" << input.preloadKernelArguments << std::endl;
+        os << "  maxACCVGPRs:\t\t\t" << input.maxACCVGPRs << std::endl;
+        os << "  maxSGPRs:\t\t\t" << input.maxSGPRs << std::endl;
+        os << "  maxVGPRs:\t\t\t" << input.maxVGPRs << std::endl;
         os << "  loadLocalWidth:\t\t" << input.loadLocalWidth << std::endl;
         os << "  loadGlobalWidth:\t\t" << input.loadGlobalWidth << std::endl;
         os << "  storeLocalWidth:\t\t" << input.storeLocalWidth << std::endl;
@@ -45,6 +49,7 @@ namespace rocRoller
         os << "  unrollX:\t\t\t" << input.unrollX << std::endl;
         os << "  unrollY:\t\t\t" << input.unrollY << std::endl;
         os << "  unrollK:\t\t\t" << input.unrollK << std::endl;
+        os << "  setNextFreeVGPRToMax:\t" << input.setNextFreeVGPRToMax << std::endl;
 
         for(int i = 0; i < static_cast<int>(LayoutType::Count); i++)
             os << "transposeMemoryAccess[" << static_cast<LayoutType>(i)
