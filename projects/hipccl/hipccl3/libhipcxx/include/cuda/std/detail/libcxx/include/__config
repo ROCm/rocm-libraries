@@ -1418,6 +1418,10 @@ __sanitizer_annotate_contiguous_container(const void*, const void*, const void*,
 #    define _LIBCUDACXX_FUNCTION_TYPE_NOEXCEPT
 #  endif
 
+#ifndef _LIBCUDACXX_HIP_RDTSC_NANOSECONDS_PER_CYCLE 
+#  define _LIBCUDACXX_HIP_RDTSC_NANOSECONDS_PER_CYCLE 40  // 25 MHz for s_memrealtime -> 1*1e9/25*1e6 ns/cycle = 40 ns/cycle (gfx90a and gfx908 only!)
+#endif
+
 #endif // __cplusplus
 
 #endif // _LIBCUDACXX_CONFIG
