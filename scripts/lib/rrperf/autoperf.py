@@ -3,6 +3,7 @@
 import datetime
 import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import List
 
@@ -119,6 +120,13 @@ def run(
     date = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
     output_dir = top / f"doc_{date}"
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    compare.compare(
+        results,
+        format="console",
+        output=sys.stdout,
+        normalize=normalize,
+    )
 
     output_file = output_dir / f"comparison_{date}.html"
     with open(output_file, "w+") as f:

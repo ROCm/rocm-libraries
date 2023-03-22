@@ -376,22 +376,6 @@ namespace rocRoller
         }
     }
 
-    inline void Instruction::codaString(std::ostream& os, LogLevel level) const
-    {
-        if(level >= LogLevel::Terse && m_comments.size() > 1)
-        {
-            // Only include everything but the first comment in the code string.
-            for(int i = 1; i < m_comments.size(); i++)
-            {
-                for(auto const& line : EscapeComment(m_comments[i]))
-                {
-                    os << line;
-                }
-                os << "\n";
-            }
-        }
-    }
-
     inline void Instruction::allocationString(std::ostream& os, LogLevel level) const
     {
         if(level > LogLevel::Terse)
@@ -576,5 +560,10 @@ namespace rocRoller
                 a->allocateNow();
             }
         }
+    }
+
+    inline Instruction::AllocationArray Instruction::allocations() const
+    {
+        return m_allocations;
     }
 }

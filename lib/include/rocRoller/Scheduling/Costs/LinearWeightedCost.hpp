@@ -6,7 +6,7 @@
 #include <vector>
 
 #include "Cost.hpp"
-#include "MinNopsCost_fwd.hpp"
+#include "LinearWeightedCost_fwd.hpp"
 
 namespace rocRoller
 {
@@ -14,12 +14,12 @@ namespace rocRoller
     {
 
         /**
-         * MinNopsCost: Orders the instructions based on the number of Nops.
+         * LinearWeightedCost: Orders the instructions based on a linear combination of a number of factors.
          */
-        class MinNopsCost : public Cost
+        class LinearWeightedCost : public Cost
         {
         public:
-            MinNopsCost(std::shared_ptr<Context>);
+            LinearWeightedCost(std::shared_ptr<Context>);
 
             using Base = Cost;
 
@@ -27,17 +27,17 @@ namespace rocRoller
             static const std::string Name;
 
             /**
-             * Returns true if `CostFunction` is MinNops
+             * Returns true if `CostFunction` is LinearWeighted
              */
             static bool Match(Argument arg);
 
             /**
-             * Return shared pointer of `MinNopsCost` built from context
+             * Return shared pointer of `LinearWeightedCost` built from context
              */
             static std::shared_ptr<Cost> Build(Argument arg);
 
             /**
-             * Return Name of `MinNopsCost`, used for debugging purposes currently
+             * Return Name of `LinearWeightedCost`, used for debugging purposes currently
              */
             std::string name() const override;
 

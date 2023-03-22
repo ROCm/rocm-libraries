@@ -23,7 +23,7 @@ namespace rocRoller
         class CooperativeScheduler : public Scheduler
         {
         public:
-            CooperativeScheduler(std::shared_ptr<Context>, CostProcedure);
+            CooperativeScheduler(std::shared_ptr<Context>, CostFunction);
 
             using Base = Scheduler;
 

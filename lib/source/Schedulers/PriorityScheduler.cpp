@@ -9,7 +9,7 @@ namespace rocRoller
         RegisterComponent(PriorityScheduler);
         static_assert(Component::Component<PriorityScheduler>);
 
-        inline PriorityScheduler::PriorityScheduler(std::shared_ptr<Context> ctx, CostProcedure cmp)
+        inline PriorityScheduler::PriorityScheduler(std::shared_ptr<Context> ctx, CostFunction cmp)
             : Scheduler{ctx}
         {
             m_cost = Component::Get<Scheduling::Cost>(cmp, m_ctx);
@@ -52,15 +52,15 @@ namespace rocRoller
             int minCostIdx = -1;
             do
             {
-                int minCost = std::numeric_limits<int>::max();
-                minCostIdx  = -1;
+                float minCost = std::numeric_limits<float>::max();
+                minCostIdx    = -1;
 
                 for(size_t idx = 0; idx < seqs.size(); idx++)
                 {
                     if(iterators[idx] == seqs[idx].end())
                         continue;
 
-                    int myCost = (*m_cost)(iterators[idx]);
+                    float myCost = (*m_cost)(iterators[idx]);
 
                     if(myCost < minCost)
                     {

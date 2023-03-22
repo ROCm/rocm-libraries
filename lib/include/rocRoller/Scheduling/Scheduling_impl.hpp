@@ -11,6 +11,13 @@ namespace rocRoller
 {
     namespace Scheduling
     {
+        inline InstructionStatus::InstructionStatus()
+        {
+            waitLengths.fill(0);
+            allocatedRegisters.fill(0);
+            highWaterMarkRegistersDelta.fill(0);
+        }
+
         inline InstructionStatus InstructionStatus::StallCycles(unsigned int const value)
         {
             InstructionStatus rv;
@@ -39,6 +46,21 @@ namespace rocRoller
             return rv;
         }
 
+        inline std::string InstructionStatus::toString() const
+        {
+            return concatenate("Status: {wait ",
+                               waitCount.toString(LogLevel::Terse),
+                               ", nop ",
+                               nops,
+                               ", q {",
+                               waitLengths,
+                               "}, a {",
+                               allocatedRegisters,
+                               "}, h {",
+                               highWaterMarkRegistersDelta,
+                               "}}");
+        }
+
         inline void InstructionStatus::combine(InstructionStatus const& other)
         {
             stallCycles = std::max(stallCycles, other.stallCycles);
@@ -46,6 +68,23 @@ namespace rocRoller
             waitCount.combine(other.waitCount);
 
             errors.insert(errors.end(), other.errors.begin(), other.errors.end());
+
+            for(int i = 0; i < waitLengths.size(); i++)
+            {
+                waitLengths[i] = std::max(waitLengths[i], other.waitLengths[i]);
+            }
+
+            for(int i = 0; i < allocatedRegisters.size(); i++)
+            {
+                allocatedRegisters[i]
+                    = std::max(allocatedRegisters[i], other.allocatedRegisters[i]);
+            }
+
+            for(int i = 0; i < highWaterMarkRegistersDelta.size(); i++)
+            {
+                highWaterMarkRegistersDelta[i] = std::max(highWaterMarkRegistersDelta[i],
+                                                          other.highWaterMarkRegistersDelta[i]);
+            }
         }
 
         inline IObserver::~IObserver() = default;

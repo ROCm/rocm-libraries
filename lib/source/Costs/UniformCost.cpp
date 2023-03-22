@@ -1,6 +1,5 @@
 
 #include <rocRoller/Scheduling/Costs/UniformCost.hpp>
-#include <rocRoller/Utilities/Random.hpp>
 
 namespace rocRoller
 {
@@ -16,7 +15,7 @@ namespace rocRoller
 
         inline bool UniformCost::Match(Argument arg)
         {
-            return std::get<0>(arg) == CostProcedure::Uniform;
+            return std::get<0>(arg) == CostFunction::Uniform;
         }
 
         inline std::shared_ptr<Cost> UniformCost::Build(Argument arg)
@@ -27,7 +26,7 @@ namespace rocRoller
             return std::make_shared<UniformCost>(std::get<1>(arg));
         }
 
-        inline std::string UniformCost::name()
+        inline std::string UniformCost::name() const
         {
             return Name;
         }

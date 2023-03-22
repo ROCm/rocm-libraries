@@ -7,26 +7,33 @@ namespace rocRoller
     {
         RegisterComponentBase(Cost);
 
-        std::string toString(CostProcedure proc)
+        std::string toString(CostFunction proc)
         {
             switch(proc)
             {
-            case CostProcedure::None:
+            case CostFunction::None:
                 return "None";
-            case CostProcedure::Uniform:
+            case CostFunction::Uniform:
                 return "Uniform";
-            case CostProcedure::MinNops:
+            case CostFunction::MinNops:
                 return "MinNops";
-            case CostProcedure::WaitCntNop:
+            case CostFunction::WaitCntNop:
                 return "WaitCntNop";
-            case CostProcedure::Count:
+            case CostFunction::LinearWeighted:
+                return "LinearWeighted";
+            case CostFunction::Count:
                 return "Count";
             }
 
-            Throw<FatalError>("Invalid Cost Procedure: ", ShowValue(static_cast<int>(proc)));
+            Throw<FatalError>("Invalid Cost Function: ", ShowValue(static_cast<int>(proc)));
         }
 
-        std::ostream& operator<<(std::ostream& stream, CostProcedure proc)
+        std::string ToString(CostFunction proc)
+        {
+            return toString(proc);
+        }
+
+        std::ostream& operator<<(std::ostream& stream, CostFunction proc)
         {
             return stream << toString(proc);
         }

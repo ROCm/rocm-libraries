@@ -20,7 +20,36 @@ namespace rocRoller
 
         inline InstructionStatus WaitcntObserver::peek(Instruction const& inst) const
         {
-            return InstructionStatus::Wait(computeWaitCount(inst));
+            auto rv = InstructionStatus::Wait(computeWaitCount(inst));
+
+            // The new length of each queue is the current length of the queue plus the contribution from this instruction
+            for(auto const& pair : m_instructionQueues)
+            {
+                if(pair.second.size() > 0)
+                {
+                    auto wqType = m_typeInQueue.at(pair.first);
+
+                    AssertFatal(wqType < rv.waitLengths.size(),
+                                ShowValue(static_cast<size_t>(wqType)),
+                                ShowValue(rv.waitLengths.size()),
+                                ShowValue(pair.second.size()));
+
+                    rv.waitLengths.at(wqType) = pair.second.size();
+                }
+            }
+
+            GPUInstructionInfo info
+                = m_context.lock()->targetArchitecture().GetInstructionInfo(inst.getOpCode());
+            auto whichQueues = info.getWaitQueues();
+            for(auto q : whichQueues)
+            {
+                AssertFatal(q < rv.waitLengths.size(),
+                            ShowValue(static_cast<size_t>(q)),
+                            ShowValue(rv.waitLengths.size()));
+                rv.waitLengths.at(q) += info.getWaitCount();
+            }
+
+            return rv;
         };
 
         inline void WaitcntObserver::modify(Instruction& inst) const

@@ -10,7 +10,7 @@ namespace rocRoller
         static_assert(Component::Component<CooperativeScheduler>);
 
         inline CooperativeScheduler::CooperativeScheduler(std::shared_ptr<Context> ctx,
-                                                          CostProcedure            cmp)
+                                                          CostFunction             cmp)
             : Scheduler{ctx}
         {
             m_cost = Component::Get<Scheduling::Cost>(cmp, m_ctx);

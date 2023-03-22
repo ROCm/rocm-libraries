@@ -1,6 +1,5 @@
 
 #include <rocRoller/Scheduling/Costs/MinNopsCost.hpp>
-#include <rocRoller/Utilities/Random.hpp>
 
 namespace rocRoller
 {
@@ -16,7 +15,7 @@ namespace rocRoller
 
         inline bool MinNopsCost::Match(Argument arg)
         {
-            return std::get<0>(arg) == CostProcedure::MinNops;
+            return std::get<0>(arg) == CostFunction::MinNops;
         }
 
         inline std::shared_ptr<Cost> MinNopsCost::Build(Argument arg)
@@ -27,7 +26,7 @@ namespace rocRoller
             return std::make_shared<MinNopsCost>(std::get<1>(arg));
         }
 
-        inline std::string MinNopsCost::name()
+        inline std::string MinNopsCost::name() const
         {
             return Name;
         }

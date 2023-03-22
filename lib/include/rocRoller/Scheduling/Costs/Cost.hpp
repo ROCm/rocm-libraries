@@ -24,7 +24,7 @@ namespace rocRoller
         class Cost
         {
         public:
-            using Argument = std::tuple<CostProcedure, std::shared_ptr<rocRoller::Context>>;
+            using Argument = std::tuple<CostFunction, std::shared_ptr<rocRoller::Context>>;
 
             /**
              * @brief Collection of Tuples where the first member is the index of the generator
@@ -37,7 +37,7 @@ namespace rocRoller
 
             static const std::string Basename;
 
-            virtual std::string name()                               = 0;
+            virtual std::string name() const                         = 0;
             virtual float       cost(const InstructionStatus&) const = 0;
 
             /**
@@ -60,7 +60,7 @@ namespace rocRoller
             std::weak_ptr<rocRoller::Context> m_ctx;
         };
 
-        std::ostream& operator<<(std::ostream&, CostProcedure);
+        std::ostream& operator<<(std::ostream&, CostFunction);
     }
 }
 

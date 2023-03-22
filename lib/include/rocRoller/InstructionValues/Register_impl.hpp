@@ -859,6 +859,11 @@ namespace rocRoller
             allocator->allocate(shared_from_this());
         }
 
+        inline Type Allocation::regType() const
+        {
+            return m_regType;
+        }
+
         //void Allocation::allocate(Instruction & inst)
         //{
         //    inst.addAllocation(*this);

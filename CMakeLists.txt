@@ -266,12 +266,14 @@ set(rocroller_src
  lib/source/CodeGen/Arithmetic/SignedShiftR.cpp
  lib/source/CodeGen/Arithmetic/Subtract.cpp
  lib/source/CodeGen/Buffer.cpp
+ lib/source/CodeGen/Instruction.cpp
  lib/source/CodeGen/InstructionRef.cpp
  lib/source/CodeGen/LowerFromKernelGraph.cpp
  lib/source/CodeGen/MemoryInstructions.cpp
  lib/source/CodeGen/WaitCount.cpp
 
  lib/source/Costs/Cost.cpp
+ lib/source/Costs/LinearWeightedCost.cpp
  lib/source/Costs/MinNopsCost.cpp
  lib/source/Costs/NoneCost.cpp
  lib/source/Costs/UniformCost.cpp
@@ -408,6 +410,7 @@ set(
   test/unit/GenericContextFixture.cpp
   test/unit/GPUContextFixture.cpp
 
+  test/unit/AllocatingObserverTest.cpp
   test/unit/ArgumentLoaderTest.cpp
   test/unit/ArgumentValueTest.cpp
   test/unit/ArithmeticTest.cpp

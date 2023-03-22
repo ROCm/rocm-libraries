@@ -373,6 +373,8 @@ namespace rocRoller
             bool canAllocateNow() const;
             void allocateNow();
 
+            Type regType() const;
+
             AllocationState allocationState() const;
 
             std::shared_ptr<Value> operator*();

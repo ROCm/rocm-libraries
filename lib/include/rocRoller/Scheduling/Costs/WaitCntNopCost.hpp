@@ -27,7 +27,7 @@ namespace rocRoller
             static const std::string Name;
 
             /**
-             * Returns true if `CostProcedure` is WaitCntNop
+             * Returns true if `CostFunction` is WaitCntNop
              */
             static bool Match(Argument arg);
 
@@ -39,7 +39,7 @@ namespace rocRoller
             /**
              * Return Name of `WaitCntNopCost`, used for debugging purposes currently
              */
-            std::string name() override;
+            std::string name() const override;
 
             /**
              * Call operator orders the instructions.

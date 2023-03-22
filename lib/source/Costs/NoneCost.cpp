@@ -17,7 +17,7 @@ namespace rocRoller
 
         inline bool NoneCost::Match(Argument arg)
         {
-            return std::get<0>(arg) == CostProcedure::None;
+            return std::get<0>(arg) == CostFunction::None;
         }
 
         inline std::shared_ptr<Cost> NoneCost::Build(Argument arg)
@@ -25,7 +25,7 @@ namespace rocRoller
             Throw<FatalError>("Cannot use None cost.");
         }
 
-        inline std::string NoneCost::name()
+        inline std::string NoneCost::name() const
         {
             return Name;
         }

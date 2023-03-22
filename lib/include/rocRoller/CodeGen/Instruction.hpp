@@ -114,6 +114,9 @@ namespace rocRoller
 
         void allocateNow();
 
+        using AllocationArray = std::array<std::shared_ptr<Register::Allocation>, MaxAllocations>;
+        AllocationArray allocations() const;
+
     private:
         /**
          * toString = preamble + functional + coda
@@ -140,7 +143,7 @@ namespace rocRoller
         /**
          * When this instruction is scheduled, perform this register allocation.
          */
-        std::array<std::shared_ptr<Register::Allocation>, MaxAllocations> m_allocations;
+        AllocationArray m_allocations;
 
         int m_nopCount = 0;
 

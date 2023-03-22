@@ -21,7 +21,38 @@ namespace rocRoller
 
             InstructionStatus peek(Instruction const& inst) const
             {
-                return {};
+                auto              ctx = m_context.lock();
+                InstructionStatus rv;
+                for(auto alloc : inst.allocations())
+                {
+                    if(alloc)
+                    {
+                        // Determine amount of new registers that will be allocated
+
+                        auto regIdx = static_cast<size_t>(alloc->regType());
+                        AssertFatal(regIdx < rv.allocatedRegisters.size(),
+                                    ShowValue(regIdx),
+                                    ShowValue(rv.allocatedRegisters.size()));
+                        rv.allocatedRegisters.at(regIdx) += alloc->registerCount();
+
+                        // Determine new highwater mark by simulating the allocation
+
+                        auto allocator = ctx->allocator(alloc->regType());
+                        auto newRegs
+                            = allocator->findFree(alloc->registerCount(), alloc->options());
+                        if(newRegs.size() > 0)
+                        {
+                            int myHWM = std::max(0, newRegs.back() - allocator->maxUsed());
+
+                            AssertFatal(regIdx < rv.highWaterMarkRegistersDelta.size(),
+                                        ShowValue(regIdx),
+                                        ShowValue(rv.highWaterMarkRegistersDelta.size()));
+                            rv.highWaterMarkRegistersDelta.at(regIdx)
+                                = std::max(myHWM, rv.highWaterMarkRegistersDelta.at(regIdx));
+                        }
+                    }
+                }
+                return rv;
             }
 
             //> Add any waitcnt or nop instructions needed before `inst` if it were to be scheduled now.

@@ -7,7 +7,9 @@
 #include <string>
 #include <vector>
 
+#include <rocRoller/Scheduling/Costs/Cost_fwd.hpp>
 #include <rocRoller/Scheduling/Scheduler_fwd.hpp>
+
 #include <rocRoller/Utilities/LazySingleton.hpp>
 #include <rocRoller/Utilities/Settings_fwd.hpp>
 
@@ -78,6 +80,12 @@ namespace rocRoller
             "ROCROLLER_SCHEDULER",
             "Scheduler used when scheduling independent instruction streams.",
             Scheduling::SchedulerProcedure::Sequential,
+            -1};
+
+        static inline SettingsOption<Scheduling::CostFunction> SchedulerCost{
+            "ROCROLLER_SCHEDULER_COST",
+            "Default cost function for schedulers.",
+            Scheduling::CostFunction::LinearWeighted,
             -1};
 
         static inline SettingsOption<LogLevel> LogLvl{

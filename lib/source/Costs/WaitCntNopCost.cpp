@@ -1,6 +1,5 @@
 
 #include <rocRoller/Scheduling/Costs/WaitCntNopCost.hpp>
-#include <rocRoller/Utilities/Random.hpp>
 
 namespace rocRoller
 {
@@ -16,7 +15,7 @@ namespace rocRoller
 
         inline bool WaitCntNopCost::Match(Argument arg)
         {
-            return std::get<0>(arg) == CostProcedure::WaitCntNop;
+            return std::get<0>(arg) == CostFunction::WaitCntNop;
         }
 
         inline std::shared_ptr<Cost> WaitCntNopCost::Build(Argument arg)
@@ -27,7 +26,7 @@ namespace rocRoller
             return std::make_shared<WaitCntNopCost>(std::get<1>(arg));
         }
 
-        inline std::string WaitCntNopCost::name()
+        inline std::string WaitCntNopCost::name() const
         {
             return Name;
         }

@@ -251,7 +251,7 @@ namespace rocRollerTest
                                 )";
 
         auto scheduler = Component::GetNew<Scheduling::Scheduler>(
-            Scheduling::SchedulerProcedure::Sequential, Scheduling::CostProcedure::None, m_context);
+            Scheduling::SchedulerProcedure::Sequential, Scheduling::CostFunction::None, m_context);
         m_context->schedule((*scheduler)(generators));
         EXPECT_EQ(NormalizedSource(output(), true), NormalizedSource(expected, true));
     }
@@ -284,7 +284,7 @@ namespace rocRollerTest
                                 )";
 
         auto scheduler = Component::GetNew<Scheduling::Scheduler>(
-            Scheduling::SchedulerProcedure::RoundRobin, Scheduling::CostProcedure::None, m_context);
+            Scheduling::SchedulerProcedure::RoundRobin, Scheduling::CostFunction::None, m_context);
         m_context->schedule((*scheduler)(generators));
         EXPECT_EQ(NormalizedSource(output(), true), NormalizedSource(expected, true));
     }
@@ -327,7 +327,7 @@ namespace rocRollerTest
     TEST_F(SchedulerTest, DoubleUnlocking)
     {
         auto scheduler = Component::GetNew<Scheduling::Scheduler>(
-            Scheduling::SchedulerProcedure::RoundRobin, Scheduling::CostProcedure::None, m_context);
+            Scheduling::SchedulerProcedure::RoundRobin, Scheduling::CostFunction::None, m_context);
 
         std::vector<Generator<Instruction>> sequences;
 
@@ -346,7 +346,7 @@ namespace rocRollerTest
     TEST_F(SchedulerTest, noUnlocking)
     {
         auto scheduler = Component::GetNew<Scheduling::Scheduler>(
-            Scheduling::SchedulerProcedure::RoundRobin, Scheduling::CostProcedure::None, m_context);
+            Scheduling::SchedulerProcedure::RoundRobin, Scheduling::CostFunction::None, m_context);
 
         std::vector<Generator<Instruction>> sequences;
 
@@ -363,11 +363,11 @@ namespace rocRollerTest
     TEST_F(SchedulerTest, SchedulerDepth)
     {
         auto schedulerA = Component::GetNew<Scheduling::Scheduler>(
-            Scheduling::SchedulerProcedure::RoundRobin, Scheduling::CostProcedure::None, m_context);
+            Scheduling::SchedulerProcedure::RoundRobin, Scheduling::CostFunction::None, m_context);
         auto schedulerB = Component::GetNew<Scheduling::Scheduler>(
-            Scheduling::SchedulerProcedure::RoundRobin, Scheduling::CostProcedure::None, m_context);
+            Scheduling::SchedulerProcedure::RoundRobin, Scheduling::CostFunction::None, m_context);
         auto schedulerC = Component::GetNew<Scheduling::Scheduler>(
-            Scheduling::SchedulerProcedure::RoundRobin, Scheduling::CostProcedure::None, m_context);
+            Scheduling::SchedulerProcedure::RoundRobin, Scheduling::CostFunction::None, m_context);
 
         std::vector<Generator<Instruction>> a_sequences;
         std::vector<Generator<Instruction>> b_sequences;
@@ -533,7 +533,7 @@ namespace rocRollerTest
             gens.push_back(noComments());
 
             auto scheduler = Component::GetNew<Scheduling::Scheduler>(
-                Scheduling::SchedulerProcedure::Random, Scheduling::CostProcedure::None, m_context);
+                Scheduling::SchedulerProcedure::Random, Scheduling::CostFunction::None, m_context);
             m_context->schedule((*scheduler)(gens));
 
             output1 = NormalizedSource(output(), true);
@@ -549,7 +549,7 @@ namespace rocRollerTest
             gens.push_back(noComments());
 
             auto scheduler = Component::GetNew<Scheduling::Scheduler>(
-                Scheduling::SchedulerProcedure::Random, Scheduling::CostProcedure::None, m_context);
+                Scheduling::SchedulerProcedure::Random, Scheduling::CostFunction::None, m_context);
             m_context->schedule((*scheduler)(gens));
 
             output2 = NormalizedSource(output(), true);
@@ -565,7 +565,7 @@ namespace rocRollerTest
             gens.push_back(noComments());
 
             auto scheduler = Component::GetNew<Scheduling::Scheduler>(
-                Scheduling::SchedulerProcedure::Random, Scheduling::CostProcedure::None, m_context);
+                Scheduling::SchedulerProcedure::Random, Scheduling::CostFunction::None, m_context);
             m_context->schedule((*scheduler)(gens));
 
             output3 = NormalizedSource(output(), true);
@@ -581,7 +581,7 @@ namespace rocRollerTest
             gens.push_back(noComments());
 
             auto scheduler = Component::GetNew<Scheduling::Scheduler>(
-                Scheduling::SchedulerProcedure::Random, Scheduling::CostProcedure::None, m_context);
+                Scheduling::SchedulerProcedure::Random, Scheduling::CostFunction::None, m_context);
             m_context->schedule((*scheduler)(gens));
 
             output4 = NormalizedSource(output(), true);
@@ -598,7 +598,7 @@ namespace rocRollerTest
             gens.push_back(noComments());
 
             auto scheduler = Component::GetNew<Scheduling::Scheduler>(
-                Scheduling::SchedulerProcedure::Random, Scheduling::CostProcedure::None, m_context);
+                Scheduling::SchedulerProcedure::Random, Scheduling::CostFunction::None, m_context);
             m_context->schedule((*scheduler)(gens));
 
             output5 = NormalizedSource(output(), true);
@@ -681,7 +681,7 @@ namespace rocRollerTest
 
             auto scheduler = Component::GetNew<Scheduling::Scheduler>(
                 Scheduling::SchedulerProcedure::Cooperative,
-                Scheduling::CostProcedure::MinNops,
+                Scheduling::CostFunction::MinNops,
                 m_context);
             m_context->schedule((*scheduler)(generators));
             EXPECT_EQ(NormalizedSource(output(), true), NormalizedSource(expected, true));
@@ -718,7 +718,7 @@ namespace rocRollerTest
 
             auto scheduler = Component::GetNew<Scheduling::Scheduler>(
                 Scheduling::SchedulerProcedure::Cooperative,
-                Scheduling::CostProcedure::MinNops,
+                Scheduling::CostFunction::MinNops,
                 m_context);
             m_context->schedule((*scheduler)(generators));
             EXPECT_EQ(NormalizedSource(output(), true), NormalizedSource(expected, true));
@@ -791,7 +791,7 @@ namespace rocRollerTest
 
             auto scheduler = Component::GetNew<Scheduling::Scheduler>(
                 Scheduling::SchedulerProcedure::Cooperative,
-                Scheduling::CostProcedure::MinNops,
+                Scheduling::CostFunction::MinNops,
                 m_context);
             m_context->schedule((*scheduler)(generators));
             EXPECT_EQ(NormalizedSource(output(), true), NormalizedSource(expected, true));
@@ -841,7 +841,7 @@ namespace rocRollerTest
 
             auto scheduler = Component::GetNew<Scheduling::Scheduler>(
                 Scheduling::SchedulerProcedure::Cooperative,
-                Scheduling::CostProcedure::Uniform,
+                Scheduling::CostFunction::Uniform,
                 m_context);
             m_context->schedule((*scheduler)(generators));
             coopUniformOutput = output();
@@ -858,7 +858,7 @@ namespace rocRollerTest
 
             auto scheduler = Component::GetNew<Scheduling::Scheduler>(
                 Scheduling::SchedulerProcedure::Sequential,
-                Scheduling::CostProcedure::None,
+                Scheduling::CostFunction::None,
                 m_context);
             m_context->schedule((*scheduler)(generators));
             seqOutput = output();
@@ -875,7 +875,7 @@ namespace rocRollerTest
 
             auto scheduler
                 = Component::GetNew<Scheduling::Scheduler>(Scheduling::SchedulerProcedure::Priority,
-                                                           Scheduling::CostProcedure::Uniform,
+                                                           Scheduling::CostFunction::Uniform,
                                                            m_context);
             m_context->schedule((*scheduler)(generators));
             priorityUniformOutput = output();
@@ -919,7 +919,7 @@ namespace rocRollerTest
 
             auto scheduler
                 = Component::GetNew<Scheduling::Scheduler>(Scheduling::SchedulerProcedure::Priority,
-                                                           Scheduling::CostProcedure::MinNops,
+                                                           Scheduling::CostFunction::MinNops,
                                                            m_context);
             m_context->schedule((*scheduler)(generators));
             EXPECT_EQ(NormalizedSource(output(), true), NormalizedSource(expected, true));
@@ -1011,7 +1011,7 @@ namespace rocRollerTest
 
             auto scheduler
                 = Component::GetNew<Scheduling::Scheduler>(Scheduling::SchedulerProcedure::Priority,
-                                                           Scheduling::CostProcedure::MinNops,
+                                                           Scheduling::CostFunction::MinNops,
                                                            m_context);
             m_context->schedule((*scheduler)(generators));
             EXPECT_EQ(NormalizedSource(output(), true), NormalizedSource(expected, true));
@@ -1048,7 +1048,7 @@ namespace rocRollerTest
             gens.push_back(testGeneratorWithComments(true));
             gens.push_back(gen(std::get<1>(GetParam()), false));
             auto scheduler = Component::GetNew<Scheduling::Scheduler>(
-                std::get<0>(GetParam()), Scheduling::CostProcedure::MinNops, m_context);
+                std::get<0>(GetParam()), Scheduling::CostFunction::MinNops, m_context);
             EXPECT_THROW({ m_context->schedule((*scheduler)(gens)); }, FatalError);
         }
 
@@ -1057,7 +1057,7 @@ namespace rocRollerTest
             gens.push_back(testGeneratorWithComments(true));
             gens.push_back(gen(std::get<1>(GetParam()), true));
             auto scheduler = Component::GetNew<Scheduling::Scheduler>(
-                std::get<0>(GetParam()), Scheduling::CostProcedure::MinNops, m_context);
+                std::get<0>(GetParam()), Scheduling::CostFunction::MinNops, m_context);
             EXPECT_NO_THROW({ m_context->schedule((*scheduler)(gens)); });
         }
     }

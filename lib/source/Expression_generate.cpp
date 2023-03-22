@@ -137,9 +137,10 @@ namespace rocRoller
 
                     if(!schedulable.empty())
                     {
-                        auto proc      = Settings::getInstance()->get(Settings::Scheduler);
-                        auto scheduler = Component::GetNew<Scheduling::Scheduler>(
-                            proc, Scheduling::CostProcedure::MinNops, m_context);
+                        auto proc = Settings::getInstance()->get(Settings::Scheduler);
+                        auto cost = Settings::getInstance()->get(Settings::SchedulerCost);
+                        auto scheduler
+                            = Component::GetNew<Scheduling::Scheduler>(proc, cost, m_context);
 
                         co_yield (*scheduler)(schedulable);
                     }

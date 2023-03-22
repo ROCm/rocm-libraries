@@ -178,6 +178,22 @@ def summary_statistics(perf_runs):
     return stats
 
 
+def significant_changes(summary, threshold=0.05):
+    result_diff = ""
+    for run in summary:
+        for result in summary[run]:
+            token, comparison = summary[run][result]
+            A, B = comparison.results
+            percent = (
+                (comparison.median[1] - comparison.median[0]) * 100.0
+            ) / comparison.median[0]
+            if comparison.moods_pval < threshold:
+                sign = "+" if percent < 0 else "-"
+                result_diff += f"{sign} {(abs(percent)):6.2f}% | p={comparison.moods_pval:.4e} | {token}\n"
+
+    return result_diff
+
+
 def markdown_summary(md, perf_runs):
     """Create Markdown report of summary statistics."""
 
@@ -195,8 +211,9 @@ def markdown_summary(md, perf_runs):
         "Run B",
     ]
 
+    result_diff = significant_changes(summary)
+
     result_table = ""
-    result_diff = ""
     for run in summary:
         for result in summary[run]:
             token, comparison = summary[run][result]
@@ -216,9 +233,6 @@ def markdown_summary(md, perf_runs):
                 f"{B.path.parent.stem}",
             ]
             result_table += " | ".join(row_str) + "\n"
-            if comparison.moods_pval < 0.05:
-                sign = "+" if percent < 0 else "-"
-                result_diff += f"{sign} {(abs(percent)):.2f}% | {token}\n"
 
     if len(result_diff) > 0:
         print("```diff", file=md)
@@ -586,6 +600,16 @@ def html_summary(  # noqa: C901
     )
 
 
+def console_summary(f, perf_runs):
+    summary = summary_statistics(perf_runs)
+    result_diff = significant_changes(summary)
+    if len(result_diff) > 0:
+        print("Significant Diffs (p-val < 0.05)", file=f)
+        print(result_diff, file=f)
+    else:
+        print("No statistically significant performance diffs", file=f)
+
+
 def compare(
     directories=None,
     format="md",
@@ -624,8 +648,12 @@ def compare(
         )
     elif format == "email_html":
         email_html_summary(output, perf_runs)
-    else:
+    elif format == "md":
         markdown_summary(output, perf_runs)
+    elif format == "console":
+        console_summary(output, perf_runs)
+    else:
+        raise RuntimeError("Invalid format: " + format)
 
     if print_final:
         print(output.getvalue())

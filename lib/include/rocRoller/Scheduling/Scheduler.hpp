@@ -59,8 +59,8 @@ namespace rocRoller
         class Scheduler
         {
         public:
-            using Argument = std::
-                tuple<SchedulerProcedure, CostProcedure, std::shared_ptr<rocRoller::Context>>;
+            using Argument
+                = std::tuple<SchedulerProcedure, CostFunction, std::shared_ptr<rocRoller::Context>>;
 
             Scheduler(ContextPtr);
 

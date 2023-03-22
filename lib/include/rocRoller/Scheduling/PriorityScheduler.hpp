@@ -23,7 +23,7 @@ namespace rocRoller
         class PriorityScheduler : public Scheduler
         {
         public:
-            PriorityScheduler(std::shared_ptr<Context>, CostProcedure);
+            PriorityScheduler(std::shared_ptr<Context>, CostFunction);
 
             using Base = Scheduler;
 

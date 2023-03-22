@@ -16,9 +16,19 @@ namespace rocRoller
 
         struct InstructionStatus
         {
-            unsigned int             stallCycles = 0;
-            WaitCount                waitCount;
-            unsigned int             nops = 0;
+            unsigned int stallCycles = 0;
+            WaitCount    waitCount;
+            unsigned int nops = 0;
+
+            /// The new length of each of the queues.
+            std::array<int, GPUWaitQueueType::Count> waitLengths;
+
+            /// How many new registers of each type must be allocated?
+            std::array<int, static_cast<size_t>(Register::Type::Count)> allocatedRegisters;
+
+            /// How much does this instruction add to the high water mark of allocated registers?
+            std::array<int, static_cast<size_t>(Register::Type::Count)> highWaterMarkRegistersDelta;
+
             std::vector<std::string> errors;
 
             static InstructionStatus StallCycles(unsigned int const value);
@@ -27,6 +37,10 @@ namespace rocRoller
             static InstructionStatus Error(std::string const& msg);
 
             void combine(InstructionStatus const& other);
+
+            InstructionStatus();
+
+            std::string toString() const;
         };
 
         template <typename T>

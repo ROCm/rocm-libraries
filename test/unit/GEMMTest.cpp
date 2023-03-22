@@ -314,14 +314,6 @@ namespace GEMMDriverTest
 
         EXPECT_NE(NormalizedSource(priority_nop), NormalizedSource(rr));
 
-        EXPECT_EQ(
-            NormalizedSource(coop_nop),
-            NormalizedSource(seq)); //Once we're using a scheduler in more places this will fail.
-
-        EXPECT_EQ(
-            NormalizedSource(priority_nop),
-            NormalizedSource(seq)); //Once we're using a scheduler in more places this will fail.
-
         std::set<std::string> insts;
         std::vector<int>      seeds = {2, 4, 8, 314, 1729};
         settings->set(Settings::Scheduler, Scheduling::SchedulerProcedure::Random);

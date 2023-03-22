@@ -323,9 +323,10 @@ namespace rocRoller
                     {
                         co_yield Instruction::Comment(
                             concatenate("BEGIN Scheduler for operations ", nodes));
-                        auto proc      = Settings::getInstance()->get(Settings::Scheduler);
-                        auto scheduler = Component::GetNew<Scheduling::Scheduler>(
-                            proc, Scheduling::CostProcedure::MinNops, m_context);
+                        auto proc = Settings::getInstance()->get(Settings::Scheduler);
+                        auto cost = Settings::getInstance()->get(Settings::SchedulerCost);
+                        auto scheduler
+                            = Component::GetNew<Scheduling::Scheduler>(proc, cost, m_context);
                         co_yield (*scheduler)(generators);
                         co_yield Instruction::Comment(
                             concatenate("END Scheduler for operations ", nodes));
@@ -733,8 +734,8 @@ namespace rocRoller
                       && (getUnsignedInt(colStrideReg->getLiteralValue()) == elementSize);
 
                 auto proc      = Settings::getInstance()->get(Settings::Scheduler);
-                auto scheduler = Component::GetNew<Scheduling::Scheduler>(
-                    proc, Scheduling::CostProcedure::WaitCntNop, m_context);
+                auto cost      = Settings::getInstance()->get(Settings::SchedulerCost);
+                auto scheduler = Component::GetNew<Scheduling::Scheduler>(proc, cost, m_context);
                 std::vector<Generator<Instruction>> generators;
 
                 // Load a tile of Half precision values where each register will hold
@@ -1075,8 +1076,6 @@ namespace rocRoller
                 auto [userTag, user]         = m_graph.getDimension<User>(tag);
                 auto [waveTileTag, waveTile] = m_graph.getDimension<WaveTile>(tag);
 
-                // Move the argument pointer into vPtr
-
                 uint numElements = waveTile.sizes[0] * waveTile.sizes[1];
                 uint wfs         = m_context->kernel()->wavefront_size();
                 uint numVgpr     = numElements / wfs;
@@ -1215,11 +1214,13 @@ namespace rocRoller
                     "KernelGraph::CodeGenerator::LoadVGPR(): scalar pointer");
                 co_yield Instruction::Comment("GEN: LoadVGPR; scalar pointer");
 
-                Register::ValuePtr sPtr;
-                co_yield m_context->argLoader()->getValue(user.argumentName(), sPtr);
-
                 Register::ValuePtr vPtr;
-                co_yield m_context->copier()->ensureType(vPtr, sPtr, Register::Type::Vector);
+
+                {
+                    Register::ValuePtr sPtr;
+                    co_yield m_context->argLoader()->getValue(user.argumentName(), sPtr);
+                    co_yield m_context->copier()->ensureType(vPtr, sPtr, Register::Type::Vector);
+                }
 
                 auto numBytes = DataTypeInfo::Get(vgpr->variableType()).elementSize;
                 co_yield m_context->mem()->load(
@@ -1239,11 +1240,13 @@ namespace rocRoller
                 auto indexes = coords.reverse({userTag});
                 co_yield generateOffset(offset, indexes[0], vgpr->variableType().dataType);
 
-                Register::ValuePtr sPtr;
-                co_yield m_context->argLoader()->getValue(user.argumentName(), sPtr);
-
                 Register::ValuePtr vPtr;
-                co_yield m_context->copier()->ensureType(vPtr, sPtr, Register::Type::Vector);
+
+                {
+                    Register::ValuePtr sPtr;
+                    co_yield m_context->argLoader()->getValue(user.argumentName(), sPtr);
+                    co_yield m_context->copier()->ensureType(vPtr, sPtr, Register::Type::Vector);
+                }
 
                 auto numBytes = DataTypeInfo::Get(vgpr->variableType()).elementSize;
                 co_yield m_context->mem()->load(
@@ -1794,11 +1797,13 @@ namespace rocRoller
                 co_yield offset->allocate();
                 co_yield generateOffset(offset, indexes[0], src->variableType().dataType);
 
-                Register::ValuePtr sPtr;
-                co_yield m_context->argLoader()->getValue(user.argumentName(), sPtr);
-
                 Register::ValuePtr vPtr;
-                co_yield m_context->copier()->ensureType(vPtr, sPtr, Register::Type::Vector);
+
+                {
+                    Register::ValuePtr sPtr;
+                    co_yield m_context->argLoader()->getValue(user.argumentName(), sPtr);
+                    co_yield m_context->copier()->ensureType(vPtr, sPtr, Register::Type::Vector);
+                }
 
                 auto numBytes = DataTypeInfo::Get(src->variableType()).elementSize;
                 co_yield m_context->mem()->store(

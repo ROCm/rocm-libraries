@@ -151,7 +151,7 @@ Generator<Instruction> complex_mfma_with_coop(ContextPtr m_context)
     generators.push_back(generator_three());
 
     auto scheduler = Component::GetNew<Scheduling::Scheduler>(
-        Scheduling::SchedulerProcedure::Cooperative, Scheduling::CostProcedure::MinNops, m_context);
+        Scheduling::SchedulerProcedure::Cooperative, Scheduling::CostFunction::MinNops, m_context);
     for(auto& inst : (*scheduler)(generators))
     {
         co_yield inst;

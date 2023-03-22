@@ -28,7 +28,7 @@ namespace rocRollerTest
     TEST_F(CostTest, WaitCntNopCostTest)
     {
         auto cost
-            = Component::Get<Scheduling::Cost>(Scheduling::CostProcedure::WaitCntNop, m_context);
+            = Component::Get<Scheduling::Cost>(Scheduling::CostFunction::WaitCntNop, m_context);
         {
             auto status = Scheduling::InstructionStatus();
             EXPECT_NEAR(cost->cost(status), 0.0, 1e-12);
@@ -67,7 +67,7 @@ namespace rocRollerTest
             co_yield_(Instruction("v_mfma_f32_16x16x4f32", {a[1]}, {v[0], v[2], a[1]}, {}, ""));
         };
 
-        auto cost = Component::Get<Scheduling::Cost>(Scheduling::CostProcedure::MinNops, m_context);
+        auto cost = Component::Get<Scheduling::Cost>(Scheduling::CostFunction::MinNops, m_context);
 
         {
             std::vector<Generator<Instruction>> generators;
@@ -154,7 +154,7 @@ namespace rocRollerTest
             co_yield_(Instruction("v_mfma_f32_16x16x4f32", {a[1]}, {v[0], v[2], a[1]}, {}, ""));
         };
 
-        auto cost = Component::Get<Scheduling::Cost>(Scheduling::CostProcedure::Uniform, m_context);
+        auto cost = Component::Get<Scheduling::Cost>(Scheduling::CostFunction::Uniform, m_context);
 
         std::vector<Generator<Instruction>> generators;
         generators.push_back(generator_one());
@@ -186,7 +186,7 @@ namespace rocRollerTest
     {
         std::shared_ptr<Scheduling::Cost> cost;
         EXPECT_THROW(cost
-                     = Component::Get<Scheduling::Cost>(Scheduling::CostProcedure::None, m_context),
+                     = Component::Get<Scheduling::Cost>(Scheduling::CostFunction::None, m_context),
                      FatalError);
     }
 }
