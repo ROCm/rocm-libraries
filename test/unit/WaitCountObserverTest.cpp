@@ -212,6 +212,40 @@ namespace rocRollerTest
         EXPECT_EQ(NormalizedSource(output()), NormalizedSource(expected));
     }
 
+    TEST_F(WaitCountObserverTest, BarrierLGKMWait)
+    {
+        rocRoller::Scheduling::InstructionStatus peeked;
+
+        auto src1 = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Float, 1);
+        src1->allocateNow();
+
+        auto zero = Register::Value::Literal(0);
+
+        auto inst1 = Instruction("ds_write_b32", {}, {zero, src1}, {}, "");
+        peeked     = m_context->observer()->peek(inst1);
+        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
+        m_context->schedule(inst1);
+
+        auto inst4 = Instruction("s_barrier", {}, {}, {}, "");
+        peeked     = m_context->observer()->peek(inst4);
+        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount::LGKMCnt(0));
+        m_context->schedule(inst4);
+
+        auto inst_end = Instruction("s_endpgm", {}, {}, {}, "");
+        peeked        = m_context->observer()->peek(inst_end);
+        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
+        m_context->schedule(inst_end);
+
+        std::string expected = R"(
+                                   ds_write_b32 0, v0
+                                   s_waitcnt lgkmcnt(0)
+                                   s_barrier
+                                   s_endpgm
+                                )";
+        EXPECT_EQ(NormalizedSource(output()), NormalizedSource(expected));
+    }
+
     /**
      * This test makes sure that a wait zero is inserted if instruction types are mixed.
      **/
