@@ -194,8 +194,8 @@ class _LIBGPU_UNIQUE_PTR_TRIVIAL_ABI _LIBGPU_TEMPLATE_VIS unique_ptr {
     }
 
 #ifdef _LIBGPU_CXX03_LANG
-    unique_ptr(unique_ptr const &) = delete;
-    unique_ptr &operator=(unique_ptr const &) = delete;
+    __device__ unique_ptr(unique_ptr const &) = delete;
+    __device__ unique_ptr &operator=(unique_ptr const &) = delete;
 #endif
 
     __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 ~unique_ptr() { reset(); }
@@ -368,8 +368,8 @@ class _LIBGPU_UNIQUE_PTR_TRIVIAL_ABI _LIBGPU_TEMPLATE_VIS unique_ptr<_Tp[], _Dp>
     }
 
 #ifdef _LIBGPU_CXX03_LANG
-    unique_ptr(unique_ptr const &) = delete;
-    unique_ptr &operator=(unique_ptr const &) = delete;
+    __device__ unique_ptr(unique_ptr const &) = delete;
+    __device__ unique_ptr &operator=(unique_ptr const &) = delete;
 #endif
   public:
     __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 ~unique_ptr() { reset(); }
@@ -479,7 +479,7 @@ __device__ inline _LIBGPU_INLINE_VISIBILITY bool operator>=(const unique_ptr<_T1
 template <class _T1, class _D1, class _T2, class _D2>
     requires three_way_comparable_with<typename unique_ptr<_T1, _D1>::pointer, typename unique_ptr<_T2, _D2>::pointer>
 _LIBGPU_HIDE_FROM_ABI
-    compare_three_way_result_t<typename unique_ptr<_T1, _D1>::pointer, typename unique_ptr<_T2, _D2>::pointer>
+    __device__ compare_three_way_result_t<typename unique_ptr<_T1, _D1>::pointer, typename unique_ptr<_T2, _D2>::pointer>
     operator<=>(const unique_ptr<_T1, _D1> &__x, const unique_ptr<_T2, _D2> &__y) {
     return compare_three_way()(__x.get(), __y.get());
 }
@@ -561,7 +561,7 @@ operator>=(std::nullptr_t, const unique_ptr<_T1, _D1> &__x) {
 #if _LIBGPU_STD_VER >= 20
 template <class _T1, class _D1>
     requires three_way_comparable<typename unique_ptr<_T1, _D1>::pointer>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX23 compare_three_way_result_t<typename unique_ptr<_T1, _D1>::pointer>
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX23 compare_three_way_result_t<typename unique_ptr<_T1, _D1>::pointer>
 operator<=>(const unique_ptr<_T1, _D1> &__x, std::nullptr_t) {
     return compare_three_way()(__x.get(), static_cast<typename unique_ptr<_T1, _D1>::pointer>(nullptr));
 }
@@ -599,26 +599,26 @@ __device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23
 }
 
 template <class _Tp, class... _Args>
-typename __unique_if<_Tp>::__unique_array_known_bound make_unique(_Args &&...) = delete;
+__device__ typename __unique_if<_Tp>::__unique_array_known_bound make_unique(_Args &&...) = delete;
 
 #endif // _LIBGPU_STD_VER >= 14
 
 #if _LIBGPU_STD_VER >= 20
 
 template <class _Tp>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX23 typename __unique_if<_Tp>::__unique_single
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX23 typename __unique_if<_Tp>::__unique_single
 make_unique_for_overwrite() {
     return unique_ptr<_Tp>(new _Tp);
 }
 
 template <class _Tp>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX23 typename __unique_if<_Tp>::__unique_array_unknown_bound
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX23 typename __unique_if<_Tp>::__unique_array_unknown_bound
 make_unique_for_overwrite(size_t __n) {
     return unique_ptr<_Tp>(new std::remove_extent_t<_Tp>[__n]);
 }
 
 template <class _Tp, class... _Args>
-typename __unique_if<_Tp>::__unique_array_known_bound make_unique_for_overwrite(_Args &&...) = delete;
+__device__ typename __unique_if<_Tp>::__unique_array_known_bound make_unique_for_overwrite(_Args &&...) = delete;
 
 #endif // _LIBGPU_STD_VER >= 20
 
