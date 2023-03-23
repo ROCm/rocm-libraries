@@ -1675,6 +1675,9 @@ namespace KernelGraphTest
         auto fusedForLoops = kgraph_fused.control.getNodes<ForLoopOp>().to<std::vector>();
         EXPECT_EQ(fusedForLoops.size(), 3);
 
+        auto fusedLoads = kgraph_fused.control.getNodes<LoadTiled>().to<std::vector>();
+        EXPECT_EQ(fusedLoads.size(), 12);
+
         // Verify that single iteration loops have been removed.
         auto kgraph_clean    = cleanLoops(kgraph_fused);
         auto cleanedForLoops = kgraph_clean.control.getNodes<ForLoopOp>().to<std::vector>();

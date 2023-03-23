@@ -187,6 +187,16 @@ namespace rocRoller
             Generator<int> depthFirstVisit(Range const& starts,
                                            Direction    dir = Direction::Downstream) const;
 
+            /**
+             * @brief Yields node indices connected in the specified direction to starts, in depth-first order.
+             *
+             * Will only visit through edges if the edgePredicate returns true.
+             */
+            template <CForwardRangeOf<int> Range, std::predicate<int> Predicate>
+            Generator<int> depthFirstVisit(Range const& starts,
+                                           Predicate    edgePredicate,
+                                           Direction    dir = Direction::Downstream) const;
+
             template <std::predicate<int> Predicate>
             Generator<int> depthFirstVisit(int start, Predicate edgePredicate, Direction dir) const;
 

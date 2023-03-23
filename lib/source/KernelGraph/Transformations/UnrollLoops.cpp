@@ -491,18 +491,29 @@ namespace rocRoller
                 }
 
                 // Function for adding a SetCoordinate nodes around all load and
-                // store operations.
+                // store operations. Only adds a SetCoordinate node if the coordinate is needed
+                // by the load/store operation.
                 auto connectWithSetCoord = [&](const auto& toConnect, unsigned int coordValue) {
                     for(auto const& body : toConnect)
                     {
                         graph.control.addElement(Body(), {newTag}, {body});
                         for(auto const& op : findComputeIndexCandidates(graph, body))
                         {
-                            auto setCoord = replaceWith(
-                                graph, op, SetCoordinate(Expression::literal(coordValue)), false);
-                            graph.mapper.connect<Unroll>(setCoord, unrollDimension);
+                            auto [target, direction] = getOperationTarget(op, graph);
+                            auto [required, path]
+                                = findRequiredCoordinates(target, direction, graph);
 
-                            graph.control.addElement(Body(), {setCoord}, {op});
+                            if(path.count(unrollDimension) > 0)
+                            {
+                                auto setCoord = replaceWith(graph,
+                                                            op,
+                                                            graph.control.addElement(SetCoordinate(
+                                                                Expression::literal(coordValue))),
+                                                            false);
+                                graph.mapper.connect<Unroll>(setCoord, unrollDimension);
+
+                                graph.control.addElement(Body(), {setCoord}, {op});
+                            }
                         }
                     }
                 };

@@ -447,6 +447,27 @@ namespace rocRoller
         }
 
         template <typename Node, typename Edge, bool Hyper>
+        template <CForwardRangeOf<int> Range, std::predicate<int> Predicate>
+        Generator<int> Hypergraph<Node, Edge, Hyper>::depthFirstVisit(Range const& starts,
+                                                                      Predicate    edgePredicate,
+                                                                      Direction    dir) const
+        {
+            std::unordered_set<int> visitedNodes;
+            if(dir == Direction::Downstream)
+            {
+                for(int index : starts)
+                    co_yield depthFirstVisit<Direction::Downstream>(
+                        index, edgePredicate, visitedNodes);
+            }
+            else
+            {
+                for(int index : starts)
+                    co_yield depthFirstVisit<Direction::Upstream>(
+                        index, edgePredicate, visitedNodes);
+            }
+        }
+
+        template <typename Node, typename Edge, bool Hyper>
         template <std::predicate<int> Predicate>
         Generator<int> Hypergraph<Node, Edge, Hyper>::depthFirstVisit(int       start,
                                                                       Predicate edgePredicate,

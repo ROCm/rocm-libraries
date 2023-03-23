@@ -973,7 +973,8 @@ namespace rocRoller::KernelGraph
                     // Add ComputeIndexes in a Scope above target
                     if(!scopes.contains(spec.location))
                     {
-                        scopes[spec.location] = replaceWith(kgraph, spec.location, Scope(), false);
+                        scopes[spec.location] = replaceWith(
+                            kgraph, spec.location, kgraph.control.addElement(Scope()), false);
                     }
                     auto scope = scopes[spec.location];
                     kgraph.control.addElement(Body(), {scope}, {chain.top});

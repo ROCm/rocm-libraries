@@ -21,6 +21,16 @@ namespace rocRoller
          */
         void purgeFor(KernelGraph& graph, int tag);
 
+        /**
+         * @brief Remove a node and all of its children from the control graph
+         *
+         * Also purges the mapper of references to the deleted nodes.
+         *
+         * @param kgraph
+         * @param node
+         */
+        void purgeNodeAndChildren(KernelGraph& kgraph, int node);
+
         bool isHardwareCoordinate(int tag, KernelGraph const& kgraph);
         bool isLoopishCoordinate(int tag, KernelGraph const& kgraph);
         bool isStorageCoordinate(int tag, KernelGraph const& kgraph);
@@ -77,10 +87,7 @@ namespace rocRoller
         /**
          * Replace operation with a new operation.  Does not delete the original operation.
          */
-        int replaceWith(KernelGraph& graph,
-                        int          op,
-                        ControlGraph::Operation,
-                        bool includeBody = true);
+        int replaceWith(KernelGraph& graph, int op, int newOp, bool includeBody = true);
 
         /**
          * @brief Find load/store operations that need their indexes

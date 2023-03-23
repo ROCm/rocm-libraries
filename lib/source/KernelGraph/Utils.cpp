@@ -1100,13 +1100,8 @@ namespace rocRoller
             throw FatalError("No forLoopIncrement for supplied forLoop.");
         }
 
-        /**
-         * @brief Replace operation with a scope.  Does not delete the original operation.
-         */
-        int replaceWith(KernelGraph& graph, int op, Operation newOp, bool includeBody)
+        int replaceWith(KernelGraph& graph, int op, int newOp, bool includeBody)
         {
-            auto scope = graph.control.addElement(newOp);
-
             auto location = graph.control.getLocation(op);
             for(auto const& input : location.incoming)
             {
@@ -1114,7 +1109,12 @@ namespace rocRoller
                 int  parent
                     = *graph.control.getNeighbours<Graph::Direction::Upstream>(input).begin();
                 graph.control.deleteElement(input);
-                graph.control.addElement(edge, {parent}, {scope});
+                if(graph.control.getInputNodeIndices<Body>(newOp).to<std::unordered_set>().count(
+                       parent)
+                   == 0)
+                {
+                    graph.control.addElement(edge, {parent}, {newOp});
+                }
             }
             for(auto const& output : location.outgoing)
             {
@@ -1129,12 +1129,18 @@ namespace rocRoller
                             = *graph.control.getNeighbours<Graph::Direction::Downstream>(output)
                                    .begin();
                         graph.control.deleteElement(output);
-                        graph.control.addElement(edge, {scope}, {child});
+                        if(graph.control.getOutputNodeIndices<Body>(newOp)
+                               .to<std::unordered_set>()
+                               .count(child)
+                           == 0)
+                        {
+                            graph.control.addElement(edge, {newOp}, {child});
+                        }
                     }
                 }
             }
 
-            return scope;
+            return newOp;
         }
 
         bool needsComputeIndex(Operation const& op)
@@ -1184,12 +1190,17 @@ namespace rocRoller
             }
 
             // Purge loop
-            for(auto const& reap : kgraph.control.depthFirstVisit(loop).to<std::vector>())
+            purgeNodeAndChildren(kgraph, loop);
+        }
+
+        void purgeNodeAndChildren(KernelGraph& kgraph, int node)
+        {
+            for(auto const& reap : kgraph.control.depthFirstVisit(node).to<std::vector>())
             {
                 kgraph.control.deleteElement(reap);
                 kgraph.mapper.purge(reap);
             }
-            kgraph.mapper.purge(loop);
+            kgraph.mapper.purge(node);
         }
 
         bool isHardwareCoordinate(int tag, KernelGraph const& kgraph)
