@@ -177,15 +177,6 @@ class _LIBGPU_UNIQUE_PTR_TRIVIAL_ABI _LIBGPU_TEMPLATE_VIS unique_ptr {
     __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 unique_ptr(unique_ptr<_Up, _Ep> &&__u) _NOEXCEPT
         : __ptr_(__u.release(), std::forward<_Ep>(__u.get_deleter())) {}
 
-#if _LIBGPU_STD_VER <= 14 || defined(_LIBGPU_ENABLE_CXX17_REMOVED_AUTO_PTR)
-    template <class _Up>
-    __device__ _LIBGPU_INLINE_VISIBILITY
-    unique_ptr(auto_ptr<_Up> &&__p, typename std::enable_if<std::is_convertible<_Up *, _Tp *>::value &&
-                                                                std::is_same<_Dp, default_delete<_Tp>>::value,
-                                                            __nat>::type = __nat()) _NOEXCEPT
-        : __ptr_(__p.release(), __value_init_tag()) {}
-#endif
-
     __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 unique_ptr &
     operator=(unique_ptr &&__u) _NOEXCEPT {
         reset(__u.release());
@@ -201,16 +192,6 @@ class _LIBGPU_UNIQUE_PTR_TRIVIAL_ABI _LIBGPU_TEMPLATE_VIS unique_ptr {
         __ptr_.second() = std::forward<_Ep>(__u.get_deleter());
         return *this;
     }
-
-#if _LIBGPU_STD_VER <= 14 || defined(_LIBGPU_ENABLE_CXX17_REMOVED_AUTO_PTR)
-    template <class _Up>
-    __device__ _LIBGPU_INLINE_VISIBILITY typename std::enable_if<
-        std::is_convertible<_Up *, _Tp *>::value && std::is_same<_Dp, default_delete<_Tp>>::value, unique_ptr &>::type
-    operator=(auto_ptr<_Up> __p) {
-        reset(__p.release());
-        return *this;
-    }
-#endif
 
 #ifdef _LIBGPU_CXX03_LANG
     unique_ptr(unique_ptr const &) = delete;
