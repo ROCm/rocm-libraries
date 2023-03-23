@@ -54,6 +54,9 @@ namespace GEMMDriverTest
         uint workgroup_size_x = 2 * wavefront_size;
         uint workgroup_size_y = 2;
 
+        std::string transA = "N";
+        std::string transB = "T";
+
         // Unroll Sizes
         unsigned int unrollX = 0;
         unsigned int unrollY = 0;
@@ -138,15 +141,21 @@ namespace GEMMDriverTest
         auto command  = std::make_shared<Command>();
         auto dataType = TypeInfo<T>::Var.dataType;
 
-        std::vector<size_t> oneStrides
+        std::vector<size_t> oneStridesN
             = gemm.literalStrides ? std::vector<size_t>({(size_t)1}) : std::vector<size_t>({});
 
+        std::vector<size_t> oneStridesT = gemm.literalStrides
+                                              ? std::vector<size_t>({(size_t)0, (size_t)1})
+                                              : std::vector<size_t>({});
+
+        command->addOperation(
+            std::make_shared<rocRoller::Operations::Operation>(rocRoller::Operations::T_Load_Tiled(
+                dataType, 2, 0, gemm.transA == "N" ? oneStridesN : oneStridesT))); // A
+        command->addOperation(
+            std::make_shared<rocRoller::Operations::Operation>(rocRoller::Operations::T_Load_Tiled(
+                dataType, 2, 1, gemm.transB == "N" ? oneStridesN : oneStridesT))); // B
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(dataType, 2, 0, oneStrides))); // A
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(dataType, 2, 1, oneStrides))); // B
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(dataType, 2, 2, oneStrides))); // C
+            rocRoller::Operations::T_Load_Tiled(dataType, 2, 2, oneStridesN))); // C
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
             rocRoller::Operations::T_Load_Scalar(DataType::Float, 3))); // alpha
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
@@ -173,15 +182,31 @@ namespace GEMMDriverTest
         runtimeArgs.append("d_a_limit", (size_t)M * K);
         runtimeArgs.append("d_a_size_0", (size_t)M);
         runtimeArgs.append("d_a_size_1", (size_t)K);
-        runtimeArgs.append("d_a_stride_0", (size_t)1);
-        runtimeArgs.append("d_a_stride_1", (size_t)M);
+        if(gemm.transA == "N")
+        {
+            runtimeArgs.append("d_a_stride_0", (size_t)1);
+            runtimeArgs.append("d_a_stride_1", (size_t)M);
+        }
+        else
+        {
+            runtimeArgs.append("d_a_stride_0", (size_t)K);
+            runtimeArgs.append("d_a_stride_1", (size_t)1);
+        }
 
         runtimeArgs.append("B", d_B.get());
         runtimeArgs.append("d_b_limit", (size_t)K * N);
         runtimeArgs.append("d_b_size_0", (size_t)K);
         runtimeArgs.append("d_b_size_1", (size_t)N);
-        runtimeArgs.append("d_b_stride_0", (size_t)1);
-        runtimeArgs.append("d_b_stride_1", (size_t)K);
+        if(gemm.transB == "N")
+        {
+            runtimeArgs.append("d_b_stride_0", (size_t)1);
+            runtimeArgs.append("d_b_stride_1", (size_t)K);
+        }
+        else
+        {
+            runtimeArgs.append("d_b_stride_0", (size_t)N);
+            runtimeArgs.append("d_b_stride_1", (size_t)1);
+        }
 
         runtimeArgs.append("C", d_C.get());
         runtimeArgs.append("d_c_limit", (size_t)M * N);
@@ -205,6 +230,8 @@ namespace GEMMDriverTest
         kernelOptions->unrollY                       = gemm.unrollY;
         kernelOptions->unrollK                       = gemm.unrollK;
         kernelOptions->packMultipleElementsInto1VGPR = gemm.packMultipleElementsInto1VGPR;
+        kernelOptions->transposeMemoryAccess[LayoutType::MATRIX_A] = gemm.transA == "T";
+        kernelOptions->transposeMemoryAccess[LayoutType::MATRIX_B] = gemm.transB == "T";
 
         auto params = std::make_shared<CommandParameters>();
         params->setManualKernelDimension(2);
@@ -273,7 +300,8 @@ namespace GEMMDriverTest
 
         // Host result
         std::vector<T> h_result(M * N, 0.0);
-        rocRoller::CPUMM(h_result, h_C, h_A, h_B, M, N, K, alpha, beta, false, false);
+        rocRoller::CPUMM(
+            h_result, h_C, h_A, h_B, M, N, K, alpha, beta, gemm.transA == "T", gemm.transB == "T");
 
         double rnorm = relativeNorm(d_result, h_result);
 
@@ -477,7 +505,14 @@ namespace GEMMDriverTest
         gemm.workgroup_size_x = 2 * gemm.wavefront_size;
         gemm.workgroup_size_y = 4;
 
+        gemm.transA = "T";
+        gemm.transB = "N";
+
         basicGEMM<Half>(m_context, gemm, 2.e-5);
+
+        std::string generatedCode = m_context->instructions()->toString();
+
+        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b64"), 2);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed1X2)
@@ -497,7 +532,13 @@ namespace GEMMDriverTest
         gemm.workgroup_size_x = 4 * gemm.wavefront_size;
         gemm.workgroup_size_y = 2;
 
+        gemm.transA = "T";
+
         basicGEMM<Half>(m_context, gemm, 2.e-5);
+
+        std::string generatedCode = m_context->instructions()->toString();
+
+        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b64"), 2);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed1x8)
@@ -542,6 +583,10 @@ namespace GEMMDriverTest
         gemm.storeLDSD = false;
 
         basicGEMM<Half>(m_context, gemm, 2.e-5);
+
+        std::string generatedCode = m_context->instructions()->toString();
+
+        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128"), 3);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed4x2)
@@ -563,26 +608,20 @@ namespace GEMMDriverTest
 
         gemm.storeLDSD = false;
 
-        basicGEMM<Half>(m_context, gemm, 2.e-5);
-    }
+        gemm.transB = "N";
 
-    int countSubstring(const std::string& str, const std::string& sub)
-    {
-        if(sub.length() == 0)
-            return 0;
-        int count = 0;
-        for(size_t offset = str.find(sub); offset != std::string::npos;
-            offset        = str.find(sub, offset + sub.length()))
-        {
-            ++count;
-        }
-        return count;
+        basicGEMM<Half>(m_context, gemm, 2.e-5);
+
+        std::string generatedCode = m_context->instructions()->toString();
+
+        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128"), 3);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMLiteralStrides)
     {
         GEMMProblem gemm;
         gemm.packMultipleElementsInto1VGPR = true;
+        gemm.transB                        = "N";
 
         gemm.literalStrides = true;
         basicGEMM<float>(m_context, gemm, 1.e-6);

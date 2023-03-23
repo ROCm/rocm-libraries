@@ -126,6 +126,8 @@ double relativeNormInf(std::vector<T> a, std::vector<T> b)
     return d / r;
 }
 
+int countSubstring(const std::string& str, const std::string& sub);
+
 /*
  * Matrix multiply.
  */
