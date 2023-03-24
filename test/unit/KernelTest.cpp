@@ -102,6 +102,27 @@ namespace rocRollerTest
         EXPECT_EQ(NormalizedSource(output()), NormalizedSource(expected));
     }
 
+    class MaxRegisterKernelTest : public KernelTest
+    {
+    protected:
+        void SetUp() override
+        {
+            m_kernelOptions.maxVGPRs             = 234;
+            m_kernelOptions.setNextFreeVGPRToMax = true;
+
+            GenericContextFixture::SetUp();
+        }
+    };
+
+    TEST_F(MaxRegisterKernelTest, MaxVGPRsInPostamble)
+    {
+        AssemblyKernel k(m_context, "hello_world");
+
+        m_context->schedule(k.postamble());
+
+        EXPECT_EQ(countSubstring(output(), ".amdhsa_next_free_vgpr 234"), 1);
+    }
+
     TEST_F(KernelTest, Metadata)
     {
         AssemblyKernel k(m_context, "hello_world");
