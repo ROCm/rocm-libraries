@@ -79,6 +79,9 @@ namespace rocRoller
             {
                 if(info.isBranch())
                 {
+                    AssertFatal(inst.getSrcs()[0],
+                                "Branch without a label\n",
+                                ShowValue(inst.toString(LogLevel::Debug)));
                     addBranchState(inst.getSrcs()[0]->toString());
                 }
                 else if(inst.isLabel())

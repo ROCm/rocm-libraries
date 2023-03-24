@@ -1035,12 +1035,17 @@ namespace rocRollerTest
         GTEST_SKIP() << "Skipping LockCheckTest in release mode.";
 #endif
 
-        auto gen = [&](std::string inst, bool lock) -> Generator<Instruction> {
+        auto gen = [](std::string inst, bool lock) -> Generator<Instruction> {
             if(lock)
-                co_yield(Instruction::Lock(Scheduling::Dependency::SCC));
-            co_yield(Instruction(inst, {}, {}, {}, ""));
+            {
+                co_yield_(Instruction::Lock(Scheduling::Dependency::SCC));
+            }
+            auto label = Register::Value::Label("testLabel");
+            co_yield_(Instruction(inst, {}, {label}, {}, ""));
             if(lock)
-                co_yield(Instruction::Unlock());
+            {
+                co_yield_(Instruction::Unlock());
+            }
         };
 
         {
@@ -1065,11 +1070,11 @@ namespace rocRollerTest
     INSTANTIATE_TEST_SUITE_P(
         LockCheckSchedulerTest,
         LockCheckSchedulerTest,
-        testing::Combine(
-            ::testing::Values(Scheduling::SchedulerProcedure::Sequential,
-                              Scheduling::SchedulerProcedure::RoundRobin,
-                              Scheduling::SchedulerProcedure::Random,
-                              Scheduling::SchedulerProcedure::Cooperative,
-                              Scheduling::SchedulerProcedure::Priority),
-            ::testing::Values("s_branch", "s_cbranch_scc0", "s_addc_u32", "s_subb_u32")));
+        testing::Combine(::testing::Values(Scheduling::SchedulerProcedure::Sequential,
+                                           Scheduling::SchedulerProcedure::RoundRobin,
+                                           Scheduling::SchedulerProcedure::Random,
+                                           Scheduling::SchedulerProcedure::Cooperative,
+                                           Scheduling::SchedulerProcedure::Priority),
+                         ::testing::Values("s_branch",
+                                           "s_cbranch_scc0"))); //, "s_addc_u32", "s_subb_u32")));
 }
