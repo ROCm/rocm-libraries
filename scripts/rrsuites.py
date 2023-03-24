@@ -57,7 +57,6 @@ def sgemm():
         mac_m=64,
         mac_n=64,
         mac_k=64,
-        storeLDS_D=True,
         **fp32,
     )
     yield GEMMRun(
@@ -67,7 +66,6 @@ def sgemm():
         mac_m=128,
         mac_n=64,
         mac_k=16,
-        storeLDS_D=True,
         **fp32,
     )
 
@@ -80,7 +78,6 @@ def hgemm_tensile_guidepost():
         mac_k=64,
         workgroup_size_x=128,
         workgroup_size_y=2,
-        storeLDS_D=True,
         **fp16,
     )
 
@@ -93,7 +90,6 @@ def hgemm():
         mac_m=64,
         mac_n=64,
         mac_k=64,
-        storeLDS_D=True,
         **fp16,
     )
     yield GEMMRun(
@@ -146,7 +142,6 @@ def hgemm():
             mac_m=128,
             mac_n=128,
             mac_k=32,
-            storeLDS_D=True,
             workgroup_size_x=128,
             workgroup_size_y=2,
             trans_A="N",
@@ -165,7 +160,6 @@ def hgemm():
             mac_k=32,
             workgroup_size_x=128,
             workgroup_size_y=2,
-            storeLDS_D=True,
             trans_A="N",
             trans_B="T",
             visualize=False,
@@ -180,7 +174,6 @@ def hgemm():
         mac_m=64,
         mac_n=64,
         mac_k=64,
-        storeLDS_D=True,
         trans_A="T",
         trans_B="N",
         **fp16,
@@ -193,7 +186,6 @@ def hgemm():
         mac_m=64,
         mac_n=64,
         mac_k=64,
-        storeLDS_D=True,
         trans_A="T",
         trans_B="T",
         **fp16,
@@ -206,7 +198,6 @@ def hgemm():
         mac_m=64,
         mac_n=64,
         mac_k=64,
-        storeLDS_D=True,
         trans_A="N",
         trans_B="T",
         **fp16,
@@ -263,6 +254,7 @@ def visualizer():
         workgroup_size_y=1,
         trans_A="N",
         trans_B="T",
+        storeLDS_D=False,
         visualize=True,
         **fp16,
     )

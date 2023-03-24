@@ -66,7 +66,7 @@ class GEMM:
 
     loadLDS_A: bool = True
     loadLDS_B: bool = True
-    storeLDS_D: bool = False
+    storeLDS_D: bool = True
 
     scheduler: str = "Priority"
 
