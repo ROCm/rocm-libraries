@@ -429,8 +429,8 @@ class _LIBGPU_UNIQUE_PTR_TRIVIAL_ABI _LIBGPU_TEMPLATE_VIS unique_ptr<_Tp[], _Dp>
 
 template <class _Tp, class _Dp>
 __device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23
-    typename std::enable_if<std::is_swappable<_Dp>::value, void>::type
-    swap(unique_ptr<_Tp, _Dp> &__x, unique_ptr<_Tp, _Dp> &__y) _NOEXCEPT {
+typename std::enable_if<std::is_swappable<_Dp>::value, void>::type
+swap(unique_ptr<_Tp, _Dp> &__x, unique_ptr<_Tp, _Dp> &__y) _NOEXCEPT {
     __x.swap(__y);
 }
 
@@ -479,8 +479,8 @@ __device__ inline _LIBGPU_INLINE_VISIBILITY bool operator>=(const unique_ptr<_T1
 template <class _T1, class _D1, class _T2, class _D2>
     requires three_way_comparable_with<typename unique_ptr<_T1, _D1>::pointer, typename unique_ptr<_T2, _D2>::pointer>
 _LIBGPU_HIDE_FROM_ABI
-    __device__ compare_three_way_result_t<typename unique_ptr<_T1, _D1>::pointer, typename unique_ptr<_T2, _D2>::pointer>
-    operator<=>(const unique_ptr<_T1, _D1> &__x, const unique_ptr<_T2, _D2> &__y) {
+__device__ compare_three_way_result_t<typename unique_ptr<_T1, _D1>::pointer, typename unique_ptr<_T2, _D2>::pointer>
+operator<=>(const unique_ptr<_T1, _D1> &__x, const unique_ptr<_T2, _D2> &__y) {
     return compare_three_way()(__x.get(), __y.get());
 }
 #endif
@@ -592,8 +592,8 @@ make_unique(_Args &&...__args) {
 
 template <class _Tp>
 __device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23
-    typename __unique_if<_Tp>::__unique_array_unknown_bound
-    make_unique(size_t __n) {
+typename __unique_if<_Tp>::__unique_array_unknown_bound
+make_unique(size_t __n) {
     typedef std::remove_extent_t<_Tp> _Up;
     return unique_ptr<_Tp>(new _Up[__n]());
 }
