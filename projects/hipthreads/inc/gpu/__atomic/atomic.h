@@ -367,15 +367,15 @@ __host__ __device__ _LIBGPU_HIDE_FROM_ABI _Tp atomic_fetch_sub_explicit(atomic<_
 
 template <class _Tp>
 __host__ __device__ _LIBGPU_HIDE_FROM_ABI
-    typename std::enable_if<std::is_integral<_Tp>::value && !std::is_same<_Tp, bool>::value, _Tp>::type
-    atomic_fetch_and(volatile atomic<_Tp> *__o, typename atomic<_Tp>::value_type __op) _NOEXCEPT {
+typename std::enable_if<std::is_integral<_Tp>::value && !std::is_same<_Tp, bool>::value, _Tp>::type
+atomic_fetch_and(volatile atomic<_Tp> *__o, typename atomic<_Tp>::value_type __op) _NOEXCEPT {
     return __o->fetch_and(__op);
 }
 
 template <class _Tp>
 __host__ __device__ _LIBGPU_HIDE_FROM_ABI
-    typename std::enable_if<std::is_integral<_Tp>::value && !std::is_same<_Tp, bool>::value, _Tp>::type
-    atomic_fetch_and(atomic<_Tp> *__o, typename atomic<_Tp>::value_type __op) _NOEXCEPT {
+typename std::enable_if<std::is_integral<_Tp>::value && !std::is_same<_Tp, bool>::value, _Tp>::type
+atomic_fetch_and(atomic<_Tp> *__o, typename atomic<_Tp>::value_type __op) _NOEXCEPT {
     return __o->fetch_and(__op);
 }
 
@@ -383,16 +383,16 @@ __host__ __device__ _LIBGPU_HIDE_FROM_ABI
 
 template <class _Tp>
 __host__ __device__ _LIBGPU_HIDE_FROM_ABI
-    typename std::enable_if<std::is_integral<_Tp>::value && !std::is_same<_Tp, bool>::value, _Tp>::type
-    atomic_fetch_and_explicit(volatile atomic<_Tp> *__o, typename atomic<_Tp>::value_type __op,
-                              memory_order __m) _NOEXCEPT {
+typename std::enable_if<std::is_integral<_Tp>::value && !std::is_same<_Tp, bool>::value, _Tp>::type
+atomic_fetch_and_explicit(volatile atomic<_Tp> *__o, typename atomic<_Tp>::value_type __op,
+                            memory_order __m) _NOEXCEPT {
     return __o->fetch_and(__op, __m);
 }
 
 template <class _Tp>
 __host__ __device__ _LIBGPU_HIDE_FROM_ABI
-    typename std::enable_if<std::is_integral<_Tp>::value && !std::is_same<_Tp, bool>::value, _Tp>::type
-    atomic_fetch_and_explicit(atomic<_Tp> *__o, typename atomic<_Tp>::value_type __op, memory_order __m) _NOEXCEPT {
+typename std::enable_if<std::is_integral<_Tp>::value && !std::is_same<_Tp, bool>::value, _Tp>::type
+atomic_fetch_and_explicit(atomic<_Tp> *__o, typename atomic<_Tp>::value_type __op, memory_order __m) _NOEXCEPT {
     return __o->fetch_and(__op, __m);
 }
 
@@ -400,15 +400,15 @@ __host__ __device__ _LIBGPU_HIDE_FROM_ABI
 
 template <class _Tp>
 __host__ __device__ _LIBGPU_HIDE_FROM_ABI
-    typename std::enable_if<std::is_integral<_Tp>::value && !std::is_same<_Tp, bool>::value, _Tp>::type
-    atomic_fetch_or(volatile atomic<_Tp> *__o, typename atomic<_Tp>::value_type __op) _NOEXCEPT {
+typename std::enable_if<std::is_integral<_Tp>::value && !std::is_same<_Tp, bool>::value, _Tp>::type
+atomic_fetch_or(volatile atomic<_Tp> *__o, typename atomic<_Tp>::value_type __op) _NOEXCEPT {
     return __o->fetch_or(__op);
 }
 
 template <class _Tp>
 __host__ __device__ _LIBGPU_HIDE_FROM_ABI
-    typename std::enable_if<std::is_integral<_Tp>::value && !std::is_same<_Tp, bool>::value, _Tp>::type
-    atomic_fetch_or(atomic<_Tp> *__o, typename atomic<_Tp>::value_type __op) _NOEXCEPT {
+typename std::enable_if<std::is_integral<_Tp>::value && !std::is_same<_Tp, bool>::value, _Tp>::type
+atomic_fetch_or(atomic<_Tp> *__o, typename atomic<_Tp>::value_type __op) _NOEXCEPT {
     return __o->fetch_or(__op);
 }
 
@@ -416,16 +416,15 @@ __host__ __device__ _LIBGPU_HIDE_FROM_ABI
 
 template <class _Tp>
 __host__ __device__ _LIBGPU_HIDE_FROM_ABI
-    typename std::enable_if<std::is_integral<_Tp>::value && !std::is_same<_Tp, bool>::value, _Tp>::type
-    atomic_fetch_or_explicit(volatile atomic<_Tp> *__o, typename atomic<_Tp>::value_type __op,
-                             memory_order __m) _NOEXCEPT {
+typename std::enable_if<std::is_integral<_Tp>::value && !std::is_same<_Tp, bool>::value, _Tp>::type
+atomic_fetch_or_explicit(volatile atomic<_Tp> *__o, typename atomic<_Tp>::value_type __op, memory_order __m) _NOEXCEPT {
     return __o->fetch_or(__op, __m);
 }
 
 template <class _Tp>
 __host__ __device__ _LIBGPU_HIDE_FROM_ABI
-    typename std::enable_if<std::is_integral<_Tp>::value && !std::is_same<_Tp, bool>::value, _Tp>::type
-    atomic_fetch_or_explicit(atomic<_Tp> *__o, typename atomic<_Tp>::value_type __op, memory_order __m) _NOEXCEPT {
+typename std::enable_if<std::is_integral<_Tp>::value && !std::is_same<_Tp, bool>::value, _Tp>::type
+atomic_fetch_or_explicit(atomic<_Tp> *__o, typename atomic<_Tp>::value_type __op, memory_order __m) _NOEXCEPT {
     return __o->fetch_or(__op, __m);
 }
 
@@ -433,15 +432,15 @@ __host__ __device__ _LIBGPU_HIDE_FROM_ABI
 
 template <class _Tp>
 __host__ __device__ _LIBGPU_HIDE_FROM_ABI
-    typename std::enable_if<std::is_integral<_Tp>::value && !std::is_same<_Tp, bool>::value, _Tp>::type
-    atomic_fetch_xor(volatile atomic<_Tp> *__o, typename atomic<_Tp>::value_type __op) _NOEXCEPT {
+typename std::enable_if<std::is_integral<_Tp>::value && !std::is_same<_Tp, bool>::value, _Tp>::type
+atomic_fetch_xor(volatile atomic<_Tp> *__o, typename atomic<_Tp>::value_type __op) _NOEXCEPT {
     return __o->fetch_xor(__op);
 }
 
 template <class _Tp>
 __host__ __device__ _LIBGPU_HIDE_FROM_ABI
-    typename std::enable_if<std::is_integral<_Tp>::value && !std::is_same<_Tp, bool>::value, _Tp>::type
-    atomic_fetch_xor(atomic<_Tp> *__o, typename atomic<_Tp>::value_type __op) _NOEXCEPT {
+typename std::enable_if<std::is_integral<_Tp>::value && !std::is_same<_Tp, bool>::value, _Tp>::type
+atomic_fetch_xor(atomic<_Tp> *__o, typename atomic<_Tp>::value_type __op) _NOEXCEPT {
     return __o->fetch_xor(__op);
 }
 
@@ -449,16 +448,15 @@ __host__ __device__ _LIBGPU_HIDE_FROM_ABI
 
 template <class _Tp>
 __host__ __device__ _LIBGPU_HIDE_FROM_ABI
-    typename std::enable_if<std::is_integral<_Tp>::value && !std::is_same<_Tp, bool>::value, _Tp>::type
-    atomic_fetch_xor_explicit(volatile atomic<_Tp> *__o, typename atomic<_Tp>::value_type __op,
-                              memory_order __m) _NOEXCEPT {
+typename std::enable_if<std::is_integral<_Tp>::value && !std::is_same<_Tp, bool>::value, _Tp>::type
+atomic_fetch_xor_explicit(volatile atomic<_Tp> *__o, typename atomic<_Tp>::value_type __op, memory_order __m) _NOEXCEPT {
     return __o->fetch_xor(__op, __m);
 }
 
 template <class _Tp>
 __host__ __device__ _LIBGPU_HIDE_FROM_ABI
-    typename std::enable_if<std::is_integral<_Tp>::value && !std::is_same<_Tp, bool>::value, _Tp>::type
-    atomic_fetch_xor_explicit(atomic<_Tp> *__o, typename atomic<_Tp>::value_type __op, memory_order __m) _NOEXCEPT {
+typename std::enable_if<std::is_integral<_Tp>::value && !std::is_same<_Tp, bool>::value, _Tp>::type
+atomic_fetch_xor_explicit(atomic<_Tp> *__o, typename atomic<_Tp>::value_type __op, memory_order __m) _NOEXCEPT {
     return __o->fetch_xor(__op, __m);
 }
 
