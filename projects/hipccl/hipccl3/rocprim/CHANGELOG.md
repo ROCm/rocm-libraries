@@ -1,6 +1,6 @@
 # Change Log for rocPRIM
 
-Full documentation for rocPRIM is available at [https://codedocs.xyz/ROCmSoftwarePlatform/rocPRIM/](https://codedocs.xyz/ROCmSoftwarePlatform/rocPRIM/)
+Full documentation for rocPRIM is available at [https://rocprim.readthedocs.io/en/latest/](https://rocprim.readthedocs.io/en/latest/)
 
 ## [Unreleased rocPRIM-2.13.0 for ROCm 5.5.0]
 ### Added
@@ -12,8 +12,9 @@ Full documentation for rocPRIM is available at [https://codedocs.xyz/ROCmSoftwar
 - Improved the performance of `device_merge_sort`.
 ### Known Issues
 - Disabled GPU error messages relating to incorrect warp operation usage with Navi GPUs on Windows, due to GPU printf performance issues on Windows.
+- When `ROCPRIM_DISABLE_LOOKBACK_SCAN` is set, `device_scan` fails for input sizes bigger than `scan_config::size_limit`, which defaults to `std::numeric_limits<unsigned int>::max()`.
 
-## [Unreleased rocPRIM-2.12.0 for ROCm 5.4.0]
+## [rocPRIM-2.12.0 for ROCm 5.4.0]
 ### Changed
 - `device_partition`, `device_unique`, and `device_reduce_by_key` now support problem
   sizes larger than 2^32 items.

@@ -235,7 +235,7 @@ included configurations user should define macro `ROCPRIM_TARGET_ARCH` to `803` 
 should be optimized for gfx803 GCN version, or to `900` for gfx900.
 
 ## Documentation
-The latest rocPRIM documentation and API description can be found [here](https://codedocs.xyz/ROCmSoftwarePlatform/rocPRIM/).
+The latest rocPRIM documentation and API description can be found [here](https://rocprim.readthedocs.io/en/latest/).
 
 It can also be build using the following commands
 
