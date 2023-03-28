@@ -111,6 +111,7 @@ namespace rocRoller
                                  std::vector<int>&                  sdim,
                                  int                                K,
                                  std::array<unsigned int, 3> const& workgroupSizes,
+                                 int                                unroll,
                                  bool                               useSwappedAccess);
 
         void updateLoadLDSMacroTile(KernelGraph&                      graph,

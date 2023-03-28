@@ -164,6 +164,11 @@ namespace rocRoller
                                              int                 dimension)
             {
                 auto offsetTag = m_graph.mapper.get<Offset>(tag, dimension);
+                rocRoller::Log::getLogger()->debug(
+                    "KernelGraph::CodeGenerator::getOffset(tag: {}, dimension: {}, offsetTag: {})",
+                    tag,
+                    dimension,
+                    offsetTag);
                 if(offsetTag < 0)
                     co_return;
 
@@ -550,6 +555,21 @@ namespace rocRoller
                     offset,
                     stride);
 
+                // TODO: Design a better way of binding storage to coordinates
+                auto maybeLDS = m_graph.coordinates.get<LDS>(target);
+                if(maybeLDS)
+                {
+                    // If target is LDS; it might be a duplicated LDS
+                    // node.  For the purposes of computing indexes,
+                    // use the parent LDS as the target instead.
+                    namespace CT = rocRoller::KernelGraph::CoordinateGraph;
+
+                    auto maybeParentLDS = only(
+                        m_graph.coordinates.getInputNodeIndices(target, CT::isEdge<PassThrough>));
+                    if(maybeParentLDS)
+                        target = *maybeParentLDS;
+                }
+
                 auto scope    = m_context->getScopeManager();
                 uint numBytes = DataTypeInfo::Get(ci.valueType).elementSize;
 
@@ -671,7 +691,7 @@ namespace rocRoller
                                             Register::ValuePtr             offset,
                                             Transformer&                   coords)
             {
-                rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::loadTile()");
+                rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::loadTile({})", tag);
 
                 auto macTileTag = m_graph.mapper.get<MacroTile>(tag);
 
@@ -1011,12 +1031,15 @@ namespace rocRoller
                                                           Transformer        coords,
                                                           int                sdim)
             {
-                rocRoller::Log::getLogger()->debug(
-                    "KernelGraph::CodeGenerator::loadMacroTileWAVELDSCI()");
                 co_yield_(Instruction::Comment("GEN: loadMacroTileWAVELDSCI"));
 
                 auto [ldsTag, lds]           = m_graph.getDimension<LDS>(tag);
                 auto [waveTileTag, waveTile] = m_graph.getDimension<WaveTile>(tag);
+
+                rocRoller::Log::getLogger()->debug(
+                    "KernelGraph::CodeGenerator::loadMacroTileWAVELDSCI({}, {})",
+                    ldsTag,
+                    waveTileTag);
 
                 // Find the LDS allocation that contains the tile and store
                 // the offset of the beginning of the allocation into ldsOffset.
@@ -1032,7 +1055,6 @@ namespace rocRoller
                 uint numElements = waveTile.sizes[0] * waveTile.sizes[1];
                 uint wfs         = m_context->kernel()->wavefront_size();
                 uint numVgpr     = numElements / wfs;
-
                 co_yield loadTile(MemoryInstructions::MemoryKind::Local,
                                   1,
                                   numVgpr,

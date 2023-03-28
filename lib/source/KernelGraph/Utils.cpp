@@ -72,10 +72,20 @@ namespace rocRoller
                 graph.mapper.disconnect<Workgroup>(loadTag, aWorkgroupX, 0);
                 graph.coordinates.deleteElement(aWorkgroupX);
 
-                // remove passthrough between A column block and K
+                // remove edge between A column block and K if it's not an unroll split.
                 auto aTileNumY = graph.mapper.get<MacroTileNumber>(loadTag, 1);
-                graph.coordinates.deleteElement(
-                    std::vector<int>{aTileNumY}, std::vector<int>{K}, CT::isEdge<PassThrough>);
+
+                //TODO: Clean this up once there is a non-templated version of getOutputNodeIndices.
+                auto outputNodes
+                    = graph.coordinates
+                          .getOutputNodeIndices(aTileNumY, [](Edge const& a) { return true; })
+                          .to<std::vector>();
+                if(outputNodes.size() == 1)
+                {
+                    graph.coordinates.deleteElement(std::vector<int>{aTileNumY},
+                                                    outputNodes,
+                                                    [](Edge const& a) { return true; });
+                }
             }
             else if(macTile.layoutType == LayoutType::MATRIX_B)
             {
@@ -89,10 +99,20 @@ namespace rocRoller
                 graph.mapper.disconnect<Workgroup>(loadTag, bWorkgroupY, 1);
                 graph.coordinates.deleteElement(bWorkgroupY);
 
-                // remove passthrough between B row block and K
+                // remove edge between B row block and K if it's not an unroll split.
                 auto bTileNumX = graph.mapper.get<MacroTileNumber>(loadTag, 0);
-                graph.coordinates.deleteElement(
-                    std::vector<int>{bTileNumX}, std::vector<int>{K}, CT::isEdge<PassThrough>);
+
+                auto outputNodes
+                    = graph.coordinates
+                          .getOutputNodeIndices(bTileNumX, [](Edge const& a) { return true; })
+                          .to<std::vector>();
+
+                if(outputNodes.size() == 1)
+                {
+                    graph.coordinates.deleteElement(std::vector<int>{bTileNumX},
+                                                    outputNodes,
+                                                    [](Edge const& a) { return true; });
+                }
             }
             else
             {
@@ -358,6 +378,7 @@ namespace rocRoller
                                  std::vector<int>&                  sdim,
                                  int                                K,
                                  std::array<unsigned int, 3> const& workgroupSizes,
+                                 int                                unroll,
                                  bool                               useSwappedAccess)
         {
             auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
@@ -469,14 +490,28 @@ namespace rocRoller
                 graph.mapper.connect<Workgroup>(loadTag, workgroupX, 0);
                 graph.coordinates.addElement(PassThrough(), {nMacX}, {workgroupX});
                 // A row block is x-workgroup, column block is for loop index
-                graph.coordinates.addElement(PassThrough(), {nMacY}, {K});
+                if(unroll >= 0)
+                {
+                    graph.coordinates.addElement(Split(), {nMacY}, {K, unroll});
+                }
+                else
+                {
+                    graph.coordinates.addElement(PassThrough(), {nMacY}, {K});
+                }
             }
             else if(macTile.layoutType == LayoutType::MATRIX_B)
             {
                 auto workgroupY = graph.coordinates.addElement(Workgroup(1));
                 graph.mapper.connect<Workgroup>(loadTag, workgroupY, 1);
                 // B row block is for loop index, column block is y-workgroup
-                graph.coordinates.addElement(PassThrough(), {nMacX}, {K});
+                if(unroll >= 0)
+                {
+                    graph.coordinates.addElement(Split(), {nMacX}, {K, unroll});
+                }
+                else
+                {
+                    graph.coordinates.addElement(PassThrough(), {nMacX}, {K});
+                }
                 graph.coordinates.addElement(PassThrough(), {nMacY}, {workgroupY});
             }
             else
@@ -1251,6 +1286,20 @@ namespace rocRoller
             int target, Graph::Direction direction, KernelGraph const& kgraph)
         {
             namespace CT = rocRoller::KernelGraph::CoordinateGraph;
+
+            // TODO: Design a better way of binding storage to coordinates
+            auto maybeLDS = kgraph.coordinates.get<LDS>(target);
+            if(maybeLDS)
+            {
+                // If target is LDS; it might be a duplicated LDS
+                // node.  For the purposes of figuring out required
+                // coordinates, use the parent LDS as the target
+                // instead.
+                auto maybeParentLDS
+                    = only(kgraph.coordinates.getInputNodeIndices(target, CT::isEdge<PassThrough>));
+                if(maybeParentLDS)
+                    target = *maybeParentLDS;
+            }
 
             auto dontWalkPastLoopOrStorageNodes = [&](int tag) -> bool {
                 auto element = kgraph.coordinates.getElement(tag);

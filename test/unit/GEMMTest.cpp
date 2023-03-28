@@ -402,6 +402,58 @@ namespace GEMMDriverTest
         basicGEMM<float>(m_context, gemm, 1.e-6);
     }
 
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMUnrollKLDS)
+    {
+        GEMMProblem gemm;
+        gemm.K         = 64 * 4 * 2;
+        gemm.loadLDSA  = true;
+        gemm.loadLDSB  = true;
+        gemm.storeLDSD = false;
+        gemm.fuseLoops = false;
+        gemm.unrollK   = 2;
+        gemm.mac_k     = 4;
+        basicGEMM<float>(m_context, gemm, 1.e-6);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMUnrollKMoreLDS)
+    {
+        GEMMProblem gemm;
+        gemm.K         = 64 * 4 * 2;
+        gemm.loadLDSA  = true;
+        gemm.loadLDSB  = true;
+        gemm.storeLDSD = false;
+        gemm.fuseLoops = false;
+        gemm.unrollK   = 4;
+        gemm.mac_k     = 8;
+        basicGEMM<float>(m_context, gemm, 1.e-6);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMUnrollKMoreLDSA)
+    {
+        GEMMProblem gemm;
+        gemm.K         = 64 * 4 * 2;
+        gemm.loadLDSA  = true;
+        gemm.loadLDSB  = false;
+        gemm.storeLDSD = false;
+        gemm.fuseLoops = false;
+        gemm.unrollK   = 4;
+        gemm.mac_k     = 8;
+        basicGEMM<float>(m_context, gemm, 1.e-6);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMUnrollKMoreLDSB)
+    {
+        GEMMProblem gemm;
+        gemm.K         = 64 * 4 * 2;
+        gemm.loadLDSA  = false;
+        gemm.loadLDSB  = true;
+        gemm.storeLDSD = false;
+        gemm.fuseLoops = false;
+        gemm.unrollK   = 4;
+        gemm.mac_k     = 8;
+        basicGEMM<float>(m_context, gemm, 1.e-6);
+    }
+
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16)
     {
         GEMMProblem gemm;

@@ -71,7 +71,7 @@ namespace rocRollerTest
 
         std::string expected = R"(
                                    v_mov_b32 v0, 0
-                                   v_mov_b32 v1, 0 
+                                   v_mov_b32 v1, 0
                                    v_add_f32 v2, v0, v1
                                    s_endpgm
                                 )";
