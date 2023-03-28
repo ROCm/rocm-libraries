@@ -154,7 +154,7 @@ namespace rocRoller
                     result = result + coords.getCoordinate(unroll) * strideExpr;
                 }
 
-                return result;
+                return m_fastArith(result);
             }
 
             Generator<Instruction> getOffset(Register::ValuePtr& dst,
@@ -709,6 +709,11 @@ namespace rocRoller
                         m_context, Register::Type::Vector, dataType, m * n);
                 }
 
+                if(!offset)
+                {
+                    offset = Register::Value::Literal(0u);
+                }
+
                 auto vgpr = m_context->registerTagManager()->getRegister(macTileTag, tmpl);
                 co_yield Register::AllocateIfNeeded(vgpr);
 
@@ -718,7 +723,15 @@ namespace rocRoller
                 co_yield getOffset(rowOffsetReg, rowOffsetExpr, coords, tag, 0);
                 auto colOffsetReg = rowOffsetReg->placeholder();
 
-                if(rowOffsetExpr)
+                if(rowOffsetExpr
+                   && Expression::evaluationTimes(rowOffsetExpr)[EvaluationTime::Translate]
+                   && offset->regType() == Register::Type::Literal
+                   && getUnsignedInt(evaluate(rowOffsetExpr)) > 0)
+                {
+                    offset = Register::Value::Literal(getUnsignedInt(evaluate(rowOffsetExpr))
+                                                      + getUnsignedInt(offset->getLiteralValue()));
+                }
+                else if(rowOffsetExpr)
                 {
                     auto unrolledRowOffsetExpr
                         = m_fastArith(rowOffsetReg->expression() + rowOffsetExpr);
@@ -763,7 +776,7 @@ namespace rocRoller
                 if(vgpr->variableType() == DataType::Halfx2 && !colStrideIsOne)
                 {
                     if(rowStrideReg->regType() == Register::Type::Literal && colStrideIsLiteral
-                       && offset && offset->regType() == Register::Type::Literal)
+                       && offset->regType() == Register::Type::Literal)
                     {
                         // If all of the strides are literals, we can load everything using offsets
                         // without using a runtime counter
@@ -847,7 +860,7 @@ namespace rocRoller
                 else
                 {
                     if(rowStrideReg->regType() == Register::Type::Literal && colStrideIsLiteral
-                       && offset && offset->regType() == Register::Type::Literal)
+                       && offset->regType() == Register::Type::Literal)
                     {
                         // If all of the strides are literals, we can load everything using offsets
                         // without using a runtime counter
@@ -1346,6 +1359,11 @@ namespace rocRoller
             {
                 auto elementSize = DataTypeInfo::Get(dataType).elementSize;
 
+                if(!offset)
+                {
+                    offset = Register::Value::Literal(0u);
+                }
+
                 Register::ValuePtr rowOffsetReg;
                 ExpressionPtr      rowOffsetExpr;
                 co_yield getOffset(rowOffsetReg, rowOffsetExpr, coords, tag, 0);
@@ -1354,7 +1372,15 @@ namespace rocRoller
                 AssertFatal(rowOffsetReg, "Invalid row offset register.");
                 AssertFatal(colOffsetReg, "Invalid col offset register.");
 
-                if(rowOffsetExpr)
+                if(rowOffsetExpr
+                   && Expression::evaluationTimes(rowOffsetExpr)[EvaluationTime::Translate]
+                   && offset->regType() == Register::Type::Literal
+                   && getUnsignedInt(evaluate(rowOffsetExpr)) > 0)
+                {
+                    offset = Register::Value::Literal(getUnsignedInt(evaluate(rowOffsetExpr))
+                                                      + getUnsignedInt(offset->getLiteralValue()));
+                }
+                else if(rowOffsetExpr)
                 {
                     auto unrolledRowOffsetExpr
                         = simplify(rowOffsetReg->expression() + rowOffsetExpr);
@@ -1417,7 +1443,7 @@ namespace rocRoller
                 if(converted->variableType() == DataType::Halfx2 && !colStrideIsOne)
                 {
                     if(rowStrideReg->regType() == Register::Type::Literal && colStrideIsLiteral
-                       && offset && offset->regType() == Register::Type::Literal)
+                       && offset->regType() == Register::Type::Literal)
                     {
                         // If all of the strides are literals, we can load everything using offsets
                         // without using a runtime counter
@@ -1479,7 +1505,7 @@ namespace rocRoller
                 else
                 {
                     if(rowStrideReg->regType() == Register::Type::Literal && colStrideIsLiteral
-                       && offset && offset->regType() == Register::Type::Literal)
+                       && offset->regType() == Register::Type::Literal)
                     {
                         // If all of the strides are literals, we can store everything using offsets
                         // without using a runtime counter

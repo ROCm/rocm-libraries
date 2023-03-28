@@ -187,6 +187,7 @@ namespace MatrixMultiplyTest
 
         int expectedLocalWriteOffset = 0;
         int numLocalRead             = 0;
+        int expectedLocalReadOffset  = 0;
         for(auto const& instruction : instructions)
         {
             // Count the number of ds_write_b128 instructions and make sure they have
@@ -202,8 +203,22 @@ namespace MatrixMultiplyTest
             if(instruction.starts_with("ds_read_u16"))
             {
                 numLocalRead++;
+
+                if(expectedLocalReadOffset > 0)
+                    EXPECT_TRUE(
+                        instruction.ends_with("offset:" + std::to_string(expectedLocalReadOffset)));
+
+                if(numLocalRead % 4 == 0)
+                {
+                    expectedLocalReadOffset = numLocalRead / 4 * 512;
+                }
+                else
+                {
+                    expectedLocalReadOffset += 64;
+                }
             }
         }
+
         EXPECT_EQ(expectedLocalWriteOffset, 128);
         EXPECT_EQ(numLocalRead, 16);
     }
