@@ -21,7 +21,7 @@
 function usage {
   echo "Usage: ${0} [flags...] <tests...>|all"
   echo
-  echo "Run <tests> from the libc++ and libcu++ test suites."
+  echo "Run <tests> from the libc++ and libhip++ test suites."
   echo "If no tests or \"all\" is specified, all tests are run."
   echo
   echo "-h, -help, --help                : Print this message."
@@ -33,7 +33,7 @@ function usage {
   echo "                                 : Overrides \${LIBCUDACXX_SKIP_TESTS_RUN}."
   echo "--skip-libcxx-tests              : Do not build (or run) any libc++ tests."
   echo "                                 : Overrides \${LIBCUDACXX_SKIP_LIBCXX_TESTS}."
-  echo "--skip-libcudacxx-tests          : Do not build (or run) any libcu++ tests."
+  echo "--skip-libcudacxx-tests          : Do not build (or run) any libhip++ tests."
   echo "                                 : Overrides \${LIBCUDACXX_SKIP_LIBCUDACXX_TESTS}."
   echo "--skip-arch-detection            : Do not automatically detect the CDNA architecture"
   echo "                                 : for tests runs."
@@ -49,11 +49,12 @@ function usage {
   echo
   echo "--libcxx-lit-site-config <file>     : Use <file> as the libc++ lit site config"
   echo "                                    : (default: \${LIBCUDACXX_PATH}/libcxx/build/test/lit.site.cfg)."
-  echo "--libcudacxx-lit-site-config <file> : Use <file> as the libcu++ lit site config"
+  echo "--libcudacxx-lit-site-config <file> : Use <file> as the libhip++ lit site config"
   echo "                                    : (default: \${LIBCUDACXX_PATH}/build/libcxx/test/lit.site.cfg)."
   echo
   echo "--verbose                           : Print SM architecture detection and test results"
   echo "                                    : to stdout in addition to log files."
+  echo "--pretty                           : Print each test result individually."
   echo
   echo "\${LIBCUDACXX_SKIP_BASE_TESTS_BUILD}   : If set and non-zero, do not build"
   echo "                                      : (or run) any tests."
@@ -62,7 +63,7 @@ function usage {
   echo "\${LIBCUDACXX_SKIP_LIBCXX_TESTS}       : If set and non-zero, do not build"
   echo "                                      : (or run) any libc++ tests."
   echo "\${LIBCUDACXX_SKIP_LIBCUDACXX_TESTS}   : If set and non-zero, do not build"
-  echo "                                      : (or run) any libcu++ tests."
+  echo "                                      : (or run) any libhip++ tests."
   echo "\${LIBCUDACXX_SKIP_ARCH_DETECTION}     : If set, non-zero, and"
   echo "                                      : \${LIBCUDACXX_COMPUTE_ARCHS} is unset,"
   echo "                                      : do not automatically detect the SM"
@@ -197,6 +198,7 @@ do
     LIBCUDACXX_LIT_SITE_CONFIG=${1}
     ;;
   --verbose) VERBOSE=1 ;;
+  --pretty) PRETTY=1 ;;
   *)
     RAW_TEST_TARGETS="${RAW_TEST_TARGETS:+${RAW_TEST_TARGETS} }${1}"
     ;;
@@ -225,7 +227,7 @@ if [ "${LIBCUDACXX_SKIP_BASE_TESTS_BUILD:-0}" != "0" ] || \
    [[ "${LIBCUDACXX_SKIP_LIBCXX_TESTS:-0}" != "0" && "${LIBCUDACXX_SKIP_LIBCUDACXX_TESTS:-0}" != "0" ]]
 then
   echo "# TEST libc++  : Skipped"
-  echo "# TEST libcu++ : Skipped"
+  echo "# TEST libhip++ : Skipped"
   section_separator
   echo "Score: 100.00%"
   exit 0
@@ -234,6 +236,9 @@ fi
 if [ "${VERBOSE:-0}" != "0" ]
 then
   LIT_FLAGS="-vv -a"
+elif [ "${PRETTY:-0}" != "0" ]
+then
+  LIT_FLAGS="--show-pass --show-skipped"
 else
   LIT_FLAGS="-sv --no-progress-bar"
 fi
@@ -303,6 +308,7 @@ VARIABLES="
   SCRIPT_PATH
   LIBCUDACXX_PATH
   VERBOSE
+  PRETTY
   LIBCUDACXX_SKIP_BASE_TESTS_BUILD
   LIBCUDACXX_SKIP_TESTS_RUN
   LIBCUDACXX_SKIP_LIBCXX_TESTS
@@ -332,7 +338,7 @@ do
 done
 
 ################################################################################
-# Build/Run libc++ & libcu++ Tests
+# Build/Run libc++ & libhip++ Tests
 
 section_separator
 
@@ -371,8 +377,9 @@ then
   fi
 
   echo "# TEST libhip++"
+  echo ${LIBCUDACXX_LIT_SITE_CONFIG}
+  echo ${LIT_PREFIX}" lit "${LIT_FLAGS} ${LIT_COMPUTE_ARCHS_FLAG}${LIBCUDACXX_COMPUTE_ARCHS}${LIT_COMPUTE_ARCHS_SUFFIX} ${LIBCUDACXX_TEST_TARGETS} ${OUTPUT_STREAM_FLAG}
   TIMEFORMAT="# WALLTIME libhip++: %R [sec]" \
-
   LIBCUDACXX_SITE_CONFIG=${LIBCUDACXX_LIT_SITE_CONFIG} \
   bash -c "${LIT_PREFIX} lit ${LIT_FLAGS} ${LIT_COMPUTE_ARCHS_FLAG}${LIBCUDACXX_COMPUTE_ARCHS}${LIT_COMPUTE_ARCHS_SUFFIX} ${LIBCUDACXX_TEST_TARGETS} ${OUTPUT_STREAM_FLAG}" \
   2>&1 | tee "${LIBCUDACXX_LOG}"
