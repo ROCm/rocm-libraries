@@ -4,8 +4,10 @@
 #include "hip/hip_runtime_api.h"
 #include <cstddef>
 #include <type_traits>
+#include <memory>
 
 #include "gpu/__config"
+#include "gpu/__clib/malloc.h"
 #include "gpu/__functional/operations.h"
 #include "gpu/__memory/__pointer.h"
 #include "gpu/__memory/compressed_pair.h"
@@ -22,7 +24,7 @@ template <class _Tp>
 struct _LIBGPU_TEMPLATE_VIS default_delete {
     static_assert(!std::is_function<_Tp>::value, "default_delete cannot be instantiated for function types");
 #ifndef _LIBGPU_CXX03_LANG
-    __device__ _LIBGPU_INLINE_VISIBILITY constexpr default_delete() _NOEXCEPT = default;
+    __device__ _LIBGPU_INLINE_VISIBILITY default_delete() _NOEXCEPT = default;
 #else
     __device__ _LIBGPU_INLINE_VISIBILITY default_delete() {}
 #endif
@@ -46,7 +48,7 @@ struct _LIBGPU_TEMPLATE_VIS default_delete<_Tp[]> {
 
   public:
 #ifndef _LIBGPU_CXX03_LANG
-    __device__ _LIBGPU_INLINE_VISIBILITY constexpr default_delete() _NOEXCEPT = default;
+    __device__ _LIBGPU_INLINE_VISIBILITY default_delete() _NOEXCEPT = default;
 #else
     __device__ _LIBGPU_INLINE_VISIBILITY default_delete() {}
 #endif
@@ -60,6 +62,53 @@ struct _LIBGPU_TEMPLATE_VIS default_delete<_Tp[]> {
     operator()(_Up *__ptr) const _NOEXCEPT {
         static_assert(sizeof(_Up) >= 0, "cannot delete an incomplete type");
         delete[] __ptr;
+    }
+};
+
+template <class _Tp>
+struct _LIBGPU_TEMPLATE_VIS host_delete {
+    static_assert(!std::is_function<_Tp>::value, "host_delete cannot be instantiated for function types");
+    static_assert(std::is_trivially_destructible<_Tp>::value, "host_delete can only be instantiated for trivially destructible types");
+#ifndef _LIBGPU_CXX03_LANG
+    __host__ _LIBGPU_INLINE_VISIBILITY constexpr host_delete() _NOEXCEPT = default;
+#else
+    __host__ _LIBGPU_INLINE_VISIBILITY host_delete() {}
+#endif
+    template <class _Up>
+    __host__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23
+    host_delete(const host_delete<_Up> &,
+                   typename std::enable_if<std::is_convertible<_Up *, _Tp *>::value>::type * = 0) _NOEXCEPT {}
+
+    __host__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 void operator()(_Tp *__ptr) const _NOEXCEPT {
+        static_assert(sizeof(_Tp) >= 0, "cannot delete an incomplete type");
+        static_assert(!std::is_void<_Tp>::value, "cannot delete an incomplete type");
+        gpu::free(const_cast<typename std::remove_const<_Tp>::type *>(__ptr));
+    }
+};
+
+template <class _Tp>
+struct _LIBGPU_TEMPLATE_VIS host_delete<_Tp[]> {
+    static_assert(std::is_trivially_destructible<_Tp>::value, "host_delete can only be instantiated for trivially destructible types");
+  private:
+    template <class _Up>
+    struct _EnableIfConvertible : std::enable_if<std::is_convertible<_Up (*)[], _Tp (*)[]>::value> {};
+
+  public:
+#ifndef _LIBGPU_CXX03_LANG
+    __host__ _LIBGPU_INLINE_VISIBILITY constexpr host_delete() _NOEXCEPT = default;
+#else
+    __host__ _LIBGPU_INLINE_VISIBILITY host_delete() {}
+#endif
+
+    template <class _Up>
+    __host__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23
+    host_delete(const host_delete<_Up[]> &, typename _EnableIfConvertible<_Up>::type * = 0) _NOEXCEPT {}
+
+    template <class _Up>
+    __host__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 typename _EnableIfConvertible<_Up>::type
+    operator()(_Up *__ptr) const _NOEXCEPT {
+        static_assert(sizeof(_Up) >= 0, "cannot delete an incomplete type");
+        gpu::free(const_cast<typename std::remove_const<_Up>::type *>(__ptr));
     }
 };
 
@@ -144,40 +193,40 @@ class _LIBGPU_UNIQUE_PTR_TRIVIAL_ABI _LIBGPU_TEMPLATE_VIS unique_ptr {
 
   public:
     template <bool _Dummy = true, class = _EnableIfDeleterDefaultConstructible<_Dummy>>
-    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR unique_ptr() _NOEXCEPT
+    __host__ __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR unique_ptr() _NOEXCEPT
         : __ptr_(__value_init_tag(), __value_init_tag()) {}
 
     template <bool _Dummy = true, class = _EnableIfDeleterDefaultConstructible<_Dummy>>
-    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR unique_ptr(std::nullptr_t) _NOEXCEPT
+    __host__ __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR unique_ptr(std::nullptr_t) _NOEXCEPT
         : __ptr_(__value_init_tag(), __value_init_tag()) {}
 
     template <bool _Dummy = true, class = _EnableIfDeleterDefaultConstructible<_Dummy>>
-    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 explicit unique_ptr(pointer __p) _NOEXCEPT
+    __host__ __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 explicit unique_ptr(pointer __p) _NOEXCEPT
         : __ptr_(__p, __value_init_tag()) {}
 
     template <bool _Dummy = true, class = _EnableIfDeleterConstructible<_LValRefType<_Dummy>>>
-    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 unique_ptr(pointer __p,
+    __host__ __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 unique_ptr(pointer __p,
                                                                                   _LValRefType<_Dummy> __d) _NOEXCEPT
         : __ptr_(__p, __d) {}
 
     template <bool _Dummy = true, class = _EnableIfDeleterConstructible<_GoodRValRefType<_Dummy>>>
-    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23
+    __host__ __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23
     unique_ptr(pointer __p, _GoodRValRefType<_Dummy> __d) _NOEXCEPT : __ptr_(__p, std::move(__d)) {
         static_assert(!std::is_reference<deleter_type>::value, "rvalue deleter bound to reference");
     }
 
     template <bool _Dummy = true, class = _EnableIfDeleterConstructible<_BadRValRefType<_Dummy>>>
-    __device__ _LIBGPU_INLINE_VISIBILITY unique_ptr(pointer __p, _BadRValRefType<_Dummy> __d) = delete;
+    __host__ __device__ _LIBGPU_INLINE_VISIBILITY unique_ptr(pointer __p, _BadRValRefType<_Dummy> __d) = delete;
 
-    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 unique_ptr(unique_ptr &&__u) _NOEXCEPT
+    __host__ __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 unique_ptr(unique_ptr &&__u) _NOEXCEPT
         : __ptr_(__u.release(), std::forward<deleter_type>(__u.get_deleter())) {}
 
     template <class _Up, class _Ep, class = _EnableIfMoveConvertible<unique_ptr<_Up, _Ep>, _Up>,
               class = _EnableIfDeleterConvertible<_Ep>>
-    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 unique_ptr(unique_ptr<_Up, _Ep> &&__u) _NOEXCEPT
+    __host__ __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 unique_ptr(unique_ptr<_Up, _Ep> &&__u) _NOEXCEPT
         : __ptr_(__u.release(), std::forward<_Ep>(__u.get_deleter())) {}
 
-    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 unique_ptr &
+    __host__ __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 unique_ptr &
     operator=(unique_ptr &&__u) _NOEXCEPT {
         reset(__u.release());
         __ptr_.second() = std::forward<deleter_type>(__u.get_deleter());
@@ -186,7 +235,7 @@ class _LIBGPU_UNIQUE_PTR_TRIVIAL_ABI _LIBGPU_TEMPLATE_VIS unique_ptr {
 
     template <class _Up, class _Ep, class = _EnableIfMoveConvertible<unique_ptr<_Up, _Ep>, _Up>,
               class = _EnableIfDeleterAssignable<_Ep>>
-    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 unique_ptr &
+    __host__ __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 unique_ptr &
     operator=(unique_ptr<_Up, _Ep> &&__u) _NOEXCEPT {
         reset(__u.release());
         __ptr_.second() = std::forward<_Ep>(__u.get_deleter());
@@ -194,13 +243,13 @@ class _LIBGPU_UNIQUE_PTR_TRIVIAL_ABI _LIBGPU_TEMPLATE_VIS unique_ptr {
     }
 
 #ifdef _LIBGPU_CXX03_LANG
-    __device__ unique_ptr(unique_ptr const &) = delete;
-    __device__ unique_ptr &operator=(unique_ptr const &) = delete;
+    __host__ __device__ unique_ptr(unique_ptr const &) = delete;
+    __host__ __device__ unique_ptr &operator=(unique_ptr const &) = delete;
 #endif
 
-    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 ~unique_ptr() { reset(); }
+    __host__ __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 ~unique_ptr() { reset(); }
 
-    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 unique_ptr &operator=(std::nullptr_t) _NOEXCEPT {
+    __host__ __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 unique_ptr &operator=(std::nullptr_t) _NOEXCEPT {
         reset();
         return *this;
     }
@@ -211,34 +260,34 @@ class _LIBGPU_UNIQUE_PTR_TRIVIAL_ABI _LIBGPU_TEMPLATE_VIS unique_ptr {
     __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 pointer operator->() const _NOEXCEPT {
         return __ptr_.first();
     }
-    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 pointer get() const _NOEXCEPT {
+    __host__ __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 pointer get() const _NOEXCEPT {
         return __ptr_.first();
     }
-    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 deleter_type &get_deleter() _NOEXCEPT {
+    __host__ __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 deleter_type &get_deleter() _NOEXCEPT {
         return __ptr_.second();
     }
-    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 const deleter_type &
+    __host__ __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 const deleter_type &
     get_deleter() const _NOEXCEPT {
         return __ptr_.second();
     }
-    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 explicit operator bool() const _NOEXCEPT {
+    __host__ __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 explicit operator bool() const _NOEXCEPT {
         return __ptr_.first() != nullptr;
     }
 
-    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 pointer release() _NOEXCEPT {
+    __host__ __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 pointer release() _NOEXCEPT {
         pointer __t = __ptr_.first();
         __ptr_.first() = pointer();
         return __t;
     }
 
-    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 void reset(pointer __p = pointer()) _NOEXCEPT {
+    __host__ __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 void reset(pointer __p = pointer()) _NOEXCEPT {
         pointer __tmp = __ptr_.first();
         __ptr_.first() = __p;
         if (__tmp)
             __ptr_.second()(__tmp);
     }
 
-    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 void swap(unique_ptr &__u) _NOEXCEPT {
+    __host__ __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 void swap(unique_ptr &__u) _NOEXCEPT {
         __ptr_.swap(__u.__ptr_);
     }
 };
@@ -303,50 +352,50 @@ class _LIBGPU_UNIQUE_PTR_TRIVIAL_ABI _LIBGPU_TEMPLATE_VIS unique_ptr<_Tp[], _Dp>
 
   public:
     template <bool _Dummy = true, class = _EnableIfDeleterDefaultConstructible<_Dummy>>
-    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR unique_ptr() _NOEXCEPT
+    __host__ __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR unique_ptr() _NOEXCEPT
         : __ptr_(__value_init_tag(), __value_init_tag()) {}
 
     template <bool _Dummy = true, class = _EnableIfDeleterDefaultConstructible<_Dummy>>
-    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR unique_ptr(std::nullptr_t) _NOEXCEPT
+    __host__ __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR unique_ptr(std::nullptr_t) _NOEXCEPT
         : __ptr_(__value_init_tag(), __value_init_tag()) {}
 
     template <class _Pp, bool _Dummy = true, class = _EnableIfDeleterDefaultConstructible<_Dummy>,
               class = _EnableIfPointerConvertible<_Pp>>
-    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 explicit unique_ptr(_Pp __p) _NOEXCEPT
+    __host__ __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 explicit unique_ptr(_Pp __p) _NOEXCEPT
         : __ptr_(__p, __value_init_tag()) {}
 
     template <class _Pp, bool _Dummy = true, class = _EnableIfDeleterConstructible<_LValRefType<_Dummy>>,
               class = _EnableIfPointerConvertible<_Pp>>
-    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 unique_ptr(_Pp __p,
+    __host__ __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 unique_ptr(_Pp __p,
                                                                                   _LValRefType<_Dummy> __d) _NOEXCEPT
         : __ptr_(__p, __d) {}
 
     template <bool _Dummy = true, class = _EnableIfDeleterConstructible<_LValRefType<_Dummy>>>
-    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 unique_ptr(std::nullptr_t,
+    __host__ __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 unique_ptr(std::nullptr_t,
                                                                                   _LValRefType<_Dummy> __d) _NOEXCEPT
         : __ptr_(nullptr, __d) {}
 
     template <class _Pp, bool _Dummy = true, class = _EnableIfDeleterConstructible<_GoodRValRefType<_Dummy>>,
               class = _EnableIfPointerConvertible<_Pp>>
-    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23
+    __host__ __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23
     unique_ptr(_Pp __p, _GoodRValRefType<_Dummy> __d) _NOEXCEPT : __ptr_(__p, std::move(__d)) {
         static_assert(!std::is_reference<deleter_type>::value, "rvalue deleter bound to reference");
     }
 
     template <bool _Dummy = true, class = _EnableIfDeleterConstructible<_GoodRValRefType<_Dummy>>>
-    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23
+    __host__ __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23
     unique_ptr(std::nullptr_t, _GoodRValRefType<_Dummy> __d) _NOEXCEPT : __ptr_(nullptr, std::move(__d)) {
         static_assert(!std::is_reference<deleter_type>::value, "rvalue deleter bound to reference");
     }
 
     template <class _Pp, bool _Dummy = true, class = _EnableIfDeleterConstructible<_BadRValRefType<_Dummy>>,
               class = _EnableIfPointerConvertible<_Pp>>
-    __device__ _LIBGPU_INLINE_VISIBILITY unique_ptr(_Pp __p, _BadRValRefType<_Dummy> __d) = delete;
+    __host__ __device__ _LIBGPU_INLINE_VISIBILITY unique_ptr(_Pp __p, _BadRValRefType<_Dummy> __d) = delete;
 
-    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 unique_ptr(unique_ptr &&__u) _NOEXCEPT
+    __host__ __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 unique_ptr(unique_ptr &&__u) _NOEXCEPT
         : __ptr_(__u.release(), std::forward<deleter_type>(__u.get_deleter())) {}
 
-    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 unique_ptr &
+    __host__ __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 unique_ptr &
     operator=(unique_ptr &&__u) _NOEXCEPT {
         reset(__u.release());
         __ptr_.second() = std::forward<deleter_type>(__u.get_deleter());
@@ -355,12 +404,12 @@ class _LIBGPU_UNIQUE_PTR_TRIVIAL_ABI _LIBGPU_TEMPLATE_VIS unique_ptr<_Tp[], _Dp>
 
     template <class _Up, class _Ep, class = _EnableIfMoveConvertible<unique_ptr<_Up, _Ep>, _Up>,
               class = _EnableIfDeleterConvertible<_Ep>>
-    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 unique_ptr(unique_ptr<_Up, _Ep> &&__u) _NOEXCEPT
+    __host__ __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 unique_ptr(unique_ptr<_Up, _Ep> &&__u) _NOEXCEPT
         : __ptr_(__u.release(), std::forward<_Ep>(__u.get_deleter())) {}
 
     template <class _Up, class _Ep, class = _EnableIfMoveConvertible<unique_ptr<_Up, _Ep>, _Up>,
               class = _EnableIfDeleterAssignable<_Ep>>
-    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 unique_ptr &
+    __host__ __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 unique_ptr &
     operator=(unique_ptr<_Up, _Ep> &&__u) _NOEXCEPT {
         reset(__u.release());
         __ptr_.second() = std::forward<_Ep>(__u.get_deleter());
@@ -368,13 +417,13 @@ class _LIBGPU_UNIQUE_PTR_TRIVIAL_ABI _LIBGPU_TEMPLATE_VIS unique_ptr<_Tp[], _Dp>
     }
 
 #ifdef _LIBGPU_CXX03_LANG
-    __device__ unique_ptr(unique_ptr const &) = delete;
-    __device__ unique_ptr &operator=(unique_ptr const &) = delete;
+    __host__ __device__ unique_ptr(unique_ptr const &) = delete;
+    __host__ __device__ unique_ptr &operator=(unique_ptr const &) = delete;
 #endif
   public:
-    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 ~unique_ptr() { reset(); }
+    __host__ __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 ~unique_ptr() { reset(); }
 
-    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 unique_ptr &operator=(std::nullptr_t) _NOEXCEPT {
+    __host__ __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 unique_ptr &operator=(std::nullptr_t) _NOEXCEPT {
         reset();
         return *this;
     }
@@ -383,30 +432,30 @@ class _LIBGPU_UNIQUE_PTR_TRIVIAL_ABI _LIBGPU_TEMPLATE_VIS unique_ptr<_Tp[], _Dp>
     operator[](size_t __i) const {
         return __ptr_.first()[__i];
     }
-    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 pointer get() const _NOEXCEPT {
+    __host__ __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 pointer get() const _NOEXCEPT {
         return __ptr_.first();
     }
 
-    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 deleter_type &get_deleter() _NOEXCEPT {
+    __host__ __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 deleter_type &get_deleter() _NOEXCEPT {
         return __ptr_.second();
     }
 
-    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 const deleter_type &
+    __host__ __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 const deleter_type &
     get_deleter() const _NOEXCEPT {
         return __ptr_.second();
     }
-    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 explicit operator bool() const _NOEXCEPT {
+    __host__ __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 explicit operator bool() const _NOEXCEPT {
         return __ptr_.first() != nullptr;
     }
 
-    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 pointer release() _NOEXCEPT {
+    __host__ __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 pointer release() _NOEXCEPT {
         pointer __t = __ptr_.first();
         __ptr_.first() = pointer();
         return __t;
     }
 
     template <class _Pp>
-    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23
+    __host__ __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23
         typename std::enable_if<_CheckArrayPointerConversion<_Pp>::value>::type
         reset(_Pp __p) _NOEXCEPT {
         pointer __tmp = __ptr_.first();
@@ -415,41 +464,41 @@ class _LIBGPU_UNIQUE_PTR_TRIVIAL_ABI _LIBGPU_TEMPLATE_VIS unique_ptr<_Tp[], _Dp>
             __ptr_.second()(__tmp);
     }
 
-    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 void reset(std::nullptr_t = nullptr) _NOEXCEPT {
+    __host__ __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 void reset(std::nullptr_t = nullptr) _NOEXCEPT {
         pointer __tmp = __ptr_.first();
         __ptr_.first() = nullptr;
         if (__tmp)
             __ptr_.second()(__tmp);
     }
 
-    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 void swap(unique_ptr &__u) _NOEXCEPT {
+    __host__ __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 void swap(unique_ptr &__u) _NOEXCEPT {
         __ptr_.swap(__u.__ptr_);
     }
 };
 
 template <class _Tp, class _Dp>
-__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23
+__host__ __device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23
 typename std::enable_if<std::is_swappable<_Dp>::value, void>::type
 swap(unique_ptr<_Tp, _Dp> &__x, unique_ptr<_Tp, _Dp> &__y) _NOEXCEPT {
     __x.swap(__y);
 }
 
 template <class _T1, class _D1, class _T2, class _D2>
-__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 bool
+__host__ __device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 bool
 operator==(const unique_ptr<_T1, _D1> &__x, const unique_ptr<_T2, _D2> &__y) {
     return __x.get() == __y.get();
 }
 
 #if _LIBGPU_STD_VER <= 17
 template <class _T1, class _D1, class _T2, class _D2>
-__device__ inline _LIBGPU_INLINE_VISIBILITY bool operator!=(const unique_ptr<_T1, _D1> &__x,
-                                                            const unique_ptr<_T2, _D2> &__y) {
+__host__ __device__ inline _LIBGPU_INLINE_VISIBILITY bool operator!=(const unique_ptr<_T1, _D1> &__x,
+                                                                     const unique_ptr<_T2, _D2> &__y) {
     return !(__x == __y);
 }
 #endif
 
 template <class _T1, class _D1, class _T2, class _D2>
-__device__ inline _LIBGPU_INLINE_VISIBILITY bool operator<(const unique_ptr<_T1, _D1> &__x,
+__host__ __device__ inline _LIBGPU_INLINE_VISIBILITY bool operator<(const unique_ptr<_T1, _D1> &__x,
                                                            const unique_ptr<_T2, _D2> &__y) {
     typedef typename unique_ptr<_T1, _D1>::pointer _P1;
     typedef typename unique_ptr<_T2, _D2>::pointer _P2;
@@ -458,19 +507,19 @@ __device__ inline _LIBGPU_INLINE_VISIBILITY bool operator<(const unique_ptr<_T1,
 }
 
 template <class _T1, class _D1, class _T2, class _D2>
-__device__ inline _LIBGPU_INLINE_VISIBILITY bool operator>(const unique_ptr<_T1, _D1> &__x,
+__host__ __device__ inline _LIBGPU_INLINE_VISIBILITY bool operator>(const unique_ptr<_T1, _D1> &__x,
                                                            const unique_ptr<_T2, _D2> &__y) {
     return __y < __x;
 }
 
 template <class _T1, class _D1, class _T2, class _D2>
-__device__ inline _LIBGPU_INLINE_VISIBILITY bool operator<=(const unique_ptr<_T1, _D1> &__x,
+__host__ __device__ inline _LIBGPU_INLINE_VISIBILITY bool operator<=(const unique_ptr<_T1, _D1> &__x,
                                                             const unique_ptr<_T2, _D2> &__y) {
     return !(__y < __x);
 }
 
 template <class _T1, class _D1, class _T2, class _D2>
-__device__ inline _LIBGPU_INLINE_VISIBILITY bool operator>=(const unique_ptr<_T1, _D1> &__x,
+__host__ __device__ inline _LIBGPU_INLINE_VISIBILITY bool operator>=(const unique_ptr<_T1, _D1> &__x,
                                                             const unique_ptr<_T2, _D2> &__y) {
     return !(__x < __y);
 }
@@ -479,81 +528,81 @@ __device__ inline _LIBGPU_INLINE_VISIBILITY bool operator>=(const unique_ptr<_T1
 template <class _T1, class _D1, class _T2, class _D2>
     requires three_way_comparable_with<typename unique_ptr<_T1, _D1>::pointer, typename unique_ptr<_T2, _D2>::pointer>
 _LIBGPU_HIDE_FROM_ABI
-__device__ compare_three_way_result_t<typename unique_ptr<_T1, _D1>::pointer, typename unique_ptr<_T2, _D2>::pointer>
+__host__ __device__ compare_three_way_result_t<typename unique_ptr<_T1, _D1>::pointer, typename unique_ptr<_T2, _D2>::pointer>
 operator<=>(const unique_ptr<_T1, _D1> &__x, const unique_ptr<_T2, _D2> &__y) {
     return compare_three_way()(__x.get(), __y.get());
 }
 #endif
 
 template <class _T1, class _D1>
-__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 bool
+__host__ __device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 bool
 operator==(const unique_ptr<_T1, _D1> &__x, std::nullptr_t) _NOEXCEPT {
     return !__x;
 }
 
 #if _LIBGPU_STD_VER <= 17
 template <class _T1, class _D1>
-__device__ inline _LIBGPU_INLINE_VISIBILITY bool operator==(std::nullptr_t, const unique_ptr<_T1, _D1> &__x) _NOEXCEPT {
+__host__ __device__ inline _LIBGPU_INLINE_VISIBILITY bool operator==(std::nullptr_t, const unique_ptr<_T1, _D1> &__x) _NOEXCEPT {
     return !__x;
 }
 
 template <class _T1, class _D1>
-__device__ inline _LIBGPU_INLINE_VISIBILITY bool operator!=(const unique_ptr<_T1, _D1> &__x, std::nullptr_t) _NOEXCEPT {
+__host__ __device__ inline _LIBGPU_INLINE_VISIBILITY bool operator!=(const unique_ptr<_T1, _D1> &__x, std::nullptr_t) _NOEXCEPT {
     return static_cast<bool>(__x);
 }
 
 template <class _T1, class _D1>
-__device__ inline _LIBGPU_INLINE_VISIBILITY bool operator!=(std::nullptr_t, const unique_ptr<_T1, _D1> &__x) _NOEXCEPT {
+__host__ __device__ inline _LIBGPU_INLINE_VISIBILITY bool operator!=(std::nullptr_t, const unique_ptr<_T1, _D1> &__x) _NOEXCEPT {
     return static_cast<bool>(__x);
 }
 #endif // _LIBGPU_STD_VER <= 17
 
 template <class _T1, class _D1>
-__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 bool
+__host__ __device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 bool
 operator<(const unique_ptr<_T1, _D1> &__x, std::nullptr_t) {
     typedef typename unique_ptr<_T1, _D1>::pointer _P1;
     return less<_P1>()(__x.get(), nullptr);
 }
 
 template <class _T1, class _D1>
-__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 bool
+__host__ __device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 bool
 operator<(std::nullptr_t, const unique_ptr<_T1, _D1> &__x) {
     typedef typename unique_ptr<_T1, _D1>::pointer _P1;
     return less<_P1>()(nullptr, __x.get());
 }
 
 template <class _T1, class _D1>
-__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 bool
+__host__ __device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 bool
 operator>(const unique_ptr<_T1, _D1> &__x, std::nullptr_t) {
     return nullptr < __x;
 }
 
 template <class _T1, class _D1>
-__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 bool
+__host__ __device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 bool
 operator>(std::nullptr_t, const unique_ptr<_T1, _D1> &__x) {
     return __x < nullptr;
 }
 
 template <class _T1, class _D1>
-__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 bool
+__host__ __device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 bool
 operator<=(const unique_ptr<_T1, _D1> &__x, std::nullptr_t) {
     return !(nullptr < __x);
 }
 
 template <class _T1, class _D1>
-__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 bool
+__host__ __device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 bool
 operator<=(std::nullptr_t, const unique_ptr<_T1, _D1> &__x) {
     return !(__x < nullptr);
 }
 
 template <class _T1, class _D1>
-__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 bool
+__host__ __device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 bool
 operator>=(const unique_ptr<_T1, _D1> &__x, std::nullptr_t) {
     return !(__x < nullptr);
 }
 
 template <class _T1, class _D1>
-__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 bool
+__host__ __device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 bool
 operator>=(std::nullptr_t, const unique_ptr<_T1, _D1> &__x) {
     return !(nullptr < __x);
 }
@@ -561,7 +610,7 @@ operator>=(std::nullptr_t, const unique_ptr<_T1, _D1> &__x) {
 #if _LIBGPU_STD_VER >= 20
 template <class _T1, class _D1>
     requires three_way_comparable<typename unique_ptr<_T1, _D1>::pointer>
-__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX23 compare_three_way_result_t<typename unique_ptr<_T1, _D1>::pointer>
+__host__ __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX23 compare_three_way_result_t<typename unique_ptr<_T1, _D1>::pointer>
 operator<=>(const unique_ptr<_T1, _D1> &__x, std::nullptr_t) {
     return compare_three_way()(__x.get(), static_cast<typename unique_ptr<_T1, _D1>::pointer>(nullptr));
 }
@@ -572,11 +621,13 @@ operator<=>(const unique_ptr<_T1, _D1> &__x, std::nullptr_t) {
 template <class _Tp>
 struct __unique_if {
     typedef unique_ptr<_Tp> __unique_single;
+    typedef unique_ptr<_Tp, host_delete<_Tp>> __unique_single_host;
 };
 
 template <class _Tp>
 struct __unique_if<_Tp[]> {
     typedef unique_ptr<_Tp[]> __unique_array_unknown_bound;
+    typedef unique_ptr<_Tp[], host_delete<_Tp[]>> __unique_array_unknown_bound_host;
 };
 
 template <class _Tp, size_t _Np>
@@ -591,6 +642,28 @@ make_unique(_Args &&...__args) {
 }
 
 template <class _Tp>
+__host__ inline _LIBGPU_INLINE_VISIBILITY typename __unique_if<_Tp>::__unique_single_host
+make_unique() {
+    static_assert(std::is_trivially_default_constructible<_Tp>::value,
+                  "Host code can't invoke a non-trivial constructor for objects in device memory");
+    void *__buf = gpu::malloc(sizeof(_Tp));
+    return unique_ptr<_Tp, host_delete<_Tp>>(static_cast<_Tp *>(__buf));
+}
+
+template <class _Tp>
+__host__ inline _LIBGPU_INLINE_VISIBILITY typename __unique_if<typename std::remove_reference<_Tp>::type>::__unique_single_host
+make_unique(_Tp &&__arg) {
+    using __RawType = typename std::remove_reference<_Tp>::type;
+    using __RefType = decltype(std::forward<_Tp>(__arg));
+    static_assert(std::is_constructible<__RawType, __RefType>::value, "No valid constructor found");
+    static_assert(std::is_trivially_constructible<__RawType, __RefType>::value,
+                  "Host code can't invoke a non-trivial constructor for objects in device memory");
+    void *__buf = gpu::malloc(sizeof(__RawType));
+    __LIBGPU_HIP_CHECK__(hipMemcpy(__buf, &__arg, sizeof(__RawType), hipMemcpyHostToDevice));
+    return unique_ptr<__RawType, host_delete<__RawType>>(static_cast<__RawType *>(__buf));
+}
+
+template <class _Tp>
 __device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23
 typename __unique_if<_Tp>::__unique_array_unknown_bound
 make_unique(size_t __n) {
@@ -598,27 +671,38 @@ make_unique(size_t __n) {
     return unique_ptr<_Tp>(new _Up[__n]());
 }
 
+template <class _Tp>
+__host__ inline _LIBGPU_INLINE_VISIBILITY
+typename __unique_if<_Tp>::__unique_array_unknown_bound_host
+make_unique(size_t __n) {
+    typedef std::remove_extent_t<_Tp> _Up;
+    static_assert(std::is_trivially_default_constructible<_Up>::value,
+                  "Host code can't invoke a non-trivial constructor for objects in device memory");
+    void *__buf = gpu::malloc(sizeof(_Up[__n]));
+    return unique_ptr<_Tp, host_delete<_Tp>>(static_cast<_Up *>(__buf));
+}
+
 template <class _Tp, class... _Args>
-__device__ typename __unique_if<_Tp>::__unique_array_known_bound make_unique(_Args &&...) = delete;
+__host__ __device__ typename __unique_if<_Tp>::__unique_array_known_bound make_unique(_Args &&...) = delete;
 
 #endif // _LIBGPU_STD_VER >= 14
 
 #if _LIBGPU_STD_VER >= 20
 
 template <class _Tp>
-__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX23 typename __unique_if<_Tp>::__unique_single
+__host__ __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX23 typename __unique_if<_Tp>::__unique_single
 make_unique_for_overwrite() {
     return unique_ptr<_Tp>(new _Tp);
 }
 
 template <class _Tp>
-__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX23 typename __unique_if<_Tp>::__unique_array_unknown_bound
+__host__ __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX23 typename __unique_if<_Tp>::__unique_array_unknown_bound
 make_unique_for_overwrite(size_t __n) {
     return unique_ptr<_Tp>(new std::remove_extent_t<_Tp>[__n]);
 }
 
 template <class _Tp, class... _Args>
-__device__ typename __unique_if<_Tp>::__unique_array_known_bound make_unique_for_overwrite(_Args &&...) = delete;
+__host__ __device__ typename __unique_if<_Tp>::__unique_array_known_bound make_unique_for_overwrite(_Args &&...) = delete;
 
 #endif // _LIBGPU_STD_VER >= 20
 
