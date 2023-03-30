@@ -85,6 +85,21 @@ namespace rocRoller::KernelGraph
                                         Connections::TypeAndSubDimension,
                                         Connections::TypeAndNaryArgument>;
 
+    struct DeferredConnection
+    {
+        ConnectionSpec connectionSpec;
+        int            coordinate;
+    };
+
+    template <typename T>
+    inline DeferredConnection DC(int coordinate, int sdim = 0)
+    {
+        DeferredConnection rv;
+        rv.connectionSpec = Connections::TypeAndSubDimension{typeid(T), sdim};
+        rv.coordinate     = coordinate;
+        return rv;
+    }
+
     /**
      * @brief Connects nodes in the control flow graph to nodes in the
      * coordinate graph.

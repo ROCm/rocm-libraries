@@ -15,15 +15,6 @@ namespace rocRoller
         using namespace CoordinateGraph;
         using namespace Expression;
 
-        // These functions are declared in AddLDS.cpp
-        void addLDSOps(KernelGraph& graph, std::shared_ptr<Context> context, int tag);
-        void addStoreWaveLDSOps(KernelGraph&                       graph,
-                                std::shared_ptr<CommandParameters> params,
-                                std::shared_ptr<Context>           context,
-                                int                                tile,
-                                int                                store,
-                                int                                upperLoop);
-
         /*
          * Lower tile ops
          */
@@ -451,13 +442,6 @@ namespace rocRoller
                 graph.coordinates.addElement(PassThrough(), {WaveTilesY}, {d_jammed_y});
             }
 
-            // add LDS Ops for D if needed
-            if(storeD > 0)
-            {
-                auto d = graph.mapper.get<MacroTile>(storeD);
-                addStoreWaveLDSOps(graph, params, context, d, storeD, forWaveTilesX);
-            }
-
             // Delete original loadA and loadB.
             graph.control.deleteElement(loadA[0]);
             graph.control.deleteElement(loadB[0]);
@@ -493,19 +477,6 @@ namespace rocRoller
                 {
                     Throw<FatalError>("General contraction not implemented yet.");
                 }
-            }
-
-            // Add LDS operations to the control graph following LoadTiled nodes.
-            // This is done after the control graph is completly built to make
-            // it easier to modify the edges coming into and out of the
-            // original LoadTiled node.
-            for(auto const& tag : kgraph.control.getNodes())
-            {
-                auto elem = kgraph.control.getElement(tag);
-                visit(rocRoller::overloaded{
-                          [&](auto op) {},
-                          [&](LoadTiled const& load) { addLDSOps(kgraph, context, tag); }},
-                      std::get<Operation>(elem));
             }
 
             return kgraph;

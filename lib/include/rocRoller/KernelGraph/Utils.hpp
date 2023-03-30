@@ -150,12 +150,12 @@ namespace rocRoller
                                 int                               wavefrontSize,
                                 std::vector<unsigned int> const&  wavetilesPerWorkgroup);
 
-        void storeMacroTileForLDS(KernelGraph&                       graph,
-                                  int                                store_tag,
-                                  int                                user_tag,
-                                  int                                mac_tile_tag,
-                                  std::vector<int>&                  sdims,
-                                  std::array<unsigned int, 3> const& workgroupSizes);
+        std::vector<DeferredConnection>
+            storeMacroTileForLDS(KernelGraph&                       graph,
+                                 int                                user_tag,
+                                 int                                mac_tile_tag,
+                                 std::vector<int>&                  sdims,
+                                 std::array<unsigned int, 3> const& workgroupSizes);
 
         void updateStoreLDSMacroTile(KernelGraph&                      graph,
                                      CoordinateGraph::MacroTile const& mac_tile,
@@ -170,11 +170,11 @@ namespace rocRoller
                                    std::array<unsigned int, 3> const& workgroupSizes,
                                    bool                               useSwappedAccess);
 
-        void loadMacroTileFromLDS(KernelGraph&                       graph,
-                                  int                                load_tag,
-                                  int                                lds_tag,
-                                  int                                mac_tile_tag,
-                                  std::array<unsigned int, 3> const& workgroupSizes);
+        std::vector<DeferredConnection>
+            loadMacroTileFromLDS(KernelGraph&                       graph,
+                                 int                                lds_tag,
+                                 int                                mac_tile_tag,
+                                 std::array<unsigned int, 3> const& workgroupSizes);
 
         void addConnectionsMultiply(KernelGraph& graph, int waveMult, int loadA, int loadB);
 

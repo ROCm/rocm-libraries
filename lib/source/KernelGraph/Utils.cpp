@@ -316,11 +316,11 @@ namespace rocRoller
             }
         }
 
-        void loadMacroTileFromLDS(KernelGraph&                       graph,
-                                  int                                loadTag,
-                                  int                                ldsTag,
-                                  int                                macTileTag,
-                                  std::array<unsigned int, 3> const& workgroupSizes)
+        std::vector<DeferredConnection>
+            loadMacroTileFromLDS(KernelGraph&                       graph,
+                                 int                                ldsTag,
+                                 int                                macTileTag,
+                                 std::array<unsigned int, 3> const& workgroupSizes)
         {
             auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
 
@@ -364,11 +364,14 @@ namespace rocRoller
             graph.coordinates.addElement(PassThrough(), {nThrX}, {elementNumberX});
             graph.coordinates.addElement(PassThrough(), {iThrY}, {elementNumberY});
 
-            graph.mapper.connect<ElementNumber>(loadTag, elementNumberX, 0);
-            graph.mapper.connect<ElementNumber>(loadTag, elementNumberY, 1);
+            std::vector<DeferredConnection> connections;
+            connections.push_back(DC<ElementNumber>(elementNumberX, 0));
+            connections.push_back(DC<ElementNumber>(elementNumberY, 1));
 
             // LDS --DataFlow--> macrotile
             graph.coordinates.addElement(DataFlow(), {ldsTag}, {macTileTag});
+
+            return connections;
         }
 
         void loadMacroTileForLDS(KernelGraph&                       graph,
@@ -873,12 +876,12 @@ namespace rocRoller
             graph.coordinates.addElement(DataFlow(), {macTileTag}, {ldsTag});
         }
 
-        void storeMacroTileForLDS(KernelGraph&                       graph,
-                                  int                                storeTag,
-                                  int                                userTag,
-                                  int                                macTileTag,
-                                  std::vector<int>&                  sdims,
-                                  std::array<unsigned int, 3> const& workgroupSizes)
+        std::vector<DeferredConnection>
+            storeMacroTileForLDS(KernelGraph&                       graph,
+                                 int                                userTag,
+                                 int                                macTileTag,
+                                 std::vector<int>&                  sdims,
+                                 std::array<unsigned int, 3> const& workgroupSizes)
         {
             auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
             auto user    = graph.coordinates.getNode<User>(userTag);
@@ -901,14 +904,15 @@ namespace rocRoller
             auto iMacX = graph.coordinates.addElement(macTile.tileIndex(0));
             auto iMacY = graph.coordinates.addElement(macTile.tileIndex(1));
 
-            graph.mapper.connect<MacroTileNumber>(storeTag, nMacX, 0);
-            graph.mapper.connect<MacroTileNumber>(storeTag, nMacY, 1);
+            std::vector<DeferredConnection> connections;
+            connections.push_back(DC<MacroTileNumber>(nMacX, 0));
+            connections.push_back(DC<MacroTileNumber>(nMacY, 1));
 
             auto workgroupX = graph.coordinates.addElement(Workgroup(0));
             auto workgroupY = graph.coordinates.addElement(Workgroup(1));
 
-            graph.mapper.connect<Workgroup>(storeTag, workgroupX, 0);
-            graph.mapper.connect<Workgroup>(storeTag, workgroupY, 1);
+            connections.push_back(DC<Workgroup>(workgroupX, 0));
+            connections.push_back(DC<Workgroup>(workgroupY, 1));
 
             graph.coordinates.addElement(Flatten(), {nMacX, iMacX}, {sdims[0]});
             graph.coordinates.addElement(Flatten(), {nMacY, iMacY}, {sdims[1]});
@@ -941,10 +945,12 @@ namespace rocRoller
             graph.coordinates.addElement(PassThrough(), {elementNumberX}, {nThrX});
             graph.coordinates.addElement(PassThrough(), {elementNumberY}, {iThrY});
 
-            graph.mapper.connect<ElementNumber>(storeTag, elementNumberX, 0);
-            graph.mapper.connect<ElementNumber>(storeTag, elementNumberY, 1);
+            connections.push_back(DC<ElementNumber>(elementNumberX, 0));
+            connections.push_back(DC<ElementNumber>(elementNumberY, 1));
 
             graph.coordinates.addElement(Tile(), {workitemX}, {nThrY, iThrX});
+
+            return connections;
         }
 
         void storeMacroTile(KernelGraph&                       graph,

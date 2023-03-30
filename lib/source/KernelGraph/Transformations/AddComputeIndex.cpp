@@ -52,12 +52,6 @@ namespace rocRoller::KernelGraph
                < std::tie(b.target, b.type, b.location, b.direction);
     }
 
-    struct DeferredConnection
-    {
-        ConnectionSpec connectionSpec;
-        int            coordinate;
-    };
-
     struct ComputeIndexChain
     {
         int top, bottom;
@@ -163,15 +157,6 @@ namespace rocRoller::KernelGraph
     /*
      * Helpers for building ComputeIndex chains for specific layouts.
      */
-
-    template <typename T>
-    DeferredConnection DC(int coordinate, int sdim = 0)
-    {
-        DeferredConnection rv;
-        rv.connectionSpec = Connections::TypeAndSubDimension{typeid(T), sdim};
-        rv.coordinate     = coordinate;
-        return rv;
-    }
 
     /**
      * @brief Add ComputeIndexes for MATRIX_A/B from global.

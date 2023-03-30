@@ -2123,7 +2123,13 @@ namespace KernelGraphTest
         EXPECT_EQ(NormalizedSource(expected0), NormalizedSource(kgraph0.toDOT(true)));
 
         auto kgraph1 = lowerTile(kgraph0, params, m_context);
+        kgraph1      = addLDS(kgraph1, m_context);
         kgraph1      = addComputeIndexOperations(kgraph1);
+
+        namespace CG = rocRoller::KernelGraph::ControlGraph;
+        ASSERT_EQ(kgraph1.control.getNodes<CG::LoadTiled>().to<std::vector>().size(), 2);
+        ASSERT_EQ(kgraph1.control.getNodes<CG::LoadLDSTile>().to<std::vector>().size(), 1);
+        ASSERT_EQ(kgraph1.control.getNodes<CG::StoreLDSTile>().to<std::vector>().size(), 1);
     }
 
     TEST_F(KernelGraphTest, Translate02)
