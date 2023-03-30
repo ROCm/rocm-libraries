@@ -242,6 +242,51 @@ class _LIBGPU_UNIQUE_PTR_TRIVIAL_ABI _LIBGPU_TEMPLATE_VIS unique_ptr {
         return *this;
     }
 
+    // Note that we are intentionally not accepting any std::unique_ptr with a non-default deleter
+    template <class _Up, class = _EnableIfMoveConvertible<std::unique_ptr<_Up>, _Up>,
+              class = typename std::enable_if<std::is_trivially_copyable<_Up>::value &&
+                                              std::is_same<deleter_type, gpu::host_delete<element_type>>::value>::type>
+    __host__ _LIBGPU_INLINE_VISIBILITY unique_ptr(std::unique_ptr<_Up> &&__u)
+        : __ptr_(static_cast<pointer>(gpu::malloc(sizeof(element_type))), __value_init_tag()) {
+        __LIBGPU_HIP_CHECK__(
+            hipMemcpy(__ptr_.first(), static_cast<pointer>(__u.get()), sizeof(element_type), hipMemcpyHostToDevice));
+        // Avoid calling any destructor by calling `operator delete` directly instead of using a delete-expression. This
+        // isn't strictly necessary since TriviallyCopyable implies a trivial deleter.
+        // Note that we also aren't invoking the gpu::unique_ptr's deleter. Even if we allowed a deleter other than
+        // gpu::host_delete, we wouldn't want to invoke it here because we're only "moving" the object.
+        operator delete(__u.release());
+    }
+    // TODO: Provide a template for a wrapper class that uses a class-specific overriden delete operator to free the memory
+    // then allow the above conversion for gpu::unique_ptr<wrapper<T>, D> where D is any delete operator?
+
+    // TODO: provide a constructor to convert gpu::unique_ptr<T, gpu::host_delete> to gpu::unique_ptr<T, gpu::default_delete>.
+    // It would need to run on host, but launch a kernel to copy the memory to a block allocated with device-side new/malloc
+
+    // Also maybe do the same for converting std::unique_ptr<T, std::default_delete> to gpu::unique_ptr<T, gpu::default_delete>?
+
+    template <
+        class _Up = element_type, bool _Dummy = true,
+        class = typename std::enable_if<std::is_convertible<pointer, _Up *>::value &&
+                                        __dependent_type<std::is_trivially_copyable<element_type>, _Dummy>::value &&
+                                        std::is_same<deleter_type, gpu::host_delete<element_type>>::value>::type>
+    __host__ _LIBGPU_INLINE_VISIBILITY operator std::unique_ptr<_Up>() && {
+        // Avoid calling any constructor by calling `operator new` directly instead of using a new-expression.
+        void* __buf = operator new(sizeof(element_type));
+        __LIBGPU_HIP_CHECK__(hipMemcpy(__buf, __ptr_.first(), sizeof(element_type), hipMemcpyDeviceToHost));
+        // Even if we allowed a deleter other than gpu::host_delete, we wouldn't want to invoke it here because we're
+        // only "moving" the object.
+        gpu::free(release());
+        return std::unique_ptr<_Up>(static_cast<pointer>(__buf));
+    }
+    template <
+        class _Up = element_type, bool _Dummy = true,
+        class = typename std::enable_if<std::is_convertible<pointer, _Up *>::value &&
+                                        __dependent_type<std::is_trivially_copyable<element_type>, _Dummy>::value &&
+                                        std::is_same<deleter_type, gpu::host_delete<element_type>>::value>::type>
+    __host__ _LIBGPU_INLINE_VISIBILITY std::unique_ptr<_Up> move_to_host() && {
+        return std::move(*this);
+    }
+
 #ifdef _LIBGPU_CXX03_LANG
     __host__ __device__ unique_ptr(unique_ptr const &) = delete;
     __host__ __device__ unique_ptr &operator=(unique_ptr const &) = delete;
@@ -414,6 +459,36 @@ class _LIBGPU_UNIQUE_PTR_TRIVIAL_ABI _LIBGPU_TEMPLATE_VIS unique_ptr<_Tp[], _Dp>
         reset(__u.release());
         __ptr_.second() = std::forward<_Ep>(__u.get_deleter());
         return *this;
+    }
+
+    template <class _Up = element_type[], class = _EnableIfMoveConvertible<std::unique_ptr<_Up>, _Up>,
+              class = typename std::enable_if<std::is_trivially_copyable<_Up>::value &&
+                                              std::is_same<deleter_type, gpu::host_delete<element_type[]>>::value>::type>
+    __host__ _LIBGPU_INLINE_VISIBILITY unique_ptr(std::unique_ptr<_Up> &&__u, std::size_t __n)
+        : __ptr_(static_cast<pointer>(gpu::malloc(sizeof(element_type[__n]))), __value_init_tag()) {
+        __LIBGPU_HIP_CHECK__(
+            hipMemcpy(__ptr_.first(), static_cast<pointer>(__u.get()), sizeof(element_type[__n]), hipMemcpyHostToDevice));
+        // Avoid calling any destructor by calling `operator delete[]` directly instead of using a delete-expression. This
+        // isn't strictly necessary since TriviallyCopyable implies a trivial deleter.
+        // Note that we also aren't invoking the gpu::unique_ptr's deleter. Even if we allowed a deleter other than
+        // gpu::host_delete, we wouldn't want to invoke it here because we're only "moving" the object.
+        operator delete[](__u.release());
+    }
+    // TODO: Provide all the same options for converting types as we do for the non-array version
+
+    template <
+        class _Up = element_type, bool _Dummy = true,
+        class = typename std::enable_if<std::is_convertible<element_type (*)[], _Up (*)[]>::value &&
+                                        __dependent_type<std::is_trivially_copyable<element_type[]>, _Dummy>::value &&
+                                        std::is_same<deleter_type, gpu::host_delete<element_type[]>>::value>::type>
+    __host__ _LIBGPU_INLINE_VISIBILITY std::unique_ptr<_Up[]> move_to_host(std::size_t __n) && {
+        // Avoid calling any constructor by calling `operator new[]` directly instead of using a new-expression
+        void* __buf = operator new[](sizeof(element_type[__n]));
+        __LIBGPU_HIP_CHECK__(hipMemcpy(__buf, __ptr_.first(), sizeof(element_type[__n]), hipMemcpyDeviceToHost));
+        // Even if we allowed a deleter other than gpu::host_delete, we wouldn't want to invoke it here because we're
+        // only "moving" the object.
+        gpu::free(release());
+        return std::unique_ptr<_Up[]>(static_cast<pointer>(__buf));
     }
 
 #ifdef _LIBGPU_CXX03_LANG
