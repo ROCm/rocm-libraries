@@ -26,6 +26,7 @@ include:
       file:
         - /defaults.yaml
         - /deps-cmake.yaml
+        - /deps-docs.yaml
         - /deps-rocm.yaml
         - /deps-nvcc.yaml
         - /gpus-rocm.yaml
@@ -390,16 +391,9 @@ test:nvcc_install:
 
 test:doc:
   stage: test
-  image: sphinxdoc/sphinx-latexpdf
   extends:
     - .rules:test
-  needs: []
-  before_script:
-    - apt-get update
-    - apt-get install -y -qq doxygen
-    - pip3 install sphinx_rtd_theme breathe exhale
-  script:
-    - $CI_PROJECT_DIR/docs/run_doc.sh
+    - .build:docs
 
 scheduled-check-changes:
   extends: .rules:scheduled-check-changes

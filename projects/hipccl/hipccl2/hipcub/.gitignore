@@ -1,12 +1,6 @@
 
 ### Build dirs ###
 build/
-/docs/_build/
-
-### Docs dirs ###
-/docs/docBin/
-/docs/api/
-/docs/hipCUB.tag
 
 # Created by https://www.gitignore.io/api/c++,cmake
 
@@ -51,7 +45,6 @@ CMakeFiles
 CMakeScripts
 Testing
 Makefile
-!/docs/Makefile
 cmake_install.cmake
 install_manifest.txt
 compile_commands.json
