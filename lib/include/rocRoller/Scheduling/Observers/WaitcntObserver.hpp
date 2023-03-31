@@ -31,6 +31,14 @@ namespace rocRoller
 
             bool operator==(const WaitcntState& rhs) const = default;
 
+            /**
+             * @brief Returns true if this WaitcntState and the provided WaitcntState are safe
+             *        to see at a label and a branch that goes to that label.
+             *
+             * @param labelState
+             */
+            bool safeToBranchTo(const WaitcntState& labelState) const;
+
         private:
             // These members are duplicates of the waitcntobserver members, except we're storing a
             // std::vector<Register::RegisterId> for the registers instead of

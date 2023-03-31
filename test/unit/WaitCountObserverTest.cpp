@@ -1122,4 +1122,115 @@ namespace rocRollerTest
 
         m_context->schedule(inst_end); //Now this shouldn't fail.
     }
+
+    TEST_F(WaitCountObserverTest, LoopWaitCntStateAssertGoodCase2)
+    {
+        // This test sees that even though the wait count states
+        // aren't equivalent between the branch and label,
+        // there are no destination registers in the wait queues,
+        // so it is still safe to do the branch.
+        EXPECT_TRUE(m_context->kernelOptions().assertWaitCntState);
+
+        rocRoller::Scheduling::InstructionStatus peeked;
+
+        auto src1 = std::make_shared<Register::Value>(
+            m_context, Register::Type::Scalar, DataType::Int32, 2);
+        src1->allocateNow();
+
+        auto src2 = std::make_shared<Register::Value>(
+            m_context, Register::Type::Scalar, DataType::Int32, 2);
+        src2->allocateNow();
+
+        auto src3 = std::make_shared<Register::Value>(
+            m_context, Register::Type::Scalar, DataType::Int32, 2);
+        src3->allocateNow();
+
+        auto dst1 = std::make_shared<Register::Value>(
+            m_context, Register::Type::Scalar, DataType::Int32, 2);
+        dst1->allocateNow();
+
+        auto dst2 = std::make_shared<Register::Value>(
+            m_context, Register::Type::Scalar, DataType::Int32, 2);
+        dst2->allocateNow();
+
+        auto dst3 = std::make_shared<Register::Value>(
+            m_context, Register::Type::Scalar, DataType::Int32, 2);
+        dst3->allocateNow();
+
+        // Instructions
+
+        auto inst1 = Instruction("ds_write_b64", {}, {dst1, src1}, {}, "");
+        m_context->schedule(inst1);
+
+        auto instbranch
+            = Instruction("s_branch", {}, {Register::Value::Label("test_label")}, {}, "");
+        m_context->schedule(instbranch);
+
+        auto inst2 = Instruction("ds_write_b64", {}, {dst2, src2}, {}, "");
+        m_context->schedule(inst2);
+
+        auto inst3 = Instruction("ds_write_b64", {}, {dst3, src3}, {}, "");
+        m_context->schedule(inst3);
+
+        auto instlabel = Instruction::Label("test_label");
+        m_context->schedule(instlabel);
+
+        auto inst_end = Instruction("s_endpgm", {}, {}, {}, "");
+        m_context->schedule(inst_end); //Now this shouldn't fail.
+    }
+
+    TEST_F(WaitCountObserverTest, LoopWaitCntStateAssertFailCase2)
+    {
+        // This test is similar to LoopWaitCntStateAssertGoodCase2, except that
+        // it uses flat stores. These require the waitcount to always be set
+        // to zero, so the mismatch at the branches causes an error.
+        EXPECT_TRUE(m_context->kernelOptions().assertWaitCntState);
+
+        rocRoller::Scheduling::InstructionStatus peeked;
+
+        auto src1 = std::make_shared<Register::Value>(
+            m_context, Register::Type::Scalar, DataType::Int32, 2);
+        src1->allocateNow();
+
+        auto src2 = std::make_shared<Register::Value>(
+            m_context, Register::Type::Scalar, DataType::Int32, 2);
+        src2->allocateNow();
+
+        auto src3 = std::make_shared<Register::Value>(
+            m_context, Register::Type::Scalar, DataType::Int32, 2);
+        src3->allocateNow();
+
+        auto dst1 = std::make_shared<Register::Value>(
+            m_context, Register::Type::Scalar, DataType::Int32, 2);
+        dst1->allocateNow();
+
+        auto dst2 = std::make_shared<Register::Value>(
+            m_context, Register::Type::Scalar, DataType::Int32, 2);
+        dst2->allocateNow();
+
+        auto dst3 = std::make_shared<Register::Value>(
+            m_context, Register::Type::Scalar, DataType::Int32, 2);
+        dst3->allocateNow();
+
+        // Instructions
+
+        auto inst1 = Instruction("flat_store_dwordx2", {}, {dst1, src1}, {}, "");
+        m_context->schedule(inst1);
+
+        auto instbranch
+            = Instruction("s_branch", {}, {Register::Value::Label("test_label")}, {}, "");
+        m_context->schedule(instbranch);
+
+        auto inst2 = Instruction("flat_store_dwordx2", {}, {dst2, src2}, {}, "");
+        m_context->schedule(inst2);
+
+        auto inst3 = Instruction("flat_store_dwordx2", {}, {dst3, src3}, {}, "");
+        m_context->schedule(inst3);
+
+        auto instlabel = Instruction::Label("test_label");
+        m_context->schedule(instlabel);
+
+        auto inst_end = Instruction("s_endpgm", {}, {}, {}, "");
+        EXPECT_THROW(m_context->schedule(inst_end), FatalError);
+    }
 }

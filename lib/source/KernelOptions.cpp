@@ -8,7 +8,7 @@ namespace rocRoller
         : logLevel(LogLevel::Verbose)
         , alwaysWaitAfterLoad(false)
         , alwaysWaitAfterStore(false)
-        , alwaysWaitBeforeBranch(true)
+        , alwaysWaitBeforeBranch(false)
         , alwaysWaitZeroBeforeBarrier(false)
         , preloadKernelArguments(true)
         , maxACCVGPRs(256)

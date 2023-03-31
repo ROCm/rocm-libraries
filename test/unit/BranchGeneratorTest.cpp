@@ -106,6 +106,7 @@ namespace rocRollerTest
 
         m_context->schedule(k->preamble());
         m_context->schedule(k->prolog());
+        m_context->kernelOptions().alwaysWaitBeforeBranch = true;
 
         auto kb = [&]() -> Generator<Instruction> {
             auto l0 = m_context->labelAllocator()->label("l0");

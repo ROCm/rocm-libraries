@@ -41,6 +41,35 @@ namespace rocRoller
             }
         }
 
+        bool WaitcntState::safeToBranchTo(const WaitcntState& labelState) const
+        {
+            if(*this == labelState)
+                return true;
+
+            // If queues do not have needsWaitZero set, and none of the instructions
+            // contain a destination, it is still safe to branch, even if the
+            // queues do not match exactly.
+            for(auto const& [queue, instructions] : m_instructionQueues)
+            {
+                if(m_needsWaitZero.at(queue) || labelState.m_needsWaitZero.at(queue))
+                    return false;
+
+                for(auto const& instruction : instructions)
+                {
+                    if(!instruction.empty())
+                        return false;
+                }
+
+                for(auto const& instruction : labelState.m_instructionQueues.at(queue))
+                {
+                    if(!instruction.empty())
+                        return false;
+                }
+            }
+
+            return true;
+        }
+
         WaitcntObserver::WaitcntObserver() = default;
 
         WaitcntObserver::WaitcntObserver(std::shared_ptr<Context> context)

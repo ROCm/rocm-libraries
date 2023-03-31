@@ -196,7 +196,7 @@ namespace rocRoller
                 {
                     for(auto branch_state : m_branchStates[label_state.first])
                     {
-                        AssertFatal(label_state.second == branch_state,
+                        AssertFatal(label_state.second.safeToBranchTo(branch_state),
                                     "Branching to label '" + label_state.first
                                         + "' with a different waitcnt state.");
                     }
