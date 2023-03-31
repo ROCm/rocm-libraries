@@ -8,6 +8,7 @@ See README.md on how to build the hipCUB documentation using Doxygen.
 ### Changed
 - CUB backend references CUB and Thrust version 1.17.2.
 - Improved benchmark coverage of `BlockScan` by adding `ExclusiveScan`, benchmark coverage of `BlockRadixSort` by adding `SortBlockedToStriped`, and benchmark coverage of `WarpScan` by adding `Broadcast`.
+- Updated `docs` directory structure to match the standard of [rocm-docs-core](https://github.com/RadeonOpenCompute/rocm-docs-core).
 ### Known Issues
 - `BlockRadixRankMatch` is currently broken under the rocPRIM backend.
 - `BlockRadixRankMatch` with a warp size that does not exactly divide the block size is broken under the CUB backend.

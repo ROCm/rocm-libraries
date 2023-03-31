@@ -181,13 +181,18 @@ cd hipCUB; cd build
 ## Building Documentation
 
 ```shell
-# go to hipCUB docs directory
+# Go to the hipCUB docs directory
 cd hipCUB; cd docs
 
-# run doxygen and sphinx
-./run_doc.sh
+# Install required pip packages
+python3 -m pip install -r .sphinx/requirements.txt
 
-# open docBin/html/index.html
+# Build the documentation
+python3 -m sphinx -T -E -b html -d _build/doctrees -D language=en . _build/html
+
+# For e.g. serve the HTML docs locally
+cd _build/html
+python3 -m http.server
 ```
 
 ## Support
