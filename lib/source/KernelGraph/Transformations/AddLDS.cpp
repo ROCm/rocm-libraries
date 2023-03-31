@@ -52,7 +52,6 @@ namespace rocRoller
             void addLoadWaveLDSOps(KernelGraph&     graph,
                                    std::vector<int> loads,
                                    int              forK,
-                                   std::vector<int> loopBodies,
                                    int              unrollIndex);
 
             std::tuple<int, bool> getOrigMacTile(KernelGraph& graph, std::vector<int> loads);
@@ -255,7 +254,6 @@ namespace rocRoller
         void AddLDSVisitor::addLoadWaveLDSOps(KernelGraph&     graph,
                                               std::vector<int> loads,
                                               int              forK,
-                                              std::vector<int> loopBodies,
                                               int              unrollIndex)
         {
             rocRoller::Log::getLogger()->debug(
@@ -369,6 +367,8 @@ namespace rocRoller
 
                 auto barrier = graph.control.addElement(Barrier());
                 graph.control.addElement(Sequence(), {storeTileIntoLDS}, {barrier});
+
+                std::set<int> loopBodies = getTopSetCoordinates(graph, loads);
                 for(auto const& loopBody : loopBodies)
                 {
                     graph.control.addElement(Sequence(), {barrier}, {loopBody});
@@ -386,7 +386,6 @@ namespace rocRoller
 
             std::vector<int> loadAs;
             std::vector<int> loadBs;
-            std::vector<int> bodiesWithMultiply;
             int              unrollCoord = -1;
             for(auto const& body : bodies)
             {
@@ -416,8 +415,6 @@ namespace rocRoller
 
                 if(*allForLoops.begin() != forLoop)
                     continue;
-
-                bodiesWithMultiply.push_back(body);
 
                 auto loads
                     = graph.control
@@ -455,38 +452,29 @@ namespace rocRoller
                 }
             }
 
-            if(bodiesWithMultiply.empty())
+            if(loadAs.empty() && loadBs.empty())
                 return;
 
             // Call addLoadWaveLDSOps on A and B
             if(unrollCoord > 0)
             {
-                auto unrollK        = getUnsignedInt(evaluate(
+                auto unrollK = getUnsignedInt(evaluate(
                     getSize(std::get<Dimension>(graph.coordinates.getElement(unrollCoord)))));
-                int  bodiesInUnroll = bodiesWithMultiply.size() / unrollK;
-                int  loadsInUnroll  = loadAs.size() / unrollK;
                 for(int unroll = 0; unroll < unrollK; unroll++)
                 {
-                    std::vector<int> unrollBodies;
-                    std::vector<int> unrollLoadAs;
-                    std::vector<int> unrollLoadBs;
-                    for(int i = 0; i < bodiesInUnroll; i++)
-                    {
-                        unrollBodies.push_back(bodiesWithMultiply[unroll * bodiesInUnroll + i]);
-                    }
-                    for(int i = 0; i < loadsInUnroll; i++)
-                    {
-                        unrollLoadAs.push_back(loadAs[unroll * loadsInUnroll + i]);
-                        unrollLoadBs.push_back(loadBs[unroll * loadsInUnroll + i]);
-                    }
-                    addLoadWaveLDSOps(graph, unrollLoadAs, forLoop, unrollBodies, unroll);
-                    addLoadWaveLDSOps(graph, unrollLoadBs, forLoop, unrollBodies, unroll);
+                    std::vector<int> unrollLoadAs
+                        = getLoadsForUnroll(graph, unrollCoord, loadAs, unroll);
+                    std::vector<int> unrollLoadBs
+                        = getLoadsForUnroll(graph, unrollCoord, loadBs, unroll);
+
+                    addLoadWaveLDSOps(graph, unrollLoadAs, forLoop, unroll);
+                    addLoadWaveLDSOps(graph, unrollLoadBs, forLoop, unroll);
                 }
             }
             else
             {
-                addLoadWaveLDSOps(graph, loadAs, forLoop, bodiesWithMultiply, 0);
-                addLoadWaveLDSOps(graph, loadBs, forLoop, bodiesWithMultiply, 0);
+                addLoadWaveLDSOps(graph, loadAs, forLoop, 0);
+                addLoadWaveLDSOps(graph, loadBs, forLoop, 0);
             }
         }
 

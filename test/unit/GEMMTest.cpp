@@ -76,7 +76,8 @@ namespace GEMMDriverTest
     template <typename T>
     void basicGEMM(std::shared_ptr<Context>& m_context,
                    const GEMMProblem&        gemm,
-                   double                    acceptableError)
+                   double                    acceptableError,
+                   bool                      debuggable = false)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
 
@@ -127,11 +128,26 @@ namespace GEMMDriverTest
         auto NZ = std::make_shared<Expression::Expression>(1u);
 
         // Host data
-        RandomGenerator random(31415u);
-        std::vector<T>  h_A = random.vector<T>(M * K, -1.0, 1.0);
-        std::vector<T>  h_B = random.vector<T>(K * N, -1.0, 1.0);
-        std::vector<T>  h_C = random.vector<T>(M * N, -1.0, 1.0);
+        std::vector<T> h_A;
+        std::vector<T> h_B;
+        std::vector<T> h_C;
 
+        GenerateRandomInput(31415u, h_A, M * K, h_B, K * N, h_C, M * N);
+
+        if(debuggable)
+        {
+            for(size_t i = 0; i < M; i++)
+                for(size_t j = 0; j < K; j++)
+                    h_A[i * K + j] = i == j ? 1.0 : 0.0;
+
+            for(size_t i = 0; i < K; i++)
+                for(size_t j = 0; j < N; j++)
+                    h_B[i * N + j] = i == j ? 1.0 : 0.0;
+
+            for(size_t i = 0; i < M; i++)
+                for(size_t j = 0; j < N; j++)
+                    h_C[i * N + j] = 0.0;
+        }
         // Device data
         std::shared_ptr<T> d_A = make_shared_device(h_A);
         std::shared_ptr<T> d_B = make_shared_device(h_B);
@@ -303,6 +319,16 @@ namespace GEMMDriverTest
         rocRoller::CPUMM(
             h_result, h_C, h_A, h_B, M, N, K, alpha, beta, gemm.transA == "T", gemm.transB == "T");
 
+        if(debuggable)
+        {
+            for(size_t i = 0; i < 32; i++)
+            {
+                for(size_t j = 0; j < 32; j++)
+                    std::cout << d_result[i * N + j] << ", ";
+
+                std::cout << std::endl;
+            }
+        }
         double rnorm = relativeNorm(d_result, h_result);
 
         ASSERT_LT(rnorm, acceptableError);
@@ -567,6 +593,35 @@ namespace GEMMDriverTest
         EXPECT_EQ(countSubstring(generatedCode, "ds_write_b64"), 2);
     }
 
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed2X1UnrollK)
+    {
+        GEMMProblem gemm;
+
+        gemm.M = 256;
+        gemm.N = 512;
+        gemm.K = 64;
+
+        gemm.mac_m = 128;
+        gemm.mac_n = 128;
+        gemm.mac_k = 16;
+
+        gemm.unrollK = 2;
+
+        gemm.wave_k = 8;
+
+        gemm.workgroup_size_x = 2 * gemm.wavefront_size;
+        gemm.workgroup_size_y = 4;
+
+        gemm.transA = "T";
+        gemm.transB = "N";
+
+        basicGEMM<Half>(m_context, gemm, 2.e-5);
+
+        std::string generatedCode = m_context->instructions()->toString();
+
+        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b64"), 4);
+    }
+
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed1X2)
     {
         GEMMProblem gemm;
@@ -593,6 +648,34 @@ namespace GEMMDriverTest
         EXPECT_EQ(countSubstring(generatedCode, "ds_write_b64"), 2);
     }
 
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed1X2UnrollK)
+    {
+        GEMMProblem gemm;
+
+        gemm.M = 256;
+        gemm.N = 512;
+        gemm.K = 64;
+
+        gemm.mac_m = 128;
+        gemm.mac_n = 128;
+        gemm.mac_k = 16;
+
+        gemm.unrollK = 4;
+
+        gemm.wave_k = 8;
+
+        gemm.workgroup_size_x = 4 * gemm.wavefront_size;
+        gemm.workgroup_size_y = 2;
+
+        gemm.transA = "T";
+
+        basicGEMM<Half>(m_context, gemm, 2.e-5);
+
+        std::string generatedCode = m_context->instructions()->toString();
+
+        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b64"), 8);
+    }
+
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed1x8)
     {
         GEMMProblem gemm;
@@ -615,6 +698,29 @@ namespace GEMMDriverTest
         basicGEMM<Half>(m_context, gemm, 2.e-5);
     }
 
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed1x8UnrollK)
+    {
+        GEMMProblem gemm;
+
+        gemm.M = 256;
+        gemm.N = 512;
+        gemm.K = 64;
+
+        gemm.mac_m = 128;
+        gemm.mac_n = 256;
+        gemm.mac_k = 16;
+
+        gemm.unrollK = 2;
+
+        gemm.wave_k = 8;
+
+        gemm.workgroup_size_x = 4 * gemm.wavefront_size;
+        gemm.workgroup_size_y = 1;
+
+        gemm.storeLDSD = false;
+
+        basicGEMM<Half>(m_context, gemm, 2.e-5);
+    }
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed2x4)
     {
         GEMMProblem gemm;
@@ -639,6 +745,34 @@ namespace GEMMDriverTest
         std::string generatedCode = m_context->instructions()->toString();
 
         EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128"), 3);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed2x4UnrollK)
+    {
+        GEMMProblem gemm;
+
+        gemm.M = 256;
+        gemm.N = 512;
+        gemm.K = 64;
+
+        gemm.mac_m = 128;
+        gemm.mac_n = 256;
+        gemm.mac_k = 16;
+
+        gemm.unrollK = 2;
+
+        gemm.wave_k = 8;
+
+        gemm.workgroup_size_x = 2 * gemm.wavefront_size;
+        gemm.workgroup_size_y = 2;
+
+        gemm.storeLDSD = false;
+
+        basicGEMM<Half>(m_context, gemm, 2.e-5);
+
+        std::string generatedCode = m_context->instructions()->toString();
+
+        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128"), 6);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed4x2)
@@ -667,6 +801,36 @@ namespace GEMMDriverTest
         std::string generatedCode = m_context->instructions()->toString();
 
         EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128"), 3);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed4x2UnrollK)
+    {
+        GEMMProblem gemm;
+
+        gemm.M = 256;
+        gemm.N = 512;
+        gemm.K = 64;
+
+        gemm.mac_m = 128;
+        gemm.mac_n = 256;
+        gemm.mac_k = 16;
+
+        gemm.unrollK = 2;
+
+        gemm.wave_k = 8;
+
+        gemm.workgroup_size_x = 1 * gemm.wavefront_size;
+        gemm.workgroup_size_y = 4;
+
+        gemm.storeLDSD = false;
+
+        gemm.transB = "N";
+
+        basicGEMM<Half>(m_context, gemm, 2.e-5);
+
+        std::string generatedCode = m_context->instructions()->toString();
+
+        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128"), 6);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMLiteralStrides)

@@ -1417,5 +1417,77 @@ namespace rocRoller
                 t_n = t_n * dwordFactor;
             }
         }
+
+        int getTopSetCoordinate(KernelGraph& graph, int load)
+        {
+            int tag = load;
+
+            while(true)
+            {
+                auto parent = only(graph.control.getInputNodeIndices<Body>(tag));
+                if(!parent)
+                    break;
+
+                if(graph.control.get<SetCoordinate>(*parent))
+                    tag = *parent;
+                else
+                    break;
+
+                auto setCoord = graph.control.get<SetCoordinate>(tag);
+                AssertFatal(graph.mapper.get<Unroll>(tag), "SetCoordinate needs Unroll dimension");
+            }
+            return tag;
+        }
+
+        std::set<int> getTopSetCoordinates(KernelGraph& graph, std::vector<int> loads)
+        {
+            std::set<int> retval;
+            for(auto& load : loads)
+            {
+                retval.insert(getTopSetCoordinate(graph, load));
+            }
+            return retval;
+        }
+
+        int getSetCoordinateForDim(KernelGraph& graph, int dim, int load)
+        {
+            int tag = load;
+
+            while(true)
+            {
+                auto parent = only(graph.control.getInputNodeIndices<Body>(tag));
+                AssertFatal(parent, "Dimension was not found in the parents.");
+                AssertFatal(graph.control.get<SetCoordinate>(*parent),
+                            "Dimension was not found in the parents.");
+                tag           = *parent;
+                auto setCoord = graph.control.get<SetCoordinate>(tag);
+                AssertFatal(graph.mapper.get<Unroll>(tag), "SetCoordinate needs Unroll dimension");
+                if(graph.mapper.get<Unroll>(tag) == dim)
+                {
+                    return tag;
+                }
+            }
+        }
+
+        std::vector<int> getLoadsForUnroll(KernelGraph&     graph,
+                                           int              unrollCoord,
+                                           std::vector<int> loads,
+                                           int              unroll)
+        {
+            std::vector<int> retval;
+            for(auto& load : loads)
+            {
+                int  tag      = getSetCoordinateForDim(graph, unrollCoord, load);
+                auto setCoord = graph.control.get<SetCoordinate>(tag);
+                AssertFatal(evaluationTimes(
+                                setCoord->value)[rocRoller::Expression::EvaluationTime::Translate],
+                            "Unroll value should be a literal");
+                if(unroll == getUnsignedInt(evaluate(setCoord->value)))
+                {
+                    retval.push_back(load);
+                }
+            }
+            return retval;
+        }
     }
 }

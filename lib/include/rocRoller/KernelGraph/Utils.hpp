@@ -221,6 +221,48 @@ namespace rocRoller
                                            int& t_n,
                                            int  maxWidth,
                                            int  numDwordsPerElement);
+
+        /**
+         * @brief Get the tag of the highest SetCoordinate directly upstream from load.
+         *
+         * @param graph
+         * @param load
+         * @return int
+         */
+        int getTopSetCoordinate(KernelGraph& graph, int load);
+
+        /**
+         * @brief Get the unique tags of the highest SetCoordinate nodes directly upstream from each load.
+         *
+         * @param graph
+         * @param loads
+         * @return std::set<int>
+         */
+        std::set<int> getTopSetCoordinates(KernelGraph& graph, std::vector<int> loads);
+
+        /**
+         * @brief Get the SetCoordinate object upstream from load that sets the coordinate for the dimension dim.
+         *
+         * @param graph
+         * @param dim
+         * @param load
+         * @return int
+         */
+        int getSetCoordinateForDim(KernelGraph& graph, int dim, int load);
+
+        /**
+         * @brief Retrieve all loads from the input vector that have a SetCoordinate which sets the input unrollCoord dimension to unroll.
+         *
+         * @param graph
+         * @param unrollCoord
+         * @param loads
+         * @param unroll
+         * @return std::vector<int>
+         */
+        std::vector<int> getLoadsForUnroll(KernelGraph&     graph,
+                                           int              unrollCoord,
+                                           std::vector<int> loads,
+                                           int              unroll);
     }
 }
 
