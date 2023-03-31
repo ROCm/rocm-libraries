@@ -268,6 +268,7 @@ set(rocroller_src
  lib/source/CodeGen/Buffer.cpp
  lib/source/CodeGen/Instruction.cpp
  lib/source/CodeGen/InstructionRef.cpp
+ lib/source/CodeGen/LoadStoreTileGenerator.cpp
  lib/source/CodeGen/LowerFromKernelGraph.cpp
  lib/source/CodeGen/MemoryInstructions.cpp
  lib/source/CodeGen/WaitCount.cpp
