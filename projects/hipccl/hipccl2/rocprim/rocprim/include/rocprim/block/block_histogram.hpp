@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -94,7 +94,7 @@ struct select_block_histogram_impl<block_histogram_algorithm::using_sort>
 ///
 /// \par Overview
 /// * block_histogram has two alternative implementations: \p block_histogram_algorithm::using_atomic
-///   and block_histogram_algorithm::using_sort.
+///   and \p block_histogram_algorithm::using_sort.
 ///
 /// \par Examples
 /// \parblock

@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -346,6 +346,7 @@ void block_load_direct_striped(unsigned int flat_id,
 /// \brief Loads data from continuous memory into a warp-striped arrangement of items
 /// across the thread block.
 ///
+/// \ingroup blockmodule_warp_load_functions
 /// The warp-striped arrangement is assumed to be (\p WarpSize * \p ItemsPerThread) items
 /// across a thread block. Each thread uses a \p flat_id to load a range of
 /// \p ItemsPerThread into \p items.
@@ -396,6 +397,7 @@ void block_load_direct_warp_striped(unsigned int flat_id,
 /// \brief Loads data from continuous memory into a warp-striped arrangement of items
 /// across the thread block, which is guarded by range \p valid.
 ///
+/// \ingroup blockmodule_warp_load_functions
 /// The warp-striped arrangement is assumed to be (\p WarpSize * \p ItemsPerThread) items
 /// across a thread block. Each thread uses a \p flat_id to load a range of
 /// \p ItemsPerThread into \p items.
@@ -453,6 +455,7 @@ void block_load_direct_warp_striped(unsigned int flat_id,
 /// across the thread block, which is guarded by range with a fall-back value
 /// for out-of-bound elements.
 ///
+/// \ingroup blockmodule_warp_load_functions
 /// The warp-striped arrangement is assumed to be (\p WarpSize * \p ItemsPerThread) items
 /// across a thread block. Each thread uses a \p flat_id to load a range of
 /// \p ItemsPerThread into \p items.

@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -100,11 +100,11 @@ enum class block_load_method
 ///
 /// \par Overview
 /// * The \p block_load class has a number of different methods to load data:
-///   * [block_load_direct](\ref ::block_load_method::block_load_direct)
-///   * [block_load_striped](\ref ::block_load_method::block_load_striped)
-///   * [block_load_vectorize](\ref ::block_load_method::block_load_vectorize)
-///   * [block_load_transpose](\ref ::block_load_method::block_load_transpose)
-///   * [block_load_warp_transpose](\ref ::block_load_method::block_load_warp_transpose)
+///   * \p block_load_method::block_load_direct
+///   * \p block_load_method::block_load_striped
+///   * \p block_load_method::block_load_vectorize
+///   * \p ::block_load_method::block_load_transpose
+///   * \p ::block_load_method::block_load_warp_transpose
 ///
 /// \par Example:
 /// \parblock

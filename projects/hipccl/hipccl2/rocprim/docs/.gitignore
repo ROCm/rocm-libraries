@@ -1,0 +1,9 @@
+/_build/
+/_doxygen/
+/_images/
+/_static/
+/_templates/
+/.doxygen/docBin
+/.doxygen/rocPRIM.tag
+/.sphinx/_toc.yml
+/api

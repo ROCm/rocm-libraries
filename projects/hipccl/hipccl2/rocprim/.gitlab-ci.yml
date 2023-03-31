@@ -26,6 +26,7 @@ include:
     file:
       - /defaults.yaml
       - /deps-cmake.yaml
+      - /deps-docs.yaml
       - /deps-rocm.yaml
       - /deps-vcpkg.yaml
       - /gpus-rocm.yaml
@@ -352,21 +353,9 @@ test:deb:
 
 test:docs:
   stage: test
-  extends: .rules:test
-  image: sphinxdoc/sphinx-latexpdf:latest
-  needs: []
-  before_script:
-    - apt-get update -qq
-    - apt-get install -y -qq doxygen
-    - pip3 install --user -r $CI_PROJECT_DIR/docs/requirements.txt
-  script:
-    - cd docs
-    - make
-  artifacts:
-    paths:
-      - $CI_PROJECT_DIR/docs/_build
-      - $CI_PROJECT_DIR/docs/docBin
-    expire_in: 1 week
+  extends:
+    - .rules:test
+    - .build:docs
 
 .benchmark-base:
   stage: benchmark

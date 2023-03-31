@@ -1,0 +1,21 @@
+/**
+@brief rocPRIM Block-wide parallel primitives
+@author
+@file
+*/
+
+/**
+ * \defgroup blockmodule Block-wide
+ * \ingroup primitivesmodule
+ *
+ */
+
+/**
+ * \defgroup blockmodule_warp_load_functions
+ * \ingroup blockmodule
+ */
+
+/**
+ * \defgroup blockmodule_warp_store_functions
+ * \ingroup blockmodule
+ */
