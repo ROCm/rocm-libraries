@@ -1,0 +1,14 @@
+# Anywhere {branch} is used, the branch name will be substituted.
+# These comments will also be removed.
+root: index
+subtrees:
+  - entries:
+    - file: intro
+    - file: ops_summary
+    - file: device_ops/index
+    - file: block_ops/index
+    - file: warp_ops/index
+    - file: thread_ops
+    - file: iterators
+    - file: intrinsics
+    - file: glossary

@@ -237,16 +237,21 @@ should be optimized for gfx803 GCN version, or to `900` for gfx900.
 ## Documentation
 The latest rocPRIM documentation and API description can be found [here](https://rocprim.readthedocs.io/en/latest/).
 
-It can also be build using the following commands
+It can also be built using the following commands:
 
 ```shell
-# go to rocPRIM doc directory
-cd rocPRIM; cd doc
+# Go to rocPRIM docs directory
+cd rocPRIM; cd docs
 
-# run doxygen
-doxygen Doxyfile
+# Install Python dependencies
+python3 -m pip install -r .sphinx/requirements.txt
 
-# open html/index.html
+# Build the documentation
+python3 -m sphinx -T -E -b html -d _build/doctrees -D language=en . _build/html
+
+# For e.g. serve the HTML docs locally
+cd _build/html
+python3 -m http.server
 ```
 
 ## hipCUB

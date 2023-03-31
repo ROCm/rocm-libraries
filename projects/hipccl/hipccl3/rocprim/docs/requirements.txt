@@ -1,3 +1,0 @@
-breathe<4.33.1
-exhale
-sphinx_rtd_theme

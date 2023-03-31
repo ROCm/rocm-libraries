@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2019 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -274,6 +274,7 @@ void block_store_direct_striped(unsigned int flat_id,
 /// \brief Stores a warp-striped arrangement of items from across the thread block
 /// into a blocked arrangement on continuous memory.
 ///
+/// \ingroup blockmodule_warp_store_functions
 /// The warp-striped arrangement is assumed to be (\p WarpSize * \p ItemsPerThread) items
 /// across a thread block. Each thread uses a \p flat_id to store a range of
 /// \p ItemsPerThread \p items to the thread block.
@@ -328,6 +329,7 @@ void block_store_direct_warp_striped(unsigned int flat_id,
 /// \brief Stores a warp-striped arrangement of items from across the thread block
 /// into a blocked arrangement on continuous memory, which is guarded by range \p valid.
 ///
+/// \ingroup blockmodule_warp_store_functions
 /// The warp-striped arrangement is assumed to be (\p WarpSize * \p ItemsPerThread) items
 /// across a thread block. Each thread uses a \p flat_id to store a range of
 /// \p ItemsPerThread \p items to the thread block.
