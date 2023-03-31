@@ -6,9 +6,6 @@ doc/html/
 doc/xml/
 doc/latex/
 doc/*.tag
-docs/_build/
-docs/api/
-docs/docBin/
 
 # Created by https://www.gitignore.io/api/c++,cmake
 

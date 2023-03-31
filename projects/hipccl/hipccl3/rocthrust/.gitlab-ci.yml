@@ -8,6 +8,7 @@ include:
     file:
       - /defaults.yaml
       - /deps-cmake.yaml
+      - /deps-docs.yaml
       - /deps-rocm.yaml
       - /gpus-rocm.yaml
       - /rules.yaml
@@ -159,17 +160,10 @@ test:package:
     - $SUDO_CMD dpkg -r rocprim-dev
 
 test:doc:
-  image: sphinxdoc/sphinx-latexpdf
-  needs: []
   stage: test
   extends:
+    - .build:docs
     - .rules:test
-  before_script:
-    - $SUDO_CMD apt update -qq
-    - $SUDO_CMD apt install -y -qq doxygen
-    - $SUDO_CMD pip3 install sphinx_rtd_theme breathe exhale
-  script:
-    - bash -x $CI_PROJECT_DIR/docs/run_doc.sh
 
 test:
   stage: test

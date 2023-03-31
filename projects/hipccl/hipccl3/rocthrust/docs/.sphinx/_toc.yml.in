@@ -1,0 +1,9 @@
+# Anywhere {branch} is used, the branch name will be substituted.
+# These comments will also be removed.
+root: index
+subtrees:
+  - numbered: False
+    entries:
+    - file: installing
+    - file: introduction
+    - file: cpp_api

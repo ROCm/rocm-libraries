@@ -5,6 +5,8 @@ Full documentation for rocThrust is available at [https://rocthrust.readthedocs.
 ## (Unreleased) rocThrust 2.18.0 for ROCm 5.6
 ### Fixed 
 - `lower_bound`, `upper_bound`, and `binary_search` failed to compile for certain types.
+### Changed
+- Updated `docs` directory structure to match the standard of [rocm-docs-core](https://github.com/RadeonOpenCompute/rocm-docs-core).
 
 ## (Unreleased) rocThrust 2.17.0 for ROCm 5.5
 ### Added
