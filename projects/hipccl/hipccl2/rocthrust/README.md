@@ -221,6 +221,23 @@ make -j4
 
 Documentation is available [here](https://rocthrust.readthedocs.io/en/latest/).
 
+It can also be build using the following commands:
+
+```shell
+# Go to rocThrust docs directory
+cd rocThrust; cd docs
+
+# Install Python dependencies
+python3 -m pip install -r .sphinx/requirements.txt
+
+# Build the documentation
+python3 -m sphinx -T -E -b html -d _build/doctrees -D language=en . _build/html
+
+# For e.g. serve the HTML docs locally
+cd _build/html
+python3 -m http.server
+```
+
 ## Support
 
 Bugs and feature requests can be reported through [the issue tracker](https://github.com/ROCmSoftwarePlatform/rocThrust/issues).
