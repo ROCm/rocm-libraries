@@ -211,6 +211,17 @@ namespace ScopeTest
         auto sched = GetParam();
         Settings::getInstance()->set(Settings::Scheduler, sched);
         EXPECT_NO_THROW(m_context->schedule(generate(kgraph, m_context->kernel())));
+
+        auto expected = R"(
+           "coord1" -> "cntrl5" [style=dotted,weight=0,arrowsize=0,label="DEST"]
+           "coord2" -> "cntrl6" [style=dotted,weight=0,arrowsize=0,label="DEST"]
+           "coord3" -> "cntrl7" [style=dotted,weight=0,arrowsize=0,label="DEST"]
+           "coord1" -> "cntrl8" [style=dotted,weight=0,arrowsize=0,label="DEST"]
+           "coord4" -> "cntrl9" [style=dotted,weight=0,arrowsize=0,label="DEST"]
+        )";
+
+        EXPECT_EQ(NormalizedSource(expected),
+                  NormalizedSource(kgraph.mapper.toDOT("coord", "cntrl", true)));
     }
 
     auto schedulers()

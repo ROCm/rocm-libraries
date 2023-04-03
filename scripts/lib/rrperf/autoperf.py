@@ -79,7 +79,7 @@ def run(
 
     targets = [git.short_hash(orig_project_dir, x) for x in commits]
 
-    if len(targets) <= 1:
+    if len(targets) + (current) <= 1:
         targets.append(git.short_hash(orig_project_dir))  # HEAD
 
     if ancestral:
@@ -101,6 +101,9 @@ def run(
 
     results = []
     success = True
+
+    print(targets)
+
     for target in targets:
         project_dir = top / f"build_{target}"
         if target == "current":

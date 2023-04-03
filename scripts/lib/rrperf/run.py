@@ -99,6 +99,7 @@ def run_problems(
 ) -> bool:
     already_run = set()
     result = True
+    failed = []
 
     for i, problem in enumerate(generator):
         if filter is not None:
@@ -130,8 +131,15 @@ def run_problems(
                 print("  status:  ok", flush=True)
             else:
                 print("  status:  error", flush=True)
+                failed.append((i, problem))
 
         already_run.add(problem)
+
+    if len(failed) > 0:
+        print(f"Failed {len(failed)} problems:")
+        for i, problem in failed:
+            cmd = list(map(str, problem.command()))
+            print(f"{i}: {' '.join(cmd)}")
 
     return result
 

@@ -30,24 +30,12 @@ namespace rocRoller
             static const std::string Basename;
             static const std::string Name;
 
-            /**
-             * Returns true if `SchedulerProcedure` is Priority
-             */
             static bool Match(Argument arg);
 
-            /**
-             * Return shared pointer of `PriorityScheduler` built from context
-             */
             static std::shared_ptr<Scheduler> Build(Argument arg);
 
-            /**
-             * Return Name of `PriorityScheduler`, used for debugging purposes currently
-             */
             std::string name() override;
 
-            /**
-             * Call operator schedules instructions based on the Priority mechanism
-             */
             Generator<Instruction> operator()(std::vector<Generator<Instruction>>& seqs) override;
         };
     }

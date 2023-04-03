@@ -67,10 +67,13 @@ namespace rocRoller
             static const std::string Basename;
             static const bool        SingleUse = true;
 
-            virtual std::string            name()                                           = 0;
-            virtual Generator<Instruction> operator()(std::vector<Generator<Instruction>>&) = 0;
+            virtual std::string name() = 0;
 
-            Generator<Instruction> yieldFromStream(Generator<Instruction>::iterator& iter);
+            /**
+             * Call operator schedules instructions based on the Priority mechanism
+             */
+            virtual Generator<Instruction> operator()(std::vector<Generator<Instruction>>& streams)
+                = 0;
 
             LockState getLockState() const;
 
@@ -78,6 +81,14 @@ namespace rocRoller
             LockState                         m_lockstate;
             std::weak_ptr<rocRoller::Context> m_ctx;
             std::shared_ptr<Cost>             m_cost;
+
+            /**
+             * Yields from `iter`:
+             *
+             * - At least one instruction
+             * - If that first instruction locks the stream, yields until the stream is unlocked.
+             */
+            Generator<Instruction> yieldFromStream(Generator<Instruction>::iterator& iter);
         };
 
         std::ostream& operator<<(std::ostream&, SchedulerProcedure);

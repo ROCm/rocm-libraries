@@ -141,15 +141,21 @@ namespace rocRoller
         None = Count
     };
 
-    enum class NaryArgument : int
-    {
-        DEST,
-        LHS,
-        RHS,
-    };
-
     std::string   ToString(LayoutType l);
     std::ostream& operator<<(std::ostream& stream, LayoutType l);
+
+    enum class NaryArgument : int
+    {
+        DEST = 0,
+        LHS,
+        RHS,
+
+        Count,
+        None = Count
+    };
+
+    std::string   ToString(NaryArgument n);
+    std::ostream& operator<<(std::ostream& stream, NaryArgument n);
 
     /**
      * VariableType

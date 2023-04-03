@@ -61,7 +61,8 @@ namespace rocRoller::KernelGraph
     }
 
     std::string ControlToCoordinateMapper::toDOT(std::string const& coord,
-                                                 std::string const& cntrl) const
+                                                 std::string const& cntrl,
+                                                 bool               addLabels) const
     {
         std::stringstream ss;
 
@@ -86,8 +87,80 @@ namespace rocRoller::KernelGraph
         for(auto key : keys)
         {
             ss << "\"" << coord << m_map.at(key) << "\" -> \"" << cntrl << std::get<0>(key)
-               << "\" [style=dotted,weight=0,arrowsize=0]\n";
+               << "\" [style=dotted,weight=0,arrowsize=0";
+            if(addLabels)
+                ss << ",label=\"" << std::get<1>(key) << "\"";
+            ss << "]\n";
         }
         return ss.str();
+    }
+
+    namespace Connections
+    {
+        std::string ToString(ComputeIndexArgument cia)
+        {
+            switch(cia)
+            {
+            case ComputeIndexArgument::TARGET:
+                return "TARGET";
+            case ComputeIndexArgument::INCREMENT:
+                return "INCREMENT";
+            case ComputeIndexArgument::BASE:
+                return "BASE";
+            case ComputeIndexArgument::OFFSET:
+                return "OFFSET";
+            case ComputeIndexArgument::STRIDE:
+                return "STRIDE";
+            case ComputeIndexArgument::ZERO:
+                return "ZERO";
+            case ComputeIndexArgument::BUFFER:
+                return "BUFFER";
+            default:
+                return "Invalid";
+            }
+        }
+
+        std::string toString(ComputeIndexArgument cia)
+        {
+            return ToString(cia);
+        }
+    }
+
+    struct CSToStringVisitor
+    {
+        std::string operator()(std::monostate const&) const
+        {
+            return "EMPTY";
+        }
+
+        std::string operator()(NaryArgument const& n) const
+        {
+            return ToString(n);
+        }
+
+        std::string operator()(Connections::ComputeIndex const& ci) const
+        {
+            return concatenate(ci.argument, ": (", ci.index, ")");
+        }
+
+        std::string operator()(Connections::TypeAndSubDimension const& ci) const
+        {
+            return concatenate(ci.id.hash_code(), ": (", ci.subdimension, ")");
+        }
+
+        std::string operator()(Connections::TypeAndNaryArgument const& ci) const
+        {
+            return concatenate(ci.id.hash_code(), ": (", ci.argument, ")");
+        }
+    };
+
+    std::string ToString(ConnectionSpec const& cs)
+    {
+        return std::visit(CSToStringVisitor(), cs);
+    }
+
+    std::ostream& operator<<(std::ostream& stream, ConnectionSpec const& cs)
+    {
+        return stream << ToString(cs);
     }
 }

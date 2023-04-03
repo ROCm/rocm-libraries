@@ -56,14 +56,19 @@ namespace rocRoller::KernelGraph
 
         enum class ComputeIndexArgument : int
         {
-            TARGET,
+            TARGET = 0,
             INCREMENT,
             BASE,
             OFFSET,
             STRIDE,
             ZERO,
-            BUFFER
+            BUFFER,
+
+            Count
         };
+
+        std::string ToString(ComputeIndexArgument cia);
+        std::string toString(ComputeIndexArgument cia);
 
         struct ComputeIndex
         {
@@ -99,6 +104,9 @@ namespace rocRoller::KernelGraph
         rv.coordinate     = coordinate;
         return rv;
     }
+
+    std::string   ToString(ConnectionSpec const& cs);
+    std::ostream& operator<<(std::ostream& stream, ConnectionSpec const& cs);
 
     /**
      * @brief Connects nodes in the control flow graph to nodes in the
@@ -185,8 +193,12 @@ namespace rocRoller::KernelGraph
 
         /**
          * @brief Emit DOT representation of connections.
+         *
+         * Currently, addLabels will use the hash id for any connections which makes this representation
+         * non-portable between compilers.
          */
-        std::string toDOT(std::string const& coord, std::string const& cntrl) const;
+        std::string
+            toDOT(std::string const& coord, std::string const& cntrl, bool addLabels = false) const;
 
     private:
         std::map<key_type, int> m_map;

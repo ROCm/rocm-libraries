@@ -282,28 +282,25 @@ namespace rocRoller
                       m_kernelGraph.toDOT(false, "CommandKernel::generateKernelGraph: end"));
     }
 
+    Generator<Instruction> CommandKernel::kernelInstructions()
+    {
+        co_yield commandComments();
+        co_yield m_context->kernel()->preamble();
+        co_yield m_context->kernel()->prolog();
+
+        co_yield KernelGraph::generate(m_kernelGraph, m_context->kernel());
+
+        co_yield m_context->kernel()->postamble();
+        co_yield m_context->kernel()->amdgpu_metadata();
+    }
+
     void CommandKernel::generateKernelSource()
     {
         TIMER(t, "CommandKernel::generateKernelSource");
         m_context->kernel()->setKernelGraphMeta(
             std::make_shared<KernelGraph::KernelGraph>(m_kernelGraph));
 
-        // A sequential scheduler should always be used here to ensure
-        // the parts of the kernel are yielded in the correct order.
-        auto scheduler = Component::GetNew<Scheduling::Scheduler>(
-            Scheduling::SchedulerProcedure::Sequential, Scheduling::CostFunction::None, m_context);
-
-        std::vector<Generator<Instruction>> generators;
-
-        generators.push_back(commandComments());
-        generators.push_back(m_context->kernel()->preamble());
-        generators.push_back(m_context->kernel()->prolog());
-
-        generators.push_back(KernelGraph::generate(m_kernelGraph, m_context->kernel()));
-
-        generators.push_back(m_context->kernel()->postamble());
-        generators.push_back(m_context->kernel()->amdgpu_metadata());
-        m_context->schedule((*scheduler)(generators));
+        m_context->schedule(kernelInstructions());
     }
 
     void CommandKernel::assembleKernel()

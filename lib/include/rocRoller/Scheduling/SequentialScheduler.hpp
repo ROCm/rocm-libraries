@@ -14,7 +14,7 @@ namespace rocRoller
     {
 
         /**
-         * A subclass for Sequential scheduling
+         * Takes every instruction from the first stream, then every instruction from the second stream, and so on.
          */
         class SequentialScheduler : public Scheduler
         {
@@ -25,24 +25,12 @@ namespace rocRoller
 
             static const std::string Name;
 
-            /**
-             * Returns true if `SchedulerProcedure` is Sequential
-             */
             static bool Match(Argument arg);
 
-            /**
-             * Return shared pointer of `SequentialScheduler` built from context
-             */
             static std::shared_ptr<Scheduler> Build(Argument arg);
 
-            /**
-             * Return Name of `SequentialScheduler`, used for debugging purposes currently
-             */
             std::string name() override;
 
-            /**
-             * Call operator schedules instructions based on Sequential priority
-             */
             Generator<Instruction> operator()(std::vector<Generator<Instruction>>& seqs) override;
         };
     }

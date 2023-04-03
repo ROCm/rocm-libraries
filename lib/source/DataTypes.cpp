@@ -167,6 +167,28 @@ namespace rocRoller
         return stream << ToString(l);
     }
 
+    std::string ToString(NaryArgument n)
+    {
+        switch(n)
+        {
+
+        case NaryArgument::DEST:
+            return "DEST";
+        case NaryArgument::LHS:
+            return "LHS";
+        case NaryArgument::RHS:
+            return "RHS";
+
+        case NaryArgument::Count:;
+        }
+        return "Invalid";
+    }
+
+    std::ostream& operator<<(std::ostream& stream, NaryArgument n)
+    {
+        return stream << ToString(n);
+    }
+
     std::string ToString(PointerType const& p)
     {
         switch(p)

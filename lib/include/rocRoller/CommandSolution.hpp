@@ -170,6 +170,9 @@ namespace rocRoller
 
         void generateKernelGraph(std::string name);
         void generateKernelSource();
+
+        Generator<Instruction> kernelInstructions();
+
         void assembleKernel();
     };
 

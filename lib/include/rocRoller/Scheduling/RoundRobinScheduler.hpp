@@ -12,8 +12,12 @@ namespace rocRoller
 {
     namespace Scheduling
     {
+
         /**
-         * A subclass for round robin scheduling
+         * Round-robin scheduler: Takes the first instruction from each stream, then the
+         * second from each stream, and so on.
+         *
+         * Must also follow the locking rules.
          */
         class RoundRobinScheduler : public Scheduler
         {
@@ -24,24 +28,12 @@ namespace rocRoller
 
             static const std::string Name;
 
-            /**
-             * Returns true if `SchedulerProcedure` is RoundRobin
-             */
             static bool Match(Argument arg);
 
-            /**
-             * Return shared pointer of `RoundRobinScheduler` built from context
-             */
             static std::shared_ptr<Scheduler> Build(Argument arg);
 
-            /**
-             * Return Name of `RoundRobinScheduler`, used for debugging purposes currently
-             */
             std::string name() override;
 
-            /**
-             * Call operator schedules instructions based on the round robin priority
-             */
             Generator<Instruction> operator()(std::vector<Generator<Instruction>>& seqs) override;
         };
     }
