@@ -90,60 +90,74 @@ namespace rocRoller
             Expression::FastArithmetic   m_fastArith;
             unsigned int                 m_workgroupSizeTotal;
 
+            // Information needed in order to load or store a tile.
+            struct LoadStoreTileInfo
+            {
+                MemoryInstructions::MemoryKind    kind;
+                uint64_t                          m;
+                uint64_t                          n;
+                uint32_t                          elementSize;
+                uint32_t                          packedAmount;
+                Register::ValuePtr                data;
+                Register::ValuePtr                rowOffsetReg;
+                Register::ValuePtr                rowStrideReg;
+                Register::ValuePtr                colStrideReg;
+                Register::ValuePtr                offset;
+                std::shared_ptr<BufferDescriptor> bufDesc;
+            };
+
             inline Generator<Instruction> generate(auto&                     dest,
                                                    Expression::ExpressionPtr expr) const;
 
             // Index calculation Helpers
-            Register::ValuePtr        getBufferSrd(int tag);
-            Expression::ExpressionPtr getOffsetExpr(int                                 offsetTag,
-                                                    CoordinateGraph::Transformer const& coords);
-            Generator<Instruction>    getOffset(Register::ValuePtr&          dst,
-                                                Expression::ExpressionPtr&   expr,
-                                                CoordinateGraph::Transformer coords,
-                                                int                          tag,
-                                                int                          dimension);
+            std::shared_ptr<BufferDescriptor> getBufferDesc(int tag);
+            Expression::ExpressionPtr         getOffsetExpr(int                                 offsetTag,
+                                                            CoordinateGraph::Transformer const& coords);
+            Generator<Instruction>            getOffset(Register::ValuePtr&          dst,
+                                                        Expression::ExpressionPtr&   expr,
+                                                        CoordinateGraph::Transformer coords,
+                                                        int                          tag,
+                                                        int                          dimension);
             Generator<Instruction>
                 generateStride(Register::ValuePtr& stride, int tag, int dimension);
 
-            // Load Tile Helpers
-            Generator<Instruction> loadTile(MemoryInstructions::MemoryKind kind,
+            // Move Tile Helpers
+            template <MemoryInstructions::MemoryDirection Dir>
+            Generator<Instruction> moveTile(MemoryInstructions::MemoryKind kind,
                                             uint64_t                       m,
                                             uint64_t                       n,
                                             VariableType                   dataType,
                                             int                            tag,
+                                            Register::ValuePtr             vgpr,
                                             Register::ValuePtr             offset,
                                             CoordinateGraph::Transformer&  coords);
-            Generator<Instruction> loadMacroTileVGPRCI(int                            tag,
-                                                       ControlGraph::LoadTiled const& load,
-                                                       CoordinateGraph::Transformer   coords,
-                                                       int                            sdim);
+            template <MemoryInstructions::MemoryDirection Dir>
+            Generator<Instruction> moveTileLiteralStrides(LoadStoreTileInfo& info);
+            template <MemoryInstructions::MemoryDirection Dir>
+            Generator<Instruction> moveTileColStrideOne(LoadStoreTileInfo& info);
+            template <MemoryInstructions::MemoryDirection Dir>
+            Generator<Instruction> moveTileRuntimeStrides(LoadStoreTileInfo& info);
+            Generator<Instruction> loadTileLiteralStridesPack(LoadStoreTileInfo& info);
+            Generator<Instruction> loadTileRuntimeStridesPack(LoadStoreTileInfo& info);
+
+            // Load Tile Helpers
             Generator<Instruction> loadMacroTileVGPR(int                            tag,
                                                      ControlGraph::LoadTiled const& load,
                                                      CoordinateGraph::Transformer   coords);
             Generator<Instruction> loadMacroTileLDS(int                              tag,
                                                     ControlGraph::LoadLDSTile const& load,
                                                     CoordinateGraph::Transformer     coords);
-            Generator<Instruction> loadMacroTileWAVELDSCI(int                              tag,
-                                                          ControlGraph::LoadLDSTile const& load,
-                                                          CoordinateGraph::Transformer     coords,
-                                                          int                              sdim);
-            Generator<Instruction> loadMacroTileWAVECI(int                            tag,
-                                                       ControlGraph::LoadTiled const& load,
-                                                       CoordinateGraph::Transformer   coords,
-                                                       int                            sdim);
+            Generator<Instruction> loadMacroTileWAVELDS(int                              tag,
+                                                        ControlGraph::LoadLDSTile const& load,
+                                                        CoordinateGraph::Transformer     coords);
+            Generator<Instruction> loadMacroTileWAVE(int                            tag,
+                                                     ControlGraph::LoadTiled const& load,
+                                                     CoordinateGraph::Transformer   coords);
             Generator<Instruction> loadMacroTileWAVECIACCUM(int                            tag,
                                                             ControlGraph::LoadTiled const& load,
                                                             CoordinateGraph::Transformer   coords);
 
             // Store Tile Helpers
-            Generator<Instruction> storeTile(MemoryInstructions::MemoryKind kind,
-                                             uint64_t                       m,
-                                             uint64_t                       n,
-                                             VariableType                   dataType,
-                                             int                            tag,
-                                             Register::ValuePtr             vgpr,
-                                             Register::ValuePtr             offset,
-                                             CoordinateGraph::Transformer&  coords);
             Generator<Instruction> storeMacroTileLDS(int                               tag,
                                                      ControlGraph::StoreLDSTile const& store,
                                                      CoordinateGraph::Transformer      coords);
@@ -153,9 +167,9 @@ namespace rocRoller
             Generator<Instruction> storeMacroTileWAVELDS(int                               tag,
                                                          ControlGraph::StoreLDSTile const& store,
                                                          CoordinateGraph::Transformer      coords);
-            Generator<Instruction> storeMacroTileWAVECI(int                             tag,
-                                                        ControlGraph::StoreTiled const& store,
-                                                        CoordinateGraph::Transformer    coords);
+            Generator<Instruction> storeMacroTileWAVE(int                             tag,
+                                                      ControlGraph::StoreTiled const& store,
+                                                      CoordinateGraph::Transformer    coords);
         };
     }
 }

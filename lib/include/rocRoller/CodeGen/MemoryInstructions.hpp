@@ -32,6 +32,12 @@ namespace rocRoller
             Buffer
         };
 
+        enum MemoryDirection : int
+        {
+            Load = 0,
+            Store
+        };
+
         /**
          * @brief Generate the instructions required to perform a load.
          *
@@ -64,7 +70,7 @@ namespace rocRoller
          * @param addr The register containing the address to store the data.
          * @param data  The register containing the data to store.
          * @param offset Register containing an offset to be added to addr.
-         * @param numBytes The number of bytes to load.
+         * @param numBytes The number of bytes to store.
          * @param comment Comment that will be generated along with the instructions. (Default = "")
          * @param high Whether the value will be loaded into the high bits of the register. (Default=false)
          * @param buffDesc Buffer descriptor to use when `kind` is `Buffer`. (Default = nullptr)
@@ -80,6 +86,32 @@ namespace rocRoller
                                      std::shared_ptr<BufferDescriptor> buffDesc = nullptr,
                                      BufferInstructionOptions          buffOpts
                                      = BufferInstructionOptions());
+
+        /**
+         * @brief Generate the instructions required to perform a load or store.
+         *
+         * @tparam Dir Whether to load or store data
+         * @param kind The kind of memory operation to perform.
+         * @param addr The register containing the address.
+         * @param data  The register containing the data.
+         * @param offset Register containing an offset to be added to addr.
+         * @param numBytes The number of bytes.
+         * @param comment Comment that will be generated along with the instructions. (Default = "")
+         * @param high Whether the value will be loaded or stored into the high bits of the register. (Default=false)
+         * @param buffDesc Buffer descriptor to use when `kind` is `Buffer`. (Default = nullptr)
+         * @param buffOpts Buffer options. (Default = BufferInstructionOptions())
+         */
+        template <MemoryDirection Dir>
+        Generator<Instruction> moveData(MemoryKind                        kind,
+                                        std::shared_ptr<Register::Value>  addr,
+                                        std::shared_ptr<Register::Value>  data,
+                                        std::shared_ptr<Register::Value>  offset,
+                                        int                               numBytes,
+                                        std::string const                 comment  = "",
+                                        bool                              high     = false,
+                                        std::shared_ptr<BufferDescriptor> buffDesc = nullptr,
+                                        BufferInstructionOptions          buffOpts
+                                        = BufferInstructionOptions());
 
         /**
          * @brief Generate instructions that will load two 16bit values and pack them into
@@ -262,6 +294,9 @@ namespace rocRoller
         std::string            genOffsetModifier(int) const;
         Generator<Instruction> genLocalAddr(std::shared_ptr<Register::Value>& addr) const;
     };
+
+    std::string   ToString(MemoryInstructions::MemoryDirection const& d);
+    std::ostream& operator<<(std::ostream& stream, MemoryInstructions::MemoryDirection n);
 }
 
 #include "MemoryInstructions_impl.hpp"

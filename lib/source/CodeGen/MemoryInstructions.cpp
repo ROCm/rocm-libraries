@@ -3,6 +3,24 @@
 
 namespace rocRoller
 {
+    std::string ToString(MemoryInstructions::MemoryDirection const& d)
+    {
+        switch(d)
+        {
+        case MemoryInstructions::MemoryDirection::Load:
+            return "Load";
+        case MemoryInstructions::MemoryDirection::Store:
+            return "Store";
+        }
+
+        Throw<FatalError>("Invalid MemoryDirection");
+    }
+
+    std::ostream& operator<<(std::ostream& stream, MemoryInstructions::MemoryDirection d)
+    {
+        return stream << ToString(d);
+    }
+
     Generator<Instruction>
         MemoryInstructions::loadAndPack(MemoryKind                        kind,
                                         std::shared_ptr<Register::Value>  dest,

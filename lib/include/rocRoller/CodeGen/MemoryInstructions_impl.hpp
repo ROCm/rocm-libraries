@@ -147,6 +147,28 @@ namespace rocRoller
         }
     }
 
+    template <MemoryInstructions::MemoryDirection Dir>
+    inline Generator<Instruction>
+        MemoryInstructions::moveData(MemoryKind                        kind,
+                                     std::shared_ptr<Register::Value>  addr,
+                                     std::shared_ptr<Register::Value>  data,
+                                     std::shared_ptr<Register::Value>  offset,
+                                     int                               numBytes,
+                                     std::string const                 comment,
+                                     bool                              high,
+                                     std::shared_ptr<BufferDescriptor> buffDesc,
+                                     BufferInstructionOptions          buffOpts)
+    {
+        if constexpr(Dir == MemoryDirection::Load)
+            co_yield load(kind, data, addr, offset, numBytes, comment, high, buffDesc, buffOpts);
+        else if constexpr(Dir == MemoryDirection::Store)
+            co_yield store(kind, addr, data, offset, numBytes, comment, high, buffDesc, buffOpts);
+        else
+        {
+            Throw<FatalError>("Unsupported MemoryDirection");
+        }
+    }
+
     inline std::string MemoryInstructions::genOffsetModifier(int offset) const
     {
         std::string offset_modifier = "";
