@@ -8,6 +8,23 @@
 //
 //===----------------------------------------------------------------------===//
 
+// Modifications Copyright (c) 2025 Advanced Micro Devices, Inc.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
 #ifndef _CUDA_STD_CHRONO
 #define _CUDA_STD_CHRONO
 
@@ -26,5 +43,45 @@ _CCCL_PUSH_MACROS
 #include <cuda/std/detail/libcxx/include/chrono>
 
 _CCCL_POP_MACROS
+
+_LIBCUDACXX_BEGIN_NAMESPACE_STD
+
+namespace chrono {
+
+inline _LIBCUDACXX_INLINE_VISIBILITY
+system_clock::time_point system_clock::now() _NOEXCEPT
+{
+#ifdef __CUDA_ARCH__
+    uint64_t __time;
+    asm volatile("mov.u64 %0, %%globaltimer;":"=l"(__time)::);
+    return time_point(duration_cast<duration>(nanoseconds(__time)));
+#elif defined(__HIP_DEVICE_COMPILE__)
+    uint64_t __time =__builtin_amdgcn_s_memrealtime(); //*_LIBCUDACXX_HIP_TSC_NANOSECONDS_PER_CYCLE;
+    return time_point(duration_cast<duration>(chrono::duration<uint64_t, ratio<1,_LIBCUDACXX_HIP_TSC_CLOCKRATE>>(__time)));
+#else
+    return time_point(duration_cast<duration>(nanoseconds(
+            ::std::chrono::duration_cast<::std::chrono::nanoseconds>(
+                ::std::chrono::system_clock::now().time_since_epoch()
+            ).count()
+           )));
+#endif
+}
+
+inline _LIBCUDACXX_INLINE_VISIBILITY
+time_t system_clock::to_time_t(const system_clock::time_point& __t) _NOEXCEPT
+{
+    return time_t(duration_cast<seconds>(__t.time_since_epoch()).count());
+}
+
+inline _LIBCUDACXX_INLINE_VISIBILITY
+system_clock::time_point system_clock::from_time_t(time_t __t) _NOEXCEPT
+{
+    return time_point(seconds(__t));;
+}
+}
+
+_LIBCUDACXX_END_NAMESPACE_STD
+
+#include "detail/__pragma_pop"
 
 #endif // _CUDA_STD_CHRONO

@@ -1357,6 +1357,14 @@ __sanitizer_annotate_contiguous_container(const void*, const void*, const void*,
 
 #  ifndef _LIBCUDACXX_SYS_CLOCK_DURATION
 #    define _LIBCUDACXX_SYS_CLOCK_DURATION nanoseconds
+#    if defined(__HIP_DEVICE_COMPILE__)
+     // 25 MHz TSC for s_memrealtime -> 1*1e9/25*1e6 ns/cycle = 40 ns/cycle (gfx90a and gfx908 only!)
+#      define _LIBCUDACXX_HIP_TSC_CLOCKRATE 25000000
+#      define _LIBCUDACXX_HIP_TSC_NANOSECONDS_PER_CYCLE (1/_LIBCUDACXX_HIP_TSC_CLOCKRATE)  
+#      define _LIBCUDACXX_SYS_CLOCK_DURATION duration<long long, std::ratio<1,_LIBCUDACXX_HIP_TSC_CLOCKRATE>>
+#    else
+#      define _LIBCUDACXX_SYS_CLOCK_DURATION nanoseconds
+#    endif
 #  endif // _LIBCUDACXX_SYS_CLOCK_DURATION
 
 // There are a handful of public standard library types that are intended to
