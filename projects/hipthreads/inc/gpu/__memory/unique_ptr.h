@@ -551,6 +551,9 @@ class _LIBGPU_UNIQUE_PTR_TRIVIAL_ABI _LIBGPU_TEMPLATE_VIS unique_ptr<_Tp[], _Dp>
     }
 };
 
+template <class _Tp>
+using unique_ptr_h = unique_ptr<_Tp, host_delete<_Tp>>;
+
 template <class _Tp, class _Dp>
 __host__ __device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23
 typename std::enable_if<std::is_swappable<_Dp>::value, void>::type
