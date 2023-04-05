@@ -350,14 +350,15 @@ struct block_sort_impl
              typename ValuesInputIterator,
              typename ValuesOutputIterator,
              typename BinaryFunction>
-    ROCPRIM_DEVICE void sort(const unsigned int   valid_in_last_block,
-                             const bool           is_incomplete_block,
-                             KeysInputIterator    keys_input,
-                             KeysOutputIterator   keys_output,
-                             ValuesInputIterator  values_input,
-                             ValuesOutputIterator values_output,
-                             BinaryFunction       compare_function,
-                             storage_type&        storage)
+    ROCPRIM_DEVICE  ROCPRIM_FORCE_INLINE
+    void sort(const unsigned int   valid_in_last_block,
+              const bool           is_incomplete_block,
+              KeysInputIterator    keys_input,
+              KeysOutputIterator   keys_output,
+              ValuesInputIterator  values_input,
+              ValuesOutputIterator values_output,
+              BinaryFunction       compare_function,
+              storage_type&        storage)
     {
         // By default, the block sort algorithm is not stable. We can make it stable
         // by adding an index to each key.
@@ -386,7 +387,8 @@ struct block_sort_impl
 
         // Special compare function that enforces sorting is stable.
         auto stable_compare_function
-            = [compare_function](const stable_key_type& a, const stable_key_type& b) mutable
+            = [compare_function](const stable_key_type& a,
+                                 const stable_key_type& b) ROCPRIM_FORCE_INLINE mutable
         {
             const bool ab = compare_function(rocprim::get<0>(a), rocprim::get<0>(b));
             return ab
