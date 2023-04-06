@@ -113,11 +113,10 @@ namespace rocRoller
             std::shared_ptr<BufferDescriptor> getBufferDesc(int tag);
             Expression::ExpressionPtr         getOffsetExpr(int                                 offsetTag,
                                                             CoordinateGraph::Transformer const& coords);
-            Generator<Instruction>            getOffset(Register::ValuePtr&          dst,
-                                                        Expression::ExpressionPtr&   expr,
+            Generator<Instruction>            getOffset(LoadStoreTileInfo&           info,
                                                         CoordinateGraph::Transformer coords,
                                                         int                          tag,
-                                                        int                          dimension);
+                                                        bool                         preserveOffset);
             Generator<Instruction>
                 generateStride(Register::ValuePtr& stride, int tag, int dimension);
 

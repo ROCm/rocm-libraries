@@ -137,41 +137,64 @@ namespace rocRoller
             return m_fastArith(result);
         }
 
-        Generator<Instruction> LoadStoreTileGenerator::getOffset(Register::ValuePtr& dst,
-                                                                 ExpressionPtr&      expr,
-                                                                 Transformer         coords,
-                                                                 int                 tag,
-                                                                 int                 dimension)
+        Generator<Instruction> LoadStoreTileGenerator::getOffset(LoadStoreTileInfo& info,
+                                                                 Transformer        coords,
+                                                                 int                tag,
+                                                                 bool               preserveOffset)
         {
-            auto offsetTag = m_graph->mapper.get<Offset>(tag, dimension);
+            auto offsetTag = m_graph->mapper.get<Offset>(tag, 0);
             rocRoller::Log::getLogger()->debug("KernelGraph::LoadStoreTileGenerator::getOffset(tag:"
-                                               " {}, dimension: {}, offsetTag: {})",
+                                               " {}, offsetTag: {})",
                                                tag,
-                                               dimension,
                                                offsetTag);
-            if(offsetTag < 0)
-                co_return;
+
+            AssertFatal(offsetTag >= 0, "No Offset found");
+
+            ExpressionPtr rowOffsetExpr;
 
             if(m_context->registerTagManager()->hasRegister(offsetTag))
             {
-                dst  = m_context->registerTagManager()->getRegister(offsetTag);
-                expr = getOffsetExpr(offsetTag, coords);
-                co_return;
+                info.rowOffsetReg = m_context->registerTagManager()->getRegister(offsetTag);
+                rowOffsetExpr     = getOffsetExpr(offsetTag, coords);
+            }
+            else if(m_baseOffsets.count(offsetTag) > 0)
+            {
+                auto baseTag      = m_baseOffsets[offsetTag];
+                info.rowOffsetReg = m_context->registerTagManager()->getRegister(baseTag);
+
+                info.rowOffsetReg->setName(concatenate("offset", offsetTag));
+                m_context->getScopeManager()->addRegister(offsetTag);
+                m_context->registerTagManager()->addRegister(offsetTag, info.rowOffsetReg);
+                rowOffsetExpr = getOffsetExpr(offsetTag, coords);
+            }
+            else
+            {
+                Throw<FatalError>("Base offset not found");
             }
 
-            if(m_baseOffsets.count(offsetTag) > 0)
+            if(rowOffsetExpr
+               && Expression::evaluationTimes(rowOffsetExpr)[EvaluationTime::Translate]
+               && info.offset->regType() == Register::Type::Literal)
             {
-                auto baseTag = m_baseOffsets[offsetTag];
-                auto base    = m_context->registerTagManager()->getRegister(baseTag);
+                info.offset
+                    = Register::Value::Literal(getUnsignedInt(evaluate(rowOffsetExpr))
+                                               + getUnsignedInt(info.offset->getLiteralValue()));
+                rowOffsetExpr.reset();
+            }
 
-                dst = base->placeholder();
-                co_yield m_context->copier()->copy(dst, base);
-                dst->setName(concatenate("offset", offsetTag));
-
-                m_context->getScopeManager()->addRegister(offsetTag);
-                m_context->registerTagManager()->addRegister(offsetTag, dst);
-                expr = getOffsetExpr(offsetTag, coords);
-                co_return;
+            if(rowOffsetExpr)
+            {
+                auto unrolledRowOffsetExpr
+                    = m_fastArith(info.rowOffsetReg->expression() + rowOffsetExpr);
+                auto tmp = info.rowOffsetReg->placeholder();
+                co_yield generate(tmp, unrolledRowOffsetExpr);
+                info.rowOffsetReg = tmp;
+            }
+            else if(preserveOffset)
+            {
+                auto tmp = info.rowOffsetReg->placeholder();
+                co_yield m_context->copier()->copy(tmp, info.rowOffsetReg);
+                info.rowOffsetReg = tmp;
             }
         }
 
@@ -644,29 +667,6 @@ namespace rocRoller
                 info.offset = Register::Value::Literal(0u);
             }
 
-            // Get the values from the associated ComputeIndex node
-            ExpressionPtr rowOffsetExpr;
-            co_yield getOffset(info.rowOffsetReg, rowOffsetExpr, coords, tag, 0);
-            AssertFatal(info.rowOffsetReg, "Invalid row offset register.");
-
-            if(rowOffsetExpr
-               && Expression::evaluationTimes(rowOffsetExpr)[EvaluationTime::Translate]
-               && info.offset->regType() == Register::Type::Literal
-               && getUnsignedInt(evaluate(rowOffsetExpr)) > 0)
-            {
-                info.offset
-                    = Register::Value::Literal(getUnsignedInt(evaluate(rowOffsetExpr))
-                                               + getUnsignedInt(info.offset->getLiteralValue()));
-            }
-            else if(rowOffsetExpr)
-            {
-                auto unrolledRowOffsetExpr
-                    = m_fastArith(info.rowOffsetReg->expression() + rowOffsetExpr);
-                auto tmp = info.rowOffsetReg->placeholder();
-                co_yield generate(tmp, unrolledRowOffsetExpr);
-                info.rowOffsetReg = tmp;
-            }
-
             if(kind == MemoryInstructions::MemoryKind::Buffer)
             {
                 info.bufDesc = getBufferDesc(tag);
@@ -685,12 +685,18 @@ namespace rocRoller
             info.packedAmount = DataTypeInfo::Get(info.data->variableType()).packing;
 
             bool colStrideIsLiteral = (info.colStrideReg->regType() == Register::Type::Literal);
+            bool allStridesAreLiteral
+                = (info.rowStrideReg->regType() == Register::Type::Literal && colStrideIsLiteral
+                   && info.offset->regType() == Register::Type::Literal);
             bool colStrideIsOne
                 = colStrideIsLiteral
                   && (getUnsignedInt(info.colStrideReg->getLiteralValue()) == info.elementSize);
 
-            if(info.rowStrideReg->regType() == Register::Type::Literal && colStrideIsLiteral
-               && info.offset->regType() == Register::Type::Literal)
+            // Get the values from the associated ComputeIndex node
+            co_yield getOffset(info, coords, tag, !allStridesAreLiteral && info.m > 1);
+            AssertFatal(info.rowOffsetReg, "Invalid row offset register.");
+
+            if(allStridesAreLiteral)
             {
                 co_yield moveTileLiteralStrides<Dir>(info);
             }
@@ -922,11 +928,6 @@ namespace rocRoller
             auto vgpr  = m_context->registerTagManager()->getRegister(tileTag);
             auto vtype = store.dataType;
 
-            Register::ValuePtr rowOffsetReg;
-            ExpressionPtr      rowOffsetExpr;
-            co_yield getOffset(rowOffsetReg, rowOffsetExpr, coords, tag, 0);
-            AssertFatal(rowOffsetReg, "Invalid row offset register.");
-
             auto numElements = product(tile.subTileSizes) * m_workgroupSizeTotal;
             // Allocate LDS memory, and store the offset of the beginning of the allocation
             // into ldsOffset.
@@ -948,17 +949,8 @@ namespace rocRoller
             auto const m           = getUnsignedInt(evaluate(elemX.size));
             auto const n           = getUnsignedInt(evaluate(elemY.size));
 
-            // saving the offsets to be restored for each macrotile in LDS
-            // TODO : Need more design thought (how to seed an offset register)
-            auto resetOffset = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::UInt32, 1);
-            co_yield m_context->copier()->copy(resetOffset, rowOffsetReg);
-
             co_yield moveTile<MemoryInstructions::MemoryDirection::Store>(
                 MemoryInstructions::MemoryKind::Local, m, n, vtype, tag, vgpr, ldsOffset, coords);
-
-            // TODO : Need more design thought (how to seed an offset register)
-            co_yield m_context->copier()->copy(rowOffsetReg, resetOffset);
         }
 
         Generator<Instruction> LoadStoreTileGenerator::storeMacroTileVGPR(int               tag,
