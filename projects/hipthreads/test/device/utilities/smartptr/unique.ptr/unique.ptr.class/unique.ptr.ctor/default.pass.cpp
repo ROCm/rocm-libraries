@@ -25,7 +25,6 @@
 #include "gpu/memory"
 #include <cassert>
 #include "test_macros.h"
-#include "kernel_launcher.h"
 
 #include "test_macros.h"
 #include "kernel_launcher.h"
