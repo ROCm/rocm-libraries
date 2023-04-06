@@ -48,8 +48,11 @@ _LIBCUDACXX_BEGIN_NAMESPACE_STD
 
 namespace chrono {
 
-#ifdef __HIP__
-#include "detail/libcxx/include/support/hip/chrono_hip_helpers.h"
+#ifdef __HIP__ 
+#if _LIBCUDACXX_STD_VER>17 && defined(_LIBCUDACXX_EXPERIMENTAL_CHRONO_HIP)
+// Workaround for system_clock on AMD GPUs for c++20, please see documentation in the below header file
+#include "detail/libcxx/include/support/hip/chrono_hip_extension.h"
+#endif
 #endif
 
 inline _LIBCUDACXX_INLINE_VISIBILITY
@@ -60,15 +63,30 @@ system_clock::time_point system_clock::now() _NOEXCEPT
     asm volatile("mov.u64 %0, %%globaltimer;":"=l"(__time)::);
     return time_point(duration_cast<duration>(nanoseconds(__time)));
 #elif defined(__HIP_DEVICE_COMPILE__)
-    if(!__is_sysclock_initialized) {
-        // FIXME(HIP): As this function is NOEXCEPT, we do not throw an exception at this point.
+#if _LIBCUDACXX_STD_VER>17 
+#if defined(_LIBCUDACXX_EXPERIMENTAL_CHRONO_HIP)
+    if(!hip_gpu_ext::__is_sysclock_initialized) {
+        // FIXME(HIP): As this function needs to be NOEXCEPT, we do not throw an exception at this point.
         printf("ERROR: Using sysclock on AMD GPUs requires a prior initialization call on the host side (cuda::std::chrono::initialize_amdgpu_sysclock())."
              "The returned time will not be a UNIX timestamp.\n");
     }
-    assert(__is_sysclock_initialized);
-    uint64_t __time = __host_sysclock0 
-                    + (__builtin_amdgcn_s_memrealtime()-__offset_smemrealtime)*_LIBCUDACXX_HIP_TSC_NANOSECONDS_PER_CYCLE;
+    assert(hip_gpu_ext::__is_sysclock_initialized);
+    uint64_t __time = hip_gpu_ext::__unix_sysclock0 
+                    + (__builtin_amdgcn_s_memrealtime()-hip_gpu_ext::__offset_devclock0)*_LIBCUDACXX_HIP_RDTSC_NANOSECONDS_PER_CYCLE;
     return time_point(duration_cast<duration>(nanoseconds(__time)));
+#else
+    printf("WARNING: A C++20 standard-conform system_clock is currently only supported with an experimental workaround that can be "
+           " activated with -D_LIBCUDACXX_EXPERIMENTAL_CHRONO_HIP compile flag (see detail/libcxx/include/support/hip/chrono_hip_extension.h)."
+             "The returned time will not be a UNIX timestamp.\n");
+    // default HIP implementation
+    uint64_t __time = __builtin_amdgcn_s_memrealtime()*_LIBCUDACXX_HIP_RDTSC_NANOSECONDS_PER_CYCLE;
+    return time_point(duration_cast<duration>(nanoseconds(__time)));
+#endif /*_LIBCUDACXX_EXPERIMENTAL_CHRONO_HIP*/
+#else
+    // default HIP implementation
+    uint64_t __time = __builtin_amdgcn_s_memrealtime()*_LIBCUDACXX_HIP_RDTSC_NANOSECONDS_PER_CYCLE;
+    return time_point(duration_cast<duration>(nanoseconds(__time)));
+#endif /*_LIBCUDACXX_STD_VER>17*/
 #else
     return time_point(duration_cast<duration>(nanoseconds(
             ::std::chrono::duration_cast<::std::chrono::nanoseconds>(
