@@ -247,7 +247,8 @@ class _LIBGPU_UNIQUE_PTR_TRIVIAL_ABI _LIBGPU_TEMPLATE_VIS unique_ptr {
               class = typename std::enable_if<std::is_trivially_copyable<_Up>::value &&
                                               std::is_same<deleter_type, gpu::host_delete<element_type>>::value>::type>
     __host__ _LIBGPU_INLINE_VISIBILITY unique_ptr(std::unique_ptr<_Up> &&__u)
-        : __ptr_(static_cast<pointer>(gpu::malloc(sizeof(element_type))), __value_init_tag()) {
+        : __ptr_(static_cast<pointer>(gpu::malloc(sizeof(element_type) == 0 ? 1 : sizeof(element_type))),
+                 __value_init_tag()) {
         __LIBGPU_HIP_CHECK__(
             hipMemcpy(__ptr_.first(), static_cast<pointer>(__u.get()), sizeof(element_type), hipMemcpyHostToDevice));
         // Avoid calling any destructor by calling `operator delete` directly instead of using a delete-expression. This
@@ -465,7 +466,7 @@ class _LIBGPU_UNIQUE_PTR_TRIVIAL_ABI _LIBGPU_TEMPLATE_VIS unique_ptr<_Tp[], _Dp>
               class = typename std::enable_if<std::is_trivially_copyable<_Up>::value &&
                                               std::is_same<deleter_type, gpu::host_delete<element_type[]>>::value>::type>
     __host__ _LIBGPU_INLINE_VISIBILITY unique_ptr(std::unique_ptr<_Up> &&__u, std::size_t __n)
-        : __ptr_(static_cast<pointer>(gpu::malloc(sizeof(element_type[__n]))), __value_init_tag()) {
+        : __ptr_(static_cast<pointer>(gpu::malloc(sizeof(element_type[__n]) == 0 ? 1 : sizeof(element_type[__n]))), __value_init_tag()) {
         __LIBGPU_HIP_CHECK__(
             hipMemcpy(__ptr_.first(), static_cast<pointer>(__u.get()), sizeof(element_type[__n]), hipMemcpyHostToDevice));
         // Avoid calling any destructor by calling `operator delete[]` directly instead of using a delete-expression. This
@@ -724,7 +725,7 @@ __host__ inline _LIBGPU_INLINE_VISIBILITY typename __unique_if<_Tp>::__unique_si
 make_unique() {
     static_assert(std::is_trivially_default_constructible<_Tp>::value,
                   "Host code can't invoke a non-trivial constructor for objects in device memory");
-    void *__buf = gpu::malloc(sizeof(_Tp));
+    void *__buf = gpu::malloc(sizeof(_Tp) == 0 ? 1 : sizeof(_Tp));
     return unique_ptr<_Tp, host_delete<_Tp>>(static_cast<_Tp *>(__buf));
 }
 
@@ -736,7 +737,7 @@ make_unique(_Tp &&__arg) {
     static_assert(std::is_constructible<__RawType, __RefType>::value, "No valid constructor found");
     static_assert(std::is_trivially_constructible<__RawType, __RefType>::value,
                   "Host code can't invoke a non-trivial constructor for objects in device memory");
-    void *__buf = gpu::malloc(sizeof(__RawType));
+    void *__buf = gpu::malloc(sizeof(__RawType) == 0 ? 1 : sizeof(__RawType));
     __LIBGPU_HIP_CHECK__(hipMemcpy(__buf, &__arg, sizeof(__RawType), hipMemcpyHostToDevice));
     return unique_ptr<__RawType, host_delete<__RawType>>(static_cast<__RawType *>(__buf));
 }
@@ -756,7 +757,7 @@ make_unique(size_t __n) {
     typedef std::remove_extent_t<_Tp> _Up;
     static_assert(std::is_trivially_default_constructible<_Up>::value,
                   "Host code can't invoke a non-trivial constructor for objects in device memory");
-    void *__buf = gpu::malloc(sizeof(_Up[__n]));
+    void *__buf = gpu::malloc(sizeof(_Up[__n]) == 0 ? 1 : sizeof(_Up[__n]));
     return unique_ptr<_Tp, host_delete<_Tp>>(static_cast<_Up *>(__buf));
 }
 
