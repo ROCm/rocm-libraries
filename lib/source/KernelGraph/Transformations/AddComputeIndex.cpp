@@ -66,19 +66,6 @@ namespace rocRoller::KernelGraph
      */
 
     /**
-     * @brief Get ForLoop dimension assciated with ForLoopOp.
-     */
-    int getForLoop(int forLoopOp, KernelGraph const& kgraph)
-    {
-        namespace CG = rocRoller::KernelGraph::CoordinateGraph;
-
-        auto range = kgraph.mapper.getConnections(forLoopOp)[0].coordinate;
-        auto forLoop
-            = only(kgraph.coordinates.getOutputNodeIndices(range, CG::isEdge<CG::DataFlow>));
-        return *forLoop;
-    }
-
-    /**
      * @brief Append elements of b onto a.
      */
     std::vector<int> addZeros(std::vector<int> const& a, std::unordered_set<int> const& b)

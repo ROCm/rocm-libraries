@@ -374,15 +374,15 @@ namespace rocRoller
             return connections;
         }
 
-        void loadMacroTileForLDS(KernelGraph&                       graph,
-                                 int                                loadTag,
-                                 int                                userTag,
-                                 int                                macTileTag,
-                                 std::vector<int>&                  sdim,
-                                 int                                K,
-                                 std::array<unsigned int, 3> const& workgroupSizes,
-                                 int                                unroll,
-                                 bool                               useSwappedAccess)
+        std::vector<DeferredConnection>
+            loadMacroTileForLDS(KernelGraph&                       graph,
+                                int                                userTag,
+                                int                                macTileTag,
+                                std::vector<int>&                  sdim,
+                                int                                K,
+                                std::array<unsigned int, 3> const& workgroupSizes,
+                                int                                unroll,
+                                bool                               useSwappedAccess)
         {
             auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
             auto user    = graph.coordinates.getNode<User>(userTag);
@@ -399,18 +399,21 @@ namespace rocRoller
             AssertFatal(
                 macTile.rank == 2, "Rank != 2 not implemented yet.", ShowValue(macTile.rank));
 
+            std::vector<DeferredConnection> connections;
+
             auto sdimX = sdim[0];
             auto sdimY = sdim[1];
-            graph.mapper.connect<SubDimension>(loadTag, sdimX, 0);
-            graph.mapper.connect<SubDimension>(loadTag, sdimY, 1);
+
+            connections.push_back(DC<SubDimension>(sdimX, 0));
+            connections.push_back(DC<SubDimension>(sdimY, 1));
 
             auto nMacX = graph.coordinates.addElement(macTile.tileNumber(0));
             auto nMacY = graph.coordinates.addElement(macTile.tileNumber(1));
             auto iMacX = graph.coordinates.addElement(macTile.tileIndex(0));
             auto iMacY = graph.coordinates.addElement(macTile.tileIndex(1));
 
-            graph.mapper.connect<MacroTileNumber>(loadTag, nMacX, 0);
-            graph.mapper.connect<MacroTileNumber>(loadTag, nMacY, 1);
+            connections.push_back(DC<MacroTileNumber>(nMacX, 0));
+            connections.push_back(DC<MacroTileNumber>(nMacY, 1));
 
             graph.coordinates.addElement(Tile(), {sdimX}, {nMacX, iMacX});
             graph.coordinates.addElement(Tile(), {sdimY}, {nMacY, iMacY});
@@ -439,8 +442,8 @@ namespace rocRoller
                 graph.coordinates.addElement(PassThrough(), {iThrX}, {elementNumberX});
                 graph.coordinates.addElement(PassThrough(), {iThrY}, {elementNumberY});
 
-                graph.mapper.connect<ElementNumber>(loadTag, elementNumberX, 0);
-                graph.mapper.connect<ElementNumber>(loadTag, elementNumberY, 1);
+                connections.push_back(DC<ElementNumber>(elementNumberX, 0));
+                connections.push_back(DC<ElementNumber>(elementNumberY, 1));
 
                 if(macTile.layoutType == LayoutType::MATRIX_A
                    || macTile.layoutType == LayoutType::MATRIX_B)
@@ -466,8 +469,8 @@ namespace rocRoller
                 graph.coordinates.addElement(PassThrough(), {iThrX}, {elementNumberY});
                 graph.coordinates.addElement(PassThrough(), {iThrY}, {elementNumberX});
 
-                graph.mapper.connect<ElementNumber>(loadTag, elementNumberX, 0);
-                graph.mapper.connect<ElementNumber>(loadTag, elementNumberY, 1);
+                connections.push_back(DC<ElementNumber>(elementNumberX, 0));
+                connections.push_back(DC<ElementNumber>(elementNumberY, 1));
 
                 if(macTile.layoutType == LayoutType::MATRIX_A
                    || macTile.layoutType == LayoutType::MATRIX_B)
@@ -490,7 +493,7 @@ namespace rocRoller
             if(macTile.layoutType == LayoutType::MATRIX_A)
             {
                 auto workgroupX = graph.coordinates.addElement(Workgroup(0));
-                graph.mapper.connect<Workgroup>(loadTag, workgroupX, 0);
+                connections.push_back(DC<Workgroup>(workgroupX, 0));
                 graph.coordinates.addElement(PassThrough(), {nMacX}, {workgroupX});
                 // A row block is x-workgroup, column block is for loop index
                 if(unroll >= 0)
@@ -505,7 +508,7 @@ namespace rocRoller
             else if(macTile.layoutType == LayoutType::MATRIX_B)
             {
                 auto workgroupY = graph.coordinates.addElement(Workgroup(1));
-                graph.mapper.connect<Workgroup>(loadTag, workgroupY, 1);
+                connections.push_back(DC<Workgroup>(workgroupY, 1));
                 // B row block is for loop index, column block is y-workgroup
                 if(unroll >= 0)
                 {
@@ -521,12 +524,14 @@ namespace rocRoller
             {
                 auto workgroupX = graph.coordinates.addElement(Workgroup(0));
                 graph.coordinates.addElement(PassThrough(), {nMacX}, {workgroupX});
-                graph.mapper.connect<Workgroup>(loadTag, workgroupX, 0);
+                connections.push_back(DC<Workgroup>(workgroupX, 0));
 
                 auto workgroupY = graph.coordinates.addElement(Workgroup(1));
                 graph.coordinates.addElement(PassThrough(), {nMacY}, {workgroupY});
-                graph.mapper.connect<Workgroup>(loadTag, workgroupY, 1);
+                connections.push_back(DC<Workgroup>(workgroupY, 1));
             }
+
+            return connections;
         }
 
         void loadMacroTile(KernelGraph&                       graph,
@@ -776,12 +781,12 @@ namespace rocRoller
             graph.coordinates.addElement(Tile(), {workitem}, {wave, lane});
         }
 
-        void storeMacroTileIntoLDS(KernelGraph&                       graph,
-                                   int                                storeTag,
-                                   int                                ldsTag,
-                                   int                                macTileTag,
-                                   std::array<unsigned int, 3> const& workgroupSizes,
-                                   bool                               useSwappedAccess)
+        std::vector<DeferredConnection>
+            storeMacroTileIntoLDS(KernelGraph&                       graph,
+                                  int                                ldsTag,
+                                  int                                macTileTag,
+                                  std::array<unsigned int, 3> const& workgroupSizes,
+                                  bool                               useSwappedAccess)
         {
             auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
             rocRoller::Log::getLogger()->debug(
@@ -810,6 +815,8 @@ namespace rocRoller
             auto iThrY
                 = graph.coordinates.addElement(ThreadTileIndex(1, literal(thrTile.sizes.at(1))));
 
+            std::vector<DeferredConnection> connections;
+
             if(useSwappedAccess)
             {
                 auto elementNumberX
@@ -820,8 +827,8 @@ namespace rocRoller
                 graph.coordinates.addElement(PassThrough(), {elementNumberX}, {iThrX});
                 graph.coordinates.addElement(PassThrough(), {elementNumberY}, {iThrY});
 
-                graph.mapper.connect<ElementNumber>(storeTag, elementNumberX, 0);
-                graph.mapper.connect<ElementNumber>(storeTag, elementNumberY, 1);
+                connections.push_back(DC<ElementNumber>(elementNumberX, 0));
+                connections.push_back(DC<ElementNumber>(elementNumberY, 1));
 
                 if(macTile.layoutType == LayoutType::MATRIX_A
                    || macTile.layoutType == LayoutType::MATRIX_B)
@@ -849,8 +856,8 @@ namespace rocRoller
                 graph.coordinates.addElement(PassThrough(), {elementNumberY}, {iThrX});
                 graph.coordinates.addElement(PassThrough(), {elementNumberX}, {iThrY});
 
-                graph.mapper.connect<ElementNumber>(storeTag, elementNumberX, 0);
-                graph.mapper.connect<ElementNumber>(storeTag, elementNumberY, 1);
+                connections.push_back(DC<ElementNumber>(elementNumberX, 0));
+                connections.push_back(DC<ElementNumber>(elementNumberY, 1));
 
                 if(macTile.layoutType == LayoutType::MATRIX_A
                    || macTile.layoutType == LayoutType::MATRIX_B)
@@ -874,6 +881,8 @@ namespace rocRoller
 
             //macrotile --DataFlow--> LDS
             graph.coordinates.addElement(DataFlow(), {macTileTag}, {ldsTag});
+
+            return connections;
         }
 
         std::vector<DeferredConnection>
@@ -1099,6 +1108,16 @@ namespace rocRoller
                 waveMult, waveBTag, Connections::typeArgument<WaveTile>(NaryArgument::RHS));
         }
 
+        int getForLoop(int forLoopOp, KernelGraph const& kgraph)
+        {
+            namespace CG = rocRoller::KernelGraph::CoordinateGraph;
+
+            auto range = kgraph.mapper.getConnections(forLoopOp)[0].coordinate;
+            auto forLoop
+                = only(kgraph.coordinates.getOutputNodeIndices(range, CG::isEdge<CG::DataFlow>));
+            return *forLoop;
+        }
+
         std::pair<Expression::ExpressionPtr, Expression::ExpressionPtr>
             getForLoopIncrement(KernelGraph const& graph, int forLoop)
         {
@@ -1182,6 +1201,25 @@ namespace rocRoller
             }
 
             return newOp;
+        }
+
+        void insertBefore(KernelGraph& graph, int op, int top, int bottom)
+        {
+            auto location = graph.control.getLocation(op);
+            for(auto const& input : location.incoming)
+            {
+                auto edge = graph.control.getElement(input);
+                int  parent
+                    = *graph.control.getNeighbours<Graph::Direction::Upstream>(input).begin();
+                graph.control.deleteElement(input);
+                if(graph.control.getInputNodeIndices<Body>(top).to<std::unordered_set>().count(
+                       parent)
+                   == 0)
+                {
+                    graph.control.addElement(edge, {parent}, {top});
+                }
+            }
+            graph.control.addElement(Sequence(), {bottom}, {op});
         }
 
         bool needsComputeIndex(Operation const& op)
@@ -1449,7 +1487,7 @@ namespace rocRoller
             return retval;
         }
 
-        int getSetCoordinateForDim(KernelGraph& graph, int dim, int load)
+        int getSetCoordinateForDim(KernelGraph const& graph, int dim, int load)
         {
             int tag = load;
 

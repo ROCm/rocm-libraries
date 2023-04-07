@@ -90,6 +90,13 @@ namespace rocRoller
         int replaceWith(KernelGraph& graph, int op, int newOp, bool includeBody = true);
 
         /**
+         * @brief Insert chain (from top to bottom) above operation.
+         *
+         * Bottom is attached to op via a Sequence edge.
+         */
+        void insertBefore(KernelGraph& graph, int op, int top, int bottom);
+
+        /**
          * @brief Find load/store operations that need their indexes
          * precomputed by ComputeIndex.
          */
@@ -104,15 +111,15 @@ namespace rocRoller
                            int                                wavefrontSize,
                            std::vector<unsigned int> const&   wavetilesPerWorkgroup);
 
-        void loadMacroTileForLDS(KernelGraph&                       graph,
-                                 int                                load_tag,
-                                 int                                user_tag,
-                                 int                                mac_tile_tag,
-                                 std::vector<int>&                  sdim,
-                                 int                                K,
-                                 std::array<unsigned int, 3> const& workgroupSizes,
-                                 int                                unroll,
-                                 bool                               useSwappedAccess);
+        std::vector<DeferredConnection>
+            loadMacroTileForLDS(KernelGraph&                       graph,
+                                int                                user_tag,
+                                int                                mac_tile_tag,
+                                std::vector<int>&                  sdim,
+                                int                                K,
+                                std::array<unsigned int, 3> const& workgroupSizes,
+                                int                                unroll,
+                                bool                               useSwappedAccess);
 
         void updateLoadLDSMacroTile(KernelGraph&                      graph,
                                     CoordinateGraph::MacroTile const& mac_tile,
@@ -163,12 +170,12 @@ namespace rocRoller
                                      std::vector<int>&                 sdims,
                                      int                               lds);
 
-        void storeMacroTileIntoLDS(KernelGraph&                       graph,
-                                   int                                store_tag,
-                                   int                                lds_tag,
-                                   int                                mac_tile_tag,
-                                   std::array<unsigned int, 3> const& workgroupSizes,
-                                   bool                               useSwappedAccess);
+        std::vector<DeferredConnection>
+            storeMacroTileIntoLDS(KernelGraph&                       graph,
+                                  int                                lds_tag,
+                                  int                                mac_tile_tag,
+                                  std::array<unsigned int, 3> const& workgroupSizes,
+                                  bool                               useSwappedAccess);
 
         std::vector<DeferredConnection>
             loadMacroTileFromLDS(KernelGraph&                       graph,
@@ -177,6 +184,11 @@ namespace rocRoller
                                  std::array<unsigned int, 3> const& workgroupSizes);
 
         void addConnectionsMultiply(KernelGraph& graph, int waveMult, int loadA, int loadB);
+
+        /**
+         * @brief Get ForLoop dimension assciated with ForLoopOp.
+         */
+        int getForLoop(int forLoopOp, KernelGraph const& kgraph);
 
         /**
          * @brief Get a pair of expressions representing a for loop increment
@@ -248,7 +260,7 @@ namespace rocRoller
          * @param load
          * @return int
          */
-        int getSetCoordinateForDim(KernelGraph& graph, int dim, int load);
+        int getSetCoordinateForDim(KernelGraph const& graph, int dim, int load);
 
         /**
          * @brief Retrieve all loads from the input vector that have a SetCoordinate which sets the input unrollCoord dimension to unroll.
