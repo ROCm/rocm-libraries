@@ -65,6 +65,78 @@ newValue(int num_elements) {
   return new VT[num_elements];
 }
 
+template <class T>
+__host__ TEST_CONSTEXPR_CXX23 typename std::enable_if<!std::is_array<T>::value, T*>::type newValue(int num_elements) {
+  assert(num_elements == 1);
+  T *__buf;
+  assert(hipMalloc(&__buf, sizeof(T) == 0 ? 1 : sizeof(T)) == hipSuccess);
+  return __buf;
+}
+
+template <class T>
+__host__ TEST_CONSTEXPR_CXX23 typename std::enable_if<std::is_array<T>::value, typename std::remove_all_extents<T>::type*>::type
+newValue(int num_elements) {
+  typedef typename std::remove_all_extents<T>::type VT;
+  assert(num_elements >= 1);
+  VT *__buf;
+  assert(hipMalloc(&__buf, sizeof(VT[num_elements]) == 0 ? 1 : sizeof(VT[num_elements])) == hipSuccess);
+  return __buf;
+}
+
+template <>
+__host__ TEST_CONSTEXPR_CXX23 const A_h* newValue<const A_h>(int num_elements) {
+  assert(num_elements == 1);
+  A_h *__buf;
+  assert(hipMalloc(&__buf, sizeof(A_h) == 0 ? 1 : sizeof(A_h)) == hipSuccess);
+  ++A_h::count;
+  return __buf;
+}
+template <>
+__host__ TEST_CONSTEXPR_CXX23 A_h *newValue<A_h>(int num_elements) {
+  return const_cast<A_h *>(newValue<const A_h>(num_elements));
+}
+
+template <>
+__host__ TEST_CONSTEXPR_CXX23 const A_h* newValue<const A_h[]>(int num_elements) {
+  assert(num_elements >= 1);
+  A_h *__buf;
+  assert(hipMalloc(&__buf, sizeof(A_h[num_elements]) == 0 ? 1 : sizeof(A_h[num_elements])) == hipSuccess);
+  A_h::count += num_elements;
+  return __buf;
+}
+template <>
+__host__ TEST_CONSTEXPR_CXX23 A_h *newValue<A_h[]>(int num_elements) {
+  return const_cast<A_h *>(newValue<const A_h[]>(num_elements));
+}
+
+template <>
+__host__ TEST_CONSTEXPR_CXX23 const B_h* newValue<const B_h>(int num_elements) {
+  assert(num_elements == 1);
+  B_h *__buf;
+  assert(hipMalloc(&__buf, sizeof(B_h) == 0 ? 1 : sizeof(B_h)) == hipSuccess);
+  ++A_h::count;
+  ++B_h::count;
+  return __buf;
+}
+template <>
+__host__ TEST_CONSTEXPR_CXX23 B_h *newValue<B_h>(int num_elements) {
+  return const_cast<B_h *>(newValue<const B_h>(num_elements));
+}
+
+template <>
+__host__ TEST_CONSTEXPR_CXX23 const B_h* newValue<const B_h[]>(int num_elements) {
+  assert(num_elements >= 1);
+  B_h *__buf;
+  assert(hipMalloc(&__buf, sizeof(B_h[num_elements]) == 0 ? 1 : sizeof(B_h[num_elements])) == hipSuccess);
+  A_h::count += num_elements;
+  B_h::count += num_elements;
+  return __buf;
+}
+template <>
+__host__ TEST_CONSTEXPR_CXX23 B_h *newValue<B_h[]>(int num_elements) {
+  return const_cast<B_h *>(newValue<const B_h[]>(num_elements));
+}
+
 struct IncompleteType;
 
 __device__ void checkNumIncompleteTypeAlive(int i);
