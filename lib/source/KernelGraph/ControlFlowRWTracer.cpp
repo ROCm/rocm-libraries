@@ -79,45 +79,85 @@ namespace rocRoller::KernelGraph
 
     void ControlFlowRWTracer::trace(int start)
     {
+        m_depth++;
         auto body = m_graph.control.getOutputNodeIndices<Body>(start).to<std::set>();
+        for(auto const& b : body)
+        {
+            m_bodyParent.insert_or_assign(b, start);
+        }
         generate(body);
+        m_depth--;
     }
 
-    std::map<int, int> ControlFlowRWTracer::deallocateLocations() const
+    std::map<int, std::set<int>> ControlFlowRWTracer::deallocateLocations() const
     {
-        //
-        // We need to avoid situations like: we can't deallocate a
-        // register in the middle of a for-loop if it was created
-        // out-side the for-loop.
-        //
-        // Note: Using `insert_or_assign` means we'll be left with
-        // the last one...
-        //
-
-        // track operation that touches coordinate last
-        std::map<int, int> rv;
+        // track operation(s) that concurrently touch coordinate
+        std::map<int, std::set<int>> rv;
 
         // track event that touches coordinate last, at lowest
         // depth (closest to kernel)
         std::map<int, EventRecord> ev;
 
+        // Pass 1 : populate the [coordinate, controls] map
         for(auto x : m_trace)
         {
             // have we seen this coordinate before?
             if(ev.count(x.coordinate) > 0)
             {
-                // if last recorded event was not at the same
-                // depth, deallocate when we reach last loop at
-                // the same depth
+                // if last recorded event is at the depth less than
+                // the new depth, deallocate at a new lower
+                // depth bodyParent location, keeping the lowest
+                // depth recorded event intact.
                 if(ev.at(x.coordinate).depth < x.depth)
                 {
-                    rv.insert_or_assign(x.coordinate, x.loop);
+                    auto n       = x.depth - ev.at(x.coordinate).depth;
+                    auto control = x.control;
+                    while(n > 0)
+                    {
+                        control = m_bodyParent.at(control);
+                        n--;
+                    }
+                    rv[x.coordinate].clear();
+                    rv[x.coordinate].insert(control);
                     continue;
                 }
-            }
 
-            rv.insert_or_assign(x.coordinate, x.control);
+                // if last recorded event is at the depth more than
+                // the new depth, deallocate at the lower depth location.
+                if(ev.at(x.coordinate).depth > x.depth)
+                {
+                    rv[x.coordinate].clear();
+                }
+            }
+            rv[x.coordinate].insert(x.control);
             ev.insert_or_assign(x.coordinate, x);
+        }
+
+        // Pass 2 : update the controls in the [coordinate, controls] map to handle
+        // situations where the deallocate locations inside controls are at the
+        // same depth but have different bodyParents.
+        // Keep going up the bodyParent ladder until all deallocate locations inside
+        // controls have a common bodyParent.
+        for(auto& [coordinate, controls] : rv)
+        {
+            std::set<int> temp;
+            while(temp.empty() && controls.size() > 1)
+            {
+                for(auto const& src : controls)
+                {
+                    auto parent = m_bodyParent.at(src);
+                    if(temp.find(parent) == temp.end())
+                    {
+                        temp.insert(parent);
+                    }
+                }
+                // if we haven't reached a common bodyParent yet.
+                if(temp.size() != 1)
+                {
+                    controls = temp;
+                    temp.clear();
+                }
+            }
         }
         return rv;
     }
@@ -138,11 +178,7 @@ namespace rocRoller::KernelGraph
         // Ignore invalid tags
         if(control >= 0 && coordinate >= 0)
         {
-            m_trace.push_back({static_cast<int>(m_loop.size()),
-                               m_loop.empty() ? -1 : m_loop.back(),
-                               control,
-                               coordinate,
-                               rw});
+            m_trace.push_back({m_depth, control, coordinate, rw});
         }
     }
 
@@ -197,6 +233,11 @@ namespace rocRoller::KernelGraph
     void ControlFlowRWTracer::call(Operation const& op, int tag)
     {
         std::visit(*this, op, std::variant<int>(tag));
+        auto outputs = m_graph.control.getOutputNodeIndices<Sequence>(tag).to<std::set>();
+        for(auto const& output : outputs)
+        {
+            m_bodyParent.insert_or_assign(output, m_bodyParent[tag]);
+        }
         m_completedControlNodes.insert(tag);
     }
 
@@ -224,7 +265,7 @@ namespace rocRoller::KernelGraph
 
     void ControlFlowRWTracer::operator()(ForLoopOp const& op, int tag)
     {
-        m_loop.push_back(tag);
+        m_depth++;
 
         //
         // Don't examine for loop intialize or increment operations.
@@ -265,15 +306,25 @@ namespace rocRoller::KernelGraph
         // generate(incr);
 
         auto body = m_graph.control.getOutputNodeIndices<Body>(tag).to<std::set>();
+        for(auto const& b : body)
+        {
+            m_bodyParent.insert_or_assign(b, tag);
+        }
         generate(body);
 
-        m_loop.pop_back();
+        m_depth--;
     }
 
     void ControlFlowRWTracer::operator()(Kernel const& op, int tag)
     {
+        m_depth++;
         auto body = m_graph.control.getOutputNodeIndices<Body>(tag).to<std::set>();
+        for(auto const& b : body)
+        {
+            m_bodyParent.insert_or_assign(b, tag);
+        }
         generate(body);
+        m_depth--;
     }
 
     void ControlFlowRWTracer::operator()(LoadLDSTile const& op, int tag)
@@ -315,20 +366,26 @@ namespace rocRoller::KernelGraph
 
     void ControlFlowRWTracer::operator()(Scope const& op, int tag)
     {
+        m_depth++;
         auto body = m_graph.control.getOutputNodeIndices<Body>(tag).to<std::set>();
+        for(auto const& b : body)
+        {
+            m_bodyParent.insert_or_assign(b, tag);
+        }
         generate(body);
+        m_depth--;
     }
 
     void ControlFlowRWTracer::operator()(SetCoordinate const& op, int tag)
     {
-        if(m_setCoordinatesAsLoop)
-            m_loop.push_back(tag);
-
+        m_depth++;
         auto body = m_graph.control.getOutputNodeIndices<Body>(tag).to<std::set>();
+        for(auto const& b : body)
+        {
+            m_bodyParent.insert_or_assign(b, tag);
+        }
         generate(body);
-
-        if(m_setCoordinatesAsLoop)
-            m_loop.pop_back();
+        m_depth--;
     }
 
     void ControlFlowRWTracer::operator()(StoreLDSTile const& op, int tag)

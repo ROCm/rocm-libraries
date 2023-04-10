@@ -23,29 +23,12 @@ namespace rocRoller::KernelGraph
         for(auto kv : tracer.deallocateLocations())
         {
             auto coordinate = kv.first;
-            auto control    = kv.second;
+            auto controls   = kv.second;
             auto deallocate = graph.control.addElement(Deallocate());
 
-            std::vector<int> children;
-            for(auto elem : graph.control.getNeighbours<Graph::Direction::Downstream>(control))
+            for(auto src : controls)
             {
-                auto sequence = graph.control.get<Sequence>(elem);
-                if(sequence)
-                {
-                    for(auto child :
-                        graph.control.getNeighbours<Graph::Direction::Downstream>(elem))
-                    {
-                        children.push_back(child);
-                    }
-                    graph.control.deleteElement(elem);
-                }
-            }
-
-            graph.control.addElement(Sequence(), {control}, {deallocate});
-
-            for(auto child : children)
-            {
-                graph.control.addElement(Sequence(), {deallocate}, {child});
+                graph.control.addElement(Sequence(), {src}, {deallocate});
             }
 
             graph.mapper.connect<Dimension>(deallocate, coordinate);

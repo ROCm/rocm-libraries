@@ -92,47 +92,47 @@ def hgemm():
         mac_k=64,
         **fp16,
     )
-    yield GEMMRun(
-        M=7680,
-        N=8448,
-        K=8192,
-        mac_m=128,
-        mac_n=256,
-        mac_k=16,
-        workgroup_size_x=256,
-        workgroup_size_y=1,
-        **fp16,
-    )
+    # yield GEMMRun(
+    #     M=7680,
+    #     N=8448,
+    #     K=8192,
+    #     mac_m=128,
+    #     mac_n=256,
+    #     mac_k=16,
+    #     workgroup_size_x=256,
+    #     workgroup_size_y=1,
+    #     **fp16,
+    # )
     yield from hgemm_tensile_guidepost()
-    yield GEMMRun(
-        **tensile_guidepost_HGEMM,
-        mac_m=128,
-        mac_n=256,
-        mac_k=16,
-        workgroup_size_x=256,
-        workgroup_size_y=1,
-        **fp16,
-    )
+    # yield GEMMRun(
+    #     **tensile_guidepost_HGEMM,
+    #     mac_m=128,
+    #     mac_n=256,
+    #     mac_k=16,
+    #     workgroup_size_x=256,
+    #     workgroup_size_y=1,
+    #     **fp16,
+    # )
 
-    yield GEMMRun(
-        **tensile_guidepost_HGEMM,
-        mac_m=128,
-        mac_n=256,
-        mac_k=16,
-        workgroup_size_x=128,
-        workgroup_size_y=2,
-        **fp16,
-    )
+    # yield GEMMRun(
+    #     **tensile_guidepost_HGEMM,
+    #     mac_m=128,
+    #     mac_n=256,
+    #     mac_k=16,
+    #     workgroup_size_x=128,
+    #     workgroup_size_y=2,
+    #     **fp16,
+    # )
 
-    yield GEMMRun(
-        **tensile_guidepost_HGEMM,
-        mac_m=128,
-        mac_n=256,
-        mac_k=16,
-        workgroup_size_x=64,
-        workgroup_size_y=4,
-        **fp16,
-    )
+    # yield GEMMRun(
+    #     **tensile_guidepost_HGEMM,
+    #     mac_m=128,
+    #     mac_n=256,
+    #     mac_k=16,
+    #     workgroup_size_x=64,
+    #     workgroup_size_y=4,
+    #     **fp16,
+    # )
 
     for sched in ["Priority", "Cooperative", "Sequential"]:
         yield GEMMRun(
@@ -203,41 +203,41 @@ def hgemm():
         **fp16,
     )
 
-    for sched in ["Priority", "Cooperative", "Sequential"]:
-        yield GEMMRun(
-            M=7680,
-            N=8448,
-            K=8192,
-            mac_m=128,
-            mac_n=256,
-            mac_k=16,
-            workgroup_size_x=256,
-            workgroup_size_y=1,
-            trans_A="N",
-            trans_B="T",
-            visualize=False,
-            scheduler=sched,
-            **fp16,
-        )
+    # for sched in ["Priority", "Cooperative", "Sequential"]:
+    #     yield GEMMRun(
+    #         M=7680,
+    #         N=8448,
+    #         K=8192,
+    #         mac_m=128,
+    #         mac_n=256,
+    #         mac_k=16,
+    #         workgroup_size_x=256,
+    #         workgroup_size_y=1,
+    #         trans_A="N",
+    #         trans_B="T",
+    #         visualize=False,
+    #         scheduler=sched,
+    #         **fp16,
+    #     )
 
-    yield GEMMRun(
-        M=7680,
-        N=8448,
-        K=8192,
-        mac_m=128,
-        mac_n=256,
-        mac_k=16,
-        workgroup_size_x=256,
-        workgroup_size_y=1,
-        trans_A="T",
-        trans_B="N",
-        visualize=False,
-        scheduler=sched,
-        match_memory_access=True,
-        **fp16,
-    )
+    # yield GEMMRun(
+    #     M=7680,
+    #     N=8448,
+    #     K=8192,
+    #     mac_m=128,
+    #     mac_n=256,
+    #     mac_k=16,
+    #     workgroup_size_x=256,
+    #     workgroup_size_y=1,
+    #     trans_A="T",
+    #     trans_B="N",
+    #     visualize=False,
+    #     scheduler=sched,
+    #     match_memory_access=True,
+    #     **fp16,
+    # )
 
-    yield from visualizer()
+    # yield from visualizer()
 
 
 def visualizer():

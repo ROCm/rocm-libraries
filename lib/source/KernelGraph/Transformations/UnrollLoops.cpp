@@ -224,7 +224,7 @@ namespace rocRoller
                 return result;
             auto topForLoopCoord = *maybeTopForLoopCoord;
 
-            ControlFlowRWTracer tracer(kgraph, true);
+            ControlFlowRWTracer tracer(kgraph);
             tracer.trace(forLoop);
 
             auto readwrite = tracer.coordinatesReadWrite();

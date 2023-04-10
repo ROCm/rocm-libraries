@@ -37,7 +37,7 @@ namespace rocRoller::KernelGraph
 
         struct EventRecord
         {
-            int       depth, loop, control, coordinate;
+            int       depth, control, coordinate;
             ReadWrite rw;
         };
 
@@ -47,9 +47,8 @@ namespace rocRoller::KernelGraph
             ReadWrite rw;
         };
 
-        ControlFlowRWTracer(KernelGraph const& graph, bool setCoordinatesAsLoops = false)
+        ControlFlowRWTracer(KernelGraph const& graph)
             : m_graph(graph)
-            , m_setCoordinatesAsLoop(setCoordinatesAsLoops)
         {
         }
 
@@ -64,7 +63,7 @@ namespace rocRoller::KernelGraph
          * @brief Analyse the trace and return locations where
          * Deallocate operations can be added.
          */
-        std::map<int, int> deallocateLocations() const;
+        std::map<int, std::set<int>> deallocateLocations() const;
 
         std::vector<ReadWriteRecord> coordinatesReadWrite() const;
 
@@ -95,11 +94,11 @@ namespace rocRoller::KernelGraph
         void generate(std::set<int> candidates);
         void call(Operation const& op, int tag);
 
-        KernelGraph              m_graph;
-        std::set<int>            m_completedControlNodes;
-        std::vector<EventRecord> m_trace;
-        std::vector<int>         m_loop;
-        bool                     m_setCoordinatesAsLoop;
+        KernelGraph                  m_graph;
+        std::set<int>                m_completedControlNodes;
+        std::vector<EventRecord>     m_trace;
+        std::unordered_map<int, int> m_bodyParent;
+        int                          m_depth = 0;
     };
 
 }
