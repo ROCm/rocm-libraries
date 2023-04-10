@@ -303,6 +303,14 @@ class _LIBGPU_UNIQUE_PTR_TRIVIAL_ABI _LIBGPU_TEMPLATE_VIS unique_ptr {
     __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 std::add_lvalue_reference_t<_Tp> operator*() const {
         return *__ptr_.first();
     }
+    template <bool _Dummy = true, class = typename std::enable_if<std::is_scalar<element_type>::value ||
+                                      __dependent_type<std::is_trivially_copyable<element_type>, _Dummy>::value>::type>
+    __host__ _LIBGPU_INLINE_VISIBILITY typename std::add_const<element_type>::type operator*() const {
+        // Avoid calling any constructor by using a char buffer.
+        char __buf[sizeof(element_type)];
+        __LIBGPU_HIP_CHECK__(hipMemcpy(__buf, __ptr_.first(), sizeof(element_type), hipMemcpyDeviceToHost));
+        return *reinterpret_cast<element_type *>(__buf);
+    }
     __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 pointer operator->() const _NOEXCEPT {
         return __ptr_.first();
     }
