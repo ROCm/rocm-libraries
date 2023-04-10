@@ -30,7 +30,7 @@ namespace rocRoller
             return Name;
         }
 
-        inline float NoneCost::cost(const InstructionStatus& inst) const
+        inline float NoneCost::cost(Instruction const& inst, InstructionStatus const& status) const
         {
             Throw<FatalError>("Cannot use None cost.");
         }

@@ -23,6 +23,18 @@ namespace rocRoller
             {
                 auto              ctx = m_context.lock();
                 InstructionStatus rv;
+
+                // Remaining registers after this instruction:
+                // currently remaining - newly allocated
+                for(int i = 0; i < static_cast<int>(Register::Type::Count); i++)
+                {
+                    auto regType   = static_cast<Register::Type>(i);
+                    auto allocator = ctx->allocator(regType);
+
+                    if(allocator)
+                        rv.remainingRegisters[i] = allocator->currentlyFree();
+                }
+
                 for(auto alloc : inst.allocations())
                 {
                     if(alloc)
@@ -50,6 +62,11 @@ namespace rocRoller
                             rv.highWaterMarkRegistersDelta.at(regIdx)
                                 = std::max(myHWM, rv.highWaterMarkRegistersDelta.at(regIdx));
                         }
+
+                        rv.outOfRegisters[alloc->regType()]
+                            = rv.outOfRegisters[alloc->regType()]
+                              || alloc->registerCount() > 0 && newRegs.empty();
+                        rv.remainingRegisters[regIdx] -= alloc->registerCount();
                     }
                 }
                 return rv;

@@ -676,7 +676,7 @@ namespace GEMMDriverTest
         EXPECT_EQ(countSubstring(generatedCode, "ds_write_b64"), 8);
     }
 
-    TEST_F(GEMMTestGPU, DISABLED_GPU_BasicGEMMFP16Jammed1x8)
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed1x8)
     {
         GEMMProblem gemm;
 
@@ -698,7 +698,7 @@ namespace GEMMDriverTest
         basicGEMM<Half>(m_context, gemm, 2.e-5);
     }
 
-    TEST_F(GEMMTestGPU, DISABLED_GPU_BasicGEMMFP16Jammed1x8UnrollK)
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed1x8UnrollK)
     {
         GEMMProblem gemm;
 
@@ -721,7 +721,7 @@ namespace GEMMDriverTest
 
         basicGEMM<Half>(m_context, gemm, 2.e-5);
     }
-    TEST_F(GEMMTestGPU, DISABLED_GPU_BasicGEMMFP16Jammed2x4)
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed2x4)
     {
         GEMMProblem gemm;
 
@@ -747,7 +747,7 @@ namespace GEMMDriverTest
         EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128"), 3);
     }
 
-    TEST_F(GEMMTestGPU, DISABLED_GPU_BasicGEMMFP16Jammed2x4UnrollK)
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed2x4UnrollK)
     {
         GEMMProblem gemm;
 
@@ -775,7 +775,7 @@ namespace GEMMDriverTest
         EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128"), 6);
     }
 
-    TEST_F(GEMMTestGPU, DISABLED_GPU_BasicGEMMFP16Jammed4x2)
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed4x2)
     {
         GEMMProblem gemm;
 
@@ -803,7 +803,7 @@ namespace GEMMDriverTest
         EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128"), 3);
     }
 
-    TEST_F(GEMMTestGPU, DISABLED_GPU_BasicGEMMFP16Jammed4x2UnrollK)
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed4x2UnrollK)
     {
         GEMMProblem gemm;
 
@@ -864,7 +864,7 @@ namespace GEMMDriverTest
                   countSubstring(output_noLiteralStrides, "Load_Tiled_2_stride_1"));
     }
 
-    TEST_F(GEMMTestGPU, DISABLED_GPU_BasicGEMMFP16AllLDS)
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16AllLDS)
     {
         GEMMProblem gemm;
 

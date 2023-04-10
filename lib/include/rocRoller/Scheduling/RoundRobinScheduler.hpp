@@ -32,7 +32,7 @@ namespace rocRoller
 
             static std::shared_ptr<Scheduler> Build(Argument arg);
 
-            std::string name() override;
+            std::string name() const override;
 
             Generator<Instruction> operator()(std::vector<Generator<Instruction>>& seqs) override;
         };

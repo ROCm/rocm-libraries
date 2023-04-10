@@ -42,7 +42,7 @@ namespace rocRoller
             /**
              * Return Name of `RandomScheduler`, used for debugging purposes currently
              */
-            std::string name() override;
+            std::string name() const override;
 
             /**
              * Call operator schedules instructions based on Sequential priority

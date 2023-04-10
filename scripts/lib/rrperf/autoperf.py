@@ -59,10 +59,23 @@ def build_rocroller(
     return build_dir
 
 
+def ancestral_targets(targets: List[str]):
+    orig_project_dir = git.top()
+    targets = git.rev_list(orig_project_dir, targets[0], targets[-1])
+    targets.reverse()
+    targets = [git.short_hash(orig_project_dir, x) for x in targets]
+    if len(targets) == 0:
+        raise RuntimeError(
+            """No targets. Check `git rev-list` and make sure
+            commits are listed from oldest to newest."""
+        )
+
+
 def run(
     commits: List[str],
     clonedir: str,
     rundir: str,
+    no_fail: List[str] = None,
     current: bool = False,
     ancestral: bool = False,
     suite: str = None,
@@ -75,22 +88,21 @@ def run(
     x_value: str = "timestamp",
     **kwargs,
 ):
+    if no_fail is None:
+        no_fail = []
+
     orig_project_dir = git.top()
 
     targets = [git.short_hash(orig_project_dir, x) for x in commits]
+    no_fail_targets = frozenset(
+        [git.short_hash(orig_project_dir, x) for x in no_fail if x != "current"]
+    )
 
     if len(targets) + (current) <= 1:
         targets.append(git.short_hash(orig_project_dir))  # HEAD
 
     if ancestral:
-        targets = git.rev_list(orig_project_dir, targets[0], targets[-1])
-        targets.reverse()
-        targets = [git.short_hash(orig_project_dir, x) for x in targets]
-        if len(targets) == 0:
-            raise RuntimeError(
-                """No targets. Check `git rev-list` and make sure
-                commits are listed from oldest to newest."""
-            )
+        targets = ancestral_targets(targets)
 
     if current:
         targets.append("current")
@@ -101,6 +113,7 @@ def run(
 
     results = []
     success = True
+    success_no_fail = True
 
     print(targets)
 
@@ -117,7 +130,10 @@ def run(
         target_success, result_dir = suite_run.run(
             build_dir=build_dir, rundir=rundir, suite=suite, filter=filter, recast=True
         )
-        success &= target_success
+        if target in no_fail_targets:
+            success_no_fail &= target_success
+        else:
+            success &= target_success
         results.append(result_dir)
 
     date = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
@@ -146,5 +162,7 @@ def run(
         )
     print(f"Wrote {output_file}")
 
+    if not success_no_fail:
+        print("Failures occurred in branches marked no-fail.")
     if not success:
         raise RuntimeError("Some jobs failed.")

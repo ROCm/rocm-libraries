@@ -26,7 +26,7 @@ namespace rocRoller
             return std::make_shared<RoundRobinScheduler>(std::get<2>(arg));
         }
 
-        inline std::string RoundRobinScheduler::name()
+        inline std::string RoundRobinScheduler::name() const
         {
             return Name;
         }

@@ -67,13 +67,21 @@ namespace rocRoller
             static const std::string Basename;
             static const bool        SingleUse = true;
 
-            virtual std::string name() = 0;
+            virtual std::string name() const = 0;
 
             /**
-             * Call operator schedules instructions based on the Priority mechanism
+             * Call operator schedules instructions based on the scheduling algorithm.
              */
             virtual Generator<Instruction> operator()(std::vector<Generator<Instruction>>& streams)
                 = 0;
+
+            /**
+             * Returns true if `this->operator()` supports having the caller append to the `streams`
+             * argument while the coroutine is suspended. Instructions from the new streams should be
+             * incorporated according to the same scheduling algorithm, and **MUST** be added to the
+             * end of the vector, not anywhere in the middle.
+             */
+            virtual bool supportsAddingStreams() const;
 
             LockState getLockState() const;
 

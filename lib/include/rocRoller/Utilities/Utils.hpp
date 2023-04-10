@@ -159,13 +159,6 @@ namespace rocRoller
         return stream;
     }
 
-    template <typename T, size_t N>
-    inline std::ostream& operator<<(std::ostream& stream, std::array<T, N> const& array)
-    {
-        streamJoin(stream, array, ", ");
-        return stream;
-    }
-
     template <int Idx = 0, typename... Ts>
     inline void
         streamJoinTuple(std::ostream& stream, std::string const& sep, std::tuple<Ts...> const& tup)
@@ -407,6 +400,13 @@ namespace std
         stream << "[";
         rocRoller::streamJoinTuple(stream, ", ", tup);
         return stream << "]";
+    }
+
+    template <typename T, size_t N>
+    inline std::ostream& operator<<(std::ostream& stream, std::array<T, N> const& array)
+    {
+        rocRoller::streamJoin(stream, array, ", ");
+        return stream;
     }
 }
 

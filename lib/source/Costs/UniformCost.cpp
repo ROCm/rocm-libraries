@@ -31,7 +31,8 @@ namespace rocRoller
             return Name;
         }
 
-        inline float UniformCost::cost(const InstructionStatus& inst) const
+        inline float UniformCost::cost(Instruction const&       inst,
+                                       InstructionStatus const& status) const
         {
             return 0.0;
         }

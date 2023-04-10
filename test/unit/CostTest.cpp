@@ -27,27 +27,28 @@ namespace rocRollerTest
 
     TEST_F(CostTest, WaitCntNopCostTest)
     {
-        auto cost
+        Instruction inst;
+        auto        cost
             = Component::Get<Scheduling::Cost>(Scheduling::CostFunction::WaitCntNop, m_context);
         {
             auto status = Scheduling::InstructionStatus();
-            EXPECT_NEAR(cost->cost(status), 0.0, 1e-12);
+            EXPECT_NEAR(cost->cost(inst, status), 0.0, 1e-12);
         }
         {
             auto status = Scheduling::InstructionStatus::Nops(1);
-            EXPECT_GT(cost->cost(status), 0.0);
+            EXPECT_GT(cost->cost(inst, status), 0.0);
         }
         {
             auto status = Scheduling::InstructionStatus::Wait(WaitCount::VMCnt(3));
-            EXPECT_GT(cost->cost(status), 0.0);
+            EXPECT_GT(cost->cost(inst, status), 0.0);
         }
         {
             auto status = Scheduling::InstructionStatus::Wait(WaitCount::EXPCnt(3));
-            EXPECT_GT(cost->cost(status), 0.0);
+            EXPECT_GT(cost->cost(inst, status), 0.0);
         }
         {
             auto status = Scheduling::InstructionStatus::Wait(WaitCount::LGKMCnt(3));
-            EXPECT_GT(cost->cost(status), 0.0);
+            EXPECT_GT(cost->cost(inst, status), 0.0);
         }
     }
 

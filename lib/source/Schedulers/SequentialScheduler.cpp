@@ -27,22 +27,57 @@ namespace rocRoller
             return std::make_shared<SequentialScheduler>(std::get<2>(arg));
         }
 
-        inline std::string SequentialScheduler::name()
+        inline std::string SequentialScheduler::name() const
         {
             return Name;
+        }
+
+        bool SequentialScheduler::supportsAddingStreams() const
+        {
+            return true;
         }
 
         inline Generator<Instruction>
             SequentialScheduler::operator()(std::vector<Generator<Instruction>>& seqs)
         {
+            bool yieldedAny = false;
+
+            std::vector<Generator<Instruction>::iterator> iterators;
+            iterators.reserve(seqs.size());
             for(auto& seq : seqs)
+                iterators.emplace_back(seq.begin());
+
+            do
             {
-                for(auto& inst : seq)
+                yieldedAny = false;
+
+                for(size_t i = 0; i < seqs.size(); i++)
                 {
-                    m_lockstate.add(inst);
-                    co_yield inst;
+
+                    while(iterators[i] != seqs[i].end())
+                    {
+                        auto status = m_ctx.lock()->peek(*iterators[i]);
+
+                        co_yield yieldFromStream(iterators[i]);
+                        yieldedAny = true;
+                    }
+
+                    AssertFatal(seqs.size() >= iterators.size());
+                    if(seqs.size() != iterators.size())
+                    {
+                        iterators.reserve(seqs.size());
+                        for(size_t i = iterators.size(); i < seqs.size(); i++)
+                        {
+                            iterators.emplace_back(seqs[i].begin());
+                            // Consume any comments at the beginning of the stream.
+                            // This has the effect of immediately executing Deallocate nodes.
+                            co_yield consumeComments(iterators[i], seqs[i].end());
+                        }
+                        yieldedAny = true;
+                    }
                 }
-            }
+
+            } while(yieldedAny);
         }
     }
 }

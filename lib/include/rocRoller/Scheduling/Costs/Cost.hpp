@@ -37,8 +37,8 @@ namespace rocRoller
 
             static const std::string Basename;
 
-            virtual std::string name() const                         = 0;
-            virtual float       cost(const InstructionStatus&) const = 0;
+            virtual std::string name() const                                                   = 0;
+            virtual float cost(Instruction const& inst, InstructionStatus const& status) const = 0;
 
             /**
              * @brief Gets the sorted costs for the collection of generator iterators

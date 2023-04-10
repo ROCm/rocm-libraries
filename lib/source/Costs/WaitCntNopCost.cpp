@@ -31,14 +31,15 @@ namespace rocRoller
             return Name;
         }
 
-        inline float WaitCntNopCost::cost(const InstructionStatus& inst) const
+        inline float WaitCntNopCost::cost(Instruction const&       inst,
+                                          InstructionStatus const& status) const
         {
             auto const& architecture = m_ctx.lock()->targetArchitecture();
 
             int vmCost = 0;
             if(architecture.HasCapability(GPUCapability::MaxVmcnt))
             {
-                int vm = inst.waitCount.vmcnt();
+                int vm = status.waitCount.vmcnt();
                 vmCost
                     = vm == -1 ? 0 : (architecture.GetCapability(GPUCapability::MaxVmcnt) - vm + 1);
             }
@@ -46,7 +47,7 @@ namespace rocRoller
             int lgkmCost = 0;
             if(architecture.HasCapability(GPUCapability::MaxLgkmcnt))
             {
-                int lgkm = inst.waitCount.lgkmcnt();
+                int lgkm = status.waitCount.lgkmcnt();
                 lgkmCost = lgkm == -1
                                ? 0
                                : (architecture.GetCapability(GPUCapability::MaxLgkmcnt) - lgkm + 1);
@@ -55,13 +56,13 @@ namespace rocRoller
             int expCost = 0;
             if(architecture.HasCapability(GPUCapability::MaxExpcnt))
             {
-                int exp = inst.waitCount.expcnt();
+                int exp = status.waitCount.expcnt();
                 expCost = exp == -1
                               ? 0
                               : (architecture.GetCapability(GPUCapability::MaxExpcnt) - exp + 1);
             }
 
-            return static_cast<float>(inst.nops) + static_cast<float>(vmCost)
+            return static_cast<float>(status.nops) + static_cast<float>(vmCost)
                    + static_cast<float>(lgkmCost) + static_cast<float>(expCost);
         }
     }

@@ -31,9 +31,10 @@ namespace rocRoller
             return Name;
         }
 
-        inline float MinNopsCost::cost(const InstructionStatus& inst) const
+        inline float MinNopsCost::cost(Instruction const&       inst,
+                                       InstructionStatus const& status) const
         {
-            return static_cast<float>(inst.nops);
+            return static_cast<float>(status.nops);
         }
     }
 }

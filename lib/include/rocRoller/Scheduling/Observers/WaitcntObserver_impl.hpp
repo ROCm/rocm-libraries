@@ -22,7 +22,12 @@ namespace rocRoller
         {
             auto rv = InstructionStatus::Wait(computeWaitCount(inst));
 
-            // The new length of each queue is the current length of the queue plus the contribution from this instruction
+            // The new length of each queue is:
+            // - The current length of the queue
+            // - With the new WaitCount applied.
+            // - Plus the contribution from this instruction
+
+            // Get current length of queue
             for(auto const& pair : m_instructionQueues)
             {
                 if(pair.second.size() > 0)
@@ -38,6 +43,19 @@ namespace rocRoller
                 }
             }
 
+            // Apply the waitcount from this instruction.
+            for(int i = 0; i < GPUWaitQueueType::Count; i++)
+            {
+                auto wqType = GPUWaitQueueType(i);
+                auto wq     = GPUWaitQueue(wqType);
+
+                auto count = rv.waitCount.getCount(wq);
+
+                if(count >= 0)
+                    rv.waitLengths.at(i) = std::min(rv.waitLengths.at(i), count);
+            }
+
+            // Add contribution from this instruction
             GPUInstructionInfo info
                 = m_context.lock()->targetArchitecture().GetInstructionInfo(inst.getOpCode());
             auto whichQueues = info.getWaitQueues();
@@ -46,7 +64,8 @@ namespace rocRoller
                 AssertFatal(q < rv.waitLengths.size(),
                             ShowValue(static_cast<size_t>(q)),
                             ShowValue(rv.waitLengths.size()));
-                rv.waitLengths.at(q) += info.getWaitCount();
+                auto waitCount = info.getWaitCount();
+                rv.waitLengths.at(q) += waitCount == 0 ? 1 : waitCount;
             }
 
             return rv;

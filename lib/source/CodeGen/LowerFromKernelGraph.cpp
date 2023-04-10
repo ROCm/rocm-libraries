@@ -87,6 +87,28 @@ namespace rocRoller
             }
 
             /**
+             * Partitions `candidates` into nodes that are ready to be generated and nodes that aren't ready.
+             * A node is ready if all the upstream nodes connected via `Sequence` edges have been generated.
+             * Nodes that are ready will be removed from `candidates` and will be in the returned set.
+             * Nodes that are not ready will remain in `candidates`.
+             */
+            std::set<int> findAndRemoveSatisfiedNodes(std::set<int>& candidates)
+            {
+                std::set<int> nodes;
+
+                // Find all candidate nodes whose inputs have been satisfied
+                for(auto const& tag : candidates)
+                    if(hasGeneratedInputs(tag))
+                        nodes.insert(tag);
+
+                // Delete nodes about to be generated from candidates.
+                for(auto node : nodes)
+                    candidates.erase(node);
+
+                return nodes;
+            }
+
+            /**
              * Generate code for the specified nodes and their standard (Sequence) dependencies.
              */
             Generator<Instruction> generate(std::set<int> candidates, Transformer coords)
@@ -97,30 +119,37 @@ namespace rocRoller
                 auto message = concatenate("generate(", candidates, ")");
                 co_yield Instruction::Comment(message);
 
-                // TODO: Remove this once dynamic scheduler is implemented
-                //       Right now, we run out of registers without this.
-                int MAX_NODES_TO_GENERATE = 4;
+                // Include all nodes that are connected to candidates via Sequence edges.
+                {
+                    std::set<int> newCandidates, prevCandidates = candidates;
+                    auto          numCandidates = candidates.size();
+
+                    do
+                    {
+                        numCandidates = candidates.size();
+
+                        for(auto tag : prevCandidates)
+                        {
+                            auto outTags = m_graph->control.getOutputNodeIndices<Sequence>(tag);
+                            newCandidates.insert(outTags.begin(), outTags.end());
+                        }
+
+                        candidates.insert(newCandidates.begin(), newCandidates.end());
+                        prevCandidates = std::move(newCandidates);
+                        newCandidates.clear();
+                    } while(numCandidates != candidates.size());
+                }
 
                 while(!candidates.empty())
                 {
-                    std::set<int> nodes;
+                    std::set<int> nodes = findAndRemoveSatisfiedNodes(candidates);
 
-                    // Find all candidate nodes whose inputs have been satisfied
-                    for(auto const& tag : candidates)
-                    {
-                        if(hasGeneratedInputs(tag))
-                        {
-                            nodes.insert(tag);
-                            if(nodes.size() >= MAX_NODES_TO_GENERATE)
-                                break;
-                        }
-                    }
-
-                    // If there are none, we have a problem.
+                    // If there are no valid nodes, we have a problem.
                     AssertFatal(!nodes.empty(),
                                 "Invalid control graph!",
                                 ShowValue(m_graph->control),
-                                ShowValue(candidates));
+                                ShowValue(candidates),
+                                ShowValue(m_completedControlNodes));
 
                     // Generate code for all the nodes we found.
 
@@ -143,23 +172,51 @@ namespace rocRoller
                         auto cost = Settings::getInstance()->get(Settings::SchedulerCost);
                         auto scheduler
                             = Component::GetNew<Scheduling::Scheduler>(proc, cost, m_context);
-                        co_yield (*scheduler)(generators);
+
+                        if(!scheduler->supportsAddingStreams())
+                        {
+                            co_yield (*scheduler)(generators);
+                        }
+                        else
+                        {
+                            auto generator         = (*scheduler)(generators);
+                            auto numCompletedNodes = m_completedControlNodes.size();
+
+                            for(auto iter = generator.begin(); iter != generator.end(); ++iter)
+                            {
+                                if(numCompletedNodes != m_completedControlNodes.size()
+                                   && !candidates.empty())
+                                {
+                                    auto newNodes = findAndRemoveSatisfiedNodes(candidates);
+
+                                    if(!newNodes.empty())
+                                    {
+                                        co_yield Instruction::Comment(
+                                            concatenate("ADD operations ",
+                                                        newNodes,
+                                                        " to scheduler for ",
+                                                        nodes));
+
+                                        for(auto tag : newNodes)
+                                        {
+                                            auto op = std::get<Operation>(
+                                                m_graph->control.getElement(tag));
+                                            generators.push_back(call(tag, op, coords));
+                                        }
+
+                                        nodes.insert(newNodes.begin(), newNodes.end());
+                                    }
+
+                                    numCompletedNodes = m_completedControlNodes.size();
+                                }
+
+                                co_yield *iter;
+                            }
+                        }
+
                         co_yield Instruction::Comment(
                             concatenate("END Scheduler for operations ", nodes));
                     }
-
-                    // Add output nodes to candidates.
-
-                    for(auto tag : nodes)
-                    {
-                        auto outTags = m_graph->control.getOutputNodeIndices<Sequence>(tag);
-                        candidates.insert(outTags.begin(), outTags.end());
-                    }
-
-                    // Delete generated nodes from candidates.
-
-                    for(auto node : nodes)
-                        candidates.erase(node);
                 }
 
                 co_yield Instruction::Comment("end: " + message);
@@ -333,7 +390,6 @@ namespace rocRoller
                 rocRoller::Log::getLogger()->debug("  deallocate dimension: {}", dimTag);
                 co_yield Instruction::Comment(concatenate("Deallocate ", dimTag));
                 m_context->registerTagManager()->deleteTag(dimTag);
-                co_return;
             }
 
             Generator<Instruction> operator()(int, Barrier const&, Transformer)
@@ -357,6 +413,12 @@ namespace rocRoller
                 auto connections = m_graph->mapper.getConnections(tag);
                 AssertFatal(connections.size() == 1,
                             "Invalid SetCoordinate operation; coordinate missing.");
+                co_yield Instruction::Comment(concatenate("SetCoordinate (",
+                                                          tag,
+                                                          "): Coordinate ",
+                                                          connections[0].coordinate,
+                                                          " = ",
+                                                          setCoordinate.value));
                 coords.setCoordinate(connections[0].coordinate, setCoordinate.value);
 
                 auto init = m_graph->control.getOutputNodeIndices<Initialize>(tag).to<std::set>();

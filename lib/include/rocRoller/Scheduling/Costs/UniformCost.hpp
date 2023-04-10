@@ -44,7 +44,7 @@ namespace rocRoller
             /**
              * Call operator orders the instructions.
              */
-            float cost(const InstructionStatus& inst) const override;
+            float cost(Instruction const& inst, InstructionStatus const& status) const override;
         };
     }
 }

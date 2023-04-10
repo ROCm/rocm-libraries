@@ -15,7 +15,9 @@ namespace rocRoller
         {
             waitLengths.fill(0);
             allocatedRegisters.fill(0);
+            remainingRegisters.fill(-1);
             highWaterMarkRegistersDelta.fill(0);
+            outOfRegisters.reset();
         }
 
         inline InstructionStatus InstructionStatus::StallCycles(unsigned int const value)
@@ -64,10 +66,8 @@ namespace rocRoller
         inline void InstructionStatus::combine(InstructionStatus const& other)
         {
             stallCycles = std::max(stallCycles, other.stallCycles);
-            nops        = std::max(nops, other.nops);
             waitCount.combine(other.waitCount);
-
-            errors.insert(errors.end(), other.errors.begin(), other.errors.end());
+            nops = std::max(nops, other.nops);
 
             for(int i = 0; i < waitLengths.size(); i++)
             {
@@ -80,11 +80,24 @@ namespace rocRoller
                     = std::max(allocatedRegisters[i], other.allocatedRegisters[i]);
             }
 
+            for(int i = 0; i < remainingRegisters.size(); i++)
+            {
+                if(remainingRegisters[i] < 0)
+                    remainingRegisters[i] = other.remainingRegisters[i];
+                else if(other.remainingRegisters[i] >= 0)
+                    remainingRegisters[i]
+                        = std::min(remainingRegisters[i], other.remainingRegisters[i]);
+            }
+
             for(int i = 0; i < highWaterMarkRegistersDelta.size(); i++)
             {
                 highWaterMarkRegistersDelta[i] = std::max(highWaterMarkRegistersDelta[i],
                                                           other.highWaterMarkRegistersDelta[i]);
             }
+
+            outOfRegisters |= other.outOfRegisters;
+
+            errors.insert(errors.end(), other.errors.begin(), other.errors.end());
         }
 
         inline IObserver::~IObserver() = default;

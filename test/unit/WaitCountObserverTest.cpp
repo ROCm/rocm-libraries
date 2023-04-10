@@ -325,6 +325,7 @@ namespace rocRollerTest
     TEST_F(WaitCountObserverTest, QueuesIndependent)
     {
         rocRoller::Scheduling::InstructionStatus peeked;
+        auto                                     expectedWaitLengths = peeked.waitLengths;
 
         auto src1 = std::make_shared<Register::Value>(
             m_context, Register::Type::Scalar, DataType::Int32, 2);
@@ -351,51 +352,39 @@ namespace rocRollerTest
         auto inst1 = Instruction("s_load_dwordx2", {dst1}, {src1, zero}, {}, "");
         peeked     = m_context->observer()->peek(inst1);
         EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
+        expectedWaitLengths[GPUWaitQueueType::LGKMSmemQueue] = 1;
+        EXPECT_EQ(expectedWaitLengths, peeked.waitLengths);
         m_context->schedule(inst1);
 
         auto inst2 = Instruction("s_load_dwordx2", {dst2}, {src1, zero}, {}, "");
         peeked     = m_context->observer()->peek(inst2);
         EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
+        expectedWaitLengths[GPUWaitQueueType::LGKMSmemQueue] = 2;
+        EXPECT_EQ(expectedWaitLengths, peeked.waitLengths);
         m_context->schedule(inst2);
 
         auto inst3 = Instruction("buffer_load_dwordx2", {dst3}, {src1, zero}, {}, "");
         peeked     = m_context->observer()->peek(inst3);
         EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
+        expectedWaitLengths[GPUWaitQueueType::VMQueue] = 1;
+        EXPECT_EQ(expectedWaitLengths, peeked.waitLengths);
         m_context->schedule(inst3);
 
         auto inst4 = Instruction("buffer_load_dwordx2", {dst4}, {src1, zero}, {}, "");
         peeked     = m_context->observer()->peek(inst4);
         EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
+        expectedWaitLengths[GPUWaitQueueType::VMQueue] = 2;
+        EXPECT_EQ(expectedWaitLengths, peeked.waitLengths);
         m_context->schedule(inst4);
 
         auto inst5 = Instruction("buffer_load_dwordx2", {dst1}, {src1, zero}, {}, "");
         peeked     = m_context->observer()->peek(inst5);
         EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount::LGKMCnt(0));
 
-        // Peek at an unrelated instruction, no wait should be needed
-        {
-            auto tmp_src0 = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Float, 1);
-            auto tmp_src1 = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Float, 1);
-            auto tmp_dst0 = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Float, 1);
-
-            auto alloc0 = tmp_src0->allocate();
-            auto alloc1 = tmp_src1->allocate();
-
-            m_context->schedule(alloc0);
-            m_context->schedule(alloc1);
-
-            auto instPossible
-                = Instruction("v_add_u32_e32", {tmp_dst0}, {tmp_src0, tmp_src1}, {}, "");
-            peeked = m_context->observer()->peek(instPossible);
-            EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
-        }
-
-        // Back to the original instruction, shouldn't change.
-        peeked = m_context->observer()->peek(inst5);
-        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount::LGKMCnt(0));
+        auto inst5Expected                             = expectedWaitLengths;
+        inst5Expected[GPUWaitQueueType::LGKMSmemQueue] = 0;
+        inst5Expected[GPUWaitQueueType::VMQueue]       = 3;
+        EXPECT_EQ(inst5Expected, peeked.waitLengths);
 
         // Peek at an unrelated instruction, no wait should be needed
         {
@@ -416,22 +405,55 @@ namespace rocRollerTest
                 = Instruction("v_add_u32_e32", {tmp_dst0}, {tmp_src0, tmp_src1}, {}, "");
             peeked = m_context->observer()->peek(instPossible);
             EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
+            EXPECT_EQ(expectedWaitLengths, peeked.waitLengths);
         }
 
         // Back to the original instruction, shouldn't change.
         peeked = m_context->observer()->peek(inst5);
         EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount::LGKMCnt(0));
+        EXPECT_EQ(inst5Expected, peeked.waitLengths);
+
+        // Peek at an unrelated instruction, no wait should be needed
+        {
+            auto tmp_src0 = Register::Value::Placeholder(
+                m_context, Register::Type::Vector, DataType::Float, 1);
+            auto tmp_src1 = Register::Value::Placeholder(
+                m_context, Register::Type::Vector, DataType::Float, 1);
+            auto tmp_dst0 = Register::Value::Placeholder(
+                m_context, Register::Type::Vector, DataType::Float, 1);
+
+            auto alloc0 = tmp_src0->allocate();
+            auto alloc1 = tmp_src1->allocate();
+
+            m_context->schedule(alloc0);
+            m_context->schedule(alloc1);
+
+            auto instPossible
+                = Instruction("v_add_u32_e32", {tmp_dst0}, {tmp_src0, tmp_src1}, {}, "");
+            peeked = m_context->observer()->peek(instPossible);
+            EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
+            EXPECT_EQ(expectedWaitLengths, peeked.waitLengths);
+        }
+
+        // Back to the original instruction, shouldn't change.
+        peeked = m_context->observer()->peek(inst5);
+        EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount::LGKMCnt(0));
+        EXPECT_EQ(inst5Expected, peeked.waitLengths);
 
         m_context->schedule(inst5);
+        expectedWaitLengths = inst5Expected;
 
         auto inst6 = Instruction("buffer_load_dword", {dst3}, {src1, zero}, {}, "");
         peeked     = m_context->observer()->peek(inst6);
         EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount::VMCnt(2));
+        expectedWaitLengths[GPUWaitQueueType::VMQueue] = 3; // We wait for 1 but then add 1.
+        EXPECT_EQ(expectedWaitLengths, peeked.waitLengths);
         m_context->schedule(inst6);
 
         auto inst_end = Instruction("s_endpgm", {}, {}, {}, "");
         peeked        = m_context->observer()->peek(inst_end);
         EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
+        EXPECT_EQ(expectedWaitLengths, peeked.waitLengths);
         m_context->schedule(inst_end);
 
         std::string expected = R"(
@@ -593,6 +615,7 @@ namespace rocRollerTest
         auto inst_wait_lgkm = Instruction::Wait(WaitCount::LGKMCnt(20));
         peeked              = m_context->observer()->peek(inst_wait_lgkm);
         EXPECT_EQ(peeked.waitCount, rocRoller::WaitCount());
+
         m_context->schedule(inst_wait_lgkm);
 
         auto inst_wait_exp = Instruction::Wait(WaitCount::EXPCnt(20));
@@ -876,7 +899,7 @@ namespace rocRollerTest
                     // Wait Queue State:
                     // --Queue: LGKMQueue
                     // ----Needs Wait Zero: True
-                    // ----Type In Queue : LGKMDSQueue
+                    // ----Type In Queue : LGKMSmemQueue
                     // ----Registers :
                     // ------Dst: {v[0:1], }
                 )";
@@ -979,7 +1002,7 @@ namespace rocRollerTest
                     // Wait Queue State:
                     // --Queue: LGKMQueue
                     // ----Needs Wait Zero: True
-                    // ----Type In Queue : LGKMDSQueue
+                    // ----Type In Queue : LGKMSmemQueue
                     // ----Registers :
                     // ------Dst: {v1, }
                 )";

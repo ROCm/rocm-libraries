@@ -52,12 +52,14 @@ namespace RegisterAllocatorTest
         EXPECT_EQ(0, allocator->useCount());
         EXPECT_EQ(allocator->regType(), Register::Type::Scalar);
         EXPECT_EQ(allocator->size(), 10);
+        EXPECT_EQ(allocator->currentlyFree(), 10);
 
         auto alloc0 = std::make_shared<Register::Allocation>(
             m_context, Register::Type::Scalar, DataType::Float);
 
         EXPECT_EQ(-1, allocator->maxUsed());
         EXPECT_EQ(0, allocator->useCount());
+        EXPECT_EQ(allocator->currentlyFree(), 10);
 
         EXPECT_EQ(0, allocator->findContiguousRange(0, 1, alloc0->options()));
 
@@ -67,6 +69,7 @@ namespace RegisterAllocatorTest
         EXPECT_EQ(false, allocator->isFree(0));
         EXPECT_EQ(0, allocator->maxUsed());
         EXPECT_EQ(1, allocator->useCount());
+        EXPECT_EQ(allocator->currentlyFree(), 9);
 
         auto alloc1 = std::make_shared<Register::Allocation>(
             m_context, Register::Type::Scalar, DataType::Float, 3);
@@ -80,11 +83,13 @@ namespace RegisterAllocatorTest
         EXPECT_EQ(true, allocator->isFree(4));
         EXPECT_EQ(3, allocator->maxUsed());
         EXPECT_EQ(4, allocator->useCount());
+        EXPECT_EQ(allocator->currentlyFree(), 6);
 
         alloc0.reset();
         EXPECT_EQ(true, allocator->isFree(0));
         EXPECT_EQ(3, allocator->maxUsed());
         EXPECT_EQ(4, allocator->useCount());
+        EXPECT_EQ(allocator->currentlyFree(), 7);
 
         Register::Allocation::Options options;
         options.contiguous = false;
@@ -99,6 +104,7 @@ namespace RegisterAllocatorTest
         EXPECT_EQ(false, allocator->isFree(4));
         EXPECT_EQ(false, allocator->isFree(5));
         EXPECT_EQ(true, allocator->isFree(6));
+        EXPECT_EQ(allocator->currentlyFree(), 4);
 
         auto alloc3 = std::make_shared<Register::Allocation>(
             m_context, Register::Type::Scalar, DataType::Float, 5, options);
@@ -111,6 +117,7 @@ namespace RegisterAllocatorTest
         EXPECT_EQ(true, allocator->isFree(3));
         EXPECT_EQ(5, allocator->maxUsed());
         EXPECT_EQ(6, allocator->useCount());
+        EXPECT_EQ(allocator->currentlyFree(), 7);
     }
 
     TEST_F(RegisterAllocatorTest, MaxReg)

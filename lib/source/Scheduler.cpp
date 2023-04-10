@@ -149,5 +149,10 @@ namespace rocRoller
                 co_yield consumeComments(iter, std::default_sentinel_t{});
             } while(m_lockstate.isLocked());
         }
+
+        bool Scheduler::supportsAddingStreams() const
+        {
+            return false;
+        }
     }
 }

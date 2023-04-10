@@ -573,15 +573,15 @@ namespace GPUArchitectureGenerator
                  rocRoller::GPUInstructionInfo(
                      "s_dcache_wb_vol", 1, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_load_dword", 0, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_load_dword", 0, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_load_dwordx16", 0, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_load_dwordx16", 0, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_load_dwordx2", 0, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_load_dwordx2", 0, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_load_dwordx4", 0, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_load_dwordx4", 0, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_load_dwordx8", 0, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_load_dwordx8", 0, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
                      "s_memrealtime", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(

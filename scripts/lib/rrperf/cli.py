@@ -72,6 +72,14 @@ def main():
         "commits", type=str, nargs="*", help="Commits/tags/branches to test."
     )
 
+    autoperf_cmd.add_argument(
+        "--no-fail",
+        action="append",
+        default=[],
+        help="Commits/tags/branches where a failure does not cause the"
+        " overall command to fail.",
+    )
+
     for cmd in [run_cmd, autoperf_cmd]:
         cmd.add_argument(
             "--rundir",

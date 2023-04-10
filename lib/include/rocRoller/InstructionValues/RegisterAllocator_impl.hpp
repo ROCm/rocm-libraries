@@ -28,7 +28,7 @@ namespace rocRoller
         {
             auto registers = findFree(alloc->registerCount(), alloc->options());
 
-            AssertFatal(!registers.empty(), "No more registers!\n", ShowValue(ToString(m_regType)));
+            AssertFatal(!registers.empty(), "No more ", m_regType, " registers!");
 
             allocate(alloc, std::move(registers));
         }
@@ -187,6 +187,16 @@ namespace rocRoller
         inline bool Allocator::isFree(int idx) const
         {
             return m_registers[idx].expired();
+        }
+
+        inline int Allocator::currentlyFree() const
+        {
+            int rv = 0;
+            for(int idx = 0; idx < size(); idx++)
+                if(isFree(idx))
+                    rv++;
+
+            return rv;
         }
 
         inline void Allocator::free(std::vector<int> const& registers)

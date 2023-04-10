@@ -9,11 +9,20 @@
 #include "../CodeGen/WaitCount.hpp"
 #include "../Context_fwd.hpp"
 
+#include "../Utilities/EnumBitset.hpp"
+
 namespace rocRoller
 {
     namespace Scheduling
     {
 
+        /**
+         * Struct that describes modeled properties of an instruction if it were to be scheduled now.
+         *
+         * Note that any new members need to:
+         * 1. Have a neutral default value, either in the declaration or in the constructor
+         * 2. Be added to the combine() function which is used to merge values from different observers.
+         */
         struct InstructionStatus
         {
             unsigned int stallCycles = 0;
@@ -26,8 +35,14 @@ namespace rocRoller
             /// How many new registers of each type must be allocated?
             std::array<int, static_cast<size_t>(Register::Type::Count)> allocatedRegisters;
 
+            /// How many free registers of each type will remain?
+            std::array<int, static_cast<size_t>(Register::Type::Count)> remainingRegisters;
+
             /// How much does this instruction add to the high water mark of allocated registers?
             std::array<int, static_cast<size_t>(Register::Type::Count)> highWaterMarkRegistersDelta;
+
+            /// Will this cause an out-of-registers error?
+            EnumBitset<Register::Type> outOfRegisters;
 
             std::vector<std::string> errors;
 
@@ -36,6 +51,9 @@ namespace rocRoller
             static InstructionStatus Nops(unsigned int const value);
             static InstructionStatus Error(std::string const& msg);
 
+            /**
+             * Merge values of members from `other` into `this`.
+             */
             void combine(InstructionStatus const& other);
 
             InstructionStatus();

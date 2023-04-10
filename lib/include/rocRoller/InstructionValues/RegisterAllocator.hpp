@@ -19,6 +19,7 @@ namespace rocRoller
             size_t size() const;
             int    maxUsed() const;
             int    useCount() const;
+            int    currentlyFree() const;
 
             void allocate(std::shared_ptr<Allocation> alloc);
 

@@ -27,7 +27,7 @@ namespace rocRoller
             return std::make_shared<RandomScheduler>(std::get<2>(arg));
         }
 
-        inline std::string RandomScheduler::name()
+        inline std::string RandomScheduler::name() const
         {
             return Name;
         }

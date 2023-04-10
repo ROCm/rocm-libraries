@@ -48,7 +48,9 @@ namespace rocRoller
             {
                 if(iters[i] != std::default_sentinel_t{})
                 {
-                    float                  peek = cost(context->peek(*(iters[i])));
+                    auto const&            inst   = *(iters[i]);
+                    auto                   status = context->peek(inst);
+                    float                  peek   = cost(inst, status);
                     std::tuple<int, float> new_val{i, peek};
 
                     retval.insert(
@@ -69,7 +71,9 @@ namespace rocRoller
 
         float Cost::operator()(Generator<Instruction>::iterator& iter) const
         {
-            return cost(m_ctx.lock()->peek(*iter));
+            auto const& inst   = *iter;
+            auto        status = m_ctx.lock()->peek(inst);
+            return cost(inst, status);
         }
     }
 }

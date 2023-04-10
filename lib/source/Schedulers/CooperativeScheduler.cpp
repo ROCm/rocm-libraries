@@ -29,9 +29,14 @@ namespace rocRoller
             return std::make_shared<CooperativeScheduler>(std::get<2>(arg), std::get<1>(arg));
         }
 
-        inline std::string CooperativeScheduler::name()
+        inline std::string CooperativeScheduler::name() const
         {
             return Name;
+        }
+
+        bool CooperativeScheduler::supportsAddingStreams() const
+        {
+            return true;
         }
 
         inline Generator<Instruction>
@@ -42,19 +47,31 @@ namespace rocRoller
             if(seqs.empty())
                 co_return;
 
-            size_t n = seqs.size();
-
-            iterators.reserve(n);
-            for(auto& seq : seqs)
-            {
-                iterators.emplace_back(seq.begin());
-            }
+            size_t numSeqs = 0;
 
             size_t idx = 0;
             float  currentCost;
 
             while(true)
             {
+                while(seqs.size() != numSeqs)
+                {
+                    AssertFatal(seqs.size() > numSeqs,
+                                "Sequences cannot shrink!",
+                                ShowValue(seqs.size()),
+                                ShowValue(numSeqs));
+
+                    auto oldNumSeqs = numSeqs;
+                    numSeqs         = seqs.size();
+
+                    iterators.reserve(numSeqs);
+                    for(size_t i = oldNumSeqs; i < numSeqs; i++)
+                    {
+                        iterators.emplace_back(seqs[i].begin());
+                        co_yield consumeComments(iterators[i], seqs[i].end());
+                    }
+                }
+
                 if(iterators[idx] != seqs[idx].end())
                 {
                     currentCost = (*m_cost)(iterators[idx]);
@@ -70,7 +87,7 @@ namespace rocRoller
                         minCostIdx = idx;
                     }
 
-                    idx = (idx + 1) % n;
+                    idx = (idx + 1) % numSeqs;
 
                     while(idx != origIdx)
                     {
@@ -87,7 +104,7 @@ namespace rocRoller
                         if(minCost == 0)
                             break;
 
-                        idx = (idx + 1) % n;
+                        idx = (idx + 1) % numSeqs;
                     }
 
                     if(minCostIdx == -1)
