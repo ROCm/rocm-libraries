@@ -6,6 +6,23 @@
 //
 //===----------------------------------------------------------------------===//
 
+// Modifications Copyright (c) 2025 Advanced Micro Devices, Inc.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
 #include <cuda/std/ctime>
 #include <cuda/std/type_traits>
 
@@ -51,7 +68,10 @@ int main(int, char**)
   unused(tmspec); // Prevent unused warning
 #  endif
 
-#  ifndef TEST_COMPILER_CLANG_CUDA
+//FIXME(hip): clock() is declared as extern clock_t clock (void) __THROW; in <time.h>. clock_t is a typedef to long.
+//The below test doesn't work for HIP, as the clock() function is defined in /opt/rocm/include/hip/amd_detail/amd_device_functions.h
+//as "long long int  clock() { return __clock(); }". Therefore, the decltype expands to long long instead of the expected type long.
+#  if !defined(TEST_COMPILER_CLANG_CUDA) || !defined(__HIP__)
   static_assert((cuda::std::is_same<decltype(cuda::std::clock()), cuda::std::clock_t>::value), "");
 #  endif // TEST_COMPILER_CLANG_CUDA
   static_assert((cuda::std::is_same<decltype(cuda::std::difftime(t, t)), double>::value), "");
