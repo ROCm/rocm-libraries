@@ -270,3 +270,16 @@ def all():
     yield from sgemm()
     yield from hgemm()
     yield from codegen()
+
+
+def priority_problems():
+    return {
+        "1. HGEMM Guidepost": {
+            "M": 7680,
+            "N": 8448,
+            "trans_A": "N",
+            "trans_B": "T",
+        },
+        "2. Halfs": {"type_A": "half"},
+        "3. Floats": {"type_A": "float"},
+    }

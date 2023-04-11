@@ -28,28 +28,16 @@ class RRPerfResult:
 #
 # GEMM
 #
-
-
 @dataclass(unsafe_hash=True)
-class GEMM:
-    """GEMM base problem description."""
+class GEMMProblem:
+    """GEMM arguments that are part of the problem description."""
 
-    M: int
-    N: int
-    K: int
-
-    mac_m: int
-    mac_n: int
-    mac_k: int
+    M: int = 1024
+    N: int = 1024
+    K: int = 1024
 
     alpha: float = 2.0
     beta: float = 0.5
-
-    workgroup_size_x: int = 64 * 2
-    workgroup_size_y: int = 2
-
-    unroll_x: int = 0
-    unroll_y: int = 0
 
     type_A: str = "float"
     type_B: str = "float"
@@ -57,18 +45,38 @@ class GEMM:
     type_D: str = "float"
     type_acc: str = "float"
 
-    numWarmUp: int = 2
-    numOuter: int = 10
-    numInner: int = 1
-
     trans_A: str = "N"
     trans_B: str = "N"
+
+
+@dataclass(unsafe_hash=True)
+class GEMMSolution:
+    """GEMM arguments that are part of the selected solution."""
+
+    mac_m: int = 16
+    mac_n: int = 16
+    mac_k: int = 16
+
+    workgroup_size_x: int = 64 * 2
+    workgroup_size_y: int = 2
+
+    unroll_x: int = 0
+    unroll_y: int = 0
 
     loadLDS_A: bool = True
     loadLDS_B: bool = True
     storeLDS_D: bool = True
 
     scheduler: str = "Priority"
+
+
+@dataclass(unsafe_hash=True)
+class GEMM(GEMMProblem, GEMMSolution):
+    """GEMM base problem description."""
+
+    numWarmUp: int = 2
+    numOuter: int = 10
+    numInner: int = 1
 
     visualize: bool = False
 
@@ -77,6 +85,44 @@ class GEMM:
     @property
     def token(self):
         return repr(GEMM(**field_dict(GEMM, self)))
+
+    def problem_token(self, priority_problems):
+        label = ""
+        self_dict = field_dict(GEMMProblem, self)
+        for label, priority_problem in priority_problems.items():
+            if all(
+                [
+                    arg in self_dict and self_dict[arg] == priority_problem[arg]
+                    for arg in priority_problem
+                ]
+            ):
+                label = str(label) + ": "
+                break
+        return (
+            label
+            + "GEMM("
+            + ", ".join(
+                [
+                    key + ": " + str(val)
+                    for key, val in field_dict(GEMMProblem, self).items()
+                ]
+            )
+            + ")"
+        )
+
+    @property
+    def solution_token(self):
+        return (
+            "GEMM("
+            + ", ".join(
+                [
+                    key + ": " + str(val)
+                    for key, val in field_dict(GEMM, self).items()
+                    if key in field_dict(GEMMSolution, self).items()
+                ]
+            )
+            + ")"
+        )
 
 
 @dataclass(unsafe_hash=True)
@@ -141,6 +187,41 @@ class CodeGen:
     @property
     def token(self):
         return repr(CodeGen(**field_dict(CodeGen, self)))
+
+    @staticmethod
+    def problem_args():
+        return {"instCount", "instructions"}
+
+    @staticmethod
+    def solution_args():
+        return {}
+
+    def problem_token(self, priority_problems):
+        return (
+            "CodeGen("
+            + ", ".join(
+                [
+                    key + ": " + str(val)
+                    for key, val in field_dict(CodeGen, self).items()
+                    if key in CodeGen.problem_args()
+                ]
+            )
+            + ")"
+        )
+
+    @property
+    def solution_token(self):
+        return (
+            "CodeGen("
+            + ", ".join(
+                [
+                    key + ": " + str(val)
+                    for key, val in field_dict(CodeGen, self).items()
+                    if key in CodeGen.solution_args()
+                ]
+            )
+            + ")"
+        )
 
 
 @dataclass(unsafe_hash=True)

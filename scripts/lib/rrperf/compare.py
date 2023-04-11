@@ -16,6 +16,15 @@ import scipy.stats
 from rrperf.specs import MachineSpecs
 
 
+def priority_problems():
+    """Load priority problem args from rrsuites.py."""
+    loc = pathlib.Path(os.path.dirname(os.path.realpath(__file__)))
+    tdef = loc / ".." / ".." / "rrsuites.py"
+    code, ns = compile(tdef.read_text(), str(tdef), "exec"), {}
+    exec(code, ns)
+    return ns["priority_problems"]()
+
+
 @dataclass
 class ComparisonResult:
     mean: List[float]
@@ -23,6 +32,8 @@ class ComparisonResult:
     moods_pval: float
 
     results: List[Any] = field(repr=False)
+
+    problem: str
 
 
 @dataclass
@@ -68,22 +79,17 @@ class PerformanceRun:
         for run in runs:
             common = common.intersection(set(run.results.keys()))
 
-        common = list(common)
-        common.sort()
+        common = sorted(common)
 
         return common
 
     @staticmethod
     def get_all_tokens(runs):
-        tests = list({token for run in runs for token in run.results})
-        tests.sort()
-        return tests
+        return sorted({token for run in runs for token in run.results})
 
     @staticmethod
     def get_all_specs(runs):
-        configs = list({run.machine_spec for run in runs})
-        configs.sort()
-        return configs
+        return sorted({run.machine_spec for run in runs})
 
     @staticmethod
     def get_timestamp(wrkdir):
@@ -167,19 +173,19 @@ def summary_statistics(perf_runs):
             kb_mean = statistics.mean(kb)
 
             _, p, _, _ = scipy.stats.median_test(ka, kb)
-
             stats[run][token] = A.token, ComparisonResult(
                 mean=[ka_mean, kb_mean],
                 median=[ka_median, kb_median],
                 moods_pval=p,
                 results=[A, B],
+                problem=A.problem_token(priority_problems()),
             )
 
     return stats
 
 
 def significant_changes(summary, threshold=0.05):
-    result_diff = ""
+    result_diffs = dict()
     for run in summary:
         for result in summary[run]:
             token, comparison = summary[run][result]
@@ -189,8 +195,17 @@ def significant_changes(summary, threshold=0.05):
             ) / comparison.median[0]
             if comparison.moods_pval < threshold:
                 sign = "+" if percent < 0 else "-"
-                result_diff += f"{sign} {(abs(percent)):6.2f}% | p={comparison.moods_pval:.4e} | {token}\n"
-
+                result_diffs[A.problem_token(priority_problems()) + A.token] = (
+                    f"{sign} {(abs(percent)):6.2f}% "
+                    f"| p={comparison.moods_pval:.4e} "
+                    f"| {A.problem_token(priority_problems())} "
+                    f"| {A.solution_token} "
+                    f"| {token}\n"
+                )
+    keys = sorted(result_diffs.keys())
+    result_diff = ""
+    for key in keys:
+        result_diff += result_diffs[key]
     return result_diff
 
 
@@ -273,7 +288,7 @@ def markdown_summary(md, perf_runs):
     print("</details>\n", file=md)
 
 
-def html_overview_table(html_file, summary):
+def html_overview_table(html_file, summary, problems):
     """Create HTML table with summary statistics."""
 
     print("<table><tr><td>", file=html_file)
@@ -300,10 +315,15 @@ def html_overview_table(html_file, summary):
             relative_diff = (
                 comparison.median[1] - comparison.median[0]
             ) / comparison.median[0]
+            link_target = (
+                problems.index(comparison.problem)
+                if comparison.problem in problems
+                else i
+            )
             print(
                 f"""
                 <tr>
-                    <td><a href="#plot{i}"> {token} </a></td>
+                    <td><a href="#plot{link_target}"> {token} </a></td>
                     <td> {comparison.mean[0]:,} </td>
                     <td> {comparison.mean[1]:,} </td>
                     <td> {comparison.median[0]:,} </td>
@@ -326,7 +346,7 @@ def email_html_summary(html_file, perf_runs):
 
     print("<h2>Results</h2>", file=html_file)
 
-    html_overview_table(html_file, summary)
+    html_overview_table(html_file, summary, [])
 
     perf_runs.sort()
 
@@ -350,6 +370,13 @@ def email_html_summary(html_file, perf_runs):
         )
 
 
+def get_common_args(tokens):
+    splitTokens = [x.split(",") for x in tokens]
+    return {
+        arg for arg in splitTokens[0] if all([arg in token for token in splitTokens])
+    }
+
+
 def html_summary(  # noqa: C901
     html_file,
     perf_runs,
@@ -359,60 +386,77 @@ def html_summary(  # noqa: C901
     plot_median=False,
     plot_min=False,
     x_value="timestamp",
+    group_results=False,
 ):
     """Create HTML report of summary statistics."""
-
     import plotly.express as px
     from plotly import graph_objs as go
+
+    if plot_box and group_results:
+        raise Exception(
+            "Result grouping and box plots cannot be used at the same time."
+        )
 
     perf_runs.sort()
     summary = summary_statistics(perf_runs[-2:])
 
     plots = []
 
-    # Get test tokens from the most recent run and sort them for consistent results.
-    tests = list(perf_runs[-1].results.keys())
-    tests.sort()
+    # Get problem and test tokens from the most recent run and sort them for consistent results.
+    problems = sorted(
+        {
+            val.problem_token(priority_problems())
+            for val in perf_runs[-1].results.values()
+        }
+    )
+    tests = sorted(perf_runs[-1].results.keys())
 
     # Get all unique machine specs and sort them for consistent results.
     configs = PerformanceRun.get_all_specs(perf_runs)
 
-    for token in tests:
-        machine_filtered_runs = defaultdict(lambda: PlotData())
-        normalizer = None if normalize else 1
-        for run in perf_runs:
-            if token not in run.results:
-                continue
-
-            name = (
-                run.name() + " <br> Machine ID: " + str(configs.index(run.machine_spec))
-            )
-
-            A = run.results[token]
-            ka = np.asarray(A.kernelExecute)
-            if "numInner" in A.__dict__.values():
-                ka = ka / A.numInner
-
-            median = statistics.median(ka)
-            if normalizer is None:
-                normalizer = median
-
-            ka = ka / normalizer
-            median = median / normalizer
-            min = np.min(ka)
-            for machine in ["all", run.machine_spec]:
-                machine_filtered_runs[machine].timestamp.append(run.timestamp)
-                machine_filtered_runs[machine].commit.append(run.commit)
-                machine_filtered_runs[machine].median.append(median)
-                machine_filtered_runs[machine].min.append(min)
-                machine_filtered_runs[machine].name.append(name)
-                machine_filtered_runs[machine].kernel.append(ka)
-                machine_filtered_runs[machine].machine.append(
-                    configs.index(run.machine_spec)
+    # Don't group when using box plots.
+    for problem in problems if group_results else tests:
+        runs = defaultdict(lambda: PlotData())
+        for token in tests if group_results else [problem]:
+            normalizer = None if normalize else 1
+            for run in perf_runs:
+                if token not in run.results:
+                    continue
+                if (
+                    group_results
+                    and run.results[token].problem_token(priority_problems()) != problem
+                ):
+                    continue
+                name = (
+                    run.name()
+                    + " <br> Machine ID: "
+                    + str(configs.index(run.machine_spec))
+                    + " <br> "
+                    + run.results[token].solution_token
                 )
-                machine_filtered_runs[machine].box_data = pd.concat(
+
+                A = run.results[token]
+                ka = np.asarray(A.kernelExecute)
+                if "numInner" in A.__dict__.values():
+                    ka = ka / A.numInner
+
+                median = statistics.median(ka)
+                if normalizer is None:
+                    normalizer = median
+
+                ka = ka / normalizer
+                median = median / normalizer
+                min = np.min(ka)
+                runs[token].timestamp.append(run.timestamp)
+                runs[token].commit.append(run.commit)
+                runs[token].median.append(median)
+                runs[token].min.append(min)
+                runs[token].name.append(name)
+                runs[token].kernel.append(ka)
+                runs[token].machine.append(configs.index(run.machine_spec))
+                runs[token].box_data = pd.concat(
                     [
-                        machine_filtered_runs[machine].box_data,
+                        runs[token].box_data,
                         pd.DataFrame(
                             {
                                 "timestamp": run.timestamp,
@@ -423,99 +467,41 @@ def html_summary(  # noqa: C901
                     ]
                 )
 
-        total_plots = 0
-        for flag in [plot_box, plot_median, plot_min]:
-            total_plots += 1 if flag else 0
-
-        drop_down_options = [
-            {
-                "method": "update",
-                "label": "All Machines",
-                "args": [
-                    {
-                        "visible": ([True] * total_plots)
-                        + ([False] * len(configs) * total_plots)
-                    }
-                ],
-            }
-        ]
-
         plot = go.Figure()
+        common_args = get_common_args(runs.keys())
         if plot_box:
-            box = px.box(
-                machine_filtered_runs["all"].box_data, x=x_value, y="runs"
-            ).select_traces()
-            plot.add_trace(next(box))
-        if plot_median:
-            scatter = go.Scatter(
-                x=getattr(machine_filtered_runs["all"], x_value),
-                y=machine_filtered_runs["all"].median,
-                name="Median",
-                text=machine_filtered_runs["all"].name,
-                marker_color=machine_filtered_runs["all"].machine,
-                mode="lines+markers",
-            )
-            plot.add_trace(scatter)
-        if plot_min:
-            scatter = go.Scatter(
-                x=getattr(machine_filtered_runs["all"], x_value),
-                y=machine_filtered_runs["all"].min,
-                name="Min",
-                text=machine_filtered_runs["all"].name,
-                marker_color=machine_filtered_runs["all"].machine,
-                mode="lines+markers",
-            )
-            plot.add_trace(scatter)
-
-        for i, config in enumerate(configs):
-            if plot_box:
-                box = px.box(
-                    machine_filtered_runs[config].box_data, x=x_value, y="runs"
-                ).select_traces()
-                plot.add_trace(next(box))
+            dfs = pd.concat([runs[token].box_data for token in runs])
+            box = px.box(dfs, x=x_value, y="runs").select_traces()
+            for trace in box:
+                plot.add_trace(trace)
+        for token in runs:
+            legend = sorted(set(token.split(",")) - common_args)
+            legend = "<br>".join(legend) + "<br>-----------------------"
             if plot_median:
                 scatter = go.Scatter(
-                    x=getattr(machine_filtered_runs[config], x_value),
-                    y=machine_filtered_runs[config].median,
-                    visible=False,
-                    name="Median",
-                    text=machine_filtered_runs[config].name,
+                    x=getattr(runs[token], x_value),
+                    y=runs[token].median,
+                    name="Median for<br>" + legend,
+                    text=runs[token].name,
+                    marker_color=runs[token].machine,
                     mode="lines+markers",
                 )
                 plot.add_trace(scatter)
             if plot_min:
                 scatter = go.Scatter(
-                    x=getattr(machine_filtered_runs[config], x_value),
-                    y=machine_filtered_runs[config].min,
-                    visible=False,
-                    name="Min",
-                    text=machine_filtered_runs[config].name,
+                    x=getattr(runs[token], x_value),
+                    y=runs[token].min,
+                    name="Min for<br>" + legend,
+                    text=runs[token].name,
+                    marker_color=runs[token].machine,
                     mode="lines+markers",
                 )
                 plot.add_trace(scatter)
-
-            filter = [False] * ((len(configs) + 1) * total_plots)
-            for j in range(total_plots):
-                filter[(i + 1) * total_plots + j] = True
-            drop_down_options.append(
-                {
-                    "method": "update",
-                    "label": "Machine ID: {}".format(str(configs.index(config))),
-                    "args": [{"visible": filter}],
-                }
-            )
 
         if y_zero:
             plot.update_yaxes(rangemode="tozero")
 
         plot.update_layout(
-            updatemenus=[
-                {
-                    "buttons": drop_down_options,
-                    "direction": "down",
-                    "showactive": True,
-                }
-            ],
             xaxis=dict(
                 rangeslider=dict(visible=True),
                 type="date" if x_value == "timestamp" else "category",
@@ -526,7 +512,7 @@ def html_summary(  # noqa: C901
         )
         plot.update_layout(
             height=1000,
-            title_text=str(token),
+            title_text=str(problem),
         )
         if not normalize:
             plot.update_yaxes(title={"text": "Runtime (ns)"})
@@ -571,21 +557,31 @@ def html_summary(  # noqa: C901
     )
 
     print("<h1>rocRoller performance</h1>", file=html_file)
-    print("<h2>Overview</h2>", file=html_file)
-    html_overview_table(html_file, summary)
+
+    if len(perf_runs) == 2:
+        print("<h2>Overview</h2>", file=html_file)
+        html_overview_table(html_file, summary, problems if group_results else [])
 
     print("<h2>Results</h2>", file=html_file)
+    if group_results:
+        print("<ul>", file=html_file)
+        print(
+            "\n".join(
+                [
+                    f'<li><a href="#plot{link_target}"> {token} </a></li>'
+                    for link_target, token in enumerate(problems)
+                ]
+            ),
+            file=html_file,
+        )
+        print("</ul>", file=html_file)
+
     print('<table width="100%">', file=html_file)
-
-    print("<tr><td>", file=html_file)
-    print(machine_table.to_html(full_html=False, include_plotlyjs=True), file=html_file)
-    print("</td></tr>", file=html_file)
-
     for i in range(len(plots)):
         print("<tr><td>", file=html_file)
         print(
             plots[i].to_html(
-                full_html=False, include_plotlyjs=False, div_id=f"plot{i}"
+                full_html=False, include_plotlyjs=i == 0, div_id=f"plot{i}"
             ),
             file=html_file,
         )
@@ -593,6 +589,19 @@ def html_summary(  # noqa: C901
     print(
         """
     </table>
+    """,
+        file=html_file,
+    )
+
+    print("<h2>Machines</h2>", file=html_file)
+    print("<tr><td>", file=html_file)
+    print(
+        machine_table.to_html(full_html=False, include_plotlyjs=False), file=html_file
+    )
+    print("</td></tr>", file=html_file)
+
+    print(
+        """
     </body>
     </html>
     """,
@@ -620,6 +629,7 @@ def compare(
     plot_min=False,
     exclude_boxplot=False,
     x_value="timestamp",
+    group_results=False,
     **kwargs,
 ):
     """Compare multiple run directories.
@@ -645,6 +655,7 @@ def compare(
             plot_min=plot_min,
             plot_box=not exclude_boxplot,
             x_value=x_value,
+            group_results=group_results,
         )
     elif format == "email_html":
         email_html_summary(output, perf_runs)

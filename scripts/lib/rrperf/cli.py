@@ -112,13 +112,19 @@ def main():
         cmd.add_argument(
             "--exclude_boxplot",
             action="store_true",
-            help="Exclude the box plots when plotting in html.",
+            help="Exclude the box plots when plotting in html. (Must be used with --group_results)",
         )
         cmd.add_argument(
             "--x_value",
             help="Choose which value to use for the x-axis.",
             default="timestamp",
             choices=["timestamp", "commit"],
+        )
+        cmd.add_argument(
+            "--group_results",
+            action="store_true",
+            help="Group data with the same problem args on the same graph.\n"
+            "(Not compatible with boxplots.)",
         )
 
     profile_cmd = subparsers.add_parser(
@@ -145,6 +151,13 @@ def main():
     )
 
     args = parser.parse_args()
+
+    if (
+        "group_results" in args.__dict__
+        and args.group_results
+        and not args.exclude_boxplot
+    ):
+        parser.error("--group_results cannot be used without --exclude_boxplot")
 
     command = {
         "run": rrperf.run.run,
