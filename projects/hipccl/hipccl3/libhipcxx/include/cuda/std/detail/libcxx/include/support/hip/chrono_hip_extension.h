@@ -7,6 +7,23 @@
 //
 //===----------------------------------------------------------------------===//
 
+// Modifications Copyright (c) 2025 Advanced Micro Devices, Inc.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
 #ifndef _LIBCUDACXX_SUPPORT_HIP_EXTENSION_H 
 #define _LIBCUDACXX_SUPPORT_HIP_EXTENSION_H
 
@@ -16,12 +33,26 @@
  * The idea is to send an initial host timestamp to the device and to store it in global memory.
  * IMPORTANT: This is an EXPERIMENTAL workaround. 
  * IMPORTANT: Any application requiring a C++20 conforming system clock (i.e. with UNIX timestamp epoch) needs to enable the workaround according to the following steps:
- * 1) The macro LIBCUDACXX_HIP_DEFINE_SYSCLOCK_VARS needs to be called at file scope level in a single translation unit, usually where the main function is located.
- *    The header "cuda/std/chrono" must be included to make the macro available.
- * 2) cuda::std::chrono::hip_gpu_ext::initialize_amdgpu_sysclock_on_current_device() or cuda::std::chrono::hip_gpu_ext::initialize_amdgpu_sysclock_on_device()
- *    need to be called to initialize the system clock on a given device.
- * 3) Subsequent calls to cuda::std::system_clock::now() will then return time_points starting at UNIX time.
- * CAUTION: If multiple translation units use the system_clock on the device, the linker flag --fgpu-rdc must be set.
+ * 1) The compile flag _LIBCUDACXX_EXPERIMENTAL_CHRONO_HIP needs to be set (-D_LIBCUDACXX_EXPERIMENTAL_CHRONO_HIP).
+ * 2) The linker flag --fgpu-rdc must be set.
+ * 3) The macro LIBCUDACXX_HIP_DEFINE_SYSCLOCK_VARS needs to be called at file scope level in a single translation unit, usually where the main function is located.
+ *    The header "cuda/std/chrono" must be included to make this macro available.
+ * 4) cuda::std::chrono::hip_gpu_ext::initialize_amdgpu_sysclock_on_current_device() or cuda::std::chrono::hip_gpu_ext::initialize_amdgpu_sysclock_on_device()
+ *    need to be called on the host once to initialize the system clock for a given device.
+ * 5) Subsequent calls to cuda::std::system_clock::now() will then return time_points starting at UNIX time.
+ * 
+ * Example source code file:
+ * #include "cuda/std/chrono"
+ * //... (other headers)
+ * //The following macro call defines the state we need on the device (outside of any function at file scope) 
+ * LIBCUDACXX_HIP_DEFINE_SYSCLOCK_VARS   
+ * //...
+ * int main(int argc, char **argv) {
+ * // initializes the system clock on the current device  
+ *    cuda::std::chrono::hip_gpu_ext::initialize_amdgpu_sysclock_on_current_device();
+ * // use the system clock on the device
+ *    someKernelUsingSysclock<<<...>>>(...)
+ * }
 */
 
 #include "hip/hip_runtime.h"
