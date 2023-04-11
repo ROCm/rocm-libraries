@@ -64,18 +64,18 @@ namespace rocRoller
             {
                 AssertFatal(!regs.empty());
                 auto rtype = regs[0]->regType();
-                for(int i = 0; i < regs.size(); ++i)
+                for(int i = 1; i < regs.size(); ++i)
                 {
                     rtype = Register::PromoteType(rtype, regs[i]->regType());
                 }
                 return rtype;
             }
 
-            VariableType promoteVarialbeTypes(std::vector<Register::ValuePtr> const& regs)
+            VariableType promoteVariableTypes(std::vector<Register::ValuePtr> const& regs)
             {
                 AssertFatal(!regs.empty());
                 auto vtype = regs[0]->variableType();
-                for(int i = 0; i < regs.size(); ++i)
+                for(int i = 1; i < regs.size(); ++i)
                 {
                     vtype = VariableType::Promote(vtype, regs[i]->variableType());
                 }
@@ -191,7 +191,7 @@ namespace rocRoller
                 auto const rhsInfo = DataTypeInfo::Get(rhs->variableType());
 
                 auto regType = promoteRegisterTypes({lhs, rhs});
-                auto varType = promoteVarialbeTypes({lhs, rhs});
+                auto varType = promoteVariableTypes({lhs, rhs});
 
                 // TODO: Delete once FastDivision uses only libdivide.
                 if constexpr(std::same_as<MultiplyHigh, Operation>)
@@ -317,7 +317,7 @@ namespace rocRoller
                     }
                 }
 
-                auto varType = promoteVarialbeTypes(results);
+                auto varType = promoteVariableTypes(results);
 
                 if(!dest)
                 {

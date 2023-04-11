@@ -621,10 +621,12 @@ namespace ExpressionTest
 
     TEST_F(ExpressionTest, EvaluateMixedTypes)
     {
-        auto one   = std::make_shared<Expression::Expression>(1.0);
-        auto two   = std::make_shared<Expression::Expression>(2.0f);
-        auto five  = std::make_shared<Expression::Expression>(5);
-        auto seven = std::make_shared<Expression::Expression>(7.0);
+        auto one          = std::make_shared<Expression::Expression>(1.0);
+        auto two          = std::make_shared<Expression::Expression>(2.0f);
+        auto twoPoint5    = std::make_shared<Expression::Expression>(2.5f);
+        auto five         = std::make_shared<Expression::Expression>(5);
+        auto seven        = std::make_shared<Expression::Expression>(7.0);
+        auto eightPoint75 = std::make_shared<Expression::Expression>(8.75);
 
         auto ptrNull = std::make_shared<Expression::Expression>((float*)nullptr);
 
@@ -648,6 +650,24 @@ namespace ExpressionTest
         EXPECT_EQ(6.0, std::get<double>(Expression::evaluate(exprSix)));
         EXPECT_EQ(1.0, std::get<double>(Expression::evaluate(exprOne)));
         EXPECT_EQ(7.0f, std::get<float>(Expression::evaluate(exprSeven)));
+
+        auto twoDouble = convert(DataType::Double, two);
+        EXPECT_EQ(2.0, std::get<double>(Expression::evaluate(twoDouble)));
+
+        auto twoInt = convert(DataType::Int32, twoPoint5);
+        EXPECT_EQ(2, std::get<int>(Expression::evaluate(twoInt)));
+
+        auto fiveDouble = seven - twoInt;
+        EXPECT_EQ(5.0, std::get<double>(Expression::evaluate(fiveDouble)));
+
+        auto minusThree64 = convert(DataType::Int64, twoInt - five);
+        EXPECT_EQ(-3l, std::get<int64_t>(Expression::evaluate(minusThree64)));
+
+        auto minusThreeU64 = convert(DataType::UInt64, twoInt - five);
+        EXPECT_EQ(18446744073709551613ul, std::get<uint64_t>(Expression::evaluate(minusThreeU64)));
+
+        auto eight75Half = convert(DataType::Half, eightPoint75);
+        EXPECT_EQ(Half(8.75), std::get<Half>(evaluate(eight75Half)));
 
         Expression::ResultType litDouble{Register::Type::Literal, DataType::Double};
         Expression::ResultType litFloat{Register::Type::Literal, DataType::Float};
@@ -1173,6 +1193,25 @@ namespace ExpressionTest
         testFunc(waveTilePtr);
         EXPECT_THROW(Expression::evaluate(waveTilePtr), FatalError);
         EXPECT_NO_THROW(Expression::fastDivision(waveTilePtr, m_context));
+
+        EXPECT_NO_THROW(Expression::convert(DataType::Float, intExpr));
+        EXPECT_NO_THROW(Expression::convert(DataType::Double, intExpr));
+        EXPECT_THROW(Expression::convert(DataType::ComplexFloat, intExpr), FatalError);
+        EXPECT_THROW(Expression::convert(DataType::ComplexDouble, intExpr), FatalError);
+        EXPECT_NO_THROW(Expression::convert(DataType::Half, intExpr));
+        EXPECT_THROW(Expression::convert(DataType::Halfx2, intExpr), FatalError);
+        EXPECT_THROW(Expression::convert(DataType::Int8x4, intExpr), FatalError);
+        EXPECT_NO_THROW(Expression::convert(DataType::Int32, intExpr));
+        EXPECT_NO_THROW(Expression::convert(DataType::Int64, intExpr));
+        EXPECT_THROW(Expression::convert(DataType::BFloat16, intExpr), FatalError);
+        EXPECT_THROW(Expression::convert(DataType::Int8, intExpr), FatalError);
+        EXPECT_THROW(Expression::convert(DataType::Raw32, intExpr), FatalError);
+        EXPECT_NO_THROW(Expression::convert(DataType::UInt32, intExpr));
+        EXPECT_NO_THROW(Expression::convert(DataType::UInt64, intExpr));
+        EXPECT_THROW(Expression::convert(DataType::Bool, intExpr), FatalError);
+        EXPECT_THROW(Expression::convert(DataType::Bool32, intExpr), FatalError);
+        EXPECT_THROW(Expression::convert(DataType::Count, intExpr), FatalError);
+        EXPECT_THROW(Expression::convert(static_cast<DataType>(200), intExpr), FatalError);
     }
 
     class ARCH_ExpressionTest : public GPUContextFixture
@@ -1269,10 +1308,11 @@ namespace ExpressionTest
         void basicTernaryExpression(
             std::function<Expression::ExpressionPtr(
                 Expression::ExpressionPtr, Expression::ExpressionPtr, Expression::ExpressionPtr)> f,
-            TA aValue,
-            TB bValue,
-            TC cValue,
-            TR resultValue)
+            TA   aValue,
+            TB   bValue,
+            TC   cValue,
+            TR   resultValue,
+            bool resultPlaceholder = false)
         {
             DataType aDType = TypeInfo<TA>::Var.dataType;
             DataType bDType = TypeInfo<TB>::Var.dataType;
@@ -1319,6 +1359,9 @@ namespace ExpressionTest
                 co_yield m_context->copier()->copy(v_c, s_c, "Move value");
 
                 Register::ValuePtr v_r;
+                if(resultPlaceholder)
+                    v_r = Register::Value::Placeholder(
+                        m_context, Register::Type::Vector, TypeInfo<TR>::Var, 1);
                 co_yield Expression::generate(v_r, expr, m_context);
 
                 co_yield m_context->mem()->storeFlat(v_result_ptr, v_r, 0, sizeof(TR));
@@ -1404,6 +1447,161 @@ namespace ExpressionTest
 
         auto assembly = m_context->instructions()->toString();
         EXPECT_THAT(assembly, testing::HasSubstr("v_fma_f32"));
+    }
+
+    TEST_P(ARCH_ExpressionTest, Conversions1)
+    {
+        namespace Ex = Expression;
+        int32_t  a   = -192;
+        int64_t  b   = 2235530478080l;
+        uint64_t c   = 40534632177074688l;
+
+        auto r = static_cast<uint64_t>(((b << 3) * a) >> 4) + static_cast<int64_t>(c);
+
+        auto expr = [](Expression::ExpressionPtr a,
+                       Expression::ExpressionPtr b,
+                       Expression::ExpressionPtr c) {
+            return convert<DataType::UInt64>(((b << Ex::literal(3)) * a) >> Ex::literal(4))
+                   + convert(DataType::Int64, c);
+        };
+
+        basicTernaryExpression(expr, a, b, c, r);
+    }
+
+    TEST_P(ARCH_ExpressionTest, Conversions2)
+    {
+        namespace Ex = Expression;
+        uint32_t a   = 2149597184u;
+        uint32_t b   = 3223339008u;
+        int64_t  c   = 4611703644973170816l;
+
+        auto r = ((static_cast<uint64_t>(a) * 23) + b) - static_cast<uint64_t>(c);
+
+        auto expr = [](Expression::ExpressionPtr a,
+                       Expression::ExpressionPtr b,
+                       Expression::ExpressionPtr c) {
+            return ((convert<DataType::UInt64>(a) * Ex::literal(23)) + b)
+                   - convert(DataType::UInt64, c);
+        };
+
+        basicTernaryExpression(expr, a, b, c, r);
+    }
+
+    TEST_P(ARCH_ExpressionTest, Conversions3)
+    {
+        namespace Ex = Expression;
+        int32_t  a   = -192;
+        int64_t  b   = 2235530478080l;
+        uint32_t c   = 40588;
+
+        auto r = ((static_cast<int32_t>(b) + a) >> 4) + static_cast<int32_t>(c);
+
+        auto expr = [](Expression::ExpressionPtr a,
+                       Expression::ExpressionPtr b,
+                       Expression::ExpressionPtr c) {
+            return ((convert(DataType::Int32, b) + a) >> Ex::literal(4))
+                   + convert(DataType::Int32, c);
+        };
+
+        basicTernaryExpression(expr, a, b, c, r);
+    }
+    TEST_P(ARCH_ExpressionTest, Conversions4)
+    {
+        namespace Ex = Expression;
+        uint32_t a   = 192;
+        uint64_t b   = 2235530478080l;
+        int32_t  c   = 40588;
+
+        auto r = ((static_cast<uint32_t>(b) + a) >> 4) + static_cast<uint32_t>(c);
+
+        auto expr = [](Expression::ExpressionPtr a,
+                       Expression::ExpressionPtr b,
+                       Expression::ExpressionPtr c) {
+            return shiftR(convert(DataType::UInt32, b) + a, Ex::literal(4))
+                   + convert(DataType::UInt32, c);
+        };
+
+        basicTernaryExpression(expr, a, b, c, r);
+    }
+
+    TEST_P(ARCH_ExpressionTest, ImplicitlyConvertShiftL1)
+    {
+        namespace Ex = Expression;
+        uint32_t a   = 2149597184u;
+        uint32_t b   = 12326;
+        int      c   = 9;
+
+        uint64_t r = static_cast<uint64_t>(a + b) << c;
+
+        auto expr = [](Expression::ExpressionPtr a,
+                       Expression::ExpressionPtr b,
+                       Expression::ExpressionPtr c) { return (a + b) << c; };
+
+        basicTernaryExpression(expr, a, b, c, r, true);
+    }
+
+    TEST_P(ARCH_ExpressionTest, ImplicitlyConvertShiftL2)
+    {
+        namespace Ex = Expression;
+        int32_t a    = -9597184;
+        int32_t b    = 12326;
+        int     c    = 9;
+
+        int64_t r = static_cast<int64_t>(a + b) << c;
+
+        auto expr = [](Expression::ExpressionPtr a,
+                       Expression::ExpressionPtr b,
+                       Expression::ExpressionPtr c) { return (a + b) << c; };
+
+        basicTernaryExpression(expr, a, b, c, r, true);
+    }
+
+    TEST_P(ARCH_ExpressionTest, ImplicitlyConvertShiftR1)
+    {
+        namespace Ex = Expression;
+        uint32_t a   = 2149597184u;
+        uint32_t b   = 12326;
+        int      c   = 9;
+
+        uint64_t r = static_cast<uint64_t>(a + b) >> c;
+
+        auto expr = [](Expression::ExpressionPtr a,
+                       Expression::ExpressionPtr b,
+                       Expression::ExpressionPtr c) { return Ex::shiftR((a + b), c); };
+
+        basicTernaryExpression(expr, a, b, c, r, true);
+    }
+
+    TEST_P(ARCH_ExpressionTest, ImplicitlyConvertShiftR2)
+    {
+        namespace Ex = Expression;
+        uint32_t a   = 2149597184u;
+        uint32_t b   = 12326;
+        int      c   = 9;
+
+        uint64_t r = static_cast<uint64_t>(a + b) >> c;
+
+        auto expr = [](Expression::ExpressionPtr a,
+                       Expression::ExpressionPtr b,
+                       Expression::ExpressionPtr c) { return (a + b) >> c; };
+
+        basicTernaryExpression(expr, a, b, c, r, true);
+    }
+
+    TEST_P(ARCH_ExpressionTest, ImplicitlyConvertShiftR3)
+    {
+        namespace Ex = Expression;
+        int32_t a    = -9597184;
+        int32_t b    = 12326;
+        int     c    = 9;
+
+        int64_t r = static_cast<int64_t>(a + b) >> c;
+
+        auto expr = [](Expression::ExpressionPtr a,
+                       Expression::ExpressionPtr b,
+                       Expression::ExpressionPtr c) { return (a + b) >> c; };
+
+        basicTernaryExpression(expr, a, b, c, r, true);
     }
 
     TEST_P(ARCH_ExpressionTest, ComplexExpressionScalar)

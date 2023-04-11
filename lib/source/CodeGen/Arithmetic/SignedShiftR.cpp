@@ -24,49 +24,67 @@ namespace rocRoller
         AssertFatal(value != nullptr);
         AssertFatal(shiftAmount != nullptr);
 
-        auto dataType = promoteDataType(dest, value, value);
-
         auto toShift = shiftAmount->regType() == Register::Type::Literal ? shiftAmount
                                                                          : shiftAmount->subset({0});
 
+        auto resultSize = dest->variableType().getElementSize();
+        auto inputSize  = value->variableType().getElementSize();
+
+        auto resultDWords = CeilDivide(resultSize, 4ul);
+        auto inputDWords  = CeilDivide(inputSize, 4ul);
+
+        // We only want to do this conversion if there are more DWords in the output than the
+        // input.  For example if we are using the shift to convert between Halfx2 and Half, both
+        // use only 1 DWord.
+
+        AssertFatal(resultDWords >= inputDWords,
+                    ShowValue(dest->variableType()),
+                    ShowValue(value->variableType()));
+
+        if(resultDWords > inputDWords)
+        {
+            AssertFatal(!dest->intersects(shiftAmount),
+                        "Destination intersecting with shift amount not yet supported.");
+            co_yield generateConvertOp(dest->variableType().getArithmeticType(), dest, value);
+            value = dest;
+        }
+
         if(dest->regType() == Register::Type::Scalar)
         {
-            switch(dataType)
+            if(resultSize == 4)
             {
-            case DataType::Int32:
-            case DataType::UInt32:
                 co_yield_(Instruction("s_ashr_i32", {dest}, {value, toShift}, {}, ""));
-                break;
-            case DataType::Int64:
-            case DataType::UInt64:
+            }
+            else if(resultSize == 8)
+            {
                 co_yield_(Instruction("s_ashr_i64", {dest}, {value, toShift}, {}, ""));
-                break;
-            default:
+            }
+            else
+            {
                 Throw<FatalError>("Unsupported datatype for arithmetic shift right operation: ",
-                                  ShowValue(dataType));
+                                  ShowValue(dest));
             }
         }
         else if(dest->regType() == Register::Type::Vector)
         {
-            switch(dataType)
+            if(resultSize == 4)
             {
-            case DataType::Int32:
-            case DataType::UInt32:
                 co_yield_(Instruction("v_ashrrev_i32", {dest}, {toShift, value}, {}, ""));
-                break;
-            case DataType::Int64:
-            case DataType::UInt64:
+            }
+            else if(resultSize == 8)
+            {
                 co_yield_(Instruction("v_ashrrev_i64", {dest}, {toShift, value}, {}, ""));
-                break;
-            default:
+            }
+            else
+            {
                 Throw<FatalError>("Unsupported datatype for arithmetic shift right operation: ",
-                                  ShowValue(dataType));
+                                  ShowValue(dest));
             }
         }
         else
         {
             Throw<FatalError>("Unsupported register type for arithmetic shift right operation: ",
-                              ShowValue(dest->regType()));
+                              ShowValue(dest));
         }
     }
 }

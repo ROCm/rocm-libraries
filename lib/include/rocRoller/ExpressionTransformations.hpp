@@ -65,7 +65,7 @@ namespace rocRoller
             FastArithmetic() = delete;
             FastArithmetic(std::shared_ptr<Context>);
 
-            ExpressionPtr operator()(ExpressionPtr);
+            ExpressionPtr operator()(ExpressionPtr) const;
 
         private:
             std::shared_ptr<Context> m_context;

@@ -370,29 +370,28 @@ namespace rocRoller
             }
         };
 
-        template <>
-        struct OperationEvaluatorVisitor<Convert<DataType::Float>>
-            : public UnaryEvaluatorVisitor<Convert<DataType::Float>>
+        template <DataType T_DataType>
+        struct OperationEvaluatorVisitor<Convert<T_DataType>>
+            : public UnaryEvaluatorVisitor<Convert<T_DataType>>
         {
-            template <std::floating_point T>
-            float evaluate(T const& arg) const
+            using Base       = UnaryEvaluatorVisitor<Convert<T_DataType>>;
+            using ResultType = typename EnumTypeInfo<T_DataType>::Type;
+
+            template <CArithmeticType T>
+            requires CCanStaticCastTo<ResultType, T> ResultType evaluate(T const& arg)
+            const
             {
-                assertNonNullPointer(arg);
-                return static_cast<float>(arg);
+                Base::assertNonNullPointer(arg);
+                return static_cast<ResultType>(arg);
             }
         };
 
-        template <>
-        struct OperationEvaluatorVisitor<Convert<DataType::Half>>
-            : public UnaryEvaluatorVisitor<Convert<DataType::Half>>
-        {
-            template <std::floating_point T>
-            Half evaluate(T const& arg) const
-            {
-                assertNonNullPointer(arg);
-                return static_cast<Half>(arg);
-            }
-        };
+        static_assert(
+            std::same_as<OperationEvaluatorVisitor<Convert<DataType::Double>>::ResultType, double>);
+        static_assert(
+            CCanEvaluateUnary<OperationEvaluatorVisitor<Convert<DataType::Double>>, float>);
+        static_assert(
+            CCanEvaluateUnary<OperationEvaluatorVisitor<Convert<DataType::Double>>, double>);
 
         template <>
         struct OperationEvaluatorVisitor<MagicShifts> : public UnaryEvaluatorVisitor<MagicShifts>

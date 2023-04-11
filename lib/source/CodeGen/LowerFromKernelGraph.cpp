@@ -72,7 +72,7 @@ namespace rocRoller
                 auto        numBytes = Expression::literal(static_cast<uint>(info.elementSize));
 
                 // TODO: Consider moving numBytes into input of this function.
-                co_yield Expression::generate(dst, expr * numBytes, m_context);
+                co_yield Expression::generate(dst, m_fastArith(expr * numBytes), m_context);
             }
 
             bool hasGeneratedInputs(int const& tag)
@@ -312,7 +312,7 @@ namespace rocRoller
                                            ? m_context->getSCC()
                                            : m_context->getVCC();
                 co_yield Expression::generate(
-                    conditionResult, coords.getTransducer()(op.condition), m_context);
+                    conditionResult, m_fastArith(op.condition), m_context);
                 co_yield m_context->brancher()->branchIfZero(
                     botLabel,
                     conditionResult,
@@ -331,7 +331,7 @@ namespace rocRoller
                                               + " if true)");
 
                 co_yield Expression::generate(
-                    conditionResult, coords.getTransducer()(op.condition), m_context);
+                    conditionResult, m_fastArith(op.condition), m_context);
                 co_yield m_context->brancher()->branchIfNonZero(
                     topLabel,
                     conditionResult,
@@ -373,7 +373,7 @@ namespace rocRoller
                     if(dest->name().empty())
                         dest->setName(concatenate("DataFlowTag", dimTag));
                 }
-                co_yield Expression::generate(dest, assign.expression, m_context);
+                co_yield Expression::generate(dest, m_fastArith(assign.expression), m_context);
 
                 if(deferred)
                 {
@@ -558,16 +558,15 @@ namespace rocRoller
                 waveA.vgpr = m_context->registerTagManager()->getRegister(macATag);
                 waveB.vgpr = m_context->registerTagManager()->getRegister(macBTag);
 
-                Expression::ExpressionPtr A
+                auto A
                     = std::make_shared<Expression::Expression>(std::make_shared<WaveTile>(waveA));
-                Expression::ExpressionPtr B
+                auto B
                     = std::make_shared<Expression::Expression>(std::make_shared<WaveTile>(waveB));
 
-                co_yield Expression::generate(
-                    D,
-                    std::make_shared<Expression::Expression>(
-                        Expression::MatrixMultiply(A, B, D->expression())),
-                    m_context);
+                auto matMul = std::make_shared<Expression::Expression>(
+                    Expression::MatrixMultiply(A, B, D->expression()));
+
+                co_yield Expression::generate(D, matMul, m_context);
             }
 
             Generator<Instruction>

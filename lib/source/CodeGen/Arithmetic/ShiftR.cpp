@@ -21,42 +21,62 @@ namespace rocRoller
         AssertFatal(value != nullptr);
         AssertFatal(shiftAmount != nullptr);
 
-        auto elementSize = std::max({DataTypeInfo::Get(dest->variableType()).elementSize,
-                                     DataTypeInfo::Get(value->variableType()).elementSize});
-
         auto toShift = shiftAmount->regType() == Register::Type::Literal ? shiftAmount
                                                                          : shiftAmount->subset({0});
 
+        auto resultSize = dest->variableType().getElementSize();
+        auto inputSize  = value->variableType().getElementSize();
+
+        auto resultDWords = CeilDivide(resultSize, 4ul);
+        auto inputDWords  = CeilDivide(inputSize, 4ul);
+
+        // We only want to do this conversion if there are more DWords in the output than the
+        // input.  For example if we are using the shift to convert between Halfx2 and Half, both
+        // use only 1 DWord.
+        if(resultDWords > inputDWords)
+        {
+            AssertFatal(!dest->intersects(shiftAmount),
+                        "Destination intersecting with shift amount not yet supported.");
+
+            auto uintInput = value->subset(iota<int>(0, value->registerCount()).to<std::vector>());
+            uintInput->setVariableType(getIntegerType(false, inputSize));
+
+            auto destTypeUnsigned = getIntegerType(false, resultSize);
+            co_yield generateConvertOp(destTypeUnsigned, dest, uintInput);
+
+            value = dest;
+        }
+
         if(dest->regType() == Register::Type::Scalar)
         {
-            if(elementSize <= 4)
+            if(resultSize <= 4)
             {
                 co_yield_(Instruction("s_lshr_b32", {dest}, {value, toShift}, {}, ""));
             }
-            else if(elementSize == 8)
+            else if(resultSize == 8)
             {
                 co_yield_(Instruction("s_lshr_b64", {dest}, {value, toShift}, {}, ""));
             }
             else
             {
                 Throw<FatalError>("Unsupported element size for shift right operation:: ",
-                                  ShowValue(elementSize * 8));
+                                  ShowValue(resultSize * 8));
             }
         }
         else if(dest->regType() == Register::Type::Vector)
         {
-            if(elementSize <= 4)
+            if(resultSize <= 4)
             {
                 co_yield_(Instruction("v_lshrrev_b32", {dest}, {toShift, value}, {}, ""));
             }
-            else if(elementSize == 8)
+            else if(resultSize == 8)
             {
                 co_yield_(Instruction("v_lshrrev_b64", {dest}, {toShift, value}, {}, ""));
             }
             else
             {
                 Throw<FatalError>("Unsupported element size for shift right operation:: ",
-                                  ShowValue(elementSize * 8));
+                                  ShowValue(resultSize * 8));
             }
         }
         else

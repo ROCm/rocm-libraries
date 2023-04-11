@@ -40,6 +40,14 @@ namespace rocRoller
         msd = Register::Value::Literal(static_cast<uint32_t>(value >> 32));
     }
 
+    Generator<Instruction> ArithmeticGenerator::signExtendDWord(Register::ValuePtr dst,
+                                                                Register::ValuePtr src)
+    {
+        auto l31 = Register::Value::Literal(31);
+
+        co_yield generateOp<Expression::SignedShiftR>(dst, src, l31);
+    }
+
     Generator<Instruction> ArithmeticGenerator::get2DwordsScalar(Register::ValuePtr& lsd,
                                                                  Register::ValuePtr& msd,
                                                                  Register::ValuePtr  input)
@@ -61,9 +69,7 @@ namespace rocRoller
                 msd = Register::Value::Placeholder(
                     m_context, Register::Type::Scalar, DataType::Raw32, 1);
 
-                auto l31 = Register::Value::Literal(31);
-
-                co_yield generateOp<Expression::SignedShiftR>(msd, input, l31);
+                co_yield signExtendDWord(msd, input);
 
                 co_return;
             }
@@ -124,9 +130,8 @@ namespace rocRoller
 
                 msd = Register::Value::Placeholder(
                     m_context, Register::Type::Vector, DataType::Raw32, 1);
-                auto l31 = Register::Value::Literal(31);
 
-                co_yield generateOp<Expression::SignedShiftR>(msd, input, l31);
+                co_yield signExtendDWord(msd, input);
 
                 co_return;
             }
@@ -203,13 +208,12 @@ namespace rocRoller
 
         auto variableType = reg->variableType();
 
-        if(variableType.isPointer()
-           || (variableType == DataType::Raw32 && reg->registerCount() == 2))
+        if(variableType == DataType::Raw32 && reg->registerCount() == 2)
         {
             return DataType::UInt64;
         }
 
-        return variableType.dataType;
+        return variableType.getArithmeticType();
     }
 
     DataType promoteDataType(Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs)

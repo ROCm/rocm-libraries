@@ -91,6 +91,7 @@ namespace rocRoller
         return std::to_string(x);
     }
 
+    // clang-format off
     template <typename T>
     concept CHasToString = requires(T const& x)
     {
@@ -98,14 +99,16 @@ namespace rocRoller
 
         {
             toString(x)
-            } -> std::convertible_to<std::string>;
+        } -> std::convertible_to<std::string>;
     };
 
     template <CHasToString T>
+    requires(!std::is_arithmetic_v<T>)
     inline std::ostream& operator<<(std::ostream& stream, T const& x)
     {
         return stream << toString(x);
     }
+    // clang-format on
 
     template <typename Container, typename Joiner>
     void streamJoin(std::ostream& stream, Container const& c, Joiner const& j)
@@ -372,13 +375,14 @@ namespace rocRoller
      */
     template <CCountedEnum T>
     T fromString(std::string const& str);
-
+    // clang-format off
     template <typename Range, typename Of>
-    concept CForwardRangeOf = requires
+    concept CForwardRangeOf = requires()
     {
         requires std::ranges::forward_range<Range>;
         requires std::convertible_to<std::ranges::range_value_t<Range>, Of>;
     };
+    // clang-format on
 
     static_assert(CForwardRangeOf<std::vector<int>, int>);
     static_assert(CForwardRangeOf<std::vector<short>, int>);

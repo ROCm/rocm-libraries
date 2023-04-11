@@ -52,7 +52,6 @@ namespace rocRoller
     Generator<Instruction> MultiplyGenerator<Register::Type::Scalar, DataType::Int64>::generate(
         Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
     {
-        // TODO: Optimize for cases when individual dwords are literal 0, as in the vector mul().
         co_yield describeOpArgs("dest", dest, "lhs", lhs, "rhs", rhs);
         Register::ValuePtr l0, l1, r0, r1;
         co_yield get2DwordsScalar(l0, l1, lhs);
@@ -68,27 +67,33 @@ namespace rocRoller
                               {},
                               "most significant: high of low * low"));
 
-        auto lh = std::make_shared<Register::Value>(
-            m_context, Register::Type::Scalar, DataType::Int32, 1);
-        co_yield_(
-            Instruction("s_mul_i32", {lh}, {l0, r1}, {}, "most significant: low of low * high"));
+        if(!l0->isZeroLiteral() && !r1->isZeroLiteral())
+        {
+            auto lh = std::make_shared<Register::Value>(
+                m_context, Register::Type::Scalar, DataType::Int32, 1);
+            co_yield_(Instruction(
+                "s_mul_i32", {lh}, {l0, r1}, {}, "most significant: low of low * high"));
 
-        auto hl = std::make_shared<Register::Value>(
-            m_context, Register::Type::Scalar, DataType::Int32, 1);
-        co_yield_(
-            Instruction("s_mul_i32", {hl}, {l1, r0}, {}, "most significant: low of high * low"));
+            co_yield_(Instruction("s_add_u32",
+                                  {dest->subset({1})},
+                                  {dest->subset({1}), lh},
+                                  {},
+                                  "most significant: sum"));
+        }
 
-        co_yield_(Instruction("s_add_u32",
-                              {dest->subset({1})},
-                              {dest->subset({1}), lh},
-                              {},
-                              "most significant: sum"));
+        if(!l1->isZeroLiteral() && !r0->isZeroLiteral())
+        {
+            auto hl = std::make_shared<Register::Value>(
+                m_context, Register::Type::Scalar, DataType::Int32, 1);
+            co_yield_(Instruction(
+                "s_mul_i32", {hl}, {l1, r0}, {}, "most significant: low of high * low"));
 
-        co_yield_(Instruction("s_add_u32",
-                              {dest->subset({1})},
-                              {dest->subset({1}), hl},
-                              {},
-                              "most significant: sum"));
+            co_yield_(Instruction("s_add_u32",
+                                  {dest->subset({1})},
+                                  {dest->subset({1}), hl},
+                                  {},
+                                  "most significant: sum"));
+        }
     }
 
     template <>

@@ -40,6 +40,7 @@
 #include "DataTypes_Int8x4.hpp"
 
 #include "../Utilities/Comparison.hpp"
+#include "../Utilities/Error.hpp"
 
 namespace rocRoller
 {
@@ -80,11 +81,14 @@ namespace rocRoller
         Half,
         Halfx2,
         Int8x4,
+        Int8,
+        Int16,
         Int32,
         Int64,
         BFloat16,
-        Int8,
         Raw32,
+        UInt8,
+        UInt16,
         UInt32,
         UInt64,
         Bool,
@@ -157,6 +161,46 @@ namespace rocRoller
     std::string   ToString(NaryArgument n);
     std::ostream& operator<<(std::ostream& stream, NaryArgument n);
 
+    inline constexpr DataType getIntegerType(bool isSigned, int sizeBytes)
+    {
+        if(isSigned)
+        {
+            switch(sizeBytes)
+            {
+            case 1:
+                return DataType::Int8;
+            case 2:
+                return DataType::Int16;
+            case 4:
+                return DataType::Int32;
+            case 8:
+                return DataType::Int64;
+            }
+        }
+        else
+        {
+            switch(sizeBytes)
+            {
+            case 1:
+                return DataType::UInt8;
+            case 2:
+                return DataType::UInt16;
+            case 4:
+                return DataType::UInt32;
+            case 8:
+                return DataType::UInt64;
+            }
+        }
+
+        auto name = isSigned ? "signed" : "unsigned";
+
+        Throw<FatalError>("No enumeration for ", name, " integer with size ", sizeBytes, " bytes.");
+
+        // cppcheck doesn't seem to notice that Throw<>() is marked [[noreturn]] so it will
+        // complain if this isn't here.
+        return DataType::None;
+    }
+
     /**
      * VariableType
      */
@@ -206,6 +250,14 @@ namespace rocRoller
         {
             assert(pointerType == PointerType::Value);
             return VariableType(dataType, PointerType::PointerGlobal);
+        }
+
+        inline DataType getArithmeticType() const
+        {
+            if(pointerType == PointerType::Value)
+                return dataType;
+
+            return getIntegerType(false, getElementSize());
         }
 
         inline constexpr bool operator==(const VariableType& rhs) const
@@ -296,6 +348,8 @@ namespace rocRoller
               bool        T_IsSigned>
     struct BaseTypeInfo
     {
+        using Type = T;
+
         constexpr static VariableType Var                 = VariableType(T_DEnum, T_PEnum);
         constexpr static VariableType SegmentVariableType = VariableType(T_SegmentType, T_PEnum);
 
@@ -438,29 +492,33 @@ namespace rocRoller
                                 T_IsIntegral,
                                 T_IsSigned>::IsIntegral;
 
-    template <>
-    struct TypeInfo<float> : public BaseTypeInfo<float,
-                                                 DataType::Float,
-                                                 DataType::Float,
-                                                 PointerType::Value,
-                                                 1,
-                                                 false,
-                                                 false,
-                                                 true>
-    {
-    };
+#define DeclareDefaultValueTypeInfo(dtype, enumVal)                         \
+    template <>                                                             \
+    struct TypeInfo<dtype> : public BaseTypeInfo<dtype,                     \
+                                                 DataType::enumVal,         \
+                                                 DataType::enumVal,         \
+                                                 PointerType::Value,        \
+                                                 1,                         \
+                                                 false,                     \
+                                                 std::is_integral_v<dtype>, \
+                                                 std::is_signed_v<dtype>>   \
+    {                                                                       \
+    }
 
-    template <>
-    struct TypeInfo<double> : public BaseTypeInfo<double,
-                                                  DataType::Double,
-                                                  DataType::Double,
-                                                  PointerType::Value,
-                                                  1,
-                                                  false,
-                                                  false,
-                                                  true>
-    {
-    };
+    DeclareDefaultValueTypeInfo(float, Float);
+    DeclareDefaultValueTypeInfo(double, Double);
+
+    DeclareDefaultValueTypeInfo(int8_t, Int8);
+    DeclareDefaultValueTypeInfo(int16_t, Int16);
+    DeclareDefaultValueTypeInfo(int32_t, Int32);
+    DeclareDefaultValueTypeInfo(int64_t, Int64);
+
+    DeclareDefaultValueTypeInfo(uint8_t, UInt8);
+    DeclareDefaultValueTypeInfo(uint16_t, UInt16);
+    DeclareDefaultValueTypeInfo(uint32_t, UInt32);
+    DeclareDefaultValueTypeInfo(uint64_t, UInt64);
+
+#undef DeclareDefaultValueTypeInfo
 
     template <>
     struct TypeInfo<std::complex<float>> : public BaseTypeInfo<std::complex<float>,
@@ -495,30 +553,6 @@ namespace rocRoller
                                                   false,
                                                   true,
                                                   true>
-    {
-    };
-
-    template <>
-    struct TypeInfo<int32_t> : public BaseTypeInfo<int32_t,
-                                                   DataType::Int32,
-                                                   DataType::Int32,
-                                                   PointerType::Value,
-                                                   1,
-                                                   false,
-                                                   true,
-                                                   true>
-    {
-    };
-
-    template <>
-    struct TypeInfo<int64_t> : public BaseTypeInfo<int64_t,
-                                                   DataType::Int64,
-                                                   DataType::Int64,
-                                                   PointerType::Value,
-                                                   1,
-                                                   false,
-                                                   true,
-                                                   true>
     {
     };
 
@@ -562,31 +596,6 @@ namespace rocRoller
     {
     };
 
-    // Enum DataType::Int8 maps to int8_t, struct rocRoller::Int8 is only used for LogTensor now
-    template <>
-    struct TypeInfo<int8_t> : public BaseTypeInfo<int8_t,
-                                                  DataType::Int8,
-                                                  DataType::Int8,
-                                                  PointerType::Value,
-                                                  1,
-                                                  false,
-                                                  true,
-                                                  true>
-    {
-    };
-
-    template <>
-    struct TypeInfo<uint32_t> : public BaseTypeInfo<uint32_t,
-                                                    DataType::UInt32,
-                                                    DataType::UInt32,
-                                                    PointerType::Value,
-                                                    1,
-                                                    false,
-                                                    true,
-                                                    false>
-    {
-    };
-
     struct Raw32 : public DistinctType<uint32_t, Raw32>
     {
     };
@@ -600,18 +609,6 @@ namespace rocRoller
                                                  false,
                                                  true,
                                                  false>
-    {
-    };
-
-    template <>
-    struct TypeInfo<uint64_t> : public BaseTypeInfo<uint64_t,
-                                                    DataType::UInt64,
-                                                    DataType::UInt64,
-                                                    PointerType::Value,
-                                                    1,
-                                                    false,
-                                                    true,
-                                                    false>
     {
     };
 
@@ -693,6 +690,47 @@ namespace rocRoller
                                                   true,
                                                   false>
     {
+    };
+
+    template <DataType T_DataType>
+    struct EnumTypeInfo
+    {
+    };
+
+#define DeclareEnumTypeInfo(typeEnum, dtype)                         \
+    template <>                                                      \
+    struct EnumTypeInfo<DataType::typeEnum> : public TypeInfo<dtype> \
+    {                                                                \
+    }
+
+    DeclareEnumTypeInfo(Float, float);
+    DeclareEnumTypeInfo(Double, double);
+    DeclareEnumTypeInfo(ComplexFloat, std::complex<float>);
+    DeclareEnumTypeInfo(ComplexDouble, std::complex<double>);
+    DeclareEnumTypeInfo(Half, Half);
+    DeclareEnumTypeInfo(Halfx2, Halfx2);
+    DeclareEnumTypeInfo(Int8x4, Int8x4);
+    DeclareEnumTypeInfo(Int32, int32_t);
+    DeclareEnumTypeInfo(Int64, int64_t);
+    DeclareEnumTypeInfo(BFloat16, BFloat16);
+    DeclareEnumTypeInfo(Int8, int8_t);
+    DeclareEnumTypeInfo(Raw32, Raw32);
+    DeclareEnumTypeInfo(UInt32, uint32_t);
+    DeclareEnumTypeInfo(UInt64, uint64_t);
+    DeclareEnumTypeInfo(Bool, bool);
+    DeclareEnumTypeInfo(Bool32, Bool32);
+
+#undef DeclareEnumTypeInfo
+
+    template <typename T>
+    concept CArithmeticType = std::integral<T> || std::floating_point<T>;
+
+    template <typename Result, typename T>
+    concept CCanStaticCastTo = requires(T val) //
+    {
+        {
+            static_cast<Result>(val)
+            } -> std::same_as<Result>;
     };
 
     /**

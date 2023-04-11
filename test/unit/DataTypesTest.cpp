@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2019-2022 Advanced Micro Devices, Inc.
+ * Copyright 2019-2023 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -194,4 +194,35 @@ TEST(DataTypesTest, Promotions)
     ExpectEqual(DataType::Int64, DataType::Int32, DataType::Int64);
     ExpectEqual(DataType::Int64, DataType::Raw32, DataType::Int64);
     ExpectEqual(DataType::Int32, DataType::Raw32, DataType::Int32);
+}
+
+TEST(DataTypesTest, GetIntegerType)
+{
+    using namespace rocRoller;
+
+    EXPECT_EQ(DataType::Int8, getIntegerType(true, 1));
+    EXPECT_EQ(DataType::Int16, getIntegerType(true, 2));
+    EXPECT_EQ(DataType::Int32, getIntegerType(true, 4));
+    EXPECT_EQ(DataType::Int64, getIntegerType(true, 8));
+
+    EXPECT_EQ(DataType::UInt8, getIntegerType(false, 1));
+    EXPECT_EQ(DataType::UInt16, getIntegerType(false, 2));
+    EXPECT_EQ(DataType::UInt32, getIntegerType(false, 4));
+    EXPECT_EQ(DataType::UInt64, getIntegerType(false, 8));
+
+    EXPECT_THROW(getIntegerType(false, 3), FatalError);
+    EXPECT_THROW(getIntegerType(false, 5), FatalError);
+    EXPECT_THROW(getIntegerType(false, 16), FatalError);
+
+    EXPECT_EQ(DataType::UInt64,
+              VariableType(DataType::Half, PointerType::PointerGlobal).getArithmeticType());
+    EXPECT_EQ(DataType::UInt32,
+              VariableType(DataType::Half, PointerType::PointerLocal).getArithmeticType());
+    EXPECT_EQ(DataType::Half, VariableType(DataType::Half).getArithmeticType());
+
+    EXPECT_EQ(DataType::UInt64,
+              VariableType(DataType::Int32, PointerType::PointerGlobal).getArithmeticType());
+    EXPECT_EQ(DataType::UInt32,
+              VariableType(DataType::Int32, PointerType::PointerLocal).getArithmeticType());
+    EXPECT_EQ(DataType::Int32, VariableType(DataType::Int32).getArithmeticType());
 }

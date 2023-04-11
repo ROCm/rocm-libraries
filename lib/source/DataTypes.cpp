@@ -79,16 +79,22 @@ namespace rocRoller
             return "Halfx2";
         case DataType::Int8x4:
             return "Int8x4";
+        case DataType::Int8:
+            return "Int8";
+        case DataType::Int16:
+            return "Int16";
         case DataType::Int32:
             return "Int32";
         case DataType::Int64:
             return "Int64";
         case DataType::BFloat16:
             return "BFloat16";
-        case DataType::Int8:
-            return "Int8";
         case DataType::Raw32:
             return "Raw32";
+        case DataType::UInt8:
+            return "UInt8";
+        case DataType::UInt16:
+            return "UInt16";
         case DataType::UInt32:
             return "UInt32";
         case DataType::UInt64:
@@ -121,16 +127,22 @@ namespace rocRoller
             return "2xH";
         case DataType::Int8x4:
             return "4xi8";
+        case DataType::Int8:
+            return "I8";
+        case DataType::Int16:
+            return "I16";
         case DataType::Int32:
             return "I";
         case DataType::Int64:
             return "I64";
         case DataType::BFloat16:
             return "B";
-        case DataType::Int8:
-            return "I8";
         case DataType::Raw32:
             return "R";
+        case DataType::UInt8:
+            return "U8";
+        case DataType::UInt16:
+            return "U16";
         case DataType::UInt32:
             return "U32";
         case DataType::UInt64:
@@ -356,9 +368,14 @@ namespace rocRoller
 
         registerTypeInfo<Int8x4>();
         registerTypeInfo<Raw32>();
+
+        registerTypeInfo<int8_t>();
+        registerTypeInfo<int16_t>();
         registerTypeInfo<int32_t>();
         registerTypeInfo<int64_t>();
-        registerTypeInfo<int8_t>();
+
+        registerTypeInfo<uint8_t>();
+        registerTypeInfo<uint16_t>();
         registerTypeInfo<uint32_t>();
         registerTypeInfo<uint64_t>();
 
@@ -442,5 +459,16 @@ namespace rocRoller
     }
 
     static_assert(CCountedEnum<LayoutType>);
+
+    static_assert(CArithmeticType<Half>);
+    static_assert(CArithmeticType<float>);
+    static_assert(CArithmeticType<double>);
+    static_assert(CArithmeticType<int8_t>);
+    static_assert(CArithmeticType<int32_t>);
+    static_assert(CArithmeticType<int64_t>);
+    static_assert(CArithmeticType<uint32_t>);
+    static_assert(CArithmeticType<uint64_t>);
+    static_assert(!CArithmeticType<uint64_t*>);
+    static_assert(!CArithmeticType<std::string>);
 
 } // namespace rocRoller

@@ -11,12 +11,13 @@ namespace rocRoller
         {
         }
 
-        ExpressionPtr FastArithmetic::operator()(ExpressionPtr x)
+        ExpressionPtr FastArithmetic::operator()(ExpressionPtr x) const
         {
             if(!x)
             {
                 return x;
             }
+            ExpressionPtr orig = x;
 
             x = simplify(x);
             x = fastDivision(x, m_context);
@@ -24,6 +25,13 @@ namespace rocRoller
             x = fuseAssociative(x);
             x = fuseTernary(x);
             // x = launchTimeSubExpressions(x, m_context); // TODO: Add launchTimeSubExpressions
+
+            if(m_context->kernelOptions().logLevel >= LogLevel::Debug)
+            {
+                auto comment = Instruction::Comment(
+                    concatenate("FastArithmetic:", ShowValue(orig), ShowValue(x)));
+                m_context->schedule(comment);
+            }
 
             return x;
         }

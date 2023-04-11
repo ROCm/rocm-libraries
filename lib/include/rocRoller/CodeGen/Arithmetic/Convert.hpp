@@ -6,15 +6,20 @@ namespace rocRoller
 {
 
     // GetGenerator function will return the Generator to use based on the provided arguments.
-    template <>
-    std::shared_ptr<UnaryArithmeticGenerator<Expression::Convert<DataType::Float>>>
-        GetGenerator<Expression::Convert<DataType::Float>>(Register::ValuePtr dst,
-                                                           Register::ValuePtr arg);
+#define SpecializeGetGeneratorConvert(dtype)                                        \
+    template <>                                                                     \
+    std::shared_ptr<UnaryArithmeticGenerator<Expression::Convert<DataType::dtype>>> \
+        GetGenerator<Expression::Convert<DataType::dtype>>(Register::ValuePtr dst,  \
+                                                           Register::ValuePtr arg)
 
-    template <>
-    std::shared_ptr<UnaryArithmeticGenerator<Expression::Convert<DataType::Half>>>
-        GetGenerator<Expression::Convert<DataType::Half>>(Register::ValuePtr dst,
-                                                          Register::ValuePtr arg);
+    SpecializeGetGeneratorConvert(Float);
+    SpecializeGetGeneratorConvert(Half);
+    SpecializeGetGeneratorConvert(Int32);
+    SpecializeGetGeneratorConvert(Int64);
+    SpecializeGetGeneratorConvert(UInt32);
+    SpecializeGetGeneratorConvert(UInt64);
+
+#undef SpecializeGetGeneratorConvert
 
     /**
      * @brief Generates instructions to convert register value to a new datatype.
@@ -39,14 +44,9 @@ namespace rocRoller
 
         // Match function required by Component system for selecting the correct
         // generator.
-        static bool Match(
-            typename UnaryArithmeticGenerator<Expression::Convert<DATATYPE>>::Argument const& arg)
+        static bool
+            Match(typename UnaryArithmeticGenerator<Expression::Convert<DATATYPE>>::Argument const&)
         {
-            std::shared_ptr<Context> ctx;
-            Register::Type           registerType;
-            DataType                 dataType;
-
-            std::tie(ctx, registerType, dataType) = arg;
 
             return true;
         }

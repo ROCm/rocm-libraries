@@ -154,25 +154,42 @@ namespace rocRoller
             return std::make_shared<Expression>(MagicSign{a});
         }
 
+        template <int idx = 0>
+        inline ExpressionPtr convertCase(DataType dt, ExpressionPtr a)
+        {
+            // Template-based recursion "loop" to automatically convert runtime
+            // enumeration to template parameter.  Depends on DataType having a
+            // Count enumeration which will terminate the recursion.
+
+            // This makes it so that if a value is added to the DataType enumeration,
+            // it will automatically be checked here.
+
+            constexpr auto theDT = static_cast<DataType>(idx);
+
+            if(dt == theDT)
+                return convert<theDT>(a);
+
+            if constexpr(idx + 1 < static_cast<int>(DataType::Count))
+                return convertCase<idx + 1>(dt, a);
+
+            Throw<FatalError>("Unsupported datatype conversion: ", ShowValue(dt));
+        }
+
         inline ExpressionPtr convert(DataType dt, ExpressionPtr a)
         {
-            switch(dt)
-            {
-            case DataType::Half:
-                return convert<DataType::Half>(a);
-                break;
-            case DataType::Float:
-                return convert<DataType::Float>(a);
-                break;
-            default:
-                Throw<FatalError>("Unsupported datatype conversion");
-            }
+            return convertCase(dt, a);
         }
 
         template <DataType DATATYPE>
         inline ExpressionPtr convert(ExpressionPtr a)
         {
-            return std::make_shared<Expression>(Convert<DATATYPE>{a});
+            // Check if Convert<DATATYPE> is an alternative of the Expression variant type.
+            // This means this function doesn't need to change if we add a new Convert<>
+            // alternative to the Expression variant type.
+            if constexpr(CExpression<Convert<DATATYPE>>)
+                return std::make_shared<Expression>(Convert<DATATYPE>{a});
+
+            Throw<FatalError>("Conversions to ", DATATYPE, " not yet supported.");
         }
 
         template <CCommandArgumentValue T>
@@ -262,8 +279,13 @@ namespace rocRoller
 
         EXPRESSION_INFO(Negate);
 
-        EXPRESSION_INFO(Convert<DataType::Float>);
         EXPRESSION_INFO(Convert<DataType::Half>);
+        EXPRESSION_INFO(Convert<DataType::Float>);
+        EXPRESSION_INFO(Convert<DataType::Double>);
+        EXPRESSION_INFO(Convert<DataType::Int32>);
+        EXPRESSION_INFO(Convert<DataType::Int64>);
+        EXPRESSION_INFO(Convert<DataType::UInt32>);
+        EXPRESSION_INFO(Convert<DataType::UInt64>);
 
         EXPRESSION_INFO_CUSTOM(Register::ValuePtr, "Register Value");
         EXPRESSION_INFO_CUSTOM(CommandArgumentPtr, "Command Argument");

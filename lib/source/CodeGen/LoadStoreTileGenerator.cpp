@@ -44,7 +44,7 @@ namespace rocRoller
         inline Generator<Instruction> LoadStoreTileGenerator::generate(auto&         dest,
                                                                        ExpressionPtr expr) const
         {
-            co_yield Expression::generate(dest, expr, m_context);
+            co_yield Expression::generate(dest, m_fastArith(expr), m_context);
         }
 
         inline ExpressionPtr L(auto const& x)
@@ -134,7 +134,7 @@ namespace rocRoller
                 result = result + coords.getCoordinate(unroll) * strideExpr;
             }
 
-            return m_fastArith(result);
+            return result;
         }
 
         Generator<Instruction> LoadStoreTileGenerator::getOffset(LoadStoreTileInfo& info,
@@ -207,20 +207,9 @@ namespace rocRoller
             {
                 auto [strideExpr, strideDataType]
                     = m_context->registerTagManager()->getExpression(strideTag);
-                strideExpr = m_fastArith(strideExpr);
 
-                // If stride can be evaluated at compile time, return a literal. Otherwise,
-                // create a new register.
-                if(Expression::evaluationTimes(strideExpr)[EvaluationTime::Translate])
-                {
-                    stride = Register::Value::Literal(Expression::evaluate(strideExpr));
-                }
-                else
-                {
-                    stride = Register::Value::Placeholder(
-                        m_context, Register::Type::Scalar, strideDataType, 1);
-                    co_yield generate(stride, strideExpr);
-                }
+                stride = nullptr;
+                co_yield generate(stride, strideExpr);
             }
         }
 
@@ -306,7 +295,11 @@ namespace rocRoller
                 auto indexExpr = ci.forward ? coords.forwardStride(increment, L(1), {target})[0]
                                             : coords.reverseStride(increment, L(1), {target})[0];
                 rocRoller::Log::getLogger()->debug("  Stride({}): {}", stride, toString(indexExpr));
-                tagger->addExpression(stride, indexExpr * L(numBytes), ci.strideType);
+
+                // We have to manually invoke m_fastArith here since it can't traverse into the
+                // RegisterTagManager.
+                // TODO: Revisit storing expressions in the RegisterTagManager.
+                tagger->addExpression(stride, m_fastArith(indexExpr * L(numBytes)), ci.strideType);
                 scope->addRegister(stride);
             }
 
@@ -492,12 +485,10 @@ namespace rocRoller
                 Register::ValuePtr offset1;
                 Register::ValuePtr offset2;
 
-                co_yield generate(
-                    offset1,
-                    m_fastArith(info.rowOffsetReg->expression()
-                                + info.colStrideReg->expression() * Expression::literal(j)));
-                co_yield generate(
-                    offset2, m_fastArith(offset1->expression() + info.colStrideReg->expression()));
+                co_yield generate(offset1,
+                                  info.rowOffsetReg->expression()
+                                      + info.colStrideReg->expression() * Expression::literal(j));
+                co_yield generate(offset2, offset1->expression() + info.colStrideReg->expression());
 
                 co_yield m_context->mem()->loadAndPack(
                     info.kind,

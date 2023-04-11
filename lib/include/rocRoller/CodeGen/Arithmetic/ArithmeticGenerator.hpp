@@ -7,8 +7,8 @@
 
 namespace rocRoller
 {
-    // Base Arithmetic Generator class. All Arithmetic generators should be derived
-    // from this class.
+    /// Base Arithmetic Generator class. All Arithmetic generators should be derived
+    /// from this class.
     class ArithmeticGenerator
     {
     public:
@@ -20,10 +20,13 @@ namespace rocRoller
     protected:
         std::shared_ptr<Context> m_context;
 
-        // Move a value into a single VGPR
+        /// Move a value into a single VGPR
         Generator<Instruction> moveToVGPR(Register::ValuePtr& val);
 
-        // Split a single register value into two registers each containing one word
+        /// Copy the sign bit from `src` into every bit of `dst`.
+        Generator<Instruction> signExtendDWord(Register::ValuePtr dst, Register::ValuePtr src);
+
+        /// Split a single register value into two registers each containing one word
         Generator<Instruction> get2DwordsScalar(Register::ValuePtr& lsd,
                                                 Register::ValuePtr& msd,
                                                 Register::ValuePtr  input);
@@ -31,7 +34,7 @@ namespace rocRoller
                                                 Register::ValuePtr& msd,
                                                 Register::ValuePtr  input);
 
-        // Generate comments describing an operation that is being generated.
+        /// Generate comments describing an operation that is being generated.
         Generator<Instruction> describeOpArgs(std::string const& argName0,
                                               Register::ValuePtr arg0,
                                               std::string const& argName1,
