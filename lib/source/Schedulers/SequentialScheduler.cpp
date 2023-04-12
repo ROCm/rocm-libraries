@@ -62,17 +62,9 @@ namespace rocRoller
                         yieldedAny = true;
                     }
 
-                    AssertFatal(seqs.size() >= iterators.size());
                     if(seqs.size() != iterators.size())
                     {
-                        iterators.reserve(seqs.size());
-                        for(size_t i = iterators.size(); i < seqs.size(); i++)
-                        {
-                            iterators.emplace_back(seqs[i].begin());
-                            // Consume any comments at the beginning of the stream.
-                            // This has the effect of immediately executing Deallocate nodes.
-                            co_yield consumeComments(iterators[i], seqs[i].end());
-                        }
+                        co_yield handleNewNodes(seqs, iterators);
                         yieldedAny = true;
                     }
                 }

@@ -51,24 +51,8 @@ namespace rocRoller
             int minCostIdx = -1;
             do
             {
-
-                while(seqs.size() != numSeqs)
-                {
-                    AssertFatal(seqs.size() > numSeqs,
-                                "Sequences cannot shrink!",
-                                ShowValue(seqs.size()),
-                                ShowValue(numSeqs));
-
-                    auto oldNumSeqs = numSeqs;
-                    numSeqs         = seqs.size();
-
-                    iterators.reserve(numSeqs);
-                    for(size_t i = oldNumSeqs; i < numSeqs; i++)
-                    {
-                        iterators.emplace_back(seqs[i].begin());
-                        co_yield consumeComments(iterators[i], seqs[i].end());
-                    }
-                }
+                co_yield handleNewNodes(seqs, iterators);
+                numSeqs = seqs.size();
 
                 float minCost = std::numeric_limits<float>::max();
                 minCostIdx    = -1;

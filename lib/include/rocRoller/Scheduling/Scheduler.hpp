@@ -97,6 +97,17 @@ namespace rocRoller
              * - If that first instruction locks the stream, yields until the stream is unlocked.
              */
             Generator<Instruction> yieldFromStream(Generator<Instruction>::iterator& iter);
+
+            /**
+             * @brief Handles new nodes being added to the instruction streams being scheduled.
+             *
+             * @param seqs
+             * @param iterators
+             * @return Generator<Instruction> Yielding all initial comments from any new instruction streams.
+             */
+            static Generator<Instruction>
+                handleNewNodes(std::vector<Generator<Instruction>>&           seqs,
+                               std::vector<Generator<Instruction>::iterator>& iterators);
         };
 
         std::ostream& operator<<(std::ostream&, SchedulerProcedure);

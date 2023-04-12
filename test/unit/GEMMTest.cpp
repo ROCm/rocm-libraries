@@ -449,7 +449,7 @@ namespace GEMMDriverTest
         gemm.loadLDSB  = true;
         gemm.storeLDSD = false;
         gemm.fuseLoops = false;
-        gemm.unrollK   = 4;
+        gemm.unrollK   = 8;
         gemm.mac_k     = 8;
         basicGEMM<float>(m_context, gemm, 1.e-6);
     }
@@ -462,7 +462,7 @@ namespace GEMMDriverTest
         gemm.loadLDSB  = false;
         gemm.storeLDSD = false;
         gemm.fuseLoops = false;
-        gemm.unrollK   = 4;
+        gemm.unrollK   = 8;
         gemm.mac_k     = 8;
         basicGEMM<float>(m_context, gemm, 1.e-6);
     }
@@ -475,7 +475,7 @@ namespace GEMMDriverTest
         gemm.loadLDSB  = true;
         gemm.storeLDSD = false;
         gemm.fuseLoops = false;
-        gemm.unrollK   = 4;
+        gemm.unrollK   = 8;
         gemm.mac_k     = 8;
         basicGEMM<float>(m_context, gemm, 1.e-6);
     }
@@ -710,7 +710,7 @@ namespace GEMMDriverTest
         gemm.mac_n = 256;
         gemm.mac_k = 16;
 
-        gemm.unrollK = 2;
+        gemm.unrollK = 4;
 
         gemm.wave_k = 8;
 
@@ -759,7 +759,7 @@ namespace GEMMDriverTest
         gemm.mac_n = 256;
         gemm.mac_k = 16;
 
-        gemm.unrollK = 2;
+        gemm.unrollK = 4;
 
         gemm.wave_k = 8;
 
@@ -772,7 +772,7 @@ namespace GEMMDriverTest
 
         std::string generatedCode = m_context->instructions()->toString();
 
-        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128"), 6);
+        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128"), 12);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed4x2)
@@ -815,7 +815,7 @@ namespace GEMMDriverTest
         gemm.mac_n = 256;
         gemm.mac_k = 16;
 
-        gemm.unrollK = 2;
+        gemm.unrollK = 4;
 
         gemm.wave_k = 8;
 
@@ -830,7 +830,7 @@ namespace GEMMDriverTest
 
         std::string generatedCode = m_context->instructions()->toString();
 
-        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128"), 6);
+        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128"), 12);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMLiteralStrides)

@@ -154,5 +154,26 @@ namespace rocRoller
         {
             return false;
         }
+
+        Generator<Instruction>
+            Scheduler::handleNewNodes(std::vector<Generator<Instruction>>&           seqs,
+                                      std::vector<Generator<Instruction>::iterator>& iterators)
+        {
+            while(seqs.size() != iterators.size())
+            {
+                AssertFatal(seqs.size() >= iterators.size(),
+                            "Sequences cannot shrink!",
+                            ShowValue(seqs.size()),
+                            ShowValue(iterators.size()));
+                iterators.reserve(seqs.size());
+                for(size_t i = iterators.size(); i < seqs.size(); i++)
+                {
+                    iterators.emplace_back(seqs[i].begin());
+                    // Consume any comments at the beginning of the stream.
+                    // This has the effect of immediately executing Deallocate nodes.
+                    co_yield consumeComments(iterators[i], seqs[i].end());
+                }
+            }
+        }
     }
 }
