@@ -117,8 +117,7 @@ class GEMM(GEMMProblem, GEMMSolution):
             + ", ".join(
                 [
                     key + ": " + str(val)
-                    for key, val in field_dict(GEMM, self).items()
-                    if key in field_dict(GEMMSolution, self).items()
+                    for key, val in field_dict(GEMMSolution, self).items()
                 ]
             )
             + ")"

@@ -4,6 +4,7 @@ import datetime
 import io
 import os
 import pathlib
+import re
 import statistics
 from collections import OrderedDict, defaultdict
 from dataclasses import dataclass, field
@@ -371,7 +372,7 @@ def email_html_summary(html_file, perf_runs):
 
 
 def get_common_args(tokens):
-    splitTokens = [x.split(",") for x in tokens]
+    splitTokens = [re.split(r",|\(|\)| ", x) for x in tokens]
     return {
         arg for arg in splitTokens[0] if all([arg in token for token in splitTokens])
     }
@@ -429,9 +430,9 @@ def html_summary(  # noqa: C901
                     continue
                 name = (
                     run.name()
-                    + " <br> Machine ID: "
+                    + "<br>Machine ID: "
                     + str(configs.index(run.machine_spec))
-                    + " <br> "
+                    + "<br>"
                     + run.results[token].solution_token
                 )
 
@@ -475,7 +476,7 @@ def html_summary(  # noqa: C901
             for trace in box:
                 plot.add_trace(trace)
         for token in runs:
-            legend = sorted(set(token.split(",")) - common_args)
+            legend = sorted(set(re.split(r",|\(|\)| ", token)) - common_args)
             legend = "<br>".join(legend) + "<br>-----------------------"
             if plot_median:
                 scatter = go.Scatter(
