@@ -34,7 +34,7 @@
  * IMPORTANT: This is an EXPERIMENTAL workaround. 
  * IMPORTANT: Any application requiring a C++20 conforming system clock (i.e. with UNIX timestamp epoch) needs to enable the workaround according to the following steps:
  * 1) The compile flag _LIBCUDACXX_EXPERIMENTAL_CHRONO_HIP needs to be set (-D_LIBCUDACXX_EXPERIMENTAL_CHRONO_HIP).
- * 2) The linker flag --fgpu-rdc must be set.
+ * 2) The linker flag -fgpu-rdc must be set.
  * 3) The macro LIBCUDACXX_HIP_DEFINE_SYSCLOCK_VARS needs to be called at file scope level in a single translation unit, usually where the main function is located.
  *    The header "cuda/std/chrono" must be included to make this macro available.
  * 4) cuda::std::chrono::hip_gpu_ext::initialize_amdgpu_sysclock_on_current_device() or cuda::std::chrono::hip_gpu_ext::initialize_amdgpu_sysclock_on_device()
