@@ -3,9 +3,10 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-#include "GPUContextFixture.hpp"
 #include <rocRoller/Utilities/EnumBitset.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
+
+#include "Utilities.hpp"
 
 TEST(UtilsTest, StreamTuple)
 {
@@ -86,4 +87,32 @@ TEST(EnumBitsetTest, LargeEnum)
     a1[TestEnum::A1]  = false;
     EXPECT_FALSE(a1[TestEnum::A1]);
     EXPECT_TRUE(a1[TestEnum::A33]);
+}
+
+TEST(UtilsTest, SetIdentityMatrix)
+{
+    using namespace rocRoller;
+
+    std::vector<float> mat(3 * 5);
+    SetIdentityMatrix(mat, 3, 5);
+
+    // clang-format off
+    std::vector<float> expected = { 1, 0, 0,
+                                    0, 1, 0,
+                                    0, 0, 1,
+                                    0, 0, 0,
+                                    0, 0, 0,
+                                  };
+    // clang-format on
+
+    EXPECT_EQ(mat, expected);
+
+    SetIdentityMatrix(mat, 5, 3);
+    // clang-format off
+     expected = { 1, 0, 0, 0, 0,
+                  0, 1, 0, 0, 0,
+                  0, 0, 1, 0, 0 };
+    // clang-format on
+
+    EXPECT_EQ(mat, expected);
 }

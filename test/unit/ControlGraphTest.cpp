@@ -4,6 +4,10 @@
 #include <rocRoller/KernelGraph/ControlGraph/ControlEdge_fwd.hpp>
 #include <rocRoller/KernelGraph/ControlGraph/ControlGraph.hpp>
 #include <rocRoller/KernelGraph/ControlGraph/Operation_fwd.hpp>
+#include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
+
+#include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/KernelGraph/Utils.hpp>
 
 #include "DataTypes/DataTypes.hpp"
 #include "SourceMatcher.hpp"
@@ -111,7 +115,7 @@ namespace rocRollerTest
         EXPECT_EQ(nodes8[0], mul_index);
 
         std::string expected = R".(
-	    digraph {
+        digraph {
                 "1"[label="Kernel(1)"];
                 "2"[label="LoadLinear(2)"];
                 "3"[label="LoadLinear(3)"];
@@ -143,5 +147,53 @@ namespace rocRollerTest
         ).";
 
         EXPECT_EQ(NormalizedSource(expected), NormalizedSource(control.toDOT()));
+    }
+
+    TEST(ControlGraphTest, getSetCoordinates)
+    {
+        KernelGraph::KernelGraph kg;
+        using namespace KernelGraph;
+        auto five = Expression::literal(5);
+        auto four = Expression::literal(4);
+
+        int topSet1 = kg.control.addElement(SetCoordinate{five});
+        int topSet2 = kg.control.addElement(SetCoordinate{five});
+
+        int notTopSet1 = kg.control.addElement(SetCoordinate{four});
+        int notTopSet2 = kg.control.addElement(SetCoordinate{five});
+
+        int load1 = kg.control.addElement(LoadLDSTile{DataType::Float});
+        int load2 = kg.control.addElement(LoadLDSTile{DataType::Float});
+
+        kg.control.addElement(Body{}, {topSet1}, {load1});
+
+        EXPECT_THROW(getTopSetCoordinate(kg, load1), FatalError);
+        EXPECT_THROW(getSetCoordinateForDim(kg, 1, load1), FatalError);
+
+        kg.mapper.connect<CoordinateGraph::Unroll>(topSet1, 1);
+        EXPECT_EQ(topSet1, getTopSetCoordinate(kg, load1));
+        EXPECT_THROW(getSetCoordinateForDim(kg, 2, load1), FatalError);
+        EXPECT_EQ(topSet1, getSetCoordinateForDim(kg, 1, load1));
+
+        kg.control.addElement(Body{}, {topSet2}, {notTopSet1});
+        kg.control.addElement(Body{}, {notTopSet1}, {notTopSet2});
+        kg.control.addElement(Body{}, {notTopSet2}, {load2});
+
+        EXPECT_THROW(getTopSetCoordinate(kg, load2), FatalError);
+
+        kg.mapper.connect<CoordinateGraph::Unroll>(topSet2, 2);
+        kg.mapper.connect<CoordinateGraph::Unroll>(notTopSet1, 1);
+        kg.mapper.connect<CoordinateGraph::Unroll>(notTopSet2, 3);
+        EXPECT_EQ(topSet2, getTopSetCoordinate(kg, load2));
+
+        EXPECT_THROW(getSetCoordinateForDim(kg, 5, load2), FatalError);
+        EXPECT_EQ(topSet2, getSetCoordinateForDim(kg, 2, load2));
+        EXPECT_EQ(notTopSet1, getSetCoordinateForDim(kg, 1, load2));
+        EXPECT_EQ(notTopSet2, getSetCoordinateForDim(kg, 3, load2));
+
+        EXPECT_EQ((std::vector{load1}), getLoadsForUnroll(kg, 1, {load1, load2}, 5));
+        EXPECT_EQ((std::vector{load2}), getLoadsForUnroll(kg, 1, {load1, load2}, 4));
+
+        EXPECT_EQ((std::set{topSet1, topSet2}), getTopSetCoordinates(kg, {load1, load2}));
     }
 }

@@ -196,4 +196,12 @@ namespace rocRoller
             }
         }
     }
+
+    template <typename T>
+    void SetIdentityMatrix(std::vector<T>& mat, size_t cols, size_t rows)
+    {
+        for(size_t i = 0; i < cols; i++)
+            for(size_t j = 0; j < rows; j++)
+                mat[i + j * cols] = i == j ? static_cast<T>(1.0) : static_cast<T>(0.0);
+    }
 }

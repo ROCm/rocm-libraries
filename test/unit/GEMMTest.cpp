@@ -136,17 +136,10 @@ namespace GEMMDriverTest
 
         if(debuggable)
         {
-            for(size_t i = 0; i < M; i++)
-                for(size_t j = 0; j < K; j++)
-                    h_A[i * K + j] = i == j ? 1.0 : 0.0;
+            SetIdentityMatrix(h_A, K, M);
+            SetIdentityMatrix(h_B, N, K);
 
-            for(size_t i = 0; i < K; i++)
-                for(size_t j = 0; j < N; j++)
-                    h_B[i * N + j] = i == j ? 1.0 : 0.0;
-
-            for(size_t i = 0; i < M; i++)
-                for(size_t j = 0; j < N; j++)
-                    h_C[i * N + j] = 0.0;
+            std::fill(h_C.begin(), h_C.end(), static_cast<T>(0.0));
         }
         // Device data
         std::shared_ptr<T> d_A = make_shared_device(h_A);
@@ -886,5 +879,29 @@ namespace GEMMDriverTest
         gemm.storeLDSD = true;
 
         basicGEMM<Half>(m_context, gemm, 2.e-5);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16AllLDSDebug)
+    {
+        GEMMProblem gemm;
+
+        gemm.M = 256;
+        gemm.N = 512;
+        gemm.K = 64;
+
+        gemm.mac_m = 128;
+        gemm.mac_n = 256;
+        gemm.mac_k = 16;
+
+        gemm.wave_k = 8;
+
+        gemm.workgroup_size_x = 1 * gemm.wavefront_size;
+        gemm.workgroup_size_y = 4;
+
+        gemm.loadLDSA  = true;
+        gemm.loadLDSB  = true;
+        gemm.storeLDSD = true;
+
+        basicGEMM<Half>(m_context, gemm, 2.e-5, true);
     }
 }

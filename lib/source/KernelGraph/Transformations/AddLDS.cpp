@@ -657,17 +657,17 @@ namespace rocRoller
                         loads.push_back(loadTag);
                 }
 
-                auto depdencies = getTopSetCoordinates(graph, loads);
-                auto info       = m_loadInfo.at(spec);
+                auto dependencies = getTopSetCoordinates(graph, loads);
+                auto info         = m_loadInfo.at(spec);
                 addLoadOperationsNoPrefetch(
-                    graph, info.loadChain, info.storeChain, spec.operation, depdencies);
+                    graph, info.loadChain, info.storeChain, spec.operation, dependencies);
             }
         }
 
         /*
          * Update the coordinate transform graph to compute LDS indexes.
          *
-         * DO NOT MODIFITY THE CONTROL GRAPH.
+         * DO NOT MODIFY THE CONTROL GRAPH.
          *
          * Passing a loadTag here might seem non-intuitive.  It is
          * used to look up mappings etc.

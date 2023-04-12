@@ -1466,13 +1466,14 @@ namespace rocRoller
                 if(!parent)
                     break;
 
-                if(graph.control.get<SetCoordinate>(*parent))
+                auto setCoord = graph.control.get<SetCoordinate>(*parent);
+                if(setCoord)
                     tag = *parent;
                 else
                     break;
 
-                auto setCoord = graph.control.get<SetCoordinate>(tag);
-                AssertFatal(graph.mapper.get<Unroll>(tag), "SetCoordinate needs Unroll dimension");
+                AssertFatal(graph.mapper.get<Unroll>(tag) > 0,
+                            "SetCoordinate needs Unroll dimension");
             }
             return tag;
         }
@@ -1495,15 +1496,17 @@ namespace rocRoller
             {
                 auto parent = only(graph.control.getInputNodeIndices<Body>(tag));
                 AssertFatal(parent, "Dimension was not found in the parents.");
-                AssertFatal(graph.control.get<SetCoordinate>(*parent),
-                            "Dimension was not found in the parents.");
-                tag           = *parent;
-                auto setCoord = graph.control.get<SetCoordinate>(tag);
-                AssertFatal(graph.mapper.get<Unroll>(tag), "SetCoordinate needs Unroll dimension");
-                if(graph.mapper.get<Unroll>(tag) == dim)
-                {
+
+                auto setCoord = graph.control.get<SetCoordinate>(*parent);
+                AssertFatal(setCoord, "Dimension was not found in the parents.");
+
+                tag = *parent;
+
+                auto unroll = graph.mapper.get<Unroll>(tag);
+                AssertFatal(unroll > 0, "SetCoordinate needs Unroll dimension");
+
+                if(unroll == dim)
                     return tag;
-                }
             }
         }
 
