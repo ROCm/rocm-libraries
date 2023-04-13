@@ -25,7 +25,7 @@ namespace rocRoller::KernelGraph
      * Deallocate operation (to deallocate the register associated
      * with the coordinate) can be added after the control node.
      */
-    struct ControlFlowRWTracer
+    class ControlFlowRWTracer
     {
     public:
         enum ReadWrite
@@ -59,12 +59,6 @@ namespace rocRoller::KernelGraph
         void trace();
         void trace(int start);
 
-        /**
-         * @brief Analyse the trace and return locations where
-         * Deallocate operations can be added.
-         */
-        std::map<int, std::set<int>> deallocateLocations() const;
-
         std::vector<ReadWriteRecord> coordinatesReadWrite() const;
 
         void operator()(Assign const& op, int tag);
@@ -87,7 +81,7 @@ namespace rocRoller::KernelGraph
         void operator()(TensorContraction const& op, int tag);
         void operator()(UnrollOp const& op, int tag);
 
-    private:
+    protected:
         void trackRegister(int control, int coordinate, ReadWrite rw);
 
         bool hasGeneratedInputs(int const& tag);

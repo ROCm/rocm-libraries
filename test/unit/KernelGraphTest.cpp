@@ -1702,6 +1702,16 @@ namespace KernelGraphTest
         unrolled_kgraph_lds = addLDS(kgraph_fused, m_context);
         auto fusedStoreLDS = unrolled_kgraph_lds.control.getNodes<StoreLDSTile>().to<std::vector>();
         EXPECT_EQ(fusedStoreLDS.size(), 1);
+
+        // Verify number of ComputeIndexes after unroll/fuse/lds
+        unrolled_kgraph_lds = addComputeIndexOperations(unrolled_kgraph_lds);
+        computeIndexes = unrolled_kgraph_lds.control.getNodes<ComputeIndex>().to<std::vector>();
+        EXPECT_EQ(computeIndexes.size(), 24);
+
+        // Verify number of Deallocates after unroll/fuse/lds
+        unrolled_kgraph_lds = addDeallocate(unrolled_kgraph_lds);
+        addDeallocates      = unrolled_kgraph_lds.control.getNodes<Deallocate>().to<std::vector>();
+        EXPECT_EQ(addDeallocates.size(), 32);
     }
 
     TEST_F(KernelGraphTest, TranslateTMul)
