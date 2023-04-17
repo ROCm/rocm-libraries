@@ -66,9 +66,9 @@ namespace GEMMDriverTest
         bool loadLDSB  = true;
         bool storeLDSD = true;
 
-        bool fuseLoops = true;
-
+        bool fuseLoops      = true;
         bool literalStrides = true;
+        bool prefetch       = false;
 
         bool packMultipleElementsInto1VGPR = true;
     };
@@ -141,9 +141,10 @@ namespace GEMMDriverTest
 
             std::fill(h_C.begin(), h_C.end(), static_cast<T>(0.0));
         }
-        // Device data
-        std::shared_ptr<T> d_A = make_shared_device(h_A);
-        std::shared_ptr<T> d_B = make_shared_device(h_B);
+
+        // Device data.  TODO Remove padding when prefetch fixed.
+        std::shared_ptr<T> d_A = make_shared_device(h_A, mac_k * M);
+        std::shared_ptr<T> d_B = make_shared_device(h_B, mac_k * N);
         std::shared_ptr<T> d_C = make_shared_device(h_C);
         std::shared_ptr<T> d_D = make_shared_device<T>(M * N, 0.0);
 
@@ -239,6 +240,7 @@ namespace GEMMDriverTest
         kernelOptions->unrollY                       = gemm.unrollY;
         kernelOptions->unrollK                       = gemm.unrollK;
         kernelOptions->packMultipleElementsInto1VGPR = gemm.packMultipleElementsInto1VGPR;
+        kernelOptions->prefetch                      = gemm.prefetch;
         kernelOptions->transposeMemoryAccess[LayoutType::MATRIX_A] = gemm.transA == "T";
         kernelOptions->transposeMemoryAccess[LayoutType::MATRIX_B] = gemm.transB == "T";
 
@@ -470,6 +472,20 @@ namespace GEMMDriverTest
         gemm.fuseLoops = false;
         gemm.unrollK   = 8;
         gemm.mac_k     = 8;
+        basicGEMM<float>(m_context, gemm, 1.e-6);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMUnrollKLDSPrefetch)
+    {
+        GEMMProblem gemm;
+        gemm.K         = 64 * 4 * 2;
+        gemm.loadLDSA  = true;
+        gemm.loadLDSB  = true;
+        gemm.storeLDSD = false;
+        gemm.fuseLoops = false;
+        gemm.unrollK   = 2;
+        gemm.mac_k     = 4;
+        gemm.prefetch  = true;
         basicGEMM<float>(m_context, gemm, 1.e-6);
     }
 

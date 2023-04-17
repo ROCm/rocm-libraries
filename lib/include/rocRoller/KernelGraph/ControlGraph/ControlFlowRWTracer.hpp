@@ -72,6 +72,7 @@ namespace rocRoller::KernelGraph
         void operator()(LoadTiled const& op, int tag);
         void operator()(LoadVGPR const& op, int tag);
         void operator()(Multiply const& op, int tag);
+        void operator()(NOP const& op, int tag);
         void operator()(Scope const& op, int tag);
         void operator()(SetCoordinate const& op, int tag);
         void operator()(StoreLDSTile const& op, int tag);

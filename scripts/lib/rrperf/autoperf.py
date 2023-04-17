@@ -115,8 +115,6 @@ def run(
     success = True
     success_no_fail = True
 
-    print(targets)
-
     for target in targets:
         project_dir = top / f"build_{target}"
         if target == "current":

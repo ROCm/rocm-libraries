@@ -25,111 +25,6 @@ namespace rocRoller
         };
 
         /**
-         * @brief Create duplicates of all of the nodes downstream of the provided
-         *        start nodes.
-         *        Add the duplicates to the provided graph.
-         *        Return the location of the new start nodes.
-         *
-         * @param graph
-         * @param startNodes
-         * @return std::vector<int>
-         */
-        std::vector<int> duplicateControlNodes(KernelGraph&                   graph,
-                                               GraphReindexer&                reindexer,
-                                               std::vector<int> const&        startNodes,
-                                               std::unordered_set<int> const& dontDuplicate)
-
-        {
-            std::vector<int> newStartNodes;
-
-            // Create duplicates of all of the nodes downstream of the startNodes
-            for(auto const& node :
-                graph.control.depthFirstVisit(startNodes, Graph::Direction::Downstream))
-            {
-                // Only do this step if element is a node
-                if(graph.control.getElementType(node) == Graph::ElementType::Node)
-                {
-                    auto op = graph.control.addElement(graph.control.getElement(node));
-                    reindexer.control[node] = op;
-                }
-            }
-
-            for(auto const& reindex : reindexer.control)
-            {
-                // Create all edges within new sub-graph
-                auto location = graph.control.getLocation(reindex.first);
-                for(auto const& output : location.outgoing)
-                {
-                    int child = *graph.control.getNeighbours<Graph::Direction::Downstream>(output)
-                                     .begin();
-                    graph.control.addElement(graph.control.getElement(output),
-                                             {reindex.second},
-                                             {reindexer.control[child]});
-                }
-
-                // Use the same coordinate graph mappings
-                for(auto const& c : graph.mapper.getConnections(reindex.first))
-                {
-                    auto coord = c.coordinate;
-
-                    if(dontDuplicate.contains(coord))
-                    {
-                        graph.mapper.connect(reindex.second, coord, c.connection);
-                        reindexer.coordinates.insert_or_assign(coord, coord);
-                        continue;
-                    }
-
-                    // If one of the mappings represents storage, duplicate it in the CoordinateGraph.
-                    // This will allow the RegisterTagManager to recognize that the nodes are pointing
-                    // to different data and to use different registers.
-                    // Note: A PassThrough edge is added from any of the duplicate nodes to the original
-                    // node.
-                    auto mt = graph.coordinates.get<MacroTile>(c.coordinate);
-                    if(mt)
-                    {
-                        if(reindexer.coordinates.count(c.coordinate) == 0)
-                        {
-                            auto dim = graph.coordinates.addElement(
-                                graph.coordinates.getElement(c.coordinate));
-                            reindexer.coordinates[c.coordinate] = dim;
-                            auto duplicate
-                                = graph.coordinates
-                                      .getOutputNodeIndices(coord, CT::isEdge<PassThrough>)
-                                      .to<std::vector>();
-                            if(duplicate.empty())
-                                graph.coordinates.addElement(PassThrough(), {dim}, {coord});
-                            else
-                                graph.coordinates.addElement(PassThrough(), {dim}, {duplicate[0]});
-                        }
-                        coord = reindexer.coordinates[c.coordinate];
-                    }
-                    graph.mapper.connect(reindex.second, coord, c.connection);
-                }
-            }
-
-            // Change coordinate values in Expressions
-            for(auto const& reindex : reindexer.control)
-            {
-                auto elem = graph.control.getElement(reindex.first);
-                if(isOperation<Assign>(elem))
-                {
-                    auto new_assign = graph.control.getNode<Assign>(reindex.second);
-                    ReindexExpressionVisitor visitor(reindexer);
-                    new_assign.expression = visitor.call(new_assign.expression);
-                    graph.control.setElement(reindex.second, new_assign);
-                }
-            }
-
-            // Return the new start nodes
-            for(auto const& startNode : startNodes)
-            {
-                newStartNodes.push_back(reindexer.control[startNode]);
-            }
-
-            return newStartNodes;
-        }
-
-        /**
          * @brief Gets the name of the current for loop.
          *
          * @param graph
@@ -530,11 +425,13 @@ namespace rocRoller
                 {
                     GraphReindexer unrollReindexer;
 
+                    auto dontDuplicatePedicate = [&](int x) { return dontDuplicate.contains(x); };
+
                     if(i == 0)
                         duplicatedBodies.push_back(bodies);
                     else
-                        duplicatedBodies.push_back(
-                            duplicateControlNodes(graph, unrollReindexer, bodies, dontDuplicate));
+                        duplicatedBodies.push_back(duplicateControlNodes(
+                            graph, unrollReindexer, bodies, dontDuplicatePedicate));
 
                     for(auto const& [coord, controls] : loopCarriedDependencies)
                     {

@@ -15,6 +15,7 @@ import pandas as pd
 import rrperf
 import scipy.stats
 from rrperf.specs import MachineSpecs
+from rrperf.problems import GEMMResult
 
 
 def priority_problems():
@@ -183,6 +184,31 @@ def summary_statistics(perf_runs):
             )
 
     return stats
+
+
+def summary_as_df(summary, ResultType):
+    rows = []
+    for run in summary:
+        for result in summary[run]:
+            token, comparison = summary[run][result]
+            A, B = comparison.results
+            if not isinstance(A, ResultType):
+                continue
+            row = A.compact()
+            row.update(
+                {
+                    "meanA": comparison.mean[0],
+                    "meanB": comparison.mean[1],
+                    "medianA": comparison.median[0],
+                    "medianB": comparison.median[1],
+                    "pval": comparison.moods_pval,
+                    "relative_diff": 100
+                    * (comparison.median[1] - comparison.median[0])
+                    / comparison.median[0],
+                }
+            )
+            rows.append(row)
+    return pd.DataFrame(rows)
 
 
 def significant_changes(summary, threshold=0.05):
@@ -664,6 +690,46 @@ def compare(
         markdown_summary(output, perf_runs)
     elif format == "console":
         console_summary(output, perf_runs)
+    elif format == "gemmdf":
+        summary = summary_statistics(perf_runs)
+        df = summary_as_df(summary, GEMMResult)
+        cols = [
+            "prec",
+            "AB",
+            "M",
+            "N",
+            "K",
+            "m",
+            "n",
+            "k",
+            "scheduler",
+            "LDS",
+            "WG",
+            "relative_diff",
+            "pval",
+            "medianA",
+            "medianB",
+        ]
+        scols = [
+            "prec",
+            "AB",
+            "M",
+            "N",
+            "K",
+            "m",
+            "n",
+            "k",
+            "medianB",
+            "scheduler",
+            "LDS",
+            "WG",
+            "relative_diff",
+            "pval",
+            "medianA",
+        ]
+
+        print(df[cols].sort_values(scols, axis="index"), file=output)
+
     else:
         raise RuntimeError("Invalid format: " + format)
 

@@ -1,3 +1,6 @@
+
+#pragma once
+
 #include <iostream>
 #include <memory>
 #include <set>
@@ -393,6 +396,7 @@ namespace rocRoller
             MAKE_OPERATION_VISITOR(LoadTiled);
             MAKE_OPERATION_VISITOR(LoadVGPR);
             MAKE_OPERATION_VISITOR(Multiply);
+            MAKE_OPERATION_VISITOR(NOP);
             MAKE_OPERATION_VISITOR(Scope);
             MAKE_OPERATION_VISITOR(SetCoordinate);
             MAKE_OPERATION_VISITOR(StoreLDSTile);

@@ -44,6 +44,8 @@ struct GEMMProblem
     bool loadLDS_B  = true;
     bool storeLDS_D = true;
 
+    bool prefetch = false;
+
     // Unroll Options
     unsigned int unroll_x = 0;
     unsigned int unroll_y = 0;
@@ -223,9 +225,9 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult, bool doVisualize)
     std::vector<B>  h_B = random.vector<B>(result.K * result.N, -1.0, 1.0);
     std::vector<C>  h_C = random.vector<C>(result.M * result.N, -1.0, 1.0);
 
-    // Device data
-    std::shared_ptr<A> d_A = make_shared_device(h_A);
-    std::shared_ptr<B> d_B = make_shared_device(h_B);
+    // Device data.  TODO Remove padding when prefetch fixed.
+    std::shared_ptr<A> d_A = make_shared_device(h_A, prob.prefetch ? prob.mac_k * prob.M * 10 : 0);
+    std::shared_ptr<B> d_B = make_shared_device(h_B, prob.prefetch ? prob.mac_k * prob.N * 10 : 0);
     std::shared_ptr<C> d_C = make_shared_device(h_C);
     std::shared_ptr<D> d_D = make_shared_device<D>(result.M * result.N, 0.0);
 
@@ -406,6 +408,12 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult, bool doVisualize)
     kernelOptions->unrollX = result.unroll_x;
     kernelOptions->unrollY = result.unroll_y;
 
+    if(prob.prefetch)
+    {
+        kernelOptions->unrollK  = 2;
+        kernelOptions->prefetch = true;
+    }
+
     if(result.match_memory_access)
     {
         kernelOptions->transposeMemoryAccess[LayoutType::MATRIX_A] = result.trans_A == "T";
@@ -528,6 +536,7 @@ int main(int argc, const char* argv[])
               Arg({"match_memory_access"},
                   "Match memory access to transpose. "
                   "Currently decreases performance."));
+    po.addArg("prefetch", Arg({"prefetch"}, "Enable prefetching (UnrollK=2 implied)."));
 
     // Benchmarking options
     po.addArg("yaml", Arg({"o", "yaml"}, "Results"));
@@ -565,6 +574,7 @@ int main(int argc, const char* argv[])
     prob.trans_B             = po.get("trans_B", std::string("N"));
     prob.scheduler           = po.get("scheduler", std::string("Priority"));
     prob.match_memory_access = po.get("match_memory_access", true);
+    prob.prefetch            = po.get("prefetch", false);
 
     prob.numWarmUp = po.get("num_warmup", 3);
     prob.numOuter  = po.get("num_outer", 5);

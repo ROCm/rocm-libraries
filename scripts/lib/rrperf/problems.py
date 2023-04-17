@@ -69,6 +69,8 @@ class GEMMSolution:
 
     scheduler: str = "Priority"
 
+    prefetch: bool = True
+
 
 @dataclass(unsafe_hash=True)
 class GEMM(GEMMProblem, GEMMSolution):
@@ -157,7 +159,6 @@ class GEMMRun(GEMM):
         )
         retval = [command] + args
 
-        print(" ".join(retval))
         return retval
 
 
@@ -165,7 +166,31 @@ class GEMMRun(GEMM):
 class GEMMResult(GEMM, RRPerfResult):
     """GEMM result interface."""
 
-    pass
+    def compact(self):
+        def TF(x):
+            return {True: "T", False: "F"}[x]
+
+        return {
+            "M": self.M,
+            "N": self.N,
+            "K": self.K,
+            "prec": "".join(
+                [
+                    {"half": "h", "float": "f"}[getattr(self, "type_" + x)]
+                    for x in ["A", "B", "C", "D", "acc"]
+                ]
+            ),
+            "AB": self.trans_A + self.trans_B,
+            "m": self.mac_m,
+            "n": self.mac_n,
+            "k": self.mac_k,
+            "WG": str(self.workgroup_size_x) + "/" + str(self.workgroup_size_y),
+            "LDS": TF(self.loadLDS_A) + TF(self.loadLDS_B) + TF(self.storeLDS_D),
+            "scheduler": self.scheduler,
+            "iters": "/".join(
+                [str(getattr(self, "num" + x)) for x in ["WarmUp", "Outer", "Inner"]]
+            ),
+        }
 
 
 #

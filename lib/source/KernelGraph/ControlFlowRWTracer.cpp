@@ -291,6 +291,8 @@ namespace rocRoller::KernelGraph
         trackRegister(tag, dst, ReadWrite::READWRITE);
     }
 
+    void ControlFlowRWTracer::operator()(NOP const& op, int tag) {}
+
     void ControlFlowRWTracer::operator()(Scope const& op, int tag)
     {
         m_depth++;

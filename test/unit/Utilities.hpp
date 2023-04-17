@@ -38,11 +38,11 @@ std::shared_ptr<T> make_shared_device(std::size_t n = 1, T init = 0.0)
 }
 
 template <typename T>
-std::shared_ptr<T> make_shared_device(const std::vector<T>& init)
+std::shared_ptr<T> make_shared_device(const std::vector<T>& init, size_t padding = 0)
 {
     std::size_t size   = init.size() * sizeof(T);
     T*          ptr    = nullptr;
-    auto        result = hipMalloc(&ptr, size);
+    auto        result = hipMalloc(&ptr, size + padding);
     if(result != hipSuccess)
     {
         throw std::runtime_error(hipGetErrorString(result));

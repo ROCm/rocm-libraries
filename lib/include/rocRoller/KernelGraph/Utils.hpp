@@ -5,11 +5,15 @@
 
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/KernelGraph/Visitors.hpp>
 
 namespace rocRoller
 {
     namespace KernelGraph
     {
+        namespace CT = rocRoller::KernelGraph::CoordinateGraph;
+        namespace CF = rocRoller::KernelGraph::ControlGraph;
+
         /**
          * @brief Create a range-based for loop.
          */
@@ -121,22 +125,22 @@ namespace rocRoller
                                 int                                unroll,
                                 bool                               useSwappedAccess);
 
-        void updateLoadLDSMacroTile(KernelGraph&                      graph,
-                                    CoordinateGraph::MacroTile const& mac_tile,
-                                    int                               load_tag,
-                                    std::vector<int>&                 sdims,
-                                    int                               K,
-                                    int                               lds,
-                                    bool                              useSwappedAccess);
+        void updateLoadLDSMacroTile(KernelGraph&         graph,
+                                    CT::MacroTile const& mac_tile,
+                                    int                  load_tag,
+                                    std::vector<int>&    sdims,
+                                    int                  K,
+                                    int                  lds,
+                                    bool                 useSwappedAccess);
 
-        void loadWaveMacroTile(KernelGraph&                      graph,
-                               CoordinateGraph::MacroTile const& mac_tile,
-                               int                               load_tag,
-                               int                               i_mac_x,
-                               int                               i_mac_y,
-                               int                               user_tag,
-                               int                               wavefrontSize,
-                               std::vector<unsigned int> const&  wavetilesPerWorkgroup);
+        void loadWaveMacroTile(KernelGraph&                     graph,
+                               CT::MacroTile const&             mac_tile,
+                               int                              load_tag,
+                               int                              i_mac_x,
+                               int                              i_mac_y,
+                               int                              user_tag,
+                               int                              wavefrontSize,
+                               std::vector<unsigned int> const& wavetilesPerWorkgroup);
 
         void storeMacroTile(KernelGraph&                       graph,
                             int                                store_tag,
@@ -147,15 +151,15 @@ namespace rocRoller
                             int                                wavefrontSize,
                             std::vector<unsigned int> const&   wavetilesPerWorkgroup);
 
-        void storeWaveMacroTile(KernelGraph&                      graph,
-                                CoordinateGraph::MacroTile const& mac_tile,
-                                int                               store_tag,
-                                int                               i_mac_x,
-                                int                               i_mac_y,
-                                int                               workitem,
-                                int                               user_tag,
-                                int                               wavefrontSize,
-                                std::vector<unsigned int> const&  wavetilesPerWorkgroup);
+        void storeWaveMacroTile(KernelGraph&                     graph,
+                                CT::MacroTile const&             mac_tile,
+                                int                              store_tag,
+                                int                              i_mac_x,
+                                int                              i_mac_y,
+                                int                              workitem,
+                                int                              user_tag,
+                                int                              wavefrontSize,
+                                std::vector<unsigned int> const& wavetilesPerWorkgroup);
 
         std::vector<DeferredConnection>
             storeMacroTileForLDS(KernelGraph&                       graph,
@@ -164,11 +168,11 @@ namespace rocRoller
                                  std::vector<int>&                  sdims,
                                  std::array<unsigned int, 3> const& workgroupSizes);
 
-        void updateStoreLDSMacroTile(KernelGraph&                      graph,
-                                     CoordinateGraph::MacroTile const& mac_tile,
-                                     int                               store_tag,
-                                     std::vector<int>&                 sdims,
-                                     int                               lds);
+        void updateStoreLDSMacroTile(KernelGraph&         graph,
+                                     CT::MacroTile const& mac_tile,
+                                     int                  store_tag,
+                                     std::vector<int>&    sdims,
+                                     int                  lds);
 
         std::vector<DeferredConnection>
             storeMacroTileIntoLDS(KernelGraph&                       graph,
@@ -275,6 +279,26 @@ namespace rocRoller
                                            int              unrollCoord,
                                            std::vector<int> loads,
                                            int              unroll);
+
+        /**
+         * @brief Create duplicates of all of the nodes downstream of the provided
+         *        start nodes.
+         *        Add the duplicates to the provided graph.
+         *        Return the location of the new start nodes.
+         *
+         * @param graph KernelGraph that nodes are duplicated from and into.
+         * @param startNodes Starting nodes of sub-graph to duplicate.
+         * @param reindexer Graph reindexer.
+         * @param dontDuplicate Predicate to determine if a coordinate node is duplicated.
+         *
+         * @return New start nodes for the duplicated sub-graph.
+         */
+        template <std::predicate<int> Predicate>
+        std::vector<int> duplicateControlNodes(KernelGraph&            graph,
+                                               GraphReindexer&         reindexer,
+                                               std::vector<int> const& startNodes,
+                                               Predicate               dontDuplicate);
+
     }
 }
 

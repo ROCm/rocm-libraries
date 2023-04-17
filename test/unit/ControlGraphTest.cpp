@@ -170,7 +170,7 @@ namespace rocRollerTest
         EXPECT_THROW(getTopSetCoordinate(kg, load1), FatalError);
         EXPECT_THROW(getSetCoordinateForDim(kg, 1, load1), FatalError);
 
-        kg.mapper.connect<CoordinateGraph::Unroll>(topSet1, 1);
+        kg.mapper.connect<CT::Unroll>(topSet1, 1);
         EXPECT_EQ(topSet1, getTopSetCoordinate(kg, load1));
         EXPECT_THROW(getSetCoordinateForDim(kg, 2, load1), FatalError);
         EXPECT_EQ(topSet1, getSetCoordinateForDim(kg, 1, load1));
@@ -181,9 +181,9 @@ namespace rocRollerTest
 
         EXPECT_THROW(getTopSetCoordinate(kg, load2), FatalError);
 
-        kg.mapper.connect<CoordinateGraph::Unroll>(topSet2, 2);
-        kg.mapper.connect<CoordinateGraph::Unroll>(notTopSet1, 1);
-        kg.mapper.connect<CoordinateGraph::Unroll>(notTopSet2, 3);
+        kg.mapper.connect<CT::Unroll>(topSet2, 2);
+        kg.mapper.connect<CT::Unroll>(notTopSet1, 1);
+        kg.mapper.connect<CT::Unroll>(notTopSet2, 3);
         EXPECT_EQ(topSet2, getTopSetCoordinate(kg, load2));
 
         EXPECT_THROW(getSetCoordinateForDim(kg, 5, load2), FatalError);

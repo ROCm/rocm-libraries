@@ -569,6 +569,11 @@ namespace rocRoller
                 co_yield Expression::generate(D, matMul, m_context);
             }
 
+            Generator<Instruction> operator()(int, NOP const&, Transformer)
+            {
+                co_return;
+            }
+
             Generator<Instruction>
                 operator()(int tag, TensorContraction const& mul, Transformer coords)
             {

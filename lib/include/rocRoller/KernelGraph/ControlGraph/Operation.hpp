@@ -292,6 +292,17 @@ namespace rocRoller
         };
 
         /**
+         * NOP - Do nothing.
+         */
+        struct NOP : BaseOperation
+        {
+            std::string toString() const override
+            {
+                return "NOP";
+            }
+        };
+
+        /**
          * StoreLinear - Store linear dimension.
          */
         struct StoreLinear : public BaseOperation

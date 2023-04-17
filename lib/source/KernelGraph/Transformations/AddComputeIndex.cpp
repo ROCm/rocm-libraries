@@ -886,11 +886,23 @@ namespace rocRoller::KernelGraph
             if(hasForLoop)
             {
                 log->debug("KernelGraph::addComputeIndex({}): forLoop", candidate);
-                AssertFatal(maybeForLoop, "Missing ForLoop operation.");
 
-                auto forLoop = *maybeForLoop;
+                int location, forLoop;
+                if(maybeForLoop)
+                {
+                    location = *maybeForLoop;
+                    forLoop  = *maybeForLoop;
+                }
+                else
+                {
+                    // Prefetch; has a ForLoop dependency but occurs outside the loop
+                    auto maybeScope = findContainingOperation<Scope>(candidate, kgraph);
+                    location        = *maybeScope;
+                    forLoop         = -1;
+                }
+
                 stageChain(
-                    target, candidate, forLoop, type, GD::Upstream, forLoop, unrollCoordinates);
+                    target, candidate, location, type, GD::Upstream, forLoop, unrollCoordinates);
                 return;
             }
 
@@ -954,6 +966,11 @@ namespace rocRoller::KernelGraph
                 }
 
                 // If the chain has a increment
+                if(chain.update > 0 && spec.forLoop < 0)
+                {
+                    kgraph.control.deleteElement(chain.update);
+                    chain.update = -1;
+                }
                 if(chain.update > 0)
                     kgraph.control.addElement(ForLoopIncrement(), {spec.forLoop}, {chain.update});
 

@@ -37,7 +37,7 @@ def main():
     )
     compare_cmd.add_argument(
         "--format",
-        choices=["md", "html", "email_html"],
+        choices=["md", "html", "email_html", "console", "gemmdf"],
         default="md",
         help="Output format.",
     )

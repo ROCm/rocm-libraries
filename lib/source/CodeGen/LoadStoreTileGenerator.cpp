@@ -80,6 +80,9 @@ namespace rocRoller
         ExpressionPtr LoadStoreTileGenerator::getOffsetExpr(int                offsetTag,
                                                             Transformer const& coords)
         {
+            rocRoller::Log::getLogger()->debug(
+                "KernelGraph::LoadStoreTileGenerator::getOffsetExpr(offsetTag: {})", offsetTag);
+
             // Find storage node connected to Offset edge.
             auto maybeTargetTag = findStorageNeighbour(offsetTag, *m_graph);
             if(!maybeTargetTag)
@@ -131,6 +134,9 @@ namespace rocRoller
                 auto [strideExpr, _dtype]
                     = m_context->registerTagManager()->getExpression(*maybeStrideTag);
 
+                rocRoller::Log::getLogger()->debug(
+                    "  unroll coord {} value: {}", unroll, toString(coords.getCoordinate(unroll)));
+
                 result = result + coords.getCoordinate(unroll) * strideExpr;
             }
 
@@ -171,6 +177,9 @@ namespace rocRoller
             {
                 Throw<FatalError>("Base offset not found");
             }
+
+            if(rowOffsetExpr)
+                rocRoller::Log::getLogger()->debug("  rowOffsetExpr: {}", toString(rowOffsetExpr));
 
             if(rowOffsetExpr
                && Expression::evaluationTimes(rowOffsetExpr)[EvaluationTime::Translate]

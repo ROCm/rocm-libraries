@@ -256,6 +256,7 @@ def visualizer():
         trans_B="T",
         storeLDS_D=False,
         visualize=True,
+        prefetch=False,
         **fp16,
     )
 

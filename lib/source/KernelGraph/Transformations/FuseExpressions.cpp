@@ -47,8 +47,7 @@ namespace rocRoller::KernelGraph
 
             auto dst = kgraph.mapper.get(parent, NaryArgument::DEST);
             AssertFatal(dst != -1, "Invalid connection.");
-            auto dfs = only(kgraph.coordinates.getOutputNodeIndices(
-                dst, CT::isEdge<CoordinateGraph::DataFlow>));
+            auto dfs = only(kgraph.coordinates.getOutputNodeIndices(dst, CT::isEdge<CT::DataFlow>));
             if(!dfs)
                 continue;
 
@@ -138,7 +137,7 @@ namespace rocRoller::KernelGraph
         std::vector<int> inputs, outputs;
         for(auto const& tag : graph.coordinates.getNeighbours<Graph::Direction::Upstream>(dim))
         {
-            auto df = graph.coordinates.get<CoordinateGraph::DataFlow>(tag);
+            auto df = graph.coordinates.get<CT::DataFlow>(tag);
             if(!df)
                 continue;
             auto parents = graph.coordinates.getNeighbours<Graph::Direction::Upstream>(tag);
@@ -149,7 +148,7 @@ namespace rocRoller::KernelGraph
 
         for(auto const& tag : graph.coordinates.getNeighbours<Graph::Direction::Downstream>(dim))
         {
-            auto df = graph.coordinates.get<CoordinateGraph::DataFlow>(tag);
+            auto df = graph.coordinates.get<CT::DataFlow>(tag);
             if(!df)
                 continue;
             auto children = graph.coordinates.getNeighbours<Graph::Direction::Downstream>(tag);
@@ -159,7 +158,7 @@ namespace rocRoller::KernelGraph
         }
 
         std::copy(other_inputs.cbegin(), other_inputs.cend(), std::back_inserter(inputs));
-        graph.coordinates.addElement(CoordinateGraph::DataFlow(), inputs, outputs);
+        graph.coordinates.addElement(CT::DataFlow(), inputs, outputs);
     }
 
     /**
