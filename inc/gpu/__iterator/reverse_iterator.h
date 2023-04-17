@@ -13,11 +13,11 @@ _LIBGPU_SUPPRESS_DEPRECATED_PUSH
 template <class _Iter>
 class _LIBGPU_TEMPLATE_VIS reverse_iterator
 #if _LIBGPU_STD_VER <= 14 || !defined(_LIBGPU_ABI_NO_ITERATOR_BASES)
-    : public iterator<typename std::iterator_traits<_Iter>::iterator_category,
-                      typename std::iterator_traits<_Iter>::value_type,
-                      typename std::iterator_traits<_Iter>::difference_type,
-                      typename std::iterator_traits<_Iter>::pointer,
-                      typename std::iterator_traits<_Iter>::reference>
+    : public std::iterator<typename std::iterator_traits<_Iter>::iterator_category,
+                           typename std::iterator_traits<_Iter>::value_type,
+                           typename std::iterator_traits<_Iter>::difference_type,
+                           typename std::iterator_traits<_Iter>::pointer,
+                           typename std::iterator_traits<_Iter>::reference>
 #endif
 {
 _LIBGPU_SUPPRESS_DEPRECATED_POP
@@ -32,8 +32,8 @@ protected:
 public:
     using iterator_type = _Iter;
 
-    using iterator_category = std::conditional<__is_cpp17_random_access_iterator<_Iter>::value,
-                                  std::random_access_iterator_tag,
+    using iterator_category =
+        typename std::conditional<__is_cpp17_random_access_iterator<_Iter>::value, std::random_access_iterator_tag,
                                   typename std::iterator_traits<_Iter>::iterator_category>::type;
     using pointer = typename std::iterator_traits<_Iter>::pointer;
 #if _LIBGPU_STD_VER >= 20
@@ -168,7 +168,7 @@ bool
 operator==(const reverse_iterator<_Iter1>& __x, const reverse_iterator<_Iter2>& __y)
 #if _LIBGPU_STD_VER >= 20
     requires requires {
-      { __x.base() == __y.base() } -> convertible_to<bool>;
+      { __x.base() == __y.base() } -> std::convertible_to<bool>;
     }
 #endif // _LIBGPU_STD_VER >= 20
 {
@@ -181,7 +181,7 @@ bool
 operator<(const reverse_iterator<_Iter1>& __x, const reverse_iterator<_Iter2>& __y)
 #if _LIBGPU_STD_VER >= 20
     requires requires {
-        { __x.base() > __y.base() } -> convertible_to<bool>;
+        { __x.base() > __y.base() } -> std::convertible_to<bool>;
       }
 #endif // _LIBGPU_STD_VER >= 20
 {
@@ -194,7 +194,7 @@ bool
 operator!=(const reverse_iterator<_Iter1>& __x, const reverse_iterator<_Iter2>& __y)
 #if _LIBGPU_STD_VER >= 20
     requires requires {
-      { __x.base() != __y.base() } -> convertible_to<bool>;
+      { __x.base() != __y.base() } -> std::convertible_to<bool>;
     }
 #endif // _LIBGPU_STD_VER >= 20
 {
@@ -207,7 +207,7 @@ bool
 operator>(const reverse_iterator<_Iter1>& __x, const reverse_iterator<_Iter2>& __y)
 #if _LIBGPU_STD_VER >= 20
     requires requires {
-        { __x.base() < __y.base() } -> convertible_to<bool>;
+        { __x.base() < __y.base() } -> std::convertible_to<bool>;
       }
 #endif // _LIBGPU_STD_VER >= 20
 {
@@ -220,7 +220,7 @@ bool
 operator>=(const reverse_iterator<_Iter1>& __x, const reverse_iterator<_Iter2>& __y)
 #if _LIBGPU_STD_VER >= 20
     requires requires {
-        { __x.base() <= __y.base() } -> convertible_to<bool>;
+        { __x.base() <= __y.base() } -> std::convertible_to<bool>;
       }
 #endif // _LIBGPU_STD_VER >= 20
 {
@@ -233,7 +233,7 @@ bool
 operator<=(const reverse_iterator<_Iter1>& __x, const reverse_iterator<_Iter2>& __y)
 #if _LIBGPU_STD_VER >= 20
     requires requires {
-        { __x.base() >= __y.base() } -> convertible_to<bool>;
+        { __x.base() >= __y.base() } -> std::convertible_to<bool>;
       }
 #endif // _LIBGPU_STD_VER >= 20
 {
@@ -330,7 +330,7 @@ public:
 
   using iterator_type = _Iter;
   using iterator_category =
-      _If<__is_cpp17_random_access_iterator<_Iter>::value, std::random_access_iterator_tag, __iterator_category_type<_Iter>>;
+      std::conditional_t<__is_cpp17_random_access_iterator<_Iter>::value, std::random_access_iterator_tag, __iterator_category_type<_Iter>>;
   using pointer = __iterator_pointer_type<_Iter>;
   using value_type = iter_value_t<_Iter>;
   using difference_type = iter_difference_t<_Iter>;
