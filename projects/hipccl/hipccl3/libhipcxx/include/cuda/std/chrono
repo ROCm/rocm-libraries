@@ -56,8 +56,8 @@ system_clock::time_point system_clock::now() _NOEXCEPT
     asm volatile("mov.u64 %0, %%globaltimer;":"=l"(__time)::);
     return time_point(duration_cast<duration>(nanoseconds(__time)));
 #elif defined(__HIP_DEVICE_COMPILE__)
-    uint64_t __time =__builtin_amdgcn_s_memrealtime(); //*_LIBCUDACXX_HIP_TSC_NANOSECONDS_PER_CYCLE;
-    return time_point(duration_cast<duration>(chrono::duration<uint64_t, ratio<1,_LIBCUDACXX_HIP_TSC_CLOCKRATE>>(__time)));
+    long long __time = wall_clock64();
+    return time_point(duration_cast<duration>(chrono::duration<long long, ratio<1,_LIBCUDACXX_HIP_TSC_CLOCKRATE>>(__time)));
 #else
     return time_point(duration_cast<duration>(nanoseconds(
             ::std::chrono::duration_cast<::std::chrono::nanoseconds>(
