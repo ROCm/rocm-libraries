@@ -1362,7 +1362,7 @@ __sanitizer_annotate_contiguous_container(const void*, const void*, const void*,
 // FIXME(hip): Other devices (e.g., from NVIDIA) may have a different clock rate for wall_clock64 and are currently not supported with HIP.
 // We may need to hardcode their clock rate at compile time or find a way to query it at runtime.
 #      define _LIBCUDACXX_HIP_TSC_CLOCKRATE 25000000
-#      define _LIBCUDACXX_HIP_TSC_NANOSECONDS_PER_CYCLE (1/_LIBCUDACXX_HIP_TSC_CLOCKRATE)  
+#      define _LIBCUDACXX_HIP_TSC_NANOSECONDS_PER_CYCLE 40 // (1/_LIBCUDACXX_HIP_TSC_CLOCKRATE) 
 #      define _LIBCUDACXX_SYS_CLOCK_DURATION duration<long long, std::ratio<1,_LIBCUDACXX_HIP_TSC_CLOCKRATE>>
 #    else
 #      define _LIBCUDACXX_SYS_CLOCK_DURATION nanoseconds
