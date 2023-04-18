@@ -95,7 +95,7 @@ inline __global__ void initialize_amdgpu_sysclock_kernel(uint64_t __host_unix_sy
 inline hipError_t initialize_amdgpu_sysclock_on_current_device() _NOEXCEPT {
     hipError_t __hip_error;
     initialize_amdgpu_sysclock_kernel<<<1,1>>>(
-        ::std::chrono::duration_cast<::std::chrono::nanoseconds>(
+        ::std::chrono::duration_cast<::std::chrono::duration<long long, ::std::ratio<1,_LIBCUDACXX_HIP_TSC_CLOCKRATE>>>(
                 ::std::chrono::system_clock::now().time_since_epoch()
         ).count()
         );
@@ -109,7 +109,7 @@ inline hipError_t initialize_amdgpu_sysclock_on_device(int __device_id) _NOEXCEP
     __hip_error = hipGetDevice(&__current_device_id); assert(__hip_error==hipSuccess);
     __hip_error = hipSetDevice(__device_id); assert(__hip_error==hipSuccess);
     initialize_amdgpu_sysclock_kernel<<<1,1>>>(
-        ::std::chrono::duration_cast<::std::chrono::nanoseconds>(
+        ::std::chrono::duration_cast<::std::chrono::duration<long long, ::std::ratio<1,_LIBCUDACXX_HIP_TSC_CLOCKRATE>>>(
                 ::std::chrono::system_clock::now().time_since_epoch()
         ).count()
         );
