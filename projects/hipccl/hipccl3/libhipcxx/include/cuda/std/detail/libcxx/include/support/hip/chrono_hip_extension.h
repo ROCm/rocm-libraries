@@ -58,20 +58,22 @@
 #include "hip/hip_runtime.h"
 
 #define LIBCUDACXX_HIP_DEFINE_SYSCLOCK_VARS \
-    __device__ uint64_t cuda::std::chrono::hip_gpu_ext::__unix_sysclock0 = 0; \
-    __device__ uint64_t cuda::std::chrono::hip_gpu_ext::__offset_devclock0 = 0; \
-    __device__ bool cuda::std::chrono::hip_gpu_ext::__is_sysclock_initialized = false;
+     __constant__ long long cuda::std::chrono::hip_gpu_ext::__unix_sysclock0 = -1; \
+     __constant__ long long cuda::std::chrono::hip_gpu_ext::__offset_devclock0 = -1; \
+
+#define LIBCUDACXX_HIP_CHECK(command)                                     \
+{                                                                         \
+    __hip_error = command;                                                \
+    assert(__hip_error==hipSuccess);                                      \
+}
 
 namespace hip_gpu_ext {
 
-extern __device__ uint64_t __unix_sysclock0;
-extern __device__ uint64_t __offset_devclock0; 
-extern __device__ bool     __is_sysclock_initialized;
+extern  __constant__ long long __unix_sysclock0;
+extern  __constant__ long long __offset_devclock0; 
 
-inline __global__ void initialize_amdgpu_sysclock_kernel(uint64_t __host_unix_sysclock0) {
-    __unix_sysclock0 = __host_unix_sysclock0;
-    __offset_devclock0 = __builtin_amdgcn_s_memrealtime();
-    __is_sysclock_initialized = true;
+__global__ void get_sysclock_offset_kernel(long long *__d_dev_sysclock_offset) {
+    *__d_dev_sysclock_offset = wall_clock64();
 }
 
 /* 
@@ -94,28 +96,37 @@ inline __global__ void initialize_amdgpu_sysclock_kernel(uint64_t __host_unix_sy
 
 inline hipError_t initialize_amdgpu_sysclock_on_current_device() _NOEXCEPT {
     hipError_t __hip_error;
-    initialize_amdgpu_sysclock_kernel<<<1,1>>>(
-        ::std::chrono::duration_cast<::std::chrono::duration<long long, ::std::ratio<1,_LIBCUDACXX_HIP_TSC_CLOCKRATE>>>(
-                ::std::chrono::system_clock::now().time_since_epoch()
-        ).count()
-        );
-    __hip_error = hipGetLastError(); assert(__hip_error==hipSuccess);
+    
+    long long* __d_dev_sysclock_offset; 
+    LIBCUDACXX_HIP_CHECK(hipMalloc(&__d_dev_sysclock_offset, sizeof(long long)));
+
+    // get device sysclock offset and host unix timestamp at approximately the same time
+    // FIXME (HIP): There will be some delays, e.g., due to kernel call overhead, so the clocks on the device and on the host will not be fully synchronized
+    get_sysclock_offset_kernel<<<1,1>>>(__d_dev_sysclock_offset);
+    LIBCUDACXX_HIP_CHECK(hipGetLastError(); assert(__hip_error==hipSuccess));
+    long long  __h_host_unix_sysclock = ::std::chrono::duration_cast<::std::chrono::duration<long long, ::std::ratio<1,_LIBCUDACXX_HIP_TSC_CLOCKRATE>>>(
+                ::std::chrono::system_clock::now().time_since_epoch()).count();
+
+    LIBCUDACXX_HIP_CHECK(hipDeviceSynchronize());
+
+    long long __h_dev_sysclock_offset = -1;
+    LIBCUDACXX_HIP_CHECK(hipMemcpy(&__h_dev_sysclock_offset, __d_dev_sysclock_offset, sizeof(long long), hipMemcpyDeviceToHost));
+
+    LIBCUDACXX_HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(__unix_sysclock0), &__h_host_unix_sysclock, sizeof(long long))); 
+    LIBCUDACXX_HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(__offset_devclock0), &__h_dev_sysclock_offset, sizeof(long long))); 
     return __hip_error;
 }
 
 inline hipError_t initialize_amdgpu_sysclock_on_device(int __device_id) _NOEXCEPT {
     hipError_t __hip_error;
     int __current_device_id;
-    __hip_error = hipGetDevice(&__current_device_id); assert(__hip_error==hipSuccess);
-    __hip_error = hipSetDevice(__device_id); assert(__hip_error==hipSuccess);
-    initialize_amdgpu_sysclock_kernel<<<1,1>>>(
-        ::std::chrono::duration_cast<::std::chrono::duration<long long, ::std::ratio<1,_LIBCUDACXX_HIP_TSC_CLOCKRATE>>>(
-                ::std::chrono::system_clock::now().time_since_epoch()
-        ).count()
-        );
-    __hip_error = hipGetLastError(); assert(__hip_error==hipSuccess);
-    __hip_error = hipDeviceSynchronize(); assert(__hip_error==hipSuccess);
-    __hip_error = hipSetDevice(__current_device_id); assert(__hip_error==hipSuccess);
+    LIBCUDACXX_HIP_CHECK(hipGetDevice(&__current_device_id)); 
+    LIBCUDACXX_HIP_CHECK(hipSetDevice(__device_id));
+    
+    LIBCUDACXX_HIP_CHECK(initialize_amdgpu_sysclock_on_current_device());
+
+    LIBCUDACXX_HIP_CHECK(hipDeviceSynchronize()); 
+    LIBCUDACXX_HIP_CHECK(hipSetDevice(__current_device_id)); 
     return __hip_error;
 }
 
