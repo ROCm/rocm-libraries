@@ -44,6 +44,8 @@ namespace rocRoller
              */
             std::string name() const override;
 
+            bool supportsAddingStreams() const override;
+
             /**
              * Call operator schedules instructions based on Sequential priority
              */

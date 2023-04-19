@@ -32,27 +32,50 @@ namespace rocRoller
             return Name;
         }
 
+        bool RandomScheduler::supportsAddingStreams() const
+        {
+            return true;
+        }
+
         inline Generator<Instruction>
             RandomScheduler::operator()(std::vector<Generator<Instruction>>& seqs)
         {
-            auto random = m_ctx.lock()->random();
-
-            std::vector<Generator<Instruction>::iterator> iterators;
-
             if(seqs.empty())
                 co_return;
 
-            size_t n = seqs.size();
+            auto                                          random = m_ctx.lock()->random();
+            std::vector<Generator<Instruction>::iterator> iterators;
 
-            iterators.reserve(n);
-            for(auto& seq : seqs)
-            {
-                iterators.emplace_back(seq.begin());
-            }
+            co_yield handleNewNodes(seqs, iterators);
 
-            while(n > 0)
+            std::vector<size_t> validIterIndexes(iterators.size());
+            std::iota(validIterIndexes.begin(), validIterIndexes.end(), 0);
+
+            while(!validIterIndexes.empty())
             {
-                size_t idx = random->next<size_t>(0, n - 1);
+                size_t idx;
+
+                // Try to find a stream that doesn't cause an out of register error.
+                std::vector<size_t> iterIndexesToSearch = validIterIndexes;
+                while(!iterIndexesToSearch.empty())
+                {
+                    size_t i_rand = random->next<size_t>(0, iterIndexesToSearch.size() - 1);
+                    idx           = iterIndexesToSearch[i_rand];
+
+                    if(iterators[idx] != seqs[idx].end())
+                    {
+                        auto status = m_ctx.lock()->peek(*iterators[idx]);
+                        if(status.outOfRegisters.count() == 0)
+                        {
+                            break;
+                        }
+                    }
+                    else
+                    {
+                        break;
+                    }
+                    iterIndexesToSearch.erase(iterIndexesToSearch.begin() + i_rand);
+                }
 
                 if(iterators[idx] != seqs[idx].end())
                 {
@@ -60,9 +83,16 @@ namespace rocRoller
                 }
                 else
                 {
-                    iterators.erase(iterators.begin() + idx);
-                    seqs.erase(seqs.begin() + idx);
-                    n--;
+                    validIterIndexes.erase(
+                        std::remove(validIterIndexes.begin(), validIterIndexes.end(), idx),
+                        validIterIndexes.end());
+                }
+
+                size_t n = iterators.size();
+                co_yield handleNewNodes(seqs, iterators);
+                for(size_t i = n; i < iterators.size(); i++)
+                {
+                    validIterIndexes.push_back(i);
                 }
             }
 

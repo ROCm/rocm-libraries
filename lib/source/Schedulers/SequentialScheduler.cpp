@@ -43,9 +43,7 @@ namespace rocRoller
             bool yieldedAny = false;
 
             std::vector<Generator<Instruction>::iterator> iterators;
-            iterators.reserve(seqs.size());
-            for(auto& seq : seqs)
-                iterators.emplace_back(seq.begin());
+            co_yield handleNewNodes(seqs, iterators);
 
             do
             {
@@ -56,8 +54,6 @@ namespace rocRoller
 
                     while(iterators[i] != seqs[i].end())
                     {
-                        auto status = m_ctx.lock()->peek(*iterators[i]);
-
                         co_yield yieldFromStream(iterators[i]);
                         yieldedAny = true;
                     }

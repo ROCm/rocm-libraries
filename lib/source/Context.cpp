@@ -98,7 +98,9 @@ namespace rocRoller
         rv->m_mem          = std::make_shared<MemoryInstructions>(rv);
         rv->m_copier       = std::make_shared<CopyGenerator>(rv);
         rv->m_brancher     = std::make_shared<BranchGenerator>(rv);
-        rv->m_random       = std::make_shared<RandomGenerator>(0);
+        // Using a seed of zero by default ensures consistent results.
+        // Set ROCROLLER_RANDOM_SEED to specify a different seed.
+        rv->m_random = std::make_shared<RandomGenerator>(0);
 
         rv->m_regMap = std::make_shared<RegisterHazardMap>();
 
