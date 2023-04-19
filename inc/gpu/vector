@@ -7,10 +7,20 @@
 #include <iterator>
 
 #include "gpu/__config"
+#include "gpu/__algorithm/copy.h"
+#include "gpu/__algorithm/fill_n.h"
+#include "gpu/__algorithm/max.h"
+#include "gpu/__algorithm/min.h"
+#include "gpu/__algorithm/move.h"
+#include "gpu/__algorithm/move_backward.h"
+#include "gpu/__algorithm/rotate.h"
 #include "gpu/__iterator/iterator_traits.h"
+#include "gpu/__iterator/reverse_iterator.h"
 #include "gpu/__memory/addressof.h"
+#include "gpu/__memory/uninitialized_algorithms.h"
+#include "gpu/__split_buffer"
 #include "gpu/__type_traits/type_identity.h"
-
+#include "gpu/__utility/exception_guard.h"
 
 namespace gpu {
 
@@ -32,8 +42,8 @@ class _LIBGPU_TEMPLATE_VIS vector {
     typedef const value_type*                               const_pointer;
     typedef pointer                                         iterator;
     typedef const_pointer                                   const_iterator;
-    typedef std::reverse_iterator<iterator>                 reverse_iterator;
-    typedef std::reverse_iterator<const_iterator>           const_reverse_iterator;
+    typedef gpu::reverse_iterator<iterator>                 reverse_iterator;
+    typedef gpu::reverse_iterator<const_iterator>           const_reverse_iterator;
 
     _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI vector() _NOEXCEPT {}
     _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI explicit vector(size_type __n);
@@ -368,19 +378,19 @@ class _LIBGPU_TEMPLATE_VIS vector {
 #if _LIBGPU_STD_VER >= 17
 template <class _InputIterator,
           class = std::enable_if_t<__is_cpp17_input_iterator<_InputIterator>::value>>
-vector(_InputIterator, _InputIterator) -> vector<__iter_value_type<_InputIterator>>;
+vector(_InputIterator, _InputIterator) -> vector<typename std::iterator_traits<_InputIterator>::value_type>;
 #endif
 
 template <class _Tp>
 _LIBGPU_CONSTEXPR_SINCE_CXX20 void
 vector<_Tp>::__swap_out_circular_buffer(__split_buffer<value_type> &__v) {
-    using _RevIter = std::reverse_iterator<pointer>;
-    __v.__begin_ = std::__uninitialized_allocator_move_if_noexcept(__alloc(), _RevIter(__end_), _RevIter(__begin_),
+    using _RevIter = gpu::reverse_iterator<pointer>;
+    __v.__begin_ = gpu::__uninitialized_allocator_move_if_noexcept(_RevIter(__end_), _RevIter(__begin_),
                                                                    _RevIter(__v.__begin_))
                        .base();
-    std::swap(this->__begin_, __v.__begin_);
-    std::swap(this->__end_, __v.__end_);
-    std::swap(this->__end_cap(), __v.__end_cap());
+    gpu::swap(this->__begin_, __v.__begin_);
+    gpu::swap(this->__end_, __v.__end_);
+    gpu::swap(this->__end_cap(), __v.__end_cap());
     __v.__first_ = __v.__begin_;
 }
 
@@ -388,14 +398,14 @@ template <class _Tp>
 _LIBGPU_CONSTEXPR_SINCE_CXX20 typename vector<_Tp>::pointer
 vector<_Tp>::__swap_out_circular_buffer(__split_buffer<value_type> &__v, pointer __p) {
     pointer __r = __v.__begin_;
-    using _RevIter = std::reverse_iterator<pointer>;
-    __v.__begin_ = std::__uninitialized_allocator_move_if_noexcept(__alloc(), _RevIter(__p), _RevIter(__begin_),
+    using _RevIter = gpu::reverse_iterator<pointer>;
+    __v.__begin_ = gpu::__uninitialized_allocator_move_if_noexcept(_RevIter(__p), _RevIter(__begin_),
                                                                    _RevIter(__v.__begin_))
                        .base();
-    __v.__end_ = std::__uninitialized_allocator_move_if_noexcept(__alloc(), __p, __end_, __v.__end_);
-    std::swap(this->__begin_, __v.__begin_);
-    std::swap(this->__end_, __v.__end_);
-    std::swap(this->__end_cap(), __v.__end_cap());
+    __v.__end_ = gpu::__uninitialized_allocator_move_if_noexcept(__p, __end_, __v.__end_);
+    gpu::swap(this->__begin_, __v.__begin_);
+    gpu::swap(this->__end_, __v.__end_);
+    gpu::swap(this->__end_cap(), __v.__end_cap());
     __v.__first_ = __v.__begin_;
     return __r;
 }
@@ -425,7 +435,7 @@ vector<_Tp>::__recommend(size_type __new_size) const {
     const size_type __cap = capacity();
     if (__cap >= __ms / 2)
         return __ms;
-    return std::max<size_type>(2 * __cap, __new_size);
+    return gpu::max<size_type>(2 * __cap, __new_size);
 }
 
 //  Default constructs __n objects starting at __end_
@@ -463,7 +473,7 @@ template <class _ForwardIterator, typename std::enable_if<__is_cpp17_forward_ite
 _LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::__construct_at_end(_ForwardIterator __first,
                                                                                _ForwardIterator __last, size_type __n) {
     _ConstructTransaction __tx(*this, __n);
-    __tx.__pos_ = std::__uninitialized_allocator_copy(__alloc(), __first, __last, __tx.__pos_);
+    __tx.__pos_ = gpu::__uninitialized_allocator_copy(__first, __last, __tx.__pos_);
 }
 
 //  Default constructs __n objects starting at __end_
@@ -498,7 +508,7 @@ _LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::__append(size_type __n, const_re
 
 template <class _Tp>
 _LIBGPU_CONSTEXPR_SINCE_CXX20 vector<_Tp>::vector(size_type __n) {
-    auto __guard = std::__make_exception_guard(__destroy_vector(*this));
+    auto __guard = gpu::__make_exception_guard(__destroy_vector(*this));
     if (__n > 0) {
         __vallocate(__n);
         __construct_at_end(__n);
@@ -508,7 +518,7 @@ _LIBGPU_CONSTEXPR_SINCE_CXX20 vector<_Tp>::vector(size_type __n) {
 
 template <class _Tp>
 _LIBGPU_CONSTEXPR_SINCE_CXX20 vector<_Tp>::vector(size_type __n, const value_type &__x) {
-    auto __guard = std::__make_exception_guard(__destroy_vector(*this));
+    auto __guard = gpu::__make_exception_guard(__destroy_vector(*this));
     if (__n > 0) {
         __vallocate(__n);
         __construct_at_end(__n, __x);
@@ -522,7 +532,7 @@ template <class _InputIterator,
                              std::is_constructible<_Tp, typename std::iterator_traits<_InputIterator>::reference>::value,
                          int>::type>
 _LIBGPU_CONSTEXPR_SINCE_CXX20 vector<_Tp>::vector(_InputIterator __first, _InputIterator __last) {
-    auto __guard = std::__make_exception_guard(__destroy_vector(*this));
+    auto __guard = gpu::__make_exception_guard(__destroy_vector(*this));
     for (; __first != __last; ++__first)
         emplace_back(*__first);
     __guard.__complete();
@@ -534,7 +544,7 @@ template <class _ForwardIterator,
                              std::is_constructible<_Tp, typename std::iterator_traits<_ForwardIterator>::reference>::value,
                          int>::type>
 _LIBGPU_CONSTEXPR_SINCE_CXX20 vector<_Tp>::vector(_ForwardIterator __first, _ForwardIterator __last) {
-    auto __guard = std::__make_exception_guard(__destroy_vector(*this));
+    auto __guard = gpu::__make_exception_guard(__destroy_vector(*this));
     size_type __n = static_cast<size_type>(std::distance(__first, __last));
     if (__n > 0) {
         __vallocate(__n);
@@ -546,7 +556,7 @@ _LIBGPU_CONSTEXPR_SINCE_CXX20 vector<_Tp>::vector(_ForwardIterator __first, _For
 template <class _Tp>
 _LIBGPU_CONSTEXPR_SINCE_CXX20 vector<_Tp>::vector(const vector &__x)
     : __end_cap_(nullptr) {
-    auto __guard = std::__make_exception_guard(__destroy_vector(*this));
+    auto __guard = gpu::__make_exception_guard(__destroy_vector(*this));
     size_type __n = __x.size();
     if (__n > 0) {
         __vallocate(__n);
@@ -569,7 +579,7 @@ _LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI vector<_Tp>::vector(v
 template <class _Tp>
 _LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI
 vector<_Tp>::vector(std::initializer_list<value_type> __il) {
-    auto __guard = std::__make_exception_guard(__destroy_vector(*this));
+    auto __guard = gpu::__make_exception_guard(__destroy_vector(*this));
     if (__il.size() > 0) {
         __vallocate(__il.size());
         __construct_at_end(__il.begin(), __il.end(), __il.size());
@@ -582,7 +592,7 @@ vector<_Tp>::vector(std::initializer_list<value_type> __il) {
 template <class _Tp>
 _LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI vector<_Tp> &
 vector<_Tp>::operator=(vector &&__x) _NOEXCEPT {
-    __move_assign(__x, std::true_type);
+    __move_assign(__x, std::true_type());
     return *this;
 }
 
@@ -630,7 +640,7 @@ _LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::assign(_ForwardIterator __first,
             __mid = __first;
             std::advance(__mid, size());
         }
-        pointer __m = std::copy(__first, __mid, this->__begin_);
+        pointer __m = gpu::copy(__first, __mid, this->__begin_);
         if (__growing)
             __construct_at_end(__mid, __last, __new_size - size());
         else
@@ -646,7 +656,7 @@ template <class _Tp>
 _LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::assign(size_type __n, const_reference __u) {
     if (__n <= capacity()) {
         size_type __s = size();
-        std::fill_n(this->__begin_, std::min(__n, __s), __u);
+        gpu::fill_n(this->__begin_, std::min(__n, __s), __u);
         if (__n > __s)
             __construct_at_end(__n - __s, __u);
         else
@@ -800,8 +810,6 @@ _LIBGPU_CONSTEXPR_SINCE_CXX20 inline void vector<_Tp>::pop_back() {
 template <class _Tp>
 _LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI typename vector<_Tp>::iterator
 vector<_Tp>::erase(const_iterator __position) {
-    _LIBGPU_DEBUG_ASSERT(__get_const_db()->__find_c_from_i(gpu::addressof(__position)) == this,
-                         "vector::erase(iterator) called with an iterator not referring to this vector");
     _LIBGPU_ASSERT(__position != end(), "vector::erase(iterator) called with a non-dereferenceable iterator");
     difference_type __ps = __position - cbegin();
     pointer __p = this->__begin_ + __ps;
@@ -814,11 +822,6 @@ vector<_Tp>::erase(const_iterator __position) {
 template <class _Tp>
 _LIBGPU_CONSTEXPR_SINCE_CXX20 typename vector<_Tp>::iterator
 vector<_Tp>::erase(const_iterator __first, const_iterator __last) {
-    _LIBGPU_DEBUG_ASSERT(__get_const_db()->__find_c_from_i(gpu::addressof(__first)) == this,
-                         "vector::erase(iterator, iterator) called with an iterator not referring to this vector");
-    _LIBGPU_DEBUG_ASSERT(__get_const_db()->__find_c_from_i(gpu::addressof(__last)) == this,
-                         "vector::erase(iterator, iterator) called with an iterator not referring to this vector");
-
     _LIBGPU_ASSERT(__first <= __last, "vector::erase(first, last) called with invalid range");
     pointer __p = this->__begin_ + (__first - begin());
     if (__first != __last) {
@@ -841,14 +844,12 @@ _LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::__move_range(pointer __from_s, p
             ::new (static_cast<void*>(__pos)) value_type(std::move(*__i));
         }
     }
-    std::move_backward(__from_s, __from_s + __n, __old_last);
+    gpu::move_backward(__from_s, __from_s + __n, __old_last);
 }
 
 template <class _Tp>
 _LIBGPU_CONSTEXPR_SINCE_CXX20 typename vector<_Tp>::iterator
 vector<_Tp>::insert(const_iterator __position, const_reference __x) {
-    _LIBGPU_DEBUG_ASSERT(__get_const_db()->__find_c_from_i(gpu::addressof(__position)) == this,
-                         "vector::insert(iterator, x) called with an iterator not referring to this vector");
     pointer __p = this->__begin_ + (__position - begin());
     // We can't compare unrelated pointers inside constant expressions
     if (!__builtin_is_constant_evaluated() && this->__end_ < this->__end_cap()) {
@@ -856,7 +857,7 @@ vector<_Tp>::insert(const_iterator __position, const_reference __x) {
             __construct_one_at_end(__x);
         } else {
             __move_range(__p, this->__end_, __p + 1);
-            const_pointer __xr = pointer_traits<const_pointer>::pointer_to(__x);
+            const_pointer __xr = &__x;
             if (__p <= __xr && __xr < this->__end_)
                 ++__xr;
             *__p = *__xr;
@@ -872,8 +873,6 @@ vector<_Tp>::insert(const_iterator __position, const_reference __x) {
 template <class _Tp>
 _LIBGPU_CONSTEXPR_SINCE_CXX20 typename vector<_Tp>::iterator
 vector<_Tp>::insert(const_iterator __position, value_type &&__x) {
-    _LIBGPU_DEBUG_ASSERT(__get_const_db()->__find_c_from_i(gpu::addressof(__position)) == this,
-                         "vector::insert(iterator, x) called with an iterator not referring to this vector");
     pointer __p = this->__begin_ + (__position - begin());
     if (this->__end_ < this->__end_cap()) {
         if (__p == this->__end_) {
@@ -894,16 +893,16 @@ template <class _Tp>
 template <class... _Args>
 _LIBGPU_CONSTEXPR_SINCE_CXX20 typename vector<_Tp>::iterator
 vector<_Tp>::emplace(const_iterator __position, _Args &&...__args) {
-    _LIBGPU_DEBUG_ASSERT(__get_const_db()->__find_c_from_i(gpu::addressof(__position)) == this,
-                         "vector::emplace(iterator, x) called with an iterator not referring to this vector");
     pointer __p = this->__begin_ + (__position - begin());
     if (this->__end_ < this->__end_cap()) {
         if (__p == this->__end_) {
             __construct_one_at_end(std::forward<_Args>(__args)...);
         } else {
-            __temp_value<value_type> __tmp(this->__alloc(), std::forward<_Args>(__args)...);
+            // TODO: figure out why libcxx wraps __temp_value's member in an anonymous union
+            union { value_type __tmp; };
+            ::new (static_cast<void*>(gpu::addressof(__tmp))) value_type(std::forward<_Args>(__args)...);
             __move_range(__p, this->__end_, __p + 1);
-            *__p = std::move(__tmp.get());
+            *__p = std::move(__tmp);
         }
     } else {
         __split_buffer<value_type> __v(__recommend(size() + 1), __p - this->__begin_);
@@ -916,8 +915,6 @@ vector<_Tp>::emplace(const_iterator __position, _Args &&...__args) {
 template <class _Tp>
 _LIBGPU_CONSTEXPR_SINCE_CXX20 typename vector<_Tp>::iterator
 vector<_Tp>::insert(const_iterator __position, size_type __n, const_reference __x) {
-    _LIBGPU_DEBUG_ASSERT(__get_const_db()->__find_c_from_i(gpu::addressof(__position)) == this,
-                         "vector::insert(iterator, n, x) called with an iterator not referring to this vector");
     pointer __p = this->__begin_ + (__position - begin());
     if (__n > 0) {
         // We can't compare unrelated pointers inside constant expressions
@@ -931,10 +928,10 @@ vector<_Tp>::insert(const_iterator __position, size_type __n, const_reference __
             }
             if (__n > 0) {
                 __move_range(__p, __old_last, __p + __old_n);
-                const_pointer __xr = pointer_traits<const_pointer>::pointer_to(__x);
+                const_pointer __xr = &__x;
                 if (__p <= __xr && __xr < this->__end_)
                     __xr += __old_n;
-                std::fill_n(__p, __n, *__xr);
+                gpu::fill_n(__p, __n, *__xr);
             }
         } else {
             __split_buffer<value_type> __v(__recommend(size() + __n), __p - this->__begin_);
@@ -952,15 +949,13 @@ template <class _InputIterator,
                          int>::type>
 _LIBGPU_CONSTEXPR_SINCE_CXX20 typename vector<_Tp>::iterator
 vector<_Tp>::insert(const_iterator __position, _InputIterator __first, _InputIterator __last) {
-    _LIBGPU_DEBUG_ASSERT(__get_const_db()->__find_c_from_i(gpu::addressof(__position)) == this,
-                         "vector::insert(iterator, range) called with an iterator not referring to this vector");
     difference_type __off = __position - begin();
     pointer __p = this->__begin_ + __off;
     pointer __old_last = this->__end_;
     for (; this->__end_ != this->__end_cap() && __first != __last; ++__first) {
         __construct_one_at_end(*__first);
     }
-    __split_buffer<value_type> __v();
+    __split_buffer<value_type> __v{};
     if (__first != __last) {
 #ifndef _LIBGPU_HAS_NO_EXCEPTIONS
         try {
@@ -978,7 +973,7 @@ vector<_Tp>::insert(const_iterator __position, _InputIterator __first, _InputIte
         }
 #endif // _LIBGPU_HAS_NO_EXCEPTIONS
     }
-    __p = std::rotate(__p, __old_last, this->__end_);
+    __p = gpu::rotate(__p, __old_last, this->__end_);
     insert(__make_iter(__p), std::make_move_iterator(__v.begin()), std::make_move_iterator(__v.end()));
     return begin() + __off;
 }
@@ -990,8 +985,6 @@ template <class _ForwardIterator,
                          int>::type>
 _LIBGPU_CONSTEXPR_SINCE_CXX20 typename vector<_Tp>::iterator
 vector<_Tp>::insert(const_iterator __position, _ForwardIterator __first, _ForwardIterator __last) {
-    _LIBGPU_DEBUG_ASSERT(__get_const_db()->__find_c_from_i(gpu::addressof(__position)) == this,
-                         "vector::insert(iterator, range) called with an iterator not referring to this vector");
     pointer __p = this->__begin_ + (__position - begin());
     difference_type __n = std::distance(__first, __last);
     if (__n > 0) {
@@ -1009,7 +1002,7 @@ vector<_Tp>::insert(const_iterator __position, _ForwardIterator __first, _Forwar
             }
             if (__n > 0) {
                 __move_range(__p, __old_last, __p + __old_n);
-                std::copy(__first, __m, __p);
+                gpu::copy(__first, __m, __p);
             }
         } else {
             __split_buffer<value_type> __v(__recommend(size() + __n), __p - this->__begin_);
@@ -1041,9 +1034,9 @@ _LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::resize(size_type __sz, const_ref
 template <class _Tp>
 _LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::swap(vector &__x) _NOEXCEPT
 {
-    std::swap(this->__begin_, __x.__begin_);
-    std::swap(this->__end_, __x.__end_);
-    std::swap(this->__end_cap(), __x.__end_cap());
+    gpu::swap(this->__begin_, __x.__begin_);
+    gpu::swap(this->__end_, __x.__end_);
+    gpu::swap(this->__end_cap(), __x.__end_cap());
 }
 
 template <class _Tp>
@@ -1133,8 +1126,8 @@ public:
     typedef __bit_iterator<vector, true>             const_pointer;
     typedef pointer                                  iterator;
     typedef const_pointer                            const_iterator;
-    typedef std::reverse_iterator<iterator>         reverse_iterator;
-    typedef std::reverse_iterator<const_iterator>   const_reverse_iterator;
+    typedef gpu::reverse_iterator<iterator>         reverse_iterator;
+    typedef gpu::reverse_iterator<const_iterator>   const_reverse_iterator;
 
 private:
     typedef __storage_type*                          __storage_pointer;
@@ -1349,7 +1342,7 @@ public:
     void clear() _NOEXCEPT {__size_ = 0;}
 
     _LIBGPU_CONSTEXPR_SINCE_CXX20 void swap(vector&) _NOEXCEPT;
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 static void swap(reference __x, reference __y) _NOEXCEPT { std::swap(__x, __y); }
+    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 static void swap(reference __x, reference __y) _NOEXCEPT { gpu::swap(__x, __y); }
 
     _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 void resize(size_type __sz, value_type __x = false);
     _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 void flip() _NOEXCEPT;
@@ -1474,7 +1467,7 @@ vector<bool>::__recommend(size_type __new_size) const
     const size_type __cap = capacity();
     if (__cap >= __ms / 2)
         return __ms;
-    return std::max(2 * __cap, __align_it(__new_size));
+    return gpu::max(2 * __cap, __align_it(__new_size));
 }
 
 //  Default constructs __n objects starting at __end_
@@ -1495,7 +1488,7 @@ vector<bool>::__construct_at_end(size_type __n, bool __x)
         else
             this->__begin_[(this->__size_ - 1) / __bits_per_word] = __storage_type(0);
     }
-    std::fill_n(__make_iter(__old_size), __n, __x);
+    gpu::fill_n(__make_iter(__old_size), __n, __x);
 }
 
 template <>
@@ -1517,7 +1510,7 @@ vector<bool>::__construct_at_end(_ForwardIterator __first, _ForwardIterator __la
         else
             this->__begin_[(this->__size_ - 1) / __bits_per_word] = __storage_type(0);
     }
-    std::copy(__first, __last, __make_iter(__old_size));
+    gpu::copy(__first, __last, __make_iter(__old_size));
 }
 
 template <>
@@ -1591,7 +1584,7 @@ vector<bool>::vector(_ForwardIterator __first, _ForwardIterator __last,
       __size_(0),
       __cap_alloc_(0)
 {
-    auto __guard = std::__make_exception_guard(__destroy_vector(*this));
+    auto __guard = gpu::__make_exception_guard(__destroy_vector(*this));
     size_type __n = static_cast<size_type>(std::distance(__first, __last));
     if (__n > 0)
     {
@@ -1648,7 +1641,7 @@ vector<bool>::operator=(const vector& __v)
                 __vdeallocate();
                 __vallocate(__v.__size_);
             }
-            std::copy(__v.__begin_, __v.__begin_ + __external_cap_to_internal(__v.__size_), __begin_);
+            gpu::copy(__v.__begin_, __v.__begin_ + __external_cap_to_internal(__v.__size_), __begin_);
         }
         __size_ = __v.__size_;
     }
@@ -1669,7 +1662,7 @@ template <>
 inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
 vector<bool>&
 vector<bool>::operator=(vector&& __v) _NOEXCEPT {
-    __move_assign(__v, std::true_type);
+    __move_assign(__v, std::true_type());
     return *this;
 }
 
@@ -1701,7 +1694,7 @@ vector<bool>::assign(size_type __n, const value_type& __x)
             __v.__size_ = __n;
             swap(__v);
         }
-        std::fill_n(begin(), __n, __x);
+        gpu::fill_n(begin(), __n, __x);
     }
 }
 
@@ -1814,7 +1807,7 @@ vector<bool>::insert(const_iterator __position, const value_type& __x)
     {
         const_iterator __old_end = end();
         ++__size_;
-        std::copy_backward(__position, __old_end, end());
+        gpu::copy_backward(__position, __old_end, end());
         __r = __const_iterator_cast(__position);
     }
     else
@@ -1822,8 +1815,8 @@ vector<bool>::insert(const_iterator __position, const value_type& __x)
         vector __v();
         __v.reserve(__recommend(__size_ + 1));
         __v.__size_ = __size_ + 1;
-        __r = std::copy(cbegin(), __position, __v.begin());
-        std::copy_backward(__position, cend(), __v.end());
+        __r = gpu::copy(cbegin(), __position, __v.begin());
+        gpu::copy_backward(__position, cend(), __v.end());
         swap(__v);
     }
     *__r = __x;
@@ -1840,7 +1833,7 @@ vector<bool>::insert(const_iterator __position, size_type __n, const value_type&
     {
         const_iterator __old_end = end();
         __size_ += __n;
-        std::copy_backward(__position, __old_end, end());
+        gpu::copy_backward(__position, __old_end, end());
         __r = __const_iterator_cast(__position);
     }
     else
@@ -1848,11 +1841,11 @@ vector<bool>::insert(const_iterator __position, size_type __n, const value_type&
         vector __v();
         __v.reserve(__recommend(__size_ + __n));
         __v.__size_ = __size_ + __n;
-        __r = std::copy(cbegin(), __position, __v.begin());
-        std::copy_backward(__position, cend(), __v.end());
+        __r = gpu::copy(cbegin(), __position, __v.begin());
+        gpu::copy_backward(__position, cend(), __v.end());
         swap(__v);
     }
-    std::fill_n(__r, __n, __x);
+    gpu::fill_n(__r, __n, __x);
     return __r;
 }
 
@@ -1893,7 +1886,7 @@ vector<bool>::insert(const_iterator __position, _InputIterator __first, _InputIt
         }
 #endif // _LIBGPU_HAS_NO_EXCEPTIONS
     }
-    __p = std::rotate(__p, __old_end, end());
+    __p = gpu::rotate(__p, __old_end, end());
     insert(__p, __v.begin(), __v.end());
     return begin() + __off;
 }
@@ -1917,7 +1910,7 @@ vector<bool>::insert(const_iterator __position, _ForwardIterator __first, _Forwa
     {
         const_iterator __old_end = end();
         __size_ += __n;
-        std::copy_backward(__position, __old_end, end());
+        gpu::copy_backward(__position, __old_end, end());
         __r = __const_iterator_cast(__position);
     }
     else
@@ -1925,11 +1918,11 @@ vector<bool>::insert(const_iterator __position, _ForwardIterator __first, _Forwa
         vector __v();
         __v.reserve(__recommend(__size_ + __n));
         __v.__size_ = __size_ + __n;
-        __r = std::copy(cbegin(), __position, __v.begin());
-        std::copy_backward(__position, cend(), __v.end());
+        __r = gpu::copy(cbegin(), __position, __v.begin());
+        gpu::copy_backward(__position, cend(), __v.end());
         swap(__v);
     }
-    std::copy(__first, __last, __r);
+    gpu::copy(__first, __last, __r);
     return __r;
 }
 
@@ -1939,7 +1932,7 @@ typename vector<bool>::iterator
 vector<bool>::erase(const_iterator __position)
 {
     iterator __r = __const_iterator_cast(__position);
-    std::copy(__position + 1, this->cend(), __r);
+    gpu::copy(__position + 1, this->cend(), __r);
     --__size_;
     return __r;
 }
@@ -1951,7 +1944,7 @@ vector<bool>::erase(const_iterator __first, const_iterator __last)
 {
     iterator __r = __const_iterator_cast(__first);
     difference_type __d = __last - __first;
-    std::copy(__last, this->cend(), __r);
+    gpu::copy(__last, this->cend(), __r);
     __size_ -= __d;
     return __r;
 }
@@ -1959,9 +1952,9 @@ vector<bool>::erase(const_iterator __first, const_iterator __last)
 template <>
 _LIBGPU_CONSTEXPR_SINCE_CXX20 void
 vector<bool>::swap(vector& __x) _NOEXCEPT {
-    std::swap(this->__begin_, __x.__begin_);
-    std::swap(this->__size_, __x.__size_);
-    std::swap(this->__cap(), __x.__cap());
+    gpu::swap(this->__begin_, __x.__begin_);
+    gpu::swap(this->__size_, __x.__size_);
+    gpu::swap(this->__cap(), __x.__cap());
 }
 
 template <>
@@ -1984,10 +1977,10 @@ vector<bool>::resize(size_type __sz, value_type __x)
             vector __v();
             __v.reserve(__recommend(__size_ + __n));
             __v.__size_ = __size_ + __n;
-            __r = std::copy(cbegin(), cend(), __v.begin());
+            __r = gpu::copy(cbegin(), cend(), __v.begin());
             swap(__v);
         }
-        std::fill_n(__r, __n, __x);
+        gpu::fill_n(__r, __n, __x);
     }
     else
         __size_ = __sz;
@@ -2110,7 +2103,7 @@ template <class _Tp, class _Up>
 _LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI typename vector<_Tp>::size_type
 erase(vector<_Tp> &__c, const _Up &__v) {
     auto __old_size = __c.size();
-    __c.erase(std::remove(__c.begin(), __c.end(), __v), __c.end());
+    __c.erase(gpu::remove(__c.begin(), __c.end(), __v), __c.end());
     return __old_size - __c.size();
 }
 
@@ -2118,7 +2111,7 @@ template <class _Tp, class _Predicate>
 _LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI typename vector<_Tp>::size_type
 erase_if(vector<_Tp> &__c, _Predicate __pred) {
     auto __old_size = __c.size();
-    __c.erase(std::remove_if(__c.begin(), __c.end(), __pred), __c.end());
+    __c.erase(gpu::remove_if(__c.begin(), __c.end(), __pred), __c.end());
     return __old_size - __c.size();
 }
 
