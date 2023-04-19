@@ -152,13 +152,13 @@ _ForwardIterator search_n(_ForwardIterator __first, _ForwardIterator __last,
   static_assert(__is_callable<_BinaryPredicate, decltype(*__first), const _Tp&>::value,
                 "BinaryPredicate has to be callable");
   auto __proj = __identity();
-  return std::__search_n_impl(__first, __last, std::__convert_to_integral(__count), __value, __pred, __proj).first;
+  return std::__search_n_impl(__first, __last, gpu::__convert_to_integral(__count), __value, __pred, __proj).first;
 }
 
 template <class _ForwardIterator, class _Size, class _Tp>
 _LIBGPU_NODISCARD_EXT inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
 _ForwardIterator search_n(_ForwardIterator __first, _ForwardIterator __last, _Size __count, const _Tp& __value) {
-  return gpu::search_n(__first, __last, std::__convert_to_integral(__count), __value, __equal_to());
+  return gpu::search_n(__first, __last, gpu::__convert_to_integral(__count), __value, __equal_to());
 }
 
 } // namespace gpu
