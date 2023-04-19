@@ -4,6 +4,8 @@
 #include <iterator>
 #include <type_traits>
 
+#include "gpu/__utility/pair.h"
+
 namespace gpu {
 
 //====================================================================================================================//

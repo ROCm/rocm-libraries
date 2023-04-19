@@ -23,7 +23,7 @@ typename std::enable_if
 >::type
 copy_n(_InputIterator __first, _Size __orig_n, _OutputIterator __result)
 {
-    typedef decltype(std::__convert_to_integral(__orig_n)) _IntegralSize;
+    typedef decltype(gpu::__convert_to_integral(__orig_n)) _IntegralSize;
     _IntegralSize __n = __orig_n;
     if (__n > 0)
     {
@@ -49,7 +49,7 @@ typename std::enable_if
 copy_n(_InputIterator __first, _Size __orig_n, _OutputIterator __result)
 {
     typedef typename std::iterator_traits<_InputIterator>::difference_type difference_type;
-    typedef decltype(std::__convert_to_integral(__orig_n)) _IntegralSize;
+    typedef decltype(gpu::__convert_to_integral(__orig_n)) _IntegralSize;
     _IntegralSize __n = __orig_n;
     return gpu::copy(__first, __first + difference_type(__n), __result);
 }

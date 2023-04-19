@@ -40,12 +40,12 @@ void __advance(_RandIter& __i, typename std::iterator_traits<_RandIter>::differe
 
 template <
     class _InputIter, class _Distance,
-    class _IntegralDistance = decltype(std::__convert_to_integral(std::declval<_Distance>())),
+    class _IntegralDistance = decltype(gpu::__convert_to_integral(std::declval<_Distance>())),
     class = std::enable_if_t<std::is_integral<_IntegralDistance>::value> >
 _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX17
 void advance(_InputIter& __i, _Distance __orig_n) {
   typedef typename std::iterator_traits<_InputIter>::difference_type _Difference;
-  _Difference __n = static_cast<_Difference>(std::__convert_to_integral(__orig_n));
+  _Difference __n = static_cast<_Difference>(gpu::__convert_to_integral(__orig_n));
   _LIBGPU_ASSERT(__n >= 0 || __is_cpp17_bidirectional_iterator<_InputIter>::value,
                  "Attempt to advance(it, n) with negative n on a non-bidirectional iterator");
   std::__advance(__i, __n, typename std::iterator_traits<_InputIter>::iterator_category());

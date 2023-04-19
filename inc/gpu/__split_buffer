@@ -2,6 +2,8 @@
 #define __GPU___SPLIT_BUFFER__
 
 #include "gpu/__config"
+#include "gpu/__algorithm/max.h"
+#include "gpu/__algorithm/move_backward.h"
 
 namespace gpu {
 
@@ -200,7 +202,7 @@ __split_buffer<_Tp>::__construct_at_end(_InputIter __first, _InputIter __last) {
         if (__end_ == __end_cap())
         {
             size_type __old_cap = __end_cap() - __first_;
-            size_type __new_cap = std::max<size_type>(2 * __old_cap, 8);
+            size_type __new_cap = gpu::max<size_type>(2 * __old_cap, 8);
             __split_buffer __buf(__new_cap, 0);
             for (pointer __p = __begin_; __p != __end_; ++__p, (void) ++__buf.__end_)
                 ::new (static_cast<void*>(__buf.__end_)) value_type(std::move(*__p));
@@ -303,10 +305,10 @@ __split_buffer<_Tp>::operator=(__split_buffer &&__c) _NOEXCEPT {
 
 template <class _Tp>
 _LIBGPU_CONSTEXPR_SINCE_CXX20 void __split_buffer<_Tp>::swap(__split_buffer &__x) _NOEXCEPT {
-    std::swap(__first_, __x.__first_);
-    std::swap(__begin_, __x.__begin_);
-    std::swap(__end_, __x.__end_);
-    std::swap(__end_cap(), __x.__end_cap());
+    gpu::swap(__first_, __x.__first_);
+    gpu::swap(__begin_, __x.__begin_);
+    gpu::swap(__end_, __x.__end_);
+    gpu::swap(__end_cap(), __x.__end_cap());
 }
 
 template <class _Tp>
@@ -318,10 +320,10 @@ __split_buffer<_Tp>::reserve(size_type __n) {
         __split_buffer<value_type> __t(__n, 0);
         __t.__construct_at_end(std::move_iterator<pointer>(__begin_),
                                std::move_iterator<pointer>(__end_));
-        std::swap(__first_, __t.__first_);
-        std::swap(__begin_, __t.__begin_);
-        std::swap(__end_, __t.__end_);
-        std::swap(__end_cap(), __t.__end_cap());
+        gpu::swap(__first_, __t.__first_);
+        gpu::swap(__begin_, __t.__begin_);
+        gpu::swap(__end_, __t.__end_);
+        gpu::swap(__end_cap(), __t.__end_cap());
     }
 }
 
@@ -339,10 +341,10 @@ __split_buffer<_Tp>::shrink_to_fit() _NOEXCEPT {
             __t.__construct_at_end(std::move_iterator<pointer>(__begin_),
                                    std::move_iterator<pointer>(__end_));
             __t.__end_ = __t.__begin_ + (__end_ - __begin_);
-            std::swap(__first_, __t.__first_);
-            std::swap(__begin_, __t.__begin_);
-            std::swap(__end_, __t.__end_);
-            std::swap(__end_cap(), __t.__end_cap());
+            gpu::swap(__first_, __t.__first_);
+            gpu::swap(__begin_, __t.__begin_);
+            gpu::swap(__end_, __t.__end_);
+            gpu::swap(__end_cap(), __t.__end_cap());
 #ifndef _LIBGPU_HAS_NO_EXCEPTIONS
         }
         catch (...)
@@ -362,19 +364,19 @@ __split_buffer<_Tp>::push_front(const_reference __x) {
         {
             difference_type __d = __end_cap() - __end_;
             __d = (__d + 1) / 2;
-            __begin_ = std::move_backward(__begin_, __end_, __end_ + __d);
+            __begin_ = gpu::move_backward(__begin_, __end_, __end_ + __d);
             __end_ += __d;
         }
         else
         {
-            size_type __c = std::max<size_type>(2 * static_cast<std::size_t>(__end_cap() - __first_), 1);
+            size_type __c = gpu::max<size_type>(2 * static_cast<std::size_t>(__end_cap() - __first_), 1);
             __split_buffer<value_type> __t(__c, (__c + 3) / 4);
             __t.__construct_at_end(std::move_iterator<pointer>(__begin_),
                                    std::move_iterator<pointer>(__end_));
-            std::swap(__first_, __t.__first_);
-            std::swap(__begin_, __t.__begin_);
-            std::swap(__end_, __t.__end_);
-            std::swap(__end_cap(), __t.__end_cap());
+            gpu::swap(__first_, __t.__first_);
+            gpu::swap(__begin_, __t.__begin_);
+            gpu::swap(__end_, __t.__end_);
+            gpu::swap(__end_cap(), __t.__end_cap());
         }
     }
     ::new (static_cast<void*>(__begin_-1)) value_type(__x);
@@ -391,19 +393,19 @@ __split_buffer<_Tp>::push_front(value_type&& __x) {
         {
             difference_type __d = __end_cap() - __end_;
             __d = (__d + 1) / 2;
-            __begin_ = std::move_backward(__begin_, __end_, __end_ + __d);
+            __begin_ = gpu::move_backward(__begin_, __end_, __end_ + __d);
             __end_ += __d;
         }
         else
         {
-            size_type __c = std::max<size_type>(2 * static_cast<std::size_t>(__end_cap() - __first_), 1);
+            size_type __c = gpu::max<size_type>(2 * static_cast<std::size_t>(__end_cap() - __first_), 1);
             __split_buffer<value_type> __t(__c, (__c + 3) / 4);
             __t.__construct_at_end(std::move_iterator<pointer>(__begin_),
                                    std::move_iterator<pointer>(__end_));
-            std::swap(__first_, __t.__first_);
-            std::swap(__begin_, __t.__begin_);
-            std::swap(__end_, __t.__end_);
-            std::swap(__end_cap(), __t.__end_cap());
+            gpu::swap(__first_, __t.__first_);
+            gpu::swap(__begin_, __t.__begin_);
+            gpu::swap(__end_, __t.__end_);
+            gpu::swap(__end_cap(), __t.__end_cap());
         }
     }
     ::new (static_cast<void*>(__begin_-1)) value_type(std::move(__x));
@@ -426,14 +428,14 @@ __split_buffer<_Tp>::push_back(const_reference __x) {
         }
         else
         {
-            size_type __c = std::max<size_type>(2 * static_cast<std::size_t>(__end_cap() - __first_), 1);
+            size_type __c = gpu::max<size_type>(2 * static_cast<std::size_t>(__end_cap() - __first_), 1);
             __split_buffer<value_type> __t(__c, __c / 4);
             __t.__construct_at_end(std::move_iterator<pointer>(__begin_),
                                    std::move_iterator<pointer>(__end_));
-            std::swap(__first_, __t.__first_);
-            std::swap(__begin_, __t.__begin_);
-            std::swap(__end_, __t.__end_);
-            std::swap(__end_cap(), __t.__end_cap());
+            gpu::swap(__first_, __t.__first_);
+            gpu::swap(__begin_, __t.__begin_);
+            gpu::swap(__end_, __t.__end_);
+            gpu::swap(__end_cap(), __t.__end_cap());
         }
     }
     ::new (static_cast<void*>(__end_)) value_type(__x);
@@ -455,14 +457,14 @@ __split_buffer<_Tp>::push_back(value_type&& __x) {
         }
         else
         {
-            size_type __c = std::max<size_type>(2 * static_cast<std::size_t>(__end_cap() - __first_), 1);
+            size_type __c = gpu::max<size_type>(2 * static_cast<std::size_t>(__end_cap() - __first_), 1);
             __split_buffer<value_type> __t(__c, __c / 4);
             __t.__construct_at_end(std::move_iterator<pointer>(__begin_),
                                    std::move_iterator<pointer>(__end_));
-            std::swap(__first_, __t.__first_);
-            std::swap(__begin_, __t.__begin_);
-            std::swap(__end_, __t.__end_);
-            std::swap(__end_cap(), __t.__end_cap());
+            gpu::swap(__first_, __t.__first_);
+            gpu::swap(__begin_, __t.__begin_);
+            gpu::swap(__end_, __t.__end_);
+            gpu::swap(__end_cap(), __t.__end_cap());
         }
     }
     ::new (static_cast<void*>(__end_)) value_type(std::move(__x));
@@ -485,14 +487,14 @@ __split_buffer<_Tp>::emplace_back(_Args&&... __args) {
         }
         else
         {
-            size_type __c = std::max<size_type>(2 * static_cast<std::size_t>(__end_cap() - __first_), 1);
+            size_type __c = gpu::max<size_type>(2 * static_cast<std::size_t>(__end_cap() - __first_), 1);
             __split_buffer<value_type> __t(__c, __c / 4);
             __t.__construct_at_end(std::move_iterator<pointer>(__begin_),
                                    std::move_iterator<pointer>(__end_));
-            std::swap(__first_, __t.__first_);
-            std::swap(__begin_, __t.__begin_);
-            std::swap(__end_, __t.__end_);
-            std::swap(__end_cap(), __t.__end_cap());
+            gpu::swap(__first_, __t.__first_);
+            gpu::swap(__begin_, __t.__begin_);
+            gpu::swap(__end_, __t.__end_);
+            gpu::swap(__end_cap(), __t.__end_cap());
         }
     }
     ::new (static_cast<void*>(__end_)) value_type(std::forward<_Args>(__args)...);
