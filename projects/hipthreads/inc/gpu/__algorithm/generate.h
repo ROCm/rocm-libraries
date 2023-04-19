@@ -14,7 +14,7 @@
 namespace gpu {
 
 template <class _ForwardIterator, class _Generator>
-inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
 void
 generate(_ForwardIterator __first, _ForwardIterator __last, _Generator __gen)
 {

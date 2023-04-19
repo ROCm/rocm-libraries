@@ -26,7 +26,7 @@ struct in_out_out_result {
   template <class _InIter2, class _OutIter3, class _OutIter4>
     requires std::convertible_to<const _InIter1&, _InIter2>
           && std::convertible_to<const _OutIter1&, _OutIter3> && std::convertible_to<const _OutIter2&, _OutIter4>
-  _LIBGPU_HIDE_FROM_ABI constexpr
+  __device__ _LIBGPU_HIDE_FROM_ABI constexpr
   operator in_out_out_result<_InIter2, _OutIter3, _OutIter4>() const& {
     return {in, out1, out2};
   }
@@ -34,7 +34,7 @@ struct in_out_out_result {
   template <class _InIter2, class _OutIter3, class _OutIter4>
     requires std::convertible_to<_InIter1, _InIter2>
           && std::convertible_to<_OutIter1, _OutIter3> && std::convertible_to<_OutIter2, _OutIter4>
-  _LIBGPU_HIDE_FROM_ABI constexpr
+  __device__ _LIBGPU_HIDE_FROM_ABI constexpr
   operator in_out_out_result<_InIter2, _OutIter3, _OutIter4>() && {
     return {std::move(in), std::move(out1), std::move(out2)};
   }

@@ -15,14 +15,14 @@
 namespace gpu {
 
 template <class _InputIter>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX17
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX17
 void __advance(_InputIter& __i, typename std::iterator_traits<_InputIter>::difference_type __n, std::input_iterator_tag) {
   for (; __n > 0; --__n)
     ++__i;
 }
 
 template <class _BiDirIter>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX17
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX17
 void __advance(_BiDirIter& __i, typename std::iterator_traits<_BiDirIter>::difference_type __n, std::bidirectional_iterator_tag) {
   if (__n >= 0)
     for (; __n > 0; --__n)
@@ -33,7 +33,7 @@ void __advance(_BiDirIter& __i, typename std::iterator_traits<_BiDirIter>::diffe
 }
 
 template <class _RandIter>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX17
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX17
 void __advance(_RandIter& __i, typename std::iterator_traits<_RandIter>::difference_type __n, std::random_access_iterator_tag) {
   __i += __n;
 }
@@ -42,7 +42,7 @@ template <
     class _InputIter, class _Distance,
     class _IntegralDistance = decltype(gpu::__convert_to_integral(std::declval<_Distance>())),
     class = std::enable_if_t<std::is_integral<_IntegralDistance>::value> >
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX17
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX17
 void advance(_InputIter& __i, _Distance __orig_n) {
   typedef typename std::iterator_traits<_InputIter>::difference_type _Difference;
   _Difference __n = static_cast<_Difference>(gpu::__convert_to_integral(__orig_n));
@@ -61,7 +61,7 @@ namespace __advance {
 struct __fn {
 private:
   template <class _Ip>
-  _LIBGPU_HIDE_FROM_ABI
+  __device__ _LIBGPU_HIDE_FROM_ABI
   static constexpr void __advance_forward(_Ip& __i, iter_difference_t<_Ip> __n) {
     while (__n > 0) {
       --__n;
@@ -70,7 +70,7 @@ private:
   }
 
   template <class _Ip>
-  _LIBGPU_HIDE_FROM_ABI
+  __device__ _LIBGPU_HIDE_FROM_ABI
   static constexpr void __advance_backward(_Ip& __i, iter_difference_t<_Ip> __n) {
     while (__n < 0) {
       ++__n;
@@ -81,7 +81,7 @@ private:
 public:
   // Preconditions: If `I` does not model `bidirectional_iterator`, `n` is not negative.
   template <input_or_output_iterator _Ip>
-  _LIBGPU_HIDE_FROM_ABI
+  __device__ _LIBGPU_HIDE_FROM_ABI
   constexpr void operator()(_Ip& __i, iter_difference_t<_Ip> __n) const {
     _LIBGPU_ASSERT(__n >= 0 || bidirectional_iterator<_Ip>,
                    "If `n < 0`, then `bidirectional_iterator<I>` must be true.");
@@ -105,7 +105,7 @@ public:
 
   // Preconditions: Either `assignable_from<I&, S> || sized_sentinel_for<S, I>` is modeled, or [i, bound_sentinel) denotes a range.
   template <input_or_output_iterator _Ip, sentinel_for<_Ip> _Sp>
-  _LIBGPU_HIDE_FROM_ABI constexpr void operator()(_Ip& __i, _Sp __bound_sentinel) const {
+  __device__ _LIBGPU_HIDE_FROM_ABI constexpr void operator()(_Ip& __i, _Sp __bound_sentinel) const {
     // If `I` and `S` model `assignable_from<I&, S>`, equivalent to `i = std::move(bound_sentinel)`.
     if constexpr (assignable_from<_Ip&, _Sp>) {
       __i = std::move(__bound_sentinel);
@@ -128,7 +128,7 @@ public:
   //   * If `n < 0`, [bound_sentinel, i) denotes a range, `I` models `bidirectional_iterator`, and `I` and `S` model `same_as<I, S>`.
   // Returns: `n - M`, where `M` is the difference between the ending and starting position.
   template <input_or_output_iterator _Ip, sentinel_for<_Ip> _Sp>
-  _LIBGPU_HIDE_FROM_ABI constexpr iter_difference_t<_Ip> operator()(_Ip& __i, iter_difference_t<_Ip> __n,
+  __device__ _LIBGPU_HIDE_FROM_ABI constexpr iter_difference_t<_Ip> operator()(_Ip& __i, iter_difference_t<_Ip> __n,
                                                                     _Sp __bound_sentinel) const {
     _LIBGPU_ASSERT((__n >= 0) || (bidirectional_iterator<_Ip> && same_as<_Ip, _Sp>),
                    "If `n < 0`, then `bidirectional_iterator<I> && same_as<I, S>` must be true.");

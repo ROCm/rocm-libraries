@@ -15,7 +15,7 @@
 namespace gpu {
 
 template <class _InputIterator, class _Tp>
-_LIBGPU_NODISCARD_EXT inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
+_LIBGPU_NODISCARD_EXT __device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
     typename std::iterator_traits<_InputIterator>::difference_type
     count(_InputIterator __first, _InputIterator __last, const _Tp& __value) {
   typename std::iterator_traits<_InputIterator>::difference_type __r(0);

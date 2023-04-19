@@ -15,7 +15,7 @@
 namespace gpu {
 
 template <class _InputIterator, class _Function>
-inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20 _Function for_each(_InputIterator __first,
+__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20 _Function for_each(_InputIterator __first,
                                                                                   _InputIterator __last,
                                                                                   _Function __f) {
   for (; __first != __last; ++__first)

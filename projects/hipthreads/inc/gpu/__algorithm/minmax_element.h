@@ -19,18 +19,18 @@ class _MinmaxElementLessFunc {
   _Proj& __proj_;
 
 public:
-  _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR
+  __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR
   _MinmaxElementLessFunc(_Comp& __comp, _Proj& __proj) : __comp_(__comp), __proj_(__proj) {}
 
   template <class _Iter>
-  _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14
+  __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14
   bool operator()(_Iter& __it1, _Iter& __it2) {
     return std::__invoke(__comp_, std::__invoke(__proj_, *__it1), std::__invoke(__proj_, *__it2));
   }
 };
 
 template <class _Iter, class _Sent, class _Proj, class _Comp>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14
 gpu::pair<_Iter, _Iter> __minmax_element_impl(_Iter __first, _Sent __last, _Comp& __comp, _Proj& __proj) {
   auto __less = _MinmaxElementLessFunc<_Comp, _Proj>(__comp, __proj);
 
@@ -70,7 +70,7 @@ gpu::pair<_Iter, _Iter> __minmax_element_impl(_Iter __first, _Sent __last, _Comp
 }
 
 template <class _ForwardIterator, class _Compare>
-_LIBGPU_NODISCARD_EXT _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14
+_LIBGPU_NODISCARD_EXT __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14
 gpu::pair<_ForwardIterator, _ForwardIterator>
 minmax_element(_ForwardIterator __first, _ForwardIterator __last, _Compare __comp) {
   static_assert(__is_cpp17_forward_iterator<_ForwardIterator>::value,
@@ -82,7 +82,7 @@ minmax_element(_ForwardIterator __first, _ForwardIterator __last, _Compare __com
 }
 
 template <class _ForwardIterator>
-_LIBGPU_NODISCARD_EXT inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14
+_LIBGPU_NODISCARD_EXT __device__ inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14
 gpu::pair<_ForwardIterator, _ForwardIterator> minmax_element(_ForwardIterator __first, _ForwardIterator __last) {
     return gpu::minmax_element(__first, __last, __less<typename std::iterator_traits<_ForwardIterator>::value_type>());
 }

@@ -19,23 +19,23 @@ class __invert // invert the sense of a comparison
 private:
     _Predicate __p_;
 public:
-    _LIBGPU_INLINE_VISIBILITY __invert() {}
+    __device__ _LIBGPU_INLINE_VISIBILITY __invert() {}
 
-    _LIBGPU_INLINE_VISIBILITY
+    __device__ _LIBGPU_INLINE_VISIBILITY
     explicit __invert(_Predicate __p) : __p_(__p) {}
 
     template <class _T1>
-    _LIBGPU_INLINE_VISIBILITY
+    __device__ _LIBGPU_INLINE_VISIBILITY
     bool operator()(const _T1& __x) {return !__p_(__x);}
 
     template <class _T1, class _T2>
-    _LIBGPU_INLINE_VISIBILITY
+    __device__ _LIBGPU_INLINE_VISIBILITY
     bool operator()(const _T1& __x, const _T2& __y) {return __p_(__y, __x);}
 };
 
 template <class _AlgPolicy, class _Compare, class _InputIterator1, class _Sent1,
           class _InputIterator2, class _Sent2, class _OutputIterator>
-_LIBGPU_HIDE_FROM_ABI
+__device__ _LIBGPU_HIDE_FROM_ABI
 void __half_inplace_merge(_InputIterator1 __first1, _Sent1 __last1,
                           _InputIterator2 __first2, _Sent2 __last2,
                           _OutputIterator __result, _Compare&& __comp)
@@ -63,7 +63,7 @@ void __half_inplace_merge(_InputIterator1 __first1, _Sent1 __last1,
 }
 
 template <class _AlgPolicy, class _Compare, class _BidirectionalIterator>
-_LIBGPU_HIDE_FROM_ABI
+__device__ _LIBGPU_HIDE_FROM_ABI
 void __buffered_inplace_merge(
     _BidirectionalIterator __first,
     _BidirectionalIterator __middle,
@@ -190,7 +190,7 @@ void __inplace_merge(
 }
 
 template <class _AlgPolicy, class _BidirectionalIterator, class _Compare>
-_LIBGPU_HIDE_FROM_ABI
+__device__ _LIBGPU_HIDE_FROM_ABI
 void
 __inplace_merge(_BidirectionalIterator __first, _BidirectionalIterator __middle, _BidirectionalIterator __last,
               _Compare&& __comp)
@@ -210,14 +210,14 @@ _LIBGPU_SUPPRESS_DEPRECATED_POP
 }
 
 template <class _BidirectionalIterator, class _Compare>
-inline _LIBGPU_HIDE_FROM_ABI void inplace_merge(
+__device__ inline _LIBGPU_HIDE_FROM_ABI void inplace_merge(
     _BidirectionalIterator __first, _BidirectionalIterator __middle, _BidirectionalIterator __last, _Compare __comp) {
   gpu::__inplace_merge<_ClassicAlgPolicy>(
       std::move(__first), std::move(__middle), std::move(__last), static_cast<__comp_ref_type<_Compare> >(__comp));
 }
 
 template <class _BidirectionalIterator>
-inline _LIBGPU_HIDE_FROM_ABI
+__device__ inline _LIBGPU_HIDE_FROM_ABI
 void
 inplace_merge(_BidirectionalIterator __first, _BidirectionalIterator __middle, _BidirectionalIterator __last)
 {

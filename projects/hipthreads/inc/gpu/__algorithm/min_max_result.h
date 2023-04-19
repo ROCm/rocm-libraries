@@ -25,13 +25,13 @@ struct min_max_result {
 
   template <class _T2>
     requires std::convertible_to<const _T1&, _T2>
-  _LIBGPU_HIDE_FROM_ABI constexpr operator min_max_result<_T2>() const & {
+  __device__ _LIBGPU_HIDE_FROM_ABI constexpr operator min_max_result<_T2>() const & {
     return {min, max};
   }
 
   template <class _T2>
     requires std::convertible_to<_T1, _T2>
-  _LIBGPU_HIDE_FROM_ABI constexpr operator min_max_result<_T2>() && {
+  __device__ _LIBGPU_HIDE_FROM_ABI constexpr operator min_max_result<_T2>() && {
     return {std::move(min), std::move(max)};
   }
 };

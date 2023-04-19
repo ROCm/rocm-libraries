@@ -14,7 +14,7 @@
 namespace gpu {
 
 template <class _AlgPolicy, class _Iter, class _Sent, class _Type, class _Proj, class _Comp>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
 _Iter __lower_bound_impl(_Iter __first, _Sent __last, const _Type& __value, _Comp& __comp, _Proj& __proj) {
   auto __len = _IterOps<_AlgPolicy>::distance(__first, __last);
 
@@ -33,7 +33,7 @@ _Iter __lower_bound_impl(_Iter __first, _Sent __last, const _Type& __value, _Com
 }
 
 template <class _ForwardIterator, class _Tp, class _Compare>
-_LIBGPU_NODISCARD_EXT inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+_LIBGPU_NODISCARD_EXT __device__ inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
 _ForwardIterator lower_bound(_ForwardIterator __first, _ForwardIterator __last, const _Tp& __value, _Compare __comp) {
   static_assert(__is_callable<_Compare, decltype(*__first), const _Tp&>::value,
                 "The comparator has to be callable");
@@ -42,7 +42,7 @@ _ForwardIterator lower_bound(_ForwardIterator __first, _ForwardIterator __last, 
 }
 
 template <class _ForwardIterator, class _Tp>
-_LIBGPU_NODISCARD_EXT inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+_LIBGPU_NODISCARD_EXT __device__ inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
 _ForwardIterator lower_bound(_ForwardIterator __first, _ForwardIterator __last, const _Tp& __value) {
   return gpu::lower_bound(__first, __last, __value,
                           __less<typename std::iterator_traits<_ForwardIterator>::value_type, _Tp>());

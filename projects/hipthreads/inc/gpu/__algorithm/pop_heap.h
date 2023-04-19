@@ -14,7 +14,7 @@
 namespace gpu {
 
 template <class _AlgPolicy, class _Compare, class _RandomAccessIterator>
-inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14
+__device__ inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14
 void __pop_heap(_RandomAccessIterator __first, _RandomAccessIterator __last, _Compare& __comp,
     typename std::iterator_traits<_RandomAccessIterator>::difference_type __len) {
   _LIBGPU_ASSERT(__len > 0, "The heap given to pop_heap must be non-empty");
@@ -39,7 +39,7 @@ void __pop_heap(_RandomAccessIterator __first, _RandomAccessIterator __last, _Co
 }
 
 template <class _RandomAccessIterator, class _Compare>
-inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
 void pop_heap(_RandomAccessIterator __first, _RandomAccessIterator __last, _Compare __comp) {
   static_assert(std::is_copy_constructible<_RandomAccessIterator>::value, "Iterators must be copy constructible.");
   static_assert(std::is_copy_assignable<_RandomAccessIterator>::value, "Iterators must be copy assignable.");
@@ -49,7 +49,7 @@ void pop_heap(_RandomAccessIterator __first, _RandomAccessIterator __last, _Comp
 }
 
 template <class _RandomAccessIterator>
-inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
 void pop_heap(_RandomAccessIterator __first, _RandomAccessIterator __last) {
   gpu::pop_heap(std::move(__first), std::move(__last),
       __less<typename std::iterator_traits<_RandomAccessIterator>::value_type>());

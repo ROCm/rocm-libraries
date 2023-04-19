@@ -14,7 +14,7 @@
 namespace gpu {
 
 template <class _AlgPolicy, class _Predicate, class _ForwardIterator, class _Distance, class _Pair>
-_LIBGPU_HIDE_FROM_ABI _ForwardIterator
+__device__ _LIBGPU_HIDE_FROM_ABI _ForwardIterator
 __stable_partition_impl(_ForwardIterator __first, _ForwardIterator __last, _Predicate __pred,
                    _Distance __len, _Pair __p, std::forward_iterator_tag __fit)
 {
@@ -103,7 +103,7 @@ __second_half_done:
 }
 
 template <class _AlgPolicy, class _Predicate, class _ForwardIterator>
-_LIBGPU_HIDE_FROM_ABI _ForwardIterator
+__device__ _LIBGPU_HIDE_FROM_ABI _ForwardIterator
 __stable_partition_impl(_ForwardIterator __first, _ForwardIterator __last, _Predicate __pred,
                    std::forward_iterator_tag)
 {
@@ -248,7 +248,7 @@ __second_half_done:
 }
 
 template <class _AlgPolicy, class _Predicate, class _BidirectionalIterator>
-_LIBGPU_HIDE_FROM_ABI _BidirectionalIterator
+__device__ _LIBGPU_HIDE_FROM_ABI _BidirectionalIterator
 __stable_partition_impl(_BidirectionalIterator __first, _BidirectionalIterator __last, _Predicate __pred,
                    std::bidirectional_iterator_tag)
 {
@@ -291,7 +291,7 @@ _LIBGPU_SUPPRESS_DEPRECATED_POP
 }
 
 template <class _AlgPolicy, class _Predicate, class _ForwardIterator, class _IterCategory>
-_LIBGPU_HIDE_FROM_ABI
+__device__ _LIBGPU_HIDE_FROM_ABI
 _ForwardIterator __stable_partition(
     _ForwardIterator __first, _ForwardIterator __last, _Predicate&& __pred, _IterCategory __iter_category) {
   return std::__stable_partition_impl<_AlgPolicy, std::remove_cv_t<std::remove_reference_t<_Predicate>>&>(
@@ -299,7 +299,7 @@ _ForwardIterator __stable_partition(
 }
 
 template <class _ForwardIterator, class _Predicate>
-inline _LIBGPU_INLINE_VISIBILITY
+__device__ inline _LIBGPU_INLINE_VISIBILITY
 _ForwardIterator
 stable_partition(_ForwardIterator __first, _ForwardIterator __last, _Predicate __pred)
 {

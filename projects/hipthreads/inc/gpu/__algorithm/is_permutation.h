@@ -41,7 +41,7 @@ struct _ConstTimeDistance<_Iter1, _Iter1, _Iter2, _Iter2, std::enable_if_t<
 template <class _AlgPolicy,
           class _Iter1, class _Sent1, class _Iter2, class _Sent2,
           class _Proj1, class _Proj2, class _Pred>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 bool
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 bool
 __is_permutation_impl(_Iter1 __first1, _Sent1 __last1, _Iter2 __first2, _Sent2 __last2,
                       _Pred&& __pred, _Proj1&& __proj1, _Proj2&& __proj2) {
   using _D1 = __iter_diff_t<_Iter1>;
@@ -80,7 +80,7 @@ __is_permutation_impl(_Iter1 __first1, _Sent1 __last1, _Iter2 __first2, _Sent2 _
 
 // 2+1 iterators, predicate. Not used by range algorithms.
 template <class _AlgPolicy, class _ForwardIterator1, class _Sentinel1, class _ForwardIterator2, class _BinaryPredicate>
-_LIBGPU_NODISCARD_EXT _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 bool
+_LIBGPU_NODISCARD_EXT __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 bool
 __is_permutation(_ForwardIterator1 __first1, _Sentinel1 __last1, _ForwardIterator2 __first2,
                  _BinaryPredicate&& __pred) {
   // Shorten sequences as much as possible by lopping of any equal prefix.
@@ -108,7 +108,7 @@ __is_permutation(_ForwardIterator1 __first1, _Sentinel1 __last1, _ForwardIterato
 template <class _AlgPolicy,
           class _Iter1, class _Sent1, class _Iter2, class _Sent2,
           class _Proj1, class _Proj2, class _Pred>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 bool
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 bool
 __is_permutation(_Iter1 __first1, _Sent1 __last1, _Iter2 __first2, _Sent2 __last2,
                  _Pred&& __pred, _Proj1&& __proj1, _Proj2&& __proj2,
                  /*_ConstTimeDistance=*/std::false_type) {
@@ -142,7 +142,7 @@ __is_permutation(_Iter1 __first1, _Sent1 __last1, _Iter2 __first2, _Sent2 __last
 template <class _AlgPolicy,
           class _Iter1, class _Sent1, class _Iter2, class _Sent2,
           class _Proj1, class _Proj2, class _Pred>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 bool
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 bool
 __is_permutation(_Iter1 __first1, _Sent1 __last1, _Iter2 __first2, _Sent2 __last2,
                  _Pred&& __pred, _Proj1&& __proj1, _Proj2&& __proj2,
                  /*_ConstTimeDistance=*/std::true_type) {
@@ -158,7 +158,7 @@ __is_permutation(_Iter1 __first1, _Sent1 __last1, _Iter2 __first2, _Sent2 __last
 template <class _AlgPolicy,
           class _Iter1, class _Sent1, class _Iter2, class _Sent2,
           class _Proj1, class _Proj2, class _Pred>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 bool
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 bool
 __is_permutation(_Iter1 __first1, _Sent1 __last1, _Iter2 __first2, _Sent2 __last2,
                  _Pred&& __pred, _Proj1&& __proj1, _Proj2&& __proj2) {
   return std::__is_permutation<_AlgPolicy>(
@@ -171,7 +171,7 @@ __is_permutation(_Iter1 __first1, _Sent1 __last1, _Iter2 __first2, _Sent2 __last
 
 // 2+1 iterators, predicate
 template <class _ForwardIterator1, class _ForwardIterator2, class _BinaryPredicate>
-_LIBGPU_NODISCARD_EXT _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 bool
+_LIBGPU_NODISCARD_EXT __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 bool
 is_permutation(_ForwardIterator1 __first1, _ForwardIterator1 __last1, _ForwardIterator2 __first2,
                _BinaryPredicate __pred) {
   static_assert(__is_callable<_BinaryPredicate, decltype(*__first1), decltype(*__first2)>::value,
@@ -183,7 +183,7 @@ is_permutation(_ForwardIterator1 __first1, _ForwardIterator1 __last1, _ForwardIt
 
 // 2+1 iterators
 template <class _ForwardIterator1, class _ForwardIterator2>
-_LIBGPU_NODISCARD_EXT inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 bool
+_LIBGPU_NODISCARD_EXT __device__ inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 bool
 is_permutation(_ForwardIterator1 __first1, _ForwardIterator1 __last1, _ForwardIterator2 __first2) {
   return std::is_permutation(__first1, __last1, __first2, __equal_to());
 }
@@ -192,7 +192,7 @@ is_permutation(_ForwardIterator1 __first1, _ForwardIterator1 __last1, _ForwardIt
 
 // 2+2 iterators
 template <class _ForwardIterator1, class _ForwardIterator2>
-_LIBGPU_NODISCARD_EXT inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 bool is_permutation(
+_LIBGPU_NODISCARD_EXT __device__ inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 bool is_permutation(
     _ForwardIterator1 __first1, _ForwardIterator1 __last1, _ForwardIterator2 __first2, _ForwardIterator2 __last2) {
   return std::__is_permutation<_ClassicAlgPolicy>(
       std::move(__first1),
@@ -206,7 +206,7 @@ _LIBGPU_NODISCARD_EXT inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
 
 // 2+2 iterators, predicate
 template <class _ForwardIterator1, class _ForwardIterator2, class _BinaryPredicate>
-_LIBGPU_NODISCARD_EXT inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 bool
+_LIBGPU_NODISCARD_EXT __device__ inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 bool
 is_permutation(_ForwardIterator1 __first1, _ForwardIterator1 __last1, _ForwardIterator2 __first2,
                _ForwardIterator2 __last2, _BinaryPredicate __pred) {
   static_assert(__is_callable<_BinaryPredicate, decltype(*__first1), decltype(*__first2)>::value,

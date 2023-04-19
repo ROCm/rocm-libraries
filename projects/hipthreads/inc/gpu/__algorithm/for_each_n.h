@@ -17,7 +17,7 @@ namespace gpu {
 #if _LIBGPU_STD_VER >= 17
 
 template <class _InputIterator, class _Size, class _Function>
-inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20 _InputIterator for_each_n(_InputIterator __first,
+__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20 _InputIterator for_each_n(_InputIterator __first,
                                                                                          _Size __orig_n,
                                                                                          _Function __f) {
   typedef decltype(gpu::__convert_to_integral(__orig_n)) _IntegralSize;

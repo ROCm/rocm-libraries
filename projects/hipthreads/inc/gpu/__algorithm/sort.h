@@ -16,7 +16,7 @@ namespace gpu {
 // stable, 2-3 compares, 0-2 swaps
 
 template <class _AlgPolicy, class _Compare, class _ForwardIterator>
-_LIBGPU_HIDE_FROM_ABI
+__device__ _LIBGPU_HIDE_FROM_ABI
 _LIBGPU_CONSTEXPR_SINCE_CXX14 unsigned __sort3(_ForwardIterator __x, _ForwardIterator __y, _ForwardIterator __z,
                                                _Compare __c) {
   using _Ops = _IterOps<_AlgPolicy>;
@@ -55,7 +55,7 @@ _LIBGPU_CONSTEXPR_SINCE_CXX14 unsigned __sort3(_ForwardIterator __x, _ForwardIte
 // stable, 3-6 compares, 0-5 swaps
 
 template <class _AlgPolicy, class _Compare, class _ForwardIterator>
-_LIBGPU_HIDE_FROM_ABI
+__device__ _LIBGPU_HIDE_FROM_ABI
 void __sort4(_ForwardIterator __x1, _ForwardIterator __x2, _ForwardIterator __x3, _ForwardIterator __x4,
                  _Compare __c) {
   using _Ops   = _IterOps<_AlgPolicy>;
@@ -74,7 +74,7 @@ void __sort4(_ForwardIterator __x1, _ForwardIterator __x2, _ForwardIterator __x3
 // stable, 4-10 compares, 0-9 swaps
 
 template <class _AlgPolicy, class _Comp, class _ForwardIterator>
-_LIBGPU_HIDE_FROM_ABI void __sort5(_ForwardIterator __x1, _ForwardIterator __x2, _ForwardIterator __x3,
+__device__ _LIBGPU_HIDE_FROM_ABI void __sort5(_ForwardIterator __x1, _ForwardIterator __x2, _ForwardIterator __x3,
                                    _ForwardIterator __x4, _ForwardIterator __x5, _Comp __comp) {
   using _Ops = _IterOps<_AlgPolicy>;
 
@@ -123,7 +123,7 @@ enum { __block_size = sizeof(uint64_t) * 8 };
 
 // Ensures that __c(*__x, *__y) is true by swapping *__x and *__y if necessary.
 template <class _Compare, class _RandomAccessIterator>
-inline _LIBGPU_HIDE_FROM_ABI void __cond_swap(_RandomAccessIterator __x, _RandomAccessIterator __y, _Compare __c) {
+__device__ inline _LIBGPU_HIDE_FROM_ABI void __cond_swap(_RandomAccessIterator __x, _RandomAccessIterator __y, _Compare __c) {
   // Note: this function behaves correctly even with proxy iterators (because it relies on `value_type`).
   using value_type = typename std::iterator_traits<_RandomAccessIterator>::value_type;
   bool __r = __c(*__x, *__y);
@@ -135,7 +135,7 @@ inline _LIBGPU_HIDE_FROM_ABI void __cond_swap(_RandomAccessIterator __x, _Random
 // Ensures that *__x, *__y and *__z are ordered according to the comparator __c,
 // under the assumption that *__y and *__z are already ordered.
 template <class _Compare, class _RandomAccessIterator>
-inline _LIBGPU_HIDE_FROM_ABI void __partially_sorted_swap(_RandomAccessIterator __x, _RandomAccessIterator __y,
+__device__ inline _LIBGPU_HIDE_FROM_ABI void __partially_sorted_swap(_RandomAccessIterator __x, _RandomAccessIterator __y,
                                                           _RandomAccessIterator __z, _Compare __c) {
   // Note: this function behaves correctly even with proxy iterators (because it relies on `value_type`).
   using value_type = typename std::iterator_traits<_RandomAccessIterator>::value_type;
@@ -148,7 +148,7 @@ inline _LIBGPU_HIDE_FROM_ABI void __partially_sorted_swap(_RandomAccessIterator 
 }
 
 template <class, class _Compare, class _RandomAccessIterator>
-inline _LIBGPU_HIDE_FROM_ABI std::enable_if_t<__use_branchless_sort<_Compare, _RandomAccessIterator>::value, void>
+__device__ inline _LIBGPU_HIDE_FROM_ABI std::enable_if_t<__use_branchless_sort<_Compare, _RandomAccessIterator>::value, void>
 __sort3_maybe_branchless(_RandomAccessIterator __x1, _RandomAccessIterator __x2, _RandomAccessIterator __x3,
                          _Compare __c) {
   std::__cond_swap<_Compare>(__x2, __x3, __c);
@@ -156,14 +156,14 @@ __sort3_maybe_branchless(_RandomAccessIterator __x1, _RandomAccessIterator __x2,
 }
 
 template <class _AlgPolicy, class _Compare, class _RandomAccessIterator>
-inline _LIBGPU_HIDE_FROM_ABI std::enable_if_t<!__use_branchless_sort<_Compare, _RandomAccessIterator>::value, void>
+__device__ inline _LIBGPU_HIDE_FROM_ABI std::enable_if_t<!__use_branchless_sort<_Compare, _RandomAccessIterator>::value, void>
 __sort3_maybe_branchless(_RandomAccessIterator __x1, _RandomAccessIterator __x2, _RandomAccessIterator __x3,
                          _Compare __c) {
   std::__sort3<_AlgPolicy, _Compare>(__x1, __x2, __x3, __c);
 }
 
 template <class, class _Compare, class _RandomAccessIterator>
-inline _LIBGPU_HIDE_FROM_ABI std::enable_if_t<__use_branchless_sort<_Compare, _RandomAccessIterator>::value, void>
+__device__ inline _LIBGPU_HIDE_FROM_ABI std::enable_if_t<__use_branchless_sort<_Compare, _RandomAccessIterator>::value, void>
 __sort4_maybe_branchless(_RandomAccessIterator __x1, _RandomAccessIterator __x2, _RandomAccessIterator __x3,
                          _RandomAccessIterator __x4, _Compare __c) {
   std::__cond_swap<_Compare>(__x1, __x3, __c);
@@ -174,14 +174,14 @@ __sort4_maybe_branchless(_RandomAccessIterator __x1, _RandomAccessIterator __x2,
 }
 
 template <class _AlgPolicy, class _Compare, class _RandomAccessIterator>
-inline _LIBGPU_HIDE_FROM_ABI std::enable_if_t<!__use_branchless_sort<_Compare, _RandomAccessIterator>::value, void>
+__device__ inline _LIBGPU_HIDE_FROM_ABI std::enable_if_t<!__use_branchless_sort<_Compare, _RandomAccessIterator>::value, void>
 __sort4_maybe_branchless(_RandomAccessIterator __x1, _RandomAccessIterator __x2, _RandomAccessIterator __x3,
                          _RandomAccessIterator __x4, _Compare __c) {
   std::__sort4<_AlgPolicy, _Compare>(__x1, __x2, __x3, __x4, __c);
 }
 
 template <class _AlgPolicy, class _Compare, class _RandomAccessIterator>
-inline _LIBGPU_HIDE_FROM_ABI std::enable_if_t<__use_branchless_sort<_Compare, _RandomAccessIterator>::value, void>
+__device__ inline _LIBGPU_HIDE_FROM_ABI std::enable_if_t<__use_branchless_sort<_Compare, _RandomAccessIterator>::value, void>
 __sort5_maybe_branchless(
     _RandomAccessIterator __x1,
     _RandomAccessIterator __x2,
@@ -198,7 +198,7 @@ __sort5_maybe_branchless(
 }
 
 template <class _AlgPolicy, class _Compare, class _RandomAccessIterator>
-inline _LIBGPU_HIDE_FROM_ABI std::enable_if_t<!__use_branchless_sort<_Compare, _RandomAccessIterator>::value, void>
+__device__ inline _LIBGPU_HIDE_FROM_ABI std::enable_if_t<!__use_branchless_sort<_Compare, _RandomAccessIterator>::value, void>
 __sort5_maybe_branchless(_RandomAccessIterator __x1, _RandomAccessIterator __x2, _RandomAccessIterator __x3,
                          _RandomAccessIterator __x4, _RandomAccessIterator __x5, _Compare __c) {
   std::__sort5<_AlgPolicy, _Compare, _RandomAccessIterator>(
@@ -207,7 +207,7 @@ __sort5_maybe_branchless(_RandomAccessIterator __x1, _RandomAccessIterator __x2,
 
 // Assumes size > 0
 template <class _AlgPolicy, class _Compare, class _BidirectionalIterator>
-_LIBGPU_HIDE_FROM_ABI
+__device__ _LIBGPU_HIDE_FROM_ABI
 _LIBGPU_CONSTEXPR_SINCE_CXX14 void __selection_sort(_BidirectionalIterator __first, _BidirectionalIterator __last,
                                                     _Compare __comp) {
   _BidirectionalIterator __lm1 = __last;
@@ -221,7 +221,7 @@ _LIBGPU_CONSTEXPR_SINCE_CXX14 void __selection_sort(_BidirectionalIterator __fir
 // Sort the iterator range [__first, __last) using the comparator __comp using
 // the insertion sort algorithm.
 template <class _AlgPolicy, class _Compare, class _BidirectionalIterator>
-_LIBGPU_HIDE_FROM_ABI
+__device__ _LIBGPU_HIDE_FROM_ABI
 void __insertion_sort(_BidirectionalIterator __first, _BidirectionalIterator __last, _Compare __comp) {
   using _Ops = _IterOps<_AlgPolicy>;
 
@@ -251,7 +251,7 @@ void __insertion_sort(_BidirectionalIterator __first, _BidirectionalIterator __l
 // Assumes that there is an element in the position (__first - 1) and that each
 // element in the input range is greater or equal to the element at __first - 1.
 template <class _AlgPolicy, class _Compare, class _RandomAccessIterator>
-_LIBGPU_HIDE_FROM_ABI void
+__device__ _LIBGPU_HIDE_FROM_ABI void
 __insertion_sort_unguarded(_RandomAccessIterator __first, _RandomAccessIterator __last, _Compare __comp) {
   using _Ops = _IterOps<_AlgPolicy>;
   typedef typename std::iterator_traits<_RandomAccessIterator>::difference_type difference_type;
@@ -274,7 +274,7 @@ __insertion_sort_unguarded(_RandomAccessIterator __first, _RandomAccessIterator 
 }
 
 template <class _AlgPolicy, class _Comp, class _RandomAccessIterator>
-_LIBGPU_HIDE_FROM_ABI bool __insertion_sort_incomplete(
+__device__ _LIBGPU_HIDE_FROM_ABI bool __insertion_sort_incomplete(
     _RandomAccessIterator __first, _RandomAccessIterator __last, _Comp __comp) {
   using _Ops = _IterOps<_AlgPolicy>;
 
@@ -324,7 +324,7 @@ _LIBGPU_HIDE_FROM_ABI bool __insertion_sort_incomplete(
 }
 
 template <class _AlgPolicy, class _RandomAccessIterator>
-inline _LIBGPU_HIDE_FROM_ABI void __swap_bitmap_pos(
+__device__ inline _LIBGPU_HIDE_FROM_ABI void __swap_bitmap_pos(
     _RandomAccessIterator __first, _RandomAccessIterator __last, uint64_t& __left_bitset, uint64_t& __right_bitset) {
   using _Ops = _IterOps<_AlgPolicy>;
   typedef typename std::iterator_traits<_RandomAccessIterator>::difference_type difference_type;
@@ -342,7 +342,7 @@ inline _LIBGPU_HIDE_FROM_ABI void __swap_bitmap_pos(
 template <class _Compare,
           class _RandomAccessIterator,
           class _ValueType = typename std::iterator_traits<_RandomAccessIterator>::value_type>
-inline _LIBGPU_HIDE_FROM_ABI void
+__device__ inline _LIBGPU_HIDE_FROM_ABI void
 __populate_left_bitset(_RandomAccessIterator __first, _Compare __comp, _ValueType& __pivot, uint64_t& __left_bitset) {
   // Possible vectorization. With a proper "-march" flag, the following loop
   // will be compiled into a set of SIMD instructions.
@@ -358,7 +358,7 @@ __populate_left_bitset(_RandomAccessIterator __first, _Compare __comp, _ValueTyp
 template <class _Compare,
           class _RandomAccessIterator,
           class _ValueType = typename std::iterator_traits<_RandomAccessIterator>::value_type>
-inline _LIBGPU_HIDE_FROM_ABI void
+__device__ inline _LIBGPU_HIDE_FROM_ABI void
 __populate_right_bitset(_RandomAccessIterator __lm1, _Compare __comp, _ValueType& __pivot, uint64_t& __right_bitset) {
   // Possible vectorization. With a proper "-march" flag, the following loop
   // will be compiled into a set of SIMD instructions.
@@ -375,7 +375,7 @@ template <class _AlgPolicy,
           class _Compare,
           class _RandomAccessIterator,
           class _ValueType = typename std::iterator_traits<_RandomAccessIterator>::value_type>
-inline _LIBGPU_HIDE_FROM_ABI void __bitset_partition_partial_blocks(
+__device__ inline _LIBGPU_HIDE_FROM_ABI void __bitset_partition_partial_blocks(
     _RandomAccessIterator& __first,
     _RandomAccessIterator& __lm1,
     _Compare __comp,
@@ -422,7 +422,7 @@ inline _LIBGPU_HIDE_FROM_ABI void __bitset_partition_partial_blocks(
 }
 
 template <class _AlgPolicy, class _RandomAccessIterator>
-inline _LIBGPU_HIDE_FROM_ABI void __swap_bitmap_pos_within(
+__device__ inline _LIBGPU_HIDE_FROM_ABI void __swap_bitmap_pos_within(
     _RandomAccessIterator& __first, _RandomAccessIterator& __lm1, uint64_t& __left_bitset, uint64_t& __right_bitset) {
   using _Ops = _IterOps<_AlgPolicy>;
   typedef typename std::iterator_traits<_RandomAccessIterator>::difference_type difference_type;
@@ -463,7 +463,7 @@ inline _LIBGPU_HIDE_FROM_ABI void __swap_bitmap_pos_within(
 // __bitset_partition uses bitsets for storing outcomes of the comparisons
 // between the pivot and other elements.
 template <class _AlgPolicy, class _RandomAccessIterator, class _Compare>
-_LIBGPU_HIDE_FROM_ABI gpu::pair<_RandomAccessIterator, bool>
+__device__ _LIBGPU_HIDE_FROM_ABI gpu::pair<_RandomAccessIterator, bool>
 __bitset_partition(_RandomAccessIterator __first, _RandomAccessIterator __last, _Compare __comp) {
   using _Ops = _IterOps<_AlgPolicy>;
   typedef typename std::iterator_traits<_RandomAccessIterator>::value_type value_type;
@@ -545,7 +545,7 @@ __bitset_partition(_RandomAccessIterator __first, _RandomAccessIterator __last, 
 // the provided range is already sorted, false otherwise.  We assume that the
 // length of the range is at least three elements.
 template <class _AlgPolicy, class _RandomAccessIterator, class _Compare>
-_LIBGPU_HIDE_FROM_ABI gpu::pair<_RandomAccessIterator, bool>
+__device__ _LIBGPU_HIDE_FROM_ABI gpu::pair<_RandomAccessIterator, bool>
 __partition_with_equals_on_right(_RandomAccessIterator __first, _RandomAccessIterator __last, _Compare __comp) {
   using _Ops = _IterOps<_AlgPolicy>;
   typedef typename std::iterator_traits<_RandomAccessIterator>::difference_type difference_type;
@@ -595,7 +595,7 @@ __partition_with_equals_on_right(_RandomAccessIterator __first, _RandomAccessIte
 // Similar to the above function.  Elements equivalent to the pivot are put to
 // the left of the pivot.  Returns the iterator to the pivot element.
 template <class _AlgPolicy, class _RandomAccessIterator, class _Compare>
-_LIBGPU_HIDE_FROM_ABI _RandomAccessIterator
+__device__ _LIBGPU_HIDE_FROM_ABI _RandomAccessIterator
 __partition_with_equals_on_left(_RandomAccessIterator __first, _RandomAccessIterator __last, _Compare __comp) {
   using _Ops = _IterOps<_AlgPolicy>;
   typedef typename std::iterator_traits<_RandomAccessIterator>::difference_type difference_type;
@@ -751,7 +751,7 @@ void __introsort(_RandomAccessIterator __first,
 }
 
 template <typename _Number>
-inline _LIBGPU_HIDE_FROM_ABI _Number __log2i(_Number __n) {
+__device__ inline _LIBGPU_HIDE_FROM_ABI _Number __log2i(_Number __n) {
   if (__n == 0)
     return 0;
   if (sizeof(__n) <= sizeof(unsigned))
@@ -791,7 +791,7 @@ extern template _LIBGPU_FUNC_VIS void __sort<__less<double>&, double*>(double*, 
 extern template _LIBGPU_FUNC_VIS void __sort<__less<long double>&, long double*>(long double*, long double*, __less<long double>&);
 
 template <class _AlgPolicy, class _RandomAccessIterator, class _Comp>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 void
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 void
 __sort_dispatch(_RandomAccessIterator __first, _RandomAccessIterator __last, _Comp& __comp) {
   typedef typename std::iterator_traits<_RandomAccessIterator>::difference_type difference_type;
   difference_type __depth_limit = 2 * std::__log2i(__last - __first);
@@ -831,19 +831,19 @@ using __sort_is_specialized_in_library = __is_any_of<
     long double>;
 
 template <class _AlgPolicy, class _Type, std::enable_if_t<__sort_is_specialized_in_library<_Type>::value, int> = 0>
-_LIBGPU_HIDE_FROM_ABI void __sort_dispatch(_Type* __first, _Type* __last, __less<_Type>& __comp) {
+__device__ _LIBGPU_HIDE_FROM_ABI void __sort_dispatch(_Type* __first, _Type* __last, __less<_Type>& __comp) {
   gpu::__sort<__less<_Type>&, _Type*>(__first, __last, __comp);
 }
 
 template <class _AlgPolicy, class _Type, std::enable_if_t<__sort_is_specialized_in_library<_Type>::value, int> = 0>
-_LIBGPU_HIDE_FROM_ABI void __sort_dispatch(_Type* __first, _Type* __last, less<_Type>&) {
+__device__ _LIBGPU_HIDE_FROM_ABI void __sort_dispatch(_Type* __first, _Type* __last, less<_Type>&) {
   __less<_Type> __comp;
   gpu::__sort<__less<_Type>&, _Type*>(__first, __last, __comp);
 }
 
 #if _LIBGPU_STD_VER >= 14
 template <class _AlgPolicy, class _Type, std::enable_if_t<__sort_is_specialized_in_library<_Type>::value, int> = 0>
-_LIBGPU_HIDE_FROM_ABI void __sort_dispatch(_Type* __first, _Type* __last, less<>&) {
+__device__ _LIBGPU_HIDE_FROM_ABI void __sort_dispatch(_Type* __first, _Type* __last, less<>&) {
   __less<_Type> __comp;
   gpu::__sort<__less<_Type>&, _Type*>(__first, __last, __comp);
 }
@@ -851,14 +851,14 @@ _LIBGPU_HIDE_FROM_ABI void __sort_dispatch(_Type* __first, _Type* __last, less<>
 
 #if _LIBGPU_STD_VER >= 20
 template <class _AlgPolicy, class _Type, std::enable_if_t<__sort_is_specialized_in_library<_Type>::value, int> = 0>
-_LIBGPU_HIDE_FROM_ABI void __sort_dispatch(_Type* __first, _Type* __last, ranges::less&) {
+__device__ _LIBGPU_HIDE_FROM_ABI void __sort_dispatch(_Type* __first, _Type* __last, ranges::less&) {
   __less<_Type> __comp;
   gpu::__sort<__less<_Type>&, _Type*>(__first, __last, __comp);
 }
 #endif
 
 template <class _AlgPolicy, class _RandomAccessIterator, class _Comp>
-inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
 void __sort_impl(_RandomAccessIterator __first, _RandomAccessIterator __last, _Comp& __comp) {
   std::__debug_randomize_range<_AlgPolicy>(__first, __last);
 
@@ -871,13 +871,13 @@ void __sort_impl(_RandomAccessIterator __first, _RandomAccessIterator __last, _C
 }
 
 template <class _RandomAccessIterator, class _Comp>
-inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
 void sort(_RandomAccessIterator __first, _RandomAccessIterator __last, _Comp __comp) {
   std::__sort_impl<_ClassicAlgPolicy>(std::move(__first), std::move(__last), __comp);
 }
 
 template <class _RandomAccessIterator>
-inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
 void sort(_RandomAccessIterator __first, _RandomAccessIterator __last) {
   gpu::sort(__first, __last, __less<typename std::iterator_traits<_RandomAccessIterator>::value_type>());
 }

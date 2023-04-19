@@ -14,7 +14,7 @@
 namespace gpu {
 
 template <class _AlgPolicy, class _Compare, class _BidirectionalIterator, class _Sentinel>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 gpu::pair<_BidirectionalIterator, bool>
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 gpu::pair<_BidirectionalIterator, bool>
 __next_permutation(_BidirectionalIterator __first, _Sentinel __last, _Compare&& __comp)
 {
     using _Result = gpu::pair<_BidirectionalIterator, bool>;
@@ -45,7 +45,7 @@ __next_permutation(_BidirectionalIterator __first, _Sentinel __last, _Compare&& 
 }
 
 template <class _BidirectionalIterator, class _Compare>
-inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
 bool
 next_permutation(_BidirectionalIterator __first, _BidirectionalIterator __last, _Compare __comp)
 {
@@ -54,7 +54,7 @@ next_permutation(_BidirectionalIterator __first, _BidirectionalIterator __last, 
 }
 
 template <class _BidirectionalIterator>
-inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
 bool
 next_permutation(_BidirectionalIterator __first, _BidirectionalIterator __last)
 {

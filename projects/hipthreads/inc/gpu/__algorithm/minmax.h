@@ -14,7 +14,7 @@
 namespace gpu {
 
 template<class _Tp, class _Compare>
-_LIBGPU_NODISCARD_EXT inline
+_LIBGPU_NODISCARD_EXT __device__ inline
 _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX14
 gpu::pair<const _Tp&, const _Tp&>
 minmax(_LIBGPU_LIFETIMEBOUND const _Tp& __a, _LIBGPU_LIFETIMEBOUND const _Tp& __b, _Compare __comp)
@@ -24,7 +24,7 @@ minmax(_LIBGPU_LIFETIMEBOUND const _Tp& __a, _LIBGPU_LIFETIMEBOUND const _Tp& __
 }
 
 template<class _Tp>
-_LIBGPU_NODISCARD_EXT inline
+_LIBGPU_NODISCARD_EXT __device__ inline
 _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX14
 gpu::pair<const _Tp&, const _Tp&>
 minmax(_LIBGPU_LIFETIMEBOUND const _Tp& __a, _LIBGPU_LIFETIMEBOUND const _Tp& __b)
@@ -35,7 +35,7 @@ minmax(_LIBGPU_LIFETIMEBOUND const _Tp& __a, _LIBGPU_LIFETIMEBOUND const _Tp& __
 #ifndef _LIBGPU_CXX03_LANG
 
 template<class _Tp, class _Compare>
-_LIBGPU_NODISCARD_EXT inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14
+_LIBGPU_NODISCARD_EXT __device__ inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14
 gpu::pair<_Tp, _Tp> minmax(std::initializer_list<_Tp> __t, _Compare __comp) {
     static_assert(__is_callable<_Compare, _Tp, _Tp>::value, "The comparator has to be callable");
     __identity __proj;
@@ -44,7 +44,7 @@ gpu::pair<_Tp, _Tp> minmax(std::initializer_list<_Tp> __t, _Compare __comp) {
 }
 
 template<class _Tp>
-_LIBGPU_NODISCARD_EXT inline
+_LIBGPU_NODISCARD_EXT __device__ inline
 _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX14
 gpu::pair<_Tp, _Tp>
 minmax(std::initializer_list<_Tp> __t)

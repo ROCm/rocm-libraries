@@ -17,70 +17,70 @@ namespace gpu {
 #if _LIBGPU_STD_VER >= 14
 
 template <class _Tp, std::size_t _Np>
-_LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+__device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
 reverse_iterator<_Tp*> rbegin(_Tp (&__array)[_Np])
 {
     return reverse_iterator<_Tp*>(__array + _Np);
 }
 
 template <class _Tp, std::size_t _Np>
-_LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+__device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
 reverse_iterator<_Tp*> rend(_Tp (&__array)[_Np])
 {
     return reverse_iterator<_Tp*>(__array);
 }
 
 template <class _Ep>
-_LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+__device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
 reverse_iterator<const _Ep*> rbegin(std::initializer_list<_Ep> __il)
 {
     return reverse_iterator<const _Ep*>(__il.end());
 }
 
 template <class _Ep>
-_LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+__device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
 reverse_iterator<const _Ep*> rend(std::initializer_list<_Ep> __il)
 {
     return reverse_iterator<const _Ep*>(__il.begin());
 }
 
 template <class _Cp>
-_LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+__device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
 auto rbegin(_Cp& __c) -> decltype(__c.rbegin())
 {
     return __c.rbegin();
 }
 
 template <class _Cp>
-_LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+__device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
 auto rbegin(const _Cp& __c) -> decltype(__c.rbegin())
 {
     return __c.rbegin();
 }
 
 template <class _Cp>
-_LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+__device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
 auto rend(_Cp& __c) -> decltype(__c.rend())
 {
     return __c.rend();
 }
 
 template <class _Cp>
-_LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+__device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
 auto rend(const _Cp& __c) -> decltype(__c.rend())
 {
     return __c.rend();
 }
 
 template <class _Cp>
-_LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+__device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
 auto crbegin(const _Cp& __c) -> decltype(std::rbegin(__c))
 {
     return std::rbegin(__c);
 }
 
 template <class _Cp>
-_LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+__device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
 auto crend(const _Cp& __c) -> decltype(std::rend(__c))
 {
     return std::rend(__c);

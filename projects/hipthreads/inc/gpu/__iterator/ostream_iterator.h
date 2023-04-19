@@ -40,11 +40,11 @@ private:
     ostream_type* __out_stream_;
     const char_type* __delim_;
 public:
-    _LIBGPU_INLINE_VISIBILITY ostream_iterator(ostream_type& __s) _NOEXCEPT
+    __device__ _LIBGPU_INLINE_VISIBILITY ostream_iterator(ostream_type& __s) _NOEXCEPT
         : __out_stream_(std::addressof(__s)), __delim_(nullptr) {}
-    _LIBGPU_INLINE_VISIBILITY ostream_iterator(ostream_type& __s, const _CharT* __delimiter) _NOEXCEPT
+    __device__ _LIBGPU_INLINE_VISIBILITY ostream_iterator(ostream_type& __s, const _CharT* __delimiter) _NOEXCEPT
         : __out_stream_(std::addressof(__s)), __delim_(__delimiter) {}
-    _LIBGPU_INLINE_VISIBILITY ostream_iterator& operator=(const _Tp& __value)
+    __device__ _LIBGPU_INLINE_VISIBILITY ostream_iterator& operator=(const _Tp& __value)
         {
             *__out_stream_ << __value;
             if (__delim_)
@@ -52,9 +52,9 @@ public:
             return *this;
         }
 
-    _LIBGPU_INLINE_VISIBILITY ostream_iterator& operator*()     {return *this;}
-    _LIBGPU_INLINE_VISIBILITY ostream_iterator& operator++()    {return *this;}
-    _LIBGPU_INLINE_VISIBILITY ostream_iterator& operator++(int) {return *this;}
+    __device__ _LIBGPU_INLINE_VISIBILITY ostream_iterator& operator*()     {return *this;}
+    __device__ _LIBGPU_INLINE_VISIBILITY ostream_iterator& operator++()    {return *this;}
+    __device__ _LIBGPU_INLINE_VISIBILITY ostream_iterator& operator++(int) {return *this;}
 };
 
 } // namespace gpu

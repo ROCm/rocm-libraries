@@ -14,7 +14,7 @@
 namespace gpu {
 
 template <class _AlgPolicy, class _Compare, class _RandomAccessIterator, class _Sentinel>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
 _RandomAccessIterator __partial_sort_impl(
     _RandomAccessIterator __first, _RandomAccessIterator __middle, _Sentinel __last, _Compare&& __comp) {
   if (__first == __middle) {
@@ -39,7 +39,7 @@ _RandomAccessIterator __partial_sort_impl(
 }
 
 template <class _AlgPolicy, class _Compare, class _RandomAccessIterator, class _Sentinel>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
 _RandomAccessIterator __partial_sort(_RandomAccessIterator __first, _RandomAccessIterator __middle, _Sentinel __last,
                                      _Compare& __comp) {
   if (__first == __middle)
@@ -56,7 +56,7 @@ _RandomAccessIterator __partial_sort(_RandomAccessIterator __first, _RandomAcces
 }
 
 template <class _RandomAccessIterator, class _Compare>
-inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
 void
 partial_sort(_RandomAccessIterator __first, _RandomAccessIterator __middle, _RandomAccessIterator __last,
              _Compare __comp)
@@ -68,7 +68,7 @@ partial_sort(_RandomAccessIterator __first, _RandomAccessIterator __middle, _Ran
 }
 
 template <class _RandomAccessIterator>
-inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
 void
 partial_sort(_RandomAccessIterator __first, _RandomAccessIterator __middle, _RandomAccessIterator __last)
 {

@@ -39,104 +39,104 @@ public:
   __split_buffer(const __split_buffer&) = delete;
   __split_buffer& operator=(const __split_buffer&) = delete;
 
-  _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI __split_buffer() _NOEXCEPT
+  __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI __split_buffer() _NOEXCEPT
       : __first_(nullptr), __begin_(nullptr), __end_(nullptr), __end_cap_(nullptr) {}
 
-  _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI __split_buffer(size_type __cap, size_type __start);
+  __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI __split_buffer(size_type __cap, size_type __start);
 
-  _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI __split_buffer(__split_buffer&& __c) _NOEXCEPT;
+  __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI __split_buffer(__split_buffer&& __c) _NOEXCEPT;
 
-  _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI __split_buffer& operator=(__split_buffer&& __c) _NOEXCEPT;
+  __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI __split_buffer& operator=(__split_buffer&& __c) _NOEXCEPT;
 
-  _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI ~__split_buffer();
+  __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI ~__split_buffer();
 
-  _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI pointer& __end_cap() _NOEXCEPT { return __end_cap_; }
-  _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI const pointer &__end_cap() const _NOEXCEPT { return __end_cap_; }
+  __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI pointer& __end_cap() _NOEXCEPT { return __end_cap_; }
+  __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI const pointer &__end_cap() const _NOEXCEPT { return __end_cap_; }
 
-  _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI iterator begin() _NOEXCEPT { return __begin_; }
-  _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI const_iterator begin() const _NOEXCEPT { return __begin_; }
+  __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI iterator begin() _NOEXCEPT { return __begin_; }
+  __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI const_iterator begin() const _NOEXCEPT { return __begin_; }
 
-  _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI iterator end() _NOEXCEPT { return __end_; }
-  _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI const_iterator end() const _NOEXCEPT { return __end_; }
+  __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI iterator end() _NOEXCEPT { return __end_; }
+  __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI const_iterator end() const _NOEXCEPT { return __end_; }
 
-  _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void clear() _NOEXCEPT { __destruct_at_end(__begin_); }
+  __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void clear() _NOEXCEPT { __destruct_at_end(__begin_); }
 
-  _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI size_type size() const {
+  __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI size_type size() const {
     return static_cast<size_type>(__end_ - __begin_);
   }
 
-  _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI bool empty() const { return __end_ == __begin_; }
+  __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI bool empty() const { return __end_ == __begin_; }
 
-  _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI size_type capacity() const {
+  __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI size_type capacity() const {
     return static_cast<size_type>(__end_cap() - __first_);
   }
 
-  _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI size_type __front_spare() const {
+  __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI size_type __front_spare() const {
     return static_cast<size_type>(__begin_ - __first_);
   }
 
-  _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI size_type __back_spare() const {
+  __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI size_type __back_spare() const {
     return static_cast<size_type>(__end_cap() - __end_);
   }
 
-  _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI reference front() { return *__begin_; }
-  _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI const_reference front() const { return *__begin_; }
-  _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI reference back() { return *(__end_ - 1); }
-  _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI const_reference back() const { return *(__end_ - 1); }
+  __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI reference front() { return *__begin_; }
+  __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI const_reference front() const { return *__begin_; }
+  __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI reference back() { return *(__end_ - 1); }
+  __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI const_reference back() const { return *(__end_ - 1); }
 
-  _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void reserve(size_type __n);
-  _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void shrink_to_fit() _NOEXCEPT;
-  _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void push_front(const_reference __x);
-  _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void push_back(const_reference __x);
-  _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void push_front(value_type&& __x);
-  _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void push_back(value_type&& __x);
+  __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void reserve(size_type __n);
+  __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void shrink_to_fit() _NOEXCEPT;
+  __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void push_front(const_reference __x);
+  __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void push_back(const_reference __x);
+  __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void push_front(value_type&& __x);
+  __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void push_back(value_type&& __x);
 
   template <class... _Args>
-  _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void emplace_back(_Args&&... __args);
+  __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void emplace_back(_Args&&... __args);
 
-  _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void pop_front() { __destruct_at_begin(__begin_ + 1); }
-  _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void pop_back() { __destruct_at_end(__end_ - 1); }
+  __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void pop_front() { __destruct_at_begin(__begin_ + 1); }
+  __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void pop_back() { __destruct_at_end(__end_ - 1); }
 
-  _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void __construct_at_end(size_type __n);
-  _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void __construct_at_end(size_type __n, const_reference __x);
+  __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void __construct_at_end(size_type __n);
+  __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void __construct_at_end(size_type __n, const_reference __x);
 
   template <class _InputIter>
-  _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI
+  __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI
       typename std::enable_if<__is_exactly_cpp17_input_iterator<_InputIter>::value>::type
       __construct_at_end(_InputIter __first, _InputIter __last);
 
   template <class _ForwardIterator>
-  _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI
+  __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI
       typename std::enable_if<__is_cpp17_forward_iterator<_ForwardIterator>::value>::type
       __construct_at_end(_ForwardIterator __first, _ForwardIterator __last);
 
-  _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void __destruct_at_begin(pointer __new_begin) {
+  __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void __destruct_at_begin(pointer __new_begin) {
     __destruct_at_begin(__new_begin, std::is_trivially_destructible<value_type>());
   }
 
-  _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void __destruct_at_begin(pointer __new_begin, std::false_type);
-  _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void __destruct_at_begin(pointer __new_begin, std::true_type);
+  __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void __destruct_at_begin(pointer __new_begin, std::false_type);
+  __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void __destruct_at_begin(pointer __new_begin, std::true_type);
 
-  _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void __destruct_at_end(pointer __new_last) _NOEXCEPT {
+  __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void __destruct_at_end(pointer __new_last) _NOEXCEPT {
     __destruct_at_end(__new_last, std::false_type());
   }
 
-  _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void __destruct_at_end(pointer __new_last, std::false_type) _NOEXCEPT;
-  _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void __destruct_at_end(pointer __new_last, std::true_type) _NOEXCEPT;
+  __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void __destruct_at_end(pointer __new_last, std::false_type) _NOEXCEPT;
+  __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void __destruct_at_end(pointer __new_last, std::true_type) _NOEXCEPT;
 
-  _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void swap(__split_buffer& __x) _NOEXCEPT;
+  __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void swap(__split_buffer& __x) _NOEXCEPT;
 
-  _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI bool __invariants() const;
+  __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI bool __invariants() const;
 
 private:
   struct _ConstructTransaction {
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI explicit _ConstructTransaction(
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI explicit _ConstructTransaction(
         pointer* __p, size_type __n) _NOEXCEPT
         : __pos_(*__p),
           __end_(*__p + __n),
           __dest_(__p) {}
 
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI ~_ConstructTransaction() { *__dest_ = __pos_; }
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI ~_ConstructTransaction() { *__dest_ = __pos_; }
 
     pointer __pos_;
     const pointer __end_;
@@ -147,7 +147,7 @@ private:
 };
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 bool __split_buffer<_Tp>::__invariants() const {
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 bool __split_buffer<_Tp>::__invariants() const {
   if (__first_ == nullptr) {
     if (__begin_ != nullptr)
         return false;
@@ -172,7 +172,7 @@ _LIBGPU_CONSTEXPR_SINCE_CXX20 bool __split_buffer<_Tp>::__invariants() const {
 //  Precondition:  size() + __n <= capacity()
 //  Postcondition:  size() == size() + __n
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 void __split_buffer<_Tp>::__construct_at_end(size_type __n) {
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 void __split_buffer<_Tp>::__construct_at_end(size_type __n) {
     _ConstructTransaction __tx(&this->__end_, __n);
     for (; __tx.__pos_ != __tx.__end_; ++__tx.__pos_) {
         ::new (static_cast<void *>(__tx.__pos_)) value_type();
@@ -186,7 +186,7 @@ _LIBGPU_CONSTEXPR_SINCE_CXX20 void __split_buffer<_Tp>::__construct_at_end(size_
 //  Postcondition:  size() == old size() + __n
 //  Postcondition:  [i] == __x for all i in [size() - __n, __n)
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 void __split_buffer<_Tp>::__construct_at_end(size_type __n, const_reference __x) {
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 void __split_buffer<_Tp>::__construct_at_end(size_type __n, const_reference __x) {
     _ConstructTransaction __tx(&this->__end_, __n);
     for (; __tx.__pos_ != __tx.__end_; ++__tx.__pos_) {
         ::new (static_cast<void*>(__tx.__pos_)) value_type(__x);
@@ -195,7 +195,7 @@ _LIBGPU_CONSTEXPR_SINCE_CXX20 void __split_buffer<_Tp>::__construct_at_end(size_
 
 template <class _Tp>
 template <class _InputIter>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 typename std::enable_if<__is_exactly_cpp17_input_iterator<_InputIter>::value>::type
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 typename std::enable_if<__is_exactly_cpp17_input_iterator<_InputIter>::value>::type
 __split_buffer<_Tp>::__construct_at_end(_InputIter __first, _InputIter __last) {
     for (; __first != __last; ++__first)
     {
@@ -215,7 +215,7 @@ __split_buffer<_Tp>::__construct_at_end(_InputIter __first, _InputIter __last) {
 
 template <class _Tp>
 template <class _ForwardIterator>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 typename std::enable_if<__is_cpp17_forward_iterator<_ForwardIterator>::value>::type
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 typename std::enable_if<__is_cpp17_forward_iterator<_ForwardIterator>::value>::type
 __split_buffer<_Tp>::__construct_at_end(_ForwardIterator __first, _ForwardIterator __last)
 {
     _ConstructTransaction __tx(&this->__end_, std::distance(__first, __last));
@@ -225,7 +225,7 @@ __split_buffer<_Tp>::__construct_at_end(_ForwardIterator __first, _ForwardIterat
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20
 inline
 void
 __split_buffer<_Tp>::__destruct_at_begin(pointer __new_begin, std::false_type) {
@@ -234,7 +234,7 @@ __split_buffer<_Tp>::__destruct_at_begin(pointer __new_begin, std::false_type) {
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20
 inline
 void
 __split_buffer<_Tp>::__destruct_at_begin(pointer __new_begin, std::true_type) {
@@ -242,20 +242,20 @@ __split_buffer<_Tp>::__destruct_at_begin(pointer __new_begin, std::true_type) {
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI void
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI void
 __split_buffer<_Tp>::__destruct_at_end(pointer __new_last, std::false_type) _NOEXCEPT {
     while (__new_last != __end_)
         (--__end_)->~value_type();
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI void
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI void
 __split_buffer<_Tp>::__destruct_at_end(pointer __new_last, std::true_type) _NOEXCEPT {
     __end_ = __new_last;
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20
 __split_buffer<_Tp>::__split_buffer(size_type __cap, size_type __start)
     : __end_cap_(nullptr)
 {
@@ -269,7 +269,7 @@ __split_buffer<_Tp>::__split_buffer(size_type __cap, size_type __start)
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20
 __split_buffer<_Tp>::~__split_buffer() {
     clear();
     if (__first_)
@@ -277,7 +277,7 @@ __split_buffer<_Tp>::~__split_buffer() {
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20
 __split_buffer<_Tp>::__split_buffer(__split_buffer&& __c) _NOEXCEPT
     : __first_(std::move(__c.__first_)),
       __begin_(std::move(__c.__begin_)),
@@ -291,7 +291,7 @@ __split_buffer<_Tp>::__split_buffer(__split_buffer&& __c) _NOEXCEPT
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 __split_buffer<_Tp> &
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 __split_buffer<_Tp> &
 __split_buffer<_Tp>::operator=(__split_buffer &&__c) _NOEXCEPT {
     clear();
     shrink_to_fit();
@@ -304,7 +304,7 @@ __split_buffer<_Tp>::operator=(__split_buffer &&__c) _NOEXCEPT {
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 void __split_buffer<_Tp>::swap(__split_buffer &__x) _NOEXCEPT {
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 void __split_buffer<_Tp>::swap(__split_buffer &__x) _NOEXCEPT {
     gpu::swap(__first_, __x.__first_);
     gpu::swap(__begin_, __x.__begin_);
     gpu::swap(__end_, __x.__end_);
@@ -312,7 +312,7 @@ _LIBGPU_CONSTEXPR_SINCE_CXX20 void __split_buffer<_Tp>::swap(__split_buffer &__x
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20
 void
 __split_buffer<_Tp>::reserve(size_type __n) {
     if (__n < capacity())
@@ -328,7 +328,7 @@ __split_buffer<_Tp>::reserve(size_type __n) {
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20
 void
 __split_buffer<_Tp>::shrink_to_fit() _NOEXCEPT {
     if (capacity() > size())
@@ -355,7 +355,7 @@ __split_buffer<_Tp>::shrink_to_fit() _NOEXCEPT {
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20
 void
 __split_buffer<_Tp>::push_front(const_reference __x) {
     if (__begin_ == __first_)
@@ -384,7 +384,7 @@ __split_buffer<_Tp>::push_front(const_reference __x) {
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20
 void
 __split_buffer<_Tp>::push_front(value_type&& __x) {
     if (__begin_ == __first_)
@@ -413,7 +413,7 @@ __split_buffer<_Tp>::push_front(value_type&& __x) {
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20
 inline _LIBGPU_HIDE_FROM_ABI
 void
 __split_buffer<_Tp>::push_back(const_reference __x) {
@@ -443,7 +443,7 @@ __split_buffer<_Tp>::push_back(const_reference __x) {
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20
 void
 __split_buffer<_Tp>::push_back(value_type&& __x) {
     if (__end_ == __end_cap())
@@ -473,7 +473,7 @@ __split_buffer<_Tp>::push_back(value_type&& __x) {
 
 template <class _Tp>
 template <class... _Args>
-_LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20
 void
 __split_buffer<_Tp>::emplace_back(_Args&&... __args) {
     if (__end_ == __end_cap())
@@ -502,7 +502,7 @@ __split_buffer<_Tp>::emplace_back(_Args&&... __args) {
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20
 inline _LIBGPU_HIDE_FROM_ABI
 void
 swap(__split_buffer<_Tp>& __x, __split_buffer<_Tp>& __y)

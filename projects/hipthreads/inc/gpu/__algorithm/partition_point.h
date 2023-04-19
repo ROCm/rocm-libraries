@@ -14,7 +14,7 @@
 namespace gpu {
 
 template<class _ForwardIterator, class _Predicate>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 _ForwardIterator
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 _ForwardIterator
 partition_point(_ForwardIterator __first, _ForwardIterator __last, _Predicate __pred)
 {
     typedef typename std::iterator_traits<_ForwardIterator>::difference_type difference_type;

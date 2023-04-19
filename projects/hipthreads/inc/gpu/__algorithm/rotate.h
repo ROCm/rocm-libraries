@@ -17,7 +17,7 @@
 namespace gpu {
 
 template <class _AlgPolicy, class _ForwardIterator>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 _ForwardIterator
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 _ForwardIterator
 __rotate_left(_ForwardIterator __first, _ForwardIterator __last)
 {
     typedef typename std::iterator_traits<_ForwardIterator>::value_type value_type;
@@ -31,7 +31,7 @@ __rotate_left(_ForwardIterator __first, _ForwardIterator __last)
 }
 
 template <class _AlgPolicy, class _BidirectionalIterator>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 _BidirectionalIterator
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 _BidirectionalIterator
 __rotate_right(_BidirectionalIterator __first, _BidirectionalIterator __last)
 {
     typedef typename std::iterator_traits<_BidirectionalIterator>::value_type value_type;
@@ -45,7 +45,7 @@ __rotate_right(_BidirectionalIterator __first, _BidirectionalIterator __last)
 }
 
 template <class _AlgPolicy, class _ForwardIterator>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX17 _ForwardIterator
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX17 _ForwardIterator
 __rotate_forward(_ForwardIterator __first, _ForwardIterator __middle, _ForwardIterator __last)
 {
     _ForwardIterator __i = __middle;
@@ -80,7 +80,7 @@ __rotate_forward(_ForwardIterator __first, _ForwardIterator __middle, _ForwardIt
 }
 
 template<typename _Integral>
-inline _LIBGPU_INLINE_VISIBILITY
+__device__ inline _LIBGPU_INLINE_VISIBILITY
 _LIBGPU_CONSTEXPR_SINCE_CXX17 _Integral
 __algo_gcd(_Integral __x, _Integral __y)
 {
@@ -94,7 +94,7 @@ __algo_gcd(_Integral __x, _Integral __y)
 }
 
 template <class _AlgPolicy, typename _RandomAccessIterator>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX17 _RandomAccessIterator
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX17 _RandomAccessIterator
 __rotate_gcd(_RandomAccessIterator __first, _RandomAccessIterator __middle, _RandomAccessIterator __last)
 {
     typedef typename std::iterator_traits<_RandomAccessIterator>::difference_type difference_type;
@@ -130,7 +130,7 @@ __rotate_gcd(_RandomAccessIterator __first, _RandomAccessIterator __middle, _Ran
 }
 
 template <class _AlgPolicy, class _ForwardIterator>
-inline _LIBGPU_INLINE_VISIBILITY
+__device__ inline _LIBGPU_INLINE_VISIBILITY
 _LIBGPU_CONSTEXPR_SINCE_CXX14 _ForwardIterator
 __rotate_impl(_ForwardIterator __first, _ForwardIterator __middle, _ForwardIterator __last,
          std::forward_iterator_tag)
@@ -145,7 +145,7 @@ __rotate_impl(_ForwardIterator __first, _ForwardIterator __middle, _ForwardItera
 }
 
 template <class _AlgPolicy, class _BidirectionalIterator>
-inline _LIBGPU_INLINE_VISIBILITY
+__device__ inline _LIBGPU_INLINE_VISIBILITY
 _LIBGPU_CONSTEXPR_SINCE_CXX14 _BidirectionalIterator
 __rotate_impl(_BidirectionalIterator __first, _BidirectionalIterator __middle, _BidirectionalIterator __last,
          std::bidirectional_iterator_tag)
@@ -162,7 +162,7 @@ __rotate_impl(_BidirectionalIterator __first, _BidirectionalIterator __middle, _
 }
 
 template <class _AlgPolicy, class _RandomAccessIterator>
-inline _LIBGPU_INLINE_VISIBILITY
+__device__ inline _LIBGPU_INLINE_VISIBILITY
 _LIBGPU_CONSTEXPR_SINCE_CXX14 _RandomAccessIterator
 __rotate_impl(_RandomAccessIterator __first, _RandomAccessIterator __middle, _RandomAccessIterator __last,
          std::random_access_iterator_tag)
@@ -180,7 +180,7 @@ __rotate_impl(_RandomAccessIterator __first, _RandomAccessIterator __middle, _Ra
 }
 
 template <class _AlgPolicy, class _Iterator, class _Sentinel>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14
 gpu::pair<_Iterator, _Iterator>
 __rotate(_Iterator __first, _Iterator __middle, _Sentinel __last) {
   using _Ret = gpu::pair<_Iterator, _Iterator>;
@@ -199,7 +199,7 @@ __rotate(_Iterator __first, _Iterator __middle, _Sentinel __last) {
 }
 
 template <class _ForwardIterator>
-inline _LIBGPU_INLINE_VISIBILITY
+__device__ inline _LIBGPU_INLINE_VISIBILITY
 _LIBGPU_CONSTEXPR_SINCE_CXX20 _ForwardIterator
 rotate(_ForwardIterator __first, _ForwardIterator __middle, _ForwardIterator __last)
 {

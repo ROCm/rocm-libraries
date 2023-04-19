@@ -19,20 +19,20 @@ template <semiregular _Sent>
 class _LIBGPU_TEMPLATE_VIS move_sentinel
 {
 public:
-  _LIBGPU_HIDE_FROM_ABI
+  __device__ _LIBGPU_HIDE_FROM_ABI
   move_sentinel() = default;
 
-  _LIBGPU_HIDE_FROM_ABI constexpr
+  __device__ _LIBGPU_HIDE_FROM_ABI constexpr
   explicit move_sentinel(_Sent __s) : __last_(std::move(__s)) {}
 
   template <class _S2>
     requires std::convertible_to<const _S2&, _Sent>
-  _LIBGPU_HIDE_FROM_ABI constexpr
+  __device__ _LIBGPU_HIDE_FROM_ABI constexpr
   move_sentinel(const move_sentinel<_S2>& __s) : __last_(__s.base()) {}
 
   template <class _S2>
     requires assignable_from<_Sent&, const _S2&>
-  _LIBGPU_HIDE_FROM_ABI constexpr
+  __device__ _LIBGPU_HIDE_FROM_ABI constexpr
   move_sentinel& operator=(const move_sentinel<_S2>& __s)
     { __last_ = __s.base(); return *this; }
 

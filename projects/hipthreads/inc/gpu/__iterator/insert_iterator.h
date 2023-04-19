@@ -45,21 +45,21 @@ public:
     typedef void reference;
     typedef _Container container_type;
 
-    _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20 insert_iterator(_Container& __x, __insert_iterator_iter_t<_Container> __i)
+    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20 insert_iterator(_Container& __x, __insert_iterator_iter_t<_Container> __i)
         : container(std::addressof(__x)), iter(__i) {}
-    _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20 insert_iterator& operator=(const typename _Container::value_type& __value)
+    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20 insert_iterator& operator=(const typename _Container::value_type& __value)
         {iter = container->insert(iter, __value); ++iter; return *this;}
 #ifndef _LIBGPU_CXX03_LANG
-    _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20 insert_iterator& operator=(typename _Container::value_type&& __value)
+    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20 insert_iterator& operator=(typename _Container::value_type&& __value)
         {iter = container->insert(iter, std::move(__value)); ++iter; return *this;}
 #endif // _LIBGPU_CXX03_LANG
-    _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20 insert_iterator& operator*()        {return *this;}
-    _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20 insert_iterator& operator++()       {return *this;}
-    _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20 insert_iterator& operator++(int)    {return *this;}
+    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20 insert_iterator& operator*()        {return *this;}
+    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20 insert_iterator& operator++()       {return *this;}
+    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20 insert_iterator& operator++(int)    {return *this;}
 };
 
 template <class _Container>
-inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
 insert_iterator<_Container>
 inserter(_Container& __x, __insert_iterator_iter_t<_Container> __i)
 {

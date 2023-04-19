@@ -45,7 +45,7 @@ struct __can_lower_move_assignment_to_memmove {
 // `memmove` algorithms implementation.
 
 template <class _In, class _Out>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 gpu::pair<_In*, _Out*>
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 gpu::pair<_In*, _Out*>
 __copy_trivial_impl(_In* __first, _In* __last, _Out* __result) {
   const std::size_t __n = static_cast<std::size_t>(__last - __first);
   ::__builtin_memmove(__result, __first, __n * sizeof(_Out));
@@ -54,7 +54,7 @@ __copy_trivial_impl(_In* __first, _In* __last, _Out* __result) {
 }
 
 template <class _In, class _Out>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 gpu::pair<_In*, _Out*>
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 gpu::pair<_In*, _Out*>
 __copy_backward_trivial_impl(_In* __first, _In* __last, _Out* __result) {
   const std::size_t __n = static_cast<std::size_t>(__last - __first);
   __result -= __n;
@@ -88,7 +88,7 @@ template <class _Algorithm,
           class _Sent,
           class _OutIter,
           std::enable_if_t<__can_rewrap<_InIter, _Sent, _OutIter>::value, int> = 0>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX17 gpu::pair<_InIter, _OutIter>
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX17 gpu::pair<_InIter, _OutIter>
 __unwrap_and_dispatch(_InIter __first, _Sent __last, _OutIter __out_first) {
   auto __range  = gpu::__unwrap_range(__first, std::move(__last));
   auto __result = _Algorithm()(std::move(__range.first), std::move(__range.second), gpu::__unwrap_iter(__out_first));
@@ -101,7 +101,7 @@ template <class _Algorithm,
           class _Sent,
           class _OutIter,
           std::enable_if_t<!__can_rewrap<_InIter, _Sent, _OutIter>::value, int> = 0>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX17 gpu::pair<_InIter, _OutIter>
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX17 gpu::pair<_InIter, _OutIter>
 __unwrap_and_dispatch(_InIter __first, _Sent __last, _OutIter __out_first) {
   return _Algorithm()(std::move(__first), std::move(__last), std::move(__out_first));
 }
@@ -122,7 +122,7 @@ template <class _AlgPolicy,
           class _InIter,
           class _Sent,
           class _OutIter>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX17 gpu::pair<_InIter, _OutIter>
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX17 gpu::pair<_InIter, _OutIter>
 __dispatch_copy_or_move(_InIter __first, _Sent __last, _OutIter __out_first) {
 #ifdef _LIBGPU_COMPILER_GCC
   // GCC doesn't support `__builtin_memmove` during constant evaluation.

@@ -36,21 +36,21 @@ public:
     typedef void reference;
     typedef _Container container_type;
 
-    _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20 explicit front_insert_iterator(_Container& __x) : container(std::addressof(__x)) {}
-    _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20 front_insert_iterator& operator=(const typename _Container::value_type& __value)
+    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20 explicit front_insert_iterator(_Container& __x) : container(std::addressof(__x)) {}
+    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20 front_insert_iterator& operator=(const typename _Container::value_type& __value)
         {container->push_front(__value); return *this;}
 #ifndef _LIBGPU_CXX03_LANG
-    _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20 front_insert_iterator& operator=(typename _Container::value_type&& __value)
+    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20 front_insert_iterator& operator=(typename _Container::value_type&& __value)
         {container->push_front(std::move(__value)); return *this;}
 #endif // _LIBGPU_CXX03_LANG
-    _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20 front_insert_iterator& operator*()     {return *this;}
-    _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20 front_insert_iterator& operator++()    {return *this;}
-    _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20 front_insert_iterator  operator++(int) {return *this;}
+    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20 front_insert_iterator& operator*()     {return *this;}
+    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20 front_insert_iterator& operator++()    {return *this;}
+    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20 front_insert_iterator  operator++(int) {return *this;}
 };
 _LIBGPU_CTAD_SUPPORTED_FOR_TYPE(front_insert_iterator);
 
 template <class _Container>
-inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
 front_insert_iterator<_Container>
 front_inserter(_Container& __x)
 {

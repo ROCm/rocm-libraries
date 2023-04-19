@@ -14,7 +14,7 @@
 namespace gpu {
 
 template<class _InputIterator, class _OutputIterator, class _Predicate>
-inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
 _OutputIterator
 copy_if(_InputIterator __first, _InputIterator __last,
         _OutputIterator __result, _Predicate __pred)

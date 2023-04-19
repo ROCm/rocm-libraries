@@ -45,30 +45,30 @@ class _LIBGPU_TEMPLATE_VIS vector {
     typedef gpu::reverse_iterator<iterator>                 reverse_iterator;
     typedef gpu::reverse_iterator<const_iterator>           const_reverse_iterator;
 
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI vector() _NOEXCEPT {}
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI explicit vector(size_type __n);
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI vector(size_type __n, const value_type &__x);
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI vector() _NOEXCEPT {}
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI explicit vector(size_type __n);
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI vector(size_type __n, const value_type &__x);
 
     template <class _InputIterator,
               typename std::enable_if<
                   __is_exactly_cpp17_input_iterator<_InputIterator>::value &&
                       std::is_constructible<value_type, typename std::iterator_traits<_InputIterator>::reference>::value,
                   int>::type = 0>
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI vector(_InputIterator __first, _InputIterator __last);
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI vector(_InputIterator __first, _InputIterator __last);
 
     template <class _ForwardIterator,
               typename std::enable_if<
                   __is_cpp17_forward_iterator<_ForwardIterator>::value &&
                       std::is_constructible<value_type, typename std::iterator_traits<_ForwardIterator>::reference>::value,
                   int>::type = 0>
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI vector(_ForwardIterator __first, _ForwardIterator __last);
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI vector(_ForwardIterator __first, _ForwardIterator __last);
 
   private:
     class __destroy_vector {
       public:
         _LIBGPU_CONSTEXPR __destroy_vector(vector &__vec) : __vec_(__vec) {}
 
-        _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void operator()() {
+        __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void operator()() {
             if (__vec_.__begin_ != nullptr) {
                 __vec_.__clear();
                 ::operator delete(__vec_.__begin_);
@@ -80,121 +80,121 @@ class _LIBGPU_TEMPLATE_VIS vector {
     };
 
   public:
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI ~vector() { __destroy_vector (*this)(); }
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI ~vector() { __destroy_vector (*this)(); }
 
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI vector(const vector &__x);
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI vector &operator=(const vector &__x);
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI vector(const vector &__x);
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI vector &operator=(const vector &__x);
 
 #ifndef _LIBGPU_CXX03_LANG
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI vector(std::initializer_list<value_type> __il);
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI vector(std::initializer_list<value_type> __il);
 
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI vector &operator=(std::initializer_list<value_type> __il) {
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI vector &operator=(std::initializer_list<value_type> __il) {
         assign(__il.begin(), __il.end());
         return *this;
     }
 #endif // !_LIBGPU_CXX03_LANG
 
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI vector(vector &&__x) _NOEXCEPT;
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI vector(vector &&__x) _NOEXCEPT;
 
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI vector &operator=(vector &&__x) _NOEXCEPT;
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI vector &operator=(vector &&__x) _NOEXCEPT;
 
     template <class _InputIterator,
               typename std::enable_if<
                   __is_exactly_cpp17_input_iterator<_InputIterator>::value &&
                       std::is_constructible<value_type, typename std::iterator_traits<_InputIterator>::reference>::value,
                   int>::type = 0>
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void assign(_InputIterator __first, _InputIterator __last);
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void assign(_InputIterator __first, _InputIterator __last);
     template <class _ForwardIterator,
               typename std::enable_if<
                   __is_cpp17_forward_iterator<_ForwardIterator>::value &&
                       std::is_constructible<value_type, typename std::iterator_traits<_ForwardIterator>::reference>::value,
                   int>::type = 0>
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void assign(_ForwardIterator __first, _ForwardIterator __last);
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void assign(_ForwardIterator __first, _ForwardIterator __last);
 
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void assign(size_type __n, const_reference __u);
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void assign(size_type __n, const_reference __u);
 
 #ifndef _LIBGPU_CXX03_LANG
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void assign(std::initializer_list<value_type> __il) {
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void assign(std::initializer_list<value_type> __il) {
         assign(__il.begin(), __il.end());
     }
 #endif
 
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI iterator begin() _NOEXCEPT;
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI const_iterator begin() const _NOEXCEPT;
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI iterator end() _NOEXCEPT;
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI const_iterator end() const _NOEXCEPT;
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI iterator begin() _NOEXCEPT;
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI const_iterator begin() const _NOEXCEPT;
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI iterator end() _NOEXCEPT;
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI const_iterator end() const _NOEXCEPT;
 
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI reverse_iterator rbegin() _NOEXCEPT {
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI reverse_iterator rbegin() _NOEXCEPT {
         return reverse_iterator(end());
     }
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI const_reverse_iterator rbegin() const _NOEXCEPT {
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI const_reverse_iterator rbegin() const _NOEXCEPT {
         return const_reverse_iterator(end());
     }
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI reverse_iterator rend() _NOEXCEPT {
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI reverse_iterator rend() _NOEXCEPT {
         return reverse_iterator(begin());
     }
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI const_reverse_iterator rend() const _NOEXCEPT {
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI const_reverse_iterator rend() const _NOEXCEPT {
         return const_reverse_iterator(begin());
     }
 
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI const_iterator cbegin() const _NOEXCEPT { return begin(); }
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI const_iterator cend() const _NOEXCEPT { return end(); }
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI const_reverse_iterator crbegin() const _NOEXCEPT {
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI const_iterator cbegin() const _NOEXCEPT { return begin(); }
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI const_iterator cend() const _NOEXCEPT { return end(); }
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI const_reverse_iterator crbegin() const _NOEXCEPT {
         return rbegin();
     }
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI const_reverse_iterator crend() const _NOEXCEPT {
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI const_reverse_iterator crend() const _NOEXCEPT {
         return rend();
     }
 
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI size_type size() const _NOEXCEPT {
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI size_type size() const _NOEXCEPT {
         return static_cast<size_type>(this->__end_ - this->__begin_);
     }
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI size_type capacity() const _NOEXCEPT {
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI size_type capacity() const _NOEXCEPT {
         return static_cast<size_type>(__end_cap() - this->__begin_);
     }
-    _LIBGPU_NODISCARD_AFTER_CXX17 _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI bool empty() const _NOEXCEPT {
+    _LIBGPU_NODISCARD_AFTER_CXX17 __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI bool empty() const _NOEXCEPT {
         return this->__begin_ == this->__end_;
     }
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI size_type max_size() const _NOEXCEPT;
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void reserve(size_type __n);
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void shrink_to_fit() _NOEXCEPT;
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI size_type max_size() const _NOEXCEPT;
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void reserve(size_type __n);
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void shrink_to_fit() _NOEXCEPT;
 
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI reference operator[](size_type __n) _NOEXCEPT;
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI const_reference operator[](size_type __n) const _NOEXCEPT;
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI reference at(size_type __n);
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI const_reference at(size_type __n) const;
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI reference operator[](size_type __n) _NOEXCEPT;
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI const_reference operator[](size_type __n) const _NOEXCEPT;
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI reference at(size_type __n);
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI const_reference at(size_type __n) const;
 
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI reference front() _NOEXCEPT {
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI reference front() _NOEXCEPT {
         _LIBGPU_ASSERT(!empty(), "front() called on an empty vector");
         return *this->__begin_;
     }
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI const_reference front() const _NOEXCEPT {
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI const_reference front() const _NOEXCEPT {
         _LIBGPU_ASSERT(!empty(), "front() called on an empty vector");
         return *this->__begin_;
     }
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI reference back() _NOEXCEPT {
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI reference back() _NOEXCEPT {
         _LIBGPU_ASSERT(!empty(), "back() called on an empty vector");
         return *(this->__end_ - 1);
     }
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI const_reference back() const _NOEXCEPT {
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI const_reference back() const _NOEXCEPT {
         _LIBGPU_ASSERT(!empty(), "back() called on an empty vector");
         return *(this->__end_ - 1);
     }
 
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI value_type *data() _NOEXCEPT {
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI value_type *data() _NOEXCEPT {
         return this->__begin_;
     }
 
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI const value_type *data() const _NOEXCEPT {
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI const value_type *data() const _NOEXCEPT {
         return this->__begin_;
     }
 
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void push_back(const_reference __x);
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void push_back(const_reference __x);
 
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void push_back(value_type &&__x);
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void push_back(value_type &&__x);
 
     template <class... _Args>
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI
 #if _LIBGPU_STD_VER >= 17
         reference
         emplace_back(_Args &&...__args);
@@ -203,15 +203,15 @@ class _LIBGPU_TEMPLATE_VIS vector {
         emplace_back(_Args &&...__args);
 #endif
 
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void pop_back();
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void pop_back();
 
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI iterator insert(const_iterator __position, const_reference __x);
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI iterator insert(const_iterator __position, const_reference __x);
 
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI iterator insert(const_iterator __position, value_type &&__x);
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI iterator insert(const_iterator __position, value_type &&__x);
     template <class... _Args>
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI iterator emplace(const_iterator __position, _Args &&...__args);
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI iterator emplace(const_iterator __position, _Args &&...__args);
 
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI iterator insert(const_iterator __position, size_type __n,
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI iterator insert(const_iterator __position, size_type __n,
                                                                         const_reference __x);
 
     template <class _InputIterator,
@@ -219,7 +219,7 @@ class _LIBGPU_TEMPLATE_VIS vector {
                   __is_exactly_cpp17_input_iterator<_InputIterator>::value &&
                       std::is_constructible<value_type, typename std::iterator_traits<_InputIterator>::reference>::value,
                   int>::type = 0>
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI iterator insert(const_iterator __position,
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI iterator insert(const_iterator __position,
                                                                         _InputIterator __first, _InputIterator __last);
 
     template <class _ForwardIterator,
@@ -227,30 +227,30 @@ class _LIBGPU_TEMPLATE_VIS vector {
                   __is_cpp17_forward_iterator<_ForwardIterator>::value &&
                       std::is_constructible<value_type, typename std::iterator_traits<_ForwardIterator>::reference>::value,
                   int>::type = 0>
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI iterator insert(const_iterator __position,
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI iterator insert(const_iterator __position,
                                                                         _ForwardIterator __first,
                                                                         _ForwardIterator __last);
 
 #ifndef _LIBGPU_CXX03_LANG
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI iterator insert(const_iterator __position,
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI iterator insert(const_iterator __position,
                                                                         std::initializer_list<value_type> __il) {
         return insert(__position, __il.begin(), __il.end());
     }
 #endif
 
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI iterator erase(const_iterator __position);
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI iterator erase(const_iterator __first, const_iterator __last);
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI iterator erase(const_iterator __position);
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI iterator erase(const_iterator __first, const_iterator __last);
 
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void clear() _NOEXCEPT {
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void clear() _NOEXCEPT {
         __clear();
     }
 
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void resize(size_type __sz);
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void resize(size_type __sz, const_reference __x);
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void resize(size_type __sz);
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void resize(size_type __sz, const_reference __x);
 
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void swap(vector &) _NOEXCEPT;
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void swap(vector &) _NOEXCEPT;
 
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI bool __invariants() const;
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI bool __invariants() const;
 
 #ifdef _LIBGPU_ENABLE_DEBUG_MODE
 
@@ -266,7 +266,7 @@ class _LIBGPU_TEMPLATE_VIS vector {
     pointer __end_ = nullptr;
     pointer __end_cap_ = nullptr;
 
-    _LIBGPU_HIDE_FROM_ABI void __invalidate_iterators_past(pointer __new_last);
+    __device__ _LIBGPU_HIDE_FROM_ABI void __invalidate_iterators_past(pointer __new_last);
 
     //  Allocate space for __n objects
     //  throws length_error if __n > max_size()
@@ -275,54 +275,54 @@ class _LIBGPU_TEMPLATE_VIS vector {
     //  Precondition:  __n > 0
     //  Postcondition:  capacity() >= __n
     //  Postcondition:  size() == 0
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void __vallocate(size_type __n) {
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void __vallocate(size_type __n) {
         if (__n > max_size())
             __throw_length_error();
         __begin_ = __end_ = static_cast<value_type*>(::operator new(__n * sizeof(value_type)));
         __end_cap() = __begin_ + __n;
     }
 
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void __vdeallocate() _NOEXCEPT;
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI size_type __recommend(size_type __new_size) const;
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void __construct_at_end(size_type __n);
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void __construct_at_end(size_type __n, const_reference __x);
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void __vdeallocate() _NOEXCEPT;
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI size_type __recommend(size_type __new_size) const;
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void __construct_at_end(size_type __n);
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void __construct_at_end(size_type __n, const_reference __x);
 
     template <class _ForwardIterator,
               typename std::enable_if<__is_cpp17_forward_iterator<_ForwardIterator>::value, int>::type = 0>
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void __construct_at_end(_ForwardIterator __first,
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void __construct_at_end(_ForwardIterator __first,
                                                                                 _ForwardIterator __last, size_type __n);
 
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void __append(size_type __n);
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void __append(size_type __n, const_reference __x);
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI iterator __make_iter(pointer __p) _NOEXCEPT {
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void __append(size_type __n);
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void __append(size_type __n, const_reference __x);
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI iterator __make_iter(pointer __p) _NOEXCEPT {
         return iterator(this, __p);
     }
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI const_iterator __make_iter(const_pointer __p) const _NOEXCEPT {
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI const_iterator __make_iter(const_pointer __p) const _NOEXCEPT {
         return const_iterator(this, __p);
     }
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void
     __swap_out_circular_buffer(__split_buffer<value_type> &__v);
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI pointer
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI pointer
     __swap_out_circular_buffer(__split_buffer<value_type> &__v, pointer __p);
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void __move_range(pointer __from_s, pointer __from_e,
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void __move_range(pointer __from_s, pointer __from_e,
                                                                           pointer __to);
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void __move_assign(vector &__c, std::true_type) _NOEXCEPT;
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void __destruct_at_end(pointer __new_last) _NOEXCEPT {
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void __move_assign(vector &__c, std::true_type) _NOEXCEPT;
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void __destruct_at_end(pointer __new_last) _NOEXCEPT {
         if (!__builtin_is_constant_evaluated())
             __invalidate_iterators_past(__new_last);
         __base_destruct_at_end(__new_last);
     }
 
     template <class _Up>
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI inline void __push_back_slow_path(_Up &&__x);
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI inline void __push_back_slow_path(_Up &&__x);
 
     template <class... _Args>
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI inline void __emplace_back_slow_path(_Args &&...__args);
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI inline void __emplace_back_slow_path(_Args &&...__args);
 
     struct _ConstructTransaction {
-        _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI explicit _ConstructTransaction(vector &__v, size_type __n)
+        __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI explicit _ConstructTransaction(vector &__v, size_type __n)
             : __v_(__v), __pos_(__v.__end_), __new_end_(__v.__end_ + __n) {}
-        _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI ~_ConstructTransaction() { __v_.__end_ = __pos_; }
+        __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI ~_ConstructTransaction() { __v_.__end_ = __pos_; }
 
         vector &__v_;
         pointer __pos_;
@@ -334,31 +334,31 @@ class _LIBGPU_TEMPLATE_VIS vector {
     };
 
     template <class... _Args>
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void __construct_one_at_end(_Args &&...__args) {
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void __construct_one_at_end(_Args &&...__args) {
         _ConstructTransaction __tx(*this, 1);
         ::new (static_cast<void*>(__tx.__pos_)) value_type(std::forward<_Args>(__args)...);
         ++__tx.__pos_;
     }
 
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI pointer &__end_cap() _NOEXCEPT {
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI pointer &__end_cap() _NOEXCEPT {
         return this->__end_cap_;
     }
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI const pointer &__end_cap() const _NOEXCEPT {
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI const pointer &__end_cap() const _NOEXCEPT {
         return this->__end_cap_;
     }
 
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void __clear() _NOEXCEPT {
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void __clear() _NOEXCEPT {
         __base_destruct_at_end(this->__begin_);
     }
 
-    _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void __base_destruct_at_end(pointer __new_last) _NOEXCEPT {
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void __base_destruct_at_end(pointer __new_last) _NOEXCEPT {
         pointer __soon_to_be_end = this->__end_;
         while (__new_last != __soon_to_be_end)
             --__soon_to_be_end->~value_type();
         this->__end_ = __new_last;
     }
 
-    _LIBGPU_NORETURN _LIBGPU_HIDE_FROM_ABI void __throw_length_error() const {
+    _LIBGPU_NORETURN __device__ _LIBGPU_HIDE_FROM_ABI void __throw_length_error() const {
 #if !defined(_LIBCPP_HAS_NO_EXCEPTIONS) && !defined(__HIP_DEVICE_COMPILE__)
         throw std::length_error("vector");
 #else
@@ -366,7 +366,7 @@ class _LIBGPU_TEMPLATE_VIS vector {
 #endif
     }
 
-    _LIBGPU_NORETURN _LIBGPU_HIDE_FROM_ABI void __throw_out_of_range() const {
+    _LIBGPU_NORETURN __device__ _LIBGPU_HIDE_FROM_ABI void __throw_out_of_range() const {
 #if !defined(_LIBCPP_HAS_NO_EXCEPTIONS) && !defined(__HIP_DEVICE_COMPILE__)
         throw std::out_of_range("vector");
 #else
@@ -382,7 +382,7 @@ vector(_InputIterator, _InputIterator) -> vector<typename std::iterator_traits<_
 #endif
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 void
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 void
 vector<_Tp>::__swap_out_circular_buffer(__split_buffer<value_type> &__v) {
     using _RevIter = gpu::reverse_iterator<pointer>;
     __v.__begin_ = gpu::__uninitialized_allocator_move_if_noexcept(_RevIter(__end_), _RevIter(__begin_),
@@ -395,7 +395,7 @@ vector<_Tp>::__swap_out_circular_buffer(__split_buffer<value_type> &__v) {
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 typename vector<_Tp>::pointer
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 typename vector<_Tp>::pointer
 vector<_Tp>::__swap_out_circular_buffer(__split_buffer<value_type> &__v, pointer __p) {
     pointer __r = __v.__begin_;
     using _RevIter = gpu::reverse_iterator<pointer>;
@@ -411,7 +411,7 @@ vector<_Tp>::__swap_out_circular_buffer(__split_buffer<value_type> &__v, pointer
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::__vdeallocate() _NOEXCEPT {
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::__vdeallocate() _NOEXCEPT {
     if (this->__begin_ != nullptr) {
         clear();
         ::operator delete(this->__begin_);
@@ -420,14 +420,14 @@ _LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::__vdeallocate() _NOEXCEPT {
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 typename vector<_Tp>::size_type
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 typename vector<_Tp>::size_type
 vector<_Tp>::max_size() const _NOEXCEPT {
     return std::min<size_type>(std::numeric_limits<size_type>::max() / sizeof(value_type), std::numeric_limits<difference_type>::max());
 }
 
 //  Precondition:  __new_size > capacity()
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI typename vector<_Tp>::size_type
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI typename vector<_Tp>::size_type
 vector<_Tp>::__recommend(size_type __new_size) const {
     const size_type __ms = max_size();
     if (__new_size > __ms)
@@ -444,7 +444,7 @@ vector<_Tp>::__recommend(size_type __new_size) const {
 //  Precondition:  size() + __n <= capacity()
 //  Postcondition:  size() == size() + __n
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::__construct_at_end(size_type __n) {
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::__construct_at_end(size_type __n) {
     _ConstructTransaction __tx(*this, __n);
     const_pointer __new_end = __tx.__new_end_;
     for (pointer __pos = __tx.__pos_; __pos != __new_end; __tx.__pos_ = ++__pos) {
@@ -459,7 +459,7 @@ _LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::__construct_at_end(size_type __n
 //  Postcondition:  size() == old size() + __n
 //  Postcondition:  [i] == __x for all i in [size() - __n, __n)
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 inline void vector<_Tp>::__construct_at_end(size_type __n,
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 inline void vector<_Tp>::__construct_at_end(size_type __n,
                                                                                       const_reference __x) {
     _ConstructTransaction __tx(*this, __n);
     const_pointer __new_end = __tx.__new_end_;
@@ -470,7 +470,7 @@ _LIBGPU_CONSTEXPR_SINCE_CXX20 inline void vector<_Tp>::__construct_at_end(size_t
 
 template <class _Tp>
 template <class _ForwardIterator, typename std::enable_if<__is_cpp17_forward_iterator<_ForwardIterator>::value, int>::type>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::__construct_at_end(_ForwardIterator __first,
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::__construct_at_end(_ForwardIterator __first,
                                                                                _ForwardIterator __last, size_type __n) {
     _ConstructTransaction __tx(*this, __n);
     __tx.__pos_ = gpu::__uninitialized_allocator_copy(__first, __last, __tx.__pos_);
@@ -481,7 +481,7 @@ _LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::__construct_at_end(_ForwardItera
 //  Postcondition:  size() == size() + __n
 //  Exception safety: strong.
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::__append(size_type __n) {
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::__append(size_type __n) {
     if (static_cast<size_type>(this->__end_cap() - this->__end_) >= __n)
         this->__construct_at_end(__n);
     else {
@@ -496,7 +496,7 @@ _LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::__append(size_type __n) {
 //  Postcondition:  size() == size() + __n
 //  Exception safety: strong.
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::__append(size_type __n, const_reference __x) {
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::__append(size_type __n, const_reference __x) {
     if (static_cast<size_type>(this->__end_cap() - this->__end_) >= __n)
         this->__construct_at_end(__n, __x);
     else {
@@ -507,7 +507,7 @@ _LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::__append(size_type __n, const_re
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 vector<_Tp>::vector(size_type __n) {
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 vector<_Tp>::vector(size_type __n) {
     auto __guard = gpu::__make_exception_guard(__destroy_vector(*this));
     if (__n > 0) {
         __vallocate(__n);
@@ -517,7 +517,7 @@ _LIBGPU_CONSTEXPR_SINCE_CXX20 vector<_Tp>::vector(size_type __n) {
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 vector<_Tp>::vector(size_type __n, const value_type &__x) {
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 vector<_Tp>::vector(size_type __n, const value_type &__x) {
     auto __guard = gpu::__make_exception_guard(__destroy_vector(*this));
     if (__n > 0) {
         __vallocate(__n);
@@ -531,7 +531,7 @@ template <class _InputIterator,
           typename std::enable_if<__is_exactly_cpp17_input_iterator<_InputIterator>::value &&
                              std::is_constructible<_Tp, typename std::iterator_traits<_InputIterator>::reference>::value,
                          int>::type>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 vector<_Tp>::vector(_InputIterator __first, _InputIterator __last) {
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 vector<_Tp>::vector(_InputIterator __first, _InputIterator __last) {
     auto __guard = gpu::__make_exception_guard(__destroy_vector(*this));
     for (; __first != __last; ++__first)
         emplace_back(*__first);
@@ -543,7 +543,7 @@ template <class _ForwardIterator,
           typename std::enable_if<__is_cpp17_forward_iterator<_ForwardIterator>::value &&
                              std::is_constructible<_Tp, typename std::iterator_traits<_ForwardIterator>::reference>::value,
                          int>::type>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 vector<_Tp>::vector(_ForwardIterator __first, _ForwardIterator __last) {
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 vector<_Tp>::vector(_ForwardIterator __first, _ForwardIterator __last) {
     auto __guard = gpu::__make_exception_guard(__destroy_vector(*this));
     size_type __n = static_cast<size_type>(std::distance(__first, __last));
     if (__n > 0) {
@@ -554,7 +554,7 @@ _LIBGPU_CONSTEXPR_SINCE_CXX20 vector<_Tp>::vector(_ForwardIterator __first, _For
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 vector<_Tp>::vector(const vector &__x)
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 vector<_Tp>::vector(const vector &__x)
     : __end_cap_(nullptr) {
     auto __guard = gpu::__make_exception_guard(__destroy_vector(*this));
     size_type __n = __x.size();
@@ -566,7 +566,7 @@ _LIBGPU_CONSTEXPR_SINCE_CXX20 vector<_Tp>::vector(const vector &__x)
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI vector<_Tp>::vector(vector &&__x) _NOEXCEPT
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI vector<_Tp>::vector(vector &&__x) _NOEXCEPT
     : __end_cap_(nullptr) {
     this->__begin_ = __x.__begin_;
     this->__end_ = __x.__end_;
@@ -577,7 +577,7 @@ _LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI vector<_Tp>::vector(v
 #ifndef _LIBGPU_CXX03_LANG
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI
 vector<_Tp>::vector(std::initializer_list<value_type> __il) {
     auto __guard = gpu::__make_exception_guard(__destroy_vector(*this));
     if (__il.size() > 0) {
@@ -590,14 +590,14 @@ vector<_Tp>::vector(std::initializer_list<value_type> __il) {
 #endif // _LIBGPU_CXX03_LANG
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI vector<_Tp> &
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI vector<_Tp> &
 vector<_Tp>::operator=(vector &&__x) _NOEXCEPT {
     __move_assign(__x, std::true_type());
     return *this;
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::__move_assign(vector &__c, std::true_type) _NOEXCEPT {
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::__move_assign(vector &__c, std::true_type) _NOEXCEPT {
     __vdeallocate();
     this->__begin_ = __c.__begin_;
     this->__end_ = __c.__end_;
@@ -606,7 +606,7 @@ _LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::__move_assign(vector &__c, std::
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI vector<_Tp> &
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI vector<_Tp> &
 vector<_Tp>::operator=(const vector &__x) {
     if (this != gpu::addressof(__x)) {
         assign(__x.__begin_, __x.__end_);
@@ -619,7 +619,7 @@ template <class _InputIterator,
           typename std::enable_if<__is_exactly_cpp17_input_iterator<_InputIterator>::value &&
                              std::is_constructible<_Tp, typename std::iterator_traits<_InputIterator>::reference>::value,
                          int>::type>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::assign(_InputIterator __first, _InputIterator __last) {
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::assign(_InputIterator __first, _InputIterator __last) {
     clear();
     for (; __first != __last; ++__first)
         emplace_back(*__first);
@@ -630,7 +630,7 @@ template <class _ForwardIterator,
           typename std::enable_if<__is_cpp17_forward_iterator<_ForwardIterator>::value &&
                              std::is_constructible<_Tp, typename std::iterator_traits<_ForwardIterator>::reference>::value,
                          int>::type>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::assign(_ForwardIterator __first, _ForwardIterator __last) {
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::assign(_ForwardIterator __first, _ForwardIterator __last) {
     size_type __new_size = static_cast<size_type>(std::distance(__first, __last));
     if (__new_size <= capacity()) {
         _ForwardIterator __mid = __last;
@@ -653,7 +653,7 @@ _LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::assign(_ForwardIterator __first,
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::assign(size_type __n, const_reference __u) {
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::assign(size_type __n, const_reference __u) {
     if (__n <= capacity()) {
         size_type __s = size();
         gpu::fill_n(this->__begin_, std::min(__n, __s), __u);
@@ -669,52 +669,52 @@ _LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::assign(size_type __n, const_refe
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI typename vector<_Tp>::iterator
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI typename vector<_Tp>::iterator
 vector<_Tp>::begin() _NOEXCEPT {
     return __make_iter(this->__begin_);
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI typename vector<_Tp>::const_iterator
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI typename vector<_Tp>::const_iterator
 vector<_Tp>::begin() const _NOEXCEPT {
     return __make_iter(this->__begin_);
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI typename vector<_Tp>::iterator
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI typename vector<_Tp>::iterator
 vector<_Tp>::end() _NOEXCEPT {
     return __make_iter(this->__end_);
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI typename vector<_Tp>::const_iterator
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI typename vector<_Tp>::const_iterator
 vector<_Tp>::end() const _NOEXCEPT {
     return __make_iter(this->__end_);
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI typename vector<_Tp>::reference
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI typename vector<_Tp>::reference
 vector<_Tp>::operator[](size_type __n) _NOEXCEPT {
     _LIBGPU_ASSERT(__n < size(), "vector[] index out of bounds");
     return this->__begin_[__n];
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI typename vector<_Tp>::const_reference
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI typename vector<_Tp>::const_reference
 vector<_Tp>::operator[](size_type __n) const _NOEXCEPT {
     _LIBGPU_ASSERT(__n < size(), "vector[] index out of bounds");
     return this->__begin_[__n];
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 typename vector<_Tp>::reference vector<_Tp>::at(size_type __n) {
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 typename vector<_Tp>::reference vector<_Tp>::at(size_type __n) {
     if (__n >= size())
         this->__throw_out_of_range();
     return this->__begin_[__n];
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 typename vector<_Tp>::const_reference
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 typename vector<_Tp>::const_reference
 vector<_Tp>::at(size_type __n) const {
     if (__n >= size())
         this->__throw_out_of_range();
@@ -722,7 +722,7 @@ vector<_Tp>::at(size_type __n) const {
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::reserve(size_type __n) {
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::reserve(size_type __n) {
     if (__n > capacity()) {
         if (__n > max_size())
             this->__throw_length_error();
@@ -732,7 +732,7 @@ _LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::reserve(size_type __n) {
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::shrink_to_fit() _NOEXCEPT {
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::shrink_to_fit() _NOEXCEPT {
     if (capacity() > size()) {
 #ifndef _LIBGPU_HAS_NO_EXCEPTIONS
         try {
@@ -748,7 +748,7 @@ _LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::shrink_to_fit() _NOEXCEPT {
 
 template <class _Tp>
 template <class _Up>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::__push_back_slow_path(_Up &&__x) {
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::__push_back_slow_path(_Up &&__x) {
     __split_buffer<value_type> __v(__recommend(size() + 1), size());
     // __v.push_back(std::forward<_Up>(__x));
     ::new (static_cast<void*>(__v.__end_)) value_type(std::forward<_Up>(__x));
@@ -757,7 +757,7 @@ _LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::__push_back_slow_path(_Up &&__x)
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI void
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI void
 vector<_Tp>::push_back(const_reference __x) {
     if (this->__end_ != this->__end_cap()) {
         __construct_one_at_end(__x);
@@ -766,7 +766,7 @@ vector<_Tp>::push_back(const_reference __x) {
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI void vector<_Tp>::push_back(value_type &&__x) {
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI void vector<_Tp>::push_back(value_type &&__x) {
     if (this->__end_ < this->__end_cap()) {
         __construct_one_at_end(std::move(__x));
     } else
@@ -775,7 +775,7 @@ _LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI void vector<_Tp>::pus
 
 template <class _Tp>
 template <class... _Args>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::__emplace_back_slow_path(_Args &&...__args) {
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::__emplace_back_slow_path(_Args &&...__args) {
     __split_buffer<value_type> __v(__recommend(size() + 1), size());
     //    __v.emplace_back(std::forward<_Args>(__args)...);
     ::new (static_cast<void*>(__v.__end_)) value_type(std::forward<_Args>(__args)...);
@@ -785,7 +785,7 @@ _LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::__emplace_back_slow_path(_Args &
 
 template <class _Tp>
 template <class... _Args>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 inline
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 inline
 #if _LIBGPU_STD_VER >= 17
     typename vector<_Tp>::reference
 #else
@@ -802,13 +802,13 @@ _LIBGPU_CONSTEXPR_SINCE_CXX20 inline
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 inline void vector<_Tp>::pop_back() {
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 inline void vector<_Tp>::pop_back() {
     _LIBGPU_ASSERT(!empty(), "vector::pop_back called on an empty vector");
     this->__destruct_at_end(this->__end_ - 1);
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI typename vector<_Tp>::iterator
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI typename vector<_Tp>::iterator
 vector<_Tp>::erase(const_iterator __position) {
     _LIBGPU_ASSERT(__position != end(), "vector::erase(iterator) called with a non-dereferenceable iterator");
     difference_type __ps = __position - cbegin();
@@ -820,7 +820,7 @@ vector<_Tp>::erase(const_iterator __position) {
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 typename vector<_Tp>::iterator
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 typename vector<_Tp>::iterator
 vector<_Tp>::erase(const_iterator __first, const_iterator __last) {
     _LIBGPU_ASSERT(__first <= __last, "vector::erase(first, last) called with invalid range");
     pointer __p = this->__begin_ + (__first - begin());
@@ -833,7 +833,7 @@ vector<_Tp>::erase(const_iterator __first, const_iterator __last) {
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::__move_range(pointer __from_s, pointer __from_e,
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::__move_range(pointer __from_s, pointer __from_e,
                                                                          pointer __to) {
     pointer __old_last = this->__end_;
     difference_type __n = __old_last - __to;
@@ -848,7 +848,7 @@ _LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::__move_range(pointer __from_s, p
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 typename vector<_Tp>::iterator
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 typename vector<_Tp>::iterator
 vector<_Tp>::insert(const_iterator __position, const_reference __x) {
     pointer __p = this->__begin_ + (__position - begin());
     // We can't compare unrelated pointers inside constant expressions
@@ -871,7 +871,7 @@ vector<_Tp>::insert(const_iterator __position, const_reference __x) {
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 typename vector<_Tp>::iterator
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 typename vector<_Tp>::iterator
 vector<_Tp>::insert(const_iterator __position, value_type &&__x) {
     pointer __p = this->__begin_ + (__position - begin());
     if (this->__end_ < this->__end_cap()) {
@@ -891,7 +891,7 @@ vector<_Tp>::insert(const_iterator __position, value_type &&__x) {
 
 template <class _Tp>
 template <class... _Args>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 typename vector<_Tp>::iterator
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 typename vector<_Tp>::iterator
 vector<_Tp>::emplace(const_iterator __position, _Args &&...__args) {
     pointer __p = this->__begin_ + (__position - begin());
     if (this->__end_ < this->__end_cap()) {
@@ -913,7 +913,7 @@ vector<_Tp>::emplace(const_iterator __position, _Args &&...__args) {
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 typename vector<_Tp>::iterator
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 typename vector<_Tp>::iterator
 vector<_Tp>::insert(const_iterator __position, size_type __n, const_reference __x) {
     pointer __p = this->__begin_ + (__position - begin());
     if (__n > 0) {
@@ -947,7 +947,7 @@ template <class _InputIterator,
           typename std::enable_if<__is_exactly_cpp17_input_iterator<_InputIterator>::value &&
                              std::is_constructible<_Tp, typename std::iterator_traits<_InputIterator>::reference>::value,
                          int>::type>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 typename vector<_Tp>::iterator
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 typename vector<_Tp>::iterator
 vector<_Tp>::insert(const_iterator __position, _InputIterator __first, _InputIterator __last) {
     difference_type __off = __position - begin();
     pointer __p = this->__begin_ + __off;
@@ -983,7 +983,7 @@ template <class _ForwardIterator,
           typename std::enable_if<__is_cpp17_forward_iterator<_ForwardIterator>::value &&
                              std::is_constructible<_Tp, typename std::iterator_traits<_ForwardIterator>::reference>::value,
                          int>::type>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 typename vector<_Tp>::iterator
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 typename vector<_Tp>::iterator
 vector<_Tp>::insert(const_iterator __position, _ForwardIterator __first, _ForwardIterator __last) {
     pointer __p = this->__begin_ + (__position - begin());
     difference_type __n = std::distance(__first, __last);
@@ -1014,7 +1014,7 @@ vector<_Tp>::insert(const_iterator __position, _ForwardIterator __first, _Forwar
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::resize(size_type __sz) {
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::resize(size_type __sz) {
     size_type __cs = size();
     if (__cs < __sz)
         this->__append(__sz - __cs);
@@ -1023,7 +1023,7 @@ _LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::resize(size_type __sz) {
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::resize(size_type __sz, const_reference __x) {
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::resize(size_type __sz, const_reference __x) {
     size_type __cs = size();
     if (__cs < __sz)
         this->__append(__sz - __cs, __x);
@@ -1032,7 +1032,7 @@ _LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::resize(size_type __sz, const_ref
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::swap(vector &__x) _NOEXCEPT
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::swap(vector &__x) _NOEXCEPT
 {
     gpu::swap(this->__begin_, __x.__begin_);
     gpu::swap(this->__end_, __x.__end_);
@@ -1040,7 +1040,7 @@ _LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::swap(vector &__x) _NOEXCEPT
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 bool vector<_Tp>::__invariants() const {
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 bool vector<_Tp>::__invariants() const {
     if (this->__begin_ == nullptr) {
         if (this->__end_ != nullptr || this->__end_cap() != nullptr)
             return false;
@@ -1082,7 +1082,7 @@ bool vector<_Tp>::__subscriptable(const const_iterator *__i, std::ptrdiff_t __n)
 #endif // _LIBGPU_ENABLE_DEBUG_MODE
 
 template <class _Tp>
-inline _LIBGPU_HIDE_FROM_ABI void vector<_Tp>::__invalidate_iterators_past(pointer __new_last) {
+__device__ inline _LIBGPU_HIDE_FROM_ABI void vector<_Tp>::__invalidate_iterators_past(pointer __new_last) {
 #ifdef _LIBGPU_ENABLE_DEBUG_MODE
     __c_node *__c = __get_db()->__find_c_and_lock(this);
     for (__i_node **__p = __c->end_; __p != __c->beg_;) {
@@ -1144,24 +1144,24 @@ public:
     typedef __bit_const_reference<vector>            const_reference;
 #endif
 private:
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
     size_type& __cap() _NOEXCEPT
         {return __cap_alloc_;}
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
     const size_type& __cap() const _NOEXCEPT
         {return __cap_alloc_;}
 
     static const unsigned __bits_per_word = static_cast<unsigned>(sizeof(__storage_type) * CHAR_BIT);
 
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
     static size_type __internal_cap_to_external(size_type __n) _NOEXCEPT
         {return __n * __bits_per_word;}
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
     static size_type __external_cap_to_internal(size_type __n) _NOEXCEPT
         {return (__n - 1) / __bits_per_word + 1;}
 
 public:
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
     vector() _NOEXCEPT;
 
 private:
@@ -1169,7 +1169,7 @@ private:
     public:
       _LIBGPU_CONSTEXPR __destroy_vector(vector& __vec) : __vec_(__vec) {}
 
-      _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void operator()() {
+      __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void operator()() {
         if (__vec_.__begin_ != nullptr)
             ::operator delete(__vec_.__begin_);
       }
@@ -1179,124 +1179,124 @@ private:
   };
 
 public:
-  _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 ~vector() { __destroy_vector(*this)(); }
+  __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 ~vector() { __destroy_vector(*this)(); }
 
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 explicit vector(size_type __n);
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 vector(size_type __n, const value_type& __v);
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 explicit vector(size_type __n);
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 vector(size_type __n, const value_type& __v);
     template <class _InputIterator>
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 vector(_InputIterator __first, _InputIterator __last,
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 vector(_InputIterator __first, _InputIterator __last,
                typename std::enable_if<__is_exactly_cpp17_input_iterator<_InputIterator>::value>::type* = 0);
     template <class _ForwardIterator>
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 vector(_ForwardIterator __first, _ForwardIterator __last,
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 vector(_ForwardIterator __first, _ForwardIterator __last,
                typename std::enable_if<__is_cpp17_forward_iterator<_ForwardIterator>::value>::type* = 0);
 
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 vector(const vector& __v);
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 vector& operator=(const vector& __v);
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 vector(const vector& __v);
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 vector& operator=(const vector& __v);
 
 #ifndef _LIBGPU_CXX03_LANG
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 vector(std::initializer_list<value_type> __il);
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 vector(std::initializer_list<value_type> __il);
 
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
     vector& operator=(std::initializer_list<value_type> __il)
         {assign(__il.begin(), __il.end()); return *this;}
 
 #endif // !_LIBGPU_CXX03_LANG
 
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
     vector(vector&& __v) _NOEXCEPT;
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
     vector& operator=(vector&& __v) _NOEXCEPT;
 
     template <class _InputIterator>
         typename std::enable_if <__is_exactly_cpp17_input_iterator<_InputIterator>::value,
            void
         >::type
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 assign(_InputIterator __first, _InputIterator __last);
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 assign(_InputIterator __first, _InputIterator __last);
     template <class _ForwardIterator>
         typename std::enable_if
         <
             __is_cpp17_forward_iterator<_ForwardIterator>::value,
            void
         >::type
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 assign(_ForwardIterator __first, _ForwardIterator __last);
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 assign(_ForwardIterator __first, _ForwardIterator __last);
 
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 void assign(size_type __n, const value_type& __x);
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 void assign(size_type __n, const value_type& __x);
 
 #ifndef _LIBGPU_CXX03_LANG
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
     void assign(std::initializer_list<value_type> __il)
         {assign(__il.begin(), __il.end());}
 #endif
 
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 size_type max_size() const _NOEXCEPT;
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 size_type max_size() const _NOEXCEPT;
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
     size_type capacity() const _NOEXCEPT
         {return __internal_cap_to_external(__cap());}
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
     size_type size() const _NOEXCEPT
         {return __size_;}
-    _LIBGPU_NODISCARD_AFTER_CXX17 _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+    _LIBGPU_NODISCARD_AFTER_CXX17 __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
     bool empty() const _NOEXCEPT
         {return __size_ == 0;}
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 void reserve(size_type __n);
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 void shrink_to_fit() _NOEXCEPT;
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 void reserve(size_type __n);
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 void shrink_to_fit() _NOEXCEPT;
 
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
     iterator begin() _NOEXCEPT
         {return __make_iter(0);}
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
     const_iterator begin() const _NOEXCEPT
         {return __make_iter(0);}
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
     iterator end() _NOEXCEPT
         {return __make_iter(__size_);}
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
     const_iterator end()   const _NOEXCEPT
         {return __make_iter(__size_);}
 
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
     reverse_iterator rbegin() _NOEXCEPT
         {return       reverse_iterator(end());}
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
     const_reverse_iterator rbegin() const _NOEXCEPT
         {return const_reverse_iterator(end());}
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
     reverse_iterator rend() _NOEXCEPT
         {return       reverse_iterator(begin());}
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
     const_reverse_iterator rend()   const _NOEXCEPT
         {return const_reverse_iterator(begin());}
 
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
     const_iterator         cbegin()  const _NOEXCEPT
         {return __make_iter(0);}
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
     const_iterator         cend()    const _NOEXCEPT
         {return __make_iter(__size_);}
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
     const_reverse_iterator crbegin() const _NOEXCEPT
         {return rbegin();}
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
     const_reverse_iterator crend()   const _NOEXCEPT
         {return rend();}
 
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 reference       operator[](size_type __n)       {return __make_ref(__n);}
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 const_reference operator[](size_type __n) const {return __make_ref(__n);}
-    _LIBGPU_HIDE_FROM_ABI reference       at(size_type __n);
-    _LIBGPU_HIDE_FROM_ABI const_reference at(size_type __n) const;
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 reference       operator[](size_type __n)       {return __make_ref(__n);}
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 const_reference operator[](size_type __n) const {return __make_ref(__n);}
+    __device__ _LIBGPU_HIDE_FROM_ABI reference       at(size_type __n);
+    __device__ _LIBGPU_HIDE_FROM_ABI const_reference at(size_type __n) const;
 
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 reference       front()       {return __make_ref(0);}
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 const_reference front() const {return __make_ref(0);}
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 reference       back()        {return __make_ref(__size_ - 1);}
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 const_reference back()  const {return __make_ref(__size_ - 1);}
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 reference       front()       {return __make_ref(0);}
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 const_reference front() const {return __make_ref(0);}
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 reference       back()        {return __make_ref(__size_ - 1);}
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 const_reference back()  const {return __make_ref(__size_ - 1);}
 
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 void push_back(const value_type& __x);
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 void push_back(const value_type& __x);
 #if _LIBGPU_STD_VER >= 14
     template <class... _Args>
 #if _LIBGPU_STD_VER >= 17
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 reference emplace_back(_Args&&... __args)
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 reference emplace_back(_Args&&... __args)
 #else
-    _LIBGPU_HIDE_FROM_ABI void      emplace_back(_Args&&... __args)
+    __device__ _LIBGPU_HIDE_FROM_ABI void      emplace_back(_Args&&... __args)
 #endif
     {
         push_back ( value_type ( std::forward<_Args>(__args)... ));
@@ -1306,51 +1306,51 @@ public:
     }
 #endif
 
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 void pop_back() {--__size_;}
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 void pop_back() {--__size_;}
 
 #if _LIBGPU_STD_VER >= 14
     template <class... _Args>
-   _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 iterator emplace(const_iterator __position, _Args&&... __args)
+   __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 iterator emplace(const_iterator __position, _Args&&... __args)
         { return insert ( __position, value_type ( std::forward<_Args>(__args)... )); }
 #endif
 
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 iterator insert(const_iterator __position, const value_type& __x);
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 iterator insert(const_iterator __position, size_type __n, const value_type& __x);
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 iterator insert(const_iterator __position, const value_type& __x);
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 iterator insert(const_iterator __position, size_type __n, const value_type& __x);
     template <class _InputIterator>
         typename std::enable_if <__is_exactly_cpp17_input_iterator<_InputIterator>::value,
             iterator
         >::type
-        _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 insert(const_iterator __position, _InputIterator __first, _InputIterator __last);
+        __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 insert(const_iterator __position, _InputIterator __first, _InputIterator __last);
     template <class _ForwardIterator>
         typename std::enable_if
         <
             __is_cpp17_forward_iterator<_ForwardIterator>::value,
             iterator
         >::type
-        _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 insert(const_iterator __position, _ForwardIterator __first, _ForwardIterator __last);
+        __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 insert(const_iterator __position, _ForwardIterator __first, _ForwardIterator __last);
 
 #ifndef _LIBGPU_CXX03_LANG
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
     iterator insert(const_iterator __position, std::initializer_list<value_type> __il)
         {return insert(__position, __il.begin(), __il.end());}
 #endif
 
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 iterator erase(const_iterator __position);
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 iterator erase(const_iterator __first, const_iterator __last);
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 iterator erase(const_iterator __position);
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 iterator erase(const_iterator __first, const_iterator __last);
 
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
     void clear() _NOEXCEPT {__size_ = 0;}
 
     _LIBGPU_CONSTEXPR_SINCE_CXX20 void swap(vector&) _NOEXCEPT;
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 static void swap(reference __x, reference __y) _NOEXCEPT { gpu::swap(__x, __y); }
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 static void swap(reference __x, reference __y) _NOEXCEPT { gpu::swap(__x, __y); }
 
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 void resize(size_type __sz, value_type __x = false);
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 void flip() _NOEXCEPT;
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 void resize(size_type __sz, value_type __x = false);
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 void flip() _NOEXCEPT;
 
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 bool __invariants() const;
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 bool __invariants() const;
 
 private:
-    _LIBGPU_NORETURN _LIBGPU_HIDE_FROM_ABI
+    _LIBGPU_NORETURN __device__ _LIBGPU_HIDE_FROM_ABI
     void __throw_length_error() const {
 #if !defined(_LIBCPP_HAS_NO_EXCEPTIONS) && !defined(__HIP_DEVICE_COMPILE__)
         throw std::length_error("vector");
@@ -1359,7 +1359,7 @@ private:
 #endif
     }
 
-    _LIBGPU_NORETURN _LIBGPU_HIDE_FROM_ABI
+    _LIBGPU_NORETURN __device__ _LIBGPU_HIDE_FROM_ABI
     void __throw_out_of_range() const {
 #if !defined(_LIBCPP_HAS_NO_EXCEPTIONS) && !defined(__HIP_DEVICE_COMPILE__)
         throw std::out_of_range("vector");
@@ -1375,7 +1375,7 @@ private:
     //  Precondition:  __n > 0
     //  Postcondition:  capacity() >= __n
     //  Postcondition:  size() == 0
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 void __vallocate(size_type __n) {
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 void __vallocate(size_type __n) {
         if (__n > max_size())
             __throw_length_error();
         __begin_ = static_cast<__storage_pointer>(::operator new(__external_cap_to_internal(__n) * sizeof(__storage_type)));
@@ -1387,41 +1387,41 @@ private:
         }
     }
 
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 void __vdeallocate() _NOEXCEPT;
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 void __vdeallocate() _NOEXCEPT;
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
     static size_type __align_it(size_type __new_size) _NOEXCEPT
         {return (__new_size + (__bits_per_word-1)) & ~((size_type)__bits_per_word-1);}
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20  size_type __recommend(size_type __new_size) const;
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 void __construct_at_end(size_type __n, bool __x);
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20  size_type __recommend(size_type __new_size) const;
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 void __construct_at_end(size_type __n, bool __x);
     template <class _ForwardIterator>
         typename std::enable_if
         <
             __is_cpp17_forward_iterator<_ForwardIterator>::value,
             void
         >::type
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 __construct_at_end(_ForwardIterator __first, _ForwardIterator __last);
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 void __append(size_type __n, const_reference __x);
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 __construct_at_end(_ForwardIterator __first, _ForwardIterator __last);
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 void __append(size_type __n, const_reference __x);
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
     reference __make_ref(size_type __pos) _NOEXCEPT
         {return reference(__begin_ + __pos / __bits_per_word, __storage_type(1) << __pos % __bits_per_word);}
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
     const_reference __make_ref(size_type __pos) const _NOEXCEPT {
         return __bit_const_reference<vector>(__begin_ + __pos / __bits_per_word,
                                              __storage_type(1) << __pos % __bits_per_word);
     }
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
     iterator __make_iter(size_type __pos) _NOEXCEPT
         {return iterator(__begin_ + __pos / __bits_per_word, static_cast<unsigned>(__pos % __bits_per_word));}
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
     const_iterator __make_iter(size_type __pos) const _NOEXCEPT
         {return const_iterator(__begin_ + __pos / __bits_per_word, static_cast<unsigned>(__pos % __bits_per_word));}
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
     iterator __const_iterator_cast(const_iterator __p) _NOEXCEPT
         {return begin() + (__p - cbegin());}
 
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 void __move_assign(vector& __c, std::true_type) _NOEXCEPT;
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 void __move_assign(vector& __c, std::true_type) _NOEXCEPT;
 
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 size_t __hash_code() const _NOEXCEPT;
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 size_t __hash_code() const _NOEXCEPT;
 
     friend class __bit_reference<vector>;
     friend class __bit_const_reference<vector>;
@@ -1432,7 +1432,7 @@ private:
 };
 
 template <>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 void
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 void
 vector<bool>::__vdeallocate() _NOEXCEPT
 {
     if (this->__begin_ != nullptr)
@@ -1444,7 +1444,7 @@ vector<bool>::__vdeallocate() _NOEXCEPT
 }
 
 template <>
-_LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20
 typename vector<bool>::size_type
 vector<bool>::max_size() const _NOEXCEPT
 {
@@ -1457,7 +1457,7 @@ vector<bool>::max_size() const _NOEXCEPT
 
 //  Precondition:  __new_size > capacity()
 template <>
-inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
 typename vector<bool>::size_type
 vector<bool>::__recommend(size_type __new_size) const
 {
@@ -1475,7 +1475,7 @@ vector<bool>::__recommend(size_type __new_size) const
 //  Precondition:  size() + __n <= capacity()
 //  Postcondition:  size() == size() + __n
 template <>
-inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
 void
 vector<bool>::__construct_at_end(size_type __n, bool __x)
 {
@@ -1493,7 +1493,7 @@ vector<bool>::__construct_at_end(size_type __n, bool __x)
 
 template <>
 template <class _ForwardIterator>
-_LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20
 typename std::enable_if
 <
     __is_cpp17_forward_iterator<_ForwardIterator>::value,
@@ -1514,7 +1514,7 @@ vector<bool>::__construct_at_end(_ForwardIterator __first, _ForwardIterator __la
 }
 
 template <>
-inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
 vector<bool>::vector() _NOEXCEPT
     : __begin_(nullptr),
       __size_(0),
@@ -1523,7 +1523,7 @@ vector<bool>::vector() _NOEXCEPT
 }
 
 template <>
-_LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20
 vector<bool>::vector(size_type __n)
     : __begin_(nullptr),
       __size_(0),
@@ -1536,7 +1536,7 @@ vector<bool>::vector(size_type __n)
     }
 }
 
-_LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20
 vector<bool>::vector(size_type __n, const value_type& __x)
     : __begin_(nullptr),
       __size_(0),
@@ -1551,7 +1551,7 @@ vector<bool>::vector(size_type __n, const value_type& __x)
 
 template <>
 template <class _InputIterator>
-_LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20
 vector<bool>::vector(_InputIterator __first, _InputIterator __last,
        typename std::enable_if<__is_exactly_cpp17_input_iterator<_InputIterator>::value>::type*)
     : __begin_(nullptr),
@@ -1577,7 +1577,7 @@ vector<bool>::vector(_InputIterator __first, _InputIterator __last,
 
 template <>
 template <class _ForwardIterator>
-_LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20
 vector<bool>::vector(_ForwardIterator __first, _ForwardIterator __last,
                                 typename std::enable_if<__is_cpp17_forward_iterator<_ForwardIterator>::value>::type*)
     : __begin_(nullptr),
@@ -1597,7 +1597,7 @@ vector<bool>::vector(_ForwardIterator __first, _ForwardIterator __last,
 #ifndef _LIBGPU_CXX03_LANG
 
 template <>
-_LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20
 vector<bool>::vector(std::initializer_list<value_type> __il)
     : __begin_(nullptr),
       __size_(0),
@@ -1614,7 +1614,7 @@ vector<bool>::vector(std::initializer_list<value_type> __il)
 #endif // _LIBGPU_CXX03_LANG
 
 template <>
-_LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20
 vector<bool>::vector(const vector& __v)
     : __begin_(nullptr),
       __size_(0),
@@ -1628,7 +1628,7 @@ vector<bool>::vector(const vector& __v)
 }
 
 template <>
-_LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20
 vector<bool>&
 vector<bool>::operator=(const vector& __v)
 {
@@ -1649,7 +1649,7 @@ vector<bool>::operator=(const vector& __v)
 }
 
 template <>
-inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 vector<bool>::vector(vector&& __v) _NOEXCEPT
+__device__ inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 vector<bool>::vector(vector&& __v) _NOEXCEPT
     : __begin_(__v.__begin_),
       __size_(__v.__size_),
       __cap_alloc_(std::move(__v.__cap_alloc_)) {
@@ -1659,7 +1659,7 @@ inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 vector<bool>::vector(
 }
 
 template <>
-inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
 vector<bool>&
 vector<bool>::operator=(vector&& __v) _NOEXCEPT {
     __move_assign(__v, std::true_type());
@@ -1667,7 +1667,7 @@ vector<bool>::operator=(vector&& __v) _NOEXCEPT {
 }
 
 template <>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 void
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 void
 vector<bool>::__move_assign(vector& __c, std::true_type) _NOEXCEPT {
     __vdeallocate();
     this->__begin_ = __c.__begin_;
@@ -1678,7 +1678,7 @@ vector<bool>::__move_assign(vector& __c, std::true_type) _NOEXCEPT {
 }
 
 template <>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 void
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 void
 vector<bool>::assign(size_type __n, const value_type& __x)
 {
     __size_ = 0;
@@ -1700,7 +1700,7 @@ vector<bool>::assign(size_type __n, const value_type& __x)
 
 template <>
 template <class _InputIterator>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 typename std::enable_if <__is_exactly_cpp17_input_iterator<_InputIterator>::value,
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 typename std::enable_if <__is_exactly_cpp17_input_iterator<_InputIterator>::value,
    void
 >::type
 vector<bool>::assign(_InputIterator __first, _InputIterator __last)
@@ -1712,7 +1712,7 @@ vector<bool>::assign(_InputIterator __first, _InputIterator __last)
 
 template <>
 template <class _ForwardIterator>
-_LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20
 typename std::enable_if
 <
     __is_cpp17_forward_iterator<_ForwardIterator>::value,
@@ -1736,7 +1736,7 @@ vector<bool>::assign(_ForwardIterator __first, _ForwardIterator __last)
 }
 
 template <>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 void
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 void
 vector<bool>::reserve(size_type __n)
 {
     if (__n > capacity())
@@ -1751,7 +1751,7 @@ vector<bool>::reserve(size_type __n)
 }
 
 template <>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 void
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 void
 vector<bool>::shrink_to_fit() _NOEXCEPT
 {
     if (__external_cap_to_internal(size()) > __cap())
@@ -1789,7 +1789,7 @@ vector<bool>::at(size_type __n) const
 }
 
 template <>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 void
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 void
 vector<bool>::push_back(const value_type& __x)
 {
     if (this->__size_ == this->capacity())
@@ -1799,7 +1799,7 @@ vector<bool>::push_back(const value_type& __x)
 }
 
 template <>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 typename vector<bool>::iterator
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 typename vector<bool>::iterator
 vector<bool>::insert(const_iterator __position, const value_type& __x)
 {
     iterator __r;
@@ -1824,7 +1824,7 @@ vector<bool>::insert(const_iterator __position, const value_type& __x)
 }
 
 template <>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 typename vector<bool>::iterator
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 typename vector<bool>::iterator
 vector<bool>::insert(const_iterator __position, size_type __n, const value_type& __x)
 {
     iterator __r;
@@ -1851,7 +1851,7 @@ vector<bool>::insert(const_iterator __position, size_type __n, const value_type&
 
 template <>
 template <class _InputIterator>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 typename std::enable_if <__is_exactly_cpp17_input_iterator<_InputIterator>::value,
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 typename std::enable_if <__is_exactly_cpp17_input_iterator<_InputIterator>::value,
     typename vector<bool>::iterator
 >::type
 vector<bool>::insert(const_iterator __position, _InputIterator __first, _InputIterator __last)
@@ -1893,7 +1893,7 @@ vector<bool>::insert(const_iterator __position, _InputIterator __first, _InputIt
 
 template <>
 template <class _ForwardIterator>
-_LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20
 typename std::enable_if
 <
     __is_cpp17_forward_iterator<_ForwardIterator>::value,
@@ -1927,7 +1927,7 @@ vector<bool>::insert(const_iterator __position, _ForwardIterator __first, _Forwa
 }
 
 template <>
-inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
 typename vector<bool>::iterator
 vector<bool>::erase(const_iterator __position)
 {
@@ -1938,7 +1938,7 @@ vector<bool>::erase(const_iterator __position)
 }
 
 template <>
-_LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20
 typename vector<bool>::iterator
 vector<bool>::erase(const_iterator __first, const_iterator __last)
 {
@@ -1950,7 +1950,7 @@ vector<bool>::erase(const_iterator __first, const_iterator __last)
 }
 
 template <>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 void
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 void
 vector<bool>::swap(vector& __x) _NOEXCEPT {
     gpu::swap(this->__begin_, __x.__begin_);
     gpu::swap(this->__size_, __x.__size_);
@@ -1958,7 +1958,7 @@ vector<bool>::swap(vector& __x) _NOEXCEPT {
 }
 
 template <>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 void
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 void
 vector<bool>::resize(size_type __sz, value_type __x)
 {
     size_type __cs = size();
@@ -1987,7 +1987,7 @@ vector<bool>::resize(size_type __sz, value_type __x)
 }
 
 template <>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 void
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 void
 vector<bool>::flip() _NOEXCEPT
 {
     // do middle whole words
@@ -2006,7 +2006,7 @@ vector<bool>::flip() _NOEXCEPT
 }
 
 template <>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 bool
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 bool
 vector<bool>::__invariants() const
 {
     if (this->__begin_ == nullptr)
@@ -2025,7 +2025,7 @@ vector<bool>::__invariants() const
 }
 
 template <>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 size_t
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 size_t
 vector<bool>::__hash_code() const _NOEXCEPT
 {
     size_t __h = 0;
@@ -2047,7 +2047,7 @@ template <>
 struct _LIBGPU_TEMPLATE_VIS hash<vector<bool> >
     : public __unary_function<vector<bool>, size_t>
 {
-    _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
     size_t operator()(const vector<bool>& __vec) const _NOEXCEPT
         {return __vec.__hash_code();}
 };
@@ -2055,44 +2055,44 @@ struct _LIBGPU_TEMPLATE_VIS hash<vector<bool> >
 #endif // 0
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI bool operator==(const vector<_Tp> &__x,
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI bool operator==(const vector<_Tp> &__x,
                                                                            const vector<_Tp> &__y) {
     const typename vector<_Tp>::size_type __sz = __x.size();
     return __sz == __y.size() && std::equal(__x.begin(), __x.end(), __y.begin());
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI bool operator!=(const vector<_Tp> &__x,
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI bool operator!=(const vector<_Tp> &__x,
                                                                            const vector<_Tp> &__y) {
     return !(__x == __y);
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI bool operator<(const vector<_Tp> &__x,
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI bool operator<(const vector<_Tp> &__x,
                                                                           const vector<_Tp> &__y) {
     return std::lexicographical_compare(__x.begin(), __x.end(), __y.begin(), __y.end());
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI bool operator>(const vector<_Tp> &__x,
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI bool operator>(const vector<_Tp> &__x,
                                                                           const vector<_Tp> &__y) {
     return __y < __x;
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI bool operator>=(const vector<_Tp> &__x,
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI bool operator>=(const vector<_Tp> &__x,
                                                                            const vector<_Tp> &__y) {
     return !(__x < __y);
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI bool operator<=(const vector<_Tp> &__x,
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI bool operator<=(const vector<_Tp> &__x,
                                                                            const vector<_Tp> &__y) {
     return !(__y < __x);
 }
 
 template <class _Tp>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI void swap(vector<_Tp> &__x,
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI void swap(vector<_Tp> &__x,
                                                                      vector<_Tp> &__y)
     _NOEXCEPT_(_NOEXCEPT_(__x.swap(__y))) {
     __x.swap(__y);
@@ -2100,7 +2100,7 @@ _LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI void swap(vector<_Tp>
 
 #if _LIBGPU_STD_VER >= 20
 template <class _Tp, class _Up>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI typename vector<_Tp>::size_type
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI typename vector<_Tp>::size_type
 erase(vector<_Tp> &__c, const _Up &__v) {
     auto __old_size = __c.size();
     __c.erase(gpu::remove(__c.begin(), __c.end(), __v), __c.end());
@@ -2108,7 +2108,7 @@ erase(vector<_Tp> &__c, const _Up &__v) {
 }
 
 template <class _Tp, class _Predicate>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI typename vector<_Tp>::size_type
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI typename vector<_Tp>::size_type
 erase_if(vector<_Tp> &__c, _Predicate __pred) {
     auto __old_size = __c.size();
     __c.erase(gpu::remove_if(__c.begin(), __c.end(), __pred), __c.end());
@@ -2139,12 +2139,12 @@ private:
 
 public:
   template <class _ParseContext>
-  _LIBGPU_HIDE_FROM_ABI constexpr typename _ParseContext::iterator parse(_ParseContext& __ctx) {
+  __device__ _LIBGPU_HIDE_FROM_ABI constexpr typename _ParseContext::iterator parse(_ParseContext& __ctx) {
         return __underlying_.parse(__ctx);
   }
 
   template <class _FormatContext>
-  _LIBGPU_HIDE_FROM_ABI typename _FormatContext::iterator format(const _Tp& __ref, _FormatContext& __ctx) const {
+  __device__ _LIBGPU_HIDE_FROM_ABI typename _FormatContext::iterator format(const _Tp& __ref, _FormatContext& __ctx) const {
         return __underlying_.format(__ref, __ctx);
   }
 };

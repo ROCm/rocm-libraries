@@ -14,7 +14,7 @@
 namespace gpu {
 
 template <class _Predicate, class _AlgPolicy, class _ForwardIterator, class _Sentinel>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 gpu::pair<_ForwardIterator, _ForwardIterator>
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 gpu::pair<_ForwardIterator, _ForwardIterator>
 __partition_impl(_ForwardIterator __first, _Sentinel __last, _Predicate __pred, std::forward_iterator_tag)
 {
     while (true)
@@ -39,7 +39,7 @@ __partition_impl(_ForwardIterator __first, _Sentinel __last, _Predicate __pred, 
 }
 
 template <class _Predicate, class _AlgPolicy, class _BidirectionalIterator, class _Sentinel>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 gpu::pair<_BidirectionalIterator, _BidirectionalIterator>
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 gpu::pair<_BidirectionalIterator, _BidirectionalIterator>
 __partition_impl(_BidirectionalIterator __first, _Sentinel __sentinel, _Predicate __pred,
             std::bidirectional_iterator_tag)
 {
@@ -67,7 +67,7 @@ __partition_impl(_BidirectionalIterator __first, _Sentinel __sentinel, _Predicat
 }
 
 template <class _AlgPolicy, class _ForwardIterator, class _Sentinel, class _Predicate, class _IterCategory>
-inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
 gpu::pair<_ForwardIterator, _ForwardIterator> __partition(
     _ForwardIterator __first, _Sentinel __last, _Predicate&& __pred, _IterCategory __iter_category) {
   return std::__partition_impl<std::remove_cv_t<std::remove_reference_t<_Predicate>>&, _AlgPolicy>(
@@ -75,7 +75,7 @@ gpu::pair<_ForwardIterator, _ForwardIterator> __partition(
 }
 
 template <class _ForwardIterator, class _Predicate>
-inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
 _ForwardIterator
 partition(_ForwardIterator __first, _ForwardIterator __last, _Predicate __pred)
 {

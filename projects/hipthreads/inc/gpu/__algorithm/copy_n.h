@@ -14,7 +14,7 @@
 namespace gpu {
 
 template<class _InputIterator, class _Size, class _OutputIterator>
-inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
 typename std::enable_if
 <
     __is_cpp17_input_iterator<_InputIterator>::value &&
@@ -40,7 +40,7 @@ copy_n(_InputIterator __first, _Size __orig_n, _OutputIterator __result)
 }
 
 template<class _InputIterator, class _Size, class _OutputIterator>
-inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
 typename std::enable_if
 <
     __is_cpp17_random_access_iterator<_InputIterator>::value,

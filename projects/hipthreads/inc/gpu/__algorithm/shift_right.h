@@ -16,7 +16,7 @@ namespace gpu {
 #if _LIBGPU_STD_VER >= 20
 
 template <class _ForwardIterator>
-inline _LIBGPU_INLINE_VISIBILITY constexpr
+__device__ inline _LIBGPU_INLINE_VISIBILITY constexpr
 _ForwardIterator
 shift_right(_ForwardIterator __first, _ForwardIterator __last,
             typename std::iterator_traits<_ForwardIterator>::difference_type __n)
