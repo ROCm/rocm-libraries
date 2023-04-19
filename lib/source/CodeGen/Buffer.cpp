@@ -158,8 +158,6 @@ namespace rocRoller
 
     Generator<Instruction> BufferDescriptor::setDefaultOpts()
     {
-        co_yield m_context->copier()->copy(
-            m_bufferResourceDescriptor->subset({2}), Register::Value::Literal(2147483548), "");
         co_yield m_context->copier()->copy(m_bufferResourceDescriptor->subset({3}),
                                            Register::Value::Literal(0x00020000),
                                            ""); //default options

@@ -227,9 +227,8 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult, bool doVisualize)
     std::vector<B>  h_B = random.vector<B>(result.K * result.N, -1.0, 1.0);
     std::vector<C>  h_C = random.vector<C>(result.M * result.N, -1.0, 1.0);
 
-    // Device data.  TODO Remove padding when prefetch fixed.
-    std::shared_ptr<A> d_A = make_shared_device(h_A, prob.prefetch ? prob.mac_k * prob.M * 10 : 0);
-    std::shared_ptr<B> d_B = make_shared_device(h_B, prob.prefetch ? prob.mac_k * prob.N * 10 : 0);
+    std::shared_ptr<A> d_A = make_shared_device(h_A);
+    std::shared_ptr<B> d_B = make_shared_device(h_B);
     std::shared_ptr<C> d_C = make_shared_device(h_C);
     std::shared_ptr<D> d_D = make_shared_device<D>(result.M * result.N, 0.0);
 

@@ -100,13 +100,13 @@ namespace rocRoller
              */
             void operator()(Operations::T_Load_Linear const& tload)
             {
-                // TODO: offsets and limits
                 auto sizes   = tload.sizes();
                 auto strides = tload.strides();
 
                 auto total_size_expr = std::make_shared<Expression::Expression>(sizes[0]);
 
-                auto user = graph.coordinates.addElement(User(tload.data()->name()));
+                auto user = graph.coordinates.addElement(User(
+                    tload.data()->name(), std::make_shared<Expression::Expression>(tload.limit())));
 
                 std::vector<int> dims;
                 for(size_t i = 0; i < sizes.size(); ++i)
@@ -199,13 +199,13 @@ namespace rocRoller
             {
                 rocRoller::Log::getLogger()->debug("KernelGraph::TranslateVisitor::T_Load_Tiled");
 
-                // TODO: offsets and limits
                 auto const tag             = tload.getTag();
                 auto const sizes           = tload.sizes();
                 auto const strides         = tload.strides();
                 auto const literal_strides = tload.literalStrides();
 
-                auto user = graph.coordinates.addElement(User(tload.data()->name()));
+                auto user = graph.coordinates.addElement(User(
+                    tload.data()->name(), std::make_shared<Expression::Expression>(tload.limit())));
 
                 std::vector<int> dims;
                 for(size_t i = 0; i < sizes.size(); ++i)
@@ -274,7 +274,9 @@ namespace rocRoller
                 }
 
                 auto linear = m_dim.at(tstore.getTag());
-                auto user   = graph.coordinates.addElement(User(tstore.data()->name()));
+                auto user   = graph.coordinates.addElement(
+                    User(tstore.data()->name(),
+                         std::make_shared<Expression::Expression>(tstore.limit())));
 
                 graph.coordinates.addElement(Split(), std::vector<int>{linear}, dims);
                 graph.coordinates.addElement(Join(), dims, std::vector<int>{user});
@@ -314,7 +316,9 @@ namespace rocRoller
                 }
 
                 auto tile = m_dim.at(tstore.getTag());
-                auto user = graph.coordinates.addElement(User(tstore.data()->name()));
+                auto user = graph.coordinates.addElement(
+                    User(tstore.data()->name(),
+                         std::make_shared<Expression::Expression>(tstore.limit())));
 
                 graph.coordinates.addElement(DestructMacroTile(), std::vector<int>{tile}, dims);
                 graph.coordinates.addElement(Join(), dims, std::vector<int>{user});

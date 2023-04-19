@@ -331,6 +331,10 @@ namespace rocRoller
                                                                   basePointer);
                         co_yield bufDesc.setBasePointer(basePointer);
                         co_yield bufDesc.setDefaultOpts();
+                        Register::ValuePtr limitValue;
+                        co_yield generate(limitValue, user->size * L(numBytes));
+                        // TODO: Handle sizes larger than 32 bits
+                        co_yield bufDesc.setSize(limitValue->subset({0}));
                     }
                     scope->addRegister(buffer);
                 }

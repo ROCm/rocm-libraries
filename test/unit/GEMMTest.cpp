@@ -143,9 +143,8 @@ namespace GEMMDriverTest
             std::fill(h_C.begin(), h_C.end(), static_cast<T>(0.0));
         }
 
-        // Device data.  TODO Remove padding when prefetch fixed.
-        std::shared_ptr<T> d_A = make_shared_device(h_A, mac_k * M);
-        std::shared_ptr<T> d_B = make_shared_device(h_B, mac_k * N);
+        std::shared_ptr<T> d_A = make_shared_device(h_A);
+        std::shared_ptr<T> d_B = make_shared_device(h_B);
         std::shared_ptr<T> d_C = make_shared_device(h_C);
         std::shared_ptr<T> d_D = make_shared_device<T>(M * N, 0.0);
 

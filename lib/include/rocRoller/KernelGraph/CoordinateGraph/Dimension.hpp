@@ -133,6 +133,12 @@ namespace rocRoller
             {
             }
 
+            User(std::string const& name, Expression::ExpressionPtr size)
+                : BaseDimension(size, Expression::literal(1u))
+                , m_argument_name(name)
+            {
+            }
+
             std::string name() const override
             {
                 return "User";

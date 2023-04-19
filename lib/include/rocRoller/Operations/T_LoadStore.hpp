@@ -34,6 +34,10 @@ namespace rocRoller
             {
                 return m_sizes;
             }
+            CommandArgumentPtr limit() const
+            {
+                return m_extent;
+            }
             DataType dataType() const
             {
                 return m_data_type;
