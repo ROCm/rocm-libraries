@@ -82,6 +82,8 @@ namespace rocRoller
             AddShiftL,
             ShiftLAdd,
             MatrixMultiply,
+
+            // --- TernaryMixed Operations ---
             MultiplyAdd,
 
             // --- Convert Operations ---

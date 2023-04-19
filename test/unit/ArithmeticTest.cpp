@@ -1361,6 +1361,193 @@ namespace ArithmeticTest
         }
     }
 
+    TEST_P(ArithmeticTest, ArithFMAMixed)
+    {
+        auto k = m_context->kernel();
+
+        k->setKernelName("ArithFMAMixed");
+        k->setKernelDimensions(1);
+
+        auto command = std::make_shared<Command>();
+
+        auto result_exp = std::make_shared<Expression::Expression>(
+            command->allocateArgument({DataType::Float, PointerType::PointerGlobal}));
+        auto a_exp = std::make_shared<Expression::Expression>(
+            command->allocateArgument({DataType::Float, PointerType::Value}));
+        auto b_exp = std::make_shared<Expression::Expression>(
+            command->allocateArgument({DataType::Half, PointerType::PointerGlobal}));
+        auto c_exp = std::make_shared<Expression::Expression>(
+            command->allocateArgument({DataType::Float, PointerType::PointerGlobal}));
+
+        auto one  = std::make_shared<Expression::Expression>(1u);
+        auto zero = std::make_shared<Expression::Expression>(0u);
+
+        k->addArgument({"result",
+                        {DataType::Float, PointerType::PointerGlobal},
+                        DataDirection::WriteOnly,
+                        result_exp});
+        k->addArgument({"a", DataType::Float, DataDirection::ReadOnly, a_exp});
+        k->addArgument(
+            {"b", {DataType::Half, PointerType::PointerGlobal}, DataDirection::ReadOnly, b_exp});
+        k->addArgument(
+            {"c", {DataType::Float, PointerType::PointerGlobal}, DataDirection::ReadOnly, c_exp});
+
+        k->setWorkgroupSize({1, 1, 1});
+        k->setWorkitemCount({one, one, one});
+        k->setDynamicSharedMemBytes(zero);
+
+        m_context->schedule(k->preamble());
+        m_context->schedule(k->prolog());
+
+        auto kb = [&]() -> Generator<Instruction> {
+            Register::ValuePtr s_result, s_a, s_b, s_c;
+            co_yield m_context->argLoader()->getValue("result", s_result);
+            co_yield m_context->argLoader()->getValue("a", s_a);
+            co_yield m_context->argLoader()->getValue("b", s_b);
+            co_yield m_context->argLoader()->getValue("c", s_c);
+
+            auto v_result = Register::Value::Placeholder(
+                m_context, Register::Type::Vector, DataType::Raw32, 2);
+
+            auto vbPtr = Register::Value::Placeholder(
+                m_context, Register::Type::Vector, DataType::Raw32, 2);
+
+            auto vcPtr = Register::Value::Placeholder(
+                m_context, Register::Type::Vector, DataType::Raw32, 2);
+
+            auto v_b = Register::Value::Placeholder(
+                m_context, Register::Type::Vector, DataType::Halfx2, 1);
+
+            auto v_c = Register::Value::Placeholder(
+                m_context, Register::Type::Vector, DataType::Float, 2);
+
+            auto v_r = Register::Value::Placeholder(
+                m_context, Register::Type::Vector, DataType::Float, 2);
+
+            co_yield vbPtr->allocate();
+            co_yield vcPtr->allocate();
+            co_yield v_b->allocate();
+            co_yield v_c->allocate();
+            co_yield v_r->allocate();
+            co_yield v_result->allocate();
+
+            co_yield m_context->copier()->copy(v_result, s_result, "Move pointer");
+
+            co_yield m_context->copier()->copy(vbPtr, s_b, "Move Pointer");
+            co_yield m_context->copier()->copy(vcPtr, s_c, "Move Pointer");
+            co_yield m_context->mem()->loadFlat(v_b, vbPtr, 0, 4);
+            co_yield m_context->mem()->loadFlat(v_c, vcPtr, 0, 8);
+
+            // fp32 = fp32 * fp16 + fp32
+            co_yield generateOp<Expression::MultiplyAdd>(v_r, s_a, v_b, v_c);
+            co_yield m_context->mem()->store(MemoryInstructions::Flat, v_result, v_r, 0, 8);
+
+            // fp32 = fp16 * fp16 + fp32
+            co_yield generateOp<Expression::MultiplyAdd>(v_r, v_b, v_b, v_c);
+            co_yield m_context->mem()->store(
+                MemoryInstructions::Flat, v_result, v_r, Register::Value::Literal(8), 8);
+
+            // fp32 = fp16 * fp32 + fp16
+            co_yield generateOp<Expression::MultiplyAdd>(v_r, v_b, v_c, v_b);
+            co_yield m_context->mem()->store(
+                MemoryInstructions::Flat, v_result, v_r, Register::Value::Literal(16), 8);
+
+            // fp32 = fp32 * fp16 + fp16
+            co_yield generateOp<Expression::MultiplyAdd>(v_r, s_a, v_b, v_b);
+            co_yield m_context->mem()->store(
+                MemoryInstructions::Flat, v_result, v_r, Register::Value::Literal(24), 8);
+
+            // fp32 = fp32 * fp32 + fp16
+            co_yield generateOp<Expression::MultiplyAdd>(v_r, s_a, v_c, v_b);
+            co_yield m_context->mem()->store(
+                MemoryInstructions::Flat, v_result, v_r, Register::Value::Literal(32), 8);
+
+            // fp32 = fp16 * fp32 + fp32
+            co_yield generateOp<Expression::MultiplyAdd>(v_r, v_b, v_c, v_c);
+            co_yield m_context->mem()->store(
+                MemoryInstructions::Flat, v_result, v_r, Register::Value::Literal(40), 8);
+        };
+
+        m_context->schedule(kb());
+        m_context->schedule(k->postamble());
+        m_context->schedule(k->amdgpu_metadata());
+
+        if(m_context->targetArchitecture().target().getMajorVersion() != 9
+           || m_context->targetArchitecture().target().getVersionString() == "gfx900")
+        {
+            GTEST_SKIP() << "Skipping GPU arithmetic tests for " << GetParam();
+        }
+
+        // Only execute the kernels if running on the architecture that the kernel was built for,
+        // otherwise just assemble the instructions.
+        if(isLocalDevice())
+        {
+            CommandKernel commandKernel(m_context);
+
+            float               a       = 2.f;
+            std::vector<__half> b       = {static_cast<__half>(1.), static_cast<__half>(2.)};
+            std::vector<float>  c       = {1.f, 2.f};
+            auto                bDevice = make_shared_device<__half>(b);
+            auto                cDevice = make_shared_device<float>(c);
+            auto                dResult = make_shared_device<float>(12);
+
+            KernelArguments runtimeArgs;
+            runtimeArgs.append("result", dResult.get());
+            runtimeArgs.append("a", a);
+            runtimeArgs.append("b", bDevice.get());
+            runtimeArgs.append("c", cDevice.get());
+            commandKernel.launchKernel(runtimeArgs.runtimeArguments());
+            //6 different options
+            std::vector<float> result(12);
+            ASSERT_THAT(
+                hipMemcpy(
+                    result.data(), dResult.get(), result.size() * sizeof(float), hipMemcpyDefault),
+                HasHipSuccess(0));
+
+            // fp32 * fp16 + f32
+            float fma1 = a * static_cast<float>(b[0]) + c[0];
+            float fma2 = a * static_cast<float>(b[1]) + c[1];
+
+            // fp16 * fp16 + fp32
+            float fma3 = static_cast<float>(b[0]) * static_cast<float>(b[0]) + c[0];
+            float fma4 = static_cast<float>(b[1]) * static_cast<float>(b[1]) + c[1];
+
+            // fp16 * fp32 + fp16
+            float fma5 = static_cast<float>(b[0]) * c[0] + static_cast<float>(b[0]);
+            float fma6 = static_cast<float>(b[1]) * c[1] + static_cast<float>(b[1]);
+
+            // fp32 * fp16 + fp16
+            float fma7 = a * static_cast<float>(b[0]) + static_cast<float>(b[0]);
+            float fma8 = a * static_cast<float>(b[1]) + static_cast<float>(b[1]);
+
+            // fp32 * fp32 + fp16
+            float fma9  = a * c[0] + static_cast<float>(b[0]);
+            float fma10 = a * c[1] + static_cast<float>(b[1]);
+
+            // fp16 * fp32 + fp32
+            float fma11 = static_cast<float>(b[0]) * c[0] + c[0];
+            float fma12 = static_cast<float>(b[1]) * c[1] + c[1];
+
+            EXPECT_LT(std::abs(result[0] - fma1) / fma1, 5.e-7);
+            EXPECT_LT(std::abs(result[1] - fma2) / fma2, 5.e-7);
+            EXPECT_LT(std::abs(result[2] - fma3) / fma3, 5.e-7);
+            EXPECT_LT(std::abs(result[3] - fma4) / fma4, 5.e-7);
+            EXPECT_LT(std::abs(result[4] - fma5) / fma5, 5.e-7);
+            EXPECT_LT(std::abs(result[5] - fma6) / fma6, 5.e-7);
+            EXPECT_LT(std::abs(result[6] - fma7) / fma7, 5.e-7);
+            EXPECT_LT(std::abs(result[7] - fma8) / fma8, 5.e-7);
+            EXPECT_LT(std::abs(result[8] - fma9) / fma9, 5.e-7);
+            EXPECT_LT(std::abs(result[9] - fma10) / fma10, 5.e-7);
+            EXPECT_LT(std::abs(result[10] - fma11) / fma11, 5.e-7);
+            EXPECT_LT(std::abs(result[11] - fma12) / fma12, 5.e-7);
+        }
+        else
+        {
+            std::vector<char> assembledKernel = m_context->instructions()->assemble();
+            EXPECT_GT(assembledKernel.size(), 0);
+        }
+    }
+
     TEST_P(ArithmeticTest, ArithDouble)
     {
         auto k = m_context->kernel();

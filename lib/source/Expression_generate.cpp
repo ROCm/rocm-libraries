@@ -5,6 +5,7 @@
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
 #include <rocRoller/CodeGen/Arithmetic/MatrixMultiply.hpp>
+#include <rocRoller/CodeGen/Arithmetic/MultiplyAdd.hpp>
 #include <rocRoller/Context.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/RegisterTagManager.hpp>
@@ -296,9 +297,9 @@ namespace rocRoller
             }
 
             template <CTernary Operation>
-            requires CKernelExecuteTime<Operation> Generator<Instruction>
+            requires(
+                !CTernaryMixed<Operation> && CKernelExecuteTime<Operation>) Generator<Instruction>
             operator()(Register::ValuePtr& dest, Operation const& expr)
-
             {
                 bool                            schedulerLocked = false;
                 std::vector<Register::ValuePtr> results;
@@ -344,6 +345,38 @@ namespace rocRoller
 
                 if(schedulerLocked)
                     co_yield Instruction::Unlock("Expression temporary in special register");
+            }
+
+            template <CTernaryMixed Operation>
+            requires CKernelExecuteTime<Operation> Generator<Instruction>
+            operator()(Register::ValuePtr& dest, Operation const& expr)
+            {
+                bool                            schedulerLocked = false;
+                std::vector<Register::ValuePtr> results;
+                std::vector<ExpressionPtr>      subExprs{expr.lhs, expr.r1hs, expr.r2hs};
+
+                co_yield prepareSourceOperands(results, schedulerLocked, subExprs);
+                auto regType    = promoteRegisterTypes(results);
+                auto valueCount = resultValueCount(dest, results);
+
+                if(valueCount > 1 && regType == Register::Type::Accumulator)
+                {
+                    regType = Register::Type::Vector;
+                    for(int i = 0; i < results.size(); ++i)
+                    {
+                        co_yield m_context->copier()->ensureType(results[i], results[i], regType);
+                    }
+                }
+
+                if(!dest)
+                {
+                    auto varType = promoteVariableTypes(results);
+                    dest         = resultPlaceholder({regType, varType}, true, valueCount);
+                    co_yield dest->allocate();
+                }
+
+                //If dest, results have multiple elements, handled inside generateOp
+                co_yield generateOp<Operation>(dest, results[0], results[1], results[2]);
             }
 
             template <CUnary Operation>

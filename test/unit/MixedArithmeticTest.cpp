@@ -508,8 +508,9 @@ namespace MixedArithmeticTest
          * nullptr for an invalid combination of inputs (e.g. dividing by zero)
          */
 
-        template <Expression::CTernary Operation>
-        void testBody()
+        template <typename Operation>
+        requires(
+            Expression::CTernary<Operation> || Expression::CTernaryMixed<Operation>) void testBody()
         {
             auto const& param = GetParam();
             std::string paramStr;
@@ -976,7 +977,6 @@ namespace MixedArithmeticTest
                 }
             }
         }
-
         return rv;
     }
 

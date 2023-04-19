@@ -143,6 +143,37 @@ namespace rocRoller
     const std::string TernaryArithmeticGenerator<Operation>::Basename
         = concatenate(Expression::ExpressionInfo<Operation>::name(), "Generator");
 
+    // TernaryMixed Arithmetic Generator. Only Ternary generators that can support mixed
+    // airthmetic should be derived from this class.
+    template <Expression::CTernaryMixed Operation>
+    class TernaryMixedArithmeticGenerator : public ArithmeticGenerator
+    {
+    public:
+        TernaryMixedArithmeticGenerator(std::shared_ptr<Context> context)
+            : ArithmeticGenerator(context)
+        {
+        }
+
+        virtual Generator<Instruction> generate(Register::ValuePtr dst,
+                                                Register::ValuePtr arg1,
+                                                Register::ValuePtr arg2,
+                                                Register::ValuePtr arg3)
+            = 0;
+
+        using Argument = std::tuple<std::shared_ptr<Context>, Register::Type, DataType>;
+        using Base     = TernaryMixedArithmeticGenerator<Operation>;
+        static const std::string Basename;
+
+        std::string name() const override
+        {
+            return Expression::ExpressionInfo<Operation>::name();
+        }
+    };
+
+    template <Expression::CTernaryMixed Operation>
+    const std::string TernaryMixedArithmeticGenerator<Operation>::Basename
+        = concatenate(Expression::ExpressionInfo<Operation>::name(), "Generator");
+
     // --------------------------------------------------
     // Get Functions
     // These functions are used to pick the proper Generator class for the provided
@@ -198,7 +229,6 @@ namespace rocRoller
         AssertFatal(gen != nullptr, "No generator");
         co_yield gen->generate(dst, arg1, arg2, arg3);
     }
-
     // --------------------------------------------------
     // Helper functions
 

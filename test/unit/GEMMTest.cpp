@@ -67,6 +67,7 @@ namespace GEMMDriverTest
         bool storeLDSD = true;
 
         bool fuseLoops      = true;
+        bool betaInFma      = true;
         bool literalStrides = true;
         bool prefetch       = false;
 
@@ -176,11 +177,20 @@ namespace GEMMDriverTest
 
         rocRoller::Operations::T_Execute execute;
         execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-            rocRoller::Operations::E_Mul(6, 3, 5))); // alpha * (A * B)
+            rocRoller::Operations::E_Mul(6, 4, 2))); // beta * C
         execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-            rocRoller::Operations::E_Mul(7, 4, 2))); // beta * C
-        execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-            rocRoller::Operations::E_Add(8, 6, 7))); // alpha * (A * B) + beta * C
+            rocRoller::Operations::E_Mul(7, 3, 5))); // alpha * (A * B)
+        if(gemm.betaInFma)
+        {
+            execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
+                rocRoller::Operations::E_Add(8, 6, 7))); // beta * C + alpha * (A * B)
+        }
+        else
+        {
+            execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
+                rocRoller::Operations::E_Add(8, 7, 6))); // alpha * (A * B) + beta * C
+        }
+
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(execute));
 
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
@@ -292,7 +302,9 @@ namespace GEMMDriverTest
         auto WFX = KernelGraph::CoordinateGraph::Wavefront(0, wavefront_nx, one);
         auto WFY = KernelGraph::CoordinateGraph::Wavefront(1, wavefront_ny, one);
 
-        std::vector<int> wavefront_ids = {58, 91, 124, 173};
+        std::vector<int> wavefront_ids = gemm.betaInFma ? std::vector<int>({58, 100, 133, 173})
+                                                        : std::vector<int>({58, 91, 124, 173});
+
         for(auto id : wavefront_ids)
         {
             postParams->setDimensionInfo(id, WF);

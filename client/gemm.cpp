@@ -44,7 +44,8 @@ struct GEMMProblem
     bool loadLDS_B  = true;
     bool storeLDS_D = true;
 
-    bool prefetch = false;
+    bool prefetch  = false;
+    bool betaInFma = true;
 
     // Unroll Options
     unsigned int unroll_x = 0;
@@ -114,6 +115,7 @@ struct rocRoller::Serialization::
         iot::mapRequired(io, "loadLDS_A", result.loadLDS_A);
         iot::mapRequired(io, "loadLDS_B", result.loadLDS_B);
         iot::mapRequired(io, "storeLDS_D", result.storeLDS_D);
+        iot::mapRequired(io, "betaInFma", result.betaInFma);
         iot::mapRequired(io, "scheduler", result.scheduler);
 
         iot::mapRequired(io, "numWarmUp", result.numWarmUp);
@@ -275,11 +277,19 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult, bool doVisualize)
 
     rocRoller::Operations::T_Execute execute;
     execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-        rocRoller::Operations::E_Mul(6, 3, 5))); // alpha * (A * B)
+        rocRoller::Operations::E_Mul(6, 4, 2))); // beta * C
     execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-        rocRoller::Operations::E_Mul(7, 4, 2))); // beta * C
-    execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-        rocRoller::Operations::E_Add(8, 6, 7))); // alpha * (A * B) + beta * C
+        rocRoller::Operations::E_Mul(7, 3, 5))); // alpha * (A * B)
+    if(result.betaInFma)
+    {
+        execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
+            rocRoller::Operations::E_Add(8, 6, 7))); // beta * C + alpha * (A * B)
+    }
+    else
+    {
+        execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
+            rocRoller::Operations::E_Add(8, 7, 6))); // alpha * (A * B) + beta * C
+    }
     command->addOperation(std::make_shared<rocRoller::Operations::Operation>(execute));
 
     command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
@@ -396,7 +406,8 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult, bool doVisualize)
     auto WFX = KernelGraph::CoordinateGraph::Wavefront(0, wavefront_nx, one);
     auto WFY = KernelGraph::CoordinateGraph::Wavefront(1, wavefront_ny, one);
 
-    std::vector<int> wavefront_ids = {58, 91, 124, 173};
+    std::vector<int> wavefront_ids = result.betaInFma ? std::vector<int>({58, 100, 133, 173})
+                                                      : std::vector<int>({58, 91, 124, 173});
     for(auto id : wavefront_ids)
     {
         postParams->setDimensionInfo(id, WF);
@@ -531,6 +542,7 @@ int main(int argc, const char* argv[])
     po.addArg("loadLDS_A", Arg({"loadLDS_A"}, "Use LDS when loading A Matrix"));
     po.addArg("loadLDS_B", Arg({"loadLDS_B"}, "Use LDS when loading B Matrix"));
     po.addArg("storeLDS_D", Arg({"storeLDS_D"}, "Use LDS when storing D Matrix"));
+    po.addArg("betaInFma", Arg({"betaInFma"}, "Use beta in fma instruction instead of alpha."));
     po.addArg("scheduler", Arg({"scheduler"}, "Which scheduler to use."));
     po.addArg("match_memory_access",
               Arg({"match_memory_access"},
@@ -565,6 +577,7 @@ int main(int argc, const char* argv[])
     prob.loadLDS_A           = po.get("loadLDS_A", true);
     prob.loadLDS_B           = po.get("loadLDS_B", true);
     prob.storeLDS_D          = po.get("storeLDS_D", true);
+    prob.betaInFma           = po.get("betaInFma", true);
     prob.type_A              = po.get("type_A", std::string("float"));
     prob.type_B              = po.get("type_B", std::string("float"));
     prob.type_C              = po.get("type_C", std::string("float"));

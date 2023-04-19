@@ -220,10 +220,20 @@ namespace rocRoller
             std::string   comment = "";
         };
 
+        struct TernaryMixed : Ternary
+        {
+        };
+
+        template <typename T>
+        concept CTernaryMixed = requires
+        {
+            requires std::derived_from<T, TernaryMixed>;
+        };
+
         template <typename T>
         concept CTernary = requires
         {
-            requires std::derived_from<T, Ternary>;
+            requires std::derived_from<T, Ternary> || CTernaryMixed<T>;
         };
 
         /*
@@ -277,8 +287,10 @@ namespace rocRoller
 
         /**
          * Represents DEST = LHS * R1HS + R2HS.
+         * Utilizes TernaryMixed instead of Ternary
+         * allows for mixed precision arithmetic
          */
-        struct MultiplyAdd : Ternary
+        struct MultiplyAdd : TernaryMixed
         {
             constexpr static inline auto Type        = Category::Arithmetic;
             constexpr static inline auto EvalTimes   = EvaluationTimes::All();
