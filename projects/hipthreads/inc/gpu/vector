@@ -359,19 +359,11 @@ class _LIBGPU_TEMPLATE_VIS vector {
     }
 
     _LIBGPU_NORETURN __device__ _LIBGPU_HIDE_FROM_ABI void __throw_length_error() const {
-#if !defined(_LIBCPP_HAS_NO_EXCEPTIONS) && !defined(__HIP_DEVICE_COMPILE__)
-        throw std::length_error("vector");
-#else
         assert(false && "length_error was thrown in -fno-exceptions mode with message \"vector\"");
-#endif
     }
 
     _LIBGPU_NORETURN __device__ _LIBGPU_HIDE_FROM_ABI void __throw_out_of_range() const {
-#if !defined(_LIBCPP_HAS_NO_EXCEPTIONS) && !defined(__HIP_DEVICE_COMPILE__)
-        throw std::out_of_range("vector");
-#else
         assert(false && "out_of_range was thrown in -fno-exceptions mode with message \"vector\"");
-#endif
     }
 };
 
@@ -734,15 +726,8 @@ __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::reserve(size_type __n
 template <class _Tp>
 __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::shrink_to_fit() _NOEXCEPT {
     if (capacity() > size()) {
-#ifndef _LIBGPU_HAS_NO_EXCEPTIONS
-        try {
-#endif // _LIBGPU_HAS_NO_EXCEPTIONS
-            __split_buffer<value_type> __v(size(), size());
-            __swap_out_circular_buffer(__v);
-#ifndef _LIBGPU_HAS_NO_EXCEPTIONS
-        } catch (...) {
-        }
-#endif // _LIBGPU_HAS_NO_EXCEPTIONS
+        __split_buffer<value_type> __v(size(), size());
+        __swap_out_circular_buffer(__v);
     }
 }
 
@@ -957,21 +942,12 @@ vector<_Tp>::insert(const_iterator __position, _InputIterator __first, _InputIte
     }
     __split_buffer<value_type> __v{};
     if (__first != __last) {
-#ifndef _LIBGPU_HAS_NO_EXCEPTIONS
-        try {
-#endif // _LIBGPU_HAS_NO_EXCEPTIONS
-            __v.__construct_at_end(__first, __last);
-            difference_type __old_size = __old_last - this->__begin_;
-            difference_type __old_p = __p - this->__begin_;
-            reserve(__recommend(size() + __v.size()));
-            __p = this->__begin_ + __old_p;
-            __old_last = this->__begin_ + __old_size;
-#ifndef _LIBGPU_HAS_NO_EXCEPTIONS
-        } catch (...) {
-            erase(__make_iter(__old_last), end());
-            throw;
-        }
-#endif // _LIBGPU_HAS_NO_EXCEPTIONS
+        __v.__construct_at_end(__first, __last);
+        difference_type __old_size = __old_last - this->__begin_;
+        difference_type __old_p = __p - this->__begin_;
+        reserve(__recommend(size() + __v.size()));
+        __p = this->__begin_ + __old_p;
+        __old_last = this->__begin_ + __old_size;
     }
     __p = gpu::rotate(__p, __old_last, this->__end_);
     insert(__make_iter(__p), std::make_move_iterator(__v.begin()), std::make_move_iterator(__v.end()));
@@ -1352,20 +1328,12 @@ public:
 private:
     _LIBGPU_NORETURN __device__ _LIBGPU_HIDE_FROM_ABI
     void __throw_length_error() const {
-#if !defined(_LIBCPP_HAS_NO_EXCEPTIONS) && !defined(__HIP_DEVICE_COMPILE__)
-        throw std::length_error("vector");
-#else
         assert(false && "length_error was thrown in -fno-exceptions mode with message \"vector\"");
-#endif
     }
 
     _LIBGPU_NORETURN __device__ _LIBGPU_HIDE_FROM_ABI
     void __throw_out_of_range() const {
-#if !defined(_LIBCPP_HAS_NO_EXCEPTIONS) && !defined(__HIP_DEVICE_COMPILE__)
-        throw std::out_of_range("vector");
-#else
         assert(false && "out_of_range was thrown in -fno-exceptions mode with message \"vector\"");
-#endif
     }
 
     //  Allocate space for __n objects
@@ -1558,21 +1526,8 @@ vector<bool>::vector(_InputIterator __first, _InputIterator __last,
       __size_(0),
       __cap_alloc_(0)
 {
-#ifndef _LIBGPU_HAS_NO_EXCEPTIONS
-    try
-    {
-#endif // _LIBGPU_HAS_NO_EXCEPTIONS
-        for (; __first != __last; ++__first)
-            push_back(*__first);
-#ifndef _LIBGPU_HAS_NO_EXCEPTIONS
-    }
-    catch (...)
-    {
-        if (__begin_ != nullptr)
-            ::operator delete(__begin_);
-        throw;
-    }
-#endif // _LIBGPU_HAS_NO_EXCEPTIONS
+    for (; __first != __last; ++__first)
+        push_back(*__first);
 }
 
 template <>
@@ -1756,17 +1711,7 @@ vector<bool>::shrink_to_fit() _NOEXCEPT
 {
     if (__external_cap_to_internal(size()) > __cap())
     {
-#ifndef _LIBGPU_HAS_NO_EXCEPTIONS
-        try
-        {
-#endif // _LIBGPU_HAS_NO_EXCEPTIONS
-            vector(*this).swap(*this);
-#ifndef _LIBGPU_HAS_NO_EXCEPTIONS
-        }
-        catch (...)
-        {
-        }
-#endif // _LIBGPU_HAS_NO_EXCEPTIONS
+        vector(*this).swap(*this);
     }
 }
 
@@ -1867,24 +1812,12 @@ vector<bool>::insert(const_iterator __position, _InputIterator __first, _InputIt
     vector __v();
     if (__first != __last)
     {
-#ifndef _LIBGPU_HAS_NO_EXCEPTIONS
-        try
-        {
-#endif // _LIBGPU_HAS_NO_EXCEPTIONS
-            __v.assign(__first, __last);
-            difference_type __old_size = static_cast<difference_type>(__old_end - begin());
-            difference_type __old_p = __p - begin();
-            reserve(__recommend(size() + __v.size()));
-            __p = begin() + __old_p;
-            __old_end = begin() + __old_size;
-#ifndef _LIBGPU_HAS_NO_EXCEPTIONS
-        }
-        catch (...)
-        {
-            erase(__old_end, end());
-            throw;
-        }
-#endif // _LIBGPU_HAS_NO_EXCEPTIONS
+        __v.assign(__first, __last);
+        difference_type __old_size = static_cast<difference_type>(__old_end - begin());
+        difference_type __old_p = __p - begin();
+        reserve(__recommend(size() + __v.size()));
+        __p = begin() + __old_p;
+        __old_end = begin() + __old_size;
     }
     __p = gpu::rotate(__p, __old_end, end());
     insert(__p, __v.begin(), __v.end());
