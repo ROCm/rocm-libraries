@@ -16,7 +16,7 @@ namespace gpu {
 template <class _AlgPolicy,
           class _PopulationIterator, class _PopulationSentinel, class _SampleIterator, class _Distance,
           class _UniformRandomNumberGenerator>
-_LIBGPU_INLINE_VISIBILITY
+__device__ _LIBGPU_INLINE_VISIBILITY
 _SampleIterator __sample(_PopulationIterator __first,
                          _PopulationSentinel __last, _SampleIterator __output_iter,
                          _Distance __n,
@@ -38,7 +38,7 @@ _SampleIterator __sample(_PopulationIterator __first,
 template <class _AlgPolicy,
           class _PopulationIterator, class _PopulationSentinel, class _SampleIterator, class _Distance,
           class _UniformRandomNumberGenerator>
-_LIBGPU_INLINE_VISIBILITY
+__device__ _LIBGPU_INLINE_VISIBILITY
 _SampleIterator __sample(_PopulationIterator __first,
                          _PopulationSentinel __last, _SampleIterator __output_iter,
                          _Distance __n,
@@ -58,7 +58,7 @@ _SampleIterator __sample(_PopulationIterator __first,
 template <class _AlgPolicy,
           class _PopulationIterator, class _PopulationSentinel, class _SampleIterator, class _Distance,
           class _UniformRandomNumberGenerator>
-_LIBGPU_INLINE_VISIBILITY
+__device__ _LIBGPU_INLINE_VISIBILITY
 _SampleIterator __sample(_PopulationIterator __first,
                          _PopulationSentinel __last, _SampleIterator __output_iter,
                          _Distance __n, _UniformRandomNumberGenerator& __g) {
@@ -76,7 +76,7 @@ _SampleIterator __sample(_PopulationIterator __first,
 #if _LIBGPU_STD_VER >= 17
 template <class _PopulationIterator, class _SampleIterator, class _Distance,
           class _UniformRandomNumberGenerator>
-inline _LIBGPU_INLINE_VISIBILITY
+__device__ inline _LIBGPU_INLINE_VISIBILITY
 _SampleIterator sample(_PopulationIterator __first,
                        _PopulationIterator __last, _SampleIterator __output_iter,
                        _Distance __n, _UniformRandomNumberGenerator&& __g) {

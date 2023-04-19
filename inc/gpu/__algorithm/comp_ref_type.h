@@ -41,7 +41,7 @@ struct __debug_less
     }
 
     template <class _LHS, class _RHS>
-    _LIBGPU_CONSTEXPR_SINCE_CXX14
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX14
     inline _LIBGPU_INLINE_VISIBILITY
     decltype((void)std::declval<_Compare&>()(
         std::declval<_LHS &>(), std::declval<_RHS &>()))
@@ -53,7 +53,7 @@ struct __debug_less
     }
 
     template <class _LHS, class _RHS>
-    _LIBGPU_CONSTEXPR_SINCE_CXX14
+    __device__ _LIBGPU_CONSTEXPR_SINCE_CXX14
     inline _LIBGPU_INLINE_VISIBILITY
     void __do_compare_assert(long, _LHS &, _RHS &) {}
 };

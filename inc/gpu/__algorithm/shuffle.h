@@ -25,19 +25,19 @@ public:
   static const result_type _Min = 0;
   static const result_type _Max = 0xFFFFFFFF;
 
-  _LIBGPU_HIDE_FROM_ABI result_type operator()() {
+  __device__ _LIBGPU_HIDE_FROM_ABI result_type operator()() {
     uint_fast64_t __oldstate = __state_;
     __state_ = __oldstate * 6364136223846793005ULL + __inc_;
     return __oldstate >> 32;
   }
 
-  static _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR result_type min() { return _Min; }
-  static _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR result_type max() { return _Max; }
+  __device__ static _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR result_type min() { return _Min; }
+  __device__ static _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR result_type max() { return _Max; }
 
 private:
   uint_fast64_t __state_;
   uint_fast64_t __inc_;
-  _LIBGPU_HIDE_FROM_ABI static uint_fast64_t __seed() {
+  __device__ _LIBGPU_HIDE_FROM_ABI static uint_fast64_t __seed() {
 #ifdef _LIBGPU_DEBUG_RANDOMIZE_UNSPECIFIED_STABILITY_SEED
     return _LIBGPU_DEBUG_RANDOMIZE_UNSPECIFIED_STABILITY_SEED;
 #else
@@ -78,7 +78,7 @@ public:
 _LIBGPU_FUNC_VIS __rs_default __rs_get();
 
 template <class _RandomAccessIterator>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_DEPRECATED_IN_CXX14 void
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_DEPRECATED_IN_CXX14 void
 random_shuffle(_RandomAccessIterator __first, _RandomAccessIterator __last)
 {
     typedef typename std::iterator_traits<_RandomAccessIterator>::difference_type difference_type;
@@ -99,7 +99,7 @@ random_shuffle(_RandomAccessIterator __first, _RandomAccessIterator __last)
 }
 
 template <class _RandomAccessIterator, class _RandomNumberGenerator>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_DEPRECATED_IN_CXX14 void
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_DEPRECATED_IN_CXX14 void
 random_shuffle(_RandomAccessIterator __first, _RandomAccessIterator __last,
 #ifndef _LIBGPU_CXX03_LANG
                _RandomNumberGenerator&& __rand)
@@ -122,7 +122,7 @@ random_shuffle(_RandomAccessIterator __first, _RandomAccessIterator __last,
 #endif
 
 template <class _AlgPolicy, class _RandomAccessIterator, class _Sentinel, class _UniformRandomNumberGenerator>
-_LIBGPU_HIDE_FROM_ABI _RandomAccessIterator __shuffle(
+__device__ _LIBGPU_HIDE_FROM_ABI _RandomAccessIterator __shuffle(
     _RandomAccessIterator __first, _Sentinel __last_sentinel, _UniformRandomNumberGenerator&& __g) {
     typedef typename std::iterator_traits<_RandomAccessIterator>::difference_type difference_type;
     typedef uniform_int_distribution<std::ptrdiff_t> _Dp;
@@ -146,7 +146,7 @@ _LIBGPU_HIDE_FROM_ABI _RandomAccessIterator __shuffle(
 }
 
 template <class _RandomAccessIterator, class _UniformRandomNumberGenerator>
-_LIBGPU_HIDE_FROM_ABI void
+__device__ _LIBGPU_HIDE_FROM_ABI void
 shuffle(_RandomAccessIterator __first, _RandomAccessIterator __last, _UniformRandomNumberGenerator&& __g) {
   (void)gpu::__shuffle<_ClassicAlgPolicy>(
       std::move(__first), std::move(__last), std::forward<_UniformRandomNumberGenerator>(__g));

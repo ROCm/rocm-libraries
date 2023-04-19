@@ -22,13 +22,13 @@ struct in_found_result {
 
   template <class _InIter2>
     requires std::convertible_to<const _InIter1&, _InIter2>
-  _LIBGPU_HIDE_FROM_ABI constexpr operator in_found_result<_InIter2>() const & {
+  __device__ _LIBGPU_HIDE_FROM_ABI constexpr operator in_found_result<_InIter2>() const & {
     return {in, found};
   }
 
   template <class _InIter2>
     requires std::convertible_to<_InIter1, _InIter2>
-  _LIBGPU_HIDE_FROM_ABI constexpr operator in_found_result<_InIter2>() && {
+  __device__ _LIBGPU_HIDE_FROM_ABI constexpr operator in_found_result<_InIter2>() && {
     return {std::move(in), found};
   }
 };

@@ -15,7 +15,7 @@
 namespace gpu {
 
 template <class _Iter, class _Sent, class _BinaryPredicate>
-_LIBGPU_NODISCARD_EXT _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 _Iter
+_LIBGPU_NODISCARD_EXT __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 _Iter
 __adjacent_find(_Iter __first, _Sent __last, _BinaryPredicate&& __pred) {
   if (__first == __last)
     return __first;
@@ -29,13 +29,13 @@ __adjacent_find(_Iter __first, _Sent __last, _BinaryPredicate&& __pred) {
 }
 
 template <class _ForwardIterator, class _BinaryPredicate>
-_LIBGPU_NODISCARD_EXT inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 _ForwardIterator
+_LIBGPU_NODISCARD_EXT __device__ inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 _ForwardIterator
 adjacent_find(_ForwardIterator __first, _ForwardIterator __last, _BinaryPredicate __pred) {
   return gpu::__adjacent_find(std::move(__first), std::move(__last), __pred);
 }
 
 template <class _ForwardIterator>
-_LIBGPU_NODISCARD_EXT inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 _ForwardIterator
+_LIBGPU_NODISCARD_EXT __device__ inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 _ForwardIterator
 adjacent_find(_ForwardIterator __first, _ForwardIterator __last) {
   return gpu::adjacent_find(std::move(__first), std::move(__last), __equal_to());
 }

@@ -14,7 +14,7 @@
 namespace gpu {
 
 template <class _Compare, class _RandomAccessIterator>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 _RandomAccessIterator
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 _RandomAccessIterator
 __is_heap_until(_RandomAccessIterator __first, _RandomAccessIterator __last, _Compare&& __comp)
 {
     typedef typename std::iterator_traits<_RandomAccessIterator>::difference_type difference_type;
@@ -41,14 +41,14 @@ __is_heap_until(_RandomAccessIterator __first, _RandomAccessIterator __last, _Co
 }
 
 template <class _RandomAccessIterator, class _Compare>
-_LIBGPU_NODISCARD_EXT inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 _RandomAccessIterator
+_LIBGPU_NODISCARD_EXT __device__ inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 _RandomAccessIterator
 is_heap_until(_RandomAccessIterator __first, _RandomAccessIterator __last, _Compare __comp)
 {
     return gpu::__is_heap_until(__first, __last, static_cast<__comp_ref_type<_Compare> >(__comp));
 }
 
 template<class _RandomAccessIterator>
-_LIBGPU_NODISCARD_EXT inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 _RandomAccessIterator
+_LIBGPU_NODISCARD_EXT __device__ inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 _RandomAccessIterator
 is_heap_until(_RandomAccessIterator __first, _RandomAccessIterator __last)
 {
     return gpu::__is_heap_until(__first, __last, __less<typename std::iterator_traits<_RandomAccessIterator>::value_type>());

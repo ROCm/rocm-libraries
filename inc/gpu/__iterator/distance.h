@@ -15,7 +15,7 @@
 namespace gpu {
 
 template <class _InputIter>
-inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
 typename std::iterator_traits<_InputIter>::difference_type
 __distance(_InputIter __first, _InputIter __last, std::input_iterator_tag)
 {
@@ -26,7 +26,7 @@ __distance(_InputIter __first, _InputIter __last, std::input_iterator_tag)
 }
 
 template <class _RandIter>
-inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
 typename std::iterator_traits<_RandIter>::difference_type
 __distance(_RandIter __first, _RandIter __last, std::random_access_iterator_tag)
 {
@@ -34,7 +34,7 @@ __distance(_RandIter __first, _RandIter __last, std::random_access_iterator_tag)
 }
 
 template <class _InputIter>
-inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
 typename std::iterator_traits<_InputIter>::difference_type
 distance(_InputIter __first, _InputIter __last)
 {
@@ -51,7 +51,7 @@ namespace __distance {
 struct __fn {
   template<class _Ip, sentinel_for<_Ip> _Sp>
     requires (!sized_sentinel_for<_Sp, _Ip>)
-  _LIBGPU_HIDE_FROM_ABI
+  __device__ _LIBGPU_HIDE_FROM_ABI
   constexpr iter_difference_t<_Ip> operator()(_Ip __first, _Sp __last) const {
     iter_difference_t<_Ip> __n = 0;
     while (__first != __last) {
@@ -62,7 +62,7 @@ struct __fn {
   }
 
   template<class _Ip, sized_sentinel_for<std::decay_t<_Ip>> _Sp>
-  _LIBGPU_HIDE_FROM_ABI
+  __device__ _LIBGPU_HIDE_FROM_ABI
   constexpr iter_difference_t<_Ip> operator()(_Ip&& __first, _Sp __last) const {
     if constexpr (sized_sentinel_for<_Sp, std::remove_cv_t<std::remove_reference_t<_Ip>>>) {
       return __last - __first;
@@ -72,7 +72,7 @@ struct __fn {
   }
 
   template<range _Rp>
-  _LIBGPU_HIDE_FROM_ABI
+  __device__ _LIBGPU_HIDE_FROM_ABI
   constexpr range_difference_t<_Rp> operator()(_Rp&& __r) const {
     if constexpr (sized_range<_Rp>) {
       return static_cast<range_difference_t<_Rp>>(ranges::size(__r));

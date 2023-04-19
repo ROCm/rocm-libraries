@@ -14,7 +14,7 @@
 namespace gpu {
 
 template <class _Compare, class _ForwardIterator>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 _ForwardIterator
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 _ForwardIterator
 __is_sorted_until(_ForwardIterator __first, _ForwardIterator __last, _Compare __comp)
 {
     if (__first != __last)
@@ -31,14 +31,14 @@ __is_sorted_until(_ForwardIterator __first, _ForwardIterator __last, _Compare __
 }
 
 template <class _ForwardIterator, class _Compare>
-_LIBGPU_NODISCARD_EXT inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 _ForwardIterator
+_LIBGPU_NODISCARD_EXT __device__ inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 _ForwardIterator
 is_sorted_until(_ForwardIterator __first, _ForwardIterator __last, _Compare __comp)
 {
     return gpu::__is_sorted_until<__comp_ref_type<_Compare> >(__first, __last, __comp);
 }
 
 template<class _ForwardIterator>
-_LIBGPU_NODISCARD_EXT inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 _ForwardIterator
+_LIBGPU_NODISCARD_EXT __device__ inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 _ForwardIterator
 is_sorted_until(_ForwardIterator __first, _ForwardIterator __last)
 {
     return gpu::is_sorted_until(__first, __last, __less<typename std::iterator_traits<_ForwardIterator>::value_type>());

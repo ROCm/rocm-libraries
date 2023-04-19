@@ -17,7 +17,7 @@
 namespace gpu {
 
 template <class _Tp, class _Compare>
-_LIBGPU_NODISCARD_EXT inline
+_LIBGPU_NODISCARD_EXT __device__ inline
 _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX14
 const _Tp&
 max(_LIBGPU_LIFETIMEBOUND const _Tp& __a, _LIBGPU_LIFETIMEBOUND const _Tp& __b, _Compare __comp)
@@ -26,7 +26,7 @@ max(_LIBGPU_LIFETIMEBOUND const _Tp& __a, _LIBGPU_LIFETIMEBOUND const _Tp& __b, 
 }
 
 template <class _Tp>
-_LIBGPU_NODISCARD_EXT inline
+_LIBGPU_NODISCARD_EXT __device__ inline
 _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX14
 const _Tp&
 max(_LIBGPU_LIFETIMEBOUND const _Tp& __a, _LIBGPU_LIFETIMEBOUND const _Tp& __b)
@@ -37,7 +37,7 @@ max(_LIBGPU_LIFETIMEBOUND const _Tp& __a, _LIBGPU_LIFETIMEBOUND const _Tp& __b)
 #ifndef _LIBGPU_CXX03_LANG
 
 template<class _Tp, class _Compare>
-_LIBGPU_NODISCARD_EXT inline
+_LIBGPU_NODISCARD_EXT __device__ inline
 _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX14
 _Tp
 max(std::initializer_list<_Tp> __t, _Compare __comp)
@@ -46,7 +46,7 @@ max(std::initializer_list<_Tp> __t, _Compare __comp)
 }
 
 template<class _Tp>
-_LIBGPU_NODISCARD_EXT inline
+_LIBGPU_NODISCARD_EXT __device__ inline
 _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX14
 _Tp
 max(std::initializer_list<_Tp> __t)

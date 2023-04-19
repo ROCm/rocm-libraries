@@ -14,7 +14,7 @@
 namespace gpu {
 
 template <class _BidirectionalIterator, class _OutputIterator>
-inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
 _OutputIterator
 reverse_copy(_BidirectionalIterator __first, _BidirectionalIterator __last, _OutputIterator __result)
 {

@@ -17,7 +17,7 @@ namespace gpu {
 // fill_n isn't specialized for std::memset, because the compiler already optimizes the loop to a call to std::memset.
 
 template <class _OutputIterator, class _Size, class _Tp>
-inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
 _OutputIterator
 __fill_n(_OutputIterator __first, _Size __n, const _Tp& __value)
 {
@@ -27,7 +27,7 @@ __fill_n(_OutputIterator __first, _Size __n, const _Tp& __value)
 }
 
 template <class _OutputIterator, class _Size, class _Tp>
-inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
 _OutputIterator
 fill_n(_OutputIterator __first, _Size __n, const _Tp& __value)
 {

@@ -16,7 +16,7 @@ namespace gpu {
 // Perform division by two quickly for positive integers (llvm.org/PR39129)
 
 template <typename _Integral>
-_LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR
+__device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR
 typename std::enable_if
 <
     std::is_integral<_Integral>::value,
@@ -28,7 +28,7 @@ __half_positive(_Integral __value)
 }
 
 template <typename _Tp>
-_LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR
+__device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR
 typename std::enable_if
 <
     !std::is_integral<_Tp>::value,

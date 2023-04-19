@@ -16,7 +16,7 @@ namespace gpu {
 // fill isn't specialized for std::memset, because the compiler already optimizes the loop to a call to std::memset.
 
 template <class _ForwardIterator, class _Tp>
-inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
 void
 __fill(_ForwardIterator __first, _ForwardIterator __last, const _Tp& __value, std::forward_iterator_tag)
 {
@@ -25,7 +25,7 @@ __fill(_ForwardIterator __first, _ForwardIterator __last, const _Tp& __value, st
 }
 
 template <class _RandomAccessIterator, class _Tp>
-inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
 void
 __fill(_RandomAccessIterator __first, _RandomAccessIterator __last, const _Tp& __value, std::random_access_iterator_tag)
 {
@@ -33,7 +33,7 @@ __fill(_RandomAccessIterator __first, _RandomAccessIterator __last, const _Tp& _
 }
 
 template <class _ForwardIterator, class _Tp>
-inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
 void
 fill(_ForwardIterator __first, _ForwardIterator __last, const _Tp& __value)
 {

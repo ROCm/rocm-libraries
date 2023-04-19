@@ -18,17 +18,17 @@ namespace gpu {
 template <class _Comp>
 struct __debug_three_way_comp {
   _Comp& __comp_;
-  _LIBGPU_HIDE_FROM_ABI constexpr __debug_three_way_comp(_Comp& __c) : __comp_(__c) {}
+  __device__ _LIBGPU_HIDE_FROM_ABI constexpr __debug_three_way_comp(_Comp& __c) : __comp_(__c) {}
 
   template <class _Tp, class _Up>
-  _LIBGPU_HIDE_FROM_ABI constexpr auto operator()(_Tp& __x, _Up& __y) {
+  __device__ _LIBGPU_HIDE_FROM_ABI constexpr auto operator()(_Tp& __x, _Up& __y) {
     auto __r = __comp_(__x, __y);
     __do_compare_assert(0, __y, __x, __r);
     return __r;
   }
 
   template <class _LHS, class _RHS, class _Order>
-  _LIBGPU_HIDE_FROM_ABI constexpr inline void __do_compare_assert(int, _LHS& __l, _RHS& __r, _Order __o)
+  __device__ _LIBGPU_HIDE_FROM_ABI constexpr inline void __do_compare_assert(int, _LHS& __l, _RHS& __r, _Order __o)
     requires __comparison_category<decltype(std::declval<_Comp&>()(std::declval<_LHS&>(), std::declval<_RHS&>()))>
   {
     _Order __expected = __o;
@@ -43,7 +43,7 @@ struct __debug_three_way_comp {
   }
 
   template <class _LHS, class _RHS, class _Order>
-  _LIBGPU_HIDE_FROM_ABI constexpr inline void __do_compare_assert(long, _LHS&, _RHS&, _Order) {}
+  __device__ _LIBGPU_HIDE_FROM_ABI constexpr inline void __do_compare_assert(long, _LHS&, _RHS&, _Order) {}
 };
 
 // Pass the comparator by lvalue reference. Or in debug mode, using a

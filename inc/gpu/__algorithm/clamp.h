@@ -15,7 +15,7 @@ namespace gpu {
 
 #if _LIBGPU_STD_VER >= 17
 template<class _Tp, class _Compare>
-_LIBGPU_NODISCARD_EXT inline
+_LIBGPU_NODISCARD_EXT __device__ inline
 _LIBGPU_INLINE_VISIBILITY constexpr
 const _Tp&
 clamp(const _Tp& __v, const _Tp& __lo, const _Tp& __hi, _Compare __comp)
@@ -26,7 +26,7 @@ clamp(const _Tp& __v, const _Tp& __lo, const _Tp& __hi, _Compare __comp)
 }
 
 template<class _Tp>
-_LIBGPU_NODISCARD_EXT inline
+_LIBGPU_NODISCARD_EXT __device__ inline
 _LIBGPU_INLINE_VISIBILITY constexpr
 const _Tp&
 clamp(const _Tp& __v, const _Tp& __lo, const _Tp& __hi)

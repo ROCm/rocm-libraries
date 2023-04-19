@@ -15,7 +15,7 @@
 namespace gpu {
 
 template <class _AlgPolicy, class _Pred, class _Iter, class _Sent, class _SizeT, class _Type, class _Proj>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14
 gpu::pair<_Iter, _Iter> __search_n_forward_impl(_Iter __first, _Sent __last,
                                            _SizeT __count,
                                            const _Type& __value,
@@ -57,7 +57,7 @@ gpu::pair<_Iter, _Iter> __search_n_forward_impl(_Iter __first, _Sent __last,
 }
 
 template <class _AlgPolicy, class _Pred, class _Iter, class _Sent, class _SizeT, class _Type, class _Proj, class _DiffT>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14
 gpu::pair<_Iter, _Iter> __search_n_random_access_impl(_Iter __first, _Sent __last,
                                                       _SizeT __count,
                                                       const _Type& __value,
@@ -108,7 +108,7 @@ template <class _Iter, class _Sent,
           class _Type,
           class _Pred,
           class _Proj>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14
 gpu::pair<_Iter, _Iter> __search_n_impl(_Iter __first, _Sent __last,
                                    _DiffT __count,
                                    const _Type& __value,
@@ -128,7 +128,7 @@ template <class _Iter1, class _Sent1,
           class _Type,
           class _Pred,
           class _Proj>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14
 gpu::pair<_Iter1, _Iter1> __search_n_impl(_Iter1 __first, _Sent1 __last,
                                      _DiffT __count,
                                      const _Type& __value,
@@ -144,7 +144,7 @@ gpu::pair<_Iter1, _Iter1> __search_n_impl(_Iter1 __first, _Sent1 __last,
 }
 
 template <class _ForwardIterator, class _Size, class _Tp, class _BinaryPredicate>
-_LIBGPU_NODISCARD_EXT inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+_LIBGPU_NODISCARD_EXT __device__ inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
 _ForwardIterator search_n(_ForwardIterator __first, _ForwardIterator __last,
                           _Size __count,
                           const _Tp& __value,
@@ -156,7 +156,7 @@ _ForwardIterator search_n(_ForwardIterator __first, _ForwardIterator __last,
 }
 
 template <class _ForwardIterator, class _Size, class _Tp>
-_LIBGPU_NODISCARD_EXT inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+_LIBGPU_NODISCARD_EXT __device__ inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
 _ForwardIterator search_n(_ForwardIterator __first, _ForwardIterator __last, _Size __count, const _Tp& __value) {
   return gpu::search_n(__first, __last, gpu::__convert_to_integral(__count), __value, __equal_to());
 }

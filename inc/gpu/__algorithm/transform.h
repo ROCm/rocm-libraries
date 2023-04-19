@@ -14,7 +14,7 @@
 namespace gpu {
 
 template <class _InputIterator, class _OutputIterator, class _UnaryOperation>
-inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
 _OutputIterator
 transform(_InputIterator __first, _InputIterator __last, _OutputIterator __result, _UnaryOperation __op)
 {
@@ -24,7 +24,7 @@ transform(_InputIterator __first, _InputIterator __last, _OutputIterator __resul
 }
 
 template <class _InputIterator1, class _InputIterator2, class _OutputIterator, class _BinaryOperation>
-inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
 _OutputIterator
 transform(_InputIterator1 __first1, _InputIterator1 __last1, _InputIterator2 __first2,
           _OutputIterator __result, _BinaryOperation __binary_op)

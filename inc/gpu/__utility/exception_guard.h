@@ -60,10 +60,10 @@ template <class _Rollback>
 struct __exception_guard_exceptions {
   __exception_guard_exceptions() = delete;
 
-  _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 explicit __exception_guard_exceptions(_Rollback __rollback)
+  __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 explicit __exception_guard_exceptions(_Rollback __rollback)
       : __rollback_(std::move(__rollback)), __completed_(false) {}
 
-  _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+  __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
   __exception_guard_exceptions(__exception_guard_exceptions&& __other)
       _NOEXCEPT_(std::is_nothrow_move_constructible<_Rollback>::value)
       : __rollback_(std::move(__other.__rollback_)), __completed_(__other.__completed_) {
@@ -74,9 +74,9 @@ struct __exception_guard_exceptions {
   __exception_guard_exceptions& operator=(__exception_guard_exceptions const&) = delete;
   __exception_guard_exceptions& operator=(__exception_guard_exceptions&&)      = delete;
 
-  _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 void __complete() _NOEXCEPT { __completed_ = true; }
+  __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 void __complete() _NOEXCEPT { __completed_ = true; }
 
-  _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 ~__exception_guard_exceptions() {
+  __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 ~__exception_guard_exceptions() {
     if (!__completed_)
       __rollback_();
   }
@@ -91,10 +91,10 @@ _LIBGPU_CTAD_SUPPORTED_FOR_TYPE(__exception_guard_exceptions);
 template <class _Rollback>
 struct __exception_guard_noexceptions {
   __exception_guard_noexceptions() = delete;
-  _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+  __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
       _LIBGPU_NODEBUG explicit __exception_guard_noexceptions(_Rollback) {}
 
-  _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_NODEBUG
+  __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_NODEBUG
   __exception_guard_noexceptions(__exception_guard_noexceptions&& __other)
       _NOEXCEPT_(std::is_nothrow_move_constructible<_Rollback>::value)
       : __completed_(__other.__completed_) {
@@ -105,11 +105,11 @@ struct __exception_guard_noexceptions {
   __exception_guard_noexceptions& operator=(__exception_guard_noexceptions const&) = delete;
   __exception_guard_noexceptions& operator=(__exception_guard_noexceptions&&)      = delete;
 
-  _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_NODEBUG void __complete() _NOEXCEPT {
+  __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_NODEBUG void __complete() _NOEXCEPT {
     __completed_ = true;
   }
 
-  _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_NODEBUG ~__exception_guard_noexceptions() {
+  __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_NODEBUG ~__exception_guard_noexceptions() {
     assert(__completed_ && "__exception_guard not completed with exceptions disabled");
   }
 
@@ -128,7 +128,7 @@ using __exception_guard = __exception_guard_exceptions<_Rollback>;
 #endif
 
 template <class _Rollback>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR __exception_guard<_Rollback> __make_exception_guard(_Rollback __rollback) {
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR __exception_guard<_Rollback> __make_exception_guard(_Rollback __rollback) {
   return __exception_guard<_Rollback>(std::move(__rollback));
 }
 

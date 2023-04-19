@@ -14,7 +14,7 @@
 namespace gpu {
 
 template <class _AlgPolicy, class _Compare, class _RandomAccessIterator>
-inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14
+__device__ inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14
 void __make_heap(_RandomAccessIterator __first, _RandomAccessIterator __last, _Compare&& __comp) {
   __comp_ref_type<_Compare> __comp_ref = __comp;
 
@@ -29,13 +29,13 @@ void __make_heap(_RandomAccessIterator __first, _RandomAccessIterator __last, _C
 }
 
 template <class _RandomAccessIterator, class _Compare>
-inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
 void make_heap(_RandomAccessIterator __first, _RandomAccessIterator __last, _Compare __comp) {
   gpu::__make_heap<_ClassicAlgPolicy>(std::move(__first), std::move(__last), __comp);
 }
 
 template <class _RandomAccessIterator>
-inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
 void make_heap(_RandomAccessIterator __first, _RandomAccessIterator __last) {
   gpu::make_heap(std::move(__first), std::move(__last),
       __less<typename std::iterator_traits<_RandomAccessIterator>::value_type>());

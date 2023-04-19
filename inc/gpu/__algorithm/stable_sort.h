@@ -14,7 +14,7 @@
 namespace gpu {
 
 template <class _AlgPolicy, class _Compare, class _BidirectionalIterator>
-_LIBGPU_HIDE_FROM_ABI
+__device__ _LIBGPU_HIDE_FROM_ABI
 void __insertion_sort_move(_BidirectionalIterator __first1, _BidirectionalIterator __last1,
                            typename std::iterator_traits<_BidirectionalIterator>::value_type* __first2, _Compare __comp) {
   using _Ops = _IterOps<_AlgPolicy>;
@@ -45,7 +45,7 @@ void __insertion_sort_move(_BidirectionalIterator __first1, _BidirectionalIterat
 }
 
 template <class _AlgPolicy, class _Compare, class _InputIterator1, class _InputIterator2>
-_LIBGPU_HIDE_FROM_ABI void
+__device__ _LIBGPU_HIDE_FROM_ABI void
 __merge_move_construct(_InputIterator1 __first1, _InputIterator1 __last1,
         _InputIterator2 __first2, _InputIterator2 __last2,
         typename std::iterator_traits<_InputIterator1>::value_type* __result, _Compare __comp)
@@ -87,7 +87,7 @@ __merge_move_construct(_InputIterator1 __first1, _InputIterator1 __last1,
 }
 
 template <class _AlgPolicy, class _Compare, class _InputIterator1, class _InputIterator2, class _OutputIterator>
-_LIBGPU_HIDE_FROM_ABI void
+__device__ _LIBGPU_HIDE_FROM_ABI void
 __merge_move_assign(_InputIterator1 __first1, _InputIterator1 __last1,
         _InputIterator2 __first2, _InputIterator2 __last2,
         _OutputIterator __result, _Compare __comp)
@@ -225,7 +225,7 @@ __stable_sort(_RandomAccessIterator __first, _RandomAccessIterator __last, _Comp
 }
 
 template <class _AlgPolicy, class _RandomAccessIterator, class _Compare>
-inline _LIBGPU_HIDE_FROM_ABI
+__device__ inline _LIBGPU_HIDE_FROM_ABI
 void __stable_sort_impl(_RandomAccessIterator __first, _RandomAccessIterator __last, _Compare& __comp) {
   using value_type = typename std::iterator_traits<_RandomAccessIterator>::value_type;
   using difference_type = typename std::iterator_traits<_RandomAccessIterator>::difference_type;
@@ -245,13 +245,13 @@ _LIBGPU_SUPPRESS_DEPRECATED_POP
 }
 
 template <class _RandomAccessIterator, class _Compare>
-inline _LIBGPU_HIDE_FROM_ABI
+__device__ inline _LIBGPU_HIDE_FROM_ABI
 void stable_sort(_RandomAccessIterator __first, _RandomAccessIterator __last, _Compare __comp) {
   std::__stable_sort_impl<_ClassicAlgPolicy>(std::move(__first), std::move(__last), __comp);
 }
 
 template <class _RandomAccessIterator>
-inline _LIBGPU_HIDE_FROM_ABI
+__device__ inline _LIBGPU_HIDE_FROM_ABI
 void stable_sort(_RandomAccessIterator __first, _RandomAccessIterator __last) {
   gpu::stable_sort(__first, __last, __less<typename std::iterator_traits<_RandomAccessIterator>::value_type>());
 }

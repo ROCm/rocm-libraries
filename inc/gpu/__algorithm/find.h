@@ -15,7 +15,7 @@
 namespace gpu {
 
 template <class _InputIterator, class _Tp>
-_LIBGPU_NODISCARD_EXT inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20 _InputIterator
+_LIBGPU_NODISCARD_EXT __device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20 _InputIterator
 find(_InputIterator __first, _InputIterator __last, const _Tp& __value) {
   for (; __first != __last; ++__first)
     if (*__first == __value)

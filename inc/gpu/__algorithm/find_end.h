@@ -23,7 +23,7 @@ template <
     class _Pred,
     class _Proj1,
     class _Proj2>
-_LIBGPU_HIDE_FROM_ABI inline _LIBGPU_CONSTEXPR_SINCE_CXX14 gpu::pair<_Iter1, _Iter1> __find_end_impl(
+__device__ _LIBGPU_HIDE_FROM_ABI inline _LIBGPU_CONSTEXPR_SINCE_CXX14 gpu::pair<_Iter1, _Iter1> __find_end_impl(
     _Iter1 __first1,
     _Sent1 __last1,
     _Iter2 __first2,
@@ -77,7 +77,7 @@ template <
     class _Sent2,
     class _Proj1,
     class _Proj2>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 _Iter1 __find_end(
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 _Iter1 __find_end(
     _Iter1 __first1,
     _Sent1 __sent1,
     _Iter2 __first2,
@@ -130,7 +130,7 @@ template <
     class _Sent2,
     class _Proj1,
     class _Proj2>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 _Iter1 __find_end(
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 _Iter1 __find_end(
     _Iter1 __first1,
     _Sent1 __sent1,
     _Iter2 __first2,
@@ -175,7 +175,7 @@ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 _Iter1 __find_end(
 }
 
 template <class _ForwardIterator1, class _ForwardIterator2, class _BinaryPredicate>
-_LIBGPU_NODISCARD inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14
+_LIBGPU_NODISCARD __device__ inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14
 _ForwardIterator1 __find_end_classic(_ForwardIterator1 __first1, _ForwardIterator1 __last1,
                                      _ForwardIterator2 __first2, _ForwardIterator2 __last2,
                                      _BinaryPredicate& __pred) {
@@ -194,7 +194,7 @@ _ForwardIterator1 __find_end_classic(_ForwardIterator1 __first1, _ForwardIterato
 }
 
 template <class _ForwardIterator1, class _ForwardIterator2, class _BinaryPredicate>
-_LIBGPU_NODISCARD_EXT inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+_LIBGPU_NODISCARD_EXT __device__ inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
 _ForwardIterator1 find_end(_ForwardIterator1 __first1, _ForwardIterator1 __last1,
                            _ForwardIterator2 __first2, _ForwardIterator2 __last2,
                            _BinaryPredicate __pred) {
@@ -202,7 +202,7 @@ _ForwardIterator1 find_end(_ForwardIterator1 __first1, _ForwardIterator1 __last1
 }
 
 template <class _ForwardIterator1, class _ForwardIterator2>
-_LIBGPU_NODISCARD_EXT inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+_LIBGPU_NODISCARD_EXT __device__ inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
 _ForwardIterator1 find_end(_ForwardIterator1 __first1, _ForwardIterator1 __last1,
                            _ForwardIterator2 __first2, _ForwardIterator2 __last2) {
   return gpu::find_end(__first1, __last1, __first2, __last2, __equal_to());

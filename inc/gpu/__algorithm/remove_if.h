@@ -14,7 +14,7 @@
 namespace gpu {
 
 template <class _ForwardIterator, class _Predicate>
-_LIBGPU_NODISCARD_EXT _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 _ForwardIterator
+_LIBGPU_NODISCARD_EXT __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 _ForwardIterator
 remove_if(_ForwardIterator __first, _ForwardIterator __last, _Predicate __pred)
 {
     __first = gpu::find_if<_ForwardIterator, _Predicate&>(__first, __last, __pred);

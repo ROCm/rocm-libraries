@@ -14,7 +14,7 @@
 namespace gpu {
 
 template <class _ForwardIterator, class _Tp, class _Compare>
-_LIBGPU_NODISCARD_EXT inline
+_LIBGPU_NODISCARD_EXT __device__ inline
 _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
 bool
 binary_search(_ForwardIterator __first, _ForwardIterator __last, const _Tp& __value, _Compare __comp)
@@ -24,7 +24,7 @@ binary_search(_ForwardIterator __first, _ForwardIterator __last, const _Tp& __va
 }
 
 template <class _ForwardIterator, class _Tp>
-_LIBGPU_NODISCARD_EXT inline
+_LIBGPU_NODISCARD_EXT __device__ inline
 _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
 bool
 binary_search(_ForwardIterator __first, _ForwardIterator __last, const _Tp& __value)

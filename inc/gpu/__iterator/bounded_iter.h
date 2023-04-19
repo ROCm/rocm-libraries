@@ -39,20 +39,20 @@ struct __bounded_iter {
   //
   // Such an iterator does not point to any object and is conceptually out of bounds, so it is
   // not dereferenceable. Observing operations like comparison and assignment are valid.
-  _LIBGPU_HIDE_FROM_ABI __bounded_iter() = default;
+  __device__ _LIBGPU_HIDE_FROM_ABI __bounded_iter() = default;
 
-  _LIBGPU_HIDE_FROM_ABI __bounded_iter(__bounded_iter const&) = default;
-  _LIBGPU_HIDE_FROM_ABI __bounded_iter(__bounded_iter&&)      = default;
+  __device__ _LIBGPU_HIDE_FROM_ABI __bounded_iter(__bounded_iter const&) = default;
+  __device__ _LIBGPU_HIDE_FROM_ABI __bounded_iter(__bounded_iter&&)      = default;
 
   template <class _OtherIterator, class = std::enable_if_t< std::is_convertible<_OtherIterator, _Iterator>::value > >
-  _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR __bounded_iter(__bounded_iter<_OtherIterator> const& __other) _NOEXCEPT
+  __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR __bounded_iter(__bounded_iter<_OtherIterator> const& __other) _NOEXCEPT
       : __current_(__other.__current_),
         __begin_(__other.__begin_),
         __end_(__other.__end_) {}
 
   // Assign a bounded iterator to another one, rebinding the bounds of the iterator as well.
-  _LIBGPU_HIDE_FROM_ABI __bounded_iter& operator=(__bounded_iter const&) = default;
-  _LIBGPU_HIDE_FROM_ABI __bounded_iter& operator=(__bounded_iter&&)      = default;
+  __device__ _LIBGPU_HIDE_FROM_ABI __bounded_iter& operator=(__bounded_iter const&) = default;
+  __device__ _LIBGPU_HIDE_FROM_ABI __bounded_iter& operator=(__bounded_iter&&)      = default;
 
 private:
   // Create an iterator wrapping the given iterator, and whose bounds are described
@@ -64,7 +64,7 @@ private:
   //
   // Since it is non-standard for iterators to have this constructor, __bounded_iter must
   // be created via `std::__make_bounded_iter`.
-  _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 explicit __bounded_iter(
+  __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 explicit __bounded_iter(
       _Iterator __current, _Iterator __begin, _Iterator __end)
       : __current_(__current), __begin_(__begin), __end_(__end) {
     _LIBGPU_ASSERT(__begin <= __end, "__bounded_iter(current, begin, end): [begin, end) is not a valid range");
@@ -77,19 +77,19 @@ public:
   // Dereference and indexing operations.
   //
   // These operations check that the iterator is dereferenceable, that is within [begin, end).
-  _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 reference operator*() const _NOEXCEPT {
+  __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 reference operator*() const _NOEXCEPT {
     _LIBGPU_ASSERT(
         __in_bounds(__current_), "__bounded_iter::operator*: Attempt to dereference an out-of-range iterator");
     return *__current_;
   }
 
-  _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 pointer operator->() const _NOEXCEPT {
+  __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 pointer operator->() const _NOEXCEPT {
     _LIBGPU_ASSERT(
         __in_bounds(__current_), "__bounded_iter::operator->: Attempt to dereference an out-of-range iterator");
     return std::__to_address(__current_);
   }
 
-  _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 reference operator[](difference_type __n) const _NOEXCEPT {
+  __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 reference operator[](difference_type __n) const _NOEXCEPT {
     _LIBGPU_ASSERT(
         __in_bounds(__current_ + __n), "__bounded_iter::operator[]: Attempt to index an iterator out-of-range");
     return __current_[__n];
@@ -99,54 +99,54 @@ public:
   //
   // These operations do not check that the resulting iterator is within the bounds, since that
   // would make it impossible to create a past-the-end iterator.
-  _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 __bounded_iter& operator++() _NOEXCEPT {
+  __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 __bounded_iter& operator++() _NOEXCEPT {
     ++__current_;
     return *this;
   }
-  _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 __bounded_iter operator++(int) _NOEXCEPT {
+  __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 __bounded_iter operator++(int) _NOEXCEPT {
     __bounded_iter __tmp(*this);
     ++*this;
     return __tmp;
   }
 
-  _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 __bounded_iter& operator--() _NOEXCEPT {
+  __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 __bounded_iter& operator--() _NOEXCEPT {
     --__current_;
     return *this;
   }
-  _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 __bounded_iter operator--(int) _NOEXCEPT {
+  __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 __bounded_iter operator--(int) _NOEXCEPT {
     __bounded_iter __tmp(*this);
     --*this;
     return __tmp;
   }
 
-  _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 __bounded_iter& operator+=(difference_type __n) _NOEXCEPT {
+  __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 __bounded_iter& operator+=(difference_type __n) _NOEXCEPT {
     __current_ += __n;
     return *this;
   }
-  _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 friend __bounded_iter
+  __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 friend __bounded_iter
   operator+(__bounded_iter const& __self, difference_type __n) _NOEXCEPT {
     __bounded_iter __tmp(__self);
     __tmp += __n;
     return __tmp;
   }
-  _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 friend __bounded_iter
+  __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 friend __bounded_iter
   operator+(difference_type __n, __bounded_iter const& __self) _NOEXCEPT {
     __bounded_iter __tmp(__self);
     __tmp += __n;
     return __tmp;
   }
 
-  _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 __bounded_iter& operator-=(difference_type __n) _NOEXCEPT {
+  __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 __bounded_iter& operator-=(difference_type __n) _NOEXCEPT {
     __current_ -= __n;
     return *this;
   }
-  _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 friend __bounded_iter
+  __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 friend __bounded_iter
   operator-(__bounded_iter const& __self, difference_type __n) _NOEXCEPT {
     __bounded_iter __tmp(__self);
     __tmp -= __n;
     return __tmp;
   }
-  _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 friend difference_type
+  __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 friend difference_type
   operator-(__bounded_iter const& __x, __bounded_iter const& __y) _NOEXCEPT {
     return __x.__current_ - __y.__current_;
   }
@@ -157,34 +157,34 @@ public:
   // The valid range for each iterator is also not considered as part of the comparison,
   // i.e. two iterators pointing to the same location will be considered equal even
   // if they have different validity ranges.
-  _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR friend bool
+  __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR friend bool
   operator==(__bounded_iter const& __x, __bounded_iter const& __y) _NOEXCEPT {
     return __x.__current_ == __y.__current_;
   }
-  _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR friend bool
+  __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR friend bool
   operator!=(__bounded_iter const& __x, __bounded_iter const& __y) _NOEXCEPT {
     return __x.__current_ != __y.__current_;
   }
-  _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR friend bool
+  __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR friend bool
   operator<(__bounded_iter const& __x, __bounded_iter const& __y) _NOEXCEPT {
     return __x.__current_ < __y.__current_;
   }
-  _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR friend bool
+  __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR friend bool
   operator>(__bounded_iter const& __x, __bounded_iter const& __y) _NOEXCEPT {
     return __x.__current_ > __y.__current_;
   }
-  _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR friend bool
+  __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR friend bool
   operator<=(__bounded_iter const& __x, __bounded_iter const& __y) _NOEXCEPT {
     return __x.__current_ <= __y.__current_;
   }
-  _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR friend bool
+  __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR friend bool
   operator>=(__bounded_iter const& __x, __bounded_iter const& __y) _NOEXCEPT {
     return __x.__current_ >= __y.__current_;
   }
 
 private:
   // Return whether the given iterator is in the bounds of this __bounded_iter.
-  _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR bool __in_bounds(_Iterator const& __iter) const {
+  __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR bool __in_bounds(_Iterator const& __iter) const {
     return __iter >= __begin_ && __iter < __end_;
   }
 
@@ -195,7 +195,7 @@ private:
 };
 
 template <class _It>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR __bounded_iter<_It> __make_bounded_iter(_It __it, _It __begin, _It __end) {
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR __bounded_iter<_It> __make_bounded_iter(_It __it, _It __begin, _It __end) {
   return __bounded_iter<_It>(std::move(__it), std::move(__begin), std::move(__end));
 }
 
@@ -210,7 +210,7 @@ struct pointer_traits<__bounded_iter<_Iterator> > {
   using element_type    = typename pointer_traits<_Iterator>::element_type;
   using difference_type = typename pointer_traits<_Iterator>::difference_type;
 
-  _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR static element_type* to_address(pointer __it) _NOEXCEPT {
+  __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR static element_type* to_address(pointer __it) _NOEXCEPT {
     return std::__to_address(__it.__current_);
   }
 };

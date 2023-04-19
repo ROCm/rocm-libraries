@@ -22,7 +22,7 @@ struct __read_from_tmp_value_tag {};
 } // namespace __unique_copy_tags
 
 template <class _AlgPolicy, class _BinaryPredicate, class _InputIterator, class _Sent, class _OutputIterator>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI gpu::pair<_InputIterator, _OutputIterator>
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI gpu::pair<_InputIterator, _OutputIterator>
 __unique_copy(_InputIterator __first,
               _Sent __last,
               _OutputIterator __result,
@@ -44,7 +44,7 @@ __unique_copy(_InputIterator __first,
 }
 
 template <class _AlgPolicy, class _BinaryPredicate, class _ForwardIterator, class _Sent, class _OutputIterator>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI gpu::pair<_ForwardIterator, _OutputIterator>
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI gpu::pair<_ForwardIterator, _OutputIterator>
 __unique_copy(_ForwardIterator __first,
               _Sent __last,
               _OutputIterator __result,
@@ -66,7 +66,7 @@ __unique_copy(_ForwardIterator __first,
 }
 
 template <class _AlgPolicy, class _BinaryPredicate, class _InputIterator, class _Sent, class _InputAndOutputIterator>
-_LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI gpu::pair<_InputIterator, _InputAndOutputIterator>
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI gpu::pair<_InputIterator, _InputAndOutputIterator>
 __unique_copy(_InputIterator __first,
               _Sent __last,
               _InputAndOutputIterator __result,
@@ -83,7 +83,7 @@ __unique_copy(_InputIterator __first,
 }
 
 template <class _InputIterator, class _OutputIterator, class _BinaryPredicate>
-inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 _OutputIterator
+__device__ inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 _OutputIterator
 unique_copy(_InputIterator __first, _InputIterator __last, _OutputIterator __result, _BinaryPredicate __pred) {
   using __algo_tag = std::conditional_t<
       std::is_base_of<std::forward_iterator_tag, typename std::iterator_traits<_InputIterator>::iterator_category>::value,
@@ -100,7 +100,7 @@ unique_copy(_InputIterator __first, _InputIterator __last, _OutputIterator __res
 }
 
 template <class _InputIterator, class _OutputIterator>
-inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 _OutputIterator
+__device__ inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 _OutputIterator
 unique_copy(_InputIterator __first, _InputIterator __last, _OutputIterator __result) {
   return gpu::unique_copy(std::move(__first), std::move(__last), std::move(__result), __equal_to());
 }

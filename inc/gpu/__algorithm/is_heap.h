@@ -14,7 +14,7 @@
 namespace gpu {
 
 template <class _RandomAccessIterator, class _Compare>
-_LIBGPU_NODISCARD_EXT inline
+_LIBGPU_NODISCARD_EXT __device__ inline
 _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
 bool
 is_heap(_RandomAccessIterator __first, _RandomAccessIterator __last, _Compare __comp)
@@ -23,7 +23,7 @@ is_heap(_RandomAccessIterator __first, _RandomAccessIterator __last, _Compare __
 }
 
 template<class _RandomAccessIterator>
-_LIBGPU_NODISCARD_EXT inline
+_LIBGPU_NODISCARD_EXT __device__ inline
 _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
 bool
 is_heap(_RandomAccessIterator __first, _RandomAccessIterator __last)

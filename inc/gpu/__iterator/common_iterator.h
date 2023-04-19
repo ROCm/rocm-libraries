@@ -134,7 +134,7 @@ public:
 
   template<class _I2, sentinel_for<_Iter> _S2>
     requires sentinel_for<_Sent, _I2>
-  _LIBGPU_HIDE_FROM_ABI
+  __device__ _LIBGPU_HIDE_FROM_ABI
   friend constexpr bool operator==(const common_iterator& __x, const common_iterator<_I2, _S2>& __y) {
     _LIBGPU_ASSERT(!__x.__hold_.valueless_by_exception(), "Attempted to compare a valueless common_iterator");
     _LIBGPU_ASSERT(!__y.__hold_.valueless_by_exception(), "Attempted to compare a valueless common_iterator");
@@ -153,7 +153,7 @@ public:
 
   template<class _I2, sentinel_for<_Iter> _S2>
     requires sentinel_for<_Sent, _I2> && equality_comparable_with<_Iter, _I2>
-  _LIBGPU_HIDE_FROM_ABI
+  __device__ _LIBGPU_HIDE_FROM_ABI
   friend constexpr bool operator==(const common_iterator& __x, const common_iterator<_I2, _S2>& __y) {
     _LIBGPU_ASSERT(!__x.__hold_.valueless_by_exception(), "Attempted to compare a valueless common_iterator");
     _LIBGPU_ASSERT(!__y.__hold_.valueless_by_exception(), "Attempted to compare a valueless common_iterator");
@@ -175,7 +175,7 @@ public:
 
   template<sized_sentinel_for<_Iter> _I2, sized_sentinel_for<_Iter> _S2>
     requires sized_sentinel_for<_Sent, _I2>
-  _LIBGPU_HIDE_FROM_ABI
+  __device__ _LIBGPU_HIDE_FROM_ABI
   friend constexpr iter_difference_t<_I2> operator-(const common_iterator& __x, const common_iterator<_I2, _S2>& __y) {
     _LIBGPU_ASSERT(!__x.__hold_.valueless_by_exception(), "Attempted to subtract from a valueless common_iterator");
     _LIBGPU_ASSERT(!__y.__hold_.valueless_by_exception(), "Attempted to subtract a valueless common_iterator");
@@ -195,7 +195,7 @@ public:
     return std::__unchecked_get<_Sent>(__x.__hold_) - std::__unchecked_get<_I2>(__y.__hold_);
   }
 
-  _LIBGPU_HIDE_FROM_ABI friend constexpr iter_rvalue_reference_t<_Iter> iter_move(const common_iterator& __i)
+  __device__ _LIBGPU_HIDE_FROM_ABI friend constexpr iter_rvalue_reference_t<_Iter> iter_move(const common_iterator& __i)
     noexcept(noexcept(ranges::iter_move(std::declval<const _Iter&>())))
       requires input_iterator<_Iter>
   {
@@ -204,7 +204,7 @@ public:
   }
 
   template<indirectly_swappable<_Iter> _I2, class _S2>
-  _LIBGPU_HIDE_FROM_ABI friend constexpr void iter_swap(const common_iterator& __x, const common_iterator<_I2, _S2>& __y)
+  __device__ _LIBGPU_HIDE_FROM_ABI friend constexpr void iter_swap(const common_iterator& __x, const common_iterator<_I2, _S2>& __y)
       noexcept(noexcept(ranges::iter_swap(std::declval<const _Iter&>(), std::declval<const _I2&>())))
   {
     _LIBGPU_ASSERT(std::holds_alternative<_Iter>(__x.__hold_), "Attempted to iter_swap a non-dereferenceable common_iterator");

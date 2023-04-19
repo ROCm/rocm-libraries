@@ -15,7 +15,7 @@
 namespace gpu {
 
 template <class _Tp, std::size_t _Np>
-_LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX14
+__device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX14
 _Tp*
 begin(_Tp (&__array)[_Np])
 {
@@ -23,7 +23,7 @@ begin(_Tp (&__array)[_Np])
 }
 
 template <class _Tp, std::size_t _Np>
-_LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX14
+__device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX14
 _Tp*
 end(_Tp (&__array)[_Np])
 {
@@ -33,7 +33,7 @@ end(_Tp (&__array)[_Np])
 #if !defined(_LIBGPU_CXX03_LANG)
 
 template <class _Cp>
-_LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+__device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
 auto
 begin(_Cp& __c) -> decltype(__c.begin())
 {
@@ -41,7 +41,7 @@ begin(_Cp& __c) -> decltype(__c.begin())
 }
 
 template <class _Cp>
-_LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+__device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
 auto
 begin(const _Cp& __c) -> decltype(__c.begin())
 {
@@ -49,7 +49,7 @@ begin(const _Cp& __c) -> decltype(__c.begin())
 }
 
 template <class _Cp>
-_LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+__device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
 auto
 end(_Cp& __c) -> decltype(__c.end())
 {
@@ -57,7 +57,7 @@ end(_Cp& __c) -> decltype(__c.end())
 }
 
 template <class _Cp>
-_LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+__device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
 auto
 end(const _Cp& __c) -> decltype(__c.end())
 {
@@ -67,14 +67,14 @@ end(const _Cp& __c) -> decltype(__c.end())
 #if _LIBGPU_STD_VER >= 14
 
 template <class _Cp>
-_LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX14
+__device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX14
 auto cbegin(const _Cp& __c) -> decltype(std::begin(__c))
 {
     return std::begin(__c);
 }
 
 template <class _Cp>
-_LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX14
+__device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX14
 auto cend(const _Cp& __c) -> decltype(std::end(__c))
 {
     return std::end(__c);
@@ -86,7 +86,7 @@ auto cend(const _Cp& __c) -> decltype(std::end(__c))
 #else  // defined(_LIBGPU_CXX03_LANG)
 
 template <class _Cp>
-_LIBGPU_INLINE_VISIBILITY
+__device__ _LIBGPU_INLINE_VISIBILITY
 typename _Cp::iterator
 begin(_Cp& __c)
 {
@@ -94,7 +94,7 @@ begin(_Cp& __c)
 }
 
 template <class _Cp>
-_LIBGPU_INLINE_VISIBILITY
+__device__ _LIBGPU_INLINE_VISIBILITY
 typename _Cp::const_iterator
 begin(const _Cp& __c)
 {
@@ -102,7 +102,7 @@ begin(const _Cp& __c)
 }
 
 template <class _Cp>
-_LIBGPU_INLINE_VISIBILITY
+__device__ _LIBGPU_INLINE_VISIBILITY
 typename _Cp::iterator
 end(_Cp& __c)
 {
@@ -110,7 +110,7 @@ end(_Cp& __c)
 }
 
 template <class _Cp>
-_LIBGPU_INLINE_VISIBILITY
+__device__ _LIBGPU_INLINE_VISIBILITY
 typename _Cp::const_iterator
 end(const _Cp& __c)
 {

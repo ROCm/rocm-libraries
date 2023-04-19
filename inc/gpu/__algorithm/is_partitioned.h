@@ -14,7 +14,7 @@
 namespace gpu {
 
 template <class _InputIterator, class _Predicate>
-_LIBGPU_NODISCARD_EXT _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 bool
+_LIBGPU_NODISCARD_EXT __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 bool
 is_partitioned(_InputIterator __first, _InputIterator __last, _Predicate __pred)
 {
     for (; __first != __last; ++__first)

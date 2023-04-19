@@ -16,7 +16,7 @@ namespace gpu {
 template <class _AlgPolicy, class _Compare,
           class _InputIterator, class _Sentinel1, class _RandomAccessIterator, class _Sentinel2,
           class _Proj1, class _Proj2>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 gpu::pair<_InputIterator, _RandomAccessIterator>
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 gpu::pair<_InputIterator, _RandomAccessIterator>
 __partial_sort_copy(_InputIterator __first, _Sentinel1 __last,
                     _RandomAccessIterator __result_first, _Sentinel2 __result_last,
                     _Compare&& __comp, _Proj1&& __proj1, _Proj2&& __proj2)
@@ -43,7 +43,7 @@ __partial_sort_copy(_InputIterator __first, _Sentinel1 __last,
 }
 
 template <class _InputIterator, class _RandomAccessIterator, class _Compare>
-inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
 _RandomAccessIterator
 partial_sort_copy(_InputIterator __first, _InputIterator __last,
                   _RandomAccessIterator __result_first, _RandomAccessIterator __result_last, _Compare __comp)
@@ -57,7 +57,7 @@ partial_sort_copy(_InputIterator __first, _InputIterator __last,
 }
 
 template <class _InputIterator, class _RandomAccessIterator>
-inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
 _RandomAccessIterator
 partial_sort_copy(_InputIterator __first, _InputIterator __last,
                   _RandomAccessIterator __result_first, _RandomAccessIterator __result_last)

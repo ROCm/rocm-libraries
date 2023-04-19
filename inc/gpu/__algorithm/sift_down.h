@@ -14,7 +14,7 @@
 namespace gpu {
 
 template <class _AlgPolicy, class _Compare, class _RandomAccessIterator>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 void
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 void
 __sift_down(_RandomAccessIterator __first, _Compare&& __comp,
             typename std::iterator_traits<_RandomAccessIterator>::difference_type __len,
             _RandomAccessIterator __start)
@@ -70,7 +70,7 @@ __sift_down(_RandomAccessIterator __first, _Compare&& __comp,
 }
 
 template <class _AlgPolicy, class _Compare, class _RandomAccessIterator>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 _RandomAccessIterator
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 _RandomAccessIterator
 __floyd_sift_down(_RandomAccessIterator __first, _Compare&& __comp,
                   typename std::iterator_traits<_RandomAccessIterator>::difference_type __len)
 {

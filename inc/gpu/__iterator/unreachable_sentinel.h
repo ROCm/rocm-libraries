@@ -18,7 +18,7 @@ namespace gpu {
 
 struct unreachable_sentinel_t {
   template<weakly_incrementable _Iter>
-  _LIBGPU_HIDE_FROM_ABI
+  __device__ _LIBGPU_HIDE_FROM_ABI
   friend constexpr bool operator==(unreachable_sentinel_t, const _Iter&) noexcept {
     return false;
   }

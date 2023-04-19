@@ -36,42 +36,42 @@ private:
     istream_type* __in_stream_;
     _Tp __value_;
 public:
-    _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR istream_iterator() : __in_stream_(nullptr), __value_() {}
+    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR istream_iterator() : __in_stream_(nullptr), __value_() {}
 #if _LIBGPU_STD_VER >= 20
-    _LIBGPU_HIDE_FROM_ABI constexpr istream_iterator(default_sentinel_t) : istream_iterator() {}
+    __device__ _LIBGPU_HIDE_FROM_ABI constexpr istream_iterator(default_sentinel_t) : istream_iterator() {}
 #endif // _LIBGPU_STD_VER >= 20
-    _LIBGPU_INLINE_VISIBILITY istream_iterator(istream_type& __s) : __in_stream_(std::addressof(__s))
+    __device__ _LIBGPU_INLINE_VISIBILITY istream_iterator(istream_type& __s) : __in_stream_(std::addressof(__s))
         {
             if (!(*__in_stream_ >> __value_))
                 __in_stream_ = nullptr;
         }
 
-    _LIBGPU_INLINE_VISIBILITY const _Tp& operator*() const {return __value_;}
-    _LIBGPU_INLINE_VISIBILITY const _Tp* operator->() const {return std::addressof((operator*()));}
-    _LIBGPU_INLINE_VISIBILITY istream_iterator& operator++()
+    __device__ _LIBGPU_INLINE_VISIBILITY const _Tp& operator*() const {return __value_;}
+    __device__ _LIBGPU_INLINE_VISIBILITY const _Tp* operator->() const {return std::addressof((operator*()));}
+    __device__ _LIBGPU_INLINE_VISIBILITY istream_iterator& operator++()
         {
             if (!(*__in_stream_ >> __value_))
                 __in_stream_ = nullptr;
             return *this;
         }
-    _LIBGPU_INLINE_VISIBILITY istream_iterator  operator++(int)
+    __device__ _LIBGPU_INLINE_VISIBILITY istream_iterator  operator++(int)
         {istream_iterator __t(*this); ++(*this); return __t;}
 
     template <class _Up, class _CharU, class _TraitsU, class _DistanceU>
-    friend _LIBGPU_INLINE_VISIBILITY
+    __device__ friend _LIBGPU_INLINE_VISIBILITY
     bool
     operator==(const istream_iterator<_Up, _CharU, _TraitsU, _DistanceU>& __x,
                const istream_iterator<_Up, _CharU, _TraitsU, _DistanceU>& __y);
 
 #if _LIBGPU_STD_VER >= 20
-    friend _LIBGPU_HIDE_FROM_ABI bool operator==(const istream_iterator& __i, default_sentinel_t) {
+    __device__ friend _LIBGPU_HIDE_FROM_ABI bool operator==(const istream_iterator& __i, default_sentinel_t) {
       return __i.__in_stream_ == nullptr;
     }
 #endif // _LIBGPU_STD_VER >= 20
 };
 
 template <class _Tp, class _CharT, class _Traits, class _Distance>
-inline _LIBGPU_INLINE_VISIBILITY
+__device__ inline _LIBGPU_INLINE_VISIBILITY
 bool
 operator==(const istream_iterator<_Tp, _CharT, _Traits, _Distance>& __x,
            const istream_iterator<_Tp, _CharT, _Traits, _Distance>& __y)
@@ -81,7 +81,7 @@ operator==(const istream_iterator<_Tp, _CharT, _Traits, _Distance>& __x,
 
 #if _LIBGPU_STD_VER <= 17
 template <class _Tp, class _CharT, class _Traits, class _Distance>
-inline _LIBGPU_INLINE_VISIBILITY
+__device__ inline _LIBGPU_INLINE_VISIBILITY
 bool
 operator!=(const istream_iterator<_Tp, _CharT, _Traits, _Distance>& __x,
            const istream_iterator<_Tp, _CharT, _Traits, _Distance>& __y)

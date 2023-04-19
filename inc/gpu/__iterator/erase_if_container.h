@@ -15,7 +15,7 @@
 namespace gpu {
 
 template <class _Container, class _Predicate>
-_LIBGPU_HIDE_FROM_ABI
+__device__ _LIBGPU_HIDE_FROM_ABI
 typename _Container::size_type
 __libgpu_erase_if_container(_Container& __c, _Predicate& __pred) {
   typename _Container::size_type __old_size = __c.size();

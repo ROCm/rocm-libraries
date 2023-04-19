@@ -30,15 +30,15 @@ private:
 public:
   using result_type = std::invoke_result_t<_Gen&>;
 
-  _LIBGPU_HIDE_FROM_ABI
+  __device__ _LIBGPU_HIDE_FROM_ABI
   static constexpr auto min() { return std::remove_cv_t<std::remove_reference_t<_Gen>>::min(); }
-  _LIBGPU_HIDE_FROM_ABI
+  __device__ _LIBGPU_HIDE_FROM_ABI
   static constexpr auto max() { return std::remove_cv_t<std::remove_reference_t<_Gen>>::max(); }
 
-  _LIBGPU_HIDE_FROM_ABI
+  __device__ _LIBGPU_HIDE_FROM_ABI
   constexpr explicit _ClassicGenAdaptor(_Gen& __g) : __gen_(__g) {}
 
-  _LIBGPU_HIDE_FROM_ABI
+  __device__ _LIBGPU_HIDE_FROM_ABI
   constexpr auto operator()() const { return __gen_(); }
 };
 

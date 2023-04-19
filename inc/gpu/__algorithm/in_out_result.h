@@ -25,14 +25,14 @@ struct in_out_result {
 
   template <class _InIter2, class _OutIter2>
     requires std::convertible_to<const _InIter1&, _InIter2> && std::convertible_to<const _OutIter1&, _OutIter2>
-  _LIBGPU_HIDE_FROM_ABI
+  __device__ _LIBGPU_HIDE_FROM_ABI
   constexpr operator in_out_result<_InIter2, _OutIter2>() const & {
     return {in, out};
   }
 
   template <class _InIter2, class _OutIter2>
     requires std::convertible_to<_InIter1, _InIter2> && std::convertible_to<_OutIter1, _OutIter2>
-  _LIBGPU_HIDE_FROM_ABI
+  __device__ _LIBGPU_HIDE_FROM_ABI
   constexpr operator in_out_result<_InIter2, _OutIter2>() && {
     return {std::move(in), std::move(out)};
   }

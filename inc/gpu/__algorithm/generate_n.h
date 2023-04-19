@@ -14,7 +14,7 @@
 namespace gpu {
 
 template <class _OutputIterator, class _Size, class _Generator>
-inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
 _OutputIterator
 generate_n(_OutputIterator __first, _Size __orig_n, _Generator __gen)
 {

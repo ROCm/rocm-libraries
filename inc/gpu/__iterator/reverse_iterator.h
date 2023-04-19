@@ -51,16 +51,16 @@ public:
 #endif
 
 #ifndef _LIBGPU_ABI_NO_ITERATOR_BASES
-    _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
     reverse_iterator() : current() {}
 
-    _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
     explicit reverse_iterator(_Iter __x) : current(__x) {}
 
     template <class _Up, class = typename std::enable_if<
         !std::is_same<_Up, _Iter>::value && std::is_convertible<_Up const&, _Iter>::value
     >::type >
-    _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
     reverse_iterator(const reverse_iterator<_Up>& __u)
         : current(__u.base())
     { }
@@ -70,22 +70,22 @@ public:
         std::is_convertible<_Up const&, _Iter>::value &&
         std::is_assignable<_Iter&, _Up const&>::value
     >::type >
-    _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
     reverse_iterator& operator=(const reverse_iterator<_Up>& __u) {
         current = __u.base();
         return *this;
     }
 #else
-    _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
     reverse_iterator() : current() {}
 
-    _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
     explicit reverse_iterator(_Iter __x) : current(__x) {}
 
     template <class _Up, class = typename std::enable_if<
         !std::is_same<_Up, _Iter>::value && std::is_convertible<_Up const&, _Iter>::value
     >::type >
-    _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
     reverse_iterator(const reverse_iterator<_Up>& __u)
         : current(__u.base())
     { }
@@ -95,19 +95,19 @@ public:
         std::is_convertible<_Up const&, _Iter>::value &&
         std::is_assignable<_Iter&, _Up const&>::value
     >::type >
-    _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
     reverse_iterator& operator=(const reverse_iterator<_Up>& __u) {
         current = __u.base();
         return *this;
     }
 #endif
-    _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
     _Iter base() const {return current;}
-    _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
     reference operator*() const {_Iter __tmp = current; return *--__tmp;}
 
 #if _LIBGPU_STD_VER >= 20
-    _LIBGPU_INLINE_VISIBILITY
+    __device__ _LIBGPU_INLINE_VISIBILITY
     constexpr pointer operator->() const
       requires std::is_pointer_v<_Iter> || requires(const _Iter __i) { __i.operator->(); }
     {
@@ -118,33 +118,33 @@ public:
       }
     }
 #else
-    _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
     pointer operator->() const {
       return std::addressof(operator*());
     }
 #endif // _LIBGPU_STD_VER >= 20
 
-    _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
     reverse_iterator& operator++() {--current; return *this;}
-    _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
     reverse_iterator operator++(int) {reverse_iterator __tmp(*this); --current; return __tmp;}
-    _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
     reverse_iterator& operator--() {++current; return *this;}
-    _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
     reverse_iterator operator--(int) {reverse_iterator __tmp(*this); ++current; return __tmp;}
-    _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
     reverse_iterator operator+(difference_type __n) const {return reverse_iterator(current - __n);}
-    _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
     reverse_iterator& operator+=(difference_type __n) {current -= __n; return *this;}
-    _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
     reverse_iterator operator-(difference_type __n) const {return reverse_iterator(current + __n);}
-    _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
     reverse_iterator& operator-=(difference_type __n) {current += __n; return *this;}
-    _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
     reference operator[](difference_type __n) const {return *(*this + __n);}
 
 #if _LIBGPU_STD_VER >= 20
-    _LIBGPU_HIDE_FROM_ABI friend constexpr
+    __device__ _LIBGPU_HIDE_FROM_ABI friend constexpr
     iter_rvalue_reference_t<_Iter> iter_move(const reverse_iterator& __i)
       noexcept(std::is_nothrow_copy_constructible_v<_Iter> &&
           noexcept(ranges::iter_move(--std::declval<_Iter&>()))) {
@@ -153,7 +153,7 @@ public:
     }
 
     template <indirectly_swappable<_Iter> _Iter2>
-    _LIBGPU_HIDE_FROM_ABI friend constexpr
+    __device__ _LIBGPU_HIDE_FROM_ABI friend constexpr
     void iter_swap(const reverse_iterator& __x, const reverse_iterator<_Iter2>& __y)
       noexcept(std::is_nothrow_copy_constructible_v<_Iter> &&
           std::is_nothrow_copy_constructible_v<_Iter2> &&
@@ -166,7 +166,7 @@ public:
 };
 
 template <class _Iter1, class _Iter2>
-inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
 bool
 operator==(const reverse_iterator<_Iter1>& __x, const reverse_iterator<_Iter2>& __y)
 #if _LIBGPU_STD_VER >= 20
@@ -179,7 +179,7 @@ operator==(const reverse_iterator<_Iter1>& __x, const reverse_iterator<_Iter2>& 
 }
 
 template <class _Iter1, class _Iter2>
-inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
 bool
 operator<(const reverse_iterator<_Iter1>& __x, const reverse_iterator<_Iter2>& __y)
 #if _LIBGPU_STD_VER >= 20
@@ -192,7 +192,7 @@ operator<(const reverse_iterator<_Iter1>& __x, const reverse_iterator<_Iter2>& _
 }
 
 template <class _Iter1, class _Iter2>
-inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
 bool
 operator!=(const reverse_iterator<_Iter1>& __x, const reverse_iterator<_Iter2>& __y)
 #if _LIBGPU_STD_VER >= 20
@@ -205,7 +205,7 @@ operator!=(const reverse_iterator<_Iter1>& __x, const reverse_iterator<_Iter2>& 
 }
 
 template <class _Iter1, class _Iter2>
-inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
 bool
 operator>(const reverse_iterator<_Iter1>& __x, const reverse_iterator<_Iter2>& __y)
 #if _LIBGPU_STD_VER >= 20
@@ -218,7 +218,7 @@ operator>(const reverse_iterator<_Iter1>& __x, const reverse_iterator<_Iter2>& _
 }
 
 template <class _Iter1, class _Iter2>
-inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
 bool
 operator>=(const reverse_iterator<_Iter1>& __x, const reverse_iterator<_Iter2>& __y)
 #if _LIBGPU_STD_VER >= 20
@@ -231,7 +231,7 @@ operator>=(const reverse_iterator<_Iter1>& __x, const reverse_iterator<_Iter2>& 
 }
 
 template <class _Iter1, class _Iter2>
-inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
 bool
 operator<=(const reverse_iterator<_Iter1>& __x, const reverse_iterator<_Iter2>& __y)
 #if _LIBGPU_STD_VER >= 20
@@ -245,7 +245,7 @@ operator<=(const reverse_iterator<_Iter1>& __x, const reverse_iterator<_Iter2>& 
 
 #if _LIBGPU_STD_VER >= 20
 template <class _Iter1, three_way_comparable_with<_Iter1> _Iter2>
-_LIBGPU_HIDE_FROM_ABI constexpr
+__device__ _LIBGPU_HIDE_FROM_ABI constexpr
 compare_three_way_result_t<_Iter1, _Iter2>
 operator<=>(const reverse_iterator<_Iter1>& __x, const reverse_iterator<_Iter2>& __y)
 {
@@ -255,7 +255,7 @@ operator<=>(const reverse_iterator<_Iter1>& __x, const reverse_iterator<_Iter2>&
 
 #ifndef _LIBGPU_CXX03_LANG
 template <class _Iter1, class _Iter2>
-inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
 auto
 operator-(const reverse_iterator<_Iter1>& __x, const reverse_iterator<_Iter2>& __y)
 -> decltype(__y.base() - __x.base())
@@ -264,7 +264,7 @@ operator-(const reverse_iterator<_Iter1>& __x, const reverse_iterator<_Iter2>& _
 }
 #else
 template <class _Iter1, class _Iter2>
-inline _LIBGPU_INLINE_VISIBILITY
+__device__ inline _LIBGPU_INLINE_VISIBILITY
 typename reverse_iterator<_Iter1>::difference_type
 operator-(const reverse_iterator<_Iter1>& __x, const reverse_iterator<_Iter2>& __y)
 {
@@ -273,7 +273,7 @@ operator-(const reverse_iterator<_Iter1>& __x, const reverse_iterator<_Iter2>& _
 #endif
 
 template <class _Iter>
-inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
 reverse_iterator<_Iter>
 operator+(typename reverse_iterator<_Iter>::difference_type __n, const reverse_iterator<_Iter>& __x)
 {
@@ -288,7 +288,7 @@ inline constexpr bool disable_sized_sentinel_for<reverse_iterator<_Iter1>, rever
 
 #if _LIBGPU_STD_VER >= 14
 template <class _Iter>
-inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
 reverse_iterator<_Iter> make_reverse_iterator(_Iter __i)
 {
     return reverse_iterator<_Iter>(__i);
@@ -339,17 +339,17 @@ public:
   using difference_type = iter_difference_t<_Iter>;
   using reference = iter_reference_t<_Iter>;
 
-  _LIBGPU_HIDE_FROM_ABI constexpr __unconstrained_reverse_iterator() = default;
-  _LIBGPU_HIDE_FROM_ABI constexpr __unconstrained_reverse_iterator(const __unconstrained_reverse_iterator&) = default;
-  _LIBGPU_HIDE_FROM_ABI constexpr explicit __unconstrained_reverse_iterator(_Iter __iter) : __iter_(__iter) {}
+  __device__ _LIBGPU_HIDE_FROM_ABI constexpr __unconstrained_reverse_iterator() = default;
+  __device__ _LIBGPU_HIDE_FROM_ABI constexpr __unconstrained_reverse_iterator(const __unconstrained_reverse_iterator&) = default;
+  __device__ _LIBGPU_HIDE_FROM_ABI constexpr explicit __unconstrained_reverse_iterator(_Iter __iter) : __iter_(__iter) {}
 
-  _LIBGPU_HIDE_FROM_ABI constexpr _Iter base() const { return __iter_; }
-  _LIBGPU_HIDE_FROM_ABI constexpr reference operator*() const {
+  __device__ _LIBGPU_HIDE_FROM_ABI constexpr _Iter base() const { return __iter_; }
+  __device__ _LIBGPU_HIDE_FROM_ABI constexpr reference operator*() const {
     auto __tmp = __iter_;
     return *--__tmp;
   }
 
-  _LIBGPU_HIDE_FROM_ABI constexpr pointer operator->() const {
+  __device__ _LIBGPU_HIDE_FROM_ABI constexpr pointer operator->() const {
     if constexpr (std::is_pointer_v<_Iter>) {
       return std::prev(__iter_);
     } else {
@@ -357,7 +357,7 @@ public:
     }
   }
 
-  _LIBGPU_HIDE_FROM_ABI friend constexpr
+  __device__ _LIBGPU_HIDE_FROM_ABI friend constexpr
   iter_rvalue_reference_t<_Iter> iter_move(const __unconstrained_reverse_iterator& __i)
     noexcept(std::is_nothrow_copy_constructible_v<_Iter> &&
         noexcept(ranges::iter_move(--std::declval<_Iter&>()))) {
@@ -365,80 +365,80 @@ public:
     return ranges::iter_move(--__tmp);
   }
 
-  _LIBGPU_HIDE_FROM_ABI constexpr __unconstrained_reverse_iterator& operator++() {
+  __device__ _LIBGPU_HIDE_FROM_ABI constexpr __unconstrained_reverse_iterator& operator++() {
     --__iter_;
     return *this;
   }
 
-  _LIBGPU_HIDE_FROM_ABI constexpr __unconstrained_reverse_iterator operator++(int) {
+  __device__ _LIBGPU_HIDE_FROM_ABI constexpr __unconstrained_reverse_iterator operator++(int) {
     auto __tmp = *this;
     --__iter_;
     return __tmp;
   }
 
-  _LIBGPU_HIDE_FROM_ABI constexpr __unconstrained_reverse_iterator& operator--() {
+  __device__ _LIBGPU_HIDE_FROM_ABI constexpr __unconstrained_reverse_iterator& operator--() {
     ++__iter_;
     return *this;
   }
 
-  _LIBGPU_HIDE_FROM_ABI constexpr __unconstrained_reverse_iterator operator--(int) {
+  __device__ _LIBGPU_HIDE_FROM_ABI constexpr __unconstrained_reverse_iterator operator--(int) {
     auto __tmp = *this;
     ++__iter_;
     return __tmp;
   }
 
-  _LIBGPU_HIDE_FROM_ABI constexpr __unconstrained_reverse_iterator& operator+=(difference_type __n) {
+  __device__ _LIBGPU_HIDE_FROM_ABI constexpr __unconstrained_reverse_iterator& operator+=(difference_type __n) {
     __iter_ -= __n;
     return *this;
   }
 
-  _LIBGPU_HIDE_FROM_ABI constexpr __unconstrained_reverse_iterator& operator-=(difference_type __n) {
+  __device__ _LIBGPU_HIDE_FROM_ABI constexpr __unconstrained_reverse_iterator& operator-=(difference_type __n) {
     __iter_ += __n;
     return *this;
   }
 
-  _LIBGPU_HIDE_FROM_ABI constexpr __unconstrained_reverse_iterator operator+(difference_type __n) const {
+  __device__ _LIBGPU_HIDE_FROM_ABI constexpr __unconstrained_reverse_iterator operator+(difference_type __n) const {
     return __unconstrained_reverse_iterator(__iter_ - __n);
   }
 
-  _LIBGPU_HIDE_FROM_ABI constexpr __unconstrained_reverse_iterator operator-(difference_type __n) const {
+  __device__ _LIBGPU_HIDE_FROM_ABI constexpr __unconstrained_reverse_iterator operator-(difference_type __n) const {
     return __unconstrained_reverse_iterator(__iter_ + __n);
   }
 
-  _LIBGPU_HIDE_FROM_ABI constexpr difference_type operator-(const __unconstrained_reverse_iterator& __other) const {
+  __device__ _LIBGPU_HIDE_FROM_ABI constexpr difference_type operator-(const __unconstrained_reverse_iterator& __other) const {
     return __other.__iter_ - __iter_;
   }
 
-  _LIBGPU_HIDE_FROM_ABI constexpr auto operator[](difference_type __n) const { return *(*this + __n); }
+  __device__ _LIBGPU_HIDE_FROM_ABI constexpr auto operator[](difference_type __n) const { return *(*this + __n); }
 
   // Deliberately unconstrained unlike the comparison functions in `reverse_iterator` -- see the class comment for the
   // rationale.
-  _LIBGPU_HIDE_FROM_ABI friend constexpr bool
+  __device__ _LIBGPU_HIDE_FROM_ABI friend constexpr bool
   operator==(const __unconstrained_reverse_iterator& __lhs, const __unconstrained_reverse_iterator& __rhs) {
     return __lhs.base() == __rhs.base();
   }
 
-  _LIBGPU_HIDE_FROM_ABI friend constexpr bool
+  __device__ _LIBGPU_HIDE_FROM_ABI friend constexpr bool
   operator!=(const __unconstrained_reverse_iterator& __lhs, const __unconstrained_reverse_iterator& __rhs) {
     return __lhs.base() != __rhs.base();
   }
 
-  _LIBGPU_HIDE_FROM_ABI friend constexpr bool
+  __device__ _LIBGPU_HIDE_FROM_ABI friend constexpr bool
   operator<(const __unconstrained_reverse_iterator& __lhs, const __unconstrained_reverse_iterator& __rhs) {
     return __lhs.base() > __rhs.base();
   }
 
-  _LIBGPU_HIDE_FROM_ABI friend constexpr bool
+  __device__ _LIBGPU_HIDE_FROM_ABI friend constexpr bool
   operator>(const __unconstrained_reverse_iterator& __lhs, const __unconstrained_reverse_iterator& __rhs) {
     return __lhs.base() < __rhs.base();
   }
 
-  _LIBGPU_HIDE_FROM_ABI friend constexpr bool
+  __device__ _LIBGPU_HIDE_FROM_ABI friend constexpr bool
   operator<=(const __unconstrained_reverse_iterator& __lhs, const __unconstrained_reverse_iterator& __rhs) {
     return __lhs.base() >= __rhs.base();
   }
 
-  _LIBGPU_HIDE_FROM_ABI friend constexpr bool
+  __device__ _LIBGPU_HIDE_FROM_ABI friend constexpr bool
   operator>=(const __unconstrained_reverse_iterator& __lhs, const __unconstrained_reverse_iterator& __rhs) {
     return __lhs.base() <= __rhs.base();
   }
@@ -451,20 +451,20 @@ struct __unwrap_reverse_iter_impl {
   using _UnwrappedIter = decltype(__unwrap_iter_impl<_Iter>::__unwrap(std::declval<_Iter>()));
   using _ReverseWrapper = _RevIter1<_RevIter2<_Iter> >;
 
-  static _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR _ReverseWrapper
+  __device__ static _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR _ReverseWrapper
   __rewrap(_ReverseWrapper __orig_iter, _UnwrappedIter __unwrapped_iter) {
     return _ReverseWrapper(
         _RevIter2<_Iter>(__unwrap_iter_impl<_Iter>::__rewrap(__orig_iter.base().base(), __unwrapped_iter)));
   }
 
-  static _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR _UnwrappedIter __unwrap(_ReverseWrapper __i) _NOEXCEPT {
+  __device__ static _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR _UnwrappedIter __unwrap(_ReverseWrapper __i) _NOEXCEPT {
     return __unwrap_iter_impl<_Iter>::__unwrap(__i.base().base());
   }
 };
 
 #if _LIBGPU_STD_VER >= 20
 template <ranges::bidirectional_range _Range>
-_LIBGPU_HIDE_FROM_ABI constexpr ranges::
+__device__ _LIBGPU_HIDE_FROM_ABI constexpr ranges::
     subrange<reverse_iterator<ranges::iterator_t<_Range>>, reverse_iterator<ranges::iterator_t<_Range>>>
     __reverse_range(_Range&& __range) {
   auto __first = ranges::begin(__range);

@@ -14,7 +14,7 @@
 namespace gpu {
 
 template <class _AlgPolicy, class _BidirectionalIterator>
-inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
 void
 __reverse_impl(_BidirectionalIterator __first, _BidirectionalIterator __last, std::bidirectional_iterator_tag)
 {
@@ -28,7 +28,7 @@ __reverse_impl(_BidirectionalIterator __first, _BidirectionalIterator __last, st
 }
 
 template <class _AlgPolicy, class _RandomAccessIterator>
-inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
 void
 __reverse_impl(_RandomAccessIterator __first, _RandomAccessIterator __last, std::random_access_iterator_tag)
 {
@@ -38,14 +38,14 @@ __reverse_impl(_RandomAccessIterator __first, _RandomAccessIterator __last, std:
 }
 
 template <class _AlgPolicy, class _BidirectionalIterator, class _Sentinel>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
 void __reverse(_BidirectionalIterator __first, _Sentinel __last) {
   using _IterCategory = typename _IterOps<_AlgPolicy>::template __iterator_category<_BidirectionalIterator>;
   std::__reverse_impl<_AlgPolicy>(std::move(__first), std::move(__last), _IterCategory());
 }
 
 template <class _BidirectionalIterator>
-inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
+__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
 void
 reverse(_BidirectionalIterator __first, _BidirectionalIterator __last)
 {

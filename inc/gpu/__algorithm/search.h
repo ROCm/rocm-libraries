@@ -20,7 +20,7 @@ template <class _AlgPolicy,
           class _Pred,
           class _Proj1,
           class _Proj2>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14
 gpu::pair<_Iter1, _Iter1> __search_forward_impl(_Iter1 __first1, _Sent1 __last1,
                                            _Iter2 __first2, _Sent2 __last2,
                                            _Pred& __pred,
@@ -67,7 +67,7 @@ template <class _AlgPolicy,
           class _Proj2,
           class _DiffT1,
           class _DiffT2>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14
 gpu::pair<_Iter1, _Iter1> __search_random_access_impl(_Iter1 __first1, _Sent1 __last1,
                                                  _Iter2 __first2, _Sent2 __last2,
                                                  _Pred& __pred,
@@ -107,7 +107,7 @@ template <class _Iter1, class _Sent1,
           class _Pred,
           class _Proj1,
           class _Proj2>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14
 gpu::pair<_Iter1, _Iter1> __search_impl(_Iter1 __first1, _Sent1 __last1,
                                    _Iter2 __first2, _Sent2 __last2,
                                    _Pred& __pred,
@@ -139,7 +139,7 @@ template <class _Iter1, class _Sent1,
           class _Pred,
           class _Proj1,
           class _Proj2>
-_LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14
+__device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14
 gpu::pair<_Iter1, _Iter1> __search_impl(_Iter1 __first1, _Sent1 __last1,
                                    _Iter2 __first2, _Sent2 __last2,
                                    _Pred& __pred,
@@ -157,7 +157,7 @@ gpu::pair<_Iter1, _Iter1> __search_impl(_Iter1 __first1, _Sent1 __last1,
 }
 
 template <class _ForwardIterator1, class _ForwardIterator2, class _BinaryPredicate>
-_LIBGPU_NODISCARD_EXT inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
+_LIBGPU_NODISCARD_EXT __device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
 _ForwardIterator1 search(_ForwardIterator1 __first1, _ForwardIterator1 __last1,
                          _ForwardIterator2 __first2, _ForwardIterator2 __last2,
                          _BinaryPredicate __pred) {
@@ -168,7 +168,7 @@ _ForwardIterator1 search(_ForwardIterator1 __first1, _ForwardIterator1 __last1,
 }
 
 template <class _ForwardIterator1, class _ForwardIterator2>
-_LIBGPU_NODISCARD_EXT inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
+_LIBGPU_NODISCARD_EXT __device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20
 _ForwardIterator1 search(_ForwardIterator1 __first1, _ForwardIterator1 __last1,
                          _ForwardIterator2 __first2, _ForwardIterator2 __last2) {
   return gpu::search(__first1, __last1, __first2, __last2, __equal_to());
@@ -176,7 +176,7 @@ _ForwardIterator1 search(_ForwardIterator1 __first1, _ForwardIterator1 __last1,
 
 #if _LIBGPU_STD_VER >= 17
 template <class _ForwardIterator, class _Searcher>
-_LIBGPU_NODISCARD_EXT _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20 _ForwardIterator
+_LIBGPU_NODISCARD_EXT __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20 _ForwardIterator
 search(_ForwardIterator __f, _ForwardIterator __l, const _Searcher& __s) {
   return __s(__f, __l).first;
 }

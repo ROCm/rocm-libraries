@@ -24,13 +24,13 @@ struct in_fun_result {
 
   template <class _InIter2, class _Func2>
     requires std::convertible_to<const _InIter1&, _InIter2> && std::convertible_to<const _Func1&, _Func2>
-  _LIBGPU_HIDE_FROM_ABI constexpr operator in_fun_result<_InIter2, _Func2>() const & {
+  __device__ _LIBGPU_HIDE_FROM_ABI constexpr operator in_fun_result<_InIter2, _Func2>() const & {
     return {in, fun};
   }
 
   template <class _InIter2, class _Func2>
     requires std::convertible_to<_InIter1, _InIter2> && std::convertible_to<_Func1, _Func2>
-  _LIBGPU_HIDE_FROM_ABI constexpr operator in_fun_result<_InIter2, _Func2>() && {
+  __device__ _LIBGPU_HIDE_FROM_ABI constexpr operator in_fun_result<_InIter2, _Func2>() && {
     return {std::move(in), std::move(fun)};
   }
 };

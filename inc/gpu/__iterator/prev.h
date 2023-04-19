@@ -15,7 +15,7 @@
 namespace gpu {
 
 template <class _InputIter>
-inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
+__device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
     typename std::enable_if<__is_cpp17_input_iterator<_InputIter>::value, _InputIter>::type
     prev(_InputIter __x, typename std::iterator_traits<_InputIter>::difference_type __n = 1) {
   _LIBGPU_ASSERT(__n <= 0 || __is_cpp17_bidirectional_iterator<_InputIter>::value,
@@ -33,21 +33,21 @@ namespace __prev {
 
 struct __fn {
   template <bidirectional_iterator _Ip>
-  _LIBGPU_HIDE_FROM_ABI
+  __device__ _LIBGPU_HIDE_FROM_ABI
   constexpr _Ip operator()(_Ip __x) const {
     --__x;
     return __x;
   }
 
   template <bidirectional_iterator _Ip>
-  _LIBGPU_HIDE_FROM_ABI
+  __device__ _LIBGPU_HIDE_FROM_ABI
   constexpr _Ip operator()(_Ip __x, iter_difference_t<_Ip> __n) const {
     ranges::advance(__x, -__n);
     return __x;
   }
 
   template <bidirectional_iterator _Ip>
-  _LIBGPU_HIDE_FROM_ABI constexpr _Ip operator()(_Ip __x, iter_difference_t<_Ip> __n, _Ip __bound_iter) const {
+  __device__ _LIBGPU_HIDE_FROM_ABI constexpr _Ip operator()(_Ip __x, iter_difference_t<_Ip> __n, _Ip __bound_iter) const {
     ranges::advance(__x, -__n, __bound_iter);
     return __x;
   }
