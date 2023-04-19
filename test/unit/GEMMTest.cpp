@@ -603,6 +603,8 @@ namespace GEMMDriverTest
         gemm.workgroup_size_x = 2 * gemm.wavefront_size;
         gemm.workgroup_size_y = 4;
 
+        gemm.betaInFma = false;
+
         gemm.transA = "T";
         gemm.transB = "N";
 
