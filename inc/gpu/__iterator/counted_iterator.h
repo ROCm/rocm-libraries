@@ -121,12 +121,7 @@ public:
   decltype(auto) operator++(int) {
     _LIBGPU_ASSERT(__count_ > 0, "Iterator already at or past end.");
     --__count_;
-#ifndef _LIBGPU_HAS_NO_EXCEPTIONS
-    try { return __current_++; }
-    catch(...) { ++__count_; throw; }
-#else
     return __current_++;
-#endif // _LIBGPU_HAS_NO_EXCEPTIONS
   }
 
   __device__ _LIBGPU_HIDE_FROM_ABI

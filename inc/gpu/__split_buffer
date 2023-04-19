@@ -333,24 +333,14 @@ void
 __split_buffer<_Tp>::shrink_to_fit() _NOEXCEPT {
     if (capacity() > size())
     {
-#ifndef _LIBGPU_HAS_NO_EXCEPTIONS
-        try
-        {
-#endif // _LIBGPU_HAS_NO_EXCEPTIONS
-            __split_buffer<value_type> __t(size(), 0);
-            __t.__construct_at_end(std::move_iterator<pointer>(__begin_),
-                                   std::move_iterator<pointer>(__end_));
-            __t.__end_ = __t.__begin_ + (__end_ - __begin_);
-            gpu::swap(__first_, __t.__first_);
-            gpu::swap(__begin_, __t.__begin_);
-            gpu::swap(__end_, __t.__end_);
-            gpu::swap(__end_cap(), __t.__end_cap());
-#ifndef _LIBGPU_HAS_NO_EXCEPTIONS
-        }
-        catch (...)
-        {
-        }
-#endif // _LIBGPU_HAS_NO_EXCEPTIONS
+        __split_buffer<value_type> __t(size(), 0);
+        __t.__construct_at_end(std::move_iterator<pointer>(__begin_),
+                                std::move_iterator<pointer>(__end_));
+        __t.__end_ = __t.__begin_ + (__end_ - __begin_);
+        gpu::swap(__first_, __t.__first_);
+        gpu::swap(__begin_, __t.__begin_);
+        gpu::swap(__end_, __t.__end_);
+        gpu::swap(__end_cap(), __t.__end_cap());
     }
 }
 
