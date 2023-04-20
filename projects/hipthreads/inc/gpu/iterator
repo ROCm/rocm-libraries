@@ -1,0 +1,37 @@
+#ifndef __GPU_UTILITY___
+#define __GPU_UTILITY___
+
+//====================================================================================================================//
+//      Adapted from libc++ <iterator>
+//====================================================================================================================//
+
+#include "gpu/__iterator/access.h"
+#include "gpu/__iterator/advance.h"
+#include "gpu/__iterator/back_insert_iterator.h"
+// #include "gpu/__iterator/bounded_iter.h"
+// #include "gpu/__iterator/common_iterator.h"
+// #include "gpu/__iterator/concepts.h"
+// #include "gpu/__iterator/counted_iterator.h"
+#include "gpu/__iterator/data.h"
+// #include "gpu/__iterator/default_sentinel.h"
+#include "gpu/__iterator/distance.h"
+#include "gpu/__iterator/empty.h"
+#include "gpu/__iterator/front_insert_iterator.h"
+#include "gpu/__iterator/insert_iterator.h"
+// #include "gpu/__iterator/istream_iterator.h"
+// #include "gpu/__iterator/istreambuf_iterator.h"
+// #include "gpu/__iterator/iter_move.h"
+// #include "gpu/__iterator/iter_swap.h"
+#include "gpu/__iterator/iterator_traits.h"
+#include "gpu/__iterator/move_iterator.h"
+// #include "gpu/__iterator/move_sentinel.h"
+#include "gpu/__iterator/next.h"
+// #include "gpu/__iterator/ostream_iterator.h"
+// #include "gpu/__iterator/ostreambuf_iterator.h"
+#include "gpu/__iterator/prev.h"
+#include "gpu/__iterator/reverse_access.h"
+#include "gpu/__iterator/reverse_iterator.h"
+#include "gpu/__iterator/size.h"
+// #include "gpu/__iterator/unreachable_sentinel.h"
+
+#endif // __GPU_UTILITY___
