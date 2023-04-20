@@ -13,6 +13,7 @@
 #include <type_traits>
 
 #include "gpu/__iterator/iterator_traits.h"
+#include "gpu/__memory/pointer_traits.h"
 #include "gpu/__utility/declval.h"
 
 namespace gpu {
@@ -37,14 +38,14 @@ struct __unwrap_iter_impl {
 // It's a contiguous iterator, so we can use a raw pointer instead
 template <class _Iter>
 struct __unwrap_iter_impl<_Iter, true> {
-  using _ToAddressT = decltype(std::__to_address(gpu::declval<_Iter>()));
+  using _ToAddressT = decltype(gpu::__to_address(gpu::declval<_Iter>()));
 
   __device__ static _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR _Iter __rewrap(_Iter __orig_iter, _ToAddressT __unwrapped_iter) {
-    return __orig_iter + (__unwrapped_iter - std::__to_address(__orig_iter));
+    return __orig_iter + (__unwrapped_iter - gpu::__to_address(__orig_iter));
   }
 
   __device__ static _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR _ToAddressT __unwrap(_Iter __i) _NOEXCEPT {
-    return std::__to_address(__i);
+    return gpu::__to_address(__i);
   }
 };
 

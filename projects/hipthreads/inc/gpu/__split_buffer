@@ -2,8 +2,10 @@
 #define __GPU___SPLIT_BUFFER__
 
 #include "gpu/__config"
+
 #include "gpu/__algorithm/max.h"
 #include "gpu/__algorithm/move_backward.h"
+#include "gpu/__memory/pointer_traits.h"
 
 namespace gpu {
 
@@ -175,7 +177,7 @@ template <class _Tp>
 __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 void __split_buffer<_Tp>::__construct_at_end(size_type __n) {
     _ConstructTransaction __tx(&this->__end_, __n);
     for (; __tx.__pos_ != __tx.__end_; ++__tx.__pos_) {
-        ::new (static_cast<void *>(__tx.__pos_)) value_type();
+        ::new (gpu::__to_address(__tx.__pos_)) value_type();
     }
 }
 
@@ -189,7 +191,7 @@ template <class _Tp>
 __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 void __split_buffer<_Tp>::__construct_at_end(size_type __n, const_reference __x) {
     _ConstructTransaction __tx(&this->__end_, __n);
     for (; __tx.__pos_ != __tx.__end_; ++__tx.__pos_) {
-        ::new (static_cast<void*>(__tx.__pos_)) value_type(__x);
+        ::new (gpu::__to_address(__tx.__pos_)) value_type(__x);
     }
 }
 
@@ -205,10 +207,10 @@ __split_buffer<_Tp>::__construct_at_end(_InputIter __first, _InputIter __last) {
             size_type __new_cap = gpu::max<size_type>(2 * __old_cap, 8);
             __split_buffer __buf(__new_cap, 0);
             for (pointer __p = __begin_; __p != __end_; ++__p, (void) ++__buf.__end_)
-                ::new (static_cast<void*>(__buf.__end_)) value_type(std::move(*__p));
+                ::new (gpu::__to_address(__buf.__end_)) value_type(std::move(*__p));
             swap(__buf);
         }
-        ::new (static_cast<void*>(this->__end_)) value_type(*__first);
+        ::new (gpu::__to_address(this->__end_)) value_type(*__first);
         ++this->__end_;
     }
 }
@@ -220,7 +222,7 @@ __split_buffer<_Tp>::__construct_at_end(_ForwardIterator __first, _ForwardIterat
 {
     _ConstructTransaction __tx(&this->__end_, std::distance(__first, __last));
     for (; __tx.__pos_ != __tx.__end_; ++__tx.__pos_, (void) ++__first) {
-        ::new (static_cast<void*>(__tx.__pos_)) value_type(*__first);
+        ::new (gpu::__to_address(__tx.__pos_)) value_type(*__first);
     }
 }
 
@@ -369,7 +371,7 @@ __split_buffer<_Tp>::push_front(const_reference __x) {
             gpu::swap(__end_cap(), __t.__end_cap());
         }
     }
-    ::new (static_cast<void*>(__begin_-1)) value_type(__x);
+    ::new (gpu::__to_address(__begin_-1)) value_type(__x);
     --__begin_;
 }
 
@@ -398,7 +400,7 @@ __split_buffer<_Tp>::push_front(value_type&& __x) {
             gpu::swap(__end_cap(), __t.__end_cap());
         }
     }
-    ::new (static_cast<void*>(__begin_-1)) value_type(std::move(__x));
+    ::new (gpu::__to_address(__begin_-1)) value_type(std::move(__x));
     --__begin_;
 }
 
@@ -428,7 +430,7 @@ __split_buffer<_Tp>::push_back(const_reference __x) {
             gpu::swap(__end_cap(), __t.__end_cap());
         }
     }
-    ::new (static_cast<void*>(__end_)) value_type(__x);
+    ::new (gpu::__to_address(__end_)) value_type(__x);
     ++__end_;
 }
 
@@ -457,7 +459,7 @@ __split_buffer<_Tp>::push_back(value_type&& __x) {
             gpu::swap(__end_cap(), __t.__end_cap());
         }
     }
-    ::new (static_cast<void*>(__end_)) value_type(std::move(__x));
+    ::new (gpu::__to_address(__end_)) value_type(std::move(__x));
     ++__end_;
 }
 
@@ -487,7 +489,7 @@ __split_buffer<_Tp>::emplace_back(_Args&&... __args) {
             gpu::swap(__end_cap(), __t.__end_cap());
         }
     }
-    ::new (static_cast<void*>(__end_)) value_type(std::forward<_Args>(__args)...);
+    ::new (gpu::__to_address(__end_)) value_type(std::forward<_Args>(__args)...);
     ++__end_;
 }
 

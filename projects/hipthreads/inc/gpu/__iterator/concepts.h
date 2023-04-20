@@ -158,7 +158,7 @@ concept contiguous_iterator =
   std::is_lvalue_reference_v<iter_reference_t<_Ip>> &&
   same_as<iter_value_t<_Ip>, std::remove_cvref_t<iter_reference_t<_Ip>>> &&
   requires(const _Ip& __i) {
-    { std::to_address(__i) } -> same_as<std::add_pointer_t<iter_reference_t<_Ip>>>;
+    { gpu::to_address(__i) } -> same_as<std::add_pointer_t<iter_reference_t<_Ip>>>;
   };
 
 template<class _Ip>

@@ -86,7 +86,7 @@ public:
   __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 pointer operator->() const _NOEXCEPT {
     _LIBGPU_ASSERT(
         __in_bounds(__current_), "__bounded_iter::operator->: Attempt to dereference an out-of-range iterator");
-    return std::__to_address(__current_);
+    return gpu::__to_address(__current_);
   }
 
   __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 reference operator[](difference_type __n) const _NOEXCEPT {
@@ -211,7 +211,7 @@ struct pointer_traits<__bounded_iter<_Iterator> > {
   using difference_type = typename pointer_traits<_Iterator>::difference_type;
 
   __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR static element_type* to_address(pointer __it) _NOEXCEPT {
-    return std::__to_address(__it.__current_);
+    return gpu::__to_address(__it.__current_);
   }
 };
 
