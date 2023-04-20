@@ -1,7 +1,9 @@
 #ifndef __GPU_VECTOR__
 #define __GPU_VECTOR__
 
-#include "hip/hip_runtime_api.h"
+// NOTE: Need hip_runtime and not hip_runtime_api because we use assert
+#include "hip/hip_runtime.h"
+#include <cassert>
 #include <stdexcept>
 #include <type_traits>
 #include <iterator>
@@ -14,6 +16,7 @@
 #include "gpu/__algorithm/move.h"
 #include "gpu/__algorithm/move_backward.h"
 #include "gpu/__algorithm/rotate.h"
+#include "gpu/__iterator/access.h"
 #include "gpu/__iterator/iterator_traits.h"
 #include "gpu/__iterator/reverse_iterator.h"
 #include "gpu/__memory/addressof.h"
@@ -354,16 +357,26 @@ class _LIBGPU_TEMPLATE_VIS vector {
     __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void __base_destruct_at_end(pointer __new_last) _NOEXCEPT {
         pointer __soon_to_be_end = this->__end_;
         while (__new_last != __soon_to_be_end)
-            --__soon_to_be_end->~value_type();
+            (--__soon_to_be_end)->~value_type();
         this->__end_ = __new_last;
     }
 
-    _LIBGPU_NORETURN __device__ _LIBGPU_HIDE_FROM_ABI void __throw_length_error() const {
+    _LIBGPU_NORETURN __host__ __device__ _LIBGPU_HIDE_FROM_ABI void __throw_length_error() const {
+#ifdef __HIP_DEVICE_COMPILE__
         assert(false && "length_error was thrown in -fno-exceptions mode with message \"vector\"");
+#else
+        throw std::length_error("vector");
+#endif
+        __builtin_trap();
     }
 
-    _LIBGPU_NORETURN __device__ _LIBGPU_HIDE_FROM_ABI void __throw_out_of_range() const {
+    _LIBGPU_NORETURN __host__ __device__ _LIBGPU_HIDE_FROM_ABI void __throw_out_of_range() const {
+#ifdef __HIP_DEVICE_COMPILE__
         assert(false && "out_of_range was thrown in -fno-exceptions mode with message \"vector\"");
+#else
+        throw std::out_of_range("vector");
+#endif
+        __builtin_trap();
     }
 };
 
@@ -687,14 +700,22 @@ vector<_Tp>::end() const _NOEXCEPT {
 template <class _Tp>
 __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI typename vector<_Tp>::reference
 vector<_Tp>::operator[](size_type __n) _NOEXCEPT {
-    _LIBGPU_ASSERT(__n < size(), "vector[] index out of bounds");
+#ifdef __HIP_DEVICE_COMPILE__
+    assert(__n < size() && "vector[] index out of bounds");
+#else
+    // TODO: 
+#endif
     return this->__begin_[__n];
 }
 
 template <class _Tp>
 __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI typename vector<_Tp>::const_reference
 vector<_Tp>::operator[](size_type __n) const _NOEXCEPT {
-    _LIBGPU_ASSERT(__n < size(), "vector[] index out of bounds");
+#ifdef __HIP_DEVICE_COMPILE__
+    assert(__n < size() && "vector[] index out of bounds");
+#else
+    // TODO: 
+#endif
     return this->__begin_[__n];
 }
 
@@ -1326,14 +1347,22 @@ public:
     __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 bool __invariants() const;
 
 private:
-    _LIBGPU_NORETURN __device__ _LIBGPU_HIDE_FROM_ABI
-    void __throw_length_error() const {
+    _LIBGPU_NORETURN __host__ __device__ _LIBGPU_HIDE_FROM_ABI void __throw_length_error() const {
+#ifdef __HIP_DEVICE_COMPILE__
         assert(false && "length_error was thrown in -fno-exceptions mode with message \"vector\"");
+#else
+        throw std::length_error("vector");
+#endif
+        __builtin_trap();
     }
 
-    _LIBGPU_NORETURN __device__ _LIBGPU_HIDE_FROM_ABI
-    void __throw_out_of_range() const {
+    _LIBGPU_NORETURN __host__ __device__ _LIBGPU_HIDE_FROM_ABI void __throw_out_of_range() const {
+#ifdef __HIP_DEVICE_COMPILE__
         assert(false && "out_of_range was thrown in -fno-exceptions mode with message \"vector\"");
+#else
+        throw std::out_of_range("vector");
+#endif
+        __builtin_trap();
     }
 
     //  Allocate space for __n objects
