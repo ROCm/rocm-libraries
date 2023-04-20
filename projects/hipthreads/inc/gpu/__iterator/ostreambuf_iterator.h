@@ -11,6 +11,7 @@
 #define __GPU___ITERATOR_OSTREAMBUF_ITERATOR_H
 
 #include "gpu/__config"
+#include <iterator>
 
 namespace gpu {
 

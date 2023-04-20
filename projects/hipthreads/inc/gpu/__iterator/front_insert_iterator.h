@@ -11,6 +11,9 @@
 #define __GPU___ITERATOR_FRONT_INSERT_ITERATOR_H
 
 #include "gpu/__config"
+#include <iterator>
+
+#include "gpu/__memory/addressof.h"
 
 namespace gpu {
 

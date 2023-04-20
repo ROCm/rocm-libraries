@@ -2,9 +2,11 @@
 #define __GPU___ITERATOR_REVERSE_ITERATOR_H__
 
 #include "gpu/__config"
+#include <type_traits>
 #include <iterator>
 
 #include "gpu/__algorithm/unwrap_iter.h"
+#include "gpu/__memory/addressof.h"
 
 namespace gpu {
 
