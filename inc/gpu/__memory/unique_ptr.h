@@ -288,6 +288,8 @@ class _LIBGPU_UNIQUE_PTR_TRIVIAL_ABI _LIBGPU_TEMPLATE_VIS unique_ptr {
         return std::move(*this);
     }
 
+    // TODO: Do we also need assignment operators for std::vector to gpu::vector?
+
 #ifdef _LIBGPU_CXX03_LANG
     __host__ __device__ unique_ptr(unique_ptr const &) = delete;
     __host__ __device__ unique_ptr &operator=(unique_ptr const &) = delete;
