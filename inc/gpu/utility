@@ -5,6 +5,7 @@
 //      Adapted from libc++ <memory>
 //====================================================================================================================//
 
+#include "gpu/__utility/declval.h"
 #include "gpu/__utility/pair.h"
 #include "gpu/__utility/swap.h"
 
