@@ -12,6 +12,8 @@
 
 #include "gpu/__config"
 
+#include "gpu/__memory/pointer_traits.h"
+
 namespace gpu {
 
 #if _LIBGPU_STD_VER >= 20
@@ -106,7 +108,7 @@ public:
   constexpr auto operator->() const noexcept
     requires contiguous_iterator<_Iter>
   {
-    return std::to_address(__current_);
+    return gpu::to_address(__current_);
   }
 
   __device__ _LIBGPU_HIDE_FROM_ABI

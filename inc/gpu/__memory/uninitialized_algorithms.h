@@ -4,9 +4,10 @@
 #include "gpu/__config"
 #include <iterator>
 
-#include "gpu/__utility/exception_guard.h"
 #include "gpu/__algorithm/copy.h"
 #include "gpu/__algorithm/move.h"
+#include "gpu/__memory/pointer_traits.h"
+#include "gpu/__utility/exception_guard.h"
 
 namespace gpu {
 
@@ -51,7 +52,7 @@ __uninitialized_allocator_copy(_Iter1 __first1, _Sent1 __last1, _Iter2 __first2)
   auto __guard =
       gpu::__make_exception_guard(_AllocatorDestroyRangeReverse<_Iter2>(__destruct_first, __first2));
   while (__first1 != __last1) {
-    ::new (static_cast<void*>(__first2)) value_type(*__first1);
+    ::new (gpu::__to_address(__first2)) value_type(*__first1);
     ++__first1;
     ++__first2;
   }
@@ -69,7 +70,7 @@ __uninitialized_allocator_copy(const _Type* __first1, const _Type* __last1, _Typ
   // TODO: Remove the const_cast once we drop support for std::allocator<T const>
   if (__builtin_is_constant_evaluated()) {
     while (__first1 != __last1) {
-      ::new (static_cast<void*>(__first2)) _Type(*__first1);
+      ::new (gpu::__to_address(__first2)) _Type(*__first1);
       ++__first1;
       ++__first2;
     }
@@ -93,9 +94,9 @@ __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 _Iter2 __uninitia
       gpu::__make_exception_guard(_AllocatorDestroyRangeReverse<_Iter2>(__destruct_first, __first2));
   while (__first1 != __last1) {
 #ifndef _LIBGPU_HAS_NO_EXCEPTIONS
-    ::new (static_cast<void*>(__first2)) value_type(std::move_if_noexcept(*__first1));
+    ::new (gpu::__to_address(__first2)) value_type(std::move_if_noexcept(*__first1));
 #else
-    ::new (static_cast<void*>(__first2)) value_type(std::move(*__first1));
+    ::new (gpu::__to_address(__first2)) value_type(std::move(*__first1));
 #endif
     ++__first1;
     ++__first2;
@@ -115,7 +116,7 @@ __uninitialized_allocator_move_if_noexcept(_Iter1 __first1, _Iter1 __last1, _Ite
   using value_type = typename std::iterator_traits<_Iter2>::value_type;
   if (__builtin_is_constant_evaluated()) {
     while (__first1 != __last1) {
-      ::new (static_cast<void*>(__first2)) value_type(std::move(*__first1));
+      ::new (gpu::__to_address(__first2)) value_type(std::move(*__first1));
       ++__first1;
       ++__first2;
     }
