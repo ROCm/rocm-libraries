@@ -34,6 +34,7 @@ struct __move_loop {
     return gpu::make_pair(std::move(__first), std::move(__result));
   }
 
+#if 0 // TODO: figure out why SFINAE isn't stopping this from being used
   template <class _InIter, class _OutIter, std::enable_if_t<__is_segmented_iterator<_InIter>::value, int> = 0>
   __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 gpu::pair<_InIter, _OutIter>
   operator()(_InIter __first, _InIter __last, _OutIter __result) const {
@@ -84,6 +85,7 @@ struct __move_loop {
       __local_first = _Traits::__begin(++__segment_iterator);
     }
   }
+#endif // 0
 };
 
 struct __move_trivial {
