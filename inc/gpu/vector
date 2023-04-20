@@ -168,19 +168,19 @@ class _LIBGPU_TEMPLATE_VIS vector {
     __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI const_reference at(size_type __n) const;
 
     __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI reference front() _NOEXCEPT {
-        _LIBGPU_ASSERT(!empty(), "front() called on an empty vector");
+        assert(!empty() && "front() called on an empty vector");
         return *this->__begin_;
     }
     __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI const_reference front() const _NOEXCEPT {
-        _LIBGPU_ASSERT(!empty(), "front() called on an empty vector");
+        assert(!empty() && "front() called on an empty vector");
         return *this->__begin_;
     }
     __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI reference back() _NOEXCEPT {
-        _LIBGPU_ASSERT(!empty(), "back() called on an empty vector");
+        assert(!empty() && "back() called on an empty vector");
         return *(this->__end_ - 1);
     }
     __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI const_reference back() const _NOEXCEPT {
-        _LIBGPU_ASSERT(!empty(), "back() called on an empty vector");
+        assert(!empty() && "back() called on an empty vector");
         return *(this->__end_ - 1);
     }
 
@@ -809,14 +809,14 @@ __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 inline
 
 template <class _Tp>
 __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 inline void vector<_Tp>::pop_back() {
-    _LIBGPU_ASSERT(!empty(), "vector::pop_back called on an empty vector");
+    assert(!empty() && "vector::pop_back called on an empty vector");
     this->__destruct_at_end(this->__end_ - 1);
 }
 
 template <class _Tp>
 __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI typename vector<_Tp>::iterator
 vector<_Tp>::erase(const_iterator __position) {
-    _LIBGPU_ASSERT(__position != end(), "vector::erase(iterator) called with a non-dereferenceable iterator");
+    assert(__position != end() && "vector::erase(iterator) called with a non-dereferenceable iterator");
     difference_type __ps = __position - cbegin();
     pointer __p = this->__begin_ + __ps;
     this->__destruct_at_end(std::move(__p + 1, this->__end_, __p));
@@ -828,7 +828,7 @@ vector<_Tp>::erase(const_iterator __position) {
 template <class _Tp>
 __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 typename vector<_Tp>::iterator
 vector<_Tp>::erase(const_iterator __first, const_iterator __last) {
-    _LIBGPU_ASSERT(__first <= __last, "vector::erase(first, last) called with invalid range");
+    assert(__first <= __last && "vector::erase(first, last) called with invalid range");
     pointer __p = this->__begin_ + (__first - begin());
     if (__first != __last) {
         this->__destruct_at_end(std::move(__p + (__last - __first), this->__end_, __p));
@@ -1706,7 +1706,7 @@ vector<bool>::assign(_ForwardIterator __first, _ForwardIterator __last)
 {
     clear();
     difference_type __ns = std::distance(__first, __last);
-    _LIBGPU_ASSERT(__ns >= 0, "invalid range specified");
+    assert(__ns >= 0 && "invalid range specified");
     const size_t __n = static_cast<size_type>(__ns);
     if (__n)
     {
@@ -1864,7 +1864,7 @@ typename std::enable_if
 vector<bool>::insert(const_iterator __position, _ForwardIterator __first, _ForwardIterator __last)
 {
     const difference_type __n_signed = std::distance(__first, __last);
-    _LIBGPU_ASSERT(__n_signed >= 0, "invalid range specified");
+    assert(__n_signed >= 0 && "invalid range specified");
     const size_type __n = static_cast<size_type>(__n_signed);
     iterator __r;
     size_type __c = capacity();

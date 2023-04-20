@@ -63,7 +63,7 @@ public:
   __device__ _LIBGPU_HIDE_FROM_ABI
   constexpr counted_iterator(_Iter __iter, iter_difference_t<_Iter> __n)
    : __current_(std::move(__iter)), __count_(__n) {
-    _LIBGPU_ASSERT(__n >= 0, "__n must not be negative.");
+    assert(__n >= 0 && "__n must not be negative.");
   }
 
   template<class _I2>
@@ -92,7 +92,7 @@ public:
 
   __device__ _LIBGPU_HIDE_FROM_ABI
   constexpr decltype(auto) operator*() {
-    _LIBGPU_ASSERT(__count_ > 0, "Iterator is equal to or past end.");
+    assert(__count_ > 0 && "Iterator is equal to or past end.");
     return *__current_;
   }
 
@@ -100,7 +100,7 @@ public:
   constexpr decltype(auto) operator*() const
     requires __dereferenceable<const _Iter>
   {
-    _LIBGPU_ASSERT(__count_ > 0, "Iterator is equal to or past end.");
+    assert(__count_ > 0 && "Iterator is equal to or past end.");
     return *__current_;
   }
 
@@ -113,7 +113,7 @@ public:
 
   __device__ _LIBGPU_HIDE_FROM_ABI
   constexpr counted_iterator& operator++() {
-    _LIBGPU_ASSERT(__count_ > 0, "Iterator already at or past end.");
+    assert(__count_ > 0 && "Iterator already at or past end.");
     ++__current_;
     --__count_;
     return *this;
@@ -121,7 +121,7 @@ public:
 
   __device__ _LIBGPU_HIDE_FROM_ABI
   decltype(auto) operator++(int) {
-    _LIBGPU_ASSERT(__count_ > 0, "Iterator already at or past end.");
+    assert(__count_ > 0 && "Iterator already at or past end.");
     --__count_;
     return __current_++;
   }
@@ -130,7 +130,7 @@ public:
   constexpr counted_iterator operator++(int)
     requires forward_iterator<_Iter>
   {
-    _LIBGPU_ASSERT(__count_ > 0, "Iterator already at or past end.");
+    assert(__count_ > 0 && "Iterator already at or past end.");
     counted_iterator __tmp = *this;
     ++*this;
     return __tmp;
@@ -173,7 +173,7 @@ public:
   constexpr counted_iterator& operator+=(iter_difference_t<_Iter> __n)
     requires random_access_iterator<_Iter>
   {
-    _LIBGPU_ASSERT(__n <= __count_, "Cannot advance iterator past end.");
+    assert(__n <= __count_ && "Cannot advance iterator past end.");
     __current_ += __n;
     __count_ -= __n;
     return *this;
@@ -224,7 +224,7 @@ public:
   constexpr decltype(auto) operator[](iter_difference_t<_Iter> __n) const
     requires random_access_iterator<_Iter>
   {
-    _LIBGPU_ASSERT(__n < __count_, "Subscript argument must be less than size.");
+    assert(__n < __count_ && "Subscript argument must be less than size.");
     return __current_[__n];
   }
 
@@ -255,7 +255,7 @@ public:
     noexcept(noexcept(ranges::iter_move(__i.__current_)))
       requires input_iterator<_Iter>
   {
-    _LIBGPU_ASSERT(__i.__count_ > 0, "Iterator must not be past end of range.");
+    assert(__i.__count_ > 0 && "Iterator must not be past end of range.");
     return ranges::iter_move(__i.__current_);
   }
 
