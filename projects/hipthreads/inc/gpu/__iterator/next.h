@@ -11,6 +11,7 @@
 #define __GPU___ITERATOR_NEXT_H
 
 #include "gpu/__config"
+#include "gpu/__iterator/iterator_traits.h"
 
 namespace gpu {
 

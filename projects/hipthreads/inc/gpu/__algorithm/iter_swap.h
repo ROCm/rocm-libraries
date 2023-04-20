@@ -10,6 +10,7 @@
 #define __GPU___ALGORITHM_ITER_SWAP_H
 
 #include "gpu/__config"
+#include "gpu/__utility/declval.h"
 
 namespace gpu {
 

@@ -11,9 +11,11 @@
 
 #include "gpu/__config"
 #include <type_traits>
+
 #include "gpu/__tuple_dir/sfinae_helpers.h"
 #include "gpu/__type_traits/nat.h"
 #include "gpu/__type_traits/is_implicitly_default_constructible.h"
+#include "gpu/__utility/swap.h"
 
 namespace gpu {
 

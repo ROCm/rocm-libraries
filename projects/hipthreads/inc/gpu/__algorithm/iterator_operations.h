@@ -11,6 +11,11 @@
 
 #include "gpu/__config"
 #include "gpu/__algorithm/iter_swap.h"
+#include "gpu/__iterator/advance.h"
+#include "gpu/__iterator/distance.h"
+#include "gpu/__iterator/next.h"
+#include "gpu/__iterator/prev.h"
+#include "gpu/__utility/declval.h"
 
 namespace gpu {
 

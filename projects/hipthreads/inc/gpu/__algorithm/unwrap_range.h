@@ -11,6 +11,9 @@
 
 #include "gpu/__config"
 
+#include "gpu/__algorithm/unwrap_iter.h"
+#include "gpu/__utility/pair.h"
+
 namespace gpu {
 
 // __unwrap_range and __rewrap_range are used to unwrap ranges which may have different iterator and sentinel types.
