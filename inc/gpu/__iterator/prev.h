@@ -20,7 +20,7 @@ __device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
     prev(_InputIter __x, typename std::iterator_traits<_InputIter>::difference_type __n = 1) {
   _LIBGPU_ASSERT(__n <= 0 || __is_cpp17_bidirectional_iterator<_InputIter>::value,
                  "Attempt to prev(it, n) with a positive n on a non-bidirectional iterator");
-  std::advance(__x, -__n);
+  gpu::advance(__x, -__n);
   return __x;
 }
 

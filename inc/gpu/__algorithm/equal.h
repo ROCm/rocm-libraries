@@ -90,7 +90,7 @@ __device__ inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 bool
 __equal(_RandomAccessIterator1 __first1, _RandomAccessIterator1 __last1, _RandomAccessIterator2 __first2,
         _RandomAccessIterator2 __last2, _BinaryPredicate __pred, std::random_access_iterator_tag,
         std::random_access_iterator_tag) {
-  if (std::distance(__first1, __last1) != std::distance(__first2, __last2))
+  if (gpu::distance(__first1, __last1) != gpu::distance(__first2, __last2))
     return false;
   __identity __proj;
   return std::__equal_impl(

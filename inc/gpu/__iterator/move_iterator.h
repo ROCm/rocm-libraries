@@ -30,7 +30,7 @@ struct __move_iter_category_base<_Iter> {
 
 template<class _Iter, class _Sent>
 concept __move_iter_comparable = requires {
-    { std::declval<const _Iter&>() == std::declval<_Sent>() } -> std::convertible_to<bool>;
+    { gpu::declval<const _Iter&>() == gpu::declval<_Sent>() } -> std::convertible_to<bool>;
 };
 #endif // _LIBGPU_STD_VER >= 20
 

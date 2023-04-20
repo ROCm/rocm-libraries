@@ -43,8 +43,8 @@ struct __debug_less
     template <class _LHS, class _RHS>
     __device__ _LIBGPU_CONSTEXPR_SINCE_CXX14
     inline _LIBGPU_INLINE_VISIBILITY
-    decltype((void)std::declval<_Compare&>()(
-        std::declval<_LHS &>(), std::declval<_RHS &>()))
+    decltype((void)gpu::declval<_Compare&>()(
+        gpu::declval<_LHS &>(), gpu::declval<_RHS &>()))
     __do_compare_assert(int, _LHS & __l, _RHS & __r) {
         _LIBGPU_DEBUG_ASSERT(!__comp_(__l, __r),
             "Comparator does not induce a strict weak ordering");

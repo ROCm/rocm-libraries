@@ -18,7 +18,7 @@ _LIBGPU_SUPPRESS_DEPRECATED_PUSH
 template<class _CharT, class _Traits>
 class _LIBGPU_TEMPLATE_VIS istreambuf_iterator
 #if _LIBGPU_STD_VER <= 14 || !defined(_LIBGPU_ABI_NO_ITERATOR_BASES)
-    : public iterator<std::input_iterator_tag, _CharT,
+    : public std::iterator<std::input_iterator_tag, _CharT,
                       typename _Traits::off_type, _CharT*,
                       _CharT>
 #endif

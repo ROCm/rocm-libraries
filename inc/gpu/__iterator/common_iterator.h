@@ -26,7 +26,7 @@ template<input_or_output_iterator _Iter, sentinel_for<_Iter> _Sent>
 class common_iterator {
   struct __proxy {
     constexpr const iter_value_t<_Iter>* operator->() const noexcept {
-      return std::addressof(__value_);
+      return gpu::addressof(__value_);
     }
     iter_value_t<_Iter> __value_;
   };
@@ -105,7 +105,7 @@ public:
       return std::__unchecked_get<_Iter>(__hold_);
     } else if constexpr (std::is_reference_v<iter_reference_t<_Iter>>) {
       auto&& __tmp = *std::__unchecked_get<_Iter>(__hold_);
-      return std::addressof(__tmp);
+      return gpu::addressof(__tmp);
     } else {
       return __proxy{*std::__unchecked_get<_Iter>(__hold_)};
     }
@@ -196,7 +196,7 @@ public:
   }
 
   __device__ _LIBGPU_HIDE_FROM_ABI friend constexpr iter_rvalue_reference_t<_Iter> iter_move(const common_iterator& __i)
-    noexcept(noexcept(ranges::iter_move(std::declval<const _Iter&>())))
+    noexcept(noexcept(ranges::iter_move(gpu::declval<const _Iter&>())))
       requires input_iterator<_Iter>
   {
     _LIBGPU_ASSERT(std::holds_alternative<_Iter>(__i.__hold_), "Attempted to iter_move a non-dereferenceable common_iterator");
@@ -205,7 +205,7 @@ public:
 
   template<indirectly_swappable<_Iter> _I2, class _S2>
   __device__ _LIBGPU_HIDE_FROM_ABI friend constexpr void iter_swap(const common_iterator& __x, const common_iterator<_I2, _S2>& __y)
-      noexcept(noexcept(ranges::iter_swap(std::declval<const _Iter&>(), std::declval<const _I2&>())))
+      noexcept(noexcept(ranges::iter_swap(gpu::declval<const _Iter&>(), gpu::declval<const _I2&>())))
   {
     _LIBGPU_ASSERT(std::holds_alternative<_Iter>(__x.__hold_), "Attempted to iter_swap a non-dereferenceable common_iterator");
     _LIBGPU_ASSERT(std::holds_alternative<_I2>(__y.__hold_), "Attempted to iter_swap a non-dereferenceable common_iterator");
@@ -236,7 +236,7 @@ struct __arrow_type_or_void {
 template<class _Iter, class _Sent>
   requires __common_iter_has_ptr_op<_Iter, _Sent>
 struct __arrow_type_or_void<_Iter, _Sent> {
-    using type = decltype(std::declval<const common_iterator<_Iter, _Sent>&>().operator->());
+    using type = decltype(gpu::declval<const common_iterator<_Iter, _Sent>&>().operator->());
 };
 
 template<input_iterator _Iter, class _Sent>

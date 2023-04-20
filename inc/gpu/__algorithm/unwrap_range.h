@@ -65,17 +65,17 @@ __device__ _LIBGPU_HIDE_FROM_ABI constexpr auto __unwrap_range(_Iter __first, _S
 template <
     class _Sent,
     class _Iter,
-    class _Unwrapped = decltype(gpu::__unwrap_range(std::declval<_Iter>(), std::declval<_Sent>()))>
+    class _Unwrapped = decltype(gpu::__unwrap_range(gpu::declval<_Iter>(), gpu::declval<_Sent>()))>
 __device__ _LIBGPU_HIDE_FROM_ABI constexpr _Iter __rewrap_range(_Iter __orig_iter, _Unwrapped __iter) {
   return __unwrap_range_impl<_Iter, _Sent>::__rewrap(std::move(__orig_iter), std::move(__iter));
 }
 #else  // _LIBGPU_STD_VER >= 20
-template <class _Iter, class _Unwrapped = decltype(gpu::__unwrap_iter(std::declval<_Iter>()))>
+template <class _Iter, class _Unwrapped = decltype(gpu::__unwrap_iter(gpu::declval<_Iter>()))>
 __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR gpu::pair<_Unwrapped, _Unwrapped> __unwrap_range(_Iter __first, _Iter __last) {
   return gpu::make_pair(gpu::__unwrap_iter(std::move(__first)), gpu::__unwrap_iter(std::move(__last)));
 }
 
-template <class _Iter, class _Unwrapped = decltype(gpu::__unwrap_iter(std::declval<_Iter>()))>
+template <class _Iter, class _Unwrapped = decltype(gpu::__unwrap_iter(gpu::declval<_Iter>()))>
 __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR _Iter __rewrap_range(_Iter __orig_iter, _Unwrapped __iter) {
   return gpu::__rewrap_iter(std::move(__orig_iter), std::move(__iter));
 }

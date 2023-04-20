@@ -29,7 +29,7 @@ struct __debug_three_way_comp {
 
   template <class _LHS, class _RHS, class _Order>
   __device__ _LIBGPU_HIDE_FROM_ABI constexpr inline void __do_compare_assert(int, _LHS& __l, _RHS& __r, _Order __o)
-    requires __comparison_category<decltype(std::declval<_Comp&>()(std::declval<_LHS&>(), std::declval<_RHS&>()))>
+    requires __comparison_category<decltype(gpu::declval<_Comp&>()(gpu::declval<_LHS&>(), gpu::declval<_RHS&>()))>
   {
     _Order __expected = __o;
     if (__o == _Order::less)

@@ -537,7 +537,7 @@ template <class _T1, class _T2>
 template <std::size_t _Ip, class _T1, class _T2>
 struct _LIBGPU_TEMPLATE_VIS tuple_element<_Ip, pair<_T1, _T2> >
 {
-    static_assert(_Ip < 2, "Index out of bounds in std::tuple_element<std::pair<T1, T2>>");
+    static_assert(_Ip < 2, "Index out of bounds in std::tuple_element<gpu::pair<T1, T2>>");
 };
 
 template <class _T1, class _T2>

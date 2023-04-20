@@ -18,7 +18,7 @@ _LIBGPU_SUPPRESS_DEPRECATED_PUSH
 template <class _Tp, class _CharT = char, class _Traits = char_traits<_CharT> >
 class _LIBGPU_TEMPLATE_VIS ostream_iterator
 #if _LIBGPU_STD_VER <= 14 || !defined(_LIBGPU_ABI_NO_ITERATOR_BASES)
-    : public iterator<std::output_iterator_tag, void, void, void, void>
+    : public std::iterator<std::output_iterator_tag, void, void, void, void>
 #endif
 {
 _LIBGPU_SUPPRESS_DEPRECATED_POP
@@ -41,9 +41,9 @@ private:
     const char_type* __delim_;
 public:
     __device__ _LIBGPU_INLINE_VISIBILITY ostream_iterator(ostream_type& __s) _NOEXCEPT
-        : __out_stream_(std::addressof(__s)), __delim_(nullptr) {}
+        : __out_stream_(gpu::addressof(__s)), __delim_(nullptr) {}
     __device__ _LIBGPU_INLINE_VISIBILITY ostream_iterator(ostream_type& __s, const _CharT* __delimiter) _NOEXCEPT
-        : __out_stream_(std::addressof(__s)), __delim_(__delimiter) {}
+        : __out_stream_(gpu::addressof(__s)), __delim_(__delimiter) {}
     __device__ _LIBGPU_INLINE_VISIBILITY ostream_iterator& operator=(const _Tp& __value)
         {
             *__out_stream_ << __value;

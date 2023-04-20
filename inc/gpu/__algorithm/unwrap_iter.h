@@ -34,7 +34,7 @@ struct __unwrap_iter_impl {
 // It's a contiguous iterator, so we can use a raw pointer instead
 template <class _Iter>
 struct __unwrap_iter_impl<_Iter, true> {
-  using _ToAddressT = decltype(std::__to_address(std::declval<_Iter>()));
+  using _ToAddressT = decltype(std::__to_address(gpu::declval<_Iter>()));
 
   __device__ static _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR _Iter __rewrap(_Iter __orig_iter, _ToAddressT __unwrapped_iter) {
     return __orig_iter + (__unwrapped_iter - std::__to_address(__orig_iter));
@@ -51,7 +51,7 @@ template<class _Iter,
          class _Impl = __unwrap_iter_impl<_Iter>,
          std::enable_if_t<std::is_copy_constructible<_Iter>::value, int> = 0>
 __device__ inline _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14
-decltype(_Impl::__unwrap(std::declval<_Iter>())) __unwrap_iter(_Iter __i) _NOEXCEPT {
+decltype(_Impl::__unwrap(gpu::declval<_Iter>())) __unwrap_iter(_Iter __i) _NOEXCEPT {
   return _Impl::__unwrap(__i);
 }
 

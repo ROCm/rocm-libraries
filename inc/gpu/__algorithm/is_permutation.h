@@ -146,7 +146,7 @@ __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 bool
 __is_permutation(_Iter1 __first1, _Sent1 __last1, _Iter2 __first2, _Sent2 __last2,
                  _Pred&& __pred, _Proj1&& __proj1, _Proj2&& __proj2,
                  /*_ConstTimeDistance=*/std::true_type) {
-  if (std::distance(__first1, __last1) != std::distance(__first2, __last2))
+  if (gpu::distance(__first1, __last1) != gpu::distance(__first2, __last2))
     return false;
   return std::__is_permutation<_AlgPolicy>(
       std::move(__first1), std::move(__last1), std::move(__first2), std::move(__last2),

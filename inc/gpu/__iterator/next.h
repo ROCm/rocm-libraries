@@ -21,7 +21,7 @@ __device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
   _LIBGPU_ASSERT(__n >= 0 || __is_cpp17_bidirectional_iterator<_InputIter>::value,
                  "Attempt to next(it, n) with negative n on a non-bidirectional iterator");
 
-  std::advance(__x, __n);
+  gpu::advance(__x, __n);
   return __x;
 }
 

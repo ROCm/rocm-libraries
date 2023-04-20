@@ -18,7 +18,7 @@ _LIBGPU_SUPPRESS_DEPRECATED_PUSH
 template <class _Container>
 class _LIBGPU_TEMPLATE_VIS front_insert_iterator
 #if _LIBGPU_STD_VER <= 14 || !defined(_LIBGPU_ABI_NO_ITERATOR_BASES)
-    : public iterator<std::output_iterator_tag, void, void, void, void>
+    : public std::iterator<std::output_iterator_tag, void, void, void, void>
 #endif
 {
 _LIBGPU_SUPPRESS_DEPRECATED_POP
@@ -36,7 +36,7 @@ public:
     typedef void reference;
     typedef _Container container_type;
 
-    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20 explicit front_insert_iterator(_Container& __x) : container(std::addressof(__x)) {}
+    __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20 explicit front_insert_iterator(_Container& __x) : container(gpu::addressof(__x)) {}
     __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20 front_insert_iterator& operator=(const typename _Container::value_type& __value)
         {container->push_front(__value); return *this;}
 #ifndef _LIBGPU_CXX03_LANG
