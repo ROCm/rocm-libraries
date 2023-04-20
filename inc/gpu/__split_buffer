@@ -474,7 +474,7 @@ __split_buffer<_Tp>::emplace_back(_Args&&... __args) {
         {
             difference_type __d = __begin_ - __first_;
             __d = (__d + 1) / 2;
-            __end_ = std::move(__begin_, __end_, __begin_ - __d);
+            __end_ = gpu::move(__begin_, __end_, __begin_ - __d);
             __begin_ -= __d;
         }
         else
