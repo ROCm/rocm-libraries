@@ -67,7 +67,7 @@ private:
   __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14 explicit __bounded_iter(
       _Iterator __current, _Iterator __begin, _Iterator __end)
       : __current_(__current), __begin_(__begin), __end_(__end) {
-    _LIBGPU_ASSERT(__begin <= __end, "__bounded_iter(current, begin, end): [begin, end) is not a valid range");
+    assert(__begin <= __end && "__bounded_iter(current, begin, end): [begin, end) is not a valid range");
   }
 
   template <class _It>

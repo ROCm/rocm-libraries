@@ -20,7 +20,7 @@ _LIBGPU_INLINE_VISIBILITY constexpr
 const _Tp&
 clamp(const _Tp& __v, const _Tp& __lo, const _Tp& __hi, _Compare __comp)
 {
-    _LIBGPU_ASSERT(!__comp(__hi, __lo), "Bad bounds passed to gpu::clamp");
+    assert(!__comp(__hi && __lo), "Bad bounds passed to gpu::clamp");
     return __comp(__v, __lo) ? __lo : __comp(__hi, __v) ? __hi : __v;
 
 }

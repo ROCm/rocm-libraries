@@ -50,7 +50,7 @@ public:
     requires std::convertible_to<const _I2&, _Iter> && std::convertible_to<const _S2&, _Sent>
   constexpr common_iterator(const common_iterator<_I2, _S2>& __other)
     : __hold_([&]() -> variant<_Iter, _Sent> {
-      _LIBGPU_ASSERT(!__other.__hold_.valueless_by_exception(), "Attempted to construct from a valueless common_iterator");
+      assert(!__other.__hold_.valueless_by_exception() && "Attempted to construct from a valueless common_iterator");
       if (__other.__hold_.index() == 0)
         return variant<_Iter, _Sent>{in_place_index<0>, std::__unchecked_get<0>(__other.__hold_)};
       return variant<_Iter, _Sent>{in_place_index<1>, std::__unchecked_get<1>(__other.__hold_)};
@@ -60,7 +60,7 @@ public:
     requires std::convertible_to<const _I2&, _Iter> && std::convertible_to<const _S2&, _Sent> &&
              assignable_from<_Iter&, const _I2&> && assignable_from<_Sent&, const _S2&>
   common_iterator& operator=(const common_iterator<_I2, _S2>& __other) {
-    _LIBGPU_ASSERT(!__other.__hold_.valueless_by_exception(), "Attempted to assign from a valueless common_iterator");
+    assert(!__other.__hold_.valueless_by_exception() && "Attempted to assign from a valueless common_iterator");
 
     auto __idx = __hold_.index();
     auto __other_idx = __other.__hold_.index();
@@ -82,14 +82,14 @@ public:
 
   constexpr decltype(auto) operator*()
   {
-    _LIBGPU_ASSERT(std::holds_alternative<_Iter>(__hold_), "Attempted to dereference a non-dereferenceable common_iterator");
+    assert(std::holds_alternative<_Iter>(__hold_) && "Attempted to dereference a non-dereferenceable common_iterator");
     return *std::__unchecked_get<_Iter>(__hold_);
   }
 
   constexpr decltype(auto) operator*() const
     requires __dereferenceable<const _Iter>
   {
-    _LIBGPU_ASSERT(std::holds_alternative<_Iter>(__hold_), "Attempted to dereference a non-dereferenceable common_iterator");
+    assert(std::holds_alternative<_Iter>(__hold_) && "Attempted to dereference a non-dereferenceable common_iterator");
     return *std::__unchecked_get<_Iter>(__hold_);
   }
 
@@ -100,7 +100,7 @@ public:
      std::is_reference_v<iter_reference_t<_I2>> ||
      constructible_from<iter_value_t<_I2>, iter_reference_t<_I2>>)
   {
-    _LIBGPU_ASSERT(std::holds_alternative<_Iter>(__hold_), "Attempted to dereference a non-dereferenceable common_iterator");
+    assert(std::holds_alternative<_Iter>(__hold_) && "Attempted to dereference a non-dereferenceable common_iterator");
     if constexpr (std::is_pointer_v<_Iter> || requires(const _Iter& __i) { __i.operator->(); })    {
       return std::__unchecked_get<_Iter>(__hold_);
     } else if constexpr (std::is_reference_v<iter_reference_t<_Iter>>) {
@@ -112,12 +112,12 @@ public:
   }
 
   common_iterator& operator++() {
-    _LIBGPU_ASSERT(std::holds_alternative<_Iter>(__hold_), "Attempted to increment a non-dereferenceable common_iterator");
+    assert(std::holds_alternative<_Iter>(__hold_) && "Attempted to increment a non-dereferenceable common_iterator");
     ++std::__unchecked_get<_Iter>(__hold_); return *this;
   }
 
   decltype(auto) operator++(int) {
-    _LIBGPU_ASSERT(std::holds_alternative<_Iter>(__hold_), "Attempted to increment a non-dereferenceable common_iterator");
+    assert(std::holds_alternative<_Iter>(__hold_) && "Attempted to increment a non-dereferenceable common_iterator");
     if constexpr (forward_iterator<_Iter>) {
       auto __tmp = *this;
       ++*this;
@@ -136,8 +136,8 @@ public:
     requires sentinel_for<_Sent, _I2>
   __device__ _LIBGPU_HIDE_FROM_ABI
   friend constexpr bool operator==(const common_iterator& __x, const common_iterator<_I2, _S2>& __y) {
-    _LIBGPU_ASSERT(!__x.__hold_.valueless_by_exception(), "Attempted to compare a valueless common_iterator");
-    _LIBGPU_ASSERT(!__y.__hold_.valueless_by_exception(), "Attempted to compare a valueless common_iterator");
+    assert(!__x.__hold_.valueless_by_exception() && "Attempted to compare a valueless common_iterator");
+    assert(!__y.__hold_.valueless_by_exception() && "Attempted to compare a valueless common_iterator");
 
     auto __x_index = __x.__hold_.index();
     auto __y_index = __y.__hold_.index();
@@ -155,8 +155,8 @@ public:
     requires sentinel_for<_Sent, _I2> && equality_comparable_with<_Iter, _I2>
   __device__ _LIBGPU_HIDE_FROM_ABI
   friend constexpr bool operator==(const common_iterator& __x, const common_iterator<_I2, _S2>& __y) {
-    _LIBGPU_ASSERT(!__x.__hold_.valueless_by_exception(), "Attempted to compare a valueless common_iterator");
-    _LIBGPU_ASSERT(!__y.__hold_.valueless_by_exception(), "Attempted to compare a valueless common_iterator");
+    assert(!__x.__hold_.valueless_by_exception() && "Attempted to compare a valueless common_iterator");
+    assert(!__y.__hold_.valueless_by_exception() && "Attempted to compare a valueless common_iterator");
 
     auto __x_index = __x.__hold_.index();
     auto __y_index = __y.__hold_.index();
@@ -177,8 +177,8 @@ public:
     requires sized_sentinel_for<_Sent, _I2>
   __device__ _LIBGPU_HIDE_FROM_ABI
   friend constexpr iter_difference_t<_I2> operator-(const common_iterator& __x, const common_iterator<_I2, _S2>& __y) {
-    _LIBGPU_ASSERT(!__x.__hold_.valueless_by_exception(), "Attempted to subtract from a valueless common_iterator");
-    _LIBGPU_ASSERT(!__y.__hold_.valueless_by_exception(), "Attempted to subtract a valueless common_iterator");
+    assert(!__x.__hold_.valueless_by_exception() && "Attempted to subtract from a valueless common_iterator");
+    assert(!__y.__hold_.valueless_by_exception() && "Attempted to subtract a valueless common_iterator");
 
     auto __x_index = __x.__hold_.index();
     auto __y_index = __y.__hold_.index();
@@ -199,7 +199,7 @@ public:
     noexcept(noexcept(ranges::iter_move(gpu::declval<const _Iter&>())))
       requires input_iterator<_Iter>
   {
-    _LIBGPU_ASSERT(std::holds_alternative<_Iter>(__i.__hold_), "Attempted to iter_move a non-dereferenceable common_iterator");
+    assert(std::holds_alternative<_Iter>(__i.__hold_) && "Attempted to iter_move a non-dereferenceable common_iterator");
     return ranges::iter_move( std::__unchecked_get<_Iter>(__i.__hold_));
   }
 
@@ -207,8 +207,8 @@ public:
   __device__ _LIBGPU_HIDE_FROM_ABI friend constexpr void iter_swap(const common_iterator& __x, const common_iterator<_I2, _S2>& __y)
       noexcept(noexcept(ranges::iter_swap(gpu::declval<const _Iter&>(), gpu::declval<const _I2&>())))
   {
-    _LIBGPU_ASSERT(std::holds_alternative<_Iter>(__x.__hold_), "Attempted to iter_swap a non-dereferenceable common_iterator");
-    _LIBGPU_ASSERT(std::holds_alternative<_I2>(__y.__hold_), "Attempted to iter_swap a non-dereferenceable common_iterator");
+    assert(std::holds_alternative<_Iter>(__x.__hold_) && "Attempted to iter_swap a non-dereferenceable common_iterator");
+    assert(std::holds_alternative<_I2>(__y.__hold_) && "Attempted to iter_swap a non-dereferenceable common_iterator");
     return ranges::iter_swap(std::__unchecked_get<_Iter>(__x.__hold_), std::__unchecked_get<_I2>(__y.__hold_));
   }
 };

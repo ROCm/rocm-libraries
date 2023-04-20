@@ -75,7 +75,7 @@ __floyd_sift_down(_RandomAccessIterator __first, _Compare&& __comp,
                   typename std::iterator_traits<_RandomAccessIterator>::difference_type __len)
 {
     using difference_type = typename std::iterator_traits<_RandomAccessIterator>::difference_type;
-    _LIBGPU_ASSERT(__len >= 2, "shouldn't be called unless __len >= 2");
+    assert(__len >= 2 && "shouldn't be called unless __len >= 2");
 
     _RandomAccessIterator __hole = __first;
     _RandomAccessIterator __child_i = __first;

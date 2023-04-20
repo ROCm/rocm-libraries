@@ -468,7 +468,7 @@ __bitset_partition(_RandomAccessIterator __first, _RandomAccessIterator __last, 
   using _Ops = _IterOps<_AlgPolicy>;
   typedef typename std::iterator_traits<_RandomAccessIterator>::value_type value_type;
   typedef typename std::iterator_traits<_RandomAccessIterator>::difference_type difference_type;
-  _LIBGPU_ASSERT(__last - __first >= difference_type(3), "");
+  assert(__last - __first >= difference_type(3) && "");
 
   _RandomAccessIterator __begin = __first;
   value_type __pivot(_Ops::__iter_move(__first));
@@ -550,7 +550,7 @@ __partition_with_equals_on_right(_RandomAccessIterator __first, _RandomAccessIte
   using _Ops = _IterOps<_AlgPolicy>;
   typedef typename std::iterator_traits<_RandomAccessIterator>::difference_type difference_type;
   typedef typename std::iterator_traits<_RandomAccessIterator>::value_type value_type;
-  _LIBGPU_ASSERT(__last - __first >= difference_type(3), "");
+  assert(__last - __first >= difference_type(3) && "");
   _RandomAccessIterator __begin = __first;
   value_type __pivot(_Ops::__iter_move(__first));
   // Find the first element greater or equal to the pivot.  It will be always
