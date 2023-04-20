@@ -11,6 +11,7 @@
 #define __GPU___ITERATOR_ACCESS_H
 
 #include "gpu/__config"
+#include <cstddef>
 
 namespace gpu {
 

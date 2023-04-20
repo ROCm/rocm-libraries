@@ -10,7 +10,10 @@
 #define __GPU___ALGORITHM_UNWRAP_ITER_H
 
 #include "gpu/__config"
+#include <type_traits>
+
 #include "gpu/__iterator/iterator_traits.h"
+#include "gpu/__utility/declval.h"
 
 namespace gpu {
 

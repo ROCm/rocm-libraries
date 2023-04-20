@@ -10,12 +10,14 @@
 #define __GPU___ALGORITHM_COPY_MOVE_COMMON_H
 
 #include "gpu/__config"
+#include <type_traits>
+
 #include "gpu/__algorithm/iterator_operations.h"
-#include "gpu/__utility/pair.h"
-#include "gpu/__type_traits/is_always_bitcastable.h"
 #include "gpu/__algorithm/unwrap_iter.h"
 #include "gpu/__algorithm/unwrap_range.h"
-#include <type_traits>
+#include "gpu/__type_traits/is_always_bitcastable.h"
+#include "gpu/__utility/declval.h"
+#include "gpu/__utility/pair.h"
 
 namespace gpu {
 

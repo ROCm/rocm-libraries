@@ -11,6 +11,11 @@
 #define __GPU___ITERATOR_ADVANCE_H
 
 #include "gpu/__config"
+#include <iterator>
+
+#include "gpu/__iterator/iterator_traits.h"
+#include "gpu/__utility/convert_to_integral.h"
+#include "gpu/__utility/declval.h"
 
 namespace gpu {
 
