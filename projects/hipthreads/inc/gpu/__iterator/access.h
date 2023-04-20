@@ -68,16 +68,16 @@ end(const _Cp& __c) -> decltype(__c.end())
 
 template <class _Cp>
 __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX14
-auto cbegin(const _Cp& __c) -> decltype(std::begin(__c))
+auto cbegin(const _Cp& __c) -> decltype(gpu::begin(__c))
 {
-    return std::begin(__c);
+    return gpu::begin(__c);
 }
 
 template <class _Cp>
 __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX14
-auto cend(const _Cp& __c) -> decltype(std::end(__c))
+auto cend(const _Cp& __c) -> decltype(gpu::end(__c))
 {
-    return std::end(__c);
+    return gpu::end(__c);
 }
 
 #endif

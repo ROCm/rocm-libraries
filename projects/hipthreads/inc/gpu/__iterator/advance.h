@@ -40,7 +40,7 @@ void __advance(_RandIter& __i, typename std::iterator_traits<_RandIter>::differe
 
 template <
     class _InputIter, class _Distance,
-    class _IntegralDistance = decltype(gpu::__convert_to_integral(std::declval<_Distance>())),
+    class _IntegralDistance = decltype(gpu::__convert_to_integral(gpu::declval<_Distance>())),
     class = std::enable_if_t<std::is_integral<_IntegralDistance>::value> >
 __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX17
 void advance(_InputIter& __i, _Distance __orig_n) {

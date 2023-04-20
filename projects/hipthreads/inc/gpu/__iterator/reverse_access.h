@@ -74,16 +74,16 @@ auto rend(const _Cp& __c) -> decltype(__c.rend())
 
 template <class _Cp>
 __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
-auto crbegin(const _Cp& __c) -> decltype(std::rbegin(__c))
+auto crbegin(const _Cp& __c) -> decltype(gpu::rbegin(__c))
 {
-    return std::rbegin(__c);
+    return gpu::rbegin(__c);
 }
 
 template <class _Cp>
 __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
-auto crend(const _Cp& __c) -> decltype(std::rend(__c))
+auto crend(const _Cp& __c) -> decltype(gpu::rend(__c))
 {
-    return std::rend(__c);
+    return gpu::rend(__c);
 }
 
 #endif // _LIBGPU_STD_VER >= 14

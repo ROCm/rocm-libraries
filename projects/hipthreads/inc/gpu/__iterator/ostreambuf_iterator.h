@@ -18,7 +18,7 @@ _LIBGPU_SUPPRESS_DEPRECATED_PUSH
 template <class _CharT, class _Traits>
 class _LIBGPU_TEMPLATE_VIS ostreambuf_iterator
 #if _LIBGPU_STD_VER <= 14 || !defined(_LIBGPU_ABI_NO_ITERATOR_BASES)
-    : public iterator<std::output_iterator_tag, void, void, void, void>
+    : public std::iterator<std::output_iterator_tag, void, void, void, void>
 #endif
 {
 _LIBGPU_SUPPRESS_DEPRECATED_POP

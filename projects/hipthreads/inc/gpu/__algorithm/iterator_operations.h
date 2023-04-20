@@ -60,21 +60,21 @@ struct _IterOps<_ClassicAlgPolicy> {
   template <class _Iter, class _Distance>
   __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14
   static void advance(_Iter& __iter, _Distance __count) {
-    std::advance(__iter, __count);
+    gpu::advance(__iter, __count);
   }
 
   // distance
   template <class _Iter>
   __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14
   static typename std::iterator_traits<_Iter>::difference_type distance(_Iter __first, _Iter __last) {
-    return std::distance(__first, __last);
+    return gpu::distance(__first, __last);
   }
 
   template <class _Iter>
-  using __deref_t = decltype(*std::declval<_Iter&>());
+  using __deref_t = decltype(*gpu::declval<_Iter&>());
 
   template <class _Iter>
-  using __move_t = decltype(std::move(*std::declval<_Iter&>()));
+  using __move_t = decltype(std::move(*gpu::declval<_Iter&>()));
 
   template <class _Iter>
   __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX14
@@ -131,7 +131,7 @@ struct _IterOps<_ClassicAlgPolicy> {
   __device__ _LIBGPU_HIDE_FROM_ABI static _LIBGPU_CONSTEXPR_SINCE_CXX14
   std::remove_cv_t<std::remove_reference_t<_Iter>> next(_Iter&& __it,
                           typename std::iterator_traits<std::remove_cv_t<std::remove_reference_t<_Iter>> >::difference_type __n = 1) {
-    return std::next(std::forward<_Iter>(__it), __n);
+    return gpu::next(std::forward<_Iter>(__it), __n);
   }
 
   // prev
@@ -139,7 +139,7 @@ struct _IterOps<_ClassicAlgPolicy> {
   __device__ _LIBGPU_HIDE_FROM_ABI static _LIBGPU_CONSTEXPR_SINCE_CXX14
   std::remove_cv_t<std::remove_reference_t<_Iter>> prev(_Iter&& __iter,
                  typename std::iterator_traits<std::remove_cv_t<std::remove_reference_t<_Iter>> >::difference_type __n = 1) {
-    return std::prev(std::forward<_Iter>(__iter), __n);
+    return gpu::prev(std::forward<_Iter>(__iter), __n);
   }
 
   template <class _Iter>

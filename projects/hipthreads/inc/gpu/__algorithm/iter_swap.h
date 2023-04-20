@@ -17,7 +17,7 @@ template <class _ForwardIterator1, class _ForwardIterator2>
 __device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20 void iter_swap(_ForwardIterator1 __a,
                                                                               _ForwardIterator2 __b)
     //                                  _NOEXCEPT_(_NOEXCEPT_(swap(*__a, *__b)))
-    _NOEXCEPT_(_NOEXCEPT_(swap(*std::declval<_ForwardIterator1>(), *std::declval<_ForwardIterator2>()))) {
+    _NOEXCEPT_(_NOEXCEPT_(swap(*gpu::declval<_ForwardIterator1>(), *gpu::declval<_ForwardIterator2>()))) {
   swap(*__a, *__b);
 }
 

@@ -19,7 +19,7 @@ template <class _Tp, class _CharT = char,
           class _Traits = char_traits<_CharT>, class _Distance = std::ptrdiff_t>
 class _LIBGPU_TEMPLATE_VIS istream_iterator
 #if _LIBGPU_STD_VER <= 14 || !defined(_LIBGPU_ABI_NO_ITERATOR_BASES)
-    : public iterator<std::input_iterator_tag, _Tp, _Distance, const _Tp*, const _Tp&>
+    : public std::iterator<std::input_iterator_tag, _Tp, _Distance, const _Tp*, const _Tp&>
 #endif
 {
 _LIBGPU_SUPPRESS_DEPRECATED_POP
@@ -40,14 +40,14 @@ public:
 #if _LIBGPU_STD_VER >= 20
     __device__ _LIBGPU_HIDE_FROM_ABI constexpr istream_iterator(default_sentinel_t) : istream_iterator() {}
 #endif // _LIBGPU_STD_VER >= 20
-    __device__ _LIBGPU_INLINE_VISIBILITY istream_iterator(istream_type& __s) : __in_stream_(std::addressof(__s))
+    __device__ _LIBGPU_INLINE_VISIBILITY istream_iterator(istream_type& __s) : __in_stream_(gpu::addressof(__s))
         {
             if (!(*__in_stream_ >> __value_))
                 __in_stream_ = nullptr;
         }
 
     __device__ _LIBGPU_INLINE_VISIBILITY const _Tp& operator*() const {return __value_;}
-    __device__ _LIBGPU_INLINE_VISIBILITY const _Tp* operator->() const {return std::addressof((operator*()));}
+    __device__ _LIBGPU_INLINE_VISIBILITY const _Tp* operator->() const {return gpu::addressof((operator*()));}
     __device__ _LIBGPU_INLINE_VISIBILITY istream_iterator& operator++()
         {
             if (!(*__in_stream_ >> __value_))

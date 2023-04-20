@@ -112,15 +112,15 @@ public:
       requires std::is_pointer_v<_Iter> || requires(const _Iter __i) { __i.operator->(); }
     {
       if constexpr (std::is_pointer_v<_Iter>) {
-        return std::prev(current);
+        return gpu::prev(current);
       } else {
-        return std::prev(current).operator->();
+        return gpu::prev(current).operator->();
       }
     }
 #else
     __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX17
     pointer operator->() const {
-      return std::addressof(operator*());
+      return gpu::addressof(operator*());
     }
 #endif // _LIBGPU_STD_VER >= 20
 
@@ -147,7 +147,7 @@ public:
     __device__ _LIBGPU_HIDE_FROM_ABI friend constexpr
     iter_rvalue_reference_t<_Iter> iter_move(const reverse_iterator& __i)
       noexcept(std::is_nothrow_copy_constructible_v<_Iter> &&
-          noexcept(ranges::iter_move(--std::declval<_Iter&>()))) {
+          noexcept(ranges::iter_move(--gpu::declval<_Iter&>()))) {
       auto __tmp = __i.base();
       return ranges::iter_move(--__tmp);
     }
@@ -157,7 +157,7 @@ public:
     void iter_swap(const reverse_iterator& __x, const reverse_iterator<_Iter2>& __y)
       noexcept(std::is_nothrow_copy_constructible_v<_Iter> &&
           std::is_nothrow_copy_constructible_v<_Iter2> &&
-          noexcept(ranges::iter_swap(--std::declval<_Iter&>(), --std::declval<_Iter2&>()))) {
+          noexcept(ranges::iter_swap(--gpu::declval<_Iter&>(), --gpu::declval<_Iter2&>()))) {
       auto __xtmp = __x.base();
       auto __ytmp = __y.base();
       ranges::iter_swap(--__xtmp, --__ytmp);
@@ -351,16 +351,16 @@ public:
 
   __device__ _LIBGPU_HIDE_FROM_ABI constexpr pointer operator->() const {
     if constexpr (std::is_pointer_v<_Iter>) {
-      return std::prev(__iter_);
+      return gpu::prev(__iter_);
     } else {
-      return std::prev(__iter_).operator->();
+      return gpu::prev(__iter_).operator->();
     }
   }
 
   __device__ _LIBGPU_HIDE_FROM_ABI friend constexpr
   iter_rvalue_reference_t<_Iter> iter_move(const __unconstrained_reverse_iterator& __i)
     noexcept(std::is_nothrow_copy_constructible_v<_Iter> &&
-        noexcept(ranges::iter_move(--std::declval<_Iter&>()))) {
+        noexcept(ranges::iter_move(--gpu::declval<_Iter&>()))) {
     auto __tmp = __i.base();
     return ranges::iter_move(--__tmp);
   }
@@ -448,7 +448,7 @@ public:
 
 template <template <class> class _RevIter1, template <class> class _RevIter2, class _Iter>
 struct __unwrap_reverse_iter_impl {
-  using _UnwrappedIter = decltype(__unwrap_iter_impl<_Iter>::__unwrap(std::declval<_Iter>()));
+  using _UnwrappedIter = decltype(__unwrap_iter_impl<_Iter>::__unwrap(gpu::declval<_Iter>()));
   using _ReverseWrapper = _RevIter1<_RevIter2<_Iter> >;
 
   __device__ static _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR _ReverseWrapper
@@ -468,7 +468,7 @@ __device__ _LIBGPU_HIDE_FROM_ABI constexpr ranges::
     subrange<reverse_iterator<ranges::iterator_t<_Range>>, reverse_iterator<ranges::iterator_t<_Range>>>
     __reverse_range(_Range&& __range) {
   auto __first = ranges::begin(__range);
-  return {std::make_reverse_iterator(ranges::next(__first, ranges::end(__range))), std::make_reverse_iterator(__first)};
+  return {gpu::make_reverse_iterator(ranges::next(__first, ranges::end(__range))), gpu::make_reverse_iterator(__first)};
 }
 #endif
 

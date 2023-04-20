@@ -22,7 +22,7 @@ struct _ProjectedPred {
 
   template <class _Tp>
   typename __invoke_of<_Pred&,
-                       decltype(std::__invoke(std::declval<_Proj&>(), std::declval<_Tp>()))
+                       decltype(std::__invoke(gpu::declval<_Proj&>(), gpu::declval<_Tp>()))
   >::type
   _LIBGPU_CONSTEXPR operator()(_Tp&& __v) const {
     return std::__invoke(__pred, std::__invoke(__proj, std::forward<_Tp>(__v)));
@@ -30,8 +30,8 @@ struct _ProjectedPred {
 
   template <class _T1, class _T2>
   typename __invoke_of<_Pred&,
-                       decltype(std::__invoke(std::declval<_Proj&>(), std::declval<_T1>())),
-                       decltype(std::__invoke(std::declval<_Proj&>(), std::declval<_T2>()))
+                       decltype(std::__invoke(gpu::declval<_Proj&>(), gpu::declval<_T1>())),
+                       decltype(std::__invoke(gpu::declval<_Proj&>(), gpu::declval<_T2>()))
   >::type
   _LIBGPU_CONSTEXPR operator()(_T1&& __lhs, _T2&& __rhs) const {
     return std::__invoke(__pred,

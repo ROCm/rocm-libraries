@@ -68,7 +68,7 @@ namespace __iter_swap {
     constexpr void operator()(_T1&& __x, _T2&& __y) const
       noexcept(noexcept(iter_value_t<_T2>(ranges::iter_move(__y))) &&
                noexcept(*__y = ranges::iter_move(__x)) &&
-               noexcept(*std::forward<_T1>(__x) = std::declval<iter_value_t<_T2>>()))
+               noexcept(*std::forward<_T1>(__x) = gpu::declval<iter_value_t<_T2>>()))
     {
       iter_value_t<_T2> __old(ranges::iter_move(__y));
       *__y = ranges::iter_move(__x);
