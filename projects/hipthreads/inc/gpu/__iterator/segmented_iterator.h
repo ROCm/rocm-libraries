@@ -9,7 +9,41 @@
 #ifndef __GPU___SEGMENTED_ITERATOR_H
 #define __GPU___SEGMENTED_ITERATOR_H
 
+// Segmented iterators are iterators over (not necessarily contiguous) sub-ranges.
+//
+// For example, std::deque stores its data into multiple blocks of contiguous memory,
+// which are not stored contiguously themselves. The concept of segmented iterators
+// allows algorithms to operate over these multi-level iterators natively, opening the
+// door to various optimizations. See http://lafstern.org/matt/segmented.pdf for details.
+//
+// If __segmented_iterator_traits can be instantiated, the following functions and associated types must be provided:
+// - Traits::__local_iterator
+//   The type of iterators used to iterate inside a segment.
+//
+// - Traits::__segment_iterator
+//   The type of iterators used to iterate over segments.
+//   Segment iterators can be forward iterators or bidirectional iterators, depending on the
+//   underlying data structure.
+//
+// - static __segment_iterator Traits::__segment(It __it)
+//   Returns an iterator to the segment that the provided iterator is in.
+//
+// - static __local_iterator Traits::__local(It __it)
+//   Returns the local iterator pointing to the element that the provided iterator points to.
+//
+// - static __local_iterator Traits::__begin(__segment_iterator __it)
+//   Returns the local iterator to the beginning of the segment that the provided iterator is pointing into.
+//
+// - static __local_iterator Traits::__end(__segment_iterator __it)
+//   Returns the one-past-the-end local iterator to the segment that the provided iterator is pointing into.
+//
+// - static It Traits::__compose(__segment_iterator, __local_iterator)
+//   Returns the iterator composed of the segment iterator and local iterator.
+
 #include "gpu/__config"
+
+#include <cstddef>
+#include <type_traits>
 
 namespace gpu {
 
