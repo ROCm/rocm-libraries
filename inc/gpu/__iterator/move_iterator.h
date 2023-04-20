@@ -11,6 +11,11 @@
 #define __GPU___ITERATOR_MOVE_ITERATOR_H
 
 #include "gpu/__config"
+#include <type_traits>
+#include <iterator>
+
+#include "gpu/__iterator/iterator_traits.h"
+#include "gpu/__utility/declval.h"
 
 namespace gpu {
 

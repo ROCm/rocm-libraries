@@ -12,6 +12,8 @@
 
 #include "gpu/__config"
 
+#include "gpu/__iterator/reverse_iterator.h"
+
 namespace gpu {
 
 #if _LIBGPU_STD_VER >= 14
