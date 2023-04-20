@@ -298,10 +298,10 @@ class _LIBGPU_TEMPLATE_VIS vector {
     __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void __append(size_type __n);
     __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void __append(size_type __n, const_reference __x);
     __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI iterator __make_iter(pointer __p) _NOEXCEPT {
-        return iterator(this, __p);
+        return iterator(__p);
     }
     __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI const_iterator __make_iter(const_pointer __p) const _NOEXCEPT {
-        return const_iterator(this, __p);
+        return const_iterator(__p);
     }
     __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 _LIBGPU_HIDE_FROM_ABI void
     __swap_out_circular_buffer(__split_buffer<value_type> &__v);
@@ -383,7 +383,7 @@ class _LIBGPU_TEMPLATE_VIS vector {
 #if _LIBGPU_STD_VER >= 17
 template <class _InputIterator,
           class = std::enable_if_t<__is_cpp17_input_iterator<_InputIterator>::value>>
-vector(_InputIterator, _InputIterator) -> vector<typename std::iterator_traits<_InputIterator>::value_type>;
+__device__ vector(_InputIterator, _InputIterator) -> vector<typename std::iterator_traits<_InputIterator>::value_type>;
 #endif
 
 template <class _Tp>
