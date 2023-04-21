@@ -47,3 +47,7 @@ add_executable(chrono_sysclock_workaround chrono_sysclock_workaround.hip)
 target_compile_features(chrono_sysclock_workaround PRIVATE cxx_std_20)
 target_compile_options(chrono_sysclock_workaround PRIVATE -D_LIBCUDACXX_EXPERIMENTAL_CHRONO_HIP)
 target_link_libraries(chrono_sysclock_workaround PRIVATE libcudacxx::libcudacxx)
+
+add_executable(safe_arithmetic_operations safe_arithmetic_operations.hip)
+target_compile_features(safe_arithmetic_operations PRIVATE cxx_std_17)
+target_link_libraries(safe_arithmetic_operations PRIVATE libcudacxx::libcudacxx)
