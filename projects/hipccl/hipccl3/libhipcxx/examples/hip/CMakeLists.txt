@@ -34,10 +34,6 @@ add_executable(hash_map concurrent_hash_table.hip)
 target_compile_features(hash_map PRIVATE cxx_std_14)
 target_link_libraries(hash_map PRIVATE libcudacxx::libcudacxx)
 
-add_executable(atomics_thread_fence atomics_thread_fence.hip)
-target_compile_features(atomics_thread_fence PRIVATE cxx_std_17)
-target_link_libraries(atomics_thread_fence PRIVATE libcudacxx::libcudacxx)
-
 add_executable(chrono_timestamp_processing chrono_timestamp_processing.hip)
 target_compile_features(chrono_timestamp_processing PRIVATE cxx_std_17)
 target_link_libraries(chrono_timestamp_processing PRIVATE libcudacxx::libcudacxx)
