@@ -41,3 +41,9 @@ target_link_libraries(atomics_thread_fence PRIVATE libcudacxx::libcudacxx)
 add_executable(chrono_timestamp_processing chrono_timestamp_processing.hip)
 target_compile_features(chrono_timestamp_processing PRIVATE cxx_std_17)
 target_link_libraries(chrono_timestamp_processing PRIVATE libcudacxx::libcudacxx)
+
+#This example requires C++20
+add_executable(chrono_sysclock_workaround chrono_sysclock_workaround.hip)
+target_compile_features(chrono_sysclock_workaround PRIVATE cxx_std_20)
+target_compile_options(chrono_sysclock_workaround PRIVATE -D_LIBCUDACXX_EXPERIMENTAL_CHRONO_HIP)
+target_link_libraries(chrono_sysclock_workaround PRIVATE libcudacxx::libcudacxx)
