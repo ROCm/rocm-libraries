@@ -415,7 +415,7 @@ __split_buffer<_Tp>::push_back(const_reference __x) {
         {
             difference_type __d = __begin_ - __first_;
             __d = (__d + 1) / 2;
-            __end_ = std::move(__begin_, __end_, __begin_ - __d);
+            __end_ = gpu::move(__begin_, __end_, __begin_ - __d);
             __begin_ -= __d;
         }
         else
@@ -444,7 +444,7 @@ __split_buffer<_Tp>::push_back(value_type&& __x) {
         {
             difference_type __d = __begin_ - __first_;
             __d = (__d + 1) / 2;
-            __end_ = std::move(__begin_, __end_, __begin_ - __d);
+            __end_ = gpu::move(__begin_, __end_, __begin_ - __d);
             __begin_ -= __d;
         }
         else

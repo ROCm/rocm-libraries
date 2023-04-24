@@ -820,7 +820,7 @@ vector<_Tp>::erase(const_iterator __position) {
     assert(__position != end() && "vector::erase(iterator) called with a non-dereferenceable iterator");
     difference_type __ps = __position - cbegin();
     pointer __p = this->__begin_ + __ps;
-    this->__destruct_at_end(std::move(__p + 1, this->__end_, __p));
+    this->__destruct_at_end(gpu::move(__p + 1, this->__end_, __p));
     if (!__builtin_is_constant_evaluated())
         this->__invalidate_iterators_past(__p - 1);
     return __make_iter(__p);
@@ -832,7 +832,7 @@ vector<_Tp>::erase(const_iterator __first, const_iterator __last) {
     assert(__first <= __last && "vector::erase(first, last) called with invalid range");
     pointer __p = this->__begin_ + (__first - begin());
     if (__first != __last) {
-        this->__destruct_at_end(std::move(__p + (__last - __first), this->__end_, __p));
+        this->__destruct_at_end(gpu::move(__p + (__last - __first), this->__end_, __p));
         if (!__builtin_is_constant_evaluated())
             this->__invalidate_iterators_past(__p - 1);
     }
