@@ -39,7 +39,7 @@ shift_left(_ForwardIterator __first, _ForwardIterator __last,
             ++__m;
         }
     }
-    return std::move(__m, __last, __first);
+    return gpu::move(__m, __last, __first);
 }
 
 #endif // _LIBGPU_STD_VER >= 20

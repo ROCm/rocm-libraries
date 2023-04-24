@@ -60,7 +60,7 @@ shift_right(_ForwardIterator __first, _ForwardIterator __last,
         auto __lead = __ret;
         while (__trail != __ret) {
             if (__lead == __last) {
-                std::move(__first, __trail, __ret);
+                gpu::move(__first, __trail, __ret);
                 return __ret;
             }
             ++__trail;
@@ -70,8 +70,8 @@ shift_right(_ForwardIterator __first, _ForwardIterator __last,
         _ForwardIterator __mid = __first;
         while (true) {
             if (__lead == __last) {
-                __trail = std::move(__mid, __ret, __trail);
-                std::move(__first, __mid, __trail);
+                __trail = gpu::move(__mid, __ret, __trail);
+                gpu::move(__first, __mid, __trail);
                 return __ret;
             }
             swap(*__mid, *__trail);
