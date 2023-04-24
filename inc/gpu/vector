@@ -20,6 +20,7 @@
 #include "gpu/__iterator/iterator_traits.h"
 #include "gpu/__iterator/reverse_iterator.h"
 #include "gpu/__memory/addressof.h"
+#include "gpu/__memory/temp_value.h"
 #include "gpu/__memory/uninitialized_algorithms.h"
 #include "gpu/__split_buffer"
 #include "gpu/__type_traits/type_identity.h"
@@ -904,11 +905,9 @@ vector<_Tp>::emplace(const_iterator __position, _Args &&...__args) {
         if (__p == this->__end_) {
             __construct_one_at_end(std::forward<_Args>(__args)...);
         } else {
-            // TODO: figure out why libcxx wraps __temp_value's member in an anonymous union
-            union { value_type __tmp; };
-            ::new (static_cast<void*>(gpu::addressof(__tmp))) value_type(std::forward<_Args>(__args)...);
+            __temp_value<value_type> __tmp(std::forward<_Args>(__args)...);
             __move_range(__p, this->__end_, __p + 1);
-            *__p = std::move(__tmp);
+            *__p = std::move(__tmp.get());
         }
     } else {
         __split_buffer<value_type> __v(__recommend(size() + 1), __p - this->__begin_);
