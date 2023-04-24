@@ -11,6 +11,8 @@
 #include "gpu/__config"
 #include "gpu/__algorithm/copy.h"
 #include "gpu/__algorithm/fill_n.h"
+#include "gpu/__algorithm/equal.h"
+#include "gpu/__algorithm/lexicographical_compare.h"
 #include "gpu/__algorithm/max.h"
 #include "gpu/__algorithm/min.h"
 #include "gpu/__algorithm/move.h"
@@ -428,7 +430,7 @@ __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::__vdeallocate() _NOEX
 template <class _Tp>
 __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 typename vector<_Tp>::size_type
 vector<_Tp>::max_size() const _NOEXCEPT {
-    return std::min<size_type>(std::numeric_limits<size_type>::max() / sizeof(value_type), std::numeric_limits<difference_type>::max());
+    return gpu::min<size_type>(std::numeric_limits<size_type>::max() / sizeof(value_type), std::numeric_limits<difference_type>::max());
 }
 
 //  Precondition:  __new_size > capacity()
@@ -662,7 +664,7 @@ template <class _Tp>
 __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 void vector<_Tp>::assign(size_type __n, const_reference __u) {
     if (__n <= capacity()) {
         size_type __s = size();
-        gpu::fill_n(this->__begin_, std::min(__n, __s), __u);
+        gpu::fill_n(this->__begin_, gpu::min(__n, __s), __u);
         if (__n > __s)
             __construct_at_end(__n - __s, __u);
         else
@@ -1417,7 +1419,7 @@ private:
 
     __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 void __move_assign(vector& __c, std::true_type) _NOEXCEPT;
 
-    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 size_t __hash_code() const _NOEXCEPT;
+    __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20 std::size_t __hash_code() const _NOEXCEPT;
 
     friend class __bit_reference<vector>;
     friend class __bit_const_reference<vector>;
@@ -1706,7 +1708,7 @@ vector<bool>::assign(_ForwardIterator __first, _ForwardIterator __last)
     clear();
     difference_type __ns = std::distance(__first, __last);
     assert(__ns >= 0 && "invalid range specified");
-    const size_t __n = static_cast<size_type>(__ns);
+    const std::size_t __n = static_cast<size_type>(__ns);
     if (__n)
     {
         if (__n > capacity())
@@ -1986,10 +1988,10 @@ vector<bool>::__invariants() const
 }
 
 template <>
-__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 size_t
+__device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 std::size_t
 vector<bool>::__hash_code() const _NOEXCEPT
 {
-    size_t __h = 0;
+    std::size_t __h = 0;
     // do middle whole words
     size_type __n = __size_;
     __storage_pointer __p = __begin_;
@@ -2006,10 +2008,10 @@ vector<bool>::__hash_code() const _NOEXCEPT
 
 template <>
 struct _LIBGPU_TEMPLATE_VIS hash<vector<bool> >
-    : public __unary_function<vector<bool>, size_t>
+    : public __unary_function<vector<bool>, std::size_t>
 {
     __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX20
-    size_t operator()(const vector<bool>& __vec) const _NOEXCEPT
+    std::size_t operator()(const vector<bool>& __vec) const _NOEXCEPT
         {return __vec.__hash_code();}
 };
 
@@ -2019,7 +2021,7 @@ template <class _Tp>
 __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI bool operator==(const vector<_Tp> &__x,
                                                                            const vector<_Tp> &__y) {
     const typename vector<_Tp>::size_type __sz = __x.size();
-    return __sz == __y.size() && std::equal(__x.begin(), __x.end(), __y.begin());
+    return __sz == __y.size() && gpu::equal(__x.begin(), __x.end(), __y.begin());
 }
 
 template <class _Tp>
@@ -2031,7 +2033,7 @@ __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI bool opera
 template <class _Tp>
 __device__ _LIBGPU_CONSTEXPR_SINCE_CXX20 inline _LIBGPU_HIDE_FROM_ABI bool operator<(const vector<_Tp> &__x,
                                                                           const vector<_Tp> &__y) {
-    return std::lexicographical_compare(__x.begin(), __x.end(), __y.begin(), __y.end());
+    return gpu::lexicographical_compare(__x.begin(), __x.end(), __y.begin(), __y.end());
 }
 
 template <class _Tp>

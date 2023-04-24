@@ -11,6 +11,12 @@
 
 #include "gpu/__config"
 
+#include <type_traits>
+#include <iterator>
+
+#include "gpu/__algorithm/comp.h"
+#include "gpu/__algorithm/comp_ref_type.h"
+
 namespace gpu {
 
 template <class _Compare, class _InputIterator1, class _InputIterator2>
@@ -35,7 +41,7 @@ bool
 lexicographical_compare(_InputIterator1 __first1, _InputIterator1 __last1,
                         _InputIterator2 __first2, _InputIterator2 __last2, _Compare __comp)
 {
-    return std::__lexicographical_compare<__comp_ref_type<_Compare> >(__first1, __last1, __first2, __last2, __comp);
+    return gpu::__lexicographical_compare<__comp_ref_type<_Compare> >(__first1, __last1, __first2, __last2, __comp);
 }
 
 template <class _InputIterator1, class _InputIterator2>
@@ -45,7 +51,7 @@ bool
 lexicographical_compare(_InputIterator1 __first1, _InputIterator1 __last1,
                         _InputIterator2 __first2, _InputIterator2 __last2)
 {
-    return std::lexicographical_compare(__first1, __last1, __first2, __last2,
+    return gpu::lexicographical_compare(__first1, __last1, __first2, __last2,
                                          __less<typename std::iterator_traits<_InputIterator1>::value_type,
                                                 typename std::iterator_traits<_InputIterator2>::value_type>());
 }
