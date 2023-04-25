@@ -5,8 +5,13 @@ Render a matrix stored in a msgpack file as an image.
 """
 import argparse
 import os
+import pathlib
+import sys
 
-from lib import matrix_utils
+repo_dir = pathlib.Path(__file__).resolve().parent.parent
+sys.path.append(str(repo_dir / "scripts" / "lib"))
+
+import matrix_utils
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)

@@ -1,4 +1,4 @@
-from rrperf import GEMMRun, CodeGenRun
+from rrperf.problems import GEMMRun, CodeGenRun
 
 fp16 = {
     "type_A": "half",
@@ -101,6 +101,28 @@ def hgemm():
         mac_k=16,
         workgroup_size_x=256,
         workgroup_size_y=1,
+        **fp16,
+    )
+    yield GEMMRun(
+        M=7680,
+        N=8448,
+        K=8192,
+        mac_m=128,
+        mac_n=256,
+        mac_k=16,
+        workgroup_size_x=128,
+        workgroup_size_y=2,
+        **fp16,
+    )
+    yield GEMMRun(
+        M=7680,
+        N=8448,
+        K=8192,
+        mac_m=128,
+        mac_n=256,
+        mac_k=16,
+        workgroup_size_x=64,
+        workgroup_size_y=4,
         **fp16,
     )
     yield from hgemm_tensile_guidepost()
@@ -307,6 +329,24 @@ def visualizer():
         storeLDS_D=False,
         visualize=True,
         prefetch=False,
+        **fp16,
+    )
+
+
+def guidepost_1():
+    yield GEMMRun(
+        M=7680,
+        N=8448,
+        K=8192,
+        mac_m=128,
+        mac_n=256,
+        mac_k=16,
+        workgroup_size_x=128,
+        workgroup_size_y=2,
+        trans_A="N",
+        trans_B="T",
+        visualize=False,
+        scheduler="Priority",
         **fp16,
     )
 

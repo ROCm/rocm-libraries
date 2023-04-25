@@ -20,30 +20,33 @@ def run_omniperf(
     cwd: Path = ".",
     env: Dict[str, str] = None,
 ):
+    cmd = [
+        "omniperf",
+        "profile",
+        "-n",
+        str(omniperf_workload_dir),
+        "-p",
+        str(working_dir),
+        "--",
+    ] + executable
+    print(" ".join(cmd))
     subprocess.run(
-        [
-            "omniperf",
-            "profile",
-            "-n",
-            str(omniperf_workload_dir),
-            "-p",
-            str(working_dir),
-            "--",
-        ]
-        + executable,
+        cmd,
         cwd=cwd,
         env=env,
     )
     omniperf_workload_dir = next((Path(working_dir) / omniperf_workload_dir).glob("*"))
+    cmd = [
+        "omniperf",
+        "analyze",
+        "-p",
+        str(omniperf_workload_dir),
+        "-o",
+        str(output),
+    ]
+    print(" ".join(cmd))
     subprocess.run(
-        [
-            "omniperf",
-            "analyze",
-            "-p",
-            str(omniperf_workload_dir),
-            "-o",
-            str(output),
-        ],
+        cmd,
         env=env,
     )
 
@@ -71,18 +74,26 @@ def profile_tensile(config: Path, output_dir: Path, tensile_repo: Path):
 
 
 def profile_rr(
-    problem: GEMMRun, name: str, output: Path, build_dir: Path, env: Dict[str, str]
+    problem: GEMMRun, name: str, output_dir: Path, build_dir: Path, env: Dict[str, str]
 ):
-    with tempfile.TemporaryDirectory() as working_dir_name:
-        print("Created temporary directory", working_dir_name)
-        run_omniperf(
-            working_dir_name,
-            problem.command(),
-            output,
-            "profile_" + name,
-            build_dir,
-            env,
-        )
+    i = 0
+    output = output_dir / f"results_{name}.txt"
+    while True:
+        working_dir = output_dir / f"data_{i:02}"
+        try:
+            working_dir.mkdir()
+            break
+        except FileExistsError:
+            i += 1
+    print("Created working directory", working_dir)
+    run_omniperf(
+        working_dir,
+        problem.command(),
+        output,
+        "profile_" + name,
+        build_dir,
+        env,
+    )
 
 
 def run(
@@ -94,6 +105,8 @@ def run(
     **kwargs,
 ):
     output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
     tensile_repo = Path(tensile_repo)
 
     if not has_omniperf():
@@ -113,8 +126,8 @@ def run(
         for i, problem in enumerate(load_suite(suite)):
             profile_rr(
                 problem,
-                str(i),
-                output_dir / f"results_{i:02}.txt",
+                f"{i:02}",
+                output_dir,
                 build_dir,
                 env,
             )

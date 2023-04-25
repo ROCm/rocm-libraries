@@ -57,7 +57,7 @@ namespace rocRoller
         }
         catch(const std::exception& e)
         {
-            Throw<FatalError>("GPUArchitecture::readMsgpack failed: ", e.what());
+            Throw<FatalError>("GPUArchitecture::readMsgpack(", input, ") failed: ", e.what());
         }
     }
 

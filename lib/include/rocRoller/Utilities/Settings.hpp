@@ -88,6 +88,12 @@ namespace rocRoller
             Scheduling::CostFunction::LinearWeighted,
             -1};
 
+        static inline SettingsOption<std::string> SchedulerWeights{
+            "ROCROLLER_SCHEDULER_WEIGHTS",
+            "Scheduler Weight (YAML) File for LinearWeighted cost function.",
+            "",
+            -1};
+
         static inline SettingsOption<LogLevel> LogLvl{
             "ROCROLLER_LOG_LEVEL", "Log level", LogLevel::None, -1};
 

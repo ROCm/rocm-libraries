@@ -5,6 +5,7 @@ project(rocRoller VERSION 1.0)
 
 option(ROCROLLER_ENABLE_TIMERS         "Enable rocRoller timer code." OFF)
 option(ROCROLLER_TESTS_SKIP_GUIDEPOSTS "Skip compiling guidepost tests." OFF)
+option(ROCROLLER_TESTS_SKIP_SLOW       "Skip slow tests (currently only Python tests)" ON)
 option(ROCROLLER_TESTS_USE_YAML_CPP    "Use yaml-cpp in testing." ON)
 option(ROCROLLER_USE_HIP               "Use HIP within the rocRoller." ON)
 option(SKIP_CPPCHECK                   "Skip CPPCHECK." ON)
@@ -36,6 +37,7 @@ endif()
 
 if(CODE_COVERAGE)
   set(ROCROLLER_TESTS_SKIP_GUIDEPOSTS ON)
+  set(ROCROLLER_TESTS_SKIP_SLOW OFF)
   set(EXTRA_COMPILE_OPTIONS -fprofile-instr-generate -fcoverage-mapping ${EXTRA_COMPILE_OPTIONS})
   set(EXTRA_LINK_OPTIONS -fprofile-instr-generate -fcoverage-mapping ${EXTRA_LINK_OPTIONS})
 endif()
@@ -588,9 +590,13 @@ add_test(NAME PythonLint
 set_tests_properties(PythonLint
                      PROPERTIES ENVIRONMENT "ROCROLLER_BUILD_DIR=${CMAKE_BINARY_DIR}")
 
+if (ROCROLLER_TESTS_SKIP_SLOW)
+  set(PYTHON_TEST_SKIP "-m not slow")
+endif()
+
 # Add rrperf unit tests
 add_test(NAME PythonTest
-         COMMAND pytest --cov-report html:python_cov_html --cov=rrperf scripts/lib/rrperf
+         COMMAND pytest --cov-report html:python_cov_html --cov=rrperf scripts ${PYTHON_TEST_SKIP} --junit-xml=${CMAKE_BINARY_DIR}/test_report/python_tests.xml
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 set_tests_properties(PythonTest
                      PROPERTIES ENVIRONMENT "ROCROLLER_BUILD_DIR=${CMAKE_BINARY_DIR};PYTHONPATH=${CMAKE_SOURCE_DIR}/scripts/lib")

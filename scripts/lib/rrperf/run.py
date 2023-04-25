@@ -8,7 +8,7 @@ import importlib.util
 from dataclasses import fields
 from itertools import chain
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Optional
 
 import pandas as pd
 import rrperf
@@ -21,11 +21,13 @@ def empty():
 
 def load_suite(suite: str):
     """Load performance suite from rrsuites.py."""
-    loc = os.path.dirname(os.path.realpath(__file__))
-    tdef = rrperf.git.top(loc) / "scripts" / "rrsuites.py"
-    code, ns = compile(tdef.read_text(), str(tdef), "exec"), {}
-    exec(code, ns)
-    return ns[suite]()
+    return getattr(rrperf.rrsuites, suite)()
+
+
+def first_problem_from_suite(suite: str):
+    for problem in load_suite(suite):
+        return problem
+    raise RuntimeError(f"Suite {suite} has no problems.")
 
 
 def get_work_dir(rundir: str = None, build_dir: Path = None) -> Path:
@@ -56,12 +58,42 @@ def get_work_dir(rundir: str = None, build_dir: Path = None) -> Path:
     return root / Path(f"{date}-{commit}-{serial:03d}")
 
 
+def find_arch_file(build_dir: Path) -> Optional[Path]:
+    arch_file = build_dir / "source" / "rocRoller" / "GPUArchitecture_def.msgpack"
+    if arch_file.is_file():
+        return arch_file
+    return None
+
+
+def get_arch_env(build_dir: Optional[Path] = None) -> Dict[str, str]:
+    if build_dir is None:
+        build_dir = get_build_dir()
+    env = {}
+    if "ROCROLLER_ARCHITECTURE_FILE" not in env:
+        arch = find_arch_file(build_dir)
+        if arch:
+            env["ROCROLLER_ARCHITECTURE_FILE"] = str(arch)
+    return env
+
+
 def get_build_env(build_dir: Path) -> Dict[str, str]:
     env = dict(os.environ)
-    if "ROCROLLER_ARCHITECTURE_FILE" not in env:
-        arch = build_dir / "source" / "rocRoller" / "GPUArchitecture_def.msgpack"
-        env["ROCROLLER_ARCHITECTURE_FILE"] = arch
+    env.update(get_arch_env(build_dir))
     return env
+
+
+def get_build_dir() -> Path:
+    varname = "ROCROLLER_BUILD_DIR"
+    if varname in os.environ:
+        return Path(os.environ[varname])
+    default = rrperf.git.top() / "build"
+    if default.is_dir():
+        return default
+    cwd = Path.cwd()
+    if find_arch_file(cwd):
+        return cwd
+
+    raise RuntimeError(f"Build directory not found.  Set {varname} to override.")
 
 
 def submit_directory(suite: str, wrkdir: Path, ptsdir: Path) -> None:
@@ -83,17 +115,6 @@ def from_token(token: str):
     yield rrperf.problems.upcast_to_run(eval(token, rrperf.problems.__dict__))
 
 
-def get_build_dir() -> Path:
-    varname = "ROCROLLER_BUILD_DIR"
-    if varname in os.environ:
-        return Path(os.environ[varname])
-    default = rrperf.git.top() / "build"
-    if default.is_dir():
-        return default
-
-    raise RuntimeError(f"Build directory not found.  Set {varname} to override.")
-
-
 def run_problems(
     generator, build_dir: Path, work_dir: Path, env: Dict[str, str]
 ) -> bool:
@@ -110,7 +131,7 @@ def run_problems(
 
         yaml = (work_dir / f"{problem.group}-{i:06d}.yaml").resolve()
         problem.set_output(yaml)
-        cmd = list(map(str, problem.command()))
+        cmd = problem.command()
         scmd = " ".join(cmd)
         log = yaml.with_suffix(".log")
         rr_env = {k: str(v) for k, v in env.items() if k.startswith("ROC")}

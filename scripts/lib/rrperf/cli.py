@@ -1,7 +1,22 @@
-"""rocRoller performance tracking suite command line interface."""
+"""
+rocRoller performance tracking suite command line interface.
+
+New, modular way to add subcommands to rrperf:
+
+Make a top-level module inside rrperf. It must implement get_args() and run().
+
+- get_args() should take an argparse.ArgumentParser and add all command-line arguments
+  to it.
+- run() should take the parsed arguments object and run the relevant command.
+
+The docstring for the module will be used as the description for the subcommand (under
+`rrperf <command> --help`).  The docstring for the `run` function will be used as the
+ help text for the subcommand (under `rrperf --help`).
+
+"""
 
 import argparse
-
+import inspect
 import rrperf
 
 
@@ -11,7 +26,7 @@ def main():
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    run_cmd = subparsers.add_parser("run")
+    run_cmd = subparsers.add_parser("run", help="Run a benchmark suite.")
     run_cmd.add_argument(
         "--submit",
         help="Submit results to SOMEWHERE.",
@@ -31,7 +46,9 @@ def main():
         help="Pin clocks before launching benchmark clients.",
     )
 
-    compare_cmd = subparsers.add_parser("compare")
+    compare_cmd = subparsers.add_parser(
+        "compare", help="Compare previous performance runs."
+    )
     compare_cmd.add_argument(
         "directories", nargs="*", help="Output directories to compare."
     )
@@ -150,6 +167,16 @@ def main():
         default="/home/tensile",
     )
 
+    for name, mod in rrperf.__dict__.items():
+        if hasattr(mod, "get_args") and hasattr(mod, "run"):
+            mod_parser = subparsers.add_parser(
+                name,
+                help=inspect.getdoc(mod.run),
+                description=inspect.getdoc(mod),
+                formatter_class=argparse.RawDescriptionHelpFormatter,
+            )
+            mod.get_args(mod_parser)
+
     args = parser.parse_args()
 
     if (
@@ -159,10 +186,14 @@ def main():
     ):
         parser.error("--group_results cannot be used without --exclude_boxplot")
 
-    command = {
+    manual_commands = {
         "run": rrperf.run.run,
         "compare": rrperf.compare.compare,
         "autoperf": rrperf.autoperf.run,
         "profile": rrperf.profile.run,
-    }[args.command]
-    command(**args.__dict__)
+    }
+
+    if args.command in manual_commands:
+        manual_commands[args.command](**args.__dict__)
+    else:
+        getattr(rrperf, args.command).run(args)

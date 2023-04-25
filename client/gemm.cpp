@@ -9,6 +9,7 @@
 #include <rocRoller/Serialization/YAML.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/HIPTimer.hpp>
+#include <rocRoller/Utilities/HipUtils.hpp>
 #include <rocRoller/Utilities/Timer.hpp>
 
 #include "../../test/unit/Utilities.hpp"
@@ -23,6 +24,8 @@ const int wavefront_size = 64;
 struct GEMMProblem
 {
     std::string name;
+
+    int device;
 
     // D (MxN) = alpha * A (MxK) X B (KxN) + beta * C (MxN)
     int   M;
@@ -79,6 +82,8 @@ struct GEMMResult : GEMMProblem
     size_t              kernelGenerate;
     size_t              kernelAssemble;
     std::vector<size_t> kernelExecute;
+    bool                checked = false;
+    bool                correct = true;
 };
 
 template <typename IO>
@@ -91,6 +96,7 @@ struct rocRoller::Serialization::
     static void mapping(IO& io, GEMMResult& result)
     {
         iot::mapRequired(io, "client", result.name);
+        iot::mapRequired(io, "device", result.device);
         iot::mapRequired(io, "M", result.M);
         iot::mapRequired(io, "N", result.N);
         iot::mapRequired(io, "K", result.K);
@@ -125,6 +131,9 @@ struct rocRoller::Serialization::
         iot::mapRequired(io, "kernelGenerate", result.kernelGenerate);
         iot::mapRequired(io, "kernelAssemble", result.kernelAssemble);
         iot::mapRequired(io, "kernelExecute", result.kernelExecute);
+
+        iot::mapRequired(io, "checked", result.checked);
+        iot::mapRequired(io, "correct", result.correct);
     }
 
     static void mapping(IO& io, GEMMResult& arch, EmptyContext& ctx)
@@ -489,9 +498,15 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult, bool doVisualize)
         bool isCorrect = rnorm < 3e-5;
         std::cout << "Result: " << (isCorrect ? "Correct" : "Incorrect") << std::endl;
         std::cout << "RNorm: " << rnorm << std::endl;
+        result.checked = true;
         if(!isCorrect)
         {
             std::cerr << "WARNING: Result incorrect. RNorm too large: " << rnorm << std::endl;
+            result.correct = false;
+        }
+        else
+        {
+            result.correct = true;
         }
     }
 
@@ -557,6 +572,8 @@ int main(int argc, const char* argv[])
     po.addArg("visualize",
               Arg({"visualize"}, "Dump out volumes describing memory access patterns."));
 
+    po.addArg("device", Arg({"device"}, "GPU Device Ordinal"));
+
     po.parse_args(argc, argv);
 
     GEMMProblem prob;
@@ -591,6 +608,9 @@ int main(int argc, const char* argv[])
     prob.numWarmUp = po.get("num_warmup", 3);
     prob.numOuter  = po.get("num_outer", 5);
     prob.numInner  = po.get("num_inner", 2);
+    prob.device    = po.get("device", 0);
+
+    HIP_CHECK(hipSetDevice(prob.device));
 
     bool doVisualize = po.get("visualize", false);
 

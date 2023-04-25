@@ -24,6 +24,11 @@ class RRPerfResult:
     kernelAssemble: int = field(repr=False, hash=False)
     kernelExecute: List[int] = field(repr=False, hash=False)
 
+    device: int = field(repr=False, hash=False, compare=False, default=0)
+
+    checked: bool = field(repr=False, hash=False, compare=False, default=False)
+    correct: bool = field(repr=False, hash=False, compare=False, default=True)
+
 
 #
 # GEMM
@@ -140,7 +145,7 @@ class GEMMRun(GEMM):
     def set_output(self, path: pathlib.Path):
         self.output = path
 
-    def command(self):
+    def command(self, **extra_args) -> List[str]:
         specialNames = {
             "output": "yaml",
             "numWarmUp": "num_warmup",
@@ -155,9 +160,11 @@ class GEMMRun(GEMM):
                 return specialNames[key]
             return key
 
-        args = list(
-            [f"--{argName(key)}={value}" for key, value in asdict(self).items()]
-        )
+        arg_dict = {argName(key): value for key, value in asdict(self).items()}
+        for key, value in extra_args.items():
+            arg_dict[key] = value
+
+        args = list([f"--{key}={value}" for key, value in arg_dict.items()])
         retval = [command] + args
 
         return retval
@@ -203,7 +210,7 @@ class GEMMResult(GEMM, RRPerfResult):
 class CodeGen:
     """CodeGen base problem description."""
 
-    instCount: int
+    instCount: int = 0
     instructions: str = "simple_mfma"
 
     numWarmUp: int = 2
@@ -262,7 +269,7 @@ class CodeGenRun(CodeGen):
     def set_output(self, path: pathlib.Path):
         self.output = path
 
-    def command(self):
+    def command(self) -> List[str]:
         retval = [
             "client/codegen_stress",
             "--inst_count=" + str(self.instCount),

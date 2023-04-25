@@ -4,8 +4,8 @@ import pathlib
 import sys
 
 
-rr = pathlib.Path(__file__).resolve().parent.parent
-sys.path.append(str(rr / "scripts" / "lib"))
+repo_dir = pathlib.Path(__file__).resolve().parent.parent
+sys.path.append(str(repo_dir / "scripts" / "lib"))
 
 import rrperf.cli  # noqa: E402
 

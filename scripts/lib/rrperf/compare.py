@@ -20,11 +20,7 @@ from rrperf.problems import GEMMResult
 
 def priority_problems():
     """Load priority problem args from rrsuites.py."""
-    loc = pathlib.Path(os.path.dirname(os.path.realpath(__file__)))
-    tdef = loc / ".." / ".." / "rrsuites.py"
-    code, ns = compile(tdef.read_text(), str(tdef), "exec"), {}
-    exec(code, ns)
-    return ns["priority_problems"]()
+    return rrperf.run.load_suite("priority_problems")
 
 
 @dataclass
