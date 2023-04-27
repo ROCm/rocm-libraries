@@ -25,7 +25,12 @@
 
 // UNSUPPORTED: hipcc
 // UNSUPPORTED: c++98, c++03, c++11
-
+// Marking the test as unsupported:
+// This test is including hip/std/string which does not exist.
+// HIPCC gives the correct error: hip/std/string file not found.
+// However, other errors are expected, consider the expected-error and expected-note. 
+// We found _LIBCUDACXX_HAS_STRING guard in other tests that include the header, 
+// indicating that the header is not implemented yet. 
 #include <cuda/std/string>
 #include <cuda/std/tuple>
 

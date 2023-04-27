@@ -43,7 +43,7 @@ struct ExplicitDefault
   __host__ __device__ explicit ExplicitDefault() {}
 };
 
-__host__ __device__ std::tuple<ExplicitDefault> explicit_default_test()
+__host__ __device__ cuda::std::tuple<ExplicitDefault> explicit_default_test()
 {
   return {cuda::std::allocator_arg, cuda::std::allocator<int>()}; // expected-error {{chosen constructor is explicit in
                                                                   // copy-initialization}}
