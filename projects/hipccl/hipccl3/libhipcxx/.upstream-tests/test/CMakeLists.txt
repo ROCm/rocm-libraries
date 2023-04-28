@@ -26,6 +26,8 @@ endmacro()
 find_package(CUDAToolkit REQUIRED)
 get_target_property(CUDA_INCLUDE_DIR CUDA::cudart INTERFACE_INCLUDE_DIRECTORIES)
 
+  
+if (LIBCUDACXX_ENABLE_CUDA)
 set(LIBCUDACXX_HIGHEST_COMPUTE_ARCH 90)
 
 foreach (COMPUTE_ARCH ${LIBCUDACXX_COMPUTE_ARCHS})
@@ -38,6 +40,7 @@ message(STATUS "Enabled CUDA architectures:${_compute_message}")
 option(LIBCUDACXX_TEST_WITH_NVRTC
   "Test libcu++ with runtime compilation instead of offline compilation. Only runs device side tests."
   OFF)
+endif()
 
 if (LIBCUDACXX_TEST_WITH_NVRTC)
   # TODO: Use project properties to get path to binary.
@@ -132,7 +135,7 @@ configure_lit_site_cfg(
   "${CMAKE_CURRENT_SOURCE_DIR}/lit.site.cfg.in"
   "${lit_site_cfg_path}")
 
-add_lit_testsuite(check-cudacxx
+add_lit_testsuite(check-hipcxx
   "Running libcu++ tests"
   "${CMAKE_CURRENT_BINARY_DIR}")
 
