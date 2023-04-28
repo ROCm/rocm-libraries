@@ -33,7 +33,7 @@ function usage {
   echo "                                 : Overrides \${LIBCUDACXX_SKIP_TESTS_RUN}."
   echo "--skip-libcxx-tests              : Do not build (or run) any libc++ tests."
   echo "                                 : Overrides \${LIBCUDACXX_SKIP_LIBCXX_TESTS}."
-  echo "--skip-libcudacxx-tests          : Do not build (or run) any libhip++ tests."
+  echo "--skip-libhipcxx-tests          : Do not build (or run) any libhip++ tests."
   echo "                                 : Overrides \${LIBCUDACXX_SKIP_LIBCUDACXX_TESTS}."
   echo "--skip-arch-detection            : Do not automatically detect the CDNA architecture"
   echo "                                 : for tests runs."
@@ -49,7 +49,7 @@ function usage {
   echo
   echo "--libcxx-lit-site-config <file>     : Use <file> as the libc++ lit site config"
   echo "                                    : (default: \${LIBCUDACXX_PATH}/libcxx/build/test/lit.site.cfg)."
-  echo "--libcudacxx-lit-site-config <file> : Use <file> as the libhip++ lit site config"
+  echo "--libhipcxx-lit-site-config <file> : Use <file> as the libhip++ lit site config"
   echo "                                    : (default: \${LIBCUDACXX_PATH}/build/libcxx/test/lit.site.cfg)."
   echo
   echo "--verbose                           : Print SM architecture detection and test results"
@@ -183,7 +183,7 @@ do
   --skip-base-tests-build)    LIBCUDACXX_SKIP_BASE_TESTS_BUILD=1 ;;
   --skip-tests-runs)          LIBCUDACXX_SKIP_TESTS_RUN=1 ;;
   --skip-libcxx-tests)        LIBCUDACXX_SKIP_LIBCXX_TESTS=1 ;;
-  --skip-libcudacxx-tests)    LIBCUDACXX_SKIP_LIBCUDACXX_TESTS=1 ;;
+  --skip-libhipcxx-tests)    LIBCUDACXX_SKIP_LIBCUDACXX_TESTS=1 ;;
   --skip-arch-detection)      LIBCUDACXX_SKIP_ARCH_DETECTION=1 ;;
   --compute-archs)
     shift # The next argument is the list of archs.
@@ -193,7 +193,7 @@ do
     shift # The next argument is the file.
     LIBCXX_LIT_SITE_CONFIG=${1}
     ;;
-  --libcudacxx-lit-site-config)
+  --libhipcxx-lit-site-config)
     shift # The next argument is the file.
     LIBCUDACXX_LIT_SITE_CONFIG=${1}
     ;;
