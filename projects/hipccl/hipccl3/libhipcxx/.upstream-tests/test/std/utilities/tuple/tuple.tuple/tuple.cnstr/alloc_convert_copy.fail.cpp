@@ -31,7 +31,7 @@
 //   tuple(allocator_arg_t, const Alloc& a, tuple<UTypes...> const&);
 
 // UNSUPPORTED: c++98, c++03
-// Todo: hipcc generates an additional error about depricated class in iterator header
+// TODO(HIP/AMD): hipcc generates an additional error about deprecated class in iterator header
 // because -Wno-deprecated-declarations is not passed to hipcc via lit.
 #include <cuda/std/tuple>
 
