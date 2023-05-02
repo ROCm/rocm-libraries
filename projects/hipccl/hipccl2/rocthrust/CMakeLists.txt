@@ -133,7 +133,7 @@ if(BUILD_ADDRESS_SANITIZER)
 endif()
 
 # Setup VERSION
-rocm_setup_version(VERSION "2.10.9")
+rocm_setup_version(VERSION "2.18.0")
 
 # Print configuration summary
 include(cmake/Summary.cmake)
