@@ -111,7 +111,7 @@ endif()
 include(cmake/Dependencies.cmake)
 
 # Setup VERSION
-set(VERSION_STRING "2.10.12")
+set(VERSION_STRING "2.13.1")
 rocm_setup_version(VERSION ${VERSION_STRING})
 
 # Print configuration summary
