@@ -110,7 +110,7 @@ if(USE_HIP_CPU)
 endif()
 
 # Setup VERSION
-set(VERSION_STRING "2.10.9")
+set(VERSION_STRING "2.13.0)
 rocm_setup_version(VERSION ${VERSION_STRING})
 
 # Print configuration summary
