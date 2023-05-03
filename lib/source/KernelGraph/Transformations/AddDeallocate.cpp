@@ -11,12 +11,35 @@ namespace rocRoller::KernelGraph
     using namespace CoordinateGraph;
     using namespace ControlGraph;
 
+    namespace CF = rocRoller::KernelGraph::ControlGraph;
+    using GD     = rocRoller::Graph::Direction;
+
+    int common(std::deque<int> const& a, std::deque<int> const& b)
+    {
+        for(int i = 0; (i < a.size()) && (i < b.size()); ++i)
+            if(a.at(i) != b.at(i))
+                return i - 1;
+
+        return std::min(a.size(), b.size()) - 1;
+    }
+
     class AddDeallocateTracer : public ControlFlowRWTracer
     {
     public:
         AddDeallocateTracer(KernelGraph const& graph)
             : ControlFlowRWTracer(graph)
         {
+        }
+
+        std::deque<int> controlStack(int control) const
+        {
+            std::deque<int> rv = {control};
+            while(m_bodyParent.contains(control))
+            {
+                control = m_bodyParent.at(control);
+                rv.push_front(control);
+            }
+            return rv;
         }
 
         /**
@@ -31,74 +54,108 @@ namespace rocRoller::KernelGraph
          */
         std::map<int, std::set<int>> deallocateLocations() const
         {
-            // track operation(s) that concurrently touch coordinate
             std::map<int, std::set<int>> rv;
 
-            // track event that touches coordinate last, at lowest
-            // depth (closest to kernel)
-            std::map<int, EventRecord> ev;
+            std::map<int, std::deque<int>> stacks;
 
-            // Pass 1 : populate the [coordinate, controls] map
             for(auto x : m_trace)
             {
-                // have we seen this coordinate before?
-                if(ev.count(x.coordinate) > 0)
+                if(stacks.contains(x.coordinate))
                 {
-                    // if last recorded event is at the depth less than
-                    // the new depth, deallocate at a new lower
-                    // depth bodyParent location, keeping the lowest
-                    // depth recorded event intact.
-                    if(ev.at(x.coordinate).depth < x.depth)
-                    {
-                        auto n       = x.depth - ev.at(x.coordinate).depth;
-                        auto control = x.control;
-                        while(n > 0)
-                        {
-                            control = m_bodyParent.at(control);
-                            n--;
-                        }
-                        rv[x.coordinate].clear();
-                        rv[x.coordinate].insert(control);
-                        continue;
-                    }
+                    auto last    = stacks.at(x.coordinate);
+                    auto current = controlStack(x.control);
 
-                    // if last recorded event is at the depth more than
-                    // the new depth, deallocate at the lower depth location.
-                    if(ev.at(x.coordinate).depth > x.depth)
+                    // Current stack looks like:
+                    //   { kernel, body-parent, body-parent, ..., body-parent, operation }
+                    // Last stack looks like:
+                    //   { kernel, body-parent, ..., body-parent or operation }
+
+                    // Find common body-parent
+                    int c = common(last, current);
+                    AssertFatal(c >= 0);
+
+                    if(c == 0)
                     {
-                        rv[x.coordinate].clear();
+                        // Kernel is the only common parent.
+                        stacks[x.coordinate] = {last.at(0)};
+
+                        // Deallocate after Kernel.
+                        rv[x.coordinate] = {stacks[x.coordinate].back()};
+                    }
+                    else if((c == last.size() - 1) && (c < current.size() - 1))
+                    {
+                        // Top of last is a body-parent, current is
+                        // contained in last.
+                        //
+                        // Deallocate after last body-parent.
+                        rv[x.coordinate] = {stacks[x.coordinate].back()};
+                    }
+                    else if((c == current.size() - 1) && (c < last.size() - 1))
+                    {
+                        Throw<FatalError>("Invalid operation stack during AddDeallocate.");
+                    }
+                    else
+                    {
+                        // Some shared, some not.
+
+                        stacks[x.coordinate] = {};
+                        std::copy(last.cbegin(),
+                                  last.cbegin() + c + 1,
+                                  std::back_inserter(stacks[x.coordinate]));
+
+                        if((c < last.size() - 1) && (c < current.size() - 1))
+                        {
+                            // If one can be reached by following
+                            // Sequence edges only, then we can safely
+                            // deallocate after the later one.
+
+                            auto onlyFollowSequenceEdges = [&](int x) -> bool {
+                                auto isSequence
+                                    = CF::isEdge<Sequence>(m_graph.control.getElement(x));
+                                return isSequence;
+                            };
+
+                            auto reachable = m_graph.control
+                                                 .depthFirstVisit(last.at(c + 1),
+                                                                  onlyFollowSequenceEdges,
+                                                                  GD::Downstream)
+                                                 .to<std::set>();
+
+                            if(reachable.contains(current.at(c + 1)))
+                            {
+                                for(auto it = last.cbegin() + c + 1; it != last.cend(); ++it)
+                                {
+                                    rv[x.coordinate].erase(*it);
+                                }
+                                rv[x.coordinate].insert(current.at(c + 1));
+                                stacks[x.coordinate].push_back(current.at(c + 1));
+                            }
+                            else
+                            {
+                                rv[x.coordinate].insert(last.at(c + 1));
+                                rv[x.coordinate].insert(current.at(c + 1));
+                            }
+                        }
+                        else if(c < current.size() - 1)
+                        {
+                            // Not connected; deallocate after both.
+                            rv[x.coordinate].insert(current.at(c + 1));
+                        }
+                        else if(c < last.size() - 1)
+                        {
+                            // Not connected; deallocate after both.
+                            rv[x.coordinate].insert(last.at(c + 1));
+                        }
                     }
                 }
-                rv[x.coordinate].insert(x.control);
-                ev.insert_or_assign(x.coordinate, x);
-            }
-
-            // Pass 2 : update the controls in the [coordinate, controls] map to handle
-            // situations where the deallocate locations inside controls are at the
-            // same depth but have different bodyParents.
-            // Keep going up the bodyParent ladder until all deallocate locations inside
-            // controls have a common bodyParent.
-            for(auto& [coordinate, controls] : rv)
-            {
-                std::set<int> temp;
-                while(temp.empty() && controls.size() > 1)
+                else
                 {
-                    for(auto const& src : controls)
-                    {
-                        auto parent = m_bodyParent.at(src);
-                        if(temp.find(parent) == temp.end())
-                        {
-                            temp.insert(parent);
-                        }
-                    }
-                    // if we haven't reached a common bodyParent yet.
-                    if(temp.size() != 1)
-                    {
-                        controls = temp;
-                        temp.clear();
-                    }
+                    // First time we've seen this coordinate.
+                    stacks[x.coordinate] = controlStack(x.control);
+                    rv[x.coordinate]     = {stacks[x.coordinate].back()};
                 }
             }
+
             return rv;
         }
     };

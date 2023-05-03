@@ -617,12 +617,41 @@ namespace rocRoller
             info.n      = n;
             info.offset = offset;
 
+            if(!info.offset)
+            {
+                info.offset = Register::Value::Literal(0u);
+            }
+
+            if(kind == MemoryInstructions::MemoryKind::Buffer)
+            {
+                info.bufDesc = getBufferDesc(tag);
+            }
+
+            if(m > 1)
+                co_yield generateStride(info.rowStrideReg, tag, 0);
+            else
+                info.rowStrideReg = Register::Value::Literal(0u);
+            co_yield generateStride(info.colStrideReg, tag, 1);
+
+            AssertFatal(info.rowStrideReg, "Invalid row stride register.");
+            AssertFatal(info.colStrideReg, "Invalid col stride register.");
+
+            info.elementSize = (uint)DataTypeInfo::Get(dataType).elementSize;
+
+            bool colStrideIsLiteral = (info.colStrideReg->regType() == Register::Type::Literal);
+            bool allStridesAreLiteral
+                = (info.rowStrideReg->regType() == Register::Type::Literal && colStrideIsLiteral
+                   && info.offset->regType() == Register::Type::Literal);
+            bool colStrideIsOne
+                = colStrideIsLiteral
+                  && (getUnsignedInt(info.colStrideReg->getLiteralValue()) == info.elementSize);
+
             if(Dir == MemoryInstructions::MemoryDirection::Load)
             {
                 auto macTileTag = m_graph->mapper.get<MacroTile>(tag);
 
                 Register::ValuePtr tmpl;
-                if(dataType == DataType::Half && n > 1)
+                if(dataType == DataType::Half && n > 1 && colStrideIsOne)
                 {
                     tmpl = Register::Value::Placeholder(
                         m_context, Register::Type::Vector, DataType::Halfx2, m * n / 2);
@@ -635,6 +664,9 @@ namespace rocRoller
 
                 info.data = m_context->registerTagManager()->getRegister(macTileTag, tmpl);
                 co_yield Register::AllocateIfNeeded(info.data);
+
+                rocRoller::Log::getLogger()->debug(
+                    "  tag {} tile coord {} registers {}", tag, macTileTag, info.data->toString());
             }
             else
             {
@@ -666,35 +698,7 @@ namespace rocRoller
                 }
             }
 
-            if(!info.offset)
-            {
-                info.offset = Register::Value::Literal(0u);
-            }
-
-            if(kind == MemoryInstructions::MemoryKind::Buffer)
-            {
-                info.bufDesc = getBufferDesc(tag);
-            }
-
-            if(m > 1)
-                co_yield generateStride(info.rowStrideReg, tag, 0);
-            else
-                info.rowStrideReg = Register::Value::Literal(0u);
-            co_yield generateStride(info.colStrideReg, tag, 1);
-
-            AssertFatal(info.rowStrideReg, "Invalid row stride register.");
-            AssertFatal(info.colStrideReg, "Invalid col stride register.");
-
-            info.elementSize  = (uint)DataTypeInfo::Get(dataType).elementSize;
             info.packedAmount = DataTypeInfo::Get(info.data->variableType()).packing;
-
-            bool colStrideIsLiteral = (info.colStrideReg->regType() == Register::Type::Literal);
-            bool allStridesAreLiteral
-                = (info.rowStrideReg->regType() == Register::Type::Literal && colStrideIsLiteral
-                   && info.offset->regType() == Register::Type::Literal);
-            bool colStrideIsOne
-                = colStrideIsLiteral
-                  && (getUnsignedInt(info.colStrideReg->getLiteralValue()) == info.elementSize);
 
             // Get the values from the associated ComputeIndex node
             co_yield getOffset(info, coords, tag, !allStridesAreLiteral && info.m > 1);

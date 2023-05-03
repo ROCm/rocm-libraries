@@ -26,6 +26,7 @@ namespace rocRoller
             iot::mapRequired(io, "highWaterMarkSGPRs", weights.highWaterMarkSGPRs);
             iot::mapRequired(io, "highWaterMarkVGPRs", weights.highWaterMarkVGPRs);
             iot::mapRequired(io, "notMFMA", weights.notMFMA);
+            iot::mapRequired(io, "isMFMA", weights.isMFMA);
             iot::mapRequired(io, "fractionOfSGPRs", weights.fractionOfSGPRs);
             iot::mapRequired(io, "fractionOfVGPRs", weights.fractionOfVGPRs);
             iot::mapRequired(io, "outOfRegisters", weights.outOfRegisters);
@@ -41,21 +42,22 @@ namespace rocRoller
     namespace Scheduling
     {
         Weights::Weights()
-            : fractionOfSGPRs(6332.39f)
-            , fractionOfVGPRs(3348.02f)
-            , highWaterMarkSGPRs(301.49f)
-            , highWaterMarkVGPRs(63.41f)
-            , ldsQueueSat(429.44f)
-            , lgkmQueueLen(37)
-            , lgkmcnt(113.88f)
-            , newSGPRs(1015.01f)
-            , newVGPRs(620.96f)
-            , nops(106.54f)
-            , notMFMA(886.65f)
+            : fractionOfSGPRs(31.66f)
+            , fractionOfVGPRs(144.92f)
+            , highWaterMarkSGPRs(54.55f)
+            , highWaterMarkVGPRs(36.49f)
+            , ldsQueueSat(727.43f)
+            , lgkmQueueLen(10)
+            , lgkmcnt(524.04f)
+            , newSGPRs(65.74f)
+            , newVGPRs(45.63f)
+            , nops(60.23f)
+            , isMFMA(205.87f)
+            , notMFMA(3114.06f)
             , outOfRegisters(1e9f)
-            , vectorQueueSat(474.53f)
-            , vmQueueLen(12)
-            , vmcnt(313.34f)
+            , vectorQueueSat(323.82f)
+            , vmQueueLen(8)
+            , vmcnt(87.07f)
             , zeroFreeBarriers(true)
         {
         }
@@ -156,6 +158,7 @@ namespace rocRoller
                    + m_weights.highWaterMarkSGPRs * highWaterMarkSGPRs //
                    + m_weights.highWaterMarkVGPRs * highWaterMarkVGPRs //
                    + m_weights.notMFMA * notMFMA //
+                   + m_weights.isMFMA * (1.0f - notMFMA) //
                    + m_weights.fractionOfSGPRs * fractionOfSGPRs //
                    + m_weights.fractionOfVGPRs * fractionOfVGPRs //
                    + m_weights.outOfRegisters * outOfRegisters //

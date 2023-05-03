@@ -48,6 +48,10 @@ namespace rocRoller
             /// MFMA instructions.
             float notMFMA;
 
+            /// Penalizes instructions that are MFMA, therefore prioritizing
+            /// other instructions.
+            float isMFMA;
+
             /// How many new SGPRs will the instruction allocate?
             float newSGPRs;
 

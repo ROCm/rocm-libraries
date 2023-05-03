@@ -59,6 +59,7 @@ namespace rocRoller
 
             auto defaultLog = std::make_shared<spdlog::logger>(
                 "rocRollerLog", std::begin(sinks), std::end(sinks));
+            defaultLog->set_pattern("[rr/%l] %v");
 
             spdlog::set_default_logger(defaultLog);
 
