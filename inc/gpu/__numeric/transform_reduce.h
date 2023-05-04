@@ -38,7 +38,7 @@ template <class _InputIterator1, class _InputIterator2, class _Tp>
 __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20 _Tp transform_reduce(_InputIterator1 __first1,
                                                                              _InputIterator1 __last1,
                                                                              _InputIterator2 __first2, _Tp __init) {
-  return std::transform_reduce(__first1, __last1, __first2, std::move(__init), std::plus<>(),
+  return gpu::transform_reduce(__first1, __last1, __first2, std::move(__init), std::plus<>(),
                                  std::multiplies<>());
 }
 #endif

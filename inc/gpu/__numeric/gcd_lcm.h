@@ -12,6 +12,9 @@
 
 #include "gpu/__config"
 
+#include "hip/hip_runtime.h"
+#include <cassert>
+
 namespace gpu {
 
 #if _LIBGPU_STD_VER >= 17
@@ -24,7 +27,7 @@ struct __ct_abs<_Result, _Source, true> {
     _Result operator()(_Source __t) const noexcept
     {
         if (__t >= 0) return __t;
-        if (__t == numeric_limits<_Source>::min()) return -static_cast<_Result>(__t);
+        if (__t == std::numeric_limits<_Source>::min()) return -static_cast<_Result>(__t);
         return -__t;
     }
 };
@@ -71,9 +74,9 @@ lcm(_Tp __m, _Up __n)
         return 0;
 
     using _Rp = std::common_type_t<_Tp,_Up>;
-    _Rp __val1 = __ct_abs<_Rp, _Tp>()(__m) / std::gcd(__m, __n);
+    _Rp __val1 = __ct_abs<_Rp, _Tp>()(__m) / gpu::gcd(__m, __n);
     _Rp __val2 = __ct_abs<_Rp, _Up>()(__n);
-    assert((numeric_limits<_Rp>::max() / __val1 > __val2) && "Overflow in lcm");
+    assert((std::numeric_limits<_Rp>::max() / __val1 > __val2) && "Overflow in lcm");
     return __val1 * __val2;
 }
 

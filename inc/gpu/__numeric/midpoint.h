@@ -22,7 +22,7 @@ midpoint(_Tp __a, _Tp __b) noexcept
 _LIBGPU_DISABLE_UBSAN_UNSIGNED_INTEGER_CHECK
 {
     using _Up = std::make_unsigned_t<_Tp>;
-    constexpr _Up __bitshift = numeric_limits<_Up>::digits - 1;
+    constexpr _Up __bitshift = std::numeric_limits<_Up>::digits - 1;
 
     _Up __diff = _Up(__b) - _Up(__a);
     _Up __sign_bit = __b < __a;
@@ -41,7 +41,7 @@ std::enable_if_t<std::is_pointer_v<_TPtr>
              && (sizeof(std::remove_pointer_t<_TPtr>) > 0), _TPtr>
 midpoint(_TPtr __a, _TPtr __b) noexcept
 {
-    return __a + std::midpoint(std::ptrdiff_t(0), __b - __a);
+    return __a + gpu::midpoint(std::ptrdiff_t(0), __b - __a);
 }
 
 
@@ -58,8 +58,8 @@ __device__ _LIBGPU_INLINE_VISIBILITY constexpr
 std::enable_if_t<std::is_floating_point_v<_Fp>, _Fp>
 midpoint(_Fp __a, _Fp __b) noexcept
 {
-    constexpr _Fp __lo = numeric_limits<_Fp>::min()*2;
-    constexpr _Fp __hi = numeric_limits<_Fp>::max()/2;
+    constexpr _Fp __lo = std::numeric_limits<_Fp>::min()*2;
+    constexpr _Fp __hi = std::numeric_limits<_Fp>::max()/2;
     return std::__fp_abs(__a) <= __hi && std::__fp_abs(__b) <= __hi ?  // typical case: overflow is impossible
       (__a + __b)/2 :                                        // always correctly rounded
       std::__fp_abs(__a) < __lo ? __a + __b/2 :                   // not safe to halve a

@@ -37,7 +37,7 @@ exclusive_scan(_InputIterator __first, _InputIterator __last, _OutputIterator __
 template <class _InputIterator, class _OutputIterator, class _Tp>
 __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20 _OutputIterator
 exclusive_scan(_InputIterator __first, _InputIterator __last, _OutputIterator __result, _Tp __init) {
-  return std::exclusive_scan(__first, __last, __result, __init, std::plus<>());
+  return gpu::exclusive_scan(__first, __last, __result, __init, std::plus<>());
 }
 
 #endif // _LIBGPU_STD_VER >= 17
