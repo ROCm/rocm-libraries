@@ -339,9 +339,6 @@ namespace rocRoller
                                 + " if true)"));
 
                 co_yield Instruction::Label(botLabel);
-                // TODO: This should only be needed when prefetching without a tail loop
-                co_yield Instruction::Wait(
-                    WaitCount::Zero("DEBUG: Wait after branch", m_context->targetArchitecture()));
                 co_yield Instruction::Unlock("Unlock For Loop");
             }
 
@@ -558,55 +555,8 @@ namespace rocRoller
                 auto D = m_context->registerTagManager()->getRegister(
                     DTag, Register::Type::Accumulator, DataType::Float, num_agpr);
 
-                auto macARegister = m_context->registerTagManager()->getRegister(macATag);
-                if(macARegister->variableType() == DataType::Half)
-                {
-                    waveA.vgpr = Register::Value::Placeholder(m_context,
-                                                              Register::Type::Vector,
-                                                              DataType::Halfx2,
-                                                              macARegister->registerCount() / 2);
-                    co_yield Register::AllocateIfNeeded(waveA.vgpr);
-                    for(int i = 0; i < macARegister->registerCount(); i += 2)
-                    {
-                        auto tmp = waveA.vgpr->subset({i / 2});
-                        co_yield Expression::generate(
-                            tmp,
-                            (std::make_shared<Expression::Expression>(macARegister->subset({i + 1}))
-                             << literal(16u))
-                                | std::make_shared<Expression::Expression>(
-                                    macARegister->subset({i})),
-                            m_context);
-                    }
-                }
-                else
-                {
-                    waveA.vgpr = macARegister;
-                }
-
-                auto macBRegister = m_context->registerTagManager()->getRegister(macBTag);
-                if(macBRegister->variableType() == DataType::Half)
-                {
-                    waveB.vgpr = Register::Value::Placeholder(m_context,
-                                                              Register::Type::Vector,
-                                                              DataType::Halfx2,
-                                                              macBRegister->registerCount() / 2);
-                    co_yield Register::AllocateIfNeeded(waveB.vgpr);
-                    for(int i = 0; i < macBRegister->registerCount(); i += 2)
-                    {
-                        auto tmp = waveB.vgpr->subset({i / 2});
-                        co_yield Expression::generate(
-                            tmp,
-                            (std::make_shared<Expression::Expression>(macBRegister->subset({i + 1}))
-                             << literal(16u))
-                                | std::make_shared<Expression::Expression>(
-                                    macBRegister->subset({i})),
-                            m_context);
-                    }
-                }
-                else
-                {
-                    waveB.vgpr = macBRegister;
-                }
+                waveA.vgpr = m_context->registerTagManager()->getRegister(macATag);
+                waveB.vgpr = m_context->registerTagManager()->getRegister(macBTag);
 
                 auto A
                     = std::make_shared<Expression::Expression>(std::make_shared<WaveTile>(waveA));
@@ -615,6 +565,7 @@ namespace rocRoller
 
                 auto matMul = std::make_shared<Expression::Expression>(
                     Expression::MatrixMultiply(A, B, D->expression()));
+
                 co_yield Expression::generate(D, matMul, m_context);
             }
 

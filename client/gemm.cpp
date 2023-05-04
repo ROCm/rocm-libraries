@@ -429,10 +429,8 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult, bool doVisualize)
 
     if(prob.prefetch)
     {
-        kernelOptions->unrollK           = 2;
-        kernelOptions->prefetch          = true;
-        kernelOptions->prefetchInFlight  = 1;
-        kernelOptions->prefetchLDSFactor = 2;
+        kernelOptions->unrollK  = 2;
+        kernelOptions->prefetch = true;
     }
 
     if(result.match_memory_access)

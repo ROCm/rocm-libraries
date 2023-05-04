@@ -20,8 +20,6 @@ namespace rocRoller
         , storeGlobalWidth(4)
         , fuseLoops(true)
         , prefetch(false)
-        , prefetchInFlight(1)
-        , prefetchLDSFactor(2)
         , unrollX(0)
         , unrollY(0)
         , unrollK(0)
@@ -53,8 +51,6 @@ namespace rocRoller
         os << "  unrollY:\t\t\t" << input.unrollY << std::endl;
         os << "  unrollK:\t\t\t" << input.unrollK << std::endl;
         os << "  prefetch:\t\t\t" << input.prefetch << std::endl;
-        os << "  prefetchInFlight:\t\t\t" << input.prefetchInFlight << std::endl;
-        os << "  prefetchLDSFactor:\t\t\t" << input.prefetchLDSFactor << std::endl;
         os << "  setNextFreeVGPRToMax:\t" << input.setNextFreeVGPRToMax << std::endl;
 
         for(int i = 0; i < static_cast<int>(LayoutType::Count); i++)
