@@ -202,7 +202,6 @@ namespace rocRoller
             m_context, Register::Type::Scalar, DataType::Int32, 2);
         auto s_6 = std::make_shared<Register::Value>(
             m_context, Register::Type::Scalar, DataType::Int32, 2);
-        co_yield s_6->allocate();
         auto v_7 = std::make_shared<Register::Value>(
             m_context, Register::Type::Vector, DataType::Int32, 1);
         auto v_8 = std::make_shared<Register::Value>(
@@ -231,10 +230,8 @@ namespace rocRoller
             m_context, Register::Type::Vector, DataType::Int32, 1);
         auto s_22 = std::make_shared<Register::Value>(
             m_context, Register::Type::Scalar, DataType::Int32, 2);
-        co_yield s_22->allocate();
         auto s_23 = std::make_shared<Register::Value>(
             m_context, Register::Type::Scalar, DataType::Int32, 2);
-        co_yield s_23->allocate();
 
         auto label_24 = m_context->labelAllocator()->label("BB0_2");
         auto label_25 = m_context->labelAllocator()->label("BB0_3");
@@ -244,6 +241,7 @@ namespace rocRoller
         co_yield m_context->copier()->copy(s_0->subset({0}), Register::Value::Literal(0), "");
         co_yield_(Instruction("s_cmp_lg_u64", {s_0}, {Register::Value::Literal(0)}, {}, ""));
         co_yield m_context->brancher()->branchIfZero(label_24, m_context->getSCC());
+        co_yield s_6->allocate();
         co_yield_(Instruction(
             "s_ashr_i32", {s_6->subset({0})}, {r1, Register::Value::Literal(31)}, {}, ""));
         co_yield_(Instruction("s_add_u32", {s_0->subset({0})}, {r0, s_6->subset({0})}, {}, ""));
@@ -254,6 +252,7 @@ namespace rocRoller
         co_yield_(Instruction("v_cvt_f32_u32_e32", {v_8}, {s_5->subset({1})}, {}, ""));
         co_yield_(Instruction(
             "s_sub_u32", {s_2}, {Register::Value::Literal(0), s_5->subset({0})}, {}, ""));
+        co_yield s_23->allocate();
         co_yield_(Instruction("s_subb_u32",
                               {s_23->subset({0})},
                               {Register::Value::Literal(0), s_5->subset({1})},

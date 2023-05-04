@@ -70,6 +70,7 @@ namespace rocRoller
             throw FatalError("Can not copy vector register into scalar register");
         }
 
+        // TODO: Remove AllocateIfNeeded when Register::subset can be invoked while unallocated
         co_yield Register::AllocateIfNeeded(dest);
         if(src->regType() == Register::Type::Literal && dest->regType() == Register::Type::Vector)
         {
