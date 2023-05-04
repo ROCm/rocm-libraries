@@ -26,13 +26,13 @@ __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20 _Tp reduce(_I
 template <class _InputIterator, class _Tp>
 __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20 _Tp reduce(_InputIterator __first, _InputIterator __last,
                                                                    _Tp __init) {
-  return std::reduce(__first, __last, __init, std::plus<>());
+  return gpu::reduce(__first, __last, __init, std::plus<>());
 }
 
 template <class _InputIterator>
 __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20 typename std::iterator_traits<_InputIterator>::value_type
 reduce(_InputIterator __first, _InputIterator __last) {
-  return std::reduce(__first, __last, typename std::iterator_traits<_InputIterator>::value_type{});
+  return gpu::reduce(__first, __last, typename std::iterator_traits<_InputIterator>::value_type{});
 }
 #endif
 

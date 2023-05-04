@@ -33,7 +33,7 @@ inclusive_scan(_InputIterator __first, _InputIterator __last, _OutputIterator __
     typename std::iterator_traits<_InputIterator>::value_type __init = *__first;
     *__result++ = __init;
     if (++__first != __last)
-      return std::inclusive_scan(__first, __last, __result, __b, __init);
+      return gpu::inclusive_scan(__first, __last, __result, __b, __init);
   }
 
   return __result;
@@ -43,7 +43,7 @@ template <class _InputIterator, class _OutputIterator>
 __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX20 _OutputIterator inclusive_scan(_InputIterator __first,
                                                                                        _InputIterator __last,
                                                                                        _OutputIterator __result) {
-  return std::inclusive_scan(__first, __last, __result, std::plus<>());
+  return gpu::inclusive_scan(__first, __last, __result, std::plus<>());
 }
 
 #endif // _LIBGPU_STD_VER >= 17
