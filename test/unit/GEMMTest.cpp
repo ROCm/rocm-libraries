@@ -69,7 +69,10 @@ namespace GEMMDriverTest
         bool fuseLoops      = true;
         bool betaInFma      = true;
         bool literalStrides = true;
-        bool prefetch       = false;
+
+        bool prefetch          = false;
+        int  prefetchInFlight  = 1;
+        int  prefetchLDSFactor = 0;
 
         bool packMultipleElementsInto1VGPR = true;
     };
@@ -78,7 +81,9 @@ namespace GEMMDriverTest
     void basicGEMM(std::shared_ptr<Context>& m_context,
                    const GEMMProblem&        gemm,
                    double                    acceptableError,
-                   bool                      debuggable = false)
+                   bool                      debuggable  = false,
+                   bool                      setIdentity = false)
+
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
 
@@ -135,7 +140,7 @@ namespace GEMMDriverTest
 
         GenerateRandomInput(31415u, h_A, M * K, h_B, K * N, h_C, M * N);
 
-        if(debuggable)
+        if(setIdentity)
         {
             SetIdentityMatrix(h_A, K, M);
             SetIdentityMatrix(h_B, N, K);
@@ -250,6 +255,8 @@ namespace GEMMDriverTest
         kernelOptions->unrollK                       = gemm.unrollK;
         kernelOptions->packMultipleElementsInto1VGPR = gemm.packMultipleElementsInto1VGPR;
         kernelOptions->prefetch                      = gemm.prefetch;
+        kernelOptions->prefetchInFlight              = gemm.prefetchInFlight;
+        kernelOptions->prefetchLDSFactor             = gemm.prefetchLDSFactor;
         kernelOptions->transposeMemoryAccess[LayoutType::MATRIX_A] = gemm.transA == "T";
         kernelOptions->transposeMemoryAccess[LayoutType::MATRIX_B] = gemm.transB == "T";
 
@@ -327,12 +334,19 @@ namespace GEMMDriverTest
 
         if(debuggable)
         {
-            for(size_t i = 0; i < 32; i++)
+            for(size_t i = 0; i < M; i++)
             {
-                for(size_t j = 0; j < 32; j++)
-                    std::cout << d_result[i * N + j] << ", ";
-
-                std::cout << std::endl;
+                for(size_t j = 0; j < N; j++)
+                {
+                    auto a = d_result[i * N + j];
+                    auto b = h_result[i * N + j];
+                    if((a - b) * (a - b) / (b * b) > 10.0 * acceptableError)
+                    {
+                        std::cout << std::setw(8) << i << std::setw(8) << j << std::setw(16)
+                                  << std::scientific << a << std::setw(16) << std::scientific << b
+                                  << std::setw(16) << std::scientific << a - b << std::endl;
+                    }
+                }
             }
         }
         double rnorm = relativeNorm(d_result, h_result);
@@ -489,15 +503,49 @@ namespace GEMMDriverTest
     TEST_F(GEMMTestGPU, GPU_BasicGEMMUnrollKLDSPrefetch)
     {
         GEMMProblem gemm;
-        gemm.K         = 64 * 4 * 2;
         gemm.loadLDSA  = true;
         gemm.loadLDSB  = true;
         gemm.storeLDSD = false;
-        gemm.fuseLoops = false;
+        gemm.fuseLoops = true;
         gemm.unrollK   = 2;
         gemm.mac_k     = 4;
         gemm.prefetch  = true;
-        basicGEMM<float>(m_context, gemm, 1.e-6);
+
+        for(auto inflight : {1, 2})
+        {
+            gemm.prefetchInFlight = inflight;
+            for(auto ldsFactor : {0, 2})
+            {
+                gemm.prefetchLDSFactor = ldsFactor;
+                basicGEMM<float>(m_context, gemm, 1.e-6);
+            }
+        }
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16UnrollKLDSPrefetch)
+    {
+        GEMMProblem gemm;
+        gemm.K         = 64 * 16 * 2;
+        gemm.loadLDSA  = true;
+        gemm.loadLDSB  = true;
+        gemm.storeLDSD = false;
+        gemm.fuseLoops = true;
+        gemm.unrollK   = 2;
+        gemm.mac_m     = 64;
+        gemm.mac_n     = 64;
+        gemm.mac_k     = 16;
+        gemm.prefetch  = true;
+        gemm.wave_k    = 8;
+
+        for(auto inflight : {1, 2})
+        {
+            gemm.prefetchInFlight = inflight;
+            for(auto ldsFactor : {0, 2})
+            {
+                gemm.prefetchLDSFactor = ldsFactor;
+                basicGEMM<Half>(m_context, gemm, 2.e-5);
+            }
+        }
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16)

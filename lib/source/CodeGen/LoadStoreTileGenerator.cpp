@@ -635,6 +635,9 @@ namespace rocRoller
 
                 info.data = m_context->registerTagManager()->getRegister(macTileTag, tmpl);
                 co_yield Register::AllocateIfNeeded(info.data);
+
+                rocRoller::Log::getLogger()->debug(
+                    "  tag {} tile coord {} registers {}", tag, macTileTag, info.data->toString());
             }
             else
             {

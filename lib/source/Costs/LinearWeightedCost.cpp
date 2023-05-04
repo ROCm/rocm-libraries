@@ -26,6 +26,7 @@ namespace rocRoller
             iot::mapRequired(io, "highWaterMarkSGPRs", weights.highWaterMarkSGPRs);
             iot::mapRequired(io, "highWaterMarkVGPRs", weights.highWaterMarkVGPRs);
             iot::mapRequired(io, "notMFMA", weights.notMFMA);
+            iot::mapRequired(io, "isMFMA", weights.isMFMA);
             iot::mapRequired(io, "fractionOfSGPRs", weights.fractionOfSGPRs);
             iot::mapRequired(io, "fractionOfVGPRs", weights.fractionOfVGPRs);
             iot::mapRequired(io, "outOfRegisters", weights.outOfRegisters);
@@ -156,6 +157,7 @@ namespace rocRoller
                    + m_weights.highWaterMarkSGPRs * highWaterMarkSGPRs //
                    + m_weights.highWaterMarkVGPRs * highWaterMarkVGPRs //
                    + m_weights.notMFMA * notMFMA //
+                   //+ m_weights.isMFMA * (1.0f - notMFMA) //
                    + m_weights.fractionOfSGPRs * fractionOfSGPRs //
                    + m_weights.fractionOfVGPRs * fractionOfVGPRs //
                    + m_weights.outOfRegisters * outOfRegisters //

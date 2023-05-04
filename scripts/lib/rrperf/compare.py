@@ -198,7 +198,7 @@ def summary_as_df(summary, ResultType):
                     "medianA": comparison.median[0],
                     "medianB": comparison.median[1],
                     "pval": comparison.moods_pval,
-                    "relative_diff": 100
+                    "reldiff": 100
                     * (comparison.median[1] - comparison.median[0])
                     / comparison.median[0],
                 }
@@ -690,7 +690,7 @@ def compare(
         summary = summary_statistics(perf_runs)
         df = summary_as_df(summary, GEMMResult)
         cols = [
-            "prec",
+            "PREC",
             "AB",
             "M",
             "N",
@@ -698,28 +698,28 @@ def compare(
             "m",
             "n",
             "k",
-            "scheduler",
+            "SCH",
             "LDS",
             "WG",
-            "relative_diff",
+            "reldiff",
             "pval",
             "medianA",
             "medianB",
         ]
         scols = [
-            "prec",
+            "PREC",
             "AB",
             "M",
             "N",
             "K",
+            "medianB",
             "m",
             "n",
             "k",
-            "medianB",
-            "scheduler",
+            "SCH",
             "LDS",
             "WG",
-            "relative_diff",
+            "reldiff",
             "pval",
             "medianA",
         ]

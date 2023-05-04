@@ -39,7 +39,11 @@ namespace rocRoller
         unsigned int unrollK;
 
         bool fuseLoops;
+
         bool prefetch;
+        int  prefetchInFlight;
+        int  prefetchLDSFactor;
+        bool prefetchMixMemOps;
 
         EnumBitset<LayoutType> transposeMemoryAccess;
 

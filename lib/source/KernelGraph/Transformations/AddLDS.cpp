@@ -63,73 +63,11 @@
  *
  *    c. Issue a barrier.
  *
- * 4. Construct prefetch segments as below.
- *
- * Recall prefetch notes:
- *
- *     PG denotes _prefetch global_: issuing global to vgpr loads
- *     CL denotes _commit to lds_: vgpr to lds stores
- *     PL denotes _prefetch lds_: issuing lds to vgpr loads
- *     CV denotes _commit to vgpr_: waiting on lds to vgpr loads
- *     OV denotes _operating on vgpr_: doing math
- *
- * Single prefetch (two segments):
- *
- *     Buf0      Buf1
- *     ============== for loop preamble
- *     PG        PG
- *     CL
- *     ============== unrolled for loop begin (count += 2)
- *     PL            unroll u=0
- *     CV
- *     OV
- *     PG        CL
- *     -------------- barrier
- *     PL  unroll u=1
- *     CV
- *     OV
- *     CL        PG
- *     -------------- barrier
- *     ============== for loop end
- *
- * Double prefetch (three segments):
- *
- *     Buf0      Buf1      Buf2
- *     ======================== for loop preamble
- *      PG        PG        PG
- *      CL        CL
- *      PL
- *     ======================== unrolled for loop begin (counter += 3)
- *      CV        PL            unroll u=0
- *      OV
- *      PG                  CL
- *     ------------------------ barrier
- *                CV        PL  unroll u=1
- *                OV
- *      CL        PG
- *     ------------------------ barrier
- *      PL                  CV  unroll u=2
- *                          OV
- *                CL        PG
- *     ------------------------ barrier
- *     ======================== for loop end
- *
- * In both cases, unrolled segement `u` looks like:
- *
- *     CV [u]     PL [(u-2) % U]
- *     OV [u]
- *     PG [u]     CL [(u-1) % U]
- *    ------------------------- barrier
- *
- * Note that:
- *
- *     CV is LoadLDSTile
- *     OV is math oops
- *     PG is LoadTile under a SetCoordinate for the next ForLoop iteration
- *     PL is a NOP (handled by wait-count observer)
- *     CL is StoreLDSTile
+ * 4. Construct prefetch segments.
  */
 
+#include "KernelGraph/ControlGraph/ControlGraph.hpp"
+#include "KernelGraph/ControlGraph/Operation.hpp"
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
@@ -190,13 +128,6 @@ namespace rocRoller
 
             return rv;
         }
-
-        struct PrefetchSegmentBoundary
-        {
-            int top;
-            int barrier;
-            int setCoordinate;
-        };
 
         /**
          * @brief LDS specification.
@@ -400,7 +331,7 @@ namespace rocRoller
             void addStoreThroughLDSToControlGraph(KernelGraph& graph, int store);
             void addStoreThroughLDSToCoordinateGraph(KernelGraph& graph, int store);
 
-            void setupPrefetch(KernelGraph const& graph);
+            void stagePrefetch(KernelGraph const& graph);
 
             void addLoadOperationsPrefetch(KernelGraph& graph, int forLoop, int numUnroll);
 
@@ -419,8 +350,11 @@ namespace rocRoller
             // Prefetch related
             std::map<int, int>                                    m_scopes;
             std::map<int, int>                                    m_prefetchLoops;
-            std::map<int, std::map<int, std::unordered_set<int>>> m_prefetchUnrollBodies;
-            std::map<int, std::unordered_set<int>>                m_prefetchDelete;
+            std::map<int, std::map<int, std::unordered_set<int>>> m_prefetchUnrollBodyStarts;
+            std::map<int, std::map<int, std::unordered_set<int>>> m_prefetchUnrollBodyEnds;
+            std::map<int, std::map<int, std::set<std::tuple<int, int, int, int>>>>
+                                                   m_prefetchFromLDSChains;
+            std::map<int, std::unordered_set<int>> m_prefetchDelete;
 
             ContextPtr m_context;
         };
@@ -496,17 +430,17 @@ namespace rocRoller
             auto k       = original;
             auto visitor = AddLDSVisitor(context);
 
-            if(context->kernelOptions().prefetch)
-            {
-                AssertFatal(context->kernelOptions().unrollK > 1,
-                            "KLoop must be unrolled when prefetching.");
-                visitor.setupPrefetch(k);
-            }
-
             // Add LDS operations
             for(auto const& loadTag : k.control.getNodes<LoadTiled>())
             {
                 visitor.stageLoad(k, loadTag);
+            }
+
+            if(context->kernelOptions().prefetch)
+            {
+                AssertFatal(context->kernelOptions().unrollK > 1,
+                            "KLoop must be unrolled when prefetching.");
+                visitor.stagePrefetch(k);
             }
 
             visitor.commit(k);
@@ -704,11 +638,6 @@ namespace rocRoller
             // haven't been inserted into the control grpah yet.
 
             //
-            // Commit: Connect load/store operations in the control graph.
-            //
-            addLoadOperations(k);
-
-            //
             // Commit: Change all LoadTiled operations to LoadLDSTile
             //
             for(auto [loadTag, loadSpec] : m_stagedLoads)
@@ -724,6 +653,10 @@ namespace rocRoller
                 k.control.setElement(loadTag, LoadLDSTile(vtype));
                 k.coordinates.setElement(k.mapper.get<MacroTile>(loadTag), macroTile);
                 k.mapper.connect<LDS>(loadTag, m_loadInfo.at(loadSpec).lds);
+                rocRoller::Log::getLogger()->debug(
+                    "KernelGraph::AddLDS()::commit(): LoadLDSTile {}: lds {}",
+                    loadTag,
+                    m_loadInfo.at(loadSpec).lds);
                 for(auto const& c : k.mapper.getConnections(loadTag))
                 {
                     if(!k.coordinates.exists(c.coordinate))
@@ -732,6 +665,11 @@ namespace rocRoller
                     }
                 }
             }
+
+            //
+            // Commit: Connect load/store operations in the control graph.
+            //
+            addLoadOperations(k);
         }
 
         //
@@ -845,31 +783,7 @@ namespace rocRoller
             // At this point, each of the unrolled loop bodies are
             // detached and isolated from the rest of the graph.
 
-            //
-            // Find tail end of each unrolled loop body
-            //
-            std::map<int, std::map<uint, std::unordered_set<int>>> ends;
-            for(auto u = 0; u < numUnroll; ++u)
-            {
-                auto starts = m_prefetchUnrollBodies[forLoop][u];
-
-                auto onlyFollowSequenceEdges = [&](int x) -> bool {
-                    return CF::isEdge<Sequence>(graph.control.getElement(x));
-                };
-
-                for(auto op :
-                    graph.control.depthFirstVisit(starts, onlyFollowSequenceEdges, GD::Downstream))
-                {
-                    auto outgoing
-                        = graph.control.getNeighbours(op, GD::Downstream).to<std::unordered_set>();
-                    if(outgoing.empty())
-                    {
-                        ends[forLoop][u].insert(op);
-                    }
-                }
-            }
-
-            std::map<uint, std::vector<ldsLoadInfo>> globalLoadsByUnroll;
+            std::map<int, std::vector<ldsLoadInfo>> globalLoadsByUnroll;
             for(auto spec : m_loadSpecs)
             {
                 if(spec.operation == forLoop)
@@ -892,37 +806,34 @@ namespace rocRoller
             // Prefetch before ForLoop
             //
             auto preBarrier = graph.control.addElement(Barrier());
-            graph.control.addElement(Sequence(), {preBarrier}, {forLoop});
+            auto preNOP     = graph.control.addElement(NOP());
+            graph.control.addElement(Sequence(), {preNOP}, {forLoop});
 
             std::map<int, std::vector<int>> preChain;
 
+            int numInFlight = m_context->kernelOptions().prefetchInFlight;
+
             // Loads first
-            for(uint u = 0; u < numUnroll; ++u)
+            for(int u = 0; u < numInFlight; ++u)
             {
                 for(auto load : globalLoadsByUnroll[u])
                 {
                     logger->debug(
-                        "  prefetch: pre-loop global load: segment {} user {}", u, load.user);
+                        "  prefetch: pre-loop global load: unroll {} user {}", 0, load.user);
                     auto loadChain = duplicateChain(graph, {load.loadChain});
                     preChain[load.user].push_back(loadChain);
                 }
             }
 
             // StoreLDS next
-            for(uint u = 0; u < numUnroll; ++u)
+            for(auto load : globalLoadsByUnroll[0])
             {
-                for(auto load : globalLoadsByUnroll[u])
-                {
-                    if(u < numUnroll - 1)
-                    {
-                        logger->debug("  prefetch: pre-loop commit lds: segment {} user {} lds {}",
-                                      u,
-                                      load.user,
-                                      load.lds);
-                        auto storeChain = duplicateChain(graph, {load.storeChain});
-                        preChain[load.user].push_back(storeChain);
-                    }
-                }
+                logger->debug("  prefetch: pre-loop commit lds: unroll {} user {} lds {}",
+                              0,
+                              load.user,
+                              load.lds);
+                auto storeChain = duplicateChain(graph, {load.storeChain});
+                preChain[load.user].push_back(storeChain);
             }
 
             for(auto& [user, chain] : preChain)
@@ -935,86 +846,168 @@ namespace rocRoller
                 graph.control.addElement(Sequence(), {chain.back()}, {preBarrier});
             }
 
+            auto addPrefetchChains = [&](int u, int pre, int post, bool duplicate) {
+                std::map<int, std::vector<int>> prefetchChain;
+                for(auto [user, _ignore1, _ignore2, chain] : m_prefetchFromLDSChains[forLoop][u])
+                {
+                    int dchain = duplicate ? duplicateChain(graph, {chain}) : chain;
+                    prefetchChain[user].push_back(dchain);
+                }
+
+                for(auto& [user, chain] : prefetchChain)
+                {
+                    graph.control.addElement(Sequence(), {pre}, {chain[0]});
+                    for(uint i = 1; i < chain.size(); ++i)
+                    {
+                        graph.control.addElement(Sequence(), {chain[i - 1]}, {chain[i]});
+                    }
+                    graph.control.addElement(Sequence(), {chain.back()}, {post});
+                }
+            };
+
+            addPrefetchChains(0, preBarrier, preNOP, true);
+            graph.control.addElement(Sequence(), {preBarrier}, {preNOP});
+
             //
             // ForLoop body
             //
-            std::vector<PrefetchSegmentBoundary> segmentBoundaries = {{-1, forLoop, -1}};
+
+            // Update SetCoordinates for LoadTile operations
+            //
+            // The pre-loop LoadTiles were duplicated above, so their
+            // SetCoordinates are intact.
             for(uint u = 0; u < numUnroll; ++u)
             {
-                auto prefetchCoordExpr = literal(u + numUnroll);
-                auto setPrefetchCoord  = graph.control.addElement(SetCoordinate(prefetchCoordExpr));
-                graph.mapper.connect<Unroll>(setPrefetchCoord, unrollCoord);
+                auto prefetchCoordExpr = literal(numUnroll - u);
+                if(numInFlight > 1)
+                    prefetchCoordExpr = literal(numUnroll + u);
 
-                logger->debug("  prefetch: in-loop coordinate: segment {} expr {}",
-                              u,
-                              toString(prefetchCoordExpr));
+                for(auto load : globalLoadsByUnroll[u])
+                {
+                    logger->debug("  prefetch: in-loop global load {} user {} expr {}",
+                                  u,
+                                  load.user,
+                                  toString(prefetchCoordExpr));
 
-                auto nop     = graph.control.addElement(NOP());
-                auto barrier = graph.control.addElement(Barrier());
+                    auto setPrefetchCoord = SetCoordinate(prefetchCoordExpr);
 
-                graph.control.addElement(Sequence(), {setPrefetchCoord}, {barrier});
-                segmentBoundaries.push_back({nop, barrier, setPrefetchCoord});
+                    auto maybeSetCoordinate = graph.control.get<SetCoordinate>(load.loadChain);
+                    auto loadUnrollCoord    = graph.mapper.get<Unroll>(load.loadChain);
+                    if(maybeSetCoordinate && loadUnrollCoord == unrollCoord)
+                    {
+                        graph.control.setElement(load.loadChain, setPrefetchCoord);
+                    }
+                    else
+                    {
+                        Throw<FatalError>("Mismatched SetCoordinate node above LoadTile.");
+                    }
+                }
             }
+
+            // Build Unroll segment boundaries
+            std::vector<int> segmentBoundaries = {forLoop};
+            for(uint u = 0; u < numUnroll; ++u)
+                segmentBoundaries.push_back(graph.control.addElement(NOP()));
+
+            auto separateMemOps = !m_context->kernelOptions().prefetchMixMemOps;
 
             for(uint u = 0; u < numUnroll; ++u)
             {
                 logger->debug("  prefetch: in-loop: segment {}", u);
 
                 // Connect the segment to the preceeding segment boundary
-                for(auto tag : m_prefetchUnrollBodies[forLoop][u])
+                for(auto tag : m_prefetchUnrollBodyStarts[forLoop][u])
                 {
                     if(u == 0)
-                        graph.control.addElement(Body(), {segmentBoundaries[u].barrier}, {tag});
+                        graph.control.addElement(Body(), {segmentBoundaries[u]}, {tag});
                     else
-                        graph.control.addElement(Sequence(), {segmentBoundaries[u].barrier}, {tag});
+                        graph.control.addElement(Sequence(), {segmentBoundaries[u]}, {tag});
                 }
 
-                // Connect the segment to the proceeding segment boundary
-                for(auto tag : ends[forLoop][u])
+                auto globalPrefetchU = (u + numInFlight) % numUnroll;
+                auto ldsPrefetchU    = (u + 1) % numUnroll;
+                auto barrier         = graph.control.addElement(Barrier());
+
+                auto nop = separateMemOps ? graph.control.addElement(NOP()) : -1;
+
+                // Issue global loads
+                for(auto load : globalLoadsByUnroll[globalPrefetchU])
                 {
-                    graph.control.addElement(Sequence(), {tag}, {segmentBoundaries[u + 1].top});
-                }
-
-                // Add StoreLDSTile
-                for(auto load : globalLoadsByUnroll[(u + numUnroll - 1) % numUnroll])
-                {
-                    logger->debug("  prefetch: in-loop commit lds: segment {}/{} user {} lds {}",
-                                  u,
-                                  (u + numUnroll - 1) % numUnroll,
-                                  load.user,
-                                  load.lds);
-
-                    graph.control.addElement(
-                        Sequence(), {segmentBoundaries[u + 1].top}, {load.storeChain});
-                    graph.control.addElement(
-                        Sequence(), {load.storeChain}, {segmentBoundaries[u + 1].setCoordinate});
-                }
-
-                // Add LoadTile
-                for(auto load : globalLoadsByUnroll[u])
-                {
-                    logger->debug(
-                        "  prefetch: in-loop global load: segment {} user {}", u, load.user);
-
-                    // If the top of the loadChain is a SetCoordinate, then we might have redundant SetCoordinates
-                    auto maybeSetCoordinate = graph.control.get<SetCoordinate>(load.loadChain);
-                    auto loadUnrollCoord    = graph.mapper.get<Unroll>(load.loadChain);
-                    if(maybeSetCoordinate && loadUnrollCoord == unrollCoord)
+                    if(separateMemOps)
                     {
-                        auto outgoing = graph.control.getLocation(load.loadChain).outgoing;
-                        for(auto out : outgoing)
-                        {
-                            graph.control.deleteElement(out);
-                        }
-                        graph.control.deleteElement(load.loadChain);
-                        graph.control.addElement(Body(),
-                                                 {segmentBoundaries[u + 1].setCoordinate},
-                                                 {load.loadTileFromGlobal});
+                        graph.control.addElement(Sequence(), {nop}, {load.loadChain});
+                        graph.control.addElement(
+                            Sequence(), {load.loadChain}, {segmentBoundaries[u + 1]});
                     }
                     else
                     {
-                        graph.control.addElement(
-                            Body(), {segmentBoundaries[u + 1].setCoordinate}, {load.loadChain});
+                        if(u == 0)
+                            graph.control.addElement(
+                                Body(), {segmentBoundaries[u]}, {load.loadChain});
+                        else
+                            graph.control.addElement(
+                                Sequence(), {segmentBoundaries[u]}, {load.loadChain});
+                    }
+
+                    logger->debug("  prefetch: in-loop: global load {} user {} lds {}",
+                                  globalPrefetchU,
+                                  load.user,
+                                  load.lds);
+                }
+
+                // Commit in-flight to LDS
+                for(auto load : globalLoadsByUnroll[ldsPrefetchU])
+                {
+                    if(separateMemOps)
+                    {
+                        if(globalPrefetchU == ldsPrefetchU)
+                            graph.control.addElement(
+                                Sequence(), {load.loadChain}, {load.storeChain});
+                        else
+                            graph.control.addElement(Sequence(), {nop}, {load.storeChain});
+                    }
+                    else
+                    {
+                        if(globalPrefetchU == ldsPrefetchU)
+                            graph.control.addElement(
+                                Sequence(), {load.loadChain}, {load.storeChain});
+                        else if(u == 0)
+                            graph.control.addElement(
+                                Body(), {segmentBoundaries[u]}, {load.storeChain});
+                        else
+                            graph.control.addElement(
+                                Sequence(), {segmentBoundaries[u]}, {load.storeChain});
+                    }
+                    logger->debug("  prefetch: in-loop: commit lds {} user {} lds {}",
+                                  ldsPrefetchU,
+                                  load.user,
+                                  load.lds);
+                    graph.control.addElement(Sequence(), {load.storeChain}, {barrier});
+                }
+
+                // Prefetch from LDS
+                if(m_prefetchFromLDSChains[forLoop].contains(ldsPrefetchU))
+                {
+                    addPrefetchChains(ldsPrefetchU, barrier, segmentBoundaries[u + 1], false);
+                }
+                else
+                {
+                    graph.control.addElement(Sequence(), {barrier}, {segmentBoundaries[u + 1]});
+                }
+
+                // Connect the segment to the proceeding segment boundary
+                if(separateMemOps)
+                {
+                    for(auto tag : m_prefetchUnrollBodyEnds[forLoop][u])
+                    {
+                        graph.control.addElement(Sequence(), {tag}, {nop});
+                    }
+                }
+                else
+                {
+                    for(auto tag : m_prefetchUnrollBodyEnds[forLoop][u])
+                    {
+                        graph.control.addElement(Sequence(), {tag}, {segmentBoundaries[u + 1]});
                     }
                 }
             }
@@ -1336,8 +1329,10 @@ namespace rocRoller
             m_store[lds] = info;
         }
 
-        void AddLDSVisitor::setupPrefetch(KernelGraph const& k)
+        void AddLDSVisitor::stagePrefetch(KernelGraph const& k)
         {
+            auto logger = rocRoller::Log::getLogger();
+
             m_prefetchLoops = findPrefetch(k);
 
             // Map: Operation (in loop body) to Unroll coordinate value
@@ -1419,7 +1414,7 @@ namespace rocRoller
                         continue;
                     auto node = *only(k.control.getNeighbours<GD::Downstream>(edge));
 
-                    m_prefetchUnrollBodies[forLoop][operationUnroll[node]].insert(node);
+                    m_prefetchUnrollBodyStarts[forLoop][operationUnroll[node]].insert(node);
                     m_prefetchDelete[forLoop].insert(edge);
                 }
             }
@@ -1452,6 +1447,134 @@ namespace rocRoller
                             {
                                 m_prefetchDelete[forLoop].insert(edge);
                             }
+                        }
+                    }
+                }
+            }
+
+            //
+            // Within each segment, carve out loads
+            //
+            int splitLDSPrefetchFactor = m_context->kernelOptions().prefetchLDSFactor;
+
+            for(auto [forLoop, numUnroll] : m_prefetchLoops)
+            {
+                auto forLoopCoord     = getForLoop(forLoop, k);
+                auto maybeUnrollCoord = findUnrollNeighbour(k, forLoopCoord);
+                AssertFatal(maybeUnrollCoord, "Prefetch with no unroll coordinate.");
+                auto prefetchUnrollCoord = *maybeUnrollCoord;
+
+                for(auto u = 0; u < numUnroll; ++u)
+                {
+                    logger->debug("KernelGraph::AddLDS()::stagePrefetch: segment {}", u);
+
+                    auto starts = m_prefetchUnrollBodyStarts[forLoop][u];
+
+                    for(auto start : starts)
+                    {
+                        for(auto elem : k.control.depthFirstVisit(start, GD::Downstream))
+                        {
+                            auto maybeSetCoordinate = k.control.get<SetCoordinate>(elem);
+                            if(!maybeSetCoordinate)
+                                continue;
+
+                            auto coordinate = k.mapper.get<Unroll>(elem);
+
+                            AssertFatal(
+                                evaluationTimes(
+                                    maybeSetCoordinate
+                                        ->value)[rocRoller::Expression::EvaluationTime::Translate],
+                                "Unroll value should be a literal");
+
+                            auto unrollCoordValue
+                                = getUnsignedInt(evaluate(maybeSetCoordinate->value));
+
+                            AssertFatal(coordinate != prefetchUnrollCoord);
+                            logger->debug("  SetCoordinate {} Unroll {} value {}",
+                                          elem,
+                                          coordinate,
+                                          unrollCoordValue);
+
+                            if(splitLDSPrefetchFactor == 0)
+                                break;
+
+                            if(splitLDSPrefetchFactor > 0)
+                            {
+                                auto [_ignore, unrollCoord] = k.getDimension<Unroll>(elem);
+                                auto unrollCoordSize = getUnsignedInt(evaluate(unrollCoord.size));
+                                if(unrollCoordValue >= unrollCoordSize / splitLDSPrefetchFactor)
+                                    break;
+                            }
+
+                            // Find Load operation underneath
+                            auto loadTag = *only(k.control.findNodes(
+                                elem,
+                                [&](int x) {
+                                    return isOperation<LoadTiled>(k.control.getElement(x));
+                                },
+                                GD::Downstream));
+
+                            auto userTag = k.mapper.get<User>(loadTag);
+                            auto tileTag = k.mapper.get<MacroTile>(loadTag);
+
+                            m_prefetchFromLDSChains[forLoop][u].insert(
+                                {0, tileTag, unrollCoordValue, elem});
+
+                            m_prefetchUnrollBodyStarts[forLoop][operationUnroll[elem]].erase(elem);
+
+                            for(auto inEdge : k.control.getNeighbours<GD::Upstream>(elem))
+                            {
+                                m_prefetchDelete[forLoop].insert(inEdge);
+                            }
+
+                            for(auto outEdge : k.control.getNeighbours<GD::Downstream>(elem))
+                            {
+                                if(!k.control.get<Sequence>(outEdge))
+                                    continue;
+
+                                auto outNode
+                                    = *only(k.control.getNeighbours<GD::Downstream>(outEdge));
+
+                                m_prefetchUnrollBodyStarts[forLoop][operationUnroll[elem]].insert(
+                                    outNode);
+
+                                m_prefetchDelete[forLoop].insert(outEdge);
+                            }
+
+                            break;
+                        }
+                    }
+                }
+            }
+
+            //
+            // Find tail end of each unrolled loop body
+            //
+            for(auto [forLoop, numUnroll] : m_prefetchLoops)
+            {
+                for(auto u = 0; u < numUnroll; ++u)
+                {
+                    auto starts = m_prefetchUnrollBodyStarts[forLoop][u];
+
+                    int  fLoop                   = forLoop;
+                    auto onlyFollowSequenceEdges = [&](int x) -> bool {
+                        auto isSequence = CF::isEdge<Sequence>(k.control.getElement(x));
+                        auto willDelete = m_prefetchDelete[fLoop].contains(x);
+                        return isSequence && !willDelete;
+                    };
+
+                    for(auto op :
+                        k.control.depthFirstVisit(starts, onlyFollowSequenceEdges, GD::Downstream))
+                    {
+                        auto outgoing
+                            = k.control.getNeighbours(op, GD::Downstream).to<std::unordered_set>();
+                        for(auto tag : m_prefetchDelete[forLoop])
+                        {
+                            outgoing.erase(tag);
+                        }
+                        if(outgoing.empty())
+                        {
+                            m_prefetchUnrollBodyEnds[forLoop][u].insert(op);
                         }
                     }
                 }

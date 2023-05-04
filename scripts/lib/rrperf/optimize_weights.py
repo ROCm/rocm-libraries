@@ -94,6 +94,7 @@ class Weights:
     highWaterMarkSGPRs: float = field(default_factory=random_inv_exp())
     highWaterMarkVGPRs: float = field(default_factory=random_inv_exp())
     notMFMA: float = field(default_factory=random_inv_exp())
+    isMFMA: float = field(default_factory=random_inv_exp())
     fractionOfSGPRs: float = field(default_factory=random_inv_exp())
     fractionOfVGPRs: float = field(default_factory=random_inv_exp())
 

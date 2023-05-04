@@ -182,7 +182,7 @@ class GEMMResult(GEMM, RRPerfResult):
             "M": self.M,
             "N": self.N,
             "K": self.K,
-            "prec": "".join(
+            "PREC": "".join(
                 [
                     {"half": "h", "float": "f"}[getattr(self, "type_" + x)]
                     for x in ["A", "B", "C", "D", "acc"]
@@ -194,7 +194,7 @@ class GEMMResult(GEMM, RRPerfResult):
             "k": self.mac_k,
             "WG": str(self.workgroup_size_x) + "/" + str(self.workgroup_size_y),
             "LDS": TF(self.loadLDS_A) + TF(self.loadLDS_B) + TF(self.storeLDS_D),
-            "scheduler": self.scheduler,
+            "SCH": self.scheduler[0],
             "iters": "/".join(
                 [str(getattr(self, "num" + x)) for x in ["WarmUp", "Outer", "Inner"]]
             ),
