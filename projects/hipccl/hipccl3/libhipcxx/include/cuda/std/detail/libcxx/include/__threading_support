@@ -305,7 +305,7 @@ void __libcpp_thread_sleep_for(chrono::nanoseconds __ns)
 // FIXME (HIP): Due to a lack of a clock rate independent nanosleep ISA instruction on gfx90a and gfx908,
 // we use wall_clock64 that runs at a fixed clock rate of 25 MHz to simulate a nanosleep (only on gfx90a and on gfx908).
 // Each cycle of the 25 MHz clock has a duration of 40 ns, which is the best granularity this method can have.
-// We asked for a __nanosleep builtin in https://ontrack-internal.amd.com/browse/SWDEV-394550.
+// We asked for a __nanosleep builtin in SWDEV-394550.
 // Warning: A limitation with this is that wall_clock64 will use a different clock rate for other architectures
 // than gfx90a and gfx908, so the conversion of clock ticks to nanoseconds is no longer accurate.
 // The clock rate is currently hardcoded as _LIBCUDACXX_HIP_TSC_NANOSECONDS_PER_CYCLE. 
