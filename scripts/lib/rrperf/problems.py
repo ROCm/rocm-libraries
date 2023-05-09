@@ -76,6 +76,8 @@ class GEMMSolution:
     scheduler: str = "Priority"
 
     prefetch: bool = True
+    prefetchInFlight: int = 2
+    prefetchLDSFactor: int = 0
 
 
 @dataclass(unsafe_hash=True)
@@ -194,6 +196,7 @@ class GEMMResult(GEMM, RRPerfResult):
             "k": self.mac_k,
             "WG": str(self.workgroup_size_x) + "/" + str(self.workgroup_size_y),
             "LDS": TF(self.loadLDS_A) + TF(self.loadLDS_B) + TF(self.storeLDS_D),
+            "PF": TF(self.prefetch) + "/" + str(self.prefetchInFlight) + "/" + str(self.prefetchLDSFactor),
             "SCH": self.scheduler[0],
             "iters": "/".join(
                 [str(getattr(self, "num" + x)) for x in ["WarmUp", "Outer", "Inner"]]

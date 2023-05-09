@@ -73,6 +73,7 @@ namespace GEMMDriverTest
         bool prefetch          = false;
         int  prefetchInFlight  = 1;
         int  prefetchLDSFactor = 0;
+        bool prefetchMixMemOps = false;
 
         bool packMultipleElementsInto1VGPR = true;
     };
@@ -257,6 +258,7 @@ namespace GEMMDriverTest
         kernelOptions->prefetch                      = gemm.prefetch;
         kernelOptions->prefetchInFlight              = gemm.prefetchInFlight;
         kernelOptions->prefetchLDSFactor             = gemm.prefetchLDSFactor;
+        kernelOptions->prefetchMixMemOps             = gemm.prefetchMixMemOps;
         kernelOptions->transposeMemoryAccess[LayoutType::MATRIX_A] = gemm.transA == "T";
         kernelOptions->transposeMemoryAccess[LayoutType::MATRIX_B] = gemm.transB == "T";
 
@@ -517,7 +519,11 @@ namespace GEMMDriverTest
             for(auto ldsFactor : {0, 2})
             {
                 gemm.prefetchLDSFactor = ldsFactor;
-                basicGEMM<float>(m_context, gemm, 1.e-6);
+                for(auto mixMemOps : {false, true})
+                {
+                    gemm.prefetchMixMemOps = mixMemOps;
+                    basicGEMM<float>(m_context, gemm, 1.e-6);
+                }
             }
         }
     }
@@ -543,7 +549,11 @@ namespace GEMMDriverTest
             for(auto ldsFactor : {0, 2})
             {
                 gemm.prefetchLDSFactor = ldsFactor;
-                basicGEMM<Half>(m_context, gemm, 2.e-5);
+                for(auto mixMemOps : {false, true})
+                {
+                    gemm.prefetchMixMemOps = mixMemOps;
+                    basicGEMM<Half>(m_context, gemm, 2.e-5);
+                }
             }
         }
     }

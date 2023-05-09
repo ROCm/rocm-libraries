@@ -47,8 +47,10 @@ struct GEMMProblem
     bool loadLDS_B  = true;
     bool storeLDS_D = true;
 
-    bool prefetch  = false;
-    bool betaInFma = true;
+    bool prefetch          = false;
+    int  prefetchInFlight  = 2;
+    int  prefetchLDSFactor = 0;
+    bool betaInFma         = true;
 
     // Unroll Options
     unsigned int unroll_x = 0;
@@ -121,6 +123,9 @@ struct rocRoller::Serialization::
         iot::mapRequired(io, "loadLDS_A", result.loadLDS_A);
         iot::mapRequired(io, "loadLDS_B", result.loadLDS_B);
         iot::mapRequired(io, "storeLDS_D", result.storeLDS_D);
+        iot::mapRequired(io, "prefetch", result.prefetch);
+        iot::mapRequired(io, "prefetchInFlight", result.prefetchInFlight);
+        iot::mapRequired(io, "prefetchLDSFactor", result.prefetchLDSFactor);
         iot::mapRequired(io, "betaInFma", result.betaInFma);
         iot::mapRequired(io, "scheduler", result.scheduler);
 
@@ -163,6 +168,12 @@ std::string gemmKernelName(GEMMResult const& result, std::shared_ptr<KernelOptio
 
     rv << "_UNROLL";
     streamJoin(rv, std::vector{result.unroll_x, result.unroll_y}, "x");
+
+    if(result.prefetch)
+    {
+        rv << "_PF";
+        streamJoin(rv, std::vector{result.prefetchInFlight, result.prefetchLDSFactor}, "x");
+    }
 
     rv << "_" << result.scheduler;
 
@@ -431,8 +442,13 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult, bool doVisualize)
     {
         kernelOptions->unrollK           = 2;
         kernelOptions->prefetch          = true;
-        kernelOptions->prefetchInFlight  = 2;
-        kernelOptions->prefetchLDSFactor = 0;
+        kernelOptions->prefetchInFlight  = prob.prefetchInFlight;
+        kernelOptions->prefetchLDSFactor = prob.prefetchLDSFactor;
+
+        if(prob.prefetchLDSFactor != 0)
+        {
+            kernelOptions->prefetchMixMemOps = true;
+        }
     }
 
     if(result.match_memory_access)
@@ -565,6 +581,10 @@ int main(int argc, const char* argv[])
                   "Match memory access to transpose. "
                   "Currently decreases performance."));
     po.addArg("prefetch", Arg({"prefetch"}, "Enable prefetching (UnrollK=2 implied)."));
+    po.addArg("prefetchInFlight",
+              Arg({"prefetchInFlight"}, "Number of prefetches in flight at the same time"));
+    po.addArg("prefetchLDSFactor",
+              Arg({"prefetchLDSFactor"}, "Prefetch 1/prefetchLDSFactor of MacroTile from LDS"));
 
     // Benchmarking options
     po.addArg("yaml", Arg({"o", "yaml"}, "Results"));
@@ -606,6 +626,8 @@ int main(int argc, const char* argv[])
     prob.scheduler           = po.get("scheduler", std::string("Priority"));
     prob.match_memory_access = po.get("match_memory_access", true);
     prob.prefetch            = po.get("prefetch", false);
+    prob.prefetchInFlight    = po.get("prefetchInFlight", 0);
+    prob.prefetchLDSFactor   = po.get("prefetchLDSFactor", 0);
 
     prob.numWarmUp = po.get("num_warmup", 3);
     prob.numOuter  = po.get("num_outer", 5);
