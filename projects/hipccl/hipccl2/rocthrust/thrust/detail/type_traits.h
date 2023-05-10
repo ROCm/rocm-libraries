@@ -144,11 +144,11 @@ template<typename T> struct has_trivial_constructor
       is_pod<T>::value
 #if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC || \
     THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_CLANG
-      || __has_trivial_constructor(T)
+      || __is_trivially_constructible(T)
 #elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC
 // only use the intrinsic for >= 4.3
 #if (__GNUC__ >= 4) && (__GNUC_MINOR__ >= 3)
-      || __has_trivial_constructor(T)
+      || __is_trivially_constructible(T)
 #endif // GCC VERSION
 #endif // THRUST_HOST_COMPILER
       >
@@ -160,11 +160,11 @@ template<typename T> struct has_trivial_copy_constructor
       is_pod<T>::value
 #if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC || \
     THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_CLANG
-      || __has_trivial_copy(T)
+      || __is_trivially_copyable(T)
 #elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC
 // only use the intrinsic for >= 4.3
 #if (__GNUC__ >= 4) && (__GNUC_MINOR__ >= 3)
-      || __has_trivial_copy(T)
+      || __is_trivially_copyable(T)
 #endif // GCC VERSION
 #endif // THRUST_HOST_COMPILER
     >
