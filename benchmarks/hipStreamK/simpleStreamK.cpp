@@ -1,4 +1,8 @@
-#include <iomanip>
+/**
+ * @copyright Copyright 2023 Advanced Micro Devices, Inc.
+ */
+
+#include <cassert>
 #include <iostream>
 #include <vector>
 
@@ -8,6 +12,24 @@
 
 #include "utils.hpp"
 #include <rocwmma/rocwmma.hpp>
+
+/**
+ * This is a HIP Prototype for the Basic Stream-K Algorithm outlined in
+ * Stream-K: Work-centric Parallel Decomposition for Dense Matrix-Matrix Multiplication on the GPU
+ * by Osama et Al.
+ *
+ * This prototype assumes that the K dimension of the problem is a multiply of WMMA_K, defined below.
+ * The executable takes in 6 optional arguments for Matrix Multiplication D = A * B where A is MxK and B is KxN
+ * M: the first dimension of A //Default 3072
+ * N: the second dimesnion of B //Defualt 4096
+ * K: the accumulating dimesion //Default 4096
+ * numCUs: the grid size for the Stream-K kernel
+ * test: to test the output or benchmark takes 0 (false) or 1 (true) //Default 0
+ * numBench: number of benchmark runs to choose, note does not use if test == 1 //Default 10
+ *
+ * E.g. To run streamk 100 times for benchmark using the problem 3072 x 4096 x 4096 utilizing 120 CUs (workgroups)
+ * ./streamk.exe 3072 4096 4096 120 false 100 
+ */
 
 using namespace rocwmma;
 
@@ -189,6 +211,21 @@ __global__ void streamK(uint32_t         m,
     int iter        = cta * itersPerCTA;
     int iterEnd     = iter + itersPerCTA;
 
+    int extraIters = totalIters % (gridDim.x);
+    if(extraIters != 0)
+    {
+        if(cta < extraIters)
+        {
+            iter    = cta * (itersPerCTA + 1);
+            iterEnd = iter + itersPerCTA + 1;
+        }
+        else
+        {
+            iter    = cta * itersPerCTA + extraIters;
+            iterEnd = iter + itersPerCTA;
+        }
+    }
+
     constexpr auto waveTileSize    = make_coord2d(WAVE_TILE_X, WAVE_TILE_Y);
     constexpr auto macroTileSize   = make_coord2d(MACRO_TILE_X, MACRO_TILE_Y);
     constexpr auto waveDims        = make_coord2d(WAVES_X, WAVES_Y);
@@ -259,14 +296,16 @@ __global__ void streamK(uint32_t         m,
         {
             if(!tileEnded)
             {
-                int ctaEnd = tileIterEnd / itersPerTile;
-                for(int ctaNext = cta + 1; ctaNext <= ctaEnd / gridDim.x; ctaNext++)
+                int ctaNext = cta + 1;
+                int end     = tileIter;
+                while(end <= tileIterEnd)
                 {
                     wait(flags[ctaNext]);
                     fixup(partials, ctaNext, fragsAcc);
+                    ctaNext++;
+                    end += itersPerCTA;
                 }
             }
-
             //Store Tile.
             auto dAddr = Mapper1dD::fromMatrixCoord(waveTileCoord, ldd);
             //#pragma unroll
@@ -292,17 +331,43 @@ __global__ void streamK(uint32_t         m,
 
 int main(int argc, char* argv[])
 {
-    bool test = false;
+    bool test     = false;
+    int  m        = 3072; //384
+    int  n        = 4096; //384
+    int  k        = 4096; //128
+    int  numBench = 10;
+
+    hipDeviceProp_t devProp;
+    CHECK_HIP_ERROR(hipGetDeviceProperties(&devProp, 0));
+    int grid = devProp.multiProcessorCount;
+
     if(argc > 1)
     {
-        test = true;
+        m = std::stoi(argv[1]);
+        if(argc > 2)
+            n = std::stoi(argv[2]);
+        if(argc > 3)
+            k = std::stoi(argv[3]);
+        if(argc > 4)
+            grid = std::stoi(argv[4]);
+        if(argc > 5)
+        {
+            auto temp = std::stoi(argv[5]);
+            test      = (temp == 1) ? true : false;
+        }
+        if(argc > 6 && !test)
+            numBench = std::stoi(argv[6]);
     }
 
-    const int              m = 3072;
-    const int              n = 4096;
-    const int              k = 4096;
-    std::vector<float16_t> a(m * k); //, static_cast<float16_t>(2.0f));
-    std::vector<float16_t> b(k * n); //, static_cast<float16_t>(1.0f));
+    auto testMode = (test) ? "Test" : "Benchmark with " + std::to_string(numBench) + " runs";
+
+    std::cout << "Running StreamK with the following configuration!"
+              << "\t M = " << m << "\t N = " << n << "\t K = " << k << "\t with " << grid << " CUs"
+              << "\t Test Mode" << testMode << std::endl;
+
+    assert(("k must be aligned to WMMA_K" && k % WMMA_K == 0));
+    std::vector<float16_t> a(m * k);
+    std::vector<float16_t> b(k * n);
 
     for(int i = 0; i < k; i++)
         for(int j = 0; j < m; j++)
@@ -332,8 +397,7 @@ int main(int argc, char* argv[])
     float32_t* partials;
 
     dim3 dimBlock(TBLOCK_X, TBLOCK_Y);
-    dim3 dimGrid(96);
-    auto grid = dimGrid.x;
+    dim3 dimGrid(grid);
 
     CHECK_HIP_ERROR(hipMalloc(&dA, sizeof(float16_t) * a.size()));
     CHECK_HIP_ERROR(hipMalloc(&dB, sizeof(float16_t) * b.size()));
@@ -376,8 +440,7 @@ int main(int argc, char* argv[])
     //warmup
     if(!test)
     {
-        std::cout << "Benchmarking using 100 runs" << std::endl;
-        for(int i = 0; i < 100; i++)
+        for(int i = 0; i < numBench; i++)
         {
             streamK<<<dimGrid, dimBlock>>>(m,
                                            n,
@@ -400,12 +463,15 @@ int main(int argc, char* argv[])
 
         float elapsedTimeMs = 0.0f;
         CHECK_HIP_ERROR(hipEventElapsedTime(&elapsedTimeMs, startEvent, stopEvent));
-        std::cout << "Elapsed Time for Stream-K = " << elapsedTimeMs / 100 << " ms" << std::endl;
+        std::cout << "Elapsed Time for Stream-K = " << elapsedTimeMs / numBench << " ms"
+                  << std::endl;
     }
 
     CHECK_HIP_ERROR(hipMemcpy(d.data(), dD, sizeof(float16_t) * d.size(), hipMemcpyDeviceToHost));
     if(test)
     {
+        int starti = 0;
+        int startj = 0;
         for(int i = 0; i < n; i++)
         {
             for(int j = 0; j < m; j++)
@@ -414,10 +480,37 @@ int main(int argc, char* argv[])
                 diff           = (diff > 0) ? diff : -diff;
                 if(diff > 1.e-2)
                 {
-                    std::cout << "Wrong! Value = " << d[i * m + j]
-                              << "\t Real Value = " << dH[i * m + j]
-                              << "\tdiff =  " << static_cast<float>(diff) << std::endl;
+                    starti = i;
+                    startj = j;
+                    std::cout << "Diff found at " << i << "," << j << std::endl;
+                    break;
                 }
+            }
+            if(starti != 0 || startj != 0)
+                break;
+        }
+        if(starti != 0 || startj != 0)
+        {
+            for(int i = starti; i < starti + 20; i++)
+            {
+                for(int j = startj; j < startj + 20; j++)
+                {
+                    float16_t diff = d[i * m + j] - static_cast<float16_t>(dH[i * m + j]);
+                    diff           = (diff > 0) ? diff : -diff;
+                    std::cout << d[i * m + j] << " ";
+                }
+                std::cout << std::endl;
+            }
+            std::cout << "===========" << std::endl;
+            for(int i = starti; i < starti + 20; i++)
+            {
+                for(int j = startj; j < startj + 20; j++)
+                {
+                    float16_t diff = d[i * m + j] - static_cast<float16_t>(dH[i * m + j]);
+                    diff           = (diff > 0) ? diff : -diff;
+                    std::cout << dH[i * m + j] << " ";
+                }
+                std::cout << std::endl;
             }
         }
     }
