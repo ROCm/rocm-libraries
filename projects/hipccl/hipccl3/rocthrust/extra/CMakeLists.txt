@@ -79,7 +79,7 @@ function(add_rocthrust_test TEST_NAME TEST_SOURCES)
     foreach(amdgpu_target ${AMDGPU_TARGETS})
       target_link_libraries(${TEST_TARGET}
         PRIVATE
-          --amdgpu-target=${amdgpu_target}
+          --offload-arch=${amdgpu_target}
       )
   endif()
   endforeach()
