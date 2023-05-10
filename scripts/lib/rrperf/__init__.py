@@ -1,6 +1,7 @@
 # flake8: noqa: F401
 
 import rrperf.autoperf
+import rrperf.args
 import rrperf.cli
 import rrperf.compare
 import rrperf.git

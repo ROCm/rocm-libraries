@@ -1,5 +1,11 @@
-""" autoperf routines """
+"""
+Run multiple performance tests against multiple commits and/or
+the current workspace.
+HEAD is tested if commits are not provided. Tags (like HEAD) can be specified.
+The output is in {clonedir}/doc_{datetime}.
+"""
 
+import argparse
 import datetime
 import os
 import subprocess
@@ -9,6 +15,7 @@ from typing import List
 
 from rrperf import compare, git
 from rrperf import run as suite_run
+import rrperf.args as args
 
 
 def build_rocroller(
@@ -71,7 +78,58 @@ def ancestral_targets(targets: List[str]):
         )
 
 
-def run(
+def get_args(parser: argparse.ArgumentParser):
+    common_args = [
+        args.x_value,
+        args.normalize,
+        args.y_zero,
+        args.plot_median,
+        args.plot_min,
+        args.exclude_boxplot,
+        args.group_results,
+        args.rundir,
+        args.suite,
+    ]
+    for arg in common_args:
+        arg(parser)
+
+    parser.add_argument(
+        "--clonedir",
+        type=str,
+        help="Base directory for repo clone destinations.",
+        default=".",
+    )
+    parser.add_argument(
+        "--ancestral",
+        action="store_true",
+        help="Test every commit between first and last commits.  Off by default.",
+        required=False,
+    )
+    parser.add_argument(
+        "--current",
+        action="store_true",
+        help="Test the repository in its current state.  Off by default.",
+        required=False,
+    )
+    parser.add_argument(
+        "commits", type=str, nargs="*", help="Commits/tags/branches to test."
+    )
+
+    parser.add_argument(
+        "--no-fail",
+        action="append",
+        default=[],
+        help="Commits/tags/branches where a failure does not cause the"
+        " overall command to fail.",
+    )
+
+
+def run(args):
+    """Run performance tests against multiple commits"""
+    autoperf(**args.__dict__)
+
+
+def autoperf(
     commits: List[str],
     clonedir: str,
     rundir: str,
@@ -125,7 +183,7 @@ def run(
             project_dir,
             target,
         )
-        target_success, result_dir = suite_run.run(
+        target_success, result_dir = suite_run.run_cli(
             build_dir=build_dir, rundir=rundir, suite=suite, filter=filter, recast=True
         )
         if target in no_fail_targets:
@@ -164,3 +222,11 @@ def run(
         print("Failures occurred in branches marked no-fail.")
     if not success:
         raise RuntimeError("Some jobs failed.")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    get_args(parser)
+
+    parsed_args = parser.parse_args()
+    run(parsed_args)

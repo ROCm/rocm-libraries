@@ -1,9 +1,17 @@
+"""
+Run Omniperf against a RocRoller kernel or a Tensile guidepost.
+Specify a YAML config file to invoke Tensile to build a kernel to be profiled.
+Alternatively, specify an rrperf suite to profile a RocRoller kernel.
+These kernels are profiled with Omniperf.
+"""
+import argparse
 import shutil
 import subprocess
 import tempfile
 from pathlib import Path
 from typing import Dict, List
 
+import rrperf.args as args
 from rrperf.problems import GEMMRun
 from rrperf.run import get_build_dir, get_build_env, load_suite
 
@@ -96,7 +104,32 @@ def profile_rr(
     )
 
 
-def run(
+def get_args(parser: argparse.ArgumentParser):
+    common_args = [
+        args.suite,
+    ]
+    for arg in common_args:
+        arg(parser)
+
+    parser.add_argument("--config", help="Location of Tensile YAML config file.")
+    parser.add_argument(
+        "--output_dir",
+        help="Directory where the Omniperf results are written.",
+        default=".",
+    )
+    parser.add_argument(
+        "--tensile_repo",
+        help="Directory where Tensile repository is located.",
+        default="/home/tensile",
+    )
+
+
+def run(args):
+    """Run Omniperf against a RocRoller kernel or a Tensile guidepost."""
+    profile(**args.__dict__)
+
+
+def profile(
     output_dir: str,
     tensile_repo: str,
     build_dir: str = None,
@@ -131,3 +164,11 @@ def run(
                 build_dir,
                 env,
             )
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    get_args(parser)
+
+    parsed_args = parser.parse_args()
+    run(parsed_args)

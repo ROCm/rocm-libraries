@@ -1,5 +1,6 @@
-"""Run routines."""
+"""Run a benchmark suite."""
 
+import argparse
 import datetime
 import os
 import subprocess
@@ -12,6 +13,7 @@ from typing import Dict, Tuple, Optional
 
 import pandas as pd
 import rrperf
+import rrperf.args as args
 import yaml
 
 
@@ -181,7 +183,40 @@ def backcast(generator, build_dir):
             yield backObj
 
 
-def run(
+def get_args(parser: argparse.ArgumentParser):
+    common_args = [
+        args.rundir,
+        args.suite,
+    ]
+    for arg in common_args:
+        arg(parser)
+
+    parser.add_argument(
+        "--submit",
+        help="Submit results to SOMEWHERE.",
+        action="store_true",
+        default=False,
+    )
+    parser.add_argument("--token", help="Benchmark token to run.")
+    parser.add_argument("--filter", help="Filter benchmarks...")
+    parser.add_argument(
+        "--rocm_smi",
+        default="rocm-smi",
+        help="Location of rocm-smi.",
+    )
+    parser.add_argument(
+        "--pin_clocks",
+        action="store_true",
+        help="Pin clocks before launching benchmark clients.",
+    )
+
+
+def run(args):
+    """Run benchmarks!"""
+    run_cli(**args.__dict__)
+
+
+def run_cli(
     token: str = None,
     suite: str = None,
     submit: bool = False,
@@ -241,3 +276,11 @@ def run(
         submit_directory(suite, rundir, ptsdir)
 
     return result, rundir
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    get_args(parser)
+
+    parsed_args = parser.parse_args()
+    run(parsed_args)

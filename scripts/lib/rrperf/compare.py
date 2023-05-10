@@ -1,5 +1,6 @@
 """Result comparison routines."""
 
+import argparse
 import datetime
 import io
 import os
@@ -16,6 +17,7 @@ import rrperf
 import scipy.stats
 from rrperf.specs import MachineSpecs
 from rrperf.problems import GEMMResult
+import rrperf.args as args
 
 
 def priority_problems():
@@ -642,6 +644,33 @@ def console_summary(f, perf_runs):
         print("No statistically significant performance diffs", file=f)
 
 
+def get_args(parser: argparse.ArgumentParser):
+    common_args = [
+        args.directories,
+        args.x_value,
+        args.normalize,
+        args.y_zero,
+        args.plot_median,
+        args.plot_min,
+        args.exclude_boxplot,
+        args.group_results,
+    ]
+    for arg in common_args:
+        arg(parser)
+
+    parser.add_argument(
+        "--format",
+        choices=["md", "html", "email_html", "console", "gemmdf"],
+        default="md",
+        help="Output format.",
+    )
+
+
+def run(args):
+    """Compare previous performance runs."""
+    compare(**args.__dict__)
+
+
 def compare(
     directories=None,
     format="md",
@@ -731,3 +760,11 @@ def compare(
 
     if print_final:
         print(output.getvalue())
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    get_args(parser)
+
+    parsed_args = parser.parse_args()
+    run(parsed_args)
