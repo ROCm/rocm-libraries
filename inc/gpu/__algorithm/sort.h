@@ -807,7 +807,7 @@ __sort_dispatch(_RandomAccessIterator __first, _RandomAccessIterator __last, _Co
 }
 
 template <class _Type, class... _Options>
-using __is_any_of = _Or<std::is_same<_Type, _Options>...>;
+using __is_any_of = std::disjunction_v<std::is_same<_Type, _Options>...>;
 
 template <class _Type>
 using __sort_is_specialized_in_library = __is_any_of<
