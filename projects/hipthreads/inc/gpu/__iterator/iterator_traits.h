@@ -49,7 +49,7 @@ struct __is_cpp17_random_access_iterator : public __has_iterator_category_conver
 // Such iterators receive special "contiguous" optimizations in
 // std::copy and std::sort.
 //
-#if _LIBCPP_STD_VER >= 20
+#if _LIBGPU_STD_VER >= 20
 template <class _Tp>
 struct __is_cpp17_contiguous_iterator : std::disjunction_v<
     __has_iterator_category_convertible_to<_Tp, std::contiguous_iterator_tag>,

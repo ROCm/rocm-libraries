@@ -515,7 +515,7 @@ class _LIBGPU_UNIQUE_PTR_TRIVIAL_ABI _LIBGPU_TEMPLATE_VIS unique_ptr<_Tp[], _Dp>
     }
 
     __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 std::add_lvalue_reference_t<_Tp>
-    operator[](size_t __i) const {
+    operator[](std::size_t __i) const {
         return __ptr_.first()[__i];
     }
     __host__ __device__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 pointer get() const _NOEXCEPT {
@@ -719,7 +719,7 @@ struct __unique_if<_Tp[]> {
     typedef unique_ptr<_Tp[], host_delete<_Tp[]>> __unique_array_unknown_bound_host;
 };
 
-template <class _Tp, size_t _Np>
+template <class _Tp, std::size_t _Np>
 struct __unique_if<_Tp[_Np]> {
     typedef void __unique_array_known_bound;
 };
@@ -755,7 +755,7 @@ make_unique(_Tp &&__arg) {
 template <class _Tp>
 __device__ inline _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23
 typename __unique_if<_Tp>::__unique_array_unknown_bound
-make_unique(size_t __n) {
+make_unique(std::size_t __n) {
     typedef std::remove_extent_t<_Tp> _Up;
     return unique_ptr<_Tp>(new _Up[__n]());
 }
@@ -763,7 +763,7 @@ make_unique(size_t __n) {
 template <class _Tp>
 __host__ inline _LIBGPU_INLINE_VISIBILITY
 typename __unique_if<_Tp>::__unique_array_unknown_bound_host
-make_unique(size_t __n) {
+make_unique(std::size_t __n) {
     typedef std::remove_extent_t<_Tp> _Up;
     static_assert(std::is_trivially_default_constructible<_Up>::value,
                   "Host code can't invoke a non-trivial constructor for objects in device memory");
@@ -786,7 +786,7 @@ make_unique_for_overwrite() {
 
 template <class _Tp>
 __host__ __device__ _LIBGPU_HIDE_FROM_ABI _LIBGPU_CONSTEXPR_SINCE_CXX23 typename __unique_if<_Tp>::__unique_array_unknown_bound
-make_unique_for_overwrite(size_t __n) {
+make_unique_for_overwrite(std::size_t __n) {
     return unique_ptr<_Tp>(new std::remove_extent_t<_Tp>[__n]);
 }
 
