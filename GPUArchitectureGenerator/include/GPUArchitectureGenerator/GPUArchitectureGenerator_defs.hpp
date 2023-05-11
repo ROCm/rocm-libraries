@@ -437,141 +437,141 @@ namespace GPUArchitectureGenerator
             {gfx9ISAs(),
              {
                  rocRoller::GPUInstructionInfo(
-                     "s_atc_probe", 1, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_atc_probe", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atc_probe_buffer", 1, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_atc_probe_buffer", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_add", 1, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_atomic_add", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_add_x2", 2, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_atomic_add_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_and", 1, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_atomic_and", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_and_x2", 2, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_atomic_and_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_cmpswap", 1, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_atomic_cmpswap", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_cmpswap_x2", 2, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_atomic_cmpswap_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_dec", 1, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_atomic_dec", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_dec_x2", 2, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_atomic_dec_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_inc", 1, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_atomic_inc", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_inc_x2", 2, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_atomic_inc_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_or", 1, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_atomic_or", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_or_x2", 2, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_atomic_or_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_smax", 1, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_atomic_smax", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_smax_x2", 2, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_atomic_smax_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_smin", 1, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_atomic_smin", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_smin_x2", 2, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_atomic_smin_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_sub", 1, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_atomic_sub", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_sub_x2", 2, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_atomic_sub_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_swap", 1, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_atomic_swap", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_swap_x2", 2, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_atomic_swap_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_umax", 1, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_atomic_umax", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_umax_x2", 2, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_atomic_umax_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_umin", 1, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_atomic_umin", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_umin_x2", 2, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_atomic_umin_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_xor", 1, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_atomic_xor", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_atomic_xor_x2", 2, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_atomic_xor_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_add", 1, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_buffer_atomic_add", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_add_x2", 2, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_buffer_atomic_add_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_and", 1, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_buffer_atomic_and", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_and_x2", 2, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_buffer_atomic_and_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_cmpswap", 1, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_buffer_atomic_cmpswap", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_cmpswap_x2", 2, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_buffer_atomic_cmpswap_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_dec", 1, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_buffer_atomic_dec", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_dec_x2", 2, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_buffer_atomic_dec_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_inc", 1, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_buffer_atomic_inc", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_inc_x2", 2, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_buffer_atomic_inc_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_or", 1, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_buffer_atomic_or", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_or_x2", 2, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_buffer_atomic_or_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_smax", 1, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_buffer_atomic_smax", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_smax_x2", 2, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_buffer_atomic_smax_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_smin", 1, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_buffer_atomic_smin", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_smin_x2", 2, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_buffer_atomic_smin_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_sub", 1, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_buffer_atomic_sub", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_sub_x2", 2, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_buffer_atomic_sub_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_swap", 1, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_buffer_atomic_swap", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_swap_x2", 2, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_buffer_atomic_swap_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_umax", 1, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_buffer_atomic_umax", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_umax_x2", 2, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_buffer_atomic_umax_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_umin", 1, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_buffer_atomic_umin", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_umin_x2", 2, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_buffer_atomic_umin_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_xor", 1, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_buffer_atomic_xor", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_buffer_atomic_xor_x2", 2, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_buffer_atomic_xor_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_buffer_load_dword", 1, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_buffer_load_dword", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_buffer_load_dwordx16", 2, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_buffer_load_dwordx16", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_buffer_load_dwordx2", 2, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_buffer_load_dwordx2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_buffer_load_dwordx4", 2, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_buffer_load_dwordx4", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_buffer_load_dwordx8", 2, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_buffer_load_dwordx8", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_buffer_store_dword", 1, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_buffer_store_dword", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_buffer_store_dwordx2", 2, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_buffer_store_dwordx2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_buffer_store_dwordx4", 2, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_buffer_store_dwordx4", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_dcache_discard", 1, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_dcache_discard", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_dcache_discard_x2", 2, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_dcache_discard_x2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_dcache_inv", 1, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_dcache_inv", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_dcache_inv_vol", 1, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_dcache_inv_vol", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_dcache_wb", 1, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_dcache_wb", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_dcache_wb_vol", 1, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_dcache_wb_vol", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
                      "s_load_dword", 0, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
@@ -587,23 +587,23 @@ namespace GPUArchitectureGenerator
                  rocRoller::GPUInstructionInfo(
                      "s_memtime", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_scratch_load_dword", 1, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_scratch_load_dword", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_scratch_load_dwordx2", 2, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_scratch_load_dwordx2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_scratch_load_dwordx4", 2, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_scratch_load_dwordx4", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_scratch_store_dword", 1, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_scratch_store_dword", 1, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_scratch_store_dwordx2", 2, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_scratch_store_dwordx2", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_scratch_store_dwordx4", 2, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_scratch_store_dwordx4", 2, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_store_dword", 0, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_store_dword", 0, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_store_dwordx2", 0, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_store_dwordx2", 0, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
-                     "s_store_dwordx4", 0, {rocRoller::GPUWaitQueueType::LGKMDSQueue}),
+                     "s_store_dwordx4", 0, {rocRoller::GPUWaitQueueType::LGKMSmemQueue}),
                  rocRoller::GPUInstructionInfo(
                      "s_sendmsg", 1, {rocRoller::GPUWaitQueueType::LGKMSendMsgQueue}),
                  rocRoller::GPUInstructionInfo("exp", 1, {rocRoller::GPUWaitQueueType::EXPQueue}),
