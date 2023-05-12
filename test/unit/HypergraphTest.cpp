@@ -495,4 +495,23 @@ namespace rocRollerTest
 
         g.deleteElement<TestForget>(std::vector<int>{sd0, sd1}, std::vector<int>{TestVGPR0});
     }
+
+    TEST(HypergraphTest, ParallelEdges)
+    {
+        myHypergraph g;
+
+        auto u0  = g.addElement(TestUser{});
+        auto sd0 = g.addElement(TestSubDimension{});
+        auto sd1 = g.addElement(TestSubDimension{});
+
+        auto TestSplit0 = g.addElement(TestSplit{}, {u0}, {sd0, sd1});
+        auto TestSplit1 = g.addElement(TestSplit{}, {u0}, {sd0, sd1});
+
+        auto childVec  = g.childNodes(1).to<std::vector>();
+        auto parentVec = g.parentNodes(2).to<std::vector>();
+
+        EXPECT_EQ(childVec, std::vector<int>({2, 3}));
+        EXPECT_EQ(parentVec, std::vector<int>({1}));
+    }
+
 }

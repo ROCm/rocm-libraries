@@ -395,13 +395,20 @@ namespace rocRoller
         template <typename Node, typename Edge, bool Hyper>
         Generator<int> Hypergraph<Node, Edge, Hyper>::childNodes(int parent) const
         {
-            // FIXME: If the hypergraph has parallel edges, we'll get duplicate output nodes.
-
+            std::set<int> visited;
             if(getElementType(parent) == ElementType::Node)
             {
                 for(auto const& edgeIndex : getNeighbours<Direction::Downstream>(parent))
                 {
-                    co_yield getNeighbours<Direction::Downstream>(edgeIndex);
+                    auto neighbours = getNeighbours<Direction::Downstream>(edgeIndex);
+                    for(auto const& neighbour : neighbours)
+                    {
+                        if(!visited.contains(neighbour))
+                        {
+                            visited.insert(neighbour);
+                            co_yield neighbour;
+                        }
+                    }
                 }
             }
             else
@@ -413,13 +420,20 @@ namespace rocRoller
         template <typename Node, typename Edge, bool Hyper>
         Generator<int> Hypergraph<Node, Edge, Hyper>::parentNodes(int child) const
         {
-            // FIXME: If the hypergraph has parallel edges, we'll get duplicate output nodes.
-
+            std::set<int> visited;
             if(getElementType(child) == ElementType::Node)
             {
                 for(auto const& edgeIndex : getNeighbours<Direction::Upstream>(child))
                 {
-                    co_yield getNeighbours<Direction::Upstream>(edgeIndex);
+                    auto neighbours = getNeighbours<Direction::Upstream>(edgeIndex);
+                    for(auto const& neighbour : neighbours)
+                    {
+                        if(!visited.contains(neighbour))
+                        {
+                            visited.insert(neighbour);
+                            co_yield neighbour;
+                        }
+                    }
                 }
             }
             else
