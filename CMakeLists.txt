@@ -285,6 +285,7 @@ set(rocroller_src
  lib/source/KernelGraph/ControlFlowRWTracer.cpp
  lib/source/KernelGraph/ControlToCoordinateMapper.cpp
  lib/source/KernelGraph/KernelGraph.cpp
+ lib/source/KernelGraph/LastRWTracer.cpp
  lib/source/KernelGraph/LowerFromCommand.cpp
  lib/source/KernelGraph/ScopeManager.cpp
  lib/source/KernelGraph/Utils.cpp
@@ -299,6 +300,7 @@ set(rocroller_src
  lib/source/KernelGraph/Transformations/CleanLoops.cpp
  lib/source/KernelGraph/Transformations/FuseExpressions.cpp
  lib/source/KernelGraph/Transformations/FuseLoops.cpp
+ lib/source/KernelGraph/Transformations/InlineIncrements.cpp
  lib/source/KernelGraph/Transformations/KernelGraph_loop.cpp
  lib/source/KernelGraph/Transformations/LowerLinear.cpp
  lib/source/KernelGraph/Transformations/LowerTile.cpp

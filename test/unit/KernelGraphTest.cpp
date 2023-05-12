@@ -1356,7 +1356,7 @@ namespace KernelGraphTest
         EXPECT_EQ(NormalizedSource(expected0), NormalizedSource(kgraph0.toDOT(true)));
     }
 
-    TEST_F(KernelGraphTest, LowerTensor)
+    std::shared_ptr<Command> simpleGEMMCommand()
     {
         auto command = std::make_shared<Command>();
 
@@ -1386,6 +1386,12 @@ namespace KernelGraphTest
         command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
             rocRoller::Operations::T_Store_Tiled(DataType::Float, 2, 8))); // D
 
+        return command;
+    }
+
+    TEST_F(KernelGraphTest, LowerTensor)
+    {
+        auto command = simpleGEMMCommand();
         auto kgraph0 = translate(command);
 
         std::string expected0 = R".(
@@ -1712,6 +1718,65 @@ namespace KernelGraphTest
         unrolled_kgraph_lds = addDeallocate(unrolled_kgraph_lds);
         addDeallocates      = unrolled_kgraph_lds.control.getNodes<Deallocate>().to<std::vector>();
         EXPECT_EQ(addDeallocates.size(), 32);
+    }
+
+    TEST_F(KernelGraphTest, InlineIncrement)
+    {
+        auto command = simpleGEMMCommand();
+        auto kgraph  = translate(command);
+
+        auto params = std::make_shared<CommandParameters>();
+
+        int mac_m = 128;
+        int mac_n = 256;
+        int mac_k = 8;
+
+        int wave_m = 32;
+        int wave_n = 32;
+        int wave_k = 2;
+        int wave_b = 1;
+
+        auto mac_tile_A = MacroTile({mac_m, mac_k},
+                                    LayoutType::MATRIX_A,
+                                    {wave_m, wave_n, wave_k, wave_b},
+                                    MemoryType::LDS);
+        auto mac_tile_B = MacroTile({mac_k, mac_n},
+                                    LayoutType::MATRIX_B,
+                                    {wave_m, wave_n, wave_k, wave_b},
+                                    MemoryType::LDS);
+
+        auto mac_tile_C = MacroTile(
+            {mac_m, mac_n}, LayoutType::MATRIX_ACCUMULATOR, {wave_m, wave_n, wave_k, wave_b});
+        auto mac_tile_D = MacroTile({mac_m, mac_n},
+                                    LayoutType::MATRIX_ACCUMULATOR,
+                                    {wave_m, wave_n, wave_k, wave_b},
+                                    MemoryType::LDS);
+
+        params->setDimensionInfo(4, mac_tile_A);
+        params->setDimensionInfo(11, mac_tile_B);
+        params->setDimensionInfo(18, mac_tile_C);
+        params->setDimensionInfo(28, mac_tile_C);
+        params->setDimensionInfo(30, mac_tile_C);
+        params->setDimensionInfo(32, mac_tile_C);
+        params->setDimensionInfo(34, mac_tile_D);
+
+        kgraph = updateParameters(kgraph, params);
+        kgraph = lowerLinear(kgraph, m_context);
+        kgraph = lowerTile(kgraph, params, m_context);
+
+        // Usual lowering, should be able to inline everything.
+        auto kgraph1 = unrollLoops(kgraph, m_context);
+        kgraph1      = fuseLoops(kgraph1);
+        kgraph1      = addLDS(kgraph1, m_context);
+        kgraph1      = cleanLoops(kgraph1);
+        kgraph1      = addComputeIndexOperations(kgraph1);
+
+        auto pre1  = kgraph1.control.getEdges<ForLoopIncrement>().to<std::vector>();
+        kgraph1    = inlineIncrements(kgraph1);
+        auto post1 = kgraph1.control.getEdges<ForLoopIncrement>().to<std::vector>();
+
+        EXPECT_TRUE(pre1.size() > 0);
+        EXPECT_TRUE(post1.empty());
     }
 
     TEST_F(KernelGraphTest, TranslateTMul)

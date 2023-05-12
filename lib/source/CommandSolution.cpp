@@ -274,6 +274,11 @@ namespace rocRoller
             "CommandKernel::generateKernelGraph: post addDeallocate: {}",
             m_kernelGraph.toDOT(false, "CommandKernel::generateKernelGraph: post addDeallocate"));
 
+        m_kernelGraph = KernelGraph::inlineIncrements(m_kernelGraph);
+        logger->debug("CommandKernel::generateKernelGraph: post inlineIncrements: {}",
+                      m_kernelGraph.toDOT(
+                          false, "CommandKernel::generateKernelGraph: post inlineIncrements"));
+
         m_kernelGraph = KernelGraph::cleanArguments(m_kernelGraph, m_context->kernel());
         if(m_postParameters)
             m_kernelGraph = updateParameters(m_kernelGraph, m_postParameters);

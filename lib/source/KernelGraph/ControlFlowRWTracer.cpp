@@ -102,10 +102,27 @@ namespace rocRoller::KernelGraph
 
     void ControlFlowRWTracer::trackRegister(int control, int coordinate, ReadWrite rw)
     {
-        // Ignore invalid tags
-        if(control >= 0 && coordinate >= 0)
+        if(control < 0 || coordinate < 0)
+            return;
+        m_trace.push_back({m_depth, control, coordinate, rw});
+    }
+
+    void ControlFlowRWTracer::trackConnections(int                     control,
+                                               std::unordered_set<int> except,
+                                               ReadWrite               rw)
+    {
+        if(!m_trackConnections)
+            return;
+
+        if(control < 0)
+            return;
+
+        for(auto c : m_graph.mapper.getConnections(control))
         {
-            m_trace.push_back({m_depth, control, coordinate, rw});
+            if(except.contains(c.coordinate))
+                continue;
+            if(m_graph.coordinates.exists(c.coordinate))
+                m_trace.push_back({m_depth, control, c.coordinate, rw});
         }
     }
 
@@ -185,7 +202,7 @@ namespace rocRoller::KernelGraph
 
     void ControlFlowRWTracer::operator()(ComputeIndex const& op, int tag)
     {
-        // already in a scope
+        // Already in a Scope
     }
 
     void ControlFlowRWTracer::operator()(Deallocate const& op, int tag) {}
@@ -257,26 +274,31 @@ namespace rocRoller::KernelGraph
     void ControlFlowRWTracer::operator()(LoadLDSTile const& op, int tag)
     {
         auto dst = m_graph.mapper.get<MacroTile>(tag);
+        auto lds = m_graph.mapper.get<LDS>(tag);
         trackRegister(tag, dst, ReadWrite::WRITE);
-        trackRegister(tag, m_graph.mapper.get<LDS>(tag), ReadWrite::READ);
+        trackRegister(tag, lds, ReadWrite::READ);
+        trackConnections(tag, {dst, lds}, ReadWrite::READ);
     }
 
     void ControlFlowRWTracer::operator()(LoadLinear const& op, int tag)
     {
         auto dst = m_graph.mapper.get<Linear>(tag);
         trackRegister(tag, dst, ReadWrite::WRITE);
+        trackConnections(tag, {dst}, ReadWrite::READ);
     }
 
     void ControlFlowRWTracer::operator()(LoadTiled const& op, int tag)
     {
         auto dst = m_graph.mapper.get<MacroTile>(tag);
         trackRegister(tag, dst, ReadWrite::WRITE);
+        trackConnections(tag, {dst}, ReadWrite::READ);
     }
 
     void ControlFlowRWTracer::operator()(LoadVGPR const& op, int tag)
     {
         auto dst = m_graph.mapper.get<VGPR>(tag);
         trackRegister(tag, dst, ReadWrite::WRITE);
+        trackConnections(tag, {dst}, ReadWrite::READ);
     }
 
     void ControlFlowRWTracer::operator()(Multiply const& op, int tag)
@@ -320,26 +342,31 @@ namespace rocRoller::KernelGraph
     void ControlFlowRWTracer::operator()(StoreLDSTile const& op, int tag)
     {
         auto dst = m_graph.mapper.get<MacroTile>(tag);
+        auto lds = m_graph.mapper.get<LDS>(tag);
         trackRegister(tag, dst, ReadWrite::READ);
-        trackRegister(tag, m_graph.mapper.get<LDS>(tag), ReadWrite::WRITE);
+        trackRegister(tag, lds, ReadWrite::WRITE);
+        trackConnections(tag, {dst, lds}, ReadWrite::READ);
     }
 
     void ControlFlowRWTracer::operator()(StoreLinear const& op, int tag)
     {
-        auto dst = m_graph.mapper.get<Linear>(tag);
-        trackRegister(tag, dst, ReadWrite::READ);
+        auto src = m_graph.mapper.get<Linear>(tag);
+        trackRegister(tag, src, ReadWrite::READ);
+        trackConnections(tag, {src}, ReadWrite::READ);
     }
 
     void ControlFlowRWTracer::operator()(StoreTiled const& op, int tag)
     {
-        auto dst = m_graph.mapper.get<MacroTile>(tag);
-        trackRegister(tag, dst, ReadWrite::READ);
+        auto src = m_graph.mapper.get<MacroTile>(tag);
+        trackRegister(tag, src, ReadWrite::READ);
+        trackConnections(tag, {src}, ReadWrite::READ);
     }
 
     void ControlFlowRWTracer::operator()(StoreVGPR const& op, int tag)
     {
-        auto dst = m_graph.mapper.get<VGPR>(tag);
-        trackRegister(tag, dst, ReadWrite::READ);
+        auto src = m_graph.mapper.get<VGPR>(tag);
+        trackRegister(tag, src, ReadWrite::READ);
+        trackConnections(tag, {src}, ReadWrite::READ);
     }
 
     void ControlFlowRWTracer::operator()(TensorContraction const& op, int tag) {}

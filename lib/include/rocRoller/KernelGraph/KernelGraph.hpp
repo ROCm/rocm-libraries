@@ -167,6 +167,14 @@ namespace rocRoller
          * @return KernelGraph
          */
         KernelGraph cleanLoops(KernelGraph const&);
+
+        /**
+         * @brief Moves loop-iteration operations into the loop body.
+         *
+         * @return KernelGraph
+         */
+        KernelGraph inlineIncrements(KernelGraph const&);
+
         /**
          * @brief Performs the expression fusion transformation.
          *

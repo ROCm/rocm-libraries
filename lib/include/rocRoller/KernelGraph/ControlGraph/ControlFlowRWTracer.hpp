@@ -47,8 +47,9 @@ namespace rocRoller::KernelGraph
             ReadWrite rw;
         };
 
-        ControlFlowRWTracer(KernelGraph const& graph)
+        ControlFlowRWTracer(KernelGraph const& graph, bool trackConnections = false)
             : m_graph(graph)
+            , m_trackConnections(trackConnections)
         {
         }
 
@@ -84,6 +85,7 @@ namespace rocRoller::KernelGraph
 
     protected:
         void trackRegister(int control, int coordinate, ReadWrite rw);
+        void trackConnections(int control, std::unordered_set<int> exclude, ReadWrite rw);
 
         bool hasGeneratedInputs(int const& tag);
         void generate(std::set<int> candidates);
@@ -94,6 +96,7 @@ namespace rocRoller::KernelGraph
         std::vector<EventRecord>     m_trace;
         std::unordered_map<int, int> m_bodyParent;
         int                          m_depth = 0;
+        bool                         m_trackConnections;
     };
 
 }
