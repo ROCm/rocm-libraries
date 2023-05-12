@@ -74,6 +74,9 @@ namespace rocRoller
     Generator<Instruction> AddGenerator<Register::Type::Vector, DataType::Int64>::generate(
         Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs);
     template <>
+    Generator<Instruction> AddGenerator<Register::Type::Vector, DataType::Half>::generate(
+        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs);
+    template <>
     Generator<Instruction> AddGenerator<Register::Type::Vector, DataType::Halfx2>::generate(
         Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs);
     template <>

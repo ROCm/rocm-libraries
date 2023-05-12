@@ -790,7 +790,7 @@ namespace GEMMDriverTest
         gemm.mac_n = 256;
         gemm.mac_k = 16;
 
-        gemm.unrollK = 4;
+        gemm.unrollK = 2;
 
         gemm.wave_k = 8;
 

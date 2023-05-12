@@ -64,4 +64,32 @@ namespace rocRoller
 
         co_yield store(kind, addr, val, offset, 4, comment);
     }
+
+    /**
+     * @brief Pack values from toPack into result. There may be multiple values within toPack.
+     *
+     * Currently only works for going from Half to Halfx2
+     *
+     * @param result
+     * @param toPack
+     * @return Generator<Instruction>
+     */
+    Generator<Instruction> MemoryInstructions::packForStore(Register::ValuePtr& result,
+                                                            Register::ValuePtr  toPack) const
+    {
+        auto valuesPerWord = wordSize / toPack->variableType().getElementSize();
+        AssertFatal(valuesPerWord == 2);
+        result = Register::Value::Placeholder(toPack->context(),
+                                              toPack->regType(),
+                                              DataType::Halfx2,
+                                              toPack->valueCount() / valuesPerWord);
+        co_yield Register::AllocateIfNeeded(result);
+
+        for(int i = 0; i < result->registerCount(); i++)
+        {
+            co_yield m_context.lock()->copier()->pack(result->element({i}),
+                                                      toPack->element({i * valuesPerWord}),
+                                                      toPack->element({i * valuesPerWord + 1}));
+        }
+    }
 }

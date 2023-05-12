@@ -473,20 +473,34 @@ namespace rocRoller
         {
 
             // Generate enough store instructions to store numBytes
-            int numWords = numBytes / wordSize;
-            AssertFatal(data->registerCount() == numWords);
+            int  numWords      = numBytes / wordSize;
+            auto valuesPerWord = wordSize / data->variableType().getElementSize();
+            AssertFatal(data->registerCount() == numWords * valuesPerWord);
             std::vector<int> potentialWords = {4, 3, 2, 1};
             int              count          = 0;
+
             while(count < numWords)
             {
                 // Find the largest store instruction that can be used
                 auto width = chooseWidth(
                     numWords - count, potentialWords, ctx->kernelOptions().storeLocalWidth);
-                auto offset_modifier = genOffsetModifier(offset + count * wordSize);
+                auto               offset_modifier = genOffsetModifier(offset + count * wordSize);
+                Register::ValuePtr vgprs;
+                if(valuesPerWord > 1)
+                {
+                    co_yield packForStore(vgprs,
+                                          data->element(Generated(iota(
+                                              count * valuesPerWord,
+                                              count * valuesPerWord + width * valuesPerWord))));
+                }
+                else
+                {
+                    vgprs = data->subset(Generated(iota(count, count + width)));
+                }
                 co_yield_(
                     Instruction(concatenate("ds_write_b", std::to_string(width * wordSize * 8)),
                                 {},
-                                {newAddr, data->subset(Generated(iota(count, count + width)))},
+                                {newAddr, vgprs},
                                 {offset_modifier},
                                 concatenate("Store local data ", comment)));
                 count += width;

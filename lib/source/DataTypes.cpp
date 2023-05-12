@@ -314,6 +314,14 @@ namespace rocRoller
                     ShowValue(lhs),
                     ShowValue(rhs));
 
+        if(lhsInfo.segmentVariableType == rhsInfo.segmentVariableType
+           && lhsInfo.packing < rhsInfo.packing)
+            return lhs;
+
+        if(lhsInfo.segmentVariableType == rhsInfo.segmentVariableType
+           && lhsInfo.packing > rhsInfo.packing)
+            return rhs;
+
         if(lhsInfo.elementSize > rhsInfo.elementSize)
             return lhs;
 

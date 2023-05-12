@@ -339,6 +339,12 @@ namespace rocRoller
                                 + " if true)"));
 
                 co_yield Instruction::Label(botLabel);
+                // TODO: Have deallocate nodes generate the proper wait count and remove this wait.
+                //       This is currently needed in case there are loads within a loop that are never
+                //       used within the loop. If there are, the wait count observer never releases
+                //       the registers.
+                co_yield Instruction::Wait(
+                    WaitCount::Zero("DEBUG: Wait after branch", m_context->targetArchitecture()));
                 co_yield Instruction::Unlock("Unlock For Loop");
             }
 
@@ -555,8 +561,30 @@ namespace rocRoller
                 auto D = m_context->registerTagManager()->getRegister(
                     DTag, Register::Type::Accumulator, DataType::Float, num_agpr);
 
-                waveA.vgpr = m_context->registerTagManager()->getRegister(macATag);
-                waveB.vgpr = m_context->registerTagManager()->getRegister(macBTag);
+                auto getVGPR = [this](auto macTag, auto& wave) -> Generator<Instruction> {
+                    auto macRegister = m_context->registerTagManager()->getRegister(macTag);
+                    if(macRegister->variableType() == DataType::Half)
+                    {
+                        wave.vgpr = Register::Value::Placeholder(m_context,
+                                                                 Register::Type::Vector,
+                                                                 DataType::Halfx2,
+                                                                 macRegister->registerCount() / 2);
+                        co_yield Register::AllocateIfNeeded(wave.vgpr);
+                        for(int i = 0; i < macRegister->registerCount(); i += 2)
+                        {
+                            co_yield m_context->copier()->pack(wave.vgpr->element({i / 2}),
+                                                               macRegister->element({i}),
+                                                               macRegister->element({i + 1}));
+                        }
+                    }
+                    else
+                    {
+                        wave.vgpr = macRegister;
+                    }
+                };
+
+                co_yield getVGPR(macATag, waveA);
+                co_yield getVGPR(macBTag, waveB);
 
                 auto A
                     = std::make_shared<Expression::Expression>(std::make_shared<WaveTile>(waveA));

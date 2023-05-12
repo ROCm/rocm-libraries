@@ -342,47 +342,6 @@ namespace rocRoller
         }
 
         /**
-         * @brief Load a tile from memory where all of the strides are literals and the datatype
-         *        is packed.
-         *
-         * @param info
-         * @return Generator<Instruction>
-         */
-        Generator<Instruction>
-            LoadStoreTileGenerator::loadTileLiteralStridesPack(LoadStoreTileInfo& info)
-        {
-            auto proc      = Settings::getInstance()->get(Settings::Scheduler);
-            auto cost      = Settings::getInstance()->get(Settings::SchedulerCost);
-            auto scheduler = Component::GetNew<Scheduling::Scheduler>(proc, cost, m_context);
-            std::vector<Generator<Instruction>> generators;
-
-            // If all of the strides are literals, we can load everything using offsets
-            // without using a runtime counter
-            auto offsetValue = getUnsignedInt(info.offset->getLiteralValue());
-            auto rowStride   = getUnsignedInt(info.rowStrideReg->getLiteralValue());
-            auto colStride   = getUnsignedInt(info.colStrideReg->getLiteralValue());
-            for(uint64_t i = 0; i < info.m; ++i)
-            {
-                for(uint64_t j = 0; j < info.n; j += 2)
-                {
-                    uint a = i * info.n + j;
-
-                    generators.push_back(m_context->mem()->loadAndPack(
-                        info.kind,
-                        info.data->element({static_cast<int>(a / 2)}),
-                        info.rowOffsetReg,
-                        Register::Value::Literal(offsetValue + j * colStride),
-                        info.rowOffsetReg,
-                        Register::Value::Literal(offsetValue + (j + 1) * colStride),
-                        "",
-                        info.bufDesc));
-                }
-                offsetValue += rowStride;
-            }
-            co_yield (*scheduler)(generators);
-        }
-
-        /**
          * @brief Load or Store a tile where all of the strides are literal values.
          *
          * @tparam Dir
@@ -419,12 +378,6 @@ namespace rocRoller
             }
             else
             {
-                if(Dir == MemoryInstructions::MemoryDirection::Load && info.packedAmount > 1)
-                {
-                    co_yield loadTileLiteralStridesPack(info);
-                    co_return;
-                }
-
                 for(uint64_t i = 0; i < info.m; ++i)
                 {
                     for(uint64_t j = 0; j < info.n; ++j)
@@ -480,59 +433,6 @@ namespace rocRoller
         }
 
         /**
-         * @brief Load a tile where the strides are only known at runtime, and the datatype
-         *        is packed.
-         *
-         * @param info
-         * @return Generator<Instruction>
-         */
-        Generator<Instruction>
-            LoadStoreTileGenerator::loadTileRuntimeStridesPack(LoadStoreTileInfo& info)
-        {
-            auto proc      = Settings::getInstance()->get(Settings::Scheduler);
-            auto cost      = Settings::getInstance()->get(Settings::SchedulerCost);
-            auto scheduler = Component::GetNew<Scheduling::Scheduler>(proc, cost, m_context);
-            std::vector<Generator<Instruction>> generators;
-
-            auto gen = [this, &info](uint64_t i, uint64_t j) -> Generator<Instruction> {
-                Register::ValuePtr offset1;
-                Register::ValuePtr offset2;
-
-                co_yield generate(offset1,
-                                  info.rowOffsetReg->expression()
-                                      + info.colStrideReg->expression() * Expression::literal(j));
-                co_yield generate(offset2, offset1->expression() + info.colStrideReg->expression());
-
-                co_yield m_context->mem()->loadAndPack(
-                    info.kind,
-                    info.data->element({static_cast<int>((i * info.n + j) / 2)}),
-                    offset1,
-                    info.offset,
-                    offset2,
-                    info.offset,
-                    "",
-                    info.bufDesc);
-            };
-
-            // Uses a generator so that scheduler can pick between packing and loading instructions
-            for(uint64_t i = 0; i < info.m; ++i)
-            {
-                for(uint64_t j = 0; j < info.n; j += 2)
-                {
-                    generators.push_back(gen(i, j));
-                }
-                co_yield (*scheduler)(generators);
-                generators.clear();
-                if(i < info.m - 1)
-                {
-                    co_yield generate(info.rowOffsetReg,
-                                      info.rowOffsetReg->expression()
-                                          + info.rowStrideReg->expression());
-                }
-            }
-        }
-
-        /**
          * @brief Load or store a tile where the strides are only known at runtime.
          *
          * @tparam Dir
@@ -543,12 +443,6 @@ namespace rocRoller
         Generator<Instruction>
             LoadStoreTileGenerator::moveTileRuntimeStrides(LoadStoreTileInfo& info)
         {
-            if(Dir == MemoryInstructions::MemoryDirection::Load && info.packedAmount > 1)
-            {
-                co_yield loadTileRuntimeStridesPack(info);
-                co_return;
-            }
-
             auto colOffsetReg = info.rowOffsetReg->placeholder();
 
             for(uint64_t i = 0; i < info.m; ++i)
@@ -617,12 +511,41 @@ namespace rocRoller
             info.n      = n;
             info.offset = offset;
 
+            if(!info.offset)
+            {
+                info.offset = Register::Value::Literal(0u);
+            }
+
+            if(kind == MemoryInstructions::MemoryKind::Buffer)
+            {
+                info.bufDesc = getBufferDesc(tag);
+            }
+
+            if(m > 1)
+                co_yield generateStride(info.rowStrideReg, tag, 0);
+            else
+                info.rowStrideReg = Register::Value::Literal(0u);
+            co_yield generateStride(info.colStrideReg, tag, 1);
+
+            AssertFatal(info.rowStrideReg, "Invalid row stride register.");
+            AssertFatal(info.colStrideReg, "Invalid col stride register.");
+
+            info.elementSize = (uint)DataTypeInfo::Get(dataType).elementSize;
+
+            bool colStrideIsLiteral = (info.colStrideReg->regType() == Register::Type::Literal);
+            bool allStridesAreLiteral
+                = (info.rowStrideReg->regType() == Register::Type::Literal && colStrideIsLiteral
+                   && info.offset->regType() == Register::Type::Literal);
+            bool colStrideIsOne
+                = colStrideIsLiteral
+                  && (getUnsignedInt(info.colStrideReg->getLiteralValue()) == info.elementSize);
+
             if(Dir == MemoryInstructions::MemoryDirection::Load)
             {
                 auto macTileTag = m_graph->mapper.get<MacroTile>(tag);
 
                 Register::ValuePtr tmpl;
-                if(dataType == DataType::Half && n > 1)
+                if(dataType == DataType::Half && n > 1 && colStrideIsOne)
                 {
                     tmpl = Register::Value::Placeholder(
                         m_context, Register::Type::Vector, DataType::Halfx2, m * n / 2);
@@ -669,35 +592,7 @@ namespace rocRoller
                 }
             }
 
-            if(!info.offset)
-            {
-                info.offset = Register::Value::Literal(0u);
-            }
-
-            if(kind == MemoryInstructions::MemoryKind::Buffer)
-            {
-                info.bufDesc = getBufferDesc(tag);
-            }
-
-            if(m > 1)
-                co_yield generateStride(info.rowStrideReg, tag, 0);
-            else
-                info.rowStrideReg = Register::Value::Literal(0u);
-            co_yield generateStride(info.colStrideReg, tag, 1);
-
-            AssertFatal(info.rowStrideReg, "Invalid row stride register.");
-            AssertFatal(info.colStrideReg, "Invalid col stride register.");
-
-            info.elementSize  = (uint)DataTypeInfo::Get(dataType).elementSize;
             info.packedAmount = DataTypeInfo::Get(info.data->variableType()).packing;
-
-            bool colStrideIsLiteral = (info.colStrideReg->regType() == Register::Type::Literal);
-            bool allStridesAreLiteral
-                = (info.rowStrideReg->regType() == Register::Type::Literal && colStrideIsLiteral
-                   && info.offset->regType() == Register::Type::Literal);
-            bool colStrideIsOne
-                = colStrideIsLiteral
-                  && (getUnsignedInt(info.colStrideReg->getLiteralValue()) == info.elementSize);
 
             // Get the values from the associated ComputeIndex node
             co_yield getOffset(info, coords, tag, !allStridesAreLiteral && info.m > 1);

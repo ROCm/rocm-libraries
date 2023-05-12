@@ -194,6 +194,8 @@ namespace rocRoller
                 auto regType = promoteRegisterTypes({lhs, rhs});
                 auto varType = promoteVariableTypes({lhs, rhs});
 
+                auto const destInfo = DataTypeInfo::Get(varType);
+
                 // TODO: Delete once FastDivision uses only libdivide.
                 if constexpr(std::same_as<MultiplyHigh, Operation>)
                     varType = DataType::Int32;
@@ -211,7 +213,8 @@ namespace rocRoller
 
                 if(!dest)
                 {
-                    dest = resultPlaceholder({regType, varType}, true, valueCount);
+                    dest = resultPlaceholder(
+                        {regType, varType}, true, valueCount / destInfo.packing);
                     co_yield dest->allocate();
                 }
 
@@ -258,10 +261,27 @@ namespace rocRoller
                 }
                 else
                 {
-                    for(size_t k = 0; k < valueCount / lhsInfo.packing; ++k)
+                    AssertFatal(destInfo.isIntegral || lhs->variableType() == varType
+                                    || rhs->variableType() == varType,
+                                "Only one floating point argument can be converted");
+                    for(size_t k = 0; k < dest->valueCount(); ++k)
                     {
                         auto lhsVal = lhs->valueCount() == 1 ? lhs : lhs->element({k});
+                        if(!destInfo.isIntegral && lhs->variableType() != varType)
+                        {
+                            co_yield generateConvertOp(
+                                varType.dataType, dest->element({k}), lhsVal);
+                            lhsVal = dest->element({k});
+                        }
+
                         auto rhsVal = rhs->valueCount() == 1 ? rhs : rhs->element({k});
+                        if(!destInfo.isIntegral && rhs->variableType() != varType)
+                        {
+                            co_yield generateConvertOp(
+                                varType.dataType, dest->element({k}), rhsVal);
+                            rhsVal = dest->element({k});
+                        }
+
                         co_yield generateOp<Operation>(dest->element({k}), lhsVal, rhsVal);
                     }
                 }

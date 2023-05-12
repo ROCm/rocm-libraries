@@ -118,6 +118,8 @@ def hgemm():
         M=7680,
         N=8448,
         K=8192,
+        trans_A="N",
+        trans_B="T",
         mac_m=128,
         mac_n=256,
         mac_k=16,

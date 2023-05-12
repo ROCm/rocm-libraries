@@ -11,6 +11,7 @@ namespace rocRoller
     RegisterComponentTemplateSpec(AddGenerator, Register::Type::Vector, DataType::UInt32);
     RegisterComponentTemplateSpec(AddGenerator, Register::Type::Scalar, DataType::Int64);
     RegisterComponentTemplateSpec(AddGenerator, Register::Type::Vector, DataType::Int64);
+    RegisterComponentTemplateSpec(AddGenerator, Register::Type::Vector, DataType::Half);
     RegisterComponentTemplateSpec(AddGenerator, Register::Type::Vector, DataType::Halfx2);
     RegisterComponentTemplateSpec(AddGenerator, Register::Type::Vector, DataType::Float);
     RegisterComponentTemplateSpec(AddGenerator, Register::Type::Vector, DataType::Double);
@@ -152,6 +153,16 @@ namespace rocRoller
         AssertFatal(rhs != nullptr);
 
         co_yield_(Instruction("v_pk_add_f16", {dest}, {lhs, rhs}, {}, ""));
+    }
+
+    template <>
+    Generator<Instruction> AddGenerator<Register::Type::Vector, DataType::Half>::generate(
+        Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
+    {
+        AssertFatal(lhs != nullptr);
+        AssertFatal(rhs != nullptr);
+
+        co_yield_(Instruction("v_add_f16", {dest}, {lhs, rhs}, {}, ""));
     }
 
     template <>
