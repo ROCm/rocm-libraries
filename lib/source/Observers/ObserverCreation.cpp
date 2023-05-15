@@ -3,6 +3,7 @@
 #include <rocRoller/Scheduling/Observers/AllocatingObserver.hpp>
 #include <rocRoller/Scheduling/Observers/FileWritingObserver.hpp>
 #include <rocRoller/Scheduling/Observers/RegisterLivenessObserver.hpp>
+#include <rocRoller/Scheduling/Observers/SupportedInstructionObserver.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/ACCVGPRReadWrite.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/ACCVGPRWriteWrite.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/CMPXWriteExec.hpp>
@@ -42,15 +43,18 @@ namespace rocRoller
                                                  XDLWrite90a>;
             using FileObservers     = MetaObserver<FileWritingObserver>;
             using AnalysisObservers = MetaObserver<RegisterLivenessObserver>;
+            using ErrorObservers    = MetaObserver<SupportedInstructionObserver>;
 
             static_assert(CObserver<AlwaysObservers>);
             static_assert(CObserver<Gfx908Observers>);
             static_assert(CObserver<Gfx90aObservers>);
             static_assert(CObserver<FileObservers>);
             static_assert(CObserver<AnalysisObservers>);
+            static_assert(CObserver<ErrorObservers>);
 
             PotentialObservers<FileObservers,
                                AnalysisObservers,
+                               ErrorObservers,
                                AlwaysObservers,
                                Gfx908Observers,
                                Gfx90aObservers>

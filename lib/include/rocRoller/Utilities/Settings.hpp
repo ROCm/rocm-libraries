@@ -108,6 +108,12 @@ namespace rocRoller
             false,
             -1};
 
+        static inline SettingsOption<bool> AllowUnkownInstructions{
+            "ROCROLLER_ALLOW_UNKNOWN_INSTRUCTIONS",
+            "Whether to allow arbitrary instructions.",
+            false,
+            -1};
+
         /**
          * @brief Generate defaultValue for SettingsBitField based on other defaultValues.
          *

@@ -428,12 +428,66 @@ namespace GPUArchitectureGenerator
                  "scratch_store_short",       "scratch_store_short_d16_hi",
              },
              0,
-             {rocRoller::GPUWaitQueueType::VMQueue}}}};
+             {rocRoller::GPUWaitQueueType::VMQueue}}},
+           {gfx9ISAs(),
+            {{
+                 "s_add_u32",         "s_and_saveexec_b64",
+                 "s_ashr_i32",        "s_barrier",
+                 "s_cmp_lg_u64",      "s_cmp_lt_i32",
+                 "s_lshl_b32",        "s_lshl_b64",
+                 "s_lshr_b64",        "s_mov_b32",
+                 "s_mov_b64",         "s_mul_hi_u32",
+                 "s_mul_i32",         "s_or_b64",
+                 "s_or_saveexec_b64", "s_sub_i32",
+                 "s_sub_u32",         "s_waitcnt",
+                 "s_xor_b64",         "v_accvgpr_mov_b32",
+                 "v_accvgpr_read",    "v_add_co_u32",
+                 "v_add_co_u32_e32",  "v_add_f32",
+                 "v_add_i32",         "v_add_u32",
+                 "v_add_u32_e32",     "v_add3_u32",
+                 "v_addc_co_u32",     "v_addc_co_u32_e32",
+                 "v_and_b32",         "v_ashrrev_i32",
+                 "v_ashrrev_i32_e32", "v_ashrrev_i64",
+                 "v_cmp_eq_i32",      "v_cmp_eq_u32",
+                 "v_cmp_eq_u32_e32",  "v_cmp_ge_u32",
+                 "v_cmp_ge_u32_e32",  "v_cmp_gt_i32",
+                 "v_cmp_gt_i64",      "v_cmp_le_u32",
+                 "v_cmp_le_u32_e32",  "v_cmp_lt_f32",
+                 "v_cmp_lt_i64",      "v_cmp_ne_u32",
+                 "v_cmp_ne_u32_e32",  "v_cmp_ne_u64_e32",
+                 "v_cmpx_lt_f32",     "v_cndmask_b32",
+                 "v_cndmask_b32_e32", "v_cvt_f16_f32",
+                 "v_cvt_f32_f16",     "v_cvt_f32_u32_e32",
+                 "v_cvt_u32_f32_e32", "v_dot2c_f32_f16",
+                 "v_fma_f32",         "v_fma_f64",
+                 "v_fma_mix_f32",     "v_lshlrev_b32",
+                 "v_lshlrev_b64",     "v_lshrrev_b32",
+                 "v_lshrrev_b64",     "v_mac_f32_e32",
+                 "v_mov_b32",         "v_mul_f32",
+                 "v_mul_f32_e32",     "v_mul_hi_u32",
+                 "v_mul_lo_u32",      "v_or_b32",
+                 "v_or_b32_e32",      "v_pack_B32_F16",
+                 "v_rcp_f32_e32",     "v_rcp_iflag_f32_e32",
+                 "v_readlane_b32",    "v_sub_co_u32",
+                 "v_sub_co_u32_e32",  "v_sub_i32",
+                 "v_sub_u32_e32",     "v_subb_co_u32",
+                 "v_subb_co_u32_e32", "v_subbrev_co_u32",
+                 "v_subrev_co_u32",   "v_subrev_co_u32_e32",
+                 "v_subrev_u32_e32",  "v_trunc_f32_e32",
+                 "v_xor_b32",         "v_xor_b32_e32",
+             },
+             -1,
+             {}}}};
 
     // Tuple mapping a <Vector of GPUInstructionInfo> to a <Vector of GPUArchitectureTarget>
     const std::vector<std::tuple<std::vector<rocRoller::GPUArchitectureTarget>,
                                  std::vector<rocRoller::GPUInstructionInfo>>>
         InstructionInfos = {
+            {SupportedISAs,
+             {
+                 rocRoller::GPUInstructionInfo(
+                     "s_endpgm", -1, {rocRoller::GPUWaitQueueType::FinalInstruction}),
+             }},
             {gfx9ISAs(),
              {
                  rocRoller::GPUInstructionInfo(
@@ -607,8 +661,6 @@ namespace GPUArchitectureGenerator
                  rocRoller::GPUInstructionInfo(
                      "s_sendmsg", 1, {rocRoller::GPUWaitQueueType::LGKMSendMsgQueue}),
                  rocRoller::GPUInstructionInfo("exp", 1, {rocRoller::GPUWaitQueueType::EXPQueue}),
-                 rocRoller::GPUInstructionInfo(
-                     "s_endpgm", -1, {rocRoller::GPUWaitQueueType::FinalInstruction}),
                  rocRoller::GPUInstructionInfo("v_dot2_f32_f16", 0, {}, 1),
                  rocRoller::GPUInstructionInfo("v_dot2_i32_i16", 0, {}, 1),
                  rocRoller::GPUInstructionInfo("v_dot4_i32_i8", 0, {}, 1),

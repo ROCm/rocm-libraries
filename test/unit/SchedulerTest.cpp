@@ -23,6 +23,12 @@ namespace rocRollerTest
             return "gfx90a";
         }
 
+        void SetUp()
+        {
+            Settings::getInstance()->set(Settings::AllowUnkownInstructions, true);
+            GenericContextFixture::SetUp();
+        }
+
         Generator<Instruction> testGeneratorWithComments(bool includeComments = true);
     };
 
@@ -507,6 +513,7 @@ namespace rocRollerTest
     {
         void SetUp() override
         {
+            Settings::getInstance()->set(Settings::AllowUnkownInstructions, true);
             GenericContextFixture::SetUp();
             int seed = GetParam();
 

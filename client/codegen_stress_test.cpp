@@ -4,6 +4,7 @@
 #include <rocRoller/InstructionValues/Register.hpp>
 #include <rocRoller/Serialization/YAML.hpp>
 #include <rocRoller/Utilities/Error.hpp>
+#include <rocRoller/Utilities/Settings.hpp>
 #include <rocRoller/Utilities/Timer.hpp>
 
 #include "../../test/unit/Utilities.hpp"
@@ -160,8 +161,9 @@ Generator<Instruction> complex_mfma_with_coop(ContextPtr m_context)
 
 CodeGenResult CodeGen(CodeGenProblem const& prob)
 {
-    CodeGenResult result(prob);
+    Settings::getInstance()->set(Settings::AllowUnkownInstructions, true);
 
+    CodeGenResult result(prob);
     Generator<rocRoller::Instruction> (*generator)(rocRoller::ContextPtr);
 
     if(prob.instructions == "comments")

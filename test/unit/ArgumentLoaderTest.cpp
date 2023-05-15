@@ -22,6 +22,11 @@ namespace rocRollerTest
 {
     class ArgumentLoaderTest : public GenericContextFixture
     {
+        void SetUp()
+        {
+            Settings::getInstance()->set(Settings::AllowUnkownInstructions, true);
+            GenericContextFixture::SetUp();
+        }
     };
 
     TEST_F(ArgumentLoaderTest, IsContiguousRange)

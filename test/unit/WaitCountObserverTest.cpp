@@ -18,6 +18,7 @@ namespace rocRollerTest
     protected:
         void SetUp() override
         {
+            Settings::getInstance()->set(Settings::AllowUnkownInstructions, true);
             m_kernelOptions.assertWaitCntState = true;
             GenericContextFixture::SetUp();
         }

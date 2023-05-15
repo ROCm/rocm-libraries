@@ -48,6 +48,7 @@ namespace rocRollerTest
     protected:
         void SetUp() override
         {
+            Settings::getInstance()->set(Settings::AllowUnkownInstructions, true);
             // m_kernelOptions.logLevel               = LogLevel::Debug;
             m_kernelOptions.preloadKernelArguments
                 = false; // Disabled due to kernels exceeding register limits

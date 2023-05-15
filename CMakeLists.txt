@@ -316,6 +316,7 @@ set(rocroller_src
  lib/source/Observers/ObserverCreation.cpp
  lib/source/Observers/RegisterLivenessObserver.cpp
  lib/source/Observers/RegisterMapObserver.cpp
+ lib/source/Observers/SupportedInstructionObserver.cpp
  lib/source/Observers/VALUWrite.cpp
  lib/source/Observers/WaitcntObserver.cpp
  lib/source/Observers/XDLReadSrcC908.cpp
@@ -463,6 +464,7 @@ set(
   test/unit/ScopeTest.cpp
   test/unit/SettingsTest.cpp
   test/unit/SourceMatcherTest.cpp
+  test/unit/SupportedInstructionObserverTest.cpp
   test/unit/TileTransposeAdd.cpp
   test/unit/TimerTest.cpp
   test/unit/Utilities.cpp

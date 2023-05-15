@@ -25,6 +25,10 @@ namespace CopyGeneratorTest
 
     class CopyGeneratorTest : public GenericContextFixture
     {
+        std::string targetArchitecture()
+        {
+            return "gfx90a";
+        }
     };
 
     // Test if correct instructions are generated

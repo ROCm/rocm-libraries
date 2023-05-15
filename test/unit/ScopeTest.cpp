@@ -19,6 +19,11 @@ namespace ScopeTest
     class ScopeTest : public GenericContextFixture,
                       public ::testing::WithParamInterface<Scheduling::SchedulerProcedure>
     {
+        void SetUp()
+        {
+            Settings::getInstance()->set(Settings::AllowUnkownInstructions, true);
+            GenericContextFixture::SetUp();
+        }
     };
 
     TEST_P(ScopeTest, ScopeOperation)

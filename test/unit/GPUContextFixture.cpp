@@ -17,6 +17,11 @@ rocRoller::ContextPtr BaseGPUContextFixture::createContextLocalDevice()
 void BaseGPUContextFixture::SetUp()
 {
     using namespace rocRoller;
+
+    if(!isLocalDevice())
+    {
+        Settings::getInstance()->set(Settings::AllowUnkownInstructions, true);
+    }
     ContextFixture::SetUp();
 
     ASSERT_EQ(true, m_context->targetArchitecture().HasCapability(GPUCapability::SupportedISA));

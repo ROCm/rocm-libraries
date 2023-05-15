@@ -24,6 +24,7 @@ namespace rocRollerTest
 
         void SetUp()
         {
+            Settings::getInstance()->set(Settings::AllowUnkownInstructions, true);
             Settings::getInstance()->set(Settings::AssemblyFile, testKernelName());
             Settings::getInstance()->set(Settings::KernelAnalysis, true);
             GenericContextFixture::SetUp();
@@ -279,6 +280,7 @@ namespace rocRollerTest
 
         void SetUp()
         {
+            Settings::getInstance()->set(Settings::AllowUnkownInstructions, true);
             Settings::getInstance()->set(Settings::AssemblyFile, testKernelName());
             Settings::getInstance()->set(Settings::KernelAnalysis, false);
             GenericContextFixture::SetUp();

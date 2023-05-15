@@ -105,6 +105,11 @@ namespace rocRollerTest
     class MaxRegisterKernelTest : public KernelTest
     {
     protected:
+        std::string targetArchitecture()
+        {
+            return "gfx90a";
+        }
+
         void SetUp() override
         {
             m_kernelOptions.maxVGPRs             = 234;
