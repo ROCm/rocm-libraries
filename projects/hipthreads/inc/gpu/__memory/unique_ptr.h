@@ -739,17 +739,16 @@ make_unique() {
     return unique_ptr<_Tp, host_delete<_Tp>>(static_cast<_Tp *>(__buf));
 }
 
-template <class _Tp>
-__host__ inline _LIBGPU_INLINE_VISIBILITY typename __unique_if<typename std::remove_reference<_Tp>::type>::__unique_single_host
-make_unique(_Tp &&__arg) {
-    using __RawType = typename std::remove_reference<_Tp>::type;
-    using __RefType = decltype(std::forward<_Tp>(__arg));
-    static_assert(std::is_constructible<__RawType, __RefType>::value, "No valid constructor found");
-    static_assert(std::is_trivially_constructible<__RawType, __RefType>::value,
+template <class _T1, class _T2>
+__host__ inline _LIBGPU_INLINE_VISIBILITY typename __unique_if<_T1>::__unique_single_host
+make_unique(_T2 &&__arg) {
+    using __RefType = decltype(std::forward<_T2>(__arg));
+    static_assert(std::is_constructible<_T1, __RefType>::value, "No valid constructor found");
+    static_assert(std::is_trivially_constructible<_T1, __RefType>::value,
                   "Host code can't invoke a non-trivial constructor for objects in device memory");
-    void *__buf = gpu::malloc(sizeof(__RawType) == 0 ? 1 : sizeof(__RawType));
-    __LIBGPU_HIP_CHECK__(hipMemcpy(__buf, &__arg, sizeof(__RawType), hipMemcpyHostToDevice));
-    return unique_ptr<__RawType, host_delete<__RawType>>(static_cast<__RawType *>(__buf));
+    void *__buf = gpu::malloc(sizeof(_T1) == 0 ? 1 : sizeof(_T1));
+    __LIBGPU_HIP_CHECK__(hipMemcpy(__buf, &__arg, sizeof(_T1), hipMemcpyHostToDevice));
+    return unique_ptr<_T1, host_delete<_T1>>(static_cast<_T1 *>(__buf));
 }
 
 template <class _Tp>
