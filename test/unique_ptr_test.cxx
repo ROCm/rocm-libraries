@@ -188,6 +188,17 @@ int main() {
         assert(z2_h[1].i == 19);
     }
 
+    {
+        auto x = gpu::make_unique<const NotConstructible>(NotConstructible::make());
+        assert(x->c == 23);
+        assert(x->i == 29);
+        assert((*x).c == 23);
+        assert((*x).i == 29);
+
+        auto y = gpu::make_unique<int>(3);
+        assert(*y == 3);
+    }
+
     hipLaunchKernelGGL(gmain, dim3(1), dim3(1), 0, nullptr);
     CHECK(hipGetLastError());
     CHECK(hipDeviceSynchronize());
