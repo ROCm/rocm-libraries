@@ -103,20 +103,21 @@ int main() {
         NotConstructible nc = NotConstructible::make();
         auto a = gpu::make_unique<int>();
         auto b = gpu::make_unique<float[]>(3);
-        auto c = gpu::make_unique(tt);
+        auto c = gpu::make_unique<Trivial>(tt);
         auto d = gpu::make_unique<Trivial>();
         auto e = gpu::make_unique<Trivial[]>(5);
-        auto f = gpu::make_unique(tc);
-        auto g = gpu::make_unique(TriviallyCopyable{});
-        auto h = gpu::make_unique(std::move(tm));
-        auto i = gpu::make_unique(TriviallyMoveable{});
-        auto j = gpu::make_unique(std::move(nc));
-        auto k = gpu::make_unique(NotConstructible::make());
+        auto f = gpu::make_unique<TriviallyCopyable>(tc);
+        auto g = gpu::make_unique<TriviallyCopyable>(TriviallyCopyable{});
+        auto h = gpu::make_unique<TriviallyMoveable>(std::move(tm));
+        auto i = gpu::make_unique<TriviallyMoveable>(TriviallyMoveable{});
+        auto j = gpu::make_unique<NotConstructible>(std::move(nc));
+        auto k = gpu::make_unique<NotConstructible>(NotConstructible::make());
+        auto l = gpu::make_unique<const NotConstructible>(NotConstructible::make());
     }
 
     {
         int x_h = 3;
-        auto x_d = gpu::make_unique(x_h);
+        auto x_d = gpu::make_unique<int>(x_h);
         hipLaunchKernelGGL(test_value, dim3(1), dim3(1), 0, nullptr, x_d.get(), 3, 5);
         CHECK(hipMemcpy(&x_h, x_d.get(), sizeof(x_h), hipMemcpyDeviceToHost));
         assert(x_h == 5);
