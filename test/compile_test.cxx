@@ -1,4 +1,5 @@
 #include "gpu/atomic"
+#include "gpu/condition_variable"
 #include "gpu/iterator"
 #include "gpu/memory"
 #include "gpu/mutex"
