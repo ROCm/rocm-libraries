@@ -3,4 +3,4 @@
 root: index
 subtrees:
   - entries:
-    - file: api/library_root
+    - file: .doxygen/docBin/html/index
