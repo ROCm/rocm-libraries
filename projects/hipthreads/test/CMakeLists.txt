@@ -34,7 +34,10 @@ find_library(GPU_THREADING_LIB GpuThreading
              PATHS "/home/daniel/saxpy/build/lib"
              REQUIRED)
 target_link_libraries(gpu_thread_mutex_test PRIVATE ${GPU_THREADING_LIB})
+target_link_libraries(gpu_thread_condvar_test PRIVATE ${GPU_THREADING_LIB})
+
 find_path(GPU_THREADING_INC "gpu/thread"
           PATHS "/home/daniel/saxpy/include"
           REQUIRED)
 target_include_directories(gpu_thread_mutex_test PUBLIC ${GPU_THREADING_INC})
+target_include_directories(gpu_thread_condvar_test PUBLIC ${GPU_THREADING_INC})
