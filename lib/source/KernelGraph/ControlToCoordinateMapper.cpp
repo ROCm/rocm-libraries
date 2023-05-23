@@ -60,6 +60,22 @@ namespace rocRoller::KernelGraph
         }
     }
 
+    void ControlToCoordinateMapper::purgeMappingsTo(int coordinate)
+    {
+        std::vector<ControlToCoordinateMapper::key_type> toPurge;
+        for(auto const& kv : m_map)
+        {
+            if(kv.second == coordinate)
+            {
+                toPurge.push_back(kv.first);
+            }
+        }
+        for(auto const& k : toPurge)
+        {
+            m_map.erase(k);
+        }
+    }
+
     std::string ControlToCoordinateMapper::toDOT(std::string const& coord,
                                                  std::string const& cntrl,
                                                  bool               addLabels) const
@@ -93,6 +109,16 @@ namespace rocRoller::KernelGraph
             ss << "]\n";
         }
         return ss.str();
+    }
+
+    std::vector<int> ControlToCoordinateMapper::getControls() const
+    {
+        std::set<int> retval;
+        for(auto it = m_map.begin(); it != m_map.end(); ++it)
+        {
+            retval.insert(std::get<0>(it->first));
+        }
+        return std::vector<int>(retval.begin(), retval.end());
     }
 
     namespace Connections

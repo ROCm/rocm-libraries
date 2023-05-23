@@ -172,6 +172,11 @@ namespace rocRoller::KernelGraph
         void purge(int control);
 
         /**
+         * @brief Purges all connections into coordinate node `coordinate`.
+         */
+        void purgeMappingsTo(int coordinate);
+
+        /**
          * @brief Get the coordinate index associated with the control
          * flow node `control`.
          */
@@ -179,6 +184,11 @@ namespace rocRoller::KernelGraph
         int get(int control, int subDimension = 0) const;
 
         int get(int control, ConnectionSpec conn = {}) const;
+
+        /**
+         * @brief Get the all control nodes.
+         */
+        std::vector<int> getControls() const;
 
         /**
          * @brief Get all connections emanating from the control flow

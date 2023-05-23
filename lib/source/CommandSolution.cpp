@@ -188,6 +188,8 @@ namespace rocRoller
 
         auto logger = rocRoller::Log::getLogger();
 
+        KernelGraph::ConstraintStatus check;
+
         if(!m_kernelOptions)
         {
             m_kernelOptions = std::make_shared<KernelOptions>();
@@ -220,30 +222,79 @@ namespace rocRoller
         m_kernelGraph = KernelGraph::translate(m_command);
         logger->debug("CommandKernel::generateKernel: post translate: {}",
                       m_kernelGraph.toDOT(false, "CommandKernel::generateKernel: post translate"));
+
+        if(Settings::getInstance()->get(Settings::EnforceGraphConstraints))
+        {
+            check = m_kernelGraph.checkConstraints();
+            AssertFatal(
+                check.satisfied,
+                concatenate("CommandKernel::generateKernel: post translate:\n", check.explanation));
+        }
+
         m_kernelGraph = updateParameters(m_kernelGraph, m_preParameters);
         logger->debug("CommandKernel::generateKernelGraph: post updateParameters: {}",
                       m_kernelGraph.toDOT(
                           false, "CommandKernel::generateKernelGraph: post updateParameters"));
+
+        if(Settings::getInstance()->get(Settings::EnforceGraphConstraints))
+        {
+            check = m_kernelGraph.checkConstraints();
+            AssertFatal(check.satisfied,
+                        concatenate("CommandKernel::generateKernel: post updateParameters:\n",
+                                    check.explanation));
+        }
 
         m_kernelGraph = KernelGraph::lowerLinear(m_kernelGraph, m_context);
         logger->debug(
             "CommandKernel::generateKernelGraph: post lowerLinear: {}",
             m_kernelGraph.toDOT(false, "CommandKernel::generateKernelGraph: post lowerLinear"));
 
+        if(Settings::getInstance()->get(Settings::EnforceGraphConstraints))
+        {
+            check = m_kernelGraph.checkConstraints();
+            AssertFatal(check.satisfied,
+                        concatenate("CommandKernel::generateKernel: post lowerLinear:\n",
+                                    check.explanation));
+        }
+
         m_kernelGraph = KernelGraph::lowerTile(m_kernelGraph, m_preParameters, m_context);
         logger->debug(
             "CommandKernel::generateKernelGraph: post lowertile: {}",
             m_kernelGraph.toDOT(false, "CommandKernel::generateKernelGraph: post lowertile"));
+
+        if(Settings::getInstance()->get(Settings::EnforceGraphConstraints))
+        {
+            check = m_kernelGraph.checkConstraints();
+            AssertFatal(
+                check.satisfied,
+                concatenate("CommandKernel::generateKernel: post lowertile:\n", check.explanation));
+        }
 
         m_kernelGraph = KernelGraph::fuseExpressions(m_kernelGraph);
         logger->debug(
             "CommandKernel::generateKernelGraph: post fuseExpressions: {}",
             m_kernelGraph.toDOT(false, "CommandKernel::generateKernelGraph: post fuseExpressions"));
 
+        if(Settings::getInstance()->get(Settings::EnforceGraphConstraints))
+        {
+            check = m_kernelGraph.checkConstraints();
+            AssertFatal(check.satisfied,
+                        concatenate("CommandKernel::generateKernel: post fuseExpressions:\n",
+                                    check.explanation));
+        }
+
         m_kernelGraph = KernelGraph::unrollLoops(m_kernelGraph, m_context);
         logger->debug(
             "CommandKernel::generateKernelGraph: post unroll: {}",
             m_kernelGraph.toDOT(false, "CommandKernel::generateKernelGraph: post unroll"));
+
+        if(Settings::getInstance()->get(Settings::EnforceGraphConstraints))
+        {
+            check = m_kernelGraph.checkConstraints();
+            AssertFatal(
+                check.satisfied,
+                concatenate("CommandKernel::generateKernel: post unroll:\n", check.explanation));
+        }
 
         if(m_context->kernelOptions().fuseLoops)
         {
@@ -251,6 +302,14 @@ namespace rocRoller
             logger->debug(
                 "CommandKernel::generateKernelGraph: post fuse: {}",
                 m_kernelGraph.toDOT(false, "CommandKernel::generateKernelGraph: post fuse"));
+
+            if(Settings::getInstance()->get(Settings::EnforceGraphConstraints))
+            {
+                check = m_kernelGraph.checkConstraints();
+                AssertFatal(
+                    check.satisfied,
+                    concatenate("CommandKernel::generateKernel: post fuse:\n", check.explanation));
+            }
         }
 
         m_kernelGraph = KernelGraph::addLDS(m_kernelGraph, m_context);
@@ -258,10 +317,26 @@ namespace rocRoller
             "CommandKernel::generateKernelGraph: post addLDS: {}",
             m_kernelGraph.toDOT(false, "CommandKernel::generateKernelGraph: post addLDS"));
 
+        if(Settings::getInstance()->get(Settings::EnforceGraphConstraints))
+        {
+            check = m_kernelGraph.checkConstraints();
+            AssertFatal(
+                check.satisfied,
+                concatenate("CommandKernel::generateKernel: post addLDS:\n", check.explanation));
+        }
+
         m_kernelGraph = KernelGraph::cleanLoops(m_kernelGraph);
         logger->debug(
             "CommandKernel::generateKernelGraph: post clean loops: {}",
             m_kernelGraph.toDOT(false, "CommandKernel::generateKernelGraph: post clean loops"));
+
+        if(Settings::getInstance()->get(Settings::EnforceGraphConstraints))
+        {
+            check = m_kernelGraph.checkConstraints();
+            AssertFatal(check.satisfied,
+                        concatenate("CommandKernel::generateKernel: post clean loops:\n",
+                                    check.explanation));
+        }
 
         m_kernelGraph = KernelGraph::addComputeIndexOperations(m_kernelGraph);
         logger->debug(
@@ -269,15 +344,40 @@ namespace rocRoller
             m_kernelGraph.toDOT(
                 false, "CommandKernel::generateKernelGraph: post addComputeIndexOperations"));
 
+        if(Settings::getInstance()->get(Settings::EnforceGraphConstraints))
+        {
+            check = m_kernelGraph.checkConstraints();
+            AssertFatal(
+                check.satisfied,
+                concatenate("CommandKernel::generateKernel: post addComputeIndexOperations:\n",
+                            check.explanation));
+        }
+
         m_kernelGraph = KernelGraph::addDeallocate(m_kernelGraph);
         logger->debug(
             "CommandKernel::generateKernelGraph: post addDeallocate: {}",
             m_kernelGraph.toDOT(false, "CommandKernel::generateKernelGraph: post addDeallocate"));
 
+        if(Settings::getInstance()->get(Settings::EnforceGraphConstraints))
+        {
+            check = m_kernelGraph.checkConstraints();
+            AssertFatal(check.satisfied,
+                        concatenate("CommandKernel::generateKernel: post addDeallocate:\n",
+                                    check.explanation));
+        }
+
         m_kernelGraph = KernelGraph::inlineIncrements(m_kernelGraph);
         logger->debug("CommandKernel::generateKernelGraph: post inlineIncrements: {}",
                       m_kernelGraph.toDOT(
                           false, "CommandKernel::generateKernelGraph: post inlineIncrements"));
+
+        if(Settings::getInstance()->get(Settings::EnforceGraphConstraints))
+        {
+            check = m_kernelGraph.checkConstraints();
+            AssertFatal(check.satisfied,
+                        concatenate("CommandKernel::generateKernel: post inlineIncrements:\n",
+                                    check.explanation));
+        }
 
         m_kernelGraph = KernelGraph::cleanArguments(m_kernelGraph, m_context->kernel());
         if(m_postParameters)

@@ -284,6 +284,7 @@ set(rocroller_src
 
  lib/source/KernelGraph/ControlFlowRWTracer.cpp
  lib/source/KernelGraph/ControlToCoordinateMapper.cpp
+ lib/source/KernelGraph/GlobalConstraints.cpp
  lib/source/KernelGraph/KernelGraph.cpp
  lib/source/KernelGraph/LastRWTracer.cpp
  lib/source/KernelGraph/LowerFromCommand.cpp

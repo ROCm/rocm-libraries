@@ -25,5 +25,26 @@ namespace rocRoller
             ss << "}" << std::endl;
             return ss.str();
         }
+
+        ConstraintStatus
+            KernelGraph::checkConstraints(const std::vector<GraphConstraint>& constraints) const
+        {
+            ConstraintStatus retval;
+            for(int i = 0; i < constraints.size(); i++)
+            {
+                retval.combine(constraints[i](*this));
+            }
+            return retval;
+        }
+
+        ConstraintStatus KernelGraph::checkConstraints() const
+        {
+            return checkConstraints(m_constraints);
+        }
+
+        void KernelGraph::addConstraints(const std::vector<GraphConstraint>& constraints)
+        {
+            m_constraints.insert(m_constraints.end(), constraints.begin(), constraints.end());
+        }
     }
 }

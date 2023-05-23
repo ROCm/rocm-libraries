@@ -969,6 +969,7 @@ namespace rocRoller::KernelGraph
                 if(chain.update > 0 && spec.forLoop < 0)
                 {
                     kgraph.control.deleteElement(chain.update);
+                    kgraph.mapper.purge(chain.update);
                     chain.update = -1;
                 }
                 if(chain.update > 0)

@@ -114,6 +114,13 @@ namespace rocRoller
             false,
             -1};
 
+        static inline SettingsOption<bool> EnforceGraphConstraints{
+            "ROCROLLER_ENFORCE_GRAPH_CONSTRAINTS",
+            "Whether to enforce kernel graph constraints. (Could negatively impact code gen "
+            "performance)",
+            false,
+            -1};
+
         /**
          * @brief Generate defaultValue for SettingsBitField based on other defaultValues.
          *

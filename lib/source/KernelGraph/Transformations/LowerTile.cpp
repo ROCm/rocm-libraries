@@ -343,6 +343,7 @@ namespace rocRoller
             for(auto const e : tensor_incoming_edges)
                 graph.control.deleteElement(e);
             graph.control.deleteElement(tag);
+            graph.mapper.purge(tag);
 
             // Add loops to iterate over wavetiles within a wavefront
             auto wavetilesPerWorkgroup = params->getWaveTilesPerWorkgroup();
@@ -445,6 +446,8 @@ namespace rocRoller
             // Delete original loadA and loadB.
             graph.control.deleteElement(loadA[0]);
             graph.control.deleteElement(loadB[0]);
+            graph.mapper.purge(loadA[0]);
+            graph.mapper.purge(loadB[0]);
         }
 
         KernelGraph lowerTile(KernelGraph                        graph,

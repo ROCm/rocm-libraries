@@ -71,6 +71,7 @@ namespace rocRoller
                                                 CT::isEdge<PassThrough>);
                 graph.mapper.disconnect<Workgroup>(loadTag, aWorkgroupX, 0);
                 graph.coordinates.deleteElement(aWorkgroupX);
+                graph.mapper.purgeMappingsTo(aWorkgroupX);
 
                 // remove edge between A column block and K if it's not an unroll split.
                 auto aTileNumY = graph.mapper.get<MacroTileNumber>(loadTag, 1);
@@ -98,6 +99,7 @@ namespace rocRoller
                                                 CT::isEdge<PassThrough>);
                 graph.mapper.disconnect<Workgroup>(loadTag, bWorkgroupY, 1);
                 graph.coordinates.deleteElement(bWorkgroupY);
+                graph.mapper.purgeMappingsTo(bWorkgroupY);
 
                 // remove edge between B row block and K if it's not an unroll split.
                 auto bTileNumX = graph.mapper.get<MacroTileNumber>(loadTag, 0);
@@ -123,6 +125,7 @@ namespace rocRoller
                                                 std::vector<int>{workgroupX},
                                                 CT::isEdge<PassThrough>);
                 graph.coordinates.deleteElement(workgroupX);
+                graph.mapper.purgeMappingsTo(workgroupX);
 
                 auto tileNumY   = graph.mapper.get<MacroTileNumber>(loadTag, 1);
                 auto workgroupY = graph.mapper.get<Workgroup>(loadTag, 1);
@@ -131,6 +134,7 @@ namespace rocRoller
                                                 std::vector<int>{workgroupY},
                                                 CT::isEdge<PassThrough>);
                 graph.coordinates.deleteElement(workgroupY);
+                graph.mapper.purgeMappingsTo(workgroupY);
             }
 
             std::vector<int> iMac;
@@ -142,6 +146,7 @@ namespace rocRoller
                 graph.coordinates.deleteElement(std::vector<int>{sdims[i]}, mac, CT::isEdge<Tile>);
                 graph.mapper.disconnect<MacroTileNumber>(loadTag, mac[0], i);
                 graph.coordinates.deleteElement(mac[0]);
+                graph.mapper.purgeMappingsTo(mac[0]);
             }
 
             if(useSwappedAccess)
@@ -659,6 +664,7 @@ namespace rocRoller
             graph.coordinates.deleteElement(
                 std::vector<int>{workgroupX}, std::vector<int>{tileNumX}, CT::isEdge<PassThrough>);
             graph.coordinates.deleteElement(workgroupX);
+            graph.mapper.purgeMappingsTo(workgroupX);
 
             auto tileNumY   = graph.mapper.get<MacroTileNumber>(storeTag, 1);
             auto workgroupY = graph.mapper.get<Workgroup>(storeTag, 1);
@@ -666,6 +672,7 @@ namespace rocRoller
             graph.coordinates.deleteElement(
                 std::vector<int>{workgroupY}, std::vector<int>{tileNumY}, CT::isEdge<PassThrough>);
             graph.coordinates.deleteElement(workgroupY);
+            graph.mapper.purgeMappingsTo(workgroupY);
 
             std::vector<int> iMac;
             for(size_t i = 0; i < sdims.size(); ++i)
@@ -677,6 +684,7 @@ namespace rocRoller
                     mac, std::vector<int>{sdims[i]}, CT::isEdge<Flatten>);
                 graph.mapper.disconnect<MacroTileNumber>(storeTag, mac[0], i);
                 graph.coordinates.deleteElement(mac[0]);
+                graph.mapper.purgeMappingsTo(mac[0]);
             }
 
             graph.coordinates.addElement(Flatten(), {iMac[0], iMac[1]}, {lds});
@@ -1262,8 +1270,11 @@ namespace rocRoller
                     auto forLoop = *only(
                         kgraph.coordinates.getNeighbours<Graph::Direction::Downstream>(dataflow));
                     kgraph.coordinates.deleteElement(iterator);
+                    kgraph.mapper.purgeMappingsTo(iterator);
                     kgraph.coordinates.deleteElement(dataflow);
+                    kgraph.mapper.purgeMappingsTo(dataflow);
                     kgraph.coordinates.deleteElement(forLoop);
+                    kgraph.mapper.purgeMappingsTo(forLoop);
                 }
                 // XXX THIS LEAVES SOME DANGLING COORDS; IS THIS STILL TRUE?
             }
