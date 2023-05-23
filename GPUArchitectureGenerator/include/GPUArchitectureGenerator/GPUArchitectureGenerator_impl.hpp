@@ -119,7 +119,7 @@ namespace GPUArchitectureGenerator
         std::string cmd
             = hipcc
               + " -Wno-unused-command-line-argument -c -x assembler -target amdgcn-amdhsa -mcpu="
-              + isaVersion.ToString() + " -mcode-object-version=3 " + options + " -o "
+              + isaVersion.toString() + " -mcode-object-version=3 " + options + " -o "
               + ouputFileName + " " + asmFileName + " 2>&1";
 
         std::ofstream asmFile;

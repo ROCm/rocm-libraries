@@ -3,7 +3,7 @@
 
 namespace rocRoller
 {
-    std::string ToString(MemoryInstructions::MemoryDirection const& d)
+    std::string toString(MemoryInstructions::MemoryDirection const& d)
     {
         switch(d)
         {
@@ -18,7 +18,7 @@ namespace rocRoller
 
     std::ostream& operator<<(std::ostream& stream, MemoryInstructions::MemoryDirection d)
     {
-        return stream << ToString(d);
+        return stream << toString(d);
     }
 
     Generator<Instruction>

@@ -297,7 +297,7 @@ namespace rocRoller
                                             Register::ValuePtr  toPack) const;
     };
 
-    std::string   ToString(MemoryInstructions::MemoryDirection const& d);
+    std::string   toString(MemoryInstructions::MemoryDirection const& d);
     std::ostream& operator<<(std::ostream& stream, MemoryInstructions::MemoryDirection n);
 }
 

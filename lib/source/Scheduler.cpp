@@ -27,10 +27,6 @@ namespace rocRoller
 
             Throw<FatalError>("Invalid Scheduler Procedure: ", ShowValue(static_cast<int>(proc)));
         }
-        std::string ToString(SchedulerProcedure proc)
-        {
-            return toString(proc);
-        }
 
         std::ostream& operator<<(std::ostream& stream, SchedulerProcedure proc)
         {

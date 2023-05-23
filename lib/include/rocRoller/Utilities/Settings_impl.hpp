@@ -161,11 +161,6 @@ namespace rocRoller
         Throw<FatalError>("Unsupported LogLevel.");
     }
 
-    inline std::string ToString(LogLevel level)
-    {
-        return toString(level);
-    }
-
     inline std::ostream& operator<<(std::ostream& os, const LogLevel& input)
     {
         return os << toString(input);

@@ -28,11 +28,6 @@ namespace rocRoller
             Throw<FatalError>("Invalid Cost Function: ", ShowValue(static_cast<int>(proc)));
         }
 
-        std::string ToString(CostFunction proc)
-        {
-            return toString(proc);
-        }
-
         std::ostream& operator<<(std::ostream& stream, CostFunction proc)
         {
             return stream << toString(proc);

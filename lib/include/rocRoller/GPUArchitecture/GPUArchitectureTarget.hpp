@@ -63,11 +63,11 @@ namespace rocRoller
             }
             else
             {
-                return ToString() < a.ToString();
+                return toString() < a.toString();
             }
         }
 
-        std::string ToString() const;
+        std::string toString() const;
 
         void parseString(std::string const&);
 
@@ -85,7 +85,7 @@ namespace rocRoller
         {
             std::size_t operator()(const GPUArchitectureTarget& input) const
             {
-                return std::hash<std::string>()(input.ToString());
+                return std::hash<std::string>()(input.toString());
             };
         };
 

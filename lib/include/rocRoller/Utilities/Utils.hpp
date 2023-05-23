@@ -352,7 +352,7 @@ namespace rocRoller
     // clang-format off
     /**
      * Matches enumerations that are scoped, that have a Count member, and that
-     * can be converted to string with ToString().
+     * can be converted to string with toString().
      */
     template <typename T>
     concept CCountedEnum = requires()
@@ -365,13 +365,13 @@ namespace rocRoller
             static_cast<std::underlying_type_t<T>>(T::Count)
         } -> std::convertible_to<std::underlying_type_t<T>>;
 
-        { ToString(T::Count) } -> std::convertible_to<std::string>;
+        { toString(T::Count) } -> std::convertible_to<std::string>;
 
     };
     // clang-format on
 
     /**
-     * Converts a string value to an enum by comparing against each ToString conversion.
+     * Converts a string value to an enum by comparing against each toString conversion.
      */
     template <CCountedEnum T>
     T fromString(std::string const& str);

@@ -36,7 +36,7 @@
 
 namespace rocRoller
 {
-    std::string ToString(DataDirection dir)
+    std::string toString(DataDirection dir)
     {
         switch(dir)
         {
@@ -55,13 +55,13 @@ namespace rocRoller
 
     std::ostream& operator<<(std::ostream& stream, DataDirection dir)
     {
-        return stream << ToString(dir);
+        return stream << toString(dir);
     }
 
     std::map<VariableType, DataTypeInfo> DataTypeInfo::data;
     std::map<std::string, VariableType>  DataTypeInfo::typeNames;
 
-    std::string ToString(DataType d)
+    std::string toString(DataType d)
     {
         switch(d)
         {
@@ -157,7 +157,7 @@ namespace rocRoller
         return "Invalid";
     }
 
-    std::string ToString(LayoutType l)
+    std::string toString(LayoutType l)
     {
         switch(l)
         {
@@ -176,10 +176,10 @@ namespace rocRoller
 
     std::ostream& operator<<(std::ostream& stream, LayoutType l)
     {
-        return stream << ToString(l);
+        return stream << toString(l);
     }
 
-    std::string ToString(NaryArgument n)
+    std::string toString(NaryArgument n)
     {
         switch(n)
         {
@@ -198,10 +198,10 @@ namespace rocRoller
 
     std::ostream& operator<<(std::ostream& stream, NaryArgument n)
     {
-        return stream << ToString(n);
+        return stream << toString(n);
     }
 
-    std::string ToString(PointerType const& p)
+    std::string toString(PointerType const& p)
     {
         switch(p)
         {
@@ -221,12 +221,12 @@ namespace rocRoller
 
     std::ostream& operator<<(std::ostream& stream, PointerType const& p)
     {
-        return stream << ToString(p);
+        return stream << toString(p);
     }
 
-    std::string ToString(VariableType const& v)
+    std::string toString(VariableType const& v)
     {
-        return ToString(v.pointerType) + ": " + ToString(v.dataType);
+        return toString(v.pointerType) + ": " + toString(v.dataType);
     }
 
     std::string TypeAbbrev(VariableType const& v)
@@ -249,7 +249,7 @@ namespace rocRoller
 
     std::ostream& operator<<(std::ostream& stream, const VariableType& v)
     {
-        return stream << ToString(v);
+        return stream << toString(v);
     }
 
     size_t VariableType::getElementSize() const
@@ -453,7 +453,7 @@ namespace rocRoller
 
     std::ostream& operator<<(std::ostream& stream, const DataType& t)
     {
-        return stream << ToString(t);
+        return stream << toString(t);
     }
 
     std::istream& operator>>(std::istream& stream, DataType& t)

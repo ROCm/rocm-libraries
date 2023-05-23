@@ -31,7 +31,6 @@ namespace rocRoller
         int         bit = -1;
     };
 
-    std::string ToString(LogLevel level);
     std::string toString(LogLevel level);
 
     /**

@@ -49,7 +49,7 @@ namespace rocRoller
                 for(int i = 0; i < static_cast<int>(GPUWaitQueueType::Count); i++)
                 {
                     auto dir = static_cast<GPUWaitQueueType>(i);
-                    auto str = dir.ToString();
+                    auto str = dir.toString();
                     iot::enumCase(io, value, str.c_str(), dir);
                 }
             }

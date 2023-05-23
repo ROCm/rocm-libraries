@@ -67,7 +67,6 @@ namespace rocRoller::KernelGraph
             Count
         };
 
-        std::string ToString(ComputeIndexArgument cia);
         std::string toString(ComputeIndexArgument cia);
 
         struct ComputeIndex
@@ -105,7 +104,7 @@ namespace rocRoller::KernelGraph
         return rv;
     }
 
-    std::string   ToString(ConnectionSpec const& cs);
+    std::string   toString(ConnectionSpec const& cs);
     std::ostream& operator<<(std::ostream& stream, ConnectionSpec const& cs);
 
     /**

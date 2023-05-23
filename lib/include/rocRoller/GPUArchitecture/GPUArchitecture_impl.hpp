@@ -99,7 +99,7 @@ namespace rocRoller
 
     inline std::ostream& operator<<(std::ostream& os, GPUCapability const& input)
     {
-        os << input.ToString();
+        os << input.toString();
         return os;
     }
 
@@ -113,13 +113,13 @@ namespace rocRoller
 
     inline std::ostream& operator<<(std::ostream& os, GPUWaitQueueType const& input)
     {
-        os << input.ToString();
+        os << input.toString();
         return os;
     }
 
     inline std::ostream& operator<<(std::ostream& os, GPUArchitectureTarget const& input)
     {
-        return (os << input.ToString());
+        return (os << input.toString());
     }
 
     inline std::istream& operator>>(std::istream& is, GPUArchitectureTarget& input)

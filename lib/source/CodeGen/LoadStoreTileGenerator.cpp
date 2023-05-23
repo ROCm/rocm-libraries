@@ -503,7 +503,7 @@ namespace rocRoller
                                                                 Transformer&       coords)
         {
             rocRoller::Log::getLogger()->debug(
-                "KernelGraph::LoadStoreTileGenerator::moveTile<{}>({})", ToString(Dir), tag);
+                "KernelGraph::LoadStoreTileGenerator::moveTile<{}>({})", toString(Dir), tag);
 
             LoadStoreTileInfo info;
             info.kind   = kind;

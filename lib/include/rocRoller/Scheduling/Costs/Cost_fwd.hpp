@@ -19,6 +19,5 @@ namespace rocRoller
         class Cost;
 
         std::string toString(CostFunction);
-        std::string ToString(CostFunction);
     }
 }

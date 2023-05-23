@@ -50,7 +50,7 @@ namespace rocRoller
         return ss.str();
     }
 
-    inline std::string GPUArchitectureTarget::ToString() const
+    inline std::string GPUArchitectureTarget::toString() const
     {
         return m_string_rep;
     }

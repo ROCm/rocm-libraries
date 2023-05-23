@@ -186,10 +186,10 @@ namespace rocRoller
                     {
                         retval << "\nWait Queue State:";
                     }
-                    retval << "\n--Queue: " << waitQueue.ToString();
+                    retval << "\n--Queue: " << waitQueue.toString();
                     retval << "\n----Needs Wait Zero: "
                            << (m_needsWaitZero.at(waitQueue) ? "True" : "False");
-                    retval << "\n----Type In Queue  : " << m_typeInQueue.at(waitQueue).ToString();
+                    retval << "\n----Type In Queue  : " << m_typeInQueue.at(waitQueue).toString();
                     retval << "\n----Registers      : ";
 
                     for(int queue_i = 0; queue_i < m_instructionQueues.at(waitQueue).size();

@@ -125,9 +125,9 @@ namespace rocRoller
             return static_cast<uint8_t>(m_value);
         }
 
-        std::string ToString() const;
+        std::string toString() const;
 
-        static std::string ToString(Value);
+        static std::string toString(Value);
 
         struct Hash
         {

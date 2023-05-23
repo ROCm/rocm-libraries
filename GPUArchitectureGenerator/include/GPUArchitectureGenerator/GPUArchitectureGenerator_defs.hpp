@@ -123,17 +123,17 @@ namespace GPUArchitectureGenerator
 
     inline bool Is10XGPU(rocRoller::GPUArchitectureTarget const& input)
     {
-        return input.ToString().find("gfx10") == 0;
+        return input.toString().find("gfx10") == 0;
     }
 
     inline bool Is9XGPU(rocRoller::GPUArchitectureTarget const& input)
     {
-        return input.ToString().find("gfx9") == 0;
+        return input.toString().find("gfx9") == 0;
     }
 
     inline bool Is90aGPU(rocRoller::GPUArchitectureTarget const& input)
     {
-        return input.ToString().find("gfx90a") == 0;
+        return input.toString().find("gfx90a") == 0;
     }
 
     inline std::vector<rocRoller::GPUArchitectureTarget> gfx9ISAs()
@@ -163,7 +163,7 @@ namespace GPUArchitectureGenerator
 
             {rocRoller::GPUCapability::HasXnack,
              [](rocRoller::GPUArchitectureTarget x) -> bool {
-                 return x.ToString().find("xnack+") != std::string::npos;
+                 return x.toString().find("xnack+") != std::string::npos;
              }},
 
             {rocRoller::GPUCapability::PackedWorkitemIDs, Is90aGPU},

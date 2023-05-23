@@ -82,7 +82,7 @@ namespace rocRoller
             Throw<FatalError>("Invalid Register::Type combo: ", ShowValue(lhs), ShowValue(rhs));
         }
 
-        inline std::string ToString(Type t)
+        inline std::string toString(Type t)
         {
             switch(t)
             {
@@ -110,10 +110,10 @@ namespace rocRoller
 
         inline std::ostream& operator<<(std::ostream& stream, Type t)
         {
-            return stream << ToString(t);
+            return stream << toString(t);
         }
 
-        inline std::string ToString(AllocationState state)
+        inline std::string toString(AllocationState state)
         {
             switch(state)
             {
@@ -137,10 +137,10 @@ namespace rocRoller
 
         inline std::ostream& operator<<(std::ostream& stream, AllocationState state)
         {
-            return stream << ToString(state);
+            return stream << toString(state);
         }
 
-        inline std::string ToString(SpecialType spec)
+        inline std::string toString(SpecialType spec)
         {
             switch(spec)
             {
@@ -163,7 +163,7 @@ namespace rocRoller
 
         inline std::ostream& operator<<(std::ostream& stream, SpecialType spec)
         {
-            return stream << ToString(spec);
+            return stream << toString(spec);
         }
 
         inline Value::Value() = default;

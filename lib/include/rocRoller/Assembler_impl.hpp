@@ -28,7 +28,7 @@ namespace rocRoller
             throw std::runtime_error("Unable to create temporary directory");
 
         std::string outputName = kernelName.size() ? kernelName : "a";
-        outputName += "_" + target.ToString();
+        outputName += "_" + target.toString();
         std::replace(outputName.begin(), outputName.end(), ':', '-');
         std::string tmpObjectFile       = std::string(tmpFolder) + "/" + outputName + ".o";
         std::string tmpSharedObjectFile = std::string(tmpFolder) + "/" + outputName + ".so";

@@ -93,7 +93,7 @@ namespace rocRoller
 
         for(auto target : GPUArchitectures)
         {
-            result.push_back(target.first.ToString());
+            result.push_back(target.first.toString());
         }
 
         return result;

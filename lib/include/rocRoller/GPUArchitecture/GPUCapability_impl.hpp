@@ -15,12 +15,12 @@
 
 namespace rocRoller
 {
-    inline std::string GPUCapability::ToString() const
+    inline std::string GPUCapability::toString() const
     {
-        return GPUCapability::ToString(m_value);
+        return GPUCapability::toString(m_value);
     }
 
-    inline std::string GPUCapability::ToString(GPUCapability::Value value)
+    inline std::string GPUCapability::toString(GPUCapability::Value value)
     {
         auto it = std::find_if(m_stringMap.begin(),
                                m_stringMap.end(),

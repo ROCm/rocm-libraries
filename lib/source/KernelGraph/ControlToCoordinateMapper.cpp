@@ -123,7 +123,7 @@ namespace rocRoller::KernelGraph
 
     namespace Connections
     {
-        std::string ToString(ComputeIndexArgument cia)
+        std::string toString(ComputeIndexArgument cia)
         {
             switch(cia)
             {
@@ -145,11 +145,6 @@ namespace rocRoller::KernelGraph
                 return "Invalid";
             }
         }
-
-        std::string toString(ComputeIndexArgument cia)
-        {
-            return ToString(cia);
-        }
     }
 
     struct CSToStringVisitor
@@ -161,7 +156,7 @@ namespace rocRoller::KernelGraph
 
         std::string operator()(NaryArgument const& n) const
         {
-            return ToString(n);
+            return toString(n);
         }
 
         std::string operator()(Connections::ComputeIndex const& ci) const
@@ -180,13 +175,13 @@ namespace rocRoller::KernelGraph
         }
     };
 
-    std::string ToString(ConnectionSpec const& cs)
+    std::string toString(ConnectionSpec const& cs)
     {
         return std::visit(CSToStringVisitor(), cs);
     }
 
     std::ostream& operator<<(std::ostream& stream, ConnectionSpec const& cs)
     {
-        return stream << ToString(cs);
+        return stream << toString(cs);
     }
 }

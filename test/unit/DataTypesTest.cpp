@@ -138,7 +138,7 @@ TEST_P(Enumerations, Conversions)
 
     auto const& typeInfo = rocRoller::DataTypeInfo::Get(val);
 
-    EXPECT_EQ(typeInfo.name, rocRoller::ToString(val));
+    EXPECT_EQ(typeInfo.name, rocRoller::toString(val));
     EXPECT_EQ(typeInfo.abbrev, rocRoller::TypeAbbrev(val));
     EXPECT_EQ(&typeInfo, &rocRoller::DataTypeInfo::Get(typeInfo.name));
 

@@ -35,7 +35,7 @@ inline auto supportedISAValues()
 inline auto currentGPUISA()
 {
     auto currentDevice = rocRoller::GPUArchitectureLibrary::GetDefaultHipDeviceArch();
-    return ::testing::Values(currentDevice.target().ToString());
+    return ::testing::Values(currentDevice.target().toString());
 }
 
 /**

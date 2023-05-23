@@ -161,7 +161,7 @@ namespace rocRoller
                                 if(explanation != nullptr)
                                 {
                                     *explanation += "WaitCnt Needed: Intersects with registers in '"
-                                                    + waitQueue.ToString()
+                                                    + waitQueue.toString()
                                                     + "', which needs a wait zero.";
                                 }
                             }
@@ -173,7 +173,7 @@ namespace rocRoller
                                 if(explanation != nullptr)
                                 {
                                     *explanation += "WaitCnt Needed: Intersects with registers in '"
-                                                    + waitQueue.ToString() + "', at "
+                                                    + waitQueue.toString() + "', at "
                                                     + std::to_string(queue_i)
                                                     + " and the queue size is "
                                                     + std::to_string(

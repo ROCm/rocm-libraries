@@ -110,7 +110,7 @@ namespace rocRoller
         if(rv->m_assemblyFileName.empty())
         {
             rv->m_assemblyFileName = kernelName.size() ? kernelName : "a";
-            rv->m_assemblyFileName += "_" + arch.target().ToString();
+            rv->m_assemblyFileName += "_" + arch.target().toString();
             std::replace(rv->m_assemblyFileName.begin(), rv->m_assemblyFileName.end(), ':', '-');
             rv->m_assemblyFileName += ".s";
         }

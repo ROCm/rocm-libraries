@@ -59,7 +59,7 @@ namespace rocRoller
         Count
     };
 
-    std::string   ToString(DataDirection dir);
+    std::string   toString(DataDirection dir);
     std::ostream& operator<<(std::ostream& stream, DataDirection dir);
 
     /**
@@ -97,7 +97,7 @@ namespace rocRoller
         None = Count /**< Represents: any, unknown/unspecified, or a deferred type. */
     };
 
-    std::string   ToString(DataType d);
+    std::string   toString(DataType d);
     std::string   TypeAbbrev(DataType d);
     std::ostream& operator<<(std::ostream& stream, DataType const& t);
     std::istream& operator>>(std::istream& stream, DataType& t);
@@ -145,7 +145,7 @@ namespace rocRoller
         None = Count
     };
 
-    std::string   ToString(LayoutType l);
+    std::string   toString(LayoutType l);
     std::ostream& operator<<(std::ostream& stream, LayoutType l);
 
     enum class NaryArgument : int
@@ -158,7 +158,7 @@ namespace rocRoller
         None = Count
     };
 
-    std::string   ToString(NaryArgument n);
+    std::string   toString(NaryArgument n);
     std::ostream& operator<<(std::ostream& stream, NaryArgument n);
 
     inline constexpr DataType getIntegerType(bool isSigned, int sizeBytes)
@@ -283,10 +283,10 @@ namespace rocRoller
         static VariableType Promote(VariableType lhs, VariableType rhs);
     };
 
-    std::string   ToString(PointerType const& p);
+    std::string   toString(PointerType const& p);
     std::ostream& operator<<(std::ostream& stream, PointerType const& p);
 
-    std::string   ToString(VariableType const& v);
+    std::string   toString(VariableType const& v);
     std::string   ValueString(VariableType const& v);
     std::string   TypeAbbrev(VariableType const& v);
     std::ostream& operator<<(std::ostream& stream, VariableType const& v);
@@ -368,9 +368,9 @@ namespace rocRoller
         static inline std::string Name()
         {
             if(Var.pointerType == PointerType::Value)
-                return ToString(Var.dataType);
+                return toString(Var.dataType);
             else
-                return ToString(Var.pointerType);
+                return toString(Var.pointerType);
         }
         static inline std::string Abbrev()
         {

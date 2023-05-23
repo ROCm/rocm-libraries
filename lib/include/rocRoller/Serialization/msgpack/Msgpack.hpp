@@ -78,7 +78,7 @@ namespace msgpack
                                            rocRoller::GPUArchitectureTarget const& v) const
                 {
                     o.pack_array(1);
-                    o.pack(v.ToString());
+                    o.pack(v.toString());
                     return o;
                 }
             };

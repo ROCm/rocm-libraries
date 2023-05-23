@@ -204,7 +204,7 @@ TEST_F(RegisterTest, LabelRegister)
     EXPECT_EQ(NormalizedSource(output()), NormalizedSource(expected1));
 }
 
-#define CHECK_ALLOCATION_STATE(state) EXPECT_EQ(#state, ToString(Register::AllocationState::state))
+#define CHECK_ALLOCATION_STATE(state) EXPECT_EQ(#state, toString(Register::AllocationState::state))
 
 TEST_F(RegisterTest, PrintAllocationState)
 {

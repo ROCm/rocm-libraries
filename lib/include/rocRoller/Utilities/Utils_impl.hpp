@@ -15,7 +15,7 @@ namespace rocRoller
         for(myInt i = 0; i < maxValue; ++i)
         {
             auto val = static_cast<T>(i);
-            if(ToString(val) == str)
+            if(toString(val) == str)
                 return val;
         }
         Throw<FatalError>("Invalid ", typeid(T).name(), ": ", str);

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2019-2022 Advanced Micro Devices, Inc.
+ * Copyright 2019-2023 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -38,7 +38,7 @@ namespace rocRoller
     {
         /**
          * Provides serialization for any enumeration type that adheres to the CCountedEnum concept;
-         * i.e. provides a Count value and ToString.
+         * i.e. provides a Count value and toString.
          */
         template <CCountedEnum Enum, typename IO>
         struct EnumTraits<Enum, IO>
@@ -51,7 +51,7 @@ namespace rocRoller
                 for(int i = 0; i < static_cast<int>(Enum::Count); i++)
                 {
                     auto value = static_cast<Enum>(i);
-                    auto str   = ToString(value);
+                    auto str   = toString(value);
                     iot::enumCase(io, ref, str.c_str(), value);
                 }
             }

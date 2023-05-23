@@ -54,9 +54,9 @@ namespace rocRoller
             return static_cast<uint8_t>(m_value);
         }
 
-        std::string ToString() const;
+        std::string toString() const;
 
-        static std::string ToString(Value);
+        static std::string toString(Value);
 
         struct Hash
         {
@@ -134,9 +134,9 @@ namespace rocRoller
             return static_cast<uint8_t>(m_value);
         }
 
-        std::string ToString() const;
+        std::string toString() const;
 
-        static std::string ToString(Value);
+        static std::string toString(Value);
 
         struct Hash
         {
@@ -183,7 +183,7 @@ namespace rocRoller
         bool                          m_isBranch       = false;
     };
 
-    std::string ToString(GPUWaitQueueType);
+    std::string toString(GPUWaitQueueType);
 }
 
 #include "GPUInstructionInfo_impl.hpp"

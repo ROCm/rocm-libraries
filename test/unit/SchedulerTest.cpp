@@ -93,12 +93,12 @@ namespace rocRollerTest
     TEST_F(SchedulerTest, Enum)
     {
         using namespace rocRoller::Scheduling;
-        EXPECT_EQ(ToString(SchedulerProcedure::Sequential), "Sequential");
-        EXPECT_EQ(ToString(SchedulerProcedure::RoundRobin), "RoundRobin");
-        EXPECT_EQ(ToString(SchedulerProcedure::Random), "Random");
-        EXPECT_EQ(ToString(SchedulerProcedure::Cooperative), "Cooperative");
-        EXPECT_EQ(ToString(SchedulerProcedure::Priority), "Priority");
-        EXPECT_EQ(ToString(SchedulerProcedure::Count), "Count");
+        EXPECT_EQ(toString(SchedulerProcedure::Sequential), "Sequential");
+        EXPECT_EQ(toString(SchedulerProcedure::RoundRobin), "RoundRobin");
+        EXPECT_EQ(toString(SchedulerProcedure::Random), "Random");
+        EXPECT_EQ(toString(SchedulerProcedure::Cooperative), "Cooperative");
+        EXPECT_EQ(toString(SchedulerProcedure::Priority), "Priority");
+        EXPECT_EQ(toString(SchedulerProcedure::Count), "Count");
 
         EXPECT_EQ(fromString<SchedulerProcedure>("Sequential"), SchedulerProcedure::Sequential);
         EXPECT_EQ(fromString<SchedulerProcedure>("RoundRobin"), SchedulerProcedure::RoundRobin);

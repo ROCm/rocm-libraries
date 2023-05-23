@@ -30,6 +30,5 @@ namespace rocRoller
         class LockState;
 
         std::string toString(SchedulerProcedure);
-        std::string ToString(SchedulerProcedure);
     }
 }

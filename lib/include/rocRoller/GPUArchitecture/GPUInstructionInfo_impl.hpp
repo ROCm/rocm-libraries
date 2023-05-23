@@ -15,9 +15,9 @@
 
 namespace rocRoller
 {
-    inline std::string ToString(GPUWaitQueueType input)
+    inline std::string toString(GPUWaitQueueType input)
     {
-        return input.ToString();
+        return input.toString();
     }
 
     inline GPUInstructionInfo::GPUInstructionInfo(std::string const&                   instruction,
@@ -65,12 +65,12 @@ namespace rocRoller
     }
 
     //--GPUWaitQueue
-    inline std::string GPUWaitQueue::ToString() const
+    inline std::string GPUWaitQueue::toString() const
     {
-        return GPUWaitQueue::ToString(m_value);
+        return GPUWaitQueue::toString(m_value);
     }
 
-    inline std::string GPUWaitQueue::ToString(GPUWaitQueue::Value value)
+    inline std::string GPUWaitQueue::toString(GPUWaitQueue::Value value)
     {
         auto it = std::find_if(m_stringMap.begin(),
                                m_stringMap.end(),
@@ -91,12 +91,12 @@ namespace rocRoller
     };
 
     //--GPUWaitQueueType
-    inline std::string GPUWaitQueueType::ToString() const
+    inline std::string GPUWaitQueueType::toString() const
     {
-        return GPUWaitQueueType::ToString(m_value);
+        return GPUWaitQueueType::toString(m_value);
     }
 
-    inline std::string GPUWaitQueueType::ToString(GPUWaitQueueType::Value value)
+    inline std::string GPUWaitQueueType::toString(GPUWaitQueueType::Value value)
     {
         auto it = std::find_if(m_stringMap.begin(),
                                m_stringMap.end(),
