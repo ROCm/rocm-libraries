@@ -1467,7 +1467,7 @@ namespace rocRoller
             }
         }
 
-        int getTopSetCoordinate(KernelGraph& graph, int load)
+        int getTopSetCoordinate(KernelGraph const& graph, int load)
         {
             int tag = load;
 

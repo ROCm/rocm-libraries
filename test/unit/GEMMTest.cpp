@@ -825,6 +825,7 @@ namespace GEMMDriverTest
         std::string generatedCode = m_context->instructions()->toString();
 
         EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128"), 3);
+        EXPECT_EQ(countSubstring(generatedCode, "v_pack_B32_F16"), 24);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed2x4UnrollK)
@@ -839,7 +840,11 @@ namespace GEMMDriverTest
         gemm.mac_n = 256;
         gemm.mac_k = 16;
 
-        gemm.unrollK = 4;
+        gemm.unrollK = 2;
+
+        gemm.prefetchInFlight  = 2;
+        gemm.prefetchLDSFactor = 2;
+        gemm.prefetchMixMemOps = true;
 
         gemm.wave_k = 8;
 
@@ -852,7 +857,7 @@ namespace GEMMDriverTest
 
         std::string generatedCode = m_context->instructions()->toString();
 
-        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128"), 12);
+        EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128"), 6);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed4x2)

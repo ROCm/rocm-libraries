@@ -1199,7 +1199,7 @@ namespace ExpressionTest
         EXPECT_THROW(Expression::convert(DataType::ComplexFloat, intExpr), FatalError);
         EXPECT_THROW(Expression::convert(DataType::ComplexDouble, intExpr), FatalError);
         EXPECT_NO_THROW(Expression::convert(DataType::Half, intExpr));
-        EXPECT_THROW(Expression::convert(DataType::Halfx2, intExpr), FatalError);
+        EXPECT_NO_THROW(Expression::convert(DataType::Halfx2, intExpr));
         EXPECT_THROW(Expression::convert(DataType::Int8x4, intExpr), FatalError);
         EXPECT_NO_THROW(Expression::convert(DataType::Int32, intExpr));
         EXPECT_NO_THROW(Expression::convert(DataType::Int64, intExpr));

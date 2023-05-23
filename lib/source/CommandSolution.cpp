@@ -353,6 +353,19 @@ namespace rocRoller
                             check.explanation));
         }
 
+        m_kernelGraph = KernelGraph::addConvert(m_kernelGraph);
+        logger->debug(
+            "CommandKernel::generateKernelGraph: post addConvert: {}",
+            m_kernelGraph.toDOT(false, "CommandKernel::generateKernelGraph: post addConvert"));
+
+        if(Settings::getInstance()->get(Settings::EnforceGraphConstraints))
+        {
+            check = m_kernelGraph.checkConstraints();
+            AssertFatal(check.satisfied,
+                        concatenate("CommandKernel::generateKernel: post addConvert:\n",
+                                    check.explanation));
+        }
+
         m_kernelGraph = KernelGraph::addDeallocate(m_kernelGraph);
         logger->debug(
             "CommandKernel::generateKernelGraph: post addDeallocate: {}",

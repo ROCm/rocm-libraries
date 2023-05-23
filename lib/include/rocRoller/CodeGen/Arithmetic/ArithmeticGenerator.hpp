@@ -70,6 +70,16 @@ namespace rocRoller
 
         virtual Generator<Instruction> generate(Register::ValuePtr dst, Register::ValuePtr arg) = 0;
 
+        /**
+         * @brief Returns true if arg will be equivalent to the result.
+         *
+         * @param arg
+         */
+        virtual bool isIdentity(Register::ValuePtr arg) const
+        {
+            return false;
+        }
+
         using Argument = std::tuple<std::shared_ptr<Context>, Register::Type, DataType>;
         using Base     = UnaryArithmeticGenerator<Operation>;
         static const std::string Basename;

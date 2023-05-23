@@ -8,6 +8,7 @@ namespace rocRoller
     // Register supported components
     RegisterComponentTemplateSpec(ConvertGenerator, DataType::Float);
     RegisterComponentTemplateSpec(ConvertGenerator, DataType::Half);
+    RegisterComponentTemplateSpec(ConvertGenerator, DataType::Halfx2);
     RegisterComponentTemplateSpec(ConvertGenerator, DataType::Int32);
     RegisterComponentTemplateSpec(ConvertGenerator, DataType::Int64);
     RegisterComponentTemplateSpec(ConvertGenerator, DataType::UInt32);
@@ -25,6 +26,7 @@ namespace rocRoller
 
     DefineSpecializedGetGeneratorConvert(Float);
     DefineSpecializedGetGeneratorConvert(Half);
+    DefineSpecializedGetGeneratorConvert(Halfx2);
     DefineSpecializedGetGeneratorConvert(Int32);
     DefineSpecializedGetGeneratorConvert(Int64);
     DefineSpecializedGetGeneratorConvert(UInt32);
@@ -43,6 +45,7 @@ namespace rocRoller
         {
             ConvertCase(Float);
             ConvertCase(Half);
+            ConvertCase(Halfx2);
             ConvertCase(Int32);
             ConvertCase(Int64);
             ConvertCase(UInt32);
@@ -103,6 +106,25 @@ namespace rocRoller
             break;
         default:
             Throw<FatalError>("Unsupported datatype for convert to half: ", ShowValue(dataType));
+        }
+    }
+
+    template <>
+    Generator<Instruction> ConvertGenerator<DataType::Halfx2>::generate(Register::ValuePtr dest,
+                                                                        Register::ValuePtr arg)
+    {
+        AssertFatal(arg != nullptr);
+
+        auto dataType = getArithDataType(arg);
+
+        switch(dataType)
+        {
+        case DataType::Half:
+            AssertFatal(arg->valueCount() == 2, "Conversion to Halfx2 requires two elements");
+            co_yield m_context->copier()->pack(dest, arg->element({0}), arg->element({1}));
+            break;
+        default:
+            Throw<FatalError>("Unsupported datatype for convert to halfx2: ", ShowValue(dataType));
         }
     }
 

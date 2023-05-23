@@ -409,10 +409,52 @@ namespace rocRoller
 
                 co_yield prepareSourceOperands(results, schedulerLocked, subExprs);
 
-                if(dest == nullptr)
-                    dest = resultPlaceholder(resultType(expr));
+                auto       destType = resultType(expr);
+                auto const destInfo = DataTypeInfo::Get(destType.varType);
+                auto const argInfo  = DataTypeInfo::Get(results[0]->variableType());
 
-                co_yield generateOp<Operation>(dest, results[0]);
+                int packingRatio = std::max(destInfo.packing, argInfo.packing)
+                                   / std::min(destInfo.packing, argInfo.packing);
+
+                if(dest == nullptr)
+                {
+                    dest = resultPlaceholder(
+                        destType, true, results[0]->valueCount() / packingRatio);
+                }
+
+                if(GetGenerator<Operation>(dest, results[0])->isIdentity(results[0]))
+                {
+                    dest = results[0];
+                }
+                else if(dest->valueCount() == 1 && results[0]->valueCount() == 1)
+                {
+                    co_yield generateOp<Operation>(dest, results[0]);
+                }
+                else
+                {
+                    co_yield Register::AllocateIfNeeded(dest);
+
+                    for(size_t i = 0; i < dest->valueCount(); i++)
+                    {
+                        Register::ValuePtr arg;
+                        if(argInfo.packing < destInfo.packing)
+                        {
+                            arg = results[0]->element(
+                                {i * packingRatio, i * packingRatio + packingRatio - 1});
+                        }
+                        else if(argInfo.packing > destInfo.packing)
+                        {
+                            Throw<FatalError>("Argument to unary expression cannot be a datatype "
+                                              "with packing greater than the destination");
+                        }
+                        else
+                        {
+                            arg = results[0]->element({i});
+                        }
+
+                        co_yield generateOp<Operation>(dest->element({i}), arg);
+                    }
+                }
 
                 if(schedulerLocked)
                     co_yield Instruction::Unlock("Expression temporary in special register");

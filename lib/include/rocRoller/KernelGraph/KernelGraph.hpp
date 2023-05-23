@@ -137,6 +137,18 @@ namespace rocRoller
         KernelGraph addComputeIndexOperations(KernelGraph const& original);
 
         /**
+         * @brief Add required convert nodes to the control graph.
+         *
+         * Finds any multiply node that might require converting the datatype
+         * of the arguments to the multiply and adds control nodes that will
+         * perform the appropriate type conversion.
+         *
+         * @param k
+         * @return KernelGraph
+         */
+        KernelGraph addConvert(KernelGraph const& k);
+
+        /**
          * @brief Rewrite KernelGraph to add Deallocate operations.
          *
          * The control graph is analysed to determine register

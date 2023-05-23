@@ -394,5 +394,22 @@ namespace rocRoller
         {
             return std::visit([](const auto& a) { return a.toString(); }, x);
         }
+
+        /**
+         * @brief Return the datatype associated with the Operation.
+         *
+         * @param x
+         * @return DataType
+         */
+        inline DataType getDataType(const Operation& x)
+        {
+            return std::visit(
+                rocRoller::overloaded{[&](StoreTiled const& op) { return op.dataType; },
+                                      [&](LoadTiled const& op) { return op.vtype.dataType; },
+                                      [&](StoreLDSTile const& op) { return op.dataType; },
+                                      [&](LoadLDSTile const& op) { return op.vtype.dataType; },
+                                      [&](auto const& op) { return DataType::None; }},
+                x);
+        }
     }
 }

@@ -14,6 +14,7 @@ namespace rocRoller
 
     SpecializeGetGeneratorConvert(Float);
     SpecializeGetGeneratorConvert(Half);
+    SpecializeGetGeneratorConvert(Halfx2);
     SpecializeGetGeneratorConvert(Int32);
     SpecializeGetGeneratorConvert(Int64);
     SpecializeGetGeneratorConvert(UInt32);
@@ -64,7 +65,12 @@ namespace rocRoller
         }
 
         // Method to generate instructions
-        Generator<Instruction> generate(Register::ValuePtr dst, Register::ValuePtr arg);
+        Generator<Instruction> generate(Register::ValuePtr dst, Register::ValuePtr arg) override;
+
+        inline bool isIdentity(Register::ValuePtr arg) const override
+        {
+            return arg->variableType() == DATATYPE;
+        }
 
         inline static const std::string Name;
     };

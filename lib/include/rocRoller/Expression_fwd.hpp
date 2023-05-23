@@ -88,6 +88,7 @@ namespace rocRoller
 
             // --- Convert Operations ---
             Convert<DataType::Half>,
+            Convert<DataType::Halfx2>,
             Convert<DataType::Float>,
             Convert<DataType::Double>,
             Convert<DataType::Int32>,

@@ -280,6 +280,7 @@ namespace rocRoller
         EXPRESSION_INFO(Negate);
 
         EXPRESSION_INFO(Convert<DataType::Half>);
+        EXPRESSION_INFO(Convert<DataType::Halfx2>);
         EXPRESSION_INFO(Convert<DataType::Float>);
         EXPRESSION_INFO(Convert<DataType::Double>);
         EXPRESSION_INFO(Convert<DataType::Int32>);

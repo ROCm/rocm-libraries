@@ -353,6 +353,73 @@ namespace rocRoller
                 Throw<FatalError>("Not implemented yet.");
             }
 
+            struct ExpressionHasNoneDTVisitor
+            {
+                template <CTernary Expr>
+                bool operator()(Expr const& expr) const
+                {
+                    return call(expr.lhs) || call(expr.r1hs) || call(expr.r2hs);
+                }
+
+                template <CBinary Expr>
+                bool operator()(Expr const& expr) const
+                {
+                    return call(expr.lhs) || call(expr.rhs);
+                }
+
+                template <CUnary Expr>
+                bool operator()(Expr const& expr) const
+                {
+                    return call(expr.arg);
+                }
+
+                template <typename T>
+                bool operator()(T const& expr) const
+                {
+                    return false;
+                }
+
+                bool operator()(std::shared_ptr<Register::Value> const& expr) const
+                {
+                    if(!expr)
+                        return false;
+
+                    return expr->variableType() == DataType::None;
+                }
+
+                bool operator()(DataFlowTag const& expr) const
+                {
+                    return expr.varType == DataType::None;
+                }
+
+                bool call(Expression::Expression const& expr) const
+                {
+                    return std::visit(*this, expr);
+                }
+
+                bool call(ExpressionPtr expr) const
+                {
+                    if(!expr)
+                        return false;
+
+                    return call(*expr);
+                }
+            };
+
+            /**
+             * @brief Returns true if an expression has any values with
+             *        a datatype of None.
+             *
+             * @param expr
+             * @return true
+             * @return false
+             */
+            bool expressionHasNoneDT(ExpressionPtr const& expr)
+            {
+                auto visitor = ExpressionHasNoneDTVisitor();
+                return visitor.call(expr);
+            }
+
             Generator<Instruction> operator()(int tag, Assign const& assign, Transformer coords)
             {
                 auto dimTag = m_graph->mapper.get(tag, NaryArgument::DEST);
@@ -364,7 +431,7 @@ namespace rocRoller
                 auto scope = m_context->getScopeManager();
                 scope->addRegister(dimTag);
 
-                auto deferred = resultVariableType(assign.expression).dataType == DataType::None
+                auto deferred = expressionHasNoneDT(assign.expression)
                                 && !m_context->registerTagManager()->hasRegister(dimTag);
 
                 Register::ValuePtr dest;
@@ -561,30 +628,8 @@ namespace rocRoller
                 auto D = m_context->registerTagManager()->getRegister(
                     DTag, Register::Type::Accumulator, DataType::Float, num_agpr);
 
-                auto getVGPR = [this](auto macTag, auto& wave) -> Generator<Instruction> {
-                    auto macRegister = m_context->registerTagManager()->getRegister(macTag);
-                    if(macRegister->variableType() == DataType::Half)
-                    {
-                        wave.vgpr = Register::Value::Placeholder(m_context,
-                                                                 Register::Type::Vector,
-                                                                 DataType::Halfx2,
-                                                                 macRegister->registerCount() / 2);
-                        co_yield Register::AllocateIfNeeded(wave.vgpr);
-                        for(int i = 0; i < macRegister->registerCount(); i += 2)
-                        {
-                            co_yield m_context->copier()->pack(wave.vgpr->element({i / 2}),
-                                                               macRegister->element({i}),
-                                                               macRegister->element({i + 1}));
-                        }
-                    }
-                    else
-                    {
-                        wave.vgpr = macRegister;
-                    }
-                };
-
-                co_yield getVGPR(macATag, waveA);
-                co_yield getVGPR(macBTag, waveB);
+                waveA.vgpr = m_context->registerTagManager()->getRegister(macATag);
+                waveB.vgpr = m_context->registerTagManager()->getRegister(macBTag);
 
                 auto A
                     = std::make_shared<Expression::Expression>(std::make_shared<WaveTile>(waveA));

@@ -245,7 +245,7 @@ namespace rocRoller
          * @param load
          * @return int
          */
-        int getTopSetCoordinate(KernelGraph& graph, int load);
+        int getTopSetCoordinate(KernelGraph const& graph, int load);
 
         /**
          * @brief Get the unique tags of the highest SetCoordinate nodes directly upstream from each load.
