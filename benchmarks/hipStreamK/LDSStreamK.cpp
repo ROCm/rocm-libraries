@@ -11,6 +11,8 @@
 #include <hip/hip_runtime.h>
 
 #include <rocwmma/rocwmma.hpp>
+#include <rocwmma/rocwmma_coop.hpp>
+#include <rocwmma/rocwmma_transforms.hpp>
 
 #include "utils.hpp"
 
@@ -29,7 +31,7 @@
  * numBench: number of benchmark runs to choose, note does not use if test == 1 //Default 10
  *
  * E.g. To run streamk 100 times for benchmark using the problem 3072 x 4096 x 4096 utilizing 120 CUs (workgroups)
- * ./streamk.exe 3072 4096 4096 120 false 100
+ * ./streamk.exe 3072 4096 4096 120 0 100
  */
 
 using namespace rocwmma;
@@ -88,7 +90,6 @@ using MfmaFragAcc = fragment<accumulator, WMMA_M, WMMA_N, WMMA_K, ComputeT>;
 using GRBuffA = fragment<matrix_a, MACRO_TILE_X, WMMA_N, WMMA_K, InputT, DataLayoutA>;
 using GRBuffB = fragment<matrix_b, WMMA_M, MACRO_TILE_Y, WMMA_K, InputT, DataLayoutB>;
 
-/*
 // Local write of global buffers (macro tile)
 // - Must match Lds data layout.
 // - Lds has transposed B frags.
@@ -100,9 +101,9 @@ using LWBuffB = ApplyDataLayout_t<ApplyTranspose_t<GRBuffB>, DataLayoutLds>;
 // - Lds has transposed B frags.
 using LRFragA = ApplyDataLayout_t<MfmaFragA, DataLayoutLds>;
 using LRFragB = ApplyDataLayout_t<ApplyTranspose_t<MfmaFragB>, DataLayoutLds>;
-*/
+//*/
 
-__device__ inline void
+__device__ static inline void
     globalReadC(MfmaFragC (&fragC)[BLOCKS_X][BLOCKS_Y], OutputT const* gAddrC, uint32_t ldc)
 {
     using FragShape = GetIOShape_t<MfmaFragC>;
@@ -154,9 +155,11 @@ __device__ static inline void
 __device__ inline void
     storePartials(ComputeT* partials, int cta, const MfmaFragAcc fragAcc[BLOCKS_X][BLOCKS_Y])
 {
+#pragma unroll
     for(int i = 0; i < BLOCKS_X; i++)
     {
         auto xOffset = i * WAVE_TILE_X;
+#pragma unroll
         for(int j = 0; j < BLOCKS_Y; j++)
         {
             auto offset = (xOffset * MACRO_TILE_Y + j * WAVE_TILE_Y);
@@ -170,12 +173,14 @@ __device__ inline void
 
 //Reduce partial tiles. Note that a full fracAcc exists in *partials*, but it only has some of the K.
 //The rest of the K lives in fragAcc.
-__device__ inline void
+__device__ static inline void
     fixup(ComputeT* partials, int cta, MfmaFragAcc (&fragAcc)[BLOCKS_X][BLOCKS_Y])
 {
+#pragma unroll
     for(int i = 0; i < BLOCKS_X; i++)
     {
         auto xOffset = i * WAVE_TILE_X;
+#pragma unroll
         for(int j = 0; j < BLOCKS_Y; j++)
         {
             auto offset = (xOffset * MACRO_TILE_Y + j * WAVE_TILE_Y);
@@ -193,7 +198,7 @@ __device__ inline void signal(bool& flag)
     {
         flag = true;
     }
-    __syncthreads();
+    synchronize_workgroup();
 }
 
 __device__ inline void wait(bool& flag)
@@ -204,12 +209,12 @@ __device__ inline void wait(bool& flag)
         {
         }
     }
-    __syncthreads();
+    synchronize_workgroup();
 }
 
-__device__ inline void mfmaLoop(const MfmaFragA fragA[BLOCKS_X],
-                                const MfmaFragB fragB[BLOCKS_Y],
-                                MfmaFragAcc (&fragAcc)[BLOCKS_X][BLOCKS_Y])
+__device__ static inline void mfmaLoop(const MfmaFragA fragA[BLOCKS_X],
+                                       const MfmaFragB fragB[BLOCKS_Y],
+                                       MfmaFragAcc (&fragAcc)[BLOCKS_X][BLOCKS_Y])
 {
 #pragma unroll
     for(int i = 0; i < BLOCKS_X; i++)
@@ -237,11 +242,11 @@ __device__ static inline void fill(FragT (&frags)[BLOCKS_X][BLOCKS_Y], GetDataTy
     }
 }
 
-__device__ inline void fma(MfmaFragD (&fragsD)[BLOCKS_X][BLOCKS_Y],
-                           ComputeT alpha,
-                           MfmaFragAcc const (&fragsAcc)[BLOCKS_X][BLOCKS_Y],
-                           ComputeT beta,
-                           MfmaFragC const (&fragsC)[BLOCKS_X][BLOCKS_Y])
+__device__ static inline void fma(MfmaFragD (&fragsD)[BLOCKS_X][BLOCKS_Y],
+                                  ComputeT alpha,
+                                  MfmaFragAcc const (&fragsAcc)[BLOCKS_X][BLOCKS_Y],
+                                  ComputeT beta,
+                                  MfmaFragC const (&fragsC)[BLOCKS_X][BLOCKS_Y])
 {
 #pragma unroll
     for(int i = 0; i < BLOCKS_X; i++)
@@ -256,6 +261,85 @@ __device__ inline void fma(MfmaFragD (&fragsD)[BLOCKS_X][BLOCKS_Y],
                     alpha * fragsAcc[i][j].x[k] + beta * static_cast<ComputeT>(fragsC[i][j].x[k]));
             }
         }
+    }
+}
+
+template <uint32_t WaveCountA, uint32_t SplitCountA>
+__device__ static inline void
+    globalReadCoopA(GRBuffA& grBuffA, InputT const* gAddrA, uint32_t lda, uint32_t waveIndexA)
+{
+    load_matrix_coop_sync<WaveCountA, SplitCountA>(grBuffA, gAddrA, lda, waveIndexA);
+}
+
+// Global B reads in cooperative mode (macro tile)
+template <uint32_t WaveCountB, uint32_t SplitCountB>
+__device__ static inline void
+    globalReadCoopB(GRBuffB& grBuffB, InputT const* gAddrB, uint32_t ldb, uint32_t waveIndexB)
+{
+    load_matrix_coop_sync<WaveCountB, SplitCountB>(grBuffB, gAddrB, ldb, waveIndexB);
+}
+
+// Local A writes in cooperative mode (macro tile)
+template <uint32_t WaveCountA, uint32_t SplitCountA>
+__device__ static inline void
+    localWriteCoopA(InputT* ldsAddr, GRBuffA const& grBuffA, uint32_t WMMA_K, uint32_t waveIndexA)
+{
+    // No transpose, but apply the lds data layout
+    store_matrix_coop_sync<WaveCountA, SplitCountA>(
+        ldsAddr, applyDataLayout<DataLayoutLds>(grBuffA), WMMA_K, waveIndexA);
+}
+
+// Local B writes in cooperative mode (macro tile)
+template <uint32_t WaveCountB, uint32_t SplitCountB>
+__device__ static inline void
+    localWriteCoopB(InputT* ldsAddr, GRBuffB const& grBuffB, uint32_t WMMA_K, uint32_t waveIndexB)
+{
+    // Transpose B and then apply lds data layout
+    store_matrix_coop_sync<WaveCountB, SplitCountB>(
+        ldsAddr, applyDataLayout<DataLayoutLds>(applyTranspose(grBuffB)), WMMA_K, waveIndexB);
+}
+
+// Local A reads for warp tile gemm, non-cooperative
+__device__ static inline void
+    localReadA(MfmaFragA (&fragsA)[BLOCKS_X], InputT const* ldsAddrA, uint32_t WMMA_K)
+{
+    using FragShape = GetIOShape_t<LRFragA>;
+    using Mapper1d  = typename FragShape::DataLayout;
+
+    // Each A block is stacked vertically in LDS
+    auto blockStep = Mapper1d::fromMatrixCoord(make_coord2d(FragShape::BlockHeight, 0u), WMMA_K);
+
+#pragma unroll
+    for(int i = 0; i < BLOCKS_X; i++)
+    {
+        LRFragA tmp;
+        load_matrix_sync(tmp, ldsAddrA, WMMA_K);
+        fragsA[i] = applyDataLayout<DataLayoutA>(tmp);
+
+        ldsAddrA += blockStep;
+    }
+}
+
+// Local B reads for warp tile gemm, non-cooperative
+__device__ static inline void
+    localReadB(MfmaFragB (&fragsB)[BLOCKS_Y], InputT const* ldsAddrB, uint32_t WMMA_K)
+{
+    using FragShape = GetIOShape_t<LRFragB>;
+    using Mapper1d  = GetDataLayout_t<LRFragB>;
+
+    // Each B block is stacked vertically in LDS
+    auto blockStep = Mapper1d::fromMatrixCoord(make_coord2d(FragShape::BlockHeight, 0u), WMMA_K);
+
+#pragma unroll
+    for(int i = 0; i < BLOCKS_Y; i++)
+    {
+        LRFragB tmp;
+        load_matrix_sync(tmp, ldsAddrB, WMMA_K);
+
+        // Transform back to MFMA tile
+        fragsB[i] = applyDataLayout<DataLayoutB>(applyTranspose(tmp));
+
+        ldsAddrB += blockStep;
     }
 }
 
@@ -275,9 +359,14 @@ __global__ void streamK(uint32_t      m,
                         bool*         flags,
                         ComputeT*     partials)
 {
-    int itersPerTile = static_cast<int>(std::ceil(k / WMMA_K));
-    int totalIters   = static_cast<int>(std::ceil(m / MACRO_TILE_X))
-                     * static_cast<int>(std::ceil(n / MACRO_TILE_Y)) * itersPerTile;
+    extern __shared__ InputT localMemPtr[];
+
+    int itersPerTile
+        = static_cast<int>(std::ceil(static_cast<float>(k) / static_cast<float>(WMMA_K)));
+    int totalIters
+        = static_cast<int>(std::ceil(static_cast<float>(m) / static_cast<float>(MACRO_TILE_X)))
+          * static_cast<int>(std::ceil(static_cast<float>(n) / static_cast<float>(MACRO_TILE_Y)))
+          * itersPerTile;
     int itersPerCTA = totalIters / (gridDim.x);
     int cta         = blockIdx.x;
     int iter        = cta * itersPerCTA;
@@ -298,28 +387,49 @@ __global__ void streamK(uint32_t      m,
         }
     }
 
-    constexpr auto waveTileSize    = make_coord2d(WAVE_TILE_X, WAVE_TILE_Y);
-    constexpr auto macroTileSize   = make_coord2d(MACRO_TILE_X, MACRO_TILE_Y);
-    constexpr auto waveDims        = make_coord2d(WAVES_X, WAVES_Y);
-    auto           localWaveCoord  = make_coord2d(threadIdx.x / WAVE_SIZE, threadIdx.y);
-    auto           localWaveOffset = localWaveCoord * waveTileSize;
+    using GRBuffAMap1d = GetDataLayout_t<GRBuffA>;
+    using GRBuffBMap1d = GetDataLayout_t<GRBuffB>;
+    using LWBuffAShape = GetIOShape_t<LWBuffA>;
+    using LWBuffBShape = GetIOShape_t<LWBuffB>;
+    using LWBuffAMap1d = GetDataLayout_t<LWBuffA>;
+    using LWBuffBMap1d = GetDataLayout_t<LWBuffB>;
+    using FragShape    = GetIOShape_t<MfmaFragD>;
+    using Mapper1dC    = GetDataLayout_t<MfmaFragC>;
+    using Mapper1dD    = GetDataLayout_t<MfmaFragD>;
 
-    using Mapper1dA = GetDataLayout_t<MfmaFragA>;
-    using Mapper1dB = GetDataLayout_t<MfmaFragB>;
-    using FragShape = GetIOShape_t<MfmaFragD>;
-    using Mapper1dC = GetDataLayout_t<MfmaFragC>;
-    using Mapper1dD = GetDataLayout_t<MfmaFragD>;
+    GRBuffA grBuffA;
+    GRBuffB grBuffB;
 
-    auto stepA
-        = Mapper1dA::fromMatrixCoord(make_coord2d(GetIOShape_t<MfmaFragA>::BlockHeight, 0u), lda);
-    auto stepB
-        = Mapper1dB::fromMatrixCoord(make_coord2d(0u, GetIOShape_t<MfmaFragB>::BlockWidth), ldb);
-    auto blockStepX = Mapper1dD::fromMatrixCoord(make_coord2d(FragShape::BlockHeight, 0u), ldd);
-    auto blockStepY = Mapper1dD::fromMatrixCoord(make_coord2d(0u, FragShape::BlockWidth), ldd);
+    constexpr auto waveTileSize  = make_coord2d(WAVE_TILE_X, WAVE_TILE_Y);
+    constexpr auto macroTileSize = make_coord2d(MACRO_TILE_X, MACRO_TILE_Y);
+    constexpr auto waveCount     = WAVES_X * WAVES_Y;
+    constexpr auto splitCountA   = std::min(static_cast<uint32_t>(GetIOTraits_t<GRBuffA>::IOCount),
+                                          static_cast<uint32_t>(GetIOTraits_t<LWBuffA>::IOCount));
+    constexpr auto splitCountB   = std::min(static_cast<uint32_t>(GetIOTraits_t<GRBuffB>::IOCount),
+                                          static_cast<uint32_t>(GetIOTraits_t<LWBuffB>::IOCount));
+
+    auto localWaveCoord  = make_coord2d(threadIdx.x / WAVE_SIZE, threadIdx.y);
+    auto localWaveOffset = localWaveCoord * waveTileSize;
 
     MfmaFragA   fragsA[BLOCKS_X];
     MfmaFragAcc fragsAcc[BLOCKS_X][BLOCKS_Y];
     MfmaFragB   fragsB[BLOCKS_Y];
+
+    //Setup LDS.
+    uint32_t sizeLds  = (LWBuffAShape::BlockHeight + LWBuffBShape::BlockHeight) * WMMA_K;
+    auto*    ldsPtrLo = localMemPtr;
+    auto*    ldsPtrHi = localMemPtr + sizeLds;
+
+    auto ldsWriteOffsetA = 0u;
+    auto ldsWriteOffsetB
+        = LWBuffAMap1d::fromMatrixCoord(make_coord2d(LWBuffAShape::BlockHeight, 0u), WMMA_K);
+    auto ldsReadOffsetA
+        = ldsWriteOffsetA
+          + LWBuffAMap1d::fromMatrixCoord(make_coord2d(get<0>(localWaveOffset), 0u), WMMA_K);
+    auto ldsReadOffsetB
+        = ldsWriteOffsetB
+          + LWBuffBMap1d::fromMatrixCoord(make_coord2d(get<1>(localWaveOffset), 0u), WMMA_K);
+
     while(iter < iterEnd)
     {
         int tileId       = iter / itersPerTile;
@@ -328,46 +438,75 @@ __global__ void streamK(uint32_t      m,
         int localIter    = iter - tileIter;
         int localIterEnd = min(iterEnd, tileIterEnd) - tileIter;
 
-        auto xDim = (tileId / static_cast<int>(std::ceil(n / MACRO_TILE_Y))) * MACRO_TILE_X;
-        auto yDim = (tileId % static_cast<int>(std::ceil(n / MACRO_TILE_Y))) * MACRO_TILE_Y;
+        const int factor
+            = static_cast<int>(std::ceil(static_cast<float>(n) / static_cast<float>(MACRO_TILE_Y)));
+        auto xDim           = (tileId / factor) * MACRO_TILE_X;
+        auto yDim           = (tileId % factor) * MACRO_TILE_Y;
         auto macroTileCoord = make_coord2d(xDim, yDim);
         auto waveTileCoord  = macroTileCoord + localWaveOffset;
+        auto waveIndex      = get<0>(localWaveCoord) * WAVES_Y + get<1>(localWaveCoord);
 
-        auto aAddr = Mapper1dA::fromMatrixCoord(make_coord2d(get<0>(waveTileCoord), 0u), lda);
-        auto bAddr = Mapper1dB::fromMatrixCoord(make_coord2d(0u, get<1>(waveTileCoord)), ldb);
+        auto globalReadOffsetA
+            = GRBuffAMap1d::fromMatrixCoord(make_coord2d(get<0>(macroTileCoord), 0u), lda);
+        auto globalReadOffsetB
+            = GRBuffBMap1d::fromMatrixCoord(make_coord2d(0u, get<1>(macroTileCoord)), ldb);
 
+        //Initial read of global memory
+        globalReadCoopA<waveCount, splitCountA>(
+            grBuffA, a + globalReadOffsetA + localIter * WMMA_K * lda, lda, waveIndex);
+        globalReadCoopB<waveCount, splitCountB>(
+            grBuffB, b + globalReadOffsetB + localIter * WMMA_K * ldb, ldb, waveIndex);
+
+        ///Write global prefetch to LDS
+        localWriteCoopA<waveCount, splitCountA>(
+            ldsPtrLo + ldsWriteOffsetA, grBuffA, WMMA_K, waveIndex);
+        localWriteCoopB<waveCount, splitCountB>(
+            ldsPtrLo + ldsWriteOffsetB, grBuffB, WMMA_K, waveIndex);
         //MFMA loop
         fill(fragsAcc, 0.0f);
-        for(auto currentK = localIter; currentK < localIterEnd; currentK++)
-        {
-            auto kk      = currentK * WMMA_K;
-            auto aOffset = aAddr;
-            for(int i = 0; i < BLOCKS_X; i++)
-            {
-                load_matrix_sync(fragsA[i], a + aOffset + kk * lda, lda);
-                aOffset += stepA;
-            }
+        synchronize_workgroup();
 
-            auto bOffset = bAddr;
-            for(int i = 0; i < BLOCKS_Y; i++)
-            {
-                load_matrix_sync(fragsB[i], b + bOffset + kk * ldb, ldb);
-                bOffset += stepB;
-            }
+        for(auto currentK = localIter; currentK < localIterEnd - 1; currentK++)
+        {
+            //local Read frags from first LDS Buffer
+            localReadA(fragsA, ldsPtrLo + ldsReadOffsetA, WMMA_K);
+            localReadB(fragsB, ldsPtrLo + ldsReadOffsetB, WMMA_K);
+
+            // Prefetch next round of global
+            globalReadCoopA<waveCount, splitCountA>(
+                grBuffA, a + globalReadOffsetA + (currentK + 1) * WMMA_K * lda, lda, waveIndex);
+            globalReadCoopB<waveCount, splitCountB>(
+                grBuffB, b + globalReadOffsetB + (currentK + 1) * WMMA_K * ldb, ldb, waveIndex);
+
             mfmaLoop(fragsA, fragsB, fragsAcc);
+
+            localWriteCoopA<waveCount, splitCountA>(
+                ldsPtrHi + ldsWriteOffsetA, grBuffA, WMMA_K, waveIndex);
+            localWriteCoopB<waveCount, splitCountB>(
+                ldsPtrHi + ldsWriteOffsetB, grBuffB, WMMA_K, waveIndex);
+
+            synchronize_workgroup();
+
+            //Swap Buffers!
+            auto* tmp = ldsPtrLo;
+            ldsPtrLo  = ldsPtrHi;
+            ldsPtrHi  = tmp;
         }
 
-        bool tileStarted = iter == tileIter;
-        bool tileEnded   = iterEnd >= tileIterEnd;
+        //Last MFMA
+        // Local read mfma frags
+        localReadA(fragsA, ldsPtrLo + ldsReadOffsetA, WMMA_K);
+        localReadB(fragsB, ldsPtrLo + ldsReadOffsetB, WMMA_K);
+        mfmaLoop(fragsA, fragsB, fragsAcc);
 
-        if(!tileStarted)
+        if(iter != tileIter)
         {
             storePartials(partials, cta, fragsAcc);
             signal(flags[cta]);
         }
         else
         {
-            if(!tileEnded)
+            if(iterEnd < tileIterEnd)
             {
                 int ctaNext = cta + 1;
                 int end     = tileIter;
@@ -393,17 +532,19 @@ __global__ void streamK(uint32_t      m,
 int main(int argc, char* argv[])
 {
     bool     test     = false;
-    int      m        = 3072;
-    int      n        = 4096;
-    int      k        = 4096;
+    int      m        = 7680;
+    int      n        = 8448;
+    int      k        = 8192;
     int      numBench = 10;
     ComputeT alpha    = 1.f;
     ComputeT beta     = 1.f;
 
     hipDeviceProp_t devProp;
     CHECK_HIP_ERROR(hipGetDeviceProperties(&devProp, 0));
-    int grid = devProp.multiProcessorCount;
-
+    int  grid     = devProp.multiProcessorCount;
+    auto waveSize = devProp.warpSize;
+    auto macroTileSize
+        = rocwmma::make_coord2d(TBLOCK_X / waveSize * WAVE_TILE_X, TBLOCK_Y * WAVE_TILE_Y);
     if(argc > 1)
     {
         if(strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0)
@@ -492,8 +633,38 @@ int main(int argc, char* argv[])
 
     // Works as a warmup if benchmarking, or just the test results if test is true.
     std::cout << "Launching Kernel" << std::endl;
-    streamK<<<dimGrid, dimBlock>>>(
-        m, n, k, dA, dB, dC, dD, m, n, m, m, alpha, beta, flags, partials);
+    uint32_t ldsSize
+        = 2u * sizeof(InputT) * (get<0>(macroTileSize) + get<1>(macroTileSize)) * WMMA_K;
+
+    auto streamKKernel = [&]() {
+        hipExtLaunchKernelGGL(streamK,
+                              dimGrid,
+                              dimBlock,
+                              ldsSize,
+                              0,
+                              nullptr,
+                              nullptr,
+                              0,
+                              m,
+                              n,
+                              k,
+                              dA,
+                              dB,
+                              dC,
+                              dD,
+                              m,
+                              n,
+                              m,
+                              m,
+                              alpha,
+                              beta,
+                              flags,
+                              partials);
+    };
+
+    auto numWarmups = (!test) ? 2u : 1u;
+    for(uint32_t i = 0; i < numWarmups; i++)
+        streamKKernel();
     if(!test)
     {
         std::cout << "Benchmarking Kernel" << std::endl;
@@ -501,15 +672,13 @@ int main(int argc, char* argv[])
         CHECK_HIP_ERROR(hipEventCreate(&startEvent));
         CHECK_HIP_ERROR(hipEventCreate(&stopEvent));
         CHECK_HIP_ERROR(hipEventRecord(startEvent));
+        float elapsedTimeMs = 0.0f;
         for(int i = 0; i < numBench; i++)
         {
-            streamK<<<dimGrid, dimBlock>>>(
-                m, n, k, dA, dB, dC, dD, m, n, m, m, alpha, beta, flags, partials);
+            streamKKernel();
         }
         CHECK_HIP_ERROR(hipEventRecord(stopEvent));
         CHECK_HIP_ERROR(hipEventSynchronize(stopEvent));
-
-        float elapsedTimeMs = 0.0f;
         CHECK_HIP_ERROR(hipEventElapsedTime(&elapsedTimeMs, startEvent, stopEvent));
         std::cout << "Elapsed Time for Stream-K = " << elapsedTimeMs / numBench << " ms"
                   << std::endl;
@@ -544,8 +713,6 @@ int main(int argc, char* argv[])
             {
                 for(int j = startj; j < startj + 20; j++)
                 {
-                    InputT diff = d[i * m + j] - static_cast<InputT>(dH[i * m + j]);
-                    diff        = (diff > 0) ? diff : -diff;
                     std::cout << d[i * m + j] << " ";
                 }
                 std::cout << std::endl;
@@ -555,8 +722,6 @@ int main(int argc, char* argv[])
             {
                 for(int j = startj; j < startj + 20; j++)
                 {
-                    InputT diff = d[i * m + j] - static_cast<InputT>(dH[i * m + j]);
-                    diff        = (diff > 0) ? diff : -diff;
                     std::cout << dH[i * m + j] << " ";
                 }
                 std::cout << std::endl;
