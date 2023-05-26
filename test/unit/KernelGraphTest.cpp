@@ -15,6 +15,7 @@
 #include <rocRoller/KernelGraph/Constraints.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/CoordinateGraph.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/KernelGraph/Transforms/AddDeallocate.hpp>
 #include <rocRoller/KernelGraph/Visitors.hpp>
 #include <rocRoller/Operations/Command.hpp>
 #include <rocRoller/Utilities/Error.hpp>
@@ -1702,7 +1703,8 @@ namespace KernelGraphTest
         EXPECT_EQ(computeIndexes.size(), 14);
 
         // Verify number of Deallocates
-        auto kgraph2        = addDeallocate(kgraph1);
+        auto addDeallocate  = std::make_shared<AddDeallocate>();
+        auto kgraph2        = kgraph1.transform(addDeallocate);
         auto addDeallocates = kgraph2.control.getNodes<Deallocate>().to<std::vector>();
         EXPECT_EQ(addDeallocates.size(), 11);
 
@@ -1716,7 +1718,7 @@ namespace KernelGraphTest
         EXPECT_EQ(computeIndexes.size(), 24);
 
         // Verify number of Deallocates after unroll/fuse/lds
-        unrolled_kgraph_lds = addDeallocate(unrolled_kgraph_lds);
+        unrolled_kgraph_lds = unrolled_kgraph_lds.transform(addDeallocate);
         addDeallocates      = unrolled_kgraph_lds.control.getNodes<Deallocate>().to<std::vector>();
         EXPECT_EQ(addDeallocates.size(), 32);
     }

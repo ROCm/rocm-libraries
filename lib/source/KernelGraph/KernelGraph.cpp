@@ -1,4 +1,5 @@
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/Utilities/Settings_fwd.hpp>
 
 namespace rocRoller
 {
@@ -45,6 +46,23 @@ namespace rocRoller
         void KernelGraph::addConstraints(const std::vector<GraphConstraint>& constraints)
         {
             m_constraints.insert(m_constraints.end(), constraints.begin(), constraints.end());
+        }
+
+        KernelGraph KernelGraph::transform(std::shared_ptr<GraphTransform> const& transformation)
+        {
+            KernelGraph newGraph = transformation->apply(*this);
+            auto        logger   = rocRoller::Log::getLogger();
+            auto transformString = concatenate("KernelGraph::transform ", transformation->name());
+            if(Settings::getInstance()->get(Settings::EnforceGraphConstraints))
+            {
+                auto check = newGraph.checkConstraints();
+                AssertFatal(check.satisfied,
+                            concatenate(transformString, ": \n", check.explanation));
+            }
+            logger->debug("KernelGraph::transform: {}, post: {}",
+                          transformation->name(),
+                          newGraph.toDOT(false, transformString));
+            return newGraph;
         }
     }
 }

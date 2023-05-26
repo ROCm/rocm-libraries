@@ -4,6 +4,7 @@
 
 #include <rocRoller/KernelGraph/ControlGraph/LastRWTracer.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/KernelGraph/Transforms/AddDeallocate.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 
 namespace rocRoller::KernelGraph
@@ -11,7 +12,7 @@ namespace rocRoller::KernelGraph
     using namespace CoordinateGraph;
     using namespace ControlGraph;
 
-    KernelGraph addDeallocate(KernelGraph const& original)
+    KernelGraph AddDeallocate::apply(KernelGraph const& original)
     {
         TIMER(t, "KernelGraph::addDeallocate");
         rocRoller::Log::getLogger()->debug("KernelGraph::addDeallocate()");

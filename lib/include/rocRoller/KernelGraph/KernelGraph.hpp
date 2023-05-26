@@ -10,6 +10,7 @@
 #include <rocRoller/KernelGraph/ControlGraph/ControlGraph.hpp>
 #include <rocRoller/KernelGraph/ControlToCoordinateMapper.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/CoordinateGraph.hpp>
+#include <rocRoller/KernelGraph/Transforms/GraphTransform.hpp>
 
 namespace rocRoller
 {
@@ -76,6 +77,13 @@ namespace rocRoller
              * @param constraints
              */
             void addConstraints(const std::vector<GraphConstraint>& constraints);
+
+            /**
+             * @brief Returns new KernelGraph given a particular transformation
+             * 
+             * @param GraphTransform
+            */
+            KernelGraph transform(std::shared_ptr<GraphTransform> const&);
         };
 
         /**
@@ -155,7 +163,7 @@ namespace rocRoller
          * lifetimes.  Deallocate operations are added when registers
          * are no longer needed.
          */
-        KernelGraph addDeallocate(KernelGraph const&);
+        class AddDeallocate;
 
         /**
          * @brief Rewrite KernelGraph to add LDS operations for

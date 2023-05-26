@@ -8,6 +8,7 @@
 #include "AssemblyKernel.hpp"
 #include "KernelArguments.hpp"
 #include "KernelGraph/KernelGraph.hpp"
+#include "KernelGraph/Transforms/AddDeallocate.hpp"
 #include "Operations/Command.hpp"
 #include "Scheduling/Costs/Cost.hpp"
 #include "Scheduling/Scheduler.hpp"
@@ -366,18 +367,8 @@ namespace rocRoller
                                     check.explanation));
         }
 
-        m_kernelGraph = KernelGraph::addDeallocate(m_kernelGraph);
-        logger->debug(
-            "CommandKernel::generateKernelGraph: post addDeallocate: {}",
-            m_kernelGraph.toDOT(false, "CommandKernel::generateKernelGraph: post addDeallocate"));
-
-        if(Settings::getInstance()->get(Settings::EnforceGraphConstraints))
-        {
-            check = m_kernelGraph.checkConstraints();
-            AssertFatal(check.satisfied,
-                        concatenate("CommandKernel::generateKernel: post addDeallocate:\n",
-                                    check.explanation));
-        }
+        auto deallocateTransform = std::make_shared<KernelGraph::AddDeallocate>();
+        m_kernelGraph            = m_kernelGraph.transform(deallocateTransform);
 
         m_kernelGraph = KernelGraph::inlineIncrements(m_kernelGraph);
         logger->debug("CommandKernel::generateKernelGraph: post inlineIncrements: {}",
