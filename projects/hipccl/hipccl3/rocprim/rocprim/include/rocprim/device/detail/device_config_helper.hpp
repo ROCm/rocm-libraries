@@ -55,11 +55,9 @@ struct merge_sort_block_sort_config_params
 template<unsigned int BlockSize, unsigned int ItemsPerThread, rocprim::block_sort_algorithm Algo>
 struct merge_sort_block_sort_config : rocprim::detail::merge_sort_block_sort_config_params
 {
+    using sort_config = kernel_config<BlockSize, ItemsPerThread>;
     constexpr merge_sort_block_sort_config()
-        : rocprim::detail::merge_sort_block_sort_config_params{
-            {BlockSize, ItemsPerThread},
-            Algo
-    } {};
+        : rocprim::detail::merge_sort_block_sort_config_params{sort_config(), Algo} {};
 };
 
 constexpr unsigned int merge_sort_items_per_thread(const unsigned int item_scale)
@@ -101,6 +99,8 @@ struct merge_sort_block_sort_config_base
 };
 
 // Calculate kernel configurations, such that it will not exceed shared memory maximum
+// No radix_sort_block_sort_params and radix_sort_block_sort_config exist since the only
+// configuration member is a kernel_config.
 template<class Key, class Value>
 struct radix_sort_block_sort_config_base
 {
@@ -111,6 +111,11 @@ struct radix_sort_block_sort_config_base
     static constexpr unsigned int items_per_thread
         = rocprim::min(4u, merge_sort_items_per_thread(item_scale));
     using type = kernel_config<block_size, items_per_thread>;
+
+    // The items per block should be a power of two, as this is a requirement for the
+    // radix sort merge sort.
+    static_assert(is_power_of_two(block_size * items_per_thread),
+                  "Sorted items per block should be a power of two.");
 };
 
 /// \brief Default values are provided by \p merge_sort_block_merge_config_base.
@@ -154,50 +159,6 @@ struct merge_sort_block_merge_config_base
                                                items_per_thread>;
 };
 
-struct merge_sort_config_params
-{
-    merge_sort_block_sort_config_params  block_sort_config;
-    merge_sort_block_merge_config_params block_merge_config;
-};
-
-} // namespace detail
-
-/// \brief Configuration of device-level merge primitives.
-///
-/// \tparam SortBlockSize - block size in the block-sort step
-/// \tparam SortItemsPerThread - ItemsPerThread in the block-sort step
-/// \tparam MergeOddevenBlockSize - block size in the block merge step using oddeven impl (used when input_size < MinInputSizeMergepath)
-/// \tparam MergeMergepathPartitionBlockSize - block size of the partition kernel in the block merge step using mergepath impl
-/// \tparam MergeMergepathBlockSize - block size in the block merge step using mergepath impl
-/// \tparam MergeMergepathItemsPerThread - ItemsPerThread in the block merge step using mergepath impl
-/// \tparam MinInputSizeMergepath - breakpoint of input-size to use mergepath impl for block merge step
-template<unsigned int MergeOddevenBlockSize            = 512,
-         unsigned int SortBlockSize                    = MergeOddevenBlockSize,
-         unsigned int SortItemsPerThread               = 1,
-         unsigned int MergeMergepathPartitionBlockSize = 128,
-         unsigned int MergeMergepathBlockSize          = 128,
-         unsigned int MergeMergepathItemsPerThread     = 4,
-         unsigned int MinInputSizeMergepath            = (1 << 17) + 70000>
-struct merge_sort_config : detail::merge_sort_config_params
-{
-    /// \remark Here we map the public parameters to our internal structure.
-    using block_sort_config
-        = detail::merge_sort_block_sort_config<SortBlockSize,
-                                               SortItemsPerThread,
-                                               block_sort_algorithm::stable_merge_sort>;
-    using block_merge_config = detail::merge_sort_block_merge_config<MergeOddevenBlockSize,
-                                                                     1,
-                                                                     MinInputSizeMergepath,
-                                                                     MergeMergepathBlockSize,
-                                                                     MergeMergepathBlockSize,
-                                                                     MergeMergepathItemsPerThread>;
-    constexpr merge_sort_config()
-        : detail::merge_sort_config_params{block_sort_config(), block_merge_config()} {};
-};
-
-namespace detail
-{
-
 /// \brief Default values are provided by \p radix_sort_onesweep_config_base.
 struct radix_sort_onesweep_config_params
 {
@@ -211,13 +172,22 @@ struct radix_sort_onesweep_config_params
     block_radix_rank_algorithm radix_rank_algorithm = block_radix_rank_algorithm::default_algorithm;
 };
 
+} // namespace detail
+
+/// \brief Configuration of subalgorithm Onesweep.
+///
+/// \tparam HistogramConfig - configuration of histogram kernel.
+/// \tparam SortConfig - configuration of sort kernel.
+/// \tparam RadixBits - number of bits per iteration.
+/// \tparam RadixRankAlgorithm - algorithm used for radix rank.
 template<class HistogramConfig                = kernel_config<256, 12>,
          class SortConfig                     = kernel_config<256, 12>,
          unsigned int               RadixBits = 4,
          block_radix_rank_algorithm RadixRankAlgorithm
          = block_radix_rank_algorithm::default_algorithm>
-struct radix_sort_onesweep_config : radix_sort_onesweep_config_params
+struct radix_sort_onesweep_config : detail::radix_sort_onesweep_config_params
 {
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
     /// \brief Configration of radix sort onesweep histogram kernel.
     using histogram = HistogramConfig;
     /// \brief Configration of radix sort onesweep sort kernel.
@@ -230,7 +200,11 @@ struct radix_sort_onesweep_config : radix_sort_onesweep_config_params
             RadixBits,
             RadixRankAlgorithm,
     } {};
+#endif
 };
+
+namespace detail
+{
 
 // Calculate kernel configurations, such that it will not exceed shared memory maximum
 template<class Key, class Value>
@@ -244,54 +218,6 @@ struct radix_sort_onesweep_config_base
         kernel_config<block_size, ::rocprim::max(1u, 65000u / block_size / item_scale)>,
         4>;
 };
-
-} // namespace detail
-
-/// \brief Configuration of device-level radix sort operation.
-///
-/// Radix sort is excecuted in a single tile (at size < BlocksPerItem) or
-/// few iterations (passes) depending on total number of bits to be sorted
-/// (\p begin_bit and \p end_bit), each iteration sorts either \p LongRadixBits or \p ShortRadixBits bits
-/// choosen to cover whole bit range in optimal way.
-///
-/// For example, if \p LongRadixBits is 7, \p ShortRadixBits is 6, \p begin_bit is 0 and \p end_bit is 32
-/// there will be 5 iterations: 7 + 7 + 6 + 6 + 6 = 32 bits.
-///
-/// \tparam LongRadixBits - number of bits in long iterations.
-/// \tparam ShortRadixBits - number of bits in short iterations, must be equal to or less than \p LongRadixBits.
-/// \tparam ScanConfig - configuration of digits scan kernel. Must be \p kernel_config.
-/// \tparam SortConfig - configuration of radix sort kernel. Must be \p kernel_config.
-template<unsigned int LongRadixBits,
-         unsigned int ShortRadixBits,
-         class ScanConfig,
-         class SortConfig,
-         class SortSingleConfig               = kernel_config<256, 10>,
-         class SortMergeConfig                = kernel_config<1024, 1>,
-         unsigned int MergeSizeLimitBlocks    = 1024U,
-         bool         ForceSingleKernelConfig = false,
-         class OnesweepHistogramConfig        = kernel_config<256, 8>,
-         class OnesweepSortConfig             = kernel_config<256, 15>,
-         unsigned int OnesweepRadixBits       = 4>
-struct radix_sort_config
-{
-    /// \remark Here we map the public parameters to our internal structure.
-    /// \brief Limit number of blocks to use merge kernel.
-    static constexpr unsigned int merge_size_limit_blocks = MergeSizeLimitBlocks;
-
-    /// \brief Configuration of radix sort single kernel.
-    using block_sort_config = SortSingleConfig;
-    /// \brief Configuration of merge sort algorithm.
-    using merge_sort_config = default_config;
-    /// \brief Configration of radix sort onesweep.
-    using onesweep = detail::
-        radix_sort_onesweep_config<OnesweepHistogramConfig, OnesweepSortConfig, OnesweepRadixBits>;
-
-    /// \brief Force use radix sort single kernel configuration.
-    static constexpr bool force_single_kernel_config = ForceSingleKernelConfig;
-};
-
-namespace detail
-{
 
 struct reduce_config_params
 {
@@ -339,13 +265,67 @@ template<class Value>
 struct default_reduce_config_base : default_reduce_config_base_helper<Value>::type
 {};
 
+/// \brief Provides the kernel parameters for exclusive_scan and inclusive_scan based
+///        on autotuned configurations or user-provided configurations.
+struct scan_config_params
+{
+    kernel_config_params            kernel_config{};
+    ::rocprim::block_load_method    block_load_method{};
+    ::rocprim::block_store_method   block_store_method{};
+    ::rocprim::block_scan_algorithm block_scan_method{};
+};
+
 } // namespace detail
 
 /// \brief Configuration of device-level scan primitives.
 ///
 /// \tparam BlockSize - number of threads in a block.
 /// \tparam ItemsPerThread - number of items processed by each thread.
-/// \tparam UseLookback - whether to use lookback scan or reduce-then-scan algorithm.
+/// \tparam BlockLoadMethod - method for loading input values.
+/// \tparam StoreLoadMethod - method for storing values.
+/// \tparam BlockScanMethod - algorithm for block scan.
+/// \tparam SizeLimit - limit on the number of items for a single scan kernel launch.
+template<unsigned int                    BlockSize,
+         unsigned int                    ItemsPerThread,
+         ::rocprim::block_load_method    BlockLoadMethod,
+         ::rocprim::block_store_method   BlockStoreMethod,
+         ::rocprim::block_scan_algorithm BlockScanMethod,
+         unsigned int                    SizeLimit = ROCPRIM_GRID_SIZE_LIMIT>
+struct scan_config_v2 : ::rocprim::detail::scan_config_params
+{
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+    // Requirement dictated by init_lookback_scan_state_kernel.
+    static_assert(BlockSize <= ROCPRIM_DEFAULT_MAX_BLOCK_SIZE,
+                  "Block size should at most be ROCPRIM_DEFAULT_MAX_BLOCK_SIZE.");
+
+    /// \brief Number of threads in a block.
+    static constexpr unsigned int block_size = BlockSize;
+    /// \brief Number of items processed by each thread.
+    static constexpr unsigned int items_per_thread = ItemsPerThread;
+    /// \brief Method for loading input values.
+    static constexpr ::rocprim::block_load_method block_load_method = BlockLoadMethod;
+    /// \brief Method for storing values.
+    static constexpr ::rocprim::block_store_method block_store_method = BlockStoreMethod;
+    /// \brief Algorithm for block scan.
+    static constexpr ::rocprim::block_scan_algorithm block_scan_method = BlockScanMethod;
+    /// \brief Limit on the number of items for a single scan kernel launch.
+    static constexpr unsigned int size_limit = SizeLimit;
+
+    constexpr scan_config_v2()
+        : ::rocprim::detail::scan_config_params{
+            {BlockSize, ItemsPerThread, SizeLimit},
+            BlockLoadMethod,
+            BlockStoreMethod,
+            BlockScanMethod
+    } {};
+#endif
+};
+
+/// \brief Deprecated: Configuration of device-level scan primitives.
+///
+/// \tparam BlockSize - number of threads in a block.
+/// \tparam ItemsPerThread - number of items processed by each thread.
+/// \tparam UseLookback - deprecated, scan always uses lookback scan.
 /// \tparam BlockLoadMethod - method for loading input values.
 /// \tparam StoreLoadMethod - method for storing values.
 /// \tparam BlockScanMethod - algorithm for block scan.
@@ -357,8 +337,11 @@ template<unsigned int                    BlockSize,
          ::rocprim::block_store_method   BlockStoreMethod,
          ::rocprim::block_scan_algorithm BlockScanMethod,
          unsigned int                    SizeLimit = ROCPRIM_GRID_SIZE_LIMIT>
-struct scan_config
+struct [[deprecated("The UseLookback switch has been removed, as scan now only supports the "
+                    "lookback-scan implementation. Use scan_config_v2 instead.")]] scan_config
+    : ::rocprim::detail::scan_config_params
 {
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
     /// \brief Number of threads in a block.
     static constexpr unsigned int block_size = BlockSize;
     /// \brief Number of items processed by each thread.
@@ -373,6 +356,15 @@ struct scan_config
     static constexpr ::rocprim::block_scan_algorithm block_scan_method = BlockScanMethod;
     /// \brief Limit on the number of items for a single scan kernel launch.
     static constexpr unsigned int size_limit = SizeLimit;
+#endif
+
+    constexpr scan_config()
+        : ::rocprim::detail::scan_config_params{
+            {BlockSize, ItemsPerThread, SizeLimit},
+            BlockLoadMethod,
+            BlockStoreMethod,
+            BlockScanMethod
+    } {};
 };
 
 namespace detail
@@ -384,17 +376,26 @@ struct default_scan_config_base_helper
     static constexpr unsigned int item_scale
         = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
 
-    using type = scan_config<limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
-                             ::rocprim::max(1u, 16u / item_scale),
-                             ROCPRIM_DETAIL_USE_LOOKBACK_SCAN,
-                             ::rocprim::block_load_method::block_load_transpose,
-                             ::rocprim::block_store_method::block_store_transpose,
-                             ::rocprim::block_scan_algorithm::using_warp_scan>;
+    using type = scan_config_v2<limit_block_size<256U, sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
+                                ::rocprim::max(1u, 16u / item_scale),
+                                ::rocprim::block_load_method::block_load_transpose,
+                                ::rocprim::block_store_method::block_store_transpose,
+                                ::rocprim::block_scan_algorithm::using_warp_scan>;
 };
 
 template<class Value>
 struct default_scan_config_base : default_scan_config_base_helper<Value>::type
 {};
+
+/// \brief Provides the kernel parameters for exclusive_scan_by_key and inclusive_scan_by_key based
+///        on autotuned configurations or user-provided configurations.
+struct scan_by_key_config_params
+{
+    kernel_config_params            kernel_config;
+    ::rocprim::block_load_method    block_load_method;
+    ::rocprim::block_store_method   block_store_method;
+    ::rocprim::block_scan_algorithm block_scan_method;
+};
 
 } // namespace detail
 
@@ -402,7 +403,51 @@ struct default_scan_config_base : default_scan_config_base_helper<Value>::type
 ///
 /// \tparam BlockSize - number of threads in a block.
 /// \tparam ItemsPerThread - number of items processed by each thread.
-/// \tparam UseLookback - whether to use lookback scan or reduce-then-scan algorithm.
+/// \tparam BlockLoadMethod - method for loading input values.
+/// \tparam StoreLoadMethod - method for storing values.
+/// \tparam BlockScanMethod - algorithm for block scan.
+/// \tparam SizeLimit - limit on the number of items for a single scan kernel launch.
+template<unsigned int                    BlockSize,
+         unsigned int                    ItemsPerThread,
+         ::rocprim::block_load_method    BlockLoadMethod,
+         ::rocprim::block_store_method   BlockStoreMethod,
+         ::rocprim::block_scan_algorithm BlockScanMethod,
+         unsigned int                    SizeLimit = ROCPRIM_GRID_SIZE_LIMIT>
+struct scan_by_key_config_v2 : ::rocprim::detail::scan_by_key_config_params
+{
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+    // Requirement dictated by init_lookback_scan_state_kernel.
+    static_assert(BlockSize <= ROCPRIM_DEFAULT_MAX_BLOCK_SIZE,
+                  "Block size should at most be ROCPRIM_DEFAULT_MAX_BLOCK_SIZE.");
+
+    /// \brief Number of threads in a block.
+    static constexpr unsigned int block_size = BlockSize;
+    /// \brief Number of items processed by each thread.
+    static constexpr unsigned int items_per_thread = ItemsPerThread;
+    /// \brief Method for loading input values.
+    static constexpr ::rocprim::block_load_method block_load_method = BlockLoadMethod;
+    /// \brief Method for storing values.
+    static constexpr ::rocprim::block_store_method block_store_method = BlockStoreMethod;
+    /// \brief Algorithm for block scan.
+    static constexpr ::rocprim::block_scan_algorithm block_scan_method = BlockScanMethod;
+    /// \brief Limit on the number of items for a single scan kernel launch.
+    static constexpr unsigned int size_limit = SizeLimit;
+
+    constexpr scan_by_key_config_v2()
+        : ::rocprim::detail::scan_by_key_config_params{
+            {BlockSize, ItemsPerThread, SizeLimit},
+            BlockLoadMethod,
+            BlockStoreMethod,
+            BlockScanMethod
+    } {};
+#endif
+};
+
+/// \brief Deprecated: Configuration of device-level scan-by-key operation.
+///
+/// \tparam BlockSize - number of threads in a block.
+/// \tparam ItemsPerThread - number of items processed by each thread.
+/// \tparam UseLookback - deprecated, scan always uses lookback scan.
 /// \tparam BlockLoadMethod - method for loading input values.
 /// \tparam StoreLoadMethod - method for storing values.
 /// \tparam BlockScanMethod - algorithm for block scan.
@@ -414,8 +459,12 @@ template<unsigned int                    BlockSize,
          ::rocprim::block_store_method   BlockStoreMethod,
          ::rocprim::block_scan_algorithm BlockScanMethod,
          unsigned int                    SizeLimit = ROCPRIM_GRID_SIZE_LIMIT>
-struct scan_by_key_config
+struct [[deprecated(
+    "The UseLookback switch has been removed, as scan now only supports the lookback-scan "
+    "implementation. Use scan_by_key_config_v2 instead.")]] scan_by_key_config
+    : ::rocprim::detail::scan_by_key_config_params
 {
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
     /// \brief Number of threads in a block.
     static constexpr unsigned int block_size = BlockSize;
     /// \brief Number of items processed by each thread.
@@ -430,6 +479,15 @@ struct scan_by_key_config
     static constexpr ::rocprim::block_scan_algorithm block_scan_method = BlockScanMethod;
     /// \brief Limit on the number of items for a single scan kernel launch.
     static constexpr unsigned int size_limit = SizeLimit;
+#endif
+
+    constexpr scan_by_key_config()
+        : ::rocprim::detail::scan_by_key_config_params{
+            {BlockSize, ItemsPerThread, SizeLimit},
+            BlockLoadMethod,
+            BlockStoreMethod,
+            BlockScanMethod
+    } {};
 };
 
 namespace detail
@@ -441,10 +499,9 @@ struct default_scan_by_key_config_base_helper
     static constexpr unsigned int item_scale = ::rocprim::detail::ceiling_div<unsigned int>(
         sizeof(Key) + sizeof(Value), 2 * sizeof(int));
 
-    using type = scan_config<
+    using type = scan_by_key_config_v2<
         limit_block_size<256U, sizeof(Key) + sizeof(Value), ROCPRIM_WARP_SIZE_64>::value,
         ::rocprim::max(1u, 16u / item_scale),
-        ROCPRIM_DETAIL_USE_LOOKBACK_SCAN,
         ::rocprim::block_load_method::block_load_transpose,
         ::rocprim::block_store_method::block_store_transpose,
         ::rocprim::block_scan_algorithm::using_warp_scan>;
@@ -452,6 +509,71 @@ struct default_scan_by_key_config_base_helper
 
 template<class Key, class Value>
 struct default_scan_by_key_config_base : default_scan_by_key_config_base_helper<Key, Value>::type
+{};
+
+} // namespace detail
+
+namespace detail
+{
+
+/// \brief Provides the kernel parameters for histogram_even, multi_histogram_even,
+///        histogram_range, and multi_histogram_range based on autotuned configurations or
+///        user-provided configurations.
+struct histogram_config_params
+{
+    kernel_config_params histogram_config = {0, 0};
+
+    unsigned int max_grid_size          = 0;
+    unsigned int shared_impl_max_bins   = 0;
+    unsigned int shared_impl_histograms = 0;
+};
+
+} // namespace detail
+
+/// \brief Configuration of device-level histogram operation.
+///
+/// \tparam HistogramConfig - configuration of histogram kernel. Must be \p kernel_config.
+/// \tparam MaxGridSize - maximum number of blocks to launch.
+/// \tparam SharedImplMaxBins - maximum total number of bins for all active channels
+/// for the shared memory histogram implementation (samples -> shared memory bins -> global memory bins),
+/// when exceeded the global memory implementation is used (samples -> global memory bins).
+/// \tparam SharedImplHistograms - number of histograms in the shared memory to reduce bank conflicts
+/// for atomic operations with narrow sample distributions. Sweetspot for 9xx and 10xx is 3.
+template<class HistogramConfig,
+         unsigned int MaxGridSize          = 1024,
+         unsigned int SharedImplMaxBins    = 2048,
+         unsigned int SharedImplHistograms = 3>
+struct histogram_config : detail::histogram_config_params
+{
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+    using histogram = HistogramConfig;
+
+    static constexpr unsigned int max_grid_size          = MaxGridSize;
+    static constexpr unsigned int shared_impl_max_bins   = SharedImplMaxBins;
+    static constexpr unsigned int shared_impl_histograms = SharedImplHistograms;
+
+    constexpr histogram_config()
+        : detail::histogram_config_params{
+            HistogramConfig{}, MaxGridSize, SharedImplMaxBins, SharedImplHistograms} {};
+#endif
+};
+
+namespace detail
+{
+
+template<class Sample, unsigned int Channels, unsigned int ActiveChannels>
+struct default_histogram_config_base_helper
+{
+    static constexpr unsigned int item_scale
+        = ::rocprim::detail::ceiling_div(sizeof(Sample), sizeof(int));
+
+    using type
+        = histogram_config<kernel_config<256, ::rocprim::max(8u / Channels / item_scale, 1u)>>;
+};
+
+template<class Sample, unsigned int Channels, unsigned int ActiveChannels>
+struct default_histogram_config_base
+    : default_histogram_config_base_helper<Sample, Channels, ActiveChannels>::type
 {};
 
 } // namespace detail

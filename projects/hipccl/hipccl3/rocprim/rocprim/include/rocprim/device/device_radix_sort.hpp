@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -583,70 +583,67 @@ inline hipError_t radix_sort_onesweep_impl(
     return hipSuccess;
 }
 
-template<
-    class Config,
-    bool Descending,
-    class KeysInputIterator,
-    class KeysOutputIterator,
-    class ValuesInputIterator,
-    class ValuesOutputIterator,
-    class Size
->
-inline
-hipError_t radix_sort_impl(void * temporary_storage,
-                           size_t& storage_size,
-                           KeysInputIterator keys_input,
-                           typename std::iterator_traits<KeysInputIterator>::value_type * keys_tmp,
-                           KeysOutputIterator keys_output,
-                           ValuesInputIterator values_input,
-                           typename std::iterator_traits<ValuesInputIterator>::value_type * values_tmp,
-                           ValuesOutputIterator values_output,
-                           Size size,
-                           bool& is_result_in_output,
-                           unsigned int begin_bit,
-                           unsigned int end_bit,
-                           hipStream_t stream,
-                           bool debug_synchronous)
+template<class Config,
+         bool Descending,
+         class KeysInputIterator,
+         class KeysOutputIterator,
+         class ValuesInputIterator,
+         class ValuesOutputIterator,
+         class Size>
+inline hipError_t
+    radix_sort_impl(void*                                                         temporary_storage,
+                    size_t&                                                       storage_size,
+                    KeysInputIterator                                             keys_input,
+                    typename std::iterator_traits<KeysInputIterator>::value_type* keys_tmp,
+                    KeysOutputIterator                                            keys_output,
+                    ValuesInputIterator                                           values_input,
+                    typename std::iterator_traits<ValuesInputIterator>::value_type* values_tmp,
+                    ValuesOutputIterator                                            values_output,
+                    Size                                                            size,
+                    bool&        is_result_in_output,
+                    unsigned int begin_bit,
+                    unsigned int end_bit,
+                    hipStream_t  stream,
+                    bool         debug_synchronous)
 {
-    using key_type = typename std::iterator_traits<KeysInputIterator>::value_type;
+    using key_type   = typename std::iterator_traits<KeysInputIterator>::value_type;
     using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
 
     static_assert(
-        std::is_same<key_type, typename std::iterator_traits<KeysOutputIterator>::value_type>::value,
-        "KeysInputIterator and KeysOutputIterator must have the same value_type"
-    );
+        std::is_same<key_type,
+                     typename std::iterator_traits<KeysOutputIterator>::value_type>::value,
+        "KeysInputIterator and KeysOutputIterator must have the same value_type");
     static_assert(
-        std::is_same<value_type, typename std::iterator_traits<ValuesOutputIterator>::value_type>::value,
-        "ValuesInputIterator and ValuesOutputIterator must have the same value_type"
-    );
+        std::is_same<value_type,
+                     typename std::iterator_traits<ValuesOutputIterator>::value_type>::value,
+        "ValuesInputIterator and ValuesOutputIterator must have the same value_type");
 
-    // dummy values, we are only interested in config::merge_size_limit_blocks
-    using config = default_or_custom_config<
-        Config,
-        rocprim::radix_sort_config<3, 4, kernel_config<256, 4>, kernel_config<256, 4>>>;
+    constexpr bool is_default_config = std::is_same<Config, default_config>::value;
+    // if config is not custom, provide default value for merge sort limit
+    constexpr size_t merge_sort_limit = std::
+        conditional<is_default_config, radix_sort_config_v2<>, Config>::type::merge_sort_limit;
 
-    // The following hardcoded radix_sort_block_sort kernel configuration provides
-    // superior performance when input_size is small (< ~100000). This is because
-    // compute unit utilization is higher with this hardcoded configuration.
+    // Instantiate single sort config to find the threshold that determines which algorithm is used.
+
+    // In the case that the user provides no custom config for the single sort,
+    // instead of using the autotuned merge_sort_block_sort_config, use a hard-coded config that
+    // significantly improves performance in the case that only a single block is launched.
+    // Higher performance is achieved by increasing compute unit utilization.
     // Use <256u, 4u>, unless smaller is needed to not exceed shared memory maximum.
+    constexpr bool use_default_small_block_sort
+        = is_default_config
+          || std::is_same<typename Config::single_sort_config, default_config>::value;
     using default_radix_sort_block_sort_config =
-        typename rocprim::detail::radix_sort_block_sort_config_base<key_type, value_type>::type;
-    using small_sizes_block_sort_config
+        typename radix_sort_block_sort_config_base<key_type, value_type>::type;
+    using default_block_sort_config
         = kernel_config<rocprim::min(256u, default_radix_sort_block_sort_config::block_size),
                         rocprim::min(4u, default_radix_sort_block_sort_config::items_per_thread)>;
-
-    kernel_config_params single_sort_params;
-    hipError_t           error
-        = get_radix_sort_block_sort_config<small_sizes_block_sort_config, key_type, value_type>(
-            stream,
-            single_sort_params);
-    if(error != hipSuccess)
-        return error;
-
-    constexpr unsigned int merge_sort_limit = config::merge_size_limit_blocks * 1024;
+    using block_sort_config = typename std::conditional<use_default_small_block_sort,
+                                                        default_block_sort_config,
+                                                        typename Config::single_sort_config>::type;
 
     unsigned int single_sort_items_per_block
-        = single_sort_params.block_size * single_sort_params.items_per_thread;
+        = block_sort_config::block_size * block_sort_config::items_per_thread;
     if(size <= single_sort_items_per_block)
     {
         if(temporary_storage == nullptr)
@@ -661,53 +658,57 @@ hipError_t radix_sort_impl(void * temporary_storage,
             return hipSuccess;
         }
         is_result_in_output = true;
-        return radix_sort_block_sort<small_sizes_block_sort_config, Descending>(
-            keys_input,
-            keys_output,
-            values_input,
-            values_output,
-            static_cast<unsigned int>(size),
-            single_sort_items_per_block,
-            begin_bit,
-            end_bit,
-            stream,
-            debug_synchronous);
+        // block_sort_config is never default_config
+        return radix_sort_block_sort<block_sort_config, Descending>(keys_input,
+                                                                    keys_output,
+                                                                    values_input,
+                                                                    values_output,
+                                                                    static_cast<unsigned int>(size),
+                                                                    single_sort_items_per_block,
+                                                                    begin_bit,
+                                                                    end_bit,
+                                                                    stream,
+                                                                    debug_synchronous);
     }
-    // For sizeof(key_type) <= 2, onesweep is 2x/3x faster (also with values) when input_size > 100K, so don't use radix_sort_merge_sort then.
+    // For sizeof(key_type) <= 2, onesweep is 2x/3x faster (also with values) when
+    // input_size > 100K, so don't use radix_sort_merge_sort then.
     else if(size <= merge_sort_limit && (sizeof(key_type) > 2 || size < 100000))
     {
         is_result_in_output = true;
-        return radix_sort_merge_impl<typename Config::merge_sort_config, Descending>(
-            temporary_storage,
-            storage_size,
-            keys_input,
-            keys_tmp,
-            keys_output,
-            values_input,
-            values_tmp,
-            values_output,
-            static_cast<unsigned int>(size),
-            begin_bit,
-            end_bit,
-            stream,
-            debug_synchronous);
+        // note: Config::merge_sort_config may be default_config
+        using merge_sort_config = typename Config::merge_sort_config;
+        return radix_sort_merge_impl<merge_sort_config, Descending>(temporary_storage,
+                                                                    storage_size,
+                                                                    keys_input,
+                                                                    keys_tmp,
+                                                                    keys_output,
+                                                                    values_input,
+                                                                    values_tmp,
+                                                                    values_output,
+                                                                    static_cast<unsigned int>(size),
+                                                                    begin_bit,
+                                                                    end_bit,
+                                                                    stream,
+                                                                    debug_synchronous);
     }
     else
     {
-        return radix_sort_onesweep_impl<typename Config::onesweep, Descending>(temporary_storage,
-                                                                               storage_size,
-                                                                               keys_input,
-                                                                               keys_tmp,
-                                                                               keys_output,
-                                                                               values_input,
-                                                                               values_tmp,
-                                                                               values_output,
-                                                                               size,
-                                                                               is_result_in_output,
-                                                                               begin_bit,
-                                                                               end_bit,
-                                                                               stream,
-                                                                               debug_synchronous);
+        // note: Config::onesweep_config may be default_config
+        using onesweep_config = typename Config::onesweep_config;
+        return radix_sort_onesweep_impl<onesweep_config, Descending>(temporary_storage,
+                                                                     storage_size,
+                                                                     keys_input,
+                                                                     keys_tmp,
+                                                                     keys_output,
+                                                                     values_input,
+                                                                     values_tmp,
+                                                                     values_output,
+                                                                     size,
+                                                                     is_result_in_output,
+                                                                     begin_bit,
+                                                                     end_bit,
+                                                                     stream,
+                                                                     debug_synchronous);
     }
 }
 

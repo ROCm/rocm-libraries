@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -41,12 +41,6 @@ namespace detail
 {{ general_case() }}
 
 {% for benchmark_of_architecture in all_architectures %}
-    {% for configuration, measurement in benchmark_of_architecture.best_config_by_selection_types.items() %}
-{{ configuration_arch_specific(benchmark_of_architecture, configuration) }}
-{{ kernel_configuration(measurement) }}
-
-    {% endfor %}
-
     {% for based_on_type, fallback_selection_criteria, measurement in benchmark_of_architecture.fallback_types %}
 {{ configuration_fallback(benchmark_of_architecture, based_on_type, fallback_selection_criteria) }}
 {{ kernel_configuration(measurement) }}

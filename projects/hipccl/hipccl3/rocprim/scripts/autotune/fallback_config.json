@@ -30,6 +30,17 @@
             "floating_point": true
         },
         {
+            "algo_regex": "^device_merge_sort",
+            "based_on": {
+                "datatype": "custom_type<char,double>"
+            },
+            "sizeof": {
+                "max_inclusive": 16,
+                "min_exclusive": 8
+            },
+            "floating_point": false
+        },
+        {
             "based_on": {
                 "datatype": "int64_t"
             },

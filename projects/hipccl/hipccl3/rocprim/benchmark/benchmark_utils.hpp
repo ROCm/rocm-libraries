@@ -43,8 +43,8 @@
         hipError_t error = condition;                                                       \
         if(error != hipSuccess)                                                             \
         {                                                                                   \
-            std::cout << "HIP error: " << hipGetErrorString(error) << " line: " << __LINE__ \
-                      << std::endl;                                                         \
+            std::cout << "HIP error: " << hipGetErrorString(error) << " file: " << __FILE__ \
+                      << " line: " << __LINE__ << std::endl;                                \
             exit(error);                                                                    \
         }                                                                                   \
     }
@@ -288,33 +288,29 @@ struct DeviceSelectWarpSize
 };
 
 template<typename T>
-std::vector<T> get_random_segments(const size_t size,
-                                   const size_t max_segment_length,
-                                   const int seed_value)
+std::vector<T>
+    get_random_segments(const size_t size, const size_t max_segment_length, const int seed_value)
 {
-    static_assert(std::is_arithmetic<T>::value, "Key type must be arithmetic");
+    static_assert(rocprim::is_arithmetic<T>::value, "Key type must be arithmetic");
 
-    std::default_random_engine prng(seed_value);
+    std::default_random_engine            prng(seed_value);
     std::uniform_int_distribution<size_t> segment_length_distribution(max_segment_length);
-    using key_distribution_type = std::conditional_t<
-        std::is_integral<T>::value,
-        std::uniform_int_distribution<T>,
-        std::uniform_real_distribution<T>
-    >;
+    // std::uniform_real_distribution cannot handle rocprim::half, use float instead
+    using dis_type =
+        typename std::conditional<std::is_same<rocprim::half, T>::value, float, T>::type;
+    using key_distribution_type = std::conditional_t<rocprim::is_integral<T>::value,
+                                                     std::uniform_int_distribution<dis_type>,
+                                                     std::uniform_real_distribution<dis_type>>;
     key_distribution_type key_distribution(std::numeric_limits<T>::max());
-    std::vector<T> keys(size);
+    std::vector<T>        keys(size);
 
     size_t keys_start_index = 0;
-    while (keys_start_index < size)
+    while(keys_start_index < size)
     {
         const size_t new_segment_length = segment_length_distribution(prng);
-        const size_t new_segment_end = std::min(size, keys_start_index + new_segment_length);
-        const T key = key_distribution(prng);
-        std::fill(
-            keys.begin() + keys_start_index,
-            keys.begin() + new_segment_end,
-            key
-        );
+        const size_t new_segment_end    = std::min(size, keys_start_index + new_segment_length);
+        const T      key                = key_distribution(prng);
+        std::fill(keys.begin() + keys_start_index, keys.begin() + new_segment_end, key);
         keys_start_index += new_segment_length;
     }
     return keys;
@@ -803,6 +799,19 @@ inline void add_common_benchmark_info()
     num("hdp_arch_has_surface_funcs", arch.hasSurfaceFuncs);
     num("hdp_arch_has_3d_grid", arch.has3dGrid);
     num("hdp_arch_has_dynamic_parallelism", arch.hasDynamicParallelism);
+}
+
+inline const char* get_block_scan_method_name(rocprim::block_scan_algorithm alg)
+{
+    switch(alg)
+    {
+        case rocprim::block_scan_algorithm::using_warp_scan:
+            return "block_scan_algorithm::using_warp_scan";
+        case rocprim::block_scan_algorithm::reduce_then_scan:
+            return "block_scan_algorithm::reduce_then_scan";
+            // Not using `default: ...` because it kills effectiveness of -Wswitch
+    }
+    return "unknown_algorithm";
 }
 
 #endif // ROCPRIM_BENCHMARK_UTILS_HPP_

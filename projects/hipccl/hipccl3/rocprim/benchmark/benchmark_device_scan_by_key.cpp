@@ -35,18 +35,31 @@
 // CmdParser
 #include "cmdparser.hpp"
 
-#include "benchmark_device_scan.parallel.hpp"
+#include "benchmark_device_scan_by_key.parallel.hpp"
 #include "benchmark_utils.hpp"
 
 #ifndef DEFAULT_N
 const size_t DEFAULT_N = 1024 * 1024 * 32;
 #endif
 
-#define CREATE_EXCL_INCL_BENCHMARK(EXCL, T, SCAN_OP)            \
-    {                                                           \
-        const device_scan_benchmark<EXCL, T, SCAN_OP> instance; \
-        REGISTER_BENCHMARK(benchmarks, size, stream, instance); \
+#define CREATE_BY_KEY_BENCHMARK(EXCL, T, SCAN_OP, MAX_SEGMENT_LENGTH) \
+    {                                                                 \
+        const device_scan_by_key_benchmark<EXCL,                      \
+                                           int,                       \
+                                           T,                         \
+                                           SCAN_OP,                   \
+                                           rocprim::equal_to<int>,    \
+                                           MAX_SEGMENT_LENGTH>        \
+            instance;                                                 \
+        REGISTER_BENCHMARK(benchmarks, size, stream, instance);       \
     }
+
+#define CREATE_EXCL_INCL_BENCHMARK(EXCL, T, SCAN_OP) \
+    CREATE_BY_KEY_BENCHMARK(EXCL, T, SCAN_OP, 1)     \
+    CREATE_BY_KEY_BENCHMARK(EXCL, T, SCAN_OP, 16)    \
+    CREATE_BY_KEY_BENCHMARK(EXCL, T, SCAN_OP, 256)   \
+    CREATE_BY_KEY_BENCHMARK(EXCL, T, SCAN_OP, 4096)  \
+    CREATE_BY_KEY_BENCHMARK(EXCL, T, SCAN_OP, 65536)
 
 #define CREATE_BENCHMARK(T, SCAN_OP)              \
     CREATE_EXCL_INCL_BENCHMARK(false, T, SCAN_OP) \

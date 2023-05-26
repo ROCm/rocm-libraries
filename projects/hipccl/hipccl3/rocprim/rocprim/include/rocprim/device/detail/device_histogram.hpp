@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -326,7 +326,6 @@ template<unsigned int BlockSize,
          unsigned int ItemsPerThread,
          unsigned int Channels,
          unsigned int ActiveChannels,
-         unsigned int SharedHistograms,
          class SampleIterator,
          class Counter,
          class SampleToBinOp>
@@ -336,6 +335,7 @@ ROCPRIM_DEVICE ROCPRIM_INLINE void
                      unsigned int                               rows,
                      unsigned int                               row_stride,
                      unsigned int                               rows_per_block,
+                     unsigned int                               shared_histograms,
                      fixed_array<Counter*, ActiveChannels>      histogram,
                      fixed_array<SampleToBinOp, ActiveChannels> sample_to_bin_op,
                      fixed_array<unsigned int, ActiveChannels>  bins,
@@ -361,10 +361,10 @@ ROCPRIM_DEVICE ROCPRIM_INLINE void
     }
 
     // partial histogram to work with
-    const unsigned int thread_shift = (flat_id % SharedHistograms) * total_bins;
+    const unsigned int thread_shift = (flat_id % shared_histograms) * total_bins;
 
     // fill all histograms with 0
-    for(unsigned int i = flat_id; i < total_bins * SharedHistograms; i += BlockSize)
+    for(unsigned int i = flat_id; i < total_bins * shared_histograms; i += BlockSize)
     {
         block_histogram_start[i] = 0;
     }
@@ -435,7 +435,7 @@ ROCPRIM_DEVICE ROCPRIM_INLINE void
         for(unsigned int bin = flat_id; bin < bins[channel]; bin += BlockSize)
         {
             unsigned int total = 0;
-            for(unsigned int i = 0; i < SharedHistograms; i++)
+            for(unsigned int i = 0; i < shared_histograms; i++)
             {
                 total += block_histogram[channel][bin + i * total_bins];
             }

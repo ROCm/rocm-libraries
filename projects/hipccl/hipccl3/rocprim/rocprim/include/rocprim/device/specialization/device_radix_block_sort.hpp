@@ -1,4 +1,4 @@
-// Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2021-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -135,22 +135,6 @@ inline hipError_t radix_sort_block_sort(KeysInputIterator    keys_input,
                        bit,
                        current_radix_bits);
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("radix_sort_block_sort_kernel", size, start)
-    return hipSuccess;
-}
-
-template<class Config, class key_type, class value_type>
-hipError_t get_radix_sort_block_sort_config(hipStream_t stream, kernel_config_params& params)
-{
-    using block_single_config = wrapped_radix_sort_block_sort_config<Config, key_type, value_type>;
-
-    detail::target_arch target_arch;
-    hipError_t          result = host_target_arch(stream, target_arch);
-    if(result != hipSuccess)
-    {
-        return result;
-    }
-
-    params = dispatch_target_arch<block_single_config>(target_arch);
     return hipSuccess;
 }
 

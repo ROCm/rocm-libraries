@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -29,7 +29,6 @@
 // Google Benchmark
 #include "benchmark/benchmark.h"
 // CmdParser
-#include "benchmark_utils.hpp"
 #include "cmdparser.hpp"
 
 // HIP API
@@ -37,6 +36,9 @@
 
 // rocPRIM
 #include <rocprim/rocprim.hpp>
+
+#include "benchmark_device_histogram.parallel.hpp"
+#include "benchmark_utils.hpp"
 
 #ifndef DEFAULT_N
 const size_t DEFAULT_N = 1024 * 1024 * 32;
@@ -46,40 +48,6 @@ namespace rp = rocprim;
 
 const unsigned int batch_size  = 10;
 const unsigned int warmup_size = 5;
-
-template<class T>
-std::vector<T> generate(size_t size, int entropy_reduction, int lower_level, int upper_level)
-{
-    if(entropy_reduction >= 5)
-    {
-        return std::vector<T>(size, (T)((lower_level + upper_level) / 2));
-    }
-
-    const size_t max_random_size = 1024 * 1024;
-
-    std::random_device         rd;
-    std::default_random_engine gen(rd());
-    std::vector<T>             data(size);
-    std::generate(data.begin(),
-                  data.begin() + std::min(size, max_random_size),
-                  [&]()
-                  {
-                      // Reduce enthropy by applying bitwise AND to random bits
-                      // "An Improved Supercomputer Sorting Benchmark", 1992
-                      // Kurt Thearling & Stephen Smith
-                      auto v = gen();
-                      for(int e = 0; e < entropy_reduction; e++)
-                      {
-                          v &= gen();
-                      }
-                      return T(lower_level + v % (upper_level - lower_level));
-                  });
-    for(size_t i = max_random_size; i < size; i += max_random_size)
-    {
-        std::copy_n(data.begin(), std::min(size - i, max_random_size), data.begin() + i);
-    }
-    return data;
-}
 
 int get_entropy_percents(int entropy_reduction)
 {
@@ -105,9 +73,11 @@ void run_even_benchmark(benchmark::State& state,
                         size_t            size)
 {
     using counter_type = unsigned int;
+    using level_type =
+        typename std::conditional_t<std::is_integral<T>::value && sizeof(T) < sizeof(int), int, T>;
 
-    const T lower_level = 0;
-    const T upper_level = bins * scale;
+    const level_type lower_level = 0;
+    const level_type upper_level = bins * scale;
 
     // Generate data
     std::vector<T> input = generate<T>(size, entropy_reduction, lower_level, upper_level);
@@ -204,10 +174,12 @@ void run_multi_even_benchmark(benchmark::State& state,
                               size_t            size)
 {
     using counter_type = unsigned int;
+    using level_type =
+        typename std::conditional_t<std::is_integral<T>::value && sizeof(T) < sizeof(int), int, T>;
 
     unsigned int num_levels[ActiveChannels];
-    int          lower_level[ActiveChannels];
-    int          upper_level[ActiveChannels];
+    level_type   lower_level[ActiveChannels];
+    level_type   upper_level[ActiveChannels];
     for(unsigned int channel = 0; channel < ActiveChannels; channel++)
     {
         lower_level[channel] = 0;
@@ -312,21 +284,27 @@ template<class T>
 void run_range_benchmark(benchmark::State& state, size_t bins, hipStream_t stream, size_t size)
 {
     using counter_type = unsigned int;
+    using level_type =
+        typename std::conditional_t<std::is_integral<T>::value && sizeof(T) < sizeof(int), int, T>;
 
     // Generate data
     std::vector<T> input = get_random_data<T>(size, 0, bins);
 
-    std::vector<T> levels(bins + 1);
-    std::iota(levels.begin(), levels.end(), 0);
+    std::vector<level_type> levels(bins + 1);
+    for(size_t i = 0; i < levels.size(); i++)
+    {
+        levels[i] = static_cast<level_type>(i);
+    }
 
     T*            d_input;
-    T*            d_levels;
+    level_type*   d_levels;
     counter_type* d_histogram;
     HIP_CHECK(hipMalloc(&d_input, size * sizeof(T)));
-    HIP_CHECK(hipMalloc(&d_levels, (bins + 1) * sizeof(T)));
+    HIP_CHECK(hipMalloc(&d_levels, (bins + 1) * sizeof(level_type)));
     HIP_CHECK(hipMalloc(&d_histogram, size * sizeof(counter_type)));
     HIP_CHECK(hipMemcpy(d_input, input.data(), size * sizeof(T), hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy(d_levels, levels.data(), (bins + 1) * sizeof(T), hipMemcpyHostToDevice));
+    HIP_CHECK(
+        hipMemcpy(d_levels, levels.data(), (bins + 1) * sizeof(level_type), hipMemcpyHostToDevice));
 
     void*  d_temporary_storage     = nullptr;
     size_t temporary_storage_bytes = 0;
@@ -410,14 +388,19 @@ void run_multi_range_benchmark(benchmark::State& state,
                                size_t            size)
 {
     using counter_type = unsigned int;
+    using level_type =
+        typename std::conditional_t<std::is_integral<T>::value && sizeof(T) < sizeof(int), int, T>;
 
-    const int      num_levels_channel = bins + 1;
-    unsigned int   num_levels[ActiveChannels];
-    std::vector<T> levels[ActiveChannels];
+    const int               num_levels_channel = bins + 1;
+    unsigned int            num_levels[ActiveChannels];
+    std::vector<level_type> levels[ActiveChannels];
     for(unsigned int channel = 0; channel < ActiveChannels; channel++)
     {
         levels[channel].resize(num_levels_channel);
-        std::iota(levels[channel].begin(), levels[channel].end(), static_cast<T>(0));
+        for(size_t i = 0; i < levels[channel].size(); i++)
+        {
+            levels[channel][i] = static_cast<level_type>(i);
+        }
         num_levels[channel] = num_levels_channel;
     }
 
@@ -425,12 +408,12 @@ void run_multi_range_benchmark(benchmark::State& state,
     std::vector<T> input = get_random_data<T>(size * Channels, 0, bins);
 
     T*            d_input;
-    T*            d_levels[ActiveChannels];
+    level_type*   d_levels[ActiveChannels];
     counter_type* d_histogram[ActiveChannels];
     HIP_CHECK(hipMalloc(&d_input, size * Channels * sizeof(T)));
     for(unsigned int channel = 0; channel < ActiveChannels; channel++)
     {
-        HIP_CHECK(hipMalloc(&d_levels[channel], num_levels_channel * sizeof(T)));
+        HIP_CHECK(hipMalloc(&d_levels[channel], num_levels_channel * sizeof(level_type)));
         HIP_CHECK(hipMalloc(&d_histogram[channel], size * sizeof(counter_type)));
     }
 
@@ -439,7 +422,7 @@ void run_multi_range_benchmark(benchmark::State& state,
     {
         HIP_CHECK(hipMemcpy(d_levels[channel],
                             levels[channel].data(),
-                            num_levels_channel * sizeof(T),
+                            num_levels_channel * sizeof(level_type),
                             hipMemcpyHostToDevice));
     }
 
@@ -521,43 +504,20 @@ void run_multi_range_benchmark(benchmark::State& state,
     }
 }
 
-template<class T>
-struct num_limits
-{
-    static constexpr T max()
-    {
-        return std::numeric_limits<T>::max();
-    };
-};
+#define CREATE_EVEN_BENCHMARK(VECTOR, T, BINS, SCALE)                                          \
+    VECTOR.push_back(benchmark::RegisterBenchmark(                                             \
+        bench_naming::format_name("{lvl:device,algo:histogram_even,value_type:" #T ",entropy:" \
+                                  + std::to_string(get_entropy_percents(entropy_reduction))    \
+                                  + ",bins:" + std::to_string(BINS) + ",cfg:default_config}")  \
+            .c_str(),                                                                          \
+        [=](benchmark::State& state)                                                           \
+        { run_even_benchmark<T>(state, BINS, SCALE, entropy_reduction, stream, size); }));
 
-template<>
-struct num_limits<rocprim::half>
-{
-    static constexpr double max()
-    {
-        return 65504.0;
-    };
-};
-
-#define CREATE_EVEN_BENCHMARK(VECTOR, T, BINS, SCALE)                                             \
-    if(num_limits<T>::max() > BINS * SCALE)                                                       \
-    {                                                                                             \
-        VECTOR.push_back(benchmark::RegisterBenchmark(                                            \
-            bench_naming::format_name("{lvl:device,algo:histogram_even,key_type:" #T ",entropy:"  \
-                                      + std::to_string(get_entropy_percents(entropy_reduction))   \
-                                      + ",bins:" + std::to_string(BINS) + ",cfg:default_config}") \
-                .c_str(),                                                                         \
-            [=](benchmark::State& state)                                                          \
-            { run_even_benchmark<T>(state, BINS, SCALE, entropy_reduction, stream, size); }));    \
-    }
-
-#define BENCHMARK_TYPE(VECTOR, T)                 \
-    CREATE_EVEN_BENCHMARK(VECTOR, T, 10, 1234);   \
-    CREATE_EVEN_BENCHMARK(VECTOR, T, 100, 1234);  \
-    CREATE_EVEN_BENCHMARK(VECTOR, T, 1000, 1234); \
-    CREATE_EVEN_BENCHMARK(VECTOR, T, 16, 10);     \
-    CREATE_EVEN_BENCHMARK(VECTOR, T, 256, 10);    \
-    CREATE_EVEN_BENCHMARK(VECTOR, T, 65536, 1)
+#define BENCHMARK_EVEN_TYPE(VECTOR, T, S)      \
+    CREATE_EVEN_BENCHMARK(VECTOR, T, 10, S);   \
+    CREATE_EVEN_BENCHMARK(VECTOR, T, 100, S);  \
+    CREATE_EVEN_BENCHMARK(VECTOR, T, 1000, S); \
+    CREATE_EVEN_BENCHMARK(VECTOR, T, 10000, S);
 
 void add_even_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
                          hipStream_t                                   stream,
@@ -565,19 +525,20 @@ void add_even_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmark
 {
     for(int entropy_reduction : entropy_reductions)
     {
-        BENCHMARK_TYPE(benchmarks, long long);
-        BENCHMARK_TYPE(benchmarks, int);
-        BENCHMARK_TYPE(benchmarks, unsigned short);
-        BENCHMARK_TYPE(benchmarks, uint8_t);
-        BENCHMARK_TYPE(benchmarks, double);
-        BENCHMARK_TYPE(benchmarks, float);
-        BENCHMARK_TYPE(benchmarks, rocprim::half);
+        BENCHMARK_EVEN_TYPE(benchmarks, long long, 12345);
+        BENCHMARK_EVEN_TYPE(benchmarks, int, 1234);
+        BENCHMARK_EVEN_TYPE(benchmarks, short, 5);
+        CREATE_EVEN_BENCHMARK(benchmarks, unsigned char, 16, 16);
+        CREATE_EVEN_BENCHMARK(benchmarks, unsigned char, 256, 1);
+        BENCHMARK_EVEN_TYPE(benchmarks, double, 1234);
+        BENCHMARK_EVEN_TYPE(benchmarks, float, 1234);
+        BENCHMARK_EVEN_TYPE(benchmarks, rocprim::half, 5);
     };
 }
 
 #define CREATE_MULTI_EVEN_BENCHMARK(CHANNELS, ACTIVE_CHANNELS, T, BINS, SCALE)                \
     benchmark::RegisterBenchmark(                                                             \
-        bench_naming::format_name("{lvl:device,algo:histogram_even_multi,key_type:" #T        \
+        bench_naming::format_name("{lvl:device,algo:multi_histogram_even,value_type:" #T      \
                                   ",channels:" #CHANNELS ",active_channels:" #ACTIVE_CHANNELS \
                                   ",entropy:"                                                 \
                                   + std::to_string(get_entropy_percents(entropy_reduction))   \
@@ -593,6 +554,11 @@ void add_even_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmark
                                                                    size);                     \
         })
 
+#define BENCHMARK_MULTI_EVEN_TYPE(C, A, T, S)                                                  \
+    CREATE_MULTI_EVEN_BENCHMARK(C, A, T, 10, S), CREATE_MULTI_EVEN_BENCHMARK(C, A, T, 100, S), \
+        CREATE_MULTI_EVEN_BENCHMARK(C, A, T, 1000, S),                                         \
+        CREATE_MULTI_EVEN_BENCHMARK(C, A, T, 10000, S)
+
 void add_multi_even_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
                                hipStream_t                                   stream,
                                size_t                                        size)
@@ -600,61 +566,70 @@ void add_multi_even_benchmarks(std::vector<benchmark::internal::Benchmark*>& ben
     for(int entropy_reduction : entropy_reductions)
     {
         std::vector<benchmark::internal::Benchmark*> bs = {
-            CREATE_MULTI_EVEN_BENCHMARK(4, 3, int, 10, 1234),
-            CREATE_MULTI_EVEN_BENCHMARK(4, 3, int, 100, 1234),
-
-            CREATE_MULTI_EVEN_BENCHMARK(4, 3, unsigned char, 16, 10),
+            BENCHMARK_MULTI_EVEN_TYPE(4, 4, int, 1234),
+            BENCHMARK_MULTI_EVEN_TYPE(4, 3, short, 5),
+            CREATE_MULTI_EVEN_BENCHMARK(4, 3, unsigned char, 16, 16),
             CREATE_MULTI_EVEN_BENCHMARK(4, 3, unsigned char, 256, 1),
-
-            CREATE_MULTI_EVEN_BENCHMARK(4, 3, unsigned short, 16, 10),
-            CREATE_MULTI_EVEN_BENCHMARK(4, 3, unsigned short, 256, 10),
-            CREATE_MULTI_EVEN_BENCHMARK(4, 3, unsigned short, 65536, 1),
+            BENCHMARK_MULTI_EVEN_TYPE(3, 3, float, 1234),
         };
         benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
     };
 }
 
-#define CREATE_RANGE_BENCHMARK(T, BINS)                                                    \
-    benchmark::RegisterBenchmark(                                                          \
-        bench_naming::format_name("{lvl:device,algo:histogram_range,key_type:" #T ",bins:" \
-                                  + std::to_string(BINS) + ",cfg:default_config}")         \
-            .c_str(),                                                                      \
+#define CREATE_RANGE_BENCHMARK(T, BINS)                                                      \
+    benchmark::RegisterBenchmark(                                                            \
+        bench_naming::format_name("{lvl:device,algo:histogram_range,value_type:" #T ",bins:" \
+                                  + std::to_string(BINS) + ",cfg:default_config}")           \
+            .c_str(),                                                                        \
         [=](benchmark::State& state) { run_range_benchmark<T>(state, BINS, stream, size); })
 
-#define BENCHMARK_RANGE_TYPE(T)                                            \
-    CREATE_RANGE_BENCHMARK(T, 10), CREATE_RANGE_BENCHMARK(T, 100),         \
-        CREATE_RANGE_BENCHMARK(T, 1000), CREATE_RANGE_BENCHMARK(T, 10000), \
-        CREATE_RANGE_BENCHMARK(T, 100000), CREATE_RANGE_BENCHMARK(T, 1000000)
+#define BENCHMARK_RANGE_TYPE(T)                                    \
+    CREATE_RANGE_BENCHMARK(T, 10), CREATE_RANGE_BENCHMARK(T, 100), \
+        CREATE_RANGE_BENCHMARK(T, 1000), CREATE_RANGE_BENCHMARK(T, 10000)
 
 void add_range_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
                           hipStream_t                                   stream,
                           size_t                                        size)
 {
-    std::vector<benchmark::internal::Benchmark*> bs
-        = {BENCHMARK_RANGE_TYPE(float), BENCHMARK_RANGE_TYPE(double)};
+    std::vector<benchmark::internal::Benchmark*> bs = {
+        BENCHMARK_RANGE_TYPE(long long),
+        BENCHMARK_RANGE_TYPE(int),
+        BENCHMARK_RANGE_TYPE(short),
+        CREATE_RANGE_BENCHMARK(unsigned char, 16),
+        CREATE_RANGE_BENCHMARK(unsigned char, 256),
+        BENCHMARK_RANGE_TYPE(double),
+        BENCHMARK_RANGE_TYPE(float),
+        BENCHMARK_RANGE_TYPE(rocprim::half),
+    };
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
 }
 
-#define CREATE_MULTI_RANGE_BENCHMARK(CHANNELS, ACTIVE_CHANNELS, T, BINS)                          \
-    benchmark::RegisterBenchmark(                                                                 \
-        bench_naming::format_name(                                                                \
-            "{lvl:device,algo:histogram_range,key_type:" #T ",bins:" + std::to_string(BINS)       \
-            + ",channels:" #CHANNELS ",active_channels:" #ACTIVE_CHANNELS ",cfg:default_config}") \
-            .c_str(),                                                                             \
-        [=](benchmark::State& state)                                                              \
+#define CREATE_MULTI_RANGE_BENCHMARK(CHANNELS, ACTIVE_CHANNELS, T, BINS)                      \
+    benchmark::RegisterBenchmark(                                                             \
+        bench_naming::format_name("{lvl:device,algo:multi_histogram_range,value_type:" #T     \
+                                  ",channels:" #CHANNELS ",active_channels:" #ACTIVE_CHANNELS \
+                                  ",bins:"                                                    \
+                                  + std::to_string(BINS) + ",cfg:default_config}")            \
+            .c_str(),                                                                         \
+        [=](benchmark::State& state)                                                          \
         { run_multi_range_benchmark<T, CHANNELS, ACTIVE_CHANNELS>(state, BINS, stream, size); })
+
+#define BENCHMARK_MULTI_RANGE_TYPE(C, A, T)                                                \
+    CREATE_MULTI_RANGE_BENCHMARK(C, A, T, 10), CREATE_MULTI_RANGE_BENCHMARK(C, A, T, 100), \
+        CREATE_MULTI_RANGE_BENCHMARK(C, A, T, 1000), CREATE_MULTI_RANGE_BENCHMARK(C, A, T, 10000)
 
 void add_multi_range_benchmarks(std::vector<benchmark::internal::Benchmark*>& benchmarks,
                                 hipStream_t                                   stream,
                                 size_t                                        size)
 {
-    std::vector<benchmark::internal::Benchmark*> bs
-        = {CREATE_MULTI_RANGE_BENCHMARK(4, 3, float, 10),
-           CREATE_MULTI_RANGE_BENCHMARK(4, 3, float, 100),
-           CREATE_MULTI_RANGE_BENCHMARK(4, 3, float, 1000),
-           CREATE_MULTI_RANGE_BENCHMARK(4, 3, float, 10000),
-           CREATE_MULTI_RANGE_BENCHMARK(4, 3, float, 100000),
-           CREATE_MULTI_RANGE_BENCHMARK(4, 3, float, 1000000)};
+    std::vector<benchmark::internal::Benchmark*> bs = {
+        BENCHMARK_MULTI_RANGE_TYPE(4, 4, int),
+        BENCHMARK_MULTI_RANGE_TYPE(4, 3, short),
+        CREATE_MULTI_RANGE_BENCHMARK(4, 3, unsigned char, 16),
+        CREATE_MULTI_RANGE_BENCHMARK(4, 3, unsigned char, 256),
+        BENCHMARK_MULTI_RANGE_TYPE(3, 3, float),
+        BENCHMARK_MULTI_RANGE_TYPE(2, 2, double),
+    };
     benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
 }
 
@@ -667,6 +642,17 @@ int main(int argc, char* argv[])
                                      "name_format",
                                      "human",
                                      "either: json,human,txt");
+#ifdef BENCHMARK_CONFIG_TUNING
+    // optionally run an evenly split subset of benchmarks, when making multiple program invocations
+    parser.set_optional<int>("parallel_instance",
+                             "parallel_instance",
+                             0,
+                             "parallel instance index");
+    parser.set_optional<int>("parallel_instances",
+                             "parallel_instances",
+                             1,
+                             "total parallel instances");
+#endif
     parser.run_and_exit_if_error();
 
     // Parse argv
@@ -684,10 +670,20 @@ int main(int argc, char* argv[])
 
     // Add benchmarks
     std::vector<benchmark::internal::Benchmark*> benchmarks;
+#ifdef BENCHMARK_CONFIG_TUNING
+    const int parallel_instance  = parser.get<int>("parallel_instance");
+    const int parallel_instances = parser.get<int>("parallel_instances");
+    config_autotune_register::register_benchmark_subset(benchmarks,
+                                                        parallel_instance,
+                                                        parallel_instances,
+                                                        size,
+                                                        stream);
+#else // BENCHMARK_CONFIG_TUNING
     add_even_benchmarks(benchmarks, stream, size);
     add_multi_even_benchmarks(benchmarks, stream, size);
     add_range_benchmarks(benchmarks, stream, size);
     add_multi_range_benchmarks(benchmarks, stream, size);
+#endif // BENCHMARK_CONFIG_TUNING
 
     // Use manual timing
     for(auto& b : benchmarks)

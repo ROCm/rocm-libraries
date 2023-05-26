@@ -5,7 +5,7 @@ ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_SCAN_BY_KEY_HPP_
 {%- endmacro %}
 
 {% macro kernel_configuration(measurement) -%}
-scan_by_key_config<{{ measurement['block_size'] }}, {{ measurement['items_per_thread'] }}, true, ::rocprim::block_load_method::block_load_transpose, ::rocprim::block_store_method::block_store_transpose, {{ measurement['block_scan_algo'] }}> { };
+scan_by_key_config_v2<{{ measurement['cfg']['bs'] }}, {{ measurement['cfg']['ipt'] }}, ::rocprim::block_load_method::block_load_transpose, ::rocprim::block_store_method::block_store_transpose, {{ measurement['cfg']['method'] }}> { };
 {%- endmacro %}
 
 {% macro general_case() -%}

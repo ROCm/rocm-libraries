@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -385,11 +385,11 @@ struct device_radix_sort_onesweep_benchmark_generator
                       RadixRankAlgorithm,
                       std::enable_if_t<(is_buildable<ItemsPerThread, RadixRankAlgorithm>())>>
     {
-        using generated_config = rocprim::detail::radix_sort_onesweep_config<
-            rocprim::kernel_config<BlockSize, ItemsPerThread>,
-            rocprim::kernel_config<BlockSize, ItemsPerThread>,
-            RadixBits,
-            RadixRankAlgorithm>;
+        using generated_config
+            = rocprim::radix_sort_onesweep_config<rocprim::kernel_config<BlockSize, ItemsPerThread>,
+                                                  rocprim::kernel_config<BlockSize, ItemsPerThread>,
+                                                  RadixBits,
+                                                  RadixRankAlgorithm>;
         void operator()(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
         {
             storage.emplace_back(

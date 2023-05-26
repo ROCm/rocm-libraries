@@ -1,0 +1,21 @@
+{% extends "config_template" %}
+
+{% macro get_header_guard() %}
+ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_HISTOGRAM_HPP_
+{%- endmacro %}
+
+{% macro kernel_configuration(measurement) -%}
+histogram_config<kernel_config<{{ measurement['cfg']['bs'] }}, {{ measurement['cfg']['ipt'] }}>, {{ measurement['cfg']['max_grid_size'] }}, {{ measurement['cfg']['shared_impl_max_bins'] }}, {{ measurement['cfg']['shared_impl_histograms'] }}> { };
+{%- endmacro %}
+
+{% macro general_case() -%}
+template<unsigned int arch, class value_type, unsigned int channels, unsigned int active_channels, class enable = void>
+struct default_histogram_config :
+default_histogram_config_base<value_type, channels, active_channels> { };
+{%- endmacro %}
+
+{% macro configuration_fallback(benchmark_of_architecture, based_on_type, fallback_selection_criteria) -%}
+// Based on {{ based_on_type }}
+template<class value_type, unsigned int channels, unsigned int active_channels>
+struct default_histogram_config<static_cast<unsigned int>({{ benchmark_of_architecture.name }}), value_type, channels, active_channels, {{ fallback_selection_criteria }}> :
+{%- endmacro %}

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,11 +22,10 @@
 
 #include <cstdint>
 
-#include "benchmark_device_scan.parallel.hpp"
 #include "benchmark_utils.hpp"
+#include "benchmark_device_histogram.parallel.hpp"
 
-namespace
-{
-auto benchmarks = config_autotune_register::create_bulk(
-    device_scan_benchmark_generator<@DataType@, rocprim::block_scan_algorithm::@Algo@>::create);
-} // namespace
+namespace {
+    auto benchmarks = config_autotune_register::create_bulk(
+        device_histogram_benchmark_generator<@DataType@, @BlockSize@>::create);
+}

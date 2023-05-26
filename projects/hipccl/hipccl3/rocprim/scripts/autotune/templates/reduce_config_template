@@ -9,17 +9,17 @@ reduce_config<{{ measurement['cfg']['bs'] }}, {{ measurement['cfg']['ipt'] }}, :
 {%- endmacro %}
 
 {% macro general_case() -%}
-template<unsigned int arch, class datatype, class enable = void> struct default_reduce_config :
-default_reduce_config_base<datatype> { };
+template<unsigned int arch, class key_type, class enable = void> struct default_reduce_config :
+default_reduce_config_base<key_type> { };
 {%- endmacro %}
 
 {% macro configuration_arch_specific(benchmark_of_architecture, configuration) -%}
-template<> struct default_reduce_config<static_cast<unsigned int>({{ benchmark_of_architecture.name }}), {{configuration.datatype}}> :
+template<> struct default_reduce_config<static_cast<unsigned int>({{ benchmark_of_architecture.name }}), {{configuration.key_type}}> :
 {%- endmacro %}
 
 {% macro configuration_fallback(benchmark_of_architecture, based_on_type, fallback_selection_criteria) -%}
 // Based on {{ based_on_type }}
-template<class datatype> struct default_reduce_config<static_cast<unsigned int>({{ benchmark_of_architecture.name }}), datatype, {{ fallback_selection_criteria }}> :
+template<class key_type> struct default_reduce_config<static_cast<unsigned int>({{ benchmark_of_architecture.name }}), key_type, {{ fallback_selection_criteria }}> :
 {%- endmacro %}
 
   

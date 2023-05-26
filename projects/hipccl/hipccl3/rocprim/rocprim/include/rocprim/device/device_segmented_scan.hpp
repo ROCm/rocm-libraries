@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -112,13 +112,17 @@ hipError_t segmented_scan_impl(void * temporary_storage,
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
     using result_type = typename std::conditional<Exclusive, InitValueType, input_type>::type;
 
-    // Get default config if Config is default_config
-    using config = default_or_custom_config<
-        Config,
-        default_scan_config<ROCPRIM_TARGET_ARCH, result_type>
-    >;
+    using config = wrapped_scan_config<Config, input_type>;
 
-    constexpr unsigned int block_size = config::block_size;
+    detail::target_arch target_arch;
+    hipError_t          result = host_target_arch(stream, target_arch);
+    if(result != hipSuccess)
+    {
+        return result;
+    }
+    const scan_config_params params = dispatch_target_arch<config>(target_arch);
+
+    const unsigned int block_size = params.kernel_config.block_size;
 
     if(temporary_storage == nullptr)
     {

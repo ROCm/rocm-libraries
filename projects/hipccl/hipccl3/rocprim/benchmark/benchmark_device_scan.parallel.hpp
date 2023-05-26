@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -38,38 +38,33 @@
 
 #include "benchmark_utils.hpp"
 
-template<bool ByKey                    = false,
-         bool Exclusive                = false,
-         class T                       = int,
-         class BinaryFunction          = rocprim::plus<T>,
-         unsigned int MaxSegmentLength = 1024,
-         class Config = rocprim::detail::default_scan_config<ROCPRIM_TARGET_ARCH, T>>
+template<typename Config>
+std::string config_name()
+{
+    const rocprim::detail::scan_config_params config = Config();
+    return "{bs:" + std::to_string(config.kernel_config.block_size)
+           + ",ipt:" + std::to_string(config.kernel_config.items_per_thread)
+           + ",method:" + std::string(get_block_scan_method_name(config.block_scan_method)) + "}";
+}
+
+template<>
+inline std::string config_name<rocprim::default_config>()
+{
+    return "default_config";
+}
+
+template<bool Exclusive = false,
+         class T        = int,
+         class ScanOp   = rocprim::plus<T>,
+         class Config   = rocprim::default_config>
 struct device_scan_benchmark : public config_autotune_interface
 {
-    static const char* get_block_scan_method_name(rocprim::block_scan_algorithm alg)
-    {
-        switch(alg)
-        {
-            case rocprim::block_scan_algorithm::using_warp_scan:
-                return "block_scan_algorithm::using_warp_scan";
-            case rocprim::block_scan_algorithm::reduce_then_scan:
-                return "block_scan_algorithm::reduce_then_scan";
-                // Not using `default: ...` because it kills effectiveness of -Wswitch
-        }
-        return "unknown_algorithm";
-    }
-
     std::string name() const override
     {
         using namespace std::string_literals;
         return bench_naming::format_name(
-            "{lvl:device,algo:scan" + (Exclusive ? "_exclusive"s : "_inclusive"s)
-            + ",key_type:" + std::string(Traits<T>::name()) + ",value_type:"
-            + std::string(ByKey ? Traits<T>::name() : Traits<rocprim::empty_type>::name())
-            + ",max_segment_length:" + std::to_string(MaxSegmentLength)
-            + ",cfg:{bs:" + std::to_string(Config::block_size)
-            + ",ipt:" + std::to_string(Config::items_per_thread) + ",method:"
-            + std::string(get_block_scan_method_name(Config::block_scan_method)) + "}}");
+            "{lvl:device,algo:scan,exclusive:" + (Exclusive ? "true"s : "false"s) + ",value_type:"
+            + std::string(Traits<T>::name()) + ",cfg:" + config_name<Config>() + "}");
     }
 
     template<bool excl = Exclusive>
@@ -79,7 +74,7 @@ struct device_scan_benchmark : public config_autotune_interface
                          T*                output,
                          const T           initial_value,
                          const size_t      input_size,
-                         BinaryFunction    scan_op,
+                         ScanOp            scan_op,
                          const hipStream_t stream,
                          const bool        debug = false) const ->
         typename std::enable_if<excl, hipError_t>::type
@@ -102,7 +97,7 @@ struct device_scan_benchmark : public config_autotune_interface
                          T*                output,
                          const T           initial_value,
                          const size_t      input_size,
-                         BinaryFunction    scan_op,
+                         ScanOp            scan_op,
                          const hipStream_t stream,
                          const bool        debug = false) const ->
         typename std::enable_if<!excl, hipError_t>::type
@@ -118,63 +113,10 @@ struct device_scan_benchmark : public config_autotune_interface
                                                debug);
     }
 
-    template<typename K, typename CompareFunction, bool excl = Exclusive>
-    auto run_device_scan_by_key(void*                 temporary_storage,
-                                size_t&               storage_size,
-                                const K*              keys,
-                                const T*              input,
-                                T*                    output,
-                                const T               initial_value,
-                                const size_t          input_size,
-                                const BinaryFunction  scan_op,
-                                const CompareFunction compare,
-                                const hipStream_t     stream,
-                                const bool            debug = false) const ->
-        typename std::enable_if<excl, hipError_t>::type
-    {
-        return rocprim::exclusive_scan_by_key<Config>(temporary_storage,
-                                                      storage_size,
-                                                      keys,
-                                                      input,
-                                                      output,
-                                                      initial_value,
-                                                      input_size,
-                                                      scan_op,
-                                                      compare,
-                                                      stream,
-                                                      debug);
-    }
-
-    template<typename K, typename CompareFunction, bool excl = Exclusive>
-    auto run_device_scan_by_key(void*    temporary_storage,
-                                size_t&  storage_size,
-                                const K* keys,
-                                const T* input,
-                                T*       output,
-                                const T /*initial_value*/,
-                                const size_t          input_size,
-                                const BinaryFunction  scan_op,
-                                const CompareFunction compare,
-                                const hipStream_t     stream,
-                                const bool            debug = false) const ->
-        typename std::enable_if<!excl, hipError_t>::type
-    {
-        return rocprim::inclusive_scan_by_key<Config>(temporary_storage,
-                                                      storage_size,
-                                                      keys,
-                                                      input,
-                                                      output,
-                                                      input_size,
-                                                      scan_op,
-                                                      compare,
-                                                      stream,
-                                                      debug);
-    }
-
     void run_benchmark(benchmark::State& state,
                        size_t            size,
                        const hipStream_t stream,
-                       BinaryFunction    scan_op) const
+                       ScanOp            scan_op) const
     {
         std::vector<T> input         = get_random_data<T>(size, T(0), T(1000));
         T              initial_value = T(123);
@@ -258,157 +200,18 @@ struct device_scan_benchmark : public config_autotune_interface
         HIP_CHECK(hipFree(d_temp_storage));
     }
 
-    template<typename K, typename CompareFunction>
-    void run_benchmark_by_key(benchmark::State&     state,
-                              const size_t          size,
-                              const hipStream_t     stream,
-                              const BinaryFunction  scan_op,
-                              const CompareFunction compare = CompareFunction()) const
-    {
-        constexpr bool       debug = false;
-        const std::vector<T> input = get_random_data<T>(size, T(0), T(1000));
-
-        const std::vector<K> keys
-            = get_random_segments<K>(size, MaxSegmentLength, std::random_device{}());
-
-        T  initial_value = T(123);
-        T* d_input;
-        K* d_keys;
-        T* d_output;
-        HIP_CHECK(hipMalloc(&d_input, input.size() * sizeof(input[0])));
-        HIP_CHECK(hipMalloc(&d_keys, keys.size() * sizeof(keys[0])));
-        HIP_CHECK(hipMalloc(&d_output, input.size() * sizeof(input[0])));
-        HIP_CHECK(hipMemcpy(d_input,
-                            input.data(),
-                            input.size() * sizeof(input[0]),
-                            hipMemcpyHostToDevice));
-        HIP_CHECK(
-            hipMemcpy(d_keys, keys.data(), keys.size() * sizeof(keys[0]), hipMemcpyHostToDevice));
-
-        // Allocate temporary storage memory
-        size_t temp_storage_size_bytes;
-        void*  d_temp_storage = nullptr;
-        // Get size of d_temp_storage
-        HIP_CHECK((run_device_scan_by_key<K, CompareFunction>(d_temp_storage,
-                                                              temp_storage_size_bytes,
-                                                              d_keys,
-                                                              d_input,
-                                                              d_output,
-                                                              initial_value,
-                                                              size,
-                                                              scan_op,
-                                                              compare,
-                                                              stream,
-                                                              debug)));
-        HIP_CHECK(hipMalloc(&d_temp_storage, temp_storage_size_bytes));
-
-        // Warm-up
-        for(size_t i = 0; i < 5; i++)
-        {
-            HIP_CHECK((run_device_scan_by_key<K, CompareFunction>(d_temp_storage,
-                                                                  temp_storage_size_bytes,
-                                                                  d_keys,
-                                                                  d_input,
-                                                                  d_output,
-                                                                  initial_value,
-                                                                  size,
-                                                                  scan_op,
-                                                                  compare,
-                                                                  stream,
-                                                                  debug)));
-        }
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // HIP events creation
-        hipEvent_t start, stop;
-        HIP_CHECK(hipEventCreate(&start));
-        HIP_CHECK(hipEventCreate(&stop));
-
-        const unsigned int batch_size = 10;
-        for(auto _ : state)
-        {
-            // Record start event
-            HIP_CHECK(hipEventRecord(start, stream));
-
-            for(size_t i = 0; i < batch_size; i++)
-            {
-                HIP_CHECK((run_device_scan_by_key<K, CompareFunction>(d_temp_storage,
-                                                                      temp_storage_size_bytes,
-                                                                      d_keys,
-                                                                      d_input,
-                                                                      d_output,
-                                                                      initial_value,
-                                                                      size,
-                                                                      scan_op,
-                                                                      compare,
-                                                                      stream,
-                                                                      debug)));
-            }
-
-            // Record stop event and wait until it completes
-            HIP_CHECK(hipEventRecord(stop, stream));
-            HIP_CHECK(hipEventSynchronize(stop));
-
-            float elapsed_mseconds;
-            HIP_CHECK(hipEventElapsedTime(&elapsed_mseconds, start, stop));
-            state.SetIterationTime(elapsed_mseconds / 1000);
-        }
-
-        // Destroy HIP events
-        HIP_CHECK(hipEventDestroy(start));
-        HIP_CHECK(hipEventDestroy(stop));
-
-        state.SetBytesProcessed(state.iterations() * batch_size * size * sizeof(T));
-        state.SetItemsProcessed(state.iterations() * batch_size * size);
-
-        HIP_CHECK(hipFree(d_input));
-        HIP_CHECK(hipFree(d_keys));
-        HIP_CHECK(hipFree(d_output));
-        HIP_CHECK(hipFree(d_temp_storage));
-    }
-
-    template<bool by_key = ByKey>
-    auto do_run(benchmark::State& state, size_t size, const hipStream_t stream) const ->
-        typename std::enable_if<!by_key, void>::type
-    {
-        run_benchmark(state, size, stream, BinaryFunction());
-    }
-
-    template<bool by_key = ByKey>
-    auto do_run(benchmark::State& state, size_t size, const hipStream_t stream) const ->
-        typename std::enable_if<by_key, void>::type
-    {
-        run_benchmark_by_key<int, rocprim::equal_to<int>>(state, size, stream, BinaryFunction());
-    }
-
     void run(benchmark::State& state, size_t size, hipStream_t stream) const override
     {
-        do_run(state, size, stream);
+        run_benchmark(state, size, stream, ScanOp());
     }
 };
 
 #ifdef BENCHMARK_CONFIG_TUNING
 
-inline constexpr unsigned int get_max_items_per_thread(size_t bytes)
-{
-    if(bytes <= 2)
-    {
-        return 30;
-    }
-    else if(2 < bytes && bytes <= 6)
-    {
-        return 20;
-    }
-    else //(6 < bytes)
-    {
-        return 15;
-    }
-}
-
-template<typename T, bool ByKey, bool Excl>
+template<typename T, rocprim::block_scan_algorithm BlockScanAlgorithm>
 struct device_scan_benchmark_generator
 {
-    template<rocprim::block_scan_algorithm BlockScanAlgorithm, typename index_range>
+    template<typename index_range>
     struct create_block_scan_algorithm
     {
         template<unsigned int BlockSizeExponent>
@@ -419,17 +222,13 @@ struct device_scan_benchmark_generator
             {
                 void operator()(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
                 {
-                    static constexpr unsigned int block_size = 1u << BlockSizeExponent;
-                    storage.emplace_back(
-                        std::make_unique<device_scan_benchmark<
-                            ByKey,
-                            Excl,
-                            T,
-                            rocprim::plus<T>,
-                            1024,
-                            rocprim::scan_config<block_size,
+                    storage.emplace_back(std::make_unique<device_scan_benchmark<
+                                             false,
+                                             T,
+                                             rocprim::plus<T>,
+                                             rocprim::scan_config_v2<
+                                                 block_size,
                                                  ItemsPerThread,
-                                                 true,
                                                  rocprim::block_load_method::block_load_transpose,
                                                  rocprim::block_store_method::block_store_transpose,
                                                  BlockScanAlgorithm>>>());
@@ -438,11 +237,14 @@ struct device_scan_benchmark_generator
 
             void operator()(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
             {
+                // Limit items per thread to not over-use shared memory
                 static constexpr unsigned int max_items_per_thread
-                    = get_max_items_per_thread(sizeof(T));
+                    = ::rocprim::min<size_t>(65536 / (block_size * sizeof(T)), 24);
                 static_for_each<make_index_range<unsigned int, 1, max_items_per_thread>,
                                 create_ipt>(storage);
             }
+
+            static constexpr unsigned int block_size = 1u << BlockSizeExponent;
         };
 
         static void create(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
@@ -453,17 +255,8 @@ struct device_scan_benchmark_generator
 
     static void create(std::vector<std::unique_ptr<config_autotune_interface>>& storage)
     {
-        static const rocprim::block_scan_algorithm using_warp_scan
-            = rocprim::block_scan_algorithm::using_warp_scan;
-        static const rocprim::block_scan_algorithm reduce_then_scan
-            = rocprim::block_scan_algorithm::reduce_then_scan;
-
-        // 64, 128, 256
-        create_block_scan_algorithm<using_warp_scan, make_index_range<unsigned int, 6, 8>>::create(
-            storage);
-        // 256
-        create_block_scan_algorithm<reduce_then_scan, make_index_range<unsigned int, 8, 8>>::create(
-            storage);
+        // Block sizes 64, 128, 256
+        create_block_scan_algorithm<make_index_range<unsigned int, 6, 8>>::create(storage);
     }
 };
 

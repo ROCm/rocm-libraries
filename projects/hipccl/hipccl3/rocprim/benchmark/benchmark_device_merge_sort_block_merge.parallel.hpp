@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -154,7 +154,7 @@ struct device_merge_sort_block_merge_benchmark : public config_autotune_interfac
         }
         if(err == hipError_t::hipErrorAssert)
         {
-            state.SkipWithError("SKIPPING: block_sort_items_per_block <= "
+            state.SkipWithError("SKIPPING: block_sort_items_per_block >= "
                                 "block_merge_items_per_block does not hold");
             HIP_CHECK(hipFree(d_temporary_storage));
             HIP_CHECK(hipFree(d_keys_input));
@@ -303,7 +303,7 @@ struct device_merge_sort_block_merge_benchmark : public config_autotune_interfac
         }
         if(err == hipError_t::hipErrorAssert)
         {
-            state.SkipWithError("SKIPPING: block_sort_items_per_block <= "
+            state.SkipWithError("SKIPPING: block_sort_items_per_block >= "
                                 "block_merge_items_per_block does not hold");
             HIP_CHECK(hipFree(d_temporary_storage));
             HIP_CHECK(hipFree(d_keys_input));
