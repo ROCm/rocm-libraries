@@ -22,11 +22,11 @@
 
 #include <cstdint>
 
-#include "benchmark_device_scan.parallel.hpp"
+#include "benchmark_device_scan_by_key.parallel.hpp"
 #include "benchmark_utils.hpp"
 
 namespace
 {
 auto benchmarks = config_autotune_register::create_bulk(
-    device_scan_benchmark_generator<@DataType@, rocprim::block_scan_algorithm::@Algo@>::create);
+    device_scan_by_key_benchmark_generator<@KeyType@, @ValueType@, rocprim::block_scan_algorithm::@Algo@>::create);
 } // namespace

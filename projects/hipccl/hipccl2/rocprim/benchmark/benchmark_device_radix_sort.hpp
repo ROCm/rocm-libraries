@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -48,7 +48,7 @@ struct device_radix_sort_benchmark : public config_autotune_interface
     std::string name() const override
     {
         return bench_naming::format_name(
-            "{lvl:device,algo:device_radix_sort,key_type:" + std::string(Traits<Key>::name())
+            "{lvl:device,algo:radix_sort,key_type:" + std::string(Traits<Key>::name())
             + ",value_type:" + std::string(Traits<Value>::name()) + ",cfg: default_config}");
     }
 

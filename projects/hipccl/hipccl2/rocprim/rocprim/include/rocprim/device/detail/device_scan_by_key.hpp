@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,7 +23,6 @@
 
 #include "device_scan_common.hpp"
 #include "lookback_scan_state.hpp"
-#include "ordered_block_id.hpp"
 
 #include "../../block/block_discontinuity.hpp"
 #include "../../block/block_load.hpp"
@@ -243,15 +242,15 @@ namespace detail
         }
     };
 
-    template <bool Exclusive,
-              typename Config,
-              typename KeyInputIterator,
-              typename InputIterator,
-              typename OutputIterator,
-              typename ResultType,
-              typename CompareFunction,
-              typename BinaryFunction,
-              typename LookbackScanState>
+    template<bool Exclusive,
+             typename Config,
+             typename KeyInputIterator,
+             typename InputIterator,
+             typename OutputIterator,
+             typename ResultType,
+             typename CompareFunction,
+             typename BinaryFunction,
+             typename LookbackScanState>
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void device_scan_by_key_kernel_impl(
         KeyInputIterator                              keys,
         InputIterator                                 values,
@@ -263,17 +262,17 @@ namespace detail
         const size_t                                  size,
         const size_t                                  starting_block,
         const size_t                                  number_of_blocks,
-        ordered_block_id<unsigned int>                ordered_bid,
         const rocprim::tuple<ResultType, bool>* const previous_last_value)
     {
         using result_type = ResultType;
         static_assert(std::is_same<rocprim::tuple<ResultType, bool>,
                                    typename LookbackScanState::value_type>::value,
                       "value_type of LookbackScanState must be tuple of result type and flag");
+        static constexpr scan_by_key_config_params params = device_params<Config>();
 
-        constexpr auto block_size         = Config::block_size;
-        constexpr auto items_per_thread   = Config::items_per_thread;
-        constexpr auto load_keys_method   = Config::block_load_method;
+        constexpr auto block_size         = params.kernel_config.block_size;
+        constexpr auto items_per_thread   = params.kernel_config.items_per_thread;
+        constexpr auto load_keys_method   = params.block_load_method;
         constexpr auto load_values_method = load_keys_method;
 
         using key_type = typename std::iterator_traits<KeyInputIterator>::value_type;
@@ -289,26 +288,20 @@ namespace detail
         using wrapped_type = rocprim::tuple<result_type, bool>;
 
         using block_scan_type
-            = ::rocprim::block_scan<wrapped_type, block_size, Config::block_scan_method>;
+            = ::rocprim::block_scan<wrapped_type, block_size, params.block_scan_method>;
 
-        constexpr auto store_method = Config::block_store_method;
+        constexpr auto store_method = params.block_store_method;
         using store_unwrap = unwrap_store<block_size, items_per_thread, result_type, store_method>;
-
-        using order_bid_type = ordered_block_id<unsigned int>;
 
         ROCPRIM_SHARED_MEMORY union
         {
-            struct
-            {
-                typename load_flagged::storage_type   load;
-                typename order_bid_type::storage_type ordered_bid;
-            };
+            typename load_flagged::storage_type    load;
             typename block_scan_type::storage_type scan;
             typename store_unwrap::storage_type    store;
         } storage;
 
         const auto flat_thread_id = ::rocprim::detail::block_thread_id<0>();
-        const auto flat_block_id = ordered_bid.get(flat_thread_id, storage.ordered_bid);
+        const auto flat_block_id  = ::rocprim::detail::block_id<0>();
 
         // Load input
         wrapped_type wrapped_values[items_per_thread];

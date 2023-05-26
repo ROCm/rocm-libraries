@@ -2,7 +2,16 @@
 
 Full documentation for rocPRIM is available at [https://rocprim.readthedocs.io/en/latest/](https://rocprim.readthedocs.io/en/latest/)
 
-## [Unreleased rocPRIM-2.13.0 for ROCm 5.5.0]
+## [Unreleased rocPRIM-2.13.1 for ROCm 5.7.0]
+### Changed
+- Deprecated configuration `radix_sort_config` for device-level radix sort as it no longer matches the algorithm's parameters. New configuration `radix_sort_config_v2` is preferred instead.
+- Removed erroneous implementation of device-level `inclusive_scan` and `exclusive_scan`. The prior default implementation using lookback-scan now is the only available implementation.
+- The benchmark metric indicating the bytes processed for `exclusive_scan_by_key` and `inclusive_scan_by_key` has been changed to incorporate the key type. Furthermore, the benchmark log has been changed such that these algorithms are reported as `scan` and `scan_by_key` instead of `scan_exclusive` and `scan_inclusive`.
+- Deprecated configurations `scan_config` and `scan_by_key_config` for device-level scans, as they no longer match the algorithm's parameters. New configurations `scan_config_v2` and `scan_by_key_config_v2` are preferred instead.
+### Fixed
+- Fixed build issue caused by missing header in `thread/thread_search.hpp`.
+
+## [rocPRIM-2.13.0 for ROCm 5.5.0]
 ### Added
 - New block level `radix_rank` primitive.
 - New block level `radix_rank_match` primitive.

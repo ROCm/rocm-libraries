@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -58,19 +58,18 @@ template<select_method SelectMethod,
          class OffsetLookbackScanState,
          class... UnaryPredicates>
 ROCPRIM_KERNEL __launch_bounds__(Config::block_size) void partition_kernel(
-    KeyIterator                    keys_input,
-    ValueIterator                  values_input,
-    FlagIterator                   flags,
-    OutputKeyIterator              keys_output,
-    OutputValueIterator            values_output,
-    size_t*                        selected_count,
-    size_t*                        prev_selected_count,
-    size_t                         prev_processed,
-    const size_t                   total_size,
-    InequalityOp                   inequality_op,
-    OffsetLookbackScanState        offset_scan_state,
-    const unsigned int             number_of_blocks,
-    ordered_block_id<unsigned int> ordered_bid,
+    KeyIterator             keys_input,
+    ValueIterator           values_input,
+    FlagIterator            flags,
+    OutputKeyIterator       keys_output,
+    OutputValueIterator     values_output,
+    size_t*                 selected_count,
+    size_t*                 prev_selected_count,
+    size_t                  prev_processed,
+    const size_t            total_size,
+    InequalityOp            inequality_op,
+    OffsetLookbackScanState offset_scan_state,
+    const unsigned int      number_of_blocks,
     UnaryPredicates... predicates)
 {
     partition_kernel_impl<SelectMethod, OnlySelected, Config>(keys_input,
@@ -85,7 +84,6 @@ ROCPRIM_KERNEL __launch_bounds__(Config::block_size) void partition_kernel(
                                                               inequality_op,
                                                               offset_scan_state,
                                                               number_of_blocks,
-                                                              ordered_bid,
                                                               predicates...);
 }
 
@@ -158,8 +156,6 @@ hipError_t partition_impl(void * temporary_storage,
 
     using offset_scan_state_type = detail::lookback_scan_state<offset_type>;
     using offset_scan_state_with_sleep_type = detail::lookback_scan_state<offset_type, true>;
-    using ordered_block_id_type = detail::ordered_block_id<unsigned int>;
-
 
     static constexpr unsigned int block_size = config::block_size;
     static constexpr unsigned int items_per_thread = config::items_per_thread;
@@ -178,7 +174,6 @@ hipError_t partition_impl(void * temporary_storage,
 
     // Calculate required temporary storage
     void*                           offset_scan_state_storage;
-    ordered_block_id_type::id_type* ordered_bid_storage;
     size_t*                         selected_count;
     size_t*                         prev_selected_count;
 
@@ -190,8 +185,6 @@ hipError_t partition_impl(void * temporary_storage,
             detail::temp_storage::make_partition(
                 &offset_scan_state_storage,
                 offset_scan_state_type::get_temp_storage_layout(number_of_blocks)),
-            detail::temp_storage::make_partition(&ordered_bid_storage,
-                                                 ordered_block_id_type::get_temp_storage_layout()),
             // Note: the following two are to be allocated continuously, so that they can be initialized
             // simultaneously.
             // They have the same base type, so there is no padding between the types.
@@ -210,9 +203,6 @@ hipError_t partition_impl(void * temporary_storage,
         = offset_scan_state_type::create(offset_scan_state_storage, number_of_blocks);
     auto offset_scan_state_with_sleep
         = offset_scan_state_with_sleep_type::create(offset_scan_state_storage, number_of_blocks);
-
-    // Create and initialize ordered_block_id obj
-    auto ordered_bid = ordered_block_id_type::create(ordered_bid_storage);
 
     hipError_t error;
 
@@ -269,16 +259,22 @@ hipError_t partition_impl(void * temporary_storage,
         {
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(init_lookback_scan_state_kernel<offset_scan_state_with_sleep_type>),
-                dim3(grid_size), dim3(block_size), 0, stream,
-                offset_scan_state_with_sleep, current_number_of_blocks, ordered_bid
-            );
+                dim3(grid_size),
+                dim3(block_size),
+                0,
+                stream,
+                offset_scan_state_with_sleep,
+                current_number_of_blocks);
         } else
         {
             hipLaunchKernelGGL(
                 HIP_KERNEL_NAME(init_lookback_scan_state_kernel<offset_scan_state_type>),
-                dim3(grid_size), dim3(block_size), 0, stream,
-                offset_scan_state, current_number_of_blocks, ordered_bid
-            );
+                dim3(grid_size),
+                dim3(block_size),
+                0,
+                stream,
+                offset_scan_state,
+                current_number_of_blocks);
         }
 
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init_offset_scan_state_kernel", current_number_of_blocks, start)
@@ -307,7 +303,6 @@ hipError_t partition_impl(void * temporary_storage,
                 inequality_op,
                 offset_scan_state_with_sleep,
                 current_number_of_blocks,
-                ordered_bid,
                 predicates...);
         } else
         {
@@ -329,7 +324,6 @@ hipError_t partition_impl(void * temporary_storage,
                 inequality_op,
                 offset_scan_state,
                 current_number_of_blocks,
-                ordered_bid,
                 predicates...);
         }
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,113 +21,70 @@
 #ifndef ROCPRIM_DEVICE_DEVICE_HISTOGRAM_CONFIG_HPP_
 #define ROCPRIM_DEVICE_DEVICE_HISTOGRAM_CONFIG_HPP_
 
-#include <type_traits>
-
-#include "../config.hpp"
-#include "../detail/various.hpp"
-
 #include "config_types.hpp"
+#include "detail/config/device_histogram.hpp"
 
 /// \addtogroup primitivesmodule_deviceconfigs
 /// @{
 
 BEGIN_ROCPRIM_NAMESPACE
 
-/// \brief Configuration of device-level histogram operation.
-///
-/// \tparam HistogramConfig - configuration of histogram kernel. Must be \p kernel_config.
-/// \tparam MaxGridSize - maximum number of blocks to launch.
-/// \tparam SharedImplMaxBins - maximum total number of bins for all active channels
-/// for the shared memory histogram implementation (samples -> shared memory bins -> global memory bins),
-/// when exceeded the global memory implementation is used (samples -> global memory bins).
-/// \tparam SharedImplHistograms - number of histograms in the shared memory to reduce bank conflicts
-/// for atomic operations with narrow sample distributions. Sweetspot for 9xx and 10xx is 3.
-template<class HistogramConfig,
-         unsigned int MaxGridSize          = 1024,
-         unsigned int SharedImplMaxBins    = 2048,
-         unsigned int SharedImplHistograms = 3>
-struct histogram_config
-{
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
-    using histogram = HistogramConfig;
-
-    static constexpr unsigned int max_grid_size = MaxGridSize;
-    static constexpr unsigned int shared_impl_max_bins = SharedImplMaxBins;
-    static constexpr unsigned int shared_impl_histograms = SharedImplHistograms;
-#endif
-};
-
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
-template<class HistogramConfig,
-         unsigned int MaxGridSize,
-         unsigned int SharedImplMaxBins,
-         unsigned int SharedImplHistograms>
-constexpr unsigned int
-    histogram_config<HistogramConfig, MaxGridSize, SharedImplMaxBins, SharedImplHistograms>::
-        max_grid_size;
-template<class HistogramConfig,
-         unsigned int MaxGridSize,
-         unsigned int SharedImplMaxBins,
-         unsigned int SharedImplHistograms>
-constexpr unsigned int
-    histogram_config<HistogramConfig, MaxGridSize, SharedImplMaxBins, SharedImplHistograms>::
-        shared_impl_max_bins;
-template<class HistogramConfig,
-         unsigned int MaxGridSize,
-         unsigned int SharedImplMaxBins,
-         unsigned int SharedImplHistograms>
-constexpr unsigned int
-    histogram_config<HistogramConfig, MaxGridSize, SharedImplMaxBins, SharedImplHistograms>::
-        shared_impl_histograms;
-#endif
-
 namespace detail
 {
 
-template<class Sample, unsigned int Channels, unsigned int ActiveChannels>
-struct histogram_config_803
+template<typename HistogramConfig>
+constexpr histogram_config_params wrap_histogram_config()
 {
-    static constexpr unsigned int item_scale = ::rocprim::detail::ceiling_div(sizeof(Sample), sizeof(int));
+    return histogram_config_params{
+        {HistogramConfig::histogram::block_size,
+         HistogramConfig::histogram::items_per_thread,
+         HistogramConfig::histogram::size_limit},
+        HistogramConfig::max_grid_size,
+        HistogramConfig::shared_impl_max_bins,
+        HistogramConfig::shared_impl_histograms
+    };
+}
 
-    using type = histogram_config<kernel_config<256, ::rocprim::max(10u / Channels / item_scale, 1u)>>;
+template<typename HistogramConfig, typename, unsigned int, unsigned int>
+struct wrapped_histogram_config
+{
+    template<target_arch Arch>
+    struct architecture_config
+    {
+        static constexpr histogram_config_params params = wrap_histogram_config<HistogramConfig>();
+    };
 };
 
-template<class Sample, unsigned int Channels, unsigned int ActiveChannels>
-struct histogram_config_900
+template<typename Sample, unsigned int Channels, unsigned int ActiveChannels>
+struct wrapped_histogram_config<default_config, Sample, Channels, ActiveChannels>
 {
-    static constexpr unsigned int item_scale = ::rocprim::detail::ceiling_div(sizeof(Sample), sizeof(int));
-
-    using type = histogram_config<kernel_config<256, ::rocprim::max(8u / Channels / item_scale, 1u)>>;
+    template<target_arch Arch>
+    struct architecture_config
+    {
+        static constexpr histogram_config_params params
+            = wrap_histogram_config<default_histogram_config<static_cast<unsigned int>(Arch),
+                                                             Sample,
+                                                             Channels,
+                                                             ActiveChannels>>();
+    };
 };
 
-// TODO: We need to update these parameters
-template<class Sample, unsigned int Channels, unsigned int ActiveChannels>
-struct histogram_config_90a
-{
-    static constexpr unsigned int item_scale = ::rocprim::detail::ceiling_div(sizeof(Sample), sizeof(int));
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+template<typename HistogramConfig,
+         typename Sample,
+         unsigned int Channels,
+         unsigned int ActiveChannels>
+template<target_arch Arch>
+constexpr histogram_config_params
+    wrapped_histogram_config<HistogramConfig, Sample, Channels, ActiveChannels>::
+        architecture_config<Arch>::params;
 
-    using type = histogram_config<kernel_config<256, ::rocprim::max(8u / Channels / item_scale, 1u)>>;
-};
-
-// TODO: We need to update these parameters
-template<class Sample, unsigned int Channels, unsigned int ActiveChannels>
-struct histogram_config_1030
-{
-    static constexpr unsigned int item_scale = ::rocprim::detail::ceiling_div(sizeof(Sample), sizeof(int));
-
-    using type = histogram_config<kernel_config<256, ::rocprim::max(8u / Channels / item_scale, 1u)>>;
-};
-
-template<unsigned int TargetArch, class Sample, unsigned int Channels, unsigned int ActiveChannels>
-struct default_histogram_config
-    : select_arch<
-        TargetArch,
-        select_arch_case<803, histogram_config_803<Sample, Channels, ActiveChannels> >,
-        select_arch_case<900, histogram_config_900<Sample, Channels, ActiveChannels> >,
-        select_arch_case<ROCPRIM_ARCH_90a, histogram_config_90a<Sample, Channels, ActiveChannels> >,
-        select_arch_case<1030, histogram_config_1030<Sample, Channels, ActiveChannels> >,
-        histogram_config_900<Sample, Channels, ActiveChannels>
-    > { };
+template<typename Sample, unsigned int Channels, unsigned int ActiveChannels>
+template<target_arch Arch>
+constexpr histogram_config_params
+    wrapped_histogram_config<default_config, Sample, Channels, ActiveChannels>::architecture_config<
+        Arch>::params;
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 } // end namespace detail
 

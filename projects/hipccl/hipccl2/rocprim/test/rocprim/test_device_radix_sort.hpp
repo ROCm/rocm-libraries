@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -138,11 +138,11 @@ inline void sort_keys()
                 expected.end(),
                 test_utils::key_comparator<key_type, descending, start_bit, end_bit>());
 
-            // Use custom config
-            using config = rocprim::radix_sort_config<8,
-                                                      5,
-                                                      rocprim::kernel_config<256, 3>,
-                                                      rocprim::kernel_config<256, 8>>;
+            // Use arbitrary custom config to increase test coverage without making more test cases
+            using config = rocprim::radix_sort_config_v2<rocprim::default_config,
+                                                         rocprim::default_config,
+                                                         rocprim::default_config,
+                                                         1024 * 512>;
 
             size_t temporary_storage_bytes;
             HIP_CHECK(rocprim::radix_sort_keys<config>(nullptr,
@@ -318,17 +318,26 @@ inline void sort_pairs()
                 values_expected[i] = expected[i].second;
             }
 
+            // Use arbitrary custom config to increase test coverage without making more test cases
+            using config = rocprim::radix_sort_config_v2<
+                rocprim::kernel_config<256, 1>,
+                rocprim::merge_sort_config<128, 64, 2, 128, 64, 2>,
+                rocprim::radix_sort_onesweep_config<rocprim::kernel_config<128, 1>,
+                                                    rocprim::kernel_config<128, 1>,
+                                                    4>,
+                1024 * 512>;
+
             void*  d_temporary_storage = nullptr;
             size_t temporary_storage_bytes;
-            HIP_CHECK(rocprim::radix_sort_pairs(d_temporary_storage,
-                                                temporary_storage_bytes,
-                                                d_keys_input,
-                                                d_keys_output,
-                                                d_values_input,
-                                                d_values_output,
-                                                size,
-                                                start_bit,
-                                                end_bit));
+            HIP_CHECK(rocprim::radix_sort_pairs<config>(d_temporary_storage,
+                                                        temporary_storage_bytes,
+                                                        d_keys_input,
+                                                        d_keys_output,
+                                                        d_values_input,
+                                                        d_values_output,
+                                                        size,
+                                                        start_bit,
+                                                        end_bit));
 
             ASSERT_GT(temporary_storage_bytes, 0);
 
@@ -337,31 +346,31 @@ inline void sort_pairs()
 
             if(descending)
             {
-                HIP_CHECK(rocprim::radix_sort_pairs_desc(d_temporary_storage,
-                                                         temporary_storage_bytes,
-                                                         d_keys_input,
-                                                         d_keys_output,
-                                                         d_values_input,
-                                                         d_values_output,
-                                                         size,
-                                                         start_bit,
-                                                         end_bit,
-                                                         stream,
-                                                         debug_synchronous));
+                HIP_CHECK(rocprim::radix_sort_pairs_desc<config>(d_temporary_storage,
+                                                                 temporary_storage_bytes,
+                                                                 d_keys_input,
+                                                                 d_keys_output,
+                                                                 d_values_input,
+                                                                 d_values_output,
+                                                                 size,
+                                                                 start_bit,
+                                                                 end_bit,
+                                                                 stream,
+                                                                 debug_synchronous));
             }
             else
             {
-                HIP_CHECK(rocprim::radix_sort_pairs(d_temporary_storage,
-                                                    temporary_storage_bytes,
-                                                    d_keys_input,
-                                                    d_keys_output,
-                                                    d_values_input,
-                                                    d_values_output,
-                                                    size,
-                                                    start_bit,
-                                                    end_bit,
-                                                    stream,
-                                                    debug_synchronous));
+                HIP_CHECK(rocprim::radix_sort_pairs<config>(d_temporary_storage,
+                                                            temporary_storage_bytes,
+                                                            d_keys_input,
+                                                            d_keys_output,
+                                                            d_values_input,
+                                                            d_values_output,
+                                                            size,
+                                                            start_bit,
+                                                            end_bit,
+                                                            stream,
+                                                            debug_synchronous));
             }
 
             std::vector<key_type> keys_output(size);

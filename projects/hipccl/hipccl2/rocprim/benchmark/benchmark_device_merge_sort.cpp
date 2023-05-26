@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -84,7 +84,7 @@ int main(int argc, char *argv[])
     using custom_float2          = custom_type<float, float>;
     using custom_double2         = custom_type<double, double>;
     using custom_int2            = custom_type<int, int>;
-    using custom_char_double     = custom_type<char, double>;
+    using custom_char_double     = custom_type<char, double>; // used by ssbk benchmark
     using custom_longlong_double = custom_type<long long, double>;
 
     CREATE_BENCHMARK(int, float)

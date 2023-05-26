@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -34,9 +34,7 @@
 #include "../../block/block_scan.hpp"
 #include "../../block/block_discontinuity.hpp"
 
-#include "device_scan_lookback.hpp"
 #include "lookback_scan_state.hpp"
-#include "ordered_block_id.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -608,19 +606,18 @@ template<select_method SelectMethod,
          class OffsetLookbackScanState,
          class... UnaryPredicates>
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
-    partition_kernel_impl(KeyIterator                    keys_input,
-                          ValueIterator                  values_input,
-                          FlagIterator                   flags,
-                          OutputKeyIterator              keys_output,
-                          OutputValueIterator            values_output,
-                          size_t*                        selected_count,
-                          size_t*                        prev_selected_count,
-                          size_t                         prev_processed,
-                          const size_t                   total_size,
-                          InequalityOp                   inequality_op,
-                          OffsetLookbackScanState        offset_scan_state,
-                          const unsigned int             number_of_blocks,
-                          ordered_block_id<unsigned int> ordered_bid,
+    partition_kernel_impl(KeyIterator             keys_input,
+                          ValueIterator           values_input,
+                          FlagIterator            flags,
+                          OutputKeyIterator       keys_output,
+                          OutputValueIterator     values_output,
+                          size_t*                 selected_count,
+                          size_t*                 prev_selected_count,
+                          size_t                  prev_processed,
+                          const size_t            total_size,
+                          InequalityOp            inequality_op,
+                          OffsetLookbackScanState offset_scan_state,
+                          const unsigned int      number_of_blocks,
                           UnaryPredicates... predicates)
 {
     constexpr auto block_size = Config::block_size;
@@ -648,10 +645,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
         offset_type, block_size,
         Config::block_scan_method
     >;
-    using block_discontinuity_key_type = ::rocprim::block_discontinuity<
-        key_type, block_size
-    >;
-    using order_bid_type = ordered_block_id<unsigned int>;
+    using block_discontinuity_key_type = ::rocprim::block_discontinuity<key_type, block_size>;
 
     // Offset prefix operation type
     using offset_scan_prefix_op_type = offset_lookback_scan_prefix_op<
@@ -669,33 +663,23 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
         bool[items_per_thread],
         bool[sizeof...(UnaryPredicates)][items_per_thread]>;
 
-    ROCPRIM_SHARED_MEMORY struct
+    ROCPRIM_SHARED_MEMORY union
     {
-        typename order_bid_type::storage_type ordered_bid;
-        union
-        {
-            raw_exchange_keys_storage_type exchange_keys;
-            raw_exchange_values_storage_type exchange_values;
-            typename block_load_key_type::storage_type load_keys;
-            typename block_load_value_type::storage_type load_values;
-            typename block_load_flag_type::storage_type load_flags;
-            typename block_discontinuity_key_type::storage_type discontinuity_values;
-            typename block_scan_offset_type::storage_type scan_offsets;
-        };
+        raw_exchange_keys_storage_type                      exchange_keys;
+        raw_exchange_values_storage_type                    exchange_values;
+        typename block_load_key_type::storage_type          load_keys;
+        typename block_load_value_type::storage_type        load_values;
+        typename block_load_flag_type::storage_type         load_flags;
+        typename block_discontinuity_key_type::storage_type discontinuity_values;
+        typename block_scan_offset_type::storage_type       scan_offsets;
     } storage;
 
-    // For better performance this must stay before the `ordered_block_id.get` (and other writes).
-    // `ordered_block_id.get` includes an atomic write and syncthreads (a memory fence) that the
-    // compiler thinks could alias with the read of `prev_selected_count`.
-    // This makes the load a vector load instead of scalar because (quoting llvm's amdgpu backend)
-    // "Scalar memory operations are only used to access memory that is proven to not change during
-    // the execution of the kernel dispatch".
     size_t prev_selected_count_values[sizeof...(UnaryPredicates)]{};
     load_selected_count(prev_selected_count, prev_selected_count_values);
 
-    const auto flat_block_thread_id = ::rocprim::detail::block_thread_id<0>();
-    const auto flat_block_id = ordered_bid.get(flat_block_thread_id, storage.ordered_bid);
-    const auto block_offset         = flat_block_id * items_per_block;
+    const auto         flat_block_thread_id = ::rocprim::detail::block_thread_id<0>();
+    const auto         flat_block_id        = ::rocprim::detail::block_id<0>();
+    const auto         block_offset         = flat_block_id * items_per_block;
     const unsigned int valid_in_global_last_block
         = total_size - prev_processed - items_per_block * (number_of_blocks - 1);
     const bool is_last_launch = total_size <= prev_processed + number_of_blocks * items_per_block;

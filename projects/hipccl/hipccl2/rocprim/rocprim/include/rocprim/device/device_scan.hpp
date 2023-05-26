@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -31,11 +31,10 @@
 #include "../functional.hpp"
 #include "../type_traits.hpp"
 #include "../types/future_value.hpp"
-
 #include "detail/config/device_scan.hpp"
+#include "detail/device_scan.hpp"
 #include "detail/device_scan_common.hpp"
-#include "detail/device_scan_lookback.hpp"
-#include "detail/device_scan_reduce_then_scan.hpp"
+#include "device_scan_config.hpp"
 #include "device_transform.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
@@ -47,109 +46,110 @@ namespace detail
 {
 
 // Single kernel scan (performs scan on one thread block only)
-template<
-    bool Exclusive,
-    class Config,
-    class InputIterator,
-    class OutputIterator,
-    class BinaryFunction,
-    class InitValueType
->
-ROCPRIM_KERNEL
-__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
-void single_scan_kernel(InputIterator input,
-                        const size_t size,
-                        const InitValueType initial_value,
-                        OutputIterator output,
-                        BinaryFunction scan_op)
+template<bool Exclusive,
+         class Config,
+         class InputIterator,
+         class OutputIterator,
+         class BinaryFunction,
+         class ResultType>
+ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void single_scan_kernel_impl(InputIterator  input,
+                                                                 const size_t   input_size,
+                                                                 ResultType     initial_value,
+                                                                 OutputIterator output,
+                                                                 BinaryFunction scan_op)
 {
-    single_scan_kernel_impl<Exclusive, Config>(
-        input, size, get_input_value(initial_value), output, scan_op
-    );
+    static constexpr scan_config_params params = device_params<Config>();
+
+    constexpr unsigned int block_size       = params.kernel_config.block_size;
+    constexpr unsigned int items_per_thread = params.kernel_config.items_per_thread;
+
+    using result_type = ResultType;
+
+    using block_load_type = ::rocprim::
+        block_load<result_type, block_size, items_per_thread, params.block_load_method>;
+    using block_store_type = ::rocprim::
+        block_store<result_type, block_size, items_per_thread, params.block_store_method>;
+    using block_scan_type
+        = ::rocprim::block_scan<result_type, block_size, params.block_scan_method>;
+
+    ROCPRIM_SHARED_MEMORY union
+    {
+        typename block_load_type::storage_type  load;
+        typename block_store_type::storage_type store;
+        typename block_scan_type::storage_type  scan;
+    } storage;
+
+    result_type values[items_per_thread];
+    // load input values into values
+    block_load_type().load(input, values, input_size, *(input), storage.load);
+    ::rocprim::syncthreads(); // sync threads to reuse shared memory
+
+    single_scan_block_scan<Exclusive, block_scan_type>(values, // input
+                                                       values, // output
+                                                       initial_value,
+                                                       storage.scan,
+                                                       scan_op);
+    ::rocprim::syncthreads(); // sync threads to reuse shared memory
+
+    // Save values into output array
+    block_store_type().store(output, values, input_size, storage.store);
 }
 
-// Reduce-then-scan kernels
-
-// Calculates block prefixes that will be used in final_scan_kernel
-// when performing block scan operations.
-template<
-    class Config,
-    class InputIterator,
-    class BinaryFunction,
-    class ResultType
->
+template<bool Exclusive,
+         class Config,
+         class InputIterator,
+         class OutputIterator,
+         class BinaryFunction,
+         class InitValueType>
 ROCPRIM_KERNEL
-__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
-void block_reduce_kernel(InputIterator input,
-                         BinaryFunction scan_op,
-                         ResultType * block_prefixes)
+    __launch_bounds__(device_params<Config>().kernel_config.block_size) void single_scan_kernel(
+        InputIterator       input,
+        const size_t        size,
+        const InitValueType initial_value,
+        OutputIterator      output,
+        BinaryFunction      scan_op)
 {
-    block_reduce_kernel_impl<Config>(
-        input, scan_op, block_prefixes
-    );
-}
-
-template<
-    bool Exclusive,
-    class Config,
-    class InputIterator,
-    class OutputIterator,
-    class BinaryFunction,
-    class InitValueType
->
-ROCPRIM_KERNEL
-__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
-void final_scan_kernel(InputIterator input,
-                       const size_t size,
-                       OutputIterator output,
-                       const InitValueType initial_value,
-                       BinaryFunction scan_op,
-                       input_type_t<InitValueType>* block_prefixes,
-                       input_type_t<InitValueType>* previous_last_element = nullptr,
-                       input_type_t<InitValueType>* new_last_element = nullptr,
-                       bool override_first_value = false,
-                       bool save_last_value = false)
-{
-    final_scan_kernel_impl<Exclusive, Config>(
-        input, size, output, get_input_value(initial_value),
-        scan_op, block_prefixes,
-        previous_last_element, new_last_element,
-        override_first_value, save_last_value
-    );
+    single_scan_kernel_impl<Exclusive, Config>(input,
+                                               size,
+                                               get_input_value(initial_value),
+                                               output,
+                                               scan_op);
 }
 
 // Single pass (look-back kernels)
 
-template<
-    bool Exclusive,
-    class Config,
-    class InputIterator,
-    class OutputIterator,
-    class BinaryFunction,
-    class InitValueType,
-    class LookBackScanState
->
+template<bool Exclusive,
+         class Config,
+         class InputIterator,
+         class OutputIterator,
+         class BinaryFunction,
+         class InitValueType,
+         class LookBackScanState>
 ROCPRIM_KERNEL
-__launch_bounds__(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE)
-void lookback_scan_kernel(InputIterator input,
-                          OutputIterator output,
-                          const size_t size,
-                          const InitValueType initial_value,
-                          BinaryFunction scan_op,
-                          LookBackScanState lookback_scan_state,
-                          const unsigned int number_of_blocks,
-                          ordered_block_id<unsigned int> ordered_bid,
-                          input_type_t<InitValueType>* previous_last_element = nullptr,
-                          input_type_t<InitValueType>* new_last_element = nullptr,
-                          bool override_first_value = false,
-                          bool save_last_value = false)
+    __launch_bounds__(device_params<Config>().kernel_config.block_size) void lookback_scan_kernel(
+        InputIterator                input,
+        OutputIterator               output,
+        const size_t                 size,
+        const InitValueType          initial_value,
+        BinaryFunction               scan_op,
+        LookBackScanState            lookback_scan_state,
+        const unsigned int           number_of_blocks,
+        input_type_t<InitValueType>* previous_last_element = nullptr,
+        input_type_t<InitValueType>* new_last_element      = nullptr,
+        bool                         override_first_value  = false,
+        bool                         save_last_value       = false)
 {
-    lookback_scan_kernel_impl<Exclusive, Config>(
-        input, output, size, get_input_value(initial_value), scan_op,
-        lookback_scan_state, number_of_blocks, ordered_bid,
-        previous_last_element, new_last_element,
-        override_first_value, save_last_value
-    );
+    lookback_scan_kernel_impl<Exclusive, Config>(input,
+                                                 output,
+                                                 size,
+                                                 get_input_value(initial_value),
+                                                 scan_op,
+                                                 lookback_scan_state,
+                                                 number_of_blocks,
+                                                 previous_last_element,
+                                                 new_last_element,
+                                                 override_first_value,
+                                                 save_last_value);
 }
 
 #define ROCPRIM_DETAIL_HIP_SYNC(name, size, start) \
@@ -178,236 +178,53 @@ void lookback_scan_kernel(InputIterator input,
         } \
     }
 
-template<
-    bool Exclusive,
-    class Config,
-    class InputIterator,
-    class OutputIterator,
-    class InitValueType,
-    class BinaryFunction
->
-inline
-auto scan_impl(void * temporary_storage,
-               size_t& storage_size,
-               InputIterator input,
-               OutputIterator output,
-               const InitValueType initial_value,
-               const size_t size,
-               BinaryFunction scan_op,
-               const hipStream_t stream,
-               bool debug_synchronous)
-    -> typename std::enable_if<!Config::use_lookback, hipError_t>::type
+template<bool Exclusive,
+         class Config,
+         class InputIterator,
+         class OutputIterator,
+         class InitValueType,
+         class BinaryFunction>
+inline auto scan_impl(void*               temporary_storage,
+                      size_t&             storage_size,
+                      InputIterator       input,
+                      OutputIterator      output,
+                      const InitValueType initial_value,
+                      const size_t        size,
+                      BinaryFunction      scan_op,
+                      const hipStream_t   stream,
+                      bool                debug_synchronous)
 {
-    using config = Config;
     using real_init_value_type = input_type_t<InitValueType>;
 
-    constexpr unsigned int block_size = config::block_size;
-    constexpr unsigned int items_per_thread = config::items_per_thread;
-    constexpr auto items_per_block = block_size * items_per_thread;
+    using config = wrapped_scan_config<Config, real_init_value_type>;
 
-    static constexpr size_t size_limit = config::size_limit;
-    static constexpr size_t aligned_size_limit = ::rocprim::max<size_t>(size_limit - size_limit % items_per_block, items_per_block);
-    size_t limited_size = std::min<size_t>(size, aligned_size_limit);
-    const bool use_limited_size = limited_size == aligned_size_limit;
-    size_t nested_prefixes_size_bytes = scan_get_temporary_storage_bytes<real_init_value_type>(limited_size, items_per_block);
-
-    // Pointer to array with block_prefixes
-    real_init_value_type* block_prefixes;
-    real_init_value_type* previous_last_element;
-    real_init_value_type* new_last_element;
-
-    const hipError_t partition_result = detail::temp_storage::partition(
-        temporary_storage,
-        storage_size,
-        detail::temp_storage::make_linear_partition(
-            detail::temp_storage::make_partition(&block_prefixes, nested_prefixes_size_bytes),
-            detail::temp_storage::ptr_aligned_array(&previous_last_element,
-                                                    use_limited_size ? 1 : 0),
-            detail::temp_storage::ptr_aligned_array(&new_last_element, use_limited_size ? 1 : 0)));
-    if(partition_result != hipSuccess || temporary_storage == nullptr)
+    detail::target_arch target_arch;
+    hipError_t          result = host_target_arch(stream, target_arch);
+    if(result != hipSuccess)
     {
-        return partition_result;
+        return result;
     }
+    const scan_config_params params = dispatch_target_arch<config>(target_arch);
 
-    // Start point for time measurements
-    std::chrono::high_resolution_clock::time_point start;
-
-    auto number_of_blocks = (size + items_per_block - 1)/items_per_block;
-
-    if( number_of_blocks == 0u )
-        return hipSuccess;
-
-    if(number_of_blocks > 1)
-    {
-        unsigned int number_of_launch = (size + limited_size - 1)/limited_size;
-        for (size_t i = 0, offset = 0; i < number_of_launch; i++, offset+=limited_size )
-        {
-            size_t current_size = std::min<size_t>(size - offset, limited_size);
-            number_of_blocks = (current_size + items_per_block - 1)/items_per_block;
-            if(debug_synchronous)
-            {
-                std::cout << "use_limited_size " << use_limited_size << '\n';
-                std::cout << "number_of_launch " << number_of_launch << '\n';
-                std::cout << "inex " << i << '\n';
-                std::cout << "aligned_size_limit " << aligned_size_limit << '\n';
-                std::cout << "size " << current_size << '\n';
-                std::cout << "block_size " << block_size << '\n';
-                std::cout << "number of blocks " << number_of_blocks << '\n';
-                std::cout << "items_per_block " << items_per_block << '\n';
-                std::cout.flush();
-            }
-
-            // Grid size for block_reduce_kernel, we don't need to calculate reduction
-            // of the last block as it will never be used as prefix for other blocks
-            auto grid_size = number_of_blocks - 1;
-            if( grid_size != 0 )
-            {
-                if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-                hipLaunchKernelGGL(
-                    HIP_KERNEL_NAME(detail::block_reduce_kernel<
-                        config, InputIterator, BinaryFunction, real_init_value_type
-                    >),
-                    dim3(grid_size), dim3(block_size), 0, stream,
-                    input + offset, scan_op, block_prefixes
-                );
-                ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("block_reduce_kernel", current_size, start)
-
-                if( !Exclusive && i > 0 )
-                {
-                    hipError_t error = ::rocprim::transform(
-                        previous_last_element, block_prefixes, block_prefixes, 1,
-                        scan_op, stream, debug_synchronous
-                    );
-                    if(error != hipSuccess) return error;
-                }
-
-                // TODO: Performance may increase if for (number_of_blocks < 8192) (or some other
-                // threshold) we would just use CPU to calculate prefixes.
-
-                // Calculate size of temporary storage for nested device scan operation
-                void * nested_temp_storage = static_cast<void*>(block_prefixes + number_of_blocks);
-                auto nested_temp_storage_size = storage_size - (number_of_blocks * sizeof(real_init_value_type));
-
-                if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-                auto error = scan_impl<false, config>(
-                    nested_temp_storage,
-                    nested_temp_storage_size,
-                    block_prefixes, // input
-                    block_prefixes, // output
-                    real_init_value_type(), // dummy initial value
-                    number_of_blocks, // input size
-                    scan_op,
-                    stream,
-                    debug_synchronous
-                );
-                if(error != hipSuccess) return error;
-                ROCPRIM_DETAIL_HIP_SYNC("nested_device_scan", number_of_blocks, start);
-
-            }
-
-            // Grid size for final_scan_kernel
-            grid_size = number_of_blocks;
-            if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-            hipLaunchKernelGGL(
-                HIP_KERNEL_NAME(detail::final_scan_kernel<
-                    Exclusive, // flag for exclusive scan operation
-                    config, // kernel configuration (block size, ipt)
-                    InputIterator, OutputIterator,
-                    BinaryFunction, InitValueType
-                >),
-                dim3(grid_size), dim3(block_size), 0, stream,
-                input + offset,
-                current_size,
-                output + offset,
-                initial_value,
-                scan_op,
-                block_prefixes,
-                previous_last_element,
-                new_last_element,
-                i != size_t(0) && ((!Exclusive && number_of_blocks == 1) || Exclusive),
-                number_of_launch > 1
-            );
-            ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("final_scan_kernel", size, start);
-
-            // Swap the last_elements if it's necessary
-            if(number_of_launch > 1)
-            {
-                hipError_t error = ::rocprim::transform(
-                    new_last_element, previous_last_element, 1,
-                    ::rocprim::identity<real_init_value_type>(),
-                    stream, debug_synchronous
-                );
-                if(error != hipSuccess) return error;
-            }
-        }
-    }
-    else
-    {
-        if(debug_synchronous)
-        {
-            std::cout << "block_size " << block_size << '\n';
-            std::cout << "number of blocks " << number_of_blocks << '\n';
-            std::cout << "items_per_block " << items_per_block << '\n';
-        }
-
-        if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(detail::single_scan_kernel<
-                Exclusive, // flag for exclusive scan operation
-                config, // kernel configuration (block size, ipt)
-                InputIterator, OutputIterator, BinaryFunction
-            >),
-            dim3(1), dim3(block_size), 0, stream,
-            input, size, initial_value, output, scan_op
-        );
-        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("single_scan_kernel", size, start);
-    }
-    return hipSuccess;
-}
-
-template<
-    bool Exclusive,
-    class Config,
-    class InputIterator,
-    class OutputIterator,
-    class InitValueType,
-    class BinaryFunction
->
-inline
-auto scan_impl(void * temporary_storage,
-               size_t& storage_size,
-               InputIterator input,
-               OutputIterator output,
-               const InitValueType initial_value,
-               const size_t size,
-               BinaryFunction scan_op,
-               const hipStream_t stream,
-               bool debug_synchronous)
-    -> typename std::enable_if<Config::use_lookback, hipError_t>::type
-{
-    using config = Config;
-    using real_init_value_type = input_type_t<InitValueType>;
-
-    using scan_state_type = detail::lookback_scan_state<real_init_value_type>;
+    using scan_state_type            = detail::lookback_scan_state<real_init_value_type>;
     using scan_state_with_sleep_type = detail::lookback_scan_state<real_init_value_type, true>;
-    using ordered_block_id_type = detail::ordered_block_id<unsigned int>;
 
-    constexpr unsigned int block_size = config::block_size;
-    constexpr unsigned int items_per_thread = config::items_per_thread;
-    constexpr auto items_per_block = block_size * items_per_thread;
+    const unsigned int block_size       = params.kernel_config.block_size;
+    const unsigned int items_per_thread = params.kernel_config.items_per_thread;
+    const auto         items_per_block  = block_size * items_per_thread;
 
-    static constexpr size_t size_limit = config::size_limit;
-    static constexpr size_t aligned_size_limit = ::rocprim::max<size_t>(size_limit - size_limit % items_per_block, items_per_block);
+    const size_t size_limit = params.kernel_config.size_limit;
+    const size_t aligned_size_limit
+        = ::rocprim::max<size_t>(size_limit - size_limit % items_per_block, items_per_block);
     size_t limited_size = std::min<size_t>(size, aligned_size_limit);
     const bool use_limited_size = limited_size == aligned_size_limit;
 
     unsigned int number_of_blocks = (limited_size + items_per_block - 1)/items_per_block;
 
     // Pointer to array with block_prefixes
-    void*                           scan_state_storage;
-    ordered_block_id_type::id_type* ordered_bid_storage;
-    real_init_value_type*           previous_last_element;
-    real_init_value_type*           new_last_element;
+    void*                 scan_state_storage;
+    real_init_value_type* previous_last_element;
+    real_init_value_type* new_last_element;
 
     const hipError_t partition_result = detail::temp_storage::partition(
         temporary_storage,
@@ -417,8 +234,6 @@ auto scan_impl(void * temporary_storage,
             detail::temp_storage::make_partition(
                 &scan_state_storage,
                 scan_state_type::get_temp_storage_layout(number_of_blocks)),
-            detail::temp_storage::make_partition(&ordered_bid_storage,
-                                                 ordered_block_id_type::get_temp_storage_layout()),
             detail::temp_storage::ptr_aligned_array(&previous_last_element,
                                                     use_limited_size ? 1 : 0),
             detail::temp_storage::ptr_aligned_array(&new_last_element, use_limited_size ? 1 : 0)));
@@ -439,8 +254,6 @@ auto scan_impl(void * temporary_storage,
         auto scan_state = scan_state_type::create(scan_state_storage, number_of_blocks);
         auto scan_state_with_sleep
             = scan_state_with_sleep_type::create(scan_state_storage, number_of_blocks);
-        // Create and initialize ordered_block_id obj
-        auto ordered_bid = ordered_block_id_type::create(ordered_bid_storage);
 
         hipDeviceProp_t prop;
         int deviceId;
@@ -478,16 +291,22 @@ auto scan_impl(void * temporary_storage,
             {
                 hipLaunchKernelGGL(
                     HIP_KERNEL_NAME(init_lookback_scan_state_kernel<scan_state_with_sleep_type>),
-                    dim3(grid_size), dim3(block_size), 0, stream,
-                    scan_state_with_sleep, number_of_blocks, ordered_bid
-                );
+                    dim3(grid_size),
+                    dim3(block_size),
+                    0,
+                    stream,
+                    scan_state_with_sleep,
+                    number_of_blocks);
             } else
             {
                 hipLaunchKernelGGL(
                     HIP_KERNEL_NAME(init_lookback_scan_state_kernel<scan_state_type>),
-                    dim3(grid_size), dim3(block_size), 0, stream,
-                    scan_state, number_of_blocks, ordered_bid
-                );
+                    dim3(grid_size),
+                    dim3(block_size),
+                    0,
+                    stream,
+                    scan_state,
+                    number_of_blocks);
             }
             ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init_lookback_scan_state_kernel", number_of_blocks, start)
 
@@ -496,18 +315,29 @@ auto scan_impl(void * temporary_storage,
             if (prop.gcnArch == 908 && asicRevision < 2)
             {
                 hipLaunchKernelGGL(
-                    HIP_KERNEL_NAME(lookback_scan_kernel<
-                        Exclusive, // flag for exclusive scan operation
-                        config, // kernel configuration (block size, ipt)
-                        InputIterator, OutputIterator,
-                        BinaryFunction, InitValueType, scan_state_with_sleep_type
-                    >),
-                    dim3(grid_size), dim3(block_size), 0, stream,
-                    input + offset, output + offset, current_size, initial_value,
-                    scan_op, scan_state_with_sleep, number_of_blocks, ordered_bid,
-                    previous_last_element, new_last_element,
-                    i != size_t(0), number_of_launch > 1
-                );
+                    HIP_KERNEL_NAME(
+                        lookback_scan_kernel<Exclusive, // flag for exclusive scan operation
+                                             config,
+                                             InputIterator,
+                                             OutputIterator,
+                                             BinaryFunction,
+                                             InitValueType,
+                                             scan_state_with_sleep_type>),
+                    dim3(grid_size),
+                    dim3(block_size),
+                    0,
+                    stream,
+                    input + offset,
+                    output + offset,
+                    current_size,
+                    initial_value,
+                    scan_op,
+                    scan_state_with_sleep,
+                    number_of_blocks,
+                    previous_last_element,
+                    new_last_element,
+                    i != size_t(0),
+                    number_of_launch > 1);
             }
             else
             {
@@ -522,29 +352,41 @@ auto scan_impl(void * temporary_storage,
                 }
 
                 hipLaunchKernelGGL(
-                    HIP_KERNEL_NAME(lookback_scan_kernel<
-                        Exclusive, // flag for exclusive scan operation
-                        config, // kernel configuration (block size, ipt)
-                        InputIterator, OutputIterator,
-                        BinaryFunction, InitValueType, scan_state_type
-                    >),
-                    dim3(grid_size), dim3(block_size), 0, stream,
-                    input + offset, output + offset, current_size, initial_value,
-                    scan_op, scan_state, number_of_blocks, ordered_bid,
-                    previous_last_element, new_last_element,
-                    i != size_t(0), number_of_launch > 1
-                );
+                    HIP_KERNEL_NAME(
+                        lookback_scan_kernel<Exclusive, // flag for exclusive scan operation
+                                             config,
+                                             InputIterator,
+                                             OutputIterator,
+                                             BinaryFunction,
+                                             InitValueType,
+                                             scan_state_type>),
+                    dim3(grid_size),
+                    dim3(block_size),
+                    0,
+                    stream,
+                    input + offset,
+                    output + offset,
+                    current_size,
+                    initial_value,
+                    scan_op,
+                    scan_state,
+                    number_of_blocks,
+                    previous_last_element,
+                    new_last_element,
+                    i != size_t(0),
+                    number_of_launch > 1);
             }
             ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("lookback_scan_kernel", current_size, start)
 
             // Swap the last_elements
             if(number_of_launch > 1)
             {
-                hipError_t error = ::rocprim::transform(
-                    new_last_element, previous_last_element, 1,
-                    ::rocprim::identity<real_init_value_type>(),
-                    stream, debug_synchronous
-                );
+                hipError_t error = ::rocprim::transform(new_last_element,
+                                                        previous_last_element,
+                                                        1,
+                                                        ::rocprim::identity<real_init_value_type>(),
+                                                        stream,
+                                                        debug_synchronous);
                 if(error != hipSuccess) return error;
             }
         }
@@ -561,14 +403,20 @@ auto scan_impl(void * temporary_storage,
 
         if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
         hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(single_scan_kernel<
-                Exclusive, // flag for exclusive scan operation
-                config, // kernel configuration (block size, ipt)
-                InputIterator, OutputIterator, BinaryFunction
-            >),
-            dim3(1), dim3(block_size), 0, stream,
-            input, size, initial_value, output, scan_op
-        );
+            HIP_KERNEL_NAME(single_scan_kernel<Exclusive, // flag for exclusive scan operation
+                                               config,
+                                               InputIterator,
+                                               OutputIterator,
+                                               BinaryFunction>),
+            dim3(1),
+            dim3(block_size),
+            0,
+            stream,
+            input,
+            size,
+            initial_value,
+            output,
+            scan_op);
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("single_scan_kernel", size, start);
     }
     return hipSuccess;
@@ -594,8 +442,7 @@ auto scan_impl(void * temporary_storage,
 /// * By default, the input type is used for accumulation. A custom type
 /// can be specified using <tt>rocprim::transform_iterator</tt>, see the example below.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It can be \p scan_config or
-/// a custom class with the same members.
+/// \tparam Config - [optional] configuration of the primitive, should be \p scan_config_v2.
 /// \tparam InputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
@@ -684,37 +531,31 @@ auto scan_impl(void * temporary_storage,
 /// );
 /// \endcode
 /// \endparblock
-
-template<
-    class Config = default_config,
-    class InputIterator,
-    class OutputIterator,
-    class BinaryFunction = ::rocprim::plus<typename std::iterator_traits<InputIterator>::value_type>
->
-inline
-hipError_t inclusive_scan(void * temporary_storage,
-                          size_t& storage_size,
-                          InputIterator input,
-                          OutputIterator output,
-                          const size_t size,
-                          BinaryFunction scan_op = BinaryFunction(),
-                          const hipStream_t stream = 0,
-                          bool debug_synchronous = false)
+template<class Config = default_config,
+         class InputIterator,
+         class OutputIterator,
+         class BinaryFunction
+         = ::rocprim::plus<typename std::iterator_traits<InputIterator>::value_type>>
+inline hipError_t inclusive_scan(void*             temporary_storage,
+                                 size_t&           storage_size,
+                                 InputIterator     input,
+                                 OutputIterator    output,
+                                 const size_t      size,
+                                 BinaryFunction    scan_op           = BinaryFunction(),
+                                 const hipStream_t stream            = 0,
+                                 bool              debug_synchronous = false)
 {
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
-
-    // Get default config if Config is default_config
-    using config = detail::default_or_custom_config<
-        Config,
-        detail::default_scan_config<ROCPRIM_TARGET_ARCH, input_type>
-        >;
-
-    return detail::scan_impl<false, config>(
-        temporary_storage, storage_size,
-        // input_type() is a dummy initial value (not used)
-        input, output, input_type(), size,
-        scan_op, stream, debug_synchronous
-    );
+    // input_type() is a dummy initial value (not used)
+    return detail::scan_impl<false, Config>(temporary_storage,
+                                            storage_size,
+                                            input,
+                                            output,
+                                            input_type(),
+                                            size,
+                                            scan_op,
+                                            stream,
+                                            debug_synchronous);
 }
 
 /// \brief Parallel exclusive scan primitive for device level.
@@ -730,8 +571,7 @@ hipError_t inclusive_scan(void * temporary_storage,
 /// if \p temporary_storage in a null pointer.
 /// * Ranges specified by \p input and \p output must have at least \p size elements.
 ///
-/// \tparam Config - [optional] configuration of the primitive. It can be \p scan_config or
-/// a custom class with the same members.
+/// \tparam Config - [optional] configuration of the primitive, should be \p scan_config_v2.
 /// \tparam InputIterator - random-access iterator type of the input range. Must meet the
 /// requirements of a C++ InputIterator concept. It can be a simple pointer type.
 /// \tparam OutputIterator - random-access iterator type of the output range. Must meet the
@@ -802,37 +642,31 @@ hipError_t inclusive_scan(void * temporary_storage,
 /// // output: [9, 4, 7, 6, 2, 2, 1, 1]
 /// \endcode
 /// \endparblock
-template<
-    class Config = default_config,
-    class InputIterator,
-    class OutputIterator,
-    class InitValueType,
-    class BinaryFunction = ::rocprim::plus<typename std::iterator_traits<InputIterator>::value_type>
->
-inline
-hipError_t exclusive_scan(void * temporary_storage,
-                          size_t& storage_size,
-                          InputIterator input,
-                          OutputIterator output,
-                          const InitValueType initial_value,
-                          const size_t size,
-                          BinaryFunction scan_op = BinaryFunction(),
-                          const hipStream_t stream = 0,
-                          bool debug_synchronous = false)
+template<class Config = default_config,
+         class InputIterator,
+         class OutputIterator,
+         class InitValueType,
+         class BinaryFunction
+         = ::rocprim::plus<typename std::iterator_traits<InputIterator>::value_type>>
+inline hipError_t exclusive_scan(void*               temporary_storage,
+                                 size_t&             storage_size,
+                                 InputIterator       input,
+                                 OutputIterator      output,
+                                 const InitValueType initial_value,
+                                 const size_t        size,
+                                 BinaryFunction      scan_op           = BinaryFunction(),
+                                 const hipStream_t   stream            = 0,
+                                 bool                debug_synchronous = false)
 {
-    using real_init_value_type = detail::input_type_t<InitValueType>;
-
-    // Get default config if Config is default_config
-    using config = detail::default_or_custom_config<
-        Config,
-        detail::default_scan_config<ROCPRIM_TARGET_ARCH, real_init_value_type>
-    >;
-
-    return detail::scan_impl<true, config>(
-        temporary_storage, storage_size,
-        input, output, initial_value, size,
-        scan_op, stream, debug_synchronous
-    );
+    return detail::scan_impl<true, Config>(temporary_storage,
+                                           storage_size,
+                                           input,
+                                           output,
+                                           initial_value,
+                                           size,
+                                           scan_op,
+                                           stream,
+                                           debug_synchronous);
 }
 
 /// @}

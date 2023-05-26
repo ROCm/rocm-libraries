@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -100,22 +100,32 @@ struct transform_op
     }
 };
 
-template<
-    class SampleType,
-    unsigned int Bins,
-    int LowerLevel,
-    int UpperLevel,
-    class LevelType = SampleType,
-    class CounterType = int
->
+// provides the same members as rocprim::histogram_config
+struct user_config
+{
+    using histogram = ::rocprim::kernel_config<256, 1>;
+
+    static constexpr unsigned int max_grid_size          = 1024;
+    static constexpr unsigned int shared_impl_max_bins   = 2048;
+    static constexpr unsigned int shared_impl_histograms = 3;
+};
+
+template<class SampleType,
+         unsigned int Bins,
+         int          LowerLevel,
+         int          UpperLevel,
+         class LevelType   = SampleType,
+         class CounterType = int,
+         class Config      = rocprim::default_config>
 struct params1
 {
-    using sample_type = SampleType;
-    static constexpr unsigned int bins = Bins;
-    static constexpr int lower_level = LowerLevel;
-    static constexpr int upper_level = UpperLevel;
-    using level_type = LevelType;
-    using counter_type = CounterType;
+    using sample_type                         = SampleType;
+    static constexpr unsigned int bins        = Bins;
+    static constexpr int          lower_level = LowerLevel;
+    static constexpr int          upper_level = UpperLevel;
+    using level_type                          = LevelType;
+    using counter_type                        = CounterType;
+    using config                              = Config;
 };
 
 template<class Params>
@@ -124,18 +134,19 @@ public:
     using params = Params;
 };
 
-typedef ::testing::Types<
-    params1<int, 10, 0, 10>,
-    params1<int, 128, 0, 256>,
-    params1<unsigned int, 12345, 10, 12355, short>,
-    params1<unsigned short, 65536, 0, 65536, int>,
-    params1<unsigned char, 10, 20, 240, unsigned char, unsigned int>,
-    params1<unsigned char, 256, 0, 256, short>,
+using custom_config1 = rocprim::histogram_config<rocprim::kernel_config<128, 5>>;
 
-    params1<double, 10, 0, 1000, double, int>,
-    params1<int, 123, 100, 5635, int>,
-    params1<double, 55, -123, +123, double>
-> Params1;
+typedef ::testing::Types<params1<int, 10, 0, 10>,
+                         params1<int, 128, 0, 256, int, int, custom_config1>,
+                         params1<unsigned int, 12345, 10, 12355, short>,
+                         params1<unsigned short, 65536, 0, 65536, int>,
+                         params1<unsigned char, 10, 20, 240, unsigned char, unsigned int>,
+                         params1<unsigned char, 256, 0, 256, short>,
+
+                         params1<double, 10, 0, 1000, double, int, user_config>,
+                         params1<int, 123, 100, 5635, int>,
+                         params1<double, 55, -123, +123, double, unsigned int, custom_config1>>
+    Params1;
 
 TYPED_TEST_SUITE(RocprimDeviceHistogramEven, Params1);
 
@@ -228,7 +239,7 @@ TYPED_TEST(RocprimDeviceHistogramEven, Even)
                 }
             }
 
-            using config = rocprim::histogram_config<rocprim::kernel_config<128, 5>>;
+            using config = typename TestFixture::params::config;
 
             size_t temporary_storage_bytes = 0;
             if(rows == 1)
@@ -308,24 +319,24 @@ TYPED_TEST(RocprimDeviceHistogramEven, Even)
     }
 }
 
-template<
-    class SampleType,
-    unsigned int Bins,
-    int StartLevel = 0,
-    unsigned int MinBinWidth = 1,
-    unsigned int MaxBinWidth = 10,
-    class LevelType = SampleType,
-    class CounterType = int
->
+template<class SampleType,
+         unsigned int Bins,
+         int          StartLevel  = 0,
+         unsigned int MinBinWidth = 1,
+         unsigned int MaxBinWidth = 10,
+         class LevelType          = SampleType,
+         class CounterType        = int,
+         class Config             = rocprim::default_config>
 struct params2
 {
-    using sample_type = SampleType;
-    static constexpr unsigned int bins = Bins;
-    static constexpr int start_level = StartLevel;
+    using sample_type                            = SampleType;
+    static constexpr unsigned int bins           = Bins;
+    static constexpr int          start_level    = StartLevel;
     static constexpr unsigned int min_bin_length = MinBinWidth;
     static constexpr unsigned int max_bin_length = MaxBinWidth;
-    using level_type = LevelType;
-    using counter_type = CounterType;
+    using level_type                             = LevelType;
+    using counter_type                           = CounterType;
+    using config                                 = Config;
 };
 
 template<class Params>
@@ -334,16 +345,18 @@ public:
     using params = Params;
 };
 
+using custom_config2 = rocprim::histogram_config<rocprim::kernel_config<256, 2>>;
+
 typedef ::testing::Types<
     params2<int, 10, 0, 1, 10>,
     params2<unsigned char, 5, 10, 10, 20>,
-    params2<unsigned int, 10000, 0, 1, 100>,
+    params2<unsigned int, 10000, 0, 1, 100, unsigned int, unsigned long long, custom_config2>,
     params2<unsigned short, 65536, 0, 1, 1, int>,
-    params2<unsigned char, 256, 0, 1, 1, unsigned short>,
+    params2<unsigned char, 256, 0, 1, 1, unsigned short, int, custom_config2>,
 
     params2<float, 456, -100, 1, 123>,
-    params2<double, 3, 10000, 1000, 1000, double, unsigned int>
-> Params2;
+    params2<double, 3, 10000, 1000, 1000, double, unsigned int>>
+    Params2;
 
 TYPED_TEST_SUITE(RocprimDeviceHistogramRange, Params2);
 
@@ -465,30 +478,34 @@ TYPED_TEST(RocprimDeviceHistogramRange, Range)
                 transform_op<sample_type>()
             );
 
+            using config = typename TestFixture::params::config;
+
             size_t temporary_storage_bytes = 0;
             if(rows == 1)
             {
-                HIP_CHECK(
-                    rocprim::histogram_range(
-                        nullptr, temporary_storage_bytes,
-                        d_input2, columns,
-                        d_histogram,
-                        bins + 1, d_levels,
-                        stream, debug_synchronous
-                    )
-                );
+                HIP_CHECK(rocprim::histogram_range<config>(nullptr,
+                                                           temporary_storage_bytes,
+                                                           d_input2,
+                                                           columns,
+                                                           d_histogram,
+                                                           bins + 1,
+                                                           d_levels,
+                                                           stream,
+                                                           debug_synchronous));
             }
             else
             {
-                HIP_CHECK(
-                    rocprim::histogram_range(
-                        nullptr, temporary_storage_bytes,
-                        d_input2, columns, rows, row_stride_bytes,
-                        d_histogram,
-                        bins + 1, d_levels,
-                        stream, debug_synchronous
-                    )
-                );
+                HIP_CHECK(rocprim::histogram_range<config>(nullptr,
+                                                           temporary_storage_bytes,
+                                                           d_input2,
+                                                           columns,
+                                                           rows,
+                                                           row_stride_bytes,
+                                                           d_histogram,
+                                                           bins + 1,
+                                                           d_levels,
+                                                           stream,
+                                                           debug_synchronous));
             }
 
             ASSERT_GT(temporary_storage_bytes, 0U);
@@ -498,27 +515,29 @@ TYPED_TEST(RocprimDeviceHistogramRange, Range)
 
             if(rows == 1)
             {
-                HIP_CHECK(
-                    rocprim::histogram_range(
-                        d_temporary_storage, temporary_storage_bytes,
-                        d_input2, columns,
-                        d_histogram,
-                        bins + 1, d_levels,
-                        stream, debug_synchronous
-                    )
-                );
+                HIP_CHECK(rocprim::histogram_range<config>(d_temporary_storage,
+                                                           temporary_storage_bytes,
+                                                           d_input2,
+                                                           columns,
+                                                           d_histogram,
+                                                           bins + 1,
+                                                           d_levels,
+                                                           stream,
+                                                           debug_synchronous));
             }
             else
             {
-                HIP_CHECK(
-                    rocprim::histogram_range(
-                        d_temporary_storage, temporary_storage_bytes,
-                        d_input2, columns, rows, row_stride_bytes,
-                        d_histogram,
-                        bins + 1, d_levels,
-                        stream, debug_synchronous
-                    )
-                );
+                HIP_CHECK(rocprim::histogram_range<config>(d_temporary_storage,
+                                                           temporary_storage_bytes,
+                                                           d_input2,
+                                                           columns,
+                                                           rows,
+                                                           row_stride_bytes,
+                                                           d_histogram,
+                                                           bins + 1,
+                                                           d_levels,
+                                                           stream,
+                                                           debug_synchronous));
             }
 
             std::vector<counter_type> histogram(bins);
@@ -545,26 +564,26 @@ TYPED_TEST(RocprimDeviceHistogramRange, Range)
     }
 }
 
-template<
-    class SampleType,
-    unsigned int Channels,
-    unsigned int ActiveChannels,
-    unsigned int Bins,
-    int LowerLevel,
-    int UpperLevel,
-    class LevelType = SampleType,
-    class CounterType = int
->
+template<class SampleType,
+         unsigned int Channels,
+         unsigned int ActiveChannels,
+         unsigned int Bins,
+         int          LowerLevel,
+         int          UpperLevel,
+         class LevelType   = SampleType,
+         class CounterType = int,
+         class Config      = rocprim::default_config>
 struct params3
 {
-    using sample_type = SampleType;
-    static constexpr unsigned int channels = Channels;
+    using sample_type                             = SampleType;
+    static constexpr unsigned int channels        = Channels;
     static constexpr unsigned int active_channels = ActiveChannels;
-    static constexpr unsigned int bins = Bins;
-    static constexpr int lower_level = LowerLevel;
-    static constexpr int upper_level = UpperLevel;
-    using level_type = LevelType;
-    using counter_type = CounterType;
+    static constexpr unsigned int bins            = Bins;
+    static constexpr int          lower_level     = LowerLevel;
+    static constexpr int          upper_level     = UpperLevel;
+    using level_type                              = LevelType;
+    using counter_type                            = CounterType;
+    using config                                  = Config;
 };
 
 template<class Params>
@@ -573,9 +592,11 @@ public:
     using params = Params;
 };
 
+using custom_config3 = rocprim::histogram_config<rocprim::kernel_config<192, 1>>;
+
 typedef ::testing::Types<
     params3<int, 4, 3, 2000, 0, 2000>,
-    params3<int, 2, 1, 10, 0, 10>,
+    params3<int, 2, 1, 10, 0, 10, int, int, custom_config3>,
     params3<int, 3, 3, 128, 0, 256>,
     params3<unsigned int, 1, 1, 12345, 10, 12355, short>,
     params3<unsigned short, 4, 4, 65536, 0, 65536, int>,
@@ -584,8 +605,8 @@ typedef ::testing::Types<
 
     params3<double, 4, 2, 10, 0, 1000, double, int>,
     params3<int, 3, 2, 123, 100, 5635, int>,
-    params3<double, 4, 3, 55, -123, +123, double>
-> Params3;
+    params3<double, 4, 3, 55, -123, +123, double, unsigned long long, custom_config3>>
+    Params3;
 
 TYPED_TEST_SUITE(RocprimDeviceHistogramMultiEven, Params3);
 
@@ -714,30 +735,38 @@ TYPED_TEST(RocprimDeviceHistogramMultiEven, MultiEven)
                 transform_op<sample_type>()
             );
 
+            using config = typename TestFixture::params::config;
+
             size_t temporary_storage_bytes = 0;
             if(rows == 1)
             {
-                HIP_CHECK((
-                    rocprim::multi_histogram_even<channels, active_channels>(
-                        nullptr, temporary_storage_bytes,
-                        d_input2, columns,
-                        d_histogram,
-                        num_levels, lower_level, upper_level,
-                        stream, debug_synchronous
-                    )
-                ));
+                HIP_CHECK((rocprim::multi_histogram_even<channels, active_channels, config>(
+                    nullptr,
+                    temporary_storage_bytes,
+                    d_input2,
+                    columns,
+                    d_histogram,
+                    num_levels,
+                    lower_level,
+                    upper_level,
+                    stream,
+                    debug_synchronous)));
             }
             else
             {
-                HIP_CHECK((
-                    rocprim::multi_histogram_even<channels, active_channels>(
-                        nullptr, temporary_storage_bytes,
-                        d_input2, columns, rows, row_stride_bytes,
-                        d_histogram,
-                        num_levels, lower_level, upper_level,
-                        stream, debug_synchronous
-                    )
-                ));
+                HIP_CHECK((rocprim::multi_histogram_even<channels, active_channels, config>(
+                    nullptr,
+                    temporary_storage_bytes,
+                    d_input2,
+                    columns,
+                    rows,
+                    row_stride_bytes,
+                    d_histogram,
+                    num_levels,
+                    lower_level,
+                    upper_level,
+                    stream,
+                    debug_synchronous)));
             }
 
             ASSERT_GT(temporary_storage_bytes, 0U);
@@ -747,27 +776,33 @@ TYPED_TEST(RocprimDeviceHistogramMultiEven, MultiEven)
 
             if(rows == 1)
             {
-                HIP_CHECK((
-                    rocprim::multi_histogram_even<channels, active_channels>(
-                        d_temporary_storage, temporary_storage_bytes,
-                        d_input2, columns,
-                        d_histogram,
-                        num_levels, lower_level, upper_level,
-                        stream, debug_synchronous
-                    )
-                ));
+                HIP_CHECK((rocprim::multi_histogram_even<channels, active_channels, config>(
+                    d_temporary_storage,
+                    temporary_storage_bytes,
+                    d_input2,
+                    columns,
+                    d_histogram,
+                    num_levels,
+                    lower_level,
+                    upper_level,
+                    stream,
+                    debug_synchronous)));
             }
             else
             {
-                HIP_CHECK((
-                    rocprim::multi_histogram_even<channels, active_channels>(
-                        d_temporary_storage, temporary_storage_bytes,
-                        d_input2, columns, rows, row_stride_bytes,
-                        d_histogram,
-                        num_levels, lower_level, upper_level,
-                        stream, debug_synchronous
-                    )
-                ));
+                HIP_CHECK((rocprim::multi_histogram_even<channels, active_channels, config>(
+                    d_temporary_storage,
+                    temporary_storage_bytes,
+                    d_input2,
+                    columns,
+                    rows,
+                    row_stride_bytes,
+                    d_histogram,
+                    num_levels,
+                    lower_level,
+                    upper_level,
+                    stream,
+                    debug_synchronous)));
             }
 
             std::vector<counter_type> histogram[active_channels];
@@ -801,28 +836,28 @@ TYPED_TEST(RocprimDeviceHistogramMultiEven, MultiEven)
     }
 }
 
-template<
-    class SampleType,
-    unsigned int Channels,
-    unsigned int ActiveChannels,
-    unsigned int Bins,
-    int StartLevel = 0,
-    unsigned int MinBinWidth = 1,
-    unsigned int MaxBinWidth = 10,
-    class LevelType = SampleType,
-    class CounterType = int
->
+template<class SampleType,
+         unsigned int Channels,
+         unsigned int ActiveChannels,
+         unsigned int Bins,
+         int          StartLevel  = 0,
+         unsigned int MinBinWidth = 1,
+         unsigned int MaxBinWidth = 10,
+         class LevelType          = SampleType,
+         class CounterType        = int,
+         class Config             = rocprim::default_config>
 struct params4
 {
-    using sample_type = SampleType;
-    static constexpr unsigned int channels = Channels;
+    using sample_type                             = SampleType;
+    static constexpr unsigned int channels        = Channels;
     static constexpr unsigned int active_channels = ActiveChannels;
-    static constexpr unsigned int bins = Bins;
-    static constexpr int start_level = StartLevel;
-    static constexpr unsigned int min_bin_length = MinBinWidth;
-    static constexpr unsigned int max_bin_length = MaxBinWidth;
-    using level_type = LevelType;
-    using counter_type = CounterType;
+    static constexpr unsigned int bins            = Bins;
+    static constexpr int          start_level     = StartLevel;
+    static constexpr unsigned int min_bin_length  = MinBinWidth;
+    static constexpr unsigned int max_bin_length  = MaxBinWidth;
+    using level_type                              = LevelType;
+    using counter_type                            = CounterType;
+    using config                                  = Config;
 };
 
 template<class Params>
@@ -831,16 +866,18 @@ public:
     using params = Params;
 };
 
+using custom_config4 = rocprim::histogram_config<rocprim::kernel_config<256, 7>>;
+
 typedef ::testing::Types<
     params4<int, 4, 3, 10, 0, 1, 10>,
     params4<unsigned char, 2, 2, 5, 10, 10, 20>,
     params4<unsigned int, 1, 1, 10000, 0, 1, 100>,
     params4<unsigned short, 4, 4, 65536, 0, 1, 1, int>,
-    params4<unsigned char, 3, 2, 256, 0, 1, 1, unsigned short>,
+    params4<unsigned char, 3, 2, 256, 0, 1, 1, unsigned short, int, custom_config4>,
 
-    params4<float, 4, 2, 456, -100, 1, 123>,
-    params4<double, 3, 1, 3, 10000, 1000, 1000, double, unsigned int>
-> Params4;
+    params4<float, 4, 2, 456, -100, 1, 123, float, int, custom_config4>,
+    params4<double, 3, 1, 3, 10000, 1000, 1000, double, unsigned int>>
+    Params4;
 
 TYPED_TEST_SUITE(RocprimDeviceHistogramMultiRange, Params4);
 
@@ -991,7 +1028,7 @@ TYPED_TEST(RocprimDeviceHistogramMultiRange, MultiRange)
                 }
             }
 
-            using config = rocprim::histogram_config<rocprim::kernel_config<192, 3>>;
+            using config = typename TestFixture::params::config;
 
             size_t temporary_storage_bytes = 0;
             if(rows == 1)

@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2021, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2021-2023, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -27,13 +27,15 @@
  *
  ******************************************************************************/
 
- #ifndef ROCPRIM_THREAD_THREAD_SCAN_HPP_
- #define ROCPRIM_THREAD_THREAD_SCAN_HPP_
+#ifndef ROCPRIM_THREAD_THREAD_SCAN_HPP_
+#define ROCPRIM_THREAD_THREAD_SCAN_HPP_
 
- #include <iterator>
- #include "../config.hpp"
+#include "../config.hpp"
+#include "../functional.hpp"
 
- BEGIN_ROCPRIM_NAMESPACE
+#include <iterator>
+
+BEGIN_ROCPRIM_NAMESPACE
 
 /**
  * Computes the begin offsets into A and B for the specific diagonal
@@ -51,10 +53,7 @@ ROCPRIM_HOST_DEVICE inline void merge_path_search(
     OffsetT         b_len,
     CoordinateT&    path_coordinate)
 {
-    /// The value type of the input iterator
-    typedef typename std::iterator_traits<AIteratorT>::value_type T;
-
-    OffsetT split_min = ::rocprim::max(diagonal - b_len, 0);
+    OffsetT split_min = ::rocprim::max(diagonal - b_len, static_cast<OffsetT>(0));
     OffsetT split_max = ::rocprim::min(diagonal, a_len);
 
     while (split_min < split_max)
