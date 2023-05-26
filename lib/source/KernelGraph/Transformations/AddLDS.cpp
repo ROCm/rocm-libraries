@@ -809,7 +809,7 @@ namespace rocRoller
             auto preNOP     = graph.control.addElement(NOP());
             graph.control.addElement(Sequence(), {preNOP}, {forLoop});
 
-            std::map<int, std::vector<int>> preChain;
+            std::vector<int> preChain;
 
             int numInFlight = m_context->kernelOptions().prefetchInFlight;
 
@@ -821,7 +821,7 @@ namespace rocRoller
                     logger->debug(
                         "  prefetch: pre-loop global load: unroll {} user {}", 0, load.user);
                     auto loadChain = duplicateChain(graph, {load.loadChain});
-                    preChain[load.user].push_back(loadChain);
+                    preChain.push_back(loadChain);
                 }
             }
 
@@ -833,18 +833,15 @@ namespace rocRoller
                               load.user,
                               load.lds);
                 auto storeChain = duplicateChain(graph, {load.storeChain});
-                preChain[load.user].push_back(storeChain);
+                preChain.push_back(storeChain);
             }
 
-            for(auto& [user, chain] : preChain)
+            graph.control.addElement(Body(), {scope}, {preChain[0]});
+            for(uint i = 1; i < preChain.size(); ++i)
             {
-                graph.control.addElement(Body(), {scope}, {chain[0]});
-                for(uint i = 1; i < chain.size(); ++i)
-                {
-                    graph.control.addElement(Sequence(), {chain[i - 1]}, {chain[i]});
-                }
-                graph.control.addElement(Sequence(), {chain.back()}, {preBarrier});
+                graph.control.addElement(Sequence(), {preChain[i - 1]}, {preChain[i]});
             }
+            graph.control.addElement(Sequence(), {preChain.back()}, {preBarrier});
 
             auto addPrefetchChains = [&](int u, int pre, int post, bool duplicate) {
                 std::map<int, std::vector<int>> prefetchChain;
@@ -931,59 +928,86 @@ namespace rocRoller
                 auto nop = separateMemOps ? graph.control.addElement(NOP()) : -1;
 
                 // Issue global loads
-                for(auto load : globalLoadsByUnroll[globalPrefetchU])
+                auto globalLoads = globalLoadsByUnroll[globalPrefetchU];
+                if(separateMemOps)
                 {
-                    if(separateMemOps)
-                    {
-                        graph.control.addElement(Sequence(), {nop}, {load.loadChain});
-                        graph.control.addElement(
-                            Sequence(), {load.loadChain}, {segmentBoundaries[u + 1]});
-                    }
-                    else
-                    {
-                        if(u == 0)
-                            graph.control.addElement(
-                                Body(), {segmentBoundaries[u]}, {load.loadChain});
-                        else
-                            graph.control.addElement(
-                                Sequence(), {segmentBoundaries[u]}, {load.loadChain});
-                    }
+                    graph.control.addElement(Sequence(), {nop}, {globalLoads[0].loadChain});
+                }
+                else if(u == 0)
+                {
+                    graph.control.addElement(
+                        Body(), {segmentBoundaries[0]}, {globalLoads[0].loadChain});
+                }
+                else
+                {
+                    graph.control.addElement(
+                        Sequence(), {segmentBoundaries[u]}, {globalLoads[0].loadChain});
+                }
+
+                logger->debug("  prefetch: in-loop: global load {} user {} lds {}",
+                              globalPrefetchU,
+                              globalLoads[0].user,
+                              globalLoads[0].lds);
+
+                for(int i = 1; i < globalLoads.size(); i++)
+                {
+                    graph.control.addElement(
+                        Sequence(), {globalLoads[i - 1].loadChain}, {globalLoads[i].loadChain});
 
                     logger->debug("  prefetch: in-loop: global load {} user {} lds {}",
                                   globalPrefetchU,
-                                  load.user,
-                                  load.lds);
+                                  globalLoads[i].user,
+                                  globalLoads[i].lds);
+                }
+
+                if(separateMemOps)
+                {
+                    graph.control.addElement(Sequence(),
+                                             {globalLoads[globalLoads.size() - 1].loadChain},
+                                             {segmentBoundaries[u + 1]});
                 }
 
                 // Commit in-flight to LDS
-                for(auto load : globalLoadsByUnroll[ldsPrefetchU])
+                auto globalStores = globalLoadsByUnroll[ldsPrefetchU];
+                if(globalPrefetchU == ldsPrefetchU)
                 {
-                    if(separateMemOps)
-                    {
-                        if(globalPrefetchU == ldsPrefetchU)
-                            graph.control.addElement(
-                                Sequence(), {load.loadChain}, {load.storeChain});
-                        else
-                            graph.control.addElement(Sequence(), {nop}, {load.storeChain});
-                    }
-                    else
-                    {
-                        if(globalPrefetchU == ldsPrefetchU)
-                            graph.control.addElement(
-                                Sequence(), {load.loadChain}, {load.storeChain});
-                        else if(u == 0)
-                            graph.control.addElement(
-                                Body(), {segmentBoundaries[u]}, {load.storeChain});
-                        else
-                            graph.control.addElement(
-                                Sequence(), {segmentBoundaries[u]}, {load.storeChain});
-                    }
+                    graph.control.addElement(Sequence(),
+                                             {globalLoads[globalLoads.size() - 1].loadChain},
+                                             {globalStores[0].storeChain});
+                }
+                else if(separateMemOps)
+                {
+                    graph.control.addElement(Sequence(), {nop}, {globalStores[0].storeChain});
+                }
+                else if(u == 0)
+                {
+                    graph.control.addElement(
+                        Body(), {segmentBoundaries[u]}, {globalStores[0].storeChain});
+                }
+                else
+                {
+                    graph.control.addElement(
+                        Sequence(), {segmentBoundaries[u]}, {globalStores[0].storeChain});
+                }
+
+                logger->debug("  prefetch: in-loop: commit lds {} user {} lds {}",
+                              ldsPrefetchU,
+                              globalStores[0].user,
+                              globalStores[0].lds);
+
+                for(int i = 1; i < globalStores.size(); i++)
+                {
+                    graph.control.addElement(
+                        Sequence(), {globalStores[i - 1].storeChain}, {globalStores[i].storeChain});
+
                     logger->debug("  prefetch: in-loop: commit lds {} user {} lds {}",
                                   ldsPrefetchU,
-                                  load.user,
-                                  load.lds);
-                    graph.control.addElement(Sequence(), {load.storeChain}, {barrier});
+                                  globalStores[i].user,
+                                  globalStores[i].lds);
                 }
+
+                graph.control.addElement(
+                    Sequence(), {globalStores[globalStores.size() - 1].storeChain}, {barrier});
 
                 // Prefetch from LDS
                 if(m_prefetchFromLDSChains[forLoop].contains(ldsPrefetchU))
