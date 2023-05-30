@@ -165,7 +165,7 @@ template<typename Element, typename Tag, typename Reference, typename Derived>
     __host__ __device__
     explicit pointer(OtherElement *ptr);
 
-    // Fixes HCC linkage error
+    // Fixes hipcc linkage error
     __host__ __device__
     explicit pointer(Element *ptr);
 

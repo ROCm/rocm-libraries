@@ -39,13 +39,7 @@ TYPED_TEST(IsSortedVectorTests, TestIsSortedSimple)
     ASSERT_EQ(thrust::is_sorted(v.begin(), v.begin() + 0), true);
     ASSERT_EQ(thrust::is_sorted(v.begin(), v.begin() + 1), true);
 
-    // the following line crashes gcc 4.3
-#if(__GNUC__ == 4) && (__GNUC_MINOR__ == 3)
-    // do nothing
-#else
-    // compile this line on other compilers
     ASSERT_EQ(thrust::is_sorted(v.begin(), v.begin() + 2), true);
-#endif // GCC
 
     ASSERT_EQ(thrust::is_sorted(v.begin(), v.begin() + 3), true);
     ASSERT_EQ(thrust::is_sorted(v.begin(), v.begin() + 4), false);

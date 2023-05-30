@@ -1,7 +1,5 @@
 #include <thrust/detail/config.h>
 
-#if THRUST_CPP_DIALECT >= 2011
-
 #include <thrust/limits.h>
 #include <thrust/async/copy.h>
 #include <thrust/host_vector.h>
@@ -223,5 +221,3 @@ TYPED_TEST(AsyncCopyTests, TestAsyncCopyDevicetoDeviceWithPolicy)
 
 // TODO: H->D copy, then dependent D->H copy (round trip).
 // Can't do this today because we can't do cross-system with explicit policies.
-
-#endif // THRUST_CPP_DIALECT >= 2011

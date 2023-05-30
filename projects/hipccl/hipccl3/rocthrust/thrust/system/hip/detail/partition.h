@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2023, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -384,55 +384,37 @@ partition_copy(execution_policy<Derived>& policy,
                RejectedOutIt              rejected_result,
                Predicate                  predicate)
 {
-  struct workaround
-  {
-      __host__
-      static pair<SelectedOutIt, RejectedOutIt> par(
-        execution_policy<Derived>& policy,
-        InputIt                    first,
-        InputIt                    last,
-        StencilIt                  stencil,
-        SelectedOutIt              selected_result,
-        RejectedOutIt              rejected_result,
-        Predicate                  predicate)
-      {
-      #if __HCC__ && __HIP_DEVICE_COMPILE__
-      THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-          (__partition::partition<detail::false_type,
-                                  Derived,
-                                  InputIt,
-                                  StencilIt,
-                                  SelectedOutIt,
-                                  RejectedOutIt,
-                                  Predicate>)
-      );
-      #else
+    // struct workaround is required for HIP-clang
+    struct workaround
+    {
+        __host__ static pair<SelectedOutIt, RejectedOutIt> par(execution_policy<Derived>& policy,
+                                                               InputIt                    first,
+                                                               InputIt                    last,
+                                                               StencilIt                  stencil,
+                                                               SelectedOutIt selected_result,
+                                                               RejectedOutIt rejected_result,
+                                                               Predicate     predicate)
+        {
+            return __partition::partition<detail::false_type>(
+                policy, first, last, stencil, selected_result, rejected_result, predicate);
+        }
 
-      return __partition::partition<detail::false_type>(
-          policy, first, last, stencil, selected_result, rejected_result, predicate
-        );
-      #endif
-      }
-      __device__
-      static pair<SelectedOutIt, RejectedOutIt> seq(
-        execution_policy<Derived>& policy,
-        InputIt                    first,
-        InputIt                    last,
-        StencilIt                  stencil,
-        SelectedOutIt              selected_result,
-        RejectedOutIt              rejected_result,
-        Predicate                  predicate)
-      {
-        return thrust::partition_copy(
-          cvt_to_seq(derived_cast(policy)),
-          first,
-          last,
-          stencil,
-          selected_result,
-          rejected_result,
-          predicate
-        );
-      }
+        __device__ static pair<SelectedOutIt, RejectedOutIt> seq(execution_policy<Derived>& policy,
+                                                                 InputIt                    first,
+                                                                 InputIt                    last,
+                                                                 StencilIt                  stencil,
+                                                                 SelectedOutIt selected_result,
+                                                                 RejectedOutIt rejected_result,
+                                                                 Predicate     predicate)
+        {
+            return thrust::partition_copy(cvt_to_seq(derived_cast(policy)),
+                                          first,
+                                          last,
+                                          stencil,
+                                          selected_result,
+                                          rejected_result,
+                                          predicate);
+        }
   };
   #if __THRUST_HAS_HIPRT__
   return workaround::par(policy, first, last, stencil, selected_result, rejected_result, predicate);
@@ -454,8 +436,9 @@ partition_copy(execution_policy<Derived>& policy,
                RejectedOutIt              rejected_result,
                Predicate                  predicate)
 {
-    struct workaround
-    {
+  // struct workaround is required for HIP-clang
+  struct workaround
+  {
         __host__
         static pair<SelectedOutIt, RejectedOutIt> par(
           execution_policy<Derived>& policy,
@@ -465,21 +448,10 @@ partition_copy(execution_policy<Derived>& policy,
           RejectedOutIt              rejected_result,
           Predicate                  predicate)
         {
-        #if __HCC__ && __HIP_DEVICE_COMPILE__
-        THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-          (__partition::partition<detail::false_type,
-                                          Derived,
-                                          InputIt,
-                                          SelectedOutIt,
-                                          RejectedOutIt,
-                                          Predicate>
-        );
-        #else
-        return __partition::partition<detail::false_type>(
-          policy, first, last, selected_result, rejected_result, predicate
-        );
-        #endif
+            return __partition::partition<detail::false_type>(
+                policy, first, last, selected_result, rejected_result, predicate);
         }
+
         __device__
         static pair<SelectedOutIt, RejectedOutIt> seq(
           execution_policy<Derived>& policy,
@@ -517,50 +489,34 @@ stable_partition_copy(execution_policy<Derived>& policy,
                       RejectedOutIt              rejected_result,
                       Predicate                  predicate)
 {
-  struct workaround
-  {
-      __host__
-      static pair<SelectedOutIt, RejectedOutIt> par(
-        execution_policy<Derived>& policy,
-        InputIt                    first,
-        InputIt                    last,
-        SelectedOutIt              selected_result,
-        RejectedOutIt              rejected_result,
-        Predicate                  predicate)
-      {
-        #if __HCC__ && __HIP_DEVICE_COMPILE__
-        THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-            (__partition::partition<detail::false_type,
-                                    Derived,
-                                    InputIt,
-                                    SelectedOutIt,
-                                    RejectedOutIt,
-                                    Predicate>)
-        );
-        THRUST_HIP_PRESERVE_KERNELS_WORKAROUND((hip_rocprim::reverse<Derived, InputIt>));
-        #else
-        return __partition::partition<detail::false_type>(
-            policy, first, last, selected_result, rejected_result, predicate);
-        #endif
-      }
-      __device__
-      static pair<SelectedOutIt, RejectedOutIt> seq(
-        execution_policy<Derived>& policy,
-        InputIt                    first,
-        InputIt                    last,
-        SelectedOutIt              selected_result,
-        RejectedOutIt              rejected_result,
-        Predicate                  predicate)
-      {
-        return thrust::stable_partition_copy(
-          cvt_to_seq(derived_cast(policy)),
-          first,
-          last,
-          selected_result,
-          rejected_result,
-          predicate
-        );
-      }
+    // struct workaround is required for HIP-clang
+    struct workaround
+    {
+        __host__ static pair<SelectedOutIt, RejectedOutIt> par(execution_policy<Derived>& policy,
+                                                               InputIt                    first,
+                                                               InputIt                    last,
+                                                               SelectedOutIt selected_result,
+                                                               RejectedOutIt rejected_result,
+                                                               Predicate     predicate)
+        {
+          return __partition::partition<detail::false_type>(
+              policy, first, last, selected_result, rejected_result, predicate);
+        }
+
+        __device__ static pair<SelectedOutIt, RejectedOutIt> seq(execution_policy<Derived>& policy,
+                                                                 InputIt                    first,
+                                                                 InputIt                    last,
+                                                                 SelectedOutIt selected_result,
+                                                                 RejectedOutIt rejected_result,
+                                                                 Predicate     predicate)
+        {
+          return thrust::stable_partition_copy(cvt_to_seq(derived_cast(policy)),
+                                               first,
+                                               last,
+                                               selected_result,
+                                               rejected_result,
+                                               predicate);
+        }
   };
   #if __THRUST_HAS_HIPRT__
   return workaround::par(policy, first, last, selected_result, rejected_result, predicate);
@@ -584,6 +540,7 @@ stable_partition_copy(execution_policy<Derived>& policy,
                       RejectedOutIt              rejected_result,
                       Predicate                  predicate)
 {
+  // struct workaround is required for HIP-clang
   struct workaround
   {
       __host__
@@ -596,21 +553,8 @@ stable_partition_copy(execution_policy<Derived>& policy,
         RejectedOutIt              rejected_result,
         Predicate                  predicate)
       {
-        #if __HCC__ && __HIP_DEVICE_COMPILE__
-        THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-            (__partition::partition<detail::false_type,
-                                    Derived,
-                                    InputIt,
-                                    StencilIt,
-                                    SelectedOutIt,
-                                    RejectedOutIt,
-                                    Predicate>)
-        );
-        THRUST_HIP_PRESERVE_KERNELS_WORKAROUND((hip_rocprim::reverse<Derived, InputIt>));
-        #else
-        return __partition::partition<detail::false_type>(
-            policy, first, last, stencil, selected_result, rejected_result, predicate);
-        #endif
+          return __partition::partition<detail::false_type>(
+              policy, first, last, stencil, selected_result, rejected_result, predicate);
       }
       __device__
       static pair<SelectedOutIt, RejectedOutIt> seq(
@@ -652,6 +596,7 @@ partition(execution_policy<Derived>& policy,
           StencilIt                  stencil,
           Predicate                  predicate)
 {
+  // struct workaround is required for HIP-clang
   struct workaround
   {
       __host__
@@ -661,14 +606,6 @@ partition(execution_policy<Derived>& policy,
                           StencilIt                  stencil,
                           Predicate                  predicate)
       {
-        #if __HCC__ && __HIP_DEVICE_COMPILE__
-        THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-            (__partition::partition_inplace<Derived, Iterator, StencilIt, Predicate>)
-        );
-        THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-            (hip_rocprim::reverse<Derived, Iterator>)
-        );
-        #else
         Iterator result =  __partition::partition_inplace(
           policy,
           first,
@@ -678,7 +615,6 @@ partition(execution_policy<Derived>& policy,
         );
         hip_rocprim::reverse<Derived,Iterator>(policy, result, last);
         return result;
-        #endif
       }
       __device__
       static Iterator seq(execution_policy<Derived>& policy,
@@ -710,7 +646,7 @@ partition(execution_policy<Derived>& policy,
           Iterator                   last,
           Predicate                  predicate)
 {
-
+  // struct workaround is required for HIP-clang
   struct workaround
   {
       __host__
@@ -719,18 +655,7 @@ partition(execution_policy<Derived>& policy,
                           Iterator                   last,
                           Predicate                  predicate)
       {
-      #if __HCC__ && __HIP_DEVICE_COMPILE__
-      THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-          (__partition::partition<Derived, Iterator, Iterator, StencilIt, Predicate>)
-      );
-      #else
-      return __partition::partition_inplace(
-        policy,
-        first,
-        last,
-        predicate
-      );
-      #endif
+          return __partition::partition_inplace(policy, first, last, predicate);
       }
       __device__
       static Iterator seq(execution_policy<Derived>& policy,
@@ -765,6 +690,7 @@ stable_partition(execution_policy<Derived>& policy,
                  StencilIt                  stencil,
                  Predicate                  predicate)
 {
+  // struct workaround is required for HIP-clang
   struct workaround
   {
       __host__
@@ -774,25 +700,11 @@ stable_partition(execution_policy<Derived>& policy,
                           StencilIt                  stencil,
                           Predicate                  predicate)
       {
-        #if __HCC__ && __HIP_DEVICE_COMPILE__
-        THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-            (__partition::partition_inplace<Derived, Iterator, StencilIt, Predicate>)
-        );
-        THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-            (hip_rocprim::reverse<Derived, Iterator>)
-        );
-        #else
-        Iterator result =  __partition::partition_inplace(
-          policy,
-          first,
-          last,
-          stencil,
-          predicate
-        );
-        hip_rocprim::reverse<Derived,Iterator>(policy, result, last);
-        return result;
-        #endif
+          Iterator result = __partition::partition_inplace(policy, first, last, stencil, predicate);
+          hip_rocprim::reverse<Derived, Iterator>(policy, result, last);
+          return result;
       }
+
       __device__
       static Iterator seq(execution_policy<Derived>& policy,
                           Iterator                   first,
@@ -823,6 +735,7 @@ stable_partition(execution_policy<Derived>& policy,
                  Iterator                   last,
                  Predicate                  predicate)
 {
+  // struct workaround is required for HIP-clang
   struct workaround
   {
       __host__
@@ -831,24 +744,11 @@ stable_partition(execution_policy<Derived>& policy,
                           Iterator                   last,
                           Predicate                  predicate)
       {
-        #if __HCC__ && __HIP_DEVICE_COMPILE__
-        THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-            (__partition::partition_inplace<Derived, Iterator, Predicate>)
-        );
-        THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-            (hip_rocprim::reverse<Derived, Iterator>)
-        );
-        #else
-        Iterator result =  __partition::partition_inplace(
-          policy,
-          first,
-          last,
-          predicate
-        );
-        hip_rocprim::reverse<Derived,Iterator>(policy, result, last);
-        return result;
-        #endif
+          Iterator result = __partition::partition_inplace(policy, first, last, predicate);
+          hip_rocprim::reverse<Derived, Iterator>(policy, result, last);
+          return result;
       }
+
       __device__
       static Iterator seq(execution_policy<Derived>& policy,
                           Iterator                   first,

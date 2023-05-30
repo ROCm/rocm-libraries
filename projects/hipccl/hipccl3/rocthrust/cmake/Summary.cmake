@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2019-2020 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -32,7 +32,7 @@ function (print_configuration_summary)
     message(STATUS "  CXX flags             : ${CMAKE_CXX_FLAGS_STRIP}")
     message(STATUS "  Build type            : ${CMAKE_BUILD_TYPE}")
     message(STATUS "  Install prefix        : ${CMAKE_INSTALL_PREFIX}")
-if(HIP_COMPILER STREQUAL "hcc" OR HIP_COMPILER STREQUAL "clang")
+if(HIP_COMPILER STREQUAL "clang")
     message(STATUS "  Device targets        : ${AMDGPU_TARGETS}")
 endif()
     message(STATUS "")

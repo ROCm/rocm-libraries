@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright 2019 Advanced Micro Devices, Inc.
+# Copyright 2019-2023 Advanced Micro Devices, Inc.
 # ########################################################################
 
 cmake_minimum_required(VERSION 3.10.2 FATAL_ERROR)
@@ -31,7 +31,7 @@ else()
   set(AMDGPU_TARGETS gfx803;gfx900;gfx906;gfx908 CACHE STRING "List of specific machine types for library to target")
 endif()
 
-# Verify that hcc or hipcc compiler is used on ROCM platform
+# Verify that supported compilers are used
 include(VerifyCompiler)
 include(DownloadProject)
 

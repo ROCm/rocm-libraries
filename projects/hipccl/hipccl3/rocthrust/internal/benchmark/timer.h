@@ -121,7 +121,7 @@ class cuda_timer
 
 #endif
 
-#if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC || defined(WIN32))
+#if(THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC || defined(_WIN32))
 #include <windows.h>
 
 class steady_timer

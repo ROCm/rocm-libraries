@@ -21,8 +21,7 @@
 #include <thrust/system/hip/detail/malloc_and_free.h>
 #include <limits>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
 
@@ -46,4 +45,4 @@ THRUST_HIP_FUNCTION void free(pointer<void> ptr)
 } // end free()
 
 } // end hip_rocprim
-} // end thrust
+THRUST_NAMESPACE_END

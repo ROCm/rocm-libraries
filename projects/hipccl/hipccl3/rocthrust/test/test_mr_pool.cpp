@@ -1,9 +1,7 @@
 #include <thrust/mr/pool.h>
+#include <thrust/mr/sync_pool.h>
 #include <thrust/mr/new.h>
 
-#if __cplusplus >= 201103L
-#include <thrust/mr/sync_pool.h>
-#endif
 
 #include "test_header.hpp"
 
@@ -243,14 +241,12 @@ TEST(MrPoolTests, TestUnsynchronizedPool)
     TestPool<thrust::mr::unsynchronized_pool_resource>();
 }
 
-#if __cplusplus >= 201103L
 TEST(MrPoolTests, TestSynchronizedPool)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     TestPool<thrust::mr::synchronized_pool_resource>();
 }
-#endif
 
 template<template<typename> class PoolTemplate>
 void TestPoolCachingOversized()
@@ -328,14 +324,12 @@ TEST(MrPoolTests, TestUnsynchronizedPoolCachingOversized)
     TestPoolCachingOversized<thrust::mr::unsynchronized_pool_resource>();
 }
 
-#if __cplusplus >= 201103L
 TEST(MrPoolTests, TestSynchronizedPoolCachingOversized)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     TestPoolCachingOversized<thrust::mr::synchronized_pool_resource>();
 }
-#endif
 
 template<template<typename> class PoolTemplate>
 void TestGlobalPool()
@@ -354,11 +348,9 @@ TEST(MrPoolTests, TestUnsynchronizedGlobalPool)
     TestGlobalPool<thrust::mr::unsynchronized_pool_resource>();
 }
 
-#if __cplusplus >= 201103L
 TEST(MrPoolTests, TestSynchronizedGlobalPool)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     TestGlobalPool<thrust::mr::synchronized_pool_resource>();
 }
-#endif

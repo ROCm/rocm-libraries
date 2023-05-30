@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -32,7 +32,22 @@
 #include <hip/hip_runtime.h>
 #include <hip/hip_runtime_api.h>
 
-#define HIP_CHECK(condition) ASSERT_EQ(condition, hipSuccess)
+// GoogleTest-compatible HIP_CHECK macro. FAIL is called to log the Google Test trace.
+// The lambda is invoked immediately as assertions that generate a fatal failure can
+// only be used in void-returning functions.
+#ifndef HIP_CHECK
+#define HIP_CHECK(condition)                                                                      \
+    do                                                                                            \
+    {                                                                                             \
+        hipError_t error = condition;                                                             \
+        if(error != hipSuccess)                                                                   \
+        {                                                                                         \
+            [error]() { FAIL() << "HIP error " << error << ": " << hipGetErrorString(error); }(); \
+            exit(error);                                                                          \
+        }                                                                                         \
+    } while(0)
+#endif
+
 #endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
 #include "test_assertions.hpp"
@@ -54,8 +69,8 @@ int set_device_from_ctest()
         std::transform(amdgpu_target.cbegin(), amdgpu_target.cend(), amdgpu_target.begin(), ::toupper);
         std::string reqs = std::getenv((rg0 + "_" + amdgpu_target).c_str());
         int device_id = std::atoi(reqs.substr(reqs.find(':') + 1, reqs.find(',') - (reqs.find(':') + 1)).c_str());
-        hipSetDevice(device_id);
-        return device_id; 
+        HIP_CHECK(hipSetDevice(device_id));
+        return device_id;
     }
     else
         return 0;
@@ -192,7 +207,7 @@ typedef ::testing::Types<Params<short>,
 // Scalar signed interger types
 typedef ::testing::Types<Params<short>, Params<int>, Params<long long>> SignedIntegerTestsParams;
 
-#if defined(WIN32) && defined(__HIP__)
+#if defined(_WIN32) && defined(__HIP__)
 // Scalar unsigned interger types of all lengths
 typedef ::testing::Types<Params<thrust::detail::uint16_t>,
                          Params<thrust::detail::uint32_t>,

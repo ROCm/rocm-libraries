@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2020, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2020-2023, Advanced Micro Devices, Inc.  All rights reserved.
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
  *     * Redistributions of source code must retain the above copyright
@@ -28,9 +28,6 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/detail/cpp11_required.h>
-
-#if THRUST_CPP_DIALECT >= 2011
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 
@@ -63,7 +60,5 @@ MR * get_per_device_resource(execution_policy<DerivedPolicy>&)
 }
 
 THRUST_NAMESPACE_END
-
-#endif
 
 #endif

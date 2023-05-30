@@ -1,11 +1,9 @@
 #include <thrust/mr/disjoint_pool.h>
+#include <thrust/mr/disjoint_sync_pool.h>
 #include <thrust/mr/new.h>
 
 #include "test_header.hpp"
 
-#if __cplusplus >= 201103L
-#include <thrust/mr/disjoint_sync_pool.h>
-#endif
 
 struct alloc_id
 {
@@ -177,14 +175,12 @@ TEST(MrDisjointPoolTests, TestDisjointUnsynchronizedPool)
     TestDisjointPool<thrust::mr::disjoint_unsynchronized_pool_resource>();
 }
 
-#if __cplusplus >= 201103L
 TEST(MrDisjointPoolTests, TestDisjointSynchronizedPool)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     TestDisjointPool<thrust::mr::disjoint_synchronized_pool_resource>();
 }
-#endif
 
 template<template<typename, typename> class PoolTemplate>
 void TestDisjointPoolCachingOversized()
@@ -262,14 +258,12 @@ TEST(MrDisjointPoolTests, TestDisjointUnsynchronizedPoolCachingOversized)
     TestDisjointPoolCachingOversized<thrust::mr::disjoint_unsynchronized_pool_resource>();
 }
 
-#if __cplusplus >= 201103L
 TEST(MrDisjointPoolTests, TestDisjointSynchronizedPoolCachingOversized)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     TestDisjointPoolCachingOversized<thrust::mr::disjoint_synchronized_pool_resource>();
 }
-#endif
 
 template<template<typename, typename> class PoolTemplate>
 void TestDisjointGlobalPool()
@@ -289,11 +283,9 @@ TEST(MrDisjointPoolTests, TestUnsynchronizedDisjointGlobalPool)
     TestDisjointGlobalPool<thrust::mr::disjoint_unsynchronized_pool_resource>();
 }
 
-#if __cplusplus >= 201103L
 TEST(MrDisjointPoolTests, TestSynchronizedDisjointGlobalPool)
 {
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     TestDisjointGlobalPool<thrust::mr::disjoint_synchronized_pool_resource>();
 }
-#endif

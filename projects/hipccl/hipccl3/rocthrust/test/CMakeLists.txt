@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright 2019-2021 Advanced Micro Devices, Inc.
+# Copyright 2019-2023 Advanced Micro Devices, Inc.
 # ########################################################################
 
 set(INSTALL_TEST_FILE "${CMAKE_CURRENT_BINARY_DIR}/install_CTestTestfile.cmake")
@@ -53,15 +53,24 @@ function(add_rocthrust_test TEST)
     add_executable(${TEST_TARGET} ${TEST_SOURCE})
     target_include_directories(${TEST_TARGET} SYSTEM BEFORE
         PUBLIC
-            $<BUILD_INTERFACE:${GTEST_INCLUDE_DIRS}>
             $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
     )
     target_link_libraries(${TEST_TARGET}
         PRIVATE
             rocthrust
             roc::rocprim_hip
-            ${GTEST_BOTH_LIBRARIES}
     )
+    if (TARGET GTest::GTest)
+        target_link_libraries(${TEST_TARGET}
+                PRIVATE
+                GTest::GTest
+                GTest::Main)
+    else ()
+        target_link_libraries(${TEST_TARGET}
+                PRIVATE
+                GTest::gtest
+                GTest::gtest_main)
+    endif ()
     if (NOT WIN32)
       foreach(amdgpu_target ${AMDGPU_TARGETS})
           target_link_libraries(${TEST_TARGET}

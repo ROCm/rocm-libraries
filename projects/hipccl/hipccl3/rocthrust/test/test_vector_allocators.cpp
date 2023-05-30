@@ -24,7 +24,6 @@ public:
         return *this;
     }
 
-#if __cplusplus >= 201103L
     stateful_allocator(stateful_allocator && other)
         : BaseAlloc(std::move(other)), state(other.state)
     {
@@ -37,7 +36,6 @@ public:
         other.state = 0;
         return *this;
     }
-#endif
 
     static int last_allocated;
     static int last_deallocated;
@@ -130,7 +128,6 @@ void TestVectorAllocatorConstructors()
     ASSERT_EQ(Alloc::last_allocated, 2);
     Alloc::last_allocated = 0;
 
-#if __cplusplus >= 201103L
     // FIXME: uncomment this after the vector_base(vector_base&&, const Alloc&)
     // is fixed and implemented
     // Vector v5(std::move(v3), alloc2);
@@ -138,7 +135,6 @@ void TestVectorAllocatorConstructors()
     // ASSERT_EQ(v5.get_allocator(), alloc2);
     // ASSERT_EQ(Alloc::last_allocated, 1);
     // Alloc::last_allocated = 0;
-#endif
 
     Vector v6(v4.begin(), v4.end(), alloc2);
     ASSERT_EQ((v4 == v6), true);
@@ -193,7 +189,6 @@ TEST(VectorAllocatorTests, TestVectorAllocatorPropagateOnCopyAssignmentDevice)
     TestVectorAllocatorPropagateOnCopyAssignment<device_vector>();
 }
 
-#if __cplusplus >= 201103L
 template<typename Vector>
 void TestVectorAllocatorPropagateOnMoveAssignment()
 {
@@ -230,8 +225,6 @@ TEST(VectorAllocatorTests, TestVectorAllocatorPropagateOnMoveAssignmentDevice)
 
     TestVectorAllocatorPropagateOnMoveAssignment<device_vector>();
 }
-
-#endif
 
 template<typename Vector>
 void TestVectorAllocatorPropagateOnSwap()

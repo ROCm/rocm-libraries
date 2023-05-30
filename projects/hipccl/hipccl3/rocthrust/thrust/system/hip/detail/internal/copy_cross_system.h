@@ -151,47 +151,32 @@ namespace __copy
                         OutputIt                                  result,
                         thrust::detail::false_type) // non-trivial copy
     {
+        // struct workaround is required for HIP-clang
+        struct workaround
+        {
+            __host__ static OutputIt par(thrust::cpp::execution_policy<H>&         host_s,
+                                         thrust::hip_rocprim::execution_policy<D>& device_s,
+                                         InputIt                                   first,
+                                         Size                                      num_items,
+                                         OutputIt                                  result)
+            {
+                return cross_system_copy_n_hd_nt(host_s, device_s, first, num_items, result);
+            }
 
+            __device__ static OutputIt seq(thrust::cpp::execution_policy<H>&         host_s,
+                                           thrust::hip_rocprim::execution_policy<D>& device_s,
+                                           InputIt                                   first,
+                                           Size                                      num_items,
+                                           OutputIt                                  result)
+            {
+                THRUST_UNUSED_VAR(host_s);
+                THRUST_UNUSED_VAR(device_s);
+                THRUST_UNUSED_VAR(first);
+                THRUST_UNUSED_VAR(num_items);
 
-      // struct workaround is required for HIP-clang
-      // THRUST_HIP_PRESERVE_KERNELS_WORKAROUND is required for HCC
-      struct workaround
-      {
-          __host__
-          static OutputIt par(thrust::cpp::execution_policy<H>&         host_s,
-                              thrust::hip_rocprim::execution_policy<D>& device_s,
-                              InputIt                                   first,
-                              Size                                      num_items,
-                              OutputIt                                  result)
-          {
-  #if __HCC__ && __HIP_DEVICE_COMPILE__
-              THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-                (cross_system_copy_n_hd_nt<H, D, InputIt, Size, OutputIt>)
-              );
-              THRUST_UNUSED_VAR(host_s);
-              THRUST_UNUSED_VAR(device_s);
-              THRUST_UNUSED_VAR(first);
-              THRUST_UNUSED_VAR(num_items);
-  #else
-              return cross_system_copy_n_hd_nt(host_s, device_s, first, num_items, result);
-  #endif
-          }
-
-          __device__
-          static OutputIt seq(thrust::cpp::execution_policy<H>&         host_s,
-                              thrust::hip_rocprim::execution_policy<D>& device_s,
-                              InputIt                                   first,
-                              Size                                      num_items,
-                              OutputIt                                  result)
-          {
-            THRUST_UNUSED_VAR(host_s);
-            THRUST_UNUSED_VAR(device_s);
-            THRUST_UNUSED_VAR(first);
-            THRUST_UNUSED_VAR(num_items);
-
-            return result;
-          }
-      };
+                return result;
+            }
+        };
 
   #if __THRUST_HAS_HIPRT__
       return workaround::par(host_s, device_s, first, num_items, result);
@@ -217,7 +202,7 @@ cross_system_copy_n_dh_nt(thrust::hip_rocprim::execution_policy<D>& device_s,
     // allocate device temp storage
     thrust::detail::temporary_array<InputTy, D> d_in_ptr(device_s, num_items);
 
-    // uninitialize copy into temp device storage
+    // uninitialized copy into temp device storage
     hip_rocprim::uninitialized_copy_n(device_s, first, num_items, d_in_ptr.data());
 
     // allocate host temp storage
@@ -234,9 +219,7 @@ cross_system_copy_n_dh_nt(thrust::hip_rocprim::execution_policy<D>& device_s,
     return ret;
 }
 
-// non-trivial copy D->H, only supported with HCC compiler
-// because copy ctor must have  __device__ annotations, which is hcc-only
-// feature
+// non-trivial copy D->H, only supported with HIP-aware compiler
 template <class D, class H, class InputIt, class Size, class OutputIt>
 OutputIt THRUST_HIP_FUNCTION
 cross_system_copy_n(thrust::hip_rocprim::execution_policy<D>& device_s,
@@ -247,43 +230,30 @@ cross_system_copy_n(thrust::hip_rocprim::execution_policy<D>& device_s,
                 thrust::detail::false_type) // non-trivial copy
 
 {
-  // struct workaround is required for HIP-clang
-  // THRUST_HIP_PRESERVE_KERNELS_WORKAROUND is required for HCC
-  struct workaround
-  {
-      __host__
-      static void par(thrust::hip_rocprim::execution_policy<D>& device_s,
-                      thrust::cpp::execution_policy<H>&         host_s,
-                      InputIt                                   first,
-                      Size                                      num_items,
-                      OutputIt&                                 result)
-      {
-#if __HCC__ && __HIP_DEVICE_COMPILE__
-          THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-            (cross_system_copy_n_dh_nt<D, H, InputIt, Size, OutputIt>)
-          );
-          THRUST_UNUSED_VAR(device_s);
-          THRUST_UNUSED_VAR(host_s);
-          THRUST_UNUSED_VAR(first);
-          THRUST_UNUSED_VAR(num_items);
-#else
-          result = cross_system_copy_n_dh_nt(device_s, host_s, first, num_items, result);
-#endif
-      }
+    // struct workaround is required for HIP-clang
+    struct workaround
+    {
+            __host__ static void par(thrust::hip_rocprim::execution_policy<D>& device_s,
+                                     thrust::cpp::execution_policy<H>&         host_s,
+                                     InputIt                                   first,
+                                     Size                                      num_items,
+                                     OutputIt&                                 result)
+            {
+                result = cross_system_copy_n_dh_nt(device_s, host_s, first, num_items, result);
+            }
 
-      __device__
-      static void seq(thrust::hip_rocprim::execution_policy<D>& device_s,
-                      thrust::cpp::execution_policy<H>&         host_s,
-                      InputIt                                   first,
-                      Size                                      num_items,
-                      OutputIt&                                 result)
-      {
-        THRUST_UNUSED_VAR(device_s);
-        THRUST_UNUSED_VAR(host_s);
-        THRUST_UNUSED_VAR(first);
-        THRUST_UNUSED_VAR(num_items);
-        THRUST_UNUSED_VAR(result);
-      }
+            __device__ static void seq(thrust::hip_rocprim::execution_policy<D>& device_s,
+                                       thrust::cpp::execution_policy<H>&         host_s,
+                                       InputIt                                   first,
+                                       Size                                      num_items,
+                                       OutputIt&                                 result)
+            {
+                THRUST_UNUSED_VAR(device_s);
+                THRUST_UNUSED_VAR(host_s);
+                THRUST_UNUSED_VAR(first);
+                THRUST_UNUSED_VAR(num_items);
+                THRUST_UNUSED_VAR(result);
+            }
   };
 
 #if __THRUST_HAS_HIPRT__

@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2018 NVIDIA Corporation
- *  Modifications Copyright© 2019-2020 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -122,11 +122,9 @@ struct TestAllocatorAttachment
         test_temporary_allocation_valid(policy(const_alloc));
         test_temporary_allocation_valid(policy(&test_memory_resource));
 
-        #if THRUST_CPP_DIALECT >= 2011
         test_temporary_allocation_valid(policy(std::allocator<int>()).after(1));
         test_temporary_allocation_valid(policy(alloc).after(1));
         test_temporary_allocation_valid(policy(const_alloc).after(1));
-        #endif
     }
 };
 

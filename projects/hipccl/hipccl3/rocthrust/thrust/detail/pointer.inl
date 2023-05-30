@@ -48,7 +48,7 @@ template<typename Element, typename Tag, typename Reference, typename Derived>
         : super_t(other)
 {} // end pointer::pointer
 
-// Fixes HCC linkage error
+// Fixes hipcc linkage error
 template<typename Element, typename Tag, typename Reference, typename Derived>
   __host__ __device__
   pointer<Element,Tag,Reference,Derived>

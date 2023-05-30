@@ -1,7 +1,5 @@
 #include <thrust/detail/config.h>
 
-#if THRUST_CPP_DIALECT >= 2011
-
 #include <thrust/async/sort.h>
 #include <thrust/host_vector.h>
 #include <thrust/device_vector.h>
@@ -317,5 +315,3 @@ TYPED_TEST(AsyncSortTests, AsyncSortPolicyCustomGreaterNoWait)
 // TODO: Async copy then sort.
 
 // TODO: Test future return type.
-
-#endif // THRUST_CPP_DIALECT >= 2011

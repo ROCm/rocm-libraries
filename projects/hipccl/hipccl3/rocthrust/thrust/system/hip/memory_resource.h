@@ -1,6 +1,6 @@
 /*
  *  Copyright 2018-2020 NVIDIA Corporation
- *  Modifications Copyright© 2019-2021 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -56,7 +56,9 @@ namespace detail
 
             if (status != hipSuccess)
             {
-                hipGetLastError(); // Clear the HIP global error state.
+                // Clear the HIP global error state.
+                hipError_t clear_error_status = hipGetLastError();
+                THRUST_UNUSED_VAR(clear_error_status);
                 throw thrust::system::detail::bad_alloc(thrust::hip_category().message(status).c_str());
             }
 

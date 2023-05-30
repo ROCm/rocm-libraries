@@ -395,7 +395,6 @@ stable_sort(execution_policy<Derived>& policy,
             CompareOp                  compare_op)
 {
     // struct workaround is required for HIP-clang
-    // THRUST_HIP_PRESERVE_KERNELS_WORKAROUND is required for HCC
     struct workaround
     {
         __host__
@@ -404,16 +403,9 @@ stable_sort(execution_policy<Derived>& policy,
                         ItemsIt                    last,
                         CompareOp                  compare_op)
         {
-        #if __HCC__ && __HIP_DEVICE_COMPILE__
-        THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-            (__smart_sort::smart_sort<detail::false_type, Derived, ItemsIt, ItemsIt, CompareOp>)
-        );
-        #else
-        typedef typename thrust::iterator_value<ItemsIt>::type item_type;
-        __smart_sort::smart_sort<detail::false_type>(
-                                 policy, first, last, (item_type*)NULL, compare_op
-                                 );
-        #endif
+            typedef typename thrust::iterator_value<ItemsIt>::type item_type;
+            __smart_sort::smart_sort<detail::false_type>(
+                policy, first, last, (item_type*)NULL, compare_op);
         }
         __device__
         static void seq(execution_policy<Derived>& policy,
@@ -453,7 +445,6 @@ stable_sort_by_key(execution_policy<Derived>& policy,
                    CompareOp                  compare_op)
 {
     // struct workaround is required for HIP-clang
-    // THRUST_HIP_PRESERVE_KERNELS_WORKAROUND is required for HCC
     struct workaround
     {
         __host__
@@ -463,14 +454,8 @@ stable_sort_by_key(execution_policy<Derived>& policy,
                         ValuesIt                   values,
                         CompareOp                  compare_op)
         {
-            #if __HCC__ && __HIP_DEVICE_COMPILE__
-             THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-                   (__smart_sort::smart_sort<detail::true_type, Derived, KeysIt, ValuesIt, CompareOp>)
-               );
-             #else
             __smart_sort::smart_sort<detail::true_type>(
-                            policy, keys_first, keys_last, values, compare_op);
-            #endif
+                policy, keys_first, keys_last, values, compare_op);
         }
 
         __device__

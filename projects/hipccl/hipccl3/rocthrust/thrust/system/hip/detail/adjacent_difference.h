@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2022, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2023, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -417,7 +417,6 @@ adjacent_difference(execution_policy<Derived>& policy,
                     BinaryOp                   binary_op)
 {
     // struct workaround is required for HIP-clang
-    // THRUST_HIP_PRESERVE_KERNELS_WORKAROUND is required for HCC
     struct workaround
     {
         __host__
@@ -427,19 +426,8 @@ adjacent_difference(execution_policy<Derived>& policy,
                         OutputIt&                  result,
                         BinaryOp                   binary_op)
         {
-        #if __HCC__ && __HIP_DEVICE_COMPILE__
-        THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-            (__adjacent_difference::adjacent_difference<Derived, InputIt, OutputIt, BinaryOp>)
-        );
-        #else
-        result = __adjacent_difference::adjacent_difference(
-            policy,
-            first,
-            last,
-            result,
-            binary_op
-        );
-        #endif
+            result = __adjacent_difference::adjacent_difference(
+                policy, first, last, result, binary_op);
         }
         __device__
         static void seq(execution_policy<Derived>& policy,

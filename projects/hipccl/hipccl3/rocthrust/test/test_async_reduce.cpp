@@ -1,7 +1,5 @@
 #include <thrust/detail/config.h>
 
-#if THRUST_CPP_DIALECT >= 2011 && !defined(THRUST_LEGACY_GCC)
-
 #include <thrust/async/reduce.h>
 #include <thrust/async/copy.h>
 #include <thrust/host_vector.h>
@@ -1215,5 +1213,3 @@ TYPED_TEST(AsyncReduceTests, TestAsyncCopyThenReduce)
 ///////////////////////////////////////////////////////////////////////////////
 
 // TODO: when_all from reductions.
-
-#endif

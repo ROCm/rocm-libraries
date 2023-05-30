@@ -182,6 +182,7 @@ pair<KeyOutputIt, ValOutputIt>
                                            ValOutputIt                values_result,
                                            BinaryPred                 binary_pred)
 {
+    // struct workaround is required for HIP-clang
     struct workaround
     {
         __host__
@@ -193,27 +194,13 @@ pair<KeyOutputIt, ValOutputIt>
                                                   ValOutputIt                values_result,
                                                   BinaryPred                 binary_pred)
         {
-        #if __HCC__ && __HIP_DEVICE_COMPILE__
-        THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-            (__unique_by_key::unique_by_key<
-                Derived,
-                KeyInputIt,
-                ValInputIt,
-                KeyOutputIt,
-                ValOutputIt,
-                BinaryPred>)
-        );
-        #else
-          return __unique_by_key::unique_by_key(
-            policy,
-            keys_first,
-            keys_last,
-            values_first,
-            keys_result,
-            values_result,
-            binary_pred
-        );
-        #endif
+            return __unique_by_key::unique_by_key(policy,
+                                                  keys_first,
+                                                  keys_last,
+                                                  values_first,
+                                                  keys_result,
+                                                  values_result,
+                                                  binary_pred);
         }
         __device__
         static pair<KeyOutputIt, ValOutputIt> seq(execution_policy<Derived>& policy,
@@ -273,48 +260,27 @@ unique_by_key(execution_policy<Derived>& policy,
               ValInputIt                 values_first,
               BinaryPred                 binary_pred)
 {
-  struct workaround
-  {
-      __host__
-      static pair<KeyInputIt, ValInputIt>par(
-          execution_policy<Derived>& policy,
-          KeyInputIt                 keys_first,
-          KeyInputIt                 keys_last,
-          ValInputIt                 values_first,
-          BinaryPred                 binary_pred)
-      {
-      #if __HCC__ && __HIP_DEVICE_COMPILE__
-      THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-          (hip_rocprim::unique_by_key_copy<Derived,
-                                           KeyInputIt,
-                                           ValInputIt,
-                                           KeyInputIt,
-                                           ValInputIt>)
-      );
-      #else
-        return hip_rocprim::unique_by_key_copy(
-          policy,
-          keys_first,
-          keys_last,
-          values_first,
-          keys_first,
-          values_first,
-          binary_pred
-      );
-      #endif
-      }
-      __device__
-      static pair<KeyInputIt, ValInputIt> seq(
-          execution_policy<Derived>& policy,
-          KeyInputIt                 keys_first,
-          KeyInputIt                 keys_last,
-          ValInputIt                 values_first,
-          BinaryPred                 binary_pred)
-      {
-          return thrust::unique_by_key(
-              cvt_to_seq(derived_cast(policy)), keys_first, keys_last, values_first, binary_pred
-          );
-      }
+    // struct workaround is required for HIP-clang
+    struct workaround
+    {
+        __host__ static pair<KeyInputIt, ValInputIt> par(execution_policy<Derived>& policy,
+                                                         KeyInputIt                 keys_first,
+                                                         KeyInputIt                 keys_last,
+                                                         ValInputIt                 values_first,
+                                                         BinaryPred                 binary_pred)
+        {
+            return hip_rocprim::unique_by_key_copy(
+                policy, keys_first, keys_last, values_first, keys_first, values_first, binary_pred);
+        }
+        __device__ static pair<KeyInputIt, ValInputIt> seq(execution_policy<Derived>& policy,
+                                                           KeyInputIt                 keys_first,
+                                                           KeyInputIt                 keys_last,
+                                                           ValInputIt                 values_first,
+                                                           BinaryPred                 binary_pred)
+        {
+            return thrust::unique_by_key(
+                cvt_to_seq(derived_cast(policy)), keys_first, keys_last, values_first, binary_pred);
+        }
   };
   #if __THRUST_HAS_HIPRT__
       return workaround::par(policy, keys_first, keys_last, values_first, binary_pred);

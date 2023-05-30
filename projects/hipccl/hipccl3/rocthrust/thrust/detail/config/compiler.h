@@ -21,7 +21,7 @@
 
 #pragma once
 
-#if defined(__HCC__) || defined(__HIP__)
+#if defined(__HIP__)
 // Macro enables Device Malloc
 #ifndef __HIP_ENABLE_DEVICE_MALLOC__
 #define __HIP_ENABLE_DEVICE_MALLOC__ 1
@@ -83,7 +83,7 @@
 // CUDA-capable clang should behave similar to NVCC.
 #if defined(__CUDA__)
 #define THRUST_DEVICE_COMPILER THRUST_DEVICE_COMPILER_NVCC
-#elif defined(__HCC__) || defined(__HIP__)
+#elif defined(__HIP__)
 #define THRUST_DEVICE_COMPILER THRUST_DEVICE_COMPILER_HIP
 #else
 #define THRUST_DEVICE_COMPILER THRUST_DEVICE_COMPILER_CLANG

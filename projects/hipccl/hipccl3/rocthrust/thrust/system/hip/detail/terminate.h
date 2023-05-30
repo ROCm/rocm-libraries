@@ -33,8 +33,7 @@
 
 #include <cstdio>
 
-namespace thrust
-{
+THRUST_NAMESPACE_BEGIN
 namespace system
 {
 namespace hip
@@ -59,4 +58,4 @@ void THRUST_HIP_FUNCTION terminate_with_message(const char* message)
 } // end detail
 } // end hip
 } // end system
-} // end thrust
+THRUST_NAMESPACE_END

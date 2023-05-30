@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights meserved.
- *  Modifications Copyright© 2019-2022 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -87,15 +87,13 @@ hipError_t synchronize_stream(execution_policy<Derived>& policy)
   hipError_t result;
 if (THRUST_IS_HOST_CODE) {
   #if THRUST_INCLUDE_HOST_CODE
-    hipStreamSynchronize(stream(policy));
-    result = hipGetLastError();
+    result = hipStreamSynchronize(stream(policy));
   #endif
 } else {
   #if THRUST_INCLUDE_DEVICE_CODE
     #if __THRUST_HAS_HIPRT__
       THRUST_UNUSED_VAR(policy);
-      hipDeviceSynchronize();
-      result = hipGetLastError();
+      result = hipDeviceSynchronize();
     #else
       THRUST_UNUSED_VAR(policy);
       result = hipSuccess;
@@ -316,18 +314,15 @@ struct transform_input_iterator_t
     {
     }
 
+    transform_input_iterator_t(const self_t&) = default;
 
-#if THRUST_CPP_DIALECT >= 2011
-  transform_input_iterator_t(const self_t &) = default;
-#endif
-
-  // UnaryOp might not be copy assignable, such as when it is a lambda.  Define
-  // an explicit copy assignment operator that doesn't try to assign it.
-  THRUST_HIP_FUNCTION self_t& operator=(const self_t& o)
-  {
-    input = o.input;
-    return *this;
-  }
+    // UnaryOp might not be copy assignable, such as when it is a lambda.  Define
+    // an explicit copy assignment operator that doesn't try to assign it.
+    THRUST_HIP_FUNCTION self_t& operator=(const self_t& o)
+    {
+        input = o.input;
+        return *this;
+    }
 
     /// Postfix increment
     THRUST_HIP_FUNCTION self_t operator++(int)
@@ -432,14 +427,12 @@ struct transform_pair_of_input_iterators_t
     {
     }
 
-    #if THRUST_CPP_DIALECT >= 2011
-      transform_pair_of_input_iterators_t(const self_t &) = default;
-    #endif
+    transform_pair_of_input_iterators_t(const self_t&) = default;
 
-      // BinaryOp might not be copy assignable, such as when it is a lambda.
-      // Define an explicit copy assignment operator that doesn't try to assign it.
-      self_t& operator=(const self_t& o)
-      {
+    // BinaryOp might not be copy assignable, such as when it is a lambda.
+    // Define an explicit copy assignment operator that doesn't try to assign it.
+    self_t& operator=(const self_t& o)
+    {
         input1 = o.input1;
         input2 = o.input2;
         return *this;

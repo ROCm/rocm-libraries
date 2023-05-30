@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright 2019 Advanced Micro Devices, Inc.
+# Copyright 2019-2023 Advanced Micro Devices, Inc.
 # ########################################################################
 
 # ###########################
@@ -60,7 +60,6 @@ if(BUILD_TEST)
       BUILD_PROJECT       TRUE
       UPDATE_DISCONNECTED TRUE
     )
-    list( APPEND CMAKE_PREFIX_PATH ${GTEST_ROOT} )
-    find_package(GTest REQUIRED)
+    find_package(GTest REQUIRED CONFIG PATHS ${GTEST_ROOT})
   endif()
 endif()

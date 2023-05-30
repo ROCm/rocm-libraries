@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2022, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2023, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -27,18 +27,12 @@
  ******************************************************************************/
 #pragma once
 
-
-#include <thrust/detail/config.h>
-#include <thrust/system/hip/detail/guarded_hip_runtime_api.h>
-#include <thrust/system/hip/detail/execution_policy.h>
-#include <thrust/system/hip/detail/util.h>
-
 #include <thrust/detail/allocator_aware_execution_policy.h>
-
-#if THRUST_CPP_DIALECT >= 2011
-#  include <thrust/detail/dependencies_aware_execution_policy.h>
-#endif
-
+#include <thrust/detail/config.h>
+#include <thrust/detail/dependencies_aware_execution_policy.h>
+#include <thrust/system/hip/detail/execution_policy.h>
+#include <thrust/system/hip/detail/guarded_hip_runtime_api.h>
+#include <thrust/system/hip/detail/util.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
@@ -131,10 +125,8 @@ namespace hip_rocprim
     };
 
     struct par_t : execution_policy<par_t>,
-        thrust::detail::allocator_aware_execution_policy<execute_on_stream_base>
-    #if THRUST_CPP_DIALECT >= 2011
-        , thrust::detail::dependencies_aware_execution_policy<execute_on_stream_base>
-    #endif
+                   thrust::detail::allocator_aware_execution_policy<execute_on_stream_base>,
+                   thrust::detail::dependencies_aware_execution_policy<execute_on_stream_base>
     {
         typedef execution_policy<par_t> base_t;
 
@@ -153,11 +145,10 @@ namespace hip_rocprim
         }
     };
 
-    struct par_nosync_t : execution_policy<par_nosync_t>,
-        thrust::detail::allocator_aware_execution_policy<execute_on_stream_nosync_base>
-    #if THRUST_CPP_DIALECT >= 2011
-        , thrust::detail::dependencies_aware_execution_policy<execute_on_stream_nosync_base>
-    #endif
+    struct par_nosync_t
+        : execution_policy<par_nosync_t>,
+          thrust::detail::allocator_aware_execution_policy<execute_on_stream_nosync_base>,
+          thrust::detail::dependencies_aware_execution_policy<execute_on_stream_nosync_base>
     {
         typedef execution_policy<par_nosync_t> base_t;
 

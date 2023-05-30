@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2023, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -31,14 +31,11 @@
 
 #include <hip/hip_runtime.h>
 
+#include <thrust/detail/allocator_aware_execution_policy.h>
+#include <thrust/detail/dependencies_aware_execution_policy.h>
 #include <thrust/detail/execution_policy.h>
 #include <thrust/iterator/detail/any_system_tag.h>
 #include <thrust/system/hip/config.h>
-#include <thrust/detail/allocator_aware_execution_policy.h>
-
-#if THRUST_CPP_DIALECT >= 2011
-  #include <thrust/detail/dependencies_aware_execution_policy.h>
-#endif
 
 THRUST_NAMESPACE_BEGIN
 
@@ -55,11 +52,9 @@ namespace hip_rocprim
         typedef tag tag_type;
     };
 
-    struct tag : execution_policy<tag>
-    , thrust::detail::allocator_aware_execution_policy<hip_rocprim::execution_policy>
-    #if THRUST_CPP_DIALECT >= 2011
-    , thrust::detail::dependencies_aware_execution_policy<hip_rocprim::execution_policy>
-    #endif
+    struct tag : execution_policy<tag>,
+                 thrust::detail::allocator_aware_execution_policy<hip_rocprim::execution_policy>,
+                 thrust::detail::dependencies_aware_execution_policy<hip_rocprim::execution_policy>
     {};
 
     template <class Derived>
