@@ -5,6 +5,18 @@
 #include <hip/hip_runtime.h>
 #include <numeric>
 
+#define HIP_CHECK(condition)                                                                     \
+    do                                                                                           \
+    {                                                                                            \
+        hipError_t error = condition;                                                            \
+        if(error != hipSuccess)                                                                  \
+        {                                                                                        \
+            std::cout << "HIP error: " << hipGetErrorString(error) << " on: " << __FILE__ << ":" \
+                      << __LINE__ << std::endl;                                                  \
+            exit(EXIT_FAILURE);                                                                  \
+        }                                                                                        \
+    } while(0)
+
 __global__ void dummy_kernel() {}
 
 bool binary_exists_for_current_device()
@@ -25,19 +37,19 @@ bool binary_exists_for_current_device()
 void list_devices(void)
 {
   int deviceCount;
-  hipGetDeviceCount(&deviceCount);
+  HIP_CHECK(hipGetDeviceCount(&deviceCount));
   if(deviceCount == 0)
   {
-    std::cout << "There is no device supporting HIP" << std::endl;
+      std::cout << "There is no device supporting HIP" << std::endl;
   }
 
   int selected_device;
-  hipGetDevice(&selected_device);
+  HIP_CHECK(hipGetDevice(&selected_device));
 
   for (int dev = 0; dev < deviceCount; ++dev)
   {
     hipDeviceProp_t deviceProp;
-    hipGetDeviceProperties(&deviceProp, dev);
+    HIP_CHECK(hipGetDeviceProperties(&deviceProp, dev));
 
     if(dev == 0)
     {
@@ -61,13 +73,6 @@ void list_devices(void)
   std::cout << std::endl;
 }
 
-// provide next, which c++03 doesn't have
-template<typename Iterator> Iterator my_next(Iterator iter)
-{
-  return ++iter;
-}
-
-
 std::vector<int> HIPTestDriver::target_devices(const ArgumentMap &kwargs)
 {
   std::vector<int> result;
@@ -85,7 +90,7 @@ std::vector<int> HIPTestDriver::target_devices(const ArgumentMap &kwargs)
   {
     // target all devices in the system
     int count = 0;
-    hipGetDeviceCount(&count);
+    HIP_CHECK(hipGetDeviceCount(&count));
 
     result.resize(count);
     std::iota(result.begin(), result.end(), 0);
@@ -165,10 +170,10 @@ bool HIPTestDriver::run_tests(const ArgumentSet &args, const ArgumentMap &kwargs
       device != devices.end();
       ++device)
   {
-    hipDeviceSynchronize();
+    HIP_CHECK(hipDeviceSynchronize());
 
     // set the device
-    hipSetDevice(*device);
+    HIP_CHECK(hipSetDevice(*device));
 
     // check if a binary exists for this device
     // if none exists, skip the device silently unless this is the only one we're targeting
@@ -176,7 +181,7 @@ bool HIPTestDriver::run_tests(const ArgumentSet &args, const ArgumentMap &kwargs
     {
       // note which device we're skipping
       hipDeviceProp_t deviceProp;
-      hipGetDeviceProperties(&deviceProp, *device);
+      HIP_CHECK(hipGetDeviceProperties(&deviceProp, *device));
 
       std::cout << "Skipping Device " << *device << ": \"" << deviceProp.name << "\"" << std::endl;
 
@@ -187,7 +192,7 @@ bool HIPTestDriver::run_tests(const ArgumentSet &args, const ArgumentMap &kwargs
     {
       // note which device we're testing
       hipDeviceProp_t deviceProp;
-      hipGetDeviceProperties(&deviceProp, *device);
+      HIP_CHECK(hipGetDeviceProperties(&deviceProp, *device));
 
       std::cout << "Testing Device " << *device << ": \"" << deviceProp.name << "\"" << std::endl;
     }
@@ -198,7 +203,7 @@ bool HIPTestDriver::run_tests(const ArgumentSet &args, const ArgumentMap &kwargs
     // run tests
     result &= UnitTestDriver::run_tests(args, kwargs);
 
-    if(!concise && my_next(device) != devices.end())
+    if(!concise && std::next(device) != devices.end())
     {
       // provide some separation between the output of separate tests
       std::cout << std::endl;
@@ -211,9 +216,9 @@ bool HIPTestDriver::run_tests(const ArgumentSet &args, const ArgumentMap &kwargs
 int HIPTestDriver::current_device_architecture() const
 {
   int current = -1;
-  hipGetDevice(&current);
+  HIP_CHECK(hipGetDevice(&current));
   hipDeviceProp_t deviceProp;
-  hipGetDeviceProperties(&deviceProp, current);
+  HIP_CHECK(hipGetDeviceProperties(&deviceProp, current));
 
   return 100 * deviceProp.major + 10 * deviceProp.minor;
 }
@@ -226,11 +231,10 @@ UnitTestDriver &driver_instance(thrust::system::hip::tag)
 
 bool HIPTestDriver::supports_managed_memory() const {
   int current = -1;
-  hipGetDevice(&current);
+  HIP_CHECK(hipGetDevice(&current));
 
   int managedMemory = 0;
-  hipDeviceGetAttribute(&managedMemory,
-    hipDeviceAttributeManagedMemory, current);
+  HIP_CHECK(hipDeviceGetAttribute(&managedMemory, hipDeviceAttributeManagedMemory, current));
 
   return managedMemory;
 }

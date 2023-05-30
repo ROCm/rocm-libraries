@@ -1,7 +1,5 @@
 #include <thrust/detail/config.h>
 
-#if THRUST_CPP_DIALECT >= 2011 && !defined(THRUST_LEGACY_GCC)
-
 #include <thrust/async/for_each.h>
 #include <thrust/host_vector.h>
 #include <thrust/device_vector.h>
@@ -96,5 +94,3 @@ TYPED_TEST(AsyncForEachTests, TestAsyncForEachPolicy)
         , inplace_divide_by_2
     >();
 }
-
-#endif

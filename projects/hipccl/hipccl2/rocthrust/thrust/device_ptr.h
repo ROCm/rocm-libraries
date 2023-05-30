@@ -111,10 +111,6 @@ class device_ptr
     __host__ __device__
     explicit device_ptr(U* ptr) : super_t(ptr) {}
 
-    // Fixes HCC linkage error
-    __host__ __device__
-    explicit device_ptr(T *ptr) : super_t(ptr) {}
-
     /*! \brief Copy construct a \c device_ptr from another \c device_ptr whose
      *  pointer type is convertible to \c T*.
      *

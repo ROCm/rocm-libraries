@@ -255,22 +255,6 @@ constexpr auto invoke(Fn &&f, Args &&... args)
 {
   return std::forward<Fn>(f)(std::forward<Args>(args)...);
 }
-
-// std::invoke_result from C++17
-template <class F, class, class... Us> struct invoke_result_impl;
-
-template <class F, class... Us>
-struct invoke_result_impl<
-    F, decltype(detail::invoke(std::declval<F>(), std::declval<Us>()...), void()),
-    Us...> {
-  using type = decltype(detail::invoke(std::declval<F>(), std::declval<Us>()...));
-};
-
-template <class F, class... Us>
-using invoke_result = invoke_result_impl<F, void, Us...>;
-
-template <class F, class... Us>
-using invoke_result_t = typename invoke_result<F, Us...>::type;
 #endif
 
 // std::void_t from C++17

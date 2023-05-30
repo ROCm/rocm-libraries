@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright 2019-2020 Advanced Micro Devices, Inc.
+# Copyright 2019-2023 Advanced Micro Devices, Inc.
 # ########################################################################
 
 cmake_minimum_required(VERSION 3.10.2 FATAL_ERROR)
@@ -74,7 +74,7 @@ set(AMDGPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "List of specific ma
 # Get dependencies
 include(cmake/Dependencies.cmake)
 
-# Verify that hcc or hipcc compiler is used on ROCM platform
+# Verify that supported compilers are used
 if (NOT WIN32)
   include(cmake/VerifyCompiler.cmake)
 endif()

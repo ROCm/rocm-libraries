@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright 2019 - 2020 Advanced Micro Devices, Inc.
+# Copyright 2019 - 2023 Advanced Micro Devices, Inc.
 # ########################################################################
 
 add_library(testing_common INTERFACE)
@@ -7,15 +7,24 @@ target_include_directories(testing_common
     SYSTEM
     BEFORE
     INTERFACE
-        $<BUILD_INTERFACE:${GTEST_INCLUDE_DIRS}>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}>
 )
 target_link_libraries(testing_common
     INTERFACE
         rocthrust
         roc::rocprim_hip
-        ${GTEST_BOTH_LIBRARIES}
 )
+if (TARGET GTest::GTest)
+    target_link_libraries(testing_common
+            INTERFACE
+            GTest::GTest
+            GTest::Main)
+else ()
+    target_link_libraries(testing_common
+            INTERFACE
+            GTest::gtest
+            GTest::gtest_main)
+endif ()
 foreach(amdgpu_target ${AMDGPU_TARGETS})
     target_link_libraries(testing_common
         INTERFACE
@@ -43,7 +52,7 @@ if(HIP_COMPILER STREQUAL "nvcc")
             LANGUAGE CXX
     )
     target_sources(testframework PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/unittest/cuda/testframework.cu)
-elseif(HIP_COMPILER STREQUAL "hcc" OR HIP_COMPILER STREQUAL "clang")
+elseif(HIP_COMPILER STREQUAL "clang")
     set_source_files_properties(unittest/hip/testframework.cu
     PROPERTIES
         LANGUAGE CXX

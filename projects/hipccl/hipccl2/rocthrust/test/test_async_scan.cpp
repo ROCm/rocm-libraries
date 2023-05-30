@@ -1,7 +1,5 @@
 #include <thrust/detail/config.h>
 
-#if THRUST_CPP_DIALECT >= 2011
-
 #include <thrust/async/scan.h>
 #include <thrust/device_vector.h>
 #include <thrust/host_vector.h>
@@ -222,5 +220,3 @@ TYPED_TEST(AsyncScanTests, AsyncExclusiveScanPolicyMaximumNoWait)
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-
-#endif // THRUST_CPP_DIALECT >= 2011

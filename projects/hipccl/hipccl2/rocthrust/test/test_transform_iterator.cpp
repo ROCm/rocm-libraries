@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-21 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -146,4 +146,20 @@ TEST(TransformIteratorTests, TestTransformIteratorNonCopyable)
     ASSERT_EQ(transformed[1], 2);
     ASSERT_EQ(transformed[2], 3);
     ASSERT_EQ(transformed[3], 4);
+}
+
+struct DeviceOp
+{
+    __device__ int operator()(int)
+    {
+        return int {};
+    }
+};
+
+/// Tests compilation of device-only operators.
+TEST(TransformIteratorTests, TestDeviceOperator)
+{
+    thrust::device_vector<int> dv(1);
+    auto                       iter = thrust::make_transform_iterator(dv.begin(), DeviceOp {});
+    THRUST_UNUSED_VAR(iter);
 }

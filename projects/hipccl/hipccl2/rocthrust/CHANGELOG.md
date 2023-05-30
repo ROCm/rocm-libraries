@@ -2,13 +2,15 @@
 
 Full documentation for rocThrust is available at [https://rocthrust.readthedocs.io/en/latest/](https://rocthrust.readthedocs.io/en/latest/)
 
-## (Unreleased) rocThrust 2.18.0 for ROCm 5.6
+## (Unreleased) rocThrust 2.18.0 for ROCm 5.7
 ### Fixed 
 - `lower_bound`, `upper_bound`, and `binary_search` failed to compile for certain types.
+- Fixed issue where `transform_iterator` would not compile with `__device__`-only operators.
 ### Changed
 - Updated `docs` directory structure to match the standard of [rocm-docs-core](https://github.com/RadeonOpenCompute/rocm-docs-core).
+- Removed references to and workarounds for deprecated hcc
 
-## (Unreleased) rocThrust 2.17.0 for ROCm 5.5
+## rocThrust 2.17.0 for ROCm 5.5
 ### Added
 - Updated to match upstream Thrust 1.17.2
 ### Fixed

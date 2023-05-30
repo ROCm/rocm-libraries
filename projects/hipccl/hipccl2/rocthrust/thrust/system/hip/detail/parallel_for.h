@@ -131,26 +131,16 @@ parallel_for(execution_policy<Derived>& policy, F f, Size count)
         return;
 
     // struct workaround is required for HIP-clang
-    // THRUST_HIP_PRESERVE_KERNELS_WORKAROUND is required for HCC
     struct workaround
     {
         __host__
         static void par(execution_policy<Derived>& policy, F f, Size count)
         {
-#if __HCC__ && __HIP_DEVICE_COMPILE__
-            THRUST_HIP_PRESERVE_KERNELS_WORKAROUND((__parallel_for::parallel_for<F, Size>));
-            (void)policy;
-            (void)f;
-            (void)count;
-#else
             hipStream_t stream = hip_rocprim::stream(policy);
             hipError_t  status = __parallel_for::parallel_for(count, f, stream);
             hip_rocprim::throw_on_error(status, "parallel_for failed");
-            hip_rocprim::throw_on_error(
-                hip_rocprim::synchronize_optional(policy),
-                "parallel_for: failed to synchronize"
-            );
-#endif
+            hip_rocprim::throw_on_error(hip_rocprim::synchronize_optional(policy),
+                                        "parallel_for: failed to synchronize");
         }
 
         __device__

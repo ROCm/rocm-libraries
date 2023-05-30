@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2023, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -202,37 +202,37 @@ inclusive_scan_by_key(execution_policy<Derived>& policy,
                       BinaryPred                 binary_pred,
                       ScanOp                     scan_op)
 {
-  struct workaround
-  {
-      __host__
-      static ValOutputIt par(execution_policy<Derived>& policy,
-                          KeyInputIt                 key_first,
-                          KeyInputIt                 key_last,
-                          ValInputIt                 value_first,
-                          ValOutputIt                value_result,
-                          BinaryPred                 binary_pred,
-                          ScanOp                     scan_op)
-      {
-        #if __HCC__ && __HIP_DEVICE_COMPILE__
-        THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-               (__scan_by_key::inclusive_scan_by_key<Derived,KeyInputIt,ValInputIt,ValOutputIt,BinaryPred,ScanOp>)
-        );
-        #else
-        return __scan_by_key::inclusive_scan_by_key(policy,key_first, key_last, value_first, value_result, binary_pred, scan_op);
-        #endif
-      }
+    // struct workaround is required for HIP-clang
+    struct workaround
+    {
+        __host__ static ValOutputIt par(execution_policy<Derived>& policy,
+                                        KeyInputIt                 key_first,
+                                        KeyInputIt                 key_last,
+                                        ValInputIt                 value_first,
+                                        ValOutputIt                value_result,
+                                        BinaryPred                 binary_pred,
+                                        ScanOp                     scan_op)
+        {
+            return __scan_by_key::inclusive_scan_by_key(
+                policy, key_first, key_last, value_first, value_result, binary_pred, scan_op);
+        }
 
-      __device__
-      static ValOutputIt seq(execution_policy<Derived>& policy,
-                          KeyInputIt                 key_first,
-                          KeyInputIt                 key_last,
-                          ValInputIt                 value_first,
-                          ValOutputIt                value_result,
-                          BinaryPred                 binary_pred,
-                          ScanOp                     scan_op)
-      {
-        return thrust::inclusive_scan_by_key( cvt_to_seq(derived_cast(policy)), key_first, key_last, value_first, value_result, binary_pred, scan_op);
-      }
+        __device__ static ValOutputIt seq(execution_policy<Derived>& policy,
+                                          KeyInputIt                 key_first,
+                                          KeyInputIt                 key_last,
+                                          ValInputIt                 value_first,
+                                          ValOutputIt                value_result,
+                                          BinaryPred                 binary_pred,
+                                          ScanOp                     scan_op)
+        {
+            return thrust::inclusive_scan_by_key(cvt_to_seq(derived_cast(policy)),
+                                                 key_first,
+                                                 key_last,
+                                                 value_first,
+                                                 value_result,
+                                                 binary_pred,
+                                                 scan_op);
+        }
   };
 
   #if __THRUST_HAS_HIPRT__
@@ -305,39 +305,40 @@ exclusive_scan_by_key(execution_policy<Derived>& policy,
                       ScanOp                     scan_op)
 {
 
-  struct workaround
-  {
-      __host__
-      static ValOutputIt par(execution_policy<Derived>& policy,
-                            KeyInputIt                 key_first,
-                            KeyInputIt                 key_last,
-                            ValInputIt                 value_first,
-                            ValOutputIt                value_result,
-                            Init                       init,
-                            BinaryPred                 binary_pred,
-                            ScanOp                     scan_op)
-      {
-        #if __HCC__ && __HIP_DEVICE_COMPILE__
-        THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-               (__scan_by_key::inclusive_scan_by_key<Derived,KeyInputIt,ValInputIt,ValOutputIt,Init,BinaryPred,ScanOp>)
-        );
-        #else
-        return __scan_by_key::exclusive_scan_by_key(policy,key_first, key_last, value_first, value_result, init, binary_pred, scan_op);
-        #endif
-      }
+    // struct workaround is required for HIP-clang
+    struct workaround
+    {
+        __host__ static ValOutputIt par(execution_policy<Derived>& policy,
+                                        KeyInputIt                 key_first,
+                                        KeyInputIt                 key_last,
+                                        ValInputIt                 value_first,
+                                        ValOutputIt                value_result,
+                                        Init                       init,
+                                        BinaryPred                 binary_pred,
+                                        ScanOp                     scan_op)
+        {
+            return __scan_by_key::exclusive_scan_by_key(
+                policy, key_first, key_last, value_first, value_result, init, binary_pred, scan_op);
+        }
 
-      __device__
-      static ValOutputIt seq(execution_policy<Derived>& policy,
-                            KeyInputIt                 key_first,
-                            KeyInputIt                 key_last,
-                            ValInputIt                 value_first,
-                            ValOutputIt                value_result,
-                            Init                       init,
-                            BinaryPred                 binary_pred,
-                            ScanOp                     scan_op)
-      {
-        return thrust::exclusive_scan_by_key( cvt_to_seq(derived_cast(policy)), key_first, key_last, value_first, value_result, init, binary_pred, scan_op);
-      }
+        __device__ static ValOutputIt seq(execution_policy<Derived>& policy,
+                                          KeyInputIt                 key_first,
+                                          KeyInputIt                 key_last,
+                                          ValInputIt                 value_first,
+                                          ValOutputIt                value_result,
+                                          Init                       init,
+                                          BinaryPred                 binary_pred,
+                                          ScanOp                     scan_op)
+        {
+            return thrust::exclusive_scan_by_key(cvt_to_seq(derived_cast(policy)),
+                                                 key_first,
+                                                 key_last,
+                                                 value_first,
+                                                 value_result,
+                                                 init,
+                                                 binary_pred,
+                                                 scan_op);
+        }
   };
 
   #if __THRUST_HAS_HIPRT__

@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2023, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -238,53 +238,36 @@ merge(execution_policy<Derived>& policy,
       CompareOp                  compare_op)
 
 {
-
-  struct workaround
-  {
-      __host__
-      static ResultIt par(execution_policy<Derived>& policy,
-                      KeysIt1                    keys1_first,
-                      KeysIt1                    keys1_last,
-                      KeysIt2                    keys2_first,
-                      KeysIt2                    keys2_last,
-                      ResultIt                   result,
-                      CompareOp                  compare_op)
-      {
-      #if __HCC__ && __HIP_DEVICE_COMPILE__
-      THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-          (__merge::merge<Derived, KeysIt1, KeysIt2, ResultIt, CompareOp>)
-      );
-      #else
-      return __merge::merge(
-        policy,
-        keys1_first,
-        keys1_last,
-        keys2_first,
-        keys2_last,
-        result,
-        compare_op
-      );
-      #endif
-      }
-      __device__
-      static ResultIt seq(execution_policy<Derived>& policy,
-                      KeysIt1                    keys1_first,
-                      KeysIt1                    keys1_last,
-                      KeysIt2                    keys2_first,
-                      KeysIt2                    keys2_last,
-                      ResultIt                   result,
-                      CompareOp                  compare_op)
-      {
-          return thrust::merge(
-             cvt_to_seq(derived_cast(policy)),
-             keys1_first,
-             keys1_last,
-             keys2_first,
-             keys2_last,
-             result,
-             compare_op
-          );
-      }
+    // struct workaround is required for HIP-clang
+    struct workaround
+    {
+        __host__ static ResultIt par(execution_policy<Derived>& policy,
+                                     KeysIt1                    keys1_first,
+                                     KeysIt1                    keys1_last,
+                                     KeysIt2                    keys2_first,
+                                     KeysIt2                    keys2_last,
+                                     ResultIt                   result,
+                                     CompareOp                  compare_op)
+        {
+            return __merge::merge(
+                policy, keys1_first, keys1_last, keys2_first, keys2_last, result, compare_op);
+        }
+        __device__ static ResultIt seq(execution_policy<Derived>& policy,
+                                       KeysIt1                    keys1_first,
+                                       KeysIt1                    keys1_last,
+                                       KeysIt2                    keys2_first,
+                                       KeysIt2                    keys2_last,
+                                       ResultIt                   result,
+                                       CompareOp                  compare_op)
+        {
+            return thrust::merge(cvt_to_seq(derived_cast(policy)),
+                                 keys1_first,
+                                 keys1_last,
+                                 keys2_first,
+                                 keys2_last,
+                                 result,
+                                 compare_op);
+        }
   };
   #if __THRUST_HAS_HIPRT__
   return workaround::par(policy, keys1_first, keys1_last, keys2_first, keys2_last, result, compare_op);
@@ -313,9 +296,9 @@ merge_by_key(execution_policy<Derived>& policy,
              ItemsOutputIt              items_result,
              CompareOp                  compare_op)
 {
-
-    struct workaround
-    {
+  // struct workaround is required for HIP-clang
+  struct workaround
+  {
         __host__
         static pair<KeysOutputIt, ItemsOutputIt> par(execution_policy<Derived>& policy,
                             KeysIt1                    keys1_first,
@@ -328,24 +311,16 @@ merge_by_key(execution_policy<Derived>& policy,
                             ItemsOutputIt              items_result,
                             CompareOp                  compare_op)
         {
-        #if __HCC__ && __HIP_DEVICE_COMPILE__
-        THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-            (__merge::merge<Derived, KeysIt1, KeysIt2, ResultIt, CompareOp>)
-        );
-        #else
-        return __merge::merge(
-          policy,
-          keys1_first,
-          keys1_last,
-          keys2_first,
-          keys2_last,
-          items1_first,
-          items2_first,
-          keys_result,
-          items_result,
-          compare_op
-        );
-        #endif
+            return __merge::merge(policy,
+                                  keys1_first,
+                                  keys1_last,
+                                  keys2_first,
+                                  keys2_last,
+                                  items1_first,
+                                  items2_first,
+                                  keys_result,
+                                  items_result,
+                                  compare_op);
         }
         __device__
         static pair<KeysOutputIt, ItemsOutputIt> seq(execution_policy<Derived>& policy,

@@ -1,6 +1,5 @@
 #include <thrust/detail/config.h>
 
-#if THRUST_CPP_DIALECT >= 2011
 #include <map>
 #include <limits>
 #include <thrust/random.h>
@@ -639,5 +638,3 @@ TYPED_TEST(ShuffleVectorTests, TestShuffleEvenDistribution)
       }
     }
 }
-
-#endif

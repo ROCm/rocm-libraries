@@ -1,5 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
+ *  Modifications Copyright© 2023 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -30,10 +31,9 @@ THRUST_NAMESPACE_BEGIN
 namespace detail
 {
 
-template<typename T> struct has_trivial_assign
-  : public integral_constant<
-      bool,
-      (is_pod<T>::value && !is_const<T>::value)
+template <typename T>
+struct has_trivial_assign : public integral_constant<bool,
+                                                     (is_pod<T>::value && !is_const<T>::value)
 #if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC
       || __is_trivially_assignable(T, const T)
 #elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC
@@ -44,8 +44,9 @@ template<typename T> struct has_trivial_assign
 #elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_CLANG
       || __is_trivially_assignable(T, const T)
 #endif // THRUST_HOST_COMPILER
-    >
-{};
+                                                     >
+{
+};
 
 } // end detail
 

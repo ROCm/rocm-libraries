@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2023, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -132,45 +132,26 @@ T reduce_n(execution_policy<Derived>& policy,
            T                          init,
            BinaryOp                   binary_op)
 {
-
-  struct workaround
-  {
-      __host__
-      static T par(execution_policy<Derived>& policy,
-                      InputIt                    first,
-                      Size                       num_items,
-                      T                          init,
-                      BinaryOp                   binary_op)
-      {
-      #if __HCC__ && __HIP_DEVICE_COMPILE__
-      THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-          (__reduce::reduce<Derived, InputIt, Size, T, BinaryOp>)
-      );
-      #else
-      return __reduce::reduce(
-          policy,
-          first,
-          num_items,
-          init,
-          binary_op
-      );
-      #endif
-      }
-      __device__
-      static T seq(execution_policy<Derived>& policy,
-                      InputIt                    first,
-                      Size                       num_items,
-                      T                          init,
-                      BinaryOp                   binary_op)
-      {
-        return thrust::reduce(
-             cvt_to_seq(derived_cast(policy)),
-             first,
-             first + num_items,
-             init,
-             binary_op
-          );
-      }
+    // struct workaround is required for HIP-clang
+    struct workaround
+    {
+        __host__ static T par(execution_policy<Derived>& policy,
+                              InputIt                    first,
+                              Size                       num_items,
+                              T                          init,
+                              BinaryOp                   binary_op)
+        {
+            return __reduce::reduce(policy, first, num_items, init, binary_op);
+        }
+        __device__ static T seq(execution_policy<Derived>& policy,
+                                InputIt                    first,
+                                Size                       num_items,
+                                T                          init,
+                                BinaryOp                   binary_op)
+        {
+            return thrust::reduce(
+                cvt_to_seq(derived_cast(policy)), first, first + num_items, init, binary_op);
+        }
   };
 
   #if __THRUST_HAS_HIPRT__

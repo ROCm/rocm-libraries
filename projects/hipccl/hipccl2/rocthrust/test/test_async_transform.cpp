@@ -1,11 +1,8 @@
-#include <thrust/detail/config.h>
-
-#if THRUST_CPP_DIALECT >= 2011 && !defined(THRUST_LEGACY_GCC)
-
 #include <thrust/async/transform.h>
 #include <thrust/async/copy.h>
-#include <thrust/host_vector.h>
+#include <thrust/detail/config.h>
 #include <thrust/device_vector.h>
+#include <thrust/host_vector.h>
 
 #include "test_header.hpp"
 
@@ -418,4 +415,3 @@ TYPED_TEST(AsyncTransformTests, TestAsyncTransformUnaryInplaceDeviceAllocatorOn)
 
 ///////////////////////////////////////////////////////////////////////////////
 
-#endif

@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2023, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -194,33 +194,26 @@ inclusive_scan_n(execution_policy<Derived>& policy,
                  OutputIt                   result,
                  ScanOp                     scan_op)
 {
-
-  struct workaround
-  {
-      __host__
-      static OutputIt par(execution_policy<Derived>& policy,
-                       InputIt                    input_it,
-                       Size                       num_items,
-                       OutputIt                   result,
-                       ScanOp                     scan_op)
-      {
-        #if __HCC__ && __HIP_DEVICE_COMPILE__
-        THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-            (rocprim::inclusive_scan<rocprim::default_config, InputIt, OutputIt, ScanOp>)
-        );
-        #else
-        return __scan::inclusive_scan(policy, input_it, result, num_items, scan_op);
-        #endif
-      }
-      __device__
-      static OutputIt seq(execution_policy<Derived>& policy,
-                       InputIt                    input_it,
-                       Size                       num_items,
-                       OutputIt                   result,
-                       ScanOp                     scan_op)
-      {
-        return thrust::inclusive_scan( cvt_to_seq(derived_cast(policy)), input_it, input_it + num_items, result, scan_op );
-      }
+    // struct workaround is required for HIP-clang
+    struct workaround
+    {
+        __host__ static OutputIt par(execution_policy<Derived>& policy,
+                                     InputIt                    input_it,
+                                     Size                       num_items,
+                                     OutputIt                   result,
+                                     ScanOp                     scan_op)
+        {
+            return __scan::inclusive_scan(policy, input_it, result, num_items, scan_op);
+        }
+        __device__ static OutputIt seq(execution_policy<Derived>& policy,
+                                       InputIt                    input_it,
+                                       Size                       num_items,
+                                       OutputIt                   result,
+                                       ScanOp                     scan_op)
+        {
+            return thrust::inclusive_scan(
+                cvt_to_seq(derived_cast(policy)), input_it, input_it + num_items, result, scan_op);
+        }
   };
   #if __THRUST_HAS_HIPRT__
     return workaround::par(policy, input_it, num_items, result, scan_op);
@@ -273,36 +266,29 @@ OutputIt THRUST_HIP_FUNCTION exclusive_scan_n(execution_policy<Derived>& policy,
                                               T                          init,
                                               ScanOp                     scan_op)
 {
+    // struct workaround is required for HIP-clang
+    struct workaround
+    {
+        __host__ static OutputIt par(execution_policy<Derived>& policy,
+                                     InputIt                    first,
+                                     Size                       num_items,
+                                     OutputIt                   result,
+                                     T                          init,
+                                     ScanOp                     scan_op)
+        {
+            return __scan::exclusive_scan(policy, first, result, num_items, init, scan_op);
+        }
 
-  struct workaround
-  {
-      __host__
-      static OutputIt par(execution_policy<Derived>& policy,
-                          InputIt                    first,
-                          Size                       num_items,
-                          OutputIt                   result,
-                          T                          init,
-                          ScanOp                     scan_op)
-      {
-        #if __HCC__ && __HIP_DEVICE_COMPILE__
-        THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-             rocprim::exclusive_scan<rocprim::default_config, InputIt, OutputIt, T, ScanOp>);
-        #else
-          return __scan::exclusive_scan(policy, first, result, num_items, init, scan_op);
-        #endif
-      }
-
-
-      __device__
-      static OutputIt seq(execution_policy<Derived>& policy,
-                          InputIt                    first,
-                          Size                       num_items,
-                          OutputIt                   result,
-                          T                          init,
-                          ScanOp                     scan_op)
-      {
-        return thrust::exclusive_scan(cvt_to_seq(derived_cast(policy)), first, first + num_items, result, init, scan_op);
-      }
+        __device__ static OutputIt seq(execution_policy<Derived>& policy,
+                                       InputIt                    first,
+                                       Size                       num_items,
+                                       OutputIt                   result,
+                                       T                          init,
+                                       ScanOp                     scan_op)
+        {
+            return thrust::exclusive_scan(
+                cvt_to_seq(derived_cast(policy)), first, first + num_items, result, init, scan_op);
+        }
   };
 
   #if __THRUST_HAS_HIPRT__

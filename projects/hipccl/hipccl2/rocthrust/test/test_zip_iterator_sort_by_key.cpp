@@ -20,7 +20,7 @@
 
 #include "test_header.hpp"
 
-#if defined(WIN32) && defined(__HIP__)
+#if defined(_WIN32) && defined(__HIP__)
 typedef ::testing::Types<Params<int16_t>, Params<int32_t>> TestParams;
 #else
 typedef ::testing::Types<Params<int8_t>, Params<int16_t>, Params<int32_t>> TestParams;

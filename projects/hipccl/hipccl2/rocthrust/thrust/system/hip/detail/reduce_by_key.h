@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2023, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -164,57 +164,45 @@ reduce_by_key(execution_policy<Derived>& policy,
               BinaryPred                 binary_pred,
               BinaryOp                   binary_op)
 {
-  struct workaround
-  {
-      __host__
-      static pair<KeyOutputIt, ValOutputIt> par(
-        execution_policy<Derived>& policy,
-        KeyInputIt                 keys_first,
-        KeyInputIt                 keys_last,
-        ValInputIt                 values_first,
-        KeyOutputIt                keys_output,
-        ValOutputIt                values_output,
-        BinaryPred                 binary_pred,
-        BinaryOp                   binary_op)
-      {
-      #if __HCC__ && __HIP_DEVICE_COMPILE__
-      THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-          (__reduce_by_key::reduce_by_key<Derived, KeyInputIt, ValInputIt, KeyOutputIt, ValOutputIt, BinaryPred, BinaryOp>)
-      );
-      #else
-      return __reduce_by_key::reduce_by_key(
-        policy,
-        keys_first,
-        keys_last,
-        values_first,
-        keys_output,
-        values_output,
-        binary_pred,
-        binary_op
-      );
-      #endif
-      }
-      __device__
-      static pair<KeyOutputIt, ValOutputIt> seq(
-        execution_policy<Derived>& policy,
-        KeyInputIt                 keys_first,
-        KeyInputIt                 keys_last,
-        ValInputIt                 values_first,
-        KeyOutputIt                keys_output,
-        ValOutputIt                values_output,
-        BinaryPred                 binary_pred,
-        BinaryOp                   binary_op)
-      {
-        return thrust::reduce_by_key(cvt_to_seq(derived_cast(policy)),
-                                     keys_first,
-                                     keys_last,
-                                     values_first,
-                                     keys_output,
-                                     values_output,
-                                     binary_pred,
-                                     binary_op
-                                     );
-      }
+    // struct workaround is required for HIP-clang
+    struct workaround
+    {
+        __host__ static pair<KeyOutputIt, ValOutputIt> par(execution_policy<Derived>& policy,
+                                                           KeyInputIt                 keys_first,
+                                                           KeyInputIt                 keys_last,
+                                                           ValInputIt                 values_first,
+                                                           KeyOutputIt                keys_output,
+                                                           ValOutputIt                values_output,
+                                                           BinaryPred                 binary_pred,
+                                                           BinaryOp                   binary_op)
+        {
+            return __reduce_by_key::reduce_by_key(policy,
+                                                  keys_first,
+                                                  keys_last,
+                                                  values_first,
+                                                  keys_output,
+                                                  values_output,
+                                                  binary_pred,
+                                                  binary_op);
+        }
+        __device__ static pair<KeyOutputIt, ValOutputIt> seq(execution_policy<Derived>& policy,
+                                                             KeyInputIt                 keys_first,
+                                                             KeyInputIt                 keys_last,
+                                                             ValInputIt  values_first,
+                                                             KeyOutputIt keys_output,
+                                                             ValOutputIt values_output,
+                                                             BinaryPred  binary_pred,
+                                                             BinaryOp    binary_op)
+        {
+            return thrust::reduce_by_key(cvt_to_seq(derived_cast(policy)),
+                                         keys_first,
+                                         keys_last,
+                                         values_first,
+                                         keys_output,
+                                         values_output,
+                                         binary_pred,
+                                         binary_op);
+        }
   };
   #if __THRUST_HAS_HIPRT__
     return workaround::par(policy,  keys_first, keys_last, values_first, keys_output, values_output, binary_pred, binary_op);

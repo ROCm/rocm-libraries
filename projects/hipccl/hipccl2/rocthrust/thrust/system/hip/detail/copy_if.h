@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2023, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -44,7 +44,7 @@
 THRUST_NAMESPACE_BEGIN
 
 // XXX declare generic copy_if interface
-// to avoid circulular dependency from thrust/copy.h
+// to avoid circular dependency from thrust/copy.h
 template <typename DerivedPolicy,
           typename InputIterator,
           typename OutputIterator,
@@ -198,46 +198,25 @@ copy_if(execution_policy<Derived>& policy,
         OutputIterator             result,
         Predicate                  pred)
 {
-  // struct workaround is required for HIP-clang
-  // THRUST_HIP_PRESERVE_KERNELS_WORKAROUND is required for HCC
-  struct workaround
-  {
-      __host__
-      static OutputIterator par(execution_policy<Derived>& policy,
-                      InputIterator              first,
-                      InputIterator              last,
-                      OutputIterator             result,
-                      Predicate                  pred)
-      {
-      #if __HCC__ && __HIP_DEVICE_COMPILE__
-      THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-          (__copy_if::copy_if<Derived, InputIterator, OutputIterator, Predicate>)
-      );
-      #else
-      return __copy_if::copy_if(
-          policy,
-          first,
-          last,
-          result,
-          pred
-      );
-      #endif
-      }
-      __device__
-      static OutputIterator seq(execution_policy<Derived>& policy,
-                      InputIterator              first,
-                      InputIterator              last,
-                      OutputIterator             result,
-                      Predicate                  pred)
-      {
-          return thrust::copy_if(
-             cvt_to_seq(derived_cast(policy)),
-             first,
-             last,
-             result,
-             pred
-          );
-      }
+    // struct workaround is required for HIP-clang
+    struct workaround
+    {
+        __host__ static OutputIterator par(execution_policy<Derived>& policy,
+                                           InputIterator              first,
+                                           InputIterator              last,
+                                           OutputIterator             result,
+                                           Predicate                  pred)
+        {
+            return __copy_if::copy_if(policy, first, last, result, pred);
+        }
+        __device__ static OutputIterator seq(execution_policy<Derived>& policy,
+                                             InputIterator              first,
+                                             InputIterator              last,
+                                             OutputIterator             result,
+                                             Predicate                  pred)
+        {
+            return thrust::copy_if(cvt_to_seq(derived_cast(policy)), first, last, result, pred);
+        }
   };
 
   #if __THRUST_HAS_HIPRT__
@@ -264,56 +243,28 @@ copy_if(execution_policy<Derived>& policy,
         Predicate                  pred)
 {
 
-  // struct workaround is required for HIP-clang
-  // THRUST_HIP_PRESERVE_KERNELS_WORKAROUND is required for HCC
-  struct workaround
-  {
-      __host__
-      static OutputIterator par(
-        execution_policy<Derived>& policy,
-        InputIterator              first,
-        InputIterator              last,
-        StencilIterator            stencil,
-        OutputIterator             result,
-        Predicate                  pred)
-      {
-      #if __HCC__ && __HIP_DEVICE_COMPILE__
-      THRUST_HIP_PRESERVE_KERNELS_WORKAROUND(
-          (__copy_if::copy_if<Derived,
-                             InputIterator,
-                             StencilIterator,
-                             OutputIterator,
-                             Predicate>)
-      );
-      #else
-      return __copy_if::copy_if(
-          policy,
-          first,
-          last,
-          stencil,
-          result,
-          pred
-      );
-      #endif
-      }
-      __device__
-      static OutputIterator seq(
-        execution_policy<Derived>& policy,
-        InputIterator              first,
-        InputIterator              last,
-        StencilIterator            stencil,
-        OutputIterator             result,
-        Predicate                  pred)
-      {
-          return thrust::copy_if(
-             cvt_to_seq(derived_cast(policy)),
-             first,
-             last,
-             stencil,
-             result,
-             pred
-          );
-      }
+    // struct workaround is required for HIP-clang
+    struct workaround
+    {
+        __host__ static OutputIterator par(execution_policy<Derived>& policy,
+                                           InputIterator              first,
+                                           InputIterator              last,
+                                           StencilIterator            stencil,
+                                           OutputIterator             result,
+                                           Predicate                  pred)
+        {
+            return __copy_if::copy_if(policy, first, last, stencil, result, pred);
+        }
+        __device__ static OutputIterator seq(execution_policy<Derived>& policy,
+                                             InputIterator              first,
+                                             InputIterator              last,
+                                             StencilIterator            stencil,
+                                             OutputIterator             result,
+                                             Predicate                  pred)
+        {
+            return thrust::copy_if(
+                cvt_to_seq(derived_cast(policy)), first, last, stencil, result, pred);
+        }
   };
 
 #if __THRUST_HAS_HIPRT__

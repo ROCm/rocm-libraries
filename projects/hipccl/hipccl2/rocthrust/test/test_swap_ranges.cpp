@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -192,9 +192,7 @@ struct type_with_swap
         return m_x == other.m_x && m_swapped == other.m_swapped;
     }
 
-#if THRUST_CPP_DIALECT >= 2011
-    type_with_swap & operator=(const type_with_swap &) = default;
-#endif
+    type_with_swap& operator=(const type_with_swap&) = default;
 
     int  m_x;
     bool m_swapped;

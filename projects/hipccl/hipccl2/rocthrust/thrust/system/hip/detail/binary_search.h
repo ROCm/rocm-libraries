@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2022, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2023, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -246,50 +246,37 @@ lower_bound(execution_policy<Derived>& policy,
             OutputIt                   result,
             CompareOp                  compare_op)
 {
-  struct workaround
-  {
-      __host__
-      static OutputIt par(execution_policy<Derived>& policy,
-                          HaystackIt                 first,
-                          HaystackIt                 last,
-                          NeedlesIt                  values_first,
-                          NeedlesIt                  values_last,
-                          OutputIt                   result,
-                          CompareOp                  compare_op)
-      {
-        #if __HCC__ && __HIP_DEVICE_COMPILE__
-          THRUST_HIP_PRESERVE_KERNELS_WORKAROUND
-          (__binary_search::lower_bound<Derived,
-                                        HaystackIt,
-                                        NeedlesIt,
-                                        OutputIt,
-                                        CompareOp>);
-          return first;
-        #else
-        return __binary_search::lower_bound(
-            policy, first, last, values_first, values_last, result, compare_op
-        );
-        #endif
-      }
+    // struct workaround is required for HIP-clang
+    struct workaround
+    {
+        __host__ static OutputIt par(execution_policy<Derived>& policy,
+                                     HaystackIt                 first,
+                                     HaystackIt                 last,
+                                     NeedlesIt                  values_first,
+                                     NeedlesIt                  values_last,
+                                     OutputIt                   result,
+                                     CompareOp                  compare_op)
+        {
+            return __binary_search::lower_bound(
+                policy, first, last, values_first, values_last, result, compare_op);
+        }
 
-
-      __device__
-      static OutputIt seq(execution_policy<Derived>& policy,
-                          HaystackIt                 first,
-                          HaystackIt                 last,
-                          NeedlesIt                  values_first,
-                          NeedlesIt                  values_last,
-                          OutputIt                   result,
-                          CompareOp                  compare_op)
-      {
-        return thrust::lower_bound(cvt_to_seq(derived_cast(policy)),
-                                   first,
-                                   last,
-                                   values_first,
-                                   values_last,
-                                   result,
-                                   compare_op);
-      }
+        __device__ static OutputIt seq(execution_policy<Derived>& policy,
+                                       HaystackIt                 first,
+                                       HaystackIt                 last,
+                                       NeedlesIt                  values_first,
+                                       NeedlesIt                  values_last,
+                                       OutputIt                   result,
+                                       CompareOp                  compare_op)
+        {
+            return thrust::lower_bound(cvt_to_seq(derived_cast(policy)),
+                                       first,
+                                       last,
+                                       values_first,
+                                       values_last,
+                                       result,
+                                       compare_op);
+        }
   };
 
   #if __THRUST_HAS_HIPRT__
@@ -326,51 +313,37 @@ upper_bound(execution_policy<Derived>& policy,
             OutputIt                   result,
             CompareOp                  compare_op)
 {
-  struct workaround
-  {
-      __host__
-      static OutputIt par(execution_policy<Derived>& policy,
-                          HaystackIt                 first,
-                          HaystackIt                 last,
-                          NeedlesIt                  values_first,
-                          NeedlesIt                  values_last,
-                          OutputIt                   result,
-                          CompareOp                  compare_op)
-      {
-        #if __HCC__ && __HIP_DEVICE_COMPILE__
-          THRUST_HIP_PRESERVE_KERNELS_WORKAROUND
-          (__binary_search::upper_bound<Derived,
-                                        HaystackIt,
-                                        NeedlesIt,
-                                        OutputIt,
-                                        CompareOp>);
-          return first;
+    // struct workaround is required for HIP-clang
+    struct workaround
+    {
+        __host__ static OutputIt par(execution_policy<Derived>& policy,
+                                     HaystackIt                 first,
+                                     HaystackIt                 last,
+                                     NeedlesIt                  values_first,
+                                     NeedlesIt                  values_last,
+                                     OutputIt                   result,
+                                     CompareOp                  compare_op)
+        {
+            return __binary_search::upper_bound(
+                policy, first, last, values_first, values_last, result, compare_op);
+        }
 
-        #else
-        return __binary_search::upper_bound(
-            policy, first, last, values_first, values_last, result, compare_op
-        );
-        #endif
-      }
-
-
-      __device__
-      static OutputIt seq(execution_policy<Derived>& policy,
-                          HaystackIt                 first,
-                          HaystackIt                 last,
-                          NeedlesIt                  values_first,
-                          NeedlesIt                  values_last,
-                          OutputIt                   result,
-                          CompareOp                  compare_op)
-      {
-        return thrust::upper_bound(cvt_to_seq(derived_cast(policy)),
-                                   first,
-                                   last,
-                                   values_first,
-                                   values_last,
-                                   result,
-                                   compare_op);
-      }
+        __device__ static OutputIt seq(execution_policy<Derived>& policy,
+                                       HaystackIt                 first,
+                                       HaystackIt                 last,
+                                       NeedlesIt                  values_first,
+                                       NeedlesIt                  values_last,
+                                       OutputIt                   result,
+                                       CompareOp                  compare_op)
+        {
+            return thrust::upper_bound(cvt_to_seq(derived_cast(policy)),
+                                       first,
+                                       last,
+                                       values_first,
+                                       values_last,
+                                       result,
+                                       compare_op);
+        }
   };
 
   #if __THRUST_HAS_HIPRT__
@@ -405,51 +378,37 @@ binary_search(execution_policy<Derived>& policy,
               OutputIt                   result,
               CompareOp                  compare_op)
 {
-  struct workaround
-  {
-      __host__
-      static OutputIt par(execution_policy<Derived>& policy,
-                          HaystackIt                 first,
-                          HaystackIt                 last,
-                          NeedlesIt                  values_first,
-                          NeedlesIt                  values_last,
-                          OutputIt                   result,
-                          CompareOp                  compare_op)
-      {
-        #if __HCC__ && __HIP_DEVICE_COMPILE__
-          THRUST_HIP_PRESERVE_KERNELS_WORKAROUND
-          (__binary_search::binary_search<Derived,
-                                        HaystackIt,
-                                        NeedlesIt,
-                                        OutputIt,
-                                        CompareOp>);
-          return first;
+    // struct workaround is required for HIP-clang
+    struct workaround
+    {
+        __host__ static OutputIt par(execution_policy<Derived>& policy,
+                                     HaystackIt                 first,
+                                     HaystackIt                 last,
+                                     NeedlesIt                  values_first,
+                                     NeedlesIt                  values_last,
+                                     OutputIt                   result,
+                                     CompareOp                  compare_op)
+        {
+            return __binary_search::binary_search(
+                policy, first, last, values_first, values_last, result, compare_op);
+        }
 
-        #else
-        return __binary_search::binary_search(
-            policy, first, last, values_first, values_last, result, compare_op
-        );
-        #endif
-      }
-
-
-      __device__
-      static OutputIt seq(execution_policy<Derived>& policy,
-                          HaystackIt                 first,
-                          HaystackIt                 last,
-                          NeedlesIt                  values_first,
-                          NeedlesIt                  values_last,
-                          OutputIt                   result,
-                          CompareOp                  compare_op)
-      {
-        return thrust::binary_search(cvt_to_seq(derived_cast(policy)),
-                                   first,
-                                   last,
-                                   values_first,
-                                   values_last,
-                                   result,
-                                   compare_op);
-      }
+        __device__ static OutputIt seq(execution_policy<Derived>& policy,
+                                       HaystackIt                 first,
+                                       HaystackIt                 last,
+                                       NeedlesIt                  values_first,
+                                       NeedlesIt                  values_last,
+                                       OutputIt                   result,
+                                       CompareOp                  compare_op)
+        {
+            return thrust::binary_search(cvt_to_seq(derived_cast(policy)),
+                                         first,
+                                         last,
+                                         values_first,
+                                         values_last,
+                                         result,
+                                         compare_op);
+        }
   };
 
   #if __THRUST_HAS_HIPRT__
@@ -492,6 +451,7 @@ HaystackIt lower_bound(execution_policy<Derived>& policy,
     using values_type = typename thrust::detail::temporary_array<T, Derived>;
     using results_type = typename thrust::detail::temporary_array<difference_type, Derived>;
 
+    // struct workaround is required for HIP-clang
     struct workaround
     {
         __host__
@@ -501,29 +461,16 @@ HaystackIt lower_bound(execution_policy<Derived>& policy,
                               const T&                   value,
                               CompareOp                  compare_op)
         {
-          #if __HCC__ && __HIP_DEVICE_COMPILE__
-            THRUST_HIP_PRESERVE_KERNELS_WORKAROUND
-            (__binary_search::lower_bound<Derived,
-                                          HaystackIt,
-                                          typename values_type::iterator,
-                                          typename results_type::iterator,
-                                          CompareOp>);
-            return first;
-          #else
-          values_type values(policy, 1);
-          results_type result(policy, 1);
+            values_type  values(policy, 1);
+            results_type result(policy, 1);
 
-          values[0] = value;
+            values[0] = value;
 
-          __binary_search::lower_bound(
-              policy, first, last, values.begin(), values.end(), result.begin(), compare_op
-          );
+            __binary_search::lower_bound(
+                policy, first, last, values.begin(), values.end(), result.begin(), compare_op);
 
-          return first + result[0];
-
-          #endif
+            return first + result[0];
         }
-
 
         __device__
         static HaystackIt seq(execution_policy<Derived>& policy,
@@ -564,6 +511,7 @@ HaystackIt upper_bound(execution_policy<Derived>& policy,
     using values_type = typename thrust::detail::temporary_array<T, Derived>;
     using results_type = typename thrust::detail::temporary_array<difference_type, Derived>;
 
+    // struct workaround is required for HIP-clang
     struct workaround
     {
         __host__
@@ -573,16 +521,6 @@ HaystackIt upper_bound(execution_policy<Derived>& policy,
                               const T&                   value,
                               CompareOp                  compare_op)
         {
-          #if __HCC__ && __HIP_DEVICE_COMPILE__
-            THRUST_HIP_PRESERVE_KERNELS_WORKAROUND
-            (__binary_search::upper_bound<Derived,
-                                          HaystackIt,
-                                          typename values_type::iterator,
-                                          typename results_type::iterator,
-                                          CompareOp>);
-            return first;
-
-          #else
           values_type values(policy, 1);
           results_type result(policy, 1);
 
@@ -593,10 +531,7 @@ HaystackIt upper_bound(execution_policy<Derived>& policy,
           );
 
           return first + result[0];
-
-          #endif
         }
-
 
         __device__
         static HaystackIt seq(execution_policy<Derived>& policy,
@@ -635,6 +570,7 @@ bool binary_search(execution_policy<Derived>& policy,
     using values_type = typename thrust::detail::temporary_array<T, Derived>;
     using results_type = typename thrust::detail::temporary_array<int, Derived>;
 
+    // struct workaround is required for HIP-clang
     struct workaround
     {
         __host__
@@ -644,15 +580,6 @@ bool binary_search(execution_policy<Derived>& policy,
                               const T&                   value,
                               CompareOp                  compare_op)
         {
-          #if __HCC__ && __HIP_DEVICE_COMPILE__
-            THRUST_HIP_PRESERVE_KERNELS_WORKAROUND
-            (__binary_search::binary_search<Derived,
-                                          HaystackIt,
-                                          typename values_type::iterator,
-                                          typename results_type::iterator,
-                                          CompareOp>);
-            return first;
-          #else
           values_type values(policy, 1);
           results_type result(policy, 1);
 
@@ -663,9 +590,7 @@ bool binary_search(execution_policy<Derived>& policy,
           );
 
           return result[0] != 0;
-          #endif
         }
-
 
         __device__
         static bool seq(execution_policy<Derived>& policy,
