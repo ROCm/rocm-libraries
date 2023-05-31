@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2020, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2023, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -56,16 +56,16 @@ struct DeviceHistogram
                              hipStream_t stream = 0,
                              bool debug_synchronous = false)
     {
-        return hipCUDAErrorTohipError(
-            ::cub::DeviceHistogram::HistogramEven(
-                d_temp_storage, temp_storage_bytes,
-                d_samples,
-                d_histogram,
-                num_levels, lower_level, upper_level,
-                num_samples,
-                stream, debug_synchronous
-            )
-        );
+        (void)debug_synchronous;
+        return hipCUDAErrorTohipError(::cub::DeviceHistogram::HistogramEven(d_temp_storage,
+                                                                            temp_storage_bytes,
+                                                                            d_samples,
+                                                                            d_histogram,
+                                                                            num_levels,
+                                                                            lower_level,
+                                                                            upper_level,
+                                                                            num_samples,
+                                                                            stream));
     }
 
     template<
@@ -88,16 +88,18 @@ struct DeviceHistogram
                              hipStream_t stream = 0,
                              bool debug_synchronous = false)
     {
-        return hipCUDAErrorTohipError(
-            ::cub::DeviceHistogram::HistogramEven(
-                d_temp_storage, temp_storage_bytes,
-                d_samples,
-                d_histogram,
-                num_levels, lower_level, upper_level,
-                num_row_samples, num_rows, row_stride_bytes,
-                stream, debug_synchronous
-            )
-        );
+        (void)debug_synchronous;
+        return hipCUDAErrorTohipError(::cub::DeviceHistogram::HistogramEven(d_temp_storage,
+                                                                            temp_storage_bytes,
+                                                                            d_samples,
+                                                                            d_histogram,
+                                                                            num_levels,
+                                                                            lower_level,
+                                                                            upper_level,
+                                                                            num_row_samples,
+                                                                            num_rows,
+                                                                            row_stride_bytes,
+                                                                            stream));
     }
 
     template<
@@ -120,16 +122,18 @@ struct DeviceHistogram
                                   hipStream_t stream = 0,
                                   bool debug_synchronous = false)
     {
+        (void)debug_synchronous;
         return hipCUDAErrorTohipError(
             ::cub::DeviceHistogram::MultiHistogramEven<NUM_CHANNELS, NUM_ACTIVE_CHANNELS>(
-                d_temp_storage, temp_storage_bytes,
+                d_temp_storage,
+                temp_storage_bytes,
                 d_samples,
                 d_histogram,
-                num_levels, lower_level, upper_level,
+                num_levels,
+                lower_level,
+                upper_level,
                 num_pixels,
-                stream, debug_synchronous
-            )
-        );
+                stream));
     }
 
     template<
@@ -154,16 +158,20 @@ struct DeviceHistogram
                                   hipStream_t stream = 0,
                                   bool debug_synchronous = false)
     {
+        (void)debug_synchronous;
         return hipCUDAErrorTohipError(
             ::cub::DeviceHistogram::MultiHistogramEven<NUM_CHANNELS, NUM_ACTIVE_CHANNELS>(
-                d_temp_storage, temp_storage_bytes,
+                d_temp_storage,
+                temp_storage_bytes,
                 d_samples,
                 d_histogram,
-                num_levels, lower_level, upper_level,
-                num_row_pixels, num_rows, row_stride_bytes,
-                stream, debug_synchronous
-            )
-        );
+                num_levels,
+                lower_level,
+                upper_level,
+                num_row_pixels,
+                num_rows,
+                row_stride_bytes,
+                stream));
     }
 
     template<
@@ -183,16 +191,15 @@ struct DeviceHistogram
                               hipStream_t stream = 0,
                               bool debug_synchronous = false)
     {
-        return hipCUDAErrorTohipError(
-            ::cub::DeviceHistogram::HistogramRange(
-                d_temp_storage, temp_storage_bytes,
-                d_samples,
-                d_histogram,
-                num_levels, d_levels,
-                num_samples,
-                stream, debug_synchronous
-            )
-        );
+        (void)debug_synchronous;
+        return hipCUDAErrorTohipError(::cub::DeviceHistogram::HistogramRange(d_temp_storage,
+                                                                             temp_storage_bytes,
+                                                                             d_samples,
+                                                                             d_histogram,
+                                                                             num_levels,
+                                                                             d_levels,
+                                                                             num_samples,
+                                                                             stream));
     }
 
     template<
@@ -214,16 +221,17 @@ struct DeviceHistogram
                               hipStream_t stream = 0,
                               bool debug_synchronous = false)
     {
-        return hipCUDAErrorTohipError(
-            ::cub::DeviceHistogram::HistogramRange(
-                d_temp_storage, temp_storage_bytes,
-                d_samples,
-                d_histogram,
-                num_levels, d_levels,
-                num_row_samples, num_rows, row_stride_bytes,
-                stream, debug_synchronous
-            )
-        );
+        (void)debug_synchronous;
+        return hipCUDAErrorTohipError(::cub::DeviceHistogram::HistogramRange(d_temp_storage,
+                                                                             temp_storage_bytes,
+                                                                             d_samples,
+                                                                             d_histogram,
+                                                                             num_levels,
+                                                                             d_levels,
+                                                                             num_row_samples,
+                                                                             num_rows,
+                                                                             row_stride_bytes,
+                                                                             stream));
     }
 
     template<
@@ -245,16 +253,17 @@ struct DeviceHistogram
                                    hipStream_t stream = 0,
                                    bool debug_synchronous = false)
     {
+        (void)debug_synchronous;
         return hipCUDAErrorTohipError(
             ::cub::DeviceHistogram::MultiHistogramRange<NUM_CHANNELS, NUM_ACTIVE_CHANNELS>(
-                d_temp_storage, temp_storage_bytes,
+                d_temp_storage,
+                temp_storage_bytes,
                 d_samples,
                 d_histogram,
-                num_levels, d_levels,
+                num_levels,
+                d_levels,
                 num_pixels,
-                stream, debug_synchronous
-            )
-        );
+                stream));
     }
 
     template<
@@ -278,16 +287,19 @@ struct DeviceHistogram
                                    hipStream_t stream = 0,
                                    bool debug_synchronous = false)
     {
+        (void)debug_synchronous;
         return hipCUDAErrorTohipError(
             ::cub::DeviceHistogram::MultiHistogramRange<NUM_CHANNELS, NUM_ACTIVE_CHANNELS>(
-                d_temp_storage, temp_storage_bytes,
+                d_temp_storage,
+                temp_storage_bytes,
                 d_samples,
                 d_histogram,
-                num_levels, d_levels,
-                num_row_pixels, num_rows, row_stride_bytes,
-                stream, debug_synchronous
-            )
-        );
+                num_levels,
+                d_levels,
+                num_row_pixels,
+                num_rows,
+                row_stride_bytes,
+                stream));
     }
 };
 

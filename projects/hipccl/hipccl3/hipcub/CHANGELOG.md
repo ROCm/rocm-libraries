@@ -2,13 +2,24 @@
 
 See README.md on how to build the hipCUB documentation using Doxygen.
 
+## (Unreleased) hipCUB-2.13.1 for ROCm 5.7.0
+### Changed
+- CUB backend references CUB and Thrust version 2.0.1.
+- Fixed `DeviceSegmentedReduce::ArgMin` and `DeviceSegmentedReduce::ArgMax` by returning the segment-relative index instead of the absolute one.
+- Fixed `DeviceSegmentedReduce::ArgMin` for inputs where the segment minimum is smaller than the value returned for empty segments. An equivalent fix is applied to `DeviceSegmentedReduce::ArgMax`.
+### Known Issues
+- `debug_synchronous` no longer works on CUDA platform. `CUB_DEBUG_SYNC` should be used to enable those checks.
+- `DeviceReduce::Sum` does not compile on CUDA platform for mixed extended-floating-point/floating-point InputT and OutputT types.
+- `DeviceHistogram::HistogramEven` fails on CUDA platform for `[LevelT, SampleIteratorT] = [int, int]`.
+- `DeviceHistogram::MultiHistogramEven` fails on CUDA platform for `[LevelT, SampleIteratorT] = [int, int/unsigned short/float/double]` and `[LevelT, SampleIteratorT] = [float, double]`.
+
 ## (Unreleased) hipCUB-2.13.1 for ROCm 5.5.0
 ### Added
 - Benchmarks for `BlockShuffle`, `BlockLoad`, and `BlockStore`.
 ### Changed
 - CUB backend references CUB and Thrust version 1.17.2.
 - Improved benchmark coverage of `BlockScan` by adding `ExclusiveScan`, benchmark coverage of `BlockRadixSort` by adding `SortBlockedToStriped`, and benchmark coverage of `WarpScan` by adding `Broadcast`.
-- Updated `docs` directory structure to match the standard of [rocm-docs-core](https://github.com/RadeonOpenCompute/rocm-docs-core).
+- Removed references to and workarounds for deprecated hcc
 ### Known Issues
 - `BlockRadixRankMatch` is currently broken under the rocPRIM backend.
 - `BlockRadixRankMatch` with a warp size that does not exactly divide the block size is broken under the CUB backend.

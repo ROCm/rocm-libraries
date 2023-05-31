@@ -48,27 +48,34 @@ public:
     using params = Params;
 };
 
-using HipcubBlockRunLengthDecodeTestParams = ::testing::Types<
-    Params<int, int, 256, 4, 4>,
-    Params<double, char, 256, 4, 4>,
-    Params<char, long long, 256, 4, 4>,
-    Params<float, int, 256, 4, 4>,
+using HipcubBlockRunLengthDecodeTestParams
+    = ::testing::Types<Params<int, int, 256, 4, 4>,
+                       Params<double, char, 256, 4, 4>,
+                       Params<char, long long, 256, 4, 4>,
+                       Params<float, int, 256, 4, 4>,
+                       Params<test_utils::half, int, 256, 4, 4>,
+                       Params<test_utils::bfloat16, int, 256, 4, 4>,
 
-    Params<int, int, 256, 8, 8>,
-    Params<double, char, 256, 8, 8>,
-    Params<char, long long, 256, 8, 8>,
-    Params<float, int, 256, 8, 8>,
+                       Params<int, int, 256, 8, 8>,
+                       Params<double, char, 256, 8, 8>,
+                       Params<char, long long, 256, 8, 8>,
+                       Params<float, int, 256, 8, 8>,
+                       Params<test_utils::half, int, 256, 8, 8>,
+                       Params<test_utils::bfloat16, int, 256, 8, 8>,
 
-    Params<int, int, 256, 1, 14>,
-    Params<double, char, 256, 1, 14>,
-    Params<char, long long, 256, 1, 14>,
-    Params<float, int, 256, 1, 14>,
+                       Params<int, int, 256, 1, 14>,
+                       Params<double, char, 256, 1, 14>,
+                       Params<char, long long, 256, 1, 14>,
+                       Params<float, int, 256, 1, 14>,
+                       Params<test_utils::half, int, 256, 1, 14>,
+                       Params<test_utils::bfloat16, int, 256, 1, 14>,
 
-    Params<int, int, 256, 9, 7>,
-    Params<double, char, 256, 9, 7>,
-    Params<char, long long, 256, 9, 7>,
-    Params<float, int, 256, 9, 7>
->;
+                       Params<int, int, 256, 9, 7>,
+                       Params<double, char, 256, 9, 7>,
+                       Params<char, long long, 256, 9, 7>,
+                       Params<float, int, 256, 9, 7>,
+                       Params<test_utils::half, int, 256, 9, 7>,
+                       Params<test_utils::bfloat16, int, 256, 9, 7>>;
 
 TYPED_TEST_SUITE(HipcubBlockRunLengthDecodeTest, HipcubBlockRunLengthDecodeTestParams);
 
@@ -239,6 +246,10 @@ TYPED_TEST(HipcubBlockRunLengthDecodeTest, TestDecode)
         HIP_CHECK(hipFree(d_run_lengths));
         HIP_CHECK(hipFree(d_decoded_runs));
 
-        ASSERT_EQ(output, expected);
+        for(size_t i = 0; i < output.size(); ++i)
+        {
+            ASSERT_EQ(test_utils::convert_to_native(output[i]),
+                      test_utils::convert_to_native(expected[i]));
+        }
     }
 }

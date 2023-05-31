@@ -49,15 +49,11 @@ template<class T,
          unsigned int       Trials>
 __global__ __launch_bounds__(BlockSize) void rank_kernel(const T* keys_input, int* ranks_output)
 {
-    constexpr bool     warp_striped = BenchmarkKind == RadixRankAlgorithm::RADIX_RANK_MATCH;
     const unsigned int lid          = hipThreadIdx_x;
     const unsigned int block_offset = hipBlockIdx_x * ItemsPerThread * BlockSize;
 
     T keys[ItemsPerThread];
-    if(warp_striped)
-        hipcub::LoadDirectWarpStriped(lid, keys_input + block_offset, keys);
-    else
-        hipcub::LoadDirectBlocked(lid, keys_input + block_offset, keys);
+    hipcub::LoadDirectBlocked(lid, keys_input + block_offset, keys);
 
     using KeyTraits      = hipcub::Traits<T>;
     using UnsignedBits   = typename KeyTraits::UnsignedBits;
@@ -75,9 +71,9 @@ __global__ __launch_bounds__(BlockSize) void rank_kernel(const T* keys_input, in
                                BenchmarkKind == RadixRankAlgorithm::RADIX_RANK_MEMOIZE>>;
 
 #pragma unroll
-    for(int KEY = 0; KEY < ItemsPerThread; KEY++)
+    for(unsigned int key = 0; key < ItemsPerThread; key++)
     {
-        unsigned_keys[KEY] = KeyTraits::TwiddleIn(unsigned_keys[KEY]);
+        unsigned_keys[key] = KeyTraits::TwiddleIn(unsigned_keys[key]);
     }
 
     int ranks[ItemsPerThread];
@@ -100,10 +96,7 @@ __global__ __launch_bounds__(BlockSize) void rank_kernel(const T* keys_input, in
         }
     }
 
-    if(warp_striped)
-        hipcub::StoreDirectWarpStriped(lid, ranks_output + block_offset, ranks);
-    else
-        hipcub::StoreDirectBlocked(lid, ranks_output + block_offset, ranks);
+    hipcub::StoreDirectBlocked(lid, ranks_output + block_offset, ranks);
 }
 
 template<class T,
@@ -171,15 +164,19 @@ void run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
         stream,                                                                                  \
         size)
 
-// Note: RADIX_RANK_MATCH disabled because the related tests do not pass.
-#define CREATE_BENCHMARK_KINDS(type, block, ipt)                              \
-    CREATE_BENCHMARK(type, RadixRankAlgorithm::RADIX_RANK_BASIC, block, ipt), \
-        CREATE_BENCHMARK(type, RadixRankAlgorithm::RADIX_RANK_MEMOIZE, block, ipt)
+// clang-format off
+#define CREATE_BENCHMARK_KINDS(type, block, ipt)                                \
+    CREATE_BENCHMARK(type, RadixRankAlgorithm::RADIX_RANK_BASIC, block, ipt),   \
+    CREATE_BENCHMARK(type, RadixRankAlgorithm::RADIX_RANK_MEMOIZE, block, ipt), \
+    CREATE_BENCHMARK(type, RadixRankAlgorithm::RADIX_RANK_MATCH, block, ipt)
 
-#define BENCHMARK_TYPE(type, block)                                                      \
-    CREATE_BENCHMARK_KINDS(type, block, 1), CREATE_BENCHMARK_KINDS(type, block, 4),      \
-        CREATE_BENCHMARK_KINDS(type, block, 8), CREATE_BENCHMARK_KINDS(type, block, 16), \
-        CREATE_BENCHMARK_KINDS(type, block, 32)
+#define BENCHMARK_TYPE(type, block)          \
+    CREATE_BENCHMARK_KINDS(type, block, 1),  \
+    CREATE_BENCHMARK_KINDS(type, block, 4),  \
+    CREATE_BENCHMARK_KINDS(type, block, 8),  \
+    CREATE_BENCHMARK_KINDS(type, block, 16), \
+    CREATE_BENCHMARK_KINDS(type, block, 32)
+// clang-format on
 
 void add_benchmarks(const std::string&                            name,
                     std::vector<benchmark::internal::Benchmark*>& benchmarks,

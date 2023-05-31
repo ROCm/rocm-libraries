@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2018 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2018-2023 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -49,7 +49,7 @@ target_include_directories(hipcub
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/>
 )
 
-if(HIP_COMPILER STREQUAL "hcc" OR HIP_COMPILER STREQUAL "clang")
+if(HIP_COMPILER STREQUAL "clang")
   target_link_libraries(hipcub
     INTERFACE
       roc::rocprim_hip
@@ -103,7 +103,7 @@ endif()
 include(ROCMExportTargetsHeaderOnly)
 
 # Export targets
-if(HIP_COMPILER STREQUAL "hcc" OR HIP_COMPILER STREQUAL "clang")
+if(HIP_COMPILER STREQUAL "clang")
   rocm_export_targets_header_only(
     TARGETS hip::hipcub
     DEPENDS PACKAGE rocprim

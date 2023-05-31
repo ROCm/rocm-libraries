@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2021-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -62,6 +62,8 @@ typedef ::testing::Types<
 
     // Power of 2 BlockSize and ItemsPerThread > 1
     params<float, char, 64U, 2, test_utils::greater>,
+    params<test_utils::half, test_utils::half, 64U, 2, test_utils::greater>,
+    params<test_utils::bfloat16, test_utils::bfloat16, 64U, 2, test_utils::greater>,
     params<int, short, 128U, 4>,
     params<unsigned short, char, 256U, 7>,
 
@@ -69,8 +71,8 @@ typedef ::testing::Types<
 
     // Stability (a number of key values is lower than BlockSize * ItemsPerThread: some keys appear
     // multiple times with different values
-    params<unsigned char, int, 512U, 2, test_utils::less, true>
-> Params;
+    params<unsigned char, int, 512U, 2, test_utils::less, true>>
+    Params;
 
 TYPED_TEST_SUITE(HipcubBlockMergeSort, Params);
 
@@ -173,7 +175,8 @@ TYPED_TEST(HipcubBlockMergeSort, SortKeys)
         // Verifying results
         for(size_t i = 0; i < size; i++)
         {
-            ASSERT_EQ(keys_output[i], expected[i]);
+            ASSERT_EQ(test_utils::convert_to_native(keys_output[i]),
+                      test_utils::convert_to_native(expected[i]));
         }
 
         HIP_CHECK(hipFree(device_keys_output));
@@ -316,8 +319,10 @@ TYPED_TEST(HipcubBlockMergeSort, SortKeysValues)
 
         for(size_t i = 0; i < size; i++)
         {
-            ASSERT_EQ(keys_output[i], expected[i].first);
-            ASSERT_EQ(values_output[i], expected[i].second);
+            ASSERT_EQ(test_utils::convert_to_native(keys_output[i]),
+                      test_utils::convert_to_native(expected[i].first));
+            ASSERT_EQ(test_utils::convert_to_native(values_output[i]),
+                      test_utils::convert_to_native(expected[i].second));
         }
 
         HIP_CHECK(hipFree(device_keys_output));

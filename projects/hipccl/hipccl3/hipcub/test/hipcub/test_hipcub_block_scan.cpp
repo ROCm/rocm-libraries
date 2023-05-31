@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -958,26 +958,32 @@ typedef ::testing::Types<
     // -----------------------------------------------------------------------
     // hipcub::BlockScanAlgorithm::using_warp_scan
     // -----------------------------------------------------------------------
-    params<float, 6U,   32>,
-    params<float, 32,   2>,
-    params<unsigned int, 256,  3>,
-    params<int, 512,  4>,
-    params<float, 37,   2>,
-    params<float, 65,   5>,
-    params<float, 162,  7>,
-    params<float, 255,  15>,
+    params<float, 6U, 32>,
+    params<float, 32, 2>,
+    params<unsigned int, 256, 3>,
+    params<int, 512, 4>,
+    params<float, 37, 2>,
+    params<float, 65, 5>,
+    params<float, 162, 7>,
+    params<float, 255, 15>,
+    // half and bfloat require small block sizes due to the very limited accuracy
+    params<test_utils::half, 65, 5>,
+    params<test_utils::bfloat16, 16, 5>,
     // -----------------------------------------------------------------------
     // hipcub::BLOCK_SCAN_RAKING
     // -----------------------------------------------------------------------
-    params<float, 6U,   32, hipcub::BLOCK_SCAN_RAKING>,
-    params<float, 32,   2,  hipcub::BLOCK_SCAN_RAKING>,
-    params<int, 256,  3,  hipcub::BLOCK_SCAN_RAKING>,
-    params<unsigned int, 512,  4,  hipcub::BLOCK_SCAN_RAKING>,
-    params<float, 37,   2,  hipcub::BLOCK_SCAN_RAKING>,
-    params<float, 65,   5,  hipcub::BLOCK_SCAN_RAKING>,
-    params<float, 162,  7,  hipcub::BLOCK_SCAN_RAKING>,
-    params<float, 255,  15, hipcub::BLOCK_SCAN_RAKING>
-> InputArrayTestParams;
+    params<float, 6U, 32, hipcub::BLOCK_SCAN_RAKING>,
+    params<float, 32, 2, hipcub::BLOCK_SCAN_RAKING>,
+    params<int, 256, 3, hipcub::BLOCK_SCAN_RAKING>,
+    params<unsigned int, 512, 4, hipcub::BLOCK_SCAN_RAKING>,
+    params<float, 37, 2, hipcub::BLOCK_SCAN_RAKING>,
+    params<float, 65, 5, hipcub::BLOCK_SCAN_RAKING>,
+    params<float, 162, 7, hipcub::BLOCK_SCAN_RAKING>,
+    params<float, 255, 15, hipcub::BLOCK_SCAN_RAKING>,
+    // half and bfloat require small block sizes due to the very limited accuracy
+    params<test_utils::half, 65, 5, hipcub::BLOCK_SCAN_RAKING>,
+    params<test_utils::bfloat16, 16, 5, hipcub::BLOCK_SCAN_RAKING>>
+    InputArrayTestParams;
 
 TYPED_TEST_SUITE(HipcubBlockScanInputArrayTests, InputArrayTestParams);
 
@@ -1042,13 +1048,15 @@ TYPED_TEST(HipcubBlockScanInputArrayTests, InclusiveScan)
         std::vector<T> output = test_utils::get_random_data<T>(size, 2, 200, seed_value);
 
         // Calculate expected results on host
-        std::vector<T> expected(output.size(), 0);
+        std::vector<T> expected(output.size(), test_utils::convert_to_device<T>(0));
         for(size_t i = 0; i < output.size() / items_per_block; i++)
         {
             for(size_t j = 0; j < items_per_block; j++)
             {
                 auto idx = i * items_per_block + j;
-                expected[idx] = output[idx] + expected[j > 0 ? idx-1 : idx];
+                expected[idx] = test_utils::convert_to_device<T>(
+                    test_utils::convert_to_native(output[idx])
+                    + test_utils::convert_to_native(expected[j > 0 ? idx - 1 : idx]));
             }
         }
 
@@ -1086,10 +1094,9 @@ TYPED_TEST(HipcubBlockScanInputArrayTests, InclusiveScan)
         // Validating results
         for(size_t i = 0; i < output.size(); i++)
         {
-            ASSERT_NEAR(
-                output[i], expected[i],
-                static_cast<T>(0.05) * expected[i]
-            );
+            ASSERT_NEAR(test_utils::convert_to_native(output[i]),
+                        test_utils::convert_to_native(expected[i]),
+                        0.05 * test_utils::convert_to_native(expected[i]));
         }
 
         HIP_CHECK(hipFree(device_output));
@@ -1138,9 +1145,9 @@ TYPED_TEST(HipcubBlockScanInputArrayTests, InclusiveScanReduce)
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    using T = typename TestFixture::type;
-    constexpr auto algorithm = TestFixture::algorithm;
-    constexpr size_t block_size = TestFixture::block_size;
+    using T                           = typename TestFixture::type;
+    constexpr auto   algorithm        = TestFixture::algorithm;
+    constexpr size_t block_size       = TestFixture::block_size;
     constexpr size_t items_per_thread = TestFixture::items_per_thread;
 
     // Given block size not supported
@@ -1162,17 +1169,20 @@ TYPED_TEST(HipcubBlockScanInputArrayTests, InclusiveScanReduce)
         std::vector<T> output = test_utils::get_random_data<T>(size, 2, 200, seed_value);
 
         // Output reduce results
-        std::vector<T> output_reductions(size / block_size, 0);
+        std::vector<T> output_reductions(size / block_size, test_utils::convert_to_device<T>(0));
 
         // Calculate expected results on host
-        std::vector<T> expected(output.size(), 0);
-        std::vector<T> expected_reductions(output_reductions.size(), 0);
+        std::vector<T> expected(output.size(), test_utils::convert_to_device<T>(0));
+        std::vector<T> expected_reductions(output_reductions.size(),
+                                           test_utils::convert_to_device<T>(0));
         for(size_t i = 0; i < output.size() / items_per_block; i++)
         {
             for(size_t j = 0; j < items_per_block; j++)
             {
                 auto idx = i * items_per_block + j;
-                expected[idx] = output[idx] + expected[j > 0 ? idx-1 : idx];
+                expected[idx] = test_utils::convert_to_device<T>(
+                    test_utils::convert_to_native(output[idx])
+                    + test_utils::convert_to_native(expected[j > 0 ? idx - 1 : idx]));
             }
             expected_reductions[i] = expected[(i+1) * items_per_block - 1];
         }
@@ -1196,11 +1206,9 @@ TYPED_TEST(HipcubBlockScanInputArrayTests, InclusiveScanReduce)
             )
         );
 
-        HIP_CHECK(
-            hipMemset(
-                device_output_reductions, T(0), output_reductions.size() * sizeof(T)
-            )
-        );
+        HIP_CHECK(hipMemset(device_output_reductions,
+                            test_utils::convert_to_device<T>(0),
+                            output_reductions.size() * sizeof(T)));
 
         // Launching kernel
         hipLaunchKernelGGL(
@@ -1232,18 +1240,16 @@ TYPED_TEST(HipcubBlockScanInputArrayTests, InclusiveScanReduce)
         // Validating results
         for(size_t i = 0; i < output.size(); i++)
         {
-            ASSERT_NEAR(
-                output[i], expected[i],
-                static_cast<T>(0.05) * expected[i]
-            );
+            ASSERT_NEAR(test_utils::convert_to_native(output[i]),
+                        test_utils::convert_to_native(expected[i]),
+                        0.05 * test_utils::convert_to_native(expected[i]));
         }
 
         for(size_t i = 0; i < output_reductions.size(); i++)
         {
-            ASSERT_NEAR(
-                output_reductions[i], expected_reductions[i],
-                static_cast<T>(0.05) * expected_reductions[i]
-            );
+            ASSERT_NEAR(test_utils::convert_to_native(output_reductions[i]),
+                        test_utils::convert_to_native(expected_reductions[i]),
+                        0.05 * test_utils::convert_to_native(expected_reductions[i]));
         }
 
         HIP_CHECK(hipFree(device_output));
@@ -1266,7 +1272,7 @@ void inclusive_scan_array_prefix_callback_kernel(T* device_output, T* device_out
     auto prefix_callback = [&prefix_value](T reduction)
     {
         T prefix = prefix_value;
-        prefix_value += reduction;
+        prefix_value = prefix_value + reduction;
         return prefix;
     };
 
@@ -1321,23 +1327,25 @@ TYPED_TEST(HipcubBlockScanInputArrayTests, InclusiveScanPrefixCallback)
 
         // Generate data
         std::vector<T> output = test_utils::get_random_data<T>(size, 2, 200, seed_value);
-        std::vector<T> output_block_prefixes(size / items_per_block, 0);
-        T block_prefix = test_utils::get_random_value<T>(
-            0,
-            100,
-            seed_value + seed_value_addition
-        );
+        std::vector<T> output_block_prefixes(size / items_per_block,
+                                             test_utils::convert_to_device<T>(0));
+        T block_prefix = test_utils::get_random_value<T>(test_utils::convert_to_device<T>(0),
+                                                         test_utils::convert_to_device<T>(100),
+                                                         seed_value + seed_value_addition);
 
         // Calculate expected results on host
-        std::vector<T> expected(output.size(), 0);
-        std::vector<T> expected_block_prefixes(output_block_prefixes.size(), 0);
+        std::vector<T> expected(output.size(), test_utils::convert_to_device<T>(0));
+        std::vector<T> expected_block_prefixes(output_block_prefixes.size(),
+                                               test_utils::convert_to_device<T>(0));
         for(size_t i = 0; i < output.size() / items_per_block; i++)
         {
             expected[i * items_per_block] = block_prefix;
             for(size_t j = 0; j < items_per_block; j++)
             {
                 auto idx = i * items_per_block + j;
-                expected[idx] = output[idx] + expected[j > 0 ? idx-1 : idx];
+                expected[idx] = test_utils::convert_to_device<T>(
+                    test_utils::convert_to_native(output[idx])
+                    + test_utils::convert_to_native(expected[j > 0 ? idx - 1 : idx]));
             }
             expected_block_prefixes[i] = expected[(i+1) * items_per_block - 1];
         }
@@ -1401,18 +1409,16 @@ TYPED_TEST(HipcubBlockScanInputArrayTests, InclusiveScanPrefixCallback)
         // Validating results
         for(size_t i = 0; i < output.size(); i++)
         {
-            ASSERT_NEAR(
-                output[i], expected[i],
-                static_cast<T>(0.05) * expected[i]
-            );
+            ASSERT_NEAR(test_utils::convert_to_native(output[i]),
+                        test_utils::convert_to_native(expected[i]),
+                        0.05 * test_utils::convert_to_native(expected[i]));
         }
 
         for(size_t i = 0; i < output_block_prefixes.size(); i++)
         {
-            ASSERT_NEAR(
-                output_block_prefixes[i], expected_block_prefixes[i],
-                static_cast<T>(0.05) * expected_block_prefixes[i]
-            );
+            ASSERT_NEAR(test_utils::convert_to_native(output_block_prefixes[i]),
+                        test_utils::convert_to_native(expected_block_prefixes[i]),
+                        0.05 * test_utils::convert_to_native(expected_block_prefixes[i]));
         }
 
         HIP_CHECK(hipFree(device_output));
@@ -1476,22 +1482,26 @@ TYPED_TEST(HipcubBlockScanInputArrayTests, ExclusiveScan)
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
-        std::vector<T> output = test_utils::get_random_data<T>(size, 2, 200, seed_value);
-        const T init = test_utils::get_random_value<T>(
-            0,
-            100,
-            seed_value + seed_value_addition
-        );
+        std::vector<T> output
+            = test_utils::get_random_data<T>(size,
+                                             test_utils::convert_to_device<T>(2),
+                                             test_utils::convert_to_device<T>(200),
+                                             seed_value);
+        const T init = test_utils::get_random_value<T>(test_utils::convert_to_device<T>(0),
+                                                       test_utils::convert_to_device<T>(100),
+                                                       seed_value + seed_value_addition);
 
         // Calculate expected results on host
-        std::vector<T> expected(output.size(), 0);
+        std::vector<T> expected(output.size(), test_utils::convert_to_device<T>(0));
         for(size_t i = 0; i < output.size() / items_per_block; i++)
         {
             expected[i * items_per_block] = init;
             for(size_t j = 1; j < items_per_block; j++)
             {
                 auto idx = i * items_per_block + j;
-                expected[idx] = output[idx-1] + expected[idx-1];
+                expected[idx] = test_utils::convert_to_device<T>(
+                    test_utils::convert_to_native(output[idx - 1])
+                    + test_utils::convert_to_native(expected[idx - 1]));
             }
         }
 
@@ -1529,10 +1539,9 @@ TYPED_TEST(HipcubBlockScanInputArrayTests, ExclusiveScan)
         // Validating results
         for(size_t i = 0; i < output.size(); i++)
         {
-            ASSERT_NEAR(
-                output[i], expected[i],
-                static_cast<T>(0.05) * expected[i]
-            );
+            ASSERT_NEAR(test_utils::convert_to_native(output[i]),
+                        test_utils::convert_to_native(expected[i]),
+                        0.05 * test_utils::convert_to_native(expected[i]));
         }
 
         HIP_CHECK(hipFree(device_output));
@@ -1601,30 +1610,37 @@ TYPED_TEST(HipcubBlockScanInputArrayTests, ExclusiveScanReduce)
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
-        std::vector<T> output = test_utils::get_random_data<T>(size, 2, 200, seed_value);
+        std::vector<T> output
+            = test_utils::get_random_data<T>(size,
+                                             test_utils::convert_to_device<T>(2),
+                                             test_utils::convert_to_device<T>(200),
+                                             seed_value);
 
         // Output reduce results
-        std::vector<T> output_reductions(size / block_size, 0);
-        const T init = test_utils::get_random_value<T>(
-            0,
-            100,
-            seed_value + seed_value_addition
-        );
+        std::vector<T> output_reductions(size / block_size, test_utils::convert_to_device<T>(0));
+        const T        init = test_utils::get_random_value<T>(test_utils::convert_to_device<T>(0),
+                                                       test_utils::convert_to_device<T>(100),
+                                                       seed_value + seed_value_addition);
 
         // Calculate expected results on host
-        std::vector<T> expected(output.size(), 0);
-        std::vector<T> expected_reductions(output_reductions.size(), 0);
+        std::vector<T> expected(output.size(), test_utils::convert_to_device<T>(0));
+        std::vector<T> expected_reductions(output_reductions.size(),
+                                           test_utils::convert_to_device<T>(0));
         for(size_t i = 0; i < output.size() / items_per_block; i++)
         {
             expected[i * items_per_block] = init;
             for(size_t j = 1; j < items_per_block; j++)
             {
                 auto idx = i * items_per_block + j;
-                expected[idx] = output[idx-1] + expected[idx-1];
+                expected[idx] = test_utils::convert_to_device<T>(
+                    test_utils::convert_to_native(output[idx - 1])
+                    + test_utils::convert_to_native(expected[idx - 1]));
             }
             for(size_t j = 0; j < items_per_block; j++)
             {
-                expected_reductions[i] += output[i * items_per_block + j];
+                expected_reductions[i] = test_utils::convert_to_device<T>(
+                    test_utils::convert_to_native(expected_reductions[i])
+                    + test_utils::convert_to_native(output[i * items_per_block + j]));
             }
         }
 
@@ -1647,11 +1663,9 @@ TYPED_TEST(HipcubBlockScanInputArrayTests, ExclusiveScanReduce)
             )
         );
 
-        HIP_CHECK(
-            hipMemset(
-                device_output_reductions, T(0), output_reductions.size() * sizeof(T)
-            )
-        );
+        HIP_CHECK(hipMemset(device_output_reductions,
+                            test_utils::convert_to_device<T>(0),
+                            output_reductions.size() * sizeof(T)));
 
         // Launching kernel
         hipLaunchKernelGGL(
@@ -1685,18 +1699,16 @@ TYPED_TEST(HipcubBlockScanInputArrayTests, ExclusiveScanReduce)
         // Validating results
         for(size_t i = 0; i < output.size(); i++)
         {
-            ASSERT_NEAR(
-                output[i], expected[i],
-                static_cast<T>(0.05) * expected[i]
-            );
+            ASSERT_NEAR(test_utils::convert_to_native(output[i]),
+                        test_utils::convert_to_native(expected[i]),
+                        0.05 * test_utils::convert_to_native(expected[i]));
         }
 
         for(size_t i = 0; i < output_reductions.size(); i++)
         {
-            ASSERT_NEAR(
-                output_reductions[i], expected_reductions[i],
-                static_cast<T>(0.05) * expected_reductions[i]
-            );
+            ASSERT_NEAR(test_utils::convert_to_native(output_reductions[i]),
+                        test_utils::convert_to_native(expected_reductions[i]),
+                        0.05 * test_utils::convert_to_native(expected_reductions[i]));
         }
     }
 }
@@ -1720,7 +1732,7 @@ void exclusive_scan_prefix_callback_array_kernel(
     auto prefix_callback = [&prefix_value](T reduction)
     {
         T prefix = prefix_value;
-        prefix_value += reduction;
+        prefix_value = prefix_value + reduction;
         return prefix;
     };
 
@@ -1776,28 +1788,31 @@ TYPED_TEST(HipcubBlockScanInputArrayTests, ExclusiveScanPrefixCallback)
         // Generate data
         std::vector<T> output = test_utils::get_random_data<T>(size, 2, 200, seed_value);
         std::vector<T> output_block_prefixes(size / items_per_block);
-        T block_prefix = test_utils::get_random_value<T>(
-            0,
-            100,
-            seed_value + seed_value_addition
-        );
+        T block_prefix = test_utils::get_random_value<T>(test_utils::convert_to_device<T>(0),
+                                                         test_utils::convert_to_device<T>(100),
+                                                         seed_value + seed_value_addition);
 
         // Calculate expected results on host
-        std::vector<T> expected(output.size(), 0);
-        std::vector<T> expected_block_prefixes(output_block_prefixes.size(), 0);
+        std::vector<T> expected(output.size(), test_utils::convert_to_device<T>(0));
+        std::vector<T> expected_block_prefixes(output_block_prefixes.size(),
+                                               test_utils::convert_to_device<T>(0));
         for(size_t i = 0; i < output.size() / items_per_block; i++)
         {
             expected[i * items_per_block] = block_prefix;
             for(size_t j = 1; j < items_per_block; j++)
             {
                 auto idx = i * items_per_block + j;
-                expected[idx] = output[idx-1] + expected[idx-1];
+                expected[idx] = test_utils::convert_to_device<T>(
+                    test_utils::convert_to_native(output[idx - 1])
+                    + test_utils::convert_to_native(expected[idx - 1]));
             }
             expected_block_prefixes[i] = block_prefix;
             for(size_t j = 0; j < items_per_block; j++)
             {
                 auto idx = i * items_per_block + j;
-                expected_block_prefixes[i] += output[idx];
+                expected_block_prefixes[i] = test_utils::convert_to_device<T>(
+                    test_utils::convert_to_native(expected_block_prefixes[i])
+                    + test_utils::convert_to_native(output[idx]));
             }
         }
 
@@ -1852,18 +1867,16 @@ TYPED_TEST(HipcubBlockScanInputArrayTests, ExclusiveScanPrefixCallback)
         // Validating results
         for(size_t i = 0; i < output.size(); i++)
         {
-            ASSERT_NEAR(
-                output[i], expected[i],
-                static_cast<T>(0.05) * expected[i]
-            );
+            ASSERT_NEAR(test_utils::convert_to_native(output[i]),
+                        test_utils::convert_to_native(expected[i]),
+                        0.05 * test_utils::convert_to_native(expected[i]));
         }
 
         for(size_t i = 0; i < output_block_prefixes.size(); i++)
         {
-            ASSERT_NEAR(
-                output_block_prefixes[i], expected_block_prefixes[i],
-                static_cast<T>(0.05) * expected_block_prefixes[i]
-            );
+            ASSERT_NEAR(test_utils::convert_to_native(output_block_prefixes[i]),
+                        test_utils::convert_to_native(expected_block_prefixes[i]),
+                        0.05 * test_utils::convert_to_native(expected_block_prefixes[i]));
         }
 
         HIP_CHECK(hipFree(device_output));

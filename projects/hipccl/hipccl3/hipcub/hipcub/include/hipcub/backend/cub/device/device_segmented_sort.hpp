@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2020, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2023, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -53,15 +53,16 @@ struct DeviceSegmentedSort
                         hipStream_t stream = 0,
                         bool debug_synchronous = false)
     {
-        return hipCUDAErrorTohipError(
-            ::cub::DeviceSegmentedSort::SortKeys(
-                d_temp_storage, temp_storage_bytes,
-                d_keys_in, d_keys_out,
-                num_items, num_segments,
-                d_begin_offsets, d_end_offsets,
-                stream, debug_synchronous
-            )
-        );
+        (void)debug_synchronous;
+        return hipCUDAErrorTohipError(::cub::DeviceSegmentedSort::SortKeys(d_temp_storage,
+                                                                           temp_storage_bytes,
+                                                                           d_keys_in,
+                                                                           d_keys_out,
+                                                                           num_items,
+                                                                           num_segments,
+                                                                           d_begin_offsets,
+                                                                           d_end_offsets,
+                                                                           stream));
     }
 
     template <typename KeyT,
@@ -79,15 +80,17 @@ struct DeviceSegmentedSort
                                   hipStream_t stream = 0,
                                   bool debug_synchronous = false)
     {
+        (void)debug_synchronous;
         return hipCUDAErrorTohipError(
-            ::cub::DeviceSegmentedSort::SortKeysDescending(
-                d_temp_storage, temp_storage_bytes,
-                d_keys_in, d_keys_out,
-                num_items, num_segments,
-                d_begin_offsets, d_end_offsets,
-                stream, debug_synchronous
-            )
-        );
+            ::cub::DeviceSegmentedSort::SortKeysDescending(d_temp_storage,
+                                                           temp_storage_bytes,
+                                                           d_keys_in,
+                                                           d_keys_out,
+                                                           num_items,
+                                                           num_segments,
+                                                           d_begin_offsets,
+                                                           d_end_offsets,
+                                                           stream));
     }
 
     template <typename KeyT,
@@ -104,15 +107,15 @@ struct DeviceSegmentedSort
                         hipStream_t stream = 0,
                         bool debug_synchronous = false)
     {
-        return hipCUDAErrorTohipError(
-            ::cub::DeviceSegmentedSort::SortKeys(
-                d_temp_storage, temp_storage_bytes,
-                d_keys,
-                num_items, num_segments,
-                d_begin_offsets, d_end_offsets,
-                stream, debug_synchronous
-            )
-        );
+        (void)debug_synchronous;
+        return hipCUDAErrorTohipError(::cub::DeviceSegmentedSort::SortKeys(d_temp_storage,
+                                                                           temp_storage_bytes,
+                                                                           d_keys,
+                                                                           num_items,
+                                                                           num_segments,
+                                                                           d_begin_offsets,
+                                                                           d_end_offsets,
+                                                                           stream));
     }
     
     template <typename KeyT,
@@ -129,15 +132,16 @@ struct DeviceSegmentedSort
                                   hipStream_t stream = 0,
                                   bool debug_synchronous = false)
     {
+        (void)debug_synchronous;
         return hipCUDAErrorTohipError(
-            ::cub::DeviceSegmentedSort::SortKeysDescending(
-                d_temp_storage, temp_storage_bytes,
-                d_keys,
-                num_items, num_segments,
-                d_begin_offsets, d_end_offsets,
-                stream, debug_synchronous
-            )
-        );
+            ::cub::DeviceSegmentedSort::SortKeysDescending(d_temp_storage,
+                                                           temp_storage_bytes,
+                                                           d_keys,
+                                                           num_items,
+                                                           num_segments,
+                                                           d_begin_offsets,
+                                                           d_end_offsets,
+                                                           stream));
     }
 
     template <typename KeyT,
@@ -155,15 +159,16 @@ struct DeviceSegmentedSort
                               hipStream_t stream = 0,
                               bool debug_synchronous = false)
     {
-        return hipCUDAErrorTohipError(
-            ::cub::DeviceSegmentedSort::StableSortKeys(
-                d_temp_storage, temp_storage_bytes,
-                d_keys_in, d_keys_out,
-                num_items, num_segments,
-                d_begin_offsets, d_end_offsets,
-                stream, debug_synchronous
-            )
-        );
+        (void)debug_synchronous;
+        return hipCUDAErrorTohipError(::cub::DeviceSegmentedSort::StableSortKeys(d_temp_storage,
+                                                                                 temp_storage_bytes,
+                                                                                 d_keys_in,
+                                                                                 d_keys_out,
+                                                                                 num_items,
+                                                                                 num_segments,
+                                                                                 d_begin_offsets,
+                                                                                 d_end_offsets,
+                                                                                 stream));
     }
 
     template <typename KeyT,
@@ -181,15 +186,17 @@ struct DeviceSegmentedSort
                                         hipStream_t stream = 0,
                                         bool debug_synchronous = false)
     {
+        (void)debug_synchronous;
         return hipCUDAErrorTohipError(
-            ::cub::DeviceSegmentedSort::StableSortKeysDescending(
-                d_temp_storage, temp_storage_bytes,
-                d_keys_in, d_keys_out,
-                num_items, num_segments,
-                d_begin_offsets, d_end_offsets,
-                stream, debug_synchronous
-            )
-        );
+            ::cub::DeviceSegmentedSort::StableSortKeysDescending(d_temp_storage,
+                                                                 temp_storage_bytes,
+                                                                 d_keys_in,
+                                                                 d_keys_out,
+                                                                 num_items,
+                                                                 num_segments,
+                                                                 d_begin_offsets,
+                                                                 d_end_offsets,
+                                                                 stream));
     }
 
     template <typename KeyT,
@@ -206,15 +213,15 @@ struct DeviceSegmentedSort
                               hipStream_t stream = 0,
                               bool debug_synchronous = false)
     {
-        return hipCUDAErrorTohipError(
-            ::cub::DeviceSegmentedSort::StableSortKeys(
-                d_temp_storage, temp_storage_bytes,
-                d_keys,
-                num_items, num_segments,
-                d_begin_offsets, d_end_offsets,
-                stream, debug_synchronous
-            )
-        );
+        (void)debug_synchronous;
+        return hipCUDAErrorTohipError(::cub::DeviceSegmentedSort::StableSortKeys(d_temp_storage,
+                                                                                 temp_storage_bytes,
+                                                                                 d_keys,
+                                                                                 num_items,
+                                                                                 num_segments,
+                                                                                 d_begin_offsets,
+                                                                                 d_end_offsets,
+                                                                                 stream));
     }
     
     template <typename KeyT,
@@ -231,15 +238,16 @@ struct DeviceSegmentedSort
                                         hipStream_t stream = 0,
                                         bool debug_synchronous = false)
     {
+        (void)debug_synchronous;
         return hipCUDAErrorTohipError(
-            ::cub::DeviceSegmentedSort::StableSortKeysDescending(
-                d_temp_storage, temp_storage_bytes,
-                d_keys,
-                num_items, num_segments,
-                d_begin_offsets, d_end_offsets,
-                stream, debug_synchronous
-            )
-        );
+            ::cub::DeviceSegmentedSort::StableSortKeysDescending(d_temp_storage,
+                                                                 temp_storage_bytes,
+                                                                 d_keys,
+                                                                 num_items,
+                                                                 num_segments,
+                                                                 d_begin_offsets,
+                                                                 d_end_offsets,
+                                                                 stream));
     }
 
     template <typename KeyT,
@@ -260,16 +268,18 @@ struct DeviceSegmentedSort
                          hipStream_t stream = 0,
                          bool debug_synchronous = false)
     {
-        return hipCUDAErrorTohipError(
-            ::cub::DeviceSegmentedSort::SortPairs(
-                d_temp_storage, temp_storage_bytes,
-                d_keys_in, d_keys_out,
-                d_values_in, d_values_out,
-                num_items, num_segments,
-                d_begin_offsets, d_end_offsets,
-                stream, debug_synchronous
-            )
-        );
+        (void)debug_synchronous;
+        return hipCUDAErrorTohipError(::cub::DeviceSegmentedSort::SortPairs(d_temp_storage,
+                                                                            temp_storage_bytes,
+                                                                            d_keys_in,
+                                                                            d_keys_out,
+                                                                            d_values_in,
+                                                                            d_values_out,
+                                                                            num_items,
+                                                                            num_segments,
+                                                                            d_begin_offsets,
+                                                                            d_end_offsets,
+                                                                            stream));
     }
 
     template <typename KeyT,
@@ -290,16 +300,19 @@ struct DeviceSegmentedSort
                                    hipStream_t stream = 0,
                                    bool debug_synchronous = false)
     {
+        (void)debug_synchronous;
         return hipCUDAErrorTohipError(
-            ::cub::DeviceSegmentedSort::SortPairsDescending(
-                d_temp_storage, temp_storage_bytes,
-                d_keys_in, d_keys_out,
-                d_values_in, d_values_out,
-                num_items, num_segments,
-                d_begin_offsets, d_end_offsets,
-                stream, debug_synchronous
-            )
-        );
+            ::cub::DeviceSegmentedSort::SortPairsDescending(d_temp_storage,
+                                                            temp_storage_bytes,
+                                                            d_keys_in,
+                                                            d_keys_out,
+                                                            d_values_in,
+                                                            d_values_out,
+                                                            num_items,
+                                                            num_segments,
+                                                            d_begin_offsets,
+                                                            d_end_offsets,
+                                                            stream));
     }
 
     template <typename KeyT,
@@ -318,15 +331,16 @@ struct DeviceSegmentedSort
                          hipStream_t stream = 0,
                          bool debug_synchronous = false)
     {
-        return hipCUDAErrorTohipError(
-            ::cub::DeviceSegmentedSort::SortPairs(
-                d_temp_storage, temp_storage_bytes,
-                d_keys, d_values,
-                num_items, num_segments,
-                d_begin_offsets, d_end_offsets,
-                stream, debug_synchronous
-            )
-        );
+        (void)debug_synchronous;
+        return hipCUDAErrorTohipError(::cub::DeviceSegmentedSort::SortPairs(d_temp_storage,
+                                                                            temp_storage_bytes,
+                                                                            d_keys,
+                                                                            d_values,
+                                                                            num_items,
+                                                                            num_segments,
+                                                                            d_begin_offsets,
+                                                                            d_end_offsets,
+                                                                            stream));
     }
     
     template <typename KeyT,
@@ -345,15 +359,17 @@ struct DeviceSegmentedSort
                                    hipStream_t stream = 0,
                                    bool debug_synchronous = false)
     {
+        (void)debug_synchronous;
         return hipCUDAErrorTohipError(
-            ::cub::DeviceSegmentedSort::SortPairsDescending(
-                d_temp_storage, temp_storage_bytes,
-                d_keys, d_values,
-                num_items, num_segments,
-                d_begin_offsets, d_end_offsets,
-                stream, debug_synchronous
-            )
-        );
+            ::cub::DeviceSegmentedSort::SortPairsDescending(d_temp_storage,
+                                                            temp_storage_bytes,
+                                                            d_keys,
+                                                            d_values,
+                                                            num_items,
+                                                            num_segments,
+                                                            d_begin_offsets,
+                                                            d_end_offsets,
+                                                            stream));
     }
 
     template <typename KeyT,
@@ -374,16 +390,19 @@ struct DeviceSegmentedSort
                                hipStream_t stream = 0,
                                bool debug_synchronous = false)
     {
+        (void)debug_synchronous;
         return hipCUDAErrorTohipError(
-            ::cub::DeviceSegmentedSort::StableSortPairs(
-                d_temp_storage, temp_storage_bytes,
-                d_keys_in, d_keys_out,
-                d_values_in, d_values_out,
-                num_items, num_segments,
-                d_begin_offsets, d_end_offsets,
-                stream, debug_synchronous
-            )
-        );
+            ::cub::DeviceSegmentedSort::StableSortPairs(d_temp_storage,
+                                                        temp_storage_bytes,
+                                                        d_keys_in,
+                                                        d_keys_out,
+                                                        d_values_in,
+                                                        d_values_out,
+                                                        num_items,
+                                                        num_segments,
+                                                        d_begin_offsets,
+                                                        d_end_offsets,
+                                                        stream));
     }
 
     template <typename KeyT,
@@ -404,16 +423,19 @@ struct DeviceSegmentedSort
                                          hipStream_t stream = 0,
                                          bool debug_synchronous = false)
     {
+        (void)debug_synchronous;
         return hipCUDAErrorTohipError(
-            ::cub::DeviceSegmentedSort::StableSortPairsDescending(
-                d_temp_storage, temp_storage_bytes,
-                d_keys_in, d_keys_out,
-                d_values_in, d_values_out,
-                num_items, num_segments,
-                d_begin_offsets, d_end_offsets,
-                stream, debug_synchronous
-            )
-        );
+            ::cub::DeviceSegmentedSort::StableSortPairsDescending(d_temp_storage,
+                                                                  temp_storage_bytes,
+                                                                  d_keys_in,
+                                                                  d_keys_out,
+                                                                  d_values_in,
+                                                                  d_values_out,
+                                                                  num_items,
+                                                                  num_segments,
+                                                                  d_begin_offsets,
+                                                                  d_end_offsets,
+                                                                  stream));
     }
 
     template <typename KeyT,
@@ -432,15 +454,17 @@ struct DeviceSegmentedSort
                                hipStream_t stream = 0,
                                bool debug_synchronous = false)
     {
+        (void)debug_synchronous;
         return hipCUDAErrorTohipError(
-            ::cub::DeviceSegmentedSort::StableSortPairs(
-                d_temp_storage, temp_storage_bytes,
-                d_keys, d_values,
-                num_items, num_segments,
-                d_begin_offsets, d_end_offsets,
-                stream, debug_synchronous
-            )
-        );
+            ::cub::DeviceSegmentedSort::StableSortPairs(d_temp_storage,
+                                                        temp_storage_bytes,
+                                                        d_keys,
+                                                        d_values,
+                                                        num_items,
+                                                        num_segments,
+                                                        d_begin_offsets,
+                                                        d_end_offsets,
+                                                        stream));
     }
     
     template <typename KeyT,
@@ -459,15 +483,17 @@ struct DeviceSegmentedSort
                                          hipStream_t stream = 0,
                                          bool debug_synchronous = false)
     {
+        (void)debug_synchronous;
         return hipCUDAErrorTohipError(
-            ::cub::DeviceSegmentedSort::StableSortPairsDescending(
-                d_temp_storage, temp_storage_bytes,
-                d_keys, d_values,
-                num_items, num_segments,
-                d_begin_offsets, d_end_offsets,
-                stream, debug_synchronous
-            )
-        );
+            ::cub::DeviceSegmentedSort::StableSortPairsDescending(d_temp_storage,
+                                                                  temp_storage_bytes,
+                                                                  d_keys,
+                                                                  d_values,
+                                                                  num_items,
+                                                                  num_segments,
+                                                                  d_begin_offsets,
+                                                                  d_end_offsets,
+                                                                  stream));
     }
 };
 

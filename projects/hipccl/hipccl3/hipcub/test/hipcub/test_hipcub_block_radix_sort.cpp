@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -67,6 +67,8 @@ typedef ::testing::Types<
     // Non-power of 2 BlockSize
     params<double, unsigned int, 65U, 1>,
     params<float, int, 37U, 1>,
+    params<test_utils::bfloat16, int, 37U, 1>,
+    params<test_utils::half, int, 37U, 1>,
     params<long long, char, 510U, 1, true>,
     params<unsigned int, long long, 162U, 1, false, true>,
     params<unsigned char, float, 255U, 1>,
@@ -90,8 +92,8 @@ typedef ::testing::Types<
     // Stability (a number of key values is lower than BlockSize * ItemsPerThread: some keys appear
     // multiple times with different values or key parts outside [StartBit, EndBit))
     params<unsigned char, int, 512U, 2, false, true>,
-    params<unsigned short, double, 60U, 1, true, false, 8, 11>
-> Params;
+    params<unsigned short, double, 60U, 1, true, false, 8, 11>>
+    Params;
 
 TYPED_TEST_SUITE(HipcubBlockRadixSort, Params);
 
@@ -167,14 +169,13 @@ TYPED_TEST(HipcubBlockRadixSort, SortKeys)
 
         // Generate data
         std::vector<key_type> keys_output;
-        if(std::is_floating_point<key_type>::value)
+        if(test_utils::is_floating_point<key_type>::value)
         {
             keys_output = test_utils::get_random_data<key_type>(
                 size,
-                (key_type)-1000,
-                (key_type)+1000,
-                seed_value
-            );
+                test_utils::convert_to_device<key_type>(-1000),
+                test_utils::convert_to_device<key_type>(+1000),
+                seed_value);
         }
         else
         {
@@ -228,7 +229,8 @@ TYPED_TEST(HipcubBlockRadixSort, SortKeys)
         // Verifying results
         for(size_t i = 0; i < size; i++)
         {
-            ASSERT_EQ(keys_output[i], expected[i]);
+            ASSERT_EQ(test_utils::convert_to_native(keys_output[i]),
+                      test_utils::convert_to_native(expected[i]));
         }
 
         HIP_CHECK(hipFree(device_keys_output));
@@ -315,14 +317,13 @@ TYPED_TEST(HipcubBlockRadixSort, SortKeysValues)
 
         // Generate data
         std::vector<key_type> keys_output;
-        if(std::is_floating_point<key_type>::value)
+        if(test_utils::is_floating_point<key_type>::value)
         {
             keys_output = test_utils::get_random_data<key_type>(
                 size,
-                (key_type)-1000,
-                (key_type)+1000,
-                seed_value
-            );
+                test_utils::convert_to_device<key_type>(-1000),
+                test_utils::convert_to_device<key_type>(+1000),
+                seed_value);
         }
         else
         {
@@ -335,14 +336,13 @@ TYPED_TEST(HipcubBlockRadixSort, SortKeysValues)
         }
 
         std::vector<value_type> values_output;
-        if(std::is_floating_point<value_type>::value)
+        if(test_utils::is_floating_point<value_type>::value)
         {
             values_output = test_utils::get_random_data<value_type>(
                 size,
-                (value_type)-1000,
-                (value_type)+1000,
-                seed_value + seed_value_addition
-            );
+                test_utils::convert_to_device<value_type>(-1000),
+                test_utils::convert_to_device<value_type>(+1000),
+                seed_value + seed_value_addition);
         }
         else
         {
@@ -419,8 +419,10 @@ TYPED_TEST(HipcubBlockRadixSort, SortKeysValues)
 
         for(size_t i = 0; i < size; i++)
         {
-            ASSERT_EQ(keys_output[i], expected[i].first);
-            ASSERT_EQ(values_output[i], expected[i].second);
+            ASSERT_EQ(test_utils::convert_to_native(keys_output[i]),
+                      test_utils::convert_to_native(expected[i].first));
+            ASSERT_EQ(test_utils::convert_to_native(values_output[i]),
+                      test_utils::convert_to_native(expected[i].second));
         }
 
         HIP_CHECK(hipFree(device_keys_output));

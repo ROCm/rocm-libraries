@@ -2,7 +2,7 @@
 /******************************************************************************
 * Copyright (c) 2011, Duane Merrill.  All rights reserved.
 * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
-* Modifications Copyright (c) 2021-2022, Advanced Micro Devices, Inc.  All rights reserved.
+* Modifications Copyright (c) 2021-2023, Advanced Micro Devices, Inc.  All rights reserved.
 *
 * Redistribution and use in source and binary forms, with or without
 * modification, are permitted provided that the following conditions are met:
@@ -31,6 +31,7 @@
 #include "common_test_header.hpp"
 
 // hipcub API
+#include "hipcub/block/block_exchange.hpp"
 #include "hipcub/block/block_load.hpp"
 #include "hipcub/block/block_radix_rank.hpp"
 #include "hipcub/block/block_store.hpp"
@@ -65,6 +66,7 @@ typedef ::testing::Types<
     // Power of 2 BlockSize
     params<unsigned int, 64U, 1>,
     params<test_utils::half, 128U, 1>,
+    params<test_utils::bfloat16, 128U, 1>,
     params<float, 256U, 1>,
     params<unsigned short, 512U, 1, true>,
 
@@ -86,6 +88,7 @@ typedef ::testing::Types<
     params<char, 464U, 2, true>,
     params<unsigned short, 100U, 3>,
     params<test_utils::half, 234U, 9>,
+    params<test_utils::bfloat16, 234U, 9>,
 
     // StartBit and MaxRadixBits
     params<unsigned long long, 64U, 1, false, 8, 5>,
@@ -94,7 +97,8 @@ typedef ::testing::Types<
 
     // RadixBits < MaxRadixBits
     params<unsigned int, 162U, 2, true, 3, 6, 2>,
-    params<test_utils::half, 193U, 2, true, 1, 4, 3>>
+    params<test_utils::half, 193U, 2, true, 1, 4, 3>,
+    params<test_utils::bfloat16, 193U, 2, true, 1, 4, 3>>
     Params;
 
 TYPED_TEST_SUITE(HipcubBlockRadixRank, Params);
@@ -130,36 +134,53 @@ __global__ __launch_bounds__(BlockSize) void rank_kernel(const KeyType* keys_inp
                                Descending,
                                Algorithm == RadixRankAlgorithm::RADIX_RANK_MEMOIZE>>;
 
+    using KeyExchangeType  = hipcub::BlockExchange<KeyType, BlockSize, ItemsPerThread>;
+    using RankExchangeType = hipcub::BlockExchange<int, BlockSize, ItemsPerThread>;
+
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
     const unsigned int     lid             = hipThreadIdx_x;
     const unsigned int     block_offset    = hipBlockIdx_x * items_per_block;
 
+    __shared__ union
+    {
+        typename KeyExchangeType::TempStorage  key_exchange;
+        typename RankType::TempStorage         rank;
+        typename RankExchangeType::TempStorage rank_exchange;
+    } storage;
+
     KeyType keys[ItemsPerThread];
+    hipcub::LoadDirectBlocked(lid, keys_input + block_offset, keys);
+
     if(warp_striped)
-        hipcub::LoadDirectWarpStriped(lid, keys_input + block_offset, keys);
-    else
-        hipcub::LoadDirectBlocked(lid, keys_input + block_offset, keys);
+    {
+        KeyExchangeType exchange(storage.key_exchange);
+        exchange.BlockedToWarpStriped(keys, keys);
+        __syncthreads();
+    }
 
     UnsignedBits(&unsigned_keys)[ItemsPerThread]
         = reinterpret_cast<UnsignedBits(&)[ItemsPerThread]>(keys);
 
 #pragma unroll
-    for(int KEY = 0; KEY < ItemsPerThread; KEY++)
+    for(unsigned int key = 0; key < ItemsPerThread; key++)
     {
-        unsigned_keys[KEY] = KeyTraits::TwiddleIn(unsigned_keys[KEY]);
+        unsigned_keys[key] = KeyTraits::TwiddleIn(unsigned_keys[key]);
     }
 
-    __shared__ typename RankType::TempStorage storage;
-    RankType                                  rank(storage);
-    const DigitExtractor                      digit_extractor(start_bit, radix_bits);
-    int                                       ranks[ItemsPerThread];
+    RankType             rank(storage.rank);
+    const DigitExtractor digit_extractor(start_bit, radix_bits);
+    int                  ranks[ItemsPerThread];
 
     rank.RankKeys(unsigned_keys, ranks, digit_extractor);
 
     if(warp_striped)
-        hipcub::StoreDirectWarpStriped(lid, ranks_output + block_offset, ranks);
-    else
-        hipcub::StoreDirectBlocked(lid, ranks_output + block_offset, ranks);
+    {
+        __syncthreads();
+        RankExchangeType exchange(storage.rank_exchange);
+        exchange.WarpStripedToBlocked(ranks, ranks);
+    }
+
+    hipcub::StoreDirectBlocked(lid, ranks_output + block_offset, ranks);
 }
 
 template<typename TestFixture, RadixRankAlgorithm Algorithm>
@@ -200,19 +221,21 @@ void test_radix_rank()
 
         // Generate data
         std::vector<key_type> keys_input;
-        if(std::is_floating_point<key_type>::value)
+        if(test_utils::is_floating_point<key_type>::value)
         {
-            keys_input = test_utils::get_random_data<key_type>(size,
-                                                               static_cast<key_type>(-1000),
-                                                               static_cast<key_type>(+1000),
-                                                               seed_value);
+            keys_input = test_utils::get_random_data<key_type>(
+                size,
+                test_utils::convert_to_device<key_type>(-1000),
+                test_utils::convert_to_device<key_type>(+1000),
+                seed_value);
         }
         else
         {
-            keys_input = test_utils::get_random_data<key_type>(size,
-                                                               std::numeric_limits<key_type>::min(),
-                                                               std::numeric_limits<key_type>::max(),
-                                                               seed_value);
+            keys_input
+                = test_utils::get_random_data<key_type>(size,
+                                                        test_utils::numeric_limits<key_type>::min(),
+                                                        test_utils::numeric_limits<key_type>::max(),
+                                                        seed_value);
         }
 
         test_utils::add_special_values(keys_input, seed_value);
@@ -299,12 +322,7 @@ TYPED_TEST(HipcubBlockRadixRank, BlockRadixRankMemoize)
 
 TYPED_TEST(HipcubBlockRadixRank, BlockRadixRankMatch)
 {
-// The hipCUB implementation of BlockRadixRankMatch is currently broken for the
-// rocPRIM backend, and does not pass the tests yet.
-#ifdef __HIP_PLATFORM_AMD__
-    GTEST_SKIP();
-#endif
-
+#ifdef __HIP_PLATFORM_NVIDIA__
     constexpr unsigned int block_size = TestFixture::params::block_size;
     if(block_size % HIPCUB_DEVICE_WARP_THREADS != 0)
     {
@@ -313,6 +331,7 @@ TYPED_TEST(HipcubBlockRadixRank, BlockRadixRankMatch)
         // https://github.com/NVIDIA/cub/issues/552.
         GTEST_SKIP();
     }
+#endif
 
     test_radix_rank<TestFixture, RadixRankAlgorithm::RADIX_RANK_MATCH>();
 }

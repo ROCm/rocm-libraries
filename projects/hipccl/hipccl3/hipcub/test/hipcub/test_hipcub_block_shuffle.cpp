@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -69,8 +69,11 @@ typedef ::testing::Types<
     // long tests
     params<long, 64U>,
     params<long, 256U>,
-    params<long, 377U>
-> SingleValueTestParams;
+    params<long, 377U>,
+    params<float, 32U>,
+    params<test_utils::half, 32U>,
+    params<test_utils::bfloat16, 32U>>
+    SingleValueTestParams;
 
 TYPED_TEST_SUITE(HipcubBlockShuffleTests, SingleValueTestParams);
 
@@ -144,14 +147,17 @@ TYPED_TEST(HipcubBlockShuffleTests, BlockOffset)
         // Calculate expected results on host
         for(size_t block_index = 0; block_index < grid_size; block_index++)
         {
-          for(size_t thread_index = 0; thread_index < block_size; thread_index++)
-          {
-            int offset = thread_index + distance;
-            if((offset >= 0 ) && (offset < (int)block_size))
+            for(size_t thread_index = 0; thread_index < block_size; thread_index++)
             {
-              ASSERT_EQ(input_data[block_index*block_size + offset],output_data[block_index*block_size + thread_index]);
+                int offset = thread_index + distance;
+                if((offset >= 0) && (offset < (int)block_size))
+                {
+                    size_t base_index = block_index * block_size;
+                    ASSERT_EQ(
+                        test_utils::convert_to_native(input_data[base_index + offset]),
+                        test_utils::convert_to_native(output_data[base_index + thread_index]));
+                }
             }
-          }
         }
 
         HIP_CHECK(hipFree(device_input));
@@ -229,13 +235,15 @@ TYPED_TEST(HipcubBlockShuffleTests, BlockRotate)
         // Calculate expected results on host
         for(size_t block_index = 0; block_index < grid_size; block_index++)
         {
-          for(size_t thread_index = 0; thread_index < block_size; thread_index++)
-          {
-            int offset = thread_index + distance;
-            if (offset >= (int)block_size)
-                offset -=      block_size;
-            ASSERT_EQ(input_data[block_index*block_size + offset],output_data[block_index*block_size + thread_index]);
-          }
+            for(size_t thread_index = 0; thread_index < block_size; thread_index++)
+            {
+                int offset = thread_index + distance;
+                if(offset >= (int)block_size)
+                    offset -= block_size;
+                size_t base_index = block_index * block_size;
+                ASSERT_EQ(test_utils::convert_to_native(input_data[base_index + offset]),
+                          test_utils::convert_to_native(output_data[base_index + thread_index]));
+            }
         }
 
         HIP_CHECK(hipFree(device_input));
@@ -319,17 +327,20 @@ TYPED_TEST(HipcubBlockShuffleTests, BlockUp)
         // Calculate expected results on host
         for(size_t block_index = 0; block_index < grid_size; block_index++)
         {
-          for(size_t thread_index = 0; thread_index < block_size; thread_index++)
-          {
-            size_t start_offset = (block_index*block_size + thread_index)*ItemsPerThread;
-            for(size_t item_index = 0; item_index < ItemsPerThread; item_index++)
+            for(size_t thread_index = 0; thread_index < block_size; thread_index++)
             {
-              if(thread_index + item_index>0)
-              {
-                  ASSERT_EQ(input_data[start_offset + item_index-1],output_data[start_offset + item_index]);
-              }
+                size_t start_offset = (block_index * block_size + thread_index) * ItemsPerThread;
+                for(size_t item_index = 0; item_index < ItemsPerThread; item_index++)
+                {
+                    if(thread_index + item_index > 0)
+                    {
+                        ASSERT_EQ(
+                            test_utils::convert_to_native(
+                                input_data[start_offset + item_index - 1]),
+                            test_utils::convert_to_native(output_data[start_offset + item_index]));
+                    }
+                }
             }
-          }
         }
 
         HIP_CHECK(hipFree(device_input));
@@ -414,17 +425,20 @@ TYPED_TEST(HipcubBlockShuffleTests, BlockDown)
         // Calculate expected results on host
         for(size_t block_index = 0; block_index < grid_size; block_index++)
         {
-          for(size_t thread_index = 0; thread_index < block_size; thread_index++)
-          {
-            size_t start_offset = (block_index*block_size + thread_index)*ItemsPerThread;
-            for(size_t item_index = 0; item_index < ItemsPerThread; item_index++)
+            for(size_t thread_index = 0; thread_index < block_size; thread_index++)
             {
-              if((thread_index!=block_size-1)&&(item_index!=ItemsPerThread-1))
-              {
-                  ASSERT_EQ(input_data[start_offset + item_index+1],output_data[start_offset + item_index]);
-              }
+                size_t start_offset = (block_index * block_size + thread_index) * ItemsPerThread;
+                for(size_t item_index = 0; item_index < ItemsPerThread; item_index++)
+                {
+                    if((thread_index != block_size - 1) && (item_index != ItemsPerThread - 1))
+                    {
+                        ASSERT_EQ(
+                            test_utils::convert_to_native(
+                                input_data[start_offset + item_index + 1]),
+                            test_utils::convert_to_native(output_data[start_offset + item_index]));
+                    }
+                }
             }
-          }
         }
 
         HIP_CHECK(hipFree(device_input));

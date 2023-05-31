@@ -156,7 +156,7 @@ if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY AND NOT WIN32)
 endif()
 
 # Package
-if(HIP_COMPILER STREQUAL "hcc" OR HIP_COMPILER STREQUAL "clang")
+if(HIP_COMPILER STREQUAL "clang")
   rocm_package_add_deb_dependencies(DEPENDS "rocprim-dev >= 2.10.1")
   rocm_package_add_rpm_dependencies(DEPENDS "rocprim-devel >= 2.10.1")
   set(CPACK_DEBIAN_PACKAGE_REPLACES "cub-hip")

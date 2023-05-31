@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -52,10 +52,10 @@ typed_test_def(HipcubBlockLoadStoreTests, name_suffix, LoadStoreClass)
 
         // Generate data
         std::vector<Type> input = test_utils::get_random_data<Type>(size, -100, 100, seed_value);
-        std::vector<Type> output(input.size(), 0);
+        std::vector<Type> output(input.size(), test_utils::convert_to_device<Type>(0));
 
         // Calculate expected results on host
-        std::vector<Type> expected(input.size(), 0);
+        std::vector<Type> expected(input.size(), test_utils::convert_to_device<Type>(0));
         for(size_t i = 0; i < 113; i++)
         {
             size_t block_offset = i * items_per_block;
@@ -100,7 +100,8 @@ typed_test_def(HipcubBlockLoadStoreTests, name_suffix, LoadStoreClass)
         // Validating results
         for(size_t i = 0; i < output.size(); i++)
         {
-            ASSERT_EQ(output[i], expected[i]);
+            ASSERT_EQ(test_utils::convert_to_native(output[i]),
+                      test_utils::convert_to_native(expected[i]));
         }
 
         HIP_CHECK(hipFree(device_input));
@@ -137,10 +138,10 @@ typed_test_def(HipcubBlockLoadStoreTests, name_suffix, LoadStoreClassValid)
         const size_t valid = items_per_block - 32;
         // Generate data
         std::vector<Type> input = test_utils::get_random_data<Type>(size, -100, 100, seed_value);
-        std::vector<Type> output(input.size(), 0);
+        std::vector<Type> output(input.size(), test_utils::convert_to_device<Type>(0));
 
         // Calculate expected results on host
-        std::vector<Type> expected(input.size(), 0);
+        std::vector<Type> expected(input.size(), test_utils::convert_to_device<Type>(0));
         for(size_t i = 0; i < 113; i++)
         {
             size_t block_offset = i * items_per_block;
@@ -197,7 +198,8 @@ typed_test_def(HipcubBlockLoadStoreTests, name_suffix, LoadStoreClassValid)
         // Validating results
         for(size_t i = 0; i < output.size(); i++)
         {
-            ASSERT_EQ(output[i], expected[i]);
+            ASSERT_EQ(test_utils::convert_to_native(output[i]),
+                      test_utils::convert_to_native(expected[i]));
         }
 
         HIP_CHECK(hipFree(device_input));
@@ -232,10 +234,10 @@ typed_test_def(HipcubBlockLoadStoreTests, name_suffix, LoadStoreClassDefault)
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         const size_t valid    = items_per_thread + 1;
-        int          _default = -1;
+        Type         _default = test_utils::convert_to_device<Type>(-1);
         // Generate data
         std::vector<Type> input = test_utils::get_random_data<Type>(size, -100, 100, seed_value);
-        std::vector<Type> output(input.size(), 0);
+        std::vector<Type> output(input.size(), test_utils::convert_to_device<Type>(0));
 
         // Calculate expected results on host
         std::vector<Type> expected(input.size(), _default);
@@ -290,7 +292,8 @@ typed_test_def(HipcubBlockLoadStoreTests, name_suffix, LoadStoreClassDefault)
         // Validating results
         for(size_t i = 0; i < output.size(); i++)
         {
-            ASSERT_EQ(output[i], expected[i]);
+            ASSERT_EQ(test_utils::convert_to_native(output[i]),
+                      test_utils::convert_to_native(expected[i]));
         }
 
         HIP_CHECK(hipFree(device_input));
@@ -333,8 +336,8 @@ typed_test_def(HipcubBlockLoadStoreTests, name_suffix, LoadStoreDiscardIterator)
         // Generate data
         std::vector<Type> input =
             test_utils::get_random_data<Type>(unguarded_elements, -100, 100, seed_value);
-        std::vector<Type> unguarded(unguarded_elements, 0);
-        std::vector<Type> guarded(guarded_elements, 0);
+        std::vector<Type> unguarded(unguarded_elements, test_utils::convert_to_device<Type>(0));
+        std::vector<Type> guarded(guarded_elements, test_utils::convert_to_device<Type>(0));
 
         // Calculate expected results on host
         std::vector<Type> unguarded_expected(unguarded_elements);
@@ -410,11 +413,15 @@ typed_test_def(HipcubBlockLoadStoreTests, name_suffix, LoadStoreDiscardIterator)
         // Validating results
         for(size_t i = 0; i < guarded_expected.size(); i++)
         {
-            ASSERT_EQ(guarded[i], guarded_expected[i]) << "where index = " << i;
+            ASSERT_EQ(test_utils::convert_to_native(guarded[i]),
+                      test_utils::convert_to_native(guarded_expected[i]))
+                << "where index = " << i;
         }
         for(size_t i = 0; i < unguarded_expected.size(); i++)
         {
-            ASSERT_EQ(unguarded[i], unguarded_expected[i]) << "where index = " << i;
+            ASSERT_EQ(test_utils::convert_to_native(unguarded[i]),
+                      test_utils::convert_to_native(unguarded_expected[i]))
+                << "where index = " << i;
         }
 
         HIP_CHECK(hipFree(device_input));

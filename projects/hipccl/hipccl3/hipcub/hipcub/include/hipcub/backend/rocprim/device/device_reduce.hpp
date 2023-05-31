@@ -47,50 +47,114 @@ BEGIN_HIPCUB_NAMESPACE
 namespace detail
 {
 
+template<typename T>
+HIPCUB_HOST_DEVICE T set_half_bits(uint16_t value)
+{
+    T              half_value{};
+    unsigned char* char_representation = reinterpret_cast<unsigned char*>(&half_value);
+    char_representation[0]             = value;
+    char_representation[1]             = value >> 8;
+    return half_value;
+}
+
 template<class T>
-inline
-T get_lowest_value()
+HIPCUB_HOST_DEVICE inline T get_lowest_value()
 {
     return std::numeric_limits<T>::lowest();
 }
 
 template<>
-inline
-__half get_lowest_value<__half>()
+HIPCUB_HOST_DEVICE inline __half get_lowest_value<__half>()
 {
-    unsigned short lowest_half = 0xfbff;
-    __half lowest_value = *reinterpret_cast<__half*>(&lowest_half);
-    return lowest_value;
+    // smallest normal value (not subnormal): 1 11110 1111111111
+    return set_half_bits<__half>(0xfbff);
 }
 
 template<>
-inline
-hip_bfloat16 get_lowest_value<hip_bfloat16>()
+HIPCUB_HOST_DEVICE inline hip_bfloat16 get_lowest_value<hip_bfloat16>()
 {
-    return hip_bfloat16(-3.38953138925e+38f);
+    // smallest normal value (not subnormal): 1 11111110 1111111
+    return set_half_bits<hip_bfloat16>(0xff7f);
 }
 
 template<class T>
-inline
-T get_max_value()
+HIPCUB_HOST_DEVICE inline T get_max_value()
 {
     return std::numeric_limits<T>::max();
 }
 
 template<>
-inline
-__half get_max_value<__half>()
+HIPCUB_HOST_DEVICE inline __half get_max_value<__half>()
 {
-    unsigned short max_half = 0x7bff;
-    __half max_value = *reinterpret_cast<__half*>(&max_half);
-    return max_value;
+    // largest normal value (not subnormal): 0 11110 1111111111
+    return set_half_bits<__half>(0x7bff);
 }
 
 template<>
-inline
-hip_bfloat16 get_max_value<hip_bfloat16>()
+HIPCUB_HOST_DEVICE inline hip_bfloat16 get_max_value<hip_bfloat16>()
 {
-    return hip_bfloat16(3.38953138925e+38f);
+    // largest normal value (not subnormal): 0 11111110 1111111
+    return set_half_bits<hip_bfloat16>(0x7f7f);
+}
+
+/// Same as \p get_lowest_value, but includes negative infinity for floating-point types.
+template<class T>
+inline auto get_lowest_special_value() ->
+    typename std::enable_if_t<!rocprim::is_floating_point<T>::value, T>
+{
+    return get_lowest_value<T>();
+}
+
+/// Same as \p get_lowest_value, but includes negative infinity for floating-point types.
+template<class T>
+inline auto get_lowest_special_value() ->
+    typename std::enable_if_t<rocprim::is_floating_point<T>::value, T>
+{
+    return -std::numeric_limits<T>::infinity();
+}
+
+template<>
+inline __half get_lowest_special_value<__half>()
+{
+    // negative infinity: 1 11111 0000000000
+    return set_half_bits<__half>(0xfc00);
+}
+
+template<>
+inline hip_bfloat16 get_lowest_special_value<hip_bfloat16>()
+{
+    // negative infinity: 1 11111111 0000000
+    return set_half_bits<hip_bfloat16>(0xff80);
+}
+
+/// Same as \p get_max_value, but includes positive infinity for floating-point types.
+template<typename T>
+inline auto get_max_special_value() ->
+    typename std::enable_if_t<!rocprim::is_floating_point<T>::value, T>
+{
+    return get_max_value<T>();
+}
+
+/// Same as \p get_max_value, but includes positive infinity for floating-point types.
+template<typename T>
+inline auto get_max_special_value() ->
+    typename std::enable_if_t<rocprim::is_floating_point<T>::value, T>
+{
+    return std::numeric_limits<T>::infinity();
+}
+
+template<>
+inline __half get_max_special_value<__half>()
+{
+    // positive infinity: 0 11111 0000000000
+    return set_half_bits<__half>(0x7c00);
+}
+
+template<>
+inline hip_bfloat16 get_max_special_value<hip_bfloat16>()
+{
+    // positive infinity: 0 11111111 0000000
+    return set_half_bits<hip_bfloat16>(0x7f80);
 }
 
 } // end detail namespace
@@ -192,7 +256,11 @@ public:
         using IteratorT = ArgIndexInputIterator<InputIteratorT, OffsetT, OutputValueT>;
 
         IteratorT d_indexed_in(d_in);
-        OutputTupleT init(1, detail::get_max_value<T>());
+        // Empty inputs produce a specific value dictated by CUB's API: numeric_limits::max.
+        // When not empty, using this value as initial is invalid and +infinity is used instead.
+        OutputTupleT init(1,
+                          num_items > 0 ? detail::get_max_special_value<T>()
+                                        : detail::get_max_value<T>());
 
         return Reduce(
             d_temp_storage, temp_storage_bytes,
@@ -249,7 +317,11 @@ public:
         using IteratorT = ArgIndexInputIterator<InputIteratorT, OffsetT, OutputValueT>;
 
         IteratorT d_indexed_in(d_in);
-        OutputTupleT init(1, detail::get_lowest_value<T>());
+        // Empty inputs produce a specific value dictated by CUB's API: numeric_limits::lowest.
+        // When not empty, using this value as initial is invalid and -infinity is used instead.
+        const OutputTupleT init(1,
+                                num_items > 0 ? detail::get_lowest_special_value<T>()
+                                              : detail::get_lowest_value<T>());
 
         return Reduce(
             d_temp_storage, temp_storage_bytes,

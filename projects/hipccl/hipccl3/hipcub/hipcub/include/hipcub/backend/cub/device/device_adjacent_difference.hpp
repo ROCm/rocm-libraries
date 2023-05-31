@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2011-2021, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2022, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2022-2023, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -50,12 +50,15 @@ struct DeviceAdjacentDifference
                                                                hipStream_t     stream        = 0,
                                                                bool debug_synchronous = false)
     {
+        (void)debug_synchronous;
         return hipCUDAErrorTohipError(
-            ::cub::DeviceAdjacentDifference::SubtractLeftCopy(
-                d_temp_storage, temp_storage_bytes, d_input, d_output,
-                num_items, difference_op, stream, debug_synchronous
-            )
-        );
+            ::cub::DeviceAdjacentDifference::SubtractLeftCopy(d_temp_storage,
+                                                              temp_storage_bytes,
+                                                              d_input,
+                                                              d_output,
+                                                              num_items,
+                                                              difference_op,
+                                                              stream));
     }
 
     template<typename RandomAccessIteratorT,
@@ -69,12 +72,14 @@ struct DeviceAdjacentDifference
                                                            hipStream_t           stream        = 0,
                                                            bool debug_synchronous = false)
     {
+        (void)debug_synchronous;
         return hipCUDAErrorTohipError(
-            ::cub::DeviceAdjacentDifference::SubtractLeft(
-                d_temp_storage, temp_storage_bytes, d_input,
-                num_items, difference_op, stream, debug_synchronous
-            )
-        );
+            ::cub::DeviceAdjacentDifference::SubtractLeft(d_temp_storage,
+                                                          temp_storage_bytes,
+                                                          d_input,
+                                                          num_items,
+                                                          difference_op,
+                                                          stream));
     }
 
     template<typename InputIteratorT,
@@ -90,12 +95,15 @@ struct DeviceAdjacentDifference
                                                                 hipStream_t     stream        = 0,
                                                                 bool debug_synchronous = false)
     {
+        (void)debug_synchronous;
         return hipCUDAErrorTohipError(
-            ::cub::DeviceAdjacentDifference::SubtractRightCopy(
-                d_temp_storage, temp_storage_bytes, d_input, d_output,
-                num_items, difference_op, stream, debug_synchronous
-            )
-        );
+            ::cub::DeviceAdjacentDifference::SubtractRightCopy(d_temp_storage,
+                                                               temp_storage_bytes,
+                                                               d_input,
+                                                               d_output,
+                                                               num_items,
+                                                               difference_op,
+                                                               stream));
     }
 
     template<typename RandomAccessIteratorT,
@@ -109,12 +117,14 @@ struct DeviceAdjacentDifference
                                                             hipStream_t   stream            = 0,
                                                             bool          debug_synchronous = false)
     {
+        (void)debug_synchronous;
         return hipCUDAErrorTohipError(
-            ::cub::DeviceAdjacentDifference::SubtractRight(
-                d_temp_storage, temp_storage_bytes, d_input,
-                num_items, difference_op, stream, debug_synchronous
-            )
-        );
+            ::cub::DeviceAdjacentDifference::SubtractRight(d_temp_storage,
+                                                           temp_storage_bytes,
+                                                           d_input,
+                                                           num_items,
+                                                           difference_op,
+                                                           stream));
     }
 };
 

@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2021, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2023, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -170,6 +170,28 @@ struct DeviceMergeSort
         );
     }
 
+    template<typename KeyInputIteratorT,
+             typename KeyIteratorT,
+             typename OffsetT,
+             typename CompareOpT>
+    HIPCUB_RUNTIME_FUNCTION static hipError_t StableSortKeysCopy(void*        d_temp_storage,
+                                                                 std::size_t& temp_storage_bytes,
+                                                                 KeyInputIteratorT d_input_keys,
+                                                                 KeyIteratorT      d_output_keys,
+                                                                 OffsetT           num_items,
+                                                                 CompareOpT        compare_op,
+                                                                 hipStream_t       stream = 0,
+                                                                 bool debug_synchronous   = false)
+    {
+        return ::rocprim::merge_sort(d_temp_storage,
+                                     temp_storage_bytes,
+                                     d_input_keys,
+                                     d_output_keys,
+                                     num_items,
+                                     compare_op,
+                                     stream,
+                                     debug_synchronous);
+    }
 };
 END_HIPCUB_NAMESPACE
 

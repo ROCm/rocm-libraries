@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2021-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -26,12 +26,24 @@
 // Std::memcpy and std::memcmp
 #include <cstring>
 
+#include <type_traits>
+
 #include "test_utils_half.hpp"
 #include "test_utils_bfloat16.hpp"
 #include "test_utils_custom_test_types.hpp"
 
 namespace test_utils
 {
+
+template<typename T>
+HIPCUB_HOST_DEVICE T set_half_bits(uint16_t value)
+{
+    T              half_value{};
+    unsigned char* char_representation = reinterpret_cast<unsigned char*>(&half_value);
+    char_representation[0]             = value;
+    char_representation[1]             = value >> 8;
+    return half_value;
+}
 
 // Numeric limits which also supports custom_test_type<U> classes
 template<class T>
@@ -45,38 +57,48 @@ template<> struct numeric_limits<test_utils::half> : public std::numeric_limits<
     static inline T min() {
         return T(0.00006104f);
     };
-    static inline T max() {
-        return T(65504.0f);
+    static inline T max()
+    {
+        return set_half_bits<T>(0x7bff);
     };
-    static inline T lowest() {
-        return T(-65504.0f);
+    static inline T lowest()
+    {
+        return set_half_bits<T>(0xfbff);
     };
-    static inline T infinity() {
-        return T(std::numeric_limits<float>::infinity());
+    static inline T infinity()
+    {
+        return set_half_bits<T>(0x7c00);
     };
     static inline T quiet_NaN() {
         return T(std::numeric_limits<float>::quiet_NaN());
     };
     static inline T signaling_NaN() {
         return T(std::numeric_limits<float>::signaling_NaN());
+    };
+    static inline T infinity_neg()
+    {
+        return set_half_bits<T>(0xfc00);
     };
 };
 
 template<> class numeric_limits<test_utils::bfloat16> : public std::numeric_limits<test_utils::bfloat16> {
     public:
     using T = test_utils::bfloat16;
-
-    static inline T max() {
-        return T(3.38953138925e+38f);
+    static inline T max()
+    {
+        return set_half_bits<T>(0x7f7f);
     };
-    static inline T min() {
+    static inline T min()
+    {
         return T(std::numeric_limits<float>::min());
     };
-    static inline T lowest() {
-        return T(-3.38953138925e+38f);
+    static inline T lowest()
+    {
+        return set_half_bits<T>(0xff7f);
     };
-    static inline T infinity() {
-        return T(std::numeric_limits<float>::infinity());
+    static inline T infinity()
+    {
+        return set_half_bits<T>(0x7f80);
     };
     static inline T quiet_NaN() {
         return T(std::numeric_limits<float>::quiet_NaN());
@@ -84,8 +106,139 @@ template<> class numeric_limits<test_utils::bfloat16> : public std::numeric_limi
     static inline T signaling_NaN() {
         return T(std::numeric_limits<float>::signaling_NaN());
     };
+    static inline T infinity_neg()
+    {
+        return set_half_bits<T>(0xff80);
+    };
+};
+
+template<>
+class numeric_limits<float> : public std::numeric_limits<float>
+{
+public:
+    static inline float infinity_neg()
+    {
+        return -std::numeric_limits<float>::infinity();
+    };
 };
 // End of extended numeric_limits
+
+template<class T>
+using is_half = std::is_same<test_utils::half, typename std::remove_cv<T>::type>;
+
+template<class T>
+using is_bfloat16 = std::is_same<test_utils::bfloat16, typename std::remove_cv<T>::type>;
+
+template<class T>
+using is_native_half = std::is_same<test_utils::native_half, typename std::remove_cv<T>::type>;
+
+template<class T>
+using is_native_bfloat16
+    = std::is_same<test_utils::native_bfloat16, typename std::remove_cv<T>::type>;
+
+template<class T>
+struct convert_to_native_t_impl
+{
+    using type = T;
+};
+
+template<>
+struct convert_to_native_t_impl<test_utils::bfloat16>
+{
+    using type = test_utils::native_bfloat16;
+};
+template<>
+struct convert_to_native_t_impl<test_utils::half>
+{
+    using type = test_utils::native_half;
+};
+
+template<class T>
+using convert_to_native_t = typename convert_to_native_t_impl<T>::type;
+
+// is_floating_point which supports custom_test_type<U> classes
+template<class T>
+struct is_special_floating_point
+    : std::integral_constant<bool,
+                             is_half<T>::value || is_bfloat16<T>::value || is_native_half<T>::value
+                                 || is_native_bfloat16<T>::value>
+{};
+
+template<class T>
+struct is_floating_point
+    : std::integral_constant<bool,
+                             std::is_floating_point<T>::value
+                                 || is_special_floating_point<T>::value>
+{};
+
+// is_integral which supports custom_test_type<U> classes
+template<class T>
+struct is_integral : std::integral_constant<bool, std::is_integral<T>::value>
+{};
+
+template<class T>
+struct is_arithmetic
+    : std::integral_constant<bool, is_integral<T>::value || is_floating_point<T>::value>
+{};
+
+// Converts possible device side types to their relevant host side native types
+inline test_utils::native_half convert_to_native(test_utils::half value)
+{
+    return test_utils::native_half(value);
+}
+
+inline test_utils::native_bfloat16 convert_to_native(const test_utils::bfloat16& value)
+{
+    return test_utils::native_bfloat16(value);
+}
+
+template<class T>
+inline auto convert_to_native(const T& value) ->
+    typename std::enable_if<!(is_half<T>::value || is_bfloat16<T>::value), T>::type
+{
+    return value;
+}
+
+// Converts possible host side native types to their relevant device side types
+template<class U, class T>
+inline auto convert_to_device(const T& value) ->
+    typename std::enable_if<is_half<U>::value, test_utils::half>::type
+{
+    return test_utils::native_to_half(value);
+}
+
+template<class U, class T>
+inline auto convert_to_device(T value) ->
+    typename std::enable_if<is_bfloat16<U>::value, test_utils::bfloat16>::type
+{
+#ifdef __HIP_PLATFORM_NVIDIA__
+    // __nv__bfloat16 has no cast from int and gets confused wether to
+    // cast via float or double.
+    if(std::is_integral<T>::value)
+    {
+        return test_utils::native_to_bfloat16(static_cast<float>(value));
+    }
+#endif
+
+    return test_utils::native_to_bfloat16(value);
+}
+
+template<class U, class T>
+inline auto convert_to_device(T value) ->
+    typename std::enable_if<!(is_half<U>::value || is_bfloat16<U>::value), U>::type
+{
+    return static_cast<U>(value);
+}
+
+template<class T>
+using convert_to_fundamental_t
+    = std::conditional_t<is_half<T>::value || is_bfloat16<T>::value, float, T>;
+
+template<class T>
+inline auto convert_to_fundamental(T value)
+{
+    return static_cast<convert_to_fundamental_t<T>>(value);
+}
 
 // Helper class to generate a vector of special values for any type
 template<class T>
@@ -187,7 +340,8 @@ inline auto get_random_data(size_t size, S min, U max, int seed_value)
     -> typename std::enable_if<!std::is_integral<T>::value && !is_custom_test_type<T>::value, std::vector<T>>::type
 {
     std::default_random_engine gen(seed_value);
-    using dis_type = typename std::conditional<std::is_same<test_utils::half, T>::value || std::is_same<test_utils::bfloat16, T>::value, float, T>::type;
+    using dis_type =
+        typename std::conditional<test_utils::is_special_floating_point<T>::value, float, T>::type;
     std::uniform_real_distribution<dis_type> distribution(static_cast<dis_type>(min), static_cast<dis_type>(max));
     std::vector<T> data(size);
     std::generate(
@@ -199,11 +353,13 @@ inline auto get_random_data(size_t size, S min, U max, int seed_value)
 }
 
 template<class T>
-inline auto get_random_data(size_t size, typename T::value_type min, typename T::value_type max, int seed_value)
-    -> typename std::enable_if<
-        is_custom_test_type<T>::value && std::is_integral<typename T::value_type>::value,
-        std::vector<T>
-        >::type
+inline auto get_random_data(size_t                 size,
+                            typename T::value_type min,
+                            typename T::value_type max,
+                            int                    seed_value) ->
+    typename std::enable_if<is_custom_test_type<T>::value
+                                && std::is_integral<typename T::value_type>::value,
+                            std::vector<T>>::type
 {
     std::default_random_engine gen(seed_value);
     using dis_type = typename std::conditional<
@@ -220,11 +376,13 @@ inline auto get_random_data(size_t size, typename T::value_type min, typename T:
 }
 
 template<class T>
-inline auto get_random_data(size_t size, typename T::value_type min, typename T::value_type max, int seed_value)
-    -> typename std::enable_if<
-        is_custom_test_type<T>::value && std::is_floating_point<typename T::value_type>::value,
-        std::vector<T>
-        >::type
+inline auto get_random_data(size_t                 size,
+                            typename T::value_type min,
+                            typename T::value_type max,
+                            int                    seed_value) ->
+    typename std::enable_if<is_custom_test_type<T>::value
+                                && std::is_floating_point<typename T::value_type>::value,
+                            std::vector<T>>::type
 {
     std::default_random_engine gen(seed_value);
     std::uniform_real_distribution<typename T::value_type> distribution(min, max);
@@ -234,8 +392,8 @@ inline auto get_random_data(size_t size, typename T::value_type min, typename T:
 }
 
 template<class T>
-inline auto get_random_value(T min, T max, int seed_value)
-    -> typename std::enable_if<std::is_arithmetic<T>::value, T>::type
+inline auto get_random_value(T min, T max, int seed_value) ->
+    typename std::enable_if<test_utils::is_arithmetic<T>::value, T>::type
 {
     return get_random_data<T>(1, min, max, seed_value)[0];
 }
@@ -247,10 +405,9 @@ inline std::vector<T> get_random_data01(size_t size, float p, int seed_value)
     std::default_random_engine gen(seed_value);
     std::bernoulli_distribution distribution(p);
     std::vector<T> data(size);
-    std::generate(
-        data.begin(), data.begin() + std::min(size, max_random_size),
-        [&]() { return distribution(gen); }
-    );
+    std::generate(data.begin(),
+                  data.begin() + std::min(size, max_random_size),
+                  [&]() { return convert_to_device<T>(distribution(gen)); });
     for(size_t i = max_random_size; i < size; i += max_random_size)
     {
         std::copy_n(data.begin(), std::min(size - i, max_random_size), data.begin() + i);
@@ -258,6 +415,6 @@ inline std::vector<T> get_random_data01(size_t size, float p, int seed_value)
     return data;
 }
 
-} // end test_utils namespace
+} // namespace test_utils
 
 #endif  // HIPCUB_TEST_HIPCUB_TEST_UTILS_DATA_GENERATION_HPP_

@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2018-2021 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2018-2023 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -20,10 +20,10 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-# Find the HIP package and verify that the correct C++ compiler was selected.
-# On the ROCm platform, both host and device code is compiled by the same
-# compiler: clang. On CUDA, host code can be compiled by any C++ compiler
-# while device code is compiled by the nvcc compiler.
+# Find HIP package and verify that correct C++ compiler was selected for available
+# platform. On ROCm platform host and device code is compiled by the same compiler:
+# hipcc or clang. On CUDA host can be compiled by any C++ compiler while device 
+# code is compiled by nvcc compiler (CMake's CUDA package handles this).
 
 # A function for automatic detection of the CC of the installed NV GPUs
 function(hip_cuda_detect_cc out_variable)

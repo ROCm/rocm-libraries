@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,8 @@
 #include "common_test_header.hpp"
 
 #include "hipcub/warp/warp_exchange.hpp"
+#include "test_utils_data_generation.hpp"
+#include "test_utils_half.hpp"
 
 template<
     class T,
@@ -44,46 +46,57 @@ public:
     using params = Params;
 };
 
-using HipcubWarpExchangeTestParams = ::testing::Types<
-    Params<char, 1U, 8U>,
-    Params<char, 4U, 8U>,
-    Params<char, 5U, 8U>,
-    Params<char, 1U, 16U>,
-    Params<char, 4U, 16U>,
-    Params<char, 5U, 16U>,
-    Params<char, 1U, 32U>,
-    Params<char, 4U, 32U>,
-    Params<char, 5U, 32U>,
-    Params<char, 1U, 64U>,
-    Params<char, 4U, 64U>,
-    Params<char, 5U, 64U>,
+using HipcubWarpExchangeTestParams = ::testing::Types<Params<char, 1U, 8U>,
+                                                      Params<char, 4U, 8U>,
+                                                      Params<char, 5U, 8U>,
+                                                      Params<char, 1U, 16U>,
+                                                      Params<char, 4U, 16U>,
+                                                      Params<char, 5U, 16U>,
+                                                      Params<char, 1U, 32U>,
+                                                      Params<char, 4U, 32U>,
+                                                      Params<char, 5U, 32U>,
+                                                      Params<char, 1U, 64U>,
+                                                      Params<char, 4U, 64U>,
+                                                      Params<char, 5U, 64U>,
 
-    Params<int, 1U, 8U>,
-    Params<int, 4U, 8U>,
-    Params<int, 5U, 8U>,
-    Params<int, 1U, 16U>,
-    Params<int, 4U, 16U>,
-    Params<int, 5U, 16U>,
-    Params<int, 1U, 32U>,
-    Params<int, 4U, 32U>,
-    Params<int, 5U, 32U>,
-    Params<int, 1U, 64U>,
-    Params<int, 4U, 64U>,
-    Params<int, 5U, 64U>,
+                                                      Params<int, 1U, 8U>,
+                                                      Params<int, 4U, 8U>,
+                                                      Params<int, 5U, 8U>,
+                                                      Params<int, 1U, 16U>,
+                                                      Params<int, 4U, 16U>,
+                                                      Params<int, 5U, 16U>,
+                                                      Params<int, 1U, 32U>,
+                                                      Params<int, 4U, 32U>,
+                                                      Params<int, 5U, 32U>,
+                                                      Params<int, 1U, 64U>,
+                                                      Params<int, 4U, 64U>,
+                                                      Params<int, 5U, 64U>,
 
-    Params<double, 1U, 8U>,
-    Params<double, 4U, 8U>,
-    Params<double, 5U, 8U>,
-    Params<double, 1U, 16U>,
-    Params<double, 4U, 16U>,
-    Params<double, 5U, 16U>,
-    Params<double, 1U, 32U>,
-    Params<double, 4U, 32U>,
-    Params<double, 5U, 32U>,
-    Params<double, 1U, 64U>,
-    Params<double, 4U, 64U>,
-    Params<double, 5U, 64U>
->;
+                                                      Params<double, 1U, 8U>,
+                                                      Params<double, 4U, 8U>,
+                                                      Params<double, 5U, 8U>,
+                                                      Params<double, 1U, 16U>,
+                                                      Params<double, 4U, 16U>,
+                                                      Params<double, 5U, 16U>,
+                                                      Params<double, 1U, 32U>,
+                                                      Params<double, 4U, 32U>,
+                                                      Params<double, 5U, 32U>,
+                                                      Params<double, 1U, 64U>,
+                                                      Params<double, 4U, 64U>,
+                                                      Params<double, 5U, 64U>,
+
+                                                      Params<test_utils::half, 1U, 8U>,
+                                                      Params<test_utils::half, 4U, 8U>,
+                                                      Params<test_utils::half, 5U, 8U>,
+                                                      Params<test_utils::half, 1U, 16U>,
+                                                      Params<test_utils::half, 4U, 16U>,
+                                                      Params<test_utils::half, 5U, 16U>,
+                                                      Params<test_utils::half, 1U, 32U>,
+                                                      Params<test_utils::half, 4U, 32U>,
+                                                      Params<test_utils::half, 5U, 32U>,
+                                                      Params<test_utils::half, 1U, 64U>,
+                                                      Params<test_utils::half, 4U, 64U>,
+                                                      Params<test_utils::half, 5U, 64U>>;
 
 TYPED_TEST_SUITE(HipcubWarpExchangeTest, HipcubWarpExchangeTestParams);
 
@@ -258,7 +271,10 @@ TYPED_TEST(HipcubWarpExchangeTest, WarpExchangeStripedToBlocked)
     SKIP_IF_UNSUPPORTED_WARP_SIZE(warp_size);
 
     std::vector<T> input(items_count);
-    std::iota(input.begin(), input.end(), static_cast<T>(0));
+    for(int i = 0; i < input.size(); i++)
+    {
+        input[i] = test_utils::convert_to_device<T>(i);
+    }
 
     T* d_input{};
     HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, items_count * sizeof(T)));
@@ -289,7 +305,11 @@ TYPED_TEST(HipcubWarpExchangeTest, WarpExchangeStripedToBlocked)
     HIP_CHECK(hipFree(d_output));
 
     auto expected = stripe_vector(input, warp_size, items_per_thread);
-    ASSERT_EQ(expected, output);
+    for(int i = 0; i < items_count; i++)
+    {
+        ASSERT_EQ(test_utils::convert_to_native(expected[i]),
+                  test_utils::convert_to_native(output[i]));
+    }
 }
 
 TYPED_TEST(HipcubWarpExchangeTest, WarpExchangeBlockedToStriped)
@@ -307,7 +327,11 @@ TYPED_TEST(HipcubWarpExchangeTest, WarpExchangeBlockedToStriped)
     SKIP_IF_UNSUPPORTED_WARP_SIZE(warp_size);
 
     std::vector<T> input(items_count);
-    std::iota(input.begin(), input.end(), static_cast<T>(0));
+    for(int i = 0; i < input.size(); i++)
+    {
+        input[i] = test_utils::convert_to_device<T>(i);
+    }
+
     input = stripe_vector(input, warp_size, items_per_thread);
 
     T* d_input{};
@@ -339,9 +363,16 @@ TYPED_TEST(HipcubWarpExchangeTest, WarpExchangeBlockedToStriped)
     HIP_CHECK(hipFree(d_output));
 
     std::vector<T> expected(items_count);
-    std::iota(expected.begin(), expected.end(), static_cast<T>(0));
+    for(int i = 0; i < expected.size(); i++)
+    {
+        expected[i] = test_utils::convert_to_device<T>(i);
+    }
 
-    ASSERT_EQ(expected, output);
+    for(int i = 0; i < items_count; i++)
+    {
+        ASSERT_EQ(test_utils::convert_to_native(expected[i]),
+                  test_utils::convert_to_native(output[i]));
+    }
 }
 
 TYPED_TEST(HipcubWarpExchangeTest, WarpExchangeScatterToStriped)
@@ -362,7 +393,10 @@ TYPED_TEST(HipcubWarpExchangeTest, WarpExchangeScatterToStriped)
     SKIP_IF_UNSUPPORTED_WARP_SIZE(warp_size);
 
     std::vector<T> input(items_count);
-    std::iota(input.begin(), input.end(), static_cast<T>(0));
+    for(int i = 0; i < input.size(); i++)
+    {
+        input[i] = test_utils::convert_to_device<T>(i);
+    }
 
     std::vector<OffsetT> ranks(items_count);
     for (size_t i = 0; i < items_count / items_per_warp; ++i)
@@ -407,5 +441,9 @@ TYPED_TEST(HipcubWarpExchangeTest, WarpExchangeScatterToStriped)
 
     const std::vector<T> expected = stripe_vector(input, ranks, warp_size, items_per_thread);
 
-    ASSERT_EQ(expected, output);
+    for(int i = 0; i < items_count; i++)
+    {
+        ASSERT_EQ(test_utils::convert_to_native(expected[i]),
+                  test_utils::convert_to_native(output[i]));
+    }
 }
