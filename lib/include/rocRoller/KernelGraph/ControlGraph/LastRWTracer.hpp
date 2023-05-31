@@ -4,9 +4,6 @@
 
 namespace rocRoller::KernelGraph
 {
-    using namespace CoordinateGraph;
-    using namespace ControlGraph;
-
     class LastRWTracer : public ControlFlowRWTracer
     {
     public:

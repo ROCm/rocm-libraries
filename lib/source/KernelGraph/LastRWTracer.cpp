@@ -9,11 +9,6 @@
 
 namespace rocRoller::KernelGraph
 {
-    using namespace CoordinateGraph;
-    using namespace ControlGraph;
-
-    using GD = rocRoller::Graph::Direction;
-
     int common(std::deque<int> const& a, std::deque<int> const& b)
     {
         for(int i = 0; (i < a.size()) && (i < b.size()); ++i)
@@ -38,7 +33,7 @@ namespace rocRoller::KernelGraph
     {
         // Precompute all stacks
         std::map<int, std::vector<std::deque<int>>> controlStacks;
-        for(auto x : m_trace)
+        for(auto const& x : m_trace)
         {
             controlStacks[x.coordinate].push_back(controlStack(x.control));
         }
@@ -61,6 +56,8 @@ namespace rocRoller::KernelGraph
 
             for(auto const& stack : stacks)
             {
+                AssertFatal(c + 1 < stack.size(),
+                            "LastRWTracer::lastRWLocations: Stacks are identical");
                 rv[coordinate].insert(stack.at(c + 1));
             }
         }
