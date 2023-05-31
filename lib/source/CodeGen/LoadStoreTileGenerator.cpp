@@ -195,13 +195,13 @@ namespace rocRoller
             {
                 auto unrolledRowOffsetExpr
                     = m_fastArith(info.rowOffsetReg->expression() + rowOffsetExpr);
-                auto tmp = info.rowOffsetReg->placeholder();
+                auto tmp = info.rowOffsetReg->placeholder(Register::Type::Vector);
                 co_yield generate(tmp, unrolledRowOffsetExpr);
                 info.rowOffsetReg = tmp;
             }
             else if(preserveOffset)
             {
-                auto tmp = info.rowOffsetReg->placeholder();
+                auto tmp = info.rowOffsetReg->placeholder(Register::Type::Vector);
                 co_yield m_context->copier()->copy(tmp, info.rowOffsetReg);
                 info.rowOffsetReg = tmp;
             }
@@ -217,7 +217,16 @@ namespace rocRoller
                 auto [strideExpr, strideDataType]
                     = m_context->registerTagManager()->getExpression(strideTag);
 
-                stride = nullptr;
+                if(!Expression::evaluationTimes(strideExpr)[EvaluationTime::Translate])
+                {
+                    stride = Register::Value::Placeholder(
+                        m_context, Register::Type::Vector, strideDataType, 1);
+                }
+                else
+                {
+                    stride = nullptr;
+                }
+
                 co_yield generate(stride, strideExpr);
             }
         }
