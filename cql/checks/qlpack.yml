@@ -1,0 +1,8 @@
+---
+name: rocmsoftwareplatform/rocroller
+library: false
+version: 0.0.1
+libraryPathDependencies:
+  - codeql/cpp-all
+suites: rr-query-suites
+

@@ -1,0 +1,9 @@
+name: "RR CodeQL config"
+
+# disable-default-queries: true
+
+
+paths:
+  - lib
+  - GPUArchitectureGenerator
+  - test

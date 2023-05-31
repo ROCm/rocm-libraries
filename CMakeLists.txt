@@ -10,6 +10,7 @@ option(ROCROLLER_TESTS_USE_YAML_CPP    "Use yaml-cpp in testing." ON)
 option(ROCROLLER_USE_HIP               "Use HIP within the rocRoller." ON)
 option(SKIP_CPPCHECK                   "Skip CPPCHECK." ON)
 
+option(CODE_ANALYSIS                    "When building, don't query for tests etc." OFF)
 option(CODE_COVERAGE                    "Build with code coverage flags (clang only)" OFF)
 
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
@@ -568,40 +569,42 @@ target_compile_definitions(rocroller PUBLIC ROCROLLER_PATH_PREFIX_LENGTH=${PATH_
 target_compile_definitions(ArchGenTests PUBLIC ROCROLLER_PATH_PREFIX_LENGTH=${PATH_PREFIX_LENGTH})
 target_compile_definitions(GPUArchitectureGenerator PUBLIC ROCROLLER_PATH_PREFIX_LENGTH=${PATH_PREFIX_LENGTH})
 
-include(GoogleTest)
-gtest_discover_tests(rocRollerTests
-  XML_OUTPUT_DIR test_report
-  TEST_FILTER "-*GPU_*"
-)
-gtest_discover_tests(rocRollerTests
-  XML_OUTPUT_DIR test_report
-  TEST_FILTER "*GPU_*"
-  PROPERTIES "LABELS" "GPU"
-)
-gtest_discover_tests(ArchGenTests
-  XML_OUTPUT_DIR test_report
-)
-
 # Add docs directory
 add_subdirectory(docs)
 
 # Add client directory
 add_subdirectory(client)
 
-# Add script linting
-add_test(NAME PythonLint
-         COMMAND flake8 scripts --count --max-complexity=10 --max-line-length=127 --show-source --statistics
-         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-set_tests_properties(PythonLint
-                     PROPERTIES ENVIRONMENT "ROCROLLER_BUILD_DIR=${CMAKE_BINARY_DIR}")
+if (NOT CODE_ANALYSIS)
+  include(GoogleTest)
+  gtest_discover_tests(rocRollerTests
+    XML_OUTPUT_DIR test_report
+    TEST_FILTER "-*GPU_*"
+  )
+  gtest_discover_tests(rocRollerTests
+    XML_OUTPUT_DIR test_report
+    TEST_FILTER "*GPU_*"
+    PROPERTIES "LABELS" "GPU"
+  )
+  gtest_discover_tests(ArchGenTests
+    XML_OUTPUT_DIR test_report
+  )
 
-if (ROCROLLER_TESTS_SKIP_SLOW)
-  set(PYTHON_TEST_SKIP "-m not slow")
+  # Add script linting
+  add_test(NAME PythonLint
+           COMMAND flake8 scripts --count --max-complexity=10 --max-line-length=127 --show-source --statistics
+           WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+  set_tests_properties(PythonLint
+                       PROPERTIES ENVIRONMENT "ROCROLLER_BUILD_DIR=${CMAKE_BINARY_DIR}")
+
+  if (ROCROLLER_TESTS_SKIP_SLOW)
+    set(PYTHON_TEST_SKIP "-m not slow")
+  endif()
+
+  # Add rrperf unit tests
+  add_test(NAME PythonTest
+           COMMAND pytest --cov-report html:python_cov_html --cov=rrperf scripts ${PYTHON_TEST_SKIP} --junit-xml=${CMAKE_BINARY_DIR}/test_report/python_tests.xml
+           WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+  set_tests_properties(PythonTest
+                       PROPERTIES ENVIRONMENT "ROCROLLER_BUILD_DIR=${CMAKE_BINARY_DIR};PYTHONPATH=${CMAKE_SOURCE_DIR}/scripts/lib")
 endif()
-
-# Add rrperf unit tests
-add_test(NAME PythonTest
-         COMMAND pytest --cov-report html:python_cov_html --cov=rrperf scripts ${PYTHON_TEST_SKIP} --junit-xml=${CMAKE_BINARY_DIR}/test_report/python_tests.xml
-         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-set_tests_properties(PythonTest
-                     PROPERTIES ENVIRONMENT "ROCROLLER_BUILD_DIR=${CMAKE_BINARY_DIR};PYTHONPATH=${CMAKE_SOURCE_DIR}/scripts/lib")

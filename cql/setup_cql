@@ -1,0 +1,6 @@
+#!/bin/bash -ex
+
+# Sets up a QLPack with dependencies for our check(s).
+cd cql/checks
+unzip /opt/codeql/codeql-cli.zip
+mv codeql-codeql-cli-* codeql

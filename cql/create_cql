@@ -1,0 +1,24 @@
+#!/bin/bash -ex
+
+# export PATH=$PATH:/opt/codeql/codeql
+
+# Creates a CodeQL database based on our code in cql-data/rr-db.
+# Unfortunately the DB cannot be incrementally rebuilt so the cql-data dir should just be deleted if you want to 
+# re-run based on code changes.
+
+if [ -d "cql-data" ]; then
+    exit 1
+fi
+
+export CCACHE_DISABLE=1
+
+mkdir -p cql-data/build_cql
+cmake -G Ninja -S . -B cql-data/build_cql -DCODE_ANALYSIS=ON
+
+codeql database create cql-data/rr-db --source-root=`readlink -f .` \
+  --codescanning-config=cql/scanning.yml \
+  --language=cpp \
+  --threads=32 \
+  --search-path=cql/checks/codeql \
+  --command="ninja" \
+  --working-dir=cql-data/build_cql
