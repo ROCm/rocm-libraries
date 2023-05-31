@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,6 +25,8 @@
 // hipcub API
 #include "hipcub/device/device_scan.hpp"
 #include "hipcub/iterator/counting_input_iterator.hpp"
+#include "test_utils_bfloat16.hpp"
+#include "test_utils_data_generation.hpp"
 
 // Params for tests
 template<
@@ -59,13 +61,18 @@ public:
     const bool debug_synchronous = false;
 };
 
-typedef ::testing::Types<
-    DeviceScanParams<int, long>,
-    DeviceScanParams<unsigned long long, unsigned long long, hipcub::Min>,
-    DeviceScanParams<unsigned long>,
-    DeviceScanParams<short, float, hipcub::Max>,
-    DeviceScanParams<int, double>
-> HipcubDeviceScanTestsParams;
+typedef ::testing::Types<DeviceScanParams<int, long>,
+                         DeviceScanParams<unsigned long long, unsigned long long, hipcub::Min>,
+                         DeviceScanParams<unsigned long>,
+                         DeviceScanParams<short, float, hipcub::Max>,
+                         DeviceScanParams<int, double>
+#ifdef __HIP_PLATFORM_AMD__
+                         ,
+                         DeviceScanParams<test_utils::bfloat16, test_utils::bfloat16, hipcub::Max>,
+                         DeviceScanParams<test_utils::half, test_utils::half, hipcub::Max>
+#endif
+                         >
+    HipcubDeviceScanTestsParams;
 
 std::vector<size_t> get_sizes()
 {
@@ -121,6 +128,7 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScan)
 
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
+    using V                      = test_utils::convert_to_fundamental_t<U>;
     using scan_op_type = typename TestFixture::scan_op_type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
@@ -136,8 +144,12 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScan)
             hipStream_t stream = 0; // default
 
             // Generate data
-            std::vector<T> input = test_utils::get_random_data<T>(size, 1, 10, seed_value);
-            std::vector<U> output(input.size(), 0);
+            std::vector<T> input
+                = test_utils::get_random_data<T>(size,
+                                                 test_utils::convert_to_device<T>(1),
+                                                 test_utils::convert_to_device<T>(10),
+                                                 seed_value);
+            std::vector<U> output(input.size(), test_utils::convert_to_device<U>(0));
 
             T * d_input;
             U * d_output;
@@ -231,9 +243,15 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScan)
             // Check if output values are as expected
             for(size_t i = 0; i < output.size(); i++)
             {
-                auto diff = std::max<U>(std::abs(0.01f * expected[i]), U(0.01f));
-                if(std::is_integral<U>::value) diff = 0;
-                ASSERT_NEAR(output[i], expected[i], diff) << "where index = " << i;
+                auto diff
+                    = std::max<V>(std::abs(0.01f * test_utils::convert_to_fundamental(expected[i])),
+                                  V(0.01f));
+                if(std::is_integral<V>::value)
+                    diff = 0;
+                ASSERT_NEAR(test_utils::convert_to_native(output[i]),
+                            test_utils::convert_to_native(expected[i]),
+                            diff)
+                    << "where index = " << i;
             }
 
             hipFree(d_input);
@@ -249,12 +267,13 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScanByKey)
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    using T = typename TestFixture::input_type;
-    using U = typename TestFixture::output_type;
-    using K = typename TestFixture::key_type;
-    using scan_op_type = typename TestFixture::scan_op_type;
+    using T                             = typename TestFixture::input_type;
+    using U                             = typename TestFixture::output_type;
+    using V                             = test_utils::convert_to_fundamental_t<U>;
+    using K                             = typename TestFixture::key_type;
+    using scan_op_type                  = typename TestFixture::scan_op_type;
     constexpr size_t max_segment_length = 100;
-    const bool debug_synchronous = TestFixture::debug_synchronous;
+    const bool       debug_synchronous  = TestFixture::debug_synchronous;
 
     const std::vector<size_t> sizes = get_sizes();
     for (auto size : sizes)
@@ -269,8 +288,12 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScanByKey)
 
             // Generate data
             const std::vector<K> keys = generate_segments<K>(size, max_segment_length, seed_value);
-            const std::vector<T> input = test_utils::get_random_data<T>(size, 1, 10, seed_value);
-            std::vector<U> output(input.size(), 0);
+            const std::vector<T> input
+                = test_utils::get_random_data<T>(size,
+                                                 test_utils::convert_to_device<T>(1),
+                                                 test_utils::convert_to_device<T>(10),
+                                                 seed_value);
+            std::vector<U> output(input.size(), test_utils::convert_to_device<U>(0));
 
             T *d_input;
             U *d_output;
@@ -373,12 +396,18 @@ TYPED_TEST(HipcubDeviceScanTests, InclusiveScanByKey)
             // Check if output values are as expected
             for (size_t i = 0; i < output.size(); i++)
             {
-                auto diff = std::max<U>(std::abs(0.01f * expected[i]), U(0.01f));
-                if (std::is_integral<U>::value)
+                // to fundemental instead of native as native will be implicitely casted to fundemental anyway
+                auto diff
+                    = std::max<V>(std::abs(0.01f * test_utils::convert_to_fundamental(expected[i])),
+                                  V(0.01f));
+                if(std::is_integral<V>::value)
                 {
                     diff = 0;
                 }
-                ASSERT_NEAR(output[i], expected[i], diff) << "where index = " << i;
+                ASSERT_NEAR(test_utils::convert_to_native(output[i]),
+                            test_utils::convert_to_native(expected[i]),
+                            diff)
+                    << "where index = " << i;
             }
 
             HIP_CHECK(hipFree(d_keys));
@@ -395,9 +424,10 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScan)
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    using T = typename TestFixture::input_type;
-    using U = typename TestFixture::output_type;
-    using scan_op_type = typename TestFixture::scan_op_type;
+    using T                      = typename TestFixture::input_type;
+    using U                      = typename TestFixture::output_type;
+    using V                      = test_utils::convert_to_fundamental_t<U>;
+    using scan_op_type           = typename TestFixture::scan_op_type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
     const std::vector<size_t> sizes = get_sizes();
@@ -412,7 +442,11 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScan)
             hipStream_t stream = 0; // default
 
             // Generate data
-            std::vector<T> input = test_utils::get_random_data<T>(size, 1, 10, seed_value);
+            std::vector<T> input
+                = test_utils::get_random_data<T>(size,
+                                                 test_utils::convert_to_device<T>(1),
+                                                 test_utils::convert_to_device<T>(10),
+                                                 seed_value);
             std::vector<U> output(input.size());
 
             T * d_input;
@@ -433,10 +467,12 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScan)
 
             // Calculate expected results on host
             std::vector<U> expected(input.size());
-            const T initial_value =
-                std::is_same<scan_op_type, hipcub::Sum>::value
-                ? T(0)
-                : test_utils::get_random_value<T>(1, 100, seed_value + seed_value_addition);
+            const T        initial_value
+                = std::is_same<scan_op_type, hipcub::Sum>::value
+                      ? test_utils::convert_to_device<T>(0)
+                      : test_utils::get_random_value<T>(test_utils::convert_to_device<T>(1),
+                                                        test_utils::convert_to_device<T>(100),
+                                                        seed_value + seed_value_addition);
             test_utils::host_exclusive_scan(
                 input.begin(), input.end(),
                 initial_value, expected.begin(),
@@ -512,9 +548,15 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScan)
             // Check if output values are as expected
             for(size_t i = 0; i < output.size(); i++)
             {
-                auto diff = std::max<U>(std::abs(0.01f * expected[i]), U(0.01f));
-                if(std::is_integral<U>::value) diff = 0;
-                ASSERT_NEAR(output[i], expected[i], diff) << "where index = " << i;
+                auto diff
+                    = std::max<V>(std::abs(0.01f * test_utils::convert_to_native(expected[i])),
+                                  V(0.01f));
+                if(std::is_integral<U>::value)
+                    diff = 0;
+                ASSERT_NEAR(test_utils::convert_to_native(output[i]),
+                            test_utils::convert_to_native(expected[i]),
+                            diff)
+                    << "where index = " << i;
             }
 
             hipFree(d_input);
@@ -532,6 +574,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanByKey)
 
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
+    using V                             = test_utils::convert_to_fundamental_t<U>;
     using K = typename TestFixture::key_type;
     using scan_op_type = typename TestFixture::scan_op_type;
     constexpr size_t max_segment_length = 100;
@@ -550,14 +593,22 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanByKey)
 
             // Generate data
             const std::vector<K> keys = generate_segments<K>(size, max_segment_length, seed_value);
-            const std::vector<T> input = test_utils::get_random_data<T>(size, 1, 10, seed_value);
-            std::vector<U> output(input.size(), 0);
+            const std::vector<T> input
+                = test_utils::get_random_data<T>(size,
+                                                 test_utils::convert_to_device<T>(1),
+                                                 test_utils::convert_to_device<T>(10),
+                                                 seed_value);
+            std::vector<U> output(input.size(), test_utils::convert_to_device<U>(0));
 
-            std::vector<T> initial_value_vector = test_utils::get_random_data<T>(1, 1, 10, seed_value);
+            std::vector<T> initial_value_vector
+                = test_utils::get_random_data<T>(1,
+                                                 test_utils::convert_to_device<T>(1),
+                                                 test_utils::convert_to_device<T>(10),
+                                                 seed_value);
             T initial_value = initial_value_vector.front();
             if (std::is_same<scan_op_type, hipcub::Sum>::value)
             {
-                initial_value = static_cast<T>(0);
+                initial_value = test_utils::convert_to_device<T>(0);
             }
 
             T *d_input;
@@ -663,12 +714,17 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanByKey)
             // Check if output values are as expected
             for (size_t i = 0; i < output.size(); i++)
             {
-                auto diff = std::max<U>(std::abs(0.01f * expected[i]), U(0.01f));
-                if (std::is_integral<U>::value)
+                auto diff
+                    = std::max<V>(std::abs(0.01f * test_utils::convert_to_fundamental(expected[i])),
+                                  V(0.01f));
+                if(std::is_integral<V>::value)
                 {
                     diff = 0;
                 }
-                ASSERT_NEAR(output[i], expected[i], diff) << "where index = " << i;
+                ASSERT_NEAR(test_utils::convert_to_native(output[i]),
+                            test_utils::convert_to_native(expected[i]),
+                            diff)
+                    << "where index = " << i;
             }
 
             HIP_CHECK(hipFree(d_keys));
@@ -931,6 +987,7 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanFuture)
 
     using T = typename TestFixture::input_type;
     using U = typename TestFixture::output_type;
+    using V                      = test_utils::convert_to_fundamental_t<U>;
     using scan_op_type = typename TestFixture::scan_op_type;
     const bool debug_synchronous = TestFixture::debug_synchronous;
 
@@ -946,7 +1003,11 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanFuture)
             const hipStream_t stream = 0; // default
 
             // Generate data
-            const std::vector<T> input = test_utils::get_random_data<T>(size, 1, 10, seed_value);
+            const std::vector<T> input
+                = test_utils::get_random_data<T>(size,
+                                                 test_utils::convert_to_device<T>(1),
+                                                 test_utils::convert_to_device<T>(10),
+                                                 seed_value);
             std::vector<U> output(input.size());
 
             T* d_input;
@@ -969,7 +1030,10 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanFuture)
 
             // Calculate expected results on host
             std::vector<U> expected(input.size());
-            const U initial_value = test_utils::get_random_value<T>(1, 100, seed_value + seed_value_addition);
+            const U        initial_value
+                = (U)test_utils::get_random_value<T>(test_utils::convert_to_device<U>(1),
+                                                     test_utils::convert_to_device<U>(100),
+                                                     seed_value + seed_value_addition);
             test_utils::host_exclusive_scan(
                 input.begin(), input.end(),
                 initial_value, expected.begin(),
@@ -1039,9 +1103,15 @@ TYPED_TEST(HipcubDeviceScanTests, ExclusiveScanFuture)
             // Check if output values are as expected
             for(size_t i = 0; i < output.size(); i++)
             {
-                auto diff = std::max<U>(std::abs(0.01f * expected[i]), U(0.01f));
-                if(std::is_integral<U>::value) diff = 0;
-                ASSERT_NEAR(output[i], expected[i], diff) << "where index = " << i;
+                auto diff
+                    = std::max<V>(std::abs(0.01f * test_utils::convert_to_fundamental(expected[i])),
+                                  V(0.01f));
+                if(std::is_integral<U>::value)
+                    diff = 0;
+                ASSERT_NEAR(test_utils::convert_to_native(output[i]),
+                            test_utils::convert_to_native(expected[i]),
+                            diff)
+                    << "where index = " << i;
             }
 
             hipFree(d_input);

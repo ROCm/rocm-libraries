@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -26,6 +26,9 @@
 #include "hipcub/device/device_select.hpp"
 #include "hipcub/iterator/counting_input_iterator.hpp"
 #include "hipcub/iterator/discard_output_iterator.hpp"
+#include "test_utils_bfloat16.hpp"
+#include "test_utils_data_generation.hpp"
+#include "test_utils_half.hpp"
 
 // Params for tests
 template<
@@ -50,10 +53,15 @@ public:
     const bool debug_synchronous = false;
 };
 
-typedef ::testing::Types<
-    DeviceSelectParams<int, long>,
-    DeviceSelectParams<unsigned char, float>
-> HipcubDeviceSelectTestsParams;
+typedef ::testing::Types<DeviceSelectParams<int, long>,
+                         DeviceSelectParams<unsigned char, float>
+#ifdef __HIP_PLATFORM_AMD__
+                         ,
+                         DeviceSelectParams<test_utils::half, test_utils::half>,
+                         DeviceSelectParams<test_utils::bfloat16, test_utils::bfloat16>
+#endif
+                         >
+    HipcubDeviceSelectTestsParams;
 
 std::vector<size_t> get_sizes()
 {
@@ -94,7 +102,11 @@ TYPED_TEST(HipcubDeviceSelectTests, Flagged)
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             // Generate data
-            std::vector<T> input = test_utils::get_random_data<T>(size, static_cast<T>(1), static_cast<T>(100), seed_value);
+            std::vector<T> input
+                = test_utils::get_random_data<T>(size,
+                                                 test_utils::convert_to_device<T>(1),
+                                                 test_utils::convert_to_device<T>(100),
+                                                 seed_value);
             std::vector<F> flags = test_utils::get_random_data<F>(
                 size,
                 static_cast<F>(0),
@@ -203,7 +215,9 @@ TYPED_TEST(HipcubDeviceSelectTests, Flagged)
             HIP_CHECK(hipDeviceSynchronize());
             for(size_t i = 0; i < expected.size(); i++)
             {
-                ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
+                ASSERT_EQ(test_utils::convert_to_native(output[i]),
+                          test_utils::convert_to_native(expected[i]))
+                    << "where index = " << i;
             }
 
             hipFree(d_input);
@@ -344,7 +358,11 @@ TYPED_TEST(HipcubDeviceSelectTests, SelectOp)
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             // Generate data
-            std::vector<T> input = test_utils::get_random_data<T>(size, static_cast<T>(0), static_cast<T>(100), seed_value);
+            std::vector<T> input
+                = test_utils::get_random_data<T>(size,
+                                                 test_utils::convert_to_device<T>(0),
+                                                 test_utils::convert_to_device<T>(100),
+                                                 seed_value);
 
             T * d_input;
             U * d_output;
@@ -438,7 +456,9 @@ TYPED_TEST(HipcubDeviceSelectTests, SelectOp)
             HIP_CHECK(hipDeviceSynchronize());
             for(size_t i = 0; i < expected.size(); i++)
             {
-                ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
+                ASSERT_EQ(test_utils::convert_to_native(output[i]),
+                          test_utils::convert_to_native(expected[i]))
+                    << "where index = " << i;
             }
 
             hipFree(d_input);
@@ -513,7 +533,8 @@ TYPED_TEST(HipcubDeviceSelectTests, Unique)
                 expected.push_back(input[0]);
                 for(size_t i = 1; i < input.size(); i++)
                 {
-                    if(!(input[i-1] == input[i]))
+                    if(!(test_utils::convert_to_native(input[i - 1])
+                         == test_utils::convert_to_native(input[i])))
                     {
                         expected.push_back(input[i]);
                     }
@@ -583,7 +604,9 @@ TYPED_TEST(HipcubDeviceSelectTests, Unique)
                 HIP_CHECK(hipDeviceSynchronize());
                 for(size_t i = 0; i < expected.size(); i++)
                 {
-                    ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
+                    ASSERT_EQ(test_utils::convert_to_native(output[i]),
+                              test_utils::convert_to_native(expected[i]))
+                        << "where index = " << i;
                 }
 
                 hipFree(d_input);

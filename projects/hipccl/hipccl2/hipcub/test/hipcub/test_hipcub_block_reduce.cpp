@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -163,7 +163,8 @@ TYPED_TEST(HipcubBlockReduceSingleValueTests, Reduce)
         std::vector<T> output_reductions(size / block_size);
 
         // Calculate expected results on host
-        std::vector<T> expected_reductions(output_reductions.size(), 0);
+        std::vector<T> expected_reductions(output_reductions.size(),
+                                           test_utils::convert_to_device<T>(0));
         for(size_t i = 0; i < output.size() / block_size; i++)
         {
             T value = 0;
@@ -278,7 +279,8 @@ TYPED_TEST(HipcubBlockReduceSingleValueTests, ReduceValid)
         std::vector<T> output_reductions(size / block_size);
 
         // Calculate expected results on host
-        std::vector<T> expected_reductions(output_reductions.size(), 0);
+        std::vector<T> expected_reductions(output_reductions.size(),
+                                           test_utils::convert_to_device<T>(0));
         for(size_t i = 0; i < output.size() / block_size; i++)
         {
             T value = 0;
@@ -346,28 +348,34 @@ typedef ::testing::Types<
     // -----------------------------------------------------------------------
     // hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_WARP_REDUCTIONS
     // -----------------------------------------------------------------------
-    params<float, 6U,   32>,
-    params<float, 32,   2>,
-    params<unsigned int, 256,  3>,
-    params<int, 512,  4>,
+    params<float, 6U, 32>,
+    params<float, 32, 2>,
+    params<unsigned int, 256, 3>,
+    params<int, 512, 4>,
     params<float, 1024, 1>,
-    params<float, 37,   2>,
-    params<float, 65,   5>,
-    params<float, 162,  7>,
-    params<float, 255,  15>,
+    params<float, 37, 2>,
+    params<float, 65, 5>,
+    params<float, 162, 7>,
+    params<float, 255, 15>,
+    // half and bfloat require small block sizes due to the very limited accuracy
+    params<test_utils::half, 32, 4>,
+    params<test_utils::bfloat16, 32, 4>,
     // -----------------------------------------------------------------------
     // hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING
     // -----------------------------------------------------------------------
-    params<float, 6U,   32, hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING>,
-    params<float, 32,   2,  hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING>,
-    params<int, 256,  3,  hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING>,
-    params<unsigned int, 512,  4,  hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING>,
-    params<float, 1024, 1,  hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING>,
-    params<float, 37,   2,  hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING>,
-    params<float, 65,   5,  hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING>,
-    params<float, 162,  7,  hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING>,
-    params<float, 255,  15, hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING>
-> InputArrayTestParams;
+    params<float, 6U, 32, hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING>,
+    params<float, 32, 2, hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING>,
+    params<int, 256, 3, hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING>,
+    params<unsigned int, 512, 4, hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING>,
+    params<float, 1024, 1, hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING>,
+    params<float, 37, 2, hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING>,
+    params<float, 65, 5, hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING>,
+    params<float, 162, 7, hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING>,
+    params<float, 255, 15, hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING>,
+    // half and bfloat require small block sizes due to the very limited accuracy
+    params<test_utils::half, 32, 4, hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING>,
+    params<test_utils::bfloat16, 32, 4, hipcub::BlockReduceAlgorithm::BLOCK_REDUCE_RAKING>>
+    InputArrayTestParams;
 
 TYPED_TEST_SUITE(HipcubBlockReduceInputArrayTests, InputArrayTestParams);
 
@@ -407,7 +415,7 @@ TYPED_TEST(HipcubBlockReduceInputArrayTests, Reduce)
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    using T = typename TestFixture::type;
+    using T                           = typename TestFixture::type;
     constexpr auto algorithm = TestFixture::algorithm;
     constexpr size_t block_size = TestFixture::block_size;
     constexpr size_t items_per_thread = TestFixture::items_per_thread;
@@ -428,22 +436,27 @@ TYPED_TEST(HipcubBlockReduceInputArrayTests, Reduce)
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
-        std::vector<T> output = test_utils::get_random_data<T>(size, 2, 200, seed_value);
+        std::vector<T> output
+            = test_utils::get_random_data<T>(size,
+                                             test_utils::convert_to_device<T>(2),
+                                             test_utils::convert_to_device<T>(200),
+                                             seed_value);
 
         // Output reduce results
-        std::vector<T> output_reductions(size / block_size, 0);
+        std::vector<T> output_reductions(size / block_size, test_utils::convert_to_device<T>(0));
 
         // Calculate expected results on host
-        std::vector<T> expected_reductions(output_reductions.size(), 0);
+        std::vector<T> expected_reductions(output_reductions.size(),
+                                           test_utils::convert_to_device<T>(0));
         for(size_t i = 0; i < output.size() / items_per_block; i++)
         {
-            T value = 0;
+            test_utils::convert_to_native_t<T> value = 0;
             for(size_t j = 0; j < items_per_block; j++)
             {
                 auto idx = i * items_per_block + j;
                 value += output[idx];
             }
-            expected_reductions[i] = value;
+            expected_reductions[i] = test_utils::convert_to_device<T>(value);
         }
 
         // Preparing device
@@ -487,10 +500,10 @@ TYPED_TEST(HipcubBlockReduceInputArrayTests, Reduce)
         // Verifying results
         for(size_t i = 0; i < output_reductions.size(); i++)
         {
-            ASSERT_NEAR(
-                output_reductions[i], expected_reductions[i],
-                static_cast<T>(0.05) * expected_reductions[i]
-            );
+            ASSERT_NEAR(test_utils::convert_to_native(output_reductions[i]),
+                        test_utils::convert_to_native(expected_reductions[i]),
+                        test_utils::convert_to_native(0.05)
+                            * test_utils::convert_to_native(expected_reductions[i]));
         }
 
         HIP_CHECK(hipFree(device_output));

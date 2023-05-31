@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2020, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2023, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -52,13 +52,13 @@ public:
                             hipStream_t stream = 0,
                             bool debug_synchronous = false)
     {
-        return hipCUDAErrorTohipError(
-            ::cub::DeviceScan::InclusiveSum(
-                d_temp_storage, temp_storage_bytes,
-                d_in, d_out, num_items,
-                stream, debug_synchronous
-            )
-        );
+        (void)debug_synchronous;
+        return hipCUDAErrorTohipError(::cub::DeviceScan::InclusiveSum(d_temp_storage,
+                                                                      temp_storage_bytes,
+                                                                      d_in,
+                                                                      d_out,
+                                                                      num_items,
+                                                                      stream));
     }
 
     template <
@@ -76,13 +76,14 @@ public:
                              hipStream_t stream = 0,
                              bool debug_synchronous = false)
     {
-        return hipCUDAErrorTohipError(
-            ::cub::DeviceScan::InclusiveScan(
-                d_temp_storage, temp_storage_bytes,
-                d_in, d_out, scan_op, num_items,
-                stream, debug_synchronous
-            )
-        );
+        (void)debug_synchronous;
+        return hipCUDAErrorTohipError(::cub::DeviceScan::InclusiveScan(d_temp_storage,
+                                                                       temp_storage_bytes,
+                                                                       d_in,
+                                                                       d_out,
+                                                                       scan_op,
+                                                                       num_items,
+                                                                       stream));
     }
 
     template <
@@ -98,13 +99,13 @@ public:
                             hipStream_t stream = 0,
                             bool debug_synchronous = false)
     {
-        return hipCUDAErrorTohipError(
-            ::cub::DeviceScan::ExclusiveSum(
-                d_temp_storage, temp_storage_bytes,
-                d_in, d_out, num_items,
-                stream, debug_synchronous
-            )
-        );
+        (void)debug_synchronous;
+        return hipCUDAErrorTohipError(::cub::DeviceScan::ExclusiveSum(d_temp_storage,
+                                                                      temp_storage_bytes,
+                                                                      d_in,
+                                                                      d_out,
+                                                                      num_items,
+                                                                      stream));
     }
 
     template <
@@ -124,13 +125,15 @@ public:
                              hipStream_t stream = 0,
                              bool debug_synchronous = false)
     {
-        return hipCUDAErrorTohipError(
-            ::cub::DeviceScan::ExclusiveScan(
-                d_temp_storage, temp_storage_bytes,
-                d_in, d_out, scan_op, init_value, num_items,
-                stream, debug_synchronous
-            )
-        );
+        (void)debug_synchronous;
+        return hipCUDAErrorTohipError(::cub::DeviceScan::ExclusiveScan(d_temp_storage,
+                                                                       temp_storage_bytes,
+                                                                       d_in,
+                                                                       d_out,
+                                                                       scan_op,
+                                                                       init_value,
+                                                                       num_items,
+                                                                       stream));
     }
 
     template <
@@ -151,13 +154,15 @@ public:
                              hipStream_t stream = 0,
                              bool debug_synchronous = false)
     {
-        return hipCUDAErrorTohipError(
-            ::cub::DeviceScan::ExclusiveScan(
-                d_temp_storage, temp_storage_bytes,
-                d_in, d_out, scan_op, init_value, num_items,
-                stream, debug_synchronous
-            )
-        );
+        (void)debug_synchronous;
+        return hipCUDAErrorTohipError(::cub::DeviceScan::ExclusiveScan(d_temp_storage,
+                                                                       temp_storage_bytes,
+                                                                       d_in,
+                                                                       d_out,
+                                                                       scan_op,
+                                                                       init_value,
+                                                                       num_items,
+                                                                       stream));
     }
 
     template <
@@ -177,13 +182,15 @@ public:
                                  hipStream_t stream = 0,
                                  bool debug_synchronous = false)
     {
-        return hipCUDAErrorTohipError(
-            ::cub::DeviceScan::ExclusiveSumByKey(
-                d_temp_storage, temp_storage_bytes,
-                d_keys_in, d_values_in, d_values_out, num_items,
-                equality_op, stream, debug_synchronous
-            )
-        );
+        (void)debug_synchronous;
+        return hipCUDAErrorTohipError(::cub::DeviceScan::ExclusiveSumByKey(d_temp_storage,
+                                                                           temp_storage_bytes,
+                                                                           d_keys_in,
+                                                                           d_values_in,
+                                                                           d_values_out,
+                                                                           num_items,
+                                                                           equality_op,
+                                                                           stream));
     }
 
     template <
@@ -207,13 +214,17 @@ public:
                                   hipStream_t stream = 0,
                                   bool debug_synchronous = false)
     {
-        return hipCUDAErrorTohipError(
-            ::cub::DeviceScan::ExclusiveScanByKey(
-                d_temp_storage, temp_storage_bytes,
-                d_keys_in, d_values_in, d_values_out, scan_op, init_value,
-                num_items, equality_op, stream, debug_synchronous
-            )
-        );
+        (void)debug_synchronous;
+        return hipCUDAErrorTohipError(::cub::DeviceScan::ExclusiveScanByKey(d_temp_storage,
+                                                                            temp_storage_bytes,
+                                                                            d_keys_in,
+                                                                            d_values_in,
+                                                                            d_values_out,
+                                                                            scan_op,
+                                                                            init_value,
+                                                                            num_items,
+                                                                            equality_op,
+                                                                            stream));
     }
 
     template <
@@ -233,13 +244,15 @@ public:
                                  hipStream_t stream = 0,
                                  bool debug_synchronous = false)
     {
-        return hipCUDAErrorTohipError(
-            ::cub::DeviceScan::InclusiveSumByKey(
-                d_temp_storage, temp_storage_bytes,
-                d_keys_in, d_values_in, d_values_out, num_items,
-                equality_op, stream, debug_synchronous
-            )
-        );
+        (void)debug_synchronous;
+        return hipCUDAErrorTohipError(::cub::DeviceScan::InclusiveSumByKey(d_temp_storage,
+                                                                           temp_storage_bytes,
+                                                                           d_keys_in,
+                                                                           d_values_in,
+                                                                           d_values_out,
+                                                                           num_items,
+                                                                           equality_op,
+                                                                           stream));
     }
 
     template <
@@ -261,13 +274,16 @@ public:
                                   hipStream_t stream = 0,
                                   bool debug_synchronous = false)
     {
-        return hipCUDAErrorTohipError(
-            ::cub::DeviceScan::InclusiveScanByKey(
-                d_temp_storage, temp_storage_bytes,
-                d_keys_in, d_values_in, d_values_out, scan_op,
-                num_items, equality_op, stream, debug_synchronous
-            )
-        );
+        (void)debug_synchronous;
+        return hipCUDAErrorTohipError(::cub::DeviceScan::InclusiveScanByKey(d_temp_storage,
+                                                                            temp_storage_bytes,
+                                                                            d_keys_in,
+                                                                            d_values_in,
+                                                                            d_values_out,
+                                                                            scan_op,
+                                                                            num_items,
+                                                                            equality_op,
+                                                                            stream));
     }
 };
 

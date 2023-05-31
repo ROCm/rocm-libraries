@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,6 +21,8 @@
 // SOFTWARE.
 
 #include "common_test_header.hpp"
+#include "test_utils_bfloat16.hpp"
+#include "test_utils_data_generation.hpp"
 
 #include <algorithm>
 #include <ostream>
@@ -85,21 +87,26 @@ public:
     static constexpr unsigned int logical_warp_size = Params::logical_warp_size;
 };
 
-typedef ::testing::Types<
-    params<int, 32>,
-    params<int, 16>,
-    params<int, 8>,
-    params<int, 4>,
-    params<int, 2>,
-    params<float, HIPCUB_WARP_SIZE_32>,
-    params<double, HIPCUB_WARP_SIZE_32>,
-    params<unsigned char, HIPCUB_WARP_SIZE_32>
+typedef ::testing::Types<params<int, 32>,
+                         params<int, 16>,
+                         params<int, 8>,
+                         params<int, 4>,
+                         params<int, 2>,
+                         params<float, HIPCUB_WARP_SIZE_32>,
+                         params<double, HIPCUB_WARP_SIZE_32>,
+                         params<test_utils::half, HIPCUB_WARP_SIZE_32>,
+                         params<test_utils::bfloat16, HIPCUB_WARP_SIZE_32>,
+                         params<unsigned char, HIPCUB_WARP_SIZE_32>
 #ifdef __HIP_PLATFORM_AMD__
-    ,params<float, HIPCUB_WARP_SIZE_64>,
-    params<double, HIPCUB_WARP_SIZE_64>,
-    params<unsigned char, HIPCUB_WARP_SIZE_64>
+                         ,
+                         params<float, HIPCUB_WARP_SIZE_64>,
+                         params<double, HIPCUB_WARP_SIZE_64>,
+                         params<unsigned char, HIPCUB_WARP_SIZE_64>,
+                         params<test_utils::half, HIPCUB_WARP_SIZE_64>,
+                         params<test_utils::bfloat16, HIPCUB_WARP_SIZE_64>
 #endif
-> UtilPtxTestParams;
+                         >
+    UtilPtxTestParams;
 
 TYPED_TEST_SUITE(HipcubUtilPtxTests, UtilPtxTestParams);
 
@@ -146,7 +153,10 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleUp)
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate input
-        auto input = test_utils::get_random_data<T>(size, static_cast<T>(-100), static_cast<T>(100), seed_value);
+        auto           input = test_utils::get_random_data<T>(size,
+                                                    test_utils::convert_to_device<T>(-100),
+                                                    test_utils::convert_to_device<T>(100),
+                                                    seed_value);
         std::vector<T> output(input.size());
 
         auto src_offsets = test_utils::get_random_data<unsigned int>(
@@ -168,7 +178,7 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleUp)
         {
             SCOPED_TRACE(testing::Message() << "where src_offset = " << src_offset);
             // Calculate expected results on host
-            std::vector<T> expected(size, 0);
+            std::vector<T> expected(size, test_utils::convert_to_device<T>(0));
             for(size_t i = 0; i < input.size()/logical_warp_size; i++)
             {
                 for(size_t j = 0; j < logical_warp_size; j++)
@@ -208,7 +218,9 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleUp)
 
             for(size_t i = 0; i < output.size(); i++)
             {
-                ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
+                ASSERT_EQ(test_utils::convert_to_native(output[i]),
+                          test_utils::convert_to_native(expected[i]))
+                    << "where index = " << i;
             }
         }
         hipFree(device_data);
@@ -258,7 +270,10 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleDown)
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate input
-        auto input = test_utils::get_random_data<T>(size, static_cast<T>(-100), static_cast<T>(100), seed_value);
+        auto           input = test_utils::get_random_data<T>(size,
+                                                    test_utils::convert_to_device<T>(-100),
+                                                    test_utils::convert_to_device<T>(100),
+                                                    seed_value);
         std::vector<T> output(input.size());
 
         auto src_offsets = test_utils::get_random_data<unsigned int>(
@@ -280,7 +295,7 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleDown)
         {
             SCOPED_TRACE(testing::Message() << "where src_offset = " << src_offset);
             // Calculate expected results on host
-            std::vector<T> expected(size, 0);
+            std::vector<T> expected(size, test_utils::convert_to_device<T>(0));
             for(size_t i = 0; i < input.size()/logical_warp_size; i++)
             {
                 for(size_t j = 0; j < logical_warp_size; j++)
@@ -320,7 +335,9 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleDown)
 
             for(size_t i = 0; i < output.size(); i++)
             {
-                ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
+                ASSERT_EQ(test_utils::convert_to_native(output[i]),
+                          test_utils::convert_to_native(expected[i]))
+                    << "where index = " << i;
             }
         }
         hipFree(device_data);
@@ -368,7 +385,10 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleIndex)
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate input
-        auto input = test_utils::get_random_data<T>(size, static_cast<T>(-100), static_cast<T>(100), seed_value);
+        auto           input = test_utils::get_random_data<T>(size,
+                                                    test_utils::convert_to_device<T>(-100),
+                                                    test_utils::convert_to_device<T>(100),
+                                                    seed_value);
         std::vector<T> output(input.size());
 
         auto src_offsets = test_utils::get_random_data<int>(
@@ -379,7 +399,7 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleIndex)
         );
 
         // Calculate expected results on host
-        std::vector<T> expected(size, 0);
+        std::vector<T> expected(size, test_utils::convert_to_device<T>(0));
         for(size_t i = 0; i < input.size()/logical_warp_size; i++)
         {
             int src_index = src_offsets[i];
@@ -441,7 +461,9 @@ TYPED_TEST(HipcubUtilPtxTests, ShuffleIndex)
 
         for(size_t i = 0; i < output.size(); i++)
         {
-            ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
+            ASSERT_EQ(test_utils::convert_to_native(output[i]),
+                      test_utils::convert_to_native(expected[i]))
+                << "where index = " << i;
         }
 
         hipFree(device_data);
@@ -551,7 +573,9 @@ TEST(HipcubUtilPtxTests, ShuffleUpCustomStruct)
 
             for(size_t i = 0; i < output.size(); i++)
             {
-                ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
+                ASSERT_EQ(test_utils::convert_to_native(output[i]),
+                          test_utils::convert_to_native(expected[i]))
+                    << "where index = " << i;
             }
         }
         hipFree(device_data);
@@ -661,7 +685,9 @@ TEST(HipcubUtilPtxTests, ShuffleUpCustomAlignedStruct)
 
             for(size_t i = 0; i < output.size(); i++)
             {
-                ASSERT_EQ(output[i], expected[i]) << "where index = " << i;
+                ASSERT_EQ(test_utils::convert_to_native(output[i]),
+                          test_utils::convert_to_native(expected[i]))
+                    << "where index = " << i;
             }
         }
         hipFree(device_data);

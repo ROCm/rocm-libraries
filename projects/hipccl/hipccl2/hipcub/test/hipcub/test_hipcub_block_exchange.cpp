@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -71,6 +71,9 @@ struct dummy
 typedef ::testing::Types<
     // Power of 2 BlockSize and ItemsPerThread = 1 (no rearrangement)
     params<int, int, 128, 4>,
+    params<float, double, 128, 4>,
+    params<test_utils::bfloat16, test_utils::bfloat16, 128, 4>,
+    params<test_utils::half, test_utils::half, 128, 4>,
     params<int, long long, 64, 1>,
     params<unsigned long long, unsigned long long, 128, 1>,
     params<short, dummy<int>, 256, 1>,
@@ -86,10 +89,11 @@ typedef ::testing::Types<
 
     // Non-power of 2 BlockSize and ItemsPerThread > 1
     params<int, double, 33U, 5>,
+    params<float, int, 33U, 5>,
     params<char, dummy<double>, 464U, 2>,
     params<unsigned short, unsigned int, 100U, 3>,
-    params<short, int, 234U, 9>
-> Params;
+    params<short, int, 234U, 9>>
+    Params;
 
 TYPED_TEST_SUITE(HipcubBlockExchangeTests, Params);
 
@@ -123,11 +127,13 @@ TYPED_TEST(HipcubBlockExchangeTests, BlockedToStriped)
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    using type = typename TestFixture::params::type;
-    using output_type = typename TestFixture::params::output_type;
-    constexpr size_t block_size = TestFixture::params::block_size;
+    using type             = typename TestFixture::params::type;
+    using fundemental_type = test_utils::convert_to_fundamental_t<type>;
+    using output_type      = typename TestFixture::params::output_type;
+
+    constexpr size_t block_size       = TestFixture::params::block_size;
     constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
-    constexpr size_t items_per_block = block_size * items_per_thread;
+    constexpr size_t items_per_block  = block_size * items_per_thread;
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
     {
@@ -138,10 +144,10 @@ TYPED_TEST(HipcubBlockExchangeTests, BlockedToStriped)
     // Generate data
     std::vector<type> input(size);
     std::vector<output_type> expected(size);
-    std::vector<output_type> output(size, output_type(0));
+    std::vector<output_type> output(size, test_utils::convert_to_device<output_type>(0));
 
     // Calculate input and expected results on host
-    std::vector<type> values(size);
+    std::vector<fundemental_type> values(size);
     std::iota(values.begin(), values.end(), 0);
     for(size_t bi = 0; bi < size / items_per_block; bi++)
     {
@@ -150,10 +156,10 @@ TYPED_TEST(HipcubBlockExchangeTests, BlockedToStriped)
             for(size_t ii = 0; ii < items_per_thread; ii++)
             {
                 const size_t offset = bi * items_per_block;
-                const size_t i0 = offset + ti * items_per_thread + ii;
-                const size_t i1 = offset + ii * block_size + ti;
-                input[i1] = values[i1];
-                expected[i0] = values[i1];
+                const size_t i0     = offset + ti * items_per_thread + ii;
+                const size_t i1     = offset + ii * block_size + ti;
+                input[i1]           = test_utils::convert_to_device<type>(values[i1]);
+                expected[i0]        = test_utils::convert_to_device<type>(values[i1]);
             }
         }
     }
@@ -193,7 +199,8 @@ TYPED_TEST(HipcubBlockExchangeTests, BlockedToStriped)
 
     for(size_t i = 0; i < size; i++)
     {
-        ASSERT_EQ(output[i], expected[i]);
+        ASSERT_EQ(test_utils::convert_to_native(output[i]),
+                  test_utils::convert_to_native(expected[i]));
     }
 
     HIP_CHECK(hipFree(device_input));
@@ -230,11 +237,13 @@ TYPED_TEST(HipcubBlockExchangeTests, StripedToBlocked)
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    using type = typename TestFixture::params::type;
-    using output_type = typename TestFixture::params::output_type;
-    constexpr size_t block_size = TestFixture::params::block_size;
+    using type             = typename TestFixture::params::type;
+    using fundemental_type = test_utils::convert_to_fundamental_t<type>;
+    using output_type      = typename TestFixture::params::output_type;
+
+    constexpr size_t block_size       = TestFixture::params::block_size;
     constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
-    constexpr size_t items_per_block = block_size * items_per_thread;
+    constexpr size_t items_per_block  = block_size * items_per_thread;
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
     {
@@ -245,10 +254,10 @@ TYPED_TEST(HipcubBlockExchangeTests, StripedToBlocked)
     // Generate data
     std::vector<type> input(size);
     std::vector<output_type> expected(size);
-    std::vector<output_type> output(size, output_type(0));
+    std::vector<output_type> output(size, test_utils::convert_to_device<output_type>(0));
 
     // Calculate input and expected results on host
-    std::vector<type> values(size);
+    std::vector<fundemental_type> values(size);
     std::iota(values.begin(), values.end(), 0);
     for(size_t bi = 0; bi < size / items_per_block; bi++)
     {
@@ -257,10 +266,10 @@ TYPED_TEST(HipcubBlockExchangeTests, StripedToBlocked)
             for(size_t ii = 0; ii < items_per_thread; ii++)
             {
                 const size_t offset = bi * items_per_block;
-                const size_t i0 = offset + ti * items_per_thread + ii;
-                const size_t i1 = offset + ii * block_size + ti;
-                input[i0] = values[i1];
-                expected[i1] = values[i1];
+                const size_t i0     = offset + ti * items_per_thread + ii;
+                const size_t i1     = offset + ii * block_size + ti;
+                input[i0]           = test_utils::convert_to_device<type>(values[i1]);
+                expected[i1]        = test_utils::convert_to_device<type>(values[i1]);
             }
         }
     }
@@ -300,7 +309,8 @@ TYPED_TEST(HipcubBlockExchangeTests, StripedToBlocked)
 
     for(size_t i = 0; i < size; i++)
     {
-        ASSERT_EQ(output[i], expected[i]);
+        ASSERT_EQ(test_utils::convert_to_native(output[i]),
+                  test_utils::convert_to_native(expected[i]));
     }
 
     HIP_CHECK(hipFree(device_input));
@@ -337,11 +347,14 @@ TYPED_TEST(HipcubBlockExchangeTests, BlockedToWarpStriped)
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    using type = typename TestFixture::params::type;
-    using output_type = typename TestFixture::params::output_type;
-    constexpr size_t block_size = TestFixture::params::block_size;
+    using type             = typename TestFixture::params::type;
+    using fundemental_type = test_utils::convert_to_fundamental_t<type>;
+    using output_type      = typename TestFixture::params::output_type;
+
+    constexpr size_t block_size       = TestFixture::params::block_size;
     constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
-    constexpr size_t items_per_block = block_size * items_per_thread;
+    constexpr size_t items_per_block  = block_size * items_per_thread;
+
     const unsigned int current_device_warp_size = HIPCUB_HOST_WARP_THREADS;
     // Given block size not supported
     bool is_block_size_unsupported = block_size > test_utils::get_max_block_size();
@@ -362,7 +375,7 @@ TYPED_TEST(HipcubBlockExchangeTests, BlockedToWarpStriped)
     // Generate data
     std::vector<type> input(size);
     std::vector<output_type> expected(size);
-    std::vector<output_type> output(size, output_type(0));
+    std::vector<output_type> output(size, test_utils::convert_to_device<output_type>(0));
 
     constexpr size_t warp_size_32 = test_utils::get_min_warp_size(block_size, size_t(HIPCUB_WARP_SIZE_32));
     constexpr size_t warp_size_64 = test_utils::get_min_warp_size(block_size, size_t(HIPCUB_WARP_SIZE_64));
@@ -372,7 +385,7 @@ TYPED_TEST(HipcubBlockExchangeTests, BlockedToWarpStriped)
     constexpr size_t items_per_warp_64 = warp_size_64 * items_per_thread;
 
     // Calculate input and expected results on host
-    std::vector<type> values(size);
+    std::vector<fundemental_type> values(size);
     std::iota(values.begin(), values.end(), 0);
 
     const size_t warps_no = current_device_warp_size == HIPCUB_WARP_SIZE_32 ? warps_no_32 : warps_no_64;
@@ -393,8 +406,8 @@ TYPED_TEST(HipcubBlockExchangeTests, BlockedToWarpStriped)
                     const size_t offset = bi * items_per_block + wi * items_per_warp;
                     const size_t i0 = offset + li * items_per_thread + ii;
                     const size_t i1 = offset + ii * current_warp_size + li;
-                    input[i1] = values[i1];
-                    expected[i0] = values[i1];
+                    input[i1]           = test_utils::convert_to_device<type>(values[i1]);
+                    expected[i0]        = test_utils::convert_to_device<type>(values[i1]);
                 }
             }
         }
@@ -437,7 +450,8 @@ TYPED_TEST(HipcubBlockExchangeTests, BlockedToWarpStriped)
 
     for(size_t i = 0; i < size; i++)
     {
-        ASSERT_EQ(output[i], expected[i]);
+        ASSERT_EQ(test_utils::convert_to_native(output[i]),
+                  test_utils::convert_to_native(expected[i]));
     }
 
     HIP_CHECK(hipFree(device_input));
@@ -474,11 +488,14 @@ TYPED_TEST(HipcubBlockExchangeTests, WarpStripedToBlocked)
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    using type = typename TestFixture::params::type;
-    using output_type = typename TestFixture::params::output_type;
-    constexpr size_t block_size = TestFixture::params::block_size;
+    using type             = typename TestFixture::params::type;
+    using fundemental_type = test_utils::convert_to_fundamental_t<type>;
+    using output_type      = typename TestFixture::params::output_type;
+
+    constexpr size_t block_size       = TestFixture::params::block_size;
     constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
-    constexpr size_t items_per_block = block_size * items_per_thread;
+    constexpr size_t items_per_block  = block_size * items_per_thread;
+
     const unsigned int current_device_warp_size = HIPCUB_HOST_WARP_THREADS;
     // Given block size not supported
     bool is_block_size_unsupported = block_size > test_utils::get_max_block_size();
@@ -499,7 +516,7 @@ TYPED_TEST(HipcubBlockExchangeTests, WarpStripedToBlocked)
     // Generate data
     std::vector<type> input(size);
     std::vector<output_type> expected(size);
-    std::vector<output_type> output(size, output_type(0));
+    std::vector<output_type> output(size, test_utils::convert_to_device<output_type>(0));
 
     constexpr size_t warp_size_32 = test_utils::get_min_warp_size(block_size, size_t(HIPCUB_WARP_SIZE_32));
     constexpr size_t warp_size_64 = test_utils::get_min_warp_size(block_size, size_t(HIPCUB_WARP_SIZE_64));
@@ -509,7 +526,7 @@ TYPED_TEST(HipcubBlockExchangeTests, WarpStripedToBlocked)
     constexpr size_t items_per_warp_64 = warp_size_64 * items_per_thread;
 
     // Calculate input and expected results on host
-    std::vector<type> values(size);
+    std::vector<fundemental_type> values(size);
     std::iota(values.begin(), values.end(), 0);
 
     const size_t warps_no = current_device_warp_size == HIPCUB_WARP_SIZE_32 ? warps_no_32 : warps_no_64;
@@ -528,10 +545,10 @@ TYPED_TEST(HipcubBlockExchangeTests, WarpStripedToBlocked)
                 for(size_t ii = 0; ii < items_per_thread; ii++)
                 {
                     const size_t offset = bi * items_per_block + wi * items_per_warp;
-                    const size_t i0 = offset + li * items_per_thread + ii;
-                    const size_t i1 = offset + ii * current_warp_size + li;
-                    input[i0] = values[i1];
-                    expected[i1] = values[i1];
+                    const size_t i0     = offset + li * items_per_thread + ii;
+                    const size_t i1     = offset + ii * current_warp_size + li;
+                    input[i0]           = test_utils::convert_to_device<type>(values[i1]);
+                    expected[i1]        = test_utils::convert_to_device<type>(values[i1]);
                 }
             }
         }
@@ -572,7 +589,8 @@ TYPED_TEST(HipcubBlockExchangeTests, WarpStripedToBlocked)
 
     for(size_t i = 0; i < size; i++)
     {
-        ASSERT_EQ(output[i], expected[i]);
+        ASSERT_EQ(test_utils::convert_to_native(output[i]),
+                  test_utils::convert_to_native(expected[i]));
     }
 
     HIP_CHECK(hipFree(device_input));
@@ -611,11 +629,13 @@ TYPED_TEST(HipcubBlockExchangeTests, ScatterToBlocked)
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    using type = typename TestFixture::params::type;
-    using output_type = typename TestFixture::params::output_type;
-    constexpr size_t block_size = TestFixture::params::block_size;
+    using type             = typename TestFixture::params::type;
+    using fundemental_type = test_utils::convert_to_fundamental_t<type>;
+    using output_type      = typename TestFixture::params::output_type;
+
+    constexpr size_t block_size       = TestFixture::params::block_size;
     constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
-    constexpr size_t items_per_block = block_size * items_per_thread;
+    constexpr size_t items_per_block  = block_size * items_per_thread;
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
     {
@@ -626,7 +646,7 @@ TYPED_TEST(HipcubBlockExchangeTests, ScatterToBlocked)
     // Generate data
     std::vector<type> input(size);
     std::vector<output_type> expected(size);
-    std::vector<output_type> output(size, output_type(0));
+    std::vector<output_type>  output(size, test_utils::convert_to_device<output_type>(0));
     std::vector<unsigned int> ranks(size);
 
     // Calculate input and expected results on host
@@ -636,7 +656,7 @@ TYPED_TEST(HipcubBlockExchangeTests, ScatterToBlocked)
         std::iota(block_ranks, block_ranks + items_per_block, 0);
         std::shuffle(block_ranks, block_ranks + items_per_block, std::mt19937{std::random_device{}()});
     }
-    std::vector<type> values(size);
+    std::vector<fundemental_type> values(size);
     std::iota(values.begin(), values.end(), 0);
     for(size_t bi = 0; bi < size / items_per_block; bi++)
     {
@@ -645,10 +665,10 @@ TYPED_TEST(HipcubBlockExchangeTests, ScatterToBlocked)
             for(size_t ii = 0; ii < items_per_thread; ii++)
             {
                 const size_t offset = bi * items_per_block;
-                const size_t i0 = offset + ti * items_per_thread + ii;
-                const size_t i1 = offset + ranks[i0];
-                input[i0] = values[i0];
-                expected[i1] = values[i0];
+                const size_t i0     = offset + ti * items_per_thread + ii;
+                const size_t i1     = offset + ranks[i0];
+                input[i0]           = test_utils::convert_to_device<type>(values[i0]);
+                expected[i1]        = test_utils::convert_to_device<type>(values[i0]);
             }
         }
     }
@@ -698,7 +718,8 @@ TYPED_TEST(HipcubBlockExchangeTests, ScatterToBlocked)
 
     for(size_t i = 0; i < size; i++)
     {
-        ASSERT_EQ(output[i], expected[i]);
+        ASSERT_EQ(test_utils::convert_to_native(output[i]),
+                  test_utils::convert_to_native(expected[i]));
     }
 
     HIP_CHECK(hipFree(device_input));
@@ -738,11 +759,13 @@ TYPED_TEST(HipcubBlockExchangeTests, ScatterToStriped)
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    using type = typename TestFixture::params::type;
-    using output_type = typename TestFixture::params::output_type;
-    constexpr size_t block_size = TestFixture::params::block_size;
+    using type             = typename TestFixture::params::type;
+    using fundemental_type = test_utils::convert_to_fundamental_t<type>;
+    using output_type      = typename TestFixture::params::output_type;
+
+    constexpr size_t block_size       = TestFixture::params::block_size;
     constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
-    constexpr size_t items_per_block = block_size * items_per_thread;
+    constexpr size_t items_per_block  = block_size * items_per_thread;
     // Given block size not supported
     if(block_size > test_utils::get_max_block_size())
     {
@@ -753,7 +776,7 @@ TYPED_TEST(HipcubBlockExchangeTests, ScatterToStriped)
     // Generate data
     std::vector<type> input(size);
     std::vector<output_type> expected(size);
-    std::vector<output_type> output(size, output_type(0));
+    std::vector<output_type>  output(size, test_utils::convert_to_device<output_type>(0));
     std::vector<unsigned int> ranks(size);
 
     // Calculate input and expected results on host
@@ -763,7 +786,7 @@ TYPED_TEST(HipcubBlockExchangeTests, ScatterToStriped)
         std::iota(block_ranks, block_ranks + items_per_block, 0);
         std::shuffle(block_ranks, block_ranks + items_per_block, std::mt19937{std::random_device{}()});
     }
-    std::vector<type> values(size);
+    std::vector<fundemental_type> values(size);
     std::iota(values.begin(), values.end(), 0);
     for(size_t bi = 0; bi < size / items_per_block; bi++)
     {
@@ -776,8 +799,8 @@ TYPED_TEST(HipcubBlockExchangeTests, ScatterToStriped)
                 const size_t i1 = offset
                     + ranks[i0] % block_size * items_per_thread
                     + ranks[i0] / block_size;
-                input[i0] = values[i0];
-                expected[i1] = values[i0];
+                input[i0]    = test_utils::convert_to_device<type>(values[i0]);
+                expected[i1] = test_utils::convert_to_device<type>(values[i0]);
             }
         }
     }
@@ -827,7 +850,8 @@ TYPED_TEST(HipcubBlockExchangeTests, ScatterToStriped)
 
     for(size_t i = 0; i < size; i++)
     {
-        ASSERT_EQ(output[i], expected[i]);
+        ASSERT_EQ(test_utils::convert_to_native(output[i]),
+                  test_utils::convert_to_native(expected[i]));
     }
 
     HIP_CHECK(hipFree(device_input));

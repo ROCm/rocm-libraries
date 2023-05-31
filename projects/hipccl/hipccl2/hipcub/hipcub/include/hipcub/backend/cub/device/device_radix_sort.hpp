@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2020, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2023, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -52,15 +52,17 @@ struct DeviceRadixSort
                          hipStream_t stream = 0,
                          bool debug_synchronous = false)
     {
-        return hipCUDAErrorTohipError(
-            ::cub::DeviceRadixSort::SortPairs(
-                d_temp_storage, temp_storage_bytes,
-                d_keys_in, d_keys_out,
-                d_values_in, d_values_out, num_items,
-                begin_bit, end_bit,
-                stream, debug_synchronous
-            )
-        );
+        (void)debug_synchronous;
+        return hipCUDAErrorTohipError(::cub::DeviceRadixSort::SortPairs(d_temp_storage,
+                                                                        temp_storage_bytes,
+                                                                        d_keys_in,
+                                                                        d_keys_out,
+                                                                        d_values_in,
+                                                                        d_values_out,
+                                                                        num_items,
+                                                                        begin_bit,
+                                                                        end_bit,
+                                                                        stream));
     }
 
     template<typename KeyT, typename ValueT, typename NumItemsT>
@@ -75,14 +77,15 @@ struct DeviceRadixSort
                          hipStream_t stream = 0,
                          bool debug_synchronous = false)
     {
-        return hipCUDAErrorTohipError(
-            ::cub::DeviceRadixSort::SortPairs(
-                d_temp_storage, temp_storage_bytes,
-                d_keys, d_values, num_items,
-                begin_bit, end_bit,
-                stream, debug_synchronous
-            )
-        );
+        (void)debug_synchronous;
+        return hipCUDAErrorTohipError(::cub::DeviceRadixSort::SortPairs(d_temp_storage,
+                                                                        temp_storage_bytes,
+                                                                        d_keys,
+                                                                        d_values,
+                                                                        num_items,
+                                                                        begin_bit,
+                                                                        end_bit,
+                                                                        stream));
     }
 
     template<typename KeyT, typename ValueT, typename NumItemsT>
@@ -99,16 +102,18 @@ struct DeviceRadixSort
                                    hipStream_t stream = 0,
                                    bool debug_synchronous = false)
     {
+        (void)debug_synchronous;
         return hipCUDAErrorTohipError(
-            ::cub::DeviceRadixSort::SortPairsDescending(
-                d_temp_storage, temp_storage_bytes,
-                d_keys_in, d_keys_out,
-                d_values_in, d_values_out, num_items,
-                begin_bit, end_bit,
-                stream, debug_synchronous
-            )
-        );
-
+            ::cub::DeviceRadixSort::SortPairsDescending(d_temp_storage,
+                                                        temp_storage_bytes,
+                                                        d_keys_in,
+                                                        d_keys_out,
+                                                        d_values_in,
+                                                        d_values_out,
+                                                        num_items,
+                                                        begin_bit,
+                                                        end_bit,
+                                                        stream));
     }
 
     template<typename KeyT, typename ValueT, typename NumItemsT>
@@ -123,14 +128,16 @@ struct DeviceRadixSort
                                    hipStream_t stream = 0,
                                    bool debug_synchronous = false)
     {
+        (void)debug_synchronous;
         return hipCUDAErrorTohipError(
-            ::cub::DeviceRadixSort::SortPairsDescending(
-                d_temp_storage, temp_storage_bytes,
-                d_keys, d_values, num_items,
-                begin_bit, end_bit,
-                stream, debug_synchronous
-            )
-        );
+            ::cub::DeviceRadixSort::SortPairsDescending(d_temp_storage,
+                                                        temp_storage_bytes,
+                                                        d_keys,
+                                                        d_values,
+                                                        num_items,
+                                                        begin_bit,
+                                                        end_bit,
+                                                        stream));
     }
 
     template<typename KeyT, typename NumItemsT>
@@ -145,14 +152,15 @@ struct DeviceRadixSort
                         hipStream_t stream = 0,
                         bool debug_synchronous = false)
     {
-        return hipCUDAErrorTohipError(
-            ::cub::DeviceRadixSort::SortKeys(
-                d_temp_storage, temp_storage_bytes,
-                d_keys_in, d_keys_out, num_items,
-                begin_bit, end_bit,
-                stream, debug_synchronous
-            )
-        );
+        (void)debug_synchronous;
+        return hipCUDAErrorTohipError(::cub::DeviceRadixSort::SortKeys(d_temp_storage,
+                                                                       temp_storage_bytes,
+                                                                       d_keys_in,
+                                                                       d_keys_out,
+                                                                       num_items,
+                                                                       begin_bit,
+                                                                       end_bit,
+                                                                       stream));
     }
 
     template<typename KeyT, typename NumItemsT>
@@ -166,14 +174,14 @@ struct DeviceRadixSort
                         hipStream_t stream = 0,
                         bool debug_synchronous = false)
     {
-        return hipCUDAErrorTohipError(
-            ::cub::DeviceRadixSort::SortKeys(
-                d_temp_storage, temp_storage_bytes,
-                d_keys, num_items,
-                begin_bit, end_bit,
-                stream, debug_synchronous
-            )
-        );
+        (void)debug_synchronous;
+        return hipCUDAErrorTohipError(::cub::DeviceRadixSort::SortKeys(d_temp_storage,
+                                                                       temp_storage_bytes,
+                                                                       d_keys,
+                                                                       num_items,
+                                                                       begin_bit,
+                                                                       end_bit,
+                                                                       stream));
     }
 
     template<typename KeyT, typename NumItemsT>
@@ -188,14 +196,15 @@ struct DeviceRadixSort
                                   hipStream_t stream = 0,
                                   bool debug_synchronous = false)
     {
-        return hipCUDAErrorTohipError(
-            ::cub::DeviceRadixSort::SortKeysDescending(
-                d_temp_storage, temp_storage_bytes,
-                d_keys_in, d_keys_out, num_items,
-                begin_bit, end_bit,
-                stream, debug_synchronous
-            )
-        );
+        (void)debug_synchronous;
+        return hipCUDAErrorTohipError(::cub::DeviceRadixSort::SortKeysDescending(d_temp_storage,
+                                                                                 temp_storage_bytes,
+                                                                                 d_keys_in,
+                                                                                 d_keys_out,
+                                                                                 num_items,
+                                                                                 begin_bit,
+                                                                                 end_bit,
+                                                                                 stream));
     }
 
     template<typename KeyT, typename NumItemsT>
@@ -209,14 +218,14 @@ struct DeviceRadixSort
                                   hipStream_t stream = 0,
                                   bool debug_synchronous = false)
     {
-        return hipCUDAErrorTohipError(
-            ::cub::DeviceRadixSort::SortKeysDescending(
-                d_temp_storage, temp_storage_bytes,
-                d_keys, num_items,
-                begin_bit, end_bit,
-                stream, debug_synchronous
-            )
-        );
+        (void)debug_synchronous;
+        return hipCUDAErrorTohipError(::cub::DeviceRadixSort::SortKeysDescending(d_temp_storage,
+                                                                                 temp_storage_bytes,
+                                                                                 d_keys,
+                                                                                 num_items,
+                                                                                 begin_bit,
+                                                                                 end_bit,
+                                                                                 stream));
     }
 };
 

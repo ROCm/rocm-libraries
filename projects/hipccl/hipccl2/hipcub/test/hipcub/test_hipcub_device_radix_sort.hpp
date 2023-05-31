@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -610,6 +610,16 @@ inline void sort_keys_over_4g()
     constexpr size_t size = (1ull << 32) + 32;
     constexpr size_t number_of_possible_keys = 1ull << (8ull * sizeof(key_type));
     assert(std::is_unsigned<key_type>::value);
+
+    hipDeviceProp_t dev_prop;
+    HIP_CHECK(hipGetDeviceProperties(&dev_prop, device_id));
+    // Radix sort requires 2 buffers of `size`, so a minimum of 8 GB of vram for this test.
+    // This is more than some cards provide.
+    if(dev_prop.totalGlobalMem < size * 2 * sizeof(key_type))
+    {
+        GTEST_SKIP() << "insufficient global memory";
+    }
+
     std::vector<size_t> histogram(number_of_possible_keys, 0);
     const int seed_value = rand();
     SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
@@ -651,7 +661,7 @@ inline void sort_keys_over_4g()
             stream, debug_synchronous
         )
     );
-    
+
     std::vector<key_type> output(keys_input.size());
     HIP_CHECK(hipMemcpy(output.data(), d_keys_input_output, size * sizeof(key_type), hipMemcpyDeviceToHost));
 

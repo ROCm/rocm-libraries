@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -81,28 +81,34 @@ typedef ::testing::Types<
     params<unsigned int, int, 64U, 1, hipcub::Equality>,
     params<int, bool, 128U, 1, hipcub::Inequality>,
     params<float, int, 256U, 1, test_utils::less>,
+    params<test_utils::half, int, 256U, 1, test_utils::less>,
+    params<test_utils::bfloat16, int, 256U, 1, test_utils::less>,
     params<char, char, 1024U, 1, test_utils::less_equal>,
-    params<int, bool, 256U, 1, custom_flag_op1<int> >,
+    params<int, bool, 256U, 1, custom_flag_op1<int>>,
 
     // Non-power of 2 BlockSize
     params<double, unsigned int, 65U, 1, test_utils::greater>,
-    params<float, int, 37U, 1, custom_flag_op1<float> >,
+    params<float, int, 37U, 1, custom_flag_op1<float>>,
+    params<test_utils::half, int, 37U, 1, test_utils::greater>,
+    params<test_utils::bfloat16, int, 37U, 1, test_utils::greater>,
     params<long long, char, 510U, 1, test_utils::greater_equal>,
     params<unsigned int, long long, 162U, 1, hipcub::Inequality>,
     params<unsigned char, bool, 255U, 1, hipcub::Equality>,
 
     // Power of 2 BlockSize and ItemsPerThread > 1
-    params<int, char, 64U, 2, custom_flag_op2<int> >,
+    params<int, char, 64U, 2, custom_flag_op2<int>>,
     params<int, short, 128U, 4, test_utils::less>,
-    params<unsigned short, unsigned char, 256U, 7, custom_flag_op2<unsigned short> >,
+    params<unsigned short, unsigned char, 256U, 7, custom_flag_op2<unsigned short>>,
     params<short, short, 512U, 8, hipcub::Equality>,
 
     // Non-power of 2 BlockSize and ItemsPerThread > 1
-    params<double, int, 33U, 5, custom_flag_op2<double> >,
+    params<double, int, 33U, 5, custom_flag_op2<double>>,
     params<double, unsigned int, 464U, 2, hipcub::Equality>,
+    params<test_utils::half, unsigned int, 464U, 2, test_utils::greater>,
+    params<test_utils::bfloat16, unsigned int, 464U, 2, test_utils::greater>,
     params<unsigned short, int, 100U, 3, test_utils::greater>,
-    params<short, bool, 234U, 9, custom_flag_op1<short> >
-> Params;
+    params<short, bool, 234U, 9, custom_flag_op1<short>>>
+    Params;
 
 TYPED_TEST_SUITE(HipcubBlockDiscontinuity, Params);
 
@@ -174,7 +180,11 @@ TYPED_TEST(HipcubBlockDiscontinuity, FlagHeads)
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
-        std::vector<type> input = test_utils::get_random_data<type>(size, type(0), type(10), seed_value);
+        std::vector<type> input
+            = test_utils::get_random_data<type>(size,
+                                                test_utils::convert_to_device<type>(0),
+                                                test_utils::convert_to_device<type>(10),
+                                                seed_value);
         std::vector<long long> heads(size);
 
         // Calculate expected results on host
@@ -313,7 +323,11 @@ TYPED_TEST(HipcubBlockDiscontinuity, FlagTails)
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
-        std::vector<type> input = test_utils::get_random_data<type>(size, type(0), type(10), seed_value);
+        std::vector<type> input
+            = test_utils::get_random_data<type>(size,
+                                                test_utils::convert_to_device<type>(0),
+                                                test_utils::convert_to_device<type>(10),
+                                                seed_value);
         std::vector<long long> tails(size);
 
         // Calculate expected results on host
@@ -466,7 +480,11 @@ TYPED_TEST(HipcubBlockDiscontinuity, FlagHeadsAndTails)
         SCOPED_TRACE(testing::Message() << "with seed= " << seed_value);
 
         // Generate data
-        std::vector<type> input = test_utils::get_random_data<type>(size, type(0), type(10), seed_value);
+        std::vector<type> input
+            = test_utils::get_random_data<type>(size,
+                                                test_utils::convert_to_device<type>(0),
+                                                test_utils::convert_to_device<type>(10),
+                                                seed_value);
         std::vector<long long> heads(size);
         std::vector<long long> tails(size);
 

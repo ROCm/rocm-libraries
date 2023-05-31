@@ -188,6 +188,11 @@ test:rocm:
       --benchmark_gpu_name "${GPU}"
       --benchmark_filename_regex "${BENCHMARK_FILENAME_REGEX}"
       --benchmark_filter_regex "${BENCHMARK_FILTER_REGEX}"
+      --no_upload
+  artifacts:
+    paths:
+      - ${CI_PROJECT_DIR}/build/benchmark/*.json
+    expire_in: 1 week
 
 benchmark:rocm:
   extends:
@@ -325,8 +330,6 @@ build:nvcc-benchmark:
       -D CMAKE_CXX_FLAGS="-Wall -Wextra"
       -D CMAKE_BUILD_TYPE=Release
       -D BUILD_BENCHMARK=ON
-      -D CMAKE_CXX_COMPILER=g++-8
-      -D CMAKE_C_COMPILER=gcc-8
       -D NVGPU_TARGETS="$GPU_TARGETS"
       -B $CI_PROJECT_DIR/build
       -S $CI_PROJECT_DIR

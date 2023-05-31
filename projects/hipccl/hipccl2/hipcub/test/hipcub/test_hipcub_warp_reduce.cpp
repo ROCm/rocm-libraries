@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -44,6 +44,7 @@ public:
 typedef ::testing::Types<
     // shuffle based reduce
     // Integer
+    params<int, 1U>,
     params<int, 2U>,
     params<int, 4U>,
     params<int, 8U>,
@@ -53,6 +54,7 @@ typedef ::testing::Types<
     params<int, 64U>,
 #endif
     // Float
+    params<float, 1U>,
     params<float, 2U>,
     params<float, 4U>,
     params<float, 8U>,
@@ -75,10 +77,12 @@ typedef ::testing::Types<
     params<float, 7U>,
     params<float, 15U>
 #ifdef __HIP_PLATFORM_AMD__
-    ,params<float, 37U>,
+    ,
+    params<float, 37U>,
     params<float, 61U>
 #endif
-> HipcubWarpReduceTestParams;
+    >
+    HipcubWarpReduceTestParams;
 
 TYPED_TEST_SUITE(HipcubWarpReduceTests, HipcubWarpReduceTestParams);
 
@@ -220,7 +224,7 @@ TYPED_TEST(HipcubWarpReduceTests, Reduce)
         {
             auto diff = std::max<T>(std::abs(0.1f * expected[i]), T(0.01f));
             if(std::is_integral<T>::value) diff = 0;
-            ASSERT_NEAR(output[i], expected[i], diff);
+            ASSERT_NEAR(output[i], expected[i], diff) << "where index = " << i;
         }
 
         HIP_CHECK(hipFree(device_input));
@@ -315,7 +319,7 @@ TYPED_TEST(HipcubWarpReduceTests, ReduceValid)
                 auto idx = i * logical_warp_size + j;
                 value += input[idx];
             }
-            expected[i] = value;
+            expected[i] = valid ? value : input[i];
         }
 
         // Writing to device memory
@@ -366,7 +370,7 @@ TYPED_TEST(HipcubWarpReduceTests, ReduceValid)
         {
             auto diff = std::max<T>(std::abs(0.1f * expected[i]), T(0.01f));
             if(std::is_integral<T>::value) diff = 0;
-            ASSERT_NEAR(output[i], expected[i], diff);
+            ASSERT_NEAR(output[i], expected[i], diff) << "where index = " << i;
         }
 
         HIP_CHECK(hipFree(device_input));
@@ -556,7 +560,7 @@ TYPED_TEST(HipcubWarpReduceTests, HeadSegmentedReduceSum)
             {
                 auto diff = std::max<T>(std::abs(0.1f * expected[i]), T(0.01f));
                 if(std::is_integral<T>::value) diff = 0;
-                ASSERT_NEAR(output[i], expected[i], diff);
+                ASSERT_NEAR(output[i], expected[i], diff) << "where index = " << i;
             }
         }
 
@@ -758,7 +762,7 @@ TYPED_TEST(HipcubWarpReduceTests, TailSegmentedReduceSum)
             auto index = segment_indexes[i];
             auto diff = std::max<T>(std::abs(0.1f * expected[i]), T(0.01f));
             if(std::is_integral<T>::value) diff = 0;
-            ASSERT_NEAR(output[index], expected[index], diff);
+            ASSERT_NEAR(output[index], expected[index], diff) << "where index = " << i;
         }
 
         HIP_CHECK(hipFree(device_input));

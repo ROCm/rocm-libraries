@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -63,7 +63,15 @@ typedef ::testing::Types<
     params<unsigned int, double, hipcub::Min, 1000, 50000>,
     params<long long, short, hipcub::Sum, 1000, 10000, long long>,
     params<unsigned long long, unsigned long long, hipcub::Sum, 100000, 100000>
-> Params;
+#ifdef __HIP_PLATFORM_AMD__
+    ,
+    // Kernel doesn't work on NVidia.
+    // Sum for half and bfloat will result in values too big due to limited range.
+    params<test_utils::half, test_utils::half, hipcub::Max, 3, 100>,
+    params<test_utils::bfloat16, test_utils::bfloat16, hipcub::Max, 20, 100>
+#endif
+    >
+    Params;
 
 TYPED_TEST_SUITE(HipcubDeviceReduceByKey, Params);
 
@@ -87,15 +95,15 @@ TYPED_TEST(HipcubDeviceReduceByKey, ReduceByKey)
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    using key_type = typename TestFixture::params::key_type;
-    using value_type = typename TestFixture::params::value_type;
-    using aggregate_type = typename TestFixture::params::aggregate_type;
-    using reduce_op_type = typename TestFixture::params::reduce_op_type;
+    using key_type              = typename TestFixture::params::key_type;
+    using native_key_type       = test_utils::convert_to_native_t<key_type>;
+    using value_type            = typename TestFixture::params::value_type;
+    using aggregate_type        = typename TestFixture::params::aggregate_type;
+    using reduce_op_type        = typename TestFixture::params::reduce_op_type;
     using key_distribution_type = typename std::conditional<
-        std::is_floating_point<key_type>::value,
-        std::uniform_real_distribution<key_type>,
-        std::uniform_int_distribution<key_type>
-    >::type;
+        test_utils::is_floating_point<key_type>::value,
+        std::uniform_real_distribution<test_utils::convert_to_fundamental_t<key_type>>,
+        std::uniform_int_distribution<test_utils::convert_to_fundamental_t<key_type>>>::type;
 
     const bool debug_synchronous = false;
 
@@ -134,8 +142,9 @@ TYPED_TEST(HipcubDeviceReduceByKey, ReduceByKey)
 
             size_t offset = 0;
             std::default_random_engine gen(seed_value + seed_value_addition);
-            key_type current_key = key_distribution_type(0, 100)(gen);
-            key_type prev_key = current_key;
+            native_key_type            current_key
+                = static_cast<native_key_type>(key_distribution_type(0, 100)(gen));
+            native_key_type prev_key = current_key;
             while(offset < size)
             {
                 const size_t key_count = key_count_dis(gen);
@@ -144,7 +153,7 @@ TYPED_TEST(HipcubDeviceReduceByKey, ReduceByKey)
                 const size_t end = std::min(size, offset + key_count);
                 for(size_t i = offset; i < end; i++)
                 {
-                    keys_input[i] = current_key;
+                    keys_input[i] = test_utils::convert_to_device<key_type>(current_key);
                 }
                 aggregate_type aggregate = values_input[offset];
                 for(size_t i = offset + 1; i < end; i++)
@@ -156,7 +165,7 @@ TYPED_TEST(HipcubDeviceReduceByKey, ReduceByKey)
                 // (it may differ from other keys in case of custom key compraison operators)
                 if(unique_count_expected == 0 || !key_compare_op(prev_key, current_key))
                 {
-                    unique_expected.push_back(current_key);
+                    unique_expected.push_back(test_utils::convert_to_device<key_type>(current_key));
                     unique_count_expected++;
                     aggregates_expected.push_back(aggregate);
                 }
@@ -262,17 +271,22 @@ TYPED_TEST(HipcubDeviceReduceByKey, ReduceByKey)
             // Validating results
             for(size_t i = 0; i < unique_count_expected; i++)
             {
-                ASSERT_EQ(unique_output[i], unique_expected[i]);
+                ASSERT_EQ(test_utils::convert_to_native(unique_output[i]),
+                          test_utils::convert_to_native(unique_expected[i]));
+
                 if(std::is_integral<aggregate_type>::value)
                 {
-                    ASSERT_EQ(aggregates_output[i], aggregates_expected[i]);
+                    ASSERT_EQ(test_utils::convert_to_native(aggregates_output[i]),
+                              test_utils::convert_to_native(aggregates_expected[i]));
                 }
-                else if (std::is_floating_point<aggregate_type>::value)
+                else if(test_utils::is_floating_point<aggregate_type>::value)
                 {
-                    auto tolerance = std::max<aggregate_type>(
-                        std::abs(0.1f * aggregates_expected[i]), aggregate_type(0.01f)
-                    );
-                    ASSERT_NEAR(aggregates_output[i], aggregates_expected[i], tolerance);
+                    auto tolerance = std::max<test_utils::convert_to_fundamental_t<aggregate_type>>(
+                        std::abs(0.1f * test_utils::convert_to_native(aggregates_expected[i])),
+                        aggregate_type(0.01f));
+                    ASSERT_NEAR(test_utils::convert_to_native(aggregates_output[i]),
+                                test_utils::convert_to_native(aggregates_expected[i]),
+                                tolerance);
                 }
             }
         }

@@ -153,6 +153,11 @@ def main():
         help='Regular expression that controls the list of benchmarks to run in each benchmark executable',
         default='',
         required=False)
+    parser.add_argument('--no_upload',
+                        help='Only run the benchmarks, do not upload them',
+                        default=False,
+                        action='store_true',
+                        required=False)
 
     args = parser.parse_args()
 
@@ -165,19 +170,24 @@ def main():
         args.benchmark_filename_regex,
         args.benchmark_filter_regex)
 
+    status = True
+
     benchmark_run_successful, to_upload_paths = run_benchmarks(benchmark_context)
+    status = status and benchmark_run_successful
     sysinfo_path = write_system_info()
     if sysinfo_path:
         # not required to be successful.
         # Not all rocm/nvidia images have rocminfo/deviceQuery in their path
         to_upload_paths.append(sysinfo_path)
 
-    upload_successful = False
-    folder_id = create_benchmark_folder(benchmark_context, api_context)
-    if folder_id is not None:
-        upload_successful = upload_results(folder_id, api_context, to_upload_paths)
-    
-    return benchmark_run_successful and upload_successful
+    if not args.no_upload:
+        upload_successful = False
+        folder_id = create_benchmark_folder(benchmark_context, api_context)
+        if folder_id is not None:
+            upload_successful = upload_results(folder_id, api_context, to_upload_paths)
+        status = status and upload_successful
+
+    return status
 
 
 if __name__ == '__main__':

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -86,35 +86,48 @@ apply(FlagOp flag_op, const T& a, const T& b, unsigned int)
     return flag_op(b, a);
 }
 
-
-
 typedef ::testing::Types<
     // Power of 2 BlockSize
     params<unsigned int, int, 64U, 1, hipcub::Equality>,
     params<int, bool, 128U, 1, hipcub::Inequality>,
     params<float, int, 256U, 1, test_utils::less>,
+#ifndef __HIP_PLATFORM_NVIDIA__
+    // Nvidia does not handle half and bfloat16 properly
+    params<test_utils::half, int, 256U, 1, test_utils::less>,
+    params<test_utils::bfloat16, int, 256U, 1, test_utils::less>,
+#endif
     params<char, char, 1024U, 1, test_utils::less_equal>,
-    params<int, bool, 256U, 1, custom_flag_op1<int> >,
+    params<int, bool, 256U, 1, custom_flag_op1<int>>,
 
     // Non-power of 2 BlockSize
     params<double, unsigned int, 65U, 1, test_utils::greater>,
-    params<float, int, 37U, 1, custom_flag_op1<float> >,
+    params<float, int, 37U, 1, custom_flag_op1<float>>,
+
+#ifndef __HIP_PLATFORM_NVIDIA__
+    params<test_utils::half, int, 37U, 1, test_utils::greater>,
+    params<test_utils::bfloat16, int, 37U, 1, test_utils::greater>,
+#endif
+
     params<long long, char, 510U, 1, test_utils::greater_equal>,
     params<unsigned int, long long, 162U, 1, hipcub::Inequality>,
     params<unsigned char, bool, 255U, 1, hipcub::Equality>,
 
     // Power of 2 BlockSize and ItemsPerThread > 1
-    params<int, char, 64U, 2, custom_flag_op2<int> >,
+    params<int, char, 64U, 2, custom_flag_op2<int>>,
     params<int, short, 128U, 4, test_utils::less>,
-    params<unsigned short, unsigned char, 256U, 7, custom_flag_op2<unsigned short> >,
+    params<unsigned short, unsigned char, 256U, 7, custom_flag_op2<unsigned short>>,
     params<short, short, 512U, 8, hipcub::Equality>,
 
     // Non-power of 2 BlockSize and ItemsPerThread > 1
-    params<double, int, 33U, 5, custom_flag_op2<double> >,
+    params<double, int, 33U, 5, custom_flag_op2<double>>,
     params<double, unsigned int, 464U, 2, hipcub::Equality>,
+#ifndef __HIP_PLATFORM_NVIDIA__
+    params<test_utils::half, int, 37U, 5, test_utils::greater>,
+    params<test_utils::bfloat16, int, 37U, 3, test_utils::greater>,
+#endif
     params<unsigned short, int, 100U, 3, test_utils::greater>,
-    params<short, bool, 234U, 9, custom_flag_op1<short> >
-> Params;
+    params<short, bool, 234U, 9, custom_flag_op1<short>>>
+    Params;
 
 TYPED_TEST_SUITE(HipcubBlockAdjacentDifference, Params);
 
@@ -284,27 +297,30 @@ struct custom_op2
     }
 };
 
-typedef ::testing::Types<
-    params_subtract<unsigned int, int, hipcub::Sum, 64U, 1>,
-    params_subtract<int, bool, custom_op1, 128U, 1>,
-    params_subtract<float, int, custom_op2, 256U, 1>,
-    params_subtract<int, bool, custom_op1, 256U, 1>,
+typedef ::testing::Types<params_subtract<unsigned int, int, hipcub::Sum, 64U, 1>,
+                         params_subtract<int, bool, custom_op1, 128U, 1>,
+                         params_subtract<float, int, custom_op2, 256U, 1>,
+#ifndef __HIP_PLATFORM_NVIDIA__
+                         params_subtract<test_utils::half, int, custom_op1, 256U, 1>,
+                         params_subtract<test_utils::bfloat16, int, custom_op2, 256U, 1>,
+#endif
+                         params_subtract<int, bool, custom_op1, 256U, 1>,
 
-    params_subtract<float, int, hipcub::Sum, 37U, 1>,
-    params_subtract<long long, char, custom_op1, 510U, 1>,
-    params_subtract<unsigned int, long long, custom_op2, 162U, 1>,  
-    params_subtract<unsigned char, bool, hipcub::Sum, 255U, 1>,
+                         params_subtract<float, int, hipcub::Sum, 37U, 1>,
+                         params_subtract<long long, char, custom_op1, 510U, 1>,
+                         params_subtract<unsigned int, long long, custom_op2, 162U, 1>,
+                         params_subtract<unsigned char, bool, hipcub::Sum, 255U, 1>,
 
-    params_subtract<int, char, custom_op1, 64U, 2>,
-    params_subtract<int, short, custom_op2, 128U, 4>,
-    params_subtract<unsigned short, unsigned char, hipcub::Sum, 256U, 7>,
-    params_subtract<short, short, custom_op1, 512U, 8>,
+                         params_subtract<int, char, custom_op1, 64U, 2>,
+                         params_subtract<int, short, custom_op2, 128U, 4>,
+                         params_subtract<unsigned short, unsigned char, hipcub::Sum, 256U, 7>,
+                         params_subtract<short, short, custom_op1, 512U, 8>,
 
-    params_subtract<double, int, custom_op2, 33U, 5>,
-    params_subtract<double, unsigned int, hipcub::Sum, 464U, 2>,
-    params_subtract<unsigned short, int, custom_op1, 100U, 3>,
-    params_subtract<short, bool, custom_op2, 234U, 9>
-> ParamsSubtract;
+                         params_subtract<double, int, custom_op2, 33U, 5>,
+                         params_subtract<double, unsigned int, hipcub::Sum, 464U, 2>,
+                         params_subtract<unsigned short, int, custom_op1, 100U, 3>,
+                         params_subtract<short, bool, custom_op2, 234U, 9>>
+    ParamsSubtract;
 
 TYPED_TEST_SUITE(HipcubBlockAdjacentDifferenceSubtract, ParamsSubtract);
 

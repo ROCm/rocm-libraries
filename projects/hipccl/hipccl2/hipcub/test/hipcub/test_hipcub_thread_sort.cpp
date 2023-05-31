@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -62,8 +62,12 @@ typedef ::testing::Types<
     params<unsigned long long, char, 9U>,
     params<unsigned char, int, 10U>,
     params<double, long long, 11U>,
-    params<test_utils::custom_test_type<int>, test_utils::custom_test_type<char>, 4U>
-> Params;
+    params<test_utils::custom_test_type<int>, test_utils::custom_test_type<char>, 4U>,
+    params<test_utils::bfloat16, test_utils::bfloat16, 7U>,
+    params<test_utils::half, test_utils::half, 6U>,
+    //params<test_utils::half, long long, 6U>,
+    params<test_utils::bfloat16, int, 7U>>
+    Params;
 
 TYPED_TEST_SUITE(HipcubThreadSort, Params);
 
@@ -126,15 +130,18 @@ TYPED_TEST(HipcubThreadSort, SortKeys)
 
         // Generate data
         using wrapped_type = typename test_utils::inner_type<key_type>::type;
-        auto keys = std::is_floating_point<wrapped_type>::value ?
-            test_utils::get_random_data<key_type>(size,
-                                                  static_cast<wrapped_type>(-1000),
-                                                  static_cast<wrapped_type>(1000),
-                                                  seed_value) :
-            test_utils::get_random_data<key_type>(size,
-                                                  std::numeric_limits<wrapped_type>::lowest(),
-                                                  std::numeric_limits<wrapped_type>::max(),
-                                                  seed_value);
+
+        auto keys = test_utils::is_floating_point<wrapped_type>::value
+                        ? test_utils::get_random_data<key_type>(
+                            size,
+                            test_utils::convert_to_device<wrapped_type>(-1000),
+                            test_utils::convert_to_device<wrapped_type>(1000),
+                            seed_value)
+                        : test_utils::get_random_data<key_type>(
+                            size,
+                            test_utils::numeric_limits<wrapped_type>::lowest(),
+                            test_utils::numeric_limits<wrapped_type>::max(),
+                            seed_value);
 
         const auto compare = typename params::compare_function{};
 
@@ -168,7 +175,11 @@ TYPED_TEST(HipcubThreadSort, SortKeys)
         );
 
         // Verifying results
-        ASSERT_EQ(keys, expected);
+        for(size_t i = 0; i < size; i++)
+        {
+            ASSERT_EQ(test_utils::convert_to_native(keys[i]),
+                      test_utils::convert_to_native(expected[i]));
+        }
 
         HIP_CHECK(hipFree(device_keys));
     }
@@ -200,26 +211,32 @@ TYPED_TEST(HipcubThreadSort, SortKeysValues)
 
         // Generate data
         using wrapped_type = typename test_utils::inner_type<key_type>::type;
-        auto keys = std::is_floating_point<wrapped_type>::value ?
-            test_utils::get_random_data<key_type>(size,
-                                                  static_cast<wrapped_type>(-1000),
-                                                  static_cast<wrapped_type>(1000),
-                                                  seed_value) :
-            test_utils::get_random_data<key_type>(size,
-                                                  std::numeric_limits<wrapped_type>::lowest(),
-                                                  std::numeric_limits<wrapped_type>::max(),
-                                                  seed_value);
+
+        auto keys = test_utils::is_floating_point<wrapped_type>::value
+                        ? test_utils::get_random_data<key_type>(
+                            size,
+                            test_utils::convert_to_device<wrapped_type>(-1000),
+                            test_utils::convert_to_device<wrapped_type>(1000),
+                            seed_value)
+                        : test_utils::get_random_data<key_type>(
+                            size,
+                            test_utils::numeric_limits<wrapped_type>::lowest(),
+                            test_utils::numeric_limits<wrapped_type>::max(),
+                            seed_value);
 
         using value_wrapped_type = typename test_utils::inner_type<value_type>::type;
-        auto values = std::is_floating_point<value_wrapped_type>::value ?
-            test_utils::get_random_data<value_type>(size,
-                                                    static_cast<value_wrapped_type>(-1000),
-                                                    static_cast<value_wrapped_type>(1000),
-                                                    seed_value) :
-            test_utils::get_random_data<value_type>(size,
-                                                    std::numeric_limits<value_wrapped_type>::lowest(),
-                                                    std::numeric_limits<value_wrapped_type>::max(),
-                                                    seed_value ^ (seed_value >> 1ul));
+
+        auto values = test_utils::is_floating_point<value_wrapped_type>::value
+                          ? test_utils::get_random_data<value_type>(
+                              size,
+                              test_utils::convert_to_device<value_wrapped_type>(-1000),
+                              test_utils::convert_to_device<value_wrapped_type>(1000),
+                              seed_value)
+                          : test_utils::get_random_data<value_type>(
+                              size,
+                              test_utils::numeric_limits<value_wrapped_type>::lowest(),
+                              test_utils::numeric_limits<value_wrapped_type>::max(),
+                              seed_value ^ (seed_value >> 1ul));
 
         const auto compare = typename params::compare_function{};
 
@@ -278,8 +295,11 @@ TYPED_TEST(HipcubThreadSort, SortKeysValues)
         // Verifying results
         for(size_t i = 0; i < size; i++)
         {
-            ASSERT_EQ(keys[i], expected[i].first);
-            ASSERT_EQ(values[i], expected[i].second);
+            ASSERT_EQ(test_utils::convert_to_native(keys[i]),
+                      test_utils::convert_to_native(expected[i].first));
+
+            ASSERT_EQ(test_utils::convert_to_native(values[i]),
+                      test_utils::convert_to_native(expected[i].second));
         }
 
         HIP_CHECK(hipFree(device_keys));

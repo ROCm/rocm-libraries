@@ -1,4 +1,6 @@
-// Copyright (c) 2019-2020 Advanced Micro Devices, Inc. All rights reserved.
+// MIT License
+//
+// Copyright (c) 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -56,6 +58,8 @@ struct class_params
 #define class_param_type(load_algo, store_algo)                                           \
     class_param_block_size_512(load_algo, store_algo, int),                               \
         class_param_block_size_512(load_algo, store_algo, double),                        \
+        class_param_block_size_512(load_algo, store_algo, test_utils::half),              \
+        class_param_block_size_512(load_algo, store_algo, test_utils::bfloat16),          \
         class_param_block_size(load_algo, store_algo, test_utils::custom_test_type<int>), \
         class_param_block_size(load_algo, store_algo, test_utils::custom_test_type<double>)
 
@@ -113,10 +117,10 @@ template<class Type,
          hipcub::BlockStoreAlgorithm StoreMethod,
          unsigned int                BlockSize,
          unsigned int                ItemsPerThread>
-__global__ __launch_bounds__(BlockSize) void load_store_valid_default_kernel(Type * device_input,
-                                                                             Type * device_output,
+__global__ __launch_bounds__(BlockSize) void load_store_valid_default_kernel(Type*  device_input,
+                                                                             Type*  device_output,
                                                                              size_t valid,
-                                                                             int    _default)
+                                                                             Type   _default)
 {
     Type         items[ItemsPerThread];
     unsigned int offset = hipBlockIdx_x * BlockSize * ItemsPerThread;

@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2021, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2021-2023, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -132,7 +132,11 @@ public:
         OffsetT counters[2];
         counters[FILL] = fill_size;
         counters[DRAIN] = 0;
-        result = CubDebug(hipMemcpyAsync(d_counters, counters, sizeof(OffsetT) * 2, hipMemcpyHostToDevice, stream));
+        result          = HipcubDebug(hipMemcpyAsync(d_counters,
+                                            counters,
+                                            sizeof(OffsetT) * 2,
+                                            hipMemcpyHostToDevice,
+                                            stream));
         return result;
     }
 
@@ -149,7 +153,7 @@ public:
     HIPCUB_HOST hipError_t ResetDrain(hipStream_t stream = 0)
     {
         hipError_t result = hipErrorUnknown;
-        result = CubDebug(hipMemsetAsync(d_counters + DRAIN, 0, sizeof(OffsetT), stream));
+        result = HipcubDebug(hipMemsetAsync(d_counters + DRAIN, 0, sizeof(OffsetT), stream));
         return result;
     }
 
@@ -167,7 +171,7 @@ public:
     HIPCUB_HOST hipError_t ResetFill(hipStream_t stream = 0)
     {
         hipError_t result = hipErrorUnknown;
-        result = CubDebug(hipMemsetAsync(d_counters + FILL, 0, sizeof(OffsetT), stream));
+        result = HipcubDebug(hipMemsetAsync(d_counters + FILL, 0, sizeof(OffsetT), stream));
         return result;
     }
 
@@ -189,7 +193,11 @@ public:
         hipStream_t stream = 0)
     {
         hipError_t result = hipErrorUnknown;
-        result = CubDebug(hipMemcpyAsync(&fill_size, d_counters + FILL, sizeof(OffsetT), hipMemcpyDeviceToHost, stream));
+        result            = HipcubDebug(hipMemcpyAsync(&fill_size,
+                                            d_counters + FILL,
+                                            sizeof(OffsetT),
+                                            hipMemcpyDeviceToHost,
+                                            stream));
         return result;
     }
 

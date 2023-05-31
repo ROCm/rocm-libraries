@@ -53,7 +53,7 @@ cd hipCUB; mkdir build; cd build
 #   DOWNLOAD_ROCPRIM - OFF by default and at ON the rocPRIM will be downloaded to build folder,
 #
 # ! IMPORTANT !
-# Set C++ compiler to HCC or HIP-clang. You can do it by adding 'CXX=<path-to-compiler>'
+# Set C++ compiler to HIP-aware clang. You can do it by adding 'CXX=<path-to-compiler>'
 # before 'cmake' or setting cmake option 'CMAKE_CXX_COMPILER' to path to the compiler.
 #
 [CXX=hipcc] cmake ../. # or cmake-gui ../.

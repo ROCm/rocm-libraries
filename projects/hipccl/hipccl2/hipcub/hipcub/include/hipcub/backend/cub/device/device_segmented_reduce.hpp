@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2020, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2023, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -58,15 +58,17 @@ struct DeviceSegmentedReduce
                       hipStream_t stream = 0,
                       bool debug_synchronous = false)
     {
-        return hipCUDAErrorTohipError(
-            ::cub::DeviceSegmentedReduce::Reduce(
-                d_temp_storage, temp_storage_bytes,
-                d_in, d_out, num_segments,
-                d_begin_offsets, d_end_offsets,
-                reduction_op, initial_value,
-                stream, debug_synchronous
-            )
-        );
+        (void)debug_synchronous;
+        return hipCUDAErrorTohipError(::cub::DeviceSegmentedReduce::Reduce(d_temp_storage,
+                                                                           temp_storage_bytes,
+                                                                           d_in,
+                                                                           d_out,
+                                                                           num_segments,
+                                                                           d_begin_offsets,
+                                                                           d_end_offsets,
+                                                                           reduction_op,
+                                                                           initial_value,
+                                                                           stream));
     }
 
     template<
@@ -85,14 +87,15 @@ struct DeviceSegmentedReduce
                    hipStream_t stream = 0,
                    bool debug_synchronous = false)
     {
-        return hipCUDAErrorTohipError(
-            ::cub::DeviceSegmentedReduce::Sum(
-                d_temp_storage, temp_storage_bytes,
-                d_in, d_out, num_segments,
-                d_begin_offsets, d_end_offsets,
-                stream, debug_synchronous
-            )
-        );
+        (void)debug_synchronous;
+        return hipCUDAErrorTohipError(::cub::DeviceSegmentedReduce::Sum(d_temp_storage,
+                                                                        temp_storage_bytes,
+                                                                        d_in,
+                                                                        d_out,
+                                                                        num_segments,
+                                                                        d_begin_offsets,
+                                                                        d_end_offsets,
+                                                                        stream));
     }
 
     template<
@@ -111,14 +114,15 @@ struct DeviceSegmentedReduce
                    hipStream_t stream = 0,
                    bool debug_synchronous = false)
     {
-        return hipCUDAErrorTohipError(
-            ::cub::DeviceSegmentedReduce::Min(
-                d_temp_storage, temp_storage_bytes,
-                d_in, d_out, num_segments,
-                d_begin_offsets, d_end_offsets,
-                stream, debug_synchronous
-            )
-        );
+        (void)debug_synchronous;
+        return hipCUDAErrorTohipError(::cub::DeviceSegmentedReduce::Min(d_temp_storage,
+                                                                        temp_storage_bytes,
+                                                                        d_in,
+                                                                        d_out,
+                                                                        num_segments,
+                                                                        d_begin_offsets,
+                                                                        d_end_offsets,
+                                                                        stream));
     }
 
     template<
@@ -137,14 +141,15 @@ struct DeviceSegmentedReduce
                       hipStream_t stream = 0,
                       bool debug_synchronous = false)
     {
-        return hipCUDAErrorTohipError(
-            ::cub::DeviceSegmentedReduce::ArgMin(
-                d_temp_storage, temp_storage_bytes,
-                d_in, d_out, num_segments,
-                d_begin_offsets, d_end_offsets,
-                stream, debug_synchronous
-            )
-        );
+        (void)debug_synchronous;
+        return hipCUDAErrorTohipError(::cub::DeviceSegmentedReduce::ArgMin(d_temp_storage,
+                                                                           temp_storage_bytes,
+                                                                           d_in,
+                                                                           d_out,
+                                                                           num_segments,
+                                                                           d_begin_offsets,
+                                                                           d_end_offsets,
+                                                                           stream));
     }
 
     template<
@@ -163,14 +168,15 @@ struct DeviceSegmentedReduce
                    hipStream_t stream = 0,
                    bool debug_synchronous = false)
     {
-        return hipCUDAErrorTohipError(
-            ::cub::DeviceSegmentedReduce::Max(
-                d_temp_storage, temp_storage_bytes,
-                d_in, d_out, num_segments,
-                d_begin_offsets, d_end_offsets,
-                stream, debug_synchronous
-            )
-        );
+        (void)debug_synchronous;
+        return hipCUDAErrorTohipError(::cub::DeviceSegmentedReduce::Max(d_temp_storage,
+                                                                        temp_storage_bytes,
+                                                                        d_in,
+                                                                        d_out,
+                                                                        num_segments,
+                                                                        d_begin_offsets,
+                                                                        d_end_offsets,
+                                                                        stream));
     }
 
     template<
@@ -189,14 +195,15 @@ struct DeviceSegmentedReduce
                       hipStream_t stream = 0,
                       bool debug_synchronous = false)
     {
-        return hipCUDAErrorTohipError(
-            ::cub::DeviceSegmentedReduce::ArgMax(
-                d_temp_storage, temp_storage_bytes,
-                d_in, d_out, num_segments,
-                d_begin_offsets, d_end_offsets,
-                stream, debug_synchronous
-            )
-        );
+        (void)debug_synchronous;
+        return hipCUDAErrorTohipError(::cub::DeviceSegmentedReduce::ArgMax(d_temp_storage,
+                                                                           temp_storage_bytes,
+                                                                           d_in,
+                                                                           d_out,
+                                                                           num_segments,
+                                                                           d_begin_offsets,
+                                                                           d_end_offsets,
+                                                                           stream));
     }
 };
 

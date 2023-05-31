@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -26,6 +26,7 @@
 #include "hipcub/device/device_adjacent_difference.hpp"
 #include "hipcub/iterator/counting_input_iterator.hpp"
 #include "hipcub/iterator/transform_input_iterator.hpp"
+#include "test_utils_data_generation.hpp"
 
 template <class InputIteratorT, class OutputIteratorT, class... Args>
 hipError_t dispatch_adjacent_difference(std::true_type /*left*/,
@@ -128,13 +129,19 @@ public:
     using params = Params;
 };
 
-typedef ::testing::Types<
-    params<int>,
-    params<int, double>,
-    params<int8_t, int8_t, true, false>,
-    params<float, float, false, true>,
-    params<double, double, true, true>
-> Params;
+typedef ::testing::Types<params<int>,
+                         params<int, double>,
+                         params<int8_t, int8_t, true, false>,
+                         params<float, float, false, true>,
+                         params<double, double, true, true>
+#ifndef __HIP_PLATFORM_NVIDIA__
+                         ,
+                         // Kernel doesn't work on NVidia.
+                         params<test_utils::half, test_utils::half>,
+                         params<test_utils::bfloat16, test_utils::bfloat16>
+#endif
+                         >
+    Params;
 
 std::vector<size_t> get_sizes()
 {
@@ -189,10 +196,9 @@ TYPED_TEST(HipcubDeviceAdjacentDifference, SubtractLeftCopy)
 
             const auto input = test_utils::get_random_data<input_type>(
                 size,
-                static_cast<input_type>(-50),
-                static_cast<input_type>(50),
-                seed_value
-            );
+                test_utils::convert_to_device<input_type>(-50),
+                test_utils::convert_to_device<input_type>(50),
+                seed_value);
 
             input_type * d_input{};
             output_type * d_output{};

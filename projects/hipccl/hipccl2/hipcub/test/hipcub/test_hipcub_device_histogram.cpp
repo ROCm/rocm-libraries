@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2020 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -63,33 +63,34 @@ std::vector<std::tuple<size_t, size_t, size_t>> get_dims()
 // Generate values ouside the desired histogram range (+-10%)
 // (correctly handling test cases like uchar [0, 256), ushort [0, 65536))
 template<class T, class U>
-inline auto get_random_samples(size_t size, U min, U max, unsigned int seed_value)
-    -> typename std::enable_if<std::is_integral<T>::value, std::vector<T>>::type
+inline auto get_random_samples(size_t size, U min, U max, unsigned int seed_value) ->
+    typename std::enable_if<std::is_integral<T>::value, std::vector<T>>::type
 {
     const long long min1 = static_cast<long long>(min);
     const long long max1 = static_cast<long long>(max);
     const long long d = max1 - min1;
     return test_utils::get_random_data<T>(
         size,
-        static_cast<T>(std::max(min1 - d / 10, static_cast<long long>(std::numeric_limits<T>::lowest()))),
-        static_cast<T>(std::min(max1 + d / 10, static_cast<long long>(std::numeric_limits<T>::max()))),
-        seed_value
-    );
+        static_cast<T>(
+            std::max(min1 - d / 10, static_cast<long long>(std::numeric_limits<T>::lowest()))),
+        static_cast<T>(
+            std::min(max1 + d / 10, static_cast<long long>(std::numeric_limits<T>::max()))),
+        seed_value);
 }
 
 template<class T, class U>
-inline auto get_random_samples(size_t size, U min, U max, unsigned int seed_value)
-    -> typename std::enable_if<std::is_floating_point<T>::value, std::vector<T>>::type
+inline auto get_random_samples(size_t size, U min, U max, unsigned int seed_value) ->
+    typename std::enable_if<test_utils::is_floating_point<T>::value, std::vector<T>>::type
 {
     const double min1 = static_cast<double>(min);
     const double max1 = static_cast<double>(max);
     const double d = max1 - min1;
     return test_utils::get_random_data<T>(
         size,
-        static_cast<T>(std::max(min1 - d / 10, static_cast<double>(std::numeric_limits<T>::lowest()))),
+        static_cast<T>(
+            std::max(min1 - d / 10, static_cast<double>(std::numeric_limits<T>::lowest()))),
         static_cast<T>(std::min(max1 + d / 10, static_cast<double>(std::numeric_limits<T>::max()))),
-        seed_value
-    );
+        seed_value);
 }
 
 // Does nothing, used for testing iterators (not raw pointers) as samples input
@@ -99,7 +100,7 @@ struct transform_op
     __host__ __device__ inline
     T operator()(T x) const
     {
-        return x * 1;
+        return x * T(1.0);
     }
 };
 
@@ -127,18 +128,20 @@ public:
     using params = Params;
 };
 
-typedef ::testing::Types<
-    params1<int, 10, 0, 10>,
-    params1<int, 128, 0, 256>,
-    params1<unsigned int, 12345, 10, 12355, short>,
-    params1<unsigned short, 65536, 0, 65536, int>,
-    params1<unsigned char, 10, 20, 240, unsigned char, unsigned int>,
-    params1<unsigned char, 256, 0, 256, short>,
-
-    params1<double, 10, 0, 1000, double, int>,
-    params1<int, 123, 100, 5635, int>,
-    params1<double, 55, -123, +123, double>
-> Params1;
+typedef ::testing::Types<params1<int, 10, 0, 10>,
+                         params1<int, 128, 0, 256>,
+                         params1<unsigned int, 12345, 10, 12355, short>,
+                         params1<unsigned short, 65536, 0, 65536, int>,
+                         params1<unsigned char, 10, 20, 240, unsigned char, unsigned int>,
+                         params1<unsigned char, 256, 0, 256, short>,
+                         params1<test_utils::half, 55, -123, +123, test_utils::half>,
+#ifndef __HIP_PLATFORM_NVIDIA__
+                         params1<test_utils::bfloat16, 55, -123, +123, test_utils::bfloat16>,
+#endif
+                         params1<double, 10, 0, 1000, double, int>,
+                         params1<int, 123, 100, 5635, int>,
+                         params1<double, 55, -123, +123, double>>
+    Params1;
 
 TYPED_TEST_SUITE(HipcubDeviceHistogramEven, Params1);
 
@@ -152,8 +155,24 @@ TYPED_TEST(HipcubDeviceHistogramEven, Even)
     using counter_type = typename TestFixture::params::counter_type;
     using level_type = typename TestFixture::params::level_type;
     constexpr unsigned int bins = TestFixture::params::bins;
-    constexpr level_type lower_level = TestFixture::params::lower_level;
-    constexpr level_type upper_level = TestFixture::params::upper_level;
+
+    // native host types
+    using native_sample_type = test_utils::convert_to_fundamental_t<sample_type>;
+    using native_level_type  = test_utils::convert_to_fundamental_t<level_type>;
+
+    const native_level_type n_lower_level = TestFixture::params::lower_level;
+    const native_level_type n_upper_level = TestFixture::params::upper_level;
+
+    level_type lower_level = test_utils::convert_to_device<level_type>(n_lower_level);
+    level_type upper_level = test_utils::convert_to_device<level_type>(n_upper_level);
+
+    // accuracy problems with bfloat and half
+    // nvidia cub also doesn't work
+    // TODO: check if nvidia works with only sample type bfloat/half
+    if(test_utils::is_half<level_type>::value || test_utils::is_bfloat16<level_type>::value)
+    {
+        GTEST_SKIP();
+    }
 
     hipStream_t stream = 0;
 
@@ -200,16 +219,17 @@ TYPED_TEST(HipcubDeviceHistogramEven, Even)
 
             // Calculate expected results on host
             std::vector<counter_type> histogram_expected(bins, 0);
-            const level_type scale = (upper_level - lower_level) / bins;
+            const native_level_type   scale = (n_upper_level - n_lower_level) / bins;
             for(size_t row = 0; row < rows; row++)
             {
                 for(size_t column = 0; column < columns; column++)
                 {
-                    const sample_type sample = input[row * row_stride + column];
-                    const level_type s = static_cast<level_type>(sample);
-                    if(s >= lower_level && s < upper_level)
+                    const native_sample_type sample
+                        = test_utils::convert_to_native(input[row * row_stride + column]);
+                    const native_level_type s = static_cast<native_level_type>(sample);
+                    if(s >= n_lower_level && s < n_upper_level)
                     {
-                        const int bin = (s - lower_level) / scale;
+                        const int bin = (s - n_lower_level) / scale;
                         histogram_expected[bin]++;
                     }
                 }
@@ -324,10 +344,13 @@ typedef ::testing::Types<
     params2<unsigned int, 10000, 0, 1, 100>,
     params2<unsigned short, 65536, 0, 1, 1, int>,
     params2<unsigned char, 256, 0, 1, 1, unsigned short>,
-
+    params2<test_utils::half, 3, 10000, 1000, 1000, test_utils::half, unsigned int>,
+#ifndef __HIP_PLATFORM_NVIDIA__
+    params2<test_utils::bfloat16, 3, 10000, 1000, 1000, test_utils::bfloat16, unsigned int>,
+#endif
     params2<float, 456, -100, 1, 123>,
-    params2<double, 3, 10000, 1000, 1000, double, unsigned int>
-> Params2;
+    params2<double, 3, 10000, 1000, 1000, double, unsigned int>>
+    Params2;
 
 TYPED_TEST_SUITE(HipcubDeviceHistogramRange, Params2);
 
@@ -337,10 +360,15 @@ TYPED_TEST(HipcubDeviceHistogramRange, Range)
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
+    // device types
     using sample_type = typename TestFixture::params::sample_type;
     using counter_type = typename TestFixture::params::counter_type;
     using level_type = typename TestFixture::params::level_type;
     constexpr unsigned int bins = TestFixture::params::bins;
+
+    // native host types
+    using native_sample_type = test_utils::convert_to_fundamental_t<sample_type>;
+    using native_level_type  = test_utils::convert_to_fundamental_t<level_type>;
 
     hipStream_t stream = 0;
 
@@ -375,13 +403,17 @@ TYPED_TEST(HipcubDeviceHistogramRange, Range)
 
             // Generate data
             std::vector<level_type> levels;
-            level_type level = TestFixture::params::start_level;
+            std::vector<native_level_type> n_levels;
+            native_level_type              n_level = TestFixture::params::start_level;
             for(unsigned int bin = 0 ; bin < bins; bin++)
             {
-                levels.push_back(level);
-                level += bin_length_dis(gen);
+                n_levels.push_back(n_level);
+                levels.push_back(test_utils::convert_to_device<level_type>(n_level));
+
+                n_level += bin_length_dis(gen);
             }
-            levels.push_back(level);
+            n_levels.push_back(n_level);
+            levels.push_back(test_utils::convert_to_device<level_type>(n_level));
 
             std::vector<sample_type> input = get_random_samples<sample_type>(
                 size,
@@ -417,12 +449,13 @@ TYPED_TEST(HipcubDeviceHistogramRange, Range)
             {
                 for(size_t column = 0; column < columns; column++)
                 {
-                    const sample_type sample = input[row * row_stride + column];
-                    const level_type s = static_cast<level_type>(sample);
-                    if(s >= levels[0] && s < levels[bins])
+                    const native_sample_type sample
+                        = test_utils::convert_to_native(input[row * row_stride + column]);
+                    const native_level_type s = static_cast<native_level_type>(sample);
+                    if(s >= n_levels[0] && s < n_levels[bins])
                     {
-                        const auto bin_iter = std::upper_bound(levels.begin(), levels.end(), s);
-                        histogram_expected[bin_iter - levels.begin() - 1]++;
+                        const auto bin_iter = std::upper_bound(n_levels.begin(), n_levels.end(), s);
+                        histogram_expected[bin_iter - n_levels.begin() - 1]++;
                     }
                 }
             }
@@ -533,19 +566,21 @@ public:
     using params = Params;
 };
 
-typedef ::testing::Types<
-    params3<int, 4, 3, 2000, 0, 2000>,
-    params3<int, 2, 1, 10, 0, 10>,
-    params3<int, 3, 3, 128, 0, 256>,
-    params3<unsigned int, 1, 1, 12345, 10, 12355, short>,
-    params3<unsigned short, 4, 4, 65536, 0, 65536, int>,
-    params3<unsigned char, 3, 1, 10, 20, 240, unsigned char, unsigned int>,
-    params3<unsigned char, 2, 2, 256, 0, 256, short>,
-
-    params3<double, 4, 2, 10, 0, 1000, double, int>,
-    params3<int, 3, 2, 123, 100, 5635, int>,
-    params3<double, 4, 3, 55, -123, +123, double>
-> Params3;
+typedef ::testing::Types<params3<int, 4, 3, 2000, 0, 2000>,
+                         params3<int, 2, 1, 10, 0, 10>,
+                         params3<int, 3, 3, 128, 0, 256>,
+                         params3<unsigned int, 1, 1, 12345, 10, 12355, short>,
+                         params3<unsigned int, 4, 4, 65536, 0, 65536, int>,
+                         params3<unsigned char, 3, 1, 10, 20, 240, unsigned char, unsigned int>,
+                         params3<unsigned char, 2, 2, 256, 0, 256, short>,
+                         params3<test_utils::half, 4, 3, 55, -123, +123, test_utils::half>,
+#ifndef __HIP_PLATFORM_NVIDIA__
+                         params3<test_utils::bfloat16, 4, 3, 55, -123, +123, test_utils::bfloat16>,
+#endif
+                         params3<double, 4, 2, 10, 0, 1000, double, int>,
+                         params3<int, 3, 2, 123, 100, 5635, int>,
+                         params3<double, 4, 3, 55, -123, +123, double>>
+    Params3;
 
 TYPED_TEST_SUITE(HipcubDeviceHistogramMultiEven, Params3);
 
@@ -555,9 +590,15 @@ TYPED_TEST(HipcubDeviceHistogramMultiEven, MultiEven)
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
+    // device types
     using sample_type = typename TestFixture::params::sample_type;
     using counter_type = typename TestFixture::params::counter_type;
     using level_type = typename TestFixture::params::level_type;
+
+    // native host types
+    using native_sample_type = test_utils::convert_to_fundamental_t<sample_type>;
+    using native_level_type  = test_utils::convert_to_fundamental_t<level_type>;
+
     constexpr unsigned int channels = TestFixture::params::channels;
     constexpr unsigned int active_channels = TestFixture::params::active_channels;
 
@@ -565,16 +606,25 @@ TYPED_TEST(HipcubDeviceHistogramMultiEven, MultiEven)
     int num_levels[active_channels];
     level_type lower_level[active_channels];
     level_type upper_level[active_channels];
+    native_level_type n_lower_level[active_channels];
+    native_level_type n_upper_level[active_channels];
+
     for(unsigned int channel = 0; channel < active_channels; channel++)
     {
         // Use different ranges for different channels
-        constexpr level_type d = TestFixture::params::upper_level - TestFixture::params::lower_level;
-        const level_type scale = d / TestFixture::params::bins;
-        lower_level[channel] = TestFixture::params::lower_level + channel * d / 9;
-        upper_level[channel] = TestFixture::params::upper_level - channel * d / 7;
-        bins[channel] = (upper_level[channel] - lower_level[channel]) / scale;
-        upper_level[channel] = lower_level[channel] + bins[channel] * scale;
+        constexpr native_level_type d
+            = TestFixture::params::upper_level - TestFixture::params::lower_level;
+        const native_level_type scale = d / TestFixture::params::bins;
+
+        n_lower_level[channel] = TestFixture::params::lower_level + channel * d / 9;
+        n_upper_level[channel] = TestFixture::params::upper_level - channel * d / 7;
+
+        bins[channel]          = (n_upper_level[channel] - n_lower_level[channel]) / scale;
+        n_upper_level[channel] = n_lower_level[channel] + bins[channel] * scale;
         num_levels[channel] = bins[channel] + 1;
+
+        lower_level[channel] = test_utils::convert_to_device<level_type>(n_lower_level[channel]);
+        upper_level[channel] = test_utils::convert_to_device<level_type>(n_upper_level[channel]);
     }
 
     hipStream_t stream = 0;
@@ -604,7 +654,8 @@ TYPED_TEST(HipcubDeviceHistogramMultiEven, MultiEven)
                 size,
                 std::numeric_limits<unsigned int>::min(),
                 std::numeric_limits<unsigned int>::max(),
-                seed_value + seed_value_addition // Make sure that we do not use the same or shifted sequence
+                seed_value
+                    + seed_value_addition // Make sure that we do not use the same or shifted sequence
             );
 
             // Generate data
@@ -667,17 +718,19 @@ TYPED_TEST(HipcubDeviceHistogramMultiEven, MultiEven)
             for(unsigned int channel = 0; channel < active_channels; channel++)
             {
                 histogram_expected[channel] = std::vector<counter_type>(bins[channel], 0);
-                const level_type scale = (upper_level[channel] - lower_level[channel]) / bins[channel];
+                const native_level_type scale
+                    = (n_upper_level[channel] - n_lower_level[channel]) / bins[channel];
 
                 for(size_t row = 0; row < rows; row++)
                 {
                     for(size_t column = 0; column < columns; column++)
                     {
-                        const sample_type sample = input[row * row_stride + column * channels + channel];
-                        const level_type s = static_cast<level_type>(sample);
-                        if(s >= lower_level[channel] && s < upper_level[channel])
+                        const native_sample_type sample = test_utils::convert_to_native(
+                            input[row * row_stride + column * channels + channel]);
+                        const native_level_type s = static_cast<level_type>(sample);
+                        if(s >= n_lower_level[channel] && s < n_upper_level[channel])
                         {
-                            const int bin = (s - lower_level[channel]) / scale;
+                            const int bin = (s - n_lower_level[channel]) / scale;
                             histogram_expected[channel][bin]++;
                         }
                     }
@@ -815,10 +868,13 @@ typedef ::testing::Types<
     params4<unsigned int, 1, 1, 10000, 0, 1, 100>,
     params4<unsigned short, 4, 4, 65536, 0, 1, 1, int>,
     params4<unsigned char, 3, 2, 256, 0, 1, 1, unsigned short>,
-
+    params4<test_utils::half, 3, 1, 3, 10000, 1000, 1000, test_utils::half, unsigned int>,
+#ifndef __HIP_PLATFORM_NVIDIA__
+    params4<test_utils::bfloat16, 3, 1, 3, 10000, 1000, 1000, test_utils::bfloat16, unsigned int>,
+#endif
     params4<float, 4, 2, 456, -100, 1, 123>,
-    params4<double, 3, 1, 3, 10000, 1000, 1000, double, unsigned int>
-> Params4;
+    params4<double, 3, 1, 3, 10000, 1000, 1000, double, unsigned int>>
+    Params4;
 
 TYPED_TEST_SUITE(HipcubDeviceHistogramMultiRange, Params4);
 
@@ -828,9 +884,15 @@ TYPED_TEST(HipcubDeviceHistogramMultiRange, MultiRange)
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
+    // device types
     using sample_type = typename TestFixture::params::sample_type;
     using counter_type = typename TestFixture::params::counter_type;
     using level_type = typename TestFixture::params::level_type;
+
+    // native host types
+    using native_sample_type = test_utils::convert_to_fundamental_t<sample_type>;
+    using native_level_type  = test_utils::convert_to_fundamental_t<level_type>;
+
     constexpr unsigned int channels = TestFixture::params::channels;
     constexpr unsigned int active_channels = TestFixture::params::active_channels;
 
@@ -878,20 +940,24 @@ TYPED_TEST(HipcubDeviceHistogramMultiRange, MultiRange)
                 size,
                 std::numeric_limits<unsigned int>::min(),
                 std::numeric_limits<unsigned int>::max(),
-                seed_value
-            );
+                seed_value);
 
             // Generate data
             std::vector<level_type> levels[active_channels];
+            std::vector<native_level_type> n_levels[active_channels];
+
             for(unsigned int channel = 0; channel < active_channels; channel++)
             {
-                level_type level = TestFixture::params::start_level;
+                native_level_type n_level = TestFixture::params::start_level;
                 for(unsigned int bin = 0 ; bin < bins[channel]; bin++)
                 {
-                    levels[channel].push_back(level);
-                    level += bin_length_dis[channel](gen);
+                    n_levels[channel].push_back(n_level);
+                    levels[channel].push_back(test_utils::convert_to_device<level_type>(n_level));
+
+                    n_level += bin_length_dis[channel](gen);
                 }
-                levels[channel].push_back(level);
+                n_levels[channel].push_back(n_level);
+                levels[channel].push_back(test_utils::convert_to_device<level_type>(n_level));
             }
 
             std::vector<sample_type> input(size);
@@ -970,12 +1036,15 @@ TYPED_TEST(HipcubDeviceHistogramMultiRange, MultiRange)
                 {
                     for(size_t column = 0; column < columns; column++)
                     {
-                        const sample_type sample = input[row * row_stride + column * channels + channel];
-                        const level_type s = static_cast<level_type>(sample);
-                        if(s >= levels[channel][0] && s < levels[channel][bins[channel]])
+                        const native_sample_type sample = test_utils::convert_to_native(
+                            input[row * row_stride + column * channels + channel]);
+                        const native_level_type s = static_cast<native_level_type>(sample);
+                        if(s >= n_levels[channel][0] && s < n_levels[channel][bins[channel]])
                         {
-                            const auto bin_iter = std::upper_bound(levels[channel].begin(), levels[channel].end(), s);
-                            const int bin = bin_iter - levels[channel].begin() - 1;
+                            const auto bin_iter = std::upper_bound(n_levels[channel].begin(),
+                                                                   n_levels[channel].end(),
+                                                                   s);
+                            const int  bin      = bin_iter - n_levels[channel].begin() - 1;
                             histogram_expected[channel][bin]++;
                         }
                     }
