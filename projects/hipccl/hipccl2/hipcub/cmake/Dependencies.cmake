@@ -116,27 +116,11 @@ endif()
 
 # Test dependencies
 if(BUILD_TEST)
-  # NOTE1: Google Test has has two incompatible find_package paths: 
-  #        the legacy FindGTest.cmake and the newer GTestConfig.cmake
-  #
-  # FindGTest.cmake defines:   GTest::GTest, GTest::Main, GTEST_FOUND
-  #
-  # GTestConfig.cmake defines: GTest::gtest, GTest::gtest_main, GTest::gmock, GTest::gmock_main
-  #
-  # NOTE2: Finding GTest in MODULE mode, one cannot invoke find_package in CONFIG mode, because targets
-  #        will be duplicately defined.
-  #
-  # NOTE3: The following snippet first tries to find Google Test binary either in MODULE or CONFIG modes.
-  #        If neither succeeds it goes on to download Google Test from GitHub and defines the CONFIG
-  #        mode targets. 
-  #        Otherwise, if MODULE or CONFIG succeeded, then it prints the result to the
-  #        console via a non-QUIET find_package call and if MODULE succeeded, creates ALIAS targets
-  #        with the CONFIG names.
   if(NOT DEPENDENCIES_FORCE_DOWNLOAD)
-    find_package(GTest 1.11.0 QUIET)
+    find_package(GTest 1.11.0 CONFIG QUIET)
   endif()
 
-  if(NOT TARGET GTest::GTest AND NOT TARGET GTest::gtest)
+  if(NOT TARGET GTest::gtest)
     message(STATUS "GTest not found or force download GTest on. Downloading and building GTest.")
     if(WIN32)
       set(COMPILER_OVERRIDE "-DCMAKE_CXX_COMPILER=cl")
@@ -158,12 +142,6 @@ if(BUILD_TEST)
     )
     list(APPEND CMAKE_PREFIX_PATH ${GTEST_ROOT})
     find_package(GTest 1.11.0 EXACT CONFIG REQUIRED PATHS ${GTEST_ROOT})
-  else()
-    find_package(GTest 1.11.0 REQUIRED)
-    if(TARGET GTest::Main AND NOT TARGET GTest::gtest_main)
-      add_library(GTest::gtest       ALIAS GTest::GTest)
-      add_library(GTest::gtest_main  ALIAS GTest::Main)
-    endif()
   endif()
 endif()
 
