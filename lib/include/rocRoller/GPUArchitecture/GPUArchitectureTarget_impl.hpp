@@ -52,7 +52,7 @@ namespace rocRoller
 
     inline std::string GPUArchitectureTarget::toString() const
     {
-        return m_string_rep;
+        return m_stringRep;
     }
 
     inline void GPUArchitectureTarget::parseString(std::string const& input)
@@ -88,19 +88,19 @@ namespace rocRoller
             }
         }
 
-        m_string_rep        = createString(true);
-        m_version_rep       = createString(false);
-        m_llvm_features_rep = createLLVMFeatureString();
+        m_stringRep       = createString(true);
+        m_versionRep      = createString(false);
+        m_llvmFeaturesRep = createLLVMFeatureString();
     }
 
     inline std::string GPUArchitectureTarget::getLLVMFeatureString() const
     {
-        return m_llvm_features_rep;
+        return m_llvmFeaturesRep;
     }
 
     inline std::string GPUArchitectureTarget::getVersionString() const
     {
-        return m_version_rep;
+        return m_versionRep;
     }
 
     inline GPUArchitectureTarget::GPUArchitectureTarget(std::string const& input)

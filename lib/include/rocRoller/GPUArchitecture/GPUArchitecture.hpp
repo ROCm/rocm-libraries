@@ -87,7 +87,7 @@ namespace rocRoller
     private:
         GPUArchitectureTarget                     m_isaVersion;
         std::map<GPUCapability, int>              m_capabilities;
-        std::map<std::string, GPUInstructionInfo> m_instruction_infos;
+        std::map<std::string, GPUInstructionInfo> m_instructionInfos;
 
         template <std::floating_point T>
         // cppcheck-suppress functionStatic

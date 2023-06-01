@@ -88,9 +88,9 @@ namespace rocRoller
     private:
         struct HIPData;
 
-        std::string              m_kernel_name;
-        bool                     m_kernel_loaded;
-        std::shared_ptr<HIPData> m_hip_data;
+        std::string              m_kernelName;
+        bool                     m_kernelLoaded;
+        std::shared_ptr<HIPData> m_hipData;
     };
 }
 

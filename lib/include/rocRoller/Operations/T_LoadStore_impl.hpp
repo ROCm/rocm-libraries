@@ -10,13 +10,13 @@ namespace rocRoller
     {
         inline Load_Store_Operation::Load_Store_Operation()
             : m_tag(-1)
-            , m_data_type(DataType::Float)
+            , m_dataType(DataType::Float)
             , m_dims(1)
         {
         }
 
         inline Load_Store_Operation::Load_Store_Operation(DataType dataType, int dims, int dest)
-            : m_data_type(dataType)
+            : m_dataType(dataType)
             , m_dims(dims)
             , m_tag(dest)
         {
@@ -42,8 +42,8 @@ namespace rocRoller
         {
             std::ostringstream msg;
 
-            if(m_data_type != DataType::None)
-                msg << "." << m_data_type;
+            if(m_dataType != DataType::None)
+                msg << "." << m_dataType;
             msg << ".d" << m_dims << " " << m_tag << ", "
                 << "(base=";
             if(m_pointer)
@@ -98,7 +98,7 @@ namespace rocRoller
             {
                 std::string base = concatenate("Load_Linear_", m_tag);
 
-                m_pointer = ptr->allocateArgument({m_data_type, PointerType::PointerGlobal},
+                m_pointer = ptr->allocateArgument({m_dataType, PointerType::PointerGlobal},
                                                   DataDirection::ReadOnly,
                                                   base + "_pointer");
 
@@ -133,7 +133,7 @@ namespace rocRoller
 
         inline T_Load_Scalar::T_Load_Scalar(VariableType variableType, int dest)
             : Load_Store_Operation(variableType.dataType, 0, dest)
-            , m_variable_type(variableType)
+            , m_variableType(variableType)
         {
         }
 
@@ -141,7 +141,7 @@ namespace rocRoller
         {
             if(auto ptr = m_command.lock())
             {
-                m_pointer = ptr->allocateArgument(m_variable_type, DataDirection::ReadOnly);
+                m_pointer = ptr->allocateArgument(m_variableType, DataDirection::ReadOnly);
             }
         }
 
@@ -157,7 +157,7 @@ namespace rocRoller
 
         inline VariableType T_Load_Scalar::variableType() const
         {
-            return m_variable_type;
+            return m_variableType;
         }
 
         inline std::ostream& operator<<(std::ostream& stream, T_Load_Scalar const& val)
@@ -172,7 +172,7 @@ namespace rocRoller
 
         inline T_Load_Tiled::T_Load_Tiled(DataType dataType, int dims, int dest)
             : Load_Store_Operation(dataType, dims, dest)
-            , m_variable_type(dataType)
+            , m_variableType(dataType)
         {
         }
 
@@ -181,7 +181,7 @@ namespace rocRoller
                                           int                        dest,
                                           std::vector<size_t> const& literalStrides)
             : Load_Store_Operation(dataType, dims, dest)
-            , m_variable_type(dataType)
+            , m_variableType(dataType)
             , m_literalStrides(literalStrides)
         {
             AssertFatal(literalStrides.size() <= dims,
@@ -195,7 +195,7 @@ namespace rocRoller
             {
                 std::string base = concatenate("Load_Tiled_", m_tag);
 
-                m_pointer = ptr->allocateArgument({m_data_type, PointerType::PointerGlobal},
+                m_pointer = ptr->allocateArgument({m_dataType, PointerType::PointerGlobal},
                                                   DataDirection::ReadOnly,
                                                   base + "_pointer");
 
@@ -220,7 +220,7 @@ namespace rocRoller
 
         inline VariableType T_Load_Tiled::variableType() const
         {
-            return m_variable_type;
+            return m_variableType;
         }
 
         inline std::vector<size_t> T_Load_Tiled::literalStrides() const

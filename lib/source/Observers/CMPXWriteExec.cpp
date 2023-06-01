@@ -43,7 +43,7 @@ namespace rocRoller
         int CMPXWriteExec::getNops(Instruction const& inst) const
         {
             InstructionRef instRef(inst);
-            if(instRef.isMFMA() || (checkACCVGPR && instRef.isACCVGPRWrite()))
+            if(instRef.isMFMA() || (m_checkACCVGPR && instRef.isACCVGPRWrite()))
             {
                 return checkRegister(m_context.lock()->getExec()).value_or(0);
             }

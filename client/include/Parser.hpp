@@ -37,7 +37,7 @@ public:
     T get(std::string const& name, T const& defaultVal) const;
 
 private:
-    std::map<std::string, std::string> m_parsed_args;
-    std::map<std::string, Arg>         m_valid_args;
+    std::map<std::string, std::string> m_parsedArgs;
+    std::map<std::string, Arg>         m_validArgs;
     std::string                        m_helpMessage;
 };

@@ -223,7 +223,7 @@ namespace rocRoller
         T getTypeValue(std::string const& var) const;
 
         std::map<std::string, std::any> m_values;
-        std::vector<std::string>        setBitOptions;
+        std::vector<std::string>        m_setBitOptions;
     };
 }
 

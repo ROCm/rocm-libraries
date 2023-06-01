@@ -29,7 +29,7 @@ namespace rocRoller
         int VALUWrite::getNops(Instruction const& inst) const
         {
             InstructionRef instRef(inst);
-            if(instRef.isMFMA() || (checkACCVGPR && instRef.isACCVGPRWrite()))
+            if(instRef.isMFMA() || (m_checkACCVGPR && instRef.isACCVGPRWrite()))
             {
                 return checkSrcs(inst).value_or(0);
             }

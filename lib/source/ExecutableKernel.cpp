@@ -36,8 +36,8 @@ namespace rocRoller
     };
 
     ExecutableKernel::ExecutableKernel()
-        : m_kernel_loaded(false)
-        , m_hip_data(std::make_shared<HIPData>())
+        : m_kernelLoaded(false)
+        , m_hipData(std::make_shared<HIPData>())
     {
     }
 
@@ -49,11 +49,11 @@ namespace rocRoller
         std::vector<char> kernelObject
             = assembler.assembleMachineCode(instructions, target, kernelName);
 
-        HIP_CHECK(hipModuleLoadData(&(m_hip_data->m_hip_module), kernelObject.data()));
+        HIP_CHECK(hipModuleLoadData(&(m_hipData->m_hip_module), kernelObject.data()));
         HIP_CHECK(hipModuleGetFunction(
-            &(m_hip_data->m_function), m_hip_data->m_hip_module, kernelName.c_str()));
-        m_kernel_loaded = true;
-        m_kernel_name   = kernelName;
+            &(m_hipData->m_function), m_hipData->m_hip_module, kernelName.c_str()));
+        m_kernelLoaded = true;
+        m_kernelName   = kernelName;
     }
 
     void ExecutableKernel::loadKernelFromFile(std::string const&           fileName,
@@ -83,7 +83,7 @@ namespace rocRoller
         // TODO: Include this at a particular logging level.
         if(args.log())
         {
-            std::cout << "Launching kernel " << m_kernel_name << ": Workgroup: {"
+            std::cout << "Launching kernel " << m_kernelName << ": Workgroup: {"
                       << invocation.workgroupSize[0] << ", " << invocation.workgroupSize[1] << ", "
                       << invocation.workgroupSize[2] << "}, Workitems: {"
                       << invocation.workitemCount[0] << ", " << invocation.workitemCount[1] << ", "
@@ -102,7 +102,7 @@ namespace rocRoller
                                    &argsSize,
                                    HIP_LAUNCH_PARAM_END};
 
-        HIP_CHECK(hipExtModuleLaunchKernel(m_hip_data->m_function,
+        HIP_CHECK(hipExtModuleLaunchKernel(m_hipData->m_function,
                                            invocation.workitemCount[0],
                                            invocation.workitemCount[1],
                                            invocation.workitemCount[2],

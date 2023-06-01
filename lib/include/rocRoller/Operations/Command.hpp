@@ -81,11 +81,11 @@ namespace rocRoller
 
         std::map<int, std::shared_ptr<Operations::Operation>> m_tagMap;
 
-        std::vector<std::shared_ptr<CommandArgument>> m_command_args;
+        std::vector<std::shared_ptr<CommandArgument>> m_commandArgs;
 
         int m_nextTagValue = 0;
 
-        int m_runtime_args_offset = 0;
+        int m_runtimeArgsOffset = 0;
     };
 
     std::ostream& operator<<(std::ostream& stream, Command const& command);

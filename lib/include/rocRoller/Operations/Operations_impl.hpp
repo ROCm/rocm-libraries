@@ -250,23 +250,23 @@ namespace rocRoller
         inline std::string ToStringVisitor::call(Operation const&     op,
                                                  const unsigned char* runtime_args)
         {
-            m_runtime_args = runtime_args;
+            m_runtimeArgs = runtime_args;
             return std::visit(*this, op);
         }
 
         inline std::string ToStringVisitor::operator()(T_Load_Linear const& load)
         {
-            return load.toString(m_runtime_args);
+            return load.toString(m_runtimeArgs);
         }
 
         inline std::string ToStringVisitor::operator()(T_Load_Scalar const& load)
         {
-            return load.toString(m_runtime_args);
+            return load.toString(m_runtimeArgs);
         }
 
         inline std::string ToStringVisitor::operator()(T_Load_Tiled const& load)
         {
-            return load.toString(m_runtime_args);
+            return load.toString(m_runtimeArgs);
         }
 
         inline std::string ToStringVisitor::operator()(T_Mul const& mul)
@@ -276,12 +276,12 @@ namespace rocRoller
 
         inline std::string ToStringVisitor::operator()(T_Store_Linear const& store)
         {
-            return store.toString(m_runtime_args);
+            return store.toString(m_runtimeArgs);
         }
 
         inline std::string ToStringVisitor::operator()(T_Store_Tiled const& store)
         {
-            return store.toString(m_runtime_args);
+            return store.toString(m_runtimeArgs);
         }
 
         inline std::string ToStringVisitor::operator()(T_Execute const& exec)

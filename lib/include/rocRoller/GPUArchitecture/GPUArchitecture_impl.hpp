@@ -27,10 +27,10 @@ namespace rocRoller
 
     inline void GPUArchitecture::AddInstructionInfo(GPUInstructionInfo const& info)
     {
-        if(m_instruction_infos.find(info.getInstruction()) != m_instruction_infos.end())
+        if(m_instructionInfos.find(info.getInstruction()) != m_instructionInfos.end())
             throw std::runtime_error(
                 concatenate("Instruction info already exists for ", info.getInstruction()));
-        m_instruction_infos[info.getInstruction()] = info;
+        m_instructionInfos[info.getInstruction()] = info;
     }
 
     inline bool GPUArchitecture::HasCapability(GPUCapability const& capability) const
@@ -59,15 +59,15 @@ namespace rocRoller
 
     inline bool GPUArchitecture::HasInstructionInfo(std::string const& instruction) const
     {
-        auto iter = m_instruction_infos.find(instruction);
-        return iter != m_instruction_infos.end();
+        auto iter = m_instructionInfos.find(instruction);
+        return iter != m_instructionInfos.end();
     }
 
     inline rocRoller::GPUInstructionInfo
         GPUArchitecture::GetInstructionInfo(std::string const& instruction) const
     {
-        auto iter = m_instruction_infos.find(instruction);
-        if(iter != m_instruction_infos.end())
+        auto iter = m_instructionInfos.find(instruction);
+        if(iter != m_instructionInfos.end())
         {
             return iter->second;
         }
@@ -93,7 +93,7 @@ namespace rocRoller
         std::map<std::string, GPUInstructionInfo> const& instruction_infos)
         : m_isaVersion(isaVersion)
         , m_capabilities(capabilities)
-        , m_instruction_infos(instruction_infos)
+        , m_instructionInfos(instruction_infos)
     {
     }
 
@@ -184,6 +184,6 @@ namespace rocRoller
     inline std::map<std::string, GPUInstructionInfo> const&
         GPUArchitecture::getAllIntructionInfo() const
     {
-        return m_instruction_infos;
+        return m_instructionInfos;
     }
 }

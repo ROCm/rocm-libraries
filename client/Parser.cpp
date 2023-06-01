@@ -16,7 +16,7 @@ void ParseOptions::print_help()
 {
     std::cout << m_helpMessage << std::endl;
 
-    for(auto arg : m_valid_args)
+    for(auto arg : m_validArgs)
     {
         for(auto flag : arg.second.flags())
         {
@@ -55,7 +55,7 @@ void ParseOptions::parse_args(int argc, const char* argv[])
         if(arg == "-h" || arg == "--help")
         {
             print_help();
-            m_parsed_args.clear();
+            m_parsedArgs.clear();
             exit(EXIT_SUCCESS);
         }
 
@@ -79,7 +79,7 @@ void ParseOptions::parse_args(int argc, const char* argv[])
         std::string flag  = match[2];
         std::string value = match[3];
 
-        m_parsed_args.insert({flag, value});
+        m_parsedArgs.insert({flag, value});
     }
 
     validateArgs();
@@ -89,7 +89,7 @@ void ParseOptions::validateArgs()
 {
     std::set<std::string> validFlags;
 
-    for(auto arg : m_valid_args)
+    for(auto arg : m_validArgs)
     {
         for(auto flag : arg.second.flags())
         {
@@ -97,7 +97,7 @@ void ParseOptions::validateArgs()
         }
     }
 
-    for(auto arg : m_parsed_args)
+    for(auto arg : m_parsedArgs)
     {
         if(validFlags.find(arg.first) == validFlags.end())
         {
@@ -111,19 +111,19 @@ void ParseOptions::validateArgs()
 
 void ParseOptions::addArg(std::string name, Arg const& arg)
 {
-    m_valid_args.insert({std::move(name), arg});
+    m_validArgs.insert({std::move(name), arg});
 }
 
 template <>
 std::string ParseOptions::get<std::string>(std::string const& name,
                                            std::string const& defaultVal) const
 {
-    auto flags = m_valid_args.at(name).flags();
+    auto flags = m_validArgs.at(name).flags();
     for(auto flag : flags)
     {
-        if(m_parsed_args.find(flag) != m_parsed_args.end())
+        if(m_parsedArgs.find(flag) != m_parsedArgs.end())
         {
-            return m_parsed_args.at(flag);
+            return m_parsedArgs.at(flag);
         }
     }
     return defaultVal;
@@ -132,12 +132,12 @@ std::string ParseOptions::get<std::string>(std::string const& name,
 template <>
 int ParseOptions::get<int>(std::string const& name, int const& defaultVal) const
 {
-    auto flags = m_valid_args.at(name).flags();
+    auto flags = m_validArgs.at(name).flags();
     for(auto flag : flags)
     {
-        if(m_parsed_args.find(flag) != m_parsed_args.end())
+        if(m_parsedArgs.find(flag) != m_parsedArgs.end())
         {
-            return std::stoi(m_parsed_args.at(flag));
+            return std::stoi(m_parsedArgs.at(flag));
         }
     }
     return defaultVal;
@@ -146,12 +146,12 @@ int ParseOptions::get<int>(std::string const& name, int const& defaultVal) const
 template <>
 float ParseOptions::get<float>(std::string const& name, float const& defaultVal) const
 {
-    auto flags = m_valid_args.at(name).flags();
+    auto flags = m_validArgs.at(name).flags();
     for(auto flag : flags)
     {
-        if(m_parsed_args.find(flag) != m_parsed_args.end())
+        if(m_parsedArgs.find(flag) != m_parsedArgs.end())
         {
-            return std::stof(m_parsed_args.at(flag));
+            return std::stof(m_parsedArgs.at(flag));
         }
     }
     return defaultVal;
@@ -160,13 +160,13 @@ float ParseOptions::get<float>(std::string const& name, float const& defaultVal)
 template <>
 bool ParseOptions::get<bool>(std::string const& name, bool const& defaultVal) const
 {
-    auto flags = m_valid_args.at(name).flags();
+    auto flags = m_validArgs.at(name).flags();
     for(auto flag : flags)
     {
-        if(m_parsed_args.find(flag) != m_parsed_args.end())
+        if(m_parsedArgs.find(flag) != m_parsedArgs.end())
         {
-            return m_parsed_args.at(flag) == "1" || m_parsed_args.at(flag) == "True"
-                   || m_parsed_args.at(flag) == "true";
+            return m_parsedArgs.at(flag) == "1" || m_parsedArgs.at(flag) == "True"
+                   || m_parsedArgs.at(flag) == "true";
         }
     }
     return defaultVal;

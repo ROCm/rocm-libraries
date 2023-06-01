@@ -129,13 +129,13 @@ namespace rocRoller
 
             User(std::string const& name)
                 : BaseDimension()
-                , m_argument_name(name)
+                , m_argumentName(name)
             {
             }
 
             User(std::string const& name, Expression::ExpressionPtr size)
                 : BaseDimension(size, Expression::literal(1u))
-                , m_argument_name(name)
+                , m_argumentName(name)
             {
             }
 
@@ -146,11 +146,11 @@ namespace rocRoller
 
             std::string argumentName() const
             {
-                return m_argument_name;
+                return m_argumentName;
             }
 
         private:
-            std::string m_argument_name;
+            std::string m_argumentName;
         };
 
         /**

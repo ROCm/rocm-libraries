@@ -80,7 +80,7 @@ namespace rocRoller
 
             /**
              * @brief Returns new KernelGraph given a particular transformation
-             * 
+             *
              * @param GraphTransform
             */
             KernelGraph transform(std::shared_ptr<GraphTransform> const&);

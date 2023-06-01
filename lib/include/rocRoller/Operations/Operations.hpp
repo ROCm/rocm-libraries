@@ -108,7 +108,7 @@ namespace rocRoller
             std::string operator()(Nop const&);
 
         private:
-            const unsigned char* m_runtime_args;
+            const unsigned char* m_runtimeArgs;
         };
 
         struct SetCommand

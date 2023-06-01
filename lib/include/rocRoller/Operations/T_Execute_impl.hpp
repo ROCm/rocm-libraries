@@ -101,12 +101,12 @@ namespace rocRoller
         // ------------------------
 
         inline T_Execute::T_Execute()
-            : m_next_tag(0)
+            : m_nextTag(0)
         {
         }
 
         inline T_Execute::T_Execute(int starting_tag)
-            : m_next_tag(starting_tag)
+            : m_nextTag(starting_tag)
         {
         }
 
@@ -130,8 +130,8 @@ namespace rocRoller
             // Determine the inputs and outputs of the xop
             auto inputs_func         = rocRoller::Operations::Inputs();
             auto assign_outputs_func = rocRoller::Operations::AssignOutputs();
-            auto outputs             = assign_outputs_func.call(*xop, m_next_tag);
-            m_next_tag++;
+            auto outputs             = assign_outputs_func.call(*xop, m_nextTag);
+            m_nextTag++;
             auto inputs = inputs_func.call(*xop);
 
             // Add the outputs of the xop to the outputs of the
@@ -153,7 +153,7 @@ namespace rocRoller
 
         inline int T_Execute::getNextTag() const
         {
-            return m_next_tag;
+            return m_nextTag;
         }
 
         inline std::string T_Execute::toString() const

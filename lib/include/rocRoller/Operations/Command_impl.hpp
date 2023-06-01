@@ -58,7 +58,7 @@ namespace rocRoller
                                        "_",
                                        variableType.pointerType,
                                        "_",
-                                       m_command_args.size());
+                                       m_commandArgs.size());
 
         return allocateArgument(variableType, direction, name);
     }
@@ -72,24 +72,24 @@ namespace rocRoller
         int  alignment = info.alignment;
         if(variableType.isPointer())
             alignment = 8;
-        m_runtime_args_offset = RoundUpToMultiple(m_runtime_args_offset, alignment);
+        m_runtimeArgsOffset = RoundUpToMultiple(m_runtimeArgsOffset, alignment);
 
-        int old_offset = m_runtime_args_offset;
-        m_runtime_args_offset += variableType.getElementSize();
-        m_command_args.emplace_back(std::make_shared<CommandArgument>(
+        int old_offset = m_runtimeArgsOffset;
+        m_runtimeArgsOffset += variableType.getElementSize();
+        m_commandArgs.emplace_back(std::make_shared<CommandArgument>(
             shared_from_this(), variableType, old_offset, direction, name));
-        return m_command_args[m_command_args.size() - 1];
+        return m_commandArgs[m_commandArgs.size() - 1];
     }
 
     inline std::vector<std::shared_ptr<CommandArgument>> Command::getArguments() const
     {
-        return m_command_args;
+        return m_commandArgs;
     }
 
     inline std::vector<std::shared_ptr<CommandArgument>>
         Command::allocateArgumentVector(DataType dataType, int length, DataDirection direction)
     {
-        std::string name = concatenate("user", m_command_args.size());
+        std::string name = concatenate("user", m_commandArgs.size());
         return allocateArgumentVector(dataType, length, direction, name);
     }
 
@@ -100,14 +100,14 @@ namespace rocRoller
         std::vector<std::shared_ptr<CommandArgument>> args;
         for(int i = 0; i < length; i++)
         {
-            m_command_args.emplace_back(
+            m_commandArgs.emplace_back(
                 std::make_shared<CommandArgument>(shared_from_this(),
                                                   dataType,
-                                                  m_runtime_args_offset,
+                                                  m_runtimeArgsOffset,
                                                   direction,
                                                   concatenate(name, "_", i)));
-            args.push_back(m_command_args[m_command_args.size() - 1]);
-            m_runtime_args_offset += DataTypeInfo::Get(dataType).elementSize;
+            args.push_back(m_commandArgs[m_commandArgs.size() - 1]);
+            m_runtimeArgsOffset += DataTypeInfo::Get(dataType).elementSize;
         }
 
         return args;
@@ -186,7 +186,7 @@ namespace rocRoller
     {
         std::string rv;
 
-        for(auto const& arg : m_command_args)
+        for(auto const& arg : m_commandArgs)
         {
             rv += arg->toString() + '\n';
         }
@@ -199,7 +199,7 @@ namespace rocRoller
     {
         std::map<std::string, CommandArgumentValue> rv;
 
-        for(auto const& ca : m_command_args)
+        for(auto const& ca : m_commandArgs)
         {
             rv[ca->name()] = ca->getValue(args);
         }

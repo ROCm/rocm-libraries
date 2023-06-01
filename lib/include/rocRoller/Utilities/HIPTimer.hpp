@@ -46,8 +46,8 @@ namespace rocRoller
         void sync();
 
     private:
-        hipEvent_t  m_hip_start, m_hip_stop;
-        hipStream_t m_hip_stream;
+        hipEvent_t  m_hipStart, m_hipStop;
+        hipStream_t m_hipStream;
     };
 }
 

@@ -63,7 +63,7 @@ namespace rocRoller
         {
             TranslateVisitor()
             {
-                m_kernel = graph.control.addElement(Kernel());
+                m_kernel = m_graph.control.addElement(Kernel());
             }
 
             /**
@@ -103,38 +103,38 @@ namespace rocRoller
                 auto sizes   = tload.sizes();
                 auto strides = tload.strides();
 
-                auto total_size_expr = std::make_shared<Expression::Expression>(sizes[0]);
+                auto totalSizeExpr = std::make_shared<Expression::Expression>(sizes[0]);
 
-                auto user = graph.coordinates.addElement(User(
+                auto user = m_graph.coordinates.addElement(User(
                     tload.data()->name(), std::make_shared<Expression::Expression>(tload.limit())));
 
                 std::vector<int> dims;
                 for(size_t i = 0; i < sizes.size(); ++i)
                 {
-                    auto size_expr   = std::make_shared<Expression::Expression>(sizes[i]);
-                    auto stride_expr = std::make_shared<Expression::Expression>(strides[i]);
+                    auto sizeExpr   = std::make_shared<Expression::Expression>(sizes[i]);
+                    auto strideExpr = std::make_shared<Expression::Expression>(strides[i]);
 
                     dims.push_back(
-                        graph.coordinates.addElement(SubDimension(i, size_expr, stride_expr)));
+                        m_graph.coordinates.addElement(SubDimension(i, sizeExpr, strideExpr)));
                     if(i > 0)
-                        total_size_expr = total_size_expr * size_expr;
+                        totalSizeExpr = totalSizeExpr * sizeExpr;
                 }
 
-                graph.coordinates.addElement(Split(), std::vector<int>{user}, dims);
+                m_graph.coordinates.addElement(Split(), std::vector<int>{user}, dims);
 
                 auto unit_stride = Expression::literal(1u);
-                auto linear = graph.coordinates.addElement(Linear(total_size_expr, unit_stride));
+                auto linear = m_graph.coordinates.addElement(Linear(totalSizeExpr, unit_stride));
 
-                graph.coordinates.addElement(Flatten(), dims, std::vector<int>{linear});
-                graph.coordinates.addElement(DataFlow(), {user}, {linear});
+                m_graph.coordinates.addElement(Flatten(), dims, std::vector<int>{linear});
+                m_graph.coordinates.addElement(DataFlow(), {user}, {linear});
 
                 Operations::VariableTypeVisitor variableTypeVisitor;
                 auto vtype = variableTypeVisitor.call(*m_command->findTag(tload.getTag()));
-                auto load  = graph.control.addElement(LoadLinear(vtype));
-                graph.control.addElement(Body(), {m_kernel}, {load});
+                auto load  = m_graph.control.addElement(LoadLinear(vtype));
+                m_graph.control.addElement(Body(), {m_kernel}, {load});
 
-                graph.mapper.connect<User>(load, user);
-                graph.mapper.connect<Linear>(load, linear);
+                m_graph.mapper.connect<User>(load, user);
+                m_graph.mapper.connect<Linear>(load, linear);
 
                 m_op.insert_or_assign(tload.getTag(), load);
                 m_dim.insert_or_assign(tload.getTag(), linear);
@@ -151,16 +151,16 @@ namespace rocRoller
              */
             void operator()(Operations::T_Load_Scalar const& tload)
             {
-                auto user = graph.coordinates.addElement(User(tload.data()->name()));
-                auto vgpr = graph.coordinates.addElement(VGPR());
+                auto user = m_graph.coordinates.addElement(User(tload.data()->name()));
+                auto vgpr = m_graph.coordinates.addElement(VGPR());
 
-                graph.coordinates.addElement(DataFlow(), {user}, {vgpr});
+                m_graph.coordinates.addElement(DataFlow(), {user}, {vgpr});
 
-                auto load = graph.control.addElement(LoadVGPR(tload.variableType(), true));
-                graph.control.addElement(Body(), {m_kernel}, {load});
+                auto load = m_graph.control.addElement(LoadVGPR(tload.variableType(), true));
+                m_graph.control.addElement(Body(), {m_kernel}, {load});
 
-                graph.mapper.connect<User>(load, user);
-                graph.mapper.connect<VGPR>(load, vgpr);
+                m_graph.mapper.connect<User>(load, user);
+                m_graph.mapper.connect<VGPR>(load, vgpr);
 
                 m_op.insert_or_assign(tload.getTag(), load);
                 m_dim.insert_or_assign(tload.getTag(), vgpr);
@@ -204,39 +204,39 @@ namespace rocRoller
                 auto const strides         = tload.strides();
                 auto const literal_strides = tload.literalStrides();
 
-                auto user = graph.coordinates.addElement(User(
+                auto user = m_graph.coordinates.addElement(User(
                     tload.data()->name(), std::make_shared<Expression::Expression>(tload.limit())));
 
                 std::vector<int> dims;
                 for(size_t i = 0; i < sizes.size(); ++i)
                 {
-                    auto size_expr = std::make_shared<Expression::Expression>(sizes[i]);
-                    std::shared_ptr<Expression::Expression> stride_expr;
+                    auto sizeExpr = std::make_shared<Expression::Expression>(sizes[i]);
+                    std::shared_ptr<Expression::Expression> strideExpr;
                     if(literal_strides.size() > i && literal_strides[i] > 0)
                     {
-                        stride_expr = std::make_shared<Expression::Expression>(literal_strides[i]);
+                        strideExpr = std::make_shared<Expression::Expression>(literal_strides[i]);
                     }
                     else
                     {
-                        stride_expr = std::make_shared<Expression::Expression>(strides[i]);
+                        strideExpr = std::make_shared<Expression::Expression>(strides[i]);
                     }
 
                     auto dim
-                        = graph.coordinates.addElement(SubDimension(i, size_expr, stride_expr));
+                        = m_graph.coordinates.addElement(SubDimension(i, sizeExpr, strideExpr));
                     dims.push_back(dim);
                 }
 
-                auto tiled = graph.coordinates.addElement(MacroTile(sizes.size()));
+                auto tiled = m_graph.coordinates.addElement(MacroTile(sizes.size()));
 
-                graph.coordinates.addElement(Split(), std::vector<int>{user}, dims);
-                graph.coordinates.addElement(ConstructMacroTile(), dims, std::vector<int>{tiled});
-                graph.coordinates.addElement(DataFlow(), {user}, {tiled});
+                m_graph.coordinates.addElement(Split(), std::vector<int>{user}, dims);
+                m_graph.coordinates.addElement(ConstructMacroTile(), dims, std::vector<int>{tiled});
+                m_graph.coordinates.addElement(DataFlow(), {user}, {tiled});
 
-                auto load = graph.control.addElement(LoadTiled(tload.variableType()));
-                graph.control.addElement(Body(), {m_kernel}, {load});
+                auto load = m_graph.control.addElement(LoadTiled(tload.variableType()));
+                m_graph.control.addElement(Body(), {m_kernel}, {load});
 
-                graph.mapper.connect<User>(load, user);
-                graph.mapper.connect<MacroTile>(load, tiled);
+                m_graph.mapper.connect<User>(load, user);
+                m_graph.mapper.connect<MacroTile>(load, tiled);
 
                 m_op.insert_or_assign(tload.getTag(), load);
                 m_dim.insert_or_assign(tload.getTag(), tiled);
@@ -268,26 +268,26 @@ namespace rocRoller
                 auto             strides = tstore.strides();
                 for(size_t i = 0; i < strides.size(); ++i)
                 {
-                    auto stride_expr = std::make_shared<Expression::Expression>(strides[i]);
-                    auto dim = graph.coordinates.addElement(SubDimension(i, nullptr, stride_expr));
+                    auto strideExpr = std::make_shared<Expression::Expression>(strides[i]);
+                    auto dim = m_graph.coordinates.addElement(SubDimension(i, nullptr, strideExpr));
                     dims.push_back(dim);
                 }
 
                 auto linear = m_dim.at(tstore.getTag());
-                auto user   = graph.coordinates.addElement(
+                auto user   = m_graph.coordinates.addElement(
                     User(tstore.data()->name(),
                          std::make_shared<Expression::Expression>(tstore.limit())));
 
-                graph.coordinates.addElement(Split(), std::vector<int>{linear}, dims);
-                graph.coordinates.addElement(Join(), dims, std::vector<int>{user});
-                graph.coordinates.addElement(DataFlow(), {linear}, {user});
+                m_graph.coordinates.addElement(Split(), std::vector<int>{linear}, dims);
+                m_graph.coordinates.addElement(Join(), dims, std::vector<int>{user});
+                m_graph.coordinates.addElement(DataFlow(), {linear}, {user});
 
-                auto store = graph.control.addElement(StoreLinear());
+                auto store = m_graph.control.addElement(StoreLinear());
                 auto last  = m_op.at(tstore.getTag());
-                graph.control.addElement(Sequence(), {last}, {store});
+                m_graph.control.addElement(Sequence(), {last}, {store});
 
-                graph.mapper.connect<Linear>(store, linear);
-                graph.mapper.connect<User>(store, user);
+                m_graph.mapper.connect<Linear>(store, linear);
+                m_graph.mapper.connect<User>(store, user);
             }
 
             /**
@@ -310,26 +310,26 @@ namespace rocRoller
                 auto             strides = tstore.strides();
                 for(size_t i = 0; i < strides.size(); ++i)
                 {
-                    auto stride_expr = std::make_shared<Expression::Expression>(strides[i]);
-                    auto dim = graph.coordinates.addElement(SubDimension(i, nullptr, stride_expr));
+                    auto strideExpr = std::make_shared<Expression::Expression>(strides[i]);
+                    auto dim = m_graph.coordinates.addElement(SubDimension(i, nullptr, strideExpr));
                     dims.push_back(dim);
                 }
 
                 auto tile = m_dim.at(tstore.getTag());
-                auto user = graph.coordinates.addElement(
+                auto user = m_graph.coordinates.addElement(
                     User(tstore.data()->name(),
                          std::make_shared<Expression::Expression>(tstore.limit())));
 
-                graph.coordinates.addElement(DestructMacroTile(), std::vector<int>{tile}, dims);
-                graph.coordinates.addElement(Join(), dims, std::vector<int>{user});
-                graph.coordinates.addElement(DataFlow(), {tile}, {user});
+                m_graph.coordinates.addElement(DestructMacroTile(), std::vector<int>{tile}, dims);
+                m_graph.coordinates.addElement(Join(), dims, std::vector<int>{user});
+                m_graph.coordinates.addElement(DataFlow(), {tile}, {user});
 
-                auto store = graph.control.addElement(StoreTiled(tstore.dataType()));
+                auto store = m_graph.control.addElement(StoreTiled(tstore.dataType()));
                 auto last  = m_op.at(tstore.getTag());
-                graph.control.addElement(Sequence(), {last}, {store});
+                m_graph.control.addElement(Sequence(), {last}, {store});
 
-                graph.mapper.connect<MacroTile>(store, tile);
-                graph.mapper.connect<User>(store, user);
+                m_graph.mapper.connect<MacroTile>(store, tile);
+                m_graph.mapper.connect<User>(store, user);
             }
 
             /**
@@ -370,19 +370,20 @@ namespace rocRoller
                         coordinate_inputs.push_back(m_dim.at(sinput));
                     }
 
-                    auto coordinateType = promoteDimensions(graph.coordinates, coordinate_inputs);
+                    auto coordinateType = promoteDimensions(m_graph.coordinates, coordinate_inputs);
                     for(auto const& soutput : soutputs)
                     {
                         AssertFatal(m_op.count(soutput) == 0,
                                     "XOp output already exists in kernel graph.");
                         AssertFatal(m_dim.count(soutput) == 0,
                                     "XOp output already exists in kernel graph.");
-                        auto dimension = graph.coordinates.addElement(coordinateType);
+                        auto dimension = m_graph.coordinates.addElement(coordinateType);
                         coordinate_outputs.push_back(dimension);
                         m_dim.insert_or_assign(soutput, dimension);
                     }
 
-                    graph.coordinates.addElement(DataFlow(), coordinate_inputs, coordinate_outputs);
+                    m_graph.coordinates.addElement(
+                        DataFlow(), coordinate_inputs, coordinate_outputs);
 
                     // Translate coodinate input tags to DataFlowTag expressions.  Each DataFlowTag
                     // referes to the corresponding coordinate input tag, and uses DataType::None to
@@ -439,16 +440,16 @@ namespace rocRoller
                         },
                         *xop);
 
-                    auto op = graph.control.addElement(Assign{Register::Type::Vector, expr});
+                    auto op = m_graph.control.addElement(Assign{Register::Type::Vector, expr});
 
                     for(auto const& input : control_inputs)
                     {
-                        graph.control.addElement(Sequence(), {input}, {op});
+                        m_graph.control.addElement(Sequence(), {input}, {op});
                     }
 
                     AssertFatal(coordinate_outputs.size() == 1,
                                 "Element op must have a single output.");
-                    graph.mapper.connect(op, coordinate_outputs[0], NaryArgument::DEST);
+                    m_graph.mapper.connect(op, coordinate_outputs[0], NaryArgument::DEST);
 
                     Operations::TagVisitor tagVisitor;
                     m_op.insert_or_assign(tagVisitor.call(*xop), op);
@@ -467,32 +468,32 @@ namespace rocRoller
 
                 auto A = m_dim.at(mul.a);
                 auto B = m_dim.at(mul.b);
-                auto D = graph.coordinates.addElement(MacroTile());
+                auto D = m_graph.coordinates.addElement(MacroTile());
                 m_dim.insert_or_assign(mul.dest, D);
 
-                graph.coordinates.addElement(DataFlow(), {A, B}, {D});
+                m_graph.coordinates.addElement(DataFlow(), {A, B}, {D});
 
                 // contraction dims are {1} and {0}, which is matrix multiplication
-                auto TC = graph.control.addElement(TensorContraction({1}, {0}));
+                auto TC = m_graph.control.addElement(TensorContraction({1}, {0}));
                 m_op.insert_or_assign(mul.dest, TC);
 
                 auto loadA = m_op.at(mul.a);
                 auto loadB = m_op.at(mul.b);
 
-                graph.control.addElement(Sequence(), {loadA}, {TC});
-                graph.control.addElement(Sequence(), {loadB}, {TC});
+                m_graph.control.addElement(Sequence(), {loadA}, {TC});
+                m_graph.control.addElement(Sequence(), {loadB}, {TC});
 
-                graph.mapper.connect(TC, D, NaryArgument::DEST);
-                graph.mapper.connect(TC, A, NaryArgument::LHS);
-                graph.mapper.connect(TC, B, NaryArgument::RHS);
+                m_graph.mapper.connect(TC, D, NaryArgument::DEST);
+                m_graph.mapper.connect(TC, A, NaryArgument::LHS);
+                m_graph.mapper.connect(TC, B, NaryArgument::RHS);
 
 #ifndef NDEBUG
-                auto parents = graph.control.parentNodes(TC).to<std::vector>();
+                auto parents = m_graph.control.parentNodes(TC).to<std::vector>();
                 AssertFatal(parents.size() == 2, "T_MUL requires 2 inputs.");
                 for(auto const& parent : parents)
                 {
-                    auto element = graph.control.getElement(parent);
-                    auto node    = std::get<Operation>(graph.control.getElement(parent));
+                    auto element = m_graph.control.getElement(parent);
+                    auto node    = std::get<Operation>(m_graph.control.getElement(parent));
                     AssertFatal(std::holds_alternative<LoadTiled>(node),
                                 "T_MUL inputs must be tiled.");
                 }
@@ -508,11 +509,11 @@ namespace rocRoller
                 {
                     std::visit(*this, *op);
                 }
-                return graph;
+                return m_graph;
             }
 
         private:
-            KernelGraph graph;
+            KernelGraph m_graph;
 
             // root/kernel tag
             int m_kernel;

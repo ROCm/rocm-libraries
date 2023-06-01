@@ -40,7 +40,7 @@ namespace rocRoller
             }
             DataType dataType() const
             {
-                return m_data_type;
+                return m_dataType;
             }
             CommandArgumentPtr data() const
             {
@@ -52,7 +52,7 @@ namespace rocRoller
 
             int m_tag;
 
-            DataType m_data_type;
+            DataType m_dataType;
             int      m_dims;
 
             std::weak_ptr<Command> m_command;
@@ -87,7 +87,7 @@ namespace rocRoller
             VariableType variableType() const;
 
         private:
-            VariableType m_variable_type;
+            VariableType m_variableType;
         };
 
         std::ostream& operator<<(std::ostream& stream, T_Load_Scalar const& val);
@@ -109,7 +109,7 @@ namespace rocRoller
             std::vector<size_t> literalStrides() const;
 
         private:
-            VariableType m_variable_type;
+            VariableType m_variableType;
             int          m_rank;
 
             std::vector<size_t> m_literalStrides;

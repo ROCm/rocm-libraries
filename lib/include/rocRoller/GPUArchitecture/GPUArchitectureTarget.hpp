@@ -100,9 +100,9 @@ namespace rocRoller
         bool m_sramecc = false;
         bool m_xnack   = false;
 
-        std::string m_string_rep;
-        std::string m_version_rep;
-        std::string m_llvm_features_rep;
+        std::string m_stringRep;
+        std::string m_versionRep;
+        std::string m_llvmFeaturesRep;
 
         std::string createString(bool) const;
         std::string createLLVMFeatureString() const;

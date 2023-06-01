@@ -13,14 +13,14 @@ namespace rocRoller
         {
             UpdateParametersVisitor(std::shared_ptr<CommandParameters> params)
             {
-                m_new_dimensions = params->getDimensionInfo();
+                m_newDimensions = params->getDimensionInfo();
             }
 
             template <typename T>
             Dimension visitDimension(int tag, T const& dim)
             {
-                if(m_new_dimensions.count(tag) > 0)
-                    return m_new_dimensions.at(tag);
+                if(m_newDimensions.count(tag) > 0)
+                    return m_newDimensions.at(tag);
                 return dim;
             }
 
@@ -31,7 +31,7 @@ namespace rocRoller
             }
 
         private:
-            std::map<int, Dimension> m_new_dimensions;
+            std::map<int, Dimension> m_newDimensions;
         };
 
         KernelGraph UpdateParameters::apply(KernelGraph const& k)

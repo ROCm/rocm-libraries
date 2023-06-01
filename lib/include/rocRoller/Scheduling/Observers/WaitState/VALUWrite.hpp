@@ -23,7 +23,7 @@ namespace rocRoller
             VALUWrite(std::shared_ptr<Context> context)
                 : WaitStateObserver<VALUWrite>(context)
             {
-                checkACCVGPR
+                m_checkACCVGPR
                     = context->targetArchitecture().target().getVersionString() == "gfx908";
             };
 
@@ -45,7 +45,7 @@ namespace rocRoller
             }
 
         private:
-            bool      checkACCVGPR;
+            bool      m_checkACCVGPR;
             int const m_maxNops = 2;
         };
 

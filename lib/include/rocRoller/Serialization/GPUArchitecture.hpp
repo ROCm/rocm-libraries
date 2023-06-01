@@ -84,9 +84,9 @@ namespace rocRoller
                 iot::mapRequired(io, KeyMinorVersion.c_str(), arch.m_minorVersion);
                 iot::mapRequired(io, KeyPointVersion.c_str(), arch.m_pointVersion);
                 iot::mapRequired(io, KeySramecc.c_str(), arch.m_sramecc);
-                iot::mapRequired(io, KeyStringRep.c_str(), arch.m_string_rep);
-                iot::mapRequired(io, KeyVersionRep.c_str(), arch.m_version_rep);
-                iot::mapRequired(io, KeyLLVMFeaturesRep.c_str(), arch.m_llvm_features_rep);
+                iot::mapRequired(io, KeyStringRep.c_str(), arch.m_stringRep);
+                iot::mapRequired(io, KeyVersionRep.c_str(), arch.m_versionRep);
+                iot::mapRequired(io, KeyLLVMFeaturesRep.c_str(), arch.m_llvmFeaturesRep);
             }
 
             static void mapping(IO& io, GPUArchitectureTarget& arch, EmptyContext& ctx)
@@ -126,7 +126,7 @@ namespace rocRoller
             static void mapping(IO& io, GPUArchitecture& arch)
             {
                 iot::mapRequired(io, KeyISAVersion.c_str(), arch.m_isaVersion);
-                iot::mapRequired(io, KeyInstructionInfos.c_str(), arch.m_instruction_infos);
+                iot::mapRequired(io, KeyInstructionInfos.c_str(), arch.m_instructionInfos);
                 iot::mapRequired(io, KeyCapabilities.c_str(), arch.m_capabilities);
             }
 

@@ -130,7 +130,7 @@ namespace rocRoller
             std::unordered_set<int> m_inputs;
             std::unordered_set<int> m_outputs;
 
-            int m_next_tag;
+            int m_nextTag;
         };
     }
 }

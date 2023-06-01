@@ -121,7 +121,7 @@ namespace rocRoller
         struct CleanArgumentsVisitor
         {
             CleanArgumentsVisitor(std::shared_ptr<AssemblyKernel> kernel)
-                : m_clean_arguments(kernel)
+                : m_cleanArguments(kernel)
             {
             }
 
@@ -129,15 +129,15 @@ namespace rocRoller
             Dimension visitDimension(int tag, T const& dim)
             {
                 auto d   = dim;
-                d.size   = m_clean_arguments.call(dim.size);
-                d.stride = m_clean_arguments.call(dim.stride);
+                d.size   = m_cleanArguments.call(dim.size);
+                d.stride = m_cleanArguments.call(dim.stride);
                 return d;
             }
 
             Operation visitOperation(ForLoopOp const& op)
             {
                 auto forOp      = op;
-                forOp.condition = m_clean_arguments.call(op.condition);
+                forOp.condition = m_cleanArguments.call(op.condition);
                 return forOp;
             }
 
@@ -148,7 +148,7 @@ namespace rocRoller
             }
 
         private:
-            CleanExpressionVisitor m_clean_arguments;
+            CleanExpressionVisitor m_cleanArguments;
         };
 
         /**

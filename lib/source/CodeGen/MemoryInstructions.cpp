@@ -77,7 +77,7 @@ namespace rocRoller
     Generator<Instruction> MemoryInstructions::packForStore(Register::ValuePtr& result,
                                                             Register::ValuePtr  toPack) const
     {
-        auto valuesPerWord = wordSize / toPack->variableType().getElementSize();
+        auto valuesPerWord = m_wordSize / toPack->variableType().getElementSize();
         AssertFatal(valuesPerWord == 2);
         result = Register::Value::Placeholder(toPack->context(),
                                               toPack->regType(),

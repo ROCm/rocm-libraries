@@ -112,7 +112,7 @@ namespace rocRoller
             // Setting new bitfield changes values of those covered by bitfield
             if constexpr(std::is_same_v<typename Option::Type, bitFieldType>)
             {
-                for(auto optName : setBitOptions)
+                for(auto optName : m_setBitOptions)
                 {
                     auto itr = m_values.find(optName);
                     if(itr != m_values.end())
@@ -121,13 +121,13 @@ namespace rocRoller
                     }
                 }
 
-                setBitOptions.clear();
+                m_setBitOptions.clear();
             }
 
             // If corresponding env var is set, we will never get here since we grab from env
             else if(opt.bit >= 0)
             {
-                setBitOptions.push_back(opt.name);
+                m_setBitOptions.push_back(opt.name);
             }
         }
         else
