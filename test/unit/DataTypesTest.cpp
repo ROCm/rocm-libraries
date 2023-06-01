@@ -77,6 +77,7 @@ TYPED_TEST(TypedDataTypesTest, TypeInfo_Consistency)
     EXPECT_EQ(fromEnum.elementSize, sizeof(TheType));
     EXPECT_EQ(fromEnum.packing, MyTypeInfo::Packing);
     EXPECT_EQ(fromEnum.segmentSize, MyTypeInfo::SegmentSize);
+    EXPECT_EQ(fromEnum.registerCount, MyTypeInfo::RegisterCount);
 
     EXPECT_EQ(fromEnum.isComplex, MyTypeInfo::IsComplex);
     EXPECT_EQ(fromEnum.isIntegral, MyTypeInfo::IsIntegral);
@@ -127,6 +128,23 @@ static_assert(rocRoller::TypeInfo<rocRoller::BFloat16>::Packing == 1, "BFloat16"
 static_assert(rocRoller::TypeInfo<rocRoller::PointerLocal>::Packing == 1, "PointerLocal");
 static_assert(rocRoller::TypeInfo<rocRoller::PointerGlobal>::Packing == 1, "PointerGlobal");
 static_assert(rocRoller::TypeInfo<rocRoller::Buffer>::Packing == 1, "Buffer");
+
+static_assert(rocRoller::TypeInfo<float>::RegisterCount == 1, "Float");
+static_assert(rocRoller::TypeInfo<double>::RegisterCount == 2, "Double");
+static_assert(rocRoller::TypeInfo<std::complex<float>>::RegisterCount == 2, "ComplexFloat");
+static_assert(rocRoller::TypeInfo<std::complex<double>>::RegisterCount == 4, "ComplexDouble");
+static_assert(rocRoller::TypeInfo<rocRoller::Half>::RegisterCount == 1, "Half");
+static_assert(rocRoller::TypeInfo<int8_t>::RegisterCount == 1, "Int8");
+static_assert(rocRoller::TypeInfo<rocRoller::Int8x4>::RegisterCount == 1, "Int8x4");
+static_assert(rocRoller::TypeInfo<int32_t>::RegisterCount == 1, "Int32");
+static_assert(rocRoller::TypeInfo<int64_t>::RegisterCount == 2, "Int64");
+static_assert(rocRoller::TypeInfo<rocRoller::Raw32>::RegisterCount == 1, "Raw32");
+static_assert(rocRoller::TypeInfo<uint32_t>::RegisterCount == 1, "UInt32");
+static_assert(rocRoller::TypeInfo<uint64_t>::RegisterCount == 2, "UInt64");
+static_assert(rocRoller::TypeInfo<rocRoller::BFloat16>::RegisterCount == 1, "BFloat16");
+static_assert(rocRoller::TypeInfo<rocRoller::PointerLocal>::RegisterCount == 1, "PointerLocal");
+static_assert(rocRoller::TypeInfo<rocRoller::PointerGlobal>::RegisterCount == 2, "PointerGlobal");
+static_assert(rocRoller::TypeInfo<rocRoller::Buffer>::RegisterCount == 4, "Buffer");
 
 struct Enumerations : public ::testing::TestWithParam<rocRoller::DataType>
 {

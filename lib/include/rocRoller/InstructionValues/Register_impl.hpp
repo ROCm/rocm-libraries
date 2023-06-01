@@ -930,10 +930,9 @@ namespace rocRoller
 
         inline void Allocation::setRegisterCount()
         {
-            // TODO: Register count oriented data in DataTypeInfo.
             m_registerCount
                 = m_valueCount
-                  * std::max(1LU, DataTypeInfo::Get(m_variableType).elementSize / bytesPerRegister);
+                  * static_cast<size_t>(DataTypeInfo::Get(m_variableType).registerCount);
         }
 
         inline Allocation::Options Allocation::options() const

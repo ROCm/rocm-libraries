@@ -352,10 +352,11 @@ namespace rocRoller
         info.name                = T_Info::Name();
         info.abbrev              = T_Info::Abbrev();
 
-        info.packing     = T_Info::Packing;
-        info.elementSize = T_Info::ElementSize;
-        info.segmentSize = T_Info::SegmentSize;
-        info.alignment   = T_Info::Alignment;
+        info.packing       = T_Info::Packing;
+        info.elementSize   = T_Info::ElementSize;
+        info.segmentSize   = T_Info::SegmentSize;
+        info.alignment     = T_Info::Alignment;
+        info.registerCount = T_Info::RegisterCount;
 
         info.isComplex  = T_Info::IsComplex;
         info.isIntegral = T_Info::IsIntegral;

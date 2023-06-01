@@ -1136,8 +1136,7 @@ namespace rocRoller
                 auto maxWidth = std::min(m_context->kernelOptions().loadGlobalWidth,
                                          m_context->kernelOptions().storeLocalWidth);
 
-                auto numDwordsPerElement
-                    = std::max(1LU, DataTypeInfo::Get(vtype).elementSize / bytesPerRegister);
+                auto numDwordsPerElement = DataTypeInfo::Get(vtype).registerCount;
 
                 updateThreadTileForLongDwords(thrTileM, thrTileN, maxWidth, numDwordsPerElement);
             }
@@ -1333,8 +1332,7 @@ namespace rocRoller
                 auto maxWidth = std::min(m_context->kernelOptions().storeGlobalWidth,
                                          m_context->kernelOptions().loadLocalWidth);
 
-                auto numDwordsPerElement
-                    = std::max(1LU, DataTypeInfo::Get(dtype).elementSize / bytesPerRegister);
+                auto numDwordsPerElement = DataTypeInfo::Get(dtype).registerCount;
 
                 updateThreadTileForLongDwords(thrTileM, thrTileN, maxWidth, numDwordsPerElement);
             }
