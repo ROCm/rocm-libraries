@@ -16,14 +16,14 @@ namespace rocRoller
     // to avoid including HIP headers within ExecutableKernel.hpp
     struct ExecutableKernel::HIPData
     {
-        hipModule_t   m_hip_module;
-        hipFunction_t m_function;
+        hipModule_t   hipModule;
+        hipFunction_t function;
 
         ~HIPData()
         {
-            if(m_hip_module)
+            if(hipModule)
             {
-                hipError_t error = hipModuleUnload(m_hip_module);
+                hipError_t error = hipModuleUnload(hipModule);
                 if(error != hipSuccess)
                 {
                     std::ostringstream msg;
@@ -49,9 +49,9 @@ namespace rocRoller
         std::vector<char> kernelObject
             = assembler.assembleMachineCode(instructions, target, kernelName);
 
-        HIP_CHECK(hipModuleLoadData(&(m_hipData->m_hip_module), kernelObject.data()));
-        HIP_CHECK(hipModuleGetFunction(
-            &(m_hipData->m_function), m_hipData->m_hip_module, kernelName.c_str()));
+        HIP_CHECK(hipModuleLoadData(&(m_hipData->hipModule), kernelObject.data()));
+        HIP_CHECK(
+            hipModuleGetFunction(&(m_hipData->function), m_hipData->hipModule, kernelName.c_str()));
         m_kernelLoaded = true;
         m_kernelName   = kernelName;
     }
@@ -102,7 +102,7 @@ namespace rocRoller
                                    &argsSize,
                                    HIP_LAUNCH_PARAM_END};
 
-        HIP_CHECK(hipExtModuleLaunchKernel(m_hipData->m_function,
+        HIP_CHECK(hipExtModuleLaunchKernel(m_hipData->function,
                                            invocation.workitemCount[0],
                                            invocation.workitemCount[1],
                                            invocation.workitemCount[2],

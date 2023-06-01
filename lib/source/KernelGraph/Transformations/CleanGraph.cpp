@@ -26,8 +26,6 @@ namespace rocRoller
          */
         struct CleanExpressionVisitor
         {
-            std::shared_ptr<AssemblyKernel> m_kernel;
-
             CleanExpressionVisitor(std::shared_ptr<AssemblyKernel> kernel)
                 : m_kernel(kernel)
             {
@@ -100,6 +98,9 @@ namespace rocRoller
 
                 return std::visit(*this, *expr);
             }
+
+        private:
+            std::shared_ptr<AssemblyKernel> m_kernel;
         };
 
         /**

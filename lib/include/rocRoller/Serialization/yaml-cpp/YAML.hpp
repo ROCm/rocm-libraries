@@ -203,13 +203,13 @@ namespace rocRoller
 
         struct NodeInput
         {
-            YAML::Node* m_node;
+            YAML::Node* node;
             void*       context;
 
             void mapRequired();
 
             NodeInput(YAML::Node* n, void* c = nullptr)
-                : m_node(n)
+                : node(n)
                 , context(c)
             {
             }
@@ -217,69 +217,69 @@ namespace rocRoller
             template <typename T>
             void mapRequired(const char* key, T& obj)
             {
-                auto subnode = (*m_node)[key];
-                AssertFatal(subnode, "Key ", ShowValue(key), " not found: ", YAML::Dump(*m_node));
+                auto subnode = (*node)[key];
+                AssertFatal(subnode, "Key ", ShowValue(key), " not found: ", YAML::Dump(*node));
                 input(subnode, obj);
             }
 
             template <typename T>
             void mapOptional(const char* key, T& obj)
             {
-                auto subnode = (*m_node)[key];
+                auto subnode = (*node)[key];
                 if(subnode)
                     input(subnode, obj);
             }
 
             template <typename T>
             requires(CMappedType<T, NodeInput> || EmptyMappedType<T, NodeInput>) void input(
-                YAML::Node& node, T& obj)
+                YAML::Node& n, T& obj)
             {
-                NodeInput    subInput(&node, context);
+                NodeInput    subInput(&n, context);
                 EmptyContext ctx;
                 MappingTraits<T, NodeInput>::mapping(subInput, obj, ctx); //, context);
             }
 
             template <typename T>
-            void input(YAML::Node& node, T& obj)
+            void input(YAML::Node& n, T& obj)
             {
-                obj = node.as<T>();
+                obj = n.as<T>();
             }
 
             template <>
-            void input(YAML::Node& node, Half& val)
+            void input(YAML::Node& n, Half& val)
             {
                 float floatVal;
-                input(node, floatVal);
+                input(n, floatVal);
                 val = floatVal;
             }
 
             template <SequenceType<NodeInput> T>
-            void input(YAML::Node& node, T& obj)
+            void input(YAML::Node& n, T& obj)
             {
-                auto count = node.size();
+                auto count = n.size();
 
                 for(size_t i = 0; i < count; i++)
                 {
                     auto& value  = SequenceTraits<T, NodeInput>::element(*this, obj, i);
-                    auto  elNode = node[i];
+                    auto  elNode = n[i];
                     input(elNode, value);
                 }
             }
 
             template <CustomMappingType<NodeInput> T>
-            void input(YAML::Node& node, T& obj)
+            void input(YAML::Node& n, T& obj)
             {
-                NodeInput subInput(&node, context);
-                for(auto pair : node)
+                NodeInput subInput(&n, context);
+                for(auto pair : n)
                 {
                     CustomMappingTraits<T, NodeInput>::inputOne(subInput, pair.first.Scalar(), obj);
                 }
             }
 
             template <EnumType<NodeInput> T>
-            void input(YAML::Node& node, T& obj)
+            void input(YAML::Node& n, T& obj)
             {
-                NodeInput subInput(&node, context);
+                NodeInput subInput(&n, context);
                 EnumTraits<T, NodeInput>::enumeration(subInput, obj);
             }
 
@@ -341,7 +341,7 @@ namespace rocRoller
             template <typename T>
             static void enumCase(IO& io, T& member, const char* key, T value)
             {
-                if(io.m_node->Scalar() == key)
+                if(io.node->Scalar() == key)
                 {
                     member = value;
                 }

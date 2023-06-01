@@ -64,6 +64,7 @@ namespace rocRoller
         virtual std::optional<T> take_value() override;
         virtual void             increment() override;
 
+    private:
         TheRange m_range;
         using iter = decltype(m_range.begin());
         iter m_iter;

@@ -14,8 +14,6 @@ namespace rocRoller
         template <CAssociativeBinary OP>
         struct AssociativeBinary
         {
-            ExpressionPtr m_lhs;
-
             template <typename RHS>
             ExpressionPtr operator()(RHS rhs)
             {
@@ -50,13 +48,14 @@ namespace rocRoller
                 m_lhs = lhs;
                 return visit(*this, rhs);
             }
+
+        private:
+            ExpressionPtr m_lhs;
         };
 
         template <CShift OP>
         struct CollectedShift
         {
-            ExpressionPtr m_lhs;
-
             template <typename RHS>
             ExpressionPtr operator()(RHS rhs)
             {
@@ -84,6 +83,9 @@ namespace rocRoller
                 m_lhs = lhs;
                 return visit(*this, rhs);
             }
+
+        private:
+            ExpressionPtr m_lhs;
         };
 
         struct AssociativeExpressionVisitor

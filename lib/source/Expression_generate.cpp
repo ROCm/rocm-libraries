@@ -19,7 +19,11 @@ namespace rocRoller
     {
         struct CodeGeneratorVisitor
         {
-            ContextPtr m_context;
+            CodeGeneratorVisitor(ContextPtr& context)
+                : m_context(context)
+            {
+            }
+
             using RegisterValue = std::variant<Register::ValuePtr>;
 
             Register::ValuePtr resultPlaceholder(ResultType const& resType,
@@ -617,6 +621,9 @@ namespace rocRoller
                     co_yield Instruction::Comment(concatenate("END: ", comment));
                 }
             }
+
+        private:
+            ContextPtr m_context;
         };
 
         Generator<Instruction>

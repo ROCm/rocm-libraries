@@ -36,8 +36,6 @@ namespace rocRoller
         template <>
         struct SimplifyByConstant<Add>
         {
-            ExpressionPtr m_lhs;
-
             template <typename RHS>
             requires(CIntegral<RHS>) ExpressionPtr operator()(RHS rhs)
             {
@@ -57,13 +55,14 @@ namespace rocRoller
                 m_lhs = lhs;
                 return visit(*this, rhs);
             }
+
+        private:
+            ExpressionPtr m_lhs;
         };
 
         template <CShift ShiftType>
         struct SimplifyByConstant<ShiftType>
         {
-            ExpressionPtr m_lhs;
-
             template <typename RHS>
             requires(CIntegral<RHS>) ExpressionPtr operator()(RHS rhs)
             {
@@ -83,13 +82,14 @@ namespace rocRoller
                 m_lhs = lhs;
                 return visit(*this, rhs);
             }
+
+        private:
+            ExpressionPtr m_lhs;
         };
 
         template <>
         struct SimplifyByConstant<BitwiseAnd>
         {
-            ExpressionPtr m_lhs;
-
             template <typename RHS>
             requires(CIntegral<RHS>) ExpressionPtr operator()(RHS rhs)
             {
@@ -109,13 +109,14 @@ namespace rocRoller
                 m_lhs = lhs;
                 return visit(*this, rhs);
             }
+
+        private:
+            ExpressionPtr m_lhs;
         };
 
         template <>
         struct SimplifyByConstant<Multiply>
         {
-            ExpressionPtr m_lhs;
-
             template <typename RHS>
             requires(CIntegral<RHS>) ExpressionPtr operator()(RHS rhs)
             {
@@ -137,12 +138,14 @@ namespace rocRoller
                 m_lhs = lhs;
                 return visit(*this, rhs);
             }
+
+        private:
+            ExpressionPtr m_lhs;
         };
 
         template <>
         struct SimplifyByConstant<Divide>
         {
-            ExpressionPtr m_lhs;
 
             template <typename RHS>
             requires(CIntegral<RHS>) ExpressionPtr operator()(RHS rhs)
@@ -163,12 +166,14 @@ namespace rocRoller
                 m_lhs = lhs;
                 return visit(*this, rhs);
             }
+
+        private:
+            ExpressionPtr m_lhs;
         };
 
         template <>
         struct SimplifyByConstant<Modulo>
         {
-            ExpressionPtr m_lhs;
 
             template <typename RHS>
             requires(CIntegral<RHS>) ExpressionPtr operator()(RHS rhs)
@@ -189,6 +194,9 @@ namespace rocRoller
                 m_lhs = lhs;
                 return visit(*this, rhs);
             }
+
+        private:
+            ExpressionPtr m_lhs;
         };
 
         struct SimplifyExpressionVisitor

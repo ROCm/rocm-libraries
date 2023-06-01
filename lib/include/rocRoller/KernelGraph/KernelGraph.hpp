@@ -22,12 +22,12 @@ namespace rocRoller
 
         class KernelGraph
         {
+            std::vector<GraphConstraint> m_constraints{&NoDanglingMappings};
+
         public:
             ControlGraph::ControlGraph       control;
             CoordinateGraph::CoordinateGraph coordinates;
             ControlToCoordinateMapper        mapper;
-
-            std::vector<GraphConstraint> m_constraints{&NoDanglingMappings};
 
             std::string toDOT(bool drawMappings = false, std::string title = "") const;
 

@@ -222,8 +222,6 @@ namespace rocRoller
 
         struct DivisionByConstant
         {
-            ExpressionPtr m_lhs;
-
             // Fast Modulo for when the divisor is a constant integer
             template <typename T>
             std::enable_if_t<std::is_integral_v<T> && !std::is_same_v<T, bool>, ExpressionPtr>
@@ -265,12 +263,13 @@ namespace rocRoller
                 m_lhs = lhs;
                 return visit(*this, rhs);
             }
+
+        private:
+            ExpressionPtr m_lhs;
         };
 
         struct ModuloByConstant
         {
-            ExpressionPtr m_lhs;
-
             // Fast Modulo for when the divisor is a constant integer
             template <typename T>
             std::enable_if_t<std::is_integral_v<T> && !std::is_same_v<T, bool>, ExpressionPtr>
@@ -310,6 +309,9 @@ namespace rocRoller
                 m_lhs = lhs;
                 return visit(*this, rhs);
             }
+
+        private:
+            ExpressionPtr m_lhs;
         };
 
         struct FastDivisionExpressionVisitor
@@ -374,9 +376,9 @@ namespace rocRoller
                 // attempt to replace the division with faster operations.
                 if(rhsEvalTimes[EvaluationTime::Translate])
                 {
-                    auto rhs_val    = evaluate(rhs);
+                    auto rhsVal     = evaluate(rhs);
                     auto divByConst = DivisionByConstant();
-                    return divByConst.call(lhs, rhs_val);
+                    return divByConst.call(lhs, rhsVal);
                 }
 
                 auto rhs_type = resultVariableType(rhs);
@@ -400,9 +402,9 @@ namespace rocRoller
                 // attempt to replace the modulo with faster operations.
                 if(rhsEvalTimes[EvaluationTime::Translate])
                 {
-                    auto rhs_val    = evaluate(rhs);
+                    auto rhsVal     = evaluate(rhs);
                     auto modByConst = ModuloByConstant();
-                    return modByConst.call(lhs, rhs_val);
+                    return modByConst.call(lhs, rhsVal);
                 }
 
                 auto rhs_type = resultVariableType(rhs);

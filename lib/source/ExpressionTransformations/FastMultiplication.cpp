@@ -22,8 +22,6 @@ namespace rocRoller
 
         struct MultiplicationByConstant
         {
-            ExpressionPtr m_lhs;
-
             // Fast Multiplication for when rhs is power of two
             template <typename T>
             requires(std::integral<T> && !std::same_as<bool, T>) ExpressionPtr operator()(T rhs)
@@ -60,6 +58,9 @@ namespace rocRoller
                 m_lhs = lhs;
                 return visit(*this, rhs);
             }
+
+        private:
+            ExpressionPtr m_lhs;
         };
 
         struct FastMultiplicationExpressionVisitor
