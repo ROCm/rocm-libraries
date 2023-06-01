@@ -3,6 +3,7 @@
 
 #include <rocRoller/KernelGraph/ControlGraph/LastRWTracer.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/KernelGraph/Transforms/InlineIncrements.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
 
 namespace rocRoller
@@ -22,7 +23,7 @@ namespace rocRoller
             std::set<int> lastRWOps;
         };
 
-        struct InlineIncrements
+        struct InlineIncrementer
         {
             std::vector<InlineIncrementStage> m_inlineIncrement;
 
@@ -121,13 +122,12 @@ namespace rocRoller
             }
         };
 
-        KernelGraph inlineIncrements(KernelGraph const& original)
+        KernelGraph InlineIncrements::apply(KernelGraph const& original)
         {
             TIMER(t, "KernelGraph::inlineIncrements");
-            rocRoller::Log::getLogger()->debug("KernelGraph::inlineIncrements()");
 
             auto graph     = original;
-            auto transform = InlineIncrements();
+            auto transform = InlineIncrementer();
             transform.stage(graph);
             transform.commit(graph);
             return graph;

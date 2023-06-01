@@ -1,4 +1,5 @@
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/KernelGraph/Transforms/AddConvert.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
 
 namespace rocRoller
@@ -247,10 +248,9 @@ namespace rocRoller
             commit(graph);
         }
 
-        KernelGraph addConvert(KernelGraph const& k)
+        KernelGraph AddConvert::apply(KernelGraph const& k)
         {
             TIMER(t, "KernelGraph::addConvert");
-            rocRoller::Log::getLogger()->debug("KernelGraph::addConvert()");
 
             auto graph = k;
 

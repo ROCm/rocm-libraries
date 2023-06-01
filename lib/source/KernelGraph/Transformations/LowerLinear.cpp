@@ -1,5 +1,5 @@
-
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/KernelGraph/Transforms/LowerLinear.hpp>
 #include <rocRoller/KernelGraph/Visitors.hpp>
 
 namespace rocRoller
@@ -180,11 +180,10 @@ namespace rocRoller
             }
         };
 
-        KernelGraph lowerLinear(KernelGraph k, std::shared_ptr<Context> context)
+        KernelGraph LowerLinear::apply(KernelGraph const& k)
         {
             TIMER(t, "KernelGraph::lowerLinear");
-            rocRoller::Log::getLogger()->debug("KernelGraph::lowerLinear()");
-            auto visitor = LowerLinearVisitor(context);
+            auto visitor = LowerLinearVisitor(m_context);
             return rewrite(k, visitor);
         }
 

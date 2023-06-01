@@ -1,5 +1,6 @@
 
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/KernelGraph/Transforms/CleanLoops.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
 #include <rocRoller/KernelGraph/Visitors.hpp>
 #include <rocRoller/Utilities/Logging.hpp>
@@ -12,10 +13,9 @@ namespace rocRoller
         using namespace CoordinateGraph;
         using namespace Expression;
 
-        KernelGraph cleanLoops(KernelGraph const& original)
+        KernelGraph CleanLoops::apply(KernelGraph const& original)
         {
             TIMER(t, "KernelGraph::cleanLoops");
-            rocRoller::Log::getLogger()->debug("KernelGraph::cleanLoops()");
 
             auto k = original;
             for(auto const& loop : k.control.getNodes<ForLoopOp>().to<std::vector>())

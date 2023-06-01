@@ -15,7 +15,18 @@
 #include <rocRoller/KernelGraph/Constraints.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/CoordinateGraph.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/KernelGraph/Transforms/AddComputeIndex.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddDeallocate.hpp>
+#include <rocRoller/KernelGraph/Transforms/AddLDS.hpp>
+#include <rocRoller/KernelGraph/Transforms/CleanArguments.hpp>
+#include <rocRoller/KernelGraph/Transforms/CleanLoops.hpp>
+#include <rocRoller/KernelGraph/Transforms/FuseLoops.hpp>
+#include <rocRoller/KernelGraph/Transforms/InlineIncrements.hpp>
+#include <rocRoller/KernelGraph/Transforms/LowerLinear.hpp>
+#include <rocRoller/KernelGraph/Transforms/LowerTile.hpp>
+#include <rocRoller/KernelGraph/Transforms/UnrollLoops.hpp>
+#include <rocRoller/KernelGraph/Transforms/UpdateParameters.hpp>
+#include <rocRoller/KernelGraph/Utils.hpp>
 #include <rocRoller/KernelGraph/Visitors.hpp>
 #include <rocRoller/Operations/Command.hpp>
 #include <rocRoller/Utilities/Error.hpp>
@@ -116,11 +127,13 @@ namespace KernelGraphTest
         auto extent       = std::make_shared<Expression::Expression>(command->getArguments()[1]);
         auto numWorkitems = extent / loopSizeExpr;
 
+	auto lowerLinearTransform = std::make_shared<LowerLinear>(m_context);
+
         ASSERT_THROW(
             {
                 auto kgraph = KernelGraph::translate(command);
 
-                kgraph = KernelGraph::lowerLinear(kgraph, m_context);
+                kgraph = kgraph.transform(lowerLinearTransform);
 
                 kgraph = KernelGraph::lowerLinearLoop(kgraph, loopSizeExpr, m_context);
 
@@ -887,7 +900,9 @@ namespace KernelGraphTest
         m_context->kernel()->setWorkgroupSize({64, 1, 1});
         m_context->kernel()->setWorkitemCount({one, one, one});
 
-        auto kgraph1 = lowerLinear(kgraph0, m_context);
+        auto lowerLinearTransform = std::make_shared<LowerLinear>(m_context);
+
+        auto kgraph1 = kgraph0.transform(lowerLinearTransform);
         EXPECT_EQ(NormalizedSource(expected1), NormalizedSource(kgraph1.toDOT(true)));
 
         std::string expected2 = R".(
@@ -1095,7 +1110,9 @@ namespace KernelGraphTest
         int  loopSize     = 16;
         auto loopSizeExpr = Expression::literal(loopSize);
 
-        auto kgraph2 = lowerLinearLoop(kgraph1, loopSizeExpr, m_context);
+        auto lowerLinerLoopTransform = std::make_shared<LowerLinearLoop>(loopSizeExpr, m_context);
+
+        auto kgraph2 = kgraph1.transform(lowerLinerLoopTransform);
         EXPECT_EQ(NormalizedSource(expected2), NormalizedSource(kgraph2.toDOT(true)));
     }
 
@@ -1663,21 +1680,28 @@ namespace KernelGraphTest
 
         params->setWaveTilesPerWavefront(wavetile_per_wavefront_m, wavetile_per_wavefront_n);
 
-        kgraph0 = updateParameters(kgraph0, params);
+        auto updateParametersTransform = std::make_shared<UpdateParameters>(params);
+        auto lowerTileTransform        = std::make_shared<LowerTile>(params, m_context);
+        auto unrollLoopsTransform      = std::make_shared<UnrollLoops>(m_context);
+        auto fuseLoopsTransform        = std::make_shared<FuseLoops>();
+        auto addLDSTransform           = std::make_shared<AddLDS>(m_context);
+        auto cleanLoopsTransform       = std::make_shared<CleanLoops>();
+        auto addComputeIndexTransform  = std::make_shared<AddComputeIndex>();
 
-        auto kgraph1 = lowerTile(kgraph0, params, m_context);
+        kgraph0      = kgraph0.transform(updateParametersTransform);
+        auto kgraph1 = kgraph0.transform(lowerTileTransform);
 
         // Verify the number of Multiply nodes in the graph after lowerTile
         auto multiplyNodes = kgraph1.control.getNodes<Multiply>().to<std::vector>();
         EXPECT_EQ(multiplyNodes.size(), mac_k / wave_k);
 
-        auto kgraph_unrolled = unrollLoops(kgraph1, m_context);
+        auto kgraph_unrolled = kgraph1.transform(unrollLoopsTransform);
 
         // Verify that loops have been unrolled
         auto unrolledForLoops = kgraph_unrolled.control.getNodes<ForLoopOp>().to<std::vector>();
         EXPECT_EQ(unrolledForLoops.size(), 7);
 
-        auto kgraph_fused = fuseLoops(kgraph_unrolled);
+        auto kgraph_fused = kgraph_unrolled.transform(fuseLoopsTransform);
 
         // Verify that loops have been fused
         auto fusedForLoops = kgraph_fused.control.getNodes<ForLoopOp>().to<std::vector>();
@@ -1687,18 +1711,18 @@ namespace KernelGraphTest
         EXPECT_EQ(fusedLoads.size(), 12);
 
         // Verify that single iteration loops have been removed.
-        auto kgraph_clean    = cleanLoops(kgraph_fused);
+        auto kgraph_clean    = kgraph_fused.transform(cleanLoopsTransform);
         auto cleanedForLoops = kgraph_clean.control.getNodes<ForLoopOp>().to<std::vector>();
         EXPECT_EQ(cleanedForLoops.size(), 1);
 
         // Verify that there is only a single StoreLDSTile node per K loop
-        auto unrolled_kgraph_lds = addLDS(kgraph_unrolled, m_context);
+        auto unrolled_kgraph_lds = kgraph_unrolled.transform(addLDSTransform);
         auto unrolledStoreLDS
             = unrolled_kgraph_lds.control.getNodes<StoreLDSTile>().to<std::vector>();
         EXPECT_EQ(unrolledStoreLDS.size(), 4);
 
         // Verify number of ComputeIndexes: 2 A/B loads; C load; D store: 2 * 3 + 4 + 4 = 14.
-        kgraph1             = addComputeIndexOperations(kgraph1);
+        kgraph1             = kgraph1.transform(addComputeIndexTransform);
         auto computeIndexes = kgraph1.control.getNodes<ComputeIndex>().to<std::vector>();
         EXPECT_EQ(computeIndexes.size(), 14);
 
@@ -1708,12 +1732,12 @@ namespace KernelGraphTest
         auto addDeallocates = kgraph2.control.getNodes<Deallocate>().to<std::vector>();
         EXPECT_EQ(addDeallocates.size(), 11);
 
-        unrolled_kgraph_lds = addLDS(kgraph_fused, m_context);
+        unrolled_kgraph_lds = kgraph_fused.transform(addLDSTransform);
         auto fusedStoreLDS = unrolled_kgraph_lds.control.getNodes<StoreLDSTile>().to<std::vector>();
         EXPECT_EQ(fusedStoreLDS.size(), 1);
 
         // Verify number of ComputeIndexes after unroll/fuse/lds
-        unrolled_kgraph_lds = addComputeIndexOperations(unrolled_kgraph_lds);
+        unrolled_kgraph_lds = unrolled_kgraph_lds.transform(addComputeIndexTransform);
         computeIndexes = unrolled_kgraph_lds.control.getNodes<ComputeIndex>().to<std::vector>();
         EXPECT_EQ(computeIndexes.size(), 24);
 
@@ -1763,19 +1787,27 @@ namespace KernelGraphTest
         params->setDimensionInfo(32, mac_tile_C);
         params->setDimensionInfo(34, mac_tile_D);
 
-        kgraph = updateParameters(kgraph, params);
-        kgraph = lowerLinear(kgraph, m_context);
-        kgraph = lowerTile(kgraph, params, m_context);
+        auto updateParametersTransform   = std::make_shared<UpdateParameters>(params);
+        auto lowerLinearTransform        = std::make_shared<LowerLinear>(m_context);
+        auto lowerTileTransform          = std::make_shared<LowerTile>(params, m_context);
+        auto unrollLoopsTransform        = std::make_shared<UnrollLoops>(m_context);
+        auto addLDSTransform             = std::make_shared<AddLDS>(m_context);
+        auto cleanLoopsTransform         = std::make_shared<CleanLoops>();
+        auto addComputeIndexTransform    = std::make_shared<AddComputeIndex>();
+        auto inlineInrecrementsTransform = std::make_shared<InlineIncrements>();
+
+        kgraph = kgraph.transform(updateParametersTransform);
+        kgraph = kgraph.transform(lowerLinearTransform);
+        kgraph = kgraph.transform(lowerTileTransform);
 
         // Usual lowering, should be able to inline everything.
-        auto kgraph1 = unrollLoops(kgraph, m_context);
-        kgraph1      = fuseLoops(kgraph1);
-        kgraph1      = addLDS(kgraph1, m_context);
-        kgraph1      = cleanLoops(kgraph1);
-        kgraph1      = addComputeIndexOperations(kgraph1);
+        auto kgraph1 = kgraph.transform(unrollLoopsTransform);
+        kgraph1      = kgraph1.transform(addLDSTransform);
+        kgraph1      = kgraph1.transform(cleanLoopsTransform);
+        kgraph1      = kgraph1.transform(addComputeIndexTransform);
 
         auto pre1  = kgraph1.control.getEdges<ForLoopIncrement>().to<std::vector>();
-        kgraph1    = inlineIncrements(kgraph1);
+        kgraph1    = kgraph1.transform(inlineInrecrementsTransform);
         auto post1 = kgraph1.control.getEdges<ForLoopIncrement>().to<std::vector>();
 
         EXPECT_TRUE(pre1.size() > 0);
@@ -1918,7 +1950,9 @@ namespace KernelGraphTest
         params->setDimensionInfo(11, mac_tile_1);
         params->setDimensionInfo(15, mac_tile_2);
 
-        kgraph0 = updateParameters(kgraph0, params);
+        auto updateParametersTransform = std::make_shared<UpdateParameters>(params);
+
+        kgraph0 = kgraph0.transform(updateParametersTransform);
 
         std::string expected0 = R".(
             digraph {
@@ -2055,7 +2089,10 @@ namespace KernelGraphTest
         params->setDimensionInfo(15, mac_tile_2);
         params->setDimensionInfo(17, mac_tile_3);
         params->setDimensionInfo(19, mac_tile_4);
-        kgraph0 = updateParameters(kgraph0, params);
+
+        auto updateParametersTransform = std::make_shared<UpdateParameters>(params);
+
+        kgraph0 = kgraph0.transform(updateParametersTransform);
 
         std::string expected0 = R".(
             digraph {
@@ -2200,9 +2237,13 @@ namespace KernelGraphTest
 
         EXPECT_EQ(NormalizedSource(expected0), NormalizedSource(kgraph0.toDOT(true)));
 
-        auto kgraph1 = lowerTile(kgraph0, params, m_context);
-        kgraph1      = addLDS(kgraph1, m_context);
-        kgraph1      = addComputeIndexOperations(kgraph1);
+        auto lowerTileTransform       = std::make_shared<LowerTile>(params, m_context);
+        auto addLDSTransform          = std::make_shared<AddLDS>(m_context);
+        auto addComputeIndexTransform = std::make_shared<AddComputeIndex>();
+
+        auto kgraph1 = kgraph0.transform(lowerTileTransform);
+        kgraph1      = kgraph1.transform(addLDSTransform);
+        kgraph1      = kgraph1.transform(addComputeIndexTransform);
 
         namespace CG = rocRoller::KernelGraph::ControlGraph;
         ASSERT_EQ(kgraph1.control.getNodes<CG::LoadTiled>().to<std::vector>().size(), 2);
@@ -2218,8 +2259,10 @@ namespace KernelGraphTest
         m_context->kernel()->setWorkgroupSize({64, 1, 1});
         m_context->kernel()->setWorkitemCount({one, one, one});
 
+        auto lowerLinearTransform = std::make_shared<LowerLinear>(m_context);
+
         auto kgraph0 = translate(command);
-        auto kgraph1 = lowerLinear(kgraph0, m_context);
+        auto kgraph1 = kgraph0.transform(lowerLinearTransform);
 
         auto user0   = 1;
         auto block0  = 23;
@@ -3082,8 +3125,10 @@ namespace KernelGraphTest
         m_context->kernel()->setKernelDimensions(1);
         m_context->kernel()->setWorkgroupSize({64, 1, 1});
 
+        auto cleanArgumentsTransform = std::make_shared<CleanArguments>(m_context->kernel());
+
         auto kgraph = translate(command);
-        kgraph      = cleanArguments(kgraph, m_context->kernel());
+        kgraph      = kgraph.transform(cleanArgumentsTransform);
 
         auto dot = kgraph.toDOT();
         EXPECT_THAT(dot, Not(HasSubstr("SubDimension{0, CommandArgument(Load_Linear_0_size_0)}")));
@@ -3377,7 +3422,9 @@ namespace KernelGraphTest
         params->setDimensionInfo(4, mac_tile_0);
         params->setDimensionInfo(11, mac_tile_1);
 
-        kgraph0 = updateParameters(kgraph0, params);
+        auto updateParametersTransform = std::make_shared<UpdateParameters>(params);
+
+        kgraph0 = kgraph0.transform(updateParametersTransform);
 
         std::string expected1 = R".(
         digraph {

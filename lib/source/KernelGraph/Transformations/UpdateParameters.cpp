@@ -1,6 +1,5 @@
-#include <rocRoller/CommandSolution.hpp>
-#include <rocRoller/Expression.hpp>
-#include <rocRoller/KernelGraph/KernelGraph.hpp>
+
+#include <rocRoller/KernelGraph/Transforms/UpdateParameters.hpp>
 #include <rocRoller/KernelGraph/Visitors.hpp>
 
 namespace rocRoller
@@ -9,7 +8,6 @@ namespace rocRoller
     {
         using namespace CoordinateGraph;
         using namespace ControlGraph;
-        namespace Expression = rocRoller::Expression;
 
         struct UpdateParametersVisitor
         {
@@ -36,11 +34,11 @@ namespace rocRoller
             std::map<int, Dimension> m_new_dimensions;
         };
 
-        KernelGraph updateParameters(KernelGraph k, std::shared_ptr<CommandParameters> params)
+        KernelGraph UpdateParameters::apply(KernelGraph const& k)
         {
             TIMER(t, "KernelGraph::updateParameters");
             rocRoller::Log::getLogger()->debug("KernelGraph::updateParameters()");
-            auto visitor = UpdateParametersVisitor(params);
+            auto visitor = UpdateParametersVisitor(m_params);
             return rewriteDimensions(k, visitor);
         }
     }

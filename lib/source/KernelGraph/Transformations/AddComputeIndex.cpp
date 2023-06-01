@@ -8,6 +8,7 @@
 #include <rocRoller/Graph/Hypergraph.hpp>
 #include <rocRoller/KernelGraph/ControlToCoordinateMapper.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/KernelGraph/Transforms/AddComputeIndex.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
 
 namespace rocRoller::KernelGraph
@@ -851,7 +852,7 @@ namespace rocRoller::KernelGraph
      * 4. If both ForLoop and Unroll dimensions are required, the
      *    chain is added above the containing ForLoop.
      */
-    struct AddComputeIndex
+    struct AddComputeIndexer
     {
         void stageChain(int                     target,
                         int                     candidate,
@@ -992,9 +993,9 @@ namespace rocRoller::KernelGraph
         std::map<ComputeIndexChainSpecification, std::vector<int>> m_chains;
     };
 
-    KernelGraph addComputeIndexOperations(KernelGraph const& original)
+    KernelGraph AddComputeIndex::apply(KernelGraph const& original)
     {
-        AddComputeIndex indexer;
+        AddComputeIndexer indexer;
         for(auto candidate :
             findComputeIndexCandidates(original, *original.control.roots().begin()))
             indexer.stage(original, candidate);

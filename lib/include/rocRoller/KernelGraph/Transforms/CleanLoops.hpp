@@ -6,19 +6,17 @@ namespace rocRoller
     namespace KernelGraph
     {
         /**
-         * @brief Rewrite KernelGraph to add Deallocate operations.
+         * @brief Performs the loop cleaning transformation.
          *
-         * The control graph is analysed to determine register
-         * lifetimes.  Deallocate operations are added when registers
-         * are no longer needed.
+         * Removes forloops that only contain a single iterations.
          */
-        class AddDeallocate : public GraphTransform
+        class CleanLoops : public GraphTransform
         {
         public:
             KernelGraph apply(KernelGraph const& original) override;
             std::string name() const override
             {
-                return "AddDeallocate";
+                return "CleanLoops";
             }
         };
     }

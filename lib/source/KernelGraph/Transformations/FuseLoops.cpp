@@ -1,4 +1,5 @@
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/KernelGraph/Transforms/FuseLoops.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
 #include <rocRoller/KernelGraph/Visitors.hpp>
 
@@ -21,7 +22,7 @@ namespace rocRoller
          * If it finds it, it will fuse the lower loops into a single
          * loop, as long as they are the same size.
          */
-        namespace FuseLoops
+        namespace FuseLoopsNS
         {
             namespace CT = rocRoller::KernelGraph::CoordinateGraph;
             /**
@@ -331,10 +332,9 @@ namespace rocRoller
             }
         }
 
-        KernelGraph fuseLoops(KernelGraph const& k)
+        KernelGraph FuseLoops::apply(KernelGraph const& k)
         {
             TIMER(t, "KernelGraph::fuseLoops");
-            rocRoller::Log::getLogger()->debug("KernelGraph::fuseLoops()");
 
             auto newGraph = k;
 
@@ -343,7 +343,7 @@ namespace rocRoller
             {
                 if(isOperation<ForLoopOp>(newGraph.control.getElement(node)))
                 {
-                    FuseLoops::fuseLoops(newGraph, node);
+                    FuseLoopsNS::fuseLoops(newGraph, node);
                 }
             }
 

@@ -1,6 +1,7 @@
 
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Expression.hpp>
+#include <rocRoller/KernelGraph/Transforms/LowerTile.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
 #include <rocRoller/KernelGraph/Visitors.hpp>
 #include <rocRoller/Operations/Command.hpp>
@@ -450,14 +451,12 @@ namespace rocRoller
             graph.mapper.purge(loadB[0]);
         }
 
-        KernelGraph lowerTile(KernelGraph                        graph,
-                              std::shared_ptr<CommandParameters> params,
-                              std::shared_ptr<Context>           context)
+        KernelGraph LowerTile::apply(KernelGraph const& graph)
         {
             TIMER(t, "KernelGraph::lowerTile");
             rocRoller::Log::getLogger()->debug("KernelGraph::lowerTile()");
 
-            auto visitor = LowerTileVisitor(params, context);
+            auto visitor = LowerTileVisitor(m_params, m_context);
             auto kgraph  = rewrite(graph, visitor);
 
             auto contractions = kgraph.control.getNodes<TensorContraction>().to<std::vector>();
@@ -474,7 +473,7 @@ namespace rocRoller
                 if(a_mac.rank == 2 && b_mac.rank == 2 && op.aDims == std::vector<int>{1}
                    && op.bDims == std::vector<int>{0})
                 {
-                    lowerMatrixMultiply(kgraph, tag, a_tag, b_tag, d_tag, params, context);
+                    lowerMatrixMultiply(kgraph, tag, a_tag, b_tag, d_tag, m_params, m_context);
                 }
                 else
                 {

@@ -1,6 +1,7 @@
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/KernelGraph/Transforms/CleanArguments.hpp>
 #include <rocRoller/KernelGraph/Visitors.hpp>
 
 namespace rocRoller
@@ -154,11 +155,11 @@ namespace rocRoller
          * Rewrite HyperGraph to make sure no more CommandArgument
          * values are present within the graph.
          */
-        KernelGraph cleanArguments(KernelGraph k, std::shared_ptr<AssemblyKernel> kernel)
+        KernelGraph CleanArguments::apply(KernelGraph const& k)
         {
             TIMER(t, "KernelGraph::cleanArguments");
             rocRoller::Log::getLogger()->debug("KernelGraph::cleanArguments()");
-            auto visitor = CleanArgumentsVisitor(kernel);
+            auto visitor = CleanArgumentsVisitor(m_kernel);
             return rewriteDimensions(k, visitor);
         }
 

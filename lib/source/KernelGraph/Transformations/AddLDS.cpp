@@ -70,6 +70,7 @@
 #include "KernelGraph/ControlGraph/Operation.hpp"
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Expression.hpp>
+#include <rocRoller/KernelGraph/Transforms/AddLDS.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
 #include <rocRoller/KernelGraph/Visitors.hpp>
 #include <rocRoller/Operations/Command.hpp>
@@ -422,13 +423,13 @@ namespace rocRoller
             return rv;
         }
 
-        KernelGraph addLDS(KernelGraph const& original, std::shared_ptr<Context> context)
+        KernelGraph AddLDS::apply(KernelGraph const& original)
         {
             TIMER(t, "KernelGraph::addLDS");
             rocRoller::Log::getLogger()->debug("KernelGraph::addLDS()");
 
             auto k       = original;
-            auto visitor = AddLDSVisitor(context);
+            auto visitor = AddLDSVisitor(m_context);
 
             // Add LDS operations
             for(auto const& loadTag : k.control.getNodes<LoadTiled>())
@@ -436,9 +437,9 @@ namespace rocRoller
                 visitor.stageLoad(k, loadTag);
             }
 
-            if(context->kernelOptions().prefetch)
+            if(m_context->kernelOptions().prefetch)
             {
-                AssertFatal(context->kernelOptions().unrollK > 1,
+                AssertFatal(m_context->kernelOptions().unrollK > 1,
                             "KLoop must be unrolled when prefetching.");
                 visitor.stagePrefetch(k);
             }

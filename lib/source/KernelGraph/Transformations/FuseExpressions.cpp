@@ -7,6 +7,7 @@
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/ControlToCoordinateMapper.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/KernelGraph/Transforms/FuseExpressions.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
 
 namespace rocRoller::KernelGraph
@@ -223,10 +224,9 @@ namespace rocRoller::KernelGraph
         return kgraph;
     }
 
-    KernelGraph fuseExpressions(KernelGraph const& original)
+    KernelGraph FuseExpressions::apply(KernelGraph const& original)
     {
         TIMER(t, "KernelGraph::fuseExpressions");
-        rocRoller::Log::getLogger()->debug("KernelGraph::fuseExpressions()");
         return fuseMultiplyAdd(original);
     }
 }

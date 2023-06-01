@@ -1,6 +1,7 @@
 #include "DataTypes/DataTypes.hpp"
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/KernelGraph/Transforms/LowerLinear.hpp>
 #include <rocRoller/KernelGraph/Visitors.hpp>
 
 namespace rocRoller
@@ -223,12 +224,10 @@ namespace rocRoller
             std::unordered_map<int, int> m_loopDims;
         };
 
-        KernelGraph lowerLinearLoop(KernelGraph const&       k,
-                                    ExpressionPtr            loopSize,
-                                    std::shared_ptr<Context> context)
+        KernelGraph LowerLinearLoop::apply(KernelGraph const& k)
         {
             TIMER(t, "KernelGraph::lowerLinearLoop");
-            auto visitor = LoopDistributeVisitor(context, loopSize);
+            auto visitor = LoopDistributeVisitor(m_context, m_loopSize);
             return rewrite(k, visitor);
         }
     }

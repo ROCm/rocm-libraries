@@ -6,19 +6,18 @@ namespace rocRoller
     namespace KernelGraph
     {
         /**
-         * @brief Rewrite KernelGraph to add Deallocate operations.
+         * @brief Performs the Loop Fusion transformation.
          *
-         * The control graph is analysed to determine register
-         * lifetimes.  Deallocate operations are added when registers
-         * are no longer needed.
+         * Fuses multiple loops together if they iterate over the same
+         * length.
          */
-        class AddDeallocate : public GraphTransform
+        class FuseLoops : public GraphTransform
         {
         public:
             KernelGraph apply(KernelGraph const& original) override;
             std::string name() const override
             {
-                return "AddDeallocate";
+                return "FuseLoops";
             }
         };
     }

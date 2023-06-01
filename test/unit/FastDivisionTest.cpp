@@ -6,6 +6,7 @@
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/KernelGraph/Utils.hpp>
 #include <rocRoller/Operations/Command.hpp>
 
 #include "GPUContextFixture.hpp"

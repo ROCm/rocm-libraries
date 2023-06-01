@@ -106,6 +106,13 @@ namespace rocRoller
          */
         std::vector<int> findComputeIndexCandidates(KernelGraph const& kgraph, int start);
 
+        /**
+         * Removes all CommandArgruments found within an expression
+         * with the appropriate AssemblyKernel Argument.
+         */
+        Expression::ExpressionPtr cleanArguments(Expression::ExpressionPtr,
+                                                 std::shared_ptr<AssemblyKernel>);
+
         void loadMacroTile(KernelGraph&                       graph,
                            int                                load_tag,
                            int                                user_tag,

@@ -1,5 +1,6 @@
 
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/KernelGraph/Transforms/UnrollLoops.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
 #include <rocRoller/KernelGraph/Visitors.hpp>
 
@@ -469,12 +470,10 @@ namespace rocRoller
             }
         };
 
-        KernelGraph unrollLoops(KernelGraph const& original, std::shared_ptr<Context> context)
+        KernelGraph UnrollLoops::apply(KernelGraph const& original)
         {
             TIMER(t, "KernelGraph::unrollLoops");
-            rocRoller::Log::getLogger()->debug("KernelGraph::unrollLoops()");
-
-            auto visitor = UnrollLoopsVisitor(context);
+            auto visitor = UnrollLoopsVisitor(m_context);
             return rewrite(original, visitor);
         }
     }
