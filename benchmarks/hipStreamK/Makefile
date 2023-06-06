@@ -4,5 +4,7 @@ CFLAGS = -fopenmp -std=c++17 -I$(ROCWMMAPATH) -lopenblas
 all: streamK
 streamK: LDSStreamK.cpp
 	$(CPP) $(CFLAGS) -o streamK.exe LDSStreamK.cpp
+assembly: LDSStreamK.cpp
+	$(CPP) $(CFLAGS) -S LDSStreamK.cpp
 clean:
 	rm -f streamK.exe

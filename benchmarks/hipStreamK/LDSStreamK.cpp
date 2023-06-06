@@ -343,46 +343,71 @@ __device__ static inline void
     }
 }
 
-__global__ void streamK(uint32_t      m,
-                        uint32_t      n,
-                        uint32_t      k,
-                        InputT const* a,
-                        InputT const* b,
-                        InputT const* c,
-                        OutputT*      d,
-                        uint32_t      lda,
-                        uint32_t      ldb,
-                        uint32_t      ldc,
-                        uint32_t      ldd,
-                        ComputeT      alpha,
-                        ComputeT      beta,
-                        bool*         flags,
-                        ComputeT*     partials)
+__device__ static inline auto macroTileCoord(const int tileId, const uint32_t n)
+{
+    return make_coord2d(
+        (tileId
+         / (static_cast<int>(std::ceil(static_cast<float>(n) / static_cast<float>(MACRO_TILE_Y)))))
+            * MACRO_TILE_X,
+        (tileId
+         % (static_cast<int>(std::ceil(static_cast<float>(n) / static_cast<float>(MACRO_TILE_Y)))))
+            * MACRO_TILE_Y);
+}
+
+__device__ static inline auto localWaveOffset()
+{
+    return make_coord2d((threadIdx.x / WAVE_SIZE) * WAVE_TILE_X, threadIdx.y * WAVE_TILE_Y);
+}
+
+__device__ static inline int waveIndex()
+{
+    return (threadIdx.x / WAVE_SIZE) * WAVES_Y + threadIdx.y;
+}
+
+__device__ static inline int totalIters(const uint32_t m, const uint32_t n, const uint32_t k)
+{
+    return ((k + WMMA_K - 1) / WMMA_K) * ((m + MACRO_TILE_X - 1) / MACRO_TILE_X)
+           * ((n + MACRO_TILE_Y - 1) / MACRO_TILE_Y);
+}
+
+__device__ static inline int itersPerTile(const uint32_t k)
+{
+    return ((k + WMMA_K - 1) / WMMA_K);
+}
+
+__global__ void __launch_bounds__(256) streamK(uint32_t       m,
+                                               uint32_t       n,
+                                               uint32_t       k,
+                                               InputT const*  a,
+                                               InputT const*  b,
+                                               OutputT const* c,
+                                               OutputT*       d,
+                                               uint32_t       lda,
+                                               uint32_t       ldb,
+                                               uint32_t       ldc,
+                                               uint32_t       ldd,
+                                               ComputeT       alpha,
+                                               ComputeT       beta,
+                                               bool*          flags,
+                                               ComputeT*      partials)
 {
     extern __shared__ InputT localMemPtr[];
 
-    int itersPerTile
-        = static_cast<int>(std::ceil(static_cast<float>(k) / static_cast<float>(WMMA_K)));
-    int totalIters
-        = static_cast<int>(std::ceil(static_cast<float>(m) / static_cast<float>(MACRO_TILE_X)))
-          * static_cast<int>(std::ceil(static_cast<float>(n) / static_cast<float>(MACRO_TILE_Y)))
-          * itersPerTile;
-    int itersPerCTA = totalIters / (gridDim.x);
-    int cta         = blockIdx.x;
-    int iter        = cta * itersPerCTA;
+    int itersPerCTA = totalIters(m, n, k) / (gridDim.x);
+    int iter        = blockIdx.x * itersPerCTA;
     int iterEnd     = iter + itersPerCTA;
 
-    int extraIters = totalIters % (gridDim.x);
+    int extraIters = totalIters(m, n, k) % (gridDim.x);
     if(extraIters != 0)
     {
-        if(cta < extraIters)
+        if(blockIdx.x < extraIters)
         {
-            iter    = cta * (itersPerCTA + 1);
+            iter    = blockIdx.x * (itersPerCTA + 1);
             iterEnd = iter + itersPerCTA + 1;
         }
         else
         {
-            iter    = cta * itersPerCTA + extraIters;
+            iter    = blockIdx.x * itersPerCTA + extraIters;
             iterEnd = iter + itersPerCTA;
         }
     }
@@ -393,75 +418,56 @@ __global__ void streamK(uint32_t      m,
     using LWBuffBShape = GetIOShape_t<LWBuffB>;
     using LWBuffAMap1d = GetDataLayout_t<LWBuffA>;
     using LWBuffBMap1d = GetDataLayout_t<LWBuffB>;
-    using FragShape    = GetIOShape_t<MfmaFragD>;
     using Mapper1dC    = GetDataLayout_t<MfmaFragC>;
     using Mapper1dD    = GetDataLayout_t<MfmaFragD>;
 
     GRBuffA grBuffA;
     GRBuffB grBuffB;
 
-    constexpr auto waveTileSize  = make_coord2d(WAVE_TILE_X, WAVE_TILE_Y);
-    constexpr auto macroTileSize = make_coord2d(MACRO_TILE_X, MACRO_TILE_Y);
-    constexpr auto waveCount     = WAVES_X * WAVES_Y;
-    constexpr auto splitCountA   = std::min(static_cast<uint32_t>(GetIOTraits_t<GRBuffA>::IOCount),
+    constexpr auto splitCountA = std::min(static_cast<uint32_t>(GetIOTraits_t<GRBuffA>::IOCount),
                                           static_cast<uint32_t>(GetIOTraits_t<LWBuffA>::IOCount));
-    constexpr auto splitCountB   = std::min(static_cast<uint32_t>(GetIOTraits_t<GRBuffB>::IOCount),
+    constexpr auto splitCountB = std::min(static_cast<uint32_t>(GetIOTraits_t<GRBuffB>::IOCount),
                                           static_cast<uint32_t>(GetIOTraits_t<LWBuffB>::IOCount));
-
-    auto localWaveCoord  = make_coord2d(threadIdx.x / WAVE_SIZE, threadIdx.y);
-    auto localWaveOffset = localWaveCoord * waveTileSize;
 
     MfmaFragA   fragsA[BLOCKS_X];
     MfmaFragAcc fragsAcc[BLOCKS_X][BLOCKS_Y];
     MfmaFragB   fragsB[BLOCKS_Y];
 
     //Setup LDS.
-    uint32_t sizeLds  = (LWBuffAShape::BlockHeight + LWBuffBShape::BlockHeight) * WMMA_K;
-    auto*    ldsPtrLo = localMemPtr;
-    auto*    ldsPtrHi = localMemPtr + sizeLds;
+    auto* ldsPtrLo = localMemPtr;
+    auto* ldsPtrHi = localMemPtr + (LWBuffAShape::BlockHeight + LWBuffBShape::BlockHeight) * WMMA_K;
 
-    auto ldsWriteOffsetA = 0u;
     auto ldsWriteOffsetB
         = LWBuffAMap1d::fromMatrixCoord(make_coord2d(LWBuffAShape::BlockHeight, 0u), WMMA_K);
-    auto ldsReadOffsetA
-        = ldsWriteOffsetA
-          + LWBuffAMap1d::fromMatrixCoord(make_coord2d(get<0>(localWaveOffset), 0u), WMMA_K);
+    auto ldsReadOffsetA = LWBuffAMap1d::fromMatrixCoord(
+        make_coord2d(threadIdx.x / WAVE_SIZE * WAVE_TILE_X, 0u), WMMA_K); //LDSWRITE OFFSET is 0
     auto ldsReadOffsetB
         = ldsWriteOffsetB
-          + LWBuffBMap1d::fromMatrixCoord(make_coord2d(get<1>(localWaveOffset), 0u), WMMA_K);
+          + LWBuffBMap1d::fromMatrixCoord(make_coord2d(threadIdx.y * WAVE_TILE_Y, 0u), WMMA_K);
 
-    while(iter < iterEnd)
+    while(true)
     {
-        int tileId       = iter / itersPerTile;
-        int tileIter     = tileId * itersPerTile;
-        int tileIterEnd  = tileIter + itersPerTile;
+        int tileId       = iter / itersPerTile(k);
+        int tileIter     = tileId * itersPerTile(k);
+        int tileIterEnd  = tileIter + itersPerTile(k);
         int localIter    = iter - tileIter;
         int localIterEnd = min(iterEnd, tileIterEnd) - tileIter;
 
-        const int factor
-            = static_cast<int>(std::ceil(static_cast<float>(n) / static_cast<float>(MACRO_TILE_Y)));
-        auto xDim           = (tileId / factor) * MACRO_TILE_X;
-        auto yDim           = (tileId % factor) * MACRO_TILE_Y;
-        auto macroTileCoord = make_coord2d(xDim, yDim);
-        auto waveTileCoord  = macroTileCoord + localWaveOffset;
-        auto waveIndex      = get<0>(localWaveCoord) * WAVES_Y + get<1>(localWaveCoord);
-
-        auto globalReadOffsetA
-            = GRBuffAMap1d::fromMatrixCoord(make_coord2d(get<0>(macroTileCoord), 0u), lda);
-        auto globalReadOffsetB
-            = GRBuffBMap1d::fromMatrixCoord(make_coord2d(0u, get<1>(macroTileCoord)), ldb);
+        auto globalReadOffsetA = GRBuffAMap1d::fromMatrixCoord(
+            make_coord2d(get<0>(macroTileCoord(tileId, n)), 0u), lda);
+        auto globalReadOffsetB = GRBuffBMap1d::fromMatrixCoord(
+            make_coord2d(0u, get<1>(macroTileCoord(tileId, n))), ldb);
 
         //Initial read of global memory
-        globalReadCoopA<waveCount, splitCountA>(
-            grBuffA, a + globalReadOffsetA + localIter * WMMA_K * lda, lda, waveIndex);
-        globalReadCoopB<waveCount, splitCountB>(
-            grBuffB, b + globalReadOffsetB + localIter * WMMA_K * ldb, ldb, waveIndex);
+        globalReadCoopA<WAVES_X * WAVES_Y, splitCountA>(
+            grBuffA, a + globalReadOffsetA + localIter * WMMA_K * lda, lda, waveIndex());
+        globalReadCoopB<WAVES_X * WAVES_Y, splitCountB>(
+            grBuffB, b + globalReadOffsetB + localIter * WMMA_K * ldb, ldb, waveIndex());
 
         ///Write global prefetch to LDS
-        localWriteCoopA<waveCount, splitCountA>(
-            ldsPtrLo + ldsWriteOffsetA, grBuffA, WMMA_K, waveIndex);
-        localWriteCoopB<waveCount, splitCountB>(
-            ldsPtrLo + ldsWriteOffsetB, grBuffB, WMMA_K, waveIndex);
+        localWriteCoopA<WAVES_X * WAVES_Y, splitCountA>(ldsPtrLo, grBuffA, WMMA_K, waveIndex());
+        localWriteCoopB<WAVES_X * WAVES_Y, splitCountB>(
+            ldsPtrLo + ldsWriteOffsetB, grBuffB, WMMA_K, waveIndex());
         //MFMA loop
         fill(fragsAcc, 0.0f);
         synchronize_workgroup();
@@ -473,17 +479,16 @@ __global__ void streamK(uint32_t      m,
             localReadB(fragsB, ldsPtrLo + ldsReadOffsetB, WMMA_K);
 
             // Prefetch next round of global
-            globalReadCoopA<waveCount, splitCountA>(
-                grBuffA, a + globalReadOffsetA + (currentK + 1) * WMMA_K * lda, lda, waveIndex);
-            globalReadCoopB<waveCount, splitCountB>(
-                grBuffB, b + globalReadOffsetB + (currentK + 1) * WMMA_K * ldb, ldb, waveIndex);
+            globalReadCoopA<WAVES_X * WAVES_Y, splitCountA>(
+                grBuffA, a + globalReadOffsetA + (currentK + 1) * WMMA_K * lda, lda, waveIndex());
+            globalReadCoopB<WAVES_X * WAVES_Y, splitCountB>(
+                grBuffB, b + globalReadOffsetB + (currentK + 1) * WMMA_K * ldb, ldb, waveIndex());
 
             mfmaLoop(fragsA, fragsB, fragsAcc);
 
-            localWriteCoopA<waveCount, splitCountA>(
-                ldsPtrHi + ldsWriteOffsetA, grBuffA, WMMA_K, waveIndex);
-            localWriteCoopB<waveCount, splitCountB>(
-                ldsPtrHi + ldsWriteOffsetB, grBuffB, WMMA_K, waveIndex);
+            localWriteCoopA<WAVES_X * WAVES_Y, splitCountA>(ldsPtrHi, grBuffA, WMMA_K, waveIndex());
+            localWriteCoopB<WAVES_X * WAVES_Y, splitCountB>(
+                ldsPtrHi + ldsWriteOffsetB, grBuffB, WMMA_K, waveIndex());
 
             synchronize_workgroup();
 
@@ -501,24 +506,23 @@ __global__ void streamK(uint32_t      m,
 
         if(iter != tileIter)
         {
-            storePartials(partials, cta, fragsAcc);
-            signal(flags[cta]);
+            storePartials(partials, blockIdx.x, fragsAcc);
+            signal(flags[blockIdx.x]);
         }
         else
         {
             if(iterEnd < tileIterEnd)
             {
-                int ctaNext = cta + 1;
-                int end     = tileIter;
-                while(end <= tileIterEnd)
+                int ctaNext = blockIdx.x + 1;
+                for(int end = tileIter; end <= tileIterEnd; end += itersPerCTA)
                 {
                     wait(flags[ctaNext]);
                     fixup(partials, ctaNext, fragsAcc);
                     ctaNext++;
-                    end += itersPerCTA;
                 }
             }
 
+            auto      waveTileCoord = macroTileCoord(tileId, n) + localWaveOffset();
             MfmaFragC fragsC[BLOCKS_X][BLOCKS_Y];
             MfmaFragD fragsD[BLOCKS_X][BLOCKS_Y];
             globalReadC(fragsC, c + Mapper1dC::fromMatrixCoord(waveTileCoord, ldc), ldc);
@@ -526,6 +530,8 @@ __global__ void streamK(uint32_t      m,
             globalWriteD(d + Mapper1dD::fromMatrixCoord(waveTileCoord, ldd), fragsD, ldd);
         }
         iter = tileIterEnd;
+        if(iter >= iterEnd)
+            break;
     }
 }
 
@@ -535,7 +541,7 @@ int main(int argc, char* argv[])
     int      m        = 7680;
     int      n        = 8448;
     int      k        = 8192;
-    int      numBench = 10;
+    int      numBench = 5;
     ComputeT alpha    = 1.f;
     ComputeT beta     = 1.f;
 
@@ -735,6 +741,7 @@ int main(int argc, char* argv[])
 
     CHECK_HIP_ERROR(hipFree(dA));
     CHECK_HIP_ERROR(hipFree(dB));
+    CHECK_HIP_ERROR(hipFree(dC));
     CHECK_HIP_ERROR(hipFree(dD));
     CHECK_HIP_ERROR(hipFree(partials));
     CHECK_HIP_ERROR(hipFree(flags));
