@@ -246,6 +246,19 @@ namespace rocRoller
         // clang-format on
     }
 
+    inline int Instruction::numExecutedInstructions() const
+    {
+        int rv = m_opcode.empty() ? 0 : 1;
+
+        if(m_nopCount > 0)
+            rv += m_nopCount;
+
+        if(m_waitCount != WaitCount())
+            rv++;
+
+        return rv;
+    }
+
     inline bool Instruction::isLabel() const
     {
         return !m_label.empty();

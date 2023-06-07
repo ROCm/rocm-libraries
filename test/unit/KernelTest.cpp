@@ -105,7 +105,7 @@ namespace rocRollerTest
     class MaxRegisterKernelTest : public KernelTest
     {
     protected:
-        std::string targetArchitecture()
+        std::string targetArchitecture() override
         {
             return "gfx90a";
         }

@@ -40,6 +40,7 @@ TEST_F(InstructionTest, Basic)
     auto inst = Instruction("v_add_f32", {dst}, {src1, src2}, {}, "C = A + 5");
 
     EXPECT_EQ("v_add_f32 v0, v1, 5 // C = A + 5\n", inst.toString(LogLevel::Verbose));
+    EXPECT_EQ(1, inst.numExecutedInstructions());
 }
 
 TEST_F(InstructionTest, ImplicitAllocation)
@@ -98,6 +99,8 @@ TEST_F(InstructionTest, Allocate)
 
     auto allocInst = reg->allocate();
 
+    EXPECT_EQ(0, allocInst.numExecutedInstructions());
+
     EXPECT_EQ(Register::AllocationState::Unallocated, reg->allocationState());
 
     m_context->schedule(allocInst);
@@ -131,11 +134,13 @@ TEST_F(InstructionTest, Warning)
 TEST_F(InstructionTest, Nop)
 {
     auto inst = Instruction::Nop();
+    EXPECT_EQ(1, inst.numExecutedInstructions());
     m_context->schedule(inst);
 
     inst = Instruction::Nop(5);
     inst.addNop();
     inst.addNop(3);
+    EXPECT_EQ(9, inst.numExecutedInstructions());
     m_context->schedule(inst);
 
     EXPECT_EQ("s_nop 0\n\ns_nop 8\n\n", output());
@@ -159,6 +164,7 @@ TEST_F(InstructionTest, NopOnRegularInstruction)
 
     auto inst = Instruction("v_add_f32", {dst}, {src, Register::Value::Literal(5)}, {}, "Addition");
     inst.setNopMin(3);
+    EXPECT_EQ(4, inst.numExecutedInstructions());
 
     m_context->schedule(inst);
 
@@ -183,6 +189,7 @@ TEST_F(InstructionTest, Wait)
     auto            inst2 = Instruction::Wait(wait2);
     m_context->schedule(inst);
     m_context->schedule(inst2);
+    EXPECT_EQ(1, inst.numExecutedInstructions());
 
     EXPECT_EQ("s_waitcnt expcnt(2)\n\ns_waitcnt expcnt(3)\n\n", output());
 }
@@ -222,9 +229,11 @@ TEST_F(InstructionTest, Directive)
     EXPECT_EQ(".amdgcn_target \"some-target\"\n",
               Instruction::Directive(".amdgcn_target \"some-target\"").toString(LogLevel::Verbose));
 
-    EXPECT_EQ(".set .amdgcn.next_free_vgpr, 0 // Comment\n",
-              Instruction::Directive(".set .amdgcn.next_free_vgpr, 0", "Comment")
-                  .toString(LogLevel::Verbose));
+    auto inst = Instruction::Directive(".set .amdgcn.next_free_vgpr, 0", "Comment");
+
+    EXPECT_EQ(".set .amdgcn.next_free_vgpr, 0 // Comment\n", inst.toString(LogLevel::Verbose));
+
+    EXPECT_EQ(0, inst.numExecutedInstructions());
 }
 
 TEST_F(InstructionTest, Classifications)

@@ -358,6 +358,7 @@ namespace rocRoller
     concept CCountedEnum = requires()
     {
         requires std::regular<T>;
+        requires CHasToString<T>;
 
         { T::Count } -> std::convertible_to<T>;
 
@@ -365,7 +366,6 @@ namespace rocRoller
             static_cast<std::underlying_type_t<T>>(T::Count)
         } -> std::convertible_to<std::underlying_type_t<T>>;
 
-        { toString(T::Count) } -> std::convertible_to<std::string>;
 
     };
     // clang-format on
@@ -376,6 +376,7 @@ namespace rocRoller
     template <CCountedEnum T>
     T fromString(std::string const& str);
     // clang-format off
+
     template <typename Range, typename Of>
     concept CForwardRangeOf = requires()
     {

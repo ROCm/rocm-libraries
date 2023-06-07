@@ -41,10 +41,20 @@ namespace rocRoller
             }
         }
 
-        bool WaitcntState::safeToBranchTo(const WaitcntState& labelState) const
+        void WaitcntState::assertSafeToBranchTo(const WaitcntState& labelState,
+                                                std::string const&  label) const
         {
             if(*this == labelState)
-                return true;
+                return;
+
+            bool fail = false;
+
+            // In Debug mode, defer throwing the exception until we have
+            // captured a more complete error message.
+            bool longErrMsg = Settings::Get(Settings::LogLvl) >= LogLevel::Debug;
+
+            std::string msg
+                = "Branching to label '" + label + "' with a different waitcnt state.\n";
 
             // If queues do not have needsWaitZero set, and none of the instructions
             // contain a destination, it is still safe to branch, even if the
@@ -52,22 +62,49 @@ namespace rocRoller
             for(auto const& [queue, instructions] : m_instructionQueues)
             {
                 if(m_needsWaitZero.at(queue) || labelState.m_needsWaitZero.at(queue))
-                    return false;
+                {
+                    fail = true;
+                    msg += concatenate(" Wait zero: ",
+                                       ShowValue(m_needsWaitZero.at(queue)),
+                                       ShowValue(labelState.m_needsWaitZero.at(queue)),
+                                       ShowValue(queue),
+                                       "\n");
+
+                    if(!longErrMsg)
+                        AssertFatal(!fail, msg);
+                }
 
                 for(auto const& instruction : instructions)
                 {
                     if(!instruction.empty())
-                        return false;
+                    {
+                        fail = true;
+                        msg += concatenate(" Extra register at label: ",
+                                           ShowValue(instruction),
+                                           ShowValue(queue),
+                                           "\n");
+
+                        if(!longErrMsg)
+                            AssertFatal(!fail, msg);
+                    }
                 }
 
                 for(auto const& instruction : labelState.m_instructionQueues.at(queue))
                 {
                     if(!instruction.empty())
-                        return false;
+                    {
+                        fail = true;
+                        msg += concatenate(" Extra register at branch: ",
+                                           ShowValue(instruction),
+                                           ShowValue(queue),
+                                           "\n");
+
+                        if(!longErrMsg)
+                            AssertFatal(!fail, msg);
+                    }
                 }
             }
-
-            return true;
+            AssertFatal(!fail, msg);
         }
 
         WaitcntObserver::WaitcntObserver() = default;

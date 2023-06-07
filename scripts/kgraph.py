@@ -22,8 +22,17 @@ from dot_diff import diff_dots
 def extract_asm_dot(path: pathlib.Path):
     """Extract .kernel_graph meta data from assembly file."""
     source = path.read_text()
-    start, end = source.find("---\n") + 4, source.find("...")
-    meta = yaml.safe_load(source[start:end])
+    beginMatch = re.search(r"^---$", source, re.MULTILINE)
+    endMatch = re.search(r"^\.\.\.$", source, re.MULTILINE)
+
+    assert beginMatch is not None
+    assert endMatch is not None
+
+    beginPos = beginMatch.span()[1]
+    endPos = endMatch.span()[0]
+    assert beginPos < endPos
+
+    meta = yaml.safe_load(source[beginPos:endPos])
     kernel = meta["amdhsa.kernels"][0]
     return kernel[".name"], kernel[".kernel_graph"]
 

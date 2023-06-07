@@ -68,27 +68,70 @@ def pool() -> multiprocessing.Pool:
     return mp_pool
 
 
+def terminate_pool():
+    global mp_pool
+
+    if mp_pool is not None:
+        mp_pool.terminate()
+        mp_pool.join()
+
+
+def close_pool():
+    global mp_pool
+
+    if mp_pool is not None:
+        mp_pool.close()
+        mp_pool.join()
+
+
 def random_int(max=40):
-    return lambda: int(random.uniform(0, max))
+    def factory():
+        return int(random.uniform(0, max))
+
+    factory.is_variable = max > 0
+    return factory
 
 
 def random_inv_exp(mean=100.0):
-    return lambda: 1.0 / random.expovariate(mean)
+    def factory():
+        return 1.0 / random.expovariate(mean)
+
+    factory.is_variable = True
+    return factory
 
 
 def random_bool():
-    return lambda: random.choice([False, True])
+    def factory():
+        return random.choice([False, True])
+
+    factory.is_variable = True
+    return factory
 
 
 def fixed_value(value):
-    return lambda: value
+    def factory():
+        return value
+
+    factory.is_variable = False
+    return factory
 
 
 @dataclass(frozen=True, order=True, unsafe_hash=True)
 class Weights:
+    # Fix the cost of a stall cycle to provide a common reference point
+    # so that different randomly generated weights are of comparable magnitudes.
+    stallCycles: float = field(default_factory=fixed_value(1000.0))
+
+    # It doesn't make a lot of sense to allow the optimizer to choose
+    # whether to run out of registers should the opportunity arise.
+    # Therefore, fix this parameter at a high value.
+    outOfRegisters: float = field(default_factory=fixed_value(1e9))
+
     nops: float = field(default_factory=random_inv_exp())
+
     vmcnt: float = field(default_factory=random_inv_exp())
     lgkmcnt: float = field(default_factory=random_inv_exp())
+
     newSGPRs: float = field(default_factory=random_inv_exp())
     newVGPRs: float = field(default_factory=random_inv_exp())
     highWaterMarkSGPRs: float = field(default_factory=random_inv_exp())
@@ -98,17 +141,31 @@ class Weights:
     fractionOfSGPRs: float = field(default_factory=random_inv_exp())
     fractionOfVGPRs: float = field(default_factory=random_inv_exp())
 
-    vmQueueLen: int = field(default_factory=random_int())
+    vmQueueLen: int = field(
+        default_factory=random_int(), metadata={"isCoefficient": False}
+    )
     vectorQueueSat: float = field(default_factory=random_inv_exp())
-    lgkmQueueLen: int = field(default_factory=random_int())
+    lgkmQueueLen: int = field(
+        default_factory=random_int(), metadata={"isCoefficient": False}
+    )
     ldsQueueSat: float = field(default_factory=random_inv_exp())
 
-    zeroFreeBarriers: bool = field(default_factory=random_bool())
+    zeroFreeBarriers: bool = field(
+        default_factory=random_bool(), metadata={"isCoefficient": False}
+    )
 
-    # It doesn't make a lot of sense to allow the optimizer to choose
-    # whether to run out of registers should the opportunity arise.
-    # Therefore, fix this parameter at a high value.
-    outOfRegisters: float = field(default_factory=fixed_value(1e9))
+    isSMEM: float = field(default_factory=random_inv_exp())
+    isSControl: float = field(default_factory=random_inv_exp())
+    isSALU: float = field(default_factory=random_inv_exp())
+
+    isVMEMRead: float = field(default_factory=random_inv_exp())
+    isVMEMWrite: float = field(default_factory=random_inv_exp())
+    isLDSRead: float = field(default_factory=random_inv_exp())
+    isLDSWrite: float = field(default_factory=random_inv_exp())
+    isVALU: float = field(default_factory=random_inv_exp())
+
+    isACCVGPRWrite: float = field(default_factory=random_inv_exp())
+    isACCVGPRRead: float = field(default_factory=random_inv_exp())
 
     @classmethod
     def Combine(cls, inputs: list, mutation: float = 0.1):
@@ -134,7 +191,58 @@ class Weights:
         return d.hexdigest(4)
 
 
-def bench(thedir: pathlib.Path, problem: rrperf.problems.GEMMRun, weights: Weights):
+@dataclass(order=True, unsafe_hash=True)
+class Result:
+    # The time field must be first so that results are sorted by speed.
+    time: float = field(default=math.inf)
+
+    weights: Weights = field(default_factory=Weights)
+
+    command: str = field(default="", compare=False)
+    output: str = field(default="", compare=False)
+
+    output_file: str = field(default="", compare=False)
+
+    @property
+    def passed(self):
+        return math.isfinite(self.time)
+
+    @property
+    def summary(self):
+        lines = [
+            f"Weights: {self.weights.short_hash}",
+            self.command,
+            self.output,
+        ]
+        if self.passed:
+            lines += [f"Median time: {self.time:,} ns"]
+        return "\n".join(lines)
+
+    @property
+    def short_summary(self):
+        return f"Weights: {self.weights.short_hash}, Median time: {self.time:,} ns"
+
+    @property
+    def dict(self):
+        rv = asdict(self)
+        rv["hash"] = self.weights.short_hash
+        return rv
+
+    @classmethod
+    def from_dict(cls, d):
+        args = {k: v for k, v in d.items() if k != "hash"}
+        if "weights" in args:
+            args["weights"] = Weights(**args["weights"])
+        return cls(**args)
+
+
+def bench_star(arg):
+    return bench(*arg)
+
+
+def bench(
+    thedir: pathlib.Path, problem: rrperf.problems.GEMMRun, weights: Weights
+) -> Result:
     device, lock = acquire_lock()
 
     try:
@@ -152,18 +260,40 @@ def bench(thedir: pathlib.Path, problem: rrperf.problems.GEMMRun, weights: Weigh
         env["ROCROLLER_SCHEDULER_WEIGHTS"] = str(weights_path.absolute())
 
         cmd = problem.command(device=device, yaml=result_path.absolute())
-        print(env, "\n", " ".join(cmd))
 
-        result = subprocess.call(cmd, env=env, cwd=build_dir)
-        if result != 0:
-            return math.inf, weights
+        result = Result(weights=weights)
 
-        with result_path.open() as f:
-            result = yaml.safe_load(f)
-        if not result["correct"]:
-            return math.inf, weights
+        env_prefix = " ".join([f"{k}='{v}'" for k, v in env.items()])
+        result.command = env_prefix + " " + " ".join(cmd)
 
-        return float(np.median(result["kernelExecute"])), weights
+        print(f"Launching {weights.short_hash}")
+
+        process_result = subprocess.run(
+            cmd,
+            env=env,
+            cwd=build_dir,
+            stderr=subprocess.STDOUT,
+            stdout=subprocess.PIPE,
+        )
+
+        result.output = process_result.stdout.decode()
+
+        if process_result.returncode == 0:
+            with result_path.open() as f:
+                result_data = yaml.safe_load(f)
+            if result_data["correct"]:
+                result.time = float(np.median(result_data["kernelExecute"]))
+
+        print(result.summary)
+
+        output_file = f"output_{weights.short_hash}.yaml"
+        output_path = thedir / output_file
+
+        with output_path.open("w") as ofile:
+            yaml.dump(result.dict, ofile)
+
+        return result
+
     finally:
         lock.release()
 
@@ -171,23 +301,43 @@ def bench(thedir: pathlib.Path, problem: rrperf.problems.GEMMRun, weights: Weigh
 prev_results = {}
 
 
-def generation(
-    output_dir: pathlib.Path, problem: rrperf.problems.GEMMRun, weights: List[Weights]
-) -> List[tuple]:
+def split_old_new_results(weights) -> Tuple[List[Weights], List[Weights]]:
     global prev_results
 
-    old_results = list([(prev_results[w], w) for w in weights if w in prev_results])
+    already_ran = []
+    to_run = []
+    for w in weights:
+        if w in prev_results:
+            already_ran.append(w)
+        else:
+            to_run.append(w)
 
-    to_run = list([w for w in weights if w not in prev_results])
+    return already_ran, to_run
 
-    to_run_msg = " ".join([w.short_hash for w in to_run])
-    old_results_msg = " ".join(w[1].short_hash for w in old_results)
-    print(f"Running {to_run_msg}.\nUsing previous results for {old_results_msg}")
+
+def generation(
+    output_dir: pathlib.Path, problem: rrperf.problems.GEMMRun, weights: List[Weights]
+) -> List[Result]:
+    global prev_results
+
+    already_ran, to_run = split_old_new_results(weights)
+
+    old_results = list([prev_results[w] for w in already_ran])
+
+    to_run_msg = ", ".join([w.short_hash for w in to_run])
+    print(f"Running {to_run_msg}.")
+
+    if len(old_results) > 0:
+        old_results_msg = ", ".join(w.weights.short_hash for w in old_results)
+        print(f"Using previous results for {old_results_msg}")
 
     to_run_args = zip(itertools.repeat(output_dir), itertools.repeat(problem), to_run)
-    new_results = pool().starmap(bench, to_run_args)
-    for t, w in new_results:
-        prev_results[w] = t
+
+    async_results = pool().imap_unordered(bench_star, to_run_args)
+    new_results = []
+    for r in async_results:
+        new_results.append(r)
+        prev_results[r.weights] = r
 
     return sorted(old_results + new_results)
 
@@ -198,23 +348,22 @@ def read_gen_results(resfile: str):
         data = yaml.safe_load(f)
 
         def res(el):
-            return (el["time"], Weights(**el["weights"]))
+            return Result.from_dict(el)
 
         return list(map(res, data))
 
 
-def write_generation(thedir: pathlib.Path, iter: int, results: List[tuple]):
-    def tup_dict(val):
-        return {"time": val[0], "hash": val[1].short_hash, "weights": asdict(val[1])}
-
-    data = list([tup_dict(val) for val in results])
-    datafile = thedir / f"results_{iter}.yaml"
+def write_generation(thedir: pathlib.Path, name, results: List[Result]):
+    data = list([val.dict for val in results])
+    datafile = thedir / f"results_{name}.yaml"
     with datafile.open("w") as f:
         yaml.dump(data, f)
     print(f"Wrote {datafile.absolute()}")
 
 
-def new_inputs(all_results, population, num_parents, num_random, mutation):
+def new_inputs(
+    all_results: List[Result], population, num_parents, num_random, mutation
+):
     if len(all_results) == 0:
         rv = set()
         while len(rv) < population:
@@ -229,7 +378,9 @@ def new_inputs(all_results, population, num_parents, num_random, mutation):
     # get parents from beginning of all_results.
     i = 0
     while i < len(all_results) and len(parents) < num_parents:
-        parents.add(all_results[i][1])
+        if not all_results[i].passed:
+            break
+        parents.add(all_results[i].weights)
         i += 1
     # use new random values if there aren't enough.
     while len(parents) < num_parents:
@@ -260,25 +411,95 @@ def genetic(args):
     num_children = args.population - args.num_random
     assert num_children > 0
 
-    for i in range(args.generations):
-        inputs = new_inputs(
-            args.all_results,
-            population=args.population,
-            num_parents=args.num_parents,
-            num_random=args.num_random,
-            mutation=args.mutation,
-        )
+    args.output_dir.mkdir(parents=True, exist_ok=True)
 
-        gen_dir = args.output_dir / f"gen_{i}"
-        results = generation(gen_dir, args.problem, inputs)
+    try:
+        for i in range(args.generations):
+            inputs = new_inputs(
+                args.all_results,
+                population=args.population,
+                num_parents=args.num_parents,
+                num_random=args.num_random,
+                mutation=args.mutation,
+            )
 
-        write_generation(args.output_dir, i, results)
+            gen_dir = args.output_dir / f"gen_{i}"
+            results = generation(gen_dir, args.problem, inputs)
 
-        ok_results = list([r for r in results if math.isfinite(r[0])])
+            write_generation(args.output_dir, i, results)
 
-        args.all_results = sorted(set(args.all_results + ok_results))
-        write_generation(args.output_dir, f"{i}_all", args.all_results)
-        args.mutation *= args.mutation_decay
+            args.all_results = sorted(set(args.all_results + results))
+            write_generation(args.output_dir, f"{i}_all", args.all_results)
+            block = "#" * 5
+            print(f"{block} Generation {i} {block}")
+            print_top_results(args)
+
+            args.mutation *= args.mutation_decay
+
+    except KeyboardInterrupt:
+        pool().terminate()
+
+    finally:
+        print_bad_results(args)
+        print_top_results(args)
+        close_pool()
+
+
+def find_most_different_outputs(results: List[Result], n: int = 5):
+    n = min(n, len(results))
+    if n <= 0:
+        return
+
+    import difflib
+
+    yielded = set()
+
+    for i in range(n):
+        bestIdx = 0
+        bestRatio = 1
+        for j in range(len(results)):
+            if j in yielded:
+                continue
+
+            for k in yielded:
+                ratio = difflib.SequenceMatcher(
+                    None, results[j].output, results[k].output
+                ).ratio()
+                if ratio < bestRatio:
+                    bestIdx = j
+                    bestRatio = ratio
+
+        yield results[bestIdx]
+        yielded.add(bestIdx)
+
+
+def print_bad_results(args):
+    bad_results = []
+    for r in reversed(args.all_results):
+        print(r.time)
+        if r.passed:
+            break
+        bad_results.append(r)
+
+    print(f"{len(bad_results)} errors.")
+    write_generation(args.output_dir, "errors", bad_results)
+
+    for r in find_most_different_outputs(bad_results):
+        print(r.summary)
+
+
+def print_top_results(args):
+    good_results = []
+    for r in args.all_results:
+        if not r.passed:
+            break
+        good_results.append(r)
+
+    print(f"{len(good_results)} good weights.")
+    write_generation(args.output_dir, "good", good_results)
+
+    for i in range(min(10, len(good_results))):
+        print(good_results[i].short_summary)
 
 
 def get_args(parser: argparse.ArgumentParser):
@@ -372,10 +593,7 @@ def run(args):
         genetic(args)
 
     finally:
-        global mp_pool
-        if mp_pool is not None:
-            mp_pool.close()
-            mp_pool.join()
+        close_pool()
 
 
 if __name__ == "__main__":

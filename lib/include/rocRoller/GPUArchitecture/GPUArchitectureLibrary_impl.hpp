@@ -99,6 +99,21 @@ namespace rocRoller
         return result;
     }
 
+    inline std::vector<std::string> GPUArchitectureLibrary::getMFMASupportedISAs()
+    {
+        TIMER(t, "GPUArchitectureLibrary::getMFMASupportedISAs");
+
+        std::vector<std::string> result;
+
+        for(auto target : GPUArchitectures)
+        {
+            if(target.second.HasCapability(GPUCapability::HasMFMA))
+                result.push_back(target.first.toString());
+        }
+
+        return result;
+    }
+
     inline std::map<GPUArchitectureTarget, GPUArchitecture> GPUArchitectureLibrary::LoadLibrary()
     {
         TIMER(t, "GPUArchitectureLibrary::LoadLibrary");

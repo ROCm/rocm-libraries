@@ -155,12 +155,12 @@ namespace rocRoller
     {
     public:
         GPUInstructionInfo() = default;
-        GPUInstructionInfo(std::string const& instruction,
-                           int,
-                           std::vector<GPUWaitQueueType> const&,
-                           int  = 0,
-                           bool = false,
-                           bool = false);
+        GPUInstructionInfo(std::string const&                   instruction,
+                           int                                  waitcnt,
+                           std::vector<GPUWaitQueueType> const& waitQueues,
+                           int                                  latency        = 0,
+                           bool                                 implicitAccess = false,
+                           bool                                 branch         = false);
 
         std::string                   getInstruction() const;
         int                           getWaitCount() const;
@@ -183,6 +183,7 @@ namespace rocRoller
         bool                          m_isBranch       = false;
     };
 
+    std::string toString(GPUWaitQueue);
     std::string toString(GPUWaitQueueType);
 }
 

@@ -374,6 +374,8 @@ def guidepost_1():
         trans_B="T",
         visualize=False,
         scheduler="Priority",
+        prefetchInFlight=2,
+        prefetchLDSFactor=1,
         **fp16,
     )
 

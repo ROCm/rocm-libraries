@@ -51,6 +51,7 @@ namespace rocRoller
          * @return std::vector<std::string>
          */
         static std::vector<std::string> getAllSupportedISAs();
+        static std::vector<std::string> getMFMASupportedISAs();
 
         static std::map<GPUArchitectureTarget, GPUArchitecture> LoadLibrary();
 

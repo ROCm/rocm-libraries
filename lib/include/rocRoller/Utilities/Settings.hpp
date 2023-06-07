@@ -158,6 +158,12 @@ namespace rocRoller
         typename Option::Type get(Option const& opt);
 
         /**
+         * Static convenience function to get a settings value.
+        */
+        template <typename Option>
+        static typename Option::Type Get(Option const& opt);
+
+        /**
          * @brief Set the value of a SettingsOption.
          *
          * Set the value of a SettingsOption.

@@ -326,6 +326,7 @@ set(rocroller_src
  lib/source/Observers/XDLReadSrcC90a.cpp
  lib/source/Observers/XDLWrite908.cpp
  lib/source/Observers/XDLWrite90a.cpp
+ lib/source/Observers/MFMAObserver.cpp
 
  lib/source/Schedulers/CooperativeScheduler.cpp
  lib/source/Schedulers/PriorityScheduler.cpp
@@ -444,6 +445,7 @@ set(
   test/unit/GeneratorTest.cpp
   test/unit/HalfPrecisionTest.cpp
   test/unit/HypergraphTest.cpp
+  test/unit/InstructionRefTest.cpp
   test/unit/InstructionTest.cpp
   test/unit/KernelArgumentsTest.cpp
   test/unit/KernelGraphTest.cpp
@@ -457,6 +459,7 @@ set(
   test/unit/MatrixMultiplyTest.cpp
   test/unit/MetaObserverTest.cpp
   test/unit/MFMAObserverTest.cpp
+  test/unit/MFMAUnitObserverTest.cpp
   test/unit/MixedArithmeticTest.cpp
   test/unit/RandomTest.cpp
   test/unit/RegisterAllocatorTest.cpp

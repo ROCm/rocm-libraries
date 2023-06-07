@@ -103,7 +103,7 @@ def test_mocked_integration(tmp_path_factory, mocker):
     with result_file.open() as f:
         data = yaml.safe_load(f)
 
-    assert len(data) == 3
+    assert len(data) == 5
     for d in data:
         assert "hash" in d
         assert "time" in d
@@ -141,14 +141,15 @@ def test_weights():
             test3, field.name
         ) == getattr(test2, field.name)
 
-    # With 100% mutation rate, all of the float fields _will probably_ be different from the parents after a combine.
+    # With 100% mutation rate, all of the float fields _will probably_ be different
+    # from the parents after a combine.
     test4 = ow.Weights.Combine([test1, test2], 1.0)
     assert test4.outOfRegisters >= 1e9
 
     fields = {
         fld.name
         for fld in dc.fields(ow.Weights)
-        if fld.type == float and fld.name not in ["outOfRegisters"]
+        if fld.type == float and fld.default_factory.is_variable
     }
     for fld in fields:
         assert getattr(test1, fld) != getattr(test4, fld)
@@ -157,15 +158,12 @@ def test_weights():
     test5 = ow.Weights.Combine([test1, test2])
     assert test5.outOfRegisters >= 1e9
 
-    # There is a small, but non-zero chance that these are not all different, in which case the test would fail.
-    assert (
-        len(
-            set(
-                [test1.short_hash, test2.short_hash, test4.short_hash, test5.short_hash]
-            )
-        )
-        == 4
-    )
+    weights = [test1, test2, test3, test4, test5]
+    hashes = list([t.short_hash for t in weights])
+
+    # There is a small, but non-zero chance that these are not all different, in which
+    # case the test would fail.
+    assert len(hashes) == len(set(hashes)), hashes
 
 
 def test_get_args():
@@ -206,10 +204,12 @@ def test_gen_rw(tmp_path_factory):
     population = 5
     num_gens = 10
     for gen in range(num_gens):
-        results = [(i, ow.Weights()) for i in range(population)]
+        results = [ow.Result(i, ow.Weights()) for i in range(population)]
         ow.write_generation(output_dir, gen, results)
-        test = ow.read_gen_results(output_dir / f"results_{gen}.yaml")
-        assert test == results
+
+        test_file = output_dir / f"results_{gen}.yaml"
+        test = ow.read_gen_results(test_file)
+        assert test == results, (test_file, test[0], results[0])
 
 
 def test_new_inputs():
@@ -217,13 +217,13 @@ def test_new_inputs():
     num_parents = 2
     num_rand = 2
     test_gen_1 = ow.new_inputs([], population, num_parents, num_rand, 0.1)
-    test_gen_1_results = [(i, val) for i, val in enumerate(test_gen_1)]
+    test_gen_1_results = [ow.Result(i, val) for i, val in enumerate(test_gen_1)]
     assert len(test_gen_1) == population
 
     test_gen_2 = ow.new_inputs(
         test_gen_1_results, population, num_parents, num_rand, 0.1
     )
-    test_gen_2_results = [(i, val) for i, val in enumerate(test_gen_2)]
+    test_gen_2_results = [ow.Result(i, val) for i, val in enumerate(test_gen_2)]
     assert len(test_gen_2) == (population + num_parents)
     # Parents are taken from the beginning and passed through.
     for i in range(num_parents):

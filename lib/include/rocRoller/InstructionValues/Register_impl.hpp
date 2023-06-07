@@ -24,6 +24,21 @@ namespace rocRoller
     {
         size_t constexpr bytesPerRegister = 4;
 
+        inline std::string RegisterId::toString() const
+        {
+            return concatenate(TypePrefix(regType), regIndex);
+        }
+
+        inline std::string toString(RegisterId const& regId)
+        {
+            return regId.toString();
+        }
+
+        inline std::ostream& operator<<(std::ostream& stream, RegisterId const& regId)
+        {
+            return stream << toString(regId);
+        }
+
         inline std::string TypePrefix(Type t)
         {
             switch(t)

@@ -4,6 +4,9 @@
 #include <rocRoller/Scheduling/Observers/FileWritingObserver.hpp>
 #include <rocRoller/Scheduling/Observers/RegisterLivenessObserver.hpp>
 #include <rocRoller/Scheduling/Observers/SupportedInstructionObserver.hpp>
+
+#include <rocRoller/Scheduling/Observers/FunctionalUnit/MFMAObserver.hpp>
+
 #include <rocRoller/Scheduling/Observers/WaitState/ACCVGPRReadWrite.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/ACCVGPRWriteWrite.hpp>
 #include <rocRoller/Scheduling/Observers/WaitState/CMPXWriteExec.hpp>
@@ -27,7 +30,8 @@ namespace rocRoller
             using AlwaysObservers
                 = MetaObserver<RegisterMapObserver, // NOTE: RegisterMapObserver should be first
                                AllocatingObserver,
-                               WaitcntObserver>;
+                               WaitcntObserver,
+                               MFMAObserver>;
             using Gfx908Observers   = MetaObserver<ACCVGPRReadWrite,
                                                  ACCVGPRWriteWrite,
                                                  CMPXWriteExec,

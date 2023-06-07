@@ -37,7 +37,8 @@ namespace rocRoller
              *
              * @param labelState
              */
-            bool safeToBranchTo(const WaitcntState& labelState) const;
+            void assertSafeToBranchTo(const WaitcntState& labelState,
+                                      std::string const&  label) const;
 
         private:
             // These members are duplicates of the waitcntobserver members, except we're storing a

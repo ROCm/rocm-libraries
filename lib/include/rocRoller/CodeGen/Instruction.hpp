@@ -112,6 +112,13 @@ namespace rocRoller
         bool        isLabel() const;
         std::string getLabel() const;
 
+        /**
+         * How many instructions actually executed by the GPU are included?
+         * This includes the main instruction, as well as any s_nop or s_waitcnt
+         * instructions attached to it.
+         */
+        int numExecutedInstructions() const;
+
         void allocateNow();
 
         using AllocationArray = std::array<std::shared_ptr<Register::Allocation>, MaxAllocations>;

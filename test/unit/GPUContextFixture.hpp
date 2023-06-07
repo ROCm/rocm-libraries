@@ -12,7 +12,8 @@
 /**
  * Returns a (googletest) Generator that will yield every GPU ISA supported by rocRoller.
  *
- * Useful if you want to parameterize a test with combinations of each ISA with other parameters. Example:
+ * Useful if you want to parameterize a test with combinations of each ISA with other
+ * parameters. Example:
  * INSTANTIATE_TEST_SUITE_P(SuiteName,
  *                          FixtureClass,
  *                          ::testing::Combine(supportedISAValues(),
@@ -21,6 +22,22 @@
 inline auto supportedISAValues()
 {
     return ::testing::ValuesIn(rocRoller::GPUArchitectureLibrary::getAllSupportedISAs());
+}
+
+/**
+ * Returns a (googletest) Generator that will yield every GPU ISA supported by rocRoller, that
+ * has MFMA instructions.
+ *
+ * Useful if you want to parameterize a test with combinations of each ISA with other
+ * parameters. Example:
+ * INSTANTIATE_TEST_SUITE_P(SuiteName,
+ *                          FixtureClass,
+ *                          ::testing::Combine(supportedISAValues(),
+ *                                             ::testing::Values(1, 2, 4, 8, 12, 16, 20, 44)));
+ */
+inline auto mfmaSupportedISAValues()
+{
+    return ::testing::ValuesIn(rocRoller::GPUArchitectureLibrary::getMFMASupportedISAs());
 }
 
 /**
@@ -49,6 +66,19 @@ inline auto currentGPUISA()
 inline auto supportedISATuples()
 {
     return ::testing::Combine(supportedISAValues());
+}
+
+/**
+ * Returns a (googletest) Generator that will yield a single-item tuple for every GPU ISA supported by rocRoller.
+ *
+ * Useful if you want to parameterize a test with only each supported ISA. Example:
+ * INSTANTIATE_TEST_SUITE_P(SuiteName,
+ *                          FixtureClass,
+ *                          supportedISATuples());
+ */
+inline auto mfmaSupportedISATuples()
+{
+    return ::testing::Combine(mfmaSupportedISAValues());
 }
 
 class BaseGPUContextFixture : public ContextFixture

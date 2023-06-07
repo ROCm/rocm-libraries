@@ -1,5 +1,7 @@
 
 #include <rocRoller/Scheduling/Costs/LinearWeightedCost.hpp>
+
+#include <rocRoller/CodeGen/InstructionRef.hpp>
 #include <rocRoller/Serialization/YAML.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
 
@@ -21,6 +23,7 @@ namespace rocRoller
             iot::mapRequired(io, "vmQueueLen", weights.vmQueueLen);
             iot::mapRequired(io, "ldsQueueSat", weights.ldsQueueSat);
             iot::mapRequired(io, "lgkmQueueLen", weights.lgkmQueueLen);
+            iot::mapRequired(io, "stallCycles", weights.stallCycles);
             iot::mapRequired(io, "newSGPRs", weights.newSGPRs);
             iot::mapRequired(io, "newVGPRs", weights.newVGPRs);
             iot::mapRequired(io, "highWaterMarkSGPRs", weights.highWaterMarkSGPRs);
@@ -31,6 +34,19 @@ namespace rocRoller
             iot::mapRequired(io, "fractionOfVGPRs", weights.fractionOfVGPRs);
             iot::mapRequired(io, "outOfRegisters", weights.outOfRegisters);
             iot::mapRequired(io, "zeroFreeBarriers", weights.zeroFreeBarriers);
+
+            iot::mapRequired(io, "isSMEM", weights.isSMEM);
+            iot::mapRequired(io, "isSControl", weights.isSControl);
+            iot::mapRequired(io, "isSALU", weights.isSALU);
+
+            iot::mapRequired(io, "isVMEMRead", weights.isVMEMRead);
+            iot::mapRequired(io, "isVMEMWrite", weights.isVMEMWrite);
+            iot::mapRequired(io, "isLDSRead", weights.isLDSRead);
+            iot::mapRequired(io, "isLDSWrite", weights.isLDSWrite);
+            iot::mapRequired(io, "isVALU", weights.isVALU);
+
+            iot::mapRequired(io, "isACCVGPRWrite", weights.isACCVGPRWrite);
+            iot::mapRequired(io, "isACCVGPRRead", weights.isACCVGPRRead);
         }
 
         static void mapping(IO& io, Scheduling::Weights& weights, EmptyContext& ctx)
@@ -42,21 +58,33 @@ namespace rocRoller
     namespace Scheduling
     {
         Weights::Weights()
-            : fractionOfSGPRs(6332.39f)
-            , fractionOfVGPRs(3348.02f)
-            , highWaterMarkSGPRs(301.49f)
-            , highWaterMarkVGPRs(63.41f)
-            , ldsQueueSat(429.44f)
-            , lgkmQueueLen(37)
-            , lgkmcnt(113.88f)
-            , newSGPRs(1015.01f)
-            , newVGPRs(620.96f)
-            , nops(106.54f)
-            , notMFMA(886.65f)
-            , outOfRegisters(1e9f)
-            , vectorQueueSat(474.53f)
-            , vmQueueLen(12)
-            , vmcnt(313.34f)
+            : fractionOfSGPRs(44.98264372308956)
+            , fractionOfVGPRs(525.4470412457496)
+            , highWaterMarkSGPRs(113.39537623201355)
+            , highWaterMarkVGPRs(37.00422398643702)
+            , isACCVGPRRead(747.4185623994033)
+            , isACCVGPRWrite(1096.6945230337333)
+            , isLDSRead(607.758489731699)
+            , isLDSWrite(86.91444650577664)
+            , isMFMA(45.93447209602163)
+            , isSALU(239.15701750275082)
+            , isSControl(116.31643718964418)
+            , isSMEM(80.55556824824268)
+            , isVALU(388.65601738846686)
+            , isVMEMRead(290.51619223432544)
+            , isVMEMWrite(55.82496180507543)
+            , ldsQueueSat(369.37335872110356)
+            , lgkmQueueLen(6)
+            , lgkmcnt(174.52641636935604)
+            , newSGPRs(239.26920196915)
+            , newVGPRs(82.88162435773559)
+            , nops(9212.979812089738)
+            , notMFMA(68.95621155902285)
+            , outOfRegisters(1000000000.0)
+            , stallCycles(1000.0)
+            , vectorQueueSat(210.94011910345515)
+            , vmQueueLen(17)
+            , vmcnt(182.03356243246634)
             , zeroFreeBarriers(true)
         {
         }
@@ -152,6 +180,7 @@ namespace rocRoller
                    + m_weights.lgkmcnt * lgkmcnt //
                    + m_weights.vectorQueueSat * vectorQueueSat //
                    + m_weights.ldsQueueSat * ldsQueueSat //
+                   + m_weights.stallCycles * status.stallCycles //
                    + m_weights.newSGPRs * newSGPRs //
                    + m_weights.newVGPRs * newVGPRs //
                    + m_weights.highWaterMarkSGPRs * highWaterMarkSGPRs //
@@ -161,6 +190,19 @@ namespace rocRoller
                    + m_weights.fractionOfSGPRs * fractionOfSGPRs //
                    + m_weights.fractionOfVGPRs * fractionOfVGPRs //
                    + m_weights.outOfRegisters * outOfRegisters //
+
+                   + m_weights.isSMEM * InstructionRef::isSMEM(inst) //
+                   + m_weights.isSControl * InstructionRef::isSControl(inst) //
+                   + m_weights.isSALU * InstructionRef::isSALU(inst) //
+
+                   + m_weights.isVMEMRead * InstructionRef::isVMEMRead(inst) //
+                   + m_weights.isVMEMWrite * InstructionRef::isVMEMWrite(inst) //
+                   + m_weights.isLDSRead * InstructionRef::isLDSRead(inst) //
+                   + m_weights.isLDSWrite * InstructionRef::isLDSWrite(inst) //
+                   + m_weights.isVALU * InstructionRef::isVALU(inst) //
+
+                   + m_weights.isACCVGPRWrite * InstructionRef::isACCVGPRWrite(inst) //
+                   + m_weights.isACCVGPRRead * InstructionRef::isACCVGPRRead(inst) //
                 ;
         }
     }

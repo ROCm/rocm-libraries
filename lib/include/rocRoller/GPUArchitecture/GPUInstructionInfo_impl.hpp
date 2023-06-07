@@ -20,6 +20,11 @@ namespace rocRoller
         return input.toString();
     }
 
+    inline std::string toString(GPUWaitQueue input)
+    {
+        return input.toString();
+    }
+
     inline GPUInstructionInfo::GPUInstructionInfo(std::string const&                   instruction,
                                                   int                                  waitcnt,
                                                   std::vector<GPUWaitQueueType> const& waitQueues,

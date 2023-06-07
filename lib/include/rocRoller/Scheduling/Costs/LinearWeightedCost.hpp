@@ -44,6 +44,11 @@ namespace rocRoller
             float ldsQueueSat;
             int   lgkmQueueLen;
 
+            /// Does our model predict that the instruction will be able to
+            /// issue immediately, or after a stall?
+            /// One per predicted stall cycle.
+            float stallCycles;
+
             /// Penalizes instructions that are not MFMA, therefore prioritizing
             /// MFMA instructions.
             float notMFMA;
@@ -51,6 +56,19 @@ namespace rocRoller
             /// Penalizes instructions that are MFMA, therefore prioritizing
             /// other instructions.
             float isMFMA;
+
+            float isSMEM;
+            float isSControl;
+            float isSALU;
+
+            float isVMEMRead;
+            float isVMEMWrite;
+            float isLDSRead;
+            float isLDSWrite;
+            float isVALU;
+
+            float isACCVGPRWrite;
+            float isACCVGPRRead;
 
             /// How many new SGPRs will the instruction allocate?
             float newSGPRs;

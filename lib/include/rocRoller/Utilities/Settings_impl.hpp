@@ -31,6 +31,12 @@ namespace rocRoller
     }
 
     template <typename Option>
+    typename Option::Type Settings::Get(Option const& opt)
+    {
+        return getInstance()->get(opt);
+    }
+
+    template <typename Option>
     typename Option::Type Settings::getValue(Option const& opt)
     {
         const char* var   = std::getenv(opt.name.c_str());

@@ -33,10 +33,14 @@ namespace rocRoller
                 , regIndex(index)
             {
             }
-            Type regType;
-            int  regIndex;
-            auto operator<=>(RegisterId const&) const = default;
+            Type        regType;
+            int         regIndex;
+            auto        operator<=>(RegisterId const&) const = default;
+            std::string toString() const;
         };
+        std::string toString(RegisterId const& regId);
+        // For some reason, GCC will not find the operator declared in Utils.hpp.
+        std::ostream& operator<<(std::ostream& stream, RegisterId const& regId);
 
         struct RegisterIdHash
         {
