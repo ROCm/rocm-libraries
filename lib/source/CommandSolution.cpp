@@ -19,6 +19,7 @@
 #include "KernelGraph/Transforms/GraphTransform.hpp"
 #include "KernelGraph/Transforms/InlineIncrements.hpp"
 #include "KernelGraph/Transforms/LowerLinear.hpp"
+#include "KernelGraph/Transforms/LowerTensorContraction.hpp"
 #include "KernelGraph/Transforms/LowerTile.hpp"
 #include "KernelGraph/Transforms/UnrollLoops.hpp"
 #include "KernelGraph/Transforms/UpdateParameters.hpp"
@@ -249,6 +250,8 @@ namespace rocRoller
         transforms.push_back(std::make_shared<KernelGraph::UpdateParameters>(m_preParameters));
         transforms.push_back(std::make_shared<KernelGraph::LowerLinear>(m_context));
         transforms.push_back(std::make_shared<KernelGraph::LowerTile>(m_preParameters, m_context));
+        transforms.push_back(
+            std::make_shared<KernelGraph::LowerTensorContraction>(m_preParameters, m_context));
         transforms.push_back(std::make_shared<KernelGraph::FuseExpressions>());
         transforms.push_back(std::make_shared<KernelGraph::UnrollLoops>(m_context));
         if(m_context->kernelOptions().fuseLoops)

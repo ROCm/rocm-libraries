@@ -632,7 +632,7 @@ namespace rocRoller
 
             std::string name() const override
             {
-                return "WaveTilePerWorkGroup";
+                return "JammedWaveTileNumber";
             }
         };
 

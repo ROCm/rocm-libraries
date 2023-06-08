@@ -23,6 +23,7 @@
 #include <rocRoller/KernelGraph/Transforms/FuseLoops.hpp>
 #include <rocRoller/KernelGraph/Transforms/InlineIncrements.hpp>
 #include <rocRoller/KernelGraph/Transforms/LowerLinear.hpp>
+#include <rocRoller/KernelGraph/Transforms/LowerTensorContraction.hpp>
 #include <rocRoller/KernelGraph/Transforms/LowerTile.hpp>
 #include <rocRoller/KernelGraph/Transforms/UnrollLoops.hpp>
 #include <rocRoller/KernelGraph/Transforms/UpdateParameters.hpp>
@@ -1682,14 +1683,17 @@ namespace KernelGraphTest
 
         auto updateParametersTransform = std::make_shared<UpdateParameters>(params);
         auto lowerTileTransform        = std::make_shared<LowerTile>(params, m_context);
-        auto unrollLoopsTransform      = std::make_shared<UnrollLoops>(m_context);
-        auto fuseLoopsTransform        = std::make_shared<FuseLoops>();
-        auto addLDSTransform           = std::make_shared<AddLDS>(m_context);
-        auto cleanLoopsTransform       = std::make_shared<CleanLoops>();
-        auto addComputeIndexTransform  = std::make_shared<AddComputeIndex>();
+        auto lowerTensorContractionTransform
+            = std::make_shared<LowerTensorContraction>(params, m_context);
+        auto unrollLoopsTransform     = std::make_shared<UnrollLoops>(m_context);
+        auto fuseLoopsTransform       = std::make_shared<FuseLoops>();
+        auto addLDSTransform          = std::make_shared<AddLDS>(m_context);
+        auto cleanLoopsTransform      = std::make_shared<CleanLoops>();
+        auto addComputeIndexTransform = std::make_shared<AddComputeIndex>();
 
         kgraph0      = kgraph0.transform(updateParametersTransform);
         auto kgraph1 = kgraph0.transform(lowerTileTransform);
+        kgraph1      = kgraph1.transform(lowerTensorContractionTransform);
 
         // Verify the number of Multiply nodes in the graph after lowerTile
         auto multiplyNodes = kgraph1.control.getNodes<Multiply>().to<std::vector>();
@@ -1787,9 +1791,11 @@ namespace KernelGraphTest
         params->setDimensionInfo(32, mac_tile_C);
         params->setDimensionInfo(34, mac_tile_D);
 
-        auto updateParametersTransform   = std::make_shared<UpdateParameters>(params);
-        auto lowerLinearTransform        = std::make_shared<LowerLinear>(m_context);
-        auto lowerTileTransform          = std::make_shared<LowerTile>(params, m_context);
+        auto updateParametersTransform = std::make_shared<UpdateParameters>(params);
+        auto lowerLinearTransform      = std::make_shared<LowerLinear>(m_context);
+        auto lowerTileTransform        = std::make_shared<LowerTile>(params, m_context);
+        auto lowerTensorContractionTransform
+            = std::make_shared<LowerTensorContraction>(params, m_context);
         auto unrollLoopsTransform        = std::make_shared<UnrollLoops>(m_context);
         auto addLDSTransform             = std::make_shared<AddLDS>(m_context);
         auto cleanLoopsTransform         = std::make_shared<CleanLoops>();
@@ -1799,6 +1805,7 @@ namespace KernelGraphTest
         kgraph = kgraph.transform(updateParametersTransform);
         kgraph = kgraph.transform(lowerLinearTransform);
         kgraph = kgraph.transform(lowerTileTransform);
+        kgraph = kgraph.transform(lowerTensorContractionTransform);
 
         // Usual lowering, should be able to inline everything.
         auto kgraph1 = kgraph.transform(unrollLoopsTransform);
