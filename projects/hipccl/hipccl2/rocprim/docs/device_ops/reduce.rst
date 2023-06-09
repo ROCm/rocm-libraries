@@ -29,4 +29,4 @@ segmented_reduce
 reduce_by_key
 ~~~~~~~~~~~~~
 
-.. doxygenfunction:: rocprim::reduce_by_key(void *temporary_storage, size_t &storage_size, KeysInputIterator keys_input, ValuesInputIterator values_input, unsigned int size, UniqueOutputIterator unique_output, AggregatesOutputIterator aggregates_output, UniqueCountOutputIterator unique_count_output, BinaryFunction reduce_op=BinaryFunction(), KeyCompareFunction key_compare_op=KeyCompareFunction(), hipStream_t stream=0, bool debug_synchronous=false)
+.. doxygenfunction:: rocprim::reduce_by_key(void *temporary_storage, size_t &storage_size, KeysInputIterator keys_input, ValuesInputIterator values_input, const size_t size, UniqueOutputIterator unique_output, AggregatesOutputIterator aggregates_output, UniqueCountOutputIterator unique_count_output, BinaryFunction reduce_op=BinaryFunction(), KeyCompareFunction key_compare_op=KeyCompareFunction(), hipStream_t stream=0, bool debug_synchronous=false)
