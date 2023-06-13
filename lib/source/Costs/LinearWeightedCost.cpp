@@ -92,7 +92,7 @@ namespace rocRoller
         RegisterComponent(LinearWeightedCost);
         static_assert(Component::Component<LinearWeightedCost>);
 
-        inline LinearWeightedCost::LinearWeightedCost(std::shared_ptr<Context> ctx)
+        inline LinearWeightedCost::LinearWeightedCost(ContextPtr ctx)
             : Cost{ctx}
         {
             auto settingsFile = Settings::getInstance()->get(Settings::SchedulerWeights);

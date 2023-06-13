@@ -22,7 +22,7 @@ namespace rocRoller
         class RoundRobinScheduler : public Scheduler
         {
         public:
-            RoundRobinScheduler(std::shared_ptr<Context>);
+            RoundRobinScheduler(ContextPtr);
 
             using Base = Scheduler;
 

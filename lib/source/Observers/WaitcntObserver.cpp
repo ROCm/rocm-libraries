@@ -13,7 +13,7 @@ namespace rocRoller
             : m_needsWaitZero(needsWaitZero)
             , m_typeInQueue(typeInQueue)
         {
-            // Here we're iterating through all of the std::shared_ptr<Register::Value>s and
+            // Here we're iterating through all of the Register::ValuePtrs and
             // converting them to RegisterIDs
             for(auto& queue : instruction_queues_with_alloc)
             {
@@ -109,7 +109,7 @@ namespace rocRoller
 
         WaitcntObserver::WaitcntObserver() = default;
 
-        WaitcntObserver::WaitcntObserver(std::shared_ptr<Context> context)
+        WaitcntObserver::WaitcntObserver(ContextPtr context)
             : m_context(context)
         {
             m_includeExplanation

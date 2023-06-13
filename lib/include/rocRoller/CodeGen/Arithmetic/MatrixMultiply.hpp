@@ -42,7 +42,7 @@ namespace rocRoller
             /**
              * Context, accumulation type, input type.
              */
-            using Argument = std::tuple<std::shared_ptr<Context>, DataType, DataType>;
+            using Argument = std::tuple<ContextPtr, DataType, DataType>;
             using Base     = MatrixMultiply;
 
             static const std::string Basename;
@@ -55,14 +55,14 @@ namespace rocRoller
              *
              * LHS is M x K with B batches.  RHS is K x N with B batches.
              */
-            virtual Generator<Instruction> mul(std::shared_ptr<Register::Value> dest,
-                                               std::shared_ptr<Register::Value> lhs,
-                                               std::shared_ptr<Register::Value> r1hs,
-                                               std::shared_ptr<Register::Value> r2hs,
-                                               int                              M,
-                                               int                              N,
-                                               int                              K,
-                                               int                              B)
+            virtual Generator<Instruction> mul(Register::ValuePtr dest,
+                                               Register::ValuePtr lhs,
+                                               Register::ValuePtr r1hs,
+                                               Register::ValuePtr r2hs,
+                                               int                M,
+                                               int                N,
+                                               int                K,
+                                               int                B)
                 = 0;
         };
 
@@ -71,7 +71,7 @@ namespace rocRoller
         {
             using Base = MatrixMultiply;
 
-            MatrixMultiplyGenerator<ACC, INPUT>(std::shared_ptr<Context> context)
+            MatrixMultiplyGenerator<ACC, INPUT>(ContextPtr context)
                 : m_context(context){};
 
             static const std::string Name;
@@ -85,23 +85,23 @@ namespace rocRoller
                 return atype == ACC && vtype == INPUT;
             }
 
-            static std::shared_ptr<MatrixMultiply> Build(Argument const& arg)
+            static MatrixMultiplyPtr Build(Argument const& arg)
             {
                 auto context = std::get<0>(arg);
                 return std::make_shared<MatrixMultiplyGenerator<ACC, INPUT>>(context);
             }
 
-            virtual Generator<Instruction> mul(std::shared_ptr<Register::Value> dest,
-                                               std::shared_ptr<Register::Value> lhs,
-                                               std::shared_ptr<Register::Value> r1hs,
-                                               std::shared_ptr<Register::Value> r2hs,
-                                               int                              M,
-                                               int                              N,
-                                               int                              K,
-                                               int                              B) override;
+            virtual Generator<Instruction> mul(Register::ValuePtr dest,
+                                               Register::ValuePtr lhs,
+                                               Register::ValuePtr r1hs,
+                                               Register::ValuePtr r2hs,
+                                               int                M,
+                                               int                N,
+                                               int                K,
+                                               int                B) override;
 
         protected:
-            std::shared_ptr<Context> m_context;
+            ContextPtr m_context;
         };
 
     }

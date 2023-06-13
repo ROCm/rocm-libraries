@@ -16,7 +16,7 @@ namespace rocRoller
     class BitwiseAndGenerator : public BinaryArithmeticGenerator<Expression::BitwiseAnd>
     {
     public:
-        BitwiseAndGenerator(std::shared_ptr<Context> c)
+        BitwiseAndGenerator(ContextPtr c)
             : BinaryArithmeticGenerator<Expression::BitwiseAnd>(c)
         {
         }
@@ -25,9 +25,9 @@ namespace rocRoller
         // generator.
         static bool Match(Argument const& arg)
         {
-            std::shared_ptr<Context> ctx;
-            Register::Type           registerType;
-            DataType                 dataType;
+            ContextPtr     ctx;
+            Register::Type registerType;
+            DataType       dataType;
 
             std::tie(ctx, registerType, dataType) = arg;
 
@@ -44,9 +44,8 @@ namespace rocRoller
         }
 
         // Method to generate instructions
-        Generator<Instruction> generate(std::shared_ptr<Register::Value> dest,
-                                        std::shared_ptr<Register::Value> lhs,
-                                        std::shared_ptr<Register::Value> rhs);
+        Generator<Instruction>
+            generate(Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs);
 
         static const std::string Name;
     };

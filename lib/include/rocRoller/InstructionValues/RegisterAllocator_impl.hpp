@@ -24,7 +24,7 @@ namespace rocRoller
             return m_regType;
         }
 
-        inline void Allocator::allocate(std::shared_ptr<Allocation> alloc)
+        inline void Allocator::allocate(AllocationPtr alloc)
         {
             auto registers = findFree(alloc->registerCount(), alloc->options());
 
@@ -33,8 +33,7 @@ namespace rocRoller
             allocate(alloc, std::move(registers));
         }
 
-        inline void Allocator::allocate(std::shared_ptr<Allocation> alloc,
-                                        std::vector<int> const&     registers)
+        inline void Allocator::allocate(AllocationPtr alloc, std::vector<int> const& registers)
         {
             for(auto idx : registers)
             {
@@ -45,8 +44,7 @@ namespace rocRoller
             alloc->setAllocation(shared_from_this(), registers);
         }
 
-        inline void Allocator::allocate(std::shared_ptr<Allocation> alloc,
-                                        std::vector<int>&&          registers)
+        inline void Allocator::allocate(AllocationPtr alloc, std::vector<int>&& registers)
         {
             for(auto idx : registers)
             {

@@ -16,7 +16,7 @@ namespace rocRoller
     class GreaterThanEqualGenerator : public BinaryArithmeticGenerator<Expression::GreaterThanEqual>
     {
     public:
-        GreaterThanEqualGenerator<REGISTER_TYPE, DATATYPE>(std::shared_ptr<Context> c)
+        GreaterThanEqualGenerator<REGISTER_TYPE, DATATYPE>(ContextPtr c)
             : BinaryArithmeticGenerator<Expression::GreaterThanEqual>(c)
         {
         }
@@ -25,9 +25,9 @@ namespace rocRoller
         // generator.
         static bool Match(Argument const& arg)
         {
-            std::shared_ptr<Context> ctx;
-            Register::Type           registerType;
-            DataType                 dataType;
+            ContextPtr     ctx;
+            Register::Type registerType;
+            DataType       dataType;
 
             std::tie(ctx, registerType, dataType) = arg;
 

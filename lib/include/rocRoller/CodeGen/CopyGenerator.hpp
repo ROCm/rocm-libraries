@@ -20,7 +20,7 @@ namespace rocRoller
     class CopyGenerator
     {
     public:
-        CopyGenerator(std::shared_ptr<Context>);
+        CopyGenerator(ContextPtr);
 
         ~CopyGenerator();
 

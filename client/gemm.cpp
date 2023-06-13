@@ -28,24 +28,24 @@ struct GEMMProblem
     int device;
 
     // D (MxN) = alpha * A (MxK) X B (KxN) + beta * C (MxN)
-    int   M;
-    int   N;
-    int   K;
+    int   m;
+    int   n;
+    int   k;
     float alpha;
     float beta;
 
     // Macro Tile Size
-    int mac_m;
-    int mac_n;
-    int mac_k;
+    int macM;
+    int macN;
+    int macK;
 
     // Number of wave tiles to execute per workgroup
-    int workgroup_size_x = 64;
-    int workgroup_size_y = 1;
+    int workgroupSizeX = 64;
+    int workgroupSizeY = 1;
 
-    bool loadLDS_A  = true;
-    bool loadLDS_B  = true;
-    bool storeLDS_D = true;
+    bool loadLDSA  = true;
+    bool loadLDSB  = true;
+    bool storeLDSD = true;
 
     bool prefetch          = false;
     int  prefetchInFlight  = 2;
@@ -53,25 +53,25 @@ struct GEMMProblem
     bool betaInFma         = true;
 
     // Unroll Options
-    unsigned int unroll_x = 0;
-    unsigned int unroll_y = 0;
+    unsigned int unrollX = 0;
+    unsigned int unrollY = 0;
 
     // Datatype of inputs and outputs
-    std::string type_A;
-    std::string type_B;
-    std::string type_C;
-    std::string type_D;
-    std::string type_acc;
+    std::string typeA;
+    std::string typeB;
+    std::string typeC;
+    std::string typeD;
+    std::string typeAcc;
 
     int numWarmUp;
     int numOuter;
     int numInner;
 
-    std::string trans_A; // N or T
-    std::string trans_B; // N or T
+    std::string transA; // N or T
+    std::string transB; // N or T
 
     std::string scheduler;
-    bool        match_memory_access;
+    bool        matchMemoryAccess;
 };
 
 struct GEMMResult : GEMMProblem
@@ -99,30 +99,30 @@ struct rocRoller::Serialization::
     {
         iot::mapRequired(io, "client", result.name);
         iot::mapRequired(io, "device", result.device);
-        iot::mapRequired(io, "M", result.M);
-        iot::mapRequired(io, "N", result.N);
-        iot::mapRequired(io, "K", result.K);
+        iot::mapRequired(io, "M", result.m);
+        iot::mapRequired(io, "N", result.n);
+        iot::mapRequired(io, "K", result.k);
         iot::mapRequired(io, "alpha", result.alpha);
         iot::mapRequired(io, "beta", result.beta);
-        iot::mapRequired(io, "trans_A", result.trans_A);
-        iot::mapRequired(io, "trans_B", result.trans_B);
+        iot::mapRequired(io, "trans_A", result.transA);
+        iot::mapRequired(io, "trans_B", result.transB);
 
-        iot::mapRequired(io, "type_A", result.type_A);
-        iot::mapRequired(io, "type_B", result.type_B);
-        iot::mapRequired(io, "type_C", result.type_C);
-        iot::mapRequired(io, "type_D", result.type_D);
-        iot::mapRequired(io, "type_acc", result.type_acc);
+        iot::mapRequired(io, "type_A", result.typeA);
+        iot::mapRequired(io, "type_B", result.typeB);
+        iot::mapRequired(io, "type_C", result.typeC);
+        iot::mapRequired(io, "type_D", result.typeD);
+        iot::mapRequired(io, "type_acc", result.typeAcc);
 
-        iot::mapRequired(io, "mac_m", result.mac_m);
-        iot::mapRequired(io, "mac_n", result.mac_n);
-        iot::mapRequired(io, "mac_k", result.mac_k);
-        iot::mapRequired(io, "workgroup_size_x", result.workgroup_size_x);
-        iot::mapRequired(io, "workgroup_size_y", result.workgroup_size_y);
-        iot::mapRequired(io, "unroll_x", result.unroll_x);
-        iot::mapRequired(io, "unroll_y", result.unroll_y);
-        iot::mapRequired(io, "loadLDS_A", result.loadLDS_A);
-        iot::mapRequired(io, "loadLDS_B", result.loadLDS_B);
-        iot::mapRequired(io, "storeLDS_D", result.storeLDS_D);
+        iot::mapRequired(io, "mac_m", result.macM);
+        iot::mapRequired(io, "mac_n", result.macN);
+        iot::mapRequired(io, "mac_k", result.macK);
+        iot::mapRequired(io, "workgroup_size_x", result.workgroupSizeX);
+        iot::mapRequired(io, "workgroup_size_y", result.workgroupSizeY);
+        iot::mapRequired(io, "unroll_x", result.unrollX);
+        iot::mapRequired(io, "unroll_y", result.unrollY);
+        iot::mapRequired(io, "loadLDS_A", result.loadLDSA);
+        iot::mapRequired(io, "loadLDS_B", result.loadLDSB);
+        iot::mapRequired(io, "storeLDS_D", result.storeLDSD);
         iot::mapRequired(io, "prefetch", result.prefetch);
         iot::mapRequired(io, "prefetchInFlight", result.prefetchInFlight);
         iot::mapRequired(io, "prefetchLDSFactor", result.prefetchLDSFactor);
@@ -150,24 +150,23 @@ struct rocRoller::Serialization::
 std::string gemmKernelName(GEMMResult const& result, std::shared_ptr<KernelOptions> const& options)
 {
     std::ostringstream rv;
-    rv << "GEMM_" << result.trans_A << result.trans_B;
+    rv << "GEMM_" << result.transA << result.transB;
 
     rv << "_";
-    for(auto const& t :
-        {result.type_A, result.type_B, result.type_C, result.type_D, result.type_acc})
+    for(auto const& t : {result.typeA, result.typeB, result.typeC, result.typeD, result.typeAcc})
         rv << t.substr(0, 1);
 
     rv << "_MT";
-    streamJoin(rv, std::vector{result.mac_m, result.mac_n, result.mac_k}, "x");
+    streamJoin(rv, std::vector{result.macM, result.macN, result.macK}, "x");
 
     rv << "_WG";
-    streamJoin(rv, std::vector{result.workgroup_size_x, result.workgroup_size_y}, "x");
+    streamJoin(rv, std::vector{result.workgroupSizeX, result.workgroupSizeY}, "x");
 
     rv << "_LDS";
-    streamJoin(rv, std::vector{result.loadLDS_A, result.loadLDS_B, result.storeLDS_D}, "");
+    streamJoin(rv, std::vector{result.loadLDSA, result.loadLDSB, result.storeLDSD}, "");
 
     rv << "_UNROLL";
-    streamJoin(rv, std::vector{result.unroll_x, result.unroll_y}, "x");
+    streamJoin(rv, std::vector{result.unrollX, result.unrollY}, "x");
 
     if(result.prefetch)
     {
@@ -186,10 +185,10 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult, bool doVisualize)
 {
     GEMMResult result(prob);
 
-    AssertFatal(result.M % result.mac_m == 0, "MacroTile size mismatch (M)");
-    AssertFatal(result.N % result.mac_n == 0, "MacroTile size mismatch (N)");
+    AssertFatal(result.m % result.macM == 0, "MacroTile size mismatch (M)");
+    AssertFatal(result.n % result.macN == 0, "MacroTile size mismatch (N)");
 
-    AssertFatal(result.workgroup_size_x % wavefront_size == 0,
+    AssertFatal(result.workgroupSizeX % wavefront_size == 0,
                 "Workgroup Size X must be multiply of wave front size");
 
     int wave_m, wave_n, wave_k, wave_b = 0;
@@ -215,27 +214,26 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult, bool doVisualize)
         Throw<FatalError>("Unsupported datatype combination in client");
     }
 
-    uint wavetile_per_wavefront_m
-        = wavefront_size * result.mac_m / wave_m / result.workgroup_size_x;
-    uint wavetile_per_wavefront_n = result.mac_n / wave_n / result.workgroup_size_y;
+    uint wavetile_per_wavefront_m = wavefront_size * result.macM / wave_m / result.workgroupSizeX;
+    uint wavetile_per_wavefront_n = result.macN / wave_n / result.workgroupSizeY;
 
-    AssertFatal(result.mac_m % (wave_m * wavetile_per_wavefront_m) == 0,
+    AssertFatal(result.macM % (wave_m * wavetile_per_wavefront_m) == 0,
                 "WaveTile size mismatch (M)",
-                ShowValue(result.mac_m),
+                ShowValue(result.macM),
                 ShowValue(wave_m),
                 ShowValue(wavetile_per_wavefront_m));
-    AssertFatal(result.mac_n % (wave_n * wavetile_per_wavefront_n) == 0,
+    AssertFatal(result.macN % (wave_n * wavetile_per_wavefront_n) == 0,
                 "WaveTile size mismatch (N)",
-                ShowValue(result.mac_n),
+                ShowValue(result.macN),
                 ShowValue(wave_n),
                 ShowValue(wavetile_per_wavefront_n));
 
-    uint workgroup_size_x = result.workgroup_size_x * result.workgroup_size_y;
+    uint workgroup_size_x = result.workgroupSizeX * result.workgroupSizeY;
     uint workgroup_size_y = 1;
 
     // one macro tile per workgroup
-    uint num_workgroup_x = result.M / result.mac_m;
-    uint num_workgroup_y = result.N / result.mac_n;
+    uint num_workgroup_x = result.m / result.macM;
+    uint num_workgroup_y = result.n / result.macN;
 
     auto NX = std::make_shared<Expression::Expression>(num_workgroup_x * workgroup_size_x);
     auto NY = std::make_shared<Expression::Expression>(num_workgroup_y * workgroup_size_y);
@@ -243,19 +241,19 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult, bool doVisualize)
 
     // Host data
     RandomGenerator random(31415u);
-    std::vector<A>  h_A = random.vector<A>(result.M * result.K, -1.0, 1.0);
-    std::vector<B>  h_B = random.vector<B>(result.K * result.N, -1.0, 1.0);
-    std::vector<C>  h_C = random.vector<C>(result.M * result.N, -1.0, 1.0);
+    std::vector<A>  h_A = random.vector<A>(result.m * result.k, -1.0, 1.0);
+    std::vector<B>  h_B = random.vector<B>(result.k * result.n, -1.0, 1.0);
+    std::vector<C>  h_C = random.vector<C>(result.m * result.n, -1.0, 1.0);
 
     std::shared_ptr<A> d_A = make_shared_device(h_A);
     std::shared_ptr<B> d_B = make_shared_device(h_B);
     std::shared_ptr<C> d_C = make_shared_device(h_C);
-    std::shared_ptr<D> d_D = make_shared_device<D>(result.M * result.N, 0.0);
+    std::shared_ptr<D> d_D = make_shared_device<D>(result.m * result.n, 0.0);
 
     auto command = std::make_shared<Command>();
 
     //TODO: Handle transposed matrices more elegantly
-    if(result.trans_A == "T")
+    if(result.transA == "T")
     {
         command->addOperation(
             std::make_shared<rocRoller::Operations::Operation>(rocRoller::Operations::T_Load_Tiled(
@@ -268,7 +266,7 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult, bool doVisualize)
                 TypeInfo<A>::Var.dataType, 2, 0, {(size_t)1}))); // A
     }
     //TODO: Handle transposed matrices more elegantly
-    if(result.trans_B == "T")
+    if(result.transB == "T")
     {
         command->addOperation(
             std::make_shared<rocRoller::Operations::Operation>(rocRoller::Operations::T_Load_Tiled(
@@ -318,56 +316,56 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult, bool doVisualize)
     KernelArguments runtimeArgs(logArgs);
 
     runtimeArgs.append("A", d_A.get());
-    runtimeArgs.append("d_a_limit", (size_t)result.M * result.K);
+    runtimeArgs.append("d_a_limit", (size_t)result.m * result.k);
 
-    runtimeArgs.append("d_a_size_0", (size_t)result.M);
-    runtimeArgs.append("d_a_size_1", (size_t)result.K);
+    runtimeArgs.append("d_a_size_0", (size_t)result.m);
+    runtimeArgs.append("d_a_size_1", (size_t)result.k);
 
     //TODO: Handle transposed matrices more elegantly
-    if(result.trans_A == "T")
+    if(result.transA == "T")
     {
-        runtimeArgs.append("d_a_stride_0", (size_t)result.K);
+        runtimeArgs.append("d_a_stride_0", (size_t)result.k);
         runtimeArgs.append("d_a_stride_1", (size_t)1);
     }
     else
     {
         runtimeArgs.append("d_a_stride_0", (size_t)1);
-        runtimeArgs.append("d_a_stride_1", (size_t)result.M);
+        runtimeArgs.append("d_a_stride_1", (size_t)result.m);
     }
 
     runtimeArgs.append("B", d_B.get());
-    runtimeArgs.append("d_b_limit", (size_t)result.K * result.N);
+    runtimeArgs.append("d_b_limit", (size_t)result.k * result.n);
 
-    runtimeArgs.append("d_b_size_0", (size_t)result.K);
-    runtimeArgs.append("d_b_size_1", (size_t)result.N);
+    runtimeArgs.append("d_b_size_0", (size_t)result.k);
+    runtimeArgs.append("d_b_size_1", (size_t)result.n);
 
     //TODO: Handle transposed matrices more elegantly
-    if(result.trans_B == "T")
+    if(result.transB == "T")
     {
-        runtimeArgs.append("d_b_stride_0", (size_t)result.N);
+        runtimeArgs.append("d_b_stride_0", (size_t)result.n);
         runtimeArgs.append("d_b_stride_1", (size_t)1);
     }
     else
     {
         runtimeArgs.append("d_b_stride_0", (size_t)1);
-        runtimeArgs.append("d_b_stride_1", (size_t)result.K);
+        runtimeArgs.append("d_b_stride_1", (size_t)result.k);
     }
 
     runtimeArgs.append("C", d_C.get());
-    runtimeArgs.append("d_c_limit", (size_t)result.M * result.N);
-    runtimeArgs.append("d_c_size_0", (size_t)result.M);
-    runtimeArgs.append("d_c_size_1", (size_t)result.N);
+    runtimeArgs.append("d_c_limit", (size_t)result.m * result.n);
+    runtimeArgs.append("d_c_size_0", (size_t)result.m);
+    runtimeArgs.append("d_c_size_1", (size_t)result.n);
     runtimeArgs.append("d_c_stride_0", (size_t)1);
-    runtimeArgs.append("d_c_stride_1", (size_t)result.M);
+    runtimeArgs.append("d_c_stride_1", (size_t)result.m);
 
     runtimeArgs.append("alpha", result.alpha);
 
     runtimeArgs.append("beta", result.beta);
 
     runtimeArgs.append("D", d_D.get());
-    runtimeArgs.append("d_d_limit", (size_t)result.M * result.N);
+    runtimeArgs.append("d_d_limit", (size_t)result.m * result.n);
     runtimeArgs.append("d_d_stride_0", (size_t)1);
-    runtimeArgs.append("d_d_stride_1", (size_t)result.M);
+    runtimeArgs.append("d_d_stride_1", (size_t)result.m);
 
     if(logArgs)
         Log::getLogger()->debug(runtimeArgs.toString());
@@ -377,24 +375,24 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult, bool doVisualize)
     // TODO: Calculate these values internally based on workgroup sizes.
     params->setWaveTilesPerWavefront(wavetile_per_wavefront_m, wavetile_per_wavefront_n);
 
-    auto mac_tile_A = KernelGraph::CoordinateGraph::MacroTile({result.mac_m, result.mac_k},
+    auto mac_tile_A = KernelGraph::CoordinateGraph::MacroTile({result.macM, result.macK},
                                                               LayoutType::MATRIX_A,
                                                               {wave_m, wave_n, wave_k, wave_b},
-                                                              result.loadLDS_A ? MemoryType::LDS
-                                                                               : MemoryType::WAVE);
-    auto mac_tile_B = KernelGraph::CoordinateGraph::MacroTile({result.mac_k, result.mac_n},
+                                                              result.loadLDSA ? MemoryType::LDS
+                                                                              : MemoryType::WAVE);
+    auto mac_tile_B = KernelGraph::CoordinateGraph::MacroTile({result.macK, result.macN},
                                                               LayoutType::MATRIX_B,
                                                               {wave_m, wave_n, wave_k, wave_b},
-                                                              result.loadLDS_B ? MemoryType::LDS
-                                                                               : MemoryType::WAVE);
-    auto mac_tile_C = KernelGraph::CoordinateGraph::MacroTile({result.mac_m, result.mac_n},
+                                                              result.loadLDSB ? MemoryType::LDS
+                                                                              : MemoryType::WAVE);
+    auto mac_tile_C = KernelGraph::CoordinateGraph::MacroTile({result.macM, result.macN},
                                                               LayoutType::MATRIX_ACCUMULATOR,
                                                               {wave_m, wave_n, wave_k, wave_b});
-    auto mac_tile_D = KernelGraph::CoordinateGraph::MacroTile({result.mac_m, result.mac_n},
+    auto mac_tile_D = KernelGraph::CoordinateGraph::MacroTile({result.macM, result.macN},
                                                               LayoutType::MATRIX_ACCUMULATOR,
                                                               {wave_m, wave_n, wave_k, wave_b},
-                                                              result.storeLDS_D ? MemoryType::LDS
-                                                                                : MemoryType::WAVE);
+                                                              result.storeLDSD ? MemoryType::LDS
+                                                                               : MemoryType::WAVE);
 
     params->setDimensionInfo(4, mac_tile_A);
     params->setDimensionInfo(11, mac_tile_B);
@@ -414,12 +412,12 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult, bool doVisualize)
 
     auto one         = Expression::literal(1u);
     auto wavefront_n = Expression::literal(
-        static_cast<uint>(result.mac_m * result.mac_n / wave_m / wave_n / wavetile_per_wavefront_m
+        static_cast<uint>(result.macM * result.macN / wave_m / wave_n / wavetile_per_wavefront_m
                           / wavetile_per_wavefront_n));
     auto wavefront_nx
-        = Expression::literal(static_cast<uint>(result.mac_m / wave_m / wavetile_per_wavefront_m));
+        = Expression::literal(static_cast<uint>(result.macM / wave_m / wavetile_per_wavefront_m));
     auto wavefront_ny
-        = Expression::literal(static_cast<uint>(result.mac_n / wave_n / wavetile_per_wavefront_n));
+        = Expression::literal(static_cast<uint>(result.macN / wave_n / wavetile_per_wavefront_n));
 
     auto WF  = KernelGraph::CoordinateGraph::Wavefront(-1, wavefront_n, one);
     auto WFX = KernelGraph::CoordinateGraph::Wavefront(0, wavefront_nx, one);
@@ -435,8 +433,8 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult, bool doVisualize)
     }
 
     auto kernelOptions     = std::make_shared<KernelOptions>();
-    kernelOptions->unrollX = result.unroll_x;
-    kernelOptions->unrollY = result.unroll_y;
+    kernelOptions->unrollX = result.unrollX;
+    kernelOptions->unrollY = result.unrollY;
 
     if(prob.prefetch)
     {
@@ -451,10 +449,10 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult, bool doVisualize)
         }
     }
 
-    if(result.match_memory_access)
+    if(result.matchMemoryAccess)
     {
-        kernelOptions->transposeMemoryAccess[LayoutType::MATRIX_A] = result.trans_A == "T";
-        kernelOptions->transposeMemoryAccess[LayoutType::MATRIX_B] = result.trans_B == "T";
+        kernelOptions->transposeMemoryAccess[LayoutType::MATRIX_A] = result.transA == "T";
+        kernelOptions->transposeMemoryAccess[LayoutType::MATRIX_B] = result.transB == "T";
     }
 
     kernelOptions->setNextFreeVGPRToMax = false;
@@ -492,24 +490,24 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult, bool doVisualize)
     if(checkResult)
     {
         // Device result
-        std::vector<D> h_D(result.M * result.N, 0.0);
+        std::vector<D> h_D(result.m * result.n, 0.0);
         AssertFatal(
-            hipMemcpy(h_D.data(), d_D.get(), result.M * result.N * sizeof(D), hipMemcpyDeviceToHost)
+            hipMemcpy(h_D.data(), d_D.get(), result.m * result.n * sizeof(D), hipMemcpyDeviceToHost)
             == (hipError_t)HIP_SUCCESS);
 
         // Host result
-        std::vector<D> h_result(result.M * result.N, 0.0);
+        std::vector<D> h_result(result.m * result.n, 0.0);
         rocRoller::CPUMM(h_result,
                          h_C,
                          h_A,
                          h_B,
-                         result.M,
-                         result.N,
-                         result.K,
+                         result.m,
+                         result.n,
+                         result.k,
                          result.alpha,
                          result.beta,
-                         result.trans_A == "T",
-                         result.trans_B == "T");
+                         result.transA == "T",
+                         result.transB == "T");
 
         double rnorm = relativeNorm(h_D, h_result);
 
@@ -535,7 +533,7 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult, bool doVisualize)
 
     std::cout << "Average runtime (s): " << averageTime << std::endl;
     std::cout << "Average GFLOPS: "
-              << (double)result.M * result.N * result.K * 2.0 / averageTime * 1.e-9 << std::endl;
+              << (double)result.m * result.n * result.k * 2.0 / averageTime * 1.e-9 << std::endl;
 
     result.kernelAssemble = TimerPool::nanoseconds("CommandKernel::assembleKernel");
     result.kernelGenerate = TimerPool::nanoseconds("CommandKernel::generateKernel");
@@ -599,35 +597,35 @@ int main(int argc, const char* argv[])
     po.parse_args(argc, argv);
 
     GEMMProblem prob;
-    prob.name                = "GEMMv00";
-    prob.M                   = po.get("M", 3072);
-    prob.N                   = po.get("N", 4096);
-    prob.K                   = po.get("K", 4096);
-    prob.alpha               = po.get("alpha", 2.0f);
-    prob.beta                = po.get("beta", 0.5f);
-    prob.mac_m               = po.get("mac_m", 64);
-    prob.mac_n               = po.get("mac_n", 64);
-    prob.mac_k               = po.get("mac_k", 64);
-    prob.workgroup_size_x    = po.get("workgroup_size_x", wavefront_size * 2);
-    prob.workgroup_size_y    = po.get("workgroup_size_y", 2);
-    prob.unroll_x            = po.get("unroll_x", 0);
-    prob.unroll_y            = po.get("unroll_y", 0);
-    prob.loadLDS_A           = po.get("loadLDS_A", true);
-    prob.loadLDS_B           = po.get("loadLDS_B", true);
-    prob.storeLDS_D          = po.get("storeLDS_D", true);
-    prob.betaInFma           = po.get("betaInFma", true);
-    prob.type_A              = po.get("type_A", std::string("float"));
-    prob.type_B              = po.get("type_B", std::string("float"));
-    prob.type_C              = po.get("type_C", std::string("float"));
-    prob.type_D              = po.get("type_D", std::string("float"));
-    prob.type_acc            = po.get("type_acc", std::string("float"));
-    prob.trans_A             = po.get("trans_A", std::string("N"));
-    prob.trans_B             = po.get("trans_B", std::string("N"));
-    prob.scheduler           = po.get("scheduler", std::string("Priority"));
-    prob.match_memory_access = po.get("match_memory_access", true);
-    prob.prefetch            = po.get("prefetch", false);
-    prob.prefetchInFlight    = po.get("prefetchInFlight", 0);
-    prob.prefetchLDSFactor   = po.get("prefetchLDSFactor", 0);
+    prob.name              = "GEMMv00";
+    prob.m                 = po.get("M", 3072);
+    prob.n                 = po.get("N", 4096);
+    prob.k                 = po.get("K", 4096);
+    prob.alpha             = po.get("alpha", 2.0f);
+    prob.beta              = po.get("beta", 0.5f);
+    prob.macM              = po.get("mac_m", 64);
+    prob.macN              = po.get("mac_n", 64);
+    prob.macK              = po.get("mac_k", 64);
+    prob.workgroupSizeX    = po.get("workgroup_size_x", wavefront_size * 2);
+    prob.workgroupSizeY    = po.get("workgroup_size_y", 2);
+    prob.unrollX           = po.get("unroll_x", 0);
+    prob.unrollY           = po.get("unroll_y", 0);
+    prob.loadLDSA          = po.get("loadLDS_A", true);
+    prob.loadLDSB          = po.get("loadLDS_B", true);
+    prob.storeLDSD         = po.get("storeLDS_D", true);
+    prob.betaInFma         = po.get("betaInFma", true);
+    prob.typeA             = po.get("type_A", std::string("float"));
+    prob.typeB             = po.get("type_B", std::string("float"));
+    prob.typeC             = po.get("type_C", std::string("float"));
+    prob.typeD             = po.get("type_D", std::string("float"));
+    prob.typeAcc           = po.get("type_acc", std::string("float"));
+    prob.transA            = po.get("trans_A", std::string("N"));
+    prob.transB            = po.get("trans_B", std::string("N"));
+    prob.scheduler         = po.get("scheduler", std::string("Priority"));
+    prob.matchMemoryAccess = po.get("match_memory_access", true);
+    prob.prefetch          = po.get("prefetch", false);
+    prob.prefetchInFlight  = po.get("prefetchInFlight", 0);
+    prob.prefetchLDSFactor = po.get("prefetchLDSFactor", 0);
 
     prob.numWarmUp = po.get("num_warmup", 3);
     prob.numOuter  = po.get("num_outer", 5);
@@ -638,17 +636,17 @@ int main(int argc, const char* argv[])
 
     bool doVisualize = po.get("visualize", false);
 
-    AssertFatal(prob.type_acc == "float");
+    AssertFatal(prob.typeAcc == "float");
 
     GEMMResult result(prob);
 
-    if(prob.type_A == "float" && prob.type_B == "float" && prob.type_C == "float"
-       && prob.type_D == "float")
+    if(prob.typeA == "float" && prob.typeB == "float" && prob.typeC == "float"
+       && prob.typeD == "float")
     {
         result = GEMM<float, float, float, float>(prob, true, doVisualize);
     }
-    else if(prob.type_A == "half" && prob.type_B == "half" && prob.type_C == "half"
-            && prob.type_D == "half")
+    else if(prob.typeA == "half" && prob.typeB == "half" && prob.typeC == "half"
+            && prob.typeD == "half")
     {
         result = GEMM<Half, Half, Half, Half>(prob, true, doVisualize);
     }

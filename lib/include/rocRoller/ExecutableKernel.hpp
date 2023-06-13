@@ -67,7 +67,7 @@ namespace rocRoller
          * @param target The target architecture
          * @param kernelName The name of the kernel
          */
-        void loadKernel(std::string const& instructions, std::shared_ptr<Context> context);
+        void loadKernel(std::string const& instructions, ContextPtr context);
 
         /**
          * @brief Execute a kernel on a GPU.

@@ -21,7 +21,7 @@ namespace rocRollerTest
     {
     };
 
-    void genHalfPrecisionMultiplyAdd(std::shared_ptr<rocRoller::Context> m_context, int N)
+    void genHalfPrecisionMultiplyAdd(rocRoller::ContextPtr m_context, int N)
     {
         auto k = m_context->kernel();
 
@@ -102,7 +102,7 @@ namespace rocRollerTest
         m_context->schedule(k->amdgpu_metadata());
     }
 
-    void genHalfPrecisionMultiplyAddConvert(std::shared_ptr<rocRoller::Context> m_context, int N)
+    void genHalfPrecisionMultiplyAddConvert(rocRoller::ContextPtr m_context, int N)
     {
         auto k = m_context->kernel();
 
@@ -197,9 +197,8 @@ namespace rocRollerTest
         m_context->schedule(k->amdgpu_metadata());
     }
 
-    void executeHalfPrecisionMultiplyAdd(std::shared_ptr<rocRoller::Context> m_context,
-                                         int                                 N,
-                                         bool                                convertToFloat)
+    void
+        executeHalfPrecisionMultiplyAdd(rocRoller::ContextPtr m_context, int N, bool convertToFloat)
     {
         if(convertToFloat)
             genHalfPrecisionMultiplyAddConvert(m_context, N);
@@ -240,7 +239,7 @@ namespace rocRollerTest
         executeHalfPrecisionMultiplyAdd(m_context, 8, true);
     }
 
-    void genHalfPrecisionPack(std::shared_ptr<rocRoller::Context> m_context, int N)
+    void genHalfPrecisionPack(rocRoller::ContextPtr m_context, int N)
     {
         AssertFatal(N % 2 == 0, "HalfPrecisionPack tests should only operate on even sizes");
 
@@ -401,7 +400,7 @@ namespace rocRollerTest
         m_context->schedule(k->amdgpu_metadata());
     }
 
-    void executeHalfPrecisionPack(std::shared_ptr<rocRoller::Context> m_context, int N)
+    void executeHalfPrecisionPack(rocRoller::ContextPtr m_context, int N)
     {
         genHalfPrecisionPack(m_context, N);
 

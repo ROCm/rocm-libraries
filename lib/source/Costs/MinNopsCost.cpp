@@ -8,7 +8,7 @@ namespace rocRoller
         RegisterComponent(MinNopsCost);
         static_assert(Component::Component<MinNopsCost>);
 
-        inline MinNopsCost::MinNopsCost(std::shared_ptr<Context> ctx)
+        inline MinNopsCost::MinNopsCost(ContextPtr ctx)
             : Cost{ctx}
         {
         }

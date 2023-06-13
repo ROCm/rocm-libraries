@@ -257,7 +257,7 @@ namespace rocRoller
 
         struct UnrollLoopsVisitor : public BaseGraphVisitor
         {
-            UnrollLoopsVisitor(std::shared_ptr<Context> context)
+            UnrollLoopsVisitor(ContextPtr context)
                 : BaseGraphVisitor(context, Graph::Direction::Upstream, false)
             {
             }

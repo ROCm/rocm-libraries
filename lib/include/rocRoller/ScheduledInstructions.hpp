@@ -12,7 +12,7 @@ namespace rocRoller
     class ScheduledInstructions
     {
     public:
-        explicit ScheduledInstructions(std::shared_ptr<Context> ctx);
+        explicit ScheduledInstructions(ContextPtr ctx);
         ~ScheduledInstructions() = default;
 
         void schedule(const Instruction& instruction);

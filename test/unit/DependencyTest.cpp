@@ -29,14 +29,14 @@ namespace rocRollerTest
           public ::testing::WithParamInterface<std::tuple<Scheduling::SchedulerProcedure, int>>
     {
     public:
-        Scheduling::SchedulerProcedure m_procedure;
+        Scheduling::SchedulerProcedure procedure;
 
     protected:
         void SetUp() override
         {
             m_kernelOptions.assertWaitCntState = false;
 
-            std::tie(m_procedure, m_randomSeed) = GetParam();
+            std::tie(procedure, m_randomSeed) = GetParam();
             CurrentGPUContextFixture::SetUp();
             m_context->setRandomSeed(m_randomSeed);
         }
@@ -161,7 +161,7 @@ namespace rocRollerTest
         sequences.push_back(comment_generator(5));
 
         std::shared_ptr<Scheduling::Scheduler> scheduler = Component::GetNew<Scheduling::Scheduler>(
-            m_procedure, Scheduling::CostFunction::MinNops, m_context);
+            procedure, Scheduling::CostFunction::MinNops, m_context);
 
         m_context->schedule((*scheduler)(sequences));
 
@@ -308,7 +308,7 @@ namespace rocRollerTest
         sequences.push_back(scalar_compare());
 
         std::shared_ptr<Scheduling::Scheduler> scheduler = Component::GetNew<Scheduling::Scheduler>(
-            m_procedure, Scheduling::CostFunction::MinNops, m_context);
+            procedure, Scheduling::CostFunction::MinNops, m_context);
 
         m_context->schedule((*scheduler)(sequences));
 
@@ -408,7 +408,7 @@ namespace rocRollerTest
         sequences.push_back(set_vcc_to_zero());
 
         std::shared_ptr<Scheduling::Scheduler> scheduler = Component::GetNew<Scheduling::Scheduler>(
-            m_procedure, Scheduling::CostFunction::MinNops, m_context);
+            procedure, Scheduling::CostFunction::MinNops, m_context);
 
         m_context->schedule((*scheduler)(sequences));
 
@@ -563,7 +563,7 @@ namespace rocRollerTest
         sequences.push_back(set_vcc2());
 
         std::shared_ptr<Scheduling::Scheduler> scheduler = Component::GetNew<Scheduling::Scheduler>(
-            m_procedure, Scheduling::CostFunction::MinNops, m_context);
+            procedure, Scheduling::CostFunction::MinNops, m_context);
 
         m_context->schedule((*scheduler)(sequences));
 

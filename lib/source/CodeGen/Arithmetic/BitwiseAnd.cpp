@@ -16,9 +16,9 @@ namespace rocRoller
             getContextFromValues(dst, lhs, rhs), dst->regType(), dst->variableType().dataType);
     }
 
-    Generator<Instruction> BitwiseAndGenerator::generate(std::shared_ptr<Register::Value> dest,
-                                                         std::shared_ptr<Register::Value> lhs,
-                                                         std::shared_ptr<Register::Value> rhs)
+    Generator<Instruction> BitwiseAndGenerator::generate(Register::ValuePtr dest,
+                                                         Register::ValuePtr lhs,
+                                                         Register::ValuePtr rhs)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);

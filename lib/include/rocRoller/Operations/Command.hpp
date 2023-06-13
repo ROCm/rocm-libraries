@@ -29,19 +29,22 @@ namespace rocRoller
         Command(Command const& rhs);
         Command(Command&& rhs);
 
-        void                             addOperation(std::shared_ptr<Operations::Operation> op);
-        std::shared_ptr<CommandArgument> allocateArgument(VariableType  variableType,
-                                                          DataDirection direction
-                                                          = DataDirection::ReadWrite);
-        std::shared_ptr<CommandArgument> allocateArgument(VariableType       variableType,
-                                                          DataDirection      direction,
-                                                          std::string const& name);
+        void               addOperation(std::shared_ptr<Operations::Operation> op);
+        CommandArgumentPtr allocateArgument(VariableType  variableType,
+                                            DataDirection direction = DataDirection::ReadWrite);
+        CommandArgumentPtr allocateArgument(VariableType       variableType,
+                                            DataDirection      direction,
+                                            std::string const& name);
 
-        std::vector<std::shared_ptr<CommandArgument>> allocateArgumentVector(
-            DataType dataType, int length, DataDirection direction = DataDirection::ReadWrite);
+        std::vector<CommandArgumentPtr> allocateArgumentVector(DataType      dataType,
+                                                               int           length,
+                                                               DataDirection direction
+                                                               = DataDirection::ReadWrite);
 
-        std::vector<std::shared_ptr<CommandArgument>> allocateArgumentVector(
-            DataType dataType, int length, DataDirection direction, std::string const& name);
+        std::vector<CommandArgumentPtr> allocateArgumentVector(DataType           dataType,
+                                                               int                length,
+                                                               DataDirection      direction,
+                                                               std::string const& name);
 
         std::shared_ptr<Operations::Operation> findTag(int tag);
         int                                    getNextTag() const;
@@ -55,7 +58,7 @@ namespace rocRoller
         /**
          * Returns a list of all of the CommandArguments within a Command.
          */
-        std::vector<std::shared_ptr<CommandArgument>> getArguments() const;
+        std::vector<CommandArgumentPtr> getArguments() const;
 
         /**
          * NOTE: Debugging & testing purposes only.
@@ -81,7 +84,7 @@ namespace rocRoller
 
         std::map<int, std::shared_ptr<Operations::Operation>> m_tagMap;
 
-        std::vector<std::shared_ptr<CommandArgument>> m_commandArgs;
+        std::vector<CommandArgumentPtr> m_commandArgs;
 
         int m_nextTagValue = 0;
 

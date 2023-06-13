@@ -15,7 +15,7 @@
 
 namespace rocRoller
 {
-    inline CopyGenerator::CopyGenerator(std::shared_ptr<Context> context)
+    inline CopyGenerator::CopyGenerator(ContextPtr context)
         : m_context(context)
     {
     }

@@ -14,7 +14,7 @@ namespace rocRoller
             using BaseGraphVisitor::visitEdge;
             using BaseGraphVisitor::visitOperation;
 
-            LowerLinearVisitor(std::shared_ptr<Context> context)
+            LowerLinearVisitor(ContextPtr context)
                 : BaseGraphVisitor(context)
             {
             }

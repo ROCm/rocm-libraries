@@ -18,7 +18,7 @@ namespace rocRoller
          */
             void observe(Instruction const& inst);
 
-            static bool required(std::shared_ptr<Context> context)
+            static bool required(ContextPtr context)
             {
                 return context->targetArchitecture().target().getVersionString() == "gfx90a";
             }

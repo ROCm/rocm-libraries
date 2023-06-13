@@ -16,7 +16,7 @@ namespace rocRoller
          * @param context
          * @return ExpressionPtr Transformed expression
          */
-        ExpressionPtr fastDivision(ExpressionPtr expr, std::shared_ptr<Context> context);
+        ExpressionPtr fastDivision(ExpressionPtr expr, ContextPtr context);
 
         /**
          * @brief Attempt to replace multiplication operations found within an expression with faster operations.
@@ -63,12 +63,12 @@ namespace rocRoller
         struct FastArithmetic
         {
             FastArithmetic() = delete;
-            FastArithmetic(std::shared_ptr<Context>);
+            FastArithmetic(ContextPtr);
 
             ExpressionPtr operator()(ExpressionPtr) const;
 
         private:
-            std::shared_ptr<Context> m_context;
+            ContextPtr m_context;
         };
     }
 }

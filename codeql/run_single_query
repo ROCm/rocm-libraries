@@ -1,0 +1,13 @@
+#!/bin/bash
+
+if [ "$#" -ne 1 ]; then
+  echo "Usage: $0 <path/to/query>"
+  exit 1
+fi
+
+codeql database analyze codeql/build/rr-database $1 \
+    --format=sarifv2.1.0 --output=codeql/build/codeql.sarif \
+    --search-path=codeql/build/codeql-cli:codeql/cpp \
+    --rerun \
+    --compilation-cache=codeql/build/.cache/ \
+    --no-default-compilation-cache

@@ -8,7 +8,7 @@ namespace rocRoller
         RegisterComponent(RoundRobinScheduler);
         static_assert(Component::Component<RoundRobinScheduler>);
 
-        inline RoundRobinScheduler::RoundRobinScheduler(std::shared_ptr<Context> ctx)
+        inline RoundRobinScheduler::RoundRobinScheduler(ContextPtr ctx)
             : Scheduler{ctx}
         {
         }

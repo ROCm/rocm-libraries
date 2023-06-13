@@ -19,7 +19,7 @@ namespace rocRoller
         class MinNopsCost : public Cost
         {
         public:
-            MinNopsCost(std::shared_ptr<Context>);
+            MinNopsCost(ContextPtr);
 
             using Base = Cost;
 

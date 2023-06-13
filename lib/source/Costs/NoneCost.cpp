@@ -9,7 +9,7 @@ namespace rocRoller
         RegisterComponent(NoneCost);
         static_assert(Component::Component<NoneCost>);
 
-        inline NoneCost::NoneCost(std::shared_ptr<Context> ctx)
+        inline NoneCost::NoneCost(ContextPtr ctx)
             : Cost{ctx}
         {
             AssertFatal(false, "Cannot use None cost.");

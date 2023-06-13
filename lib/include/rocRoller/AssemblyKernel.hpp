@@ -34,7 +34,7 @@ namespace rocRoller
     class AssemblyKernel
     {
     public:
-        AssemblyKernel(std::shared_ptr<Context> context, std::string const& kernelName);
+        AssemblyKernel(ContextPtr context, std::string const& kernelName);
 
         AssemblyKernel() noexcept;
         AssemblyKernel(AssemblyKernel const& rhs) noexcept;
@@ -44,7 +44,7 @@ namespace rocRoller
 
         ~AssemblyKernel();
 
-        std::shared_ptr<Context> context() const;
+        ContextPtr context() const;
 
         std::string kernelName() const;
         void        setKernelName(std::string const& name);
@@ -130,7 +130,7 @@ namespace rocRoller
          *
          * @param args Vector of CommandArgument pointers that should be added as arguments.
          */
-        void addCommandArguments(std::vector<std::shared_ptr<CommandArgument>> args);
+        void addCommandArguments(std::vector<CommandArgumentPtr> args);
 
         /** The size in bytes of all the arguments. */
         size_t argumentSize() const;

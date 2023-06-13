@@ -19,7 +19,7 @@ namespace rocRoller
         class UniformCost : public Cost
         {
         public:
-            UniformCost(std::shared_ptr<Context>);
+            UniformCost(ContextPtr);
 
             using Base = Cost;
 

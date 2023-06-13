@@ -50,8 +50,8 @@ namespace rocRoller
     }
 
     // Allocate a single command argument by incrementing the most recent offset.
-    inline std::shared_ptr<CommandArgument> Command::allocateArgument(VariableType  variableType,
-                                                                      DataDirection direction)
+    inline CommandArgumentPtr Command::allocateArgument(VariableType  variableType,
+                                                        DataDirection direction)
     {
         std::string name = concatenate("user_",
                                        variableType.dataType,
@@ -63,9 +63,9 @@ namespace rocRoller
         return allocateArgument(variableType, direction, name);
     }
 
-    inline std::shared_ptr<CommandArgument> Command::allocateArgument(VariableType  variableType,
-                                                                      DataDirection direction,
-                                                                      std::string const& name)
+    inline CommandArgumentPtr Command::allocateArgument(VariableType       variableType,
+                                                        DataDirection      direction,
+                                                        std::string const& name)
     {
         // TODO Fix argument alignment
         auto info      = DataTypeInfo::Get(variableType.dataType);
@@ -81,12 +81,12 @@ namespace rocRoller
         return m_commandArgs[m_commandArgs.size() - 1];
     }
 
-    inline std::vector<std::shared_ptr<CommandArgument>> Command::getArguments() const
+    inline std::vector<CommandArgumentPtr> Command::getArguments() const
     {
         return m_commandArgs;
     }
 
-    inline std::vector<std::shared_ptr<CommandArgument>>
+    inline std::vector<CommandArgumentPtr>
         Command::allocateArgumentVector(DataType dataType, int length, DataDirection direction)
     {
         std::string name = concatenate("user", m_commandArgs.size());
@@ -94,10 +94,12 @@ namespace rocRoller
     }
 
     // Allocate a vector of command arguments by incrementing the most recent offset.
-    inline std::vector<std::shared_ptr<CommandArgument>> Command::allocateArgumentVector(
-        DataType dataType, int length, DataDirection direction, std::string const& name)
+    inline std::vector<CommandArgumentPtr> Command::allocateArgumentVector(DataType      dataType,
+                                                                           int           length,
+                                                                           DataDirection direction,
+                                                                           std::string const& name)
     {
-        std::vector<std::shared_ptr<CommandArgument>> args;
+        std::vector<CommandArgumentPtr> args;
         for(int i = 0; i < length; i++)
         {
             m_commandArgs.emplace_back(

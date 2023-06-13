@@ -13,7 +13,7 @@ namespace rocRoller
 {
     namespace Scheduling
     {
-        constexpr inline bool WaitcntObserver::required(std::shared_ptr<Context> const& ctx)
+        constexpr inline bool WaitcntObserver::required(ContextPtr const& ctx)
         {
             return true;
         }

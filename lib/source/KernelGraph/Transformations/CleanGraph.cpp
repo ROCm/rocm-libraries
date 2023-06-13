@@ -78,7 +78,7 @@ namespace rocRoller
 
             // Finds the AssemblyKernelArgument with the same name as the provided
             // CommandArgument.
-            ExpressionPtr operator()(std::shared_ptr<CommandArgument> const& expr) const
+            ExpressionPtr operator()(CommandArgumentPtr const& expr) const
             {
                 auto argument = m_kernel->findArgument(expr->name());
                 return std::make_shared<Expression::Expression>(

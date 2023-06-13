@@ -19,7 +19,7 @@ namespace rocRoller
         class WaitCntNopCost : public Cost
         {
         public:
-            WaitCntNopCost(std::shared_ptr<Context>);
+            WaitCntNopCost(ContextPtr);
 
             using Base = Cost;
 

@@ -61,7 +61,7 @@ namespace rocRoller
         return m_allocators.at(static_cast<int>(registerType));
     }
 
-    inline std::shared_ptr<LabelAllocator> Context::labelAllocator() const
+    inline LabelAllocatorPtr Context::labelAllocator() const
     {
         return m_labelAllocator;
     }
@@ -131,7 +131,7 @@ namespace rocRoller
         return m_assemblyFileName;
     }
 
-    inline std::shared_ptr<RegisterTagManager> Context::registerTagManager() const
+    inline RegTagManPtr Context::registerTagManager() const
     {
         return m_registerTagMan;
     }

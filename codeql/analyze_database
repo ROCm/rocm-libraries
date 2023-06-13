@@ -1,0 +1,27 @@
+#!/bin/bash -x
+
+# Runs all the CodeQL queries in rr-checks, saving results to codeql.sarif .
+
+# Installing the SARIF VSCode extension will display issues in a nice viewer format
+# Alternatively: --format=csv
+
+# export PATH=$PATH:/opt/codeql/codeql
+
+codeql database analyze codeql/build/rr-database codeql/cpp/src/rr-query-suites.qls \
+    --format=sarifv2.1.0 --output=codeql/build/codeql.sarif \
+    --search-path=codeql/build/codeql-cli:codeql/cpp \
+    -j$(nproc) --rerun \
+    --compilation-cache=codeql/build/.cache/ \
+    --no-default-compilation-cache
+
+# Results are cached from first run
+codeql database analyze codeql/build/rr-database codeql/cpp/src/rr-query-suites.qls \
+    --format=csv --output=codeql/build/codeql.csv \
+    --search-path=codeql/build/codeql-cli:codeql/cpp \
+    -j$(nproc) \
+    --compilation-cache=codeql/build/.cache/ \
+    --no-default-compilation-cache
+
+sarif html codeql/build/codeql.sarif --output codeql/build/codeql.html
+
+./codeql/csv_to_html.py

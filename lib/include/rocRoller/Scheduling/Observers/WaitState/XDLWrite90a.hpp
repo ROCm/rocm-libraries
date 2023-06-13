@@ -41,7 +41,7 @@ namespace rocRoller
         {
         public:
             XDLWrite90a() {}
-            XDLWrite90a(std::shared_ptr<Context> context)
+            XDLWrite90a(ContextPtr context)
                 : WaitStateObserver<XDLWrite90a>(context){};
 
             void observe(Instruction const& inst)
@@ -49,7 +49,7 @@ namespace rocRoller
                 observe_base(inst);
             }
 
-            static bool required(std::shared_ptr<Context> context)
+            static bool required(ContextPtr context)
             {
                 return context->targetArchitecture().target().getVersionString() == "gfx90a";
             }

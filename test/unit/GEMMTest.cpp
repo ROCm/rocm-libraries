@@ -32,27 +32,27 @@ namespace GEMMDriverTest
     struct GEMMProblem
     {
         // D (MxN) = alpha * A (MxK) X B (KxN) + beta * C (MxN)
-        int   M     = 512;
-        int   N     = 512;
-        int   K     = 128;
+        int   m     = 512;
+        int   n     = 512;
+        int   k     = 128;
         float alpha = 2.0f;
         float beta  = 0.5f;
 
         // output macro tile size
-        int mac_m = 64;
-        int mac_n = 64;
-        int mac_k = 64;
+        int macM = 64;
+        int macN = 64;
+        int macK = 64;
 
         // Wave tile size
-        int wave_m = 32;
-        int wave_n = 32;
-        int wave_k = 2;
-        int wave_b = 1;
+        int waveM = 32;
+        int waveN = 32;
+        int waveK = 2;
+        int waveB = 1;
 
         // Workgroup size
-        uint wavefront_size   = 64;
-        uint workgroup_size_x = 2 * wavefront_size;
-        uint workgroup_size_y = 2;
+        uint wavefrontSize  = 64;
+        uint workgroupSizeX = 2 * wavefrontSize;
+        uint workgroupSizeY = 2;
 
         std::string transA = "N";
         std::string transB = "T";
@@ -79,31 +79,31 @@ namespace GEMMDriverTest
     };
 
     template <typename T>
-    void basicGEMM(std::shared_ptr<Context>& m_context,
-                   const GEMMProblem&        gemm,
-                   double                    acceptableError,
-                   bool                      debuggable  = false,
-                   bool                      setIdentity = false)
+    void basicGEMM(ContextPtr&        m_context,
+                   const GEMMProblem& gemm,
+                   double             acceptableError,
+                   bool               debuggable  = false,
+                   bool               setIdentity = false)
 
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
 
         // D (MxN) = alpha * A (MxK) X B (KxN) + beta * C (MxN)
-        int   M     = gemm.M;
-        int   N     = gemm.N;
-        int   K     = gemm.K;
+        int   M     = gemm.m;
+        int   N     = gemm.n;
+        int   K     = gemm.k;
         float alpha = gemm.alpha;
         float beta  = gemm.beta;
 
         // output macro tile size
-        int mac_m = gemm.mac_m;
-        int mac_n = gemm.mac_n;
-        int mac_k = gemm.mac_k;
+        int mac_m = gemm.macM;
+        int mac_n = gemm.macN;
+        int mac_k = gemm.macK;
 
-        int wave_m = gemm.wave_m;
-        int wave_n = gemm.wave_n;
-        int wave_k = gemm.wave_k;
-        int wave_b = gemm.wave_b;
+        int wave_m = gemm.waveM;
+        int wave_n = gemm.waveN;
+        int wave_k = gemm.waveK;
+        int wave_b = gemm.waveB;
 
         AssertFatal(M % mac_m == 0, "MacroTile size mismatch (M)");
         AssertFatal(N % mac_n == 0, "MacroTile size mismatch (N)");
@@ -113,17 +113,16 @@ namespace GEMMDriverTest
             AssertFatal(K % (mac_k * gemm.unrollK) == 0, "MacroTile size mismatch (K unroll)");
         }
 
-        AssertFatal(gemm.workgroup_size_x % gemm.wavefront_size == 0,
+        AssertFatal(gemm.workgroupSizeX % gemm.wavefrontSize == 0,
                     "Workgroup Size X must be multiply of wave front size");
 
-        uint wavetile_per_wavefront_m
-            = gemm.wavefront_size * mac_m / wave_m / gemm.workgroup_size_x;
-        uint wavetile_per_wavefront_n = mac_n / wave_n / gemm.workgroup_size_y;
+        uint wavetile_per_wavefront_m = gemm.wavefrontSize * mac_m / wave_m / gemm.workgroupSizeX;
+        uint wavetile_per_wavefront_n = mac_n / wave_n / gemm.workgroupSizeY;
 
         AssertFatal(mac_m % (wave_m * wavetile_per_wavefront_m) == 0, "WaveTile size mismatch (M)");
         AssertFatal(mac_n % (wave_n * wavetile_per_wavefront_n) == 0, "WaveTile size mismatch (N)");
 
-        uint workgroup_size_x = gemm.workgroup_size_x * gemm.workgroup_size_y;
+        uint workgroup_size_x = gemm.workgroupSizeX * gemm.workgroupSizeY;
         uint workgroup_size_y = 1;
 
         // one macro tile per workgroup
@@ -360,7 +359,7 @@ namespace GEMMDriverTest
     TEST_F(GEMMTestGPU, GPU_BasicGEMM_Schedulers)
     {
         GEMMProblem gemm;
-        gemm.mac_k = 8;
+        gemm.macK = 8;
 
         // TODO: Re-enable LDS once LDS deallocations are fixed
         gemm.loadLDSA = false;
@@ -440,65 +439,65 @@ namespace GEMMDriverTest
     TEST_F(GEMMTestGPU, GPU_BasicGEMMUnrollK)
     {
         GEMMProblem gemm;
-        gemm.K         = 64 * 4 * 2;
+        gemm.k         = 64 * 4 * 2;
         gemm.loadLDSA  = false;
         gemm.loadLDSB  = false;
         gemm.storeLDSD = false;
         gemm.fuseLoops = false;
         gemm.unrollK   = 4;
-        gemm.mac_k     = 8;
+        gemm.macK      = 8;
         basicGEMM<float>(m_context, gemm, 1.e-6);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMUnrollKLDS)
     {
         GEMMProblem gemm;
-        gemm.K         = 64 * 4 * 2;
+        gemm.k         = 64 * 4 * 2;
         gemm.loadLDSA  = true;
         gemm.loadLDSB  = true;
         gemm.storeLDSD = false;
         gemm.fuseLoops = false;
         gemm.unrollK   = 2;
-        gemm.mac_k     = 4;
+        gemm.macK      = 4;
         basicGEMM<float>(m_context, gemm, 1.e-6);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMUnrollKMoreLDS)
     {
         GEMMProblem gemm;
-        gemm.K         = 64 * 4 * 2;
+        gemm.k         = 64 * 4 * 2;
         gemm.loadLDSA  = true;
         gemm.loadLDSB  = true;
         gemm.storeLDSD = false;
         gemm.fuseLoops = false;
         gemm.unrollK   = 8;
-        gemm.mac_k     = 8;
+        gemm.macK      = 8;
         basicGEMM<float>(m_context, gemm, 1.e-6);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMUnrollKMoreLDSA)
     {
         GEMMProblem gemm;
-        gemm.K         = 64 * 4 * 2;
+        gemm.k         = 64 * 4 * 2;
         gemm.loadLDSA  = true;
         gemm.loadLDSB  = false;
         gemm.storeLDSD = false;
         gemm.fuseLoops = false;
         gemm.unrollK   = 8;
-        gemm.mac_k     = 8;
+        gemm.macK      = 8;
         basicGEMM<float>(m_context, gemm, 1.e-6);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMUnrollKMoreLDSB)
     {
         GEMMProblem gemm;
-        gemm.K         = 64 * 4 * 2;
+        gemm.k         = 64 * 4 * 2;
         gemm.loadLDSA  = false;
         gemm.loadLDSB  = true;
         gemm.storeLDSD = false;
         gemm.fuseLoops = false;
         gemm.unrollK   = 8;
-        gemm.mac_k     = 8;
+        gemm.macK      = 8;
         basicGEMM<float>(m_context, gemm, 1.e-6);
     }
 
@@ -510,7 +509,7 @@ namespace GEMMDriverTest
         gemm.storeLDSD = false;
         gemm.fuseLoops = true;
         gemm.unrollK   = 2;
-        gemm.mac_k     = 4;
+        gemm.macK      = 4;
         gemm.prefetch  = true;
 
         for(auto inflight : {1, 2})
@@ -531,17 +530,17 @@ namespace GEMMDriverTest
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16UnrollKLDSPrefetch)
     {
         GEMMProblem gemm;
-        gemm.K         = 64 * 16 * 2;
+        gemm.k         = 64 * 16 * 2;
         gemm.loadLDSA  = true;
         gemm.loadLDSB  = true;
         gemm.storeLDSD = false;
         gemm.fuseLoops = true;
         gemm.unrollK   = 2;
-        gemm.mac_m     = 64;
-        gemm.mac_n     = 64;
-        gemm.mac_k     = 16;
+        gemm.macM      = 64;
+        gemm.macN      = 64;
+        gemm.macK      = 16;
         gemm.prefetch  = true;
-        gemm.wave_k    = 8;
+        gemm.waveK     = 8;
 
         for(auto inflight : {1, 2})
         {
@@ -561,7 +560,7 @@ namespace GEMMDriverTest
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16)
     {
         GEMMProblem gemm;
-        gemm.wave_k = 8;
+        gemm.waveK = 8;
 
         basicGEMM<Half>(m_context, gemm, 2.e-5);
     }
@@ -570,18 +569,18 @@ namespace GEMMDriverTest
     {
         GEMMProblem gemm;
 
-        gemm.M = 256;
-        gemm.N = 512;
-        gemm.K = 64;
+        gemm.m = 256;
+        gemm.n = 512;
+        gemm.k = 64;
 
-        gemm.mac_m = 128;
-        gemm.mac_n = 256;
-        gemm.mac_k = 16;
+        gemm.macM = 128;
+        gemm.macN = 256;
+        gemm.macK = 16;
 
-        gemm.wave_k = 8;
+        gemm.waveK = 8;
 
-        gemm.workgroup_size_x = 2 * gemm.wavefront_size;
-        gemm.workgroup_size_y = 4;
+        gemm.workgroupSizeX = 2 * gemm.wavefrontSize;
+        gemm.workgroupSizeY = 4;
 
         gemm.unrollX = 2;
         gemm.unrollY = 1;
@@ -597,18 +596,18 @@ namespace GEMMDriverTest
     {
         GEMMProblem gemm;
 
-        gemm.M = 256;
-        gemm.N = 512;
-        gemm.K = 64;
+        gemm.m = 256;
+        gemm.n = 512;
+        gemm.k = 64;
 
-        gemm.mac_m = 128;
-        gemm.mac_n = 256;
-        gemm.mac_k = 16;
+        gemm.macM = 128;
+        gemm.macN = 256;
+        gemm.macK = 16;
 
-        gemm.wave_k = 8;
+        gemm.waveK = 8;
 
-        gemm.workgroup_size_x = 2 * gemm.wavefront_size;
-        gemm.workgroup_size_y = 4;
+        gemm.workgroupSizeX = 2 * gemm.wavefrontSize;
+        gemm.workgroupSizeY = 4;
 
         gemm.unrollX = 1;
         gemm.unrollY = 2;
@@ -624,18 +623,18 @@ namespace GEMMDriverTest
     {
         GEMMProblem gemm;
 
-        gemm.M = 256;
-        gemm.N = 512;
-        gemm.K = 64;
+        gemm.m = 256;
+        gemm.n = 512;
+        gemm.k = 64;
 
-        gemm.mac_m = 128;
-        gemm.mac_n = 256;
-        gemm.mac_k = 16;
+        gemm.macM = 128;
+        gemm.macN = 256;
+        gemm.macK = 16;
 
-        gemm.wave_k = 8;
+        gemm.waveK = 8;
 
-        gemm.workgroup_size_x = 2 * gemm.wavefront_size;
-        gemm.workgroup_size_y = 4;
+        gemm.workgroupSizeX = 2 * gemm.wavefrontSize;
+        gemm.workgroupSizeY = 4;
 
         gemm.loadLDSA  = false;
         gemm.storeLDSD = false;
@@ -648,18 +647,18 @@ namespace GEMMDriverTest
     {
         GEMMProblem gemm;
 
-        gemm.M = 256;
-        gemm.N = 512;
-        gemm.K = 64;
+        gemm.m = 256;
+        gemm.n = 512;
+        gemm.k = 64;
 
-        gemm.mac_m = 128;
-        gemm.mac_n = 128;
-        gemm.mac_k = 16;
+        gemm.macM = 128;
+        gemm.macN = 128;
+        gemm.macK = 16;
 
-        gemm.wave_k = 8;
+        gemm.waveK = 8;
 
-        gemm.workgroup_size_x = 2 * gemm.wavefront_size;
-        gemm.workgroup_size_y = 4;
+        gemm.workgroupSizeX = 2 * gemm.wavefrontSize;
+        gemm.workgroupSizeY = 4;
 
         gemm.betaInFma = false;
 
@@ -677,20 +676,20 @@ namespace GEMMDriverTest
     {
         GEMMProblem gemm;
 
-        gemm.M = 256;
-        gemm.N = 512;
-        gemm.K = 64;
+        gemm.m = 256;
+        gemm.n = 512;
+        gemm.k = 64;
 
-        gemm.mac_m = 128;
-        gemm.mac_n = 128;
-        gemm.mac_k = 16;
+        gemm.macM = 128;
+        gemm.macN = 128;
+        gemm.macK = 16;
 
         gemm.unrollK = 2;
 
-        gemm.wave_k = 8;
+        gemm.waveK = 8;
 
-        gemm.workgroup_size_x = 2 * gemm.wavefront_size;
-        gemm.workgroup_size_y = 4;
+        gemm.workgroupSizeX = 2 * gemm.wavefrontSize;
+        gemm.workgroupSizeY = 4;
 
         gemm.transA = "T";
         gemm.transB = "N";
@@ -706,18 +705,18 @@ namespace GEMMDriverTest
     {
         GEMMProblem gemm;
 
-        gemm.M = 256;
-        gemm.N = 512;
-        gemm.K = 64;
+        gemm.m = 256;
+        gemm.n = 512;
+        gemm.k = 64;
 
-        gemm.mac_m = 128;
-        gemm.mac_n = 128;
-        gemm.mac_k = 16;
+        gemm.macM = 128;
+        gemm.macN = 128;
+        gemm.macK = 16;
 
-        gemm.wave_k = 8;
+        gemm.waveK = 8;
 
-        gemm.workgroup_size_x = 4 * gemm.wavefront_size;
-        gemm.workgroup_size_y = 2;
+        gemm.workgroupSizeX = 4 * gemm.wavefrontSize;
+        gemm.workgroupSizeY = 2;
 
         gemm.transA = "T";
 
@@ -732,20 +731,20 @@ namespace GEMMDriverTest
     {
         GEMMProblem gemm;
 
-        gemm.M = 256;
-        gemm.N = 512;
-        gemm.K = 64;
+        gemm.m = 256;
+        gemm.n = 512;
+        gemm.k = 64;
 
-        gemm.mac_m = 128;
-        gemm.mac_n = 128;
-        gemm.mac_k = 16;
+        gemm.macM = 128;
+        gemm.macN = 128;
+        gemm.macK = 16;
 
         gemm.unrollK = 4;
 
-        gemm.wave_k = 8;
+        gemm.waveK = 8;
 
-        gemm.workgroup_size_x = 4 * gemm.wavefront_size;
-        gemm.workgroup_size_y = 2;
+        gemm.workgroupSizeX = 4 * gemm.wavefrontSize;
+        gemm.workgroupSizeY = 2;
 
         gemm.transA = "T";
 
@@ -760,18 +759,18 @@ namespace GEMMDriverTest
     {
         GEMMProblem gemm;
 
-        gemm.M = 256;
-        gemm.N = 512;
-        gemm.K = 64;
+        gemm.m = 256;
+        gemm.n = 512;
+        gemm.k = 64;
 
-        gemm.mac_m = 128;
-        gemm.mac_n = 256;
-        gemm.mac_k = 16;
+        gemm.macM = 128;
+        gemm.macN = 256;
+        gemm.macK = 16;
 
-        gemm.wave_k = 8;
+        gemm.waveK = 8;
 
-        gemm.workgroup_size_x = 4 * gemm.wavefront_size;
-        gemm.workgroup_size_y = 1;
+        gemm.workgroupSizeX = 4 * gemm.wavefrontSize;
+        gemm.workgroupSizeY = 1;
 
         gemm.storeLDSD = false;
 
@@ -782,20 +781,20 @@ namespace GEMMDriverTest
     {
         GEMMProblem gemm;
 
-        gemm.M = 256;
-        gemm.N = 512;
-        gemm.K = 64;
+        gemm.m = 256;
+        gemm.n = 512;
+        gemm.k = 64;
 
-        gemm.mac_m = 128;
-        gemm.mac_n = 256;
-        gemm.mac_k = 16;
+        gemm.macM = 128;
+        gemm.macN = 256;
+        gemm.macK = 16;
 
         gemm.unrollK = 2;
 
-        gemm.wave_k = 8;
+        gemm.waveK = 8;
 
-        gemm.workgroup_size_x = 4 * gemm.wavefront_size;
-        gemm.workgroup_size_y = 1;
+        gemm.workgroupSizeX = 4 * gemm.wavefrontSize;
+        gemm.workgroupSizeY = 1;
 
         gemm.storeLDSD = false;
 
@@ -805,18 +804,18 @@ namespace GEMMDriverTest
     {
         GEMMProblem gemm;
 
-        gemm.M = 256;
-        gemm.N = 512;
-        gemm.K = 64;
+        gemm.m = 256;
+        gemm.n = 512;
+        gemm.k = 64;
 
-        gemm.mac_m = 128;
-        gemm.mac_n = 256;
-        gemm.mac_k = 16;
+        gemm.macM = 128;
+        gemm.macN = 256;
+        gemm.macK = 16;
 
-        gemm.wave_k = 8;
+        gemm.waveK = 8;
 
-        gemm.workgroup_size_x = 2 * gemm.wavefront_size;
-        gemm.workgroup_size_y = 2;
+        gemm.workgroupSizeX = 2 * gemm.wavefrontSize;
+        gemm.workgroupSizeY = 2;
 
         gemm.storeLDSD = false;
 
@@ -832,13 +831,13 @@ namespace GEMMDriverTest
     {
         GEMMProblem gemm;
 
-        gemm.M = 256;
-        gemm.N = 512;
-        gemm.K = 64;
+        gemm.m = 256;
+        gemm.n = 512;
+        gemm.k = 64;
 
-        gemm.mac_m = 128;
-        gemm.mac_n = 256;
-        gemm.mac_k = 16;
+        gemm.macM = 128;
+        gemm.macN = 256;
+        gemm.macK = 16;
 
         gemm.unrollK = 2;
 
@@ -846,10 +845,10 @@ namespace GEMMDriverTest
         gemm.prefetchLDSFactor = 2;
         gemm.prefetchMixMemOps = true;
 
-        gemm.wave_k = 8;
+        gemm.waveK = 8;
 
-        gemm.workgroup_size_x = 2 * gemm.wavefront_size;
-        gemm.workgroup_size_y = 2;
+        gemm.workgroupSizeX = 2 * gemm.wavefrontSize;
+        gemm.workgroupSizeY = 2;
 
         gemm.storeLDSD = false;
 
@@ -864,18 +863,18 @@ namespace GEMMDriverTest
     {
         GEMMProblem gemm;
 
-        gemm.M = 256;
-        gemm.N = 512;
-        gemm.K = 64;
+        gemm.m = 256;
+        gemm.n = 512;
+        gemm.k = 64;
 
-        gemm.mac_m = 128;
-        gemm.mac_n = 256;
-        gemm.mac_k = 16;
+        gemm.macM = 128;
+        gemm.macN = 256;
+        gemm.macK = 16;
 
-        gemm.wave_k = 8;
+        gemm.waveK = 8;
 
-        gemm.workgroup_size_x = 1 * gemm.wavefront_size;
-        gemm.workgroup_size_y = 4;
+        gemm.workgroupSizeX = 1 * gemm.wavefrontSize;
+        gemm.workgroupSizeY = 4;
 
         gemm.storeLDSD = false;
 
@@ -892,20 +891,20 @@ namespace GEMMDriverTest
     {
         GEMMProblem gemm;
 
-        gemm.M = 256;
-        gemm.N = 512;
-        gemm.K = 64;
+        gemm.m = 256;
+        gemm.n = 512;
+        gemm.k = 64;
 
-        gemm.mac_m = 128;
-        gemm.mac_n = 256;
-        gemm.mac_k = 16;
+        gemm.macM = 128;
+        gemm.macN = 256;
+        gemm.macK = 16;
 
         gemm.unrollK = 4;
 
-        gemm.wave_k = 8;
+        gemm.waveK = 8;
 
-        gemm.workgroup_size_x = 1 * gemm.wavefront_size;
-        gemm.workgroup_size_y = 4;
+        gemm.workgroupSizeX = 1 * gemm.wavefrontSize;
+        gemm.workgroupSizeY = 4;
 
         gemm.storeLDSD = false;
 
@@ -953,18 +952,18 @@ namespace GEMMDriverTest
     {
         GEMMProblem gemm;
 
-        gemm.M = 256;
-        gemm.N = 512;
-        gemm.K = 64;
+        gemm.m = 256;
+        gemm.n = 512;
+        gemm.k = 64;
 
-        gemm.mac_m = 128;
-        gemm.mac_n = 256;
-        gemm.mac_k = 16;
+        gemm.macM = 128;
+        gemm.macN = 256;
+        gemm.macK = 16;
 
-        gemm.wave_k = 8;
+        gemm.waveK = 8;
 
-        gemm.workgroup_size_x = 1 * gemm.wavefront_size;
-        gemm.workgroup_size_y = 4;
+        gemm.workgroupSizeX = 1 * gemm.wavefrontSize;
+        gemm.workgroupSizeY = 4;
 
         gemm.loadLDSA  = true;
         gemm.loadLDSB  = true;
@@ -977,18 +976,18 @@ namespace GEMMDriverTest
     {
         GEMMProblem gemm;
 
-        gemm.M = 256;
-        gemm.N = 512;
-        gemm.K = 64;
+        gemm.m = 256;
+        gemm.n = 512;
+        gemm.k = 64;
 
-        gemm.mac_m = 128;
-        gemm.mac_n = 256;
-        gemm.mac_k = 16;
+        gemm.macM = 128;
+        gemm.macN = 256;
+        gemm.macK = 16;
 
-        gemm.wave_k = 8;
+        gemm.waveK = 8;
 
-        gemm.workgroup_size_x = 1 * gemm.wavefront_size;
-        gemm.workgroup_size_y = 4;
+        gemm.workgroupSizeX = 1 * gemm.wavefrontSize;
+        gemm.workgroupSizeY = 4;
 
         gemm.loadLDSA  = true;
         gemm.loadLDSB  = true;

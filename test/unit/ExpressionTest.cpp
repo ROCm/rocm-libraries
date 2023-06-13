@@ -409,8 +409,8 @@ namespace ExpressionTest
             Expression::generate(result, Expression::magicSign(reg), m_context)))
             << output();
 
-        std::shared_ptr<CommandArgument> arg;
-        auto                             argExp = std::make_shared<Expression::Expression>(arg);
+        CommandArgumentPtr arg;
+        auto               argExp = std::make_shared<Expression::Expression>(arg);
         EXPECT_ANY_THROW(m_context->schedule(Expression::generate(result, argExp, m_context)));
     }
 
@@ -447,7 +447,7 @@ namespace ExpressionTest
         m_context->schedule(
             Expression::generate(ic, expr, m_context)); //Test using input C as dest.
 
-        std::shared_ptr<Register::Value> rc;
+        Register::ValuePtr rc;
         m_context->schedule(
             Expression::generate(rc, expr, m_context)); //Test using a nullptr as dest.
 

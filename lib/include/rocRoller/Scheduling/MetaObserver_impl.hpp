@@ -122,7 +122,7 @@ namespace rocRoller
         namespace Detail
         {
             template <CObserver T, CObserver... Rest>
-            bool Required(std::shared_ptr<Context> ctx, T const& obs, Rest const&... rest)
+            bool Required(ContextPtr ctx, T const& obs, Rest const&... rest)
             {
                 auto rv = obs.required(ctx);
                 if constexpr(sizeof...(rest) > 0)
@@ -134,13 +134,13 @@ namespace rocRoller
         }
 
         template <>
-        inline bool MetaObserver<>::required(std::shared_ptr<Context>)
+        inline bool MetaObserver<>::required(ContextPtr)
         {
             return true;
         }
 
         template <CObserver... Types>
-        inline bool MetaObserver<Types...>::required(std::shared_ptr<Context> ctx)
+        inline bool MetaObserver<Types...>::required(ContextPtr ctx)
         {
             auto tup = Tup();
             return std::apply([&ctx](auto&&... args) { return Detail::Required(ctx, args...); },

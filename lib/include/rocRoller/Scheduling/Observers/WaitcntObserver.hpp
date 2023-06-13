@@ -13,8 +13,8 @@ namespace rocRoller
     {
         template <typename T>
         using WaitQueueMap  = std::unordered_map<GPUWaitQueue, T, GPUWaitQueue::Hash>;
-        using WaitCntQueues = WaitQueueMap<std::vector<
-            std::array<std::shared_ptr<Register::Value>, Instruction::MaxDstRegisters>>>;
+        using WaitCntQueues = WaitQueueMap<
+            std::vector<std::array<Register::ValuePtr, Instruction::MaxDstRegisters>>>;
 
         /**
          * @brief This struct is used to store the _unallocated_ state of the waitcnt queues.
@@ -43,7 +43,7 @@ namespace rocRoller
         private:
             // These members are duplicates of the waitcntobserver members, except we're storing a
             // std::vector<Register::RegisterId> for the registers instead of
-            // std::array<std::shared_ptr<Register::Value>, Instruction::MaxDstRegisters>
+            // std::array<Register::ValuePtr, Instruction::MaxDstRegisters>
             // so that we don't maintain the allocations.
             WaitQueueMap<std::vector<std::vector<Register::RegisterId>>> m_instructionQueues;
 
@@ -56,7 +56,7 @@ namespace rocRoller
         public:
             WaitcntObserver();
 
-            WaitcntObserver(std::shared_ptr<Context> context);
+            WaitcntObserver(ContextPtr context);
 
             InstructionStatus peek(Instruction const& inst) const;
 
@@ -71,7 +71,7 @@ namespace rocRoller
              **/
             void observe(Instruction const& inst);
 
-            constexpr static bool required(std::shared_ptr<Context> const& ctx);
+            constexpr static bool required(ContextPtr const& ctx);
 
         private:
             std::weak_ptr<Context> m_context;

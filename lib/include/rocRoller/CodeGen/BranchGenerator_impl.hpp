@@ -16,7 +16,7 @@
 
 namespace rocRoller
 {
-    inline BranchGenerator::BranchGenerator(std::shared_ptr<Context> context)
+    inline BranchGenerator::BranchGenerator(ContextPtr context)
         : m_context(context)
     {
     }

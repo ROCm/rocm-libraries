@@ -36,7 +36,7 @@ namespace MatrixMultiplyTest
     };
 
     template <typename T>
-    void matrixMultiplyMacroTile(std::shared_ptr<Context>        m_context,
+    void matrixMultiplyMacroTile(ContextPtr                      m_context,
                                  int                             wave_m,
                                  int                             wave_n,
                                  int                             wave_k,
@@ -224,12 +224,12 @@ namespace MatrixMultiplyTest
     }
 
     template <typename T>
-    void matrixMultiplyAB(std::shared_ptr<Context> m_context,
-                          int                      wave_m,
-                          int                      wave_n,
-                          int                      wave_k,
-                          int                      wave_b,
-                          double                   acceptableError)
+    void matrixMultiplyAB(ContextPtr m_context,
+                          int        wave_m,
+                          int        wave_n,
+                          int        wave_k,
+                          int        wave_b,
+                          double     acceptableError)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
 
@@ -363,12 +363,12 @@ namespace MatrixMultiplyTest
     }
 
     template <typename T>
-    void matrixMultiplyABC(std::shared_ptr<Context> m_context,
-                           int                      wave_m,
-                           int                      wave_n,
-                           int                      wave_k,
-                           int                      wave_b,
-                           double                   acceptableError)
+    void matrixMultiplyABC(ContextPtr m_context,
+                           int        wave_m,
+                           int        wave_n,
+                           int        wave_k,
+                           int        wave_b,
+                           double     acceptableError)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
 

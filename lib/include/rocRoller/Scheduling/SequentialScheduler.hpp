@@ -26,7 +26,7 @@ namespace rocRoller
         class SequentialScheduler : public Scheduler
         {
         public:
-            SequentialScheduler(std::shared_ptr<Context>);
+            SequentialScheduler(ContextPtr);
 
             using Base = Scheduler;
 

@@ -18,7 +18,7 @@ namespace rocRoller
     class MemoryInstructions
     {
     public:
-        MemoryInstructions(std::shared_ptr<Context> context);
+        MemoryInstructions(ContextPtr context);
 
         MemoryInstructions(MemoryInstructions const& rhs) = default;
         MemoryInstructions(MemoryInstructions&& rhs)      = default;
@@ -53,9 +53,9 @@ namespace rocRoller
          * @param buffOpts Buffer options. (Default = BufferInstructionOptions())
          */
         Generator<Instruction> load(MemoryKind                        kind,
-                                    std::shared_ptr<Register::Value>  dest,
-                                    std::shared_ptr<Register::Value>  addr,
-                                    std::shared_ptr<Register::Value>  offset,
+                                    Register::ValuePtr                dest,
+                                    Register::ValuePtr                addr,
+                                    Register::ValuePtr                offset,
                                     int                               numBytes,
                                     std::string                       comment  = "",
                                     bool                              high     = false,
@@ -77,9 +77,9 @@ namespace rocRoller
          * @param buffOpts Buffer options. (Default = BufferInstructionOptions())
          */
         Generator<Instruction> store(MemoryKind                        kind,
-                                     std::shared_ptr<Register::Value>  addr,
-                                     std::shared_ptr<Register::Value>  data,
-                                     std::shared_ptr<Register::Value>  offset,
+                                     Register::ValuePtr                addr,
+                                     Register::ValuePtr                data,
+                                     Register::ValuePtr                offset,
                                      int                               numBytes,
                                      std::string const                 comment  = "",
                                      bool                              high     = false,
@@ -103,9 +103,9 @@ namespace rocRoller
          */
         template <MemoryDirection Dir>
         Generator<Instruction> moveData(MemoryKind                        kind,
-                                        std::shared_ptr<Register::Value>  addr,
-                                        std::shared_ptr<Register::Value>  data,
-                                        std::shared_ptr<Register::Value>  offset,
+                                        Register::ValuePtr                addr,
+                                        Register::ValuePtr                data,
+                                        Register::ValuePtr                offset,
                                         int                               numBytes,
                                         std::string const                 comment  = "",
                                         bool                              high     = false,
@@ -128,11 +128,11 @@ namespace rocRoller
          * @param buffOpts Buffer options. (Default = BufferInstructionOptions())
          */
         Generator<Instruction> loadAndPack(MemoryKind                        kind,
-                                           std::shared_ptr<Register::Value>  dest,
-                                           std::shared_ptr<Register::Value>  addr1,
-                                           std::shared_ptr<Register::Value>  offset1,
-                                           std::shared_ptr<Register::Value>  addr2,
-                                           std::shared_ptr<Register::Value>  offset2,
+                                           Register::ValuePtr                dest,
+                                           Register::ValuePtr                addr1,
+                                           Register::ValuePtr                offset1,
+                                           Register::ValuePtr                addr2,
+                                           Register::ValuePtr                offset2,
                                            std::string const                 comment  = "",
                                            std::shared_ptr<BufferDescriptor> buffDesc = nullptr,
                                            BufferInstructionOptions          buffOpts
@@ -149,12 +149,12 @@ namespace rocRoller
          * @param offset Register containing an offset to be added to addr.
          * @param comment Comment that will be generated along with the instructions. (Default = "")
          */
-        Generator<Instruction> packAndStore(MemoryKind                       kind,
-                                            std::shared_ptr<Register::Value> addr,
-                                            std::shared_ptr<Register::Value> data1,
-                                            std::shared_ptr<Register::Value> data2,
-                                            std::shared_ptr<Register::Value> offset,
-                                            std::string const                comment = "");
+        Generator<Instruction> packAndStore(MemoryKind         kind,
+                                            Register::ValuePtr addr,
+                                            Register::ValuePtr data1,
+                                            Register::ValuePtr data2,
+                                            Register::ValuePtr offset,
+                                            std::string const  comment = "");
 
         /**
          * @brief Generate the instructions required to perform a flat load.
@@ -166,11 +166,11 @@ namespace rocRoller
          * @param numBytes The number of bytes to load.
          * @param high Whether the value will be loaded into the high bits of the register. (Default=false)
          */
-        Generator<Instruction> loadFlat(std::shared_ptr<Register::Value> dest,
-                                        std::shared_ptr<Register::Value> addr,
-                                        int                              offset,
-                                        int                              numBytes,
-                                        bool                             high = false);
+        Generator<Instruction> loadFlat(Register::ValuePtr dest,
+                                        Register::ValuePtr addr,
+                                        int                offset,
+                                        int                numBytes,
+                                        bool               high = false);
 
         /**
          * @brief Generate the instructions required to perform a flat store.
@@ -182,11 +182,11 @@ namespace rocRoller
          * @param numBytes The number of bytes to load.
          * @param high Whether the value will be loaded into the high bits of the register. (Default=false)
          */
-        Generator<Instruction> storeFlat(std::shared_ptr<Register::Value> addr,
-                                         std::shared_ptr<Register::Value> data,
-                                         int                              offset,
-                                         int                              numBytes,
-                                         bool                             high = false);
+        Generator<Instruction> storeFlat(Register::ValuePtr addr,
+                                         Register::ValuePtr data,
+                                         int                offset,
+                                         int                numBytes,
+                                         bool               high = false);
 
         /**
          * @brief Generate the instructions required to load scalar data into a register from memory.
@@ -197,10 +197,10 @@ namespace rocRoller
          * @param offset The value containing an offset to be added to the address in base.
          * @param numBytes The total number of bytes to load.
          */
-        Generator<Instruction> loadScalar(std::shared_ptr<Register::Value> dest,
-                                          std::shared_ptr<Register::Value> base,
-                                          std::shared_ptr<Register::Value> offset,
-                                          int                              numBytes);
+        Generator<Instruction> loadScalar(Register::ValuePtr dest,
+                                          Register::ValuePtr base,
+                                          Register::ValuePtr offset,
+                                          int                numBytes);
 
         /**
          * @brief Generate the instructions required to perform an LDS load.
@@ -213,12 +213,12 @@ namespace rocRoller
          * @param comment Comment that will be generated along with the instructions. (Default = "")
          * @param high Whether the value will be loaded into the high bits of the register. (Default=false)
          */
-        Generator<Instruction> loadLocal(std::shared_ptr<Register::Value> dest,
-                                         std::shared_ptr<Register::Value> addr,
-                                         int                              offset,
-                                         int                              numBytes,
-                                         std::string const                comment = "",
-                                         bool                             high    = false);
+        Generator<Instruction> loadLocal(Register::ValuePtr dest,
+                                         Register::ValuePtr addr,
+                                         int                offset,
+                                         int                numBytes,
+                                         std::string const  comment = "",
+                                         bool               high    = false);
 
         /**
          * @brief Generate the instructions required to perform an LDS store.
@@ -231,12 +231,12 @@ namespace rocRoller
          * @param comment Comment that will be generated along with the instructions. (Default = "")
          * @param high Whether the value will be loaded into the high bits of the register. (Default=false)
          */
-        Generator<Instruction> storeLocal(std::shared_ptr<Register::Value> addr,
-                                          std::shared_ptr<Register::Value> data,
-                                          int                              offset,
-                                          int                              numBytes,
-                                          std::string const                comment = "",
-                                          bool                             high    = false);
+        Generator<Instruction> storeLocal(Register::ValuePtr addr,
+                                          Register::ValuePtr data,
+                                          int                offset,
+                                          int                numBytes,
+                                          std::string const  comment = "",
+                                          bool               high    = false);
 
         /**
          * @brief Generate the instructions required to perform a buffer load.
@@ -250,8 +250,8 @@ namespace rocRoller
          * @param numBytes The number of bytes to load.
          * @param high Whether the value will be loaded into the high bits of the register. (Default=false)
          */
-        Generator<Instruction> loadBuffer(std::shared_ptr<Register::Value>  dest,
-                                          std::shared_ptr<Register::Value>  addr,
+        Generator<Instruction> loadBuffer(Register::ValuePtr                dest,
+                                          Register::ValuePtr                addr,
                                           int                               offset,
                                           std::shared_ptr<BufferDescriptor> buffDesc,
                                           BufferInstructionOptions          buffOpts,
@@ -270,8 +270,8 @@ namespace rocRoller
          * @param numBytes The number of bytes to load.
          * @param high Whether the value will be loaded into the high bits of the register. (Default=false)
          */
-        Generator<Instruction> storeBuffer(std::shared_ptr<Register::Value>  data,
-                                           std::shared_ptr<Register::Value>  addr,
+        Generator<Instruction> storeBuffer(Register::ValuePtr                data,
+                                           Register::ValuePtr                addr,
                                            int                               offset,
                                            std::shared_ptr<BufferDescriptor> buffDesc,
                                            BufferInstructionOptions          buffOpts,
@@ -292,7 +292,7 @@ namespace rocRoller
 
         int chooseWidth(int numWords, const std::vector<int>& potentialWidths, int maxWidth) const;
         std::string            genOffsetModifier(int) const;
-        Generator<Instruction> genLocalAddr(std::shared_ptr<Register::Value>& addr) const;
+        Generator<Instruction> genLocalAddr(Register::ValuePtr& addr) const;
         Generator<Instruction> packForStore(Register::ValuePtr& result,
                                             Register::ValuePtr  toPack) const;
     };

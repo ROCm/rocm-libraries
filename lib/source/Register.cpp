@@ -7,7 +7,7 @@ namespace rocRoller
 {
     namespace Register
     {
-        std::shared_ptr<Value> Value::WavefrontPlaceholder(ContextPtr context)
+        ValuePtr Value::WavefrontPlaceholder(ContextPtr context)
         {
             int count = 1;
             if(context->kernel()->wavefront_size() == 64)
@@ -126,7 +126,7 @@ namespace rocRoller
             m_contiguousIndices.reset();
         }
 
-        bool Value::intersects(std::shared_ptr<Value> input) const
+        bool Value::intersects(ValuePtr input) const
         {
             if(regType() != input->regType())
                 return false;

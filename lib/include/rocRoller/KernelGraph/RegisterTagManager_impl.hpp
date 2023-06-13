@@ -24,16 +24,16 @@ namespace rocRoller
         return m_expressions.at(tag);
     }
 
-    inline std::shared_ptr<Register::Value> RegisterTagManager::getRegister(int tag)
+    inline Register::ValuePtr RegisterTagManager::getRegister(int tag)
     {
         AssertFatal(hasRegister(tag), ShowValue(tag));
         return m_registers.at(tag);
     }
 
-    inline std::shared_ptr<Register::Value> RegisterTagManager::getRegister(int            tag,
-                                                                            Register::Type regType,
-                                                                            VariableType   varType,
-                                                                            size_t valueCount)
+    inline Register::ValuePtr RegisterTagManager::getRegister(int            tag,
+                                                              Register::Type regType,
+                                                              VariableType   varType,
+                                                              size_t         valueCount)
     {
         AssertFatal(!hasExpression(tag), "Tag already associated with an expression");
         if(hasRegister(tag))
@@ -57,8 +57,7 @@ namespace rocRoller
         return m_registers.at(tag);
     }
 
-    inline std::shared_ptr<Register::Value> RegisterTagManager::getRegister(int                tag,
-                                                                            Register::ValuePtr tmpl)
+    inline Register::ValuePtr RegisterTagManager::getRegister(int tag, Register::ValuePtr tmpl)
     {
         return getRegister(tag, tmpl->regType(), tmpl->variableType(), tmpl->valueCount());
     }

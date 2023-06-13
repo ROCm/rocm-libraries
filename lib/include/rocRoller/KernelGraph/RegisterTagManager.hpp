@@ -41,9 +41,9 @@ namespace rocRoller
          * a Register::Value.
          *
          * @param tag
-         * @return std::shared_ptr<Register::Value>
+         * @return Register::ValuePtr
          */
-        std::shared_ptr<Register::Value> getRegister(int tag);
+        Register::ValuePtr getRegister(int tag);
 
         /**
          * @brief Get the Expression associated with the provided tag.
@@ -70,12 +70,12 @@ namespace rocRoller
          * @param regType
          * @param varType
          * @param ValueCount
-         * @return std::shared_ptr<Register::Value>
+         * @return Register::ValuePtr
          */
-        std::shared_ptr<Register::Value> getRegister(int            tag,
-                                                     Register::Type regType,
-                                                     VariableType   varType,
-                                                     size_t         ValueCount = 1);
+        Register::ValuePtr getRegister(int            tag,
+                                       Register::Type regType,
+                                       VariableType   varType,
+                                       size_t         ValueCount = 1);
 
         /**
          * @brief Get the Register::Value associated with the provided tag.
@@ -88,9 +88,9 @@ namespace rocRoller
          *
          * @param tag
          * @param tmpl
-         * @return std::shared_ptr<Register::Value>
+         * @return Register::ValuePtr
          */
-        std::shared_ptr<Register::Value> getRegister(int tag, Register::ValuePtr tmpl);
+        Register::ValuePtr getRegister(int tag, Register::ValuePtr tmpl);
 
         /**
          * @brief Add a register to the RegisterTagManager with the provided tag.
@@ -138,7 +138,7 @@ namespace rocRoller
 
     private:
         std::weak_ptr<Context>                                        m_context;
-        std::map<int, std::shared_ptr<Register::Value>>               m_registers;
+        std::map<int, Register::ValuePtr>                             m_registers;
         std::map<int, std::pair<Expression::ExpressionPtr, DataType>> m_expressions;
     };
 }

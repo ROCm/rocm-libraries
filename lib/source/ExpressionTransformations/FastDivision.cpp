@@ -64,9 +64,7 @@ namespace rocRoller
 #endif
         }
 
-        ExpressionPtr magicNumberDivision(ExpressionPtr            lhs,
-                                          ExpressionPtr            rhs,
-                                          std::shared_ptr<Context> context)
+        ExpressionPtr magicNumberDivision(ExpressionPtr lhs, ExpressionPtr rhs, ContextPtr context)
         {
             auto k = context->kernel();
 
@@ -316,7 +314,7 @@ namespace rocRoller
 
         struct FastDivisionExpressionVisitor
         {
-            FastDivisionExpressionVisitor(std::shared_ptr<Context> cxt)
+            FastDivisionExpressionVisitor(ContextPtr cxt)
                 : m_context(cxt)
             {
             }
@@ -433,13 +431,13 @@ namespace rocRoller
             }
 
         private:
-            std::shared_ptr<Context> m_context;
+            ContextPtr m_context;
         };
 
         /**
          * Attempts to use fastDivision for all of the divisions within an Expression.
          */
-        ExpressionPtr fastDivision(ExpressionPtr expr, std::shared_ptr<Context> cxt)
+        ExpressionPtr fastDivision(ExpressionPtr expr, ContextPtr cxt)
         {
             auto visitor = FastDivisionExpressionVisitor(cxt);
             return visitor.call(expr);

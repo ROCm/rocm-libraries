@@ -25,8 +25,7 @@ namespace rocRoller
             using BaseGraphVisitor::visitEdge;
             using BaseGraphVisitor::visitOperation;
 
-            LowerTileVisitor(std::shared_ptr<CommandParameters> params,
-                             std::shared_ptr<Context>           context)
+            LowerTileVisitor(std::shared_ptr<CommandParameters> params, ContextPtr context)
                 : BaseGraphVisitor(context)
                 , m_params(params)
                 , m_kernel(context->kernel())

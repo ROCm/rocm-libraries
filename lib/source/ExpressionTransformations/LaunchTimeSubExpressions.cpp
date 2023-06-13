@@ -30,7 +30,7 @@ namespace rocRoller
 
         struct LaunchTimeExpressionVisitor
         {
-            LaunchTimeExpressionVisitor(std::shared_ptr<Context> cxt)
+            LaunchTimeExpressionVisitor(ContextPtr cxt)
                 : m_context(cxt)
             {
             }
@@ -139,10 +139,10 @@ namespace rocRoller
             }
 
         private:
-            std::shared_ptr<Context> m_context;
+            ContextPtr m_context;
         };
 
-        ExpressionPtr launchTimeSubExpressions(ExpressionPtr expr, std::shared_ptr<Context> cxt)
+        ExpressionPtr launchTimeSubExpressions(ExpressionPtr expr, ContextPtr cxt)
         {
             auto visitor = LaunchTimeExpressionVisitor(cxt);
             return visitor.call(expr);

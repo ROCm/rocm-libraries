@@ -84,7 +84,7 @@ namespace rocRoller
          * should have already been scheduled within the context. This is probably
          * only useful for creating unit tests.
          */
-        CommandKernel(std::shared_ptr<Context>);
+        CommandKernel(ContextPtr);
 
         /**
          * Create a CommandKernel based on a Command object. This will generate
@@ -118,7 +118,7 @@ namespace rocRoller
                       std::shared_ptr<KernelOptions>     kernelOptions = nullptr);
 
         CommandKernel(std::shared_ptr<Command>        command,
-                      std::shared_ptr<Context>        ctx,
+                      ContextPtr                      ctx,
                       KernelGraph::KernelGraph const& kernelGraph);
 
         void addPredicate(Expression::ExpressionPtr expression);
@@ -138,7 +138,7 @@ namespace rocRoller
 
         std::string getInstructions() const;
 
-        std::shared_ptr<Context> getContext();
+        ContextPtr getContext();
 
         /**
          * Determines kernel arguments for a particular invocation.
@@ -155,7 +155,7 @@ namespace rocRoller
         std::vector<Expression::ExpressionPtr> m_predicates;
 
         KernelGraph::KernelGraph           m_kernelGraph;
-        std::shared_ptr<Context>           m_context;
+        ContextPtr                         m_context;
         std::shared_ptr<ExecutableKernel>  m_executableKernel;
         std::shared_ptr<CommandParameters> m_preParameters, m_postParameters;
         std::shared_ptr<KernelOptions>     m_kernelOptions;

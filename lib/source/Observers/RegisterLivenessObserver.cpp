@@ -129,7 +129,7 @@ namespace rocRoller
             }
         }
 
-        bool RegisterLivenessObserver::required(std::shared_ptr<Context>)
+        bool RegisterLivenessObserver::required(ContextPtr)
         {
             return Settings::getInstance()->get(Settings::KernelAnalysis);
         }

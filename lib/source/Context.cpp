@@ -125,29 +125,29 @@ namespace rocRoller
 
     Context::~Context() = default;
 
-    std::shared_ptr<Register::Value> Context::getVCC()
+    Register::ValuePtr Context::getVCC()
     {
         auto name = kernel()->wavefront_size() == 32 ? Register::SpecialType::VCC_LO
                                                      : Register::SpecialType::VCC;
         return Register::Value::Special(name, shared_from_this());
     }
 
-    std::shared_ptr<Register::Value> Context::getVCC_LO()
+    Register::ValuePtr Context::getVCC_LO()
     {
         return Register::Value::Special(Register::SpecialType::VCC_LO, shared_from_this());
     }
 
-    std::shared_ptr<Register::Value> Context::getVCC_HI()
+    Register::ValuePtr Context::getVCC_HI()
     {
         return Register::Value::Special(Register::SpecialType::VCC_HI, shared_from_this());
     }
 
-    std::shared_ptr<Register::Value> Context::getSCC()
+    Register::ValuePtr Context::getSCC()
     {
         return Register::Value::Special(Register::SpecialType::SCC, shared_from_this());
     }
 
-    std::shared_ptr<Register::Value> Context::getExec()
+    Register::ValuePtr Context::getExec()
     {
         return Register::Value::Special(Register::SpecialType::EXEC, shared_from_this());
     }

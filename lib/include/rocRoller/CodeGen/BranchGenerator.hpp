@@ -19,7 +19,7 @@ namespace rocRoller
     class BranchGenerator
     {
     public:
-        BranchGenerator(std::shared_ptr<Context>);
+        BranchGenerator(ContextPtr);
 
         ~BranchGenerator();
 

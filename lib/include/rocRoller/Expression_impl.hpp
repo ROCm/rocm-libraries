@@ -359,7 +359,7 @@ namespace rocRoller
                 return call(expr.arg) & Expr::EvalTimes;
             }
 
-            EvaluationTimes operator()(std::shared_ptr<Register::Value> const& expr) const
+            EvaluationTimes operator()(Register::ValuePtr const& expr) const
             {
                 if(expr->regType() == Register::Type::Literal)
                     return EvaluationTimes::All();
@@ -377,7 +377,7 @@ namespace rocRoller
                 return {EvaluationTime::KernelExecute};
             }
 
-            EvaluationTimes operator()(std::shared_ptr<CommandArgument> const& expr) const
+            EvaluationTimes operator()(CommandArgumentPtr const& expr) const
             {
                 return {EvaluationTime::KernelLaunch};
             }

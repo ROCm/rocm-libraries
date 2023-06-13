@@ -1,0 +1,31 @@
+#!/bin/bash -ex
+
+# export PATH=$PATH:/opt/codeql/codeql
+
+# Creates a CodeQL database based on our code in build/rr-database.
+# Unfortunately the DB cannot be incrementally rebuilt so the build dir should just be deleted if you want to
+# re-run based on code changes.
+
+DIR="codeql/build/"
+rm -rf "${DIR}rr-database-new/"
+rm -rf "${DIR}rr-build-new/"
+
+export CCACHE_DISABLE=1
+
+mkdir -p "${DIR}rr-database-new"
+mkdir -p "${DIR}rr-build-new"
+cmake -G Ninja -S . -B "${DIR}rr-build-new" -DCODE_ANALYSIS=ON
+
+codeql database create "${DIR}rr-database-new" --source-root="$(readlink -f .)" \
+  --codescanning-config=codeql/scanning.yml \
+  --language=cpp \
+  -j$(nproc) \
+  --search-path="${DIR}codeql-cli" \
+  --command="ninja" \
+  --working-dir="${DIR}rr-build-new"
+
+# Only overwrite old dirs at end
+rm -rf "${DIR}rr-database"
+rm -rf "${DIR}rr-build" 
+mv -f "${DIR}rr-database-new" "${DIR}rr-database"
+mv -f "${DIR}rr-build-new" "${DIR}rr-build"

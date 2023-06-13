@@ -17,7 +17,7 @@ namespace rocRoller
     class SubtractGenerator : public BinaryArithmeticGenerator<Expression::Subtract>
     {
     public:
-        SubtractGenerator<REGISTER_TYPE, DATATYPE>(std::shared_ptr<Context> c)
+        SubtractGenerator<REGISTER_TYPE, DATATYPE>(ContextPtr c)
             : BinaryArithmeticGenerator<Expression::Subtract>(c)
         {
         }
@@ -26,9 +26,9 @@ namespace rocRoller
         // generator.
         static bool Match(Argument const& arg)
         {
-            std::shared_ptr<Context> ctx;
-            Register::Type           registerType;
-            DataType                 dataType;
+            ContextPtr     ctx;
+            Register::Type registerType;
+            DataType       dataType;
 
             std::tie(ctx, registerType, dataType) = arg;
 

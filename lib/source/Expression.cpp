@@ -46,7 +46,7 @@ namespace rocRoller
             {
                 return concatenate(ExpressionInfo<Expr>::name(), "(", call(expr.arg), ")");
             }
-            std::string operator()(std::shared_ptr<Register::Value> const& expr) const
+            std::string operator()(Register::ValuePtr const& expr) const
             {
                 // This allows an unallocated register value to be rendered into a string which
                 // improves debugging by allowing the string representation of that expression
@@ -59,7 +59,7 @@ namespace rocRoller
 
                 return tostr + ":" + TypeAbbrev(expr->variableType());
             }
-            std::string operator()(std::shared_ptr<CommandArgument> const& expr) const
+            std::string operator()(CommandArgumentPtr const& expr) const
             {
                 if(expr)
                     return concatenate("CommandArgument(", expr->name(), ")");

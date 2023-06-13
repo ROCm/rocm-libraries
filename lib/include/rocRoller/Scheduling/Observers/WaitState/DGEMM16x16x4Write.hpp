@@ -26,7 +26,7 @@ namespace rocRoller
         {
         public:
             DGEMM16x16x4Write() {}
-            DGEMM16x16x4Write(std::shared_ptr<Context> context)
+            DGEMM16x16x4Write(ContextPtr context)
                 : WaitStateObserver<DGEMM16x16x4Write>(context){};
 
             void observe(Instruction const& inst)
@@ -34,7 +34,7 @@ namespace rocRoller
                 observe_base(inst);
             }
 
-            static bool required(std::shared_ptr<Context> context)
+            static bool required(ContextPtr context)
             {
                 return context->targetArchitecture().target().getVersionString() == "gfx90a";
             }

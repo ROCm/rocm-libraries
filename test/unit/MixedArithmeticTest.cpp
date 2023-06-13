@@ -326,7 +326,7 @@ namespace MixedArithmeticTest
             }
             auto command = std::make_shared<Command>();
 
-            std::shared_ptr<CommandArgument> lhsArg, rhsArg, destArg;
+            CommandArgumentPtr lhsArg, rhsArg, destArg;
 
             destArg = command->allocateArgument(
                 param.resultVarType.getPointer(), DataDirection::WriteOnly, "dest");
@@ -521,7 +521,7 @@ namespace MixedArithmeticTest
             }
             auto command = std::make_shared<Command>();
 
-            std::shared_ptr<CommandArgument> arg1Arg, arg2Arg, arg3Arg, destArg;
+            CommandArgumentPtr arg1Arg, arg2Arg, arg3Arg, destArg;
 
             destArg = command->allocateArgument(
                 param.resultVarType.getPointer(), DataDirection::WriteOnly, "dest");

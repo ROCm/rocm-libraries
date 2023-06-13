@@ -121,7 +121,7 @@ namespace rocRoller
                 return std::make_shared<Expression::Expression>(cpy);
             }
 
-            Expression::ExpressionPtr operator()(std::shared_ptr<CommandArgument> const& expr) const
+            Expression::ExpressionPtr operator()(CommandArgumentPtr const& expr) const
             {
                 return std::make_shared<Expression::Expression>(expr);
             }
@@ -179,7 +179,7 @@ namespace rocRoller
          */
         struct BaseGraphVisitor
         {
-            BaseGraphVisitor(std::shared_ptr<Context> context,
+            BaseGraphVisitor(ContextPtr       context,
                              Graph::Direction controlGraphOrder  = Graph::Direction::Downstream,
                              bool             rewriteCoordinates = true)
                 : m_context(context)
@@ -435,9 +435,9 @@ namespace rocRoller
             }
 
         protected:
-            std::shared_ptr<Context> m_context;
-            Graph::Direction         m_controlGraphDirection;
-            bool                     m_rewriteCoordinates;
+            ContextPtr       m_context;
+            Graph::Direction m_controlGraphDirection;
+            bool             m_rewriteCoordinates;
         };
 #undef MAKE_OPERATION_VISITOR
 #undef MAKE_EDGE_VISITOR

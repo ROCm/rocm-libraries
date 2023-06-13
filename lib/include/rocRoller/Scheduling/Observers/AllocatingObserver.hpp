@@ -14,7 +14,7 @@ namespace rocRoller
         {
         public:
             AllocatingObserver() {}
-            AllocatingObserver(std::shared_ptr<Context> context)
+            AllocatingObserver(ContextPtr context)
                 : m_context(context)
             {
             }
@@ -82,7 +82,7 @@ namespace rocRoller
             //> This instruction _will_ be scheduled now, record any side effects.
             void observe(Instruction const& inst) {}
 
-            static bool required(std::shared_ptr<Context>)
+            static bool required(ContextPtr)
             {
                 return true;
             }

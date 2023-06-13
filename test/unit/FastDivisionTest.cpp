@@ -191,7 +191,7 @@ namespace FastDivisionTest
     {
     };
 
-    void executeFastDivision(bool isModulo, std::shared_ptr<Context> m_context)
+    void executeFastDivision(bool isModulo, ContextPtr m_context)
     {
         auto command = std::make_shared<Command>();
 
@@ -312,9 +312,7 @@ namespace FastDivisionTest
     {
     };
 
-    void executeFastDivisionByConstant(int                      divisor,
-                                       bool                     isModulo,
-                                       std::shared_ptr<Context> m_context)
+    void executeFastDivisionByConstant(int divisor, bool isModulo, ContextPtr m_context)
     {
         auto command = std::make_shared<Command>();
 

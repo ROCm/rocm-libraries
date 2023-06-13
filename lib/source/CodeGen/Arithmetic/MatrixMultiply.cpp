@@ -27,15 +27,14 @@ namespace rocRoller
         }
 
         template <DataType ACC, DataType INPUT>
-        Generator<Instruction>
-            MatrixMultiplyGenerator<ACC, INPUT>::mul(std::shared_ptr<Register::Value> dest,
-                                                     std::shared_ptr<Register::Value> lhs,
-                                                     std::shared_ptr<Register::Value> r1hs,
-                                                     std::shared_ptr<Register::Value> r2hs,
-                                                     int                              M,
-                                                     int                              N,
-                                                     int                              K,
-                                                     int                              B)
+        Generator<Instruction> MatrixMultiplyGenerator<ACC, INPUT>::mul(Register::ValuePtr dest,
+                                                                        Register::ValuePtr lhs,
+                                                                        Register::ValuePtr r1hs,
+                                                                        Register::ValuePtr r2hs,
+                                                                        int                M,
+                                                                        int                N,
+                                                                        int                K,
+                                                                        int                B)
         {
             AssertFatal(lhs != nullptr);
             AssertFatal(r1hs != nullptr);

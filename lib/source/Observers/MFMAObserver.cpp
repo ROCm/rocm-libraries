@@ -13,7 +13,7 @@ namespace rocRoller
     {
         MFMAObserver::MFMAObserver() {}
 
-        MFMAObserver::MFMAObserver(std::shared_ptr<Context> ctx)
+        MFMAObserver::MFMAObserver(ContextPtr ctx)
             : m_context(ctx)
         {
         }

@@ -128,7 +128,7 @@ namespace KernelGraphTest
         auto extent       = std::make_shared<Expression::Expression>(command->getArguments()[1]);
         auto numWorkitems = extent / loopSizeExpr;
 
-	auto lowerLinearTransform = std::make_shared<LowerLinear>(m_context);
+    auto lowerLinearTransform = std::make_shared<LowerLinear>(m_context);
 
         ASSERT_THROW(
             {

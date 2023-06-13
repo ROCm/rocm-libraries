@@ -44,11 +44,11 @@ namespace rocRoller
 
     inline Instruction::Instruction() = default;
 
-    inline Instruction::Instruction(std::string const&                                      opcode,
-                                    std::initializer_list<std::shared_ptr<Register::Value>> dst,
-                                    std::initializer_list<std::shared_ptr<Register::Value>> src,
-                                    std::initializer_list<std::string> modifiers,
-                                    std::string const&                 comment)
+    inline Instruction::Instruction(std::string const&                        opcode,
+                                    std::initializer_list<Register::ValuePtr> dst,
+                                    std::initializer_list<Register::ValuePtr> src,
+                                    std::initializer_list<std::string>        modifiers,
+                                    std::string const&                        comment)
         : m_opcode(opcode)
     {
         AssertFatal(dst.size() <= m_dst.size(), ShowValue(dst.size()), ShowValue(m_dst.size()));
@@ -71,7 +71,7 @@ namespace rocRoller
         addComment(comment);
     }
 
-    inline Instruction Instruction::Allocate(std::shared_ptr<Register::Value> reg)
+    inline Instruction Instruction::Allocate(Register::ValuePtr reg)
     {
         return Allocate(reg->allocation());
     }
@@ -204,13 +204,13 @@ namespace rocRoller
         return rv;
     }
 
-    inline std::array<std::shared_ptr<Register::Value>, Instruction::MaxSrcRegisters> const&
+    inline std::array<Register::ValuePtr, Instruction::MaxSrcRegisters> const&
         Instruction::getSrcs() const
     {
         return m_src;
     }
 
-    inline std::array<std::shared_ptr<Register::Value>, Instruction::MaxDstRegisters> const&
+    inline std::array<Register::ValuePtr, Instruction::MaxDstRegisters> const&
         Instruction::getDsts() const
     {
         return m_dst;
@@ -280,8 +280,7 @@ namespace rocRoller
     }
 
     inline bool Instruction::isAfterWriteDependency(
-        std::array<std::shared_ptr<Register::Value>, Instruction::MaxDstRegisters> const&
-            previousDest) const
+        std::array<Register::ValuePtr, Instruction::MaxDstRegisters> const& previousDest) const
     {
         for(auto const& regA : m_src)
         {

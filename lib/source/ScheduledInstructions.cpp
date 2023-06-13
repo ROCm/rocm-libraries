@@ -5,7 +5,7 @@
 
 namespace rocRoller
 {
-    ScheduledInstructions::ScheduledInstructions(std::shared_ptr<Context> ctx)
+    ScheduledInstructions::ScheduledInstructions(ContextPtr ctx)
         : m_context(ctx)
     {
     }

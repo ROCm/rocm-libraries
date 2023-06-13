@@ -33,7 +33,7 @@ namespace rocRoller::KernelGraph
     {
     public:
         ScopeManager() = delete;
-        ScopeManager(std::shared_ptr<Context> context)
+        ScopeManager(ContextPtr context)
             : m_context(context)
         {
         }
@@ -55,7 +55,7 @@ namespace rocRoller::KernelGraph
         void popAndReleaseScope();
 
     private:
-        std::shared_ptr<Context>             m_context;
+        ContextPtr                           m_context;
         std::vector<std::unordered_set<int>> m_tags;
     };
 

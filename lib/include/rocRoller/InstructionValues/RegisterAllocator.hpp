@@ -21,7 +21,7 @@ namespace rocRoller
             int    useCount() const;
             int    currentlyFree() const;
 
-            void allocate(std::shared_ptr<Allocation> alloc);
+            void allocate(AllocationPtr alloc);
 
             /**
              * Reassigns the registers in `indices` to a new `Allocation` that is returned.
@@ -51,9 +51,9 @@ namespace rocRoller
             friend class ::RegisterTest_RegisterToString_Test;
 
             //> Allocate these specific registers.
-            void allocate(std::shared_ptr<Allocation> alloc, std::vector<int> const& registers);
+            void allocate(AllocationPtr alloc, std::vector<int> const& registers);
             //> Allocate these specific registers.
-            void allocate(std::shared_ptr<Allocation> alloc, std::vector<int>&& registers);
+            void allocate(AllocationPtr alloc, std::vector<int>&& registers);
 
             Type m_regType;
 

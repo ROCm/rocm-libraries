@@ -246,7 +246,7 @@ namespace rocRoller
         };
 
         Transformer::Transformer(std::shared_ptr<CoordinateGraph> graph,
-                                 std::shared_ptr<Context>         context,
+                                 ContextPtr                       context,
                                  ExpressionTransducer             transducer)
             : m_graph(graph)
             , m_context(context)

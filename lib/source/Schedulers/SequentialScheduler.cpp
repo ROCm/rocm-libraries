@@ -9,7 +9,7 @@ namespace rocRoller
 
         static_assert(Component::Component<SequentialScheduler>);
 
-        inline SequentialScheduler::SequentialScheduler(std::shared_ptr<Context> ctx)
+        inline SequentialScheduler::SequentialScheduler(ContextPtr ctx)
             : Scheduler{ctx}
         {
         }

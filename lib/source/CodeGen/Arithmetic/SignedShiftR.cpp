@@ -16,10 +16,9 @@ namespace rocRoller
             getContextFromValues(dst, lhs, rhs), dst->regType(), dst->variableType().dataType);
     }
 
-    Generator<Instruction>
-        SignedShiftRGenerator::generate(std::shared_ptr<Register::Value> dest,
-                                        std::shared_ptr<Register::Value> value,
-                                        std::shared_ptr<Register::Value> shiftAmount)
+    Generator<Instruction> SignedShiftRGenerator::generate(Register::ValuePtr dest,
+                                                           Register::ValuePtr value,
+                                                           Register::ValuePtr shiftAmount)
     {
         AssertFatal(value != nullptr);
         AssertFatal(shiftAmount != nullptr);

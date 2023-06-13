@@ -142,7 +142,7 @@ namespace rocRoller
         return rv;
     }
 
-    CommandKernel::CommandKernel(std::shared_ptr<Context> context)
+    CommandKernel::CommandKernel(ContextPtr context)
         : m_context(context)
     {
     }
@@ -170,7 +170,7 @@ namespace rocRoller
     }
 
     CommandKernel::CommandKernel(std::shared_ptr<Command>        command,
-                                 std::shared_ptr<Context>        context,
+                                 ContextPtr                      context,
                                  KernelGraph::KernelGraph const& kernelGraph)
         : m_command(command)
         , m_context(context)
@@ -349,7 +349,7 @@ namespace rocRoller
             fileName, kernelName, m_context->targetArchitecture().target());
     }
 
-    std::shared_ptr<Context> CommandKernel::getContext()
+    ContextPtr CommandKernel::getContext()
     {
         return m_context;
     }

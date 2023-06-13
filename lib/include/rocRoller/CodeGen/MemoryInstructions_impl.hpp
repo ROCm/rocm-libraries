@@ -8,25 +8,25 @@
 
 namespace rocRoller
 {
-    inline MemoryInstructions::MemoryInstructions(std::shared_ptr<Context> context)
+    inline MemoryInstructions::MemoryInstructions(ContextPtr context)
         : m_context(context)
     {
     }
 
     inline Generator<Instruction>
         MemoryInstructions::load(MemoryKind                        kind,
-                                 std::shared_ptr<Register::Value>  dest,
-                                 std::shared_ptr<Register::Value>  addr,
-                                 std::shared_ptr<Register::Value>  offset,
+                                 Register::ValuePtr                dest,
+                                 Register::ValuePtr                addr,
+                                 Register::ValuePtr                offset,
                                  int                               numBytes,
                                  std::string const                 comment,
                                  bool                              high,
                                  std::shared_ptr<BufferDescriptor> bufDesc,
                                  BufferInstructionOptions          buffOpts)
     {
-        auto                             context   = m_context.lock();
-        int                              offsetVal = 0;
-        std::shared_ptr<Register::Value> newAddr   = addr;
+        auto               context   = m_context.lock();
+        int                offsetVal = 0;
+        Register::ValuePtr newAddr   = addr;
 
         if(offset && offset->regType() == Register::Type::Literal)
             offsetVal = getUnsignedInt(offset->getLiteralValue());
@@ -85,18 +85,18 @@ namespace rocRoller
 
     inline Generator<Instruction>
         MemoryInstructions::store(MemoryKind                        kind,
-                                  std::shared_ptr<Register::Value>  addr,
-                                  std::shared_ptr<Register::Value>  data,
-                                  std::shared_ptr<Register::Value>  offset,
+                                  Register::ValuePtr                addr,
+                                  Register::ValuePtr                data,
+                                  Register::ValuePtr                offset,
                                   int                               numBytes,
                                   std::string const                 comment,
                                   bool                              high,
                                   std::shared_ptr<BufferDescriptor> bufDesc,
                                   BufferInstructionOptions          buffOpts)
     {
-        auto                             context   = m_context.lock();
-        int                              offsetVal = 0;
-        std::shared_ptr<Register::Value> newAddr   = addr;
+        auto               context   = m_context.lock();
+        int                offsetVal = 0;
+        Register::ValuePtr newAddr   = addr;
 
         if(offset && offset->regType() == Register::Type::Literal)
             offsetVal = getUnsignedInt(offset->getLiteralValue());
@@ -150,9 +150,9 @@ namespace rocRoller
     template <MemoryInstructions::MemoryDirection Dir>
     inline Generator<Instruction>
         MemoryInstructions::moveData(MemoryKind                        kind,
-                                     std::shared_ptr<Register::Value>  addr,
-                                     std::shared_ptr<Register::Value>  data,
-                                     std::shared_ptr<Register::Value>  offset,
+                                     Register::ValuePtr                addr,
+                                     Register::ValuePtr                data,
+                                     Register::ValuePtr                offset,
                                      int                               numBytes,
                                      std::string const                 comment,
                                      bool                              high,
@@ -191,12 +191,8 @@ namespace rocRoller
         return *width;
     }
 
-    inline Generator<Instruction>
-        MemoryInstructions::loadFlat(std::shared_ptr<Register::Value> dest,
-                                     std::shared_ptr<Register::Value> addr,
-                                     int                              offset,
-                                     int                              numBytes,
-                                     bool                             high)
+    inline Generator<Instruction> MemoryInstructions::loadFlat(
+        Register::ValuePtr dest, Register::ValuePtr addr, int offset, int numBytes, bool high)
     {
         AssertFatal(dest != nullptr);
         AssertFatal(addr != nullptr);
@@ -263,12 +259,8 @@ namespace rocRoller
                 WaitCount::Zero("DEBUG: Wait after load", ctx->targetArchitecture()));
     }
 
-    inline Generator<Instruction>
-        MemoryInstructions::storeFlat(std::shared_ptr<Register::Value> addr,
-                                      std::shared_ptr<Register::Value> data,
-                                      int                              offset,
-                                      int                              numBytes,
-                                      bool                             high)
+    inline Generator<Instruction> MemoryInstructions::storeFlat(
+        Register::ValuePtr addr, Register::ValuePtr data, int offset, int numBytes, bool high)
     {
         AssertFatal(addr != nullptr);
         AssertFatal(data != nullptr);
@@ -335,11 +327,10 @@ namespace rocRoller
                 WaitCount::Zero("DEBUG: Wait after store", ctx->targetArchitecture()));
     }
 
-    inline Generator<Instruction>
-        MemoryInstructions::loadScalar(std::shared_ptr<Register::Value> dest,
-                                       std::shared_ptr<Register::Value> base,
-                                       std::shared_ptr<Register::Value> offset,
-                                       int                              numBytes)
+    inline Generator<Instruction> MemoryInstructions::loadScalar(Register::ValuePtr dest,
+                                                                 Register::ValuePtr base,
+                                                                 Register::ValuePtr offset,
+                                                                 int                numBytes)
     {
         AssertFatal(dest != nullptr);
         AssertFatal(base != nullptr);
@@ -360,8 +351,7 @@ namespace rocRoller
                 WaitCount::Zero("DEBUG: Wait after load", ctx->targetArchitecture()));
     }
 
-    inline Generator<Instruction>
-        MemoryInstructions::genLocalAddr(std::shared_ptr<Register::Value>& addr) const
+    inline Generator<Instruction> MemoryInstructions::genLocalAddr(Register::ValuePtr& addr) const
     {
         // If an allocation of LocalData is passed in, allocate a new register that contains
         // the offset.
@@ -374,13 +364,12 @@ namespace rocRoller
         }
     }
 
-    inline Generator<Instruction>
-        MemoryInstructions::loadLocal(std::shared_ptr<Register::Value> dest,
-                                      std::shared_ptr<Register::Value> addr,
-                                      int                              offset,
-                                      int                              numBytes,
-                                      std::string const                comment,
-                                      bool                             high)
+    inline Generator<Instruction> MemoryInstructions::loadLocal(Register::ValuePtr dest,
+                                                                Register::ValuePtr addr,
+                                                                int                offset,
+                                                                int                numBytes,
+                                                                std::string const  comment,
+                                                                bool               high)
     {
         AssertFatal(dest != nullptr);
         AssertFatal(addr != nullptr);
@@ -437,13 +426,12 @@ namespace rocRoller
                 WaitCount::Zero("DEBUG: Wait after load", ctx->targetArchitecture()));
     }
 
-    inline Generator<Instruction>
-        MemoryInstructions::storeLocal(std::shared_ptr<Register::Value> addr,
-                                       std::shared_ptr<Register::Value> data,
-                                       int                              offset,
-                                       int                              numBytes,
-                                       std::string const                comment,
-                                       bool                             high)
+    inline Generator<Instruction> MemoryInstructions::storeLocal(Register::ValuePtr addr,
+                                                                 Register::ValuePtr data,
+                                                                 int                offset,
+                                                                 int                numBytes,
+                                                                 std::string const  comment,
+                                                                 bool               high)
     {
         AssertFatal(addr != nullptr);
         AssertFatal(data != nullptr);
@@ -513,8 +501,8 @@ namespace rocRoller
     }
 
     inline Generator<Instruction>
-        MemoryInstructions::loadBuffer(std::shared_ptr<Register::Value>  dest,
-                                       std::shared_ptr<Register::Value>  addr,
+        MemoryInstructions::loadBuffer(Register::ValuePtr                dest,
+                                       Register::ValuePtr                addr,
                                        int                               offset,
                                        std::shared_ptr<BufferDescriptor> buffDesc,
                                        BufferInstructionOptions          buffOpts,
@@ -603,8 +591,8 @@ namespace rocRoller
     }
 
     inline Generator<Instruction>
-        MemoryInstructions::storeBuffer(std::shared_ptr<Register::Value>  data,
-                                        std::shared_ptr<Register::Value>  addr,
+        MemoryInstructions::storeBuffer(Register::ValuePtr                data,
+                                        Register::ValuePtr                addr,
                                         int                               offset,
                                         std::shared_ptr<BufferDescriptor> buffDesc,
                                         BufferInstructionOptions          buffOpts,

@@ -9,7 +9,7 @@ namespace rocRoller
         RegisterComponent(RandomScheduler);
         static_assert(Component::Component<RandomScheduler>);
 
-        inline RandomScheduler::RandomScheduler(std::shared_ptr<Context> ctx)
+        inline RandomScheduler::RandomScheduler(ContextPtr ctx)
             : Scheduler{ctx}
         {
         }

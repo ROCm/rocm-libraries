@@ -24,14 +24,14 @@ namespace rocRoller
         {
         public:
             RegisterMapObserver() {}
-            RegisterMapObserver(std::shared_ptr<Context> context)
+            RegisterMapObserver(ContextPtr context)
                 : m_context(context){};
 
             InstructionStatus peek(Instruction const& inst) const;
             void              modify(Instruction& inst) const;
             void              observe(Instruction const& inst);
 
-            static bool required(std::shared_ptr<Context> context)
+            static bool required(ContextPtr context)
             {
                 return true;
             }

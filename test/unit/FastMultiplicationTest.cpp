@@ -126,7 +126,7 @@ namespace FastMultiplicationTest
     {
     };
 
-    void executeFastMultiplicationByConstant(int multiplier, std::shared_ptr<Context> m_context)
+    void executeFastMultiplicationByConstant(int multiplier, ContextPtr m_context)
     {
         auto command = std::make_shared<Command>();
 
@@ -210,8 +210,7 @@ namespace FastMultiplicationTest
         }
     }
 
-    void executeFastMultiplicationByConstantInt64(int                      multiplier,
-                                                  std::shared_ptr<Context> m_context)
+    void executeFastMultiplicationByConstantInt64(int multiplier, ContextPtr m_context)
     {
         auto command = std::make_shared<Command>();
 

@@ -25,25 +25,25 @@ namespace rocRollerTest
 
     class EnvSettings : public GenericContextFixture
     {
-        std::shared_ptr<Settings> settings = Settings::getInstance();
+        std::shared_ptr<Settings> m_settings = Settings::getInstance();
 
-        std::vector<std::pair<std::string, char*>> envVars;
+        std::vector<std::pair<std::string, char*>> m_envVars;
 
         void SetUp()
         {
             Settings::bitFieldType bf(0x0001);
 
-            settings->set(Settings::SettingsBitField, bf);
+            m_settings->set(Settings::SettingsBitField, bf);
 
-            envVars.push_back(std::pair<std::string, char*>(
+            m_envVars.push_back(std::pair<std::string, char*>(
                 Settings::LogConsole.name, getenv(Settings::LogConsole.name.c_str())));
-            envVars.push_back(std::pair<std::string, char*>(
+            m_envVars.push_back(std::pair<std::string, char*>(
                 Settings::AssemblyFile.name, getenv(Settings::AssemblyFile.name.c_str())));
-            envVars.push_back(std::pair<std::string, char*>(
+            m_envVars.push_back(std::pair<std::string, char*>(
                 Settings::RandomSeed.name, getenv(Settings::RandomSeed.name.c_str())));
-            envVars.push_back(std::pair<std::string, char*>(
+            m_envVars.push_back(std::pair<std::string, char*>(
                 Settings::SaveAssembly.name, getenv(Settings::SaveAssembly.name.c_str())));
-            envVars.push_back(std::pair<std::string, char*>(
+            m_envVars.push_back(std::pair<std::string, char*>(
                 Settings::Scheduler.name, getenv(Settings::SaveAssembly.name.c_str())));
             setenv(Settings::LogConsole.name.c_str(), "0", 1);
             setenv(Settings::SaveAssembly.name.c_str(), "1", 1);
@@ -56,7 +56,7 @@ namespace rocRollerTest
 
         void TearDown()
         {
-            for(auto& env : envVars)
+            for(auto& env : m_envVars)
             {
                 if(!env.second)
                 {

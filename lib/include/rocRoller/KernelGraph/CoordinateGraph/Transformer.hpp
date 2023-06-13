@@ -21,7 +21,7 @@ namespace rocRoller
         public:
             Transformer() = delete;
             Transformer(std::shared_ptr<CoordinateGraph>,
-                        std::shared_ptr<Context>         = nullptr,
+                        ContextPtr                       = nullptr,
                         Expression::ExpressionTransducer = nullptr);
 
             /**
@@ -80,7 +80,7 @@ namespace rocRoller
 
             std::map<int, Expression::ExpressionPtr> m_indexes;
             std::shared_ptr<CoordinateGraph>         m_graph;
-            std::shared_ptr<Context>                 m_context;
+            ContextPtr                               m_context;
             Expression::ExpressionTransducer         m_transducer;
         };
     }

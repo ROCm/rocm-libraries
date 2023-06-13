@@ -75,22 +75,22 @@ namespace rocRoller
     class BufferDescriptor
     {
     public:
-        BufferDescriptor(std::shared_ptr<Register::Value> srd, std::shared_ptr<Context> context);
-        BufferDescriptor(std::shared_ptr<Context> context);
+        BufferDescriptor(Register::ValuePtr srd, ContextPtr context);
+        BufferDescriptor(ContextPtr context);
         Generator<Instruction> setup();
         Generator<Instruction> setDefaultOpts();
-        Generator<Instruction> incrementBasePointer(std::shared_ptr<Register::Value> value);
-        Generator<Instruction> setBasePointer(std::shared_ptr<Register::Value> value);
-        Generator<Instruction> setSize(std::shared_ptr<Register::Value> value);
-        Generator<Instruction> setOptions(std::shared_ptr<Register::Value> value);
+        Generator<Instruction> incrementBasePointer(Register::ValuePtr value);
+        Generator<Instruction> setBasePointer(Register::ValuePtr value);
+        Generator<Instruction> setSize(Register::ValuePtr value);
+        Generator<Instruction> setOptions(Register::ValuePtr value);
 
-        std::shared_ptr<Register::Value> allRegisters() const;
-        std::shared_ptr<Register::Value> basePointerAndStride() const;
-        std::shared_ptr<Register::Value> size() const;
-        std::shared_ptr<Register::Value> descriptorOptions() const;
+        Register::ValuePtr allRegisters() const;
+        Register::ValuePtr basePointerAndStride() const;
+        Register::ValuePtr size() const;
+        Register::ValuePtr descriptorOptions() const;
 
     private:
-        std::shared_ptr<Register::Value> m_bufferResourceDescriptor;
-        std::shared_ptr<Context>         m_context;
+        Register::ValuePtr m_bufferResourceDescriptor;
+        ContextPtr         m_context;
     };
 }

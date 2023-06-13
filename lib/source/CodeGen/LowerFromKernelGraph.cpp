@@ -379,7 +379,7 @@ namespace rocRoller
                     return false;
                 }
 
-                bool operator()(std::shared_ptr<Register::Value> const& expr) const
+                bool operator()(Register::ValuePtr const& expr) const
                 {
                     if(!expr)
                         return false;
@@ -544,9 +544,8 @@ namespace rocRoller
                 }
             }
 
-            Generator<Instruction> loadVGPRFromScalarValue(User                             user,
-                                                           std::shared_ptr<Register::Value> vgpr,
-                                                           Transformer                      coords)
+            Generator<Instruction>
+                loadVGPRFromScalarValue(User user, Register::ValuePtr vgpr, Transformer coords)
             {
                 rocRoller::Log::getLogger()->debug(
                     "KernelGraph::CodeGenerator::LoadVGPR(): scalar value");
@@ -557,9 +556,8 @@ namespace rocRoller
                 co_yield m_context->copier()->copy(vgpr, s_value, "Move value");
             }
 
-            Generator<Instruction> loadVGPRFromScalarPointer(User                             user,
-                                                             std::shared_ptr<Register::Value> vgpr,
-                                                             Transformer coords)
+            Generator<Instruction>
+                loadVGPRFromScalarPointer(User user, Register::ValuePtr vgpr, Transformer coords)
             {
                 rocRoller::Log::getLogger()->debug(
                     "KernelGraph::CodeGenerator::LoadVGPR(): scalar pointer");
@@ -578,10 +576,10 @@ namespace rocRoller
                     MemoryInstructions::MemoryKind::Flat, vgpr, vPtr, nullptr, numBytes);
             }
 
-            Generator<Instruction> loadVGPRFromGlobalArray(int                              userTag,
-                                                           User                             user,
-                                                           std::shared_ptr<Register::Value> vgpr,
-                                                           Transformer                      coords)
+            Generator<Instruction> loadVGPRFromGlobalArray(int                userTag,
+                                                           User               user,
+                                                           Register::ValuePtr vgpr,
+                                                           Transformer        coords)
             {
                 auto offset = Register::Value::Placeholder(
                     m_context, Register::Type::Vector, DataType::Int64, 1);
@@ -706,7 +704,7 @@ namespace rocRoller
 
         private:
             std::shared_ptr<KernelGraph>    m_graph;
-            std::shared_ptr<Context>        m_context;
+            ContextPtr                      m_context;
             std::shared_ptr<AssemblyKernel> m_kernel;
 
             std::set<int> m_completedControlNodes;

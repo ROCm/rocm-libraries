@@ -8,7 +8,7 @@ namespace rocRoller
         RegisterComponent(WaitCntNopCost);
         static_assert(Component::Component<WaitCntNopCost>);
 
-        inline WaitCntNopCost::WaitCntNopCost(std::shared_ptr<Context> ctx)
+        inline WaitCntNopCost::WaitCntNopCost(ContextPtr ctx)
             : Cost{ctx}
         {
         }

@@ -10,8 +10,7 @@
 namespace rocRoller
 {
 
-    inline AssemblyKernel::AssemblyKernel(std::shared_ptr<Context> context,
-                                          std::string const&       kernelName)
+    inline AssemblyKernel::AssemblyKernel(ContextPtr context, std::string const& kernelName)
         : m_context(context)
     {
         AssertFatal(context);
@@ -27,7 +26,7 @@ namespace rocRoller
 
     inline AssemblyKernel::~AssemblyKernel() = default;
 
-    inline std::shared_ptr<Context> AssemblyKernel::context() const
+    inline ContextPtr AssemblyKernel::context() const
     {
         return m_context.lock();
     }
@@ -192,8 +191,7 @@ namespace rocRoller
         m_arguments.push_back(std::move(arg));
     }
 
-    inline void
-        AssemblyKernel::addCommandArguments(std::vector<std::shared_ptr<CommandArgument>> args)
+    inline void AssemblyKernel::addCommandArguments(std::vector<CommandArgumentPtr> args)
     {
         for(auto arg : args)
         {

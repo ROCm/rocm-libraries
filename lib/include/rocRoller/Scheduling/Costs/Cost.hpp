@@ -24,7 +24,7 @@ namespace rocRoller
         class Cost
         {
         public:
-            using Argument = std::tuple<CostFunction, std::shared_ptr<rocRoller::Context>>;
+            using Argument = std::tuple<CostFunction, rocRoller::ContextPtr>;
 
             /**
              * @brief Collection of Tuples where the first member is the index of the generator

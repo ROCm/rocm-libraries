@@ -114,7 +114,7 @@ namespace rocRoller
         class LinearWeightedCost : public Cost
         {
         public:
-            LinearWeightedCost(std::shared_ptr<Context>);
+            LinearWeightedCost(ContextPtr);
 
             using Base = Cost;
 

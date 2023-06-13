@@ -23,11 +23,11 @@ namespace rocRoller
 
     Generator<Instruction>
         MemoryInstructions::loadAndPack(MemoryKind                        kind,
-                                        std::shared_ptr<Register::Value>  dest,
-                                        std::shared_ptr<Register::Value>  addr1,
-                                        std::shared_ptr<Register::Value>  offset1,
-                                        std::shared_ptr<Register::Value>  addr2,
-                                        std::shared_ptr<Register::Value>  offset2,
+                                        Register::ValuePtr                dest,
+                                        Register::ValuePtr                addr1,
+                                        Register::ValuePtr                offset1,
+                                        Register::ValuePtr                addr2,
+                                        Register::ValuePtr                offset2,
                                         std::string const                 comment,
                                         std::shared_ptr<BufferDescriptor> buffDesc,
                                         BufferInstructionOptions          buffOpts)
@@ -50,12 +50,12 @@ namespace rocRoller
         co_yield generateOp<Expression::BitwiseOr>(dest, val1, val2);
     }
 
-    Generator<Instruction> MemoryInstructions::packAndStore(MemoryKind                       kind,
-                                                            std::shared_ptr<Register::Value> addr,
-                                                            std::shared_ptr<Register::Value> data1,
-                                                            std::shared_ptr<Register::Value> data2,
-                                                            std::shared_ptr<Register::Value> offset,
-                                                            std::string const comment)
+    Generator<Instruction> MemoryInstructions::packAndStore(MemoryKind         kind,
+                                                            Register::ValuePtr addr,
+                                                            Register::ValuePtr data1,
+                                                            Register::ValuePtr data2,
+                                                            Register::ValuePtr offset,
+                                                            std::string const  comment)
     {
         auto val = Register::Value::Placeholder(
             m_context.lock(), Register::Type::Vector, DataType::Halfx2, 1);

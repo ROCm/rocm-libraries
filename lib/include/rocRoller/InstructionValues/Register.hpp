@@ -94,9 +94,9 @@ namespace rocRoller
             ~Value();
 
             template <CCommandArgumentValue T>
-            static std::shared_ptr<Value> Literal(T const& value);
+            static ValuePtr Literal(T const& value);
 
-            static std::shared_ptr<Value> Literal(CommandArgumentValue const& value);
+            static ValuePtr Literal(CommandArgumentValue const& value);
 
             /**
              * Special-purpose register such as vcc or exec.
@@ -104,24 +104,24 @@ namespace rocRoller
             static ValuePtr Special(SpecialType name);
             static ValuePtr Special(SpecialType name, ContextPtr ctx);
 
-            static std::shared_ptr<Value> Label(const std::string& label);
+            static ValuePtr Label(const std::string& label);
 
             /**
              * Placeholder value to be filled in later.
              */
-            static std::shared_ptr<Value>
+            static ValuePtr
                 Placeholder(ContextPtr ctx, Type regType, VariableType varType, int count);
 
             static ValuePtr WavefrontPlaceholder(ContextPtr context);
 
-            static std::shared_ptr<Value> AllocateLDS(ContextPtr   ctx,
-                                                      VariableType varType,
-                                                      int          count,
-                                                      unsigned int alignment = 4);
+            static ValuePtr AllocateLDS(ContextPtr   ctx,
+                                        VariableType varType,
+                                        int          count,
+                                        unsigned int alignment = 4);
 
             AllocationState allocationState() const;
 
-            std::shared_ptr<Allocation> allocation() const;
+            AllocationPtr allocation() const;
 
             std::vector<int> allocationCoord() const;
 
@@ -151,13 +151,13 @@ namespace rocRoller
              * Returns a new unallocated RegisterValue with the same characteristics (register type,
              * data type, count, etc.)
              */
-            std::shared_ptr<Value> placeholder() const;
+            ValuePtr placeholder() const;
 
             /**
              * Returns a new unallocated Value with the specified register type but
              * the same other properties.
              */
-            std::shared_ptr<Value> placeholder(Type regType) const;
+            ValuePtr placeholder(Type regType) const;
 
             Type         regType() const;
             VariableType variableType() const;
@@ -168,30 +168,21 @@ namespace rocRoller
             std::string toString() const;
             std::string description() const;
 
-            Value(std::shared_ptr<Context> ctx, Type regType, VariableType variableType, int count);
-            Value(std::shared_ptr<Context> ctx,
-                  Type                     regType,
-                  VariableType             variableType,
-                  std::vector<int>&&       coord);
+            Value(ContextPtr ctx, Type regType, VariableType variableType, int count);
+            Value(ContextPtr         ctx,
+                  Type               regType,
+                  VariableType       variableType,
+                  std::vector<int>&& coord);
             template <std::ranges::input_range T>
-            Value(std::shared_ptr<Context> ctx,
-                  Type                     regType,
-                  VariableType             variableType,
-                  T const&                 coord);
+            Value(ContextPtr ctx, Type regType, VariableType variableType, T const& coord);
 
-            Value(std::shared_ptr<Allocation> alloc,
-                  Type                        regType,
-                  VariableType                variableType,
-                  int                         count);
-            Value(std::shared_ptr<Allocation> alloc,
-                  Type                        regType,
-                  VariableType                variableType,
-                  std::vector<int>&&          coord);
+            Value(AllocationPtr alloc, Type regType, VariableType variableType, int count);
+            Value(AllocationPtr      alloc,
+                  Type               regType,
+                  VariableType       variableType,
+                  std::vector<int>&& coord);
             template <std::ranges::input_range T>
-            Value(std::shared_ptr<Allocation> alloc,
-                  Type                        regType,
-                  VariableType                variableType,
-                  T&                          coord);
+            Value(AllocationPtr alloc, Type regType, VariableType variableType, T& coord);
 
             std::string name() const;
             void        setName(std::string const& name);
@@ -200,7 +191,7 @@ namespace rocRoller
             /**
              * Return negated copy.
              */
-            std::shared_ptr<Value> negate() const;
+            ValuePtr negate() const;
 
             /**
              * Return subset of 32bit registers from multi-register values; always DataType::Raw32.
@@ -217,10 +208,10 @@ namespace rocRoller
              * would give v1, a single 32-bit register.
              */
             template <std::ranges::forward_range T>
-            std::shared_ptr<Value> subset(T const& indices) const;
+            ValuePtr subset(T const& indices) const;
 
             template <std::integral T>
-            std::shared_ptr<Value> subset(std::initializer_list<T> indices) const;
+            ValuePtr subset(std::initializer_list<T> indices) const;
 
             /**
              * Splits the registers allocated into individual values.
@@ -236,7 +227,7 @@ namespace rocRoller
              */
             std::vector<ValuePtr> split(std::vector<std::vector<int>> const& indices);
 
-            bool intersects(std::shared_ptr<Register::Value>) const;
+            bool intersects(Register::ValuePtr) const;
 
             /**
              * Return sub-elements of multi-value values.
@@ -254,10 +245,9 @@ namespace rocRoller
              * (that spans two 32-bit registers).
              */
             template <std::ranges::forward_range T>
-            std::shared_ptr<Value> element(T const& indices) const;
+            ValuePtr element(T const& indices) const;
             template <typename T>
-            std::enable_if_t<std::is_integral_v<T> && !std::is_same_v<T, bool>,
-                             std::shared_ptr<Value>>
+            std::enable_if_t<std::is_integral_v<T> && !std::is_same_v<T, bool>, ValuePtr>
                 element(std::initializer_list<T> indices) const;
 
             size_t registerCount() const;
@@ -281,7 +271,7 @@ namespace rocRoller
 
             rocRoller::Expression::ExpressionPtr expression();
 
-            std::shared_ptr<Context> context() const;
+            ContextPtr context() const;
 
         private:
             /**
@@ -307,7 +297,7 @@ namespace rocRoller
 
             CommandArgumentValue m_literalValue;
 
-            std::shared_ptr<Allocation>    m_allocation;
+            AllocationPtr                  m_allocation;
             std::shared_ptr<LDSAllocation> m_ldsAllocation;
 
             Type         m_regType;
@@ -329,7 +319,7 @@ namespace rocRoller
             void updateContiguousIndices() const;
         };
 
-        std::shared_ptr<Value> Representative(std::initializer_list<std::shared_ptr<Value>> values);
+        ValuePtr Representative(std::initializer_list<ValuePtr> values);
 
         /**
          * Represents one (possible) allocation of register(s) that are thought of collectively.
@@ -349,27 +339,24 @@ namespace rocRoller
             };
 
             /// One value of the given type.
-            Allocation(std::shared_ptr<Context> context, Type regType, VariableType variableType);
+            Allocation(ContextPtr context, Type regType, VariableType variableType);
 
-            Allocation(std::shared_ptr<Context> context,
-                       Type                     regType,
-                       VariableType             variableType,
-                       int                      count);
+            Allocation(ContextPtr context, Type regType, VariableType variableType, int count);
 
-            Allocation(std::shared_ptr<Context> context,
-                       Type                     regType,
-                       VariableType             variableType,
-                       int                      count,
-                       Options const&           options);
-            Allocation(std::shared_ptr<Context> context,
-                       Type                     regType,
-                       VariableType             variableType,
-                       int                      count,
-                       Options&&                options);
+            Allocation(ContextPtr     context,
+                       Type           regType,
+                       VariableType   variableType,
+                       int            count,
+                       Options const& options);
+            Allocation(ContextPtr   context,
+                       Type         regType,
+                       VariableType variableType,
+                       int          count,
+                       Options&&    options);
 
             ~Allocation();
 
-            static std::shared_ptr<Allocation> SameAs(Value const& val, std::string const& name);
+            static AllocationPtr SameAs(Value const& val, std::string const& name);
 
             Instruction allocate();
             void        allocate(Instruction& inst);
@@ -381,7 +368,7 @@ namespace rocRoller
 
             AllocationState allocationState() const;
 
-            std::shared_ptr<Value> operator*();
+            ValuePtr operator*();
 
             std::string descriptiveComment(std::string const& prefix) const;
 

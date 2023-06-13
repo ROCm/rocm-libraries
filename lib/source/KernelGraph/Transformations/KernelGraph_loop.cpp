@@ -15,7 +15,7 @@ namespace rocRoller
 
         struct LoopDistributeVisitor : public BaseGraphVisitor
         {
-            LoopDistributeVisitor(std::shared_ptr<Context> context, ExpressionPtr loopSize)
+            LoopDistributeVisitor(ContextPtr context, ExpressionPtr loopSize)
                 : BaseGraphVisitor(context)
                 , m_loopSize(loopSize)
                 , m_loopStride(Expression::literal(1))

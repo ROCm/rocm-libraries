@@ -17,7 +17,7 @@ namespace rocRoller
     class MultiplyGenerator : public BinaryArithmeticGenerator<Expression::Multiply>
     {
     public:
-        MultiplyGenerator<REGISTER_TYPE, DATATYPE>(std::shared_ptr<Context> c)
+        MultiplyGenerator<REGISTER_TYPE, DATATYPE>(ContextPtr c)
             : BinaryArithmeticGenerator<Expression::Multiply>(c)
         {
         }
@@ -26,9 +26,9 @@ namespace rocRoller
         // generator.
         static bool Match(Argument const& arg)
         {
-            std::shared_ptr<Context> ctx;
-            Register::Type           registerType;
-            DataType                 dataType;
+            ContextPtr     ctx;
+            Register::Type registerType;
+            DataType       dataType;
 
             std::tie(ctx, registerType, dataType) = arg;
 

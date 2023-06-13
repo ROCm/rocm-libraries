@@ -27,17 +27,17 @@ namespace rocRoller
             MaxAllocations  = 4
         };
 
-        Instruction(std::string const&                                      opcode,
-                    std::initializer_list<std::shared_ptr<Register::Value>> dst,
-                    std::initializer_list<std::shared_ptr<Register::Value>> src,
-                    std::initializer_list<std::string>                      modifiers,
-                    std::string const&                                      comment);
+        Instruction(std::string const&                        opcode,
+                    std::initializer_list<Register::ValuePtr> dst,
+                    std::initializer_list<Register::ValuePtr> src,
+                    std::initializer_list<std::string>        modifiers,
+                    std::string const&                        comment);
 
         Instruction();
 
         static Generator<std::string> EscapeComment(std::string comment, int indent = 0);
 
-        static Instruction Allocate(std::shared_ptr<Register::Value> reg);
+        static Instruction Allocate(Register::ValuePtr reg);
         static Instruction Allocate(std::shared_ptr<Register::Allocation> reg);
         static Instruction
             Allocate(std::initializer_list<std::shared_ptr<Register::Allocation>> regs);
@@ -65,8 +65,8 @@ namespace rocRoller
         static Instruction Lock(Scheduling::Dependency const& dependency, std::string comment);
         static Instruction Unlock(std::string comment);
 
-        std::array<std::shared_ptr<Register::Value>, MaxDstRegisters> const& getDsts() const;
-        std::array<std::shared_ptr<Register::Value>, MaxSrcRegisters> const& getSrcs() const;
+        std::array<Register::ValuePtr, MaxDstRegisters> const& getDsts() const;
+        std::array<Register::ValuePtr, MaxSrcRegisters> const& getSrcs() const;
 
         bool      hasRegisters() const;
         bool      readsSpecialRegisters() const;
@@ -79,8 +79,7 @@ namespace rocRoller
          * @return Whether this instructions registers intersect with a past instructions destination registers.
          */
         bool isAfterWriteDependency(
-            std::array<std::shared_ptr<Register::Value>, Instruction::MaxDstRegisters> const&
-                previousDest) const;
+            std::array<Register::ValuePtr, Instruction::MaxDstRegisters> const& previousDest) const;
 
         void        toStream(std::ostream&, LogLevel level) const;
         std::string toString(LogLevel level) const;
@@ -168,8 +167,8 @@ namespace rocRoller
 
         Scheduling::Dependency m_dependency = Scheduling::Dependency::None;
 
-        std::array<std::shared_ptr<Register::Value>, MaxDstRegisters> m_dst;
-        std::array<std::shared_ptr<Register::Value>, MaxSrcRegisters> m_src;
+        std::array<Register::ValuePtr, MaxDstRegisters> m_dst;
+        std::array<Register::ValuePtr, MaxSrcRegisters> m_src;
 
         std::array<std::string, MaxModifiers> m_modifiers;
     };

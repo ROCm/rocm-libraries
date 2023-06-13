@@ -17,10 +17,10 @@ namespace rocRoller
             getContextFromValues(dst, a, x, y), Register::Type::Vector, DataType::None);
     }
 
-    Generator<Instruction> MultiplyAddGenerator::generate(std::shared_ptr<Register::Value> dest,
-                                                          std::shared_ptr<Register::Value> a,
-                                                          std::shared_ptr<Register::Value> x,
-                                                          std::shared_ptr<Register::Value> y)
+    Generator<Instruction> MultiplyAddGenerator::generate(Register::ValuePtr dest,
+                                                          Register::ValuePtr a,
+                                                          Register::ValuePtr x,
+                                                          Register::ValuePtr y)
 
     {
         AssertFatal(a);

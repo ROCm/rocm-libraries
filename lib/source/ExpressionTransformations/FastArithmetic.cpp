@@ -6,7 +6,7 @@ namespace rocRoller
 {
     namespace Expression
     {
-        FastArithmetic::FastArithmetic(std::shared_ptr<Context> context)
+        FastArithmetic::FastArithmetic(ContextPtr context)
             : m_context(context)
         {
         }

@@ -34,7 +34,7 @@ namespace rocRoller
         public:
             RegisterLivenessObserver() {}
 
-            RegisterLivenessObserver(std::shared_ptr<Context> context)
+            RegisterLivenessObserver(ContextPtr context)
                 : m_context(context)
             {
                 m_history = {};
@@ -63,7 +63,7 @@ namespace rocRoller
              */
             void observe(Instruction const& inst);
 
-            static bool required(std::shared_ptr<Context>);
+            static bool required(ContextPtr);
 
         private:
             std::weak_ptr<Context>            m_context;

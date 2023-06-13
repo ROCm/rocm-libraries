@@ -319,7 +319,7 @@ namespace rocRoller
          */
         struct AddLDSVisitor
         {
-            AddLDSVisitor(std::shared_ptr<Context> context)
+            AddLDSVisitor(ContextPtr context)
                 : m_context(context)
             {
             }

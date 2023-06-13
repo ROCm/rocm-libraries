@@ -72,8 +72,8 @@ namespace rocRoller
     };
 
     std::ostream& operator<<(std::ostream&, CommandArgument const&);
-    std::ostream& operator<<(std::ostream&, std::shared_ptr<CommandArgument> const&);
-    std::ostream& operator<<(std::ostream&, std::vector<std::shared_ptr<CommandArgument>> const&);
+    std::ostream& operator<<(std::ostream&, CommandArgumentPtr const&);
+    std::ostream& operator<<(std::ostream&, std::vector<CommandArgumentPtr> const&);
 
     VariableType  variableType(CommandArgumentValue const& val);
     std::string   name(CommandArgumentValue const& val);

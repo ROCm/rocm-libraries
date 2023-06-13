@@ -14,7 +14,7 @@ namespace rocRoller
     class ShiftLGenerator : public BinaryArithmeticGenerator<Expression::ShiftL>
     {
     public:
-        ShiftLGenerator(std::shared_ptr<Context> c)
+        ShiftLGenerator(ContextPtr c)
             : BinaryArithmeticGenerator<Expression::ShiftL>(c)
         {
         }
@@ -23,9 +23,9 @@ namespace rocRoller
         // generator.
         static bool Match(Argument const& arg)
         {
-            std::shared_ptr<Context> ctx;
-            Register::Type           registerType;
-            DataType                 dataType;
+            ContextPtr     ctx;
+            Register::Type registerType;
+            DataType       dataType;
 
             std::tie(ctx, registerType, dataType) = arg;
 
@@ -42,9 +42,9 @@ namespace rocRoller
         }
 
         // Method to generate instructions
-        Generator<Instruction> generate(std::shared_ptr<Register::Value> dest,
-                                        std::shared_ptr<Register::Value> value,
-                                        std::shared_ptr<Register::Value> shiftAmount);
+        Generator<Instruction> generate(Register::ValuePtr dest,
+                                        Register::ValuePtr value,
+                                        Register::ValuePtr shiftAmount);
 
         static const std::string Name;
     };

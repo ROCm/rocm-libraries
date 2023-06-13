@@ -92,11 +92,11 @@ namespace rocRoller
 
         std::string assemblyFileName() const;
 
-        std::shared_ptr<LabelAllocator> labelAllocator() const;
-        std::shared_ptr<LDSAllocator>   ldsAllocator() const;
-        RegTagManPtr                    registerTagManager() const;
-        GPUArchitecture const&          targetArchitecture() const;
-        int                             hipDeviceIndex() const;
+        LabelAllocatorPtr             labelAllocator() const;
+        std::shared_ptr<LDSAllocator> ldsAllocator() const;
+        RegTagManPtr                  registerTagManager() const;
+        GPUArchitecture const&        targetArchitecture() const;
+        int                           hipDeviceIndex() const;
 
         std::shared_ptr<RegisterHazardMap> getRegisterHazardMap() const;
 
@@ -129,7 +129,7 @@ namespace rocRoller
         std::shared_ptr<ArgumentLoader>            m_argLoader;
         std::shared_ptr<ScheduledInstructions>     m_instructions;
         std::shared_ptr<MemoryInstructions>        m_mem;
-        std::shared_ptr<LabelAllocator>            m_labelAllocator;
+        LabelAllocatorPtr                          m_labelAllocator;
         std::shared_ptr<LDSAllocator>              m_ldsAllocator;
         std::shared_ptr<CopyGenerator>             m_copier;
         std::shared_ptr<BranchGenerator>           m_brancher;

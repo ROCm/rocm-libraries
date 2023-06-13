@@ -14,7 +14,7 @@ namespace rocRoller
     class NegateGenerator : public UnaryArithmeticGenerator<Expression::Negate>
     {
     public:
-        NegateGenerator(std::shared_ptr<Context> c)
+        NegateGenerator(ContextPtr c)
             : UnaryArithmeticGenerator<Expression::Negate>(c)
         {
         }
@@ -24,9 +24,9 @@ namespace rocRoller
         static bool
             Match(typename UnaryArithmeticGenerator<Expression::Negate>::Argument const& arg)
         {
-            std::shared_ptr<Context> ctx;
-            Register::Type           registerType;
-            DataType                 dataType;
+            ContextPtr     ctx;
+            Register::Type registerType;
+            DataType       dataType;
 
             std::tie(ctx, registerType, dataType) = arg;
 

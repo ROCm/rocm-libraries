@@ -73,7 +73,7 @@ namespace rocRoller
             return true;
         }
 
-        std::shared_ptr<spdlog::logger> getLogger()
+        LoggerPtr getLogger()
         {
             static bool doneInit = initLogger();
             AssertFatal(doneInit, "Logger failed to initialize");

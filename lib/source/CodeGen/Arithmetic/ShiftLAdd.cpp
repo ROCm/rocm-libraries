@@ -19,10 +19,10 @@ namespace rocRoller
             dst->variableType().dataType);
     }
 
-    Generator<Instruction> ShiftLAddGenerator::generate(std::shared_ptr<Register::Value> dest,
-                                                        std::shared_ptr<Register::Value> lhs,
+    Generator<Instruction> ShiftLAddGenerator::generate(Register::ValuePtr dest,
+                                                        Register::ValuePtr lhs,
                                                         Register::ValuePtr shiftAmount,
-                                                        std::shared_ptr<Register::Value> rhs)
+                                                        Register::ValuePtr rhs)
     {
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);

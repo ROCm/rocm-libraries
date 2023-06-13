@@ -9,7 +9,7 @@ namespace rocRoller
         RegisterComponent(PriorityScheduler);
         static_assert(Component::Component<PriorityScheduler>);
 
-        inline PriorityScheduler::PriorityScheduler(std::shared_ptr<Context> ctx, CostFunction cmp)
+        inline PriorityScheduler::PriorityScheduler(ContextPtr ctx, CostFunction cmp)
             : Scheduler{ctx}
         {
             m_cost = Component::Get<Scheduling::Cost>(cmp, m_ctx);

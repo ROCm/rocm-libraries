@@ -185,10 +185,7 @@ namespace rocRoller
 
         inline Value::~Value() = default;
 
-        inline Value::Value(std::shared_ptr<Context> ctx,
-                            Type                     regType,
-                            VariableType             variableType,
-                            int                      count)
+        inline Value::Value(ContextPtr ctx, Type regType, VariableType variableType, int count)
             : m_context(ctx)
             , m_regType(regType)
             , m_varType(variableType)
@@ -202,10 +199,7 @@ namespace rocRoller
         }
 
         template <std::ranges::input_range T>
-        inline Value::Value(std::shared_ptr<Context> ctx,
-                            Type                     regType,
-                            VariableType             variableType,
-                            T const&                 coord)
+        inline Value::Value(ContextPtr ctx, Type regType, VariableType variableType, T const& coord)
             : m_context(ctx)
             , m_regType(regType)
             , m_varType(variableType)
@@ -214,10 +208,10 @@ namespace rocRoller
             AssertFatal(ctx != nullptr);
         }
 
-        inline Value::Value(std::shared_ptr<Context> ctx,
-                            Type                     regType,
-                            VariableType             variableType,
-                            std::vector<int>&&       coord)
+        inline Value::Value(ContextPtr         ctx,
+                            Type               regType,
+                            VariableType       variableType,
+                            std::vector<int>&& coord)
             : m_context(ctx)
             , m_regType(regType)
             , m_varType(variableType)
@@ -226,10 +220,7 @@ namespace rocRoller
             AssertFatal(ctx != nullptr);
         }
 
-        inline Value::Value(std::shared_ptr<Allocation> alloc,
-                            Type                        regType,
-                            VariableType                variableType,
-                            int                         count)
+        inline Value::Value(AllocationPtr alloc, Type regType, VariableType variableType, int count)
             : m_context(alloc->m_context)
             , m_allocation(alloc)
             , m_regType(regType)
@@ -244,10 +235,7 @@ namespace rocRoller
         }
 
         template <std::ranges::input_range T>
-        inline Value::Value(std::shared_ptr<Allocation> alloc,
-                            Type                        regType,
-                            VariableType                variableType,
-                            T&                          coord)
+        inline Value::Value(AllocationPtr alloc, Type regType, VariableType variableType, T& coord)
             : m_context(alloc->m_context)
             , m_allocation(alloc)
             , m_regType(regType)
@@ -257,10 +245,10 @@ namespace rocRoller
             AssertFatal(m_context.lock() != nullptr);
         }
 
-        inline Value::Value(std::shared_ptr<Allocation> alloc,
-                            Type                        regType,
-                            VariableType                variableType,
-                            std::vector<int>&&          coord)
+        inline Value::Value(AllocationPtr      alloc,
+                            Type               regType,
+                            VariableType       variableType,
+                            std::vector<int>&& coord)
             : m_context(alloc->m_context)
             , m_allocation(alloc)
             , m_regType(regType)
@@ -271,12 +259,12 @@ namespace rocRoller
         }
 
         template <CCommandArgumentValue T>
-        inline std::shared_ptr<Value> Value::Literal(T const& value)
+        inline ValuePtr Value::Literal(T const& value)
         {
             return Literal(CommandArgumentValue(value));
         }
 
-        inline std::shared_ptr<Value> Value::Literal(CommandArgumentValue const& value)
+        inline ValuePtr Value::Literal(CommandArgumentValue const& value)
         {
             auto v = std::make_shared<Value>();
 
@@ -312,7 +300,7 @@ namespace rocRoller
             return v;
         }
 
-        inline std::shared_ptr<Value> Value::Label(const std::string& label)
+        inline ValuePtr Value::Label(const std::string& label)
         {
             auto v       = std::make_shared<Value>();
             v->m_regType = Type::Label;
@@ -321,10 +309,10 @@ namespace rocRoller
             return v;
         }
 
-        inline std::shared_ptr<Value> Value::AllocateLDS(ContextPtr   ctx,
-                                                         VariableType variableType,
-                                                         int          count,
-                                                         unsigned int alignment)
+        inline ValuePtr Value::AllocateLDS(ContextPtr   ctx,
+                                           VariableType variableType,
+                                           int          count,
+                                           unsigned int alignment)
         {
             auto v               = std::make_shared<Value>();
             v->m_regType         = Type::LocalData;
@@ -336,10 +324,8 @@ namespace rocRoller
             return v;
         }
 
-        inline std::shared_ptr<Value> Value::Placeholder(std::shared_ptr<Context> ctx,
-                                                         Type                     regType,
-                                                         VariableType             variableType,
-                                                         int                      count)
+        inline ValuePtr
+            Value::Placeholder(ContextPtr ctx, Type regType, VariableType variableType, int count)
         {
             AssertFatal(ctx != nullptr);
             return std::make_shared<Value>(ctx, regType, variableType, count);
@@ -356,7 +342,7 @@ namespace rocRoller
             return m_allocation->allocationState();
         }
 
-        inline std::shared_ptr<Allocation> Value::allocation() const
+        inline AllocationPtr Value::allocation() const
         {
             return m_allocation;
         }
@@ -440,12 +426,12 @@ namespace rocRoller
             return m_regType == Type::Special && m_specialName == SpecialType::EXEC;
         }
 
-        inline std::shared_ptr<Value> Value::placeholder() const
+        inline ValuePtr Value::placeholder() const
         {
             return Placeholder(m_context.lock(), m_regType, m_varType, valueCount());
         }
 
-        inline std::shared_ptr<Value> Value::placeholder(Type regType) const
+        inline ValuePtr Value::placeholder(Type regType) const
         {
             return Placeholder(m_context.lock(), regType, m_varType, valueCount());
         }
@@ -661,7 +647,7 @@ namespace rocRoller
             return m_ldsAllocation;
         }
 
-        inline std::shared_ptr<Context> Value::context() const
+        inline ContextPtr Value::context() const
         {
             return m_context.lock();
         }
@@ -694,7 +680,7 @@ namespace rocRoller
             m_name = std::move(name);
         }
 
-        inline std::shared_ptr<Value> Value::negate() const
+        inline ValuePtr Value::negate() const
         {
             AssertFatal(IsRegister(m_regType) && hasContiguousIndices());
             auto r = std::make_shared<Value>(
@@ -704,7 +690,7 @@ namespace rocRoller
         }
 
         template <std::ranges::forward_range T>
-        inline std::shared_ptr<Value> Value::subset(T const& indices) const
+        inline ValuePtr Value::subset(T const& indices) const
         {
             AssertFatal(allocationState() == AllocationState::Allocated,
                         ShowValue(allocationState()));
@@ -722,13 +708,13 @@ namespace rocRoller
         }
 
         template <std::integral T>
-        inline std::shared_ptr<Value> Value::subset(std::initializer_list<T> indices) const
+        inline ValuePtr Value::subset(std::initializer_list<T> indices) const
         {
             return subset<std::initializer_list<T>>(indices);
         }
 
         template <std::ranges::forward_range T>
-        inline std::shared_ptr<Value> Value::element(T const& indices) const
+        inline ValuePtr Value::element(T const& indices) const
         {
             AssertFatal(!m_allocationCoord.empty(), ShowValue(m_allocationCoord.size()));
             auto const   info = DataTypeInfo::Get(m_varType);
@@ -744,24 +730,21 @@ namespace rocRoller
 
         template <typename T>
         std::enable_if_t<std::is_integral_v<T> && !std::is_same_v<T, bool>,
-                         std::shared_ptr<Value>> inline Value::element(std::initializer_list<T>
-                                                                           indices) const
+                         ValuePtr> inline Value::element(std::initializer_list<T> indices) const
         {
             return element<std::initializer_list<T>>(indices);
         }
 
         //> TODO: Get default options from data type + target info
-        inline Allocation::Allocation(std::shared_ptr<Context> context,
-                                      Type                     regType,
-                                      VariableType             variableType)
+        inline Allocation::Allocation(ContextPtr context, Type regType, VariableType variableType)
             : Allocation(context, regType, variableType, 1)
         {
         }
 
-        inline Allocation::Allocation(std::shared_ptr<Context> context,
-                                      Type                     regType,
-                                      VariableType             variableType,
-                                      int                      count)
+        inline Allocation::Allocation(ContextPtr   context,
+                                      Type         regType,
+                                      VariableType variableType,
+                                      int          count)
             : m_context(context)
             , m_regType(regType)
             , m_variableType(variableType)
@@ -792,11 +775,11 @@ namespace rocRoller
             }
         }
 
-        inline Allocation::Allocation(std::shared_ptr<Context> context,
-                                      Type                     regType,
-                                      VariableType             variableType,
-                                      int                      count,
-                                      Options const&           options)
+        inline Allocation::Allocation(ContextPtr     context,
+                                      Type           regType,
+                                      VariableType   variableType,
+                                      int            count,
+                                      Options const& options)
             : m_context(context)
             , m_regType(regType)
             , m_variableType(variableType)
@@ -807,11 +790,11 @@ namespace rocRoller
             setRegisterCount();
         }
 
-        inline Allocation::Allocation(std::shared_ptr<Context> context,
-                                      Type                     regType,
-                                      VariableType             variableType,
-                                      int                      count,
-                                      Options&&                options)
+        inline Allocation::Allocation(ContextPtr   context,
+                                      Type         regType,
+                                      VariableType variableType,
+                                      int          count,
+                                      Options&&    options)
             : m_context(context)
             , m_regType(regType)
             , m_variableType(variableType)
@@ -835,8 +818,7 @@ namespace rocRoller
             }
         }
 
-        inline std::shared_ptr<Allocation> Allocation::SameAs(Value const&       val,
-                                                              std::string const& name)
+        inline AllocationPtr Allocation::SameAs(Value const& val, std::string const& name)
         {
             auto rv = std::make_shared<Allocation>(
                 val.m_context.lock(), val.m_regType, val.m_varType, val.valueCount());
@@ -889,7 +871,7 @@ namespace rocRoller
             return m_allocationState;
         }
 
-        inline std::shared_ptr<Value> Allocation::operator*()
+        inline ValuePtr Allocation::operator*()
         {
             // auto *ptr = new Value(shared_from_this(),
             //                       m_regType, m_variableType,

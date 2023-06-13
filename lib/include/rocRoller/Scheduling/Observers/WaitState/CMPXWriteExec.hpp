@@ -18,7 +18,7 @@ namespace rocRoller
          */
             void observe(Instruction const& inst);
 
-            static bool required(std::shared_ptr<Context> context)
+            static bool required(ContextPtr context)
             {
                 auto arch = context->targetArchitecture().target().getVersionString();
                 return arch == "gfx90a" || arch == "gfx908";

@@ -11,7 +11,7 @@
 class ContextFixture : public ::testing::Test
 {
 protected:
-    std::shared_ptr<rocRoller::Context> m_context;
+    rocRoller::ContextPtr m_context;
 
     void SetUp() override;
     void TearDown() override;

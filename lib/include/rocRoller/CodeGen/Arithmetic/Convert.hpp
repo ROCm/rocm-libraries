@@ -38,7 +38,7 @@ namespace rocRoller
     class ConvertGenerator : public UnaryArithmeticGenerator<Expression::Convert<DATATYPE>>
     {
     public:
-        ConvertGenerator<DATATYPE>(std::shared_ptr<Context> c)
+        ConvertGenerator<DATATYPE>(ContextPtr c)
             : UnaryArithmeticGenerator<Expression::Convert<DATATYPE>>(c)
         {
         }

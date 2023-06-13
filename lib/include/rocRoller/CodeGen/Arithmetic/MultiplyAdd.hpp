@@ -39,7 +39,7 @@ namespace rocRoller
 
     struct MultiplyAddGenerator : public TernaryArithmeticGenerator<Expression::MultiplyAdd>
     {
-        MultiplyAddGenerator(std::shared_ptr<Context> c)
+        MultiplyAddGenerator(ContextPtr c)
             : TernaryArithmeticGenerator<Expression::MultiplyAdd>(c)
         {
         }
@@ -61,10 +61,10 @@ namespace rocRoller
         }
 
         // Method to generate instructions
-        Generator<Instruction> generate(std::shared_ptr<Register::Value> dest,
-                                        std::shared_ptr<Register::Value> a,
-                                        std::shared_ptr<Register::Value> x,
-                                        std::shared_ptr<Register::Value> y);
+        Generator<Instruction> generate(Register::ValuePtr dest,
+                                        Register::ValuePtr a,
+                                        Register::ValuePtr x,
+                                        Register::ValuePtr y);
 
         static const std::string Name;
     };

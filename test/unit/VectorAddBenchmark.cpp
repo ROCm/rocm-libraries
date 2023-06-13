@@ -37,7 +37,7 @@ namespace VectorAddBenchmark
         }
     };
 
-    void VectorAddGraph(std::shared_ptr<Context> context, size_t nx)
+    void VectorAddGraph(ContextPtr context, size_t nx)
     {
         RandomGenerator random(31415u);
 

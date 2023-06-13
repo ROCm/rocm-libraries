@@ -19,7 +19,7 @@ namespace rocRoller
         public:
             FileWritingObserver() {}
 
-            FileWritingObserver(std::shared_ptr<Context> context)
+            FileWritingObserver(ContextPtr context)
                 : m_context(context)
                 , m_assemblyFile()
             {
@@ -54,7 +54,7 @@ namespace rocRoller
                 m_assemblyFile.flush();
             }
 
-            static bool required(std::shared_ptr<Context>)
+            static bool required(ContextPtr)
             {
                 return Settings::getInstance()->get(Settings::SaveAssembly);
             }

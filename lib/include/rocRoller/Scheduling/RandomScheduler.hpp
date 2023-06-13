@@ -23,7 +23,7 @@ namespace rocRoller
         class RandomScheduler : public Scheduler
         {
         public:
-            RandomScheduler(std::shared_ptr<Context>);
+            RandomScheduler(ContextPtr);
 
             using Base = Scheduler;
 

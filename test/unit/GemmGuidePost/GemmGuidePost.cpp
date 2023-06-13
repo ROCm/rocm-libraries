@@ -58,38 +58,38 @@ namespace rocRollerTest
         }
     };
 
-    void doMinimalMM(std::shared_ptr<rocRoller::Context> m_context,
-                     KernelProgram                       Program,
-                     std::vector<float>&                 hostD,
-                     const std::vector<float>&           hostC,
-                     const std::vector<float>&           hostA,
-                     const std::vector<float>&           hostB,
-                     float                               alpha,
-                     float                               beta,
-                     unsigned int                        strideD0,
-                     unsigned int                        strideD1,
-                     unsigned int                        strideC0,
-                     unsigned int                        strideC1,
-                     unsigned int                        strideA0,
-                     unsigned int                        strideA1,
-                     unsigned int                        strideB0,
-                     unsigned int                        strideB1,
-                     unsigned int                        SizesFree0,
-                     unsigned int                        SizesFree1,
-                     unsigned int                        SizesFree2,
-                     unsigned int                        SizesSum0,
-                     int                                 OrigStaggerUIter,
-                     unsigned int                        NumWorkGroups0,
-                     unsigned int                        NumWorkGroups1,
-                     unsigned int                        NumFullBlocks,
-                     unsigned int                        WgmRemainder1,
-                     unsigned int                        MagicNumberWgmRemainder1,
-                     unsigned int                        OffsetD,
-                     unsigned int                        OffsetC,
-                     unsigned int                        OffsetA,
-                     unsigned int                        OffsetB,
-                     unsigned int                        padding,
-                     bool                                hasBeta = true)
+    void doMinimalMM(rocRoller::ContextPtr     m_context,
+                     KernelProgram             Program,
+                     std::vector<float>&       hostD,
+                     const std::vector<float>& hostC,
+                     const std::vector<float>& hostA,
+                     const std::vector<float>& hostB,
+                     float                     alpha,
+                     float                     beta,
+                     unsigned int              strideD0,
+                     unsigned int              strideD1,
+                     unsigned int              strideC0,
+                     unsigned int              strideC1,
+                     unsigned int              strideA0,
+                     unsigned int              strideA1,
+                     unsigned int              strideB0,
+                     unsigned int              strideB1,
+                     unsigned int              SizesFree0,
+                     unsigned int              SizesFree1,
+                     unsigned int              SizesFree2,
+                     unsigned int              SizesSum0,
+                     int                       OrigStaggerUIter,
+                     unsigned int              NumWorkGroups0,
+                     unsigned int              NumWorkGroups1,
+                     unsigned int              NumFullBlocks,
+                     unsigned int              WgmRemainder1,
+                     unsigned int              MagicNumberWgmRemainder1,
+                     unsigned int              OffsetD,
+                     unsigned int              OffsetC,
+                     unsigned int              OffsetA,
+                     unsigned int              OffsetB,
+                     unsigned int              padding,
+                     bool                      hasBeta = true)
     {
         auto command = std::make_shared<Command>();
 
@@ -99,15 +99,15 @@ namespace rocRollerTest
         VariableType ulongVal{DataType::UInt64, PointerType::Value};
         VariableType intVal{DataType::Int32, PointerType::Value};
 
-        auto                             sizeC_arg = command->allocateArgument(ulongVal);
-        auto                             sizeA_arg = command->allocateArgument(ulongVal);
-        auto                             sizeB_arg = command->allocateArgument(ulongVal);
-        auto                             D_arg     = command->allocateArgument(floatPtr);
-        auto                             C_arg     = command->allocateArgument(floatPtr);
-        auto                             A_arg     = command->allocateArgument(floatPtr);
-        auto                             B_arg     = command->allocateArgument(floatPtr);
-        auto                             alpha_arg = command->allocateArgument(floatVal);
-        std::shared_ptr<CommandArgument> beta_arg;
+        auto               sizeC_arg = command->allocateArgument(ulongVal);
+        auto               sizeA_arg = command->allocateArgument(ulongVal);
+        auto               sizeB_arg = command->allocateArgument(ulongVal);
+        auto               D_arg     = command->allocateArgument(floatPtr);
+        auto               C_arg     = command->allocateArgument(floatPtr);
+        auto               A_arg     = command->allocateArgument(floatPtr);
+        auto               B_arg     = command->allocateArgument(floatPtr);
+        auto               alpha_arg = command->allocateArgument(floatVal);
+        CommandArgumentPtr beta_arg;
         if(hasBeta)
             beta_arg = command->allocateArgument(floatVal);
         auto strideD0_arg                 = command->allocateArgument(uintVal);
@@ -536,38 +536,38 @@ namespace rocRollerTest
         EXPECT_LT(rnorm, 2.e-6);
     }
 
-    void doMM(std::shared_ptr<rocRoller::Context> m_context,
-              KernelProgram                       Program,
-              std::vector<float>&                 hostD,
-              const std::vector<float>&           hostC,
-              const std::vector<float>&           hostA,
-              const std::vector<float>&           hostB,
-              float                               alpha,
-              float                               beta,
-              unsigned int                        strideD0,
-              unsigned int                        strideD1,
-              unsigned int                        strideC0,
-              unsigned int                        strideC1,
-              unsigned int                        strideA0,
-              unsigned int                        strideA1,
-              unsigned int                        strideB0,
-              unsigned int                        strideB1,
-              unsigned int                        SizesFree0,
-              unsigned int                        SizesFree1,
-              unsigned int                        SizesFree2,
-              unsigned int                        SizesSum0,
-              int                                 OrigStaggerUIter,
-              unsigned int                        NumWorkGroups0,
-              unsigned int                        NumWorkGroups1,
-              unsigned int                        NumFullBlocks,
-              unsigned int                        WgmRemainder1,
-              unsigned int                        MagicNumberWgmRemainder1,
-              unsigned int                        OffsetD,
-              unsigned int                        OffsetC,
-              unsigned int                        OffsetA,
-              unsigned int                        OffsetB,
-              unsigned int                        padding,
-              bool                                hasBeta = true)
+    void doMM(rocRoller::ContextPtr     m_context,
+              KernelProgram             Program,
+              std::vector<float>&       hostD,
+              const std::vector<float>& hostC,
+              const std::vector<float>& hostA,
+              const std::vector<float>& hostB,
+              float                     alpha,
+              float                     beta,
+              unsigned int              strideD0,
+              unsigned int              strideD1,
+              unsigned int              strideC0,
+              unsigned int              strideC1,
+              unsigned int              strideA0,
+              unsigned int              strideA1,
+              unsigned int              strideB0,
+              unsigned int              strideB1,
+              unsigned int              SizesFree0,
+              unsigned int              SizesFree1,
+              unsigned int              SizesFree2,
+              unsigned int              SizesSum0,
+              int                       OrigStaggerUIter,
+              unsigned int              NumWorkGroups0,
+              unsigned int              NumWorkGroups1,
+              unsigned int              NumFullBlocks,
+              unsigned int              WgmRemainder1,
+              unsigned int              MagicNumberWgmRemainder1,
+              unsigned int              OffsetD,
+              unsigned int              OffsetC,
+              unsigned int              OffsetA,
+              unsigned int              OffsetB,
+              unsigned int              padding,
+              bool                      hasBeta = true)
     {
         auto command = std::make_shared<Command>();
 
@@ -577,15 +577,15 @@ namespace rocRollerTest
         VariableType ulongVal{DataType::UInt64, PointerType::Value};
         VariableType intVal{DataType::Int32, PointerType::Value};
 
-        auto                             sizeC_arg = command->allocateArgument(ulongVal);
-        auto                             sizeA_arg = command->allocateArgument(ulongVal);
-        auto                             sizeB_arg = command->allocateArgument(ulongVal);
-        auto                             D_arg     = command->allocateArgument(floatPtr);
-        auto                             C_arg     = command->allocateArgument(floatPtr);
-        auto                             A_arg     = command->allocateArgument(floatPtr);
-        auto                             B_arg     = command->allocateArgument(floatPtr);
-        auto                             alpha_arg = command->allocateArgument(floatVal);
-        std::shared_ptr<CommandArgument> beta_arg;
+        auto               sizeC_arg = command->allocateArgument(ulongVal);
+        auto               sizeA_arg = command->allocateArgument(ulongVal);
+        auto               sizeB_arg = command->allocateArgument(ulongVal);
+        auto               D_arg     = command->allocateArgument(floatPtr);
+        auto               C_arg     = command->allocateArgument(floatPtr);
+        auto               A_arg     = command->allocateArgument(floatPtr);
+        auto               B_arg     = command->allocateArgument(floatPtr);
+        auto               alpha_arg = command->allocateArgument(floatVal);
+        CommandArgumentPtr beta_arg;
         if(hasBeta)
             beta_arg = command->allocateArgument(floatVal);
         auto strideD0_arg                 = command->allocateArgument(uintVal);
@@ -1024,42 +1024,42 @@ namespace rocRollerTest
         EXPECT_LT(rnorm, 2.e-6);
     }
 
-    void doMinimalMM_HGEMM(std::shared_ptr<rocRoller::Context> m_context,
-                           KernelProgram                       Program,
-                           std::vector<__half>&                hostD,
-                           const std::vector<__half>&          hostC,
-                           const std::vector<__half>&          hostA,
-                           const std::vector<__half>&          hostB,
-                           float                               alpha,
-                           float                               beta,
-                           unsigned int                        strideD0,
-                           unsigned int                        strideD1,
-                           unsigned int                        strideC0,
-                           unsigned int                        strideC1,
-                           unsigned int                        strideA0,
-                           unsigned int                        strideA1,
-                           unsigned int                        strideB0,
-                           unsigned int                        strideB1,
-                           unsigned int                        SizesFree0,
-                           unsigned int                        SizesFree1,
-                           unsigned int                        SizesFree2,
-                           unsigned int                        SizesSum0,
-                           int                                 OrigStaggerUIter,
-                           unsigned int                        NumWorkGroups0,
-                           unsigned int                        NumWorkGroups1,
-                           unsigned int                        NumFullBlocks,
-                           unsigned int                        WgmRemainder1,
-                           unsigned int                        MagicNumberWgmRemainder1,
-                           unsigned int                        OffsetD,
-                           unsigned int                        OffsetC,
-                           unsigned int                        OffsetA,
-                           unsigned int                        OffsetB,
-                           unsigned int                        padding,
-                           unsigned int                        numVGPR,
-                           unsigned int                        numACCGPR,
-                           unsigned int                        numSGPR,
-                           unsigned int                        sizeLDS,
-                           bool                                hasBeta = true)
+    void doMinimalMM_HGEMM(rocRoller::ContextPtr      m_context,
+                           KernelProgram              Program,
+                           std::vector<__half>&       hostD,
+                           const std::vector<__half>& hostC,
+                           const std::vector<__half>& hostA,
+                           const std::vector<__half>& hostB,
+                           float                      alpha,
+                           float                      beta,
+                           unsigned int               strideD0,
+                           unsigned int               strideD1,
+                           unsigned int               strideC0,
+                           unsigned int               strideC1,
+                           unsigned int               strideA0,
+                           unsigned int               strideA1,
+                           unsigned int               strideB0,
+                           unsigned int               strideB1,
+                           unsigned int               SizesFree0,
+                           unsigned int               SizesFree1,
+                           unsigned int               SizesFree2,
+                           unsigned int               SizesSum0,
+                           int                        OrigStaggerUIter,
+                           unsigned int               NumWorkGroups0,
+                           unsigned int               NumWorkGroups1,
+                           unsigned int               NumFullBlocks,
+                           unsigned int               WgmRemainder1,
+                           unsigned int               MagicNumberWgmRemainder1,
+                           unsigned int               OffsetD,
+                           unsigned int               OffsetC,
+                           unsigned int               OffsetA,
+                           unsigned int               OffsetB,
+                           unsigned int               padding,
+                           unsigned int               numVGPR,
+                           unsigned int               numACCGPR,
+                           unsigned int               numSGPR,
+                           unsigned int               sizeLDS,
+                           bool                       hasBeta = true)
     {
         auto command = std::make_shared<Command>();
 
@@ -1069,15 +1069,15 @@ namespace rocRollerTest
         VariableType ulongVal{DataType::UInt64, PointerType::Value};
         VariableType intVal{DataType::Int32, PointerType::Value};
 
-        auto                             sizeC_arg = command->allocateArgument(ulongVal);
-        auto                             sizeA_arg = command->allocateArgument(ulongVal);
-        auto                             sizeB_arg = command->allocateArgument(ulongVal);
-        auto                             D_arg     = command->allocateArgument(floatPtr);
-        auto                             C_arg     = command->allocateArgument(floatPtr);
-        auto                             A_arg     = command->allocateArgument(floatPtr);
-        auto                             B_arg     = command->allocateArgument(floatPtr);
-        auto                             alpha_arg = command->allocateArgument(floatVal);
-        std::shared_ptr<CommandArgument> beta_arg;
+        auto               sizeC_arg = command->allocateArgument(ulongVal);
+        auto               sizeA_arg = command->allocateArgument(ulongVal);
+        auto               sizeB_arg = command->allocateArgument(ulongVal);
+        auto               D_arg     = command->allocateArgument(floatPtr);
+        auto               C_arg     = command->allocateArgument(floatPtr);
+        auto               A_arg     = command->allocateArgument(floatPtr);
+        auto               B_arg     = command->allocateArgument(floatPtr);
+        auto               alpha_arg = command->allocateArgument(floatVal);
+        CommandArgumentPtr beta_arg;
         if(hasBeta)
             beta_arg = command->allocateArgument(floatVal);
         auto strideD0_arg                 = command->allocateArgument(uintVal);
@@ -1456,42 +1456,42 @@ namespace rocRollerTest
         EXPECT_LT(rnormInf, 1.e-4);
     }
 
-    void doMM_HGEMM(std::shared_ptr<rocRoller::Context> m_context,
-                    KernelProgram                       Program,
-                    std::vector<__half>&                hostD,
-                    const std::vector<__half>&          hostC,
-                    const std::vector<__half>&          hostA,
-                    const std::vector<__half>&          hostB,
-                    float                               alpha,
-                    float                               beta,
-                    unsigned int                        strideD0,
-                    unsigned int                        strideD1,
-                    unsigned int                        strideC0,
-                    unsigned int                        strideC1,
-                    unsigned int                        strideA0,
-                    unsigned int                        strideA1,
-                    unsigned int                        strideB0,
-                    unsigned int                        strideB1,
-                    unsigned int                        SizesFree0,
-                    unsigned int                        SizesFree1,
-                    unsigned int                        SizesFree2,
-                    unsigned int                        SizesSum0,
-                    int                                 OrigStaggerUIter,
-                    unsigned int                        NumWorkGroups0,
-                    unsigned int                        NumWorkGroups1,
-                    unsigned int                        NumFullBlocks,
-                    unsigned int                        WgmRemainder1,
-                    unsigned int                        MagicNumberWgmRemainder1,
-                    unsigned int                        OffsetD,
-                    unsigned int                        OffsetC,
-                    unsigned int                        OffsetA,
-                    unsigned int                        OffsetB,
-                    unsigned int                        padding,
-                    unsigned int                        numVGPR,
-                    unsigned int                        numACCGPR,
-                    unsigned int                        numSGPR,
-                    unsigned int                        sizeLDS,
-                    bool                                hasBeta = true)
+    void doMM_HGEMM(rocRoller::ContextPtr      m_context,
+                    KernelProgram              Program,
+                    std::vector<__half>&       hostD,
+                    const std::vector<__half>& hostC,
+                    const std::vector<__half>& hostA,
+                    const std::vector<__half>& hostB,
+                    float                      alpha,
+                    float                      beta,
+                    unsigned int               strideD0,
+                    unsigned int               strideD1,
+                    unsigned int               strideC0,
+                    unsigned int               strideC1,
+                    unsigned int               strideA0,
+                    unsigned int               strideA1,
+                    unsigned int               strideB0,
+                    unsigned int               strideB1,
+                    unsigned int               SizesFree0,
+                    unsigned int               SizesFree1,
+                    unsigned int               SizesFree2,
+                    unsigned int               SizesSum0,
+                    int                        OrigStaggerUIter,
+                    unsigned int               NumWorkGroups0,
+                    unsigned int               NumWorkGroups1,
+                    unsigned int               NumFullBlocks,
+                    unsigned int               WgmRemainder1,
+                    unsigned int               MagicNumberWgmRemainder1,
+                    unsigned int               OffsetD,
+                    unsigned int               OffsetC,
+                    unsigned int               OffsetA,
+                    unsigned int               OffsetB,
+                    unsigned int               padding,
+                    unsigned int               numVGPR,
+                    unsigned int               numACCGPR,
+                    unsigned int               numSGPR,
+                    unsigned int               sizeLDS,
+                    bool                       hasBeta = true)
     {
         auto command = std::make_shared<Command>();
 
@@ -1501,15 +1501,15 @@ namespace rocRollerTest
         VariableType ulongVal{DataType::UInt64, PointerType::Value};
         VariableType intVal{DataType::Int32, PointerType::Value};
 
-        auto                             sizeC_arg = command->allocateArgument(ulongVal);
-        auto                             sizeA_arg = command->allocateArgument(ulongVal);
-        auto                             sizeB_arg = command->allocateArgument(ulongVal);
-        auto                             D_arg     = command->allocateArgument(floatPtr);
-        auto                             C_arg     = command->allocateArgument(floatPtr);
-        auto                             A_arg     = command->allocateArgument(floatPtr);
-        auto                             B_arg     = command->allocateArgument(floatPtr);
-        auto                             alpha_arg = command->allocateArgument(floatVal);
-        std::shared_ptr<CommandArgument> beta_arg;
+        auto               sizeC_arg = command->allocateArgument(ulongVal);
+        auto               sizeA_arg = command->allocateArgument(ulongVal);
+        auto               sizeB_arg = command->allocateArgument(ulongVal);
+        auto               D_arg     = command->allocateArgument(floatPtr);
+        auto               C_arg     = command->allocateArgument(floatPtr);
+        auto               A_arg     = command->allocateArgument(floatPtr);
+        auto               B_arg     = command->allocateArgument(floatPtr);
+        auto               alpha_arg = command->allocateArgument(floatVal);
+        CommandArgumentPtr beta_arg;
         if(hasBeta)
             beta_arg = command->allocateArgument(floatVal);
         auto strideD0_arg                 = command->allocateArgument(uintVal);

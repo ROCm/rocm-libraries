@@ -44,7 +44,7 @@ namespace rocRoller
             //> This instruction _will_ be scheduled now, record any side effects.
             virtual void observe(Instruction const& inst) override;
 
-            static bool required(std::shared_ptr<Context> ctx);
+            static bool required(ContextPtr ctx);
 
         private:
             Tup m_tuple;

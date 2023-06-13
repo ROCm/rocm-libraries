@@ -14,7 +14,7 @@ namespace rocRoller
     class EqualGenerator : public BinaryArithmeticGenerator<Expression::Equal>
     {
     public:
-        EqualGenerator<REGISTER_TYPE, DATATYPE>(std::shared_ptr<Context> c)
+        EqualGenerator<REGISTER_TYPE, DATATYPE>(ContextPtr c)
             : BinaryArithmeticGenerator<Expression::Equal>(c)
         {
         }
@@ -23,9 +23,9 @@ namespace rocRoller
         // generator.
         static bool Match(Argument const& arg)
         {
-            std::shared_ptr<Context> ctx;
-            Register::Type           registerType;
-            DataType                 dataType;
+            ContextPtr     ctx;
+            Register::Type registerType;
+            DataType       dataType;
 
             std::tie(ctx, registerType, dataType) = arg;
 

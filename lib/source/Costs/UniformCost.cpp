@@ -8,7 +8,7 @@ namespace rocRoller
         RegisterComponent(UniformCost);
         static_assert(Component::Component<UniformCost>);
 
-        inline UniformCost::UniformCost(std::shared_ptr<Context> ctx)
+        inline UniformCost::UniformCost(ContextPtr ctx)
             : Cost{ctx}
         {
         }

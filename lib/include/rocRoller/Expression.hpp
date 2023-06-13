@@ -457,7 +457,7 @@ namespace rocRoller
         static_assert(CBinary<Add>);
         static_assert(CArithmetic<Add>);
         static_assert(!CComparison<Add>);
-        static_assert(!CBinary<std::shared_ptr<Register::Value>>);
+        static_assert(!CBinary<Register::ValuePtr>);
         static_assert(CAssociativeBinary<Add>);
         static_assert(!CAssociativeBinary<Subtract>);
 

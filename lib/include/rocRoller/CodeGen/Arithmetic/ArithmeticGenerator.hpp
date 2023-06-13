@@ -12,13 +12,13 @@ namespace rocRoller
     class ArithmeticGenerator
     {
     public:
-        ArithmeticGenerator(std::shared_ptr<Context> context)
+        ArithmeticGenerator(ContextPtr context)
             : m_context(context)
         {
         }
 
     protected:
-        std::shared_ptr<Context> m_context;
+        ContextPtr m_context;
 
         /// Move a value into a single VGPR
         Generator<Instruction> moveToVGPR(Register::ValuePtr& val);
@@ -63,7 +63,7 @@ namespace rocRoller
     class UnaryArithmeticGenerator : public ArithmeticGenerator
     {
     public:
-        UnaryArithmeticGenerator(std::shared_ptr<Context> context)
+        UnaryArithmeticGenerator(ContextPtr context)
             : ArithmeticGenerator(context)
         {
         }
@@ -80,7 +80,7 @@ namespace rocRoller
             return false;
         }
 
-        using Argument = std::tuple<std::shared_ptr<Context>, Register::Type, DataType>;
+        using Argument = std::tuple<ContextPtr, Register::Type, DataType>;
         using Base     = UnaryArithmeticGenerator<Operation>;
         static const std::string Basename;
 
@@ -100,7 +100,7 @@ namespace rocRoller
     class BinaryArithmeticGenerator : public ArithmeticGenerator
     {
     public:
-        BinaryArithmeticGenerator(std::shared_ptr<Context> context)
+        BinaryArithmeticGenerator(ContextPtr context)
             : ArithmeticGenerator(context)
         {
         }
@@ -108,7 +108,7 @@ namespace rocRoller
         virtual Generator<Instruction>
             generate(Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs) = 0;
 
-        using Argument = std::tuple<std::shared_ptr<Context>, Register::Type, DataType>;
+        using Argument = std::tuple<ContextPtr, Register::Type, DataType>;
         using Base     = BinaryArithmeticGenerator<Operation>;
         static const std::string Basename;
 
@@ -128,7 +128,7 @@ namespace rocRoller
     class TernaryArithmeticGenerator : public ArithmeticGenerator
     {
     public:
-        TernaryArithmeticGenerator(std::shared_ptr<Context> context)
+        TernaryArithmeticGenerator(ContextPtr context)
             : ArithmeticGenerator(context)
         {
         }
@@ -139,7 +139,7 @@ namespace rocRoller
                                                 Register::ValuePtr arg3)
             = 0;
 
-        using Argument = std::tuple<std::shared_ptr<Context>, Register::Type, DataType>;
+        using Argument = std::tuple<ContextPtr, Register::Type, DataType>;
         using Base     = TernaryArithmeticGenerator<Operation>;
         static const std::string Basename;
 
@@ -159,7 +159,7 @@ namespace rocRoller
     class TernaryMixedArithmeticGenerator : public ArithmeticGenerator
     {
     public:
-        TernaryMixedArithmeticGenerator(std::shared_ptr<Context> context)
+        TernaryMixedArithmeticGenerator(ContextPtr context)
             : ArithmeticGenerator(context)
         {
         }
@@ -170,7 +170,7 @@ namespace rocRoller
                                                 Register::ValuePtr arg3)
             = 0;
 
-        using Argument = std::tuple<std::shared_ptr<Context>, Register::Type, DataType>;
+        using Argument = std::tuple<ContextPtr, Register::Type, DataType>;
         using Base     = TernaryMixedArithmeticGenerator<Operation>;
         static const std::string Basename;
 
@@ -263,14 +263,14 @@ namespace rocRoller
     DataType getArithDataType(Register::ValuePtr reg);
 
     // Return the context from a list of register values.
-    inline std::shared_ptr<Context> getContextFromValues(Register::ValuePtr r)
+    inline ContextPtr getContextFromValues(Register::ValuePtr r)
     {
         AssertFatal(r != nullptr, "No context");
         return r->context();
     }
 
     template <typename... Args>
-    inline std::shared_ptr<Context> getContextFromValues(Register::ValuePtr arg, Args... args)
+    inline ContextPtr getContextFromValues(Register::ValuePtr arg, Args... args)
     {
         if(arg && arg->context())
         {

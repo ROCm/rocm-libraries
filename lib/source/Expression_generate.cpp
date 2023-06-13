@@ -550,7 +550,7 @@ namespace rocRoller
                 co_yield m_context->argLoader()->getValue(expr->name, dest);
             }
 
-            Generator<Instruction> operator()(std::shared_ptr<CommandArgument> const& expr)
+            Generator<Instruction> operator()(CommandArgumentPtr const& expr)
             {
                 Throw<FatalError>("CommandArgument present in expression.", ShowValue(expr));
             }

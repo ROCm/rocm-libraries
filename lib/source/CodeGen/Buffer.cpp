@@ -127,8 +127,7 @@ namespace rocRoller
      * Creates buffer descriptor object from existing SGPRs
      */
 
-    BufferDescriptor::BufferDescriptor(std::shared_ptr<Register::Value> srd,
-                                       std::shared_ptr<Context>         context)
+    BufferDescriptor::BufferDescriptor(Register::ValuePtr srd, ContextPtr context)
     {
         m_bufferResourceDescriptor = srd;
         m_context                  = context;
@@ -138,7 +137,7 @@ namespace rocRoller
      * Creates buffer descriptor object from context, no existing SGPRs
      * Requires the use of the BufferDescriptor::setup()
      */
-    BufferDescriptor::BufferDescriptor(std::shared_ptr<Context> context)
+    BufferDescriptor::BufferDescriptor(ContextPtr context)
     {
         VariableType bufferPointer{DataType::None, PointerType::Buffer};
         m_bufferResourceDescriptor
@@ -163,45 +162,44 @@ namespace rocRoller
                                            ""); //default options
     }
 
-    Generator<Instruction>
-        BufferDescriptor::incrementBasePointer(std::shared_ptr<Register::Value> value)
+    Generator<Instruction> BufferDescriptor::incrementBasePointer(Register::ValuePtr value)
     {
         co_yield generateOp<Expression::Add>(m_bufferResourceDescriptor->subset({0, 1}),
                                              m_bufferResourceDescriptor->subset({0, 1}),
                                              value);
     }
 
-    Generator<Instruction> BufferDescriptor::setBasePointer(std::shared_ptr<Register::Value> value)
+    Generator<Instruction> BufferDescriptor::setBasePointer(Register::ValuePtr value)
     {
         co_yield m_context->copier()->copy(m_bufferResourceDescriptor->subset({0, 1}), value, "");
     }
 
-    Generator<Instruction> BufferDescriptor::setSize(std::shared_ptr<Register::Value> value)
+    Generator<Instruction> BufferDescriptor::setSize(Register::ValuePtr value)
     {
         co_yield m_context->copier()->copy(m_bufferResourceDescriptor->subset({2}), value, "");
     }
 
-    Generator<Instruction> BufferDescriptor::setOptions(std::shared_ptr<Register::Value> value)
+    Generator<Instruction> BufferDescriptor::setOptions(Register::ValuePtr value)
     {
         co_yield m_context->copier()->copy(m_bufferResourceDescriptor->subset({3}), value, "");
     }
 
-    std::shared_ptr<Register::Value> BufferDescriptor::allRegisters() const
+    Register::ValuePtr BufferDescriptor::allRegisters() const
     {
         return m_bufferResourceDescriptor;
     }
 
-    std::shared_ptr<Register::Value> BufferDescriptor::basePointerAndStride() const
+    Register::ValuePtr BufferDescriptor::basePointerAndStride() const
     {
         return m_bufferResourceDescriptor->subset({0, 1});
     }
 
-    std::shared_ptr<Register::Value> BufferDescriptor::size() const
+    Register::ValuePtr BufferDescriptor::size() const
     {
         return m_bufferResourceDescriptor->subset({2});
     }
 
-    std::shared_ptr<Register::Value> BufferDescriptor::descriptorOptions() const
+    Register::ValuePtr BufferDescriptor::descriptorOptions() const
     {
         return m_bufferResourceDescriptor->subset({3});
     }

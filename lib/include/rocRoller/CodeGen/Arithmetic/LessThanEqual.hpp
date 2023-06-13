@@ -16,7 +16,7 @@ namespace rocRoller
     class LessThanEqualGenerator : public BinaryArithmeticGenerator<Expression::LessThanEqual>
     {
     public:
-        LessThanEqualGenerator<REGISTER_TYPE, DATATYPE>(std::shared_ptr<Context> c)
+        LessThanEqualGenerator<REGISTER_TYPE, DATATYPE>(ContextPtr c)
             : BinaryArithmeticGenerator<Expression::LessThanEqual>(c)
         {
         }
@@ -25,9 +25,9 @@ namespace rocRoller
         // generator.
         static bool Match(Argument const& arg)
         {
-            std::shared_ptr<Context> ctx;
-            Register::Type           registerType;
-            DataType                 dataType;
+            ContextPtr     ctx;
+            Register::Type registerType;
+            DataType       dataType;
 
             std::tie(ctx, registerType, dataType) = arg;
 

@@ -19,7 +19,7 @@ namespace rocRoller
         class NoneCost : public Cost
         {
         public:
-            NoneCost(std::shared_ptr<Context>);
+            NoneCost(ContextPtr);
 
             using Base = Cost;
 

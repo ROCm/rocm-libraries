@@ -274,8 +274,7 @@ namespace rocRoller
         return stream << arg.toString();
     }
 
-    inline std::ostream& operator<<(std::ostream&                           stream,
-                                    std::shared_ptr<CommandArgument> const& arg)
+    inline std::ostream& operator<<(std::ostream& stream, CommandArgumentPtr const& arg)
     {
         if(arg)
             return stream << *arg;
@@ -283,8 +282,8 @@ namespace rocRoller
             return stream << "nullptr";
     }
 
-    inline std::ostream& operator<<(std::ostream&                                        stream,
-                                    std::vector<std::shared_ptr<CommandArgument>> const& arg)
+    inline std::ostream& operator<<(std::ostream&                          stream,
+                                    std::vector<CommandArgumentPtr> const& arg)
     {
         stream << "[\n";
         streamJoin(stream, arg, ", \n");

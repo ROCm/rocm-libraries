@@ -16,7 +16,7 @@ namespace rocRoller
         {
         public:
             MFMAObserver();
-            MFMAObserver(std::shared_ptr<Context> ctx);
+            MFMAObserver(ContextPtr ctx);
 
             InstructionStatus peek(Instruction const& inst) const;
 
@@ -24,7 +24,7 @@ namespace rocRoller
 
             void observe(Instruction const& inst);
 
-            static bool required(std::shared_ptr<Context>)
+            static bool required(ContextPtr)
             {
                 return true;
             }

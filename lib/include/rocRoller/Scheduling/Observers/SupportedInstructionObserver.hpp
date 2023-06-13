@@ -20,14 +20,14 @@ namespace rocRoller
         {
         public:
             SupportedInstructionObserver() {}
-            SupportedInstructionObserver(std::shared_ptr<Context> context)
+            SupportedInstructionObserver(ContextPtr context)
                 : m_context(context){};
 
             InstructionStatus peek(Instruction const& inst) const;
             void              modify(Instruction& inst) const;
             void              observe(Instruction const& inst);
 
-            static bool required(std::shared_ptr<Context> context)
+            static bool required(ContextPtr context)
             {
                 return !Settings::getInstance()->get(Settings::AllowUnkownInstructions);
             }
