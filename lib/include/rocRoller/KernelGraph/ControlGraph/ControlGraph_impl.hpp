@@ -4,6 +4,147 @@
 
 namespace rocRoller::KernelGraph::ControlGraph
 {
+    inline std::string toString(NodeOrdering n)
+    {
+        switch(n)
+        {
+        case NodeOrdering::LeftFirst:
+            return "LeftFirst";
+        case NodeOrdering::LeftInBodyOfRight:
+            return "LeftInBodyOfRight";
+        case NodeOrdering::Undefined:
+            return "Undefined";
+        case NodeOrdering::RightInBodyOfLeft:
+            return "RightInBodyOfLeft";
+        case NodeOrdering::RightFirst:
+            return "RightFirst";
+
+        case NodeOrdering::Count:
+        default:
+            break;
+        }
+        Throw<FatalError>("Invalid NodeOrdering");
+    }
+
+    inline std::ostream& operator<<(std::ostream& stream, NodeOrdering n)
+    {
+        return stream << toString(n);
+    }
+
+    static_assert(CCountedEnum<NodeOrdering>);
+
+    inline std::string abbrev(NodeOrdering n)
+    {
+        switch(n)
+        {
+        case NodeOrdering::LeftFirst:
+            return " LF";
+        case NodeOrdering::LeftInBodyOfRight:
+            return "LIB";
+        case NodeOrdering::Undefined:
+            return "und";
+        case NodeOrdering::RightInBodyOfLeft:
+            return "RIB";
+        case NodeOrdering::RightFirst:
+            return " RF";
+
+        case NodeOrdering::Count:
+        default:
+            break;
+        }
+        Throw<FatalError>("Invalid NodeOrdering");
+    }
+
+    inline NodeOrdering opposite(NodeOrdering order)
+    {
+        switch(order)
+        {
+        case NodeOrdering::LeftFirst:
+            return NodeOrdering::RightFirst;
+        case NodeOrdering::LeftInBodyOfRight:
+            return NodeOrdering::RightInBodyOfLeft;
+        case NodeOrdering::Undefined:
+            return NodeOrdering::Undefined;
+        case NodeOrdering::RightInBodyOfLeft:
+            return NodeOrdering::LeftInBodyOfRight;
+        case NodeOrdering::RightFirst:
+            return NodeOrdering::LeftFirst;
+
+        case NodeOrdering::Count:
+        default:
+            break;
+        }
+        Throw<FatalError>("Invalid NodeOrdering");
+    }
+
+    inline void ControlGraph::checkOrderCache() const
+    {
+        if(m_orderCache.empty())
+            populateOrderCache();
+    }
+
+    inline NodeOrdering ControlGraph::lookupOrderCache(int nodeA, int nodeB) const
+    {
+        if(nodeA > nodeB)
+            return opposite(lookupOrderCache(nodeB, nodeA));
+
+        auto iter = m_orderCache.find({nodeA, nodeB});
+        if(iter == m_orderCache.end())
+            return NodeOrdering::Undefined;
+
+        return iter->second;
+    }
+
+    inline NodeOrdering ControlGraph::compareNodes(int nodeA, int nodeB) const
+    {
+        AssertFatal(nodeA != nodeB, ShowValue(nodeA));
+        AssertFatal(getElementType(nodeA) == Graph::ElementType::Node
+                        && getElementType(nodeB) == Graph::ElementType::Node,
+                    ShowValue(getElementType(nodeA)),
+                    ShowValue(getElementType(nodeB)));
+
+        populateOrderCache();
+        return lookupOrderCache(nodeA, nodeB);
+    }
+
+    inline Generator<int> ControlGraph::nodesAfter(int node) const
+    {
+        populateOrderCache();
+
+        for(auto const& pair : m_orderCache)
+        {
+            if(pair.first.first == node && pair.second == NodeOrdering::LeftFirst)
+                co_yield pair.first.second;
+            else if(pair.first.second == node && pair.second == NodeOrdering::RightFirst)
+                co_yield pair.first.first;
+        }
+    }
+
+    inline Generator<int> ControlGraph::nodesBefore(int node) const
+    {
+        populateOrderCache();
+
+        for(auto const& pair : m_orderCache)
+        {
+            if(pair.first.first == node && pair.second == NodeOrdering::RightFirst)
+                co_yield pair.first.second;
+            else if(pair.first.second == node && pair.second == NodeOrdering::LeftFirst)
+                co_yield pair.first.first;
+        }
+    }
+
+    inline Generator<int> ControlGraph::nodesInBody(int node) const
+    {
+        populateOrderCache();
+
+        for(auto const& pair : m_orderCache)
+        {
+            if(pair.first.first == node && pair.second == NodeOrdering::RightInBodyOfLeft)
+                co_yield pair.first.second;
+            else if(pair.first.second == node && pair.second == NodeOrdering::LeftInBodyOfRight)
+                co_yield pair.first.first;
+        }
+    }
 
     template <typename T>
     requires(std::constructible_from<ControlGraph::Element,

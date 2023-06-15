@@ -18,6 +18,22 @@ namespace rocRoller
 {
     namespace Graph
     {
+        inline std::string toString(ElementType e)
+        {
+            switch(e)
+            {
+            case ElementType::Node:
+                return "Node";
+            case ElementType::Edge:
+                return "Edge";
+
+            case ElementType::Count:
+            default:
+                break;
+            }
+            throw std::runtime_error("Invalid ElementType");
+        }
+
         inline Direction opposite(Direction d)
         {
             return d == Direction::Downstream ? Direction::Upstream : Direction::Downstream;
@@ -190,6 +206,8 @@ namespace rocRoller
             auto elem        = getElement(index);
             auto elementType = getElementType(elem);
 
+            clearCache();
+
             auto& src = m_incidence.template get<BySrc>();
 
             for(auto iter = src.lower_bound(std::make_tuple(index, 0));
@@ -220,6 +238,8 @@ namespace rocRoller
                                                           T_Predicate      edgePredicate)
         {
             AssertFatal(!inputs.empty() && !outputs.empty());
+
+            clearCache();
 
             for(int cIdx : inputs)
             {

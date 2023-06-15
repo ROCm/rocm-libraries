@@ -101,14 +101,14 @@ namespace rocRoller
             toString(x)
         } -> std::convertible_to<std::string>;
     };
+    // clang-format on
 
     template <CHasToString T>
-    requires(!std::is_arithmetic_v<T>)
-    inline std::ostream& operator<<(std::ostream& stream, T const& x)
+    requires(!std::is_arithmetic_v<T>) inline std::ostream& operator<<(std::ostream& stream,
+                                                                       T const&      x)
     {
         return stream << toString(x);
     }
-    // clang-format on
 
     template <typename Container, typename Joiner>
     void streamJoin(std::ostream& stream, Container const& c, Joiner const& j)
@@ -409,6 +409,13 @@ namespace std
 
     template <typename T, size_t N>
     inline std::ostream& operator<<(std::ostream& stream, std::array<T, N> const& array)
+    {
+        rocRoller::streamJoin(stream, array, ", ");
+        return stream;
+    }
+
+    template <typename T>
+    inline std::ostream& operator<<(std::ostream& stream, std::set<T> const& array)
     {
         rocRoller::streamJoin(stream, array, ", ");
         return stream;

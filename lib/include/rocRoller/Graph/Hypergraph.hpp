@@ -30,6 +30,8 @@ namespace rocRoller
             Count
         };
 
+        std::string toString(ElementType e);
+
         /**
          * @brief Returns the complementary type to `t`.
          */
@@ -89,7 +91,7 @@ namespace rocRoller
              */
             ElementType getElementType(Element const& e) const;
 
-            void clearCache();
+            virtual void clearCache();
 
             template <typename T>
             int addElement(T&& element);
@@ -302,6 +304,8 @@ namespace rocRoller
              */
             template <std::predicate<Edge const&> Predicate>
             Generator<int> getInputNodeIndices(int const dst, Predicate edgePredicate) const;
+
+            Generator<std::tuple<int, Edge>> getInputNodesAndEdges(int dst);
 
             /**
              * @brief Yields indices of nodes that immediately follow `src` where the Edges are of type T.

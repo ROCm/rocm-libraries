@@ -292,6 +292,8 @@ set(rocroller_src
  lib/source/KernelGraph/ScopeManager.cpp
  lib/source/KernelGraph/Utils.cpp
 
+ lib/source/KernelGraph/ControlGraph/ControlGraph.cpp
+
  lib/source/KernelGraph/CoordinateGraph/Dimension.cpp
  lib/source/KernelGraph/CoordinateGraph/Transformer.cpp
 
