@@ -7,6 +7,7 @@ namespace rocRoller
 {
     namespace KernelGraph
     {
+
         /**
          * @brief Rewrite KernelGraph to distribute linear packets
          * onto GPU.

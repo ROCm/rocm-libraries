@@ -16,6 +16,34 @@ namespace rocRoller
         using namespace CoordinateGraph;
         using namespace Expression;
 
+        ConstraintStatus NoConstructDestructMT(const KernelGraph& k)
+        {
+            ConstraintStatus retval;
+            for(auto element : k.coordinates.getEdges<CoordinateTransformEdge>())
+            {
+                auto dmt = k.coordinates.get<DestructMacroTile>(element);
+                if(dmt)
+                {
+                    retval.combine(
+                        false,
+                        concatenate(
+                            "DestructMacroTile Coordinate Edge Still Exists: ", element, "."));
+                }
+                else
+                {
+                    auto cmt = k.coordinates.get<ConstructMacroTile>(element);
+                    if(cmt)
+                    {
+                        retval.combine(
+                            false,
+                            concatenate(
+                                "ConstructMacroTile Coordinate Edge Still Exists: ", element, "."));
+                    }
+                }
+            }
+            return retval;
+        }
+
         /*
          * Lower tile ops
          */

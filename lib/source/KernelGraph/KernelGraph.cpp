@@ -50,18 +50,31 @@ namespace rocRoller
 
         KernelGraph KernelGraph::transform(std::shared_ptr<GraphTransform> const& transformation)
         {
+            auto transformString  = concatenate("KernelGraph::transform ", transformation->name());
+            auto checkConstraints = Settings::getInstance()->get(Settings::EnforceGraphConstraints);
+
+            if(checkConstraints)
+            {
+                auto check = (*this).checkConstraints(transformation->preConstraints());
+                AssertFatal(check.satisfied,
+                            concatenate(transformString, " PreCheck: \n", check.explanation));
+            }
+
             KernelGraph newGraph = transformation->apply(*this);
             auto        logger   = rocRoller::Log::getLogger();
-            auto transformString = concatenate("KernelGraph::transform ", transformation->name());
-            if(Settings::getInstance()->get(Settings::EnforceGraphConstraints))
-            {
-                auto check = newGraph.checkConstraints();
-                AssertFatal(check.satisfied,
-                            concatenate(transformString, ": \n", check.explanation));
-            }
+
             logger->debug("KernelGraph::transform: {}, post: {}",
                           transformation->name(),
                           newGraph.toDOT(false, transformString));
+
+            if(checkConstraints)
+            {
+                newGraph.addConstraints(transformation->postConstraints());
+                auto check = newGraph.checkConstraints();
+                AssertFatal(check.satisfied,
+                            concatenate(transformString, " PostCheck: \n", check.explanation));
+            }
+
             return newGraph;
         }
     }

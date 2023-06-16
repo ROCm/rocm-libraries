@@ -8,6 +8,12 @@ namespace rocRoller
     namespace KernelGraph
     {
         /**
+         * @brief After LowerTile is applied, there should be no ConstructMacroTile or
+         *        DestructMacroTile edges in the coordinate graph.
+         */
+        ConstraintStatus NoConstructDestructMT(const KernelGraph& k);
+
+        /**
          * @brief Rewrite KernelGraph to distribute tiled packets onto
          * GPU.
          *
@@ -31,6 +37,11 @@ namespace rocRoller
             std::string name() const override
             {
                 return "LowerTile";
+            }
+
+            std::vector<GraphConstraint> postConstraints() const
+            {
+                return {&NoConstructDestructMT};
             }
 
         private:
