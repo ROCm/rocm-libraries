@@ -14,6 +14,7 @@
 #include "KernelGraph/Transforms/AddLDS.hpp"
 #include "KernelGraph/Transforms/CleanArguments.hpp"
 #include "KernelGraph/Transforms/CleanLoops.hpp"
+#include "KernelGraph/Transforms/ConnectWorkgroups.hpp"
 #include "KernelGraph/Transforms/FuseExpressions.hpp"
 #include "KernelGraph/Transforms/FuseLoops.hpp"
 #include "KernelGraph/Transforms/GraphTransform.hpp"
@@ -65,6 +66,16 @@ namespace rocRoller
     std::optional<std::array<unsigned int, 3>> CommandParameters::getManualWorkgroupSize() const
     {
         return m_workgroupSize;
+    }
+
+    void CommandParameters::setManualWavefrontCount(std::pair<uint, uint> wavefrontCounts)
+    {
+        m_wavefrontCounts = wavefrontCounts;
+    }
+
+    std::optional<std::pair<uint, uint>> CommandParameters::getManualWavefrontCounts() const
+    {
+        return m_wavefrontCounts;
     }
 
     void
@@ -252,6 +263,7 @@ namespace rocRoller
         transforms.push_back(std::make_shared<KernelGraph::LowerTile>(m_preParameters, m_context));
         transforms.push_back(
             std::make_shared<KernelGraph::LowerTensorContraction>(m_preParameters, m_context));
+        transforms.push_back(std::make_shared<KernelGraph::ConnectWorkgroups>());
         transforms.push_back(std::make_shared<KernelGraph::FuseExpressions>());
         transforms.push_back(std::make_shared<KernelGraph::UnrollLoops>(m_context));
         if(m_context->kernelOptions().fuseLoops)

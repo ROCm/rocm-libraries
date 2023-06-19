@@ -3068,23 +3068,8 @@ namespace KernelGraphTest
         params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
         params->setManualWorkitemCount({NX, NY, NZ});
 
-        auto four = Expression::literal(4u);
-        auto two  = Expression::literal(2u);
-        auto one  = Expression::literal(1u);
-
-        auto WF  = Wavefront(-1, four, one);
-        auto WFX = Wavefront(0, two, one);
-        auto WFY = Wavefront(1, two, one);
-
         auto postParams = std::make_shared<CommandParameters>();
-
-        std::vector<int> wavefront_ids = {37, 87};
-        for(auto id : wavefront_ids)
-        {
-            postParams->setDimensionInfo(id, WF);
-            postParams->setDimensionInfo(id - 2, WFX);
-            postParams->setDimensionInfo(id - 1, WFY);
-        }
+        postParams->setManualWavefrontCount({static_cast<uint>(4), static_cast<uint>(2)});
 
         CommandKernel commandKernel(command, "BA", params, postParams);
         commandKernel.launchKernel(runtimeArgs.runtimeArguments());

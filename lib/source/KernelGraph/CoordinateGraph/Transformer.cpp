@@ -319,6 +319,7 @@ namespace rocRoller
 
         ExpressionPtr Transformer::getCoordinate(int tag) const
         {
+            AssertFatal(m_indexes.contains(tag), "Coordinate not set.", ShowValue(tag));
             return m_indexes.at(tag);
         }
 

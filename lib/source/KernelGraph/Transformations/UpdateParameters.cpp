@@ -1,4 +1,5 @@
 
+#include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
 #include <rocRoller/KernelGraph/Transforms/UpdateParameters.hpp>
 #include <rocRoller/KernelGraph/Visitors.hpp>
 
@@ -34,12 +35,35 @@ namespace rocRoller
             std::map<int, Dimension> m_newDimensions;
         };
 
-        KernelGraph UpdateParameters::apply(KernelGraph const& k)
+        KernelGraph UpdateParameters::apply(KernelGraph const& original)
         {
             TIMER(t, "KernelGraph::updateParameters");
             rocRoller::Log::getLogger()->debug("KernelGraph::updateParameters()");
             auto visitor = UpdateParametersVisitor(m_params);
-            return rewriteDimensions(k, visitor);
+
+            auto kgraph = rewriteDimensions(original, visitor);
+
+            auto counts = m_params->getManualWavefrontCounts();
+            if(counts)
+            {
+                auto wfx = std::get<0>(*counts);
+                auto wfy = std::get<1>(*counts);
+                auto WF  = Wavefront(-1, Expression::literal(wfx * wfy), nullptr);
+                auto WFX = Wavefront(0, Expression::literal(wfx), nullptr);
+                auto WFY = Wavefront(1, Expression::literal(wfy), nullptr);
+                for(auto tag : kgraph.coordinates.getNodes<Wavefront>())
+                {
+                    auto wavefront = *kgraph.coordinates.get<Wavefront>(tag);
+                    if(wavefront.dim == -1)
+                        kgraph.coordinates.setElement(tag, WF);
+                    if(wavefront.dim == 0)
+                        kgraph.coordinates.setElement(tag, WFX);
+                    if(wavefront.dim == 1)
+                        kgraph.coordinates.setElement(tag, WFY);
+                }
+            }
+
+            return kgraph;
         }
     }
 }

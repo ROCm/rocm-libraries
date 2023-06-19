@@ -152,6 +152,9 @@ namespace rocRoller::KernelGraph
     ComputeIndexChain
         computeIndexElementMatrixAB(KernelGraph& graph, int load, int sdim, ExpressionPtr step)
     {
+        rocRoller::Log::getLogger()->debug(
+            "KernelGraph::AddComputeIndex()::computeIndexElementMatrixAB({}, {})", load, sdim);
+
         AssertFatal(isOperation<LoadTiled>(graph.control.getElement(load)));
 
         auto user  = graph.mapper.get<User>(load);
@@ -222,6 +225,12 @@ namespace rocRoller::KernelGraph
     ComputeIndexChain
         computeIndexElementMatrix(KernelGraph& graph, int loadstore, int source, bool forward)
     {
+        rocRoller::Log::getLogger()->debug(
+            "KernelGraph::AddComputeIndex()::computeIndexElementMatrix({}, {}, {})",
+            loadstore,
+            source,
+            forward);
+
         auto elemX = graph.mapper.get<ElementNumber>(loadstore, 0);
         auto elemY = graph.mapper.get<ElementNumber>(loadstore, 1);
 
@@ -310,6 +319,9 @@ namespace rocRoller::KernelGraph
                                                   int                     sdim,
                                                   std::unordered_set<int> zeros)
     {
+        rocRoller::Log::getLogger()->debug(
+            "KernelGraph::AddComputeIndex()::computeIndexWaveMatrixABLDS({}, {})", load, sdim);
+
         AssertFatal(isOperation<LoadLDSTile>(graph.control.getElement(load)));
         auto lds  = graph.mapper.get<LDS>(load);
         auto wave = graph.mapper.get<WaveTileNumber>(load, sdim);
@@ -398,6 +410,9 @@ namespace rocRoller::KernelGraph
     ComputeIndexChain computeIndexWaveMatrixAB(
         KernelGraph& graph, int load, int sdim, ExpressionPtr step, std::unordered_set<int> zeros)
     {
+        rocRoller::Log::getLogger()->debug(
+            "KernelGraph::AddComputeIndex()::computeIndexWaveMatrixAB({}, {})", load, sdim);
+
         auto user = graph.mapper.get<User>(load);
         auto mac  = graph.mapper.get<MacroTileNumber>(load, sdim);
         auto wave = graph.mapper.get<WaveTileNumber>(load, sdim);
@@ -495,7 +510,7 @@ namespace rocRoller::KernelGraph
                                                     std::unordered_set<int> const& zeros)
     {
         rocRoller::Log::getLogger()->debug(
-            "KernelGraph::addComputeIndexMatrixAccumulator({}, {})", op, forward);
+            "KernelGraph::AddComputeIndex()::computeIndexMatrixAccumulator({}, {})", op, forward);
 
         auto [source, _d] = getOperationTarget(op, graph);
         AssertFatal(source > 0, "User or LDS dimension not found");
@@ -944,7 +959,7 @@ namespace rocRoller::KernelGraph
                 }
 
                 // Use first candidate to compute indexes
-                rocRoller::Log::getLogger()->debug("KernelGraph::addComputeIndex()::commit(): {}",
+                rocRoller::Log::getLogger()->debug("KernelGraph::AddComputeIndex()::commit({})",
                                                    candidates[0]);
                 auto chain = addComputeIndex(kgraph, candidates[0], spec.type, step, spec.zeros);
 
@@ -996,6 +1011,7 @@ namespace rocRoller::KernelGraph
     KernelGraph AddComputeIndex::apply(KernelGraph const& original)
     {
         AddComputeIndexer indexer;
+
         for(auto candidate :
             findComputeIndexCandidates(original, *original.control.roots().begin()))
             indexer.stage(original, candidate);

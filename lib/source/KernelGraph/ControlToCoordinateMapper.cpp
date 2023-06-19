@@ -145,6 +145,24 @@ namespace rocRoller::KernelGraph
                 return "Invalid";
             }
         }
+
+        std::string toString(LDSLoadStore ld)
+        {
+            switch(ld)
+            {
+            case LDSLoadStore::LOAD_FROM_GLOBAL:
+                return "LOAD_FROM_GLOBAL";
+            case LDSLoadStore::STORE_INTO_LDS:
+                return "STORE_INTO_LDS";
+            case LDSLoadStore::LOAD_FROM_LDS:
+                return "LOAD_FROM_LDS";
+            case LDSLoadStore::STORE_INTO_GLOBAL:
+                return "STORE_INTO_GLOBAL";
+            default:
+                return "Invalid";
+            }
+        }
+
     }
 
     struct CSToStringVisitor
@@ -172,6 +190,17 @@ namespace rocRoller::KernelGraph
         std::string operator()(Connections::TypeAndNaryArgument const& ci) const
         {
             return concatenate(ci.id.hash_code(), ": (", ci.argument, ")");
+        }
+
+        std::string operator()(Connections::LDSTypeAndSubDimension const& ci) const
+        {
+            return concatenate("LDS: ",
+                               ci.id.hash_code(),
+                               ": (",
+                               ci.subdimension,
+                               ", ",
+                               toString(ci.direction),
+                               ")");
         }
     };
 

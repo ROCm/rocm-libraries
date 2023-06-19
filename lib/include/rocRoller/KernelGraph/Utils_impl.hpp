@@ -30,6 +30,15 @@ namespace rocRoller::KernelGraph
         return {};
     }
 
+    bool empty(Generator<int> g)
+    {
+        auto it = g.begin();
+        if(it == g.end())
+            return true;
+
+        return false;
+    }
+
     template <typename T>
     std::unordered_set<int> filterCoordinates(std::vector<int>   candidates,
                                               KernelGraph const& kgraph)

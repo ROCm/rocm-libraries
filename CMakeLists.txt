@@ -303,6 +303,7 @@ set(rocroller_src
  lib/source/KernelGraph/Transformations/AddLDS.cpp
  lib/source/KernelGraph/Transformations/CleanGraph.cpp
  lib/source/KernelGraph/Transformations/CleanLoops.cpp
+ lib/source/KernelGraph/Transformations/ConnectWorkgroups.cpp
  lib/source/KernelGraph/Transformations/FuseExpressions.cpp
  lib/source/KernelGraph/Transformations/FuseLoops.cpp
  lib/source/KernelGraph/Transformations/InlineIncrements.cpp

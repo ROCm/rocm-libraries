@@ -682,7 +682,7 @@ namespace rocRoller
                                                                             LoadLDSTile const& load,
                                                                             Transformer coords)
         {
-            co_yield_(Instruction::Comment("GEN: loadMacroTileWAVELDSCI"));
+            co_yield_(Instruction::Comment("GEN: loadMacroTileWAVELDS"));
 
             auto [ldsTag, lds]           = m_graph->getDimension<LDS>(tag);
             auto [waveTileTag, waveTile] = m_graph->getDimension<WaveTile>(tag);
@@ -718,7 +718,7 @@ namespace rocRoller
         {
             rocRoller::Log::getLogger()->debug(
                 "KernelGraph::LoadStoreTileGenerator::loadMacroTileWAVE({})", tag);
-            co_yield Instruction::Comment("GEN: loadMacroTileWAVECI");
+            co_yield Instruction::Comment("GEN: loadMacroTileWAVE");
 
             auto [waveTileTag, waveTile] = m_graph->getDimension<WaveTile>(tag);
 

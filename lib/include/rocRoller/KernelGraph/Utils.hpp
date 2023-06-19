@@ -194,8 +194,6 @@ namespace rocRoller
                                  int                                mac_tile_tag,
                                  std::array<unsigned int, 3> const& workgroupSizes);
 
-        void addConnectionsMultiply(KernelGraph& graph, int waveMult, int loadA, int loadB);
-
         /**
          * @brief Get ForLoop dimension assciated with ForLoopOp.
          */
@@ -223,7 +221,8 @@ namespace rocRoller
         /**
          * @brief Return first entry of vector.
          *
-         * If vector does not contain a single result, return empty.
+         * If the vector does not contain a single result, returns
+         * empty.
          */
         template <typename T>
         inline std::optional<T> only(std::vector<T> v);
@@ -231,9 +230,25 @@ namespace rocRoller
         /**
          * @brief Return first result of generator.
          *
-         * If generator does not return a single result, return empty.
+         * If the generator does not return a single result, returns
+         * empty.
+         *
+         * The implementation consumes items from the generator; so
+         * will not work on persistent generators.  Currently the copy
+         * constructor of Generator is deleted, and therefore you can
+         * not call this on persistent generators.
          */
         inline std::optional<int> only(Generator<int> g);
+
+        /**
+         * @brief True if the generator is empty.
+         *
+         * The implementation consumes items from the generator; so
+         * will not work on persistent generators.  Currently the copy
+         * constructor of Generator is deleted, and therefore you can
+         * not call this on persistent generators.
+         */
+        inline bool empty(Generator<int> g);
 
         int duplicateControlNode(KernelGraph& graph, int tag);
 

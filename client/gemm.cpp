@@ -409,28 +409,9 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult, bool doVisualize)
         Settings::getInstance()->set(Settings::Scheduler, schedulerValue);
 
     auto postParams = std::make_shared<CommandParameters>();
-
-    auto one         = Expression::literal(1u);
-    auto wavefront_n = Expression::literal(
-        static_cast<uint>(result.macM * result.macN / wave_m / wave_n / wavetile_per_wavefront_m
-                          / wavetile_per_wavefront_n));
-    auto wavefront_nx
-        = Expression::literal(static_cast<uint>(result.macM / wave_m / wavetile_per_wavefront_m));
-    auto wavefront_ny
-        = Expression::literal(static_cast<uint>(result.macN / wave_n / wavetile_per_wavefront_n));
-
-    auto WF  = KernelGraph::CoordinateGraph::Wavefront(-1, wavefront_n, one);
-    auto WFX = KernelGraph::CoordinateGraph::Wavefront(0, wavefront_nx, one);
-    auto WFY = KernelGraph::CoordinateGraph::Wavefront(1, wavefront_ny, one);
-
-    std::vector<int> wavefront_ids = result.betaInFma ? std::vector<int>({58, 100, 133, 173})
-                                                      : std::vector<int>({58, 91, 124, 173});
-    for(auto id : wavefront_ids)
-    {
-        postParams->setDimensionInfo(id, WF);
-        postParams->setDimensionInfo(id - 2, WFX);
-        postParams->setDimensionInfo(id - 1, WFY);
-    }
+    postParams->setManualWavefrontCount(
+        {static_cast<uint>(result.macM / wave_m / wavetile_per_wavefront_m),
+         static_cast<uint>(result.macN / wave_n / wavetile_per_wavefront_n)});
 
     auto kernelOptions     = std::make_shared<KernelOptions>();
     kernelOptions->unrollX = result.unrollX;

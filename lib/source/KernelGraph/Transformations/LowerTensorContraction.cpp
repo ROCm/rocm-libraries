@@ -26,6 +26,44 @@ namespace rocRoller
             graph.mapper.connect<MacroTile>(load, newMacroTile);
         }
 
+        void addConnectionsMultiply(KernelGraph& graph, int waveMult, int loadATag, int loadBTag)
+        {
+            rocRoller::Log::getLogger()->debug(
+                "KernelGraph::Utils::addConnectionsMultiply(): Multiply({})", waveMult);
+
+            auto loadA = graph.control.getElement(loadATag);
+            auto loadB = graph.control.getElement(loadBTag);
+            AssertFatal(isOperation<LoadTiled>(loadA) && isOperation<LoadTiled>(loadB),
+                        "Both operands should be LoadTiled");
+
+            // LoadTiled A
+            auto userATag = graph.mapper.get<User>(loadATag);
+            AssertFatal(userATag > 0, "User dimension not found");
+            graph.mapper.connect<User>(waveMult, userATag, 0);
+
+            // LoadTiled B
+            auto userBTag = graph.mapper.get<User>(loadBTag);
+            AssertFatal(userBTag > 0, "User dimension not found");
+            graph.mapper.connect<User>(waveMult, userBTag, 1);
+
+            AssertFatal(userATag > 0 && userBTag > 0, "User dimensions not found");
+
+            auto [waveATag, waveA] = graph.getDimension<WaveTile>(loadATag);
+            auto [waveBTag, waveB] = graph.getDimension<WaveTile>(loadBTag);
+
+            auto macroTileA = graph.mapper.get<MacroTile>(loadATag);
+            auto macroTileB = graph.mapper.get<MacroTile>(loadBTag);
+
+            graph.mapper.connect(
+                waveMult, macroTileA, Connections::typeArgument<MacroTile>(NaryArgument::LHS));
+            graph.mapper.connect(
+                waveMult, macroTileB, Connections::typeArgument<MacroTile>(NaryArgument::RHS));
+            graph.mapper.connect(
+                waveMult, waveATag, Connections::typeArgument<WaveTile>(NaryArgument::LHS));
+            graph.mapper.connect(
+                waveMult, waveBTag, Connections::typeArgument<WaveTile>(NaryArgument::RHS));
+        }
+
         /**
          * Lower rank-2 TensorContraction into a matrix multiply.
          */
@@ -37,7 +75,7 @@ namespace rocRoller
                                  std::shared_ptr<CommandParameters> params,
                                  std::shared_ptr<Context>           context)
         {
-            rocRoller::Log::getLogger()->debug("KernelGraph::matrixMultiply() {}", d);
+            rocRoller::Log::getLogger()->debug("KernelGraph::lowerMatrixMultiply({})", tag);
 
             auto macrotile_a = graph.coordinates.getNode<MacroTile>(a);
             auto macrotile_b = graph.coordinates.getNode<MacroTile>(b);
