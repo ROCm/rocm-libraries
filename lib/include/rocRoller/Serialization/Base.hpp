@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2019-2022 Advanced Micro Devices, Inc.
+ * Copyright 2019-2023 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -58,6 +58,26 @@ namespace rocRoller
         };
 #endif
 
+        /**
+         * Override this struct for a type to use a custom string serialization.
+         *
+         * You must implement:
+         * 1. static std::string output(T)
+         * or static std::string output(T const&)
+         *
+         * to convert a T to a string, and
+         *
+         * 2.
+         * static void input(std::string const& string, T& )
+         *
+         * to convert a string to a T.
+         *
+         */
+        template <typename T>
+        struct ScalarTraits
+        {
+        };
+
         template <typename IO>
         struct IOTraits
         {
@@ -87,13 +107,14 @@ namespace rocRoller
         {
         };
 
-        template <typename Object, typename IO>
+        template <typename Object, typename IO, typename Context = EmptyContext>
         struct EmptyMappingTraits
         {
             using iot = IOTraits<IO>;
-            static_assert(Object::HasValue == false,
-                          "Object has a value.  Use the value base class.");
+            // static_assert(Object::HasValue == false,
+            //               "Object has a value.  Use the value base class.");
             static void mapping(IO& io, Object& obj) {}
+            static void mapping(IO& io, Object& obj, Context&) {}
 
             const static bool flow = true;
         };
@@ -224,8 +245,10 @@ namespace rocRoller
 
         /**
          * Used to non-polymorphically serialize an object via std::shared_ptr.
+         *
+         * Set Nullable to true to allow serializing `nullptr`.
          */
-        template <typename SharedPtr, typename IO, typename Context>
+        template <typename SharedPtr, typename IO, typename Context, bool Nullable = false>
         struct SharedPointerMappingTraits
         {
             using Element = typename SharedPtr::element_type;
@@ -233,19 +256,39 @@ namespace rocRoller
 
             static void mapping(IO& io, SharedPtr& p, Context& ctx)
             {
-                if(!iot::outputting(io))
+                bool isNull = false;
+
+                if(Nullable)
+                {
+                    if(iot::outputting(io))
+                    {
+                        isNull = (p == nullptr);
+                    }
+
+                    if(isNull || !iot::outputting(io))
+                    {
+                        iot::mapOptional(io, "is-null", isNull);
+                    }
+                }
+
+                if(!isNull && !iot::outputting(io))
                 {
                     p = std::make_shared<Element>();
                 }
 
-                MappingTraits<Element, IO, Context>::mapping(io, *p, ctx);
+                AssertFatal(Nullable || p != nullptr);
+
+                if(p != nullptr)
+                {
+                    MappingTraits<Element, IO, Context>::mapping(io, *p, ctx);
+                }
             }
 
-            static std::enable_if_t<std::same_as<Context, EmptyContext>> mapping(IO&        io,
-                                                                                 SharedPtr& p)
+            static void mapping(IO& io, SharedPtr& p)
             {
-                EmptyContext ctx;
+                AssertFatal((std::same_as<Context, EmptyContext>));
 
+                Context ctx;
                 mapping(io, p, ctx);
             }
         };
@@ -321,5 +364,5 @@ namespace rocRoller
             }
         };
 
-    } // namespace Serialization
-} // namespace Tensile
+    }
+}

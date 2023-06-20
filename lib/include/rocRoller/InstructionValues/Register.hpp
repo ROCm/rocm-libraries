@@ -291,7 +291,7 @@ namespace rocRoller
             std::weak_ptr<Context> m_context;
 
             std::string m_name;
-            SpecialType m_specialName;
+            SpecialType m_specialName = SpecialType::Count;
 
             std::string m_label;
 
@@ -300,7 +300,7 @@ namespace rocRoller
             AllocationPtr                  m_allocation;
             std::shared_ptr<LDSAllocation> m_ldsAllocation;
 
-            Type         m_regType;
+            Type         m_regType = Type::Count;
             VariableType m_varType;
             bool         m_negate = false;
 

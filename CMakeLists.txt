@@ -120,7 +120,6 @@ else()
               "--enable=portability"
               "--enable=style"
               "--error-exitcode=10"
-              "--inconclusive"
               "--force"
               "--inline-suppr"
               "-q"
@@ -287,12 +286,14 @@ set(rocroller_src
  lib/source/KernelGraph/ControlToCoordinateMapper.cpp
  lib/source/KernelGraph/GlobalConstraints.cpp
  lib/source/KernelGraph/KernelGraph.cpp
+ lib/source/KernelGraph/KernelGraph_serialization.cpp
  lib/source/KernelGraph/LastRWTracer.cpp
  lib/source/KernelGraph/LowerFromCommand.cpp
  lib/source/KernelGraph/ScopeManager.cpp
  lib/source/KernelGraph/Utils.cpp
 
  lib/source/KernelGraph/ControlGraph/ControlGraph.cpp
+ lib/source/KernelGraph/ControlGraph/Operation.cpp
 
  lib/source/KernelGraph/CoordinateGraph/Dimension.cpp
  lib/source/KernelGraph/CoordinateGraph/Transformer.cpp

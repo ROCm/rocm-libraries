@@ -39,19 +39,17 @@ namespace rocRoller
          * GPUWaitQueueType is actually a class that look like an enum, so it is not handled by the
          * generic enum serialization.
          */
-        template <typename IO>
-        struct EnumTraits<GPUWaitQueueType, IO>
+        template <>
+        struct ScalarTraits<GPUWaitQueueType>
         {
-            using iot = IOTraits<IO>;
-
-            static void enumeration(IO& io, GPUWaitQueueType& value)
+            static std::string output(const GPUWaitQueueType& value)
             {
-                for(int i = 0; i < static_cast<int>(GPUWaitQueueType::Count); i++)
-                {
-                    auto dir = static_cast<GPUWaitQueueType>(i);
-                    auto str = dir.toString();
-                    iot::enumCase(io, value, str.c_str(), dir);
-                }
+                return toString(value);
+            }
+
+            static void input(std::string const& scalar, GPUWaitQueueType& value)
+            {
+                value = GPUWaitQueueType(scalar);
             }
         };
 

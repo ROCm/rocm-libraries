@@ -30,12 +30,12 @@ namespace rocRoller
     std::ostream& operator<<(std::ostream& stream, const KernelArguments& t)
     {
         size_t prevOffset = 0;
-        for(auto const& name : t.m_names)
+        for(auto const& argName : t.m_names)
         {
-            auto const& iter = t.m_argRecords.find(name);
+            auto const& iter = t.m_argRecords.find(argName);
 
             if(iter == t.m_argRecords.end())
-                throw std::runtime_error("Argument " + name + " not found in record.");
+                throw std::runtime_error("Argument " + argName + " not found in record.");
 
             auto const& record = iter->second;
 
@@ -47,7 +47,7 @@ namespace rocRoller
                 stream << "[" << prevOffset << ".." << offset - 1 << "] <padding>" << std::endl;
             }
 
-            stream << "[" << offset << ".." << offset + size - 1 << "] " << name << ":";
+            stream << "[" << offset << ".." << offset + size - 1 << "] " << argName << ":";
 
             if(std::get<KernelArguments::ArgBound>(record))
             {
@@ -133,7 +133,7 @@ namespace rocRoller
     }
 
     KernelArguments::const_iterator::const_iterator(KernelArguments const& args,
-                                                    std::string const&     name)
+                                                    std::string const&     argName)
         : m_args(args)
         , m_currentArg(args.m_names.begin())
     {
@@ -142,13 +142,13 @@ namespace rocRoller
             throw std::runtime_error("KernelArguments::const_iterator requires m_log=true");
         }
 
-        if(name.empty())
+        if(argName.empty())
         {
             m_currentArg = m_args.m_names.end();
         }
         else
         {
-            while(m_currentArg != args.m_names.end() && *m_currentArg != name)
+            while(m_currentArg != args.m_names.end() && *m_currentArg != argName)
             {
                 ++m_currentArg;
             }
@@ -252,4 +252,4 @@ namespace rocRoller
         return msg.str();
     }
 
-} // namespace Tensile
+}

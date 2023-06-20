@@ -19,6 +19,8 @@
 #include "../Utilities/Generator.hpp"
 #include "../Utilities/Utils.hpp"
 
+#include "../Serialization/Base_fwd.hpp"
+
 namespace rocRoller
 {
     namespace Graph
@@ -48,18 +50,22 @@ namespace rocRoller
 
         namespace mi = boost::multi_index;
 
+        struct HypergraphIncident
+        {
+            int src;
+            int dst;
+            int edgeOrder;
+        };
+
         template <typename Node, typename Edge, bool Hyper = true>
         class Hypergraph
         {
         public:
             using Element = std::variant<Node, Edge>;
 
-            struct Incident
-            {
-                int src;
-                int dst;
-                int edgeOrder;
-            };
+            static std::string ElementName(Element const& el);
+
+            using Incident = HypergraphIncident;
 
             /**
              *
@@ -75,7 +81,6 @@ namespace rocRoller
                 constexpr inline bool operator==(Location const& rhs) const;
             };
 
-        public:
             bool exists(int index) const;
 
             /**
@@ -322,6 +327,9 @@ namespace rocRoller
             Generator<int> getOutputNodeIndices(int const src, Predicate edgePredicate) const;
 
         private:
+            template <typename T1, typename T2, typename T3>
+            friend struct rocRoller::Serialization::MappingTraits;
+
             int m_nextIndex = 1;
 
             mutable std::map<int, Location> m_locationCache;

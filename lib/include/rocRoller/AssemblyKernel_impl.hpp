@@ -279,10 +279,8 @@ namespace rocRoller
         m_kernelGraph = graph;
     }
 
-    inline std::optional<std::string> AssemblyKernel::kernel_graph() const
+    inline std::shared_ptr<KernelGraph::KernelGraph> AssemblyKernel::kernel_graph() const
     {
-        if(m_kernelGraph)
-            return (*m_kernelGraph).toDOT();
-        return {};
+        return m_kernelGraph;
     }
 }

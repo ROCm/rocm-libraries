@@ -8,7 +8,8 @@
 
 #include "Instruction.hpp"
 
-#include "../AssemblyKernel.hpp"
+#include "../AssemblyKernelArgument.hpp"
+#include "../AssemblyKernel_fwd.hpp"
 #include "../InstructionValues/Register_fwd.hpp"
 #include "../Utilities/Generator.hpp"
 

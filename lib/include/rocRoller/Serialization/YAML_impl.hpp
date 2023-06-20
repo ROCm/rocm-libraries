@@ -23,7 +23,8 @@ namespace rocRoller
 
 #ifdef ROCROLLER_USE_LLVM
             llvm::raw_string_ostream sout(rv);
-            llvm::yaml::Output       yout(sout);
+            // Don't hard-wrap until we get to 5000 lines.
+            llvm::yaml::Output yout(sout, nullptr, 5000);
             yout << obj;
 #elif ROCROLLER_USE_YAML_CPP
             YAML::Emitter                emitter;

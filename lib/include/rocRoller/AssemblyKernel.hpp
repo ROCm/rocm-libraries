@@ -8,29 +8,17 @@
 #include <unordered_map>
 
 #include "AssemblyKernel_fwd.hpp"
-#include "CodeGen/Instruction.hpp"
 #include "Expression_fwd.hpp"
+
+#include "AssemblyKernelArgument.hpp"
+
+#include "CodeGen/Instruction.hpp"
 #include "KernelGraph/KernelGraph.hpp"
 #include "Scheduling/Scheduling.hpp"
 #include "Utilities/Generator.hpp"
 
 namespace rocRoller
 {
-
-    struct AssemblyKernelArgument
-    {
-        std::string   name;
-        VariableType  variableType;
-        DataDirection dataDirection = DataDirection::ReadOnly;
-
-        Expression::ExpressionPtr expression = nullptr;
-
-        int offset = -1;
-        int size   = -1;
-
-        bool operator==(AssemblyKernelArgument const&) const = default;
-    };
-
     class AssemblyKernel
     {
     public:
@@ -118,7 +106,7 @@ namespace rocRoller
 
         int max_flat_workgroup_size() const;
 
-        std::optional<std::string> kernel_graph() const;
+        std::shared_ptr<KernelGraph::KernelGraph> kernel_graph() const;
 
         AssemblyKernelArgument const& findArgument(std::string const& name) const;
 

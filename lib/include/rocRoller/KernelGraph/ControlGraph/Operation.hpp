@@ -5,11 +5,13 @@
 #include <string>
 #include <vector>
 
+#include "Operation_fwd.hpp"
+
 #include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
+#include <rocRoller/KernelGraph/StructUtils.hpp>
 
 #include "Expression_fwd.hpp"
 #include "InstructionValues/Register_fwd.hpp"
-#include "Operation_fwd.hpp"
 #include "Utilities/Utils.hpp"
 
 namespace rocRoller
@@ -21,51 +23,26 @@ namespace rocRoller
          */
 
         /**
-         * BaseOperation - base class for representing commands.
-         */
-        struct BaseOperation
-        {
-            virtual std::string toString() const = 0;
-        };
-
-        /**
          * Kernel - represents the start of a kernel.
          */
-        struct Kernel
-        {
-            std::string toString() const
-            {
-                return "Kernel";
-            }
-        };
+        RR_EMPTY_STRUCT_WITH_NAME(Kernel);
 
         /**
          * Scope - represents a register scope.
          */
-        struct Scope
-        {
-            std::string toString() const
-            {
-                return "Scope";
-            }
-        };
+        RR_EMPTY_STRUCT_WITH_NAME(Scope);
 
         /**
          * SetCoordinate - Sets the value of a Coordinate
          */
         struct SetCoordinate
         {
-            SetCoordinate(Expression::ExpressionPtr value)
-                : value(value)
-            {
-            }
+            SetCoordinate();
+            SetCoordinate(Expression::ExpressionPtr value);
 
             Expression::ExpressionPtr value;
 
-            std::string toString() const
-            {
-                return "SetCoordinate";
-            }
+            std::string name() const;
         };
 
         /**
@@ -96,11 +73,10 @@ namespace rocRoller
         {
             Expression::ExpressionPtr condition;
 
-            std::string name;
-            std::string toString() const
-            {
-                return concatenate("ForLoopOp ", name, ": ", condition);
-            }
+            std::string loopName;
+
+            std::string name() const;
+            std::string toString() const;
         };
 
         /**
@@ -110,10 +86,8 @@ namespace rocRoller
         {
             Expression::ExpressionPtr size;
 
-            std::string toString() const
-            {
-                return concatenate("UnrollOp");
-            }
+            std::string name() const;
+            std::string toString() const;
         };
 
         /*
@@ -124,28 +98,20 @@ namespace rocRoller
          */
         struct Assign
         {
-            Register::Type            regType;
+            Register::Type            regType = Register::Type::Count;
             Expression::ExpressionPtr expression;
 
             size_t valueCount = 1;
 
-            std::string toString() const
-            {
-                return concatenate("Assign ", regType, " ", expression);
-            }
+            std::string name() const;
+            std::string toString() const;
         };
 
         /**
          * @brief Represents a memory barrier
          *
          */
-        struct Barrier
-        {
-            std::string toString() const
-            {
-                return "Barrier";
-            }
-        };
+        RR_EMPTY_STRUCT_WITH_NAME(Barrier);
 
         /**
          * @brief Computes offsets and strides between coordinates.
@@ -162,55 +128,36 @@ namespace rocRoller
             // TODO: might be nicer to have UInt32 for strides; need
             // to allow user to specify stride types instead of
             // forcing size_t.
-            ComputeIndex() = default;
+            ComputeIndex();
             ComputeIndex(bool     forward,
                          DataType valueType,
                          DataType offsetType = DataType::UInt64,
-                         DataType strideType = DataType::UInt64)
-                : forward(forward)
-                , valueType(valueType)
-                , offsetType(offsetType)
-                , strideType(strideType)
-            {
-            }
+                         DataType strideType = DataType::UInt64);
 
-            bool     forward;
-            DataType valueType, offsetType, strideType;
+            bool     forward    = false;
+            DataType valueType  = DataType::Count;
+            DataType offsetType = DataType::Count;
+            DataType strideType = DataType::Count;
 
-            std::string toString() const
-            {
-                return "ComputeIndex";
-            }
+            std::string name() const;
         };
 
         /**
          * @brief Deallocates a register.
          */
-        struct Deallocate
-        {
-            std::string toString() const
-            {
-                return "Deallocate";
-            }
-        };
+        RR_EMPTY_STRUCT_WITH_NAME(Deallocate);
 
         /**
          * LoadLinear - Load linear dimension.
          */
-        struct LoadLinear : public BaseOperation
+        struct LoadLinear
         {
-            LoadLinear() = delete;
-            LoadLinear(rocRoller::VariableType const varType)
-                : varType(varType)
-            {
-            }
+            LoadLinear();
+            LoadLinear(rocRoller::VariableType const varType);
 
             rocRoller::VariableType varType;
 
-            std::string toString() const override
-            {
-                return "LoadLinear";
-            }
+            std::string name() const;
         };
 
         /**
@@ -224,94 +171,57 @@ namespace rocRoller
          * instructions) is specified by the `LayoutType` member of
          * the the WaveTile node.
          */
-        struct LoadTiled : public BaseOperation
+        struct LoadTiled
         {
-            LoadTiled() = delete;
-            LoadTiled(VariableType const varType)
-                : vtype(varType)
-            {
-            }
+            LoadTiled();
+            LoadTiled(VariableType const varType);
 
-            VariableType vtype;
+            VariableType varType;
 
-            std::string toString() const override
-            {
-                return concatenate("LoadTiled");
-            }
+            std::string name() const;
         };
 
         /**
          * LoadVGPR - replaces LoadLinear.
          */
-        struct LoadVGPR : public BaseOperation
+        struct LoadVGPR
         {
-            LoadVGPR() = delete;
-            LoadVGPR(VariableType const varType, bool const scalar = false)
-                : vtype(varType)
-                , scalar(scalar)
-            {
-            }
+            LoadVGPR();
+            LoadVGPR(VariableType const varType, bool const scalar = false);
 
-            VariableType vtype;
+            VariableType varType;
             bool         scalar;
 
-            std::string toString() const override
-            {
-                return "LoadVGPR";
-            }
+            std::string name() const;
         };
 
         /**
          * LoadLDSTile - loads a tile from LDS
          */
-        struct LoadLDSTile : BaseOperation
+        struct LoadLDSTile
         {
-            LoadLDSTile() = delete;
-            LoadLDSTile(VariableType const varType)
-                : vtype(varType)
-            {
-            }
+            LoadLDSTile();
+            LoadLDSTile(VariableType const varType);
 
-            VariableType vtype;
+            VariableType varType;
 
-            std::string toString() const override
-            {
-                return "LoadLDSTile";
-            }
+            std::string name() const;
         };
 
         /**
          * Multiply - Multiply two MacroTiles
          */
-        struct Multiply : BaseOperation
-        {
-            std::string toString() const override
-            {
-                return "Multiply";
-            }
-        };
+        RR_EMPTY_STRUCT_WITH_NAME(Multiply);
 
         /**
          * NOP - Do nothing.
          */
-        struct NOP : BaseOperation
-        {
-            std::string toString() const override
-            {
-                return "NOP";
-            }
-        };
+        RR_EMPTY_STRUCT_WITH_NAME(NOP);
 
         /**
          * StoreLinear - Store linear dimension.
          */
-        struct StoreLinear : public BaseOperation
-        {
-            std::string toString() const override
-            {
-                return "StoreLinear";
-            }
-        };
+        RR_EMPTY_STRUCT_WITH_NAME(StoreLinear);
 
         /**
          * StoreTiled.  Stores a tile.
@@ -319,97 +229,63 @@ namespace rocRoller
          * Storage location and affinity is specified by the MacroTile
          * node.
          */
-        struct StoreTiled : public BaseOperation
+        struct StoreTiled
         {
-            StoreTiled() = delete;
-            StoreTiled(DataType const dtype)
-                : dataType(dtype)
-            {
-            }
+            StoreTiled();
+            StoreTiled(DataType const dtype);
 
-            DataType dataType;
+            DataType dataType = DataType::Count;
 
-            std::string toString() const override
-            {
-                return "StoreTiled";
-            }
+            std::string name() const;
         };
 
         /**
          * StoreVGPR - replaces StoreLinear.
          */
-        struct StoreVGPR : public BaseOperation
-        {
-            std::string toString() const override
-            {
-                return "StoreVGPR";
-            }
-        };
+        RR_EMPTY_STRUCT_WITH_NAME(StoreVGPR);
 
         /**
          * StoreLDSTile - store a tile into LDS
          */
-        struct StoreLDSTile : public BaseOperation
+        struct StoreLDSTile
         {
-            StoreLDSTile() = delete;
-            StoreLDSTile(DataType const dtype)
-                : dataType(dtype)
-            {
-            }
+            StoreLDSTile();
+            StoreLDSTile(DataType const dtype);
 
-            DataType dataType;
+            DataType dataType = DataType::Count;
 
-            std::string toString() const override
-            {
-                return "StoreLDSTile";
-            }
+            std::string name() const;
         };
 
         /**
          * TensorContraction - Tensor contraction operation.
          */
-        struct TensorContraction : public BaseOperation
+        struct TensorContraction
         {
-            TensorContraction() = delete;
+            TensorContraction();
             TensorContraction(std::vector<int> const& aContractedDimensions,
-                              std::vector<int> const& bContractedDimensions)
-                : aDims(aContractedDimensions)
-                , bDims(bContractedDimensions)
-            {
-            }
+                              std::vector<int> const& bContractedDimensions);
 
             std::vector<int> aDims, bDims; // contracted dimensions
 
-            std::string toString() const override
-            {
-                return "TensorContraction";
-            }
+            std::string name() const;
         };
+
+        template <CConcreteOperation Op>
+        std::string name(const Op& x);
 
         /*
          * Helpers
          */
+        std::string name(const Operation& x);
 
-        inline std::string toString(const Operation& x)
-        {
-            return std::visit([](const auto& a) { return a.toString(); }, x);
-        }
+        inline std::string toString(const Operation& x);
 
         /**
          * @brief Return the datatype associated with the Operation.
-         *
-         * @param x
-         * @return DataType
          */
-        inline DataType getDataType(const Operation& x)
-        {
-            return std::visit(
-                rocRoller::overloaded{[&](StoreTiled const& op) { return op.dataType; },
-                                      [&](LoadTiled const& op) { return op.vtype.dataType; },
-                                      [&](StoreLDSTile const& op) { return op.dataType; },
-                                      [&](LoadLDSTile const& op) { return op.vtype.dataType; },
-                                      [&](auto const& op) { return DataType::None; }},
-                x);
-        }
+        inline DataType getDataType(const Operation& x);
     }
 }
+
+#include "Operation_impl.hpp"

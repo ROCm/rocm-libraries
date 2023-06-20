@@ -64,5 +64,8 @@ namespace rocRoller
 
         template <typename T>
         concept CDimension = std::constructible_from<Dimension, T>;
+
+        template <typename T>
+        concept CConcreteDimension = (CDimension<T> && !std::same_as<Dimension, T>);
     }
 }

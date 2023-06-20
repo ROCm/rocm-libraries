@@ -32,28 +32,14 @@ namespace rocRoller
             std::string toDOT(bool drawMappings = false, std::string title = "") const;
 
             template <typename T>
-            std::pair<int, T> getDimension(int controlIndex, ConnectionSpec conn) const
-            {
-                int  tag     = mapper.get(controlIndex, conn);
-                auto element = coordinates.getElement(tag);
-                AssertFatal(std::holds_alternative<CoordinateGraph::Dimension>(element),
-                            "Invalid connection: element isn't a Dimension.",
-                            ShowValue(controlIndex));
-                auto dim = std::get<CoordinateGraph::Dimension>(element);
-                AssertFatal(std::holds_alternative<T>(dim),
-                            "Invalid connection: Dimension type mismatch.",
-                            ShowValue(controlIndex),
-                            ShowValue(typeid(T).name()),
-                            ShowValue(dim));
-                return {tag, std::get<T>(dim)};
-            }
+            std::pair<int, T> getDimension(int                         controlIndex,
+                                           Connections::ConnectionSpec conn) const;
 
             template <typename T>
-            std::pair<int, T> getDimension(int controlIndex, int subDimension = 0) const
-            {
-                return getDimension<T>(controlIndex,
-                                       Connections::TypeAndSubDimension{typeid(T), subDimension});
-            }
+            std::pair<int, T> getDimension(int controlIndex, NaryArgument arg) const;
+
+            template <typename T>
+            std::pair<int, T> getDimension(int controlIndex, int subDimension = 0) const;
 
             /**
              * @brief Check the input constraints against the KernelGraph's current state.
@@ -99,5 +85,10 @@ namespace rocRoller
          */
         Generator<Instruction> generate(KernelGraph, std::shared_ptr<AssemblyKernel>);
 
+        std::string toYAML(KernelGraph const& g);
+        KernelGraph fromYAML(std::string const& str);
+
     }
 }
+
+#include "KernelGraph_impl.hpp"

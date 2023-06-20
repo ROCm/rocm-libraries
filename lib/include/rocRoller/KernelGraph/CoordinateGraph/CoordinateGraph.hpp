@@ -79,10 +79,9 @@ namespace rocRoller
         class CoordinateGraph : public Graph::Hypergraph<Dimension, Edge>
         {
         public:
-            CoordinateGraph()
-                : Graph::Hypergraph<Dimension, Edge>()
-            {
-            }
+            using Base = Graph::Hypergraph<Dimension, Edge>;
+
+            CoordinateGraph() = default;
 
             std::vector<Expression::ExpressionPtr>
                 forward(std::vector<Expression::ExpressionPtr> sdims,
@@ -119,6 +118,8 @@ namespace rocRoller
                 int tag)
             const;
         };
+
+        std::string name(CoordinateGraph::Element const& el);
     }
 }
 

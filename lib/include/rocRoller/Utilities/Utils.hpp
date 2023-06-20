@@ -93,6 +93,16 @@ namespace rocRoller
 
     // clang-format off
     template <typename T>
+    concept CHasToStringMember = requires(T const& x)
+    {
+        !std::convertible_to<std::string, T>;
+
+        {
+            x.toString()
+        } -> std::convertible_to<std::string>;
+    };
+
+    template <typename T>
     concept CHasToString = requires(T const& x)
     {
         !std::convertible_to<std::string, T>;
@@ -391,6 +401,21 @@ namespace rocRoller
     static_assert(CForwardRangeOf<std::set<int>, int>);
     static_assert(!CForwardRangeOf<std::set<std::string>, int>);
     static_assert(!CForwardRangeOf<int, int>);
+
+    template <typename T>
+    concept CHasName = requires(T const& obj)
+    {
+        {
+            name(obj)
+            } -> std::convertible_to<std::string>;
+    };
+
+    template <CHasName T>
+    requires(std::default_initializable<T>) std::string name()
+    {
+        T obj;
+        return name(obj);
+    }
 
     /**
      * @}

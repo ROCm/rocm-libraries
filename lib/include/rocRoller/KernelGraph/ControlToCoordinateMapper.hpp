@@ -11,6 +11,8 @@
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/Utilities/Comparison.hpp>
 
+#include <rocRoller/Serialization/Base_fwd.hpp>
+
 namespace rocRoller::KernelGraph
 {
 
@@ -22,10 +24,17 @@ namespace rocRoller::KernelGraph
      */
     namespace Connections
     {
+        struct JustNaryArgument
+        {
+            NaryArgument argument;
+
+            auto operator<=>(JustNaryArgument const&) const = default;
+        };
+
         struct TypeAndSubDimension
         {
-            std::type_index id;
-            int             subdimension;
+            std::string id;
+            int         subdimension;
         };
 
         bool inline operator<(TypeAndSubDimension const& a, TypeAndSubDimension const& b)
@@ -37,14 +46,14 @@ namespace rocRoller::KernelGraph
 
         struct TypeAndNaryArgument
         {
-            std::type_index id;
-            NaryArgument    argument;
+            std::string  id;
+            NaryArgument argument;
         };
 
         template <typename T>
         TypeAndNaryArgument inline typeArgument(NaryArgument arg)
         {
-            return TypeAndNaryArgument{typeid(T), arg};
+            return TypeAndNaryArgument{name<T>(), arg};
         }
 
         bool inline operator<(TypeAndNaryArgument const& a, TypeAndNaryArgument const& b)
@@ -96,9 +105,9 @@ namespace rocRoller::KernelGraph
 
         struct LDSTypeAndSubDimension
         {
-            std::type_index id;
-            int             subdimension;
-            LDSLoadStore    direction;
+            std::string  id;
+            int          subdimension;
+            LDSLoadStore direction;
         };
 
         bool inline operator<(LDSTypeAndSubDimension const& a, LDSTypeAndSubDimension const& b)
@@ -113,26 +122,31 @@ namespace rocRoller::KernelGraph
             }
             return a.id < b.id;
         }
-    }
 
-    using ConnectionSpec = std::variant<std::monostate,
-                                        NaryArgument,
-                                        Connections::ComputeIndex,
-                                        Connections::TypeAndSubDimension,
-                                        Connections::TypeAndNaryArgument,
-                                        Connections::LDSTypeAndSubDimension>;
+        using ConnectionSpec = std::variant<std::monostate,
+                                            JustNaryArgument,
+                                            ComputeIndex,
+                                            TypeAndSubDimension,
+                                            TypeAndNaryArgument,
+                                            LDSTypeAndSubDimension>;
+
+        std::string   name(ConnectionSpec const& cs);
+        std::string   toString(ConnectionSpec const& cs);
+        std::ostream& operator<<(std::ostream& stream, ConnectionSpec const& cs);
+
+    }
 
     struct DeferredConnection
     {
-        ConnectionSpec connectionSpec;
-        int            coordinate;
+        Connections::ConnectionSpec connectionSpec;
+        int                         coordinate;
     };
 
     template <typename T>
     inline DeferredConnection DC(int coordinate, int sdim = 0)
     {
         DeferredConnection rv;
-        rv.connectionSpec = Connections::TypeAndSubDimension{typeid(T), sdim};
+        rv.connectionSpec = Connections::TypeAndSubDimension{name<T>(), sdim};
         rv.coordinate     = coordinate;
         return rv;
     }
@@ -142,13 +156,10 @@ namespace rocRoller::KernelGraph
         LDSDC(int coordinate, Connections::LDSLoadStore direction, int sdim = 0)
     {
         DeferredConnection rv;
-        rv.connectionSpec = Connections::LDSTypeAndSubDimension{typeid(T), sdim, direction};
+        rv.connectionSpec = Connections::LDSTypeAndSubDimension{name<T>(), sdim, direction};
         rv.coordinate     = coordinate;
         return rv;
     }
-
-    std::string   toString(ConnectionSpec const& cs);
-    std::ostream& operator<<(std::ostream& stream, ConnectionSpec const& cs);
 
     /**
      * @brief Connects nodes in the control flow graph to nodes in the
@@ -166,21 +177,26 @@ namespace rocRoller::KernelGraph
     {
         // key_type is:
         //  control graph index, connection specification
-        using key_type = std::tuple<int, ConnectionSpec>;
-
-        struct Connection
-        {
-            int            control;
-            int            coordinate;
-            ConnectionSpec connection;
-        };
+        using key_type = std::tuple<int, Connections::ConnectionSpec>;
 
     public:
+        struct Connection
+        {
+            int                         control;
+            int                         coordinate;
+            Connections::ConnectionSpec connection;
+        };
+
         /**
-         * @brief Connects the control flow node `control` to the
-         * coorindate `coordinate`.
+         * @brief Adds the given connection.
          */
-        void connect(int control, int coordinate, ConnectionSpec conn);
+        void connect(Connection const& connection);
+
+        /**
+         * @brief Connects the control flow node `control` to the coordinate `coordinate`.
+         */
+        void connect(int control, int coordinate, Connections::ConnectionSpec conn);
+        void connect(int control, int coordinate, NaryArgument arg);
 
         /**
          * @brief Connects the control flow node `control` to the
@@ -196,7 +212,7 @@ namespace rocRoller::KernelGraph
          * @brief Disconnects the control flow node `control` to the
          * coorindate `coordinate`.
          */
-        void disconnect(int control, int coordinate, ConnectionSpec conn);
+        void disconnect(int control, int coordinate, Connections::ConnectionSpec conn);
 
         /**
          * @brief Disconnects the control flow node `control` to the
@@ -225,7 +241,8 @@ namespace rocRoller::KernelGraph
         template <typename T>
         int get(int control, int subDimension = 0) const;
 
-        int get(int control, ConnectionSpec conn = {}) const;
+        int get(int control, Connections::ConnectionSpec conn = {}) const;
+        int get(int control, NaryArgument arg) const;
 
         /**
          * @brief Get the all control nodes.
@@ -237,6 +254,11 @@ namespace rocRoller::KernelGraph
          * node `control`.
          */
         std::vector<Connection> getConnections(int control) const;
+
+        /**
+         * @brief Get all connections.
+         */
+        std::vector<Connection> getConnections() const;
 
         /**
          * @brief Get all connections incoming to the coordinate `coordinate`.

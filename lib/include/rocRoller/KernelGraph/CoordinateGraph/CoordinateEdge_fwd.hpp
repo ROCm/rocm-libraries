@@ -28,6 +28,13 @@ namespace rocRoller
                                                      Split,
                                                      Tile>;
 
+        template <typename T>
+        concept CCoordinateTransformEdge = std::constructible_from<CoordinateTransformEdge, T>;
+
+        template <typename T>
+        concept CConcreteCoordinateTransformEdge
+            = (CCoordinateTransformEdge<T> && !std::same_as<CoordinateTransformEdge, T>);
+
         struct DataFlow;
         struct Buffer;
         struct Offset;
@@ -35,6 +42,18 @@ namespace rocRoller
 
         using DataFlowEdge = std::variant<DataFlow, Buffer, Offset, Stride>;
 
+        template <typename T>
+        concept CDataFlowEdge = std::constructible_from<DataFlowEdge, T>;
+
+        template <typename T>
+        concept CConcreteDataFlowEdge = (CDataFlowEdge<T> && !std::same_as<DataFlowEdge, T>);
+
         using Edge = std::variant<CoordinateTransformEdge, DataFlowEdge>;
+
+        template <typename T>
+        concept CEdge = std::constructible_from<Edge, T>;
+
+        template <typename T>
+        concept CConcreteEdge = (CEdge<T> && !std::same_as<Edge, T>);
     }
 }

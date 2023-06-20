@@ -4,13 +4,27 @@
 namespace rocRoller::KernelGraph
 {
 
-    void ControlToCoordinateMapper::connect(int control, int coordinate, ConnectionSpec conn)
+    void ControlToCoordinateMapper::connect(ControlToCoordinateMapper::Connection const& connection)
+    {
+        connect(connection.control, connection.coordinate, connection.connection);
+    }
+
+    void ControlToCoordinateMapper::connect(int                         control,
+                                            int                         coordinate,
+                                            Connections::ConnectionSpec conn)
     {
         auto key = key_type{control, conn};
         m_map.insert_or_assign(key, coordinate);
     }
 
-    void ControlToCoordinateMapper::disconnect(int control, int coordinate, ConnectionSpec conn)
+    void ControlToCoordinateMapper::connect(int control, int coordinate, NaryArgument arg)
+    {
+        connect(control, coordinate, Connections::JustNaryArgument{arg});
+    }
+
+    void ControlToCoordinateMapper::disconnect(int                         control,
+                                               int                         coordinate,
+                                               Connections::ConnectionSpec conn)
     {
         auto key = key_type{control, conn};
         m_map.erase(key);
@@ -27,6 +41,21 @@ namespace rocRoller::KernelGraph
                 rv.push_back({std::get<0>(kv.first), kv.second, std::get<1>(kv.first)});
             }
         }
+        return rv;
+    }
+
+    std::vector<ControlToCoordinateMapper::Connection>
+        ControlToCoordinateMapper::getConnections() const
+    {
+        std::vector<Connection> rv;
+        rv.reserve(m_map.size());
+
+        for(auto const& kv : m_map)
+        {
+            //cppcheck-suppress useStlAlgorithm
+            rv.push_back({std::get<0>(kv.first), kv.second, std::get<1>(kv.first)});
+        }
+
         return rv;
     }
 
@@ -123,6 +152,19 @@ namespace rocRoller::KernelGraph
 
     namespace Connections
     {
+        std::string name(ConnectionSpec const& cs)
+        {
+            return std::visit(
+                rocRoller::overloaded{
+                    [](std::monostate const&) { return "none"; },
+                    [](JustNaryArgument const&) { return "NaryArgument"; },
+                    [](ComputeIndex const&) { return "ComputeIndex"; },
+                    [](TypeAndSubDimension const&) { return "TypeAndSubDimension"; },
+                    [](TypeAndNaryArgument const&) { return "TypeAndNaryArgument"; },
+                    [](LDSTypeAndSubDimension const&) { return "LDSTypeAndSubDimension"; }},
+                cs);
+        }
+
         std::string toString(ComputeIndexArgument cia)
         {
             switch(cia)
@@ -163,54 +205,48 @@ namespace rocRoller::KernelGraph
             }
         }
 
-    }
-
-    struct CSToStringVisitor
-    {
-        std::string operator()(std::monostate const&) const
+        struct CSToStringVisitor
         {
-            return "EMPTY";
+            std::string operator()(std::monostate const&) const
+            {
+                return "EMPTY";
+            }
+
+            std::string operator()(JustNaryArgument const& n) const
+            {
+                return toString(n.argument);
+            }
+
+            std::string operator()(ComputeIndex const& ci) const
+            {
+                return concatenate(ci.argument, ": (", ci.index, ")");
+            }
+
+            std::string operator()(TypeAndSubDimension const& ci) const
+            {
+                return concatenate(ci.id, ": (", ci.subdimension, ")");
+            }
+
+            std::string operator()(TypeAndNaryArgument const& ci) const
+            {
+                return concatenate(ci.id, ": (", ci.argument, ")");
+            }
+
+            std::string operator()(LDSTypeAndSubDimension const& ci) const
+            {
+                return concatenate(
+                    "LDS: ", ci.id, ": (", ci.subdimension, ", ", toString(ci.direction), ")");
+            }
+        };
+
+        std::string toString(ConnectionSpec const& cs)
+        {
+            return std::visit(CSToStringVisitor(), cs);
         }
 
-        std::string operator()(NaryArgument const& n) const
+        std::ostream& operator<<(std::ostream& stream, ConnectionSpec const& cs)
         {
-            return toString(n);
+            return stream << toString(cs);
         }
-
-        std::string operator()(Connections::ComputeIndex const& ci) const
-        {
-            return concatenate(ci.argument, ": (", ci.index, ")");
-        }
-
-        std::string operator()(Connections::TypeAndSubDimension const& ci) const
-        {
-            return concatenate(ci.id.hash_code(), ": (", ci.subdimension, ")");
-        }
-
-        std::string operator()(Connections::TypeAndNaryArgument const& ci) const
-        {
-            return concatenate(ci.id.hash_code(), ": (", ci.argument, ")");
-        }
-
-        std::string operator()(Connections::LDSTypeAndSubDimension const& ci) const
-        {
-            return concatenate("LDS: ",
-                               ci.id.hash_code(),
-                               ": (",
-                               ci.subdimension,
-                               ", ",
-                               toString(ci.direction),
-                               ")");
-        }
-    };
-
-    std::string toString(ConnectionSpec const& cs)
-    {
-        return std::visit(CSToStringVisitor(), cs);
-    }
-
-    std::ostream& operator<<(std::ostream& stream, ConnectionSpec const& cs)
-    {
-        return stream << toString(cs);
     }
 }

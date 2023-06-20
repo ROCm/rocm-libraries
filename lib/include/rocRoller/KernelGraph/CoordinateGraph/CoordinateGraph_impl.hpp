@@ -195,5 +195,10 @@ namespace rocRoller
             }
             return {};
         }
+
+        inline std::string name(CoordinateGraph::Element const& el)
+        {
+            return CoordinateGraph::ElementName(el);
+        }
     }
 }

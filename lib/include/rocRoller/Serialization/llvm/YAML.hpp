@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2019-2022 Advanced Micro Devices, Inc.
+ * Copyright 2019-2023 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -63,39 +63,16 @@ namespace llvm
          * In the rocRoller::Serialization traits classes, having a `flow` member with a value of `false` will work to
          * specify the non-flow style.
          *
-         * The following series of concepts and classes culminate in `FlowBase` which can be used as a base class for
-         * `llvm::yaml` traits classes and contains a flow member only for types that evaluate to `true`.
+         * The following `FlowBase` can be used as a base class for `llvm::yaml` traits classes and contains a flow
+         * member only for types that evaluate to `true`. This uses a series of concepts declared in HasTraits.hpp
          */
-
-        template <typename T>
-        concept CHasFlowMember = requires
-        {
-            {
-                T::flow
-                } -> std::convertible_to<bool>;
-        };
-
-        template <typename T>
-        struct HasFlowValue
-        {
-            static const bool flow = false;
-        };
-
-        template <CHasFlowMember T>
-        struct HasFlowValue<T>
-        {
-            static const bool flow = T::flow;
-        };
-
-        template <typename T>
-        concept CHasFlow = HasFlowValue<T>::flow;
 
         template <typename T>
         struct FlowBase
         {
         };
 
-        template <CHasFlow T>
+        template <sn::CHasFlow T>
         struct FlowBase<T>
         {
             static const bool flow = true;
@@ -373,6 +350,33 @@ namespace llvm
             static QuotingType mustQuote(StringRef ref)
             {
                 return ScalarTraits<float>::mustQuote(ref);
+            }
+        };
+
+        template <rocRoller::Serialization::CHasScalarTraits Scalar>
+        struct ScalarTraits<Scalar>
+        {
+            using rrTraits = rocRoller::Serialization::ScalarTraits<Scalar>;
+
+            static void output(const Scalar& value, void* ctx, llvm::raw_ostream& out)
+            {
+                auto string = rrTraits::output(value);
+                ScalarTraits<std::string>::output(string, ctx, out);
+            }
+
+            static StringRef input(StringRef scalar, void* ctx, Scalar& value)
+            {
+                std::string string;
+                auto        rv = ScalarTraits<std::string>::input(scalar, ctx, string);
+
+                rrTraits::input(string, value);
+
+                return rv;
+            }
+
+            static QuotingType mustQuote(StringRef ref)
+            {
+                return ScalarTraits<std::string>::mustQuote(ref);
             }
         };
 

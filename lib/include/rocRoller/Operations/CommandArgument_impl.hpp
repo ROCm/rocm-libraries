@@ -16,9 +16,9 @@ namespace rocRoller
                                             DataDirection            direction,
                                             std::string              name)
         : m_command(com)
+        , m_size(variableType.getElementSize())
         , m_variableType(variableType)
         , m_offset(offset)
-        , m_size(variableType.getElementSize())
         , m_direction(direction)
         , m_name(name)
     {

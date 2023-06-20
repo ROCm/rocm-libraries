@@ -157,6 +157,28 @@ namespace rocRoller
         return "Invalid";
     }
 
+    std::string toString(MemoryType m)
+    {
+        switch(m)
+        {
+        case MemoryType::Global:
+            return "Global";
+        case MemoryType::LDS:
+            return "LDS";
+        case MemoryType::AGPR:
+            return "AGPR";
+        case MemoryType::VGPR:
+            return "VGPR";
+        case MemoryType::WAVE:
+            return "WAVE";
+        case MemoryType::WAVE_LDS:
+            return "WAVE_LDS";
+
+        case MemoryType::Count:;
+        }
+        return "INVALID";
+    }
+
     std::string toString(LayoutType l)
     {
         switch(l)
@@ -171,7 +193,7 @@ namespace rocRoller
 
         case LayoutType::Count:;
         }
-        return "Invalid";
+        return "INVALID";
     }
 
     std::ostream& operator<<(std::ostream& stream, LayoutType l)

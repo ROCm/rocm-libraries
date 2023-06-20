@@ -2,12 +2,13 @@
 
 #include <algorithm>
 
-#include <rocRoller/AssemblyKernel.hpp>
+#include <rocRoller/AssemblyKernelArgument.hpp>
+#include <rocRoller/Context.hpp>
+#include <rocRoller/Expression.hpp>
+
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
 #include <rocRoller/CodeGen/Arithmetic/MatrixMultiply.hpp>
 #include <rocRoller/CodeGen/Arithmetic/MultiplyAdd.hpp>
-#include <rocRoller/Context.hpp>
-#include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/RegisterTagManager.hpp>
 #include <rocRoller/Operations/CommandArgument.hpp>
 #include <rocRoller/Scheduling/Scheduler.hpp>

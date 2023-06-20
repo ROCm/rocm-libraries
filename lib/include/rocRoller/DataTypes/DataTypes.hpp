@@ -121,7 +121,7 @@ namespace rocRoller
      */
     enum class MemoryType : int
     {
-        Global,
+        Global = 0,
         LDS,
         AGPR,
         VGPR,
@@ -131,6 +131,8 @@ namespace rocRoller
         Count,
         None = Count
     };
+
+    std::string toString(MemoryType m);
 
     /**
      * Layout of wavetile for MFMA instructions.
@@ -192,9 +194,10 @@ namespace rocRoller
             }
         }
 
-        auto name = isSigned ? "signed" : "unsigned";
+        auto prefix = isSigned ? "signed" : "unsigned";
 
-        Throw<FatalError>("No enumeration for ", name, " integer with size ", sizeBytes, " bytes.");
+        Throw<FatalError>(
+            "No enumeration for ", prefix, " integer with size ", sizeBytes, " bytes.");
 
         // cppcheck doesn't seem to notice that Throw<>() is marked [[noreturn]] so it will
         // complain if this isn't here.

@@ -39,12 +39,12 @@ namespace rocRoller
     struct AppendKernelArgumentsVisitor
     {
         KernelArguments*   args;
-        std::string const& name;
+        std::string const& argName;
 
         template <CCommandArgumentValue T>
         void operator()(T const& value)
         {
-            args->append(name, value);
+            args->append(argName, value);
         }
 
         void call(CommandArgumentValue const& value)
@@ -54,56 +54,56 @@ namespace rocRoller
     };
 
     template <typename T>
-    inline void KernelArguments::append(std::string const& name, T value)
+    inline void KernelArguments::append(std::string const& argName, T value)
     {
         if constexpr(std::is_same<T, CommandArgumentValue>::value)
         {
-            AppendKernelArgumentsVisitor visitor{this, name};
+            AppendKernelArgumentsVisitor visitor{this, argName};
             visitor.call(value);
         }
         else
         {
-            append(name, value, true);
+            append(argName, value, true);
         }
     }
 
     template <typename T>
-    inline void KernelArguments::appendUnbound(std::string const& name)
+    inline void KernelArguments::appendUnbound(std::string const& argName)
     {
-        append(name, static_cast<T>(0), false);
+        append(argName, static_cast<T>(0), false);
     }
 
     template <typename T>
-    inline void KernelArguments::bind(std::string const& name, T value)
+    inline void KernelArguments::bind(std::string const& argName, T value)
     {
         if(!m_log)
         {
             throw std::runtime_error("Binding is not supported without logging.");
         }
 
-        auto it = m_argRecords.find(name);
+        auto it = m_argRecords.find(argName);
         if(it == m_argRecords.end())
         {
-            throw std::runtime_error("Attempt to bind unknown argument " + name);
+            throw std::runtime_error("Attempt to bind unknown argument " + argName);
         }
 
         auto& record = it->second;
 
         if(std::get<ArgBound>(record))
         {
-            throw std::runtime_error("Attempt to bind already bound argument " + name);
+            throw std::runtime_error("Attempt to bind already bound argument " + argName);
         }
 
         if(sizeof(T) != std::get<ArgSize>(record))
         {
-            throw std::runtime_error("Size mismatch in binding argument " + name);
+            throw std::runtime_error("Size mismatch in binding argument " + argName);
         }
 
         size_t offset = std::get<ArgOffset>(record);
 
         if(offset % alignof(T) != 0)
         {
-            throw std::runtime_error("Alignment error in argument " + name + ": type mismatch?");
+            throw std::runtime_error("Alignment error in argument " + argName + ": type mismatch?");
         }
 
         writeValue(offset, value);
@@ -127,7 +127,7 @@ namespace rocRoller
     }
 
     template <typename T>
-    inline void KernelArguments::append(std::string const& name, T value, bool bound)
+    inline void KernelArguments::append(std::string const& argName, T value, bool bound)
     {
         alignTo(alignof(T));
 
@@ -137,7 +137,7 @@ namespace rocRoller
         if(m_log)
         {
             std::string valueString = stringForValue(value, bound);
-            appendRecord(name, Arg(offset, argSize, bound, valueString));
+            appendRecord(argName, Arg(offset, argSize, bound, valueString));
         }
 
         m_data.insert(m_data.end(), sizeof(value), 0);
@@ -163,16 +163,17 @@ namespace rocRoller
         m_data.insert(m_data.end(), padding, 0);
     }
 
-    inline void KernelArguments::appendRecord(std::string const& name, KernelArguments::Arg record)
+    inline void KernelArguments::appendRecord(std::string const&   argName,
+                                              KernelArguments::Arg record)
     {
-        auto it = m_argRecords.find(name);
+        auto it = m_argRecords.find(argName);
         if(it != m_argRecords.end())
         {
-            throw std::runtime_error("Duplicate argument name: " + name);
+            throw std::runtime_error("Duplicate argument name: " + argName);
         }
 
-        m_argRecords[name] = record;
-        m_names.push_back(name);
+        m_argRecords[argName] = record;
+        m_names.push_back(argName);
     }
 
     template <typename T>

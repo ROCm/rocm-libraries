@@ -32,8 +32,10 @@ def extract_asm_dot(path: pathlib.Path):
     endPos = endMatch.span()[0]
     assert beginPos < endPos
 
-    meta = yaml.safe_load(source[beginPos:endPos])
+    meta = yaml.load(source[beginPos:endPos], Loader=yaml.CSafeLoader)
     kernel = meta["amdhsa.kernels"][0]
+    if ".kernel_graph_dot" in kernel:
+        return kernel[".name"], kernel[".kernel_graph_dot"], kernel[".kernel_graph"]
     return kernel[".name"], kernel[".kernel_graph"]
 
 
@@ -84,6 +86,12 @@ def process_dot(
             open_dot(rendered_fname)
 
 
+def process_serialized_graph(graph: dict, out_path: pathlib.Path):
+    with out_path.with_suffix(".yaml").open("w") as f:
+        yaml.dump(graph, f, default_flow_style=None, Dumper=yaml.CSafeDumper)
+        print(f"Wrote {f.name}")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Extract and render kernel graph.")
     parser.add_argument("fname", type=str, help="Assembly or log file name")
@@ -123,7 +131,7 @@ if __name__ == "__main__":
         foutput = pathlib.Path(args.output)
 
     if path.suffix == ".s":
-        _, dot = extract_asm_dot(path)
+        _, dot, graph = extract_asm_dot(path)
         process_dot(
             dot,
             foutput,
@@ -131,6 +139,9 @@ if __name__ == "__main__":
             args.dot_only,
             args.xdg_open,
         )
+        if graph is not None and not args.dot_only:
+            process_serialized_graph(graph, foutput)
+
     elif path.suffix == ".log":
         dots = extract_log_dots(path)
         if not args.omit_diff:

@@ -443,6 +443,12 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult, bool doVisualize)
     // Build GEMM kernel
     CommandKernel commandKernel(command, kernelName, params, postParams, kernelOptions);
 
+    // TODO: Make this optional.
+    {
+        std::ofstream outfile(kernelName + ".yaml");
+        outfile << toYAML(commandKernel.getKernelGraph());
+    }
+
     if(doVisualize)
     {
         Client::visualize(command, commandKernel, runtimeArgs);

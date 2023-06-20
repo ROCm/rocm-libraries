@@ -39,7 +39,7 @@ namespace rocRoller
                 return "LowerTile";
             }
 
-            std::vector<GraphConstraint> postConstraints() const
+            std::vector<GraphConstraint> postConstraints() const override
             {
                 return {&NoConstructDestructMT};
             }

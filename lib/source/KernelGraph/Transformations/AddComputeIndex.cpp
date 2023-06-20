@@ -162,7 +162,7 @@ namespace rocRoller::KernelGraph
         auto elemX = graph.mapper.get<ElementNumber>(load, 0);
         auto elemY = graph.mapper.get<ElementNumber>(load, 1);
 
-        auto dtype = graph.control.get<LoadTiled>(load)->vtype.dataType;
+        auto dtype = graph.control.get<LoadTiled>(load)->varType.dataType;
 
         auto offsetMac = graph.coordinates.addElement(Offset(), {user}, {mac});
         auto strideMac = graph.coordinates.addElement(Stride(), {user}, {mac});
@@ -241,10 +241,10 @@ namespace rocRoller::KernelGraph
             auto s  = graph.control.get<StoreTiled>(loadstore);
             auto sl = graph.control.get<StoreLDSTile>(loadstore);
             if(l)
-                dtype = l->vtype.dataType;
+                dtype = l->varType.dataType;
             if(ll)
             {
-                dtype      = ll->vtype.dataType;
+                dtype      = ll->varType.dataType;
                 offsettype = DataType::UInt32;
             }
             if(s)
@@ -327,7 +327,7 @@ namespace rocRoller::KernelGraph
         auto wave = graph.mapper.get<WaveTileNumber>(load, sdim);
         auto vgpr = graph.mapper.get<VGPR>(load);
 
-        auto dtype = graph.control.get<LoadLDSTile>(load)->vtype.dataType;
+        auto dtype = graph.control.get<LoadLDSTile>(load)->varType.dataType;
 
         auto offsetWave = graph.coordinates.addElement(Offset(), {lds}, {wave});
         auto strideWave = graph.coordinates.addElement(Stride(), {lds}, {wave});
@@ -418,7 +418,7 @@ namespace rocRoller::KernelGraph
         auto wave = graph.mapper.get<WaveTileNumber>(load, sdim);
         auto vgpr = graph.mapper.get<VGPR>(load);
 
-        auto dtype = graph.control.get<LoadTiled>(load)->vtype.dataType;
+        auto dtype = graph.control.get<LoadTiled>(load)->varType.dataType;
 
         auto offsetMac  = graph.coordinates.addElement(Offset(), {user}, {mac});
         auto strideMac  = graph.coordinates.addElement(Stride(), {user}, {mac});
@@ -525,10 +525,10 @@ namespace rocRoller::KernelGraph
             auto s  = graph.control.get<StoreTiled>(op);
             auto sl = graph.control.get<StoreLDSTile>(op);
             if(l)
-                dtype = l->vtype.dataType;
+                dtype = l->varType.dataType;
             if(ll)
             {
-                dtype      = ll->vtype.dataType;
+                dtype      = ll->varType.dataType;
                 offsettype = DataType::UInt32;
             }
             if(s)

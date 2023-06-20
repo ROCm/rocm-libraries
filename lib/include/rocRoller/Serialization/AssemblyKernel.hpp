@@ -11,6 +11,7 @@
 #include "Containers.hpp"
 #include "Enum.hpp"
 #include "Expression.hpp"
+#include "KernelGraph.hpp"
 
 namespace rocRoller
 {
@@ -85,7 +86,12 @@ namespace rocRoller
                 // TODO: only do this for appropriate logging levels
                 auto graph = kern.kernel_graph();
                 if(graph)
+                {
+                    // Include both DOT and new serialization for now.
                     iot::mapRequired(io, ".kernel_graph", *graph);
+                    auto dot = graph->toDOT();
+                    iot::mapRequired(io, ".kernel_graph_dot", dot);
+                }
             }
 
             static void mapping(IO& io, AssemblyKernel& kern, EmptyContext& ctx)

@@ -4,6 +4,8 @@
 
 #include "ControlEdge_fwd.hpp"
 
+#include <rocRoller/KernelGraph/StructUtils.hpp>
+
 namespace rocRoller
 {
 
@@ -17,57 +19,40 @@ namespace rocRoller
          * Sequence edges indicate sequential dependencies.  A node is considered schedulable
          * if all of its incoming Sequence edges have been scheduled.
          */
-        struct Sequence
-        {
-            // cppcheck-suppress functionStatic
-            std::string toString() const
-            {
-                return "Sequence";
-            }
-        };
+        RR_EMPTY_STRUCT_WITH_NAME(Sequence);
 
         /**
          * Body edges indicate code nesting.  A Body node could indicate the body of a kernel,
          * a for loop, an unrolled section, an if statement (potentially), or any other
          * control block.
          */
-        struct Body
-        {
-            // cppcheck-suppress functionStatic
-            std::string toString() const
-            {
-                return "Body";
-            }
-        };
+        RR_EMPTY_STRUCT_WITH_NAME(Body);
 
         /**
          * Indicates code that should come before a Body edge.  Currently only applicable to
          * for loops.
          */
-        struct Initialize
-        {
-            // cppcheck-suppress functionStatic
-            std::string toString() const
-            {
-                return "Initialize";
-            }
-        };
+        RR_EMPTY_STRUCT_WITH_NAME(Initialize);
 
         /**
          * Indicates the increment node(s) of a for loop.
          */
-        struct ForLoopIncrement
-        {
-            // cppcheck-suppress functionStatic
-            std::string toString() const
-            {
-                return "ForLoopIncrement";
-            }
-        };
+        RR_EMPTY_STRUCT_WITH_NAME(ForLoopIncrement);
 
         inline std::string toString(ControlEdge const& e)
         {
             return std::visit([](const auto& a) { return a.toString(); }, e);
+        }
+
+        template <CConcreteControlEdge Edge>
+        inline std::string toString(Edge const& e)
+        {
+            return e.toString();
+        }
+
+        inline std::string name(ControlEdge const& e)
+        {
+            return toString(e);
         }
     }
 }

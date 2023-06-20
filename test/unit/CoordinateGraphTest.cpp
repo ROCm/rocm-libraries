@@ -9,6 +9,7 @@
 #include <rocRoller/KernelGraph/CoordinateGraph/CoordinateGraph.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/Transformer.hpp>
+#include <rocRoller/Serialization/Variant.hpp>
 
 using namespace rocRoller;
 using namespace KernelGraph::CoordinateGraph;
@@ -26,6 +27,33 @@ namespace rocRollerTest
             fastArith = Expression::FastArithmetic(m_context);
         }
     };
+
+    TEST_F(CoordinateGraphTest, SerializationTypePath)
+    {
+        CoordinateGraph::Element el = User{};
+
+        EXPECT_EQ("Node.User", Serialization::typePath(el));
+
+        el = Flatten{};
+
+        EXPECT_EQ("Edge.Transform.Flatten", Serialization::typePath(el));
+
+        el = Adhoc{"BlockNumber"};
+
+        EXPECT_EQ("Node.Adhoc.BlockNumber", Serialization::typePath(el));
+
+        {
+            auto [a, b] = Serialization::splitFirst(".", "Edge.Transform.Flatten");
+            EXPECT_EQ("Edge", a);
+            EXPECT_EQ("Transform.Flatten", b);
+        }
+
+        {
+            auto [a, b] = Serialization::splitFirst(".", "Flatten");
+            EXPECT_EQ("Flatten", a);
+            EXPECT_EQ("", b);
+        }
+    }
 
     TEST_F(CoordinateGraphTest, EdgeType)
     {

@@ -1,4 +1,3 @@
-#include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/Expression.hpp>
 
 #include <bit>

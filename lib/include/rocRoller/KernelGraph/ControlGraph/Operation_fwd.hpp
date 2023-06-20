@@ -50,5 +50,8 @@ namespace rocRoller
 
         template <typename T>
         concept COperation = std::constructible_from<Operation, T>;
+
+        template <typename T>
+        concept CConcreteOperation = (COperation<T> && !std::same_as<Operation, T>);
     }
 }

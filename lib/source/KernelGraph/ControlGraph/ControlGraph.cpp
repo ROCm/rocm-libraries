@@ -6,8 +6,13 @@
 
 namespace rocRoller::KernelGraph::ControlGraph
 {
+    std::map<std::pair<int, int>, NodeOrdering> const& ControlGraph::nodeOrderTable() const
+    {
+        populateOrderCache();
+        return m_orderCache;
+    }
 
-    std::string ControlGraph::nodeOrderTable() const
+    std::string ControlGraph::nodeOrderTableString() const
     {
         populateOrderCache();
 

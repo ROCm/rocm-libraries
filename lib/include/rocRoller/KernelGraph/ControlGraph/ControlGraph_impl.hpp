@@ -198,4 +198,8 @@ namespace rocRoller::KernelGraph::ControlGraph
         return false;
     }
 
+    inline std::string name(ControlGraph::Element const& el)
+    {
+        return ControlGraph::ElementName(el);
+    }
 }

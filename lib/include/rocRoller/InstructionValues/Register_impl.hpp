@@ -783,8 +783,8 @@ namespace rocRoller
             : m_context(context)
             , m_regType(regType)
             , m_variableType(variableType)
-            , m_valueCount(count)
             , m_options(options)
+            , m_valueCount(count)
         {
             AssertFatal(context != nullptr);
             setRegisterCount();

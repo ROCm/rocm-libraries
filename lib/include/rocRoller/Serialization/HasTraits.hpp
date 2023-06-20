@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2019-2022 Advanced Micro Devices, Inc.
+ * Copyright 2019-2023 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -56,18 +56,10 @@ namespace rocRoller
         };
 
         template <typename T, typename IO, typename Context = EmptyContext>
-        class has_EmptyMappingTraits
+        struct has_EmptyMappingTraits
         {
-            using mapping = void (*)(IO&, T&);
-
-            template <typename U>
-            static uint8_t test(SameType<mapping, &U::mapping>*);
-
-            template <typename U>
-            static uint32_t test(...);
-
-        public:
-            static const bool value = sizeof(test<MappingTraits<T, IO, Context>>(nullptr)) == 1;
+            static const bool value
+                = std::same_as<Context, EmptyContext> && CEmptyMappedType<T, IO, Context>;
         };
 
         template <typename T, typename IO, typename Context = EmptyContext>
@@ -91,6 +83,17 @@ namespace rocRoller
 
         template <typename T, typename IO>
         concept EnumType = has_EnumTraits<T, IO>::value;
+
+        template <typename T>
+        concept CHasScalarTraits = requires(T const& cval, T& val, std::string const& string)
+        {
+
+            {
+                ScalarTraits<T>::output(cval)
+                } -> std::convertible_to<std::string>;
+
+            {ScalarTraits<T>::input(string, val)};
+        };
 
         template <typename T, typename IO>
         class has_SequenceTraits
@@ -138,12 +141,13 @@ namespace rocRoller
             static const bool value1 = has_EnumTraits<T, IO>::value;
             static const bool value2 = has_SequenceTraits<T, IO>::value;
             static const bool value3 = has_CustomMappingTraits<T, IO>::value;
+            static const bool value4 = CHasScalarTraits<T>;
 
-            static const int count = value0 + value1 + value2 + value3;
+            static const int count = value0 + value1 + value2 + value3 + value4;
 
             static_assert(count == 0 || count == 1, "Ambiguous serialization!");
 
-            static const bool value = value0 || value1 || value2 || value3;
+            static const bool value = value0 || value1 || value2 || value3 || value4;
         };
 
         template <typename T, typename IO, typename Context = EmptyContext>
@@ -151,6 +155,35 @@ namespace rocRoller
 
         template <typename T, typename IO, typename Context = EmptyContext>
         concept ValueType = !has_SerializationTraits<T, IO>::value;
+
+        template <typename T>
+        concept CHasFlowMember = requires
+        {
+            // clang-format off
+            { T::flow } -> std::convertible_to<bool>;
+            // clang-format on
+        };
+
+        template <typename T>
+        struct HasFlowValue
+        {
+            static const bool flow = false;
+        };
+
+        template <CHasFlowMember T>
+        struct HasFlowValue<T>
+        {
+            static const bool flow = T::flow;
+        };
+
+        /**
+         * Concept that will match a type that has a static `flow` member which is true. It will
+         * not match a type that has no such member, nor will it match if that member is set to
+         * false. It will also not cause an error if it's tested against a type that has no such
+         * member.
+         */
+        template <typename T>
+        concept CHasFlow = HasFlowValue<T>::flow;
 
     } // namespace Serialization
 } // namespace rocRoller

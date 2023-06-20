@@ -6,7 +6,6 @@
 #include <rocRoller/Graph/Hypergraph_fwd.hpp>
 
 #include "ControlEdge.hpp"
-#include "KernelGraph/ControlGraph/Operation_fwd.hpp"
 #include "Operation.hpp"
 
 namespace rocRoller
@@ -56,10 +55,9 @@ namespace rocRoller
         class ControlGraph : public Graph::Hypergraph<Operation, ControlEdge, false>
         {
         public:
-            ControlGraph()
-                : Graph::Hypergraph<Operation, ControlEdge, false>()
-            {
-            }
+            using Base = Graph::Hypergraph<Operation, ControlEdge, false>;
+
+            ControlGraph() = default;
 
             /**
              * @brief Get a node/edge from the control graph.
@@ -110,7 +108,19 @@ namespace rocRoller
              * Returns a string containing a text table describing the relationship between
              * all nodes in the graph.
              */
-            std::string nodeOrderTable() const;
+            std::string nodeOrderTableString() const;
+
+            /**
+             * Contains a map of every definite ordering between two nodes.
+             * Note that node pairs whose ordering is undefined will be missing from the cache.
+             * Also note that the entries are not duplicated for (nodeA, nodeB) and
+             * (nodeB, nodeA). Only the entry where the first node ID is the lower number
+             * will be present. The other entry can be obtained from opposite(nodeB, nodeA).
+             *
+             * Also, if a reference to the returned value is maintained through any changes
+             * to the graph, the returned map will be cleared.
+             */
+            std::map<std::pair<int, int>, NodeOrdering> const& nodeOrderTable() const;
 
         private:
             virtual void clearCache() override;
@@ -140,13 +150,6 @@ namespace rocRoller
                                  BRange const& nodesB,
                                  NodeOrdering  order) const;
 
-            /**
-             * When non-empty, will contain a map of every definite ordering between two nodes.
-             * Note that node pairs whose ordering is undefined will be missing from the cache.
-             * Also note that the entries are not duplicated for (nodeA, nodeB) and
-             * (nodeB, nodeA). Only the entry where the first node ID is the lower number
-             * will be present. The other entry can be obtained from opposite(nodeB, nodeA).
-             */
             mutable std::map<std::pair<int, int>, NodeOrdering> m_orderCache;
             /**
              * If an entry is present, the value will be the IDs of every descendent from the key,
@@ -154,6 +157,8 @@ namespace rocRoller
              */
             mutable std::map<int, std::set<int>> m_descendentCache;
         };
+
+        std::string name(ControlGraph::Element const& el);
 
         /**
          * @brief Determine if x holds an Operation of type T.
@@ -166,7 +171,6 @@ namespace rocRoller
          */
         template <typename T>
         bool isEdge(auto const& x);
-
     }
 }
 

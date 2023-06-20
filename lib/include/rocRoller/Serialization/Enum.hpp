@@ -38,22 +38,19 @@ namespace rocRoller
     {
         /**
          * Provides serialization for any enumeration type that adheres to the CCountedEnum concept;
-         * i.e. provides a Count value and toString.
+         * i.e. provides a Count value and toString (fromString() uses toString).
          */
-        template <CCountedEnum Enum, typename IO>
-        struct EnumTraits<Enum, IO>
+        template <CCountedEnum Enum>
+        struct ScalarTraits<Enum>
         {
-            using iot        = IOTraits<IO>;
-            using underlying = std::underlying_type_t<Enum>;
-
-            static void enumeration(IO& io, Enum& ref)
+            static std::string output(const Enum& value)
             {
-                for(int i = 0; i < static_cast<int>(Enum::Count); i++)
-                {
-                    auto value = static_cast<Enum>(i);
-                    auto str   = toString(value);
-                    iot::enumCase(io, ref, str.c_str(), value);
-                }
+                return toString(value);
+            }
+
+            static void input(std::string const& scalar, Enum& value)
+            {
+                value = fromString<Enum>(scalar);
             }
         };
 

@@ -79,18 +79,30 @@ namespace rocRoller
             template <CMappedType<EmitterOutput> T>
             void output(T& obj)
             {
+                using MyTraits = MappingTraits<T, EmitterOutput>;
+
+                if constexpr(CHasFlow<MyTraits>)
+                    emitter->SetMapFormat(YAML::Flow);
+                else
+                    emitter->SetMapFormat(YAML::Block);
+
                 *emitter << YAML::BeginMap;
                 EmptyContext ctx;
-                MappingTraits<T, EmitterOutput>::mapping(*this, obj, ctx);
+                MyTraits::mapping(*this, obj, ctx);
                 *emitter << YAML::EndMap;
             }
 
             template <EmptyMappedType<EmitterOutput> T>
             void output(T& obj)
             {
+                using MyTraits = MappingTraits<T, EmitterOutput>;
+                if constexpr(CHasFlow<MyTraits>)
+                    emitter->SetMapFormat(YAML::Flow);
+                else
+                    emitter->SetMapFormat(YAML::Block);
                 *emitter << YAML::BeginMap;
                 EmptyContext ctx;
-                MappingTraits<T, EmitterOutput>::mapping(*this, obj, ctx);
+                MyTraits::mapping(*this, obj, ctx);
                 *emitter << YAML::EndMap;
             }
 
@@ -106,6 +118,11 @@ namespace rocRoller
                 using ST = SequenceTraits<T, EmitterOutput>;
 
                 auto count = ST::size(*this, obj);
+                if constexpr(CHasFlow<ST>)
+                    emitter->SetSeqFormat(YAML::Flow);
+                else
+                    emitter->SetSeqFormat(YAML::Block);
+
                 *emitter << YAML::BeginSeq;
 
                 for(size_t i = 0; i < count; i++)
@@ -120,15 +137,21 @@ namespace rocRoller
             template <CustomMappingType<EmitterOutput> T>
             void output(T& obj)
             {
+                using MyTraits = CustomMappingTraits<T, EmitterOutput>;
+
+                if constexpr(CHasFlow<MyTraits>)
+                    emitter->SetMapFormat(YAML::Flow);
+                else
+                    emitter->SetMapFormat(YAML::Block);
                 *emitter << YAML::BeginMap;
-                CustomMappingTraits<T, EmitterOutput>::output(*this, obj, nullptr);
+                MyTraits::output(*this, obj, nullptr);
                 *emitter << YAML::EndMap;
             }
 
-            template <EnumType<EmitterOutput> T>
+            template <CHasScalarTraits T>
             void output(T& obj)
             {
-                *emitter << toString(obj);
+                *emitter << ScalarTraits<T>::output(obj);
             }
 
             constexpr bool outputting() const
@@ -276,11 +299,12 @@ namespace rocRoller
                 }
             }
 
-            template <EnumType<NodeInput> T>
+            template <CHasScalarTraits T>
             void input(YAML::Node& n, T& obj)
             {
-                NodeInput subInput(&n, context);
-                EnumTraits<T, NodeInput>::enumeration(subInput, obj);
+                std::string stringVal;
+                input(n, stringVal);
+                ScalarTraits<T>::input(stringVal, obj);
             }
 
             constexpr bool outputting() const

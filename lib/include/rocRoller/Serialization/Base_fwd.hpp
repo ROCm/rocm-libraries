@@ -23,7 +23,7 @@ namespace rocRoller
         template <typename T, typename IO>
         struct EnumTraits;
 
-        template <typename Object, typename IO>
+        template <typename Object, typename IO, typename Context>
         struct EmptyMappingTraits;
     }
 

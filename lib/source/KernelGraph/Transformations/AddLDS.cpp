@@ -267,14 +267,14 @@ namespace rocRoller
                 unrollCoordValue = getUnsignedInt(evaluate(setCoord->value));
             }
 
-            auto vtype = k.control.getNode<LoadTiled>(loadTag).vtype;
+            auto varType = k.control.getNode<LoadTiled>(loadTag).varType;
 
             return {userTag,
                     forLoopCoord,
                     unrollCoord,
                     unrollCoordValue,
                     operation,
-                    vtype,
+                    varType,
                     macroTile.memoryType};
         }
 
@@ -399,7 +399,7 @@ namespace rocRoller
                 {
                     // TODO: Only do the K-Loop for now
                     auto fl = kgraph.control.get<ForLoopOp>(*maybeForLoop);
-                    if(fl->name != rocRoller::KLOOP)
+                    if(fl->loopName != rocRoller::KLOOP)
                         continue;
 
                     auto forLoopCoord     = getForLoop(*maybeForLoop, kgraph);
@@ -645,13 +645,13 @@ namespace rocRoller
             {
                 auto [macroTileTag, macroTile] = k.getDimension<MacroTile>(loadTag);
 
-                auto vtype = k.control.getNode<LoadTiled>(loadTag).vtype;
+                auto varType = k.control.getNode<LoadTiled>(loadTag).varType;
                 if(macroTile.memoryType == MemoryType::WAVE_LDS)
                     macroTile.memoryType = MemoryType::WAVE;
                 else
                     macroTile.memoryType = MemoryType::VGPR;
 
-                k.control.setElement(loadTag, LoadLDSTile(vtype));
+                k.control.setElement(loadTag, LoadLDSTile(varType));
                 k.coordinates.setElement(k.mapper.get<MacroTile>(loadTag), macroTile);
                 k.mapper.connect<LDS>(loadTag, m_loadInfo.at(loadSpec).lds);
                 rocRoller::Log::getLogger()->debug(
@@ -1088,8 +1088,8 @@ namespace rocRoller
 
             AssertFatal(macroTile.memoryType == MemoryType::WAVE_LDS);
 
-            auto vtype = graph.control.getNode<LoadTiled>(loadTag).vtype;
-            int  user  = graph.mapper.get<User>(loadTag);
+            auto varType = graph.control.getNode<LoadTiled>(loadTag).varType;
+            int  user    = graph.mapper.get<User>(loadTag);
             auto sdims
                 = graph.coordinates.getOutputNodeIndices(user, CT::isEdge<Split>).to<std::vector>();
 
@@ -1118,7 +1118,7 @@ namespace rocRoller
             auto thrTileN               = 1;
 
             // Load multiple smaller-precision(< 32-bit) elements into 1 VGPR
-            auto packFactor = bytesPerRegister / DataTypeInfo::Get(vtype).elementSize;
+            auto packFactor = bytesPerRegister / DataTypeInfo::Get(varType).elementSize;
             bool packed     = false;
             if(m_context->kernelOptions().packMultipleElementsInto1VGPR && packFactor > 1
                && thrTileM % packFactor == 0)
@@ -1136,7 +1136,7 @@ namespace rocRoller
                 auto maxWidth = std::min(m_context->kernelOptions().loadGlobalWidth,
                                          m_context->kernelOptions().storeLocalWidth);
 
-                auto numDwordsPerElement = DataTypeInfo::Get(vtype).registerCount;
+                auto numDwordsPerElement = DataTypeInfo::Get(varType).registerCount;
 
                 updateThreadTileForLongDwords(thrTileM, thrTileN, maxWidth, numDwordsPerElement);
             }

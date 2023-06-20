@@ -61,7 +61,7 @@ namespace rocRoller
 
                 auto const& user = std::get<KernelGraph::CoordinateGraph::User>(node);
 
-                return user.argumentName() == argName;
+                return user.argumentName == argName;
             };
 
             auto coords = m_coords->findElements(predicate).to<std::vector>();

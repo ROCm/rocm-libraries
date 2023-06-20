@@ -121,10 +121,10 @@ namespace rocRollerTest
                 "3"[label="LoadLinear(3)"];
                 "4"[label="Body(4)",shape=box];
                 "5"[label="Body(5)",shape=box];
-                "6"[label="Assign Literal nullptr(6)"];
+                "6"[label="Assign Count nullptr(6)"];
                 "7"[label="Sequence(7)",shape=box];
                 "8"[label="Sequence(8)",shape=box];
-                "9"[label="Assign Literal nullptr(9)"];
+                "9"[label="Assign Count nullptr(9)"];
                 "10"[label="Sequence(10)",shape=box];
                 "11"[label="Sequence(11)",shape=box];
                 "12"[label="StoreLinear(12)"];
@@ -286,7 +286,8 @@ namespace rocRollerTest
                |   1   2   3   6   9  11  12  15  17  19  21  23  25  27  30  32  34  36
         ).";
 
-        EXPECT_EQ(NormalizedSource(expectedTable), NormalizedSource(control.nodeOrderTable()));
+        EXPECT_EQ(NormalizedSource(expectedTable),
+                  NormalizedSource(control.nodeOrderTableString()));
 
         // Include the graph here to make it easier to tell if there are any changes.
         std::string expected = R".(
@@ -296,35 +297,35 @@ namespace rocRollerTest
             "3"[label="LoadLinear(3)"];
             "4"[label="Body(4)",shape=box];
             "5"[label="Body(5)",shape=box];
-            "6"[label="Assign Literal nullptr(6)"];
+            "6"[label="Assign Count nullptr(6)"];
             "7"[label="Sequence(7)",shape=box];
             "8"[label="Sequence(8)",shape=box];
             "9"[label="ForLoopOp : nullptr(9)"];
             "10"[label="Sequence(10)",shape=box];
-            "11"[label="Assign Literal nullptr(11)"];
-            "12"[label="Assign Literal nullptr(12)"];
+            "11"[label="Assign Count nullptr(11)"];
+            "12"[label="Assign Count nullptr(12)"];
             "13"[label="Initialize(13)",shape=box];
             "14"[label="ForLoopIncrement(14)",shape=box];
             "15"[label="Scope(15)"];
             "16"[label="Body(16)",shape=box];
-            "17"[label="Assign Literal nullptr(17)"];
+            "17"[label="Assign Count nullptr(17)"];
             "18"[label="Body(18)",shape=box];
             "19"[label="LoadLinear(19)"];
             "20"[label="Sequence(20)",shape=box];
             "21"[label="Scope(21)"];
             "22"[label="Body(22)",shape=box];
-            "23"[label="Assign Literal nullptr(23)"];
+            "23"[label="Assign Count nullptr(23)"];
             "24"[label="Body(24)",shape=box];
             "25"[label="LoadLinear(25)"];
             "26"[label="Sequence(26)",shape=box];
-            "27"[label="Assign Literal nullptr(27)"];
+            "27"[label="Assign Count nullptr(27)"];
             "28"[label="Sequence(28)",shape=box];
             "29"[label="Sequence(29)",shape=box];
             "30"[label="StoreLinear(30)"];
             "31"[label="Sequence(31)",shape=box];
             "32"[label="Scope(32)"];
             "33"[label="Sequence(33)",shape=box];
-            "34"[label="Assign Literal nullptr(34)"];
+            "34"[label="Assign Count nullptr(34)"];
             "35"[label="Body(35)",shape=box];
             "36"[label="StoreLinear(36)"];
             "37"[label="Sequence(37)",shape=box];

@@ -17,5 +17,8 @@ namespace rocRoller
         template <typename T>
         concept CControlEdge = std::constructible_from<ControlEdge, T>;
 
+        template <typename T>
+        concept CConcreteControlEdge = (CControlEdge<T> && !std::same_as<ControlEdge, T>);
+
     }
 }

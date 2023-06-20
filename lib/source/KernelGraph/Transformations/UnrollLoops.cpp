@@ -36,7 +36,7 @@ namespace rocRoller
         {
             // Find the number of forLoops downstream from start
             auto forLoop = graph.control.get<ForLoopOp>(start);
-            return forLoop->name;
+            return forLoop->loopName;
         }
 
         /**

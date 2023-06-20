@@ -6,6 +6,7 @@
 
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/InstructionValues/Register_fwd.hpp>
+#include <rocRoller/Serialization/Base_fwd.hpp>
 
 #include "Dimension_fwd.hpp"
 
@@ -21,17 +22,8 @@ namespace rocRoller
         {
             Expression::ExpressionPtr size, stride;
 
-            BaseDimension()
-                : size(nullptr)
-                , stride(nullptr)
-            {
-            }
-
-            BaseDimension(Expression::ExpressionPtr size, Expression::ExpressionPtr stride)
-                : size(size)
-                , stride(stride)
-            {
-            }
+            BaseDimension() noexcept;
+            BaseDimension(Expression::ExpressionPtr size, Expression::ExpressionPtr stride);
 
             virtual std::string toString() const;
 
@@ -53,7 +45,7 @@ namespace rocRoller
          */
         struct Adhoc : public BaseDimension
         {
-            Adhoc() = delete;
+            Adhoc();
 
             /**
              * Create an Adhoc dimension with a specific name,
@@ -61,28 +53,19 @@ namespace rocRoller
              */
             Adhoc(std::string const&        name,
                   Expression::ExpressionPtr size,
-                  Expression::ExpressionPtr stride)
-                : BaseDimension(size, stride)
-                , m_name(name)
-            {
-                m_hash = std::hash<std::string>()(m_name);
-            }
+                  Expression::ExpressionPtr stride);
 
             /**
              * Create an Adhoc dimension with a specific name.
              */
-            Adhoc(std::string const& name)
-                : Adhoc(name, nullptr, nullptr)
-            {
-            }
+            Adhoc(std::string const& name);
 
-            std::string name() const override
-            {
-                return m_name;
-            }
+            std::string name() const override;
 
         private:
-            size_t      m_hash;
+            template <typename T1, typename T2, typename T3>
+            friend struct rocRoller::Serialization::MappingTraits;
+
             std::string m_name;
         };
 
@@ -97,24 +80,12 @@ namespace rocRoller
 
             SubDimension(int const                 dim,
                          Expression::ExpressionPtr size,
-                         Expression::ExpressionPtr stride)
-                : BaseDimension(size, stride)
-                , dim(dim)
-            {
-            }
+                         Expression::ExpressionPtr stride);
 
-            SubDimension(int const dim = 0)
-                : BaseDimension()
-                , dim(dim)
-            {
-            }
+            SubDimension(int const dim = 0);
 
             virtual std::string toString() const;
-
-            virtual std::string name() const
-            {
-                return "SubDimension";
-            }
+            virtual std::string name() const;
         };
 
         /**
@@ -125,32 +96,14 @@ namespace rocRoller
          */
         struct User : public BaseDimension
         {
+            std::string argumentName;
+
             using BaseDimension::BaseDimension;
 
-            User(std::string const& name)
-                : BaseDimension()
-                , m_argumentName(name)
-            {
-            }
+            User(std::string const& name);
+            User(std::string const& name, Expression::ExpressionPtr size);
 
-            User(std::string const& name, Expression::ExpressionPtr size)
-                : BaseDimension(size, Expression::literal(1u))
-                , m_argumentName(name)
-            {
-            }
-
-            std::string name() const override
-            {
-                return "User";
-            }
-
-            std::string argumentName() const
-            {
-                return m_argumentName;
-            }
-
-        private:
-            std::string m_argumentName;
+            std::string name() const override;
         };
 
         /**
@@ -158,12 +111,10 @@ namespace rocRoller
          */
         struct Linear : public BaseDimension
         {
+            static constexpr bool HasValue = false;
             using BaseDimension::BaseDimension;
 
-            std::string name() const override
-            {
-                return "Linear";
-            }
+            std::string name() const override;
         };
 
         /**
@@ -171,12 +122,10 @@ namespace rocRoller
          */
         struct Wavefront : public SubDimension
         {
+            static constexpr bool HasValue = false;
             using SubDimension::SubDimension;
 
-            std::string name() const override
-            {
-                return "Wavefront";
-            }
+            std::string name() const override;
         };
 
         /**
@@ -184,55 +133,41 @@ namespace rocRoller
          */
         struct Lane : public BaseDimension
         {
+            static constexpr bool HasValue = false;
             using BaseDimension::BaseDimension;
 
-            std::string name() const override
-            {
-                return "Lane";
-            }
+            std::string name() const override;
         };
 
         /**
          * Workgroup - typically represents workgroups on a GPU.
          *
-         * Sub-dimensions 0, 1, and 2 coorespond to the x, y and z
+         * Sub-dimensions 0, 1, and 2 correspond to the x, y and z
          * kernel launch dimensions.
          */
         struct Workgroup : public SubDimension
         {
-            Workgroup(int const dim = 0)
-                : SubDimension(dim)
-            {
-            }
+            static constexpr bool HasValue = false;
 
-            std::string name() const override
-            {
-                return "Workgroup";
-            }
+            Workgroup(int const dim = 0);
 
-            std::string toString() const override
-            {
-                return SubDimension::toString();
-            }
+            std::string name() const override;
         };
 
         /**
          * Workitem - typically represents threads within a workgroup.
          *
-         * Sub-dimensions 0, 1, and 2 coorespond to the x, y and z
+         * Sub-dimensions 0, 1, and 2 correspond to the x, y and z
          * kernel launch dimensions.
          */
         struct Workitem : public SubDimension
         {
-            Workitem(int const dim, Expression::ExpressionPtr size = nullptr)
-                : SubDimension(dim, size, Expression::literal(1u))
-            {
-            }
+            static constexpr bool HasValue = false;
 
-            std::string name() const override
-            {
-                return "Workitem";
-            }
+            Workitem();
+            Workitem(int const dim, Expression::ExpressionPtr size = nullptr);
+
+            std::string name() const override;
         };
 
         /**
@@ -240,32 +175,29 @@ namespace rocRoller
          */
         struct VGPR : public BaseDimension
         {
+            static constexpr bool HasValue = false;
+
             using BaseDimension::BaseDimension;
 
-            std::string name() const override
-            {
-                return "VGPR";
-            }
+            std::string name() const override;
         };
 
         struct VGPRBlockNumber : public BaseDimension
         {
+            static constexpr bool HasValue = false;
+
             using BaseDimension::BaseDimension;
 
-            std::string name() const override
-            {
-                return "VGPRBlockNumber";
-            }
+            std::string name() const override;
         };
 
         struct VGPRBlockIndex : public BaseDimension
         {
+            static constexpr bool HasValue = false;
+
             using BaseDimension::BaseDimension;
 
-            std::string name() const override
-            {
-                return "VGPRBlockIndex";
-            }
+            std::string name() const override;
         };
 
         /**
@@ -273,12 +205,11 @@ namespace rocRoller
          */
         struct LDS : public BaseDimension
         {
+            static constexpr bool HasValue = false;
+
             using BaseDimension::BaseDimension;
 
-            std::string name() const override
-            {
-                return "LDS";
-            }
+            std::string name() const override;
         };
 
         /**
@@ -286,51 +217,33 @@ namespace rocRoller
          */
         struct ForLoop : public BaseDimension
         {
+            static constexpr bool HasValue = false;
+
             using BaseDimension::BaseDimension;
 
-            std::string name() const override
-            {
-                return "ForLoop";
-            }
+            std::string name() const override;
         };
 
         struct Unroll : public BaseDimension
         {
-            Unroll()
-                : BaseDimension()
-            {
-            }
+            static constexpr bool HasValue = false;
 
-            Unroll(uint const usize)
-                : BaseDimension(nullptr, nullptr)
-            {
-                size   = rocRoller::Expression::literal(usize);
-                stride = rocRoller::Expression::literal(1);
-            }
+            Unroll();
+            Unroll(uint const usize);
+            Unroll(Expression::ExpressionPtr usize);
 
-            Unroll(Expression::ExpressionPtr usize)
-                : BaseDimension(nullptr, nullptr)
-            {
-                size   = usize;
-                stride = rocRoller::Expression::literal(1);
-            }
-
-            std::string name() const override
-            {
-                return "Unroll";
-            }
+            std::string name() const override;
         };
         /**
          * MacroTileIndex - sub-dimension of a tile.  See MacroTile.
          */
         struct MacroTileIndex : public SubDimension
         {
+            static constexpr bool HasValue = false;
+
             using SubDimension::SubDimension;
 
-            std::string name() const override
-            {
-                return "MacroTileIndex";
-            }
+            std::string name() const override;
         };
 
         /**
@@ -338,12 +251,11 @@ namespace rocRoller
          */
         struct MacroTileNumber : public SubDimension
         {
+            static constexpr bool HasValue = false;
+
             using SubDimension::SubDimension;
 
-            std::string name() const override
-            {
-                return "MacroTileNumber";
-            }
+            std::string name() const override;
         };
 
         /**
@@ -354,9 +266,9 @@ namespace rocRoller
          */
         struct MacroTile : public BaseDimension
         {
-            int        rank;
-            MemoryType memoryType;
-            LayoutType layoutType;
+            int        rank       = 0;
+            MemoryType memoryType = MemoryType::None;
+            LayoutType layoutType = LayoutType::None;
 
             std::vector<int> sizes;
 
@@ -370,41 +282,21 @@ namespace rocRoller
             /**
              * Construct MacroTile dimension with deferred rank etc.
              */
-            MacroTile()
-                : BaseDimension()
-                , rank(0)
-                , memoryType(MemoryType::None)
-                , layoutType(LayoutType::None)
-            {
-            }
+            MacroTile();
 
             /**
              * Construct MacroTile dimension with deferred sizes and
              * memory type.
              */
-            MacroTile(int const rank)
-                : BaseDimension()
-                , rank(rank)
-                , memoryType(MemoryType::None)
-                , layoutType(LayoutType::None)
-            {
-            }
+            MacroTile(int const rank);
 
             /**
              * Construct MacroTile dimension with fully specified sizes
              * and memory type (ie, LDS vs VGPR).
              */
             MacroTile(std::vector<int> const& sizes,
-                      MemoryType const        memoryType,
-                      std::vector<int> const& subTileSizes = {})
-                : BaseDimension()
-                , rank(sizes.size())
-                , sizes(sizes)
-                , memoryType(memoryType)
-                , layoutType(LayoutType::None)
-                , subTileSizes(subTileSizes)
-            {
-            }
+                      MemoryType              memoryType,
+                      std::vector<int> const& subTileSizes = {});
 
             /**
              * Construct MacroTile dimension with fully specified sizes,
@@ -416,45 +308,19 @@ namespace rocRoller
             MacroTile(std::vector<int> const& sizes,
                       LayoutType const        layoutType,
                       std::vector<int> const& subTileSizes = {},
-                      MemoryType const        memoryType   = MemoryType::WAVE)
-                : BaseDimension()
-                , rank(sizes.size())
-                , sizes(sizes)
-                , memoryType(memoryType)
-                , layoutType(layoutType)
-                , subTileSizes(subTileSizes)
-            {
-                if(this->memoryType == MemoryType::LDS)
-                    this->memoryType = MemoryType::WAVE_LDS;
-                AssertFatal(layoutType != LayoutType::None, "Invalid layout type.");
-            }
+                      MemoryType const        memoryType   = MemoryType::WAVE);
 
-            std::string toString() const override
-            {
-                if(!sizes.empty())
-                {
-                    std::string _sizes = "{";
-                    for(int s : sizes)
-                        _sizes += std::to_string(s) + ",";
-                    _sizes[_sizes.length() - 1] = '}';
-                    return name() + _sizes;
-                }
+            std::string toString() const override;
 
-                return BaseDimension::toString();
-            }
-
-            std::string name() const override
-            {
-                return "MacroTile";
-            }
+            std::string name() const override;
 
             /**
-             * Return MacroTileNumber cooresponding to sub-dimension `sdim` of this tile.
+             * Return MacroTileNumber corresponding to sub-dimension `sdim` of this tile.
              */
             MacroTileNumber tileNumber(int sdim) const;
 
             /**
-             * Return MacroTileIndex cooresponding to sub-dimension `sdim` of this tile.
+             * Return MacroTileIndex corresponding to sub-dimension `sdim` of this tile.
              */
             MacroTileIndex tileIndex(int sdim) const;
 
@@ -469,15 +335,12 @@ namespace rocRoller
          */
         struct ThreadTileIndex : public SubDimension
         {
-            ThreadTileIndex(int const dim, Expression::ExpressionPtr size = nullptr)
-                : SubDimension(dim, size, Expression::literal(1u))
-            {
-            }
+            static constexpr bool HasValue = false;
 
-            std::string name() const override
-            {
-                return "ThreadTileIndex";
-            }
+            ThreadTileIndex();
+            ThreadTileIndex(int const dim, Expression::ExpressionPtr size = nullptr);
+
+            std::string name() const override;
         };
 
         /**
@@ -485,15 +348,12 @@ namespace rocRoller
          */
         struct ThreadTileNumber : public SubDimension
         {
-            ThreadTileNumber(int const dim, Expression::ExpressionPtr size = nullptr)
-                : SubDimension(dim, size, Expression::literal(1u))
-            {
-            }
+            static constexpr bool HasValue = false;
 
-            std::string name() const override
-            {
-                return "ThreadTileNumber";
-            }
+            ThreadTileNumber();
+            ThreadTileNumber(int const dim, Expression::ExpressionPtr size = nullptr);
+
+            std::string name() const override;
         };
 
         /**
@@ -504,34 +364,20 @@ namespace rocRoller
          */
         struct ThreadTile : public BaseDimension
         {
-            int rank;
+            int rank = -1;
 
             // -1 is used to represent a "to be determined" size.
             std::vector<int> sizes;
             std::vector<int> wsizes;
 
-            ThreadTile() = delete;
-
+            ThreadTile();
             /**
              * Construct ThreadTile dimension with fully specified sizes
              * and memory type (ie, LDS vs VGPR).
              */
-            ThreadTile(MacroTile const& mac_tile)
-                : BaseDimension()
-                , rank(mac_tile.rank)
-                , sizes(mac_tile.subTileSizes)
-            {
-                wsizes.resize(rank);
-                for(int i = 0; i < rank; ++i)
-                {
-                    wsizes[i] = mac_tile.sizes[i] / sizes[i];
-                }
-            }
+            ThreadTile(MacroTile const& mac_tile);
 
-            std::string name() const override
-            {
-                return "ThreadTile";
-            }
+            std::string name() const override;
         };
 
         /**
@@ -539,12 +385,10 @@ namespace rocRoller
          */
         struct WaveTileIndex : public SubDimension
         {
+            static constexpr bool HasValue = false;
             using SubDimension::SubDimension;
 
-            std::string name() const override
-            {
-                return "WaveTileIndex";
-            }
+            std::string name() const override;
         };
 
         /**
@@ -552,12 +396,10 @@ namespace rocRoller
          */
         struct WaveTileNumber : public SubDimension
         {
+            static constexpr bool HasValue = false;
             using SubDimension::SubDimension;
 
-            std::string name() const override
-            {
-                return "WaveTileNumber";
-            }
+            std::string name() const override;
         };
 
         /**
@@ -565,55 +407,36 @@ namespace rocRoller
          */
         struct WaveTile : public BaseDimension
         {
-            int rank;
+            int rank = 0;
 
             std::vector<int>   sizes;
-            LayoutType         layout;
+            LayoutType         layout = LayoutType::None;
             Register::ValuePtr vgpr; // TODO: Does this belong here?  Move to "getVGPR"?
 
             /**
              * Construct WaveTile dimension with deferred rank and size.
              */
-            WaveTile()
-                : BaseDimension()
-                , rank(0)
-                , layout(LayoutType::None)
-            {
-            }
+            WaveTile();
 
             /**
              * Construct WaveTile dimension with deferred size and layout
              */
-            WaveTile(int const rank)
-                : BaseDimension()
-                , rank(rank)
-                , layout(LayoutType::None)
-            {
-            }
+            WaveTile(int const rank);
 
             /**
              * Construct WaveTile dimension with fully specified sizes.
              */
-            WaveTile(std::vector<int> const& sizes, LayoutType const layout)
-                : BaseDimension(Expression::literal(product(sizes)), Expression::literal(1u))
-                , rank(sizes.size())
-                , sizes(sizes)
-                , layout(layout)
-            {
-            }
+            WaveTile(std::vector<int> const& sizes, LayoutType layout);
 
-            std::string name() const override
-            {
-                return "WaveTile";
-            }
+            std::string name() const override;
 
             /**
-             * Return WaveTileNumber cooresponding to sub-dimension `sdim` of this tile.
+             * Return WaveTileNumber corresponding to sub-dimension `sdim` of this tile.
              */
             WaveTileNumber tileNumber(int const sdim) const;
 
             /**
-             * Return WaveTileIndex cooresponding to sub-dimension `sdim` of this tile.
+             * Return WaveTileIndex corresponding to sub-dimension `sdim` of this tile.
              */
             WaveTileIndex tileIndex(int const sdim) const;
 
@@ -628,12 +451,10 @@ namespace rocRoller
          */
         struct JammedWaveTileNumber : public SubDimension
         {
+            static constexpr bool HasValue = false;
             using SubDimension::SubDimension;
 
-            std::string name() const override
-            {
-                return "JammedWaveTileNumber";
-            }
+            std::string name() const override;
         };
 
         /**
@@ -641,15 +462,12 @@ namespace rocRoller
          */
         struct ElementNumber : public SubDimension
         {
-            ElementNumber(int const dim, Expression::ExpressionPtr size = nullptr)
-                : SubDimension(dim, size, Expression::literal(1u))
-            {
-            }
+            static constexpr bool HasValue = false;
 
-            std::string name() const override
-            {
-                return "ElementNumber";
-            }
+            ElementNumber();
+            ElementNumber(int const dim, Expression::ExpressionPtr size = nullptr);
+
+            std::string name() const override;
         };
 
         /*
@@ -659,6 +477,17 @@ namespace rocRoller
         inline std::string toString(const Dimension& x)
         {
             return std::visit([](const auto& a) { return a.toString(); }, x);
+        }
+
+        template <CConcreteDimension Dim>
+        inline std::string name(Dim const& d)
+        {
+            return d.name();
+        }
+
+        inline std::string name(const Dimension& x)
+        {
+            return std::visit([](const auto& a) { return a.name(); }, x);
         }
 
         template <typename T>

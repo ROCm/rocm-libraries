@@ -336,8 +336,7 @@ namespace rocRoller
                         co_yield Register::AllocateIfNeeded(bufferReg);
                         Register::ValuePtr basePointer;
                         auto               bufDesc = BufferDescriptor(bufferReg, m_context);
-                        co_yield m_context->argLoader()->getValue(user->argumentName(),
-                                                                  basePointer);
+                        co_yield m_context->argLoader()->getValue(user->argumentName, basePointer);
                         co_yield bufDesc.setBasePointer(basePointer);
                         co_yield bufDesc.setDefaultOpts();
                         Register::ValuePtr limitValue;
@@ -640,7 +639,7 @@ namespace rocRoller
                 MemoryInstructions::MemoryKind::Buffer,
                 m,
                 n,
-                load.vtype,
+                load.varType,
                 tag,
                 nullptr,
                 nullptr,
@@ -671,7 +670,7 @@ namespace rocRoller
                 MemoryInstructions::MemoryKind::Local,
                 m,
                 n,
-                load.vtype,
+                load.varType,
                 tag,
                 nullptr,
                 ldsOffset,
@@ -705,7 +704,7 @@ namespace rocRoller
                 MemoryInstructions::MemoryKind::Local,
                 1,
                 numVgpr,
-                load.vtype,
+                load.varType,
                 tag,
                 nullptr,
                 ldsOffset,
@@ -730,7 +729,7 @@ namespace rocRoller
                 MemoryInstructions::MemoryKind::Buffer,
                 1,
                 numVgpr,
-                load.vtype,
+                load.varType,
                 tag,
                 nullptr,
                 nullptr,
@@ -755,7 +754,7 @@ namespace rocRoller
                 MemoryInstructions::MemoryKind::Buffer,
                 numVgpr / 4,
                 4,
-                load.vtype,
+                load.varType,
                 tag,
                 nullptr,
                 nullptr,
@@ -836,8 +835,8 @@ namespace rocRoller
 
             // Temporary register(s) that is used to copy the data from global memory to
             // local memory.
-            auto vgpr  = m_context->registerTagManager()->getRegister(tileTag);
-            auto vtype = store.dataType;
+            auto vgpr     = m_context->registerTagManager()->getRegister(tileTag);
+            auto dataType = store.dataType;
 
             auto numElements = product(tile.subTileSizes) * m_workgroupSizeTotal;
             // Allocate LDS memory, and store the offset of the beginning of the allocation
@@ -845,7 +844,7 @@ namespace rocRoller
             Register::ValuePtr ldsAllocation;
             if(!m_context->registerTagManager()->hasRegister(ldsTag))
             {
-                ldsAllocation = Register::Value::AllocateLDS(m_context, vtype, numElements);
+                ldsAllocation = Register::Value::AllocateLDS(m_context, dataType, numElements);
                 m_context->registerTagManager()->addRegister(ldsTag, ldsAllocation);
             }
             else
@@ -861,7 +860,14 @@ namespace rocRoller
             auto const n           = getUnsignedInt(evaluate(elemY.size));
 
             co_yield moveTile<MemoryInstructions::MemoryDirection::Store>(
-                MemoryInstructions::MemoryKind::Local, m, n, vtype, tag, vgpr, ldsOffset, coords);
+                MemoryInstructions::MemoryKind::Local,
+                m,
+                n,
+                dataType,
+                tag,
+                vgpr,
+                ldsOffset,
+                coords);
         }
 
         Generator<Instruction> LoadStoreTileGenerator::storeMacroTileVGPR(int               tag,
@@ -904,7 +910,7 @@ namespace rocRoller
             auto macrotileNumElements    = product(macTile.sizes);
             auto [waveTileTag, waveTile] = m_graph->getDimension<WaveTile>(tag);
             uint waveTileNumElements     = waveTile.sizes[0] * waveTile.sizes[1];
-            auto vtype                   = store.dataType;
+            auto dataType                = store.dataType;
 
             // Allocate LDS memory, and store the offset of the beginning of the allocation
             // into ldsOffset.
@@ -912,7 +918,7 @@ namespace rocRoller
             if(!m_context->registerTagManager()->hasRegister(ldsTag))
             {
                 ldsAllocation
-                    = Register::Value::AllocateLDS(m_context, vtype, macrotileNumElements);
+                    = Register::Value::AllocateLDS(m_context, dataType, macrotileNumElements);
                 m_context->registerTagManager()->addRegister(ldsTag, ldsAllocation);
             }
             else
@@ -931,7 +937,7 @@ namespace rocRoller
                 MemoryInstructions::MemoryKind::Local,
                 numVgpr / 4,
                 4,
-                vtype,
+                dataType,
                 tag,
                 agpr,
                 ldsOffset,

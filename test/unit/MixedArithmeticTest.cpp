@@ -282,7 +282,8 @@ namespace MixedArithmeticTest
                     context, Register::Type::Vector, reg->variableType(), 1);
 
                 co_yield reg->allocate();
-                co_yield context->copier()->copy(reg, tmp, concatenate("Move ", name, " to VGPR"));
+                co_yield context->copier()->copy(
+                    reg, tmp, concatenate("Move ", tmp->name(), " to VGPR"));
             }
         }
     }

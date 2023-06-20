@@ -2,7 +2,10 @@
 
 #include "../DataTypes/DataTypes.hpp"
 
-#include "AssemblyKernel.hpp"
+#include <rocRoller/AssemblyKernelArgument.hpp>
+#include <rocRoller/KernelGraph/ControlGraph/Operation.hpp>
+#include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
+
 #include "Base.hpp"
 #include "Enum.hpp"
 #include "HasTraits.hpp"
@@ -14,22 +17,18 @@ namespace rocRoller
 {
     namespace Serialization
     {
-        template <typename IO>
-        struct MappingTraits<Expression::ExpressionPtr, IO, EmptyContext>
-            : public SharedPointerMappingTraits<Expression::ExpressionPtr, IO, EmptyContext>
+        static_assert(CNamedVariant<CommandArgumentValue>);
+        template <typename IO, typename Context>
+        struct MappingTraits<Expression::ExpressionPtr, IO, Context>
+            : public SharedPointerMappingTraits<Expression::ExpressionPtr, IO, Context, true>
         {
         };
 
-        template <typename IO>
-        struct MappingTraits<Expression::Expression, IO>
-            : public DefaultVariantMappingTraits<Expression::Expression, IO>
+        template <typename IO, typename Context>
+        struct MappingTraits<Expression::Expression, IO, Context>
+            : public DefaultVariantMappingTraits<Expression::Expression, IO, Context>
         {
         };
-
-        template <CNamedVariant T, typename IO, typename Context>
-        const typename DefaultVariantMappingTraits<T, IO, Context>::AlternativeMap
-            DefaultVariantMappingTraits<T, IO, Context>::alternatives
-            = DefaultVariantMappingTraits<T, IO, Context>::GetAlternatives();
 
         template <Expression::CBinary TExp, typename IO, typename Context>
         struct MappingTraits<TExp, IO, Context>
@@ -42,9 +41,11 @@ namespace rocRoller
                 iot::mapRequired(io, "rhs", exp.rhs, ctx);
             }
 
-            static std::enable_if_t<std::same_as<EmptyContext, Context>> mapping(IO& io, TExp& val)
+            static void mapping(IO& io, TExp& val)
             {
-                EmptyContext ctx;
+                AssertFatal((std::same_as<EmptyContext, Context>));
+
+                Context ctx;
                 mapping(io, val, ctx);
             }
         };
@@ -59,9 +60,11 @@ namespace rocRoller
                 iot::mapRequired(io, "arg", exp.arg, ctx);
             }
 
-            static std::enable_if_t<std::same_as<EmptyContext, Context>> mapping(IO& io, TExp& val)
+            static void mapping(IO& io, TExp& val)
             {
-                EmptyContext ctx;
+                AssertFatal((std::same_as<EmptyContext, Context>));
+
+                Context ctx;
                 mapping(io, val, ctx);
             }
         };
@@ -78,9 +81,11 @@ namespace rocRoller
                 iot::mapRequired(io, "r2hs", exp.r2hs, ctx);
             }
 
-            static std::enable_if_t<std::same_as<EmptyContext, Context>> mapping(IO& io, TExp& val)
+            static void mapping(IO& io, TExp& val)
             {
-                EmptyContext ctx;
+                AssertFatal((std::same_as<EmptyContext, Context>));
+
+                Context ctx;
                 mapping(io, val, ctx);
             }
         };
@@ -103,7 +108,7 @@ namespace rocRoller
                     typeName = name(val);
                 }
 
-                iot::mapRequired(io, "dataType", typeName, ctx);
+                iot::mapRequired(io, "dataType", typeName);
 
                 if(!iot::outputting(io))
                 {
@@ -116,20 +121,21 @@ namespace rocRoller
 
                         if constexpr(std::is_pointer_v<U>)
                         {
-                            Throw<FatalError>("Can't deserialize pointer values.");
+                            Throw<FatalError>("Can't (de)serialize pointer values.");
                         }
                         else
                         {
-                            iot::mapRequired(io, "value", theVal, ctx);
+                            iot::mapRequired(io, "value", theVal);
                         }
                     },
                     val);
             }
 
-            static std::enable_if_t<std::same_as<EmptyContext, Context>>
-                mapping(IO& io, CommandArgumentValue& val)
+            static void mapping(IO& io, CommandArgumentValue& val)
             {
-                EmptyContext ctx;
+                AssertFatal((std::same_as<EmptyContext, Context>));
+
+                Context ctx;
                 mapping(io, val, ctx);
             }
         };
@@ -164,10 +170,11 @@ namespace rocRoller
                 iot::mapRequired(io, "direction", direction);
             }
 
-            static std::enable_if_t<std::same_as<EmptyContext, Context>>
-                mapping(IO& io, CommandArgumentPtr& val)
+            static void mapping(IO& io, CommandArgumentPtr& val)
             {
-                EmptyContext ctx;
+                AssertFatal((std::same_as<EmptyContext, Context>));
+
+                Context ctx;
                 mapping(io, val, ctx);
             }
         };
@@ -184,66 +191,78 @@ namespace rocRoller
                 iot::mapRequired(io, "pointerType", val.pointerType, ctx);
             }
 
-            static std::enable_if_t<std::same_as<EmptyContext, Context>> mapping(IO&           io,
-                                                                                 VariableType& val)
+            static void mapping(IO& io, VariableType& val)
             {
-                EmptyContext ctx;
+                AssertFatal((std::same_as<EmptyContext, Context>));
+
+                Context ctx;
                 mapping(io, val, ctx);
             }
         };
 
         template <typename IO, typename Context>
-        struct MappingTraits<Register::ValuePtr, IO, Context>
+        struct MappingTraits<Register::Value, IO, Context>
         {
-            using iot = IOTraits<IO>;
+            static const bool flow = true;
+            using iot              = IOTraits<IO>;
 
-            static void mapping(IO& io, Register::ValuePtr& val, Context& ctx)
+            static void mapping(IO& io, Register::Value& val, Context& ctx)
             {
                 CommandArgumentValue literalVal;
 
                 if(iot::outputting(io))
                 {
-                    AssertFatal(val->regType() == Register::Type::Literal);
-                    literalVal = val->getLiteralValue();
+                    AssertFatal(val.regType() == Register::Type::Literal);
+                    literalVal = val.getLiteralValue();
                 }
 
                 iot::mapRequired(io, "literalValue", literalVal, ctx);
 
                 if(!iot::outputting(io))
                 {
-                    val = Register::Value::Literal(literalVal);
+                    val = *Register::Value::Literal(literalVal);
                 }
             }
 
-            static std::enable_if_t<std::same_as<EmptyContext, Context>>
-                mapping(IO& io, Register::ValuePtr& val)
+            static void mapping(IO& io, Register::Value& val)
             {
-                EmptyContext ctx;
+                AssertFatal((std::same_as<EmptyContext, Context>));
+
+                Context ctx;
                 mapping(io, val, ctx);
             }
         };
 
         template <typename IO, typename Context>
+        struct MappingTraits<Register::ValuePtr, IO, Context>
+            : public SharedPointerMappingTraits<Register::ValuePtr, IO, Context, true>
+        {
+            static const bool flow = true;
+        };
+
+        template <typename IO, typename Context>
         struct MappingTraits<AssemblyKernelArgumentPtr, IO, Context>
         {
-            using iot = IOTraits<IO>;
+            static const bool flow = true;
+            using iot              = IOTraits<IO>;
 
             static void mapping(IO& io, AssemblyKernelArgumentPtr& val, Context& ctx)
             {
                 AssertFatal(iot::outputting(io));
 
-                iot::mapRequired(io, "name", val->name, ctx);
-                iot::mapRequired(io, "variableType", val->variableType, ctx);
-                iot::mapRequired(io, "dataDirection", val->dataDirection, ctx);
-                iot::mapRequired(io, "expression", val->expression, ctx);
-                iot::mapRequired(io, "offset", val->offset, ctx);
-                iot::mapRequired(io, "size", val->size, ctx);
+                iot::mapRequired(io, "name", val->name);
+                iot::mapRequired(io, "variableType", val->variableType);
+                iot::mapRequired(io, "dataDirection", val->dataDirection);
+                iot::mapRequired(io, "expression", val->expression);
+                iot::mapRequired(io, "offset", val->offset);
+                iot::mapRequired(io, "size", val->size);
             }
 
-            static std::enable_if_t<std::same_as<EmptyContext, Context>>
-                mapping(IO& io, AssemblyKernelArgumentPtr& val)
+            static void mapping(IO& io, AssemblyKernelArgumentPtr& val)
             {
-                EmptyContext ctx;
+                AssertFatal((std::same_as<EmptyContext, Context>));
+
+                Context ctx;
                 mapping(io, val, ctx);
             }
         };
@@ -251,19 +270,21 @@ namespace rocRoller
         template <typename IO, typename Context>
         struct MappingTraits<Expression::DataFlowTag, IO, Context>
         {
-            using iot = IOTraits<IO>;
+            static const bool flow = true;
+            using iot              = IOTraits<IO>;
 
             static void mapping(IO& io, Expression::DataFlowTag& val, Context& ctx)
             {
-                iot::mapRequired(io, "tag", val.tag, ctx);
-                iot::mapRequired(io, "regType", val.regType, ctx);
-                iot::mapRequired(io, "varType", val.varType, ctx);
+                iot::mapRequired(io, "tag", val.tag);
+                iot::mapRequired(io, "regType", val.regType);
+                iot::mapRequired(io, "varType", val.varType);
             }
 
-            static std::enable_if_t<std::same_as<EmptyContext, Context>>
-                mapping(IO& io, Expression::DataFlowTag& val)
+            static void mapping(IO& io, Expression::DataFlowTag& val)
             {
-                EmptyContext ctx;
+                AssertFatal((std::same_as<EmptyContext, Context>));
+
+                Context ctx;
                 mapping(io, val, ctx);
             }
         };
@@ -271,36 +292,29 @@ namespace rocRoller
         template <typename IO, typename Context>
         struct MappingTraits<Expression::WaveTilePtr, IO, Context>
         {
-            using iot = IOTraits<IO>;
+            static const bool flow = true;
+            using iot              = IOTraits<IO>;
 
             static void mapping(IO& io, Expression::WaveTilePtr& val, Context& ctx)
             {
                 AssertFatal(iot::outputting(io));
 
-                iot::mapRequired(io, "size", val->size, ctx);
-                iot::mapRequired(io, "stride", val->stride, ctx);
-                iot::mapRequired(io, "rank", val->rank, ctx);
-                iot::mapRequired(io, "sizes", val->sizes, ctx);
-                iot::mapRequired(io, "layout", val->layout, ctx);
-                iot::mapRequired(io, "vgpr", val->vgpr, ctx);
+                iot::mapRequired(io, "size", val->size);
+                iot::mapRequired(io, "stride", val->stride);
+                iot::mapRequired(io, "rank", val->rank);
+                iot::mapRequired(io, "sizes", val->sizes);
+                iot::mapRequired(io, "layout", val->layout);
+                iot::mapRequired(io, "vgpr", val->vgpr);
             }
 
-            static std::enable_if_t<std::same_as<EmptyContext, Context>>
-                mapping(IO& io, Expression::WaveTilePtr& val)
+            static void mapping(IO& io, Expression::WaveTilePtr& val)
             {
-                EmptyContext ctx;
+                AssertFatal((std::same_as<EmptyContext, Context>));
+
+                Context ctx;
                 mapping(io, val, ctx);
             }
         };
 
-    } // namespace Serialization
-} // namespace Tensile
-
-#ifdef ROCROLLER_USE_LLVM
-static_assert(
-    rocRoller::Serialization::CMappedType<rocRoller::Expression::ExpressionPtr, llvm::yaml::IO>);
-static_assert(
-    rocRoller::Serialization::has_SerializationTraits<rocRoller::Expression::ExpressionPtr,
-                                                      llvm::yaml::IO>::value);
-static_assert(!llvm::yaml::has_FlowTraits<rocRoller::Expression::ExpressionPtr>::value);
-#endif
+    }
+}

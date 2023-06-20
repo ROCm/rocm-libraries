@@ -42,13 +42,13 @@ namespace rocRoller
         void reserve(size_t bytes, size_t count);
 
         template <typename T>
-        void append(std::string const& name, T value);
+        void append(std::string const& argName, T value);
 
         template <typename T>
-        void appendUnbound(std::string const& name);
+        void appendUnbound(std::string const& argName);
 
         template <typename T>
-        void bind(std::string const& name, T value);
+        void bind(std::string const& argName, T value);
 
         bool isFullyBound() const;
 
@@ -75,7 +75,7 @@ namespace rocRoller
             using reference         = ArgPair const&;
 
             explicit const_iterator(KernelArguments const& args);
-            const_iterator(KernelArguments const& args, std::string const& name);
+            const_iterator(KernelArguments const& args, std::string const& argName);
             const_iterator(const const_iterator& other) = default;
             const_iterator& operator++();
             const_iterator  operator++(int);
@@ -114,12 +114,12 @@ namespace rocRoller
         void alignTo(size_t alignment);
 
         template <typename T>
-        void append(std::string const& name, T value, bool bound);
+        void append(std::string const& argName, T value, bool bound);
 
         template <typename T>
         std::string stringForValue(T value, bool bound) const;
 
-        void appendRecord(std::string const& name, Arg record);
+        void appendRecord(std::string const& argName, Arg record);
 
         template <typename T>
         void writeValue(size_t offset, T value);

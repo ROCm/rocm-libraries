@@ -4,6 +4,9 @@
 
 #include "CoordinateEdge_fwd.hpp"
 
+#include <rocRoller/KernelGraph/StructUtils.hpp>
+#include <rocRoller/Utilities/Utils.hpp>
+
 namespace rocRoller
 {
     namespace KernelGraph::CoordinateGraph
@@ -29,37 +32,20 @@ namespace rocRoller
         /**
          * DataFlow - used to denote data flow.
          */
-        struct DataFlow
-        {
-            virtual std::string toString() const
-            {
-                return "DataFlow";
-            }
-        };
+        RR_EMPTY_STRUCT_WITH_NAME(DataFlow);
 
         /**
          * Buffer - denotes SRD for MUBUF instructions
          */
-        struct Buffer
-        {
-            virtual std::string toString() const
-            {
-                return "Buffer";
-            }
-        };
+        RR_EMPTY_STRUCT_WITH_NAME(Buffer);
+
         /**
          * Offset - denotes offset between target/increment
          * dimensions.
          *
          * See ComputeIndex.
          */
-        struct Offset
-        {
-            virtual std::string toString() const
-            {
-                return "Offset";
-            }
-        };
+        RR_EMPTY_STRUCT_WITH_NAME(Offset);
 
         /**
          * Stride - denotes stride between target/increment
@@ -67,13 +53,7 @@ namespace rocRoller
          *
          * See ComputeIndex.
          */
-        struct Stride
-        {
-            virtual std::string toString() const
-            {
-                return "Stride";
-            }
-        };
+        RR_EMPTY_STRUCT_WITH_NAME(Stride);
 
         /**
          * Construct MacroTile.
@@ -81,13 +61,7 @@ namespace rocRoller
          * Joins SubDimensions to MacroTile during translation and
          * lowering.  Should not persist.
          */
-        struct ConstructMacroTile
-        {
-            std::string toString() const
-            {
-                return "ConstructTensorTile";
-            }
-        };
+        RR_EMPTY_STRUCT_WITH_NAME(ConstructMacroTile);
 
         /**
          * Destruct MacroTile.
@@ -95,13 +69,7 @@ namespace rocRoller
          * Splits MacroTile into SubDimensions during translation and
          * lowering.  Should not persist.
          */
-        struct DestructMacroTile
-        {
-            std::string toString() const
-            {
-                return "DestructTensorTile";
-            }
-        };
+        RR_EMPTY_STRUCT_WITH_NAME(DestructMacroTile);
 
         /**
          * Flatten dimensions (row-major, contiguous storage).
@@ -124,13 +92,7 @@ namespace rocRoller
          *   Flatten'(O; I, J)(o) = { o / n_j, o % n_j }.
          *
          */
-        struct Flatten
-        {
-            std::string toString() const
-            {
-                return "Flatten";
-            }
-        };
+        RR_EMPTY_STRUCT_WITH_NAME(Flatten);
 
         /**
          * Forget (drop) dimensions.
@@ -141,13 +103,7 @@ namespace rocRoller
          *
          * Forward and reverse transforms aren't defined.
          */
-        struct Forget
-        {
-            std::string toString() const
-            {
-                return "Forget";
-            }
-        };
+        RR_EMPTY_STRUCT_WITH_NAME(Forget);
 
         /**
          * Inherit dimension(s).
@@ -161,13 +117,7 @@ namespace rocRoller
          * indexes.  The reverse coordinate transform returns the
          * source indexes.
          */
-        struct Inherit
-        {
-            std::string toString() const
-            {
-                return "Inherit";
-            }
-        };
+        RR_EMPTY_STRUCT_WITH_NAME(Inherit);
 
         /**
          * Join dimensions (forward version of Split).
@@ -186,37 +136,19 @@ namespace rocRoller
          *   Join(I, J; F)(i, j) = i * s_i + j * s_j
          *
          */
-        struct Join
-        {
-            std::string toString() const
-            {
-                return "Join";
-            }
-        };
+        RR_EMPTY_STRUCT_WITH_NAME(Join);
 
         /**
          * Make output (subsequent dims should be tagged as output).
          */
-        struct MakeOutput
-        {
-            std::string toString() const
-            {
-                return "MakeOutput";
-            }
-        };
+        RR_EMPTY_STRUCT_WITH_NAME(MakeOutput);
 
         /**
          * PassThrough (identity).
          *
          * Forward and reverse transforms are the identity.
          */
-        struct PassThrough
-        {
-            std::string toString() const
-            {
-                return "PassThrough";
-            }
-        };
+        RR_EMPTY_STRUCT_WITH_NAME(PassThrough);
 
         /**
          * Split a tensor into subdimensions.
@@ -235,13 +167,7 @@ namespace rocRoller
          *   Split'(I, J; F)(i, j) = i * s_i + j * s_j
          *
          */
-        struct Split
-        {
-            std::string toString() const
-            {
-                return "Split";
-            }
-        };
+        RR_EMPTY_STRUCT_WITH_NAME(Split);
 
         /**
          * Tile a dimension.
@@ -263,13 +189,7 @@ namespace rocRoller
          *
          *   Tile'(B, T; I)(b, t) = b * 64 + t
          */
-        struct Tile
-        {
-            std::string toString() const
-            {
-                return "Tile";
-            }
-        };
+        RR_EMPTY_STRUCT_WITH_NAME(Tile);
 
         /*
          * Helpers
@@ -280,14 +200,44 @@ namespace rocRoller
             return std::visit([](const auto& a) { return a.toString(); }, x);
         }
 
+        template <CConcreteCoordinateTransformEdge T>
+        inline std::string name(T const& x)
+        {
+            return x.toString();
+        }
+
+        inline std::string name(const CoordinateTransformEdge& x)
+        {
+            return toString(x);
+        }
+
         inline std::string toString(const DataFlowEdge& x)
         {
             return std::visit([](const auto& a) { return a.toString(); }, x);
         }
 
+        template <CConcreteDataFlowEdge T>
+        inline std::string name(T const& x)
+        {
+            return x.toString();
+        }
+
+        inline std::string name(const DataFlowEdge& x)
+        {
+            return toString(x);
+        }
+
         inline std::string toString(const Edge& x)
         {
             return std::visit([](const auto& a) { return toString(a); }, x);
+        }
+
+        inline std::string name(Edge const& x)
+        {
+            return std::visit(
+                rocRoller::overloaded{[](const CoordinateTransformEdge&) { return "Transform"; },
+                                      [](const DataFlowEdge&) { return "DataFlow"; }},
+                x);
         }
 
         template <typename T>

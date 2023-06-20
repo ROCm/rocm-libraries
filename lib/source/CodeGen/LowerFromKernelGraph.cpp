@@ -528,12 +528,12 @@ namespace rocRoller
                     vgprTag);
 
                 auto dst = m_context->registerTagManager()->getRegister(
-                    vgprTag, Register::Type::Vector, load.vtype.dataType);
+                    vgprTag, Register::Type::Vector, load.varType.dataType);
                 co_yield Register::AllocateIfNeeded(dst);
 
                 if(load.scalar)
                 {
-                    if(load.vtype.isPointer())
+                    if(load.varType.isPointer())
                         co_yield loadVGPRFromScalarPointer(user, dst, coords);
                     else
                         co_yield loadVGPRFromScalarValue(user, dst, coords);
@@ -552,7 +552,7 @@ namespace rocRoller
                 co_yield Instruction::Comment("GEN: LoadVGPR; scalar value");
 
                 Register::ValuePtr s_value;
-                co_yield m_context->argLoader()->getValue(user.argumentName(), s_value);
+                co_yield m_context->argLoader()->getValue(user.argumentName, s_value);
                 co_yield m_context->copier()->copy(vgpr, s_value, "Move value");
             }
 
@@ -567,7 +567,7 @@ namespace rocRoller
 
                 {
                     Register::ValuePtr sPtr;
-                    co_yield m_context->argLoader()->getValue(user.argumentName(), sPtr);
+                    co_yield m_context->argLoader()->getValue(user.argumentName, sPtr);
                     co_yield m_context->copier()->ensureType(vPtr, sPtr, Register::Type::Vector);
                 }
 
@@ -593,7 +593,7 @@ namespace rocRoller
 
                 {
                     Register::ValuePtr sPtr;
-                    co_yield m_context->argLoader()->getValue(user.argumentName(), sPtr);
+                    co_yield m_context->argLoader()->getValue(user.argumentName, sPtr);
                     co_yield m_context->copier()->ensureType(vPtr, sPtr, Register::Type::Vector);
                 }
 
@@ -693,7 +693,7 @@ namespace rocRoller
 
                 {
                     Register::ValuePtr sPtr;
-                    co_yield m_context->argLoader()->getValue(user.argumentName(), sPtr);
+                    co_yield m_context->argLoader()->getValue(user.argumentName, sPtr);
                     co_yield m_context->copier()->ensureType(vPtr, sPtr, Register::Type::Vector);
                 }
 

@@ -40,6 +40,15 @@ namespace rocRoller
         }
 
         template <typename Node, typename Edge, bool Hyper>
+        std::string Hypergraph<Node, Edge, Hyper>::ElementName(
+            typename Hypergraph<Node, Edge, Hyper>::Element const& el)
+        {
+            return std::visit(rocRoller::overloaded{[](Node const&) { return "Node"; },
+                                                    [](Edge const&) { return "Edge"; }},
+                              el);
+        }
+
+        template <typename Node, typename Edge, bool Hyper>
         constexpr inline bool
             Hypergraph<Node, Edge, Hyper>::Location::operator==(Location const& rhs) const
         {
