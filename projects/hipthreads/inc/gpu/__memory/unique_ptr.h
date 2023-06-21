@@ -249,8 +249,12 @@ class _LIBGPU_UNIQUE_PTR_TRIVIAL_ABI _LIBGPU_TEMPLATE_VIS unique_ptr {
     __host__ _LIBGPU_INLINE_VISIBILITY unique_ptr(std::unique_ptr<_Up> &&__u)
         : __ptr_(static_cast<pointer>(gpu::malloc(sizeof(element_type) == 0 ? 1 : sizeof(element_type))),
                  __value_init_tag()) {
-        __LIBGPU_HIP_CHECK__(
-            hipMemcpy(__ptr_.first(), static_cast<pointer>(__u.get()), sizeof(element_type), hipMemcpyHostToDevice));
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wold-style-cast" // Suppress "old-style-cast" warnings because hipStreamPerThread uses one
+        __LIBGPU_HIP_CHECK__(hipMemcpyAsync(__ptr_.first(), static_cast<pointer>(__u.get()), sizeof(element_type),
+                                            hipMemcpyHostToDevice, hipStreamPerThread));
+        __LIBGPU_HIP_CHECK__(hipStreamSynchronize(hipStreamPerThread));
+#pragma clang diagnostic pop
         // Avoid calling any destructor by calling `operator delete` directly instead of using a delete-expression. This
         // isn't strictly necessary since TriviallyCopyable implies a trivial deleter.
         // Note that we also aren't invoking the gpu::unique_ptr's deleter. Even if we allowed a deleter other than
@@ -273,7 +277,12 @@ class _LIBGPU_UNIQUE_PTR_TRIVIAL_ABI _LIBGPU_TEMPLATE_VIS unique_ptr {
     __host__ _LIBGPU_INLINE_VISIBILITY operator std::unique_ptr<_Up>() && {
         // Avoid calling any constructor by calling `operator new` directly instead of using a new-expression.
         void* __buf = operator new(sizeof(element_type));
-        __LIBGPU_HIP_CHECK__(hipMemcpy(__buf, __ptr_.first(), sizeof(element_type), hipMemcpyDeviceToHost));
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wold-style-cast" // Suppress "old-style-cast" warnings because hipStreamPerThread uses one
+        __LIBGPU_HIP_CHECK__(
+            hipMemcpyAsync(__buf, __ptr_.first(), sizeof(element_type), hipMemcpyDeviceToHost, hipStreamPerThread));
+        __LIBGPU_HIP_CHECK__(hipStreamSynchronize(hipStreamPerThread));
+#pragma clang diagnostic pop
         // Even if we allowed a deleter other than gpu::host_delete, we wouldn't want to invoke it here because we're
         // only "moving" the object.
         gpu::free(release());
@@ -315,7 +324,11 @@ class _LIBGPU_UNIQUE_PTR_TRIVIAL_ABI _LIBGPU_TEMPLATE_VIS unique_ptr {
         // Avoid calling any constructor of element_type by using a char buffer for storage.
         char __buf[sizeof(element_type)];
         __host__ _LIBGPU_INLINE_VISIBILITY MemberAccessHelper(pointer __p) {
-            __LIBGPU_HIP_CHECK__(hipMemcpy(__buf, __p, sizeof(element_type), hipMemcpyDeviceToHost));
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wold-style-cast" // Suppress "old-style-cast" warnings because hipStreamPerThread uses one
+            __LIBGPU_HIP_CHECK__(hipMemcpyAsync(__buf, __p, sizeof(element_type), hipMemcpyDeviceToHost, hipStreamPerThread));
+            __LIBGPU_HIP_CHECK__(hipStreamSynchronize(hipStreamPerThread));
+#pragma clang diagnostic pop
         }
         __host__ _LIBGPU_INLINE_VISIBILITY typename std::add_const<element_type>::type get() _NOEXCEPT {
             // We use std::move to avoid calling any constructors (the dereference operation produces an lvalue).
@@ -498,8 +511,12 @@ class _LIBGPU_UNIQUE_PTR_TRIVIAL_ABI _LIBGPU_TEMPLATE_VIS unique_ptr<_Tp[], _Dp>
                                               std::is_same<deleter_type, gpu::host_delete<element_type[]>>::value>::type>
     __host__ _LIBGPU_INLINE_VISIBILITY unique_ptr(std::unique_ptr<_Up> &&__u, std::size_t __n)
         : __ptr_(static_cast<pointer>(gpu::malloc(sizeof(element_type[__n]) == 0 ? 1 : sizeof(element_type[__n]))), __value_init_tag()) {
-        __LIBGPU_HIP_CHECK__(
-            hipMemcpy(__ptr_.first(), static_cast<pointer>(__u.get()), sizeof(element_type[__n]), hipMemcpyHostToDevice));
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wold-style-cast" // Suppress "old-style-cast" warnings because hipStreamPerThread uses one
+        __LIBGPU_HIP_CHECK__(hipMemcpyAsync(__ptr_.first(), static_cast<pointer>(__u.get()), sizeof(element_type[__n]),
+                                            hipMemcpyHostToDevice, hipStreamPerThread));
+        __LIBGPU_HIP_CHECK__(hipStreamSynchronize(hipStreamPerThread));
+#pragma clang diagnostic pop
         // Avoid calling any destructor by calling `operator delete[]` directly instead of using a delete-expression. This
         // isn't strictly necessary since TriviallyCopyable implies a trivial deleter.
         // Note that we also aren't invoking the gpu::unique_ptr's deleter. Even if we allowed a deleter other than
@@ -516,7 +533,11 @@ class _LIBGPU_UNIQUE_PTR_TRIVIAL_ABI _LIBGPU_TEMPLATE_VIS unique_ptr<_Tp[], _Dp>
     __host__ _LIBGPU_INLINE_VISIBILITY std::unique_ptr<_Up[]> move_to_host(std::size_t __n) && {
         // Avoid calling any constructor by calling `operator new[]` directly instead of using a new-expression
         void* __buf = operator new[](sizeof(element_type[__n]));
-        __LIBGPU_HIP_CHECK__(hipMemcpy(__buf, __ptr_.first(), sizeof(element_type[__n]), hipMemcpyDeviceToHost));
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wold-style-cast" // Suppress "old-style-cast" warnings because hipStreamPerThread uses one
+        __LIBGPU_HIP_CHECK__(hipMemcpyAsync(__buf, __ptr_.first(), sizeof(element_type[__n]), hipMemcpyDeviceToHost, hipStreamPerThread));
+        __LIBGPU_HIP_CHECK__(hipStreamSynchronize(hipStreamPerThread));
+#pragma clang diagnostic pop
         // Even if we allowed a deleter other than gpu::host_delete, we wouldn't want to invoke it here because we're
         // only "moving" the object.
         gpu::free(release());
@@ -768,7 +789,11 @@ make_unique(_T2 &&__arg) {
     static_assert(std::is_trivially_constructible<_T1, __RefType>::value,
                   "Host code can't invoke a non-trivial constructor for objects in device memory");
     void *__buf = gpu::malloc(sizeof(_T1) == 0 ? 1 : sizeof(_T1));
-    __LIBGPU_HIP_CHECK__(hipMemcpy(__buf, &__arg, sizeof(_T1), hipMemcpyHostToDevice));
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wold-style-cast" // Suppress "old-style-cast" warnings because hipStreamPerThread uses one
+    __LIBGPU_HIP_CHECK__(hipMemcpyAsync(__buf, &__arg, sizeof(_T1), hipMemcpyHostToDevice, hipStreamPerThread));
+    __LIBGPU_HIP_CHECK__(hipStreamSynchronize(hipStreamPerThread));
+#pragma clang diagnostic pop
     return unique_ptr<_T1, host_delete<_T1>>(static_cast<_T1 *>(__buf));
 }
 
