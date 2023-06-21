@@ -128,7 +128,7 @@ namespace MatrixMultiplyTest
         auto mac_tile_0 = KernelGraph::CoordinateGraph::MacroTile({mac_m, mac_k},
                                                                   LayoutType::MATRIX_A,
                                                                   {wave_m, wave_n, wave_k, wave_b},
-                                                                  MemoryType::LDS);
+                                                                  MemoryType::WAVE_LDS);
         auto mac_tile_1 = KernelGraph::CoordinateGraph::MacroTile(
             {mac_k, mac_n}, LayoutType::MATRIX_B, {wave_m, wave_n, wave_k, wave_b});
         auto mac_tile_2 = KernelGraph::CoordinateGraph::MacroTile(
@@ -139,22 +139,7 @@ namespace MatrixMultiplyTest
         params->setDimensionInfo(15, mac_tile_2);
 
         auto postParams = std::make_shared<CommandParameters>();
-
-        auto four = Expression::literal(4u);
-        auto two  = Expression::literal(2u);
-        auto one  = Expression::literal(1u);
-
-        auto WF  = KernelGraph::CoordinateGraph::Wavefront(-1, four, one);
-        auto WFX = KernelGraph::CoordinateGraph::Wavefront(0, two, one);
-        auto WFY = KernelGraph::CoordinateGraph::Wavefront(1, two, one);
-
-        std::vector<int> wavefront_ids = {40, 73, 114};
-        for(auto id : wavefront_ids)
-        {
-            postParams->setDimensionInfo(id, WF);
-            postParams->setDimensionInfo(id - 2, WFX);
-            postParams->setDimensionInfo(id - 1, WFY);
-        }
+        postParams->setManualWavefrontCount({2u, 2u});
 
         commandKernel = std::make_shared<CommandKernel>(
             command, "MatrixMultiplyMacroTile", params, postParams, kernelOptions);
@@ -321,21 +306,7 @@ namespace MatrixMultiplyTest
         params->setDimensionInfo(15, mac_tile_C);
 
         auto postParams = std::make_shared<CommandParameters>();
-
-        auto four = Expression::literal(4u);
-        auto two  = Expression::literal(2u);
-        auto one  = Expression::literal(1u);
-        auto WF   = KernelGraph::CoordinateGraph::Wavefront(-1, four, one);
-        auto WFX  = KernelGraph::CoordinateGraph::Wavefront(0, two, nullptr);
-        auto WFY  = KernelGraph::CoordinateGraph::Wavefront(1, two, nullptr);
-
-        std::vector<int> wavefront_ids = {40, 73, 114};
-        for(auto id : wavefront_ids)
-        {
-            postParams->setDimensionInfo(id, WF);
-            postParams->setDimensionInfo(id - 2, WFX);
-            postParams->setDimensionInfo(id - 1, WFY);
-        }
+        postParams->setManualWavefrontCount({2u, 2u});
 
         CommandKernel commandKernel(command, "MatrixMultiplyAB", params, postParams);
         commandKernel.launchKernel(runtimeArgs.runtimeArguments());
@@ -476,22 +447,7 @@ namespace MatrixMultiplyTest
         params->setDimensionInfo(24, mac_tile_2);
 
         auto postParams = std::make_shared<CommandParameters>();
-
-        auto four = Expression::literal(4u);
-        auto two  = Expression::literal(2u);
-        auto one  = Expression::literal(1u);
-
-        auto WF  = KernelGraph::CoordinateGraph::Wavefront(-1, four, one);
-        auto WFX = KernelGraph::CoordinateGraph::Wavefront(0, two, one);
-        auto WFY = KernelGraph::CoordinateGraph::Wavefront(1, two, one);
-
-        std::vector<int> wavefront_ids = {48, 81, 114, 163};
-        for(auto id : wavefront_ids)
-        {
-            postParams->setDimensionInfo(id, WF);
-            postParams->setDimensionInfo(id - 2, WFX);
-            postParams->setDimensionInfo(id - 1, WFY);
-        }
+        postParams->setManualWavefrontCount({2u, 2u});
 
         params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
         params->setManualWorkitemCount({NX, NY, NZ});

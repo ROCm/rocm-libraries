@@ -189,10 +189,8 @@ namespace rocRoller
 
                 // Does the coordinate transform for the write
                 // operation contain the loop iteration?
-
-                auto [target, direction] = getOperationTarget(*writeOperation, kgraph);
-                auto [required, path]    = findRequiredCoordinates(target, direction, kgraph);
-                if(required.size() == 0)
+                auto [required, path] = findAllRequiredCoordinates(*writeOperation, kgraph);
+                if(required.empty())
                 {
                     // Local variable
                     loopCarriedDependencies.erase(coordinate);
@@ -295,15 +293,14 @@ namespace rocRoller
                 //
                 // To disable loop-carried analysis, just set the
                 // dependencies to an empty list...
-                //
-                // The only test which tries to unroll the K-loop is
-                // the BasicGEMMUnrollK test.
+                std::unordered_set<int> dontDuplicate;
+
                 if(getForLoopName(graph, newTag) != rocRoller::KLOOP || unrollAmount <= 1)
                 {
                     loopCarriedDependencies = {};
+                    dontDuplicate = graph.coordinates.getNodes<LDS>().to<std::unordered_set>();
                 }
 
-                std::unordered_set<int> dontDuplicate;
                 for(auto const& [coord, controls] : loopCarriedDependencies)
                 {
                     dontDuplicate.insert(coord);
@@ -395,9 +392,7 @@ namespace rocRoller
                         graph.control.addElement(Body(), {newTag}, {body});
                         for(auto const& op : findComputeIndexCandidates(graph, body))
                         {
-                            auto [target, direction] = getOperationTarget(op, graph);
-                            auto [required, path]
-                                = findRequiredCoordinates(target, direction, graph);
+                            auto [required, path] = findAllRequiredCoordinates(op, graph);
 
                             if(path.count(unrollDimension) > 0)
                             {
@@ -426,13 +421,13 @@ namespace rocRoller
                 {
                     GraphReindexer unrollReindexer;
 
-                    auto dontDuplicatePedicate = [&](int x) { return dontDuplicate.contains(x); };
+                    auto dontDuplicatePredicate = [&](int x) { return dontDuplicate.contains(x); };
 
                     if(i == 0)
                         duplicatedBodies.push_back(bodies);
                     else
                         duplicatedBodies.push_back(duplicateControlNodes(
-                            graph, unrollReindexer, bodies, dontDuplicatePedicate));
+                            graph, unrollReindexer, bodies, dontDuplicatePredicate));
 
                     for(auto const& [coord, controls] : loopCarriedDependencies)
                     {

@@ -11,7 +11,6 @@ namespace rocRoller
 {
     namespace KernelGraph
     {
-        namespace CT = rocRoller::KernelGraph::CoordinateGraph;
         using namespace ControlGraph;
         using namespace CoordinateGraph;
         using namespace Expression;
@@ -142,31 +141,14 @@ namespace rocRoller
             auto [K, forK] = rangeFor(
                 graph, matK / macK, rocRoller::KLOOP); // num of loop iterations : matK / macK
 
-            // remove passthrough between A column block and y-workgroup
-            auto a_tilenum_y   = graph.mapper.get<MacroTileNumber>(loadA[0], 1);
-            auto a_workgroup_y = graph.mapper.get<Workgroup>(loadA[0], 1);
-            graph.coordinates.deleteElement(std::vector<int>{a_tilenum_y},
-                                            std::vector<int>{a_workgroup_y},
-                                            CT::isEdge<PassThrough>);
-            graph.mapper.disconnect<Workgroup>(loadA[0], a_workgroup_y, 1);
-            graph.coordinates.deleteElement(a_workgroup_y);
-
-            // remove passthrough between B row block and x-workgroup
-            auto b_tilenum_x   = graph.mapper.get<MacroTileNumber>(loadB[0], 0);
-            auto b_workgroup_x = graph.mapper.get<Workgroup>(loadB[0], 0);
-            graph.coordinates.deleteElement(std::vector<int>{b_tilenum_x},
-                                            std::vector<int>{b_workgroup_x},
-                                            CT::isEdge<PassThrough>);
-            graph.mapper.disconnect<Workgroup>(loadB[0], b_workgroup_x, 0);
-            graph.coordinates.deleteElement(b_workgroup_x);
+            auto a_tilenum_y = graph.mapper.get<MacroTileNumber>(loadA[0], 1);
+            auto b_tilenum_x = graph.mapper.get<MacroTileNumber>(loadB[0], 0);
 
             // A row block is x-workgroup, column block is for loop index
             graph.coordinates.addElement(PassThrough(), {a_tilenum_y}, {K});
 
             // B row block is for loop index, column block is y-workgroup
             graph.coordinates.addElement(PassThrough(), {b_tilenum_x}, {K});
-
-            // TODO : create helper functions to make this lowering modular and readable.
 
             auto [waveA_tag, waveA] = graph.getDimension<WaveTile>(loadA[0]);
             auto [waveB_tag, waveB] = graph.getDimension<WaveTile>(loadB[0]);
@@ -181,36 +163,15 @@ namespace rocRoller
 
             graph.control.addElement(Sequence(), {initD}, {forK});
 
-            auto waveTileNumYA
-                = graph.coordinates
-                      .findNodes(graph.mapper.get<User>(loadA[0]),
-                                 [&](int index) -> bool {
-                                     auto node = graph.coordinates.get<WaveTileNumber>(index);
-                                     if(node)
-                                         return node->dim == 1;
-                                     return false;
-                                 })
-                      .to<std::vector>();
-            AssertFatal(waveTileNumYA.size() == 1);
-
-            auto waveTileNumXB
-                = graph.coordinates
-                      .findNodes(graph.mapper.get<User>(loadB[0]),
-                                 [&](int index) -> bool {
-                                     auto node = graph.coordinates.get<WaveTileNumber>(index);
-                                     if(node)
-                                         return node->dim == 0;
-                                     return false;
-                                 })
-                      .to<std::vector>();
-            AssertFatal(waveTileNumXB.size() == 1);
+            auto waveTileNumYA = graph.mapper.get<WaveTileNumber>(loadA[0], 1);
+            auto waveTileNumXB = graph.mapper.get<WaveTileNumber>(loadB[0], 0);
 
             // Add an unroll dimension that connects to both A's WaveTileNumber[1] and B's
             // WaveTileNumber[0]. This is because we are unrolling the "small k" loop.
             uint const num_wave_tiles = macrotile_a.sizes[1] / waveA.sizes[1];
             auto       smallKUnroll   = graph.coordinates.addElement(Unroll(num_wave_tiles));
-            graph.coordinates.addElement(PassThrough(), {waveTileNumYA[0]}, {smallKUnroll});
-            graph.coordinates.addElement(PassThrough(), {waveTileNumXB[0]}, {smallKUnroll});
+            graph.coordinates.addElement(PassThrough(), {waveTileNumYA}, {smallKUnroll});
+            graph.coordinates.addElement(PassThrough(), {waveTileNumXB}, {smallKUnroll});
 
             int lastWaveMult = -1;
             for(uint k = 0; k < num_wave_tiles; k++)
@@ -397,7 +358,6 @@ namespace rocRoller
             {
                 Throw<FatalError>("General contraction not implemented yet.");
             }
-
             return kgraph;
         }
     }

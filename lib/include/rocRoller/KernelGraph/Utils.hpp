@@ -43,7 +43,7 @@ namespace rocRoller
          * @brief Filter coordinates by type.
          */
         template <typename T>
-        std::unordered_set<int> filterCoordinates(std::vector<int>   candidates,
+        std::unordered_set<int> filterCoordinates(auto const&        candidates,
                                                   KernelGraph const& kgraph);
 
         /**
@@ -81,6 +81,9 @@ namespace rocRoller
         std::pair<std::vector<int>, std::unordered_set<int>> findRequiredCoordinates(
             int target, Graph::Direction direction, KernelGraph const& kgraph);
 
+        std::pair<std::unordered_set<int>, std::unordered_set<int>>
+            findAllRequiredCoordinates(int op, KernelGraph const& graph);
+
         /**
          * @brief Find the operation of type T that contains the
          * candidate load/store operation.
@@ -112,87 +115,6 @@ namespace rocRoller
          */
         Expression::ExpressionPtr cleanArguments(Expression::ExpressionPtr,
                                                  std::shared_ptr<AssemblyKernel>);
-
-        void loadMacroTile(KernelGraph&                       graph,
-                           int                                load_tag,
-                           int                                user_tag,
-                           int                                mac_tile_tag,
-                           std::vector<int>&                  sdim,
-                           std::array<unsigned int, 3> const& workgroupSizes,
-                           int                                wavefrontSize,
-                           std::vector<unsigned int> const&   wavetilesPerWorkgroup);
-
-        std::vector<DeferredConnection>
-            loadMacroTileForLDS(KernelGraph&                       graph,
-                                int                                user_tag,
-                                int                                mac_tile_tag,
-                                std::vector<int>&                  sdim,
-                                int                                K,
-                                std::array<unsigned int, 3> const& workgroupSizes,
-                                int                                unroll,
-                                bool                               useSwappedAccess);
-
-        void updateLoadLDSMacroTile(KernelGraph&         graph,
-                                    CT::MacroTile const& mac_tile,
-                                    int                  load_tag,
-                                    std::vector<int>&    sdims,
-                                    int                  K,
-                                    int                  lds,
-                                    bool                 useSwappedAccess);
-
-        void loadWaveMacroTile(KernelGraph&                     graph,
-                               CT::MacroTile const&             mac_tile,
-                               int                              load_tag,
-                               int                              i_mac_x,
-                               int                              i_mac_y,
-                               int                              user_tag,
-                               int                              wavefrontSize,
-                               std::vector<unsigned int> const& wavetilesPerWorkgroup);
-
-        void storeMacroTile(KernelGraph&                       graph,
-                            int                                store_tag,
-                            int                                user_tag,
-                            int                                mac_tile_tag,
-                            std::vector<int>&                  sdims,
-                            std::array<unsigned int, 3> const& workgroupSizes,
-                            int                                wavefrontSize,
-                            std::vector<unsigned int> const&   wavetilesPerWorkgroup);
-
-        void storeWaveMacroTile(KernelGraph&                     graph,
-                                CT::MacroTile const&             mac_tile,
-                                int                              store_tag,
-                                int                              i_mac_x,
-                                int                              i_mac_y,
-                                int                              workitem,
-                                int                              user_tag,
-                                int                              wavefrontSize,
-                                std::vector<unsigned int> const& wavetilesPerWorkgroup);
-
-        std::vector<DeferredConnection>
-            storeMacroTileForLDS(KernelGraph&                       graph,
-                                 int                                user_tag,
-                                 int                                mac_tile_tag,
-                                 std::vector<int>&                  sdims,
-                                 std::array<unsigned int, 3> const& workgroupSizes);
-
-        void updateStoreLDSMacroTile(KernelGraph&         graph,
-                                     CT::MacroTile const& mac_tile,
-                                     int                  store_tag,
-                                     std::vector<int>&    sdims,
-                                     int                  lds);
-
-        std::vector<DeferredConnection>
-            storeMacroTileIntoLDS(KernelGraph&                       graph,
-                                  int                                lds_tag,
-                                  int                                mac_tile_tag,
-                                  std::array<unsigned int, 3> const& workgroupSizes,
-                                  bool                               useSwappedAccess);
-
-        std::vector<DeferredConnection>
-            loadMacroTileFromLDS(KernelGraph&                       graph,
-                                 int                                lds_tag,
-                                 int                                mac_tile_tag,
-                                 std::array<unsigned int, 3> const& workgroupSizes);
 
         /**
          * @brief Get ForLoop dimension assciated with ForLoopOp.
@@ -320,6 +242,11 @@ namespace rocRoller
                                                GraphReindexer&         reindexer,
                                                std::vector<int> const& startNodes,
                                                Predicate               dontDuplicate);
+
+        /**
+         * @brief Return VariableType of load/store operation.
+         */
+        VariableType getVariableType(KernelGraph const& graph, int opTag);
 
     }
 }

@@ -1725,10 +1725,11 @@ namespace KernelGraphTest
             = unrolled_kgraph_lds.control.getNodes<StoreLDSTile>().to<std::vector>();
         EXPECT_EQ(unrolledStoreLDS.size(), 4);
 
-        // Verify number of ComputeIndexes: 2 A/B loads; C load; D store: 2 * 3 + 4 + 4 = 14.
+        // Verify number of ComputeIndexes: A loads; B load (has
+        // unroll); C load; D store: 3 + 4 + 3 + 3 = 13
         kgraph1             = kgraph1.transform(addComputeIndexTransform);
         auto computeIndexes = kgraph1.control.getNodes<ComputeIndex>().to<std::vector>();
-        EXPECT_EQ(computeIndexes.size(), 14);
+        EXPECT_EQ(computeIndexes.size(), 13);
 
         // Verify number of Deallocates
         auto addDeallocate  = std::make_shared<AddDeallocate>();
@@ -3069,7 +3070,7 @@ namespace KernelGraphTest
         params->setManualWorkitemCount({NX, NY, NZ});
 
         auto postParams = std::make_shared<CommandParameters>();
-        postParams->setManualWavefrontCount({static_cast<uint>(4), static_cast<uint>(2)});
+        postParams->setManualWavefrontCount({2u, 2u});
 
         CommandKernel commandKernel(command, "BA", params, postParams);
         commandKernel.launchKernel(runtimeArgs.runtimeArguments());

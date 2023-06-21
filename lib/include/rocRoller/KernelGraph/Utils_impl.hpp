@@ -40,8 +40,7 @@ namespace rocRoller::KernelGraph
     }
 
     template <typename T>
-    std::unordered_set<int> filterCoordinates(std::vector<int>   candidates,
-                                              KernelGraph const& kgraph)
+    std::unordered_set<int> filterCoordinates(auto const& candidates, KernelGraph const& kgraph)
     {
         std::unordered_set<int> rv;
         for(auto candidate : candidates)
@@ -115,8 +114,9 @@ namespace rocRoller::KernelGraph
                 // to different data and to use different registers.
                 // Note: A PassThrough edge is added from any of the duplicate nodes to the original
                 // node.
-                auto mt = graph.coordinates.get<MacroTile>(c.coordinate);
-                if(mt)
+                auto maybeMacroTile = graph.coordinates.get<MacroTile>(c.coordinate);
+                auto maybeLDS       = graph.coordinates.get<LDS>(c.coordinate);
+                if(maybeMacroTile || maybeLDS)
                 {
                     if(reindexer.coordinates.count(c.coordinate) == 0)
                     {

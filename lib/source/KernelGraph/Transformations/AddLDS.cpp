@@ -10,7 +10,7 @@
  * A unique LDS allocation is required for each: User, ForLoop, and
  * Unroll.  This is encapsulated by the LDSSpec struct (see below).
  *
- * Transformations are done using a "stage and commit" approach:
+ * Transformations are done using a "stage and commit" approach.
  *
  * During staging, we search for all Load/Store operations tagged for
  * LDS and:
@@ -68,6 +68,8 @@
 
 #include "KernelGraph/ControlGraph/ControlGraph.hpp"
 #include "KernelGraph/ControlGraph/Operation.hpp"
+#include "KernelGraph/ControlToCoordinateMapper.hpp"
+#include "KernelGraph/CoordinateGraph/Dimension.hpp"
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddLDS.hpp>
@@ -84,6 +86,7 @@ namespace rocRoller
         namespace CF = rocRoller::KernelGraph::ControlGraph;
 
         using GD = rocRoller::Graph::Direction;
+        using LD = rocRoller::KernelGraph::Connections::LDSLoadStore;
         using namespace ControlGraph;
         using namespace CoordinateGraph;
         using namespace Expression;
@@ -145,22 +148,6 @@ namespace rocRoller
 
             VariableType variableType;
             MemoryType   memoryType;
-
-            /**
-             * @brief Return a specifier unique to each coordinate
-             * transform required to compute indexes for this LDS
-             * allocation.
-             *
-             * Recall that which coordinate transform to use is less
-             * specific than which LDS allocation to use.  The
-             * coordinate transform depends on the User, ForLoop, and
-             * Unroll etc coordinates; but not on the ForLoopOp and/or
-             * Unroll coordinate value.
-             */
-            LDSSpec forCoordinateTransform() const
-            {
-                return {userCoord, forLoopCoord, unrollCoord, -1, -1, variableType, memoryType};
-            }
         };
 
         bool operator<(LDSSpec const& a, LDSSpec const& b)
@@ -208,11 +195,11 @@ namespace rocRoller
         }
 
         /**
-         * @brief Return LDS specifier for the load operation.
+         * @brief Return LDS specifier for the load/store operation.
          *
          * This inspects the graph and figures out the User, ForLoop,
          * Unroll etc coordinates that determine which LDS buffer the
-         * load operation will populate.
+         * operation will populate.
          *
          * When determining the specific ForLoop and Unroll
          * coordinates, only the containing for loop is considered.
@@ -222,19 +209,19 @@ namespace rocRoller
          * This means jammed loops will use unique LDS allocations.
          *
          * If there is no containing ForLoop, the location of the
-         * original load is used to: determine where LDS is populated,
-         * and differentiate the LDS allocations.
+         * original operation is used to: determine where LDS is
+         * populated, and differentiate the LDS allocations.
          */
-        LDSSpec getLDSSpec(KernelGraph const& k, int loadTag)
+        LDSSpec getLDSSpec(KernelGraph const& k, int opTag)
         {
-            auto [userTag, user]           = k.getDimension<User>(loadTag);
-            auto [macroTileTag, macroTile] = k.getDimension<MacroTile>(loadTag);
+            auto [userTag, user]           = k.getDimension<User>(opTag);
+            auto [macroTileTag, macroTile] = k.getDimension<MacroTile>(opTag);
 
-            auto [target, direction] = getOperationTarget(loadTag, k);
+            auto [target, direction] = getOperationTarget(opTag, k);
             auto [required, path]    = findRequiredCoordinates(target, direction, k);
             auto forLoopCoordinates  = filterCoordinates<ForLoop>(required, k);
 
-            auto maybeForLoop = findContainingOperation<ForLoopOp>(loadTag, k);
+            auto maybeForLoop = findContainingOperation<ForLoopOp>(opTag, k);
             int  forLoopCoord = -1;
             int  operation;
             if(maybeForLoop)
@@ -248,7 +235,7 @@ namespace rocRoller
             }
             else
             {
-                operation = loadTag;
+                operation = opTag;
             }
 
             auto maybeUnroll      = findUnrollNeighbour(k, forLoopCoord);
@@ -259,7 +246,7 @@ namespace rocRoller
                 unrollCoord = *maybeUnroll;
 
                 auto setCoord
-                    = k.control.get<SetCoordinate>(getSetCoordinateForDim(k, unrollCoord, loadTag));
+                    = k.control.get<SetCoordinate>(getSetCoordinateForDim(k, unrollCoord, opTag));
                 AssertFatal(evaluationTimes(
                                 setCoord->value)[rocRoller::Expression::EvaluationTime::Translate],
                             "Unroll value should be a literal");
@@ -267,14 +254,12 @@ namespace rocRoller
                 unrollCoordValue = getUnsignedInt(evaluate(setCoord->value));
             }
 
-            auto varType = k.control.getNode<LoadTiled>(loadTag).varType;
-
             return {userTag,
                     forLoopCoord,
                     unrollCoord,
                     unrollCoordValue,
                     operation,
-                    varType,
+                    getVariableType(k, opTag),
                     macroTile.memoryType};
         }
 
@@ -282,36 +267,14 @@ namespace rocRoller
          * @brief Container for info related to loading from Global
          * into LDS.
          */
-        struct ldsLoadInfo
+        struct ldsOperationInfo
         {
-            int lds; // LDS allocation coordinate
-            int user; // User coordinate
-            int internalTile; // Internal/intermediate VGPR MacroTile
-            int loadTileFromGlobal; // LoadTiled operation
-            int storeTileIntoLDS; // StoreLDStile operation
-            int loadChain; // LoadTiled operation
-            int storeChain; // StoreLDStile operation
-        };
-
-        struct ldsLoadConnections
-        {
-            int lds;
-            int internalTile;
-
-            std::vector<DeferredConnection> loadConnections;
-            std::vector<DeferredConnection> storeConnections;
-        };
-
-        /**
-         * @brief Container for info related to storing from LDS to
-         * Global.
-         */
-        struct ldsStoreInfo
-        {
-            int                             internalTile;
-            std::vector<DeferredConnection> loadConnections;
-            std::vector<DeferredConnection> storeConnections;
-            std::optional<int>              storeOperation;
+            bool load;
+            int  user; // User coordinate
+            int  globalOperation; // LoadTiled/StoreTiled operation
+            int  ldsOperation; // StoreLDSTile/LoadLDSTile operation
+            int  globalChain; // LoadTiled/StoreTiled operation
+            int  ldsChain; // StoreLDStile/LoadLDSTile operation
         };
 
         /**
@@ -324,29 +287,25 @@ namespace rocRoller
             {
             }
 
-            ldsLoadConnections addVGPRLoadCoordinates(KernelGraph& graph, int loadTag) const;
-            ldsLoadConnections addWAVELoadCoordinates(KernelGraph& graph, int loadTag) const;
-
             void addLoadOperations(KernelGraph& graph);
-
-            void addStoreThroughLDSToControlGraph(KernelGraph& graph, int store);
-            void addStoreThroughLDSToCoordinateGraph(KernelGraph& graph, int store);
-
-            void stagePrefetch(KernelGraph const& graph);
-
+            void addStoreOperations(KernelGraph& graph);
+            void addStoreOperations(KernelGraph& graph, int storetag, LDSSpec const& spec);
             void addLoadOperationsPrefetch(KernelGraph& graph, int forLoop, int numUnroll);
 
             void stageLoad(KernelGraph const&, int loadTag);
+            void stageStore(KernelGraph const&, int storeTag);
+            void stagePrefetch(KernelGraph const& graph);
             void commit(KernelGraph&);
 
         private:
-            std::map<int, ldsStoreInfo> m_store;
+            std::set<LDSSpec>      m_loadSpecs;
+            std::map<int, LDSSpec> m_stagedLoads;
 
-            std::set<LDSSpec>              m_loadSpecs;
-            std::map<LDSSpec, ldsLoadInfo> m_loadInfo;
-            std::map<int, LDSSpec>         m_tileSpecs;
-            std::map<int, LDSSpec>         m_stagedLoads;
-            std::map<LDSSpec, int>         m_stagedCoordinates;
+            std::set<LDSSpec>      m_storeSpecs;
+            std::map<int, LDSSpec> m_stagedStores;
+
+            std::map<int, LDSSpec>              m_stagedOps;
+            std::map<LDSSpec, ldsOperationInfo> m_info;
 
             // Prefetch related
             std::map<int, int>                                    m_scopes;
@@ -428,13 +387,19 @@ namespace rocRoller
             TIMER(t, "KernelGraph::addLDS");
             rocRoller::Log::getLogger()->debug("KernelGraph::addLDS()");
 
-            auto k       = original;
+            auto k = original;
+
             auto visitor = AddLDSVisitor(m_context);
 
             // Add LDS operations
             for(auto const& loadTag : k.control.getNodes<LoadTiled>())
             {
                 visitor.stageLoad(k, loadTag);
+            }
+
+            for(auto const& storeTag : k.control.getNodes<StoreTiled>())
+            {
+                visitor.stageStore(k, storeTag);
             }
 
             if(m_context->kernelOptions().prefetch)
@@ -445,30 +410,6 @@ namespace rocRoller
             }
 
             visitor.commit(k);
-
-            // Add LDS coordinates and transforms
-            for(auto const& store : k.control.getNodes<StoreTiled>().to<std::vector>())
-            {
-                auto [macroTileTag, macroTile] = k.getDimension<MacroTile>(store);
-                if(macroTile.memoryType == MemoryType::WAVE_LDS)
-                {
-                    auto location = k.coordinates.getLocation(macroTileTag);
-                    // Only modify the coordinate graph for a store
-                    // whose associated MacroTile is not a duplicate.
-                    if(!location.incoming.empty())
-                    {
-                        visitor.addStoreThroughLDSToCoordinateGraph(k, store);
-                    }
-                }
-            }
-
-            for(auto const& store : k.control.getNodes<StoreTiled>().to<std::vector>())
-            {
-                // TODO Query graphs to figure appropriate forLoop
-                // Should probably do that logic inside
-                // addStoreThroughLDSToControlGraph
-                visitor.addStoreThroughLDSToControlGraph(k, store);
-            }
 
             return k;
         }
@@ -498,19 +439,33 @@ namespace rocRoller
             m_loadSpecs.insert(spec);
 
             //
-            // Stage: create coordinate transform
-            //
-            auto maybeParentTile
-                = only(k.coordinates.getOutputNodeIndices(tileTag, CT::isEdge<PassThrough>));
-            if(!maybeParentTile)
-            {
-                m_stagedCoordinates[spec.forCoordinateTransform()] = loadTag;
-            }
-
-            //
             // Stage: convert LoadTile to LoadLDSTile
             //
             m_stagedLoads[loadTag] = spec;
+            m_stagedOps[loadTag]   = spec;
+        }
+
+        /*
+         * Stage everything for a store.  Does not modify the graph.
+         */
+        void AddLDSVisitor::stageStore(KernelGraph const& k, int storeTag)
+        {
+            auto [userTag, user] = k.getDimension<User>(storeTag);
+            auto [tileTag, tile] = k.getDimension<MacroTile>(storeTag);
+
+            if(!(tile.memoryType == MemoryType::WAVE_LDS || tile.memoryType == MemoryType::LDS))
+                return;
+
+            rocRoller::Log::getLogger()->debug(
+                "KernelGraph::AddLDS()::stageStore({}): User {}, MacroTile {}",
+                storeTag,
+                userTag,
+                tileTag);
+
+            auto spec = getLDSSpec(k, storeTag);
+            m_storeSpecs.insert(spec);
+            m_stagedStores[storeTag] = spec;
+            m_stagedOps[storeTag]    = spec;
         }
 
         /*
@@ -520,25 +475,15 @@ namespace rocRoller
         {
             rocRoller::Log::getLogger()->debug("KernelGraph::AddLDS()::commit()");
 
-            AssertFatal(m_loadSpecs.size() >= m_stagedCoordinates.size());
-
             //
-            // Commit: Create LDS nodes, internal tiles, and load/store operations.
+            // Commit: Create operations for LoadTiled.
             //
             for(auto spec : m_loadSpecs)
             {
                 auto userTag            = spec.userCoord;
-                auto ldsTag             = k.coordinates.addElement(LDS());
-                auto internalTileTag    = k.coordinates.addElement(MacroTile());
                 auto loadTileFromGlobal = k.control.addElement(LoadTiled(spec.variableType));
                 auto storeTileIntoLDS
                     = k.control.addElement(StoreLDSTile(spec.variableType.dataType));
-
-                k.mapper.connect<MacroTile>(loadTileFromGlobal, internalTileTag);
-                k.mapper.connect<User>(loadTileFromGlobal, userTag);
-
-                k.mapper.connect<MacroTile>(storeTileIntoLDS, internalTileTag);
-                k.mapper.connect<LDS>(storeTileIntoLDS, ldsTag);
 
                 auto loadChain  = loadTileFromGlobal;
                 auto storeChain = storeTileIntoLDS;
@@ -558,112 +503,116 @@ namespace rocRoller
                     storeChain = setCoordForStore;
                 }
 
-                m_loadInfo[spec] = {ldsTag,
-                                    userTag,
-                                    internalTileTag,
-                                    loadTileFromGlobal,
-                                    storeTileIntoLDS,
-                                    loadChain,
-                                    storeChain};
+                m_info[spec]
+                    = {true, userTag, loadTileFromGlobal, storeTileIntoLDS, loadChain, storeChain};
             }
 
-            for(auto [loadTag, loadSpec] : m_stagedLoads)
+            //
+            // Commit: Create operations for StoreTiled.
+            //
+            for(auto spec : m_storeSpecs)
             {
-                auto macroTileTag         = k.mapper.get<MacroTile>(loadTag);
-                m_tileSpecs[macroTileTag] = getLDSSpec(k, loadTag);
+                auto userTag         = spec.userCoord;
+                auto loadTileFromLDS = k.control.addElement(LoadLDSTile(spec.variableType));
+                auto storeTileToGlobal
+                    = k.control.addElement(StoreTiled(spec.variableType.dataType));
+
+                auto loadChain  = loadTileFromLDS;
+                auto storeChain = storeTileToGlobal;
+
+                if(spec.unrollCoord >= 0)
+                {
+                    auto setCoordForLoad
+                        = k.control.addElement(SetCoordinate(literal(spec.unrollCoordValue)));
+                    k.mapper.connect<Unroll>(setCoordForLoad, spec.unrollCoord);
+                    auto setCoordForStore
+                        = k.control.addElement(SetCoordinate(literal(spec.unrollCoordValue)));
+                    k.mapper.connect<Unroll>(setCoordForStore, spec.unrollCoord);
+
+                    k.control.addElement(Body(), {setCoordForLoad}, {loadTileFromLDS});
+                    k.control.addElement(Body(), {setCoordForStore}, {storeTileToGlobal});
+                    loadChain  = setCoordForLoad;
+                    storeChain = setCoordForStore;
+                }
+
+                m_info[spec]
+                    = {false, userTag, storeTileToGlobal, loadTileFromLDS, storeChain, loadChain};
             }
 
-            // At this point: LDS nodes, internal tiles, and
-            // load/store operations have been added, but they aren't
-            // connected (through the mapper nor in the graphs).
-
-            //
-            // Commit: Update coordinate graph
-            //
-            std::map<LDSSpec, ldsLoadConnections> loadBySpec;
-
-            for(auto [specCT, loadTag] : m_stagedCoordinates)
-            {
-                switch(specCT.memoryType)
-                {
-                case MemoryType::WAVE_LDS:
-                    // Add/update coordinate transforms:
-                    // 1. User to internal VGPR MacroTile
-                    // 2. Internal VGPR MacroTile to LDS
-                    // 3. LDS to WaveTile
-                    loadBySpec[specCT] = addWAVELoadCoordinates(k, loadTag);
-                    break;
-                case MemoryType::LDS:
-                    loadBySpec[specCT] = addVGPRLoadCoordinates(k, loadTag);
-                    break;
-                default:
-                    break;
-                }
-            }
-
-            //
-            // Commit: Apply deferred connections, attach storage nodes via PassThrough
-            //
-            for(auto spec : m_loadSpecs)
-            {
-                auto lInfo = m_loadInfo.at(spec);
-                auto oInfo = loadBySpec.at(spec.forCoordinateTransform());
-
-                for(auto dc : oInfo.loadConnections)
-                {
-                    k.mapper.connect(lInfo.loadTileFromGlobal, dc.coordinate, dc.connectionSpec);
-                }
-
-                for(auto dc : oInfo.storeConnections)
-                {
-                    k.mapper.connect(lInfo.storeTileIntoLDS, dc.coordinate, dc.connectionSpec);
-                }
-
-                if(lInfo.internalTile != oInfo.internalTile)
-                {
-                    k.coordinates.setElement(lInfo.internalTile,
-                                             k.coordinates.getNode<MacroTile>(oInfo.internalTile));
-                    k.coordinates.addElement(
-                        PassThrough(), {lInfo.internalTile}, {oInfo.internalTile});
-                }
-
-                if(lInfo.lds != oInfo.lds)
-                {
-                    k.coordinates.addElement(PassThrough(), {oInfo.lds}, {lInfo.lds});
-                }
-            }
-
-            // At this point: LDS nodes, internal tiles, and
-            // load/store operations have been added.  Operations
-            // are connected to their coordinate nodes, but they
-            // haven't been inserted into the control grpah yet.
+            // At this point: load/store operations have been added,
+            // but they aren't connected (through the mapper nor in
+            // the graphs).
 
             //
             // Commit: Change all LoadTiled operations to LoadLDSTile
             //
-            for(auto [loadTag, loadSpec] : m_stagedLoads)
+            std::set<int> updatedTiles;
+            for(auto [opTag, opSpec] : m_stagedOps)
             {
-                auto [macroTileTag, macroTile] = k.getDimension<MacroTile>(loadTag);
-
-                auto varType = k.control.getNode<LoadTiled>(loadTag).varType;
-                if(macroTile.memoryType == MemoryType::WAVE_LDS)
-                    macroTile.memoryType = MemoryType::WAVE;
-                else
-                    macroTile.memoryType = MemoryType::VGPR;
-
-                k.control.setElement(loadTag, LoadLDSTile(varType));
-                k.coordinates.setElement(k.mapper.get<MacroTile>(loadTag), macroTile);
-                k.mapper.connect<LDS>(loadTag, m_loadInfo.at(loadSpec).lds);
-                rocRoller::Log::getLogger()->debug(
-                    "KernelGraph::AddLDS()::commit(): LoadLDSTile {}: lds {}",
-                    loadTag,
-                    m_loadInfo.at(loadSpec).lds);
-                for(auto const& c : k.mapper.getConnections(loadTag))
+                auto globalOp = m_info.at(opSpec).globalOperation;
+                auto ldsOp    = m_info.at(opSpec).ldsOperation;
+                for(auto& c : k.mapper.getConnections(opTag))
                 {
-                    if(!k.coordinates.exists(c.coordinate))
+                    if(std::holds_alternative<Connections::LDSTypeAndSubDimension>(c.connection))
                     {
-                        k.mapper.disconnect(loadTag, c.coordinate, c.connection);
+                        auto ldsConnection
+                            = std::get<Connections::LDSTypeAndSubDimension>(c.connection);
+
+                        auto newConnection = Connections::TypeAndSubDimension{
+                            ldsConnection.id, ldsConnection.subdimension};
+                        if(ldsConnection.direction == LD::LOAD_FROM_GLOBAL
+                           || ldsConnection.direction == LD::STORE_INTO_GLOBAL)
+                        {
+                            // Operation was LoadTiled or StoreTiled, connections are for
+                            // global traffic.
+                            //
+                            // Therefore use globalOp.
+
+                            k.mapper.connect(globalOp, c.coordinate, newConnection);
+                        }
+                        else if((m_info[opSpec].load
+                                 && ldsConnection.direction == LD::STORE_INTO_LDS)
+                                || (!m_info[opSpec].load
+                                    && ldsConnection.direction == LD::LOAD_FROM_LDS))
+                        {
+                            // Operation was LoadTiled, connections are for traffic into LDS; or
+                            // Operation was StoreTiled, connections are for traffic out of LDS.
+                            //
+                            // Therefore use ldsOp.
+
+                            k.mapper.connect(ldsOp, c.coordinate, newConnection);
+                        }
+                        else
+                        {
+                            // Otherwise, use original opTag.
+
+                            k.mapper.connect(opTag, c.coordinate, newConnection);
+                        }
+                        k.mapper.disconnect(opTag, c.coordinate, c.connection);
                     }
+                }
+
+                // Update dimension and operation
+                auto [macroTileTag, macroTile] = k.getDimension<MacroTile>(opTag);
+
+                if(m_info[opSpec].load)
+                {
+                    k.control.setElement(opTag, LoadLDSTile(opSpec.variableType));
+                }
+                else
+                {
+                    k.control.setElement(opTag, StoreLDSTile(opSpec.variableType.dataType));
+                }
+
+                if(!updatedTiles.contains(macroTileTag))
+                {
+                    if(macroTile.memoryType == MemoryType::WAVE_LDS)
+                        macroTile.memoryType = MemoryType::WAVE;
+                    else
+                        macroTile.memoryType = MemoryType::VGPR;
+                    k.coordinates.setElement(macroTileTag, macroTile);
+
+                    updatedTiles.insert(macroTileTag);
                 }
             }
 
@@ -671,52 +620,7 @@ namespace rocRoller
             // Commit: Connect load/store operations in the control graph.
             //
             addLoadOperations(k);
-        }
-
-        //
-        // Rework this to stage+commit workflow
-        //
-        ldsLoadConnections AddLDSVisitor::addVGPRLoadCoordinates(KernelGraph& graph,
-                                                                 int          loadTag) const
-        {
-            auto userTag = graph.mapper.get<User>(loadTag);
-            auto tileTag = graph.mapper.get<MacroTile>(loadTag);
-            auto tile    = graph.coordinates.getNode<MacroTile>(tileTag);
-            auto load    = graph.control.getNode<LoadTiled>(loadTag);
-
-            AssertFatal(tile.memoryType == MemoryType::LDS);
-
-            graph.coordinates.deleteElement(
-                std::vector<int>{userTag}, std::vector<int>{tileTag}, CT::isEdge<DataFlow>);
-            auto sdims = graph.coordinates.getOutputNodeIndices(userTag, CT::isEdge<Split>)
-                             .to<std::vector>();
-
-            auto ldsTag = m_loadInfo.at(m_tileSpecs.at(tileTag)).lds;
-
-            // remove workgroups, macrotile numbers and tile edges from sdims
-            updateLoadLDSMacroTile(graph, tile, loadTag, sdims, -1, ldsTag, true);
-
-            // create an internal macrotile to be loaded by one workgroup
-            auto workgroupSizes  = m_context->kernel()->workgroupSize();
-            auto internalTileTag = m_loadInfo.at(m_tileSpecs.at(tileTag)).internalTile;
-            auto internalTile    = MacroTile(tile.sizes, MemoryType::VGPR, tile.subTileSizes);
-            graph.coordinates.setElement(internalTileTag, internalTile);
-
-            // user --DataFlow--> internalTile
-            graph.coordinates.addElement(DataFlow(), {userTag}, {internalTileTag});
-
-            // lower tile LoadTiled : load macrotile from global memory
-            auto loadConnections = loadMacroTileForLDS(
-                graph, userTag, internalTileTag, sdims, -1, workgroupSizes, -1, true);
-
-            // lower tile StoreLDSTile : store macrotile into LDS
-            auto storeConnections
-                = storeMacroTileIntoLDS(graph, ldsTag, internalTileTag, workgroupSizes, true);
-
-            // LDS --DataFlow--> macrotile
-            graph.coordinates.addElement(DataFlow(), {ldsTag}, {tileTag});
-
-            return {ldsTag, internalTileTag, loadConnections, storeConnections};
+            addStoreOperations(k);
         }
 
         void addLoadOperationsNoPrefetch(KernelGraph&         graph,
@@ -784,12 +688,12 @@ namespace rocRoller
             // At this point, each of the unrolled loop bodies are
             // detached and isolated from the rest of the graph.
 
-            std::map<int, std::vector<ldsLoadInfo>> globalLoadsByUnroll;
+            std::map<int, std::vector<ldsOperationInfo>> globalLoadsByUnroll;
             for(auto spec : m_loadSpecs)
             {
                 if(spec.operation == forLoop)
                 {
-                    globalLoadsByUnroll[spec.unrollCoordValue].push_back(m_loadInfo[spec]);
+                    globalLoadsByUnroll[spec.unrollCoordValue].push_back(m_info[spec]);
                 }
             }
 
@@ -821,7 +725,7 @@ namespace rocRoller
                 {
                     logger->debug(
                         "  prefetch: pre-loop global load: unroll {} user {}", 0, load.user);
-                    auto loadChain = duplicateChain(graph, {load.loadChain});
+                    auto loadChain = duplicateChain(graph, {load.globalChain});
                     preChain.push_back(loadChain);
                 }
             }
@@ -829,11 +733,8 @@ namespace rocRoller
             // StoreLDS next
             for(auto load : globalLoadsByUnroll[0])
             {
-                logger->debug("  prefetch: pre-loop commit lds: unroll {} user {} lds {}",
-                              0,
-                              load.user,
-                              load.lds);
-                auto storeChain = duplicateChain(graph, {load.storeChain});
+                logger->debug("  prefetch: pre-loop commit lds: unroll {} user {}", 0, load.user);
+                auto storeChain = duplicateChain(graph, {load.ldsChain});
                 preChain.push_back(storeChain);
             }
 
@@ -889,11 +790,11 @@ namespace rocRoller
 
                     auto setPrefetchCoord = SetCoordinate(prefetchCoordExpr);
 
-                    auto maybeSetCoordinate = graph.control.get<SetCoordinate>(load.loadChain);
-                    auto loadUnrollCoord    = graph.mapper.get<Unroll>(load.loadChain);
+                    auto maybeSetCoordinate = graph.control.get<SetCoordinate>(load.globalChain);
+                    auto loadUnrollCoord    = graph.mapper.get<Unroll>(load.globalChain);
                     if(maybeSetCoordinate && loadUnrollCoord == unrollCoord)
                     {
-                        graph.control.setElement(load.loadChain, setPrefetchCoord);
+                        graph.control.setElement(load.globalChain, setPrefetchCoord);
                     }
                     else
                     {
@@ -932,39 +833,37 @@ namespace rocRoller
                 auto globalLoads = globalLoadsByUnroll[globalPrefetchU];
                 if(separateMemOps)
                 {
-                    graph.control.addElement(Sequence(), {nop}, {globalLoads[0].loadChain});
+                    graph.control.addElement(Sequence(), {nop}, {globalLoads[0].globalChain});
                 }
                 else if(u == 0)
                 {
                     graph.control.addElement(
-                        Body(), {segmentBoundaries[0]}, {globalLoads[0].loadChain});
+                        Body(), {segmentBoundaries[0]}, {globalLoads[0].globalChain});
                 }
                 else
                 {
                     graph.control.addElement(
-                        Sequence(), {segmentBoundaries[u]}, {globalLoads[0].loadChain});
+                        Sequence(), {segmentBoundaries[u]}, {globalLoads[0].globalChain});
                 }
 
-                logger->debug("  prefetch: in-loop: global load {} user {} lds {}",
+                logger->debug("  prefetch: in-loop: global load {} user {}",
                               globalPrefetchU,
-                              globalLoads[0].user,
-                              globalLoads[0].lds);
+                              globalLoads[0].user);
 
                 for(int i = 1; i < globalLoads.size(); i++)
                 {
                     graph.control.addElement(
-                        Sequence(), {globalLoads[i - 1].loadChain}, {globalLoads[i].loadChain});
+                        Sequence(), {globalLoads[i - 1].globalChain}, {globalLoads[i].globalChain});
 
-                    logger->debug("  prefetch: in-loop: global load {} user {} lds {}",
+                    logger->debug("  prefetch: in-loop: global load {} user {}",
                                   globalPrefetchU,
-                                  globalLoads[i].user,
-                                  globalLoads[i].lds);
+                                  globalLoads[i].user);
                 }
 
                 if(separateMemOps)
                 {
                     graph.control.addElement(Sequence(),
-                                             {globalLoads[globalLoads.size() - 1].loadChain},
+                                             {globalLoads[globalLoads.size() - 1].globalChain},
                                              {segmentBoundaries[u + 1]});
                 }
 
@@ -973,42 +872,40 @@ namespace rocRoller
                 if(globalPrefetchU == ldsPrefetchU)
                 {
                     graph.control.addElement(Sequence(),
-                                             {globalLoads[globalLoads.size() - 1].loadChain},
-                                             {globalStores[0].storeChain});
+                                             {globalLoads[globalLoads.size() - 1].globalChain},
+                                             {globalStores[0].ldsChain});
                 }
                 else if(separateMemOps)
                 {
-                    graph.control.addElement(Sequence(), {nop}, {globalStores[0].storeChain});
+                    graph.control.addElement(Sequence(), {nop}, {globalStores[0].ldsChain});
                 }
                 else if(u == 0)
                 {
                     graph.control.addElement(
-                        Body(), {segmentBoundaries[u]}, {globalStores[0].storeChain});
+                        Body(), {segmentBoundaries[u]}, {globalStores[0].ldsChain});
                 }
                 else
                 {
                     graph.control.addElement(
-                        Sequence(), {segmentBoundaries[u]}, {globalStores[0].storeChain});
+                        Sequence(), {segmentBoundaries[u]}, {globalStores[0].ldsChain});
                 }
 
-                logger->debug("  prefetch: in-loop: commit lds {} user {} lds {}",
+                logger->debug("  prefetch: in-loop: commit lds {} user {}",
                               ldsPrefetchU,
-                              globalStores[0].user,
-                              globalStores[0].lds);
+                              globalStores[0].user);
 
                 for(int i = 1; i < globalStores.size(); i++)
                 {
                     graph.control.addElement(
-                        Sequence(), {globalStores[i - 1].storeChain}, {globalStores[i].storeChain});
+                        Sequence(), {globalStores[i - 1].ldsChain}, {globalStores[i].ldsChain});
 
-                    logger->debug("  prefetch: in-loop: commit lds {} user {} lds {}",
+                    logger->debug("  prefetch: in-loop: commit lds {} user {}",
                                   ldsPrefetchU,
-                                  globalStores[i].user,
-                                  globalStores[i].lds);
+                                  globalStores[i].user);
                 }
 
                 graph.control.addElement(
-                    Sequence(), {globalStores[globalStores.size() - 1].storeChain}, {barrier});
+                    Sequence(), {globalStores[globalStores.size() - 1].ldsChain}, {barrier});
 
                 // Prefetch from LDS
                 if(m_prefetchFromLDSChains[forLoop].contains(ldsPrefetchU))
@@ -1066,163 +963,16 @@ namespace rocRoller
                 }
 
                 auto dependencies = getTopSetCoordinates(graph, loads);
-                auto info         = m_loadInfo.at(spec);
+                auto info         = m_info.at(spec);
                 // TODO: Can we just insert load/store chains below containing for loop?
                 addLoadOperationsNoPrefetch(
-                    graph, info.loadChain, info.storeChain, spec.operation, dependencies);
+                    graph, info.globalChain, info.ldsChain, spec.operation, dependencies);
             }
         }
 
-        /*
-         * Update the coordinate transform graph to compute LDS indexes.
-         *
-         * DO NOT MODIFY THE CONTROL GRAPH.
-         *
-         * Passing a loadTag here might seem non-intuitive.  It is
-         * used to look up mappings etc.
-         */
-        ldsLoadConnections AddLDSVisitor::addWAVELoadCoordinates(KernelGraph& graph,
-                                                                 int          loadTag) const
+        void
+            AddLDSVisitor::addStoreOperations(KernelGraph& graph, int storeTag, LDSSpec const& spec)
         {
-            auto [macroTileTag, macroTile] = graph.getDimension<MacroTile>(loadTag);
-
-            AssertFatal(macroTile.memoryType == MemoryType::WAVE_LDS);
-
-            auto varType = graph.control.getNode<LoadTiled>(loadTag).varType;
-            int  user    = graph.mapper.get<User>(loadTag);
-            auto sdims
-                = graph.coordinates.getOutputNodeIndices(user, CT::isEdge<Split>).to<std::vector>();
-
-            auto maybeForLoop = findContainingOperation<ForLoopOp>(loadTag, graph);
-            AssertFatal(maybeForLoop, "Unable to find containing ForLoop");
-            auto forLoopCoord = getForLoop(*maybeForLoop, graph);
-
-            auto maybeUnroll = findUnrollNeighbour(graph, forLoopCoord);
-            int  unrollCoord = maybeUnroll.value_or(-1);
-
-            auto ldsTag = m_loadInfo.at(m_tileSpecs.at(macroTileTag)).lds;
-
-            auto useSwappedAccess
-                = m_context->kernelOptions().transposeMemoryAccess[macroTile.layoutType];
-
-            // Remove Workgroups, MacroTileNumbers, and Tile edges from sdims
-            updateLoadLDSMacroTile(
-                graph, macroTile, loadTag, sdims, forLoopCoord, ldsTag, useSwappedAccess);
-
-            // Create an internal MacroTile to be loaded by one workgroup
-            auto workgroupSizes         = m_context->kernel()->workgroupSize();
-            auto numWorkitems           = product(workgroupSizes);
-            auto numElements            = product(macroTile.sizes);
-            auto numElementsPerWorkitem = static_cast<int>(numElements / numWorkitems);
-            auto thrTileM               = numElementsPerWorkitem;
-            auto thrTileN               = 1;
-
-            // Load multiple smaller-precision(< 32-bit) elements into 1 VGPR
-            auto packFactor = bytesPerRegister / DataTypeInfo::Get(varType).elementSize;
-            bool packed     = false;
-            if(m_context->kernelOptions().packMultipleElementsInto1VGPR && packFactor > 1
-               && thrTileM % packFactor == 0)
-            {
-                thrTileM = thrTileM / packFactor;
-                thrTileN = packFactor;
-
-                packed = true;
-            }
-
-            // Enable the use of longer word instructions if possible
-            if(m_context->kernelOptions().enableLongDwordInstructions
-               && (packed || packFactor <= 1))
-            {
-                auto maxWidth = std::min(m_context->kernelOptions().loadGlobalWidth,
-                                         m_context->kernelOptions().storeLocalWidth);
-
-                auto numDwordsPerElement = DataTypeInfo::Get(varType).registerCount;
-
-                updateThreadTileForLongDwords(thrTileM, thrTileN, maxWidth, numDwordsPerElement);
-            }
-
-            if(!useSwappedAccess)
-                std::swap(thrTileM, thrTileN);
-
-            auto internalTileTag = m_loadInfo.at(m_tileSpecs.at(macroTileTag)).internalTile;
-            auto internalTile = MacroTile(macroTile.sizes, MemoryType::VGPR, {thrTileM, thrTileN});
-            internalTile.layoutType = macroTile.layoutType;
-            graph.coordinates.setElement(internalTileTag, internalTile);
-
-            // DataFlow
-            graph.coordinates.addElement(DataFlow(), {user}, {internalTileTag});
-
-            // lower tile LoadTiled : load macrotile from global memory
-            auto loadConnections = loadMacroTileForLDS(graph,
-                                                       user,
-                                                       internalTileTag,
-                                                       sdims,
-                                                       forLoopCoord,
-                                                       workgroupSizes,
-                                                       unrollCoord,
-                                                       useSwappedAccess);
-
-            loadConnections.push_back(DC<User>(user));
-
-            // lower tile StoreLDSTile : store macrotile into LDS
-            auto storeConnections = storeMacroTileIntoLDS(
-                graph, ldsTag, internalTileTag, workgroupSizes, useSwappedAccess);
-            graph.coordinates.deleteElement(
-                std::vector<int>{user}, std::vector<int>{macroTileTag}, CT::isEdge<DataFlow>);
-            graph.coordinates.addElement(DataFlow(), {ldsTag}, {macroTileTag});
-
-            return {ldsTag, internalTileTag, loadConnections, storeConnections};
-        }
-
-        //
-        // Rework this to stage-and-commit
-        //
-        void AddLDSVisitor::addStoreThroughLDSToControlGraph(KernelGraph& graph, int storeTag)
-        {
-            rocRoller::Log::getLogger()->debug(
-                "KernelGraph::AddLDSVisitor::addStoreThroughLDSToControlGraph({})", storeTag);
-
-            auto [macroTileTag, macroTile] = graph.getDimension<MacroTile>(storeTag);
-            auto [userTag, user]           = graph.getDimension<User>(storeTag);
-            if(macroTile.memoryType != MemoryType::WAVE_LDS)
-                return;
-
-            // TODO Query graphs to figure appropriate forLoop for LDS
-            // store
-            // BEGIN fix this
-            int kernel = *graph.control.getNodes<Kernel>().begin();
-            int forLoop;
-            for(auto tag : graph.control.depthFirstVisit(kernel, GD::Downstream))
-            {
-                auto maybeForLoop = graph.control.get<ForLoopOp>(tag);
-                if(maybeForLoop)
-                {
-                    forLoop = tag;
-                    break;
-                }
-            }
-            // END fix this
-
-            int ldsTag = -1;
-            for(auto tag : graph.coordinates.depthFirstVisit(macroTileTag, GD::Downstream))
-            {
-                if(graph.coordinates.get<LDS>(tag))
-                    ldsTag = tag;
-            }
-            AssertFatal(ldsTag != -1);
-            // change StoreTiled to StoreLDSTile
-            auto info = m_store[ldsTag];
-            // and update its macrotile's memory type
-            // Change StoreTiled to StoreLDSTile
-            auto dtype = graph.control.getNode<StoreTiled>(storeTag).dataType;
-
-            graph.control.setElement(storeTag, StoreLDSTile(dtype));
-            graph.mapper.disconnect<User>(storeTag, userTag);
-
-            // Update its macroTile's memory type
-            macroTile.memoryType = MemoryType::WAVE;
-            graph.coordinates.setElement(macroTileTag, macroTile);
-
             auto storeDBarrierRW = graph.control.addElement(Barrier());
             // Find all incoming edges into StoreLDSTile.
             // Those should be changed to come into Barrier to avoid RW hazard.
@@ -1236,120 +986,30 @@ namespace rocRoller
             }
             graph.control.addElement(Sequence(), {storeDBarrierRW}, {storeTag});
 
-            graph.mapper.connect<LDS>(storeTag, ldsTag);
-
             auto barrier = graph.control.addElement(Barrier());
             graph.control.addElement(Sequence(), {storeTag}, {barrier});
 
-            // At this point we have added operations that store VGPRs
-            // into LDS.
-            //
-            // If we have added the operations that store from LDS to
-            // global for this LDS allocation already, we're done.
-            if(m_store[ldsTag].storeOperation)
-            {
-                return;
-            }
+            auto forLoop                  = spec.operation;
+            auto loadMacroTileFromLDSNode = m_info[spec].ldsChain;
+            auto storeMacroTileIntoGlobal = m_info[spec].globalChain;
 
-            auto loadMacroTileFromLDSNode
-                = graph.control.addElement(LoadLDSTile(VariableType(dtype)));
             graph.control.addElement(Sequence(), {forLoop}, {loadMacroTileFromLDSNode});
 
-            graph.mapper.connect<LDS>(loadMacroTileFromLDSNode, ldsTag);
-            graph.mapper.connect<MacroTile>(loadMacroTileFromLDSNode, info.internalTile);
-            for(auto dc : info.loadConnections)
-                graph.mapper.connect(loadMacroTileFromLDSNode, dc.coordinate, dc.connectionSpec);
-
-            auto storeMacroTileIntoGlobal = graph.control.addElement(StoreTiled(dtype));
             graph.control.addElement(
                 Sequence(), {loadMacroTileFromLDSNode}, {storeMacroTileIntoGlobal});
-
-            graph.coordinates.addElement(DataFlow(), {info.internalTile}, {userTag});
-            // add new loadLDSTile node to load a macrotile into VGPRs from LDS
-            graph.mapper.connect<User>(storeMacroTileIntoGlobal, userTag);
-            graph.mapper.connect<MacroTile>(storeMacroTileIntoGlobal, info.internalTile);
-            for(auto dc : info.storeConnections)
-                graph.mapper.connect(storeMacroTileIntoGlobal, dc.coordinate, dc.connectionSpec);
-
-            m_store[ldsTag].storeOperation = storeMacroTileIntoGlobal;
         }
 
-        //
-        // Rework this to stage-and-commit
-        //
-        void AddLDSVisitor::addStoreThroughLDSToCoordinateGraph(KernelGraph& graph, int store)
+        void AddLDSVisitor::addStoreOperations(KernelGraph& graph)
         {
-            rocRoller::Log::getLogger()->debug(
-                "KernelGraph::AddLDSVisitor::addStoreThroughLDSToCoordinateGraph");
-            // create an internal macrotile to be loaded by one workgroup
-            auto [macroTileTag, macroTile] = graph.getDimension<MacroTile>(store);
-            if(macroTile.memoryType != MemoryType::WAVE_LDS)
-                return;
+            rocRoller::Log::getLogger()->debug("KernelGraph::AddLDSVisitor::addStoreOperations()");
 
-            int user
-                = *only(graph.coordinates.getOutputNodeIndices(macroTileTag, CT::isEdge<DataFlow>));
-
-            graph.coordinates.deleteElement(
-                std::vector<int>{macroTileTag}, std::vector<int>{user}, CT::isEdge<DataFlow>);
-            auto sdims
-                = graph.coordinates.getInputNodeIndices(user, CT::isEdge<Join>).to<std::vector>();
-            AssertFatal(sdims.size() > 1);
-
-            auto lds   = graph.coordinates.addElement(LDS());
-            auto dtype = graph.control.getNode<StoreTiled>(store).dataType;
-
-            // remove workgroups, macrotile numbers and tile edges from sdims
-            updateStoreLDSMacroTile(graph, macroTile, store, sdims, lds);
-
-            // macrotile --DataFlow--> LDS
-            graph.coordinates.addElement(DataFlow(), {macroTileTag}, {lds});
-            graph.mapper.connect<LDS>(store, lds);
-
-            // create an internal macrotile to be loaded by one workgroup
-            auto workgroupSizes         = m_context->kernel()->workgroupSize();
-            auto numWorkitems           = product(workgroupSizes);
-            auto numElements            = product(macroTile.sizes);
-            auto numElementsPerWorkitem = static_cast<int>(numElements / numWorkitems);
-            auto thrTileM               = numElementsPerWorkitem;
-            auto thrTileN               = 1;
-
-            // load multiple smaller-precision(< 32-bit) elements into 1 VGPR
-            auto packFactor = bytesPerRegister / DataTypeInfo::Get(dtype).elementSize;
-            bool packed     = false;
-            if(m_context->kernelOptions().packMultipleElementsInto1VGPR && packFactor > 1
-               && thrTileM % packFactor == 0)
+            for(auto spec : m_storeSpecs)
             {
-                thrTileM = thrTileM / packFactor;
-                thrTileN = packFactor;
-
-                packed = true;
+                for(auto [storeTag, storeSpec] : m_stagedStores)
+                {
+                    addStoreOperations(graph, storeTag, spec);
+                }
             }
-
-            // enable the use of longer word instructions if possible
-            if(m_context->kernelOptions().enableLongDwordInstructions
-               && (packed || packFactor <= 1))
-            {
-                auto maxWidth = std::min(m_context->kernelOptions().storeGlobalWidth,
-                                         m_context->kernelOptions().loadLocalWidth);
-
-                auto numDwordsPerElement = DataTypeInfo::Get(dtype).registerCount;
-
-                updateThreadTileForLongDwords(thrTileM, thrTileN, maxWidth, numDwordsPerElement);
-            }
-
-            auto internalTile = MacroTile(macroTile.sizes, MemoryType::VGPR, {thrTileM, thrTileN});
-            internalTile.layoutType = macroTile.layoutType;
-
-            auto internalTileTag = graph.coordinates.addElement(internalTile);
-            graph.coordinates.addElement(DataFlow(), {internalTileTag}, {user});
-
-            ldsStoreInfo info;
-            info.internalTile = internalTileTag;
-            info.loadConnections
-                = loadMacroTileFromLDS(graph, lds, internalTileTag, workgroupSizes);
-            info.storeConnections
-                = storeMacroTileForLDS(graph, user, internalTileTag, sdims, workgroupSizes);
-            m_store[lds] = info;
         }
 
         void AddLDSVisitor::stagePrefetch(KernelGraph const& k)

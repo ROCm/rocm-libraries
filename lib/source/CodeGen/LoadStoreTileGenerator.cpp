@@ -268,7 +268,7 @@ namespace rocRoller
                 namespace CT = rocRoller::KernelGraph::CoordinateGraph;
 
                 auto maybeParentLDS = only(
-                    m_graph->coordinates.getInputNodeIndices(target, CT::isEdge<PassThrough>));
+                    m_graph->coordinates.getOutputNodeIndices(target, CT::isEdge<PassThrough>));
                 if(maybeParentLDS)
                     target = *maybeParentLDS;
             }
