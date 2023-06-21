@@ -4,6 +4,7 @@
 #include <vector>
 
 #include <rocRoller/CodeGen/Instruction.hpp>
+#include <rocRoller/CodeGen/InstructionRef.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitecture.hpp>
 #include <rocRoller/Scheduling/Observers/FunctionalUnit/MFMAObserver.hpp>
 
@@ -20,7 +21,7 @@ namespace rocRoller
 
         bool MFMAObserver::isMFMAInstruction(Instruction const& inst) const
         {
-            return inst.getOpCode().find("mfma") != std::string::npos;
+            return InstructionRef(inst).isMFMA();
         }
 
         InstructionStatus MFMAObserver::peek(Instruction const& inst) const

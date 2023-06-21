@@ -32,7 +32,7 @@ inline auto supportedISAValues()
  * parameters. Example:
  * INSTANTIATE_TEST_SUITE_P(SuiteName,
  *                          FixtureClass,
- *                          ::testing::Combine(supportedISAValues(),
+ *                          ::testing::Combine(mfmaSupportedISAValues(),
  *                                             ::testing::Values(1, 2, 4, 8, 12, 16, 20, 44)));
  */
 inline auto mfmaSupportedISAValues()
@@ -74,7 +74,7 @@ inline auto supportedISATuples()
  * Useful if you want to parameterize a test with only each supported ISA. Example:
  * INSTANTIATE_TEST_SUITE_P(SuiteName,
  *                          FixtureClass,
- *                          supportedISATuples());
+ *                          mfmaSupportedISATuples());
  */
 inline auto mfmaSupportedISATuples()
 {
