@@ -22,13 +22,15 @@ namespace rocRoller
          */
         std::pair<int, int> rangeFor(KernelGraph&              graph,
                                      Expression::ExpressionPtr size,
-                                     const std::string&        loopName)
+                                     const std::string&        loopName,
+                                     VariableType              vtype)
         {
-            auto unitStride   = Expression::literal(1u);
-            auto rangeK       = graph.coordinates.addElement(Linear(size, unitStride));
-            auto dimK         = graph.coordinates.addElement(ForLoop(size, unitStride));
-            auto sizeDataType = Expression::resultVariableType(size);
-            auto exprK        = std::make_shared<Expression::Expression>(
+            auto unitStride = Expression::literal(1u);
+            auto rangeK     = graph.coordinates.addElement(Linear(size, unitStride));
+            auto dimK       = graph.coordinates.addElement(ForLoop(size, unitStride));
+            auto sizeDataType
+                = vtype == DataType::None ? Expression::resultVariableType(size) : vtype;
+            auto exprK = std::make_shared<Expression::Expression>(
                 DataFlowTag{rangeK, Register::Type::Scalar, sizeDataType});
 
             auto forK  = graph.control.addElement(ForLoopOp{exprK < size, loopName});
@@ -160,6 +162,25 @@ namespace rocRoller
                 }
             }
             graph.control.addElement(Sequence(), {bottom}, {op});
+        }
+
+        void insertWithBody(KernelGraph& graph, int op, int newOp)
+        {
+            auto location = graph.control.getLocation(op);
+            for(auto const& input : location.incoming)
+            {
+                auto edge = graph.control.getElement(input);
+                int  parent
+                    = *graph.control.getNeighbours<Graph::Direction::Upstream>(input).begin();
+                graph.control.deleteElement(input);
+                if(graph.control.getInputNodeIndices<Body>(newOp).to<std::unordered_set>().count(
+                       parent)
+                   == 0)
+                {
+                    graph.control.addElement(edge, {parent}, {newOp});
+                }
+            }
+            graph.control.addElement(Body(), {newOp}, {op});
         }
 
         bool needsComputeIndex(Operation const& op)

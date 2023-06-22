@@ -17,8 +17,10 @@ namespace rocRoller
         /**
          * @brief Create a range-based for loop.
          */
-        std::pair<int, int>
-            rangeFor(KernelGraph& graph, Expression::ExpressionPtr size, const std::string& name);
+        std::pair<int, int> rangeFor(KernelGraph&              graph,
+                                     Expression::ExpressionPtr size,
+                                     const std::string&        name,
+                                     VariableType              vtype = DataType::None);
 
         /**
          * @brief Remove a range-based for loop created by rangeFor.
@@ -102,6 +104,11 @@ namespace rocRoller
          * Bottom is attached to op via a Sequence edge.
          */
         void insertBefore(KernelGraph& graph, int op, int top, int bottom);
+
+        /**
+         * @brief Replace operation with a new operation.
+         */
+        void insertWithBody(KernelGraph& graph, int op, int newOp);
 
         /**
          * @brief Find load/store operations that need their indexes

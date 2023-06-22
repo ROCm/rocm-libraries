@@ -16,6 +16,7 @@
 #include <rocRoller/Operations/Command.hpp>
 #include <rocRoller/Scheduling/Observers/FileWritingObserver.hpp>
 #include <rocRoller/Utilities/Error.hpp>
+#include <rocRoller/Utilities/Logging.hpp>
 #include <rocRoller/Utilities/Timer.hpp>
 
 #include "GPUContextFixture.hpp"
@@ -76,6 +77,8 @@ namespace GEMMDriverTest
         bool prefetchMixMemOps = false;
 
         bool packMultipleElementsInto1VGPR = true;
+
+        bool loopOverTiles = false;
     };
 
     template <typename T>
@@ -95,63 +98,68 @@ namespace GEMMDriverTest
         float alpha = gemm.alpha;
         float beta  = gemm.beta;
 
-        // output macro tile size
-        int mac_m = gemm.macM;
-        int mac_n = gemm.macN;
-        int mac_k = gemm.macK;
-
-        int wave_m = gemm.waveM;
-        int wave_n = gemm.waveN;
-        int wave_k = gemm.waveK;
-        int wave_b = gemm.waveB;
-
-        AssertFatal(M % mac_m == 0, "MacroTile size mismatch (M)");
-        AssertFatal(N % mac_n == 0, "MacroTile size mismatch (N)");
+        AssertFatal(M % gemm.macM == 0, "MacroTile size mismatch (M)");
+        AssertFatal(N % gemm.macN == 0, "MacroTile size mismatch (N)");
 
         if(gemm.unrollK > 0)
         {
-            AssertFatal(K % (mac_k * gemm.unrollK) == 0, "MacroTile size mismatch (K unroll)");
+            AssertFatal(K % (gemm.macK * gemm.unrollK) == 0, "MacroTile size mismatch (K unroll)");
         }
 
         AssertFatal(gemm.workgroupSizeX % gemm.wavefrontSize == 0,
                     "Workgroup Size X must be multiply of wave front size");
 
-        uint wavetile_per_wavefront_m = gemm.wavefrontSize * mac_m / wave_m / gemm.workgroupSizeX;
-        uint wavetile_per_wavefront_n = mac_n / wave_n / gemm.workgroupSizeY;
+        uint wavetilePerWavefrontM
+            = gemm.wavefrontSize * gemm.macM / gemm.waveM / gemm.workgroupSizeX;
+        uint wavetilePerWavefrontN = gemm.macN / gemm.waveN / gemm.workgroupSizeY;
 
-        AssertFatal(mac_m % (wave_m * wavetile_per_wavefront_m) == 0, "WaveTile size mismatch (M)");
-        AssertFatal(mac_n % (wave_n * wavetile_per_wavefront_n) == 0, "WaveTile size mismatch (N)");
+        AssertFatal(gemm.macM % (gemm.waveM * wavetilePerWavefrontM) == 0,
+                    "WaveTile size mismatch (M)");
+        AssertFatal(gemm.macN % (gemm.waveN * wavetilePerWavefrontN) == 0,
+                    "WaveTile size mismatch (N)");
 
-        uint workgroup_size_x = gemm.workgroupSizeX * gemm.workgroupSizeY;
-        uint workgroup_size_y = 1;
+        uint workgroupSizeX = gemm.workgroupSizeX * gemm.workgroupSizeY;
+        uint workgroupSizeY = 1;
 
-        // one macro tile per workgroup
-        uint num_workgroup_x = M / mac_m;
-        uint num_workgroup_y = N / mac_n;
+        uint numWorkgroupX;
+        uint numWorkgroupY;
 
-        auto NX = std::make_shared<Expression::Expression>(num_workgroup_x * workgroup_size_x);
-        auto NY = std::make_shared<Expression::Expression>(num_workgroup_y * workgroup_size_y);
+        if(gemm.loopOverTiles > 0)
+        {
+            // multiple output macro tiles per workgroup
+            numWorkgroupX = M * N / gemm.macM / gemm.macN / 2;
+            numWorkgroupY = 1;
+        }
+        else
+        {
+            // one output macro tile per workgroup
+            numWorkgroupX = M / gemm.macM;
+            numWorkgroupY = N / gemm.macN;
+        }
+
+        auto NX = std::make_shared<Expression::Expression>(numWorkgroupX * workgroupSizeX);
+        auto NY = std::make_shared<Expression::Expression>(numWorkgroupY * workgroupSizeY);
         auto NZ = std::make_shared<Expression::Expression>(1u);
 
         // Host data
-        std::vector<T> h_A;
-        std::vector<T> h_B;
-        std::vector<T> h_C;
+        std::vector<T> hostA;
+        std::vector<T> hostB;
+        std::vector<T> hostC;
 
-        GenerateRandomInput(31415u, h_A, M * K, h_B, K * N, h_C, M * N);
+        GenerateRandomInput(31415u, hostA, M * K, hostB, K * N, hostC, M * N);
 
         if(setIdentity)
         {
-            SetIdentityMatrix(h_A, K, M);
-            SetIdentityMatrix(h_B, N, K);
+            SetIdentityMatrix(hostA, K, M);
+            SetIdentityMatrix(hostB, N, K);
 
-            std::fill(h_C.begin(), h_C.end(), static_cast<T>(0.0));
+            std::fill(hostC.begin(), hostC.end(), static_cast<T>(0.0));
         }
 
-        std::shared_ptr<T> d_A = make_shared_device(h_A);
-        std::shared_ptr<T> d_B = make_shared_device(h_B);
-        std::shared_ptr<T> d_C = make_shared_device(h_C);
-        std::shared_ptr<T> d_D = make_shared_device<T>(M * N, 0.0);
+        std::shared_ptr<T> deviceA = make_shared_device(hostA);
+        std::shared_ptr<T> deviceB = make_shared_device(hostB);
+        std::shared_ptr<T> deviceC = make_shared_device(hostC);
+        std::shared_ptr<T> deviceD = make_shared_device<T>(M * N, 0.0);
 
         auto command  = std::make_shared<Command>();
         auto dataType = TypeInfo<T>::Var.dataType;
@@ -202,7 +210,7 @@ namespace GEMMDriverTest
 
         KernelArguments runtimeArgs;
 
-        runtimeArgs.append("A", d_A.get());
+        runtimeArgs.append("A", deviceA.get());
         runtimeArgs.append("d_a_limit", (size_t)M * K);
         runtimeArgs.append("d_a_size_0", (size_t)M);
         runtimeArgs.append("d_a_size_1", (size_t)K);
@@ -217,7 +225,7 @@ namespace GEMMDriverTest
             runtimeArgs.append("d_a_stride_1", (size_t)1);
         }
 
-        runtimeArgs.append("B", d_B.get());
+        runtimeArgs.append("B", deviceB.get());
         runtimeArgs.append("d_b_limit", (size_t)K * N);
         runtimeArgs.append("d_b_size_0", (size_t)K);
         runtimeArgs.append("d_b_size_1", (size_t)N);
@@ -232,7 +240,7 @@ namespace GEMMDriverTest
             runtimeArgs.append("d_b_stride_1", (size_t)1);
         }
 
-        runtimeArgs.append("C", d_C.get());
+        runtimeArgs.append("C", deviceC.get());
         runtimeArgs.append("d_c_limit", (size_t)M * N);
         runtimeArgs.append("d_c_size_0", (size_t)M);
         runtimeArgs.append("d_c_size_1", (size_t)N);
@@ -243,7 +251,7 @@ namespace GEMMDriverTest
 
         runtimeArgs.append("beta", beta);
 
-        runtimeArgs.append("D", d_D.get());
+        runtimeArgs.append("D", deviceD.get());
         runtimeArgs.append("d_d_limit", (size_t)M * N);
         runtimeArgs.append("d_d_stride_0", (size_t)1);
         runtimeArgs.append("d_d_stride_1", (size_t)M);
@@ -261,44 +269,59 @@ namespace GEMMDriverTest
         kernelOptions->transposeMemoryAccess[LayoutType::MATRIX_A] = gemm.transA == "T";
         kernelOptions->transposeMemoryAccess[LayoutType::MATRIX_B] = gemm.transB == "T";
 
+        if(gemm.loopOverTiles > 0)
+        {
+            kernelOptions->loopOverOutputTilesDimensions = {0, 1};
+            kernelOptions->loopOverOutputTilesCoordSizes
+                = {static_cast<uint>(M / gemm.macM), static_cast<uint>(N / gemm.macN)};
+            kernelOptions->loopOverOutputTilesIteratedTiles = 2;
+        }
+
         auto params = std::make_shared<CommandParameters>();
         params->setManualKernelDimension(2);
         // TODO: Calculate these values internally based on workgroup sizes.
-        params->setWaveTilesPerWavefront(wavetile_per_wavefront_m, wavetile_per_wavefront_n);
+        params->setWaveTilesPerWavefront(wavetilePerWavefrontM, wavetilePerWavefrontN);
 
-        auto mac_tile_A = KernelGraph::CoordinateGraph::MacroTile({mac_m, mac_k},
-                                                                  LayoutType::MATRIX_A,
-                                                                  {wave_m, wave_n, wave_k, wave_b},
-                                                                  gemm.loadLDSA ? MemoryType::LDS
-                                                                                : MemoryType::WAVE);
-        auto mac_tile_B = KernelGraph::CoordinateGraph::MacroTile({mac_k, mac_n},
-                                                                  LayoutType::MATRIX_B,
-                                                                  {wave_m, wave_n, wave_k, wave_b},
-                                                                  gemm.loadLDSB ? MemoryType::LDS
-                                                                                : MemoryType::WAVE);
-        auto mac_tile_C = KernelGraph::CoordinateGraph::MacroTile(
-            {mac_m, mac_n}, LayoutType::MATRIX_ACCUMULATOR, {wave_m, wave_n, wave_k, wave_b});
-        auto mac_tile_D = KernelGraph::CoordinateGraph::MacroTile(
-            {mac_m, mac_n},
+        auto macTileA = KernelGraph::CoordinateGraph::MacroTile(
+            {gemm.macM, gemm.macK},
+            LayoutType::MATRIX_A,
+            {gemm.waveM, gemm.waveN, gemm.waveK, gemm.waveB},
+            gemm.loadLDSA ? MemoryType::LDS : MemoryType::WAVE);
+        auto macTileB = KernelGraph::CoordinateGraph::MacroTile(
+            {gemm.macK, gemm.macN},
+            LayoutType::MATRIX_B,
+            {gemm.waveM, gemm.waveN, gemm.waveK, gemm.waveB},
+            gemm.loadLDSB ? MemoryType::LDS : MemoryType::WAVE);
+        auto macTileC = KernelGraph::CoordinateGraph::MacroTile(
+            {gemm.macM, gemm.macN},
             LayoutType::MATRIX_ACCUMULATOR,
-            {wave_m, wave_n, wave_k, wave_b},
+            {gemm.waveM, gemm.waveN, gemm.waveK, gemm.waveB});
+        auto macTileD = KernelGraph::CoordinateGraph::MacroTile(
+            {gemm.macM, gemm.macN},
+            LayoutType::MATRIX_ACCUMULATOR,
+            {gemm.waveM, gemm.waveN, gemm.waveK, gemm.waveB},
             gemm.storeLDSD ? MemoryType::LDS : MemoryType::WAVE);
 
-        params->setDimensionInfo(4, mac_tile_A);
-        params->setDimensionInfo(11, mac_tile_B);
-        params->setDimensionInfo(18, mac_tile_C);
-        params->setDimensionInfo(28, mac_tile_C);
-        params->setDimensionInfo(30, mac_tile_C);
-        params->setDimensionInfo(32, mac_tile_C);
-        params->setDimensionInfo(34, mac_tile_D);
+        params->setDimensionInfo(4, macTileA);
+        params->setDimensionInfo(11, macTileB);
+        params->setDimensionInfo(18, macTileC);
+        params->setDimensionInfo(28, macTileC);
+        params->setDimensionInfo(30, macTileC);
+        params->setDimensionInfo(32, macTileC);
+        params->setDimensionInfo(34, macTileD);
 
-        params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
+        params->setManualWorkgroupSize({workgroupSizeX, workgroupSizeY, 1});
         params->setManualWorkitemCount({NX, NY, NZ});
+
+        rocRoller::Log::getLogger()->debug(
+            "GEMM workgroup sizes {} {} {}", workgroupSizeX, workgroupSizeY, 1);
+        rocRoller::Log::getLogger()->debug(
+            "GEMM workitem counts {} {} {}", toString(NX), toString(NY), toString(NZ));
 
         auto postParams = std::make_shared<CommandParameters>();
         postParams->setManualWavefrontCount(
-            {static_cast<uint>(mac_m / wave_m / wavetile_per_wavefront_m),
-             static_cast<uint>(mac_n / wave_n / wavetile_per_wavefront_n)});
+            {static_cast<uint>(gemm.macM / gemm.waveM / wavetilePerWavefrontM),
+             static_cast<uint>(gemm.macN / gemm.waveN / wavetilePerWavefrontN)});
 
         CommandKernel commandKernel(command, "GEMMTest", params, postParams, kernelOptions);
         commandKernel.launchKernel(runtimeArgs.runtimeArguments());
@@ -306,13 +329,23 @@ namespace GEMMDriverTest
 
         // Device result
         std::vector<T> d_result(M * N, 0.0);
-        ASSERT_THAT(hipMemcpy(d_result.data(), d_D.get(), M * N * sizeof(T), hipMemcpyDeviceToHost),
-                    HasHipSuccess(0));
+        ASSERT_THAT(
+            hipMemcpy(d_result.data(), deviceD.get(), M * N * sizeof(T), hipMemcpyDeviceToHost),
+            HasHipSuccess(0));
 
         // Host result
         std::vector<T> h_result(M * N, 0.0);
-        rocRoller::CPUMM(
-            h_result, h_C, h_A, h_B, M, N, K, alpha, beta, gemm.transA == "T", gemm.transB == "T");
+        rocRoller::CPUMM(h_result,
+                         hostC,
+                         hostA,
+                         hostB,
+                         M,
+                         N,
+                         K,
+                         alpha,
+                         beta,
+                         gemm.transA == "T",
+                         gemm.transB == "T");
 
         if(debuggable)
         {
@@ -388,6 +421,14 @@ namespace GEMMDriverTest
     {
         GEMMProblem gemm;
         basicGEMM<float>(m_context, gemm, 1.e-6);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMMultipleOutputTiles)
+    {
+        GEMMProblem gemm;
+        gemm.storeLDSD     = false;
+        gemm.loopOverTiles = true;
+        basicGEMM<float>(m_context, gemm, 1.e-6, true);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMNoLDSA)

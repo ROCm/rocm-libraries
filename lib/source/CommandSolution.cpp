@@ -19,6 +19,7 @@
 #include "KernelGraph/Transforms/FuseLoops.hpp"
 #include "KernelGraph/Transforms/GraphTransform.hpp"
 #include "KernelGraph/Transforms/InlineIncrements.hpp"
+#include "KernelGraph/Transforms/LoopOverTileNumbers.hpp"
 #include "KernelGraph/Transforms/LowerLinear.hpp"
 #include "KernelGraph/Transforms/LowerTensorContraction.hpp"
 #include "KernelGraph/Transforms/LowerTile.hpp"
@@ -263,6 +264,15 @@ namespace rocRoller
         transforms.push_back(std::make_shared<KernelGraph::LowerTile>(m_preParameters, m_context));
         transforms.push_back(
             std::make_shared<KernelGraph::LowerTensorContraction>(m_preParameters, m_context));
+        if(!m_context->kernelOptions().loopOverOutputTilesDimensions.empty())
+        {
+            transforms.push_back(std::make_shared<KernelGraph::LoopOverTileNumbers>(
+                m_context->kernelOptions().loopOverOutputTilesDimensions,
+                m_context->kernelOptions().loopOverOutputTilesCoordSizes,
+                m_context->kernelOptions().loopOverOutputTilesIteratedTiles,
+                m_context->kernelOptions().loopOverOutputTilesTopLoop,
+                m_context));
+        }
         transforms.push_back(std::make_shared<KernelGraph::ConnectWorkgroups>());
         transforms.push_back(std::make_shared<KernelGraph::FuseExpressions>());
         transforms.push_back(std::make_shared<KernelGraph::UnrollLoops>(m_context));

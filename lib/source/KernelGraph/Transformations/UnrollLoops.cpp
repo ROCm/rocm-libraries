@@ -49,6 +49,14 @@ namespace rocRoller
         unsigned int
             getUnrollAmount(KernelGraph& graph, int loopTag, KernelOptions const& kernelOptions)
         {
+            auto name = getForLoopName(graph, loopTag);
+
+            // Only attempt to unroll some loops for now...
+            auto onlyUnroll
+                = std::set<std::string>{rocRoller::XLOOP, rocRoller::YLOOP, rocRoller::KLOOP};
+            if(!onlyUnroll.contains(name))
+                return 1u;
+
             auto dimTag        = graph.mapper.get<Dimension>(loopTag);
             auto forLoopLength = getSize(std::get<Dimension>(graph.coordinates.getElement(dimTag)));
 
@@ -56,7 +64,6 @@ namespace rocRoller
             auto unrollY = kernelOptions.unrollY;
             auto unrollK = kernelOptions.unrollK;
             // Find the number of forLoops following this for loop.
-            auto name = getForLoopName(graph, loopTag);
             if(name == rocRoller::XLOOP && unrollX > 0)
                 return unrollX;
             else if(name == rocRoller::YLOOP && unrollY > 0)

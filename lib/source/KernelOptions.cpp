@@ -23,6 +23,8 @@ namespace rocRoller
         , prefetchInFlight(1)
         , prefetchLDSFactor(0)
         , prefetchMixMemOps(false)
+        , loopOverOutputTilesDimensions({})
+        , loopOverOutputTilesTopLoop(XLOOP)
         , unrollX(0)
         , unrollY(0)
         , unrollK(0)

@@ -6,11 +6,12 @@ namespace rocRoller
     namespace KernelGraph
     {
         /**
-         * @brief Performs the loop cleaning transformation
+         * @brief Connect unbound (leaf) MacroTileNumber coordinates
+         * to Workgroups.
          *
-         * Removes forloops that only contain a single iterations
-         *
-         * @return KernelGraph
+         * This transform searches for MacroTileNumber coordinates
+         * that are leafs (don't have outgoing/incoming edges), and
+         * attaches Workgroup coordinates to them.
          */
         class ConnectWorkgroups : public GraphTransform
         {
