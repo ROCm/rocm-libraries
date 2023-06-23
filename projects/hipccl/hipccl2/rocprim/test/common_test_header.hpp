@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,18 +24,15 @@
 #define ROCPRIM_COMMON_TEST_HEADER
 
 #include <algorithm>
+#include <cmath>
 #include <functional>
 #include <iostream>
-#include <type_traits>
-#include <tuple>
-#include <vector>
-#include <utility>
-#include <random>
-#include <cmath>
-
-#ifdef WIN32
 #include <numeric>
-#endif
+#include <random>
+#include <tuple>
+#include <type_traits>
+#include <utility>
+#include <vector>
 
 // Google Test
 #include <gtest/gtest.h>

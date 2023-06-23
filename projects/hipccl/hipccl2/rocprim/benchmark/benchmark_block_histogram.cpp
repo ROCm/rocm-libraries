@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -91,6 +91,10 @@ struct histogram
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             bhistogram_t().histogram(values, histogram, storage);
+            for(unsigned int k = 0; k < ItemsPerThread; k++)
+            {
+                values[k] = BinSize - 1 - values[k];
+            }
         }
 
         ROCPRIM_UNROLL

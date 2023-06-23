@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2018-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -27,68 +27,65 @@
 #include "../functional.hpp"
 #include "../detail/various.hpp"
 
-#include "config_types.hpp"
+#include "detail/device_config_helper.hpp"
 
 /// \addtogroup primitivesmodule_deviceconfigs
 /// @{
 
 BEGIN_ROCPRIM_NAMESPACE
 
-/// \brief Configuration of device-level transform primitives.
-template <unsigned int BlockSize,
-          unsigned int ItemsPerThread,
-          unsigned int SizeLimit = ROCPRIM_GRID_SIZE_LIMIT>
-using transform_config = kernel_config<BlockSize, ItemsPerThread, SizeLimit>;
-
 namespace detail
 {
 
-template<class Value>
-struct transform_config_803
-{
-    static constexpr unsigned int item_scale =
-        ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
+// device transform does not have config tuning
+template<unsigned int arch, class value_type>
+struct default_transform_config : default_transform_config_base<value_type>
+{};
 
-    using type = transform_config<256, ::rocprim::max(1u, 16u / item_scale)>;
+template<typename TransformConfig>
+constexpr transform_config_params wrap_transform_config()
+{
+    return transform_config_params{
+        {
+         TransformConfig::block_size,
+         TransformConfig::items_per_thread,
+         TransformConfig::size_limit,
+         }
+    };
+}
+
+template<typename TransformConfig, typename>
+struct wrapped_transform_config
+{
+    template<target_arch Arch>
+    struct architecture_config
+    {
+        static constexpr transform_config_params params = wrap_transform_config<TransformConfig>();
+    };
 };
 
-template<class Value>
-struct transform_config_900
+template<typename Value>
+struct wrapped_transform_config<default_config, Value>
 {
-    static constexpr unsigned int item_scale =
-        ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
-
-    using type = transform_config<256, ::rocprim::max(1u, 16u / item_scale)>;
+    template<target_arch Arch>
+    struct architecture_config
+    {
+        static constexpr transform_config_params params = wrap_transform_config<
+            default_transform_config<static_cast<unsigned int>(Arch), Value>>();
+    };
 };
 
-template<class Value>
-struct transform_config_90a
-{
-    static constexpr unsigned int item_scale =
-        ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+template<typename TransformConfig, typename Value>
+template<target_arch Arch>
+constexpr transform_config_params
+    wrapped_transform_config<TransformConfig, Value>::architecture_config<Arch>::params;
 
-    using type = transform_config<256, ::rocprim::max(1u, 16u / item_scale)>;
-};
-
-template<class Value>
-struct transform_config_1030
-{
-    static constexpr unsigned int item_scale =
-        ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
-
-    using type = transform_config<256, ::rocprim::max(1u, 16u / item_scale)>;
-};
-
-template<unsigned int TargetArch, class Value>
-struct default_transform_config
-    : select_arch<
-        TargetArch,
-        select_arch_case<803, transform_config_803<Value>>,
-        select_arch_case<900, transform_config_900<Value>>,
-        select_arch_case<ROCPRIM_ARCH_90a, transform_config_90a<Value>>,
-        select_arch_case<1030, transform_config_1030<Value>>,
-        transform_config_900<Value>
-    > { };
+template<typename Value>
+template<target_arch Arch>
+constexpr transform_config_params
+    wrapped_transform_config<default_config, Value>::architecture_config<Arch>::params;
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 } // end namespace detail
 

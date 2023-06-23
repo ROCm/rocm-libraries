@@ -211,6 +211,8 @@ ${TEST_TYPE_SLICE_COUNT} test type slice(s) for test target ${TEST_TARGET}")
   set_property(DIRECTORY APPEND PROPERTY ADDITIONAL_CLEAN_FILES "${TEST_TARGET}.parallel")
   add_rocprim_test_internal(${TEST_NAME} "${SOURCES}" ${TEST_TARGET})
   target_include_directories("${TEST_TARGET}" PRIVATE "../../test/rocprim")
+  # Make sure the configured files are re-configured if they are removed (via clean).
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${SOURCES})
 endfunction()
 
 # ****************************************************************************

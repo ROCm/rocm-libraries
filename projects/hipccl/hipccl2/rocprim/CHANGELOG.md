@@ -3,13 +3,18 @@
 Full documentation for rocPRIM is available at [https://rocprim.readthedocs.io/en/latest/](https://rocprim.readthedocs.io/en/latest/)
 
 ## [Unreleased rocPRIM-2.13.1 for ROCm 5.7.0]
+### Added
+- `block_sort::sort()` overload for keys and values with a dynamic size, for all block sort algorithms. Additionally, all `block_sort::sort()` overloads with a dynamic size are now supported for `block_sort_algorithm::merge_sort` and `block_sort_algorithm::bitonic_sort`.
+- New two-way partition primitive `partition_two_way` which can write to two separate iterators.
 ### Changed
 - Deprecated configuration `radix_sort_config` for device-level radix sort as it no longer matches the algorithm's parameters. New configuration `radix_sort_config_v2` is preferred instead.
 - Removed erroneous implementation of device-level `inclusive_scan` and `exclusive_scan`. The prior default implementation using lookback-scan now is the only available implementation.
 - The benchmark metric indicating the bytes processed for `exclusive_scan_by_key` and `inclusive_scan_by_key` has been changed to incorporate the key type. Furthermore, the benchmark log has been changed such that these algorithms are reported as `scan` and `scan_by_key` instead of `scan_exclusive` and `scan_inclusive`.
 - Deprecated configurations `scan_config` and `scan_by_key_config` for device-level scans, as they no longer match the algorithm's parameters. New configurations `scan_config_v2` and `scan_by_key_config_v2` are preferred instead.
+- Improved the performance of `partition`.
 ### Fixed
 - Fixed build issue caused by missing header in `thread/thread_search.hpp`.
+- Fixed `rocprim::MatchAny` for devices with 64-bit warp size. The function `rocprim::MatchAny` is deprecated and `rocprim::match_any` is preferred instead.
 
 ## [rocPRIM-2.13.0 for ROCm 5.5.0]
 ### Added

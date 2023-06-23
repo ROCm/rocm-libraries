@@ -232,9 +232,7 @@ constexpr target_arch get_target_arch_from_name(const char* const arch_name, con
  */
 constexpr target_arch device_target_arch()
 {
-#ifdef WIN32
-    return target_arch::unknown;
-#elif defined(__amdgcn_processor__)
+#if defined(__amdgcn_processor__)
     // The terminating zero is not counted in the length of the string
     return get_target_arch_from_name(__amdgcn_processor__,
                                      sizeof(__amdgcn_processor__) - sizeof('\0'));
@@ -318,7 +316,7 @@ inline hipError_t get_device_arch(int device_id, target_arch& arch)
     return hipSuccess;
 }
 
-#ifndef WIN32
+#ifndef _WIN32
 inline hipError_t get_device_from_stream(const hipStream_t stream, int& device_id)
 {
     static constexpr hipStream_t default_stream = 0;
@@ -347,7 +345,7 @@ inline hipError_t get_device_from_stream(const hipStream_t stream, int& device_i
 
 inline hipError_t host_target_arch(const hipStream_t stream, target_arch& arch)
 {
-#ifdef WIN32
+#ifdef _WIN32
     (void)stream;
     arch = target_arch::unknown;
     return hipSuccess;

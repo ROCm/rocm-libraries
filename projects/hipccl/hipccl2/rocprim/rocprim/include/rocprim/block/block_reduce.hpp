@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -48,7 +48,7 @@ enum class block_reduce_algorithm
     /// \brief raking reduce that supports only commutative operators
     raking_reduce_commutative_only,
     /// \brief Default block_reduce algorithm.
-    default_algorithm = using_warp_reduce,
+    default_algorithm = using_warp_reduce
 };
 
 namespace detail
@@ -99,8 +99,8 @@ struct select_block_reduce_impl<block_reduce_algorithm::raking_reduce_commutativ
 ///   * \p T is an arithmetic type,
 ///   * reduce operation is simple addition operator, and
 ///   * the number of threads in the block is a multiple of the hardware warp size (see rocprim::device_warp_size()).
-/// * block_reduce has two alternative implementations: \p block_reduce_algorithm::using_warp_reduce,
-///   block_reduce_algorithm::raking_reduce and block_reduce_algorithm::raking_reduce_commutative_only.
+/// * block_reduce has three alternative implementations: \p block_reduce_algorithm::using_warp_reduce,
+///   \p block_reduce_algorithm::raking_reduce and \p block_reduce_algorithm::raking_reduce_commutative_only.
 /// * If the block sizes less than 64 only one warp reduction is used. The block reduction algorithm
 ///   stores the result only in the first thread(lane_id = 0 warp_id = 0), when the block size is
 ///   larger then the warp size.

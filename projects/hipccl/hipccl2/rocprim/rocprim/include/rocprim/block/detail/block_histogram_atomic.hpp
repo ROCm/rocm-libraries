@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -64,9 +64,32 @@ public:
             "Counter must be type that is supported by atomics (float, int, unsigned int, unsigned long long)"
         );
         ROCPRIM_UNROLL
-        for (unsigned int i = 0; i < ItemsPerThread; ++i)
+        for(unsigned int i = 0; i < ItemsPerThread; ++i)
         {
-              ::rocprim::detail::atomic_add(&hist[static_cast<unsigned int>(input[i])], Counter(1));
+            const unsigned int bin = static_cast<unsigned int>(input[i]);
+
+            // Get a mask with the threads that have the same value for `bin`.
+            ::rocprim::lane_mask_type peer_mask = ballot(1);
+            ROCPRIM_UNROLL
+            for(unsigned int b = 1; b < Bins; b <<= 1)
+            {
+                const unsigned int bit_set      = bin & b;
+                const auto         bit_set_mask = ballot(bit_set);
+                peer_mask &= (bit_set ? bit_set_mask : ~bit_set_mask);
+            }
+
+            // The total number of threads in the warp which also have this digit.
+            const unsigned int bin_count = bit_count(peer_mask);
+
+            // The number of threads in the warp that have the same digit AND whose lane id is lower
+            // than the current thread's.
+            const unsigned int peer_digit_prefix = masked_bit_count(peer_mask);
+
+            // Set counter value.
+            if(peer_digit_prefix == 0)
+            {
+                detail::atomic_add(&hist[bin], Counter(bin_count));
+            }
         }
         ::rocprim::syncthreads();
     }

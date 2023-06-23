@@ -35,6 +35,8 @@
 #include "../../block/block_discontinuity.hpp"
 
 #include "lookback_scan_state.hpp"
+#include "rocprim/type_traits.hpp"
+#include "rocprim/types/tuple.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -302,18 +304,97 @@ ROCPRIM_DEVICE ROCPRIM_INLINE void
     }
 }
 
+// two-way partition into one iterator
 template<bool         OnlySelected,
          unsigned int BlockSize,
          class ValueType,
          unsigned int ItemsPerThread,
          class OffsetType,
-         class OutputIterator,
+         class SelectType,
+         class ScatterStorageType>
+ROCPRIM_DEVICE ROCPRIM_INLINE auto
+    partition_scatter(ValueType (&values)[ItemsPerThread],
+                      bool (&is_selected)[ItemsPerThread],
+                      OffsetType (&output_indices)[ItemsPerThread],
+                      tuple<SelectType, ::rocprim::empty_type*> output,
+                      const size_t                              total_size,
+                      const OffsetType                          selected_prefix,
+                      const OffsetType                          selected_in_block,
+                      ScatterStorageType&                       storage,
+                      const unsigned int                        flat_block_id,
+                      const unsigned int                        flat_block_thread_id,
+                      const bool                                is_global_last_block,
+                      const unsigned int                        valid_in_global_last_block,
+                      size_t (&prev_selected_count_values)[1],
+                      size_t prev_processed) -> typename std::enable_if<!OnlySelected>::type
+{
+    constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
+
+    // Scatter selected/rejected values to shared memory
+    auto scatter_storage = storage.get();
+    ROCPRIM_UNROLL
+    for(unsigned int i = 0; i < ItemsPerThread; i++)
+    {
+        unsigned int item_index          = (flat_block_thread_id * ItemsPerThread) + i;
+        unsigned int selected_item_index = output_indices[i] - selected_prefix;
+        unsigned int rejected_item_index = (item_index - selected_item_index) + selected_in_block;
+        // index of item in scatter_storage
+        unsigned int scatter_index     = is_selected[i] ? selected_item_index : rejected_item_index;
+        scatter_storage[scatter_index] = values[i];
+    }
+    ::rocprim::syncthreads(); // sync threads to reuse shared memory
+
+    ValueType reloaded_values[ItemsPerThread];
+    for(unsigned int i = 0; i < ItemsPerThread; i++)
+    {
+        const unsigned int item_index = i * BlockSize + flat_block_thread_id;
+        reloaded_values[i]            = scatter_storage[item_index];
+    }
+
+    const auto calculate_scatter_index = [=](const unsigned int item_index) -> size_t
+    {
+        const size_t selected_output_index = prev_selected_count_values[0] + selected_prefix;
+        const size_t rejected_output_index = total_size + selected_output_index - prev_processed
+                                             - flat_block_id * items_per_block + selected_in_block
+                                             - 1;
+        return item_index < selected_in_block ? selected_output_index + item_index
+                                              : rejected_output_index - item_index;
+    };
+    if(is_global_last_block)
+    {
+        for(unsigned int i = 0; i < ItemsPerThread; i++)
+        {
+            const unsigned int item_index = i * BlockSize + flat_block_thread_id;
+            if(item_index < valid_in_global_last_block)
+            {
+                get<0>(output)[calculate_scatter_index(item_index)] = reloaded_values[i];
+            }
+        }
+    }
+    else
+    {
+        for(unsigned int i = 0; i < ItemsPerThread; i++)
+        {
+            const unsigned int item_index = i * BlockSize + flat_block_thread_id;
+            get<0>(output)[calculate_scatter_index(item_index)] = reloaded_values[i];
+        }
+    }
+}
+
+// two-way partition into two iterators
+template<bool         OnlySelected,
+         unsigned int BlockSize,
+         class ValueType,
+         unsigned int ItemsPerThread,
+         class OffsetType,
+         class SelectType,
+         class RejectType,
          class ScatterStorageType>
 ROCPRIM_DEVICE ROCPRIM_INLINE auto partition_scatter(ValueType (&values)[ItemsPerThread],
                                                      bool (&is_selected)[ItemsPerThread],
                                                      OffsetType (&output_indices)[ItemsPerThread],
-                                                     OutputIterator      output,
-                                                     const size_t        total_size,
+                                                     tuple<SelectType, RejectType> output,
+                                                     const size_t /*total_size*/,
                                                      const OffsetType    selected_prefix,
                                                      const OffsetType    selected_in_block,
                                                      ScatterStorageType& storage,
@@ -332,11 +413,11 @@ ROCPRIM_DEVICE ROCPRIM_INLINE auto partition_scatter(ValueType (&values)[ItemsPe
     ROCPRIM_UNROLL
     for(unsigned int i = 0; i < ItemsPerThread; i++)
     {
-        unsigned int item_index = (flat_block_thread_id * ItemsPerThread) + i;
+        unsigned int item_index          = (flat_block_thread_id * ItemsPerThread) + i;
         unsigned int selected_item_index = output_indices[i] - selected_prefix;
         unsigned int rejected_item_index = (item_index - selected_item_index) + selected_in_block;
         // index of item in scatter_storage
-        unsigned int scatter_index = is_selected[i] ? selected_item_index : rejected_item_index;
+        unsigned int scatter_index     = is_selected[i] ? selected_item_index : rejected_item_index;
         scatter_storage[scatter_index] = values[i];
     }
     ::rocprim::syncthreads(); // sync threads to reuse shared memory
@@ -348,15 +429,22 @@ ROCPRIM_DEVICE ROCPRIM_INLINE auto partition_scatter(ValueType (&values)[ItemsPe
         reloaded_values[i]            = scatter_storage[item_index];
     }
 
-    const auto calculate_scatter_index = [=](const unsigned int item_index) -> size_t
+    auto save_to_output = [=](const unsigned int item_index, const unsigned int i)
     {
-        const size_t selected_output_index
-            = prev_selected_count_values[0] + selected_prefix + item_index;
-        const size_t rejected_output_index = total_size + selected_output_index - prev_processed
-                                             - flat_block_id * items_per_block - 2 * item_index
-                                             + selected_in_block - 1;
-        return item_index < selected_in_block ? selected_output_index : rejected_output_index;
+        const size_t selected_output_index = prev_selected_count_values[0] + selected_prefix;
+        const size_t rejected_output_index = prev_processed + flat_block_id * items_per_block
+                                             - selected_output_index - selected_in_block;
+
+        if(item_index < selected_in_block)
+        {
+            get<0>(output)[selected_output_index + item_index] = reloaded_values[i];
+        }
+        else
+        {
+            get<1>(output)[rejected_output_index + item_index] = reloaded_values[i];
+        }
     };
+
     if(is_global_last_block)
     {
         for(unsigned int i = 0; i < ItemsPerThread; i++)
@@ -364,7 +452,7 @@ ROCPRIM_DEVICE ROCPRIM_INLINE auto partition_scatter(ValueType (&values)[ItemsPe
             const unsigned int item_index = i * BlockSize + flat_block_thread_id;
             if(item_index < valid_in_global_last_block)
             {
-                output[calculate_scatter_index(item_index)] = reloaded_values[i];
+                save_to_output(item_index, i);
             }
         }
     }
@@ -372,24 +460,26 @@ ROCPRIM_DEVICE ROCPRIM_INLINE auto partition_scatter(ValueType (&values)[ItemsPe
     {
         for(unsigned int i = 0; i < ItemsPerThread; i++)
         {
-            const unsigned int item_index               = i * BlockSize + flat_block_thread_id;
-            output[calculate_scatter_index(item_index)] = reloaded_values[i];
+            const unsigned int item_index = i * BlockSize + flat_block_thread_id;
+            save_to_output(item_index, i);
         }
     }
 }
 
+// two-way partition, selection only
 template<bool         OnlySelected,
          unsigned int BlockSize,
          class ValueType,
          unsigned int ItemsPerThread,
          class OffsetType,
-         class OutputIterator,
+         class SelectType,
+         class RejectType,
          class ScatterStorageType>
 ROCPRIM_DEVICE ROCPRIM_INLINE auto
     partition_scatter(ValueType (&values)[ItemsPerThread],
                       bool (&is_selected)[ItemsPerThread],
                       OffsetType (&output_indices)[ItemsPerThread],
-                      OutputIterator output,
+                      tuple<SelectType, RejectType> output,
                       const size_t /*total_size*/,
                       const OffsetType    selected_prefix,
                       const OffsetType    selected_in_block,
@@ -419,7 +509,8 @@ ROCPRIM_DEVICE ROCPRIM_INLINE auto
         // Coalesced write from shared memory to global memory
         for(unsigned int i = flat_block_thread_id; i < selected_in_block; i += BlockSize)
         {
-            output[prev_selected_count_values[0] + selected_prefix + i] = scatter_storage[i];
+            get<0>(output)[prev_selected_count_values[0] + selected_prefix + i]
+                = scatter_storage[i];
         }
     }
     else
@@ -431,13 +522,14 @@ ROCPRIM_DEVICE ROCPRIM_INLINE auto
             {
                 if(is_selected[i])
                 {
-                    output[prev_selected_count_values[0] + output_indices[i]] = values[i];
+                    get<0>(output)[prev_selected_count_values[0] + output_indices[i]] = values[i];
                 }
             }
         }
     }
 }
 
+// three-way partition
 template<bool         OnlySelected,
          unsigned int BlockSize,
          class ValueType,

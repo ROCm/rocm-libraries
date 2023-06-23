@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -101,15 +101,15 @@ void block_reduce_kernel_impl(InputIterator input,
         = ::rocprim::block_reduce<result_type, block_size, params.block_reduce_method>;
     constexpr unsigned int items_per_block = block_size * items_per_thread;
 
-    const unsigned int flat_id = ::rocprim::detail::block_thread_id<0>();
-    const unsigned int flat_block_id = ::rocprim::detail::block_id<0>();
-    const unsigned int block_offset = flat_block_id * items_per_block;
-    const unsigned int number_of_blocks = ::rocprim::detail::grid_size<0>();
-    auto valid_in_last_block = input_size - items_per_block * (number_of_blocks - 1);
+    const unsigned int flat_id             = ::rocprim::detail::block_thread_id<0>();
+    const unsigned int flat_block_id       = ::rocprim::detail::block_id<0>();
+    const size_t       block_offset        = flat_block_id * items_per_block;
+    const unsigned int valid_in_last_block = input_size - block_offset;
 
     result_type values[items_per_thread];
     result_type output_value;
-    if(flat_block_id == (number_of_blocks - 1)) // last block
+    // last incomplete block
+    if(flat_block_id == (input_size / items_per_block))
     {
         block_load_direct_striped<block_size>(
             flat_id,
@@ -129,13 +129,10 @@ void block_reduce_kernel_impl(InputIterator input,
             }
         }
 
-        block_reduce_type()
-            .reduce(
-                output_value, // input
-                output_value, // output
-                valid_in_last_block,
-                reduce_op
-            );
+        block_reduce_type().reduce(output_value, // input
+                                   output_value, // output
+                                   std::min(valid_in_last_block, block_size),
+                                   reduce_op);
     }
     else
     {

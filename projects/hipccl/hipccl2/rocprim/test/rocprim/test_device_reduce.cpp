@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -31,15 +31,17 @@
 // required test headers
 #include "test_utils_types.hpp"
 
+using bra = ::rocprim::block_reduce_algorithm;
+
 // Params for tests
-template<
-    class InputType,
-    class OutputType = InputType,
-    bool UseIdentityIterator = false,
-    size_t SizeLimit = ROCPRIM_GRID_SIZE_LIMIT
->
+template<class InputType,
+         class OutputType           = InputType,
+         bool   UseIdentityIterator = false,
+         size_t SizeLimit           = ROCPRIM_GRID_SIZE_LIMIT,
+         bra    Algo                = bra::default_algorithm>
 struct DeviceReduceParams
 {
+    static constexpr bra algo = Algo;
     using input_type = InputType;
     using output_type = OutputType;
     // Tests output iterator with void value_type (OutputIterator concept)
@@ -47,9 +49,17 @@ struct DeviceReduceParams
     static constexpr size_t size_limit = SizeLimit;
 };
 
-template <unsigned int SizeLimit>
-struct size_limit_config {
-    using type = rocprim::reduce_config<256, 16, rocprim::block_reduce_algorithm::default_algorithm, SizeLimit>;
+// clang-format off
+#define DeviceReduceParamsList(...)                                     \
+    DeviceReduceParams<__VA_ARGS__, bra::using_warp_reduce>,            \
+    DeviceReduceParams<__VA_ARGS__, bra::raking_reduce>,                \
+    DeviceReduceParams<__VA_ARGS__, bra::raking_reduce_commutative_only>
+// clang-format on
+
+template<unsigned int SizeLimit, bra algo = bra::default_algorithm>
+struct size_limit_config
+{
+    using type = rocprim::reduce_config<256, 16, algo, SizeLimit>;
 };
 
 template <>
@@ -83,11 +93,11 @@ typedef ::testing::Types<
     DeviceReduceParams<long, long, true>,
     DeviceReduceParams<short, int>,
     DeviceReduceParams<int, float>,
-    DeviceReduceParams<int, int, false, 512>,
-    DeviceReduceParams<float, float, false, 2048>,
-    DeviceReduceParams<int, int, false, 4096>,
-    DeviceReduceParams<int, int, false, 2097152>,
-    DeviceReduceParams<int, int, false, 1073741824>,
+    DeviceReduceParamsList(int, int, false, 512),
+    DeviceReduceParamsList(float, float, false, 2048),
+    DeviceReduceParamsList(int, int, false, 4096),
+    DeviceReduceParamsList(int, int, false, 2097152),
+    DeviceReduceParamsList(int, int, false, 1073741824),
     DeviceReduceParams<int8_t, int8_t>,
     DeviceReduceParams<uint8_t, uint8_t>,
     // #156 temporarily disable half test due to known issue with converting from double to half
@@ -99,9 +109,9 @@ typedef ::testing::Types<
 
 typedef ::testing::Types<
     DeviceReduceParams<double, double>,
-    DeviceReduceParams<float, float, false, 2048>,
+    DeviceReduceParamsList(float, float, false, 2048),
     // #156 temporarily disable half test due to known issue with converting from double to half
-    //  DeviceReduceParams<rocprim::half, rocprim::half>,
+    // DeviceReduceParams<rocprim::half, rocprim::half>,
     DeviceReduceParams<rocprim::bfloat16, rocprim::bfloat16>>
     RocprimDeviceReducePrecisionTestsParams;
 
@@ -577,7 +587,7 @@ TEST(RocprimDeviceReduceTests, LargeIndices)
             HIP_CHECK(hipMemcpy(&output, d_output, sizeof(T), hipMemcpyDeviceToHost));
             HIP_CHECK(hipDeviceSynchronize());
 
-            // Sum of numbers 0 to n - 1 is n(n - 1) / 2, not that this is correct even in case of overflow
+            // Sum of numbers 0 to n - 1 is n(n - 1) / 2, note that this is correct even in case of overflow
             // The division is not integer division but either n or n - 1 has to be even.
             T expected_output = (size % 2 == 0) ? size / 2 * (size - 1) : size * ((size - 1) / 2);
 

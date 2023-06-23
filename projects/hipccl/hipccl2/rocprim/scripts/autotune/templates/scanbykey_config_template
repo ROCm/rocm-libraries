@@ -13,10 +13,6 @@ template<unsigned int arch, class key_type, class value_type, class enable = voi
 default_scan_by_key_config_base<key_type, value_type> { };
 {%- endmacro %}
 
-{% macro configuration_arch_specific(benchmark_of_architecture, configuration) -%}
-template<> struct default_scan_by_key_config<static_cast<unsigned int>({{ benchmark_of_architecture.name }}), {{ configuration.key_type }}, {{ configuration.value_type }}> :
-{%- endmacro %}
-
 {% macro configuration_fallback(benchmark_of_architecture, based_on_type, fallback_selection_criteria) -%}
 // Based on {{ based_on_type }}
 template<class key_type, class value_type> struct default_scan_by_key_config<static_cast<unsigned int>({{ benchmark_of_architecture.name }}), key_type, value_type, {{ fallback_selection_criteria }}> :

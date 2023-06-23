@@ -121,16 +121,22 @@ inline hipError_t radix_sort_merge_impl(
         return hipSuccess;
     }
 
-    radix_sort_block_sort<radix_sort_block_sort_config, Descending>(keys_input,
-                                                                    keys_output,
-                                                                    values_input,
-                                                                    values_output,
-                                                                    size,
-                                                                    sort_items_per_block,
-                                                                    bit,
-                                                                    end_bit,
-                                                                    stream,
-                                                                    debug_synchronous);
+    hipError_t block_sort_status
+        = radix_sort_block_sort<radix_sort_block_sort_config, Descending>(keys_input,
+                                                                          keys_output,
+                                                                          values_input,
+                                                                          values_output,
+                                                                          size,
+                                                                          sort_items_per_block,
+                                                                          bit,
+                                                                          end_bit,
+                                                                          stream,
+                                                                          debug_synchronous);
+    if(block_sort_status != hipSuccess)
+    {
+        return block_sort_status;
+    }
+
     // ^ sort_items_per_block is now updated
     if(size > sort_items_per_block)
     {

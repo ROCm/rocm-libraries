@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2019 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -55,16 +55,6 @@ struct key_value_pair
     key_value_pair(const key_type key, const value_type value) : key(key), value(value)
     {
     }
-
-    #if __hcc_major__ < 1 || __hcc_major__ == 1 && __hcc_minor__ < 2
-    ROCPRIM_HOST_DEVICE inline
-    key_value_pair& operator =(const key_value_pair& kvb)
-    {
-        key = kvb.key;
-        value = kvb.value;
-        return *this;
-    }
-    #endif
 
     ROCPRIM_HOST_DEVICE inline
     bool operator !=(const key_value_pair& kvb)

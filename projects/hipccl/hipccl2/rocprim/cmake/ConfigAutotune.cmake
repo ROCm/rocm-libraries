@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2022 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -42,8 +42,8 @@ function(add_configured_source)
   target_sources("${ARG_TARGET}" PRIVATE "${ARG_TARGET}.parallel/${output}.cpp")
   target_include_directories("${ARG_TARGET}" PRIVATE "../benchmark")
 
-  # Cmake configuration needs to be rerun if the input template changes
-  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${ARG_INPUT}")
+  # Rerun configuration if the input template changes or if the configured file is cleaned
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${ARG_INPUT}" "${ARG_TARGET}.parallel/${output}.cpp")
 endfunction()
 
 function(div_round_up dividend divisor result_var)

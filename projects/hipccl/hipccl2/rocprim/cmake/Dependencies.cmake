@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -161,10 +161,8 @@ if(BUILD_BENCHMARK)
     FetchContent_Declare(
       googlebench
       GIT_REPOSITORY https://github.com/google/benchmark.git
-      GIT_TAG        d17ea665515f0c54d100c6fc973632431379f64b # v1.6.1
+      GIT_TAG        v1.6.1
     )
-    set(HAVE_STD_REGEX ON)
-    set(RUN_HAVE_STD_REGEX 1)
     FetchContent_MakeAvailable(googlebench)
     if(NOT TARGET benchmark::benchmark)
       add_library(benchmark::benchmark ALIAS benchmark)
@@ -175,23 +173,27 @@ if(BUILD_BENCHMARK)
 endif(BUILD_BENCHMARK)
 
 if(NOT DEPENDENCIES_FORCE_DOWNLOAD)
-  set(CMAKE_FIND_DEBUG_MODE TRUE)
-  find_package(ROCM 0.7.3 CONFIG QUIET PATHS /opt/rocm)
-  set(CMAKE_FIND_DEBUG_MODE FALSE)
+  find_package(ROCM 0.7.3 CONFIG QUIET PATHS "${ROCM_ROOT}")
 endif()
 if(NOT ROCM_FOUND)
-  if(NOT EXISTS "${FETCHCONTENT_BASE_DIR}/rocm-cmake-src")
-    message(STATUS "ROCm CMake not found. Fetching...")
-    set(rocm_cmake_tag "master" CACHE STRING "rocm-cmake tag to download")
-    FetchContent_Declare(
-      rocm-cmake
-      URL  https://github.com/RadeonOpenCompute/rocm-cmake/archive/${rocm_cmake_tag}.tar.gz
-    )
-    FetchContent_MakeAvailable(rocm-cmake)
+  message(STATUS "ROCm CMake not found. Fetching...")
+  # We don't really want to consume the build and test targets of ROCm CMake.
+  # CMake 3.18 allows omitting them, even though there's a CMakeLists.txt in source root.
+  if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.18)
+    set(SOURCE_SUBDIR_ARG SOURCE_SUBDIR "DISABLE ADDING TO BUILD")
+  else()
+    set(SOURCE_SUBDIR_ARG)
   endif()
-  find_package(ROCM CONFIG REQUIRED NO_DEFAULT_PATH HINTS "${rocm-cmake_SOURCE_DIR}")
+  set(rocm_cmake_tag "master" CACHE STRING "rocm-cmake tag to download")
+  FetchContent_Declare(
+    rocm-cmake
+    URL  https://github.com/RadeonOpenCompute/rocm-cmake/archive/${rocm_cmake_tag}.tar.gz
+    ${SOURCE_SUBDIR_ARG}
+  )
+  FetchContent_MakeAvailable(rocm-cmake)
+  find_package(ROCM CONFIG REQUIRED NO_DEFAULT_PATH PATHS "${rocm-cmake_SOURCE_DIR}")
 else()
-  find_package(ROCM 0.7.3 CONFIG REQUIRED PATHS /opt/rocm)
+  find_package(ROCM 0.7.3 CONFIG REQUIRED PATHS "${ROCM_ROOT}")
 endif()
 
 # Restore user global state

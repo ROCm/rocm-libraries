@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -411,7 +411,7 @@ hipError_t reduce_by_key_impl(void*                     temporary_storage,
 /// The signature of the function should be equivalent to the following:
 /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
 /// <tt>const &</tt>, but function object must not modify the objects passed to it and must not have
-/// any side effects since the function may be called on uninitalized data. 
+/// any side effects since the function may be called on uninitalized data.
 /// Default is BinaryFunction().
 /// \param [in] key_compare_op - binary operation function object that will be used to determine key equality.
 /// The signature of the function should be equivalent to the following:

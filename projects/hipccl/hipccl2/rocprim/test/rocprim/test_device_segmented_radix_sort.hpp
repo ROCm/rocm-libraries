@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -152,7 +152,7 @@ inline void sort_keys()
                     = test_utils::get_random_data<key_type>(size,
                                                             std::numeric_limits<key_type>::min(),
                                                             std::numeric_limits<key_type>::max(),
-                                                            seed_index);
+                                                            seed_value);
             }
 
             std::vector<offset_type> offsets;
@@ -312,7 +312,7 @@ inline void sort_pairs()
                     = test_utils::get_random_data<key_type>(size,
                                                             std::numeric_limits<key_type>::min(),
                                                             std::numeric_limits<key_type>::max(),
-                                                            seed_index);
+                                                            seed_value);
             }
 
             std::vector<offset_type> offsets;
@@ -516,7 +516,7 @@ inline void sort_keys_double_buffer()
                     = test_utils::get_random_data<key_type>(size,
                                                             std::numeric_limits<key_type>::min(),
                                                             std::numeric_limits<key_type>::max(),
-                                                            seed_index);
+                                                            seed_value);
             }
 
             std::vector<offset_type> offsets;
@@ -675,7 +675,7 @@ inline void sort_pairs_double_buffer()
                     = test_utils::get_random_data<key_type>(size,
                                                             std::numeric_limits<key_type>::min(),
                                                             std::numeric_limits<key_type>::max(),
-                                                            seed_index);
+                                                            seed_value);
             }
 
             std::vector<offset_type> offsets;

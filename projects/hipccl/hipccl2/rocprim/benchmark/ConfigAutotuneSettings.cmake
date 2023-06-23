@@ -76,5 +76,10 @@ ${TUNING_TYPES};using_warp_scan reduce_then_scan" PARENT_SCOPE)
     set(list_across "\
 ${TUNING_TYPES};${LIMITED_TUNING_TYPES};using_warp_scan reduce_then_scan" PARENT_SCOPE)
     set(output_pattern_suffix "@KeyType@_@ValueType@_@Algo@" PARENT_SCOPE)
+  elseif(file STREQUAL "benchmark_device_binary_search")
+    set(list_across_names "SubAlgorithm;ValueType;OutputType;BlockSize;ItemsPerThread" PARENT_SCOPE)
+    set(list_across "\
+binary_search upper_bound lower_bound;${TUNING_TYPES};${LIMITED_TUNING_TYPES};64 128 256;1 2 4 8 16" PARENT_SCOPE)
+    set(output_pattern_suffix "@SubAlgorithm@_@ValueType@_@OutputType@_@BlockSize@_@ItemsPerThread@" PARENT_SCOPE)
   endif()
 endfunction()

@@ -79,7 +79,7 @@ TEST(RocprimConfigDispatchTests, ParseCommonArches)
     ASSERT_EQ(parse_gcn_arch("gfx90a:sramecc+:xnack-"), target_arch::gfx90a);
 }
 
-#ifndef WIN32
+#ifndef _WIN32
 TEST(RocprimConfigDispatchTests, DeviceIdFromStream)
 {
     using rocprim::detail::get_device_from_stream;

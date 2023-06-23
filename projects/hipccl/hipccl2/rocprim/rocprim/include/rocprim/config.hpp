@@ -42,8 +42,8 @@
     #define ROCPRIM_HOST __host__
     #define ROCPRIM_HOST_DEVICE __host__ __device__
     #define ROCPRIM_SHARED_MEMORY __shared__
-    #ifdef WIN32
-    #define ROCPRIM_KERNEL __global__ static
+    #ifdef _WIN32
+        #define ROCPRIM_KERNEL __global__ static
     #else
         #define ROCPRIM_KERNEL __global__
     #endif
@@ -95,7 +95,8 @@
     #define ROCPRIM_TARGET_ARCH 0
 #endif
 
-#if (__gfx1010__ || __gfx1011__ || __gfx1012__ || __gfx1030__ || __gfx1031__ || __gfx1100__ || __gfx1101__ || __gfx1102__)
+#if(__gfx1010__ || __gfx1011__ || __gfx1012__ || __gfx1030__ || __gfx1031__ || __gfx1032__ \
+    || __gfx1035__ || __gfx1100__ || __gfx1101__ || __gfx1102__)
     #define ROCPRIM_NAVI 1
 #else
     #define ROCPRIM_NAVI 0
@@ -123,6 +124,38 @@
 #define ROCPRIM_IF_CONSTEXPR constexpr
 #else
 #define ROCPRIM_IF_CONSTEXPR
+#endif
+
+//  Copyright 2001 John Maddock.
+//  Copyright 2017 Peter Dimov.
+//
+//  Distributed under the Boost Software License, Version 1.0.
+//
+//  See http://www.boost.org/LICENSE_1_0.txt
+//
+//  BOOST_STRINGIZE(X)
+#define ROCPRIM_STRINGIZE(X) ROCPRIM_DO_STRINGIZE(X)
+#define ROCPRIM_DO_STRINGIZE(X) #X
+
+//  Copyright 2017 Peter Dimov.
+//
+//  Distributed under the Boost Software License, Version 1.0.
+//
+//  See http://www.boost.org/LICENSE_1_0.txt
+//
+//  BOOST_PRAGMA_MESSAGE("message")
+//
+//  Expands to the equivalent of #pragma message("message")
+#if defined(__INTEL_COMPILER)
+    #define ROCPRIM_PRAGMA_MESSAGE(x) \
+        __pragma(message(__FILE__ "(" ROCPRIM_STRINGIZE(__LINE__) "): note: " x))
+#elif defined(__GNUC__)
+    #define ROCPRIM_PRAGMA_MESSAGE(x) _Pragma(ROCPRIM_STRINGIZE(message(x)))
+#elif defined(_MSC_VER)
+    #define ROCPRIM_PRAGMA_MESSAGE(x) \
+        __pragma(message(__FILE__ "(" ROCPRIM_STRINGIZE(__LINE__) "): note: " x))
+#else
+    #define ROCPRIM_PRAGMA_MESSAGE(x)
 #endif
 
 #endif // ROCPRIM_CONFIG_HPP_
