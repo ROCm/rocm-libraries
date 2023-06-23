@@ -198,7 +198,7 @@ namespace detail
 #ifdef __cpp_lib_is_final
     template<class T>
     using is_final = std::is_final<T>;
-#elif defined(__HCC__) // use clang extention
+#elif defined(__clang__) // use clang extention
     template<class T>
     using is_final = std::integral_constant<bool, __is_final(T)>;
 #else
@@ -229,18 +229,6 @@ struct tuple_value
 
     ROCPRIM_HOST_DEVICE inline
     tuple_value(tuple_value&&) = default;
-
-    ROCPRIM_HOST_DEVICE inline
-    explicit tuple_value(T value) noexcept
-        : value(value)
-    {
-        // This is workaround for hcc which fails during linking without
-        // this constructor with undefine reference errors when U from ctors
-        // below is exactly T. Example:
-        // rocprim::tuple<int, int, int> t(1, 2, 3);
-        // Produced error:
-        // undefined reference to `rocprim::detail::tuple_value<0ul, int>::tuple_value(int)
-    }
 
     template<
         class U,
@@ -318,18 +306,6 @@ struct tuple_value<I, T, true> : private T
 
     ROCPRIM_HOST_DEVICE inline
     tuple_value(tuple_value&&) = default;
-
-    ROCPRIM_HOST_DEVICE inline
-    explicit tuple_value(T value) noexcept
-        : T(value)
-    {
-        // This is workaround for hcc which fails during linking without
-        // this constructor with undefine reference errors when U from ctors
-        // below is exactly T. Example:
-        // rocprim::tuple<int, int, int> t(1, 2, 3);
-        // Produced error:
-        // undefined reference to `rocprim::detail::tuple_value<0ul, int>::tuple_value(int)
-    }
 
     template<
         class U,
@@ -411,20 +387,6 @@ struct tuple_impl<::rocprim::index_sequence<Indices...>, Types...>
 
     ROCPRIM_HOST_DEVICE inline
     tuple_impl(tuple_impl&&) = default;
-
-    ROCPRIM_HOST_DEVICE inline
-    explicit tuple_impl(Types... values)
-        : tuple_value<Indices, Types>(values)...
-    {
-        // This is workaround for hcc which fails during linking without
-        // this constructor with undefine reference errors when UTypes
-        // are exactly Types (see constructor below). Example:
-        // rocprim::tuple<int, int, int> t(1, 2, 3);
-        // Produced error:
-        // undefined reference to `rocprim::detail::tuple_impl<
-        //   rocprim::integer_sequence<unsigned long, 0ul, 1ul, 2ul>, int, int, int
-        // >::tuple_impl(int, int, int)'
-    }
 
     template<
         class... UTypes,
@@ -606,19 +568,6 @@ public:
     /// \brief Implicitly-defined move constructor.
     ROCPRIM_HOST_DEVICE inline
     tuple(tuple&&) = default;
-
-    #ifndef DOXYGEN_SHOULD_SKIP_THIS
-    ROCPRIM_HOST_DEVICE inline
-    explicit tuple(Types... values) noexcept
-        : base(values...)
-    {
-        // Workaround for HCC compiler, without this we get undefined reference
-        // errors during linking. Example:
-        // rocprim::tuple<int, double> t1(1, 2)
-        // Produces error:
-        // 'undefined reference to `rocprim::tuple<int, double>::tuple(int, double)'
-    }
-    #endif
 
     /// \brief Direct constructor. Initializes each element of the tuple with
     /// the corresponding input value.

@@ -550,7 +550,7 @@ public:
     template<class BinaryFunction, typename V = Value>
     ROCPRIM_DEVICE ROCPRIM_INLINE typename std::enable_if<(sizeof(V) <= sizeof(int))>::type
         sort(Key&           thread_key,
-             Value&         thread_value,
+             V&             thread_value,
              storage_type&  storage,
              unsigned int   input_size,
              BinaryFunction compare_function)
@@ -573,16 +573,14 @@ public:
     template<class BinaryFunction, typename V = Value>
     ROCPRIM_DEVICE ROCPRIM_INLINE typename std::enable_if<!(sizeof(V) <= sizeof(int))>::type
         sort(Key&           thread_key,
-             Value&         thread_value,
+             V&             thread_value,
              storage_type&  storage,
              unsigned int   input_size,
              BinaryFunction compare_function)
     {
-        (void)storage;
-
         // Use indices to reduce the amount of permutations.
         auto value_index = lane_id();
-        sort(thread_key, value_index, input_size, compare_function);
+        sort(thread_key, value_index, storage, input_size, compare_function);
         // Perform a shuffle to get the final value.
         thread_value = warp_shuffle(thread_value, value_index);
     }

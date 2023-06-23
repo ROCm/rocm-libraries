@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -598,15 +598,20 @@ inline hipError_t merge_sort_impl(
         return hipSuccess;
     }
 
-    merge_sort_block_sort<block_sort_config>(keys_input,
-                                             keys_output,
-                                             values_input,
-                                             values_output,
-                                             size,
-                                             sort_items_per_block,
-                                             compare_function,
-                                             stream,
-                                             debug_synchronous);
+    hipError_t block_sort_status = merge_sort_block_sort<block_sort_config>(keys_input,
+                                                                            keys_output,
+                                                                            values_input,
+                                                                            values_output,
+                                                                            size,
+                                                                            sort_items_per_block,
+                                                                            compare_function,
+                                                                            stream,
+                                                                            debug_synchronous);
+    if(block_sort_status != hipSuccess)
+    {
+        return block_sort_status;
+    }
+
     // ^ sort_items_per_block is now updated
     if(size > sort_items_per_block)
     {

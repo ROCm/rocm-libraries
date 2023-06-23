@@ -70,6 +70,7 @@ struct select_block_sort_impl<block_sort_algorithm::bitonic_sort>
     using type = block_sort_bitonic<Key, BlockSizeX, BlockSizeY, BlockSizeZ, ItemsPerThread, Value>;
 };
 
+// Note: merge_sort and stable_merge_sort map to the same underlying algorithm.
 template<>
 struct select_block_sort_impl<block_sort_algorithm::merge_sort>
 {
@@ -91,8 +92,7 @@ struct select_block_sort_impl<block_sort_algorithm::stable_merge_sort>
              unsigned int BlockSizeZ,
              unsigned int ItemsPerThread,
              class Value>
-    using type
-        = block_sort_merge<Key, BlockSizeX, BlockSizeY, BlockSizeZ, ItemsPerThread, Value, true>;
+    using type = block_sort_merge<Key, BlockSizeX, BlockSizeY, BlockSizeZ, ItemsPerThread, Value>;
 };
 
 } // end namespace detail
@@ -111,10 +111,9 @@ struct select_block_sort_impl<block_sort_algorithm::stable_merge_sort>
 ///
 /// \par Overview
 /// * Accepts custom compare_functions for sorting across a block.
-/// * Performance depends on \p BlockSize.
-///   * It is better if \p BlockSize is a power of two.
-///   * If \p BlockSize is not a power of two, or when function with \p size overload is used
-///     odd-even sort is used instead of bitonic sort, leading to decreased performance.
+/// * Performance notes:
+///   * It is generally better if \p BlockSize and \p ItemsPerThread are powers of two.
+///   * The overloaded functions with \p size are generally slower.
 ///
 /// \par Examples
 /// \parblock
@@ -343,13 +342,11 @@ public:
         base_type::sort(thread_keys, thread_values, storage, compare_function);
     }
 
-    /// \brief Block sort by key for any data type. If \p size is
-    /// greater than \p BlockSize, this function does nothing.
+    /// \brief Block sort for any data type. This function sorts up to \p size elements blocked
+    /// across threads.
     ///
     /// \tparam BinaryFunction - type of binary function used for sort. Default type
     /// is rocprim::less<T>.
-    ///
-    /// \remark Not implemented for \p block_sort_algorithm::merge_sort
     ///
     /// \param [in, out] thread_key - reference to a key provided by a thread.
     /// \param [in] storage - reference to a temporary storage object of type storage_type.
@@ -360,23 +357,20 @@ public:
     /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
     /// <tt>const &</tt>, but function object must not modify the objects passed to it.
     template<class BinaryFunction = ::rocprim::less<Key>>
-    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
-    void sort(Key& thread_key,
-              storage_type& storage,
-              const unsigned int size,
-              BinaryFunction compare_function = BinaryFunction())
+    ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void sort(Key&               thread_key,
+                                                  storage_type&      storage,
+                                                  const unsigned int size,
+                                                  BinaryFunction     compare_function
+                                                  = BinaryFunction())
     {
         base_type::sort(thread_key, storage, size, compare_function);
     }
 
-    /// \brief Block sort by key for any data type. This function sorts
-    /// up to \p size elements blocked across threads.
+    /// \brief Block sort for any data type. This function sorts up to \p size elements blocked
+    /// across threads.
     ///
     /// \tparam BinaryFunction - type of binary function used for sort. Default type
     /// is rocprim::less<T>.
-    ///
-    /// \remark Not implemented for \p block_sort_algorithm::merge_sort
-    /// and \p block_sort_algorithm::bitonic_sort
     ///
     /// \param [in, out] thread_keys - reference to keys provided by a thread.
     /// \param [in] storage - reference to a temporary storage object of type storage_type.
@@ -396,14 +390,36 @@ public:
         base_type::sort(thread_keys, storage, size, compare_function);
     }
 
-    /// \brief Block sort by key for any data type. This function sorts
-    /// up to \p size elements blocked across threads.
+    /// \brief Block sort by key for any data type. This function sorts up to \p size elements
+    /// blocked across threads.
     ///
     /// \tparam BinaryFunction - type of binary function used for sort. Default type
     /// is rocprim::less<T>.
     ///
-    /// \remark Not implemented for \p block_sort_algorithm::merge_sort
-    /// and \p block_sort_algorithm::bitonic_sort
+    /// \param [in, out] thread_key - reference to a key provided by a thread.
+    /// \param [in, out] thread_value - reference to a value provided by a thread.
+    /// \param [in] storage - reference to a temporary storage object of type storage_type.
+    /// \param [in] size - custom size of block to be sorted.
+    /// \param [in] compare_function - comparison function object which returns true if the
+    /// first argument is is ordered before the second.
+    /// The signature of the function should be equivalent to the following:
+    /// <tt>bool f(const T &a, const T &b);</tt>. The signature does not need to have
+    /// <tt>const &</tt>, but function object must not modify the objects passed to it.
+    template<class BinaryFunction = ::rocprim::less<Key>>
+    ROCPRIM_DEVICE ROCPRIM_INLINE void sort(Key&               thread_key,
+                                            Value&             thread_value,
+                                            storage_type&      storage,
+                                            const unsigned int size,
+                                            BinaryFunction     compare_function = BinaryFunction())
+    {
+        base_type::sort(thread_key, thread_value, storage, size, compare_function);
+    }
+
+    /// \brief Block sort by key for any data type. This function sorts up to \p size elements
+    /// blocked across threads.
+    ///
+    /// \tparam BinaryFunction - type of binary function used for sort. Default type
+    /// is rocprim::less<T>.
     ///
     /// \param [in, out] thread_keys - reference to keys provided by a thread.
     /// \param [in, out] thread_values - reference to values provided by a thread.

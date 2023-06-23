@@ -31,8 +31,8 @@ set(CMAKE_C_COMPILER "${rocm_bin}/hipcc")
 
 # flags for clang direct use with hip
 # -x hip causes linker error
-#set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -x hip -IC:/hip/include/hip -D__HIP_PLATFORM_HCC__ -D__HIP_ROCclr__ -DHIP_CLANG_HCC_COMPAT_MODE=1")
-#set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -IC:/hip/include/hip -D__HIP_PLATFORM_HCC__ -D__HIP_ROCclr__ -DHIP_CLANG_HCC_COMPAT_MODE=1")
+#set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -x hip -IC:/hip/include/hip -D__HIP_PLATFORM_AMD__ -D__HIP_ROCclr__")
+#set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -IC:/hip/include/hip -D__HIP_PLATFORM_AMD__ -D__HIP_ROCclr__")
 
 
 # set(GTEST_DIR "C:/rocm/Utils/GTestMSVC")

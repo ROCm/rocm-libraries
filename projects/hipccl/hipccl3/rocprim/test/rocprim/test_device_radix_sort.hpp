@@ -111,7 +111,7 @@ inline void sort_keys()
                     = test_utils::get_random_data<key_type>(size,
                                                             std::numeric_limits<key_type>::min(),
                                                             std::numeric_limits<key_type>::max(),
-                                                            seed_index);
+                                                            seed_value);
             }
 
             key_type* d_keys_input;
@@ -256,7 +256,7 @@ inline void sort_pairs()
                     = test_utils::get_random_data<key_type>(size,
                                                             std::numeric_limits<key_type>::min(),
                                                             std::numeric_limits<key_type>::max(),
-                                                            seed_index);
+                                                            seed_value);
             }
 
             std::vector<value_type> values_input(size);
@@ -449,7 +449,7 @@ inline void sort_keys_double_buffer()
                     = test_utils::get_random_data<key_type>(size,
                                                             std::numeric_limits<key_type>::min(),
                                                             std::numeric_limits<key_type>::max(),
-                                                            seed_index);
+                                                            seed_value);
             }
 
             key_type* d_keys_input;
@@ -573,7 +573,7 @@ inline void sort_pairs_double_buffer()
                     = test_utils::get_random_data<key_type>(size,
                                                             std::numeric_limits<key_type>::min(),
                                                             std::numeric_limits<key_type>::max(),
-                                                            seed_index);
+                                                            seed_value);
             }
 
             std::vector<value_type> values_input(size);

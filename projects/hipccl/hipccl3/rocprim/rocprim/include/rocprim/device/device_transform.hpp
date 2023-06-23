@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -43,24 +43,18 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<
-    unsigned int BlockSize,
-    unsigned int ItemsPerThread,
-    class ResultType,
-    class InputIterator,
-    class OutputIterator,
-    class UnaryFunction
->
+template<class Config,
+         class ResultType,
+         class InputIterator,
+         class OutputIterator,
+         class UnaryFunction>
 ROCPRIM_KERNEL
-__launch_bounds__(BlockSize)
-void transform_kernel(InputIterator input,
-                      const size_t size,
-                      OutputIterator output,
-                      UnaryFunction transform_op)
+    __launch_bounds__(device_params<Config>().kernel_config.block_size) void transform_kernel(
+        InputIterator input, const size_t size, OutputIterator output, UnaryFunction transform_op)
 {
-    transform_kernel_impl<BlockSize, ItemsPerThread, ResultType>(
-        input, size, output, transform_op
-    );
+    transform_kernel_impl<device_params<Config>().kernel_config.block_size,
+                          device_params<Config>().kernel_config.items_per_thread,
+                          ResultType>(input, size, output, transform_op);
 }
 
 #define ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(name, size, start) \
@@ -134,19 +128,16 @@ void transform_kernel(InputIterator input,
 /// // output: [6, 7, 8, 9, 10, 11, 12, 13]
 /// \endcode
 /// \endparblock
-template<
-    class Config = default_config,
-    class InputIterator,
-    class OutputIterator,
-    class UnaryFunction
->
-inline
-hipError_t transform(InputIterator input,
-                     OutputIterator output,
-                     const size_t size,
-                     UnaryFunction transform_op,
-                     const hipStream_t stream = 0,
-                     bool debug_synchronous = false)
+template<class Config = default_config,
+         class InputIterator,
+         class OutputIterator,
+         class UnaryFunction>
+inline hipError_t transform(InputIterator     input,
+                            OutputIterator    output,
+                            const size_t      size,
+                            UnaryFunction     transform_op,
+                            const hipStream_t stream            = 0,
+                            bool              debug_synchronous = false)
 {
     if( size == size_t(0) )
         return hipSuccess;
@@ -154,22 +145,26 @@ hipError_t transform(InputIterator input,
     using input_type = typename std::iterator_traits<InputIterator>::value_type;
     using result_type = typename ::rocprim::detail::invoke_result<UnaryFunction, input_type>::type;
 
-    // Get default config if Config is default_config
-    using config = detail::default_or_custom_config<
-        Config,
-        detail::default_transform_config<ROCPRIM_TARGET_ARCH, result_type>
-    >;
+    using config = detail::wrapped_transform_config<Config, result_type>;
 
-    static constexpr unsigned int block_size = config::block_size;
-    static constexpr unsigned int items_per_thread = config::items_per_thread;
-    static constexpr auto items_per_block = block_size * items_per_thread;
+    detail::target_arch target_arch;
+    hipError_t          result = detail::host_target_arch(stream, target_arch);
+    if(result != hipSuccess)
+    {
+        return result;
+    }
+    const detail::transform_config_params params
+        = detail::dispatch_target_arch<config>(target_arch);
+
+    const unsigned int block_size       = params.kernel_config.block_size;
+    const unsigned int items_per_thread = params.kernel_config.items_per_thread;
+    const auto         items_per_block  = block_size * items_per_thread;
 
     // Start point for time measurements
     std::chrono::high_resolution_clock::time_point start;
 
-    static constexpr auto size_limit = config::size_limit;
-    static constexpr auto number_of_blocks_limit
-        = ::rocprim::max<size_t>(size_limit / items_per_block, 1);
+    const auto size_limit             = params.kernel_config.size_limit;
+    const auto number_of_blocks_limit = ::rocprim::max<size_t>(size_limit / items_per_block, 1);
 
     auto number_of_blocks = (size + items_per_block - 1)/items_per_block;
     if(debug_synchronous)
@@ -180,7 +175,7 @@ hipError_t transform(InputIterator input,
         std::cout << "items_per_block " << items_per_block << '\n';
     }
 
-    static constexpr auto aligned_size_limit = number_of_blocks_limit * items_per_block;
+    const auto aligned_size_limit = number_of_blocks_limit * items_per_block;
 
     // Launch number_of_blocks_limit blocks while there is still at least as many blocks left as the limit
     const auto number_of_launch = (size + aligned_size_limit - 1) / aligned_size_limit;
@@ -188,15 +183,17 @@ hipError_t transform(InputIterator input,
         const auto current_size = std::min(size - offset, aligned_size_limit);
         const auto current_blocks = (current_size + items_per_block - 1) / items_per_block;
 
-        if(debug_synchronous) start = std::chrono::high_resolution_clock::now();
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(detail::transform_kernel<
-                block_size, items_per_thread, result_type,
-                InputIterator, OutputIterator, UnaryFunction
-            >),
-            dim3(current_blocks), dim3(block_size), 0, stream,
-            input + offset, current_size, output + offset, transform_op
-        );
+        if(debug_synchronous)
+            start = std::chrono::high_resolution_clock::now();
+        hipLaunchKernelGGL(HIP_KERNEL_NAME(detail::transform_kernel<config, result_type>),
+                           dim3(current_blocks),
+                           dim3(block_size),
+                           0,
+                           stream,
+                           input + offset,
+                           current_size,
+                           output + offset,
+                           transform_op);
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("transform_kernel", current_size, start);
     }
 

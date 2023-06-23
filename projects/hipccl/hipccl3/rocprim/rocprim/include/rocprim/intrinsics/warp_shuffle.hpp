@@ -274,11 +274,25 @@ ROCPRIM_DEVICE ROCPRIM_INLINE T warp_permute(const T&  input,
                                              const int dst_lane,
                                              const int width = device_warp_size())
 {
+    // The amdgcn intrinsic does not support virtual warp sizes, so in order to support those, manually
+    // wrap around the dst_lane within groups of log2(width) bits.
     const int self  = lane_id();
-    const int index = (dst_lane + (self & ~(width - 1))) << 2;
-    return detail::warp_shuffle_op(input,
-                                   [=](int v) -> int
-                                   { return __builtin_amdgcn_ds_permute(index, v); });
+    // Construct a mask of bits which make up a virtual warp. If the warp size is `width` (a power of 2),
+    // then the lower `width - 1` bits indicate the position within a virtual warp, and the remainder
+    // indicate the position of the virtual warp within the real warp.
+    const unsigned int mask = width - 1;
+    // Wrap the `dst_lane` around the virtual warp size by only considering the part within the
+    // virtual warp size, defined by the bits in the mask. The hardware warp index is given by adding the
+    // virtual warp's destination lane to the virtual warp's base offset, which is given by rounding down the
+    // current lane's position by the virtual warp size.
+    // Note that the extra right shift by 2 is required for the amdgcn intrinsic.
+    const int index = ((dst_lane & mask) + (self & ~mask)) << 2;
+    return detail::warp_shuffle_op(
+        input,
+        [=](int v) -> int
+        // __builtin_amdgcn_ds_permute maps to the `ds_permute_b32` instruction.
+        // See AMD ISA reference at https://gpuopen.com/amd-isa-documentation/.
+        { return __builtin_amdgcn_ds_permute(index, v); });
 }
 
 END_ROCPRIM_NAMESPACE

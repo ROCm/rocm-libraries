@@ -1,4 +1,4 @@
-// Copyright (c) 2019 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -28,7 +28,7 @@
 #include "../detail/various.hpp"
 
 #include "detail/device_binary_search.hpp"
-
+#include "device_binary_search_config.hpp"
 #include "device_transform.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
@@ -104,13 +104,24 @@ hipError_t lower_bound(void * temporary_storage,
                        hipStream_t stream = 0,
                        bool debug_synchronous = false)
 {
-    return detail::binary_search<Config>(
-        temporary_storage, storage_size,
-        haystack, needles, output,
-        haystack_size, needles_size,
-        detail::lower_bound_search_op(), compare_op,
-        stream, debug_synchronous
-    );
+    using value_type  = typename std::iterator_traits<NeedlesIterator>::value_type;
+    using output_type = typename std::iterator_traits<OutputIterator>::value_type;
+    using config
+        = std::conditional_t<std::is_same<default_config, Config>::value,
+                             detail::default_config_for_lower_bound<value_type, output_type>,
+                             Config>;
+
+    return detail::binary_search<config>(temporary_storage,
+                                         storage_size,
+                                         haystack,
+                                         needles,
+                                         output,
+                                         haystack_size,
+                                         needles_size,
+                                         detail::lower_bound_search_op(),
+                                         compare_op,
+                                         stream,
+                                         debug_synchronous);
 }
 
 template<
@@ -132,13 +143,24 @@ hipError_t upper_bound(void * temporary_storage,
                        hipStream_t stream = 0,
                        bool debug_synchronous = false)
 {
-    return detail::binary_search<Config>(
-        temporary_storage, storage_size,
-        haystack, needles, output,
-        haystack_size, needles_size,
-        detail::upper_bound_search_op(), compare_op,
-        stream, debug_synchronous
-    );
+    using value_type  = typename std::iterator_traits<NeedlesIterator>::value_type;
+    using output_type = typename std::iterator_traits<OutputIterator>::value_type;
+    using config
+        = std::conditional_t<std::is_same<default_config, Config>::value,
+                             detail::default_config_for_upper_bound<value_type, output_type>,
+                             Config>;
+
+    return detail::binary_search<config>(temporary_storage,
+                                         storage_size,
+                                         haystack,
+                                         needles,
+                                         output,
+                                         haystack_size,
+                                         needles_size,
+                                         detail::upper_bound_search_op(),
+                                         compare_op,
+                                         stream,
+                                         debug_synchronous);
 }
 
 template<
@@ -160,13 +182,24 @@ hipError_t binary_search(void * temporary_storage,
                          hipStream_t stream = 0,
                          bool debug_synchronous = false)
 {
-    return detail::binary_search<Config>(
-        temporary_storage, storage_size,
-        haystack, needles, output,
-        haystack_size, needles_size,
-        detail::binary_search_op(), compare_op,
-        stream, debug_synchronous
-    );
+    using value_type  = typename std::iterator_traits<NeedlesIterator>::value_type;
+    using output_type = typename std::iterator_traits<OutputIterator>::value_type;
+    using config
+        = std::conditional_t<std::is_same<default_config, Config>::value,
+                             detail::default_config_for_binary_search<value_type, output_type>,
+                             Config>;
+
+    return detail::binary_search<config>(temporary_storage,
+                                         storage_size,
+                                         haystack,
+                                         needles,
+                                         output,
+                                         haystack_size,
+                                         needles_size,
+                                         detail::binary_search_op(),
+                                         compare_op,
+                                         stream,
+                                         debug_synchronous);
 }
 
 /// @}

@@ -341,7 +341,7 @@ TYPED_TEST(WarpExchangeScatterTest, WarpExchangeScatter)
     std::vector<T> input(items_count);
     std::iota(input.begin(), input.end(), static_cast<T>(0));
     auto expected = input;
-    std::random_shuffle(input.begin(), input.end());
+    std::shuffle(input.begin(), input.end(), std::default_random_engine{std::random_device{}()});
     std::vector<OffsetT> ranks(input.begin(), input.end());
 
     T* d_input{};

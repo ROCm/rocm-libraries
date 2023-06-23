@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2019 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -39,6 +39,8 @@
 // rocPRIM
 #include <rocprim/rocprim.hpp>
 
+#include "benchmark_device_binary_search.parallel.hpp"
+
 #ifndef DEFAULT_N
 const size_t DEFAULT_N = 1024 * 1024 * 32;
 #endif
@@ -46,10 +48,12 @@ const size_t DEFAULT_N = 1024 * 1024 * 32;
 const unsigned int batch_size = 10;
 const unsigned int warmup_size = 5;
 
-template<class T>
-void run_lower_bound_benchmark(benchmark::State& state, hipStream_t stream,
-                               size_t haystack_size, size_t needles_size,
-                               bool sorted_needles)
+template<class T, class AlgorithmSelectorTag>
+void run_benchmark(benchmark::State& state,
+                   hipStream_t       stream,
+                   size_t            haystack_size,
+                   size_t            needles_size,
+                   bool              sorted_needles)
 {
     using haystack_type = T;
     using needle_type = T;
@@ -92,30 +96,32 @@ void run_lower_bound_benchmark(benchmark::State& state, hipStream_t stream,
 
     void * d_temporary_storage = nullptr;
     size_t temporary_storage_bytes;
-    HIP_CHECK(
-        rocprim::lower_bound(
-            d_temporary_storage, temporary_storage_bytes,
-            d_haystack, d_needles, d_output,
-            haystack_size, needles_size,
-            compare_op,
-            stream
-        )
-    );
+    HIP_CHECK(dispatch_binary_search(AlgorithmSelectorTag{},
+                                     d_temporary_storage,
+                                     temporary_storage_bytes,
+                                     d_haystack,
+                                     d_needles,
+                                     d_output,
+                                     haystack_size,
+                                     needles_size,
+                                     compare_op,
+                                     stream));
 
     HIP_CHECK(hipMalloc(&d_temporary_storage, temporary_storage_bytes));
 
     // Warm-up
     for(size_t i = 0; i < warmup_size; i++)
     {
-        HIP_CHECK(
-            rocprim::lower_bound(
-                d_temporary_storage, temporary_storage_bytes,
-                d_haystack, d_needles, d_output,
-                haystack_size, needles_size,
-                compare_op,
-                stream
-            )
-        );
+        HIP_CHECK(dispatch_binary_search(AlgorithmSelectorTag{},
+                                         d_temporary_storage,
+                                         temporary_storage_bytes,
+                                         d_haystack,
+                                         d_needles,
+                                         d_output,
+                                         haystack_size,
+                                         needles_size,
+                                         compare_op,
+                                         stream));
     }
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -131,15 +137,16 @@ void run_lower_bound_benchmark(benchmark::State& state, hipStream_t stream,
 
         for(size_t i = 0; i < batch_size; i++)
         {
-            HIP_CHECK(
-                rocprim::lower_bound(
-                    d_temporary_storage, temporary_storage_bytes,
-                    d_haystack, d_needles, d_output,
-                    haystack_size, needles_size,
-                    compare_op,
-                    stream
-                )
-            );
+            HIP_CHECK(dispatch_binary_search(AlgorithmSelectorTag{},
+                                             d_temporary_storage,
+                                             temporary_storage_bytes,
+                                             d_haystack,
+                                             d_needles,
+                                             d_output,
+                                             haystack_size,
+                                             needles_size,
+                                             compare_op,
+                                             stream));
         }
 
         // Record stop event and wait until it completes
@@ -164,18 +171,22 @@ void run_lower_bound_benchmark(benchmark::State& state, hipStream_t stream,
     HIP_CHECK(hipFree(d_output));
 }
 
-#define CREATE_LOWER_BOUND_BENCHMARK(T, K, SORTED)                                        \
-    benchmark::RegisterBenchmark(                                                         \
-        bench_naming::format_name(                                                        \
-            "{lvl:device,algo:binary_search,key_type:" #T ",subalgo:" #K "_percent_"      \
-            + std::string(SORTED ? "sorted" : "random") + "_needles,cfg:default_config}") \
-            .c_str(),                                                                     \
-        [=](benchmark::State& state)                                                      \
-        { run_lower_bound_benchmark<T>(state, stream, size, size * K / 100, SORTED); })
+#define CREATE_BENCHMARK(T, K, SORTED, ALGO_TAG)                                                 \
+    benchmark::RegisterBenchmark(                                                                \
+        bench_naming::format_name(                                                               \
+            "{lvl:device,algo:" + ALGO_TAG{}.name() + ",key_type:" #T ",subalgo:" #K "_percent_" \
+            + std::string(SORTED ? "sorted" : "random") + "_needles,cfg:default_config}")        \
+            .c_str(),                                                                            \
+        [=](benchmark::State& state)                                                             \
+        { run_benchmark<T, ALGO_TAG>(state, stream, size, size * K / 100, SORTED); })
+
+#define BENCHMARK_ALGORITHMS(T, K, SORTED)                        \
+    CREATE_BENCHMARK(T, K, SORTED, binary_search_subalgorithm),   \
+        CREATE_BENCHMARK(T, K, SORTED, lower_bound_subalgorithm), \
+        CREATE_BENCHMARK(T, K, SORTED, upper_bound_subalgorithm)
 
 #define BENCHMARK_TYPE(type) \
-    CREATE_LOWER_BOUND_BENCHMARK(type, 10, false), \
-    CREATE_LOWER_BOUND_BENCHMARK(type, 10, true)
+    BENCHMARK_ALGORITHMS(type, 10, true), BENCHMARK_ALGORITHMS(type, 10, false)
 
 int main(int argc, char *argv[])
 {
@@ -186,6 +197,17 @@ int main(int argc, char *argv[])
                                      "name_format",
                                      "human",
                                      "either: json,human,txt");
+#ifdef BENCHMARK_CONFIG_TUNING
+    // optionally run an evenly split subset of benchmarks, when making multiple program invocations
+    parser.set_optional<int>("parallel_instance",
+                             "parallel_instance",
+                             0,
+                             "parallel instance index");
+    parser.set_optional<int>("parallel_instances",
+                             "parallel_instances",
+                             1,
+                             "total parallel instances");
+#endif
     parser.run_and_exit_if_error();
 
     // Parse argv
@@ -205,16 +227,24 @@ int main(int argc, char *argv[])
     using custom_double2 = custom_type<double, double>;
 
     // Add benchmarks
-    std::vector<benchmark::internal::Benchmark*> benchmarks =
-    {
-        BENCHMARK_TYPE(float),
-        BENCHMARK_TYPE(double),
-        BENCHMARK_TYPE(int8_t),
-        BENCHMARK_TYPE(uint8_t),
-        BENCHMARK_TYPE(rocprim::half),
-        BENCHMARK_TYPE(custom_float2),
-        BENCHMARK_TYPE(custom_double2)
-    };
+    std::vector<benchmark::internal::Benchmark*> benchmarks;
+#ifdef BENCHMARK_CONFIG_TUNING
+    const int parallel_instance  = parser.get<int>("parallel_instance");
+    const int parallel_instances = parser.get<int>("parallel_instances");
+    config_autotune_register::register_benchmark_subset(benchmarks,
+                                                        parallel_instance,
+                                                        parallel_instances,
+                                                        size,
+                                                        stream);
+#else // BENCHMARK_CONFIG_TUNING
+    benchmarks = {BENCHMARK_TYPE(float),
+                  BENCHMARK_TYPE(double),
+                  BENCHMARK_TYPE(int8_t),
+                  BENCHMARK_TYPE(uint8_t),
+                  BENCHMARK_TYPE(rocprim::half),
+                  BENCHMARK_TYPE(custom_float2),
+                  BENCHMARK_TYPE(custom_double2)};
+#endif // BENCHMARK_CONFIG_TUNING
 
     // Use manual timing
     for(auto& b : benchmarks)

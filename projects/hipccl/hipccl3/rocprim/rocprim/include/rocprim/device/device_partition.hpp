@@ -30,12 +30,13 @@
 #include "../detail/temp_storage.hpp"
 #include "../detail/various.hpp"
 #include "../functional.hpp"
+#include "../iterator/reverse_iterator.hpp"
 #include "../type_traits.hpp"
 #include "../types.hpp"
 
-#include "device_select_config.hpp"
-#include "detail/device_scan_common.hpp"
 #include "detail/device_partition.hpp"
+#include "detail/device_scan_common.hpp"
+#include "device_select_config.hpp"
 #include "device_transform.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
@@ -348,12 +349,294 @@ hipError_t partition_impl(void * temporary_storage,
 
 } // end of detail namespace
 
+/// \brief Two-way parallel select primitive for device level using selection predicate.
+///
+/// Performs a device-wide partition using selection predicate. Partition copies the values from
+/// \p input to \p output_selected and \p output_rejected for all values for which the \p predicate
+/// returns \p true and \p false respectively.
+///
+/// \par Overview
+/// * Returns the required size of \p temporary_storage in \p storage_size
+/// if \p temporary_storage in a null pointer.
+/// * The number of elements written to \p output_selected is equal to the number elements
+/// in the input for which \p predicate returns \p true.
+/// * The number of elements written to \p output_rejected is equal to the number elements
+/// in the input for which \p predicate returns \p false.
+/// * Range specified by \p selected_count_output must have at least 1 element.
+/// * Relative order is preserved.
+///
+/// \tparam Config - [optional] configuration of the primitive. If provided it should be \p
+/// default_config or an instance of \p select_config
+/// \tparam InputIterator - random-access iterator type of the input range. It can be a simple
+/// pointer type.
+/// \tparam SelectedOutputIterator - random-access iterator type of the selected output range. It
+/// can be a simple pointer type.
+/// \tparam RejectedOutputIterator - random-access iterator type of the rejected output range. It
+/// can be a simple pointer type.
+/// \tparam SelectedCountOutputIterator - random-access iterator type of the selected_count_output
+/// value. It can be a simple pointer type.
+/// \tparam Predicate - type of the selection predicate.
+///
+/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When a null
+/// pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the select operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] input - iterator to the first element in the range to select values from.
+/// \param [out] output_selected - iterator to the first element in the selected output range.
+/// \param [out] output_rejected - iterator to the first element in the rejected output range.
+/// \param [out] selected_count_output - iterator to the total number of selected values (length of
+/// \p output_selected ).
+/// \param [in] size - number of elements in the input range.
+/// \param [in] predicate - the unary selection predicate to select values into the select and reject
+/// outputs.
+/// \param [in] stream - [optional] HIP stream object. The default is \p 0 (default stream).
+/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel launch is
+/// forced in order to check for errors. The default value is \p false.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level two-way partition operation is performed on an array of integer
+/// values, even values are copied into the selected output and odd values are copied into rejected
+/// output.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>///
+///
+/// auto predicate =
+///     [] __device__ (int a) -> bool
+///     {
+///         return (a%2) == 0;
+///     };
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// size_t input_size;     // e.g., 8
+/// int * input;           // e.g., [1, 2, 3, 4, 5, 6, 7, 8]
+/// int * selected_output; // empty array of at least 4 elements
+/// int * rejected_output; // empty array of at least 4 elements
+/// size_t * output_count; // empty array of 1 element
+///
+/// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
+/// // Get required size of the temporary storage
+/// rocprim::partition_two_way(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input,
+///     selected_output,
+///     rejected_output,
+///     selected_output_count,
+///     input_size,
+///     predicate
+/// );
+///
+/// // allocate temporary storage
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
+///
+/// // perform partition
+/// rocprim::partition_two_way(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input,
+///     selected_output,
+///     rejected_output,
+///     selected_output_count,
+///     input_size,
+///     predicate
+/// );
+/// // output_selected: [2, 4, 6, 8]
+/// // output_rejected: [1, 3, 5, 7]
+/// // selected_output_count: 4
+/// \endcode
+/// \endparblock
+template<class Config = default_config,
+         class InputIterator,
+         class SelectedOutputIterator,
+         class RejectedOutputIterator,
+         class SelectedCountOutputIterator,
+         class Predicate>
+inline hipError_t partition_two_way(void*                       temporary_storage,
+                                    size_t&                     storage_size,
+                                    InputIterator               input,
+                                    SelectedOutputIterator      output_selected,
+                                    RejectedOutputIterator      output_rejected,
+                                    SelectedCountOutputIterator selected_count_output,
+                                    const size_t                size,
+                                    Predicate                   predicate,
+                                    const hipStream_t           stream            = 0,
+                                    const bool                  debug_synchronous = false)
+{
+    using flag_type          = ::rocprim::empty_type; //dummy
+    using inequality_op_type = ::rocprim::empty_type; //dummy
+    using offset_type        = unsigned int;
+
+    flag_type* flags = nullptr;
+
+    rocprim::empty_type* const no_input_values = nullptr; // key only
+
+    using output_key_iterator_tuple = tuple<SelectedOutputIterator, RejectedOutputIterator>;
+    output_key_iterator_tuple output{output_selected, output_rejected};
+
+    using output_value_iterator_tuple = tuple<::rocprim::empty_type*, ::rocprim::empty_type*>;
+    const output_value_iterator_tuple no_output_values{nullptr, nullptr}; // key only
+
+    return detail::partition_impl<detail::select_method::predicate, false, Config, offset_type>(
+        temporary_storage,
+        storage_size,
+        input,
+        no_input_values,
+        flags,
+        output,
+        no_output_values,
+        selected_count_output,
+        size,
+        inequality_op_type(),
+        stream,
+        debug_synchronous,
+        predicate);
+}
+
+/// \brief Two-way parallel select primitive for device level using range of flags.
+///
+/// Performs a device-wide partition based on input \p flags. Partition copies the values from \p
+/// input to \p output_selected and \p output_rejected in such a way that all values for which the
+/// corresponding items from \p flags are \p true (or can be implicitly converted to \p true )
+/// are copied to \p output_selected, and to \p output rejected if the flag is \p false .
+///
+/// \par Overview
+/// * Returns the required size of \p temporary_storage in \p storage_size if \p temporary_storage
+/// in a null pointer.
+/// * Ranges specified by \p input and \p flags must have at least \p size elements.
+/// * The number of elements written to \p output_selected is equal to the number of \p true
+/// elements in \p flags .
+/// * The number of elements written to \p output_rejected is equal to the number of \p false
+/// elements in \p flags .
+/// * Range specified by \p selected_count_output must have at least 1 element.
+/// * Values of \p flag range should be implicitly convertible to `bool` type.
+/// * The relative order of elements in both output ranges matches the input range.
+///
+/// \tparam Config - [optional] configuration of the primitive. If provided it should be \p
+/// default_config or an instance of \p select_config
+/// \tparam InputIterator - random-access iterator type of the input range. It can be
+/// a simple pointer type.
+/// \tparam FlagIterator - random-access iterator type of the flag range. It can be
+/// a simple pointer type.
+/// \tparam SelectedOutputIterator - random-access iterator type of the selected output range. It
+/// can be a simple pointer type.
+/// \tparam RejectedOutputIterator - random-access iterator type of the rejected output range. It
+/// can be a simple pointer type
+/// \tparam SelectedCountOutputIterator - random-access iterator type of the selected_count_output
+/// value. It can be a simple pointer type.
+///
+/// \param [in] temporary_storage - pointer to a device-accessible temporary storage. When
+/// a null pointer is passed, the required allocation size (in bytes) is written to
+/// \p storage_size and function returns without performing the select operation.
+/// \param [in,out] storage_size - reference to a size (in bytes) of \p temporary_storage.
+/// \param [in] input - iterator to the first element in the range to select values from.
+/// \param [in] flags - iterator to the selection flag corresponding to the first element from \p
+/// input range.
+/// \param [out] output_selected - iterator to the first element in the selected output range.
+/// \param [out] output_rejected - iterator to the first element in the rejected output range.
+/// \param [out] selected_count_output - iterator to the total number of selected values (length of
+/// \p output_selected).
+/// \param [in] size - number of elements in the input range.
+/// \param [in] stream - [optional] HIP stream object. The default is \p 0 (default stream).
+/// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
+/// launch is forced in order to check for errors. The default value is \p false.
+///
+/// \par Example
+/// \parblock
+/// In this example a device-level two-way partition operation is performed on an array of
+/// integer values with array of <tt>char</tt>s used as flags.
+///
+/// \code{.cpp}
+/// #include <rocprim/rocprim.hpp>
+///
+/// // Prepare input and output (declare pointers, allocate device memory etc.)
+/// size_t input_size;     // e.g., 8
+/// int * input;           // e.g., [1, 2, 3, 4, 5, 6, 7, 8]
+/// char * flags;          // e.g., [0, 1, 1, 0, 0, 1, 0, 1]
+/// int * output_selected; // empty array of at least 4 elements
+/// int * output_rejected; // empty array of at least 4 elements
+/// size_t * output_count; // empty array of 1 element
+///
+/// size_t temporary_storage_size_bytes;
+/// void * temporary_storage_ptr = nullptr;
+/// // Get required size of the temporary storage
+/// rocprim::partition(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input, flags,
+///     output_selected,
+///     output_rejected,
+///     output_count,
+///     input_size
+/// );
+///
+/// // allocate temporary storage
+/// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
+///
+/// // perform partition
+/// rocprim::partition(
+///     temporary_storage_ptr, temporary_storage_size_bytes,
+///     input, flags,
+///     output_selected,
+///     output_rejected,
+///     output_count,
+///     input_size
+/// );
+/// // output_selected: [2, 3, 6, 8]
+/// // output_rejected: [1, 4, 5, 7]
+/// // output_count: 4
+/// \endcode
+/// \endparblock
+template<class Config = default_config,
+         typename InputIterator,
+         typename FlagIterator,
+         typename SelectedOutputIterator,
+         typename RejectedOutputIterator,
+         typename SelectedCountOutputIterator>
+inline hipError_t partition_two_way(void*                       temporary_storage,
+                                    size_t&                     storage_size,
+                                    InputIterator               input,
+                                    FlagIterator                flags,
+                                    SelectedOutputIterator      output_selected,
+                                    RejectedOutputIterator      output_rejected,
+                                    SelectedCountOutputIterator selected_count_output,
+                                    const size_t                size,
+                                    const hipStream_t           stream            = 0,
+                                    const bool                  debug_synchronous = false)
+{
+    using unary_predicate_type = ::rocprim::empty_type; // dummy
+    using inequality_op_type   = ::rocprim::empty_type; // dummy
+    using offset_type          = unsigned int;
+
+    rocprim::empty_type* const no_input_values = nullptr; // key only
+
+    using output_key_iterator_tuple = tuple<SelectedOutputIterator, RejectedOutputIterator>;
+    output_key_iterator_tuple keys_output{output_selected, output_rejected};
+
+    using output_value_iterator_tuple = tuple<::rocprim::empty_type*, ::rocprim::empty_type*>;
+    const output_value_iterator_tuple no_output_values{nullptr, nullptr}; // key only
+
+    return detail::partition_impl<detail::select_method::flag, false, Config, offset_type>(
+        temporary_storage,
+        storage_size,
+        input,
+        no_input_values,
+        flags,
+        keys_output,
+        no_output_values,
+        selected_count_output,
+        size,
+        inequality_op_type(),
+        stream,
+        debug_synchronous,
+        unary_predicate_type());
+}
+
 /// \brief Parallel select primitive for device level using range of flags.
 ///
 /// Performs a device-wide partition based on input \p flags. Partition copies
 /// the values from \p input to \p output in such a way that all values for which the corresponding
-/// items from /p flags are \p true (or can be implicitly converted to \p true) precede
-/// the elements for which the corresponding items from /p flags are \p false.
+/// items from \p flags are \p true (or can be implicitly converted to \p true) precede
+/// the elements for which the corresponding items from \p flags are \p false.
 ///
 /// \par Overview
 /// * Returns the required size of \p temporary_storage in \p storage_size
@@ -383,7 +666,7 @@ hipError_t partition_impl(void * temporary_storage,
 /// \param [in] flags - iterator to the selection flag corresponding to the first element from \p input range.
 /// \param [out] output - iterator to the first element in the output range.
 /// \param [out] selected_count_output - iterator to the total number of selected values (length of \p output).
-/// \param [in] size - number of element in the input range.
+/// \param [in] size - number of elements in the input range.
 /// \param [in] stream - [optional] HIP stream object. The default is \p 0 (default stream).
 /// \param [in] debug_synchronous - [optional] If true, synchronization after every kernel
 /// launch is forced in order to check for errors. The default value is \p false.
@@ -445,17 +728,32 @@ hipError_t partition(void * temporary_storage,
                      const hipStream_t stream = 0,
                      const bool debug_synchronous = false)
 {
-    // Dummy unary predicate
-    using unary_predicate_type = ::rocprim::empty_type;
-    // Dummy inequality operation
-    using inequality_op_type = ::rocprim::empty_type;
-    using offset_type = unsigned int;
-    rocprim::empty_type* const no_values = nullptr; // key only
+    using unary_predicate_type = ::rocprim::empty_type; // dummy
+    using inequality_op_type   = ::rocprim::empty_type; // dummy
+    using offset_type          = unsigned int;
+
+    rocprim::empty_type* const no_input_values = nullptr; // key only
+
+    using output_key_iterator_tuple = tuple<OutputIterator, ::rocprim::empty_type*>;
+    output_key_iterator_tuple keys_output{output, nullptr};
+
+    using output_value_iterator_tuple = tuple<::rocprim::empty_type*, ::rocprim::empty_type*>;
+    const output_value_iterator_tuple no_output_values{nullptr, nullptr}; // key only
 
     return detail::partition_impl<detail::select_method::flag, false, Config, offset_type>(
-        temporary_storage, storage_size, input, no_values, flags, output, no_values, selected_count_output,
-        size, inequality_op_type(), stream, debug_synchronous, unary_predicate_type()
-    );
+        temporary_storage,
+        storage_size,
+        input,
+        no_input_values,
+        flags,
+        keys_output,
+        no_output_values,
+        selected_count_output,
+        size,
+        inequality_op_type(),
+        stream,
+        debug_synchronous,
+        unary_predicate_type());
 }
 
 /// \brief Parallel select primitive for device level using selection predicate.
@@ -467,7 +765,6 @@ hipError_t partition(void * temporary_storage,
 /// \par Overview
 /// * Returns the required size of \p temporary_storage in \p storage_size
 /// if \p temporary_storage in a null pointer.
-/// * Ranges specified by \p input, \p flags and \p output must have at least \p size elements.
 /// * Range specified by \p selected_count_output must have at least 1 element.
 /// * Relative order is preserved for the elements for which the \p predicate returns \p true. Other
 /// elements are copied in reverse order.
@@ -489,8 +786,8 @@ hipError_t partition(void * temporary_storage,
 /// \param [in] input - iterator to the first element in the range to select values from.
 /// \param [out] output - iterator to the first element in the output range.
 /// \param [out] selected_count_output - iterator to the total number of selected values (length of \p output).
-/// \param [in] size - number of element in the input range.
-/// \param [in] predicate - unary function object which returns /p true if the element should be
+/// \param [in] size - number of elements in the input range.
+/// \param [in] predicate - unary function object which returns \p true if the element should be
 /// ordered before other elements.
 /// The signature of the function should be equivalent to the following:
 /// <tt>bool f(const T &a);</tt>. The signature does not need to have
@@ -563,18 +860,34 @@ hipError_t partition(void * temporary_storage,
                      const hipStream_t stream = 0,
                      const bool debug_synchronous = false)
 {
-    // Dummy flag type
-    using flag_type = ::rocprim::empty_type;
-    flag_type * flags = nullptr;
-    // Dummy inequality operation
-    using inequality_op_type = ::rocprim::empty_type;
-    using offset_type = unsigned int;
-    rocprim::empty_type* const no_values = nullptr; // key only
+    using flag_type          = ::rocprim::empty_type; //dummy
+    using inequality_op_type = ::rocprim::empty_type; //dummy
+    using offset_type        = unsigned int;
+
+    flag_type* flags = nullptr;
+
+    rocprim::empty_type* const no_input_values = nullptr; // key only
+
+    using output_key_iterator_tuple = tuple<OutputIterator, ::rocprim::empty_type*>;
+    output_key_iterator_tuple keys_output{output, nullptr};
+
+    using output_value_iterator_tuple = tuple<::rocprim::empty_type*, ::rocprim::empty_type*>;
+    const output_value_iterator_tuple no_output_values{nullptr, nullptr}; // key only
 
     return detail::partition_impl<detail::select_method::predicate, false, Config, offset_type>(
-        temporary_storage, storage_size, input, no_values, flags, output, no_values, selected_count_output,
-        size, inequality_op_type(), stream, debug_synchronous, predicate
-    );
+        temporary_storage,
+        storage_size,
+        input,
+        no_input_values,
+        flags,
+        keys_output,
+        no_output_values,
+        selected_count_output,
+        size,
+        inequality_op_type(),
+        stream,
+        debug_synchronous,
+        predicate);
 }
 
 /// \brief Parallel select primitive for device level using two selection predicates.
@@ -626,7 +939,7 @@ hipError_t partition(void * temporary_storage,
 /// \param [out] output_unselected - iterator to the first element in the unselected output range.
 /// \param [out] selected_count_output - iterator to the total number of selected values in
 /// \p output_first_part and \p output_second_part respectively.
-/// \param [in] size - number of element in the input range.
+/// \param [in] size - number of elements in the input range.
 /// \param [in] select_first_part_op - unary function object which returns \p true if the element
 /// should be in \p output_first_part range
 /// The signature of the function should be equivalent to the following:

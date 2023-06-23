@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -89,7 +89,7 @@ simple_partition<T> make_partition(T** dest, layout storage_layout)
     return simple_partition<T>{dest, storage_layout};
 }
 
-/// \brief Construct a simple `simple_partition` from a size and an aligment that forms the layout.
+/// \brief Construct a simple `simple_partition` from a size and an alignment that forms the layout.
 /// \tparam T         - The base type to allocate temporary memory for
 /// \param  dest      - Pointer to where to store the final allocated pointer
 /// \param  size      - The required size that the memory allocated to `*dest` should have.
@@ -238,7 +238,7 @@ union_partition<Ts...> make_union_partition(Ts... ts)
 /// both to compute the total required amount of temporary memory, as well as to break it down into individual
 /// allocations.
 ///
-/// When `temporary_storage` is `nullptr`, this function computes the total amount of required tempory memory,
+/// When `temporary_storage` is `nullptr`, this function computes the total amount of required temporary memory,
 /// and writes the result to `storage_size`. Note, this value will always be more than 0, even if there is technically
 /// no temporary memory required.
 ///
@@ -248,7 +248,7 @@ union_partition<Ts...> make_union_partition(Ts... ts)
 /// returned.
 ///
 /// This function has a special case for allocations of size 0: When any (sub-)partition in `partition` requires no
-/// memory, its alignment is not factored into the total required memory, and its destination pointer will ne set to
+/// memory, its alignment is not factored into the total required memory, and its destination pointer will be set to
 /// `nullptr`.
 ///
 /// \tparam TempStoragePartition - The root partition to allocate temporary memory for. It should have the following

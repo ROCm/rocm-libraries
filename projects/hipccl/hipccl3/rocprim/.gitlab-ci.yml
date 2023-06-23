@@ -60,6 +60,20 @@ clang-format:
     - git config --global --add safe.directory $CI_PROJECT_DIR
     - scripts/code-format/check-format.sh $CI_MERGE_REQUEST_DIFF_BASE_SHA --binary "$CLANG_FORMAT"
 
+copyright-date:
+  extends:
+    - .deps:rocm
+  stage: lint
+  needs: []
+  tags:
+    - rocm-build
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  script:
+    - cd $CI_PROJECT_DIR
+    - git config --global --add safe.directory $CI_PROJECT_DIR
+    - scripts/copyright-date/check-copyright.sh -v -d $CI_MERGE_REQUEST_DIFF_BASE_SHA
+
 .cmake-minimum-vcpkg:
   extends:
     - .deps:rocm
@@ -297,7 +311,10 @@ test:
       -D CMAKE_PREFIX_PATH=/opt/rocm
       -P $CI_PROJECT_DIR/cmake/GenerateResourceSpec.cmake
     - cat ./resources.json
-    - ctest
+    # Parallel execution (with other AMDGPU processes) can oversubscribe the SDMA queue.
+    # This causes the hipMemcpy to fail, which is not reported as an error by HIP.
+    # As a temporary workaround, disable the SDMA for test stability.
+    - HSA_ENABLE_SDMA=0 ctest
       --output-on-failure
       --repeat-until-fail 2
       --tests-regex "hip|$GPU_TARGET"
@@ -374,7 +391,7 @@ benchmark:
     - .benchmark-base
   variables:
     BENCHMARK_FILENAME_REGEX: ^benchmark
-    BENCHMARK_ALGORITHM_REGEX: "benchmark_device_merge_sort_block_sort"
+    BENCHMARK_ALGORITHM_REGEX: ""
   script:
     - 'printf "CI Variables used in benchmarks:\nBENCHMARK_RESULT_DIR: %s\nBENCHMARK_FILENAME_REGEX: %s\nBENCHMARK_ALGORITHM_REGEX: %s \n" "$BENCHMARK_RESULT_DIR" "$BENCHMARK_FILENAME_REGEX" "$BENCHMARK_ALGORITHM_REGEX"'
     - cd "${CI_PROJECT_DIR}"
@@ -445,21 +462,31 @@ autotune:execute-tuning:
   variables:
     AUTOTUNE_FILENAME_REGEX: ^benchmark
     AUTOTUNE_ALGORITHM_REGEX: ""
+    AUTOTUNE_SIZE: ""
+    AUTOTUNE_TRIALS: ""
   timeout: 8h
   artifacts:
     paths:
       - ${AUTOTUNE_RESULT_DIR}/*.json
   script:
-    - 'printf "CI Variables used in benchmarks:\nAUTOTUNE_RESULT_DIR: %s\nAUTOTUNE_FILENAME_REGEX: %s\nAUTOTUNE_ALGORITHM_REGEX: %s \n" "$AUTOTUNE_RESULT_DIR" "$AUTOTUNE_FILENAME_REGEX" "$AUTOTUNE_ALGORITHM_REGEX"'
+    # Exclude benchmark that is known to fail on gfx906
+    # On ROCm 5.7 or later, check if this can be removed - the presumption is that the failure is caused by a compiler issue.
+    - >
+      if [[ "${GPU_TARGET}" == "gfx906" ]] && [[ "${AUTOTUNE_ALGORITHM_REGEX}" == "" ]]; then
+        export AUTOTUNE_ALGORITHM_REGEX="-\{\"lvl\":\"device\",\"algo\":\"radix_sort_onesweep\",\"key_type\":\"short\",\"value_type\":\"short\",\"cfg\":\{\"histogram\":\{\"bs\":1024,\"ipt\":22},\"sort\":\{\"bs\":1024,\"ipt\":22},\"bits_per_place\":5,\"algorithm\":\"block_radix_rank_algorithm::match\"}}"
+      fi
+    - 'printf "CI Variables used in benchmarks:\nAUTOTUNE_RESULT_DIR: %s\nAUTOTUNE_FILENAME_REGEX: %s\nAUTOTUNE_ALGORITHM_REGEX: %s \nAUTOTUNE_SIZE: %s \nAUTOTUNE_TRIALS: %s\n" "$AUTOTUNE_RESULT_DIR" "$AUTOTUNE_FILENAME_REGEX" "$AUTOTUNE_ALGORITHM_REGEX" "$AUTOTUNE_SIZE" "$AUTOTUNE_TRIALS"'
     - cd "${CI_PROJECT_DIR}"
     - mkdir -p "${AUTOTUNE_RESULT_DIR}"
     - python3
       .gitlab/run_benchmarks.py
-      --benchmark_dir "${BUILD_DIR}/benchmark"
-      --benchmark_gpu_architecture "${GPU_TARGET}"
-      --benchmark_output_dir "${AUTOTUNE_RESULT_DIR}"
-      --benchmark_filename_regex "${AUTOTUNE_FILENAME_REGEX}"
-      --benchmark_filter_regex "${AUTOTUNE_ALGORITHM_REGEX}"
+      --benchmark_dir="${BUILD_DIR}/benchmark"
+      --benchmark_gpu_architecture="${GPU_TARGET}"
+      --benchmark_output_dir="${AUTOTUNE_RESULT_DIR}"
+      --benchmark_filename_regex="${AUTOTUNE_FILENAME_REGEX}"
+      --benchmark_filter_regex="${AUTOTUNE_ALGORITHM_REGEX}"
+      --size="${AUTOTUNE_SIZE}"
+      --trials="${AUTOTUNE_TRIALS}"
 
 autotune:generate-config:
   image: python:3.10.5-buster

@@ -511,10 +511,93 @@ template<class Key, class Value>
 struct default_scan_by_key_config_base : default_scan_by_key_config_base_helper<Key, Value>::type
 {};
 
+struct transform_config_params
+{
+    kernel_config_params kernel_config{};
+};
+
 } // namespace detail
+
+/// \brief Configuration for the device-level transform operation.
+/// \tparam BlockSize Number of threads in a block.
+/// \tparam ItemsPerThread Number of items processed by each thread.
+/// \tparam SizeLimit Limit on the number of items for a single kernel launch.
+template<unsigned int BlockSize,
+         unsigned int ItemsPerThread,
+         unsigned int SizeLimit = ROCPRIM_GRID_SIZE_LIMIT>
+struct transform_config
+{
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+
+    /// \brief Number of threads in a block.
+    static constexpr unsigned int block_size = BlockSize;
+
+    /// \brief Number of items processed by each thread.
+    static constexpr unsigned int items_per_thread = ItemsPerThread;
+
+    /// \brief Limit on the number of items for a single kernel launch.
+    static constexpr unsigned int size_limit = SizeLimit;
+
+#endif
+};
 
 namespace detail
 {
+
+template<class Value>
+struct default_transform_config_base_helper
+{
+    static constexpr unsigned int item_scale
+        = ::rocprim::detail::ceiling_div<unsigned int>(sizeof(Value), sizeof(int));
+
+    using type = transform_config<256, ::rocprim::max(1u, 16u / item_scale)>;
+};
+
+template<class Value>
+struct default_transform_config_base : default_transform_config_base_helper<Value>::type
+{};
+
+} // namespace detail
+
+/// \brief Configuration for the device-level binary search operation.
+/// \tparam BlockSize Number of threads in a block.
+/// \tparam ItemsPerThread Number of items processed by each thread.
+/// \tparam SizeLimit Limit on the number of items for a single kernel launch.
+template<unsigned int BlockSize,
+         unsigned int ItemsPerThread,
+         unsigned int SizeLimit = ROCPRIM_GRID_SIZE_LIMIT>
+struct binary_search_config : transform_config<BlockSize, ItemsPerThread, SizeLimit>
+{};
+
+/// \brief Configuration for the device-level upper bound operation.
+/// \tparam BlockSize Number of threads in a block.
+/// \tparam ItemsPerThread Number of items processed by each thread.
+/// \tparam SizeLimit Limit on the number of items for a single kernel launch.
+template<unsigned int BlockSize,
+         unsigned int ItemsPerThread,
+         unsigned int SizeLimit = ROCPRIM_GRID_SIZE_LIMIT>
+struct upper_bound_config : transform_config<BlockSize, ItemsPerThread, SizeLimit>
+{};
+
+/// \brief Configuration for the device-level lower bound operation.
+/// \tparam BlockSize Number of threads in a block.
+/// \tparam ItemsPerThread Number of items processed by each thread.
+/// \tparam SizeLimit Limit on the number of items for a single kernel launch.
+template<unsigned int BlockSize,
+         unsigned int ItemsPerThread,
+         unsigned int SizeLimit = ROCPRIM_GRID_SIZE_LIMIT>
+struct lower_bound_config : transform_config<BlockSize, ItemsPerThread, SizeLimit>
+{};
+
+namespace detail
+{
+
+template<class Value, class Output>
+struct default_binary_search_config_base
+    : binary_search_config<
+          limit_block_size<256U, sizeof(Value) + sizeof(Output), ROCPRIM_WARP_SIZE_64>::value,
+          1>
+{};
 
 /// \brief Provides the kernel parameters for histogram_even, multi_histogram_even,
 ///        histogram_range, and multi_histogram_range based on autotuned configurations or

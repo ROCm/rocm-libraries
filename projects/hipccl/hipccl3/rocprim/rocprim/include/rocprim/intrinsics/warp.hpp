@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -118,35 +118,46 @@ int warp_all(int predicate)
 // end of group intrinsicsmodule
 
 /**
- * Compute a 32b mask of threads having the same least-significant
- * LABEL_BITS of \p label as the calling thread.
+ * This function computes a lane mask of active lanes in the warp which which have
+ * the same value for <tt>label</tt> as the lane which calls the function. The bit at
+ * index \p i in the lane mask is set if the thread of lane \i calls this function
+ * with the same value <tt>label</tt>. Only the least-significant \p LabelBits bits
+ * are taken into account when labels are considered to be equal.
  */
-template <int LABEL_BITS>
-ROCPRIM_DEVICE ROCPRIM_INLINE
-unsigned int MatchAny(unsigned int label)
+template<unsigned int LabelBits>
+ROCPRIM_DEVICE ROCPRIM_INLINE lane_mask_type match_any(unsigned int label)
 {
-    unsigned int retval;
+    // Obtain a mask with the threads which are currently active.
+    lane_mask_type peer_mask = ballot(1);
 
-    // Extract masks of common threads for each bit
+    // Compute the final value iteratively by testing each bit separately.
     ROCPRIM_UNROLL
-    for (int BIT = 0; BIT < LABEL_BITS; ++BIT)
+    for(unsigned int bit = 0; bit < LabelBits; ++bit)
     {
-        unsigned long long  mask;
-        unsigned long long current_bit = 1 << BIT;
-        mask = label & current_bit;
-        bool bit_match = (mask==current_bit);
-        mask = ballot(bit_match);
-        if(!bit_match)
-        {
-          mask = ! mask;
-        }
-        // Remove peers who differ
-        retval = (BIT == 0) ? mask : retval & mask;
+        const auto bit_set = label & (1u << bit);
+        // Create mask of threads which have the same bit set or unset.
+        const auto same_mask = ballot(bit_set);
+        // Remove bits which do not match from the peer mask.
+        peer_mask &= (bit_set ? same_mask : ~same_mask);
     }
 
-    return retval;
-
+    return peer_mask;
 }
+
+/**
+ * This function computes a lane mask of active lanes in the warp which which have
+ * the same value for <tt>label</tt> as the lane which calls the function. The bit at
+ * index \p i in the lane mask is set if the thread of lane \i calls this function
+ * with the same value <tt>label</tt>. Only the least-significant \p LabelBits bits
+ * are taken into account when labels are considered to be equal.
+ */
+template<int LabelBits>
+[[deprecated("use rocprim::match_any instead")]] ROCPRIM_DEVICE ROCPRIM_INLINE lane_mask_type
+    MatchAny(unsigned int label)
+{
+    return match_any<LabelBits>(label);
+}
+
 END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_INTRINSICS_WARP_HPP_

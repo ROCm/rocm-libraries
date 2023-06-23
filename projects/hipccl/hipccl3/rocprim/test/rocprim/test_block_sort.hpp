@@ -118,7 +118,8 @@ void TestSortKeyValue()
                                0,
                                stream,
                                device_key_output,
-                               device_value_output);
+                               device_value_output,
+                               size);
             HIP_CHECK(hipGetLastError());
         }
 
@@ -301,7 +302,7 @@ void TestSortStableKey(std::vector<size_t> sizes)
             std::vector<key_type> keys
                 = test_utils::get_random_data<key_type>(size, -10, 10, seed_value);
 
-            std::vector<index_type> values;
+            std::vector<index_type> values(size);
             std::iota(values.begin(), values.end(), 0u);
             using tuple_type = rocprim::tuple<key_type, index_type>;
             std::vector<tuple_type> tuples(size);
@@ -402,12 +403,13 @@ typed_test_def(suite_name, name_suffix, SortKeysMultipleItemsPerThread)
 
 typed_test_def(suite_name, name_suffix, SortKeysStable)
 {
-    using key_type = typename TestFixture::key_type;
-    if(std::is_same<key_type, int>::value)
+    using key_type                                            = typename TestFixture::key_type;
+    static constexpr const rocprim::block_sort_algorithm algo = TEST_BLOCK_SORT_ALGORITHM;
+    if(std::is_same<key_type, int>::value
+       && algo == rocprim::block_sort_algorithm::stable_merge_sort)
     {
-        static constexpr const rocprim::block_sort_algorithm algo       = TEST_BLOCK_SORT_ALGORITHM;
-        static constexpr const unsigned int                  block_size = TestFixture::block_size;
-        static constexpr const unsigned int                  items_per_thread = 4;
+        static constexpr const unsigned int block_size       = TestFixture::block_size;
+        static constexpr const unsigned int items_per_thread = 4;
 
         std::vector<size_t> sizes = {1134 * items_per_thread * block_size};
         TestSortStableKey<block_size, items_per_thread, algo>(sizes);
@@ -438,11 +440,7 @@ typed_test_def(suite_name, name_suffix, SortKeyInputSizeNotMultipleOfBlockSize)
     static constexpr const rocprim::block_sort_algorithm algo = TEST_BLOCK_SORT_ALGORITHM;
     static constexpr const unsigned int                  block_size       = TestFixture::block_size;
     static constexpr const unsigned int                  items_per_thread = 1;
-    if(algo == rocprim::block_sort_algorithm::bitonic_sort && items_per_thread != 1u)
-    {
-        GTEST_SKIP();
-    }
-    std::vector<size_t> sizes
+    std::vector<size_t>                                  sizes
         = {0, 53, 512, 5000, 34567, (1 << 17) - 1220, 1134 * 256, (1 << 20) - 123};
     TestSortKey<block_size, items_per_thread, key_type, value_type, algo, binary_op_type>(sizes);
 }
@@ -457,10 +455,6 @@ typed_test_def(suite_name,
     static constexpr const rocprim::block_sort_algorithm algo = TEST_BLOCK_SORT_ALGORITHM;
     static constexpr const unsigned int                  block_size       = TestFixture::block_size;
     static constexpr const unsigned int                  items_per_thread = 4;
-    if(algo != rocprim::block_sort_algorithm::stable_merge_sort)
-    {
-        GTEST_SKIP();
-    }
     std::vector<size_t> sizes
         = {0, 53, 512, 5000, 34567, (1 << 17) - 1220, 1134 * 256, (1 << 20) - 123};
     TestSortKey<block_size, items_per_thread, key_type, value_type, algo, binary_op_type>(sizes);

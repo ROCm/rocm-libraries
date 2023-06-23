@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -95,7 +95,6 @@ typed_test_def(suite_name_single, name_suffix, Reduce)
         HIP_CHECK(hipFree(device_output));
         HIP_CHECK(hipFree(device_output_reductions));
     }
-
 }
 
 typed_test_def(suite_name_single, name_suffix, ReduceMultiplies)
@@ -328,7 +327,6 @@ typed_test_def(suite_name_single, name_suffix, ReduceValid)
         HIP_CHECK(hipFree(device_output));
         HIP_CHECK(hipFree(device_output_reductions));
     }
-
 }
 
 typed_test_def(suite_name_array, name_suffix, Reduce)
@@ -340,8 +338,9 @@ typed_test_def(suite_name_array, name_suffix, Reduce)
     using T = typename TestFixture::input_type;
     constexpr size_t block_size = TestFixture::block_size;
 
-    static_for_input_array<0, 2, T, block_size, rocprim::block_reduce_algorithm::using_warp_reduce>::run();
-    static_for_input_array<0, 2, T, block_size, rocprim::block_reduce_algorithm::raking_reduce>::run();
-    static_for_input_array<0, 2, T, block_size, rocprim::block_reduce_algorithm::raking_reduce_commutative_only>::run();
+    using bra = rocprim::block_reduce_algorithm;
 
+    static_for_input_array<0, 6, T, block_size, bra::using_warp_reduce>::run();
+    static_for_input_array<0, 6, T, block_size, bra::raking_reduce>::run();
+    static_for_input_array<0, 6, T, block_size, bra::raking_reduce_commutative_only>::run();
 }

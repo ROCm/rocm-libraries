@@ -37,18 +37,16 @@ template<class Key,
          unsigned int BlockSizeY,
          unsigned int BlockSizeZ,
          unsigned int ItemsPerThread,
-         class Value,
-         bool Stable = false>
+         class Value>
 class block_sort_merge
 {
     static constexpr const unsigned int BlockSize     = BlockSizeX * BlockSizeY * BlockSizeZ;
     static constexpr const unsigned int ItemsPerBlock = BlockSize * ItemsPerThread;
     static constexpr const unsigned int WarpSortSize  = std::min(BlockSize, 16u);
     static constexpr const bool with_values = !std::is_same<Value, rocprim::empty_type>::value;
-    using warp_sort_type                            = std::conditional_t<
-        Stable,
-        rocprim::detail::warp_sort_stable<Key, BlockSize, WarpSortSize, ItemsPerThread, Value>,
-        rocprim::warp_sort<Key, WarpSortSize, Value>>;
+    // stable sort gives superior performance over the non-stable variant
+    using warp_sort_type
+        = rocprim::detail::warp_sort_stable<Key, BlockSize, WarpSortSize, ItemsPerThread, Value>;
 
     static_assert(rocprim::detail::is_power_of_two(BlockSize),
                   "BlockSize must be a power of two for block_sort_merge!");
@@ -136,10 +134,10 @@ public:
     }
 
     template<class BinaryFunction>
-    ROCPRIM_DEVICE inline void sort(Key (&thread_keys)[ItemsPerThread],
-                                    Value (&thread_values)[ItemsPerThread],
-                                    storage_type&  storage,
-                                    BinaryFunction compare_function)
+    ROCPRIM_DEVICE ROCPRIM_INLINE void sort(Key (&thread_keys)[ItemsPerThread],
+                                            Value (&thread_values)[ItemsPerThread],
+                                            storage_type&  storage,
+                                            BinaryFunction compare_function)
     {
         this->sort_impl<ItemsPerBlock>(
             ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>(),
@@ -167,6 +165,21 @@ public:
     }
 
     template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE void sort(Key&           thread_key,
+                                            storage_type&  storage,
+                                            unsigned int   size,
+                                            BinaryFunction compare_function)
+    {
+        Key thread_keys[] = {thread_key};
+        this->sort_impl(::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>(),
+                        size,
+                        storage,
+                        compare_function,
+                        thread_keys);
+        thread_key = thread_keys[0];
+    }
+
+    template<class BinaryFunction>
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void sort(Key (&thread_keys)[ItemsPerThread],
                                                   storage_type&  storage,
                                                   unsigned int   size,
@@ -177,6 +190,25 @@ public:
                         storage,
                         compare_function,
                         thread_keys);
+    }
+
+    template<class BinaryFunction>
+    ROCPRIM_DEVICE ROCPRIM_INLINE void sort(Key&           thread_key,
+                                            Value&         thread_value,
+                                            storage_type&  storage,
+                                            unsigned int   size,
+                                            BinaryFunction compare_function)
+    {
+        Key   thread_keys[]   = {thread_key};
+        Value thread_values[] = {thread_value};
+        this->sort_impl(::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>(),
+                        size,
+                        storage,
+                        compare_function,
+                        thread_keys,
+                        thread_values);
+        thread_key   = thread_keys[0];
+        thread_value = thread_values[0];
     }
 
     template<class BinaryFunction>

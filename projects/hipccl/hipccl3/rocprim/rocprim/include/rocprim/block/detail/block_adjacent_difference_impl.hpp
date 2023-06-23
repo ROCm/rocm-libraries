@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -167,8 +167,6 @@ public:
         static constexpr auto as_flags = bool_constant<AsFlags> {};
         static constexpr auto reversed = bool_constant<Reversed> {};
 
-        assert(valid_items <= BlockSize * ItemsPerThread);
-
         const unsigned int flat_id
             = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();
 
@@ -287,8 +285,6 @@ public:
     {
         static constexpr auto as_flags = bool_constant<AsFlags> {};
         static constexpr auto reversed = bool_constant<Reversed> {};
-
-        assert(valid_items <= BlockSize * ItemsPerThread);
 
         const unsigned int flat_id
             = ::rocprim::flat_block_thread_id<BlockSizeX, BlockSizeY, BlockSizeZ>();

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2019-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -29,18 +29,18 @@
 // required test headers
 #include "test_utils_types.hpp"
 
-template<
-    class Haystack,
-    class Needle,
-    class Output = size_t,
-    class CompareFunction = rocprim::less<>
->
+template<class Haystack,
+         class Needle,
+         class Output          = size_t,
+         class CompareFunction = rocprim::less<>,
+         class Config          = rocprim::default_config>
 struct params
 {
     using haystack_type = Haystack;
     using needle_type = Needle;
     using output_type = Output;
     using compare_op_type = CompareFunction;
+    using config          = Config;
 };
 
 template<class Params>
@@ -52,17 +52,37 @@ public:
 using custom_int2 = test_utils::custom_test_type<int>;
 using custom_double2 = test_utils::custom_test_type<double>;
 
-typedef ::testing::Types<
-    params<int, int>,
-    params<unsigned long long, unsigned long long, size_t, rocprim::greater<unsigned long long>>,
-    params<float, double, unsigned int, rocprim::greater<double>>,
-    params<double, int>,
-    params<int8_t, int8_t>,
-    params<uint8_t, uint8_t>,
-    params<rocprim::half, rocprim::half, size_t, rocprim::less<rocprim::half>>,
-    params<rocprim::bfloat16, rocprim::bfloat16, size_t, rocprim::less<rocprim::bfloat16>>,
-    params<custom_int2, custom_int2>,
-    params<custom_double2, custom_double2, unsigned int, rocprim::greater<custom_double2>>>
+using custom_config_0 = rocprim::transform_config<128, 4>;
+using custom_config_1 = rocprim::binary_search_config<64, 2>;
+struct custom_config_2
+{
+    static constexpr unsigned int block_size       = 256;
+    static constexpr unsigned int items_per_thread = 1;
+    static constexpr unsigned int size_limit       = ROCPRIM_GRID_SIZE_LIMIT;
+};
+
+typedef ::testing::Types<params<int, int>,
+                         params<unsigned long long,
+                                unsigned long long,
+                                size_t,
+                                rocprim::greater<unsigned long long>,
+                                custom_config_0>,
+                         params<float, double, unsigned int, rocprim::greater<double>>,
+                         params<double, int>,
+                         params<int8_t, int8_t>,
+                         params<uint8_t, uint8_t>,
+                         params<rocprim::half, rocprim::half, size_t, rocprim::less<rocprim::half>>,
+                         params<rocprim::bfloat16,
+                                rocprim::bfloat16,
+                                size_t,
+                                rocprim::less<rocprim::bfloat16>,
+                                custom_config_1>,
+                         params<custom_int2, custom_int2>,
+                         params<custom_double2,
+                                custom_double2,
+                                unsigned int,
+                                rocprim::greater<custom_double2>,
+                                custom_config_2>>
     Params;
 
 TYPED_TEST_SUITE(RocprimDeviceBinarySearch, Params);
@@ -77,6 +97,7 @@ TYPED_TEST(RocprimDeviceBinarySearch, LowerBound)
     using needle_type = typename TestFixture::params::needle_type;
     using output_type = typename TestFixture::params::output_type;
     using compare_op_type = typename TestFixture::params::compare_op_type;
+    using config          = typename TestFixture::params::config;
 
     hipStream_t stream = 0;
 
@@ -140,29 +161,31 @@ TYPED_TEST(RocprimDeviceBinarySearch, LowerBound)
 
             void * d_temporary_storage = nullptr;
             size_t temporary_storage_bytes;
-            HIP_CHECK(
-                rocprim::lower_bound(
-                    d_temporary_storage, temporary_storage_bytes,
-                    d_haystack, d_needles, d_output,
-                    haystack_size, needles_size,
-                    compare_op,
-                    stream, debug_synchronous
-                )
-            );
+            HIP_CHECK(rocprim::lower_bound<config>(d_temporary_storage,
+                                                   temporary_storage_bytes,
+                                                   d_haystack,
+                                                   d_needles,
+                                                   d_output,
+                                                   haystack_size,
+                                                   needles_size,
+                                                   compare_op,
+                                                   stream,
+                                                   debug_synchronous));
 
             ASSERT_GT(temporary_storage_bytes, 0);
 
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
-            HIP_CHECK(
-                rocprim::lower_bound(
-                    d_temporary_storage, temporary_storage_bytes,
-                    d_haystack, d_needles, d_output,
-                    haystack_size, needles_size,
-                    compare_op,
-                    stream, debug_synchronous
-                )
-            );
+            HIP_CHECK(rocprim::lower_bound<config>(d_temporary_storage,
+                                                   temporary_storage_bytes,
+                                                   d_haystack,
+                                                   d_needles,
+                                                   d_output,
+                                                   haystack_size,
+                                                   needles_size,
+                                                   compare_op,
+                                                   stream,
+                                                   debug_synchronous));
 
             std::vector<output_type> output(needles_size);
             HIP_CHECK(
@@ -195,6 +218,7 @@ TYPED_TEST(RocprimDeviceBinarySearch, UpperBound)
     using needle_type = typename TestFixture::params::needle_type;
     using output_type = typename TestFixture::params::output_type;
     using compare_op_type = typename TestFixture::params::compare_op_type;
+    using config          = typename TestFixture::params::config;
 
     hipStream_t stream = 0;
 
@@ -257,29 +281,31 @@ TYPED_TEST(RocprimDeviceBinarySearch, UpperBound)
 
             void * d_temporary_storage = nullptr;
             size_t temporary_storage_bytes;
-            HIP_CHECK(
-                rocprim::upper_bound(
-                    d_temporary_storage, temporary_storage_bytes,
-                    d_haystack, d_needles, d_output,
-                    haystack_size, needles_size,
-                    compare_op,
-                    stream, debug_synchronous
-                )
-            );
+            HIP_CHECK(rocprim::upper_bound<config>(d_temporary_storage,
+                                                   temporary_storage_bytes,
+                                                   d_haystack,
+                                                   d_needles,
+                                                   d_output,
+                                                   haystack_size,
+                                                   needles_size,
+                                                   compare_op,
+                                                   stream,
+                                                   debug_synchronous));
 
             ASSERT_GT(temporary_storage_bytes, 0);
 
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
-            HIP_CHECK(
-                rocprim::upper_bound(
-                    d_temporary_storage, temporary_storage_bytes,
-                    d_haystack, d_needles, d_output,
-                    haystack_size, needles_size,
-                    compare_op,
-                    stream, debug_synchronous
-                )
-            );
+            HIP_CHECK(rocprim::upper_bound<config>(d_temporary_storage,
+                                                   temporary_storage_bytes,
+                                                   d_haystack,
+                                                   d_needles,
+                                                   d_output,
+                                                   haystack_size,
+                                                   needles_size,
+                                                   compare_op,
+                                                   stream,
+                                                   debug_synchronous));
 
             std::vector<output_type> output(needles_size);
             HIP_CHECK(
@@ -312,6 +338,7 @@ TYPED_TEST(RocprimDeviceBinarySearch, BinarySearch)
     using needle_type = typename TestFixture::params::needle_type;
     using output_type = typename TestFixture::params::output_type;
     using compare_op_type = typename TestFixture::params::compare_op_type;
+    using config          = typename TestFixture::params::config;
 
     hipStream_t stream = 0;
 
@@ -373,29 +400,31 @@ TYPED_TEST(RocprimDeviceBinarySearch, BinarySearch)
 
             void * d_temporary_storage = nullptr;
             size_t temporary_storage_bytes;
-            HIP_CHECK(
-                rocprim::binary_search(
-                    d_temporary_storage, temporary_storage_bytes,
-                    d_haystack, d_needles, d_output,
-                    haystack_size, needles_size,
-                    compare_op,
-                    stream, debug_synchronous
-                )
-            );
+            HIP_CHECK(rocprim::binary_search<config>(d_temporary_storage,
+                                                     temporary_storage_bytes,
+                                                     d_haystack,
+                                                     d_needles,
+                                                     d_output,
+                                                     haystack_size,
+                                                     needles_size,
+                                                     compare_op,
+                                                     stream,
+                                                     debug_synchronous));
 
             ASSERT_GT(temporary_storage_bytes, 0);
 
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_temporary_storage, temporary_storage_bytes));
 
-            HIP_CHECK(
-                rocprim::binary_search(
-                    d_temporary_storage, temporary_storage_bytes,
-                    d_haystack, d_needles, d_output,
-                    haystack_size, needles_size,
-                    compare_op,
-                    stream, debug_synchronous
-                )
-            );
+            HIP_CHECK(rocprim::binary_search<config>(d_temporary_storage,
+                                                     temporary_storage_bytes,
+                                                     d_haystack,
+                                                     d_needles,
+                                                     d_output,
+                                                     haystack_size,
+                                                     needles_size,
+                                                     compare_op,
+                                                     stream,
+                                                     debug_synchronous));
 
             std::vector<output_type> output(needles_size);
             HIP_CHECK(
