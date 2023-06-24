@@ -202,9 +202,10 @@ namespace rocRoller
                 graph.control.addElement(Sequence(), {setCoordB}, {waveMult});
 
                 addConnectionsMultiply(graph, waveMult, newLoadA, newLoadB);
-
                 if(lastWaveMult >= 0)
+                {
                     graph.control.addElement(Sequence(), {lastWaveMult}, {waveMult});
+                }
 
                 lastWaveMult = waveMult;
             }

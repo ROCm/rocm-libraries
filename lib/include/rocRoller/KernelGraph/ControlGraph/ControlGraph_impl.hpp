@@ -147,6 +147,26 @@ namespace rocRoller::KernelGraph::ControlGraph
     }
 
     template <typename T>
+    requires(std::constructible_from<Operation, T>) inline std::set<
+        std::pair<int, int>> ControlGraph::ambiguousNodes() const
+    {
+        std::set<std::pair<int, int>> badNodes;
+        auto                          memNodes = getNodes<T>().template to<std::set>();
+        for(auto iter = memNodes.begin(); iter != memNodes.end(); iter++)
+        {
+            std::set otherNodes(std::next(iter), memNodes.end());
+            for(auto node : otherNodes)
+            {
+                if(compareNodes(*iter, node) == NodeOrdering::Undefined)
+                {
+                    badNodes.insert(std::make_pair(*iter, node));
+                }
+            }
+        }
+        return badNodes;
+    }
+
+    template <typename T>
     requires(std::constructible_from<ControlGraph::Element,
                                      T>) inline std::optional<T> ControlGraph::get(int tag) const
     {

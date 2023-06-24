@@ -19,6 +19,7 @@ namespace rocRoller
         , storeLocalWidth(4)
         , storeGlobalWidth(4)
         , fuseLoops(true)
+        , orderMemory(false)
         , prefetch(false)
         , prefetchInFlight(1)
         , prefetchLDSFactor(0)

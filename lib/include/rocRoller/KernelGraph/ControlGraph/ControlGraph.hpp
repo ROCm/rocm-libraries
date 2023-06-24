@@ -122,6 +122,11 @@ namespace rocRoller
              */
             std::map<std::pair<int, int>, NodeOrdering> const& nodeOrderTable() const;
 
+            template <typename T>
+            requires(std::constructible_from<Operation, T>)
+                std::set<std::pair<int, int>> ambiguousNodes()
+            const;
+
         private:
             virtual void clearCache() override;
             void         checkOrderCache() const;

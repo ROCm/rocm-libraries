@@ -68,6 +68,7 @@ namespace GEMMDriverTest
         bool storeLDSD = true;
 
         bool fuseLoops      = true;
+        bool orderMemory    = false;
         bool betaInFma      = true;
         bool literalStrides = true;
 
@@ -258,6 +259,7 @@ namespace GEMMDriverTest
 
         auto kernelOptions                           = std::make_shared<KernelOptions>();
         kernelOptions->fuseLoops                     = gemm.fuseLoops;
+        kernelOptions->orderMemory                   = gemm.orderMemory;
         kernelOptions->unrollX                       = gemm.unrollX;
         kernelOptions->unrollY                       = gemm.unrollY;
         kernelOptions->unrollK                       = gemm.unrollK;
@@ -639,6 +641,34 @@ namespace GEMMDriverTest
         gemm.fuseLoops = false;
 
         basicGEMM<Half>(m_context, gemm, 2.e-5);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed2X2UnrollYOrderMemory)
+    {
+        GEMMProblem gemm;
+
+        gemm.m = 256;
+        gemm.n = 512;
+        gemm.k = 64;
+
+        gemm.macM = 128;
+        gemm.macN = 256;
+        gemm.macK = 16;
+
+        gemm.waveK = 8;
+
+        gemm.workgroupSizeX = 2 * gemm.wavefrontSize;
+        gemm.workgroupSizeY = 4;
+
+        gemm.unrollX = 1;
+        gemm.unrollY = 2;
+
+        gemm.loadLDSA    = false;
+        gemm.storeLDSD   = false;
+        gemm.fuseLoops   = false;
+        gemm.orderMemory = true;
+
+        EXPECT_THROW(basicGEMM<Half>(m_context, gemm, 2.e-5), FatalError);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16Jammed2X2)
