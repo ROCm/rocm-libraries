@@ -16,13 +16,12 @@ string basicSharedPtrRegex() {
   result = "^shared_ptr<[^<>]+>$" // Notice the `[^<>]+` excluding more complex types
 }
 
-from UsingAliasTypedefType t, Variable v, Namespace n
+from UsingAliasTypedefType t, Variable v
 where
   isInCheckedDirs(t) and
   isInCheckedDirs(v) and
   not v.declaredUsingAutoType() and
-  t.getNamespace() = n and
-  (v.getNamespace() = n or n.getAChildNamespace() = v.getNamespace()) and
+  (t.getNamespace() = v.getNamespace() or t.getNamespace().getAChildNamespace() = v.getNamespace())and
   v.getUnderlyingType() = t.getUnderlyingType() and
   v.getType().toString().regexpMatch(basicSharedPtrRegex())
 select v,

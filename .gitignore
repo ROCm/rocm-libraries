@@ -11,4 +11,4 @@ a.out*
 test_optimize_weights
 cql-data
 cql/checks
-
+.cache
