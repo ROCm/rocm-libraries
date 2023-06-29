@@ -59,40 +59,102 @@ namespace rocRoller
 
         co_yield Register::AllocateIfNeeded(dest);
 
-        co_yield_(Instruction("s_mul_i32", {dest->subset({0})}, {l0, r0}, {}, "least significant"));
+        AssertFatal(l0 != nullptr);
+        AssertFatal(l1 != nullptr);
+        AssertFatal(r0 != nullptr);
+        AssertFatal(r1 != nullptr);
 
-        co_yield_(Instruction("s_mul_hi_u32",
-                              {dest->subset({1})},
-                              {l0, r0},
-                              {},
-                              "most significant: high of low * low"));
+        // cppcheck-suppress nullPointer
+        bool needLL = !l0->isZeroLiteral() && !r0->isZeroLiteral();
+        // cppcheck-suppress nullPointer
+        bool needLH = !l0->isZeroLiteral() && !r1->isZeroLiteral();
+        // cppcheck-suppress nullPointer
+        bool needHL = !l1->isZeroLiteral() && !r0->isZeroLiteral();
 
-        if(!l0->isZeroLiteral() && !r1->isZeroLiteral())
+        int                               numHighComponents = 0;
+        std::array<Register::ValuePtr, 3> highComponents
+            = {dest->subset({1}),
+               Register::Value::Placeholder(m_context, Register::Type::Scalar, DataType::Int32, 1),
+               Register::Value::Placeholder(m_context, Register::Type::Scalar, DataType::Int32, 1)};
+
+        if(needLH)
         {
-            auto lh = std::make_shared<Register::Value>(
-                m_context, Register::Type::Scalar, DataType::Int32, 1);
-            co_yield_(Instruction(
-                "s_mul_i32", {lh}, {l0, r1}, {}, "most significant: low of low * high"));
-
-            co_yield_(Instruction("s_add_u32",
-                                  {dest->subset({1})},
-                                  {dest->subset({1}), lh},
+            co_yield_(Instruction("s_mul_i32",
+                                  {highComponents[numHighComponents]},
+                                  {l0, r1},
                                   {},
-                                  "most significant: sum"));
+                                  "most significant: low of low * high"));
+
+            numHighComponents++;
+        }
+        else
+        {
+            co_yield Instruction::Comment("low of low * high ommitted due to zero input.");
+        }
+        if(needHL)
+        {
+            co_yield_(Instruction("s_mul_i32",
+                                  {highComponents[numHighComponents]},
+                                  {l1, r0},
+                                  {},
+                                  "most significant: low of high * low"));
+            numHighComponents++;
+        }
+        else
+        {
+            co_yield Instruction::Comment("low of high * low ommitted due to zero input.");
+        }
+        if(needLL)
+        {
+            co_yield_(
+                Instruction("s_mul_i32", {dest->subset({0})}, {l0, r0}, {}, "least significant"));
+
+            co_yield_(Instruction("s_mul_hi_u32",
+                                  {highComponents[numHighComponents]},
+                                  {l0, r0},
+                                  {},
+                                  "most significant: high of low * low"));
+            numHighComponents++;
+        }
+        else
+        {
+            co_yield m_context->copier()->copy(dest->subset({0}),
+                                               Register::Value::Literal(0),
+                                               "low * low optimized due to zero input");
         }
 
-        if(!l1->isZeroLiteral() && !r0->isZeroLiteral())
+        if(numHighComponents == 0)
         {
-            auto hl = std::make_shared<Register::Value>(
-                m_context, Register::Type::Scalar, DataType::Int32, 1);
-            co_yield_(Instruction(
-                "s_mul_i32", {hl}, {l1, r0}, {}, "most significant: low of high * low"));
-
+            co_yield m_context->copier()->copy(dest->subset({1}),
+                                               Register::Value::Literal(0),
+                                               "high * high optimized due to zero input");
+        }
+        else if(numHighComponents == 1)
+        {
+            // The first high multiply writes into the high bits of the output, nothing to do.
+            co_yield Instruction::Comment(
+                "Most significant: sum omitted due to only one valid input.");
+        }
+        else if(numHighComponents >= 2)
+        {
             co_yield_(Instruction("s_add_u32",
                                   {dest->subset({1})},
-                                  {dest->subset({1}), hl},
+                                  {highComponents[0], highComponents[1]},
                                   {},
                                   "most significant: sum"));
+            if(numHighComponents == 3)
+            {
+                co_yield_(Instruction("s_add_u32",
+                                      {dest->subset({1})},
+                                      {dest->subset({1}), highComponents[2]},
+                                      {},
+                                      "most significant: sum"));
+            }
+        }
+        else
+        {
+            Throw<FatalError>(
+                concatenate("Shouldn't get here: numHighComponents = ", numHighComponents));
         }
     }
 
