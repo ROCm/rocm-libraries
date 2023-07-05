@@ -76,6 +76,7 @@ def ancestral_targets(targets: List[str]):
             """No targets. Check `git rev-list` and make sure
             commits are listed from oldest to newest."""
         )
+    return targets
 
 
 def get_args(parser: argparse.ArgumentParser):
