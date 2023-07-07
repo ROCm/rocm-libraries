@@ -62,9 +62,7 @@ namespace rocRoller
         os << "  prefetchMixMemOps:\t\t\t" << input.prefetchMixMemOps << std::endl;
         os << "  setNextFreeVGPRToMax:\t" << input.setNextFreeVGPRToMax << std::endl;
 
-        for(int i = 0; i < static_cast<int>(LayoutType::Count); i++)
-            os << "transposeMemoryAccess[" << static_cast<LayoutType>(i)
-               << "]: " << input.transposeMemoryAccess[i] << std::endl;
+        os << "  transposeMemoryAccess:\n" << input.transposeMemoryAccess << std::endl;
 
         os << "  assertWaitCntState:\t\t" << input.assertWaitCntState << std::endl;
         os << "  packMultipleElementsInto1VGPR:\t\t" << input.packMultipleElementsInto1VGPR

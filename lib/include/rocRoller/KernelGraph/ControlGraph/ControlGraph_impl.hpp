@@ -151,7 +151,8 @@ namespace rocRoller::KernelGraph::ControlGraph
         std::pair<int, int>> ControlGraph::ambiguousNodes() const
     {
         std::set<std::pair<int, int>> badNodes;
-        auto                          memNodes = getNodes<T>().template to<std::set>();
+
+        auto memNodes = getNodes<T>().template to<std::set>();
         for(auto iter = memNodes.begin(); iter != memNodes.end(); iter++)
         {
             std::set otherNodes(std::next(iter), memNodes.end());

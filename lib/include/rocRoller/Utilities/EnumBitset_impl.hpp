@@ -30,7 +30,7 @@
 
 namespace rocRoller
 {
-    template <typename Enum>
+    template <CCountedEnum Enum>
     inline constexpr size_t EnumBitset<Enum>::initialValue(std::initializer_list<Enum> items)
     {
         size_t rv = 0;
@@ -41,19 +41,19 @@ namespace rocRoller
         return rv;
     }
 
-    template <typename Enum>
+    template <CCountedEnum Enum>
     inline constexpr EnumBitset<Enum>::EnumBitset(std::initializer_list<Enum> items)
         : Base(initialValue(items))
     {
     }
 
-    template <typename Enum>
+    template <CCountedEnum Enum>
     inline constexpr EnumBitset<Enum>::EnumBitset(Base const& val)
         : Base(val)
     {
     }
 
-    template <typename Enum>
+    template <CCountedEnum Enum>
     inline constexpr EnumBitset<Enum> EnumBitset<Enum>::All()
     {
         size_t rv = 0;
@@ -64,16 +64,39 @@ namespace rocRoller
         return EnumBitset<Enum>(rv);
     }
 
-    template <typename Enum>
+    template <CCountedEnum Enum>
     inline constexpr bool EnumBitset<Enum>::operator[](Enum val) const
     {
         return (*this)[static_cast<size_t>(val)];
     }
 
-    template <typename Enum>
+    template <CCountedEnum Enum>
     inline typename EnumBitset<Enum>::Base::reference EnumBitset<Enum>::operator[](Enum val)
     {
         return (*this)[static_cast<size_t>(val)];
+    }
+
+    template <CCountedEnum Enum>
+    inline std::string toString(EnumBitset<Enum> const& bs)
+    {
+        using myInt = std::underlying_type_t<Enum>;
+
+        std::ostringstream msg;
+
+        for(myInt i = 0; i < static_cast<myInt>(Enum::Count); ++i)
+        {
+            auto val = static_cast<Enum>(i);
+            bool set = bs[val];
+            msg << toString(val) << ": " << std::boolalpha << set << std::endl;
+        }
+
+        return msg.str();
+    }
+
+    template <CCountedEnum Enum>
+    std::ostream& operator<<(std::ostream& stream, EnumBitset<Enum> const& bs)
+    {
+        return stream << toString(bs);
     }
 
 }

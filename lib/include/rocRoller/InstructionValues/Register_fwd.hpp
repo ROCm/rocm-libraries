@@ -3,6 +3,7 @@
 #include <cassert>
 #include <concepts>
 #include <memory>
+#include <string>
 
 namespace rocRoller
 {
@@ -47,6 +48,15 @@ namespace rocRoller
 
         using AllocationPtr = std::shared_ptr<Allocation>;
         using ValuePtr      = std::shared_ptr<Value>;
+
+        std::string   toString(Type t);
+        std::ostream& operator<<(std::ostream& stream, Type t);
+
+        std::string   toString(AllocationState state);
+        std::ostream& operator<<(std::ostream& stream, AllocationState state);
+
+        std::string   toString(SpecialType);
+        std::ostream& operator<<(std::ostream&, SpecialType);
     }
 
 }

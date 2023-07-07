@@ -27,6 +27,8 @@
 
 #include <bitset>
 
+#include "Concepts.hpp"
+
 namespace rocRoller
 {
     /**
@@ -39,7 +41,7 @@ namespace rocRoller
      * - All other entries must be >= 0 and < Count.
      * - Count must be <= 64.
      */
-    template <typename Enum>
+    template <CCountedEnum Enum>
     class EnumBitset : public std::bitset<static_cast<size_t>(Enum::Count)>
     {
     public:
@@ -64,6 +66,12 @@ namespace rocRoller
     private:
         static constexpr size_t initialValue(std::initializer_list<Enum> items);
     };
+
+    template <CCountedEnum Enum>
+    std::string toString(EnumBitset<Enum> const& bs);
+
+    template <CCountedEnum Enum>
+    std::ostream& operator<<(std::ostream& stream, EnumBitset<Enum> const& bs);
 }
 
 #include "EnumBitset_impl.hpp"

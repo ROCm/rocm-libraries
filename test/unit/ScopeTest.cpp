@@ -4,6 +4,7 @@
 
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/Scheduling/Scheduler.hpp>
+#include <rocRoller/Utilities/Utils.hpp>
 
 #include "Expression.hpp"
 #include "GenericContextFixture.hpp"
@@ -81,11 +82,11 @@ namespace ScopeTest
 
         auto kexpected = R"(
             // CodeGeneratorVisitor::generate() begin
-            // generate(set{1})
+            // generate(1)
             // Kernel(1) BEGIN
-            // generate(set{})
-            // end: generate(set{})
-            // generate(set{4})
+            // generate()
+            // end: generate()
+            // generate(4)
             // Assign VGPR 11j(4) BEGIN
             // Assign dim(1) = 11j
             // 11j
@@ -94,10 +95,10 @@ namespace ScopeTest
             // Assign VGPR 11j(4) END
             // Scope(2) BEGIN
             // Lock Scope 2
-            // generate(set{3})
+            // generate(3)
             // Scope(3) BEGIN
             // Lock Scope 3
-            // generate(set{6})
+            // generate(6)
             // Assign VGPR 33j(6) BEGIN
             // Assign dim(3) = 33j
             // 33j
@@ -109,7 +110,7 @@ namespace ScopeTest
             // 44j
             v_mov_b32 v0, 44
             // Assign VGPR 44j(7) END
-            // end: generate(set{6})
+            // end: generate(6)
             // Deleting tag 3
             // Freeing DataFlowTag3: 1 VGPR (Value: UInt32): v1
             // Unlock Scope 3
@@ -120,16 +121,16 @@ namespace ScopeTest
             // Allocated DataFlowTag2: 1 VGPR (Value: UInt32): v1
             v_mov_b32 v1, 22
             // Assign VGPR 22j(5) END
-            // end: generate(set{3})
+            // end: generate(3)
             // Deleting tag 2
             // Freeing DataFlowTag2: 1 VGPR (Value: UInt32): v1
             // Unlock Scope 2
             // Scope(2) END
-            // end: generate(set{4})
+            // end: generate(4)
             // Deleting tag 1
             // Freeing DataFlowTag1: 1 VGPR (Value: UInt32): v0
             // Kernel(1) END
-            // end: generate(set{1})
+            // end: generate(1)
             // CodeGeneratorVisitor::generate() end
         )";
 

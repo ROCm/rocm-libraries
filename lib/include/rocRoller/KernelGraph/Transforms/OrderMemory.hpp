@@ -26,7 +26,7 @@ namespace rocRoller
                 return "OrderMemory";
             }
 
-            std::vector<GraphConstraint> postConstraints() const
+            std::vector<GraphConstraint> postConstraints() const override
             {
                 return {&NoAmbiguousNodes};
             }

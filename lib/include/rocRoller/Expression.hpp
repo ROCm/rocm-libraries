@@ -50,6 +50,7 @@ namespace rocRoller
             KernelExecute, // An expression that depends on at least one Register::Value.
             Count
         };
+        std::string toString(EvaluationTime t);
 
         using EvaluationTimes = EnumBitset<EvaluationTime>;
 

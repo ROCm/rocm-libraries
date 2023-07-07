@@ -69,14 +69,6 @@ namespace rocRoller
          * @return false If the type does not represent an actual register
          */
         constexpr bool IsRegister(Type t);
-        std::string    toString(Type t);
-        std::ostream&  operator<<(std::ostream& stream, Type t);
-
-        std::string   toString(AllocationState state);
-        std::ostream& operator<<(std::ostream& stream, AllocationState state);
-
-        std::string   toString(SpecialType);
-        std::ostream& operator<<(std::ostream&, SpecialType);
 
         /**
          * Represents a single value (or single value per lane) stored in one or more registers,

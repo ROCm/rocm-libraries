@@ -162,7 +162,7 @@ namespace rocRoller
 
                     if(generators.size() == 1)
                     {
-                        co_yield generators[0];
+                        co_yield std::move(generators[0]);
                     }
                     else
                     {

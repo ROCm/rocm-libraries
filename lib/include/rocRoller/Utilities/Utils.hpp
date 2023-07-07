@@ -37,6 +37,7 @@
 #include <type_traits>
 #include <vector>
 
+#include "Concepts.hpp"
 #include "Generator.hpp"
 
 namespace rocRoller
@@ -90,28 +91,6 @@ namespace rocRoller
     {
         return std::to_string(x);
     }
-
-    // clang-format off
-    template <typename T>
-    concept CHasToStringMember = requires(T const& x)
-    {
-        !std::convertible_to<std::string, T>;
-
-        {
-            x.toString()
-        } -> std::convertible_to<std::string>;
-    };
-
-    template <typename T>
-    concept CHasToString = requires(T const& x)
-    {
-        !std::convertible_to<std::string, T>;
-
-        {
-            toString(x)
-        } -> std::convertible_to<std::string>;
-    };
-    // clang-format on
 
     template <CHasToString T>
     requires(!std::is_arithmetic_v<T>) inline std::ostream& operator<<(std::ostream& stream,
@@ -359,56 +338,11 @@ namespace rocRoller
     template <class... Ts>
     overloaded(Ts...) -> overloaded<Ts...>;
 
-    // clang-format off
-    /**
-     * Matches enumerations that are scoped, that have a Count member, and that
-     * can be converted to string with toString().
-     */
-    template <typename T>
-    concept CCountedEnum = requires()
-    {
-        requires std::regular<T>;
-        requires CHasToString<T>;
-
-        { T::Count } -> std::convertible_to<T>;
-
-        {
-            static_cast<std::underlying_type_t<T>>(T::Count)
-        } -> std::convertible_to<std::underlying_type_t<T>>;
-
-
-    };
-    // clang-format on
-
     /**
      * Converts a string value to an enum by comparing against each toString conversion.
      */
     template <CCountedEnum T>
     T fromString(std::string const& str);
-    // clang-format off
-
-    template <typename Range, typename Of>
-    concept CForwardRangeOf = requires()
-    {
-        requires std::ranges::forward_range<Range>;
-        requires std::convertible_to<std::ranges::range_value_t<Range>, Of>;
-    };
-    // clang-format on
-
-    static_assert(CForwardRangeOf<std::vector<int>, int>);
-    static_assert(CForwardRangeOf<std::vector<short>, int>);
-    static_assert(CForwardRangeOf<std::vector<float>, int>);
-    static_assert(CForwardRangeOf<std::set<int>, int>);
-    static_assert(!CForwardRangeOf<std::set<std::string>, int>);
-    static_assert(!CForwardRangeOf<int, int>);
-
-    template <typename T>
-    concept CHasName = requires(T const& obj)
-    {
-        {
-            name(obj)
-            } -> std::convertible_to<std::string>;
-    };
 
     template <CHasName T>
     requires(std::default_initializable<T>) std::string name()

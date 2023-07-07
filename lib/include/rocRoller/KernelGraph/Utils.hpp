@@ -147,38 +147,6 @@ namespace rocRoller
         std::pair<Expression::ExpressionPtr, Expression::ExpressionPtr>
             getForLoopIncrement(KernelGraph const& graph, int forLoop);
 
-        /**
-         * @brief Return first entry of vector.
-         *
-         * If the vector does not contain a single result, returns
-         * empty.
-         */
-        template <typename T>
-        inline std::optional<T> only(std::vector<T> v);
-
-        /**
-         * @brief Return first result of generator.
-         *
-         * If the generator does not return a single result, returns
-         * empty.
-         *
-         * The implementation consumes items from the generator; so
-         * will not work on persistent generators.  Currently the copy
-         * constructor of Generator is deleted, and therefore you can
-         * not call this on persistent generators.
-         */
-        inline std::optional<int> only(Generator<int> g);
-
-        /**
-         * @brief True if the generator is empty.
-         *
-         * The implementation consumes items from the generator; so
-         * will not work on persistent generators.  Currently the copy
-         * constructor of Generator is deleted, and therefore you can
-         * not call this on persistent generators.
-         */
-        inline bool empty(Generator<int> g);
-
         int duplicateControlNode(KernelGraph& graph, int tag);
 
         /**

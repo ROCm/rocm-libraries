@@ -16,6 +16,23 @@ namespace rocRoller
 {
     namespace Expression
     {
+        std::string toString(EvaluationTime t)
+        {
+            switch(t)
+            {
+            case EvaluationTime::Translate:
+                return "Translate";
+            case EvaluationTime::KernelLaunch:
+                return "KernelLaunch";
+            case EvaluationTime::KernelExecute:
+                return "KernelExecute";
+            case EvaluationTime::Count:
+            default:
+                break;
+            }
+            Throw<FatalError>("Invalid EvaluationTime");
+        }
+
         /*
          * to string
          */
