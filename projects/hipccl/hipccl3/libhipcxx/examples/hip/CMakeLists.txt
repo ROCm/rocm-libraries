@@ -27,8 +27,7 @@ project(libcudacxx-examples LANGUAGES CXX HIP)
 set(CMAKE_BUILD_TYPE "RelWithDebInfo")
 
 find_package(hip)
-#Todo: we will need to change the package name to libhipcxx at some point
-find_package(libcudacxx)
+find_package(libhipcxx)
 
 add_executable(hash_map concurrent_hash_table.hip)
 target_compile_features(hash_map PRIVATE cxx_std_14)
