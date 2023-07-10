@@ -42,6 +42,8 @@
 #include "../Utilities/Comparison.hpp"
 #include "../Utilities/Error.hpp"
 
+#include "../GPUArchitecture/GPUArchitecture_fwd.hpp"
+#include "../InstructionValues/Register_fwd.hpp"
 namespace rocRoller
 {
     /**
@@ -262,6 +264,11 @@ namespace rocRoller
 
             return getIntegerType(false, getElementSize());
         }
+
+        /**
+         * Returns the register alignment for storing `count` values
+        */
+        int registerAlignment(Register::Type regType, int count, GPUArchitecture const& gpuArch);
 
         inline constexpr bool operator==(const VariableType& rhs) const
         {

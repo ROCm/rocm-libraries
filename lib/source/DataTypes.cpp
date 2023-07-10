@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include <rocRoller/DataTypes/DataTypes.hpp>
+#include <rocRoller/GPUArchitecture/GPUArchitecture.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
 
@@ -249,6 +250,29 @@ namespace rocRoller
     std::string toString(VariableType const& v)
     {
         return toString(v.pointerType) + ": " + toString(v.dataType);
+    }
+
+    int VariableType::registerAlignment(Register::Type         regType,
+                                        int                    count,
+                                        GPUArchitecture const& gpuArch)
+    {
+
+        if(this->pointerType == PointerType::Buffer)
+        {
+            return 4;
+        }
+
+        if(regType == Register::Type::Vector && count * this->getElementSize() > 4
+           && !gpuArch.HasCapability(GPUCapability::UnalignedVGPRs))
+        {
+            return 2;
+        }
+        else if(regType == Register::Type::Scalar && count * this->getElementSize() > 4
+                && !gpuArch.HasCapability(GPUCapability::UnalignedSGPRs))
+        {
+            return 2;
+        }
+        return 1;
     }
 
     std::string TypeAbbrev(VariableType const& v)
