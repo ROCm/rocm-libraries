@@ -514,4 +514,27 @@ namespace rocRollerTest
         EXPECT_EQ(parentVec, std::vector<int>({1}));
     }
 
+    TEST(HypergraphTest, FollowEdges)
+    {
+        myHypergraph g;
+
+        auto u0  = g.addElement(TestUser{});
+        auto sd0 = g.addElement(TestSubDimension{});
+        auto sd1 = g.addElement(TestSubDimension{});
+        auto sd2 = g.addElement(TestSubDimension{});
+
+        auto TestSplit0  = g.addElement(TestSplit{}, {u0}, {sd0});
+        auto TestSplit1  = g.addElement(TestSplit{}, {u0}, {sd1});
+        auto TestSplit2  = g.addElement(TestSplit{}, {sd1}, {sd2});
+        auto TestForget0 = g.addElement(TestForget{}, {sd0}, {sd2});
+
+        EXPECT_EQ(g.followEdges<TestSplit>({}), std::set<int>());
+        EXPECT_EQ(g.followEdges<TestSplit>({u0}), std::set<int>({u0, sd0, sd1, sd2}));
+        EXPECT_EQ(g.followEdges<TestSplit>({sd0}), std::set<int>({sd0}));
+        EXPECT_EQ(g.followEdges<TestSplit>({sd1}), std::set<int>({sd1, sd2}));
+        EXPECT_EQ(g.followEdges<TestSplit>({sd2}), std::set<int>({sd2}));
+        EXPECT_EQ(g.followEdges<TestForget>({sd0}), std::set<int>({sd0, sd2}));
+        EXPECT_EQ(g.followEdges<TestForget>({sd2}), std::set<int>({sd2}));
+    }
+
 }

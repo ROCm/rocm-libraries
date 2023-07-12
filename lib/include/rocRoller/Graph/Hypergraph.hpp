@@ -326,10 +326,24 @@ namespace rocRoller
             template <std::predicate<Edge const&> Predicate>
             Generator<int> getOutputNodeIndices(int const src, Predicate edgePredicate) const;
 
+            /**
+             * @brief Return all downstream nodes that are connected to `candidates` via the specified edge type.
+             * The set of original candidates is included in the returned set.
+             * 
+             * Note that this function recursively follows edges.
+             * 
+             * @param candidates Set of node ids 
+             * @return std::set<int> Set of node ids expanded
+             */
+            template <typename T>
+            requires(std::constructible_from<Edge, T>) std::set<int> followEdges(
+                std::set<int> const& candidates);
+
+            // clang-format off
         private:
+            // clang-format on
             template <typename T1, typename T2, typename T3>
             friend struct rocRoller::Serialization::MappingTraits;
-
             int m_nextIndex = 1;
 
             mutable std::map<int, Location> m_locationCache;

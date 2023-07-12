@@ -1050,6 +1050,40 @@ namespace rocRoller
         }
 
         template <typename Node, typename Edge, bool Hyper>
+        template <typename T>
+        requires(std::constructible_from<Edge, T>)
+            std::set<int> Hypergraph<Node, Edge, Hyper>::followEdges(
+                std::set<int> const& candidates)
+        {
+            // Nodes to be analyzed
+            std::set<int> currentNodes = candidates;
+
+            // Full set of connected nodes to be returned
+            std::set<int> connectedNodes = candidates;
+
+            auto numCandidates = connectedNodes.size();
+
+            do
+            {
+                // Nodes which are found by this sweep
+                std::set<int> foundNodes;
+
+                numCandidates = connectedNodes.size();
+
+                for(auto tag : currentNodes)
+                {
+                    auto outTags = getOutputNodeIndices<T>(tag);
+                    foundNodes.insert(outTags.begin(), outTags.end());
+                }
+
+                connectedNodes.insert(foundNodes.begin(), foundNodes.end());
+                currentNodes = std::move(foundNodes);
+            } while(numCandidates != connectedNodes.size());
+
+            return connectedNodes;
+        }
+
+        template <typename Node, typename Edge, bool Hyper>
         inline std::ostream& operator<<(std::ostream&                        stream,
                                         Hypergraph<Node, Edge, Hyper> const& graph)
         {

@@ -119,26 +119,7 @@ namespace rocRoller
                 auto message = concatenate("generate(", candidates, ")");
                 co_yield Instruction::Comment(message);
 
-                // Include all nodes that are connected to candidates via Sequence edges.
-                {
-                    std::set<int> newCandidates, prevCandidates = candidates;
-                    auto          numCandidates = candidates.size();
-
-                    do
-                    {
-                        numCandidates = candidates.size();
-
-                        for(auto tag : prevCandidates)
-                        {
-                            auto outTags = m_graph->control.getOutputNodeIndices<Sequence>(tag);
-                            newCandidates.insert(outTags.begin(), outTags.end());
-                        }
-
-                        candidates.insert(newCandidates.begin(), newCandidates.end());
-                        prevCandidates = std::move(newCandidates);
-                        newCandidates.clear();
-                    } while(numCandidates != candidates.size());
-                }
+                candidates = m_graph->control.followEdges<Sequence>(candidates);
 
                 while(!candidates.empty())
                 {
