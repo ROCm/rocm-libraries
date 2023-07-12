@@ -26,6 +26,7 @@ namespace rocRoller
         struct StoreVGPR;
         struct TensorContraction;
         struct UnrollOp;
+        struct WaitZero;
 
         using Operation = std::variant<Assign,
                                        Barrier,
@@ -46,7 +47,8 @@ namespace rocRoller
                                        StoreTiled,
                                        StoreVGPR,
                                        TensorContraction,
-                                       UnrollOp>;
+                                       UnrollOp,
+                                       WaitZero>;
 
         template <typename T>
         concept COperation = std::constructible_from<Operation, T>;

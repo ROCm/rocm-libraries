@@ -345,7 +345,8 @@ namespace rocRoller
                 graph.coordinates.addElement(PassThrough(), {iThrY}, {elementNumberY});
 
                 if(macTile.layoutType == LayoutType::MATRIX_A
-                   || macTile.layoutType == LayoutType::MATRIX_B)
+                   || macTile.layoutType == LayoutType::MATRIX_B
+                   || macTile.layoutType == LayoutType::SCRATCH)
                 {
                     graph.coordinates.addElement(Flatten(), {nThrX, nThrY}, {workitemX});
                 }
@@ -369,7 +370,8 @@ namespace rocRoller
                 graph.coordinates.addElement(PassThrough(), {iThrY}, {elementNumberX});
 
                 if(macTile.layoutType == LayoutType::MATRIX_A
-                   || macTile.layoutType == LayoutType::MATRIX_B)
+                   || macTile.layoutType == LayoutType::MATRIX_B
+                   || macTile.layoutType == LayoutType::SCRATCH)
                 {
                     graph.coordinates.addElement(Flatten(), {nThrY, nThrX}, {workitemX});
                 }
@@ -614,7 +616,8 @@ namespace rocRoller
                 graph.coordinates.addElement(PassThrough(), {elementNumberY}, {iThrY});
 
                 if(macTile.layoutType == LayoutType::MATRIX_A
-                   || macTile.layoutType == LayoutType::MATRIX_B)
+                   || macTile.layoutType == LayoutType::MATRIX_B
+                   || macTile.layoutType == LayoutType::SCRATCH)
                 {
                     graph.coordinates.addElement(Tile(), {workitemX}, {nThrX, nThrY});
                 }
@@ -641,7 +644,8 @@ namespace rocRoller
                 connections.push_back(DC<ElementNumber>(elementNumberY, 1));
 
                 if(macTile.layoutType == LayoutType::MATRIX_A
-                   || macTile.layoutType == LayoutType::MATRIX_B)
+                   || macTile.layoutType == LayoutType::MATRIX_B
+                   || macTile.layoutType == LayoutType::SCRATCH)
                 {
                     graph.coordinates.addElement(Tile(), {workitemX}, {nThrY, nThrX});
                 }
@@ -735,9 +739,12 @@ namespace rocRoller
         }
 
         /**
-         * @brief Create internal tile for WAVE formats.
+         * @brief Create an internal tile backed by a ThreadTile.
          */
-        int createInternalTile(KernelGraph& graph, int opTag, int macTileTag, ContextPtr context)
+        int createInternalTile(KernelGraph& graph,
+                               VariableType varType,
+                               int          macTileTag,
+                               ContextPtr   context)
         {
             auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
 
@@ -757,13 +764,11 @@ namespace rocRoller
             auto thrTileM               = numElementsPerWorkitem;
             auto thrTileN               = 1;
 
-            auto vtype = getVariableType(graph, opTag);
-
             auto useSwappedAccess
                 = context->kernelOptions().transposeMemoryAccess[macTile.layoutType];
 
             // Load multiple smaller-precision (< 32-bit) elements into one VGPR
-            auto packFactor = bytesPerRegister / DataTypeInfo::Get(vtype).elementSize;
+            auto packFactor = bytesPerRegister / DataTypeInfo::Get(varType).elementSize;
             bool packed     = false;
             if(context->kernelOptions().packMultipleElementsInto1VGPR && packFactor > 1
                && thrTileM % packFactor == 0)
@@ -780,7 +785,7 @@ namespace rocRoller
                 auto maxWidth = std::min(context->kernelOptions().storeGlobalWidth,
                                          context->kernelOptions().loadLocalWidth);
 
-                auto numDwordsPerElement = DataTypeInfo::Get(vtype).registerCount;
+                auto numDwordsPerElement = DataTypeInfo::Get(varType).registerCount;
 
                 updateThreadTileForLongDwords(thrTileM, thrTileN, maxWidth, numDwordsPerElement);
             }
@@ -864,8 +869,9 @@ namespace rocRoller
                 = useWaveAccess
                   && context->kernelOptions().transposeMemoryAccess[macTile.layoutType];
 
-            auto internalMacTileTag = createInternalTile(graph, loadTag, macTileTag, context);
-            auto ldsTag             = graph.coordinates.addElement(LDS());
+            auto internalMacTileTag
+                = createInternalTile(graph, getVariableType(graph, loadTag), macTileTag, context);
+            auto ldsTag = graph.coordinates.addElement(LDS());
 
             auto internalTile  = *graph.coordinates.get<MacroTile>(internalMacTileTag);
             auto iMacXStoreLDS = graph.coordinates.addElement(internalTile.tileIndex(0));
@@ -1036,8 +1042,9 @@ namespace rocRoller
             auto workgroupSizes = context->kernel()->workgroupSize();
             auto wavefrontSize  = context->kernel()->wavefront_size();
 
-            auto internalMacTileTag = createInternalTile(graph, storeTag, macTileTag, context);
-            auto ldsTag             = graph.coordinates.addElement(LDS());
+            auto internalMacTileTag
+                = createInternalTile(graph, getVariableType(graph, storeTag), macTileTag, context);
+            auto ldsTag = graph.coordinates.addElement(LDS());
 
             auto internalTile  = *graph.coordinates.get<MacroTile>(internalMacTileTag);
             auto iMacXStoreLDS = graph.coordinates.addElement(internalTile.tileIndex(0));

@@ -247,16 +247,19 @@ namespace rocRoller
                 tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::TARGET});
             auto increment = m_graph->mapper.get(
                 tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::INCREMENT});
+            auto buffer = m_graph->mapper.get(
+                tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::BUFFER});
 
             rocRoller::Log::getLogger()->debug(
                 "KernelGraph::LoadStoreTileGenerator::ComputeIndex({}): "
-                "target {} increment {} base {} offset {} stride {}",
+                "target {} increment {} base {} offset {} stride {} buffer {}",
                 tag,
                 target,
                 increment,
                 base,
                 offset,
-                stride);
+                stride,
+                buffer);
 
             // TODO: Design a better way of binding storage to coordinates
             auto maybeLDS = m_graph->coordinates.get<LDS>(target);
@@ -321,13 +324,14 @@ namespace rocRoller
                 scope->addRegister(stride);
             }
 
-            auto buffer = m_graph->mapper.get(
-                tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::BUFFER});
             if(buffer > 0)
             {
                 auto user = m_graph->coordinates.get<User>(target);
                 if(user && !tagger->hasRegister(buffer))
                 {
+                    AssertFatal(
+                        user->size, "Invalid User dimension: missing size.", ShowValue(target));
+
                     auto bufferReg = tagger->getRegister(
                         buffer, Register::Type::Scalar, {DataType::None, PointerType::Buffer}, 1);
                     bufferReg->setName(concatenate("buffer", tag));
@@ -342,7 +346,10 @@ namespace rocRoller
                         Register::ValuePtr limitValue;
                         co_yield generate(limitValue, user->size * L(numBytes));
                         // TODO: Handle sizes larger than 32 bits
-                        co_yield bufDesc.setSize(limitValue->subset({0}));
+                        auto limit = (limitValue->regType() == Register::Type::Literal)
+                                         ? limitValue
+                                         : limitValue->subset({0});
+                        co_yield bufDesc.setSize(limit);
                     }
                     scope->addRegister(buffer);
                 }
@@ -552,6 +559,10 @@ namespace rocRoller
             {
                 auto macTileTag = m_graph->mapper.get<MacroTile>(tag);
 
+                macTileTag
+                    = only(m_graph->coordinates.getInputNodeIndices(macTileTag, CT::isEdge<View>))
+                          .value_or(macTileTag);
+
                 Register::ValuePtr tmpl;
                 if(dataType == DataType::Half && n > 1 && colStrideIsOne)
                 {
@@ -564,7 +575,14 @@ namespace rocRoller
                         m_context, Register::Type::Vector, dataType, m * n);
                 }
 
-                info.data = m_context->registerTagManager()->getRegister(macTileTag, tmpl);
+                if(m_context->registerTagManager()->hasRegister(macTileTag))
+                {
+                    info.data = m_context->registerTagManager()->getRegister(macTileTag);
+                }
+                else
+                {
+                    info.data = m_context->registerTagManager()->getRegister(macTileTag, tmpl);
+                }
                 co_yield Register::AllocateIfNeeded(info.data);
 
                 rocRoller::Log::getLogger()->debug(
@@ -881,6 +899,10 @@ namespace rocRoller
             co_yield Instruction::Comment("GEN: storeMacroTileVGPR");
 
             rocRoller::Log::getLogger()->debug(" tile {}", macTileTag);
+
+            macTileTag
+                = only(m_graph->coordinates.getOutputNodeIndices(macTileTag, CT::isEdge<View>))
+                      .value_or(macTileTag);
 
             auto vgpr = m_context->registerTagManager()->getRegister(macTileTag);
 

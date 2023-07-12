@@ -1,6 +1,5 @@
 
 #include <rocRoller/CommandSolution.hpp>
-#include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/Transforms/LowerTensorContraction.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
 #include <rocRoller/KernelGraph/Visitors.hpp>
@@ -14,6 +13,93 @@ namespace rocRoller
         using namespace ControlGraph;
         using namespace CoordinateGraph;
         using namespace Expression;
+
+        std::tuple<int, int, int>
+            loadStoreMacroTileSCRATCH(KernelGraph&                     graph,
+                                      std::vector<DeferredConnection>& storeConnections,
+                                      std::vector<DeferredConnection>& loadConnections,
+                                      int                              macTileTag,
+                                      VariableType                     varType,
+                                      ContextPtr                       context)
+        {
+            auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
+
+            auto numWorkgroupsX = literal(context->kernelOptions().numScratchTiles);
+            auto numWorkgroupsY = literal(1u);
+
+            auto sizeX = simplify(numWorkgroupsX * literal(static_cast<uint>(macTile.sizes[0])));
+            auto sizeY = simplify(numWorkgroupsY * literal(static_cast<uint>(macTile.sizes[1])));
+
+            auto strideX = sizeY;
+            auto strideY = literal(1u);
+
+            auto globalScratch    = User(rocRoller::SCRATCH, simplify(sizeX * sizeY));
+            auto globalScratchTag = graph.coordinates.addElement(globalScratch);
+
+            // Store
+            auto storeScratchTileTag = createInternalTile(graph, varType, macTileTag, context);
+            graph.coordinates.addElement(View(), {storeScratchTileTag}, {macTileTag});
+
+            auto storeScratchTile       = *graph.coordinates.get<MacroTile>(storeScratchTileTag);
+            storeScratchTile.layoutType = LayoutType::SCRATCH;
+            graph.coordinates.setElement(storeScratchTileTag, storeScratchTile);
+
+            std::vector<int> storeSubDimensions
+                = {graph.coordinates.addElement(SubDimension(0, sizeX, strideX)),
+                   graph.coordinates.addElement(SubDimension(1, sizeY, strideY))};
+            graph.coordinates.addElement(
+                Join(), storeSubDimensions, std::vector<int>{globalScratchTag});
+
+            storeMacroTile_VGPR(graph,
+                                storeConnections,
+                                globalScratchTag,
+                                storeScratchTileTag,
+                                storeSubDimensions,
+                                context);
+
+            storeConnections.push_back(DC<MacroTile>(storeScratchTileTag));
+            storeConnections.push_back(DC<User>(globalScratchTag));
+
+            // Load
+            auto loadScratchTileTag = createInternalTile(graph, varType, macTileTag, context);
+            graph.coordinates.addElement(View(), {macTileTag}, {loadScratchTileTag});
+
+            auto loadScratchTile       = *graph.coordinates.get<MacroTile>(loadScratchTileTag);
+            loadScratchTile.layoutType = LayoutType::SCRATCH;
+            graph.coordinates.setElement(loadScratchTileTag, loadScratchTile);
+
+            std::vector<int> loadSubDimensions
+                = {graph.coordinates.addElement(SubDimension(0, sizeX, strideX)),
+                   graph.coordinates.addElement(SubDimension(1, sizeY, strideY))};
+            graph.coordinates.addElement(
+                Split(), std::vector<int>{globalScratchTag}, loadSubDimensions);
+
+            loadMacroTile_VGPR(graph,
+                               loadConnections,
+                               globalScratchTag,
+                               loadScratchTileTag,
+                               loadSubDimensions,
+                               context);
+
+            loadConnections.push_back(DC<MacroTile>(loadScratchTileTag));
+            loadConnections.push_back(DC<User>(globalScratchTag));
+
+            return {storeScratchTileTag, loadScratchTileTag, globalScratchTag};
+        }
+
+        int storeScratchTile(KernelGraph& graph, int afterOpTag, DataType dataType)
+        {
+            auto storePartialTag = graph.control.addElement(StoreTiled(dataType));
+            graph.control.addElement(Sequence(), {afterOpTag}, {storePartialTag});
+            return storePartialTag;
+        }
+
+        int loadScratchTile(KernelGraph& graph, int afterOpTag, DataType dataType)
+        {
+            auto loadPartialTag = graph.control.addElement(LoadTiled(dataType));
+            graph.control.addElement(Sequence(), {afterOpTag}, {loadPartialTag});
+            return loadPartialTag;
+        }
 
         void duplicateMacroTile(KernelGraph& graph, int load)
         {
@@ -210,6 +296,34 @@ namespace rocRoller
                 lastWaveMult = waveMult;
             }
 
+            int contractionOperation = forK;
+
+            if(context->kernelOptions().enableScratch)
+            {
+                auto varType = getVariableType(graph, storeD);
+
+                std::vector<DeferredConnection> storeConnections, loadConnections;
+
+                auto [storeScratchTileTag, loadScratchTileTag, globalScratchTag]
+                    = loadStoreMacroTileSCRATCH(
+                        graph, storeConnections, loadConnections, d, varType, context);
+
+                auto storePartialTag = storeScratchTile(graph, forK, varType.dataType);
+                auto waitZeroTag     = graph.control.addElement(WaitZero());
+                auto loadPartialTag  = loadScratchTile(graph, forK, varType.dataType);
+
+                graph.control.addElement(Sequence(), {storePartialTag}, {waitZeroTag});
+                graph.control.addElement(Sequence(), {waitZeroTag}, {loadPartialTag});
+
+                for(auto const& c : storeConnections)
+                    graph.mapper.connect(storePartialTag, c.coordinate, c.connectionSpec);
+
+                for(auto const& c : loadConnections)
+                    graph.mapper.connect(loadPartialTag, c.coordinate, c.connectionSpec);
+
+                contractionOperation = loadPartialTag;
+            }
+
             // connect ops after contraction to for loop, remove contraction and its incoming edges
             auto tensor_outgoing_edges
                 = graph.control.getNeighbours<Graph::Direction::Downstream>(tag).to<std::vector>();
@@ -219,7 +333,7 @@ namespace rocRoller
                 auto dst  = graph.control.getNeighbours<Graph::Direction::Downstream>(e)
                                .to<std::vector>();
                 graph.control.deleteElement(e);
-                graph.control.addElement(e, elem, std::vector<int>{forK}, dst);
+                graph.control.addElement(e, elem, std::vector<int>{contractionOperation}, dst);
             }
             auto tensor_incoming_edges
                 = graph.control.getNeighbours<Graph::Direction::Upstream>(tag).to<std::vector>();
@@ -359,6 +473,7 @@ namespace rocRoller
             {
                 Throw<FatalError>("General contraction not implemented yet.");
             }
+
             return kgraph;
         }
     }

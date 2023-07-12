@@ -223,6 +223,39 @@ namespace rocRoller
          */
         VariableType getVariableType(KernelGraph const& graph, int opTag);
 
+        /**
+         * @brief Add coordinate-transforms for storing a MacroTile
+         * from a ThreadTile into global.
+         *
+         * Implemented in LowerTile.cpp.
+         */
+        void storeMacroTile_VGPR(KernelGraph&                     graph,
+                                 std::vector<DeferredConnection>& connections,
+                                 int                              userTag,
+                                 int                              macTileTag,
+                                 std::vector<int> const&          sdim,
+                                 ContextPtr                       context);
+
+        /**
+         * @brief Add coordinate-transforms for loading a MacroTile
+         * from global into a ThreadTile.
+         */
+        void loadMacroTile_VGPR(KernelGraph&                     graph,
+                                std::vector<DeferredConnection>& connections,
+                                int                              userTag,
+                                int                              macTileTag,
+                                std::vector<int> const&          sdim,
+                                ContextPtr                       context);
+
+        /**
+         * @brief Create an internal tile backed by a ThreadTile.
+         *
+         * Implemented in LowerTile.cpp.
+         */
+        int createInternalTile(KernelGraph& graph,
+                               VariableType varType,
+                               int          macTileTag,
+                               ContextPtr   context);
     }
 }
 

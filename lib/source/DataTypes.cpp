@@ -184,7 +184,8 @@ namespace rocRoller
     {
         switch(l)
         {
-
+        case LayoutType::SCRATCH:
+            return "SCRATCH";
         case LayoutType::MATRIX_A:
             return "MATRIX_A";
         case LayoutType::MATRIX_B:

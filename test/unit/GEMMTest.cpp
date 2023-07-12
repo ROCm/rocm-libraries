@@ -80,6 +80,7 @@ namespace GEMMDriverTest
         bool packMultipleElementsInto1VGPR = true;
 
         bool loopOverTiles = false;
+        bool enableScratch = false;
     };
 
     template <typename T>
@@ -271,6 +272,31 @@ namespace GEMMDriverTest
         kernelOptions->transposeMemoryAccess[LayoutType::MATRIX_A] = gemm.transA == "T";
         kernelOptions->transposeMemoryAccess[LayoutType::MATRIX_B] = gemm.transB == "T";
 
+        if(gemm.enableScratch)
+        {
+            REQUIRE_ARCH_CAP(GPUCapability::ArchAccUnifiedRegs);
+
+            AssertFatal(numWorkgroupY == 1,
+                        "Current scratch space implementation assumes that the kernel is launched "
+                        "with numWorkgroupY == 1");
+
+            hipDeviceProp_t deviceProperties;
+            ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
+
+            auto numCUs        = deviceProperties.multiProcessorCount;
+            auto numElements   = gemm.macM * gemm.macN * numCUs;
+            auto deviceScratch = make_shared_device<T>(numElements, 0.0);
+
+            runtimeArgs.append("S", deviceScratch.get());
+
+            command->allocateArgument(VariableType(dataType, PointerType::PointerGlobal),
+                                      DataDirection::ReadWrite,
+                                      rocRoller::SCRATCH);
+
+            kernelOptions->enableScratch   = true;
+            kernelOptions->numScratchTiles = numCUs;
+        }
+
         if(gemm.loopOverTiles > 0)
         {
             kernelOptions->loopOverOutputTilesDimensions = {0, 1};
@@ -430,7 +456,15 @@ namespace GEMMDriverTest
         GEMMProblem gemm;
         gemm.storeLDSD     = false;
         gemm.loopOverTiles = true;
-        basicGEMM<float>(m_context, gemm, 1.e-6, true);
+        basicGEMM<float>(m_context, gemm, 1.e-6);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMEnableScratch)
+    {
+        GEMMProblem gemm;
+        gemm.n             = gemm.macN;
+        gemm.enableScratch = true;
+        basicGEMM<float>(m_context, gemm, 1.e-6);
     }
 
     TEST_F(GEMMTestGPU, GPU_BasicGEMMNoLDSA)

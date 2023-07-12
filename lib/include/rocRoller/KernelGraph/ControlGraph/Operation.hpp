@@ -271,6 +271,11 @@ namespace rocRoller
             std::string name() const;
         };
 
+        /**
+         * WaitZero - emit an s_waitcnt vmcnt(0).
+         */
+        RR_EMPTY_STRUCT_WITH_NAME(WaitZero);
+
         template <CConcreteOperation Op>
         std::string name(const Op& x);
 

@@ -14,6 +14,8 @@ namespace rocRoller
     const std::string YLOOP = "YLoop";
     const std::string KLOOP = "KLoop";
 
+    const std::string SCRATCH = "SCRATCH";
+
     struct KernelOptions
     {
         KernelOptions();
@@ -50,6 +52,9 @@ namespace rocRoller
         std::string       loopOverOutputTilesTopLoop;
         std::vector<uint> loopOverOutputTilesCoordSizes;
         uint              loopOverOutputTilesIteratedTiles;
+
+        bool enableScratch;
+        uint numScratchTiles;
 
         EnumBitset<LayoutType> transposeMemoryAccess;
 

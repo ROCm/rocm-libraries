@@ -376,6 +376,7 @@ namespace rocRoller
             MAKE_EDGE_VISITOR(DataFlow);
             MAKE_EDGE_VISITOR(Offset);
             MAKE_EDGE_VISITOR(Stride);
+            MAKE_EDGE_VISITOR(View);
             MAKE_EDGE_VISITOR(DestructMacroTile);
             MAKE_EDGE_VISITOR(Flatten);
             MAKE_EDGE_VISITOR(Forget);
@@ -405,6 +406,7 @@ namespace rocRoller
             MAKE_OPERATION_VISITOR(StoreVGPR);
             MAKE_OPERATION_VISITOR(TensorContraction);
             MAKE_OPERATION_VISITOR(UnrollOp);
+            MAKE_OPERATION_VISITOR(WaitZero);
 
             virtual void visitEdge(KernelGraph&                   graph,
                                    KernelGraph const&             original,

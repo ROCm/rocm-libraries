@@ -82,6 +82,7 @@ namespace rocRoller::KernelGraph
         void operator()(StoreVGPR const& op, int tag);
         void operator()(TensorContraction const& op, int tag);
         void operator()(UnrollOp const& op, int tag);
+        void operator()(WaitZero const& op, int tag);
 
     protected:
         void trackRegister(int control, int coordinate, ReadWrite rw);

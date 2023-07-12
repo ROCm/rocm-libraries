@@ -56,6 +56,12 @@ namespace rocRoller
         RR_EMPTY_STRUCT_WITH_NAME(Stride);
 
         /**
+         * View - denotes a virtual node with is a view into another
+         * node.
+         */
+        RR_EMPTY_STRUCT_WITH_NAME(View);
+
+        /**
          * Construct MacroTile.
          *
          * Joins SubDimensions to MacroTile during translation and

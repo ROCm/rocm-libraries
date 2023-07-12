@@ -26,6 +26,8 @@ namespace rocRoller
         , prefetchMixMemOps(false)
         , loopOverOutputTilesDimensions({})
         , loopOverOutputTilesTopLoop(XLOOP)
+        , enableScratch(false)
+        , numScratchTiles(0)
         , unrollX(0)
         , unrollY(0)
         , unrollK(0)

@@ -1,10 +1,13 @@
 
 #include <rocRoller/KernelGraph/ControlGraph/ControlFlowRWTracer.hpp>
+#include <rocRoller/KernelGraph/Utils.hpp>
 
 namespace rocRoller::KernelGraph
 {
     using namespace CoordinateGraph;
     using namespace ControlGraph;
+
+    namespace CT = rocRoller::KernelGraph::CoordinateGraph;
 
     /**
      * @brief Collect all coordinate tags referenced in an Expression.
@@ -289,7 +292,12 @@ namespace rocRoller::KernelGraph
 
     void ControlFlowRWTracer::operator()(LoadTiled const& op, int tag)
     {
+
         auto dst = m_graph.mapper.get<MacroTile>(tag);
+
+        dst = only(m_graph.coordinates.getInputNodeIndices(dst, CT::isEdge<CT::View>))
+                  .value_or(dst);
+
         trackRegister(tag, dst, ReadWrite::WRITE);
         trackConnections(tag, {dst}, ReadWrite::READ);
     }
@@ -358,6 +366,10 @@ namespace rocRoller::KernelGraph
     void ControlFlowRWTracer::operator()(StoreTiled const& op, int tag)
     {
         auto src = m_graph.mapper.get<MacroTile>(tag);
+
+        src = only(m_graph.coordinates.getOutputNodeIndices(src, CT::isEdge<CT::View>))
+                  .value_or(src);
+
         trackRegister(tag, src, ReadWrite::READ);
         trackConnections(tag, {src}, ReadWrite::READ);
     }
@@ -375,4 +387,7 @@ namespace rocRoller::KernelGraph
     {
         Throw<FatalError>("Not implemented yet.");
     }
+
+    void ControlFlowRWTracer::operator()(WaitZero const& op, int tag) {}
+
 }

@@ -3557,4 +3557,81 @@ namespace KernelGraphTest
                   "Dangling Mapping: Control node 0 does not exist.\nDangling Mapping: Control "
                   "node 0 maps to coordinate node 0, which doesn't exist.");
     }
+
+    TEST_F(KernelGraphTest, GEMMWithScratch)
+    {
+        auto command = simpleGEMMCommand();
+        auto kgraph  = translate(command);
+
+        auto params = std::make_shared<CommandParameters>();
+
+        int mac_m = 128;
+        int mac_n = 256;
+        int mac_k = 8;
+
+        int wave_m = 32;
+        int wave_n = 32;
+        int wave_k = 2;
+        int wave_b = 1;
+
+        auto mac_tile_A = MacroTile({mac_m, mac_k},
+                                    LayoutType::MATRIX_A,
+                                    {wave_m, wave_n, wave_k, wave_b},
+                                    MemoryType::LDS);
+        auto mac_tile_B = MacroTile({mac_k, mac_n},
+                                    LayoutType::MATRIX_B,
+                                    {wave_m, wave_n, wave_k, wave_b},
+                                    MemoryType::LDS);
+
+        auto mac_tile_C = MacroTile(
+            {mac_m, mac_n}, LayoutType::MATRIX_ACCUMULATOR, {wave_m, wave_n, wave_k, wave_b});
+        auto mac_tile_D = MacroTile({mac_m, mac_n},
+                                    LayoutType::MATRIX_ACCUMULATOR,
+                                    {wave_m, wave_n, wave_k, wave_b},
+                                    MemoryType::LDS);
+
+        params->setDimensionInfo(4, mac_tile_A);
+        params->setDimensionInfo(11, mac_tile_B);
+        params->setDimensionInfo(18, mac_tile_C);
+        params->setDimensionInfo(28, mac_tile_C);
+        params->setDimensionInfo(30, mac_tile_C);
+        params->setDimensionInfo(32, mac_tile_C);
+        params->setDimensionInfo(34, mac_tile_D);
+
+        m_context->kernelOptions().enableScratch = true;
+
+        auto updateParametersTransform = std::make_shared<UpdateParameters>(params);
+        auto lowerLinearTransform      = std::make_shared<LowerLinear>(m_context);
+        auto lowerTileTransform        = std::make_shared<LowerTile>(params, m_context);
+        auto lowerTensorContractionTransform
+            = std::make_shared<LowerTensorContraction>(params, m_context);
+
+        kgraph = kgraph.transform(updateParametersTransform);
+        kgraph = kgraph.transform(lowerLinearTransform);
+        kgraph = kgraph.transform(lowerTileTransform);
+        kgraph = kgraph.transform(lowerTensorContractionTransform);
+
+        auto scratchCoordinatePredicate = [&](int tag) -> bool {
+            auto maybeMacroTile = kgraph.coordinates.get<MacroTile>(tag);
+            if(maybeMacroTile)
+                return maybeMacroTile->layoutType == LayoutType::SCRATCH;
+            return false;
+        };
+
+        EXPECT_FALSE(empty(kgraph.coordinates.findElements(scratchCoordinatePredicate)));
+    }
+
+    TEST_F(KernelGraphTest, WaitCountZero)
+    {
+        rocRoller::KernelGraph::KernelGraph kgraph;
+
+        auto kernel = kgraph.control.addElement(Kernel());
+        auto wait   = kgraph.control.addElement(WaitZero());
+        kgraph.control.addElement(Body(), {kernel}, {wait});
+
+        m_context->schedule(rocRoller::KernelGraph::generate(kgraph, m_context->kernel()));
+
+        EXPECT_THAT(output(), testing::HasSubstr("s_waitcnt vmcnt(0)"));
+    }
+
 }

@@ -702,6 +702,12 @@ namespace rocRoller
                     MemoryInstructions::MemoryKind::Flat, vPtr, src, offset, numBytes);
             }
 
+            Generator<Instruction> operator()(int, WaitZero const&, Transformer)
+            {
+                co_yield Instruction::Wait(WaitCount::Zero("Explicit WaitZero operation",
+                                                           m_context->targetArchitecture()));
+            }
+
         private:
             std::shared_ptr<KernelGraph>    m_graph;
             ContextPtr                      m_context;

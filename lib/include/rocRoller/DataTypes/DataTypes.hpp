@@ -141,6 +141,7 @@ namespace rocRoller
      */
     enum class LayoutType : int
     {
+        SCRATCH,
         MATRIX_A,
         MATRIX_B,
         MATRIX_ACCUMULATOR,

@@ -39,8 +39,9 @@ namespace rocRoller
         struct Buffer;
         struct Offset;
         struct Stride;
+        struct View;
 
-        using DataFlowEdge = std::variant<DataFlow, Buffer, Offset, Stride>;
+        using DataFlowEdge = std::variant<DataFlow, Buffer, Offset, Stride, View>;
 
         template <typename T>
         concept CDataFlowEdge = std::constructible_from<DataFlowEdge, T>;

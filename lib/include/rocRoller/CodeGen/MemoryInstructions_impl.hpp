@@ -631,6 +631,16 @@ namespace rocRoller
         auto sgprSrd = buffDesc->allRegisters();
         auto ctx     = m_context.lock();
 
+        // TODO Use UInt32 offset register for StoreTiled operations
+        // that use an offset modifier.
+        //
+        // If an offset modifier is present, we can't use a 64bit
+        // vaddr.  This can happen when: the offset register created
+        // by a ComputeIndex operation for a StoreTiled operation is
+        // 64bit.
+        if(!offsetModifier.empty())
+            addr = addr->subset({0});
+
         if(numBytes < m_wordSize)
         {
             std::string opEnd = "";
