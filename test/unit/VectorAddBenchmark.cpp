@@ -1,26 +1,11 @@
 
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-
 #include <hip/hip_ext.h>
 #include <hip/hip_runtime.h>
 
-#include <random>
-
-#include <rocRoller/AssemblyKernel.hpp>
-#include <rocRoller/CommandSolution.hpp>
-#include <rocRoller/DataTypes/DataTypes.hpp>
-#include <rocRoller/Expression.hpp>
-#include <rocRoller/KernelGraph/KernelGraph.hpp>
-#include <rocRoller/Operations/Command.hpp>
-#include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/HIPTimer.hpp>
-#include <rocRoller/Utilities/Timer.hpp>
 
+#include "CommonGraphs.hpp"
 #include "GPUContextFixture.hpp"
-#include "GenericContextFixture.hpp"
-#include "Scheduling/Observers/FileWritingObserver.hpp"
-#include "SourceMatcher.hpp"
 #include "Utilities.hpp"
 
 using namespace rocRoller;
@@ -37,8 +22,10 @@ namespace VectorAddBenchmark
         }
     };
 
-    void VectorAddGraph(ContextPtr context, size_t nx)
+    TEST_P(VectorAddBenchmarkGPU, VectorAddBenchmark_GPU_Graph)
     {
+        auto nx = GetParam();
+
         RandomGenerator random(31415u);
 
         auto a = random.vector<int>(nx, -100, 100);
@@ -51,51 +38,17 @@ namespace VectorAddBenchmark
 
         int alpha = 22;
 
-        std::vector<int> r(nx), x(nx);
+        std::vector<int> r(nx);
 
         ASSERT_THAT(hipMemcpy(d_alpha.get(), &alpha, 1 * sizeof(int), hipMemcpyDefault),
                     HasHipSuccess(0));
 
-        auto command = std::make_shared<Command>();
+        auto vectorAdd = rocRollerTest::Graphs::VectorAdd<int>();
 
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Linear(DataType::Int32, 1, 0))); // a
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Linear(DataType::Int32, 1, 1))); // b
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Scalar({DataType::Int32, PointerType::PointerGlobal},
-                                                 2))); // alpha
+        CommandKernel commandKernel(vectorAdd.getCommand(), "VectorAdd");
 
-        auto execute = rocRoller::Operations::T_Execute();
-        execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-            rocRoller::Operations::E_Add(3, 0, 1))); // a + b
-        execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-            rocRoller::Operations::E_Mul(4, 2, 3))); // alpha * (a + b)
-
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(execute));
-
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Store_Linear(1, 4)));
-
-        CommandKernel commandKernel(command, "VectorAdd");
-
-        KernelArguments runtimeArgs;
-
-        runtimeArgs.append("user0", d_a.get());
-        runtimeArgs.append("d_a_limit", nx);
-        runtimeArgs.append("d_a_size", nx);
-        runtimeArgs.append("d_a_stride", (size_t)1);
-
-        runtimeArgs.append("user1", d_b.get());
-        runtimeArgs.append("d_b_limit", nx);
-        runtimeArgs.append("d_b_size", nx);
-        runtimeArgs.append("d_b_stride", (size_t)1);
-
-        runtimeArgs.append("user2", d_alpha.get());
-
-        runtimeArgs.append("user6", d_c.get());
-        runtimeArgs.append("d_c_limit", nx);
-        runtimeArgs.append("d_c_stride", (size_t)1);
+        auto runtimeArgs
+            = vectorAdd.getRuntimeArguments(nx, d_alpha.get(), d_a.get(), d_b.get(), d_c.get());
 
         HIP_TIMER(t_kernel, "VectorAddKernel_Graph");
         HIP_TIC(t_kernel);
@@ -107,20 +60,10 @@ namespace VectorAddBenchmark
                     HasHipSuccess(0));
 
         // reference solution
-        for(size_t i = 0; i < nx; ++i)
-            x[i] = alpha * (a[i] + b[i]);
-
-        double rnorm = relativeNorm(r, x);
+        double rnorm = relativeNorm(r, vectorAdd.referenceSolution(alpha, a, b));
 
         ASSERT_LT(rnorm, 1.e-12);
         EXPECT_GT(t_kernel.elapsed(), std::chrono::steady_clock::duration(0));
-    }
-
-    TEST_P(VectorAddBenchmarkGPU, VectorAddBenchmark_GPU_Graph)
-    {
-        auto nx = GetParam();
-
-        VectorAddGraph(m_context, nx);
 
         std::cout << TimerPool::summary() << std::endl;
         std::cout << TimerPool::CSV() << std::endl;

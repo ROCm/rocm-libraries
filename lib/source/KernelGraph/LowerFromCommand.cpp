@@ -502,7 +502,7 @@ namespace rocRoller
 
             void operator()(Operations::Nop const& x) {}
 
-            KernelGraph call(std::shared_ptr<Command> command)
+            KernelGraph call(CommandPtr command)
             {
                 m_command = command;
                 for(auto const& op : command->operations())
@@ -524,10 +524,10 @@ namespace rocRoller
             // command tag -> dimension/coordinate tag
             std::map<int, int> m_dim;
 
-            std::shared_ptr<Command> m_command;
+            CommandPtr m_command;
         };
 
-        KernelGraph translate(std::shared_ptr<Command> command)
+        KernelGraph translate(CommandPtr command)
         {
             TIMER(t, "KernelGraph::translate");
             rocRoller::Log::getLogger()->debug("KernelGraph::translate(); Command\n{}",

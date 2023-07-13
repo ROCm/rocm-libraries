@@ -19,7 +19,7 @@ namespace rocRoller
             T_Mul() = delete;
             T_Mul(int dest, int a, int b);
 
-            void                    setCommand(std::shared_ptr<Command>);
+            void                    setCommand(CommandPtr);
             int                     getTag() const;
             void                    setTag(int tag);
             std::unordered_set<int> getInputs() const;

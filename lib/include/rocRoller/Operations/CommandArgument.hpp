@@ -33,11 +33,11 @@ namespace rocRoller
     class CommandArgument : public std::enable_shared_from_this<CommandArgument>
     {
     public:
-        CommandArgument(std::shared_ptr<Command> com,
-                        VariableType             variableType,
-                        size_t                   offset,
-                        DataDirection            direction = DataDirection::ReadWrite,
-                        std::string              name      = "");
+        CommandArgument(CommandPtr    com,
+                        VariableType  variableType,
+                        size_t        offset,
+                        DataDirection direction = DataDirection::ReadWrite,
+                        std::string   name      = "");
 
         VariableType variableType() const;
 

@@ -22,7 +22,7 @@ namespace rocRoller
         {
         }
 
-        inline void Load_Store_Operation::setCommand(std::shared_ptr<Command> command)
+        inline void Load_Store_Operation::setCommand(CommandPtr command)
         {
             m_command = command;
         }

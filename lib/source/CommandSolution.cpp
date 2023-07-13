@@ -160,14 +160,14 @@ namespace rocRoller
     {
     }
 
-    CommandKernel::CommandKernel(std::shared_ptr<Command> command, std::string name)
+    CommandKernel::CommandKernel(CommandPtr command, std::string name)
         : m_command(command)
         , m_preParameters(std::make_shared<CommandParameters>())
     {
         generateKernel(name);
     }
 
-    CommandKernel::CommandKernel(std::shared_ptr<Command>           command,
+    CommandKernel::CommandKernel(CommandPtr                         command,
                                  std::string                        name,
                                  std::shared_ptr<CommandParameters> preParameters,
                                  std::shared_ptr<CommandParameters> postParameters,
@@ -182,7 +182,7 @@ namespace rocRoller
         generateKernel(name);
     }
 
-    CommandKernel::CommandKernel(std::shared_ptr<Command>        command,
+    CommandKernel::CommandKernel(CommandPtr                      command,
                                  ContextPtr                      context,
                                  KernelGraph::KernelGraph const& kernelGraph)
         : m_command(command)

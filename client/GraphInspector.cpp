@@ -6,9 +6,9 @@ namespace rocRoller
     namespace Client
     {
 
-        GraphInspector::GraphInspector(std::shared_ptr<Command> command,
-                                       CommandKernel&           kernel,
-                                       KernelArguments const&   runtimeArgs)
+        GraphInspector::GraphInspector(CommandPtr             command,
+                                       CommandKernel&         kernel,
+                                       KernelArguments const& runtimeArgs)
             : m_command(command)
             , m_kernel(kernel)
             , m_runtimeArgs(runtimeArgs)

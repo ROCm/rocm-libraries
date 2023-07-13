@@ -35,6 +35,7 @@
 #include <rocRoller/Utilities/Settings.hpp>
 #include <rocRoller/Utilities/Timer.hpp>
 
+#include "CommonGraphs.hpp"
 #include "GPUContextFixture.hpp"
 #include "GenericContextFixture.hpp"
 #include "SourceMatcher.hpp"
@@ -62,29 +63,7 @@ namespace KernelGraphTest
             fastArith = Expression::FastArithmetic(m_context);
         }
 
-        static std::shared_ptr<Command> commonCommand()
-        {
-            auto command = std::make_shared<rocRoller::Command>();
-
-            Operations::T_Load_Linear load_A(DataType::Int32, 1, 0);
-            command->addOperation(std::make_shared<Operations::Operation>(std::move(load_A)));
-
-            Operations::T_Load_Linear load_B(DataType::Int32, 1, 2);
-            command->addOperation(std::make_shared<Operations::Operation>(std::move(load_B)));
-
-            Operations::T_Execute execute;
-            execute.addXOp(std::make_shared<Operations::XOp>(Operations::E_Add(3, 2, 0)));
-            execute.addXOp(std::make_shared<Operations::XOp>(Operations::E_Neg(4, 3)));
-            execute.addXOp(std::make_shared<Operations::XOp>(Operations::E_Mul(5, 3, 4)));
-
-            command->addOperation(std::make_shared<Operations::Operation>(std::move(execute)));
-
-            Operations::T_Store_Linear store_C(1, 5);
-            command->addOperation(std::make_shared<Operations::Operation>(std::move(store_C)));
-            return command;
-        }
-
-        void GPU_Translate04(bool reload);
+        void GPU_SAXPBY(bool reload);
     };
 
     class KernelGraphTest : public GenericContextFixture
@@ -97,404 +76,21 @@ namespace KernelGraphTest
             GenericContextFixture::SetUp();
             fastArith = Expression::FastArithmetic(m_context);
         }
-
-        static std::shared_ptr<Command> commonCommand()
-        {
-            return KernelGraphTestGPU::commonCommand();
-        }
     };
 
-// TODO update this
-#if 0
-    class KernelGraphTestGPULoopSize : public KernelGraphTestGPU,
-                                       public ::testing::WithParamInterface<int>
+    // TODO: Add transforms and tests for VectorAdd with: 1. ForLoop
+    // and 2. ForLoop+Unroll.
+    //
+    // The tests should also make sure the lowering fails if the
+    // WorkitemCount is missing.
+    //
+    // See KernelGraphTestGPULoopSize :: MissingWorkitemCount
+    //     KernelGraphTestGPULoopSize :: TestForLoop
+
+    TEST_F(KernelGraphTest, BasicTranslateLinear)
     {
-    };
-
-    TEST_P(KernelGraphTestGPULoopSize, MissingWorkitemCount)
-    {
-        auto command = commonCommand();
-
-        m_context->kernel()->addCommandArguments(command->getArguments());
-
-        int workGroupSize = 64;
-        m_context->kernel()->setKernelDimensions(1);
-        m_context->kernel()->setWorkgroupSize({64, 1, 1});
-
-        int  loopSize     = GetParam();
-        auto loopSizeExpr = Expression::literal(loopSize);
-
-        auto one          = Expression::literal(1u);
-        auto extent       = std::make_shared<Expression::Expression>(command->getArguments()[1]);
-        auto numWorkitems = extent / loopSizeExpr;
-
-    auto lowerLinearTransform = std::make_shared<LowerLinear>(m_context);
-
-        ASSERT_THROW(
-            {
-                auto kgraph = KernelGraph::translate(command);
-
-                kgraph = kgraph.transform(lowerLinearTransform);
-
-                kgraph = KernelGraph::lowerLinearLoop(kgraph, loopSizeExpr, m_context);
-
-                kgraph = KernelGraph::cleanArguments(kgraph, m_context->kernel());
-
-                m_context->kernel()->setWorkitemCount({numWorkitems, one, one});
-            },
-            FatalError);
-    }
-
-    TEST_P(KernelGraphTestGPULoopSize, TestForLoop)
-    {
-        auto command = commonCommand();
-
-        m_context->kernel()->addCommandArguments(command->getArguments());
-
-        int workGroupSize = 64;
-        m_context->kernel()->setKernelDimensions(1);
-        m_context->kernel()->setWorkgroupSize({64, 1, 1});
-
-        int  loopSize     = GetParam();
-        auto loopSizeExpr = Expression::literal(loopSize);
-
-        auto one          = Expression::literal(1u);
-        auto extent       = std::make_shared<Expression::Expression>(command->getArguments()[1]);
-        auto numWorkitems = extent / loopSizeExpr;
-
-        m_context->kernel()->setWorkitemCount({numWorkitems, one, one});
-
-        size_t origArgSize = m_context->kernel()->arguments().size();
-
-        auto kgraph = KernelGraph::translate2(command);
-
-        kgraph = KernelGraph::lowerLinear(kgraph, m_context);
-
-        kgraph = KernelGraph::lowerLinearLoop(kgraph, loopSizeExpr, m_context);
-
-        kgraph = KernelGraph::cleanArguments(kgraph, m_context->kernel());
-
-        EXPECT_EQ(m_context->kernel()->arguments().size(), origArgSize + 1);
-        ASSERT_NO_THROW(m_context->kernel()->findArgument("LAUNCH_WORKGROUPCOUNT_0"));
-
-        CommandKernel commandKernel(command, m_context, kgraph);
-
-        RandomGenerator random(1356);
-
-        int              baseSize = workGroupSize * loopSize;
-        std::vector<int> vecSizes = {baseSize, baseSize * 5, baseSize * 16, baseSize * 65};
-        for(auto vecSize : vecSizes)
-        {
-            auto             a          = random.vector<int>(vecSize, -1000, 1000);
-            auto             b          = random.vector<int>(vecSize, -1000, 1000);
-            auto             c_expected = random.vector<int>(vecSize, -1000, 1000);
-            auto             c_actual   = random.vector<int>(vecSize, -1000, 1000);
-            std::vector<int> c(vecSize);
-            for(int i = 0; i < vecSize; i++)
-                c_expected[i] = -(a[i] + b[i]) * (a[i] + b[i]);
-
-            auto a_d = make_shared_device<int>(vecSize);
-            auto b_d = make_shared_device<int>(vecSize);
-            auto c_d = make_shared_device<int>(vecSize);
-
-            ASSERT_THAT(
-                hipMemcpy(a_d.get(), a.data(), vecSize * sizeof(int), hipMemcpyHostToDevice),
-                HasHipSuccess(0));
-            ASSERT_THAT(
-                hipMemcpy(b_d.get(), b.data(), vecSize * sizeof(int), hipMemcpyHostToDevice),
-                HasHipSuccess(0));
-
-            KernelArguments args;
-            args.append("a", a_d.get());
-            args.append<int64_t>("a_extent", vecSize);
-            args.append<int64_t>("a_size", vecSize);
-            args.append<int64_t>("a_stride", 1);
-
-            args.append("b", b_d.get());
-            args.append<int64_t>("b_extent", vecSize);
-            args.append<int64_t>("b_size", vecSize);
-            args.append<int64_t>("b_stride", 1);
-
-            args.append("c", c_d.get());
-            args.append<int64_t>("c_extent", vecSize);
-            // args.append<int64_t>("c_size", vecSize);
-            args.append<int64_t>("c_stride", 1);
-
-            commandKernel.launchKernel(args.runtimeArguments());
-
-            ASSERT_THAT(
-                hipMemcpy(c_actual.data(), c_d.get(), vecSize * sizeof(int), hipMemcpyDeviceToHost),
-                HasHipSuccess(0));
-
-            EXPECT_THAT(output(), testing::HasSubstr("Lock For Loop"));
-            EXPECT_THAT(output(), testing::HasSubstr("Unlock For Loop"));
-
-            for(int i = 0; i < vecSize; i++)
-                EXPECT_EQ(c_actual[i], c_expected[i]) << i << ", " << a[i] << ", " << b[i];
-        }
-    }
-
-    // delete this when graph rearch complete
-    TEST_P(KernelGraphTestGPULoopSize, TestForLoop2)
-    {
-        auto command = commonCommand();
-
-        m_context->kernel()->addCommandArguments(command->getArguments());
-
-        int workGroupSize = 64;
-        m_context->kernel()->setKernelDimensions(1);
-        m_context->kernel()->setWorkgroupSize({64, 1, 1});
-
-        int  loopSize     = GetParam();
-        auto loopSizeExpr = Expression::literal(loopSize);
-
-        auto one          = Expression::literal(1u);
-        auto extent       = std::make_shared<Expression::Expression>(command->getArguments()[1]);
-        auto numWorkitems = extent / loopSizeExpr;
-
-        m_context->kernel()->setWorkitemCount({numWorkitems, one, one});
-
-        size_t origArgSize = m_context->kernel()->arguments().size();
-
-        auto kgraph = KernelGraph::translate2(command);
-        kgraph      = KernelGraph::lowerLinear(kgraph, m_context);
-        kgraph      = KernelGraph::lowerLinearLoop(kgraph, loopSizeExpr, m_context);
-        kgraph      = KernelGraph::cleanArguments(kgraph, m_context->kernel());
-
-        EXPECT_EQ(m_context->kernel()->arguments().size(), origArgSize + 1);
-        ASSERT_NO_THROW(m_context->kernel()->findArgument("LAUNCH_WORKGROUPCOUNT_0"));
-
-        auto context = m_context;
-        context->schedule(context->kernel()->preamble());
-        context->schedule(context->kernel()->prolog());
-        context->schedule(KernelGraph::generate(kgraph, context->kernel()));
-        context->schedule(context->kernel()->postamble());
-        context->schedule(context->kernel()->amdgpu_metadata());
-        auto executableKernel = m_context->instructions()->getExecutableKernel();
-
-        RandomGenerator random(1356);
-
-        int              baseSize = workGroupSize * loopSize;
-        std::vector<int> vecSizes = {baseSize, baseSize * 5, baseSize * 16, baseSize * 65};
-        for(auto vecSize : vecSizes)
-        {
-            auto             a          = random.vector<int>(vecSize, -1000, 1000);
-            auto             b          = random.vector<int>(vecSize, -1000, 1000);
-            auto             c_expected = random.vector<int>(vecSize, -1000, 1000);
-            auto             c_actual   = random.vector<int>(vecSize, -1000, 1000);
-            std::vector<int> c(vecSize);
-            for(int i = 0; i < vecSize; i++)
-                c_expected[i] = -(a[i] + b[i]) * (a[i] + b[i]);
-
-            auto a_d = make_shared_device<int>(vecSize);
-            auto b_d = make_shared_device<int>(vecSize);
-            auto c_d = make_shared_device<int>(vecSize);
-
-            ASSERT_THAT(
-                hipMemcpy(a_d.get(), a.data(), vecSize * sizeof(int), hipMemcpyHostToDevice),
-                HasHipSuccess(0));
-            ASSERT_THAT(
-                hipMemcpy(b_d.get(), b.data(), vecSize * sizeof(int), hipMemcpyHostToDevice),
-                HasHipSuccess(0));
-
-            KernelArguments args;
-            args.append("a", a_d.get());
-            args.append<int64_t>("a_extent", vecSize);
-            args.append<int64_t>("a_size", vecSize);
-            args.append<int64_t>("a_stride", 1);
-
-            args.append("b", b_d.get());
-            args.append<int64_t>("b_extent", vecSize);
-            args.append<int64_t>("b_size", vecSize);
-            args.append<int64_t>("b_stride", 1);
-
-            args.append("c", c_d.get());
-            args.append<int64_t>("c_extent", vecSize);
-            args.append<int64_t>("c_stride", 1);
-
-            args.append<int64_t>("LAUNCH_WORKGROUPCOUNT_0", vecSize / baseSize);
-
-            KernelInvocation kinv;
-            kinv.workgroupSize    = context->kernel()->workgroupSize();
-            kinv.workitemCount[0] = vecSize / loopSize;
-
-            executableKernel->executeKernel(args, kinv);
-
-            ASSERT_THAT(
-                hipMemcpy(c_actual.data(), c_d.get(), vecSize * sizeof(int), hipMemcpyDeviceToHost),
-                HasHipSuccess(0));
-
-            EXPECT_THAT(output(), testing::HasSubstr("Lock For Loop"));
-            EXPECT_THAT(output(), testing::HasSubstr("Unlock For Loop"));
-
-            for(int i = 0; i < vecSize; i++)
-                EXPECT_EQ(c_actual[i], c_expected[i]) << i << ", " << a[i] << ", " << b[i];
-        }
-    }
-
-    INSTANTIATE_TEST_SUITE_P(KernelGraphTestGPULoopSize,
-                             KernelGraphTestGPULoopSize,
-                             ::testing::ValuesIn({1, 5, 16, 73}));
-
-    TEST_F(KernelGraphTestGPU, TestKernelUnroll)
-    {
-        auto command = commonCommand();
-
-        m_context->kernel()->addCommandArguments(command->getArguments());
-
-        m_context->kernel()->setKernelDimensions(1);
-        m_context->kernel()->setWorkgroupSize({64, 1, 1});
-
-        auto unrollSize = Expression::literal(4);
-
-        auto one          = Expression::literal(1u);
-        auto extent       = std::make_shared<Expression::Expression>(command->getArguments()[1]);
-        auto numWorkitems = extent / unrollSize;
-
-        m_context->kernel()->setWorkitemCount({numWorkitems, one, one});
-
-        auto kgraph = KernelGraph::translate2(command);
-
-        kgraph = KernelGraph::lowerLinear(kgraph, m_context);
-
-//        kgraph = KernelGraph::lowerLinearUnroll(kgraph, unrollSize, m_context);
-
-        kgraph = KernelGraph::cleanArguments(kgraph, m_context->kernel());
-
-        m_context->kernel()->setKernelGraphMeta(std::make_shared<KernelGraph::KernelGraph>(kgraph));
-
-        CommandKernel commandKernel(command, m_context, kgraph);
-
-        RandomGenerator random(8379);
-
-        int vecSize = 16384;
-
-        auto             a          = random.vector<int>(vecSize, -1000, 1000);
-        auto             b          = random.vector<int>(vecSize, -1000, 1000);
-        auto             c_expected = random.vector<int>(vecSize, -1000, 1000);
-        auto             c_actual   = random.vector<int>(vecSize, -1000, 1000);
-        std::vector<int> c(vecSize);
-        for(int i = 0; i < vecSize; i++)
-            c_expected[i] = -(a[i] + b[i]) * (a[i] + b[i]);
-
-        auto a_d = make_shared_device<int>(vecSize);
-        auto b_d = make_shared_device<int>(vecSize);
-        auto c_d = make_shared_device<int>(vecSize);
-
-        ASSERT_THAT(hipMemcpy(a_d.get(), a.data(), vecSize * sizeof(int), hipMemcpyHostToDevice),
-                    HasHipSuccess(0));
-        ASSERT_THAT(hipMemcpy(b_d.get(), b.data(), vecSize * sizeof(int), hipMemcpyHostToDevice),
-                    HasHipSuccess(0));
-
-        KernelArguments args;
-        args.append("a", a_d.get());
-        args.append<int64_t>("a_extent", vecSize);
-        args.append<int64_t>("a_size", vecSize);
-        args.append<int64_t>("a_stride", 1);
-
-        args.append("b", b_d.get());
-        args.append<int64_t>("b_extent", vecSize);
-        args.append<int64_t>("b_size", vecSize);
-        args.append<int64_t>("b_stride", 1);
-
-        args.append("c", c_d.get());
-        args.append<int64_t>("c_extent", vecSize);
-        // args.append<int64_t>("c_size", vecSize);
-        args.append<int64_t>("c_stride", 1);
-
-        commandKernel.launchKernel(args.runtimeArguments());
-
-        ASSERT_THAT(
-            hipMemcpy(c_actual.data(), c_d.get(), vecSize * sizeof(int), hipMemcpyDeviceToHost),
-            HasHipSuccess(0));
-
-        for(int i = 0; i < vecSize; i++)
-            EXPECT_EQ(c_actual[i], c_expected[i]) << i << ", " << a[i] << ", " << b[i];
-    }
-
-    TEST_F(KernelGraphTestGPU, TestKernelUnrollAndLoop)
-    {
-        auto command = commonCommand();
-
-        m_context->kernel()->addCommandArguments(command->getArguments());
-
-        m_context->kernel()->setKernelDimensions(1);
-        m_context->kernel()->setWorkgroupSize({64, 1, 1});
-
-        auto unrollSize = Expression::literal(4);
-        auto loopSize   = Expression::literal(16);
-
-        auto one          = Expression::literal(1u);
-        auto extent       = std::make_shared<Expression::Expression>(command->getArguments()[1]);
-        auto numWorkitems = extent / (unrollSize * loopSize);
-
-        m_context->kernel()->setWorkitemCount({numWorkitems, one, one});
-
-        auto kgraph = KernelGraph::translate(command);
-
-        kgraph = KernelGraph::lowerLinear(kgraph, m_context);
-
-        kgraph = KernelGraph::lowerLinearLoop(kgraph, loopSize, m_context);
-        kgraph = KernelGraph::lowerLinearUnroll(kgraph, unrollSize, m_context);
-
-        kgraph = KernelGraph::cleanArguments(kgraph, m_context->kernel());
-
-        m_context->kernel()->setKernelGraphMeta(std::make_shared<KernelGraph::KernelGraph>(kgraph));
-
-        CommandKernel commandKernel(command, m_context, kgraph);
-
-        RandomGenerator random(68103);
-
-        int vecSize = 16384;
-
-        auto             a          = random.vector<int>(vecSize, -1000, 1000);
-        auto             b          = random.vector<int>(vecSize, -1000, 1000);
-        auto             c_expected = random.vector<int>(vecSize, -1000, 1000);
-        auto             c_actual   = random.vector<int>(vecSize, -1000, 1000);
-        std::vector<int> c(vecSize);
-        for(int i = 0; i < vecSize; i++)
-            c_expected[i] = -(a[i] + b[i]) * (a[i] + b[i]);
-
-        auto a_d = make_shared_device<int>(vecSize);
-        auto b_d = make_shared_device<int>(vecSize);
-        auto c_d = make_shared_device<int>(vecSize);
-
-        ASSERT_THAT(hipMemcpy(a_d.get(), a.data(), vecSize * sizeof(int), hipMemcpyHostToDevice),
-                    HasHipSuccess(0));
-        ASSERT_THAT(hipMemcpy(b_d.get(), b.data(), vecSize * sizeof(int), hipMemcpyHostToDevice),
-                    HasHipSuccess(0));
-
-        KernelArguments args;
-        args.append("a", a_d.get());
-        args.append<int64_t>("a_extent", vecSize);
-        args.append<int64_t>("a_size", vecSize);
-        args.append<int64_t>("a_stride", 1);
-
-        args.append("b", b_d.get());
-        args.append<int64_t>("b_extent", vecSize);
-        args.append<int64_t>("b_size", vecSize);
-        args.append<int64_t>("b_stride", 1);
-
-        args.append("c", c_d.get());
-        args.append<int64_t>("c_extent", vecSize);
-        // args.append<int64_t>("c_size", vecSize);
-        args.append<int64_t>("c_stride", 1);
-
-        commandKernel.launchKernel(args.runtimeArguments());
-
-        ASSERT_THAT(
-            hipMemcpy(c_actual.data(), c_d.get(), vecSize * sizeof(int), hipMemcpyDeviceToHost),
-            HasHipSuccess(0));
-
-        for(int i = 0; i < vecSize; i++)
-            EXPECT_EQ(c_actual[i], c_expected[i]) << i << ", " << a[i] << ", " << b[i];
-    }
-#endif
-
-    TEST_F(KernelGraphTest, Translate01)
-    {
-        auto command = commonCommand();
-        auto kgraph0 = translate(command);
+        auto example = rocRollerTest::Graphs::VectorAddNegSquare<int>();
+        auto kgraph0 = example.getKernelGraph();
 
         auto bottom = kgraph0.coordinates.roots().to<std::vector>();
         EXPECT_EQ(bottom.size(), 2);
@@ -518,10 +114,10 @@ namespace KernelGraphTest
         std::string expectedC = R".(
                 digraph {
                 "coord1"[label="User{CommandArgument(Load_Linear_0_extent)}(1)"];
-                "coord2"[label="User{CommandArgument(Load_Linear_2_extent)}(2)"];
-                "coord3"[label="SubDimension{0, CommandArgument(Load_Linear_2_size_0)}(3)"];
+                "coord2"[label="User{CommandArgument(Load_Linear_1_extent)}(2)"];
+                "coord3"[label="SubDimension{0, CommandArgument(Load_Linear_1_size_0)}(3)"];
                 "coord4"[label="Split(4)",shape=box];
-                "coord5"[label="Linear{CommandArgument(Load_Linear_2_size_0)}(5)"];
+                "coord5"[label="Linear{CommandArgument(Load_Linear_1_size_0)}(5)"];
                 "coord6"[label="Flatten(6)",shape=box];
                 "coord7"[label="DataFlow(7)",shape=box];
                 "coord8"[label="SubDimension{0, CommandArgument(Load_Linear_0_size_0)}(8)"];
@@ -537,7 +133,7 @@ namespace KernelGraphTest
                 "coord18"[label="DataFlow(18)",shape=box];
                 "coord19"[label="SubDimension{0, NA}(19)"];
                 "coord20"[label="Split(20)",shape=box];
-                "coord21"[label="User{CommandArgument(Store_Linear_5_extent)}(21)"];
+                "coord21"[label="User{CommandArgument(Store_Linear_4_extent)}(21)"];
                 "coord22"[label="Join(22)",shape=box];
                 "coord23"[label="DataFlow(23)",shape=box];
                 "coord1" -> "coord9"
@@ -594,9 +190,9 @@ namespace KernelGraphTest
                 "cntrl15"[label="Sequence(15)",shape=box];
                 "cntrl1" -> "cntrl3"
                 "cntrl1" -> "cntrl5"
-        "cntrl2" -> "cntrl7"
+                "cntrl2" -> "cntrl7"
                 "cntrl3" -> "cntrl2"
-        "cntrl4" -> "cntrl8"
+                "cntrl4" -> "cntrl8"
                 "cntrl5" -> "cntrl4"
                 "cntrl6" -> "cntrl10"
                 "cntrl6" -> "cntrl12"
@@ -609,10 +205,10 @@ namespace KernelGraphTest
                 "cntrl13" -> "cntrl11"
                 "cntrl15" -> "cntrl14"
                 }
-        "coord2" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
-        "coord5" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
-        "coord1" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
-        "coord10" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
+                "coord2" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
+                "coord5" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
+                "coord1" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
+                "coord10" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
                 "coord13" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
                 "coord15" -> "cntrl9" [style=dotted,weight=0,arrowsize=0]
                 "coord17" -> "cntrl11" [style=dotted,weight=0,arrowsize=0]
@@ -630,10 +226,10 @@ namespace KernelGraphTest
                 "coord4"[label="Linear{CommandArgument(Load_Linear_0_size_0)}(4)"];
                 "coord5"[label="Flatten(5)",shape=box];
                 "coord6"[label="DataFlow(6)",shape=box];
-                "coord7"[label="User{CommandArgument(Load_Linear_2_extent)}(7)"];
-                "coord8"[label="SubDimension{0, CommandArgument(Load_Linear_2_size_0)}(8)"];
+                "coord7"[label="User{CommandArgument(Load_Linear_1_extent)}(7)"];
+                "coord8"[label="SubDimension{0, CommandArgument(Load_Linear_1_size_0)}(8)"];
                 "coord9"[label="Split(9)",shape=box];
-                "coord10"[label="Linear{CommandArgument(Load_Linear_2_size_0)}(10)"];
+                "coord10"[label="Linear{CommandArgument(Load_Linear_1_size_0)}(10)"];
                 "coord11"[label="Flatten(11)",shape=box];
                 "coord12"[label="DataFlow(12)",shape=box];
                 "coord13"[label="Linear{NA}(13)"];
@@ -643,7 +239,7 @@ namespace KernelGraphTest
                 "coord17"[label="Linear{NA}(17)"];
                 "coord18"[label="DataFlow(18)",shape=box];
                 "coord19"[label="SubDimension{0, NA}(19)"];
-                "coord20"[label="User{CommandArgument(Store_Linear_5_extent)}(20)"];
+                "coord20"[label="User{CommandArgument(Store_Linear_4_extent)}(20)"];
                 "coord21"[label="Split(21)",shape=box];
                 "coord22"[label="Join(22)",shape=box];
                 "coord23"[label="DataFlow(23)",shape=box];
@@ -732,10 +328,10 @@ namespace KernelGraphTest
         std::string expected1 = R".(
             digraph {
         "coord1"[label="User{CommandArgument(Load_Linear_0_extent)}(1)"];
-        "coord2"[label="User{CommandArgument(Load_Linear_2_extent)}(2)"];
-        "coord3"[label="SubDimension{0, CommandArgument(Load_Linear_2_size_0)}(3)"];
+        "coord2"[label="User{CommandArgument(Load_Linear_1_extent)}(2)"];
+        "coord3"[label="SubDimension{0, CommandArgument(Load_Linear_1_size_0)}(3)"];
         "coord4"[label="Split(4)",shape=box];
-        "coord5"[label="Linear{CommandArgument(Load_Linear_2_size_0)}(5)"];
+        "coord5"[label="Linear{CommandArgument(Load_Linear_1_size_0)}(5)"];
         "coord6"[label="Flatten(6)",shape=box];
         "coord7"[label="SubDimension{0, CommandArgument(Load_Linear_0_size_0)}(7)"];
         "coord8"[label="Split(8)",shape=box];
@@ -744,7 +340,7 @@ namespace KernelGraphTest
         "coord11"[label="Linear{NA}(11)"];
         "coord12"[label="SubDimension{0, NA}(12)"];
         "coord13"[label="Split(13)",shape=box];
-        "coord14"[label="User{CommandArgument(Store_Linear_5_extent)}(14)"];
+        "coord14"[label="User{CommandArgument(Store_Linear_4_extent)}(14)"];
         "coord15"[label="Join(15)",shape=box];
         "coord16"[label="VGPR{NA}(16)"];
         "coord17"[label="Workgroup{0, LAUNCH_WORKGROUPCOUNT_0}(17)"];
@@ -909,10 +505,10 @@ namespace KernelGraphTest
         std::string expected2 = R".(
         digraph {
         "coord1"[label="User{CommandArgument(Load_Linear_0_extent)}(1)"];
-        "coord2"[label="User{CommandArgument(Load_Linear_2_extent)}(2)"];
-        "coord3"[label="SubDimension{0, CommandArgument(Load_Linear_2_size_0)}(3)"];
+        "coord2"[label="User{CommandArgument(Load_Linear_1_extent)}(2)"];
+        "coord3"[label="SubDimension{0, CommandArgument(Load_Linear_1_size_0)}(3)"];
         "coord4"[label="Split(4)",shape=box];
-        "coord5"[label="Linear{CommandArgument(Load_Linear_2_size_0)}(5)"];
+        "coord5"[label="Linear{CommandArgument(Load_Linear_1_size_0)}(5)"];
         "coord6"[label="Flatten(6)",shape=box];
         "coord7"[label="Workgroup{0, LAUNCH_WORKGROUPCOUNT_0}(7)"];
         "coord8"[label="Workitem{0, 32j}(8)"];
@@ -950,7 +546,7 @@ namespace KernelGraphTest
         "coord40"[label="Flatten(40)",shape=box];
         "coord41"[label="SubDimension{0, NA}(41)"];
         "coord42"[label="Split(42)",shape=box];
-        "coord43"[label="User{CommandArgument(Store_Linear_5_extent)}(43)"];
+        "coord43"[label="User{CommandArgument(Store_Linear_4_extent)}(43)"];
         "coord44"[label="Join(44)",shape=box];
         "coord45"[label="DataFlow(45)",shape=box];
         "coord1" -> "coord17"
@@ -1117,23 +713,100 @@ namespace KernelGraphTest
         EXPECT_EQ(NormalizedSource(expected2), NormalizedSource(kgraph2.toDOT(true)));
     }
 
-    TEST_F(KernelGraphTest, Translate01Tiled)
+    TEST_F(KernelGraphTest, BasicTranslateScalar)
     {
-        auto command  = std::make_shared<Command>();
-        auto dataType = DataType::Int32;
+        auto example = rocRollerTest::Graphs::VectorAddNegSquare<int>(true);
+        auto kgraph0 = example.getKernelGraph();
 
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(dataType, 2, 0))); // A
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(dataType, 2, 1))); // B
+        auto bottom = kgraph0.coordinates.roots().to<std::vector>();
+        EXPECT_EQ(bottom.size(), 2);
+        for(auto const& id : bottom)
+        {
+            EXPECT_TRUE(std::holds_alternative<User>(
+                std::get<Dimension>(kgraph0.coordinates.getElement(id))));
+        }
 
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Mul(2, 0, 1))); // D = A * B
+        std::string expected0 = R".(
+                digraph {
+                "coord1"[label="User{NA}(1)"];
+                "coord2"[label="VGPR{NA}(2)"];
+                "coord3"[label="DataFlow(3)",shape=box];
+                "coord4"[label="User{NA}(4)"];
+                "coord5"[label="VGPR{NA}(5)"];
+                "coord6"[label="DataFlow(6)",shape=box];
+                "coord7"[label="VGPR{NA}(7)"];
+                "coord8"[label="DataFlow(8)",shape=box];
+                "coord9"[label="VGPR{NA}(9)"];
+                "coord10"[label="DataFlow(10)",shape=box];
+                "coord11"[label="VGPR{NA}(11)"];
+                "coord12"[label="DataFlow(12)",shape=box];
+                "coord1" -> "coord3"
+                "coord2" -> "coord8"
+                "coord3" -> "coord2"
+                "coord4" -> "coord6"
+                "coord5" -> "coord8"
+                "coord6" -> "coord5"
+                "coord7" -> "coord10"
+                "coord7" -> "coord12"
+                "coord8" -> "coord7"
+                "coord9" -> "coord12"
+                "coord10" -> "coord9"
+                "coord12" -> "coord11"
+                {
+                rank=same
+                "coord5"->"coord2"[style=invis]
+                rankdir=LR
+                }
+                {
+                rank=same
+                "coord7"->"coord9"[style=invis]
+                rankdir=LR
+                }
+                subgraph clusterCF {label = "Control Graph";
+                "cntrl1"[label="Kernel(1)"];
+                "cntrl2"[label="LoadVGPR(2)"];
+                "cntrl3"[label="Body(3)",shape=box];
+                "cntrl4"[label="LoadVGPR(4)"];
+                "cntrl5"[label="Body(5)",shape=box];
+                "cntrl6"[label="Assign VGPR Add(DataFlowTag(5), DataFlowTag(2))(6)"];
+                "cntrl7"[label="Sequence(7)",shape=box];
+                "cntrl8"[label="Sequence(8)",shape=box];
+                "cntrl9"[label="Assign VGPR Negate(DataFlowTag(7))(9)"];
+                "cntrl10"[label="Sequence(10)",shape=box];
+                "cntrl11"[label="Assign VGPR Multiply(DataFlowTag(7), DataFlowTag(9))(11)"];
+                "cntrl12"[label="Sequence(12)",shape=box];
+                "cntrl13"[label="Sequence(13)",shape=box];
+                "cntrl1" -> "cntrl3"
+                "cntrl1" -> "cntrl5"
+                "cntrl2" -> "cntrl8"
+                "cntrl3" -> "cntrl2"
+                "cntrl4" -> "cntrl7"
+                "cntrl5" -> "cntrl4"
+                "cntrl6" -> "cntrl10"
+                "cntrl6" -> "cntrl12"
+                "cntrl7" -> "cntrl6"
+                "cntrl8" -> "cntrl6"
+                "cntrl9" -> "cntrl13"
+                "cntrl10" -> "cntrl9"
+                "cntrl12" -> "cntrl11"
+                "cntrl13" -> "cntrl11"
+                }
+                "coord1" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
+                "coord2" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
+                "coord4" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
+                "coord5" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
+                "coord7" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
+                "coord9" -> "cntrl9" [style=dotted,weight=0,arrowsize=0]
+                "coord11" -> "cntrl11" [style=dotted,weight=0,arrowsize=0]
+             }).";
 
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Store_Tiled(dataType, 2, 2))); // D
+        EXPECT_EQ(NormalizedSource(expected0), NormalizedSource(kgraph0.toDOT(true)));
+    }
 
-        auto kgraph0 = translate(command);
+    TEST_F(KernelGraphTest, TranslateMatrixMultiply)
+    {
+        auto example = rocRollerTest::Graphs::MatrixMultiply<int>();
+        auto kgraph0 = example.getKernelGraph();
 
         auto bottom = kgraph0.coordinates.roots().to<std::vector>();
         EXPECT_EQ(bottom.size(), 2);
@@ -1273,146 +946,168 @@ namespace KernelGraphTest
         EXPECT_EQ(NormalizedSource(expected0), NormalizedSource(kgraph0.toDOT(true)));
     }
 
-    TEST_F(KernelGraphTest, Translate01Scalar)
+    TEST_F(KernelGraphTest, TranslateMatrixMultiplyParameters)
     {
-        auto command = std::make_shared<Command>();
+        auto example = rocRollerTest::Graphs::MatrixMultiply<int>();
+        auto kgraph0 = example.getKernelGraph();
 
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Scalar(DataType::Float, 0)));
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Scalar(DataType::Float, 1)));
+        // macro tile sizes
+        int mac_m = 64;
+        int mac_n = 64;
+        int mac_k = 64;
 
-        Operations::T_Execute execute;
-        execute.addXOp(std::make_shared<Operations::XOp>(Operations::E_Add(3, 1, 0)));
-        execute.addXOp(std::make_shared<Operations::XOp>(Operations::E_Neg(4, 3)));
-        execute.addXOp(std::make_shared<Operations::XOp>(Operations::E_Mul(5, 3, 4)));
+        int t_m = 4;
+        int t_n = 2;
 
-        command->addOperation(std::make_shared<Operations::Operation>(std::move(execute)));
+        auto mac_tile_0 = MacroTile({mac_m, mac_k}, MemoryType::VGPR, {t_m, t_n}); // A
+        auto mac_tile_1 = MacroTile({mac_k, mac_n}, MemoryType::VGPR, {t_m, t_n}); // B
+        auto mac_tile_2 = MacroTile({mac_m, mac_n}, MemoryType::VGPR, {t_m, t_n}); // A * B
 
-        auto kgraph0 = translate(command);
+        auto params = std::make_shared<CommandParameters>();
 
-        auto bottom = kgraph0.coordinates.roots().to<std::vector>();
-        EXPECT_EQ(bottom.size(), 2);
-        for(auto const& id : bottom)
-        {
-            EXPECT_TRUE(std::holds_alternative<User>(
-                std::get<Dimension>(kgraph0.coordinates.getElement(id))));
-        }
+        params->setDimensionInfo(4, mac_tile_0);
+        params->setDimensionInfo(11, mac_tile_1);
+        params->setDimensionInfo(15, mac_tile_2);
+
+        auto updateParametersTransform = std::make_shared<UpdateParameters>(params);
+
+        kgraph0 = kgraph0.transform(updateParametersTransform);
 
         std::string expected0 = R".(
-                digraph {
-                "coord1"[label="User{NA}(1)"];
-                "coord2"[label="VGPR{NA}(2)"];
-                "coord3"[label="DataFlow(3)",shape=box];
-                "coord4"[label="User{NA}(4)"];
-                "coord5"[label="VGPR{NA}(5)"];
-                "coord6"[label="DataFlow(6)",shape=box];
-                "coord7"[label="VGPR{NA}(7)"];
-                "coord8"[label="DataFlow(8)",shape=box];
-                "coord9"[label="VGPR{NA}(9)"];
-                "coord10"[label="DataFlow(10)",shape=box];
-                "coord11"[label="VGPR{NA}(11)"];
-                "coord12"[label="DataFlow(12)",shape=box];
-                "coord1" -> "coord3"
-                "coord2" -> "coord8"
-                "coord3" -> "coord2"
-                "coord4" -> "coord6"
-                "coord5" -> "coord8"
-                "coord6" -> "coord5"
-                "coord7" -> "coord10"
-                "coord7" -> "coord12"
-                "coord8" -> "coord7"
-                "coord9" -> "coord12"
-                "coord10" -> "coord9"
-                "coord12" -> "coord11"
-                {
-                rank=same
-                "coord5"->"coord2"[style=invis]
-                rankdir=LR
-                }
-                {
-                rank=same
-                "coord7"->"coord9"[style=invis]
-                rankdir=LR
-                }
-                subgraph clusterCF {label = "Control Graph";
-                "cntrl1"[label="Kernel(1)"];
-                "cntrl2"[label="LoadVGPR(2)"];
-                "cntrl3"[label="Body(3)",shape=box];
-                "cntrl4"[label="LoadVGPR(4)"];
-                "cntrl5"[label="Body(5)",shape=box];
-                "cntrl6"[label="Assign VGPR Add(DataFlowTag(5), DataFlowTag(2))(6)"];
-                "cntrl7"[label="Sequence(7)",shape=box];
-                "cntrl8"[label="Sequence(8)",shape=box];
-                "cntrl9"[label="Assign VGPR Negate(DataFlowTag(7))(9)"];
-                "cntrl10"[label="Sequence(10)",shape=box];
-                "cntrl11"[label="Assign VGPR Multiply(DataFlowTag(7), DataFlowTag(9))(11)"];
-                "cntrl12"[label="Sequence(12)",shape=box];
-                "cntrl13"[label="Sequence(13)",shape=box];
-                "cntrl1" -> "cntrl3"
-                "cntrl1" -> "cntrl5"
-                "cntrl2" -> "cntrl8"
-                "cntrl3" -> "cntrl2"
-                "cntrl4" -> "cntrl7"
-                "cntrl5" -> "cntrl4"
-                "cntrl6" -> "cntrl10"
-                "cntrl6" -> "cntrl12"
-                "cntrl7" -> "cntrl6"
-                "cntrl8" -> "cntrl6"
-                "cntrl9" -> "cntrl13"
-                "cntrl10" -> "cntrl9"
-                "cntrl12" -> "cntrl11"
-                "cntrl13" -> "cntrl11"
-                }
-                "coord1" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
-                "coord2" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
-                "coord4" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
-                "coord5" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
-                "coord7" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
-                "coord9" -> "cntrl9" [style=dotted,weight=0,arrowsize=0]
-                "coord11" -> "cntrl11" [style=dotted,weight=0,arrowsize=0]
-             }).";
+        digraph {
+        "coord1"[label="User{CommandArgument(Load_Tiled_0_extent)}(1)"];
+        "coord2"[label="SubDimension{0, CommandArgument(Load_Tiled_0_size_0)}(2)"];
+        "coord3"[label="SubDimension{1, CommandArgument(Load_Tiled_0_size_1)}(3)"];
+        "coord4"[label="MacroTile{64,64}(4)"];
+        "coord5"[label="Split(5)",shape=box];
+        "coord6"[label="ConstructMacroTile(6)",shape=box];
+        "coord7"[label="DataFlow(7)",shape=box];
+        "coord8"[label="User{CommandArgument(Load_Tiled_1_extent)}(8)"];
+        "coord9"[label="SubDimension{0, CommandArgument(Load_Tiled_1_size_0)}(9)"];
+        "coord10"[label="SubDimension{1, CommandArgument(Load_Tiled_1_size_1)}(10)"];
+        "coord11"[label="MacroTile{64,64}(11)"];
+        "coord12"[label="Split(12)",shape=box];
+        "coord13"[label="ConstructMacroTile(13)",shape=box];
+        "coord14"[label="DataFlow(14)",shape=box];
+        "coord15"[label="MacroTile{64,64}(15)"];
+        "coord16"[label="DataFlow(16)",shape=box];
+        "coord17"[label="SubDimension{0, NA}(17)"];
+        "coord18"[label="SubDimension{1, NA}(18)"];
+        "coord19"[label="User{CommandArgument(Store_Tiled_2_extent)}(19)"];
+        "coord20"[label="DestructMacroTile(20)",shape=box];
+        "coord21"[label="Join(21)",shape=box];
+        "coord22"[label="DataFlow(22)",shape=box];
+        "coord1" -> "coord5"
+        "coord1" -> "coord7"
+        "coord2" -> "coord6"
+        "coord3" -> "coord6"
+        "coord4" -> "coord16"
+        "coord5" -> "coord2"
+        "coord5" -> "coord3"
+        "coord6" -> "coord4"
+        "coord7" -> "coord4"
+        "coord8" -> "coord12"
+        "coord8" -> "coord14"
+        "coord9" -> "coord13"
+        "coord10" -> "coord13"
+        "coord11" -> "coord16"
+        "coord12" -> "coord9"
+        "coord12" -> "coord10"
+        "coord13" -> "coord11"
+        "coord14" -> "coord11"
+        "coord15" -> "coord20"
+        "coord15" -> "coord22"
+        "coord16" -> "coord15"
+        "coord17" -> "coord21"
+        "coord18" -> "coord21"
+        "coord20" -> "coord17"
+        "coord20" -> "coord18"
+        "coord21" -> "coord19"
+        "coord22" -> "coord19"
+        {
+        rank=same
+        "coord2"->"coord3"[style=invis]
+        rankdir=LR
+        }
+        {
+        rank=same
+        "coord2"->"coord3"[style=invis]
+        rankdir=LR
+        }
+        {
+        rank=same
+        "coord9"->"coord10"[style=invis]
+        rankdir=LR
+        }
+        {
+        rank=same
+        "coord9"->"coord10"[style=invis]
+        rankdir=LR
+        }
+        {
+        rank=same
+        "coord4"->"coord11"[style=invis]
+        rankdir=LR
+        }
+        {
+        rank=same
+        "coord17"->"coord18"[style=invis]
+        rankdir=LR
+        }
+        {
+        rank=same
+        "coord17"->"coord18"[style=invis]
+        rankdir=LR
+        }
+        subgraph clusterCF {label = "Control Graph";
+        "cntrl1"[label="Kernel(1)"];
+        "cntrl2"[label="LoadTiled(2)"];
+        "cntrl3"[label="Body(3)",shape=box];
+        "cntrl4"[label="LoadTiled(4)"];
+        "cntrl5"[label="Body(5)",shape=box];
+        "cntrl6"[label="TensorContraction(6)"];
+        "cntrl7"[label="Sequence(7)",shape=box];
+        "cntrl8"[label="Sequence(8)",shape=box];
+        "cntrl9"[label="StoreTiled(9)"];
+        "cntrl10"[label="Sequence(10)",shape=box];
+        "cntrl1" -> "cntrl3"
+        "cntrl1" -> "cntrl5"
+        "cntrl2" -> "cntrl7"
+        "cntrl3" -> "cntrl2"
+        "cntrl4" -> "cntrl8"
+        "cntrl5" -> "cntrl4"
+        "cntrl6" -> "cntrl10"
+        "cntrl7" -> "cntrl6"
+        "cntrl8" -> "cntrl6"
+        "cntrl10" -> "cntrl9"
+        }
+        "coord1" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
+        "coord4" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
+        "coord8" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
+        "coord11" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
+        "coord4" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
+        "coord11" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
+        "coord15" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
+        "coord15" -> "cntrl9" [style=dotted,weight=0,arrowsize=0]
+        "coord19" -> "cntrl9" [style=dotted,weight=0,arrowsize=0]
+        }).";
 
         EXPECT_EQ(NormalizedSource(expected0), NormalizedSource(kgraph0.toDOT(true)));
     }
 
-    std::shared_ptr<Command> simpleGEMMCommand()
-    {
-        auto command = std::make_shared<Command>();
-
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(DataType::Float, 2, 0))); // A
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(DataType::Float, 2, 1))); // B
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(DataType::Float, 2, 2))); // C
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Scalar(DataType::Float, 3))); // alpha
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Scalar(DataType::Float, 4))); // beta
-
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Mul(5, 0, 1))); // A * B
-
-        rocRoller::Operations::T_Execute execute;
-        execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-            rocRoller::Operations::E_Mul(6, 3, 5))); // alpha * (A * B)
-        execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-            rocRoller::Operations::E_Mul(7, 4, 2))); // beta * C
-        execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-            rocRoller::Operations::E_Add(8, 6, 7))); // alpha * (A * B) + beta * C
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(execute));
-
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Store_Tiled(DataType::Float, 2, 8))); // D
-
-        return command;
-    }
-
     TEST_F(KernelGraphTest, LowerTensor)
     {
-        auto command = simpleGEMMCommand();
-        auto kgraph0 = translate(command);
+        auto example = rocRollerTest::Graphs::GEMM<float>();
+
+        int macK  = 16;
+        int waveK = 8;
+
+        example.setTileSize(128, 256, macK);
+        example.setMFMA(32, 32, waveK, 1);
+        example.setUseLDS(true, false, false);
+
+        auto kgraph0 = example.getKernelGraph();
+        auto params  = example.getCommandParameters();
 
         std::string expected0 = R".(
         digraph {
@@ -1641,46 +1336,6 @@ namespace KernelGraphTest
              }).";
         EXPECT_EQ(NormalizedSource(expected0), NormalizedSource(kgraph0.toDOT(true)));
 
-        auto params = std::make_shared<CommandParameters>();
-
-        // output macro tile size
-        int mac_m = 128;
-        int mac_n = 256;
-        int mac_k = 16;
-
-        // Wave tile size
-        // V_MFMA_F32_32x32x8F32
-        int wave_m = 32;
-        int wave_n = 32;
-        int wave_k = 8;
-        int wave_b = 1;
-
-        auto mac_tile_A = MacroTile({mac_m, mac_k},
-                                    LayoutType::MATRIX_A,
-                                    {wave_m, wave_n, wave_k, wave_b},
-                                    MemoryType::LDS);
-        auto mac_tile_B
-            = MacroTile({mac_k, mac_n}, LayoutType::MATRIX_B, {wave_m, wave_n, wave_k, wave_b});
-        auto mac_tile_C = MacroTile(
-            {mac_m, mac_n}, LayoutType::MATRIX_ACCUMULATOR, {wave_m, wave_n, wave_k, wave_b});
-
-        params->setDimensionInfo(4, mac_tile_A);
-        params->setDimensionInfo(11, mac_tile_B);
-        params->setDimensionInfo(18, mac_tile_C);
-        params->setDimensionInfo(30, mac_tile_C);
-        params->setDimensionInfo(32, mac_tile_C);
-        params->setDimensionInfo(34, mac_tile_C);
-
-        // Workgroup size
-        uint wavefront_size   = 64;
-        uint workgroup_size_x = 2 * wavefront_size;
-        uint workgroup_size_y = 4;
-
-        uint wavetile_per_wavefront_m = wavefront_size * mac_m / wave_m / workgroup_size_x;
-        uint wavetile_per_wavefront_n = mac_n / wave_n / workgroup_size_y;
-
-        params->setWaveTilesPerWavefront(wavetile_per_wavefront_m, wavetile_per_wavefront_n);
-
         auto updateParametersTransform = std::make_shared<UpdateParameters>(params);
         auto lowerTileTransform        = std::make_shared<LowerTile>(params, m_context);
         auto lowerTensorContractionTransform
@@ -1697,7 +1352,7 @@ namespace KernelGraphTest
 
         // Verify the number of Multiply nodes in the graph after lowerTile
         auto multiplyNodes = kgraph1.control.getNodes<Multiply>().to<std::vector>();
-        EXPECT_EQ(multiplyNodes.size(), mac_k / wave_k);
+        EXPECT_EQ(multiplyNodes.size(), macK / waveK);
 
         auto kgraph_unrolled = kgraph1.transform(unrollLoopsTransform);
 
@@ -1754,43 +1409,14 @@ namespace KernelGraphTest
 
     TEST_F(KernelGraphTest, InlineIncrement)
     {
-        auto command = simpleGEMMCommand();
-        auto kgraph  = translate(command);
+        auto example = rocRollerTest::Graphs::GEMM<float>();
 
-        auto params = std::make_shared<CommandParameters>();
+        example.setTileSize(128, 256, 8);
+        example.setMFMA(32, 32, 2, 1);
+        example.setUseLDS(true, true, true);
 
-        int mac_m = 128;
-        int mac_n = 256;
-        int mac_k = 8;
-
-        int wave_m = 32;
-        int wave_n = 32;
-        int wave_k = 2;
-        int wave_b = 1;
-
-        auto mac_tile_A = MacroTile({mac_m, mac_k},
-                                    LayoutType::MATRIX_A,
-                                    {wave_m, wave_n, wave_k, wave_b},
-                                    MemoryType::LDS);
-        auto mac_tile_B = MacroTile({mac_k, mac_n},
-                                    LayoutType::MATRIX_B,
-                                    {wave_m, wave_n, wave_k, wave_b},
-                                    MemoryType::LDS);
-
-        auto mac_tile_C = MacroTile(
-            {mac_m, mac_n}, LayoutType::MATRIX_ACCUMULATOR, {wave_m, wave_n, wave_k, wave_b});
-        auto mac_tile_D = MacroTile({mac_m, mac_n},
-                                    LayoutType::MATRIX_ACCUMULATOR,
-                                    {wave_m, wave_n, wave_k, wave_b},
-                                    MemoryType::LDS);
-
-        params->setDimensionInfo(4, mac_tile_A);
-        params->setDimensionInfo(11, mac_tile_B);
-        params->setDimensionInfo(18, mac_tile_C);
-        params->setDimensionInfo(28, mac_tile_C);
-        params->setDimensionInfo(30, mac_tile_C);
-        params->setDimensionInfo(32, mac_tile_C);
-        params->setDimensionInfo(34, mac_tile_D);
+        auto kgraph = example.getKernelGraph();
+        auto params = example.getCommandParameters();
 
         auto updateParametersTransform = std::make_shared<UpdateParameters>(params);
         auto lowerLinearTransform      = std::make_shared<LowerLinear>(m_context);
@@ -1822,281 +1448,15 @@ namespace KernelGraphTest
         EXPECT_TRUE(post1.empty());
     }
 
-    TEST_F(KernelGraphTest, TranslateTMul)
-    {
-        auto command = std::make_shared<Command>();
-
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(DataType::Float, 2, 0))); // A
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(DataType::Float, 2, 1))); // B
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Mul(2, 0, 1)));
-
-        auto kgraph0 = translate(command);
-
-        std::string expected0 = R".(
-      digraph {
-        "coord1"[label="User{CommandArgument(Load_Tiled_0_extent)}(1)"];
-        "coord2"[label="SubDimension{0, CommandArgument(Load_Tiled_0_size_0)}(2)"];
-        "coord3"[label="SubDimension{1, CommandArgument(Load_Tiled_0_size_1)}(3)"];
-        "coord4"[label="MacroTile{NA}(4)"];
-        "coord5"[label="Split(5)",shape=box];
-        "coord6"[label="ConstructMacroTile(6)",shape=box];
-        "coord7"[label="DataFlow(7)",shape=box];
-        "coord8"[label="User{CommandArgument(Load_Tiled_1_extent)}(8)"];
-        "coord9"[label="SubDimension{0, CommandArgument(Load_Tiled_1_size_0)}(9)"];
-        "coord10"[label="SubDimension{1, CommandArgument(Load_Tiled_1_size_1)}(10)"];
-        "coord11"[label="MacroTile{NA}(11)"];
-        "coord12"[label="Split(12)",shape=box];
-        "coord13"[label="ConstructMacroTile(13)",shape=box];
-        "coord14"[label="DataFlow(14)",shape=box];
-        "coord15"[label="MacroTile{NA}(15)"];
-        "coord16"[label="DataFlow(16)",shape=box];
-        "coord1" -> "coord5"
-        "coord1" -> "coord7"
-        "coord2" -> "coord6"
-        "coord3" -> "coord6"
-        "coord4" -> "coord16"
-        "coord5" -> "coord2"
-        "coord5" -> "coord3"
-        "coord6" -> "coord4"
-        "coord7" -> "coord4"
-        "coord8" -> "coord12"
-        "coord8" -> "coord14"
-        "coord9" -> "coord13"
-        "coord10" -> "coord13"
-        "coord11" -> "coord16"
-        "coord12" -> "coord9"
-        "coord12" -> "coord10"
-        "coord13" -> "coord11"
-        "coord14" -> "coord11"
-        "coord16" -> "coord15"
-        {
-        rank=same
-        "coord2"->"coord3"[style=invis]
-        rankdir=LR
-        }
-        {
-        rank=same
-        "coord2"->"coord3"[style=invis]
-        rankdir=LR
-        }
-        {
-        rank=same
-        "coord9"->"coord10"[style=invis]
-        rankdir=LR
-        }
-        {
-        rank=same
-        "coord9"->"coord10"[style=invis]
-        rankdir=LR
-        }
-        {
-        rank=same
-        "coord4"->"coord11"[style=invis]
-        rankdir=LR
-        }
-        subgraph clusterCF {label = "Control Graph";
-        "cntrl1"[label="Kernel(1)"];
-        "cntrl2"[label="LoadTiled(2)"];
-        "cntrl3"[label="Body(3)",shape=box];
-        "cntrl4"[label="LoadTiled(4)"];
-        "cntrl5"[label="Body(5)",shape=box];
-        "cntrl6"[label="TensorContraction(6)"];
-        "cntrl7"[label="Sequence(7)",shape=box];
-        "cntrl8"[label="Sequence(8)",shape=box];
-        "cntrl1" -> "cntrl3"
-        "cntrl1" -> "cntrl5"
-        "cntrl2" -> "cntrl7"
-        "cntrl3" -> "cntrl2"
-        "cntrl4" -> "cntrl8"
-        "cntrl5" -> "cntrl4"
-        "cntrl7" -> "cntrl6"
-        "cntrl8" -> "cntrl6"
-        }
-        "coord1" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
-        "coord4" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
-        "coord8" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
-        "coord11" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
-        "coord4" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
-        "coord11" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
-        "coord15" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
-          }).";
-
-        EXPECT_EQ(NormalizedSource(expected0), NormalizedSource(kgraph0.toDOT(true)));
-    }
-
-    TEST_F(KernelGraphTest, TranslateTMulB)
-    {
-        auto command = std::make_shared<Command>();
-
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(DataType::Float, 2, 0))); // A
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(DataType::Float, 2, 1))); // B
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Mul(2, 0, 1)));
-
-        auto kgraph0 = translate(command);
-
-        // macro tile sizes
-        int mac_m = 64;
-        int mac_n = 64;
-        int mac_k = 64;
-
-        int t_m = 4;
-        int t_n = 2;
-
-        auto mac_tile_0 = MacroTile({mac_m, mac_k}, MemoryType::VGPR, {t_m, t_n}); // A
-        auto mac_tile_1 = MacroTile({mac_k, mac_n}, MemoryType::VGPR, {t_m, t_n}); // B
-        auto mac_tile_2 = MacroTile({mac_m, mac_n}, MemoryType::VGPR, {t_m, t_n}); // A * B
-
-        auto params = std::make_shared<CommandParameters>();
-
-        params->setDimensionInfo(4, mac_tile_0);
-        params->setDimensionInfo(11, mac_tile_1);
-        params->setDimensionInfo(15, mac_tile_2);
-
-        auto updateParametersTransform = std::make_shared<UpdateParameters>(params);
-
-        kgraph0 = kgraph0.transform(updateParametersTransform);
-
-        std::string expected0 = R".(
-            digraph {
-        "coord1"[label="User{CommandArgument(Load_Tiled_0_extent)}(1)"];
-        "coord2"[label="SubDimension{0, CommandArgument(Load_Tiled_0_size_0)}(2)"];
-        "coord3"[label="SubDimension{1, CommandArgument(Load_Tiled_0_size_1)}(3)"];
-        "coord4"[label="MacroTile{64,64}(4)"];
-        "coord5"[label="Split(5)",shape=box];
-        "coord6"[label="ConstructMacroTile(6)",shape=box];
-        "coord7"[label="DataFlow(7)",shape=box];
-        "coord8"[label="User{CommandArgument(Load_Tiled_1_extent)}(8)"];
-        "coord9"[label="SubDimension{0, CommandArgument(Load_Tiled_1_size_0)}(9)"];
-        "coord10"[label="SubDimension{1, CommandArgument(Load_Tiled_1_size_1)}(10)"];
-        "coord11"[label="MacroTile{64,64}(11)"];
-        "coord12"[label="Split(12)",shape=box];
-        "coord13"[label="ConstructMacroTile(13)",shape=box];
-        "coord14"[label="DataFlow(14)",shape=box];
-        "coord15"[label="MacroTile{64,64}(15)"];
-        "coord16"[label="DataFlow(16)",shape=box];
-        "coord1" -> "coord5"
-        "coord1" -> "coord7"
-        "coord2" -> "coord6"
-        "coord3" -> "coord6"
-        "coord4" -> "coord16"
-        "coord5" -> "coord2"
-        "coord5" -> "coord3"
-        "coord6" -> "coord4"
-        "coord7" -> "coord4"
-        "coord8" -> "coord12"
-        "coord8" -> "coord14"
-        "coord9" -> "coord13"
-        "coord10" -> "coord13"
-        "coord11" -> "coord16"
-        "coord12" -> "coord9"
-        "coord12" -> "coord10"
-        "coord13" -> "coord11"
-        "coord14" -> "coord11"
-        "coord16" -> "coord15"
-        {
-        rank=same
-        "coord2"->"coord3"[style=invis]
-        rankdir=LR
-        }
-        {
-        rank=same
-        "coord2"->"coord3"[style=invis]
-        rankdir=LR
-        }
-        {
-        rank=same
-        "coord9"->"coord10"[style=invis]
-        rankdir=LR
-        }
-        {
-        rank=same
-        "coord9"->"coord10"[style=invis]
-        rankdir=LR
-        }
-        {
-        rank=same
-        "coord4"->"coord11"[style=invis]
-        rankdir=LR
-        }
-        subgraph clusterCF {label = "Control Graph";
-        "cntrl1"[label="Kernel(1)"];
-        "cntrl2"[label="LoadTiled(2)"];
-        "cntrl3"[label="Body(3)",shape=box];
-        "cntrl4"[label="LoadTiled(4)"];
-        "cntrl5"[label="Body(5)",shape=box];
-        "cntrl6"[label="TensorContraction(6)"];
-        "cntrl7"[label="Sequence(7)",shape=box];
-        "cntrl8"[label="Sequence(8)",shape=box];
-        "cntrl1" -> "cntrl3"
-        "cntrl1" -> "cntrl5"
-        "cntrl2" -> "cntrl7"
-        "cntrl3" -> "cntrl2"
-        "cntrl4" -> "cntrl8"
-        "cntrl5" -> "cntrl4"
-        "cntrl7" -> "cntrl6"
-        "cntrl8" -> "cntrl6"
-        }
-        "coord1" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
-        "coord4" -> "cntrl2" [style=dotted,weight=0,arrowsize=0]
-        "coord8" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
-        "coord11" -> "cntrl4" [style=dotted,weight=0,arrowsize=0]
-        "coord4" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
-        "coord11" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
-        "coord15" -> "cntrl6" [style=dotted,weight=0,arrowsize=0]
-        }
-        ).";
-
-        EXPECT_EQ(NormalizedSource(expected0), NormalizedSource(kgraph0.toDOT(true)));
-    }
-
     TEST_F(KernelGraphTest, TileAdd)
     {
-        auto command = std::make_shared<Command>();
+        auto example = rocRollerTest::Graphs::TileDoubleAdd<int>();
 
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(DataType::Int32, 2, 0))); // a
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(DataType::Int32, 2, 1))); // b
+        example.setTileSize(16, 8);
+        example.setSubTileSize(4, 2);
 
-        auto execute = rocRoller::Operations::T_Execute();
-        execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-            rocRoller::Operations::E_Add(2, 0, 0))); // a + a
-        execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-            rocRoller::Operations::E_Add(3, 1, 1))); // b + b
-        execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-            rocRoller::Operations::E_Add(4, 3, 2))); // 2a + 2b
-
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(execute));
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Store_Tiled(DataType::Int32, 2, 4))); // c
-
-        auto kgraph0 = translate(command);
-
-        int m = 16;
-        int n = 8;
-
-        int t_m = 4;
-        int t_n = 2;
-
-        auto params = std::make_shared<CommandParameters>();
-
-        auto mac_tile_0 = MacroTile({m, n}, MemoryType::LDS, {t_m, t_n});
-        auto mac_tile_1 = MacroTile({m, n}, MemoryType::VGPR, {t_m, t_n});
-        auto mac_tile_2 = MacroTile({m, n}, MemoryType::VGPR, {t_m, t_n});
-        auto mac_tile_3 = MacroTile({m, n}, MemoryType::VGPR, {t_m, t_n});
-        auto mac_tile_4 = MacroTile({m, n}, MemoryType::VGPR, {t_m, t_n});
-
-        params->setDimensionInfo(4, mac_tile_0);
-        params->setDimensionInfo(11, mac_tile_1);
-        params->setDimensionInfo(15, mac_tile_2);
-        params->setDimensionInfo(17, mac_tile_3);
-        params->setDimensionInfo(19, mac_tile_4);
+        auto params  = example.getCommandParameters(512, 512);
+        auto kgraph0 = example.getKernelGraph();
 
         auto updateParametersTransform = std::make_shared<UpdateParameters>(params);
 
@@ -2261,7 +1621,8 @@ namespace KernelGraphTest
 
     TEST_F(KernelGraphTest, Translate02)
     {
-        auto command = commonCommand();
+        auto example = rocRollerTest::Graphs::VectorAddNegSquare<int>();
+        auto command = example.getCommand();
 
         auto one = Expression::literal(1);
         m_context->kernel()->setWorkgroupSize({64, 1, 1});
@@ -2451,7 +1812,7 @@ namespace KernelGraphTest
     }
 #endif
 
-    void KernelGraphTestGPU::GPU_Translate04(bool reload)
+    void KernelGraphTestGPU::GPU_SAXPBY(bool reload)
     {
         RandomGenerator random(1263u);
 
@@ -2471,52 +1832,12 @@ namespace KernelGraphTest
         ASSERT_THAT(hipMemcpy(d_alpha.get(), &alpha, 1 * sizeof(int), hipMemcpyDefault),
                     HasHipSuccess(0));
 
-        auto command = std::make_shared<Command>();
-
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Linear(DataType::Int32, 1, 0))); // a
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Linear(DataType::Int32, 1, 1))); // b
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Scalar({DataType::Int32, PointerType::PointerGlobal},
-                                                 2))); // alpha
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Scalar(DataType::Int32, 3))); // beta
-
-        auto execute = rocRoller::Operations::T_Execute();
-        execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-            rocRoller::Operations::E_Mul(4, 0, 2))); // alpha * a
-        execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-            rocRoller::Operations::E_Mul(5, 1, 3))); // beta * b
-        execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-            rocRoller::Operations::E_Add(6, 4, 5))); // add above
-
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(execute));
-
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Store_Linear(1, 6)));
+        auto example = rocRollerTest::Graphs::VectorAdd<int>(true);
+        auto command = example.getCommand();
+        auto runtimeArgs
+            = example.getRuntimeArguments(nx, d_alpha.get(), beta, d_a.get(), d_b.get(), d_c.get());
 
         CommandKernel commandKernel(command, testKernelName());
-
-        KernelArguments runtimeArgs;
-
-        runtimeArgs.append("user0", d_a.get());
-        runtimeArgs.append("d_a_limit", nx);
-        runtimeArgs.append("d_a_size", nx);
-        runtimeArgs.append("d_a_stride", (size_t)1);
-
-        runtimeArgs.append("user1", d_b.get());
-        runtimeArgs.append("d_b_limit", nx);
-        runtimeArgs.append("d_b_size", nx);
-        runtimeArgs.append("d_b_stride", (size_t)1);
-
-        runtimeArgs.append("user2", d_alpha.get());
-
-        runtimeArgs.append("user3", beta);
-
-        runtimeArgs.append("user6", d_c.get());
-        runtimeArgs.append("d_c_limit", nx);
-        runtimeArgs.append("d_c_stride", (size_t)1);
 
         commandKernel.launchKernel(runtimeArgs.runtimeArguments());
 
@@ -2529,23 +1850,20 @@ namespace KernelGraphTest
             commandKernel.launchKernel(runtimeArgs.runtimeArguments());
         }
 
-        std::vector<int> r(nx), x(nx);
+        std::vector<int> r(nx);
 
         ASSERT_THAT(hipMemcpy(r.data(), d_c.get(), nx * sizeof(int), hipMemcpyDefault),
                     HasHipSuccess(0));
 
         // reference solution
-        for(size_t i = 0; i < nx; ++i)
-            x[i] = alpha * a[i] + beta * b[i];
-
-        double rnorm = relativeNorm(r, x);
+        double rnorm = relativeNorm(r, example.referenceSolution(alpha, beta, a, b));
 
         ASSERT_LT(rnorm, 1.e-12);
 
         if(reload)
         {
             // load, using bad kernel name
-            EXPECT_THROW(commandKernel.loadKernelFromAssembly(assemblyFileName, "Translate04_BAD"),
+            EXPECT_THROW(commandKernel.loadKernelFromAssembly(assemblyFileName, "SAXPBY_BAD"),
                          FatalError);
 
             // load, using non-existant file
@@ -2557,27 +1875,27 @@ namespace KernelGraphTest
         }
     }
 
-    TEST_F(KernelGraphTestGPU, GPU_Translate04)
+    TEST_F(KernelGraphTestGPU, GPU_SAXPBY)
     {
-        GPU_Translate04(false);
+        GPU_SAXPBY(false);
     }
 
-    TEST_F(KernelGraphTestGPU, GPU_Translate04Debug)
+    TEST_F(KernelGraphTestGPU, GPU_SAXPBYDebug)
     {
         // Make sure Debug mode doesn't introduce bad pointer
         // references in observers
         auto settings = Settings::getInstance();
         settings->set(Settings::LogLvl, LogLevel::Debug);
-        GPU_Translate04(false);
+        GPU_SAXPBY(false);
         settings->reset();
     }
 
-    TEST_F(KernelGraphTestGPU, GPU_Translate04LoadAssembly)
+    TEST_F(KernelGraphTestGPU, GPU_SAXPBYLoadAssembly)
     {
-        GPU_Translate04(true);
+        GPU_SAXPBY(true);
     }
 
-    TEST_F(KernelGraphTestGPU, GPU_Translate05)
+    TEST_F(KernelGraphTestGPU, GPU_LinearCopy)
     {
         auto command = std::make_shared<rocRoller::Command>();
 
@@ -2587,7 +1905,7 @@ namespace KernelGraphTest
         Operations::T_Store_Linear store_C(1, 0);
         command->addOperation(std::make_shared<Operations::Operation>(std::move(store_C)));
 
-        CommandKernel commandKernel(command, "Translate05");
+        CommandKernel commandKernel(command, "LinearCopy");
 
         size_t nx = 64;
 
@@ -2625,26 +1943,18 @@ namespace KernelGraphTest
     template <typename T>
     void CopyStrideOverride(std::shared_ptr<CommandKernel>& commandKernel, bool override = false)
     {
-        size_t nx  = 256; // tensor size x
-        size_t ny  = 128; // tensor size y
-        int    m   = 16; // macro tile size x
-        int    n   = 4; // macro tile size y
-        int    t_m = 4; // thread tile size x
-        int    t_n = 2; // thread tile size y
+        auto example = rocRollerTest::Graphs::TileCopy<T>();
 
-        unsigned int workgroup_size_x = 4;
-        unsigned int workgroup_size_y = 2;
-        auto         dataType         = TypeInfo<T>::Var.dataType;
-        auto         typeName         = TypeInfo<T>::Name();
+        example.setTileSize(16, 4);
+        example.setSubTileSize(4, 2);
 
-        AssertFatal(m > 0 && n > 0 && t_m > 0 && t_n > 0
-                        && (size_t)m * n == t_m * t_n * workgroup_size_x * workgroup_size_y,
-                    "MacroTile size mismatch");
+        if(override)
+        {
+            example.setLiteralStrides({(size_t)0, (size_t)1});
+        }
 
-        // each workgroup will get one tile; since workgroup_size matches m * n
-        auto NX = std::make_shared<Expression::Expression>(nx / t_m); // number of work items x
-        auto NY = std::make_shared<Expression::Expression>(ny / t_n); // number of work items y
-        auto NZ = std::make_shared<Expression::Expression>(1u); // number of work items z
+        size_t nx = 256;
+        size_t ny = 128;
 
         RandomGenerator random(193674u);
         auto            ax = static_cast<T>(-100.);
@@ -2652,58 +1962,16 @@ namespace KernelGraphTest
         auto            a  = random.vector<T>(nx * ny, ax, ay);
 
         std::vector<T> r(nx * ny, 0.);
-        std::vector<T> x(nx * ny, 0.);
 
         auto d_a = make_shared_device(a);
         auto d_b = make_shared_device<T>(nx * ny);
 
-        auto command = std::make_shared<Command>();
-
-        if(override)
-        {
-            command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-                rocRoller::Operations::T_Load_Tiled(dataType, 2, 0, {(size_t)0, (size_t)1})));
-        }
-        else
-        {
-            command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-                rocRoller::Operations::T_Load_Tiled(dataType, 2, 0)));
-        }
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Store_Tiled(dataType, 2, 0)));
-
-        KernelArguments runtimeArgs;
-
-        runtimeArgs.append("a", d_a.get());
-        runtimeArgs.append("d_a_limit", (size_t)nx * ny);
-        runtimeArgs.append("d_a_size_0", (size_t)nx);
-        runtimeArgs.append("d_a_size_1", (size_t)ny);
-        runtimeArgs.append("d_a_stride_0", (size_t)ny);
-        runtimeArgs.append("d_a_stride_1", (size_t)1);
-
-        runtimeArgs.append("b", d_b.get());
-        runtimeArgs.append("d_b_limit", (size_t)nx * ny);
-        runtimeArgs.append("d_b_stride_0", (size_t)ny);
-        runtimeArgs.append("d_b_stride_1", (size_t)1);
-
-        auto params = std::make_shared<CommandParameters>();
-        params->setManualKernelDimension(2);
-
-        auto mac_tile = MacroTile({m, n}, MemoryType::VGPR, {t_m, t_n});
-        params->setDimensionInfo(4, mac_tile);
-
-        if(override)
-        {
-            auto storeColStrideOverride   = SubDimension(1);
-            storeColStrideOverride.stride = Expression::literal(1u);
-            params->setDimensionInfo(9, storeColStrideOverride);
-        }
-
-        params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
-        params->setManualWorkitemCount({NX, NY, NZ});
+        auto command     = example.getCommand();
+        auto params      = example.getCommandParameters(nx, ny);
+        auto runtimeArgs = example.getRuntimeArguments(nx, ny, d_a.get(), d_b.get());
 
         std::string colName    = (override) ? "ColOverride" : "";
-        std::string kernelName = "TensorTileCopy" + colName + typeName;
+        std::string kernelName = "TensorTileCopy" + colName + TypeInfo<T>::Name();
 
         commandKernel = std::make_shared<CommandKernel>(command, kernelName, params);
         commandKernel->launchKernel(runtimeArgs.runtimeArguments());
@@ -2711,13 +1979,7 @@ namespace KernelGraphTest
         ASSERT_THAT(hipMemcpy(r.data(), d_b.get(), nx * ny * sizeof(T), hipMemcpyDefault),
                     HasHipSuccess(0));
 
-        // reference solution
-        for(size_t i = 0; i < nx * ny; ++i)
-        {
-            x[i] = a[i];
-        }
-
-        double rnorm = relativeNorm(r, x);
+        double rnorm = relativeNorm(r, example.referenceSolution(a));
 
         ASSERT_LT(rnorm, 1.e-12);
     }
@@ -2803,169 +2065,28 @@ namespace KernelGraphTest
         EXPECT_EQ(numWrite, 4);
     }
 
-    TEST_F(KernelGraphTestGPU, GPU_TensorTileCopyLDS)
-    {
-        size_t nx  = 128; // tensor size x
-        size_t ny  = 256; // tensor size y
-        int    m   = 8; // macro tile size x
-        int    n   = 16; // macro tile size y
-        int    t_m = 2; // thread tile size x
-        int    t_n = 8; // thread tile size y
-
-        unsigned int workgroup_size_x = 4;
-        unsigned int workgroup_size_y = 2;
-
-        AssertFatal(m > 0 && n > 0 && t_m > 0 && t_n > 0
-                        && (size_t)m * n == t_m * t_n * workgroup_size_x * workgroup_size_y,
-                    "MacroTile size mismatch");
-
-        // each workgroup will get one tile; since workgroup_size matches m * n
-        auto NX = std::make_shared<Expression::Expression>(nx / t_m); // number of work items x
-        auto NY = std::make_shared<Expression::Expression>(ny / t_n); // number of work items y
-        auto NZ = std::make_shared<Expression::Expression>(1u); // number of work items z
-
-        RandomGenerator  random(193674u);
-        auto             a = random.vector<int>(nx * ny, -100, 100);
-        std::vector<int> r(nx * ny, 0);
-        std::vector<int> x(nx * ny, 0);
-
-        auto d_a = make_shared_device(a);
-        auto d_b = make_shared_device<int>(nx * ny);
-
-        auto command = std::make_shared<Command>();
-
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(DataType::Int32, 2, 0)));
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Store_Tiled(DataType::Int32, 2, 0)));
-
-        KernelArguments runtimeArgs;
-
-        runtimeArgs.append("a", d_a.get());
-        runtimeArgs.append("d_a_limit", (size_t)nx * ny);
-        runtimeArgs.append("d_a_size_0", (size_t)nx);
-        runtimeArgs.append("d_a_size_1", (size_t)ny);
-        runtimeArgs.append("d_a_stride_0", (size_t)ny);
-        runtimeArgs.append("d_a_stride_1", (size_t)1);
-
-        runtimeArgs.append("b", d_b.get());
-        runtimeArgs.append("d_b_limit", (size_t)nx * ny);
-        runtimeArgs.append("d_b_stride_0", (size_t)ny);
-        runtimeArgs.append("d_b_stride_1", (size_t)1);
-
-        auto params = std::make_shared<CommandParameters>();
-        params->setManualKernelDimension(2);
-
-        auto mac_tile = MacroTile({m, n}, MemoryType::VGPR, {t_m, t_n});
-        params->setDimensionInfo(4, mac_tile);
-
-        params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
-        params->setManualWorkitemCount({NX, NY, NZ});
-
-        CommandKernel commandKernel(command, "TensorTileCopy", params);
-        commandKernel.launchKernel(runtimeArgs.runtimeArguments());
-
-        ASSERT_THAT(hipMemcpy(r.data(), d_b.get(), nx * ny * sizeof(int), hipMemcpyDefault),
-                    HasHipSuccess(0));
-
-        // reference solution
-        for(size_t i = 0; i < nx * ny; ++i)
-        {
-            x[i] = a[i];
-        }
-
-        double rnorm = relativeNorm(r, x);
-
-        ASSERT_LT(rnorm, 1.e-12);
-    }
-
     TEST_F(KernelGraphTestGPU, GPU_TensorTileAdd)
     {
-        size_t nx  = 256; // tensor size x
-        size_t ny  = 512; // tensor size y
-        int    m   = 8; // macro tile size x
-        int    n   = 64; // macro tile size y
-        int    t_m = 2; // thread tile size x
-        int    t_n = 8; // thread tile size y
-
-        uint workgroup_size_x = 4;
-        uint workgroup_size_y = 8;
-
-        AssertFatal(m > 0 && n > 0 && t_m > 0 && t_n > 0
-                        && (size_t)m * n == t_m * t_n * workgroup_size_x * workgroup_size_y,
-                    "MacroTile size mismatch");
-
-        // each workgroup will get one tile; since workgroup_size matches m * n
-        auto NX = std::make_shared<Expression::Expression>(nx / t_m); // number of work items x
-        auto NY = std::make_shared<Expression::Expression>(ny / t_n); // number of work items y
-        auto NZ = std::make_shared<Expression::Expression>(1u); // number of work items z
+        size_t nx = 256; // tensor size x
+        size_t ny = 512; // tensor size y
 
         RandomGenerator random(129674u);
-        auto            a = random.vector<int>(nx * ny, -100, 100);
-        auto            b = random.vector<int>(nx * ny, -100, 100);
-        auto            r = random.vector<int>(nx * ny, -100, 100);
-        auto            x = random.vector<int>(nx * ny, -100, 100);
+
+        auto a = random.vector<int>(nx * ny, -100, 100);
+        auto b = random.vector<int>(nx * ny, -100, 100);
+        auto r = random.vector<int>(nx * ny, -100, 100);
 
         auto d_a = make_shared_device(a);
         auto d_b = make_shared_device(b);
         auto d_c = make_shared_device<int>(nx * ny);
 
-        auto command = std::make_shared<Command>();
+        auto example = rocRollerTest::Graphs::TileDoubleAdd<int>();
+        example.setTileSize(8, 64);
+        example.setSubTileSize(2, 8);
 
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(DataType::Int32, 2, 0))); // a
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(DataType::Int32, 2, 1))); // b
-
-        auto execute = rocRoller::Operations::T_Execute();
-        execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-            rocRoller::Operations::E_Add(2, 0, 0))); // a + a
-        execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-            rocRoller::Operations::E_Add(3, 1, 1))); // b + b
-        execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-            rocRoller::Operations::E_Add(4, 3, 2))); // 2a + 2b
-
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(execute));
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Store_Tiled(DataType::Int32, 2, 4))); // c
-
-        KernelArguments runtimeArgs;
-
-        // tiled?
-        runtimeArgs.append("user0", d_a.get());
-        runtimeArgs.append("d_a_limit", (size_t)nx * ny);
-        runtimeArgs.append("d_a_size_0", (size_t)nx);
-        runtimeArgs.append("d_a_size_1", (size_t)ny);
-        runtimeArgs.append("d_a_stride_0", (size_t)ny);
-        runtimeArgs.append("d_a_stride_1", (size_t)1);
-
-        runtimeArgs.append("user1", d_b.get());
-        runtimeArgs.append("d_b_limit", (size_t)nx * ny);
-        runtimeArgs.append("d_b_size_0", (size_t)nx);
-        runtimeArgs.append("d_b_size_1", (size_t)ny);
-        runtimeArgs.append("d_b_stride_0", (size_t)ny);
-        runtimeArgs.append("d_b_stride_1", (size_t)1);
-
-        runtimeArgs.append("user2", d_c.get());
-        runtimeArgs.append("d_c_limit", (size_t)nx * ny);
-        runtimeArgs.append("d_c_stride_0", (size_t)ny);
-        runtimeArgs.append("d_c_stride_1", (size_t)1);
-
-        auto params = std::make_shared<CommandParameters>();
-        params->setManualKernelDimension(2);
-
-        // TODO: Add a "fill" operation on the kernel graph to propagate tile sizes where appropriate
-        auto mac_tile_lds  = MacroTile({m, n}, MemoryType::LDS, {t_m, t_n});
-        auto mac_tile_vgpr = MacroTile({m, n}, MemoryType::VGPR, {t_m, t_n});
-
-        params->setDimensionInfo(4, mac_tile_lds);
-        params->setDimensionInfo(11, mac_tile_vgpr);
-        params->setDimensionInfo(15, mac_tile_vgpr);
-        params->setDimensionInfo(17, mac_tile_vgpr);
-        params->setDimensionInfo(19, mac_tile_vgpr);
-
-        params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
-        params->setManualWorkitemCount({NX, NY, NZ});
+        auto command     = example.getCommand();
+        auto runtimeArgs = example.getRuntimeArguments(nx, ny, d_a.get(), d_b.get(), d_c.get());
+        auto params      = example.getCommandParameters(nx, ny);
 
         CommandKernel commandKernel(command, "TensorTileAdd", params);
         commandKernel.launchKernel(runtimeArgs.runtimeArguments());
@@ -2974,117 +2095,9 @@ namespace KernelGraphTest
                     HasHipSuccess(0));
 
         // reference solution
-        for(size_t i = 0; i < nx * ny; ++i)
-        {
-            x[i] = a[i] + a[i] + b[i] + b[i];
-        }
-
-        double rnorm = relativeNorm(r, x);
+        double rnorm = relativeNorm(r, example.referenceSolution(a, b));
 
         ASSERT_LT(rnorm, 1.e-12);
-    }
-
-    TEST_F(KernelGraphTestGPU, GPU_TensorTileScale)
-    {
-        // matrix size: A is MxK; B is KxN; D is MxN
-        int M = 1024;
-        int N = 1024;
-
-        // output macro tile size
-        int mac_m = 64;
-        int mac_n = 64;
-
-        AssertFatal(M % mac_m == 0, "MacroTile size mismatch (M)");
-        AssertFatal(N % mac_n == 0, "MacroTile size mismatch (N)");
-
-        // wave tile sizes
-        int wave_m = 32;
-        int wave_n = 32;
-        int wave_k = 2;
-        int wave_b = 1;
-
-        uint workgroup_size_x = 256;
-        uint workgroup_size_y = 1;
-
-        // one macro tile per workgroup
-        uint num_workgroup_x = M / mac_m;
-        uint num_workgroup_y = N / mac_n;
-
-        auto NX = std::make_shared<Expression::Expression>(num_workgroup_x * workgroup_size_x);
-        auto NY = std::make_shared<Expression::Expression>(num_workgroup_y * workgroup_size_y);
-        auto NZ = std::make_shared<Expression::Expression>(1u);
-
-        RandomGenerator random(61u);
-
-        auto A = random.vector<float>(M * N, -1.f, 1.f);
-
-        std::vector<float> B = {2.12f};
-
-        auto d_A = make_shared_device(A);
-        auto d_B = make_shared_device(B);
-        auto d_D = make_shared_device<float>(M * N);
-
-        auto command = std::make_shared<Command>();
-
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Tiled(DataType::Float, 2, 0))); // A
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Load_Scalar({DataType::Float, PointerType::PointerGlobal},
-                                                 1))); // B
-
-        auto execute = rocRoller::Operations::T_Execute();
-        execute.addXOp(std::make_shared<rocRoller::Operations::XOp>(
-            rocRoller::Operations::E_Mul(2, 0, 1))); // D = B * A
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(execute));
-
-        command->addOperation(std::make_shared<rocRoller::Operations::Operation>(
-            rocRoller::Operations::T_Store_Tiled(DataType::Float, 2, 2))); // D
-
-        KernelArguments runtimeArgs;
-
-        // tiled?
-        runtimeArgs.append("A", d_A.get());
-        runtimeArgs.append("d_a_limit", (size_t)M * N);
-        runtimeArgs.append("d_a_size_0", (size_t)M);
-        runtimeArgs.append("d_a_size_1", (size_t)N);
-        runtimeArgs.append("d_a_stride_0", (size_t)1);
-        runtimeArgs.append("d_a_stride_1", (size_t)M);
-
-        runtimeArgs.append("B", d_B.get());
-
-        runtimeArgs.append("D", d_D.get());
-        runtimeArgs.append("d_d_limit", (size_t)M * N);
-        runtimeArgs.append("d_d_stride_0", (size_t)1);
-        runtimeArgs.append("d_d_stride_1", (size_t)M);
-
-        auto params = std::make_shared<CommandParameters>();
-        params->setManualKernelDimension(2);
-
-        auto mac_tile = MacroTile(
-            {mac_m, mac_n}, LayoutType::MATRIX_ACCUMULATOR, {wave_m, wave_n, wave_k, wave_b});
-
-        params->setDimensionInfo(4, mac_tile);
-        params->setDimensionInfo(11, mac_tile);
-
-        params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
-        params->setManualWorkitemCount({NX, NY, NZ});
-
-        auto postParams = std::make_shared<CommandParameters>();
-        postParams->setManualWavefrontCount({2u, 2u});
-
-        CommandKernel commandKernel(command, "BA", params, postParams);
-        commandKernel.launchKernel(runtimeArgs.runtimeArguments());
-
-        std::vector<float> D(M * N, 0.f);
-        ASSERT_THAT(hipMemcpy(D.data(), d_D.get(), M * N * sizeof(float), hipMemcpyDefault),
-                    HasHipSuccess(0));
-
-        std::vector<float> c_D(M * N, 0.f);
-        for(size_t i = 0; i < c_D.size(); ++i)
-            c_D[i] = B[0] * A[i];
-
-        double rnorm = relativeNorm(D, c_D);
-        ASSERT_LT(rnorm, 2.e-6);
     }
 
     TEST_F(KernelGraphTest, CleanExpression)
@@ -3110,7 +2123,8 @@ namespace KernelGraphTest
 
     TEST_F(KernelGraphTest, CleanArguments)
     {
-        auto command = commonCommand();
+        auto example = rocRollerTest::Graphs::VectorAddNegSquare<int>();
+        auto command = example.getCommand();
 
         m_context->kernel()->addCommandArguments(command->getArguments());
 
@@ -3125,16 +2139,16 @@ namespace KernelGraphTest
 
         auto dot = kgraph.toDOT();
         EXPECT_THAT(dot, Not(HasSubstr("SubDimension{0, CommandArgument(Load_Linear_0_size_0)}")));
-        EXPECT_THAT(dot, Not(HasSubstr("SubDimension{0, CommandArgument(Load_Linear_2_size_0)}")));
+        EXPECT_THAT(dot, Not(HasSubstr("SubDimension{0, CommandArgument(Load_Linear_1_size_0)}")));
         EXPECT_THAT(
             dot, Not(HasSubstr("SubDimension{0, Linear{CommandArgument(Load_Linear_0_size_0)}")));
         EXPECT_THAT(
-            dot, Not(HasSubstr("SubDimension{0, Linear{CommandArgument(Load_Linear_2_size_0)}")));
+            dot, Not(HasSubstr("SubDimension{0, Linear{CommandArgument(Load_Linear_1_size_0)}")));
 
         EXPECT_THAT(dot, HasSubstr("SubDimension{0, Load_Linear_0_size_0}"));
-        EXPECT_THAT(dot, HasSubstr("SubDimension{0, Load_Linear_2_size_0}"));
+        EXPECT_THAT(dot, HasSubstr("SubDimension{0, Load_Linear_1_size_0}"));
         EXPECT_THAT(dot, HasSubstr("Linear{Load_Linear_0_size_0}"));
-        EXPECT_THAT(dot, HasSubstr("Linear{Load_Linear_2_size_0}"));
+        EXPECT_THAT(dot, HasSubstr("Linear{Load_Linear_1_size_0}"));
     }
 
     TEST_F(KernelGraphTest, Basic)
@@ -3560,43 +2574,14 @@ namespace KernelGraphTest
 
     TEST_F(KernelGraphTest, GEMMWithScratch)
     {
-        auto command = simpleGEMMCommand();
-        auto kgraph  = translate(command);
+        auto example = rocRollerTest::Graphs::GEMM<float>();
 
-        auto params = std::make_shared<CommandParameters>();
+        example.setTileSize(128, 256, 8);
+        example.setMFMA(32, 32, 2, 1);
+        example.setUseLDS(true, true, true);
 
-        int mac_m = 128;
-        int mac_n = 256;
-        int mac_k = 8;
-
-        int wave_m = 32;
-        int wave_n = 32;
-        int wave_k = 2;
-        int wave_b = 1;
-
-        auto mac_tile_A = MacroTile({mac_m, mac_k},
-                                    LayoutType::MATRIX_A,
-                                    {wave_m, wave_n, wave_k, wave_b},
-                                    MemoryType::LDS);
-        auto mac_tile_B = MacroTile({mac_k, mac_n},
-                                    LayoutType::MATRIX_B,
-                                    {wave_m, wave_n, wave_k, wave_b},
-                                    MemoryType::LDS);
-
-        auto mac_tile_C = MacroTile(
-            {mac_m, mac_n}, LayoutType::MATRIX_ACCUMULATOR, {wave_m, wave_n, wave_k, wave_b});
-        auto mac_tile_D = MacroTile({mac_m, mac_n},
-                                    LayoutType::MATRIX_ACCUMULATOR,
-                                    {wave_m, wave_n, wave_k, wave_b},
-                                    MemoryType::LDS);
-
-        params->setDimensionInfo(4, mac_tile_A);
-        params->setDimensionInfo(11, mac_tile_B);
-        params->setDimensionInfo(18, mac_tile_C);
-        params->setDimensionInfo(28, mac_tile_C);
-        params->setDimensionInfo(30, mac_tile_C);
-        params->setDimensionInfo(32, mac_tile_C);
-        params->setDimensionInfo(34, mac_tile_D);
+        auto kgraph = example.getKernelGraph();
+        auto params = example.getCommandParameters();
 
         m_context->kernelOptions().enableScratch = true;
 

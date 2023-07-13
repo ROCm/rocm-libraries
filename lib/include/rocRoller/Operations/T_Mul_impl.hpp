@@ -10,7 +10,7 @@ namespace rocRoller
         {
         }
 
-        inline void T_Mul::setCommand(std::shared_ptr<Command> command)
+        inline void T_Mul::setCommand(CommandPtr command)
         {
             m_command = command;
         }

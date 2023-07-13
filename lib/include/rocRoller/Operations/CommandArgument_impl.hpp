@@ -10,11 +10,11 @@
 
 namespace rocRoller
 {
-    inline CommandArgument::CommandArgument(std::shared_ptr<Command> com,
-                                            VariableType             variableType,
-                                            size_t                   offset,
-                                            DataDirection            direction,
-                                            std::string              name)
+    inline CommandArgument::CommandArgument(CommandPtr    com,
+                                            VariableType  variableType,
+                                            size_t        offset,
+                                            DataDirection direction,
+                                            std::string   name)
         : m_command(com)
         , m_size(variableType.getElementSize())
         , m_variableType(variableType)

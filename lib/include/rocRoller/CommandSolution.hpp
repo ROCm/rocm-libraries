@@ -94,7 +94,7 @@ namespace rocRoller
          * Create a CommandKernel based on a Command object. This will generate
          * a kernel and allow the launchKernel method to be called.
          */
-        CommandKernel(std::shared_ptr<Command> command, std::string name);
+        CommandKernel(CommandPtr command, std::string name);
 
         /**
          * Create a CommandKernel based on a Command object. This will
@@ -115,13 +115,13 @@ namespace rocRoller
         // 2. graph ids/indexing change during lowering.
         // 3. during lowering new nodes might be created that didn't before
         // 4. before code-generating you need to specify, eg, how many wavefronts
-        CommandKernel(std::shared_ptr<Command>           command,
+        CommandKernel(CommandPtr                         command,
                       std::string                        name,
                       std::shared_ptr<CommandParameters> preParams,
                       std::shared_ptr<CommandParameters> postParams    = nullptr,
                       std::shared_ptr<KernelOptions>     kernelOptions = nullptr);
 
-        CommandKernel(std::shared_ptr<Command>        command,
+        CommandKernel(CommandPtr                      command,
                       ContextPtr                      ctx,
                       KernelGraph::KernelGraph const& kernelGraph);
 
@@ -154,7 +154,7 @@ namespace rocRoller
         KernelInvocation getKernelInvocation(RuntimeArguments const& args);
 
     private:
-        std::shared_ptr<Command> m_command;
+        CommandPtr m_command;
 
         std::vector<Expression::ExpressionPtr> m_predicates;
 
@@ -183,7 +183,7 @@ namespace rocRoller
     class CommandSolution
     {
     public:
-        CommandSolution(std::shared_ptr<Command> command);
+        CommandSolution(CommandPtr command);
 
         void appendKernel(std::shared_ptr<CommandKernel> kernel);
         std::vector<std::shared_ptr<CommandKernel>> const& kernels() const;

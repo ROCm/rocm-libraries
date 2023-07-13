@@ -113,7 +113,7 @@ namespace rocRoller
 
         struct SetCommand
         {
-            SetCommand(std::shared_ptr<Command>);
+            SetCommand(CommandPtr);
 
             void call(Operation&);
 
@@ -126,7 +126,7 @@ namespace rocRoller
             void operator()(T_Execute&);
             void operator()(Nop&);
 
-            std::shared_ptr<Command> command;
+            CommandPtr command;
         };
 
         struct AllocateArguments

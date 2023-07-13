@@ -22,7 +22,7 @@ namespace rocRoller
             Load_Store_Operation();
             Load_Store_Operation(DataType dataType, int dims, int dest);
 
-            void setCommand(std::shared_ptr<Command>);
+            void setCommand(CommandPtr);
             int  getTag() const;
             void setTag(int tag);
 

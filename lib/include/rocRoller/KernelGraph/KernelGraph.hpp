@@ -78,7 +78,7 @@ namespace rocRoller
          * Resulting KernelGraph matches the Command operations
          * closely.
          */
-        KernelGraph translate(std::shared_ptr<Command>);
+        KernelGraph translate(CommandPtr);
 
         /*
          * Code generation

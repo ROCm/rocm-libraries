@@ -309,7 +309,7 @@ namespace rocRoller
             return "";
         }
 
-        inline SetCommand::SetCommand(std::shared_ptr<Command> com)
+        inline SetCommand::SetCommand(CommandPtr com)
             : command(com)
         {
         }

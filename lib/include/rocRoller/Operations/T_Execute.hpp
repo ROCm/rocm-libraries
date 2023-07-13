@@ -110,7 +110,7 @@ namespace rocRoller
         public:
             T_Execute();
             T_Execute(int starting_tag);
-            void                    setCommand(std::shared_ptr<Command> command);
+            void                    setCommand(CommandPtr command);
             std::unordered_set<int> getInputs() const;
             std::unordered_set<int> getOutputs() const;
             void                    addXOp(std::shared_ptr<XOp>);

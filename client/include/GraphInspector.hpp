@@ -24,9 +24,9 @@ namespace rocRoller
         class GraphInspector
         {
         public:
-            GraphInspector(std::shared_ptr<Command> command,
-                           CommandKernel&           kernel,
-                           KernelArguments const&   runtimeArgs);
+            GraphInspector(CommandPtr             command,
+                           CommandKernel&         kernel,
+                           KernelArguments const& runtimeArgs);
 
             /**
              * In the transformer, sets the value for all dimensions of type `DimensionType` to `val`.
@@ -111,9 +111,9 @@ namespace rocRoller
              */
             int findLoadStoreTile(std::string const& argName);
 
-            std::shared_ptr<Command> m_command;
-            CommandKernel&           m_kernel;
-            KernelArguments          m_runtimeArgs;
+            CommandPtr      m_command;
+            CommandKernel&  m_kernel;
+            KernelArguments m_runtimeArgs;
 
             KernelGraph::KernelGraph                                       m_kgraph;
             std::shared_ptr<KernelGraph::CoordinateGraph::CoordinateGraph> m_coords;
