@@ -53,16 +53,22 @@ namespace rocRoller
         Register::ValuePtr dest, Register::ValuePtr lhs, Register::ValuePtr rhs)
     {
         co_yield describeOpArgs("dest", dest, "lhs", lhs, "rhs", rhs);
+
         Register::ValuePtr l0, l1, r0, r1;
         co_yield get2DwordsScalar(l0, l1, lhs);
         co_yield get2DwordsScalar(r0, r1, rhs);
 
+        AssertFatal(l0);
+        AssertFatal(l1);
+        AssertFatal(r0);
+        AssertFatal(r1);
+
+        // See the comments in the Vector Int64 generator below for more info
+
         co_yield Register::AllocateIfNeeded(dest);
 
-        AssertFatal(l0 != nullptr);
-        AssertFatal(l1 != nullptr);
-        AssertFatal(r0 != nullptr);
-        AssertFatal(r1 != nullptr);
+        AssertFatal(dest->regType() == Register::Type::Scalar);
+        AssertFatal(dest->registerCount() == 2);
 
         // cppcheck-suppress nullPointer
         bool needLL = !l0->isZeroLiteral() && !r0->isZeroLiteral();
@@ -71,7 +77,8 @@ namespace rocRoller
         // cppcheck-suppress nullPointer
         bool needHL = !l1->isZeroLiteral() && !r0->isZeroLiteral();
 
-        int                               numHighComponents = 0;
+        int numHighComponents = 0;
+
         std::array<Register::ValuePtr, 3> highComponents
             = {dest->subset({1}),
                Register::Value::Placeholder(m_context, Register::Type::Scalar, DataType::Int32, 1),
@@ -84,13 +91,13 @@ namespace rocRoller
                                   {l0, r1},
                                   {},
                                   "most significant: low of low * high"));
-
             numHighComponents++;
         }
         else
         {
             co_yield Instruction::Comment("low of low * high ommitted due to zero input.");
         }
+
         if(needHL)
         {
             co_yield_(Instruction("s_mul_i32",
@@ -104,6 +111,7 @@ namespace rocRoller
         {
             co_yield Instruction::Comment("low of high * low ommitted due to zero input.");
         }
+
         if(needLL)
         {
             co_yield_(
@@ -168,27 +176,27 @@ namespace rocRoller
         co_yield get2DwordsVector(l0, l1, lhs);
         co_yield get2DwordsVector(r0, r1, rhs);
 
-        AssertFatal(l0 != nullptr);
-        AssertFatal(l1 != nullptr);
-        AssertFatal(r0 != nullptr);
-        AssertFatal(r1 != nullptr);
+        AssertFatal(l0);
+        AssertFatal(l1);
+        AssertFatal(r0);
+        AssertFatal(r1);
 
         // The high bits of the output consist of the sum of:
-        // high bits of low * low,
-        // low bits of low * high,
-        // low bits of high * low.
+        //   - high bits of low * low,
+        //   - low bits of low * high,
+        //   - low bits of high * low.
         //
-        // If any of these are known to be zero, that can be omitted.
+        // If any of these are known to be zero, they can be omitted.
         // If they are all zero, we still need to write a zero into the output.
         // Whichever of these is generated first will write into the destination,
         // additional required instructions will require registers to be allocated.
 
         // cppcheck-suppress nullPointer
-        bool need_ll = !l0->isZeroLiteral() && !r0->isZeroLiteral();
+        bool needLL = !l0->isZeroLiteral() && !r0->isZeroLiteral();
         // cppcheck-suppress nullPointer
-        bool need_lh = !l0->isZeroLiteral() && !r1->isZeroLiteral();
+        bool needLH = !l0->isZeroLiteral() && !r1->isZeroLiteral();
         // cppcheck-suppress nullPointer
-        bool need_hl = !l1->isZeroLiteral() && !r0->isZeroLiteral();
+        bool needHL = !l1->isZeroLiteral() && !r0->isZeroLiteral();
 
         // Multiply instructions only accept constant values, not literals.
 
@@ -218,13 +226,17 @@ namespace rocRoller
 
         co_yield Register::AllocateIfNeeded(dest);
 
-        int                               numHighComponents = 0;
+        AssertFatal(dest->regType() == Register::Type::Vector);
+        AssertFatal(dest->registerCount() == 2);
+
+        int numHighComponents = 0;
+
         std::array<Register::ValuePtr, 3> highComponents
             = {dest->subset({1}),
                Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Int32, 1),
                Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Int32, 1)};
 
-        if(need_lh)
+        if(needLH)
         {
             co_yield_(Instruction("v_mul_lo_u32",
                                   {highComponents[numHighComponents]},
@@ -238,7 +250,7 @@ namespace rocRoller
             co_yield Instruction::Comment("low of low * high omitted due to zero input.");
         }
 
-        if(need_hl)
+        if(needHL)
         {
             co_yield_(Instruction("v_mul_lo_u32",
                                   {highComponents[numHighComponents]},
@@ -252,7 +264,7 @@ namespace rocRoller
             co_yield Instruction::Comment("low of high * low omitted due to zero input.");
         }
 
-        if(need_ll)
+        if(needLL)
         {
             co_yield_(Instruction("v_mul_hi_u32",
                                   {highComponents[numHighComponents]},
