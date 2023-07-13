@@ -704,8 +704,10 @@ namespace rocRoller
         {
             TIMER(t, "KernelGraph::generate");
             auto graphPtr = std::make_shared<KernelGraph>(graph);
-            rocRoller::Log::getLogger()->debug("KernelGraph::generate(); DOT\n{}",
-                                               graphPtr->toDOT(true));
+
+            if(Settings::getInstance()->get(Settings::LogGraphs))
+                rocRoller::Log::getLogger()->debug("KernelGraph::generate(); DOT\n{}",
+                                                   graphPtr->toDOT(true));
 
             auto visitor = CodeGeneratorVisitor(graphPtr, kernel);
 

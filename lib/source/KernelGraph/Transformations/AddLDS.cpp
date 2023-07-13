@@ -724,7 +724,7 @@ namespace rocRoller
                 for(auto load : globalLoadsByUnroll[u])
                 {
                     logger->debug(
-                        "  prefetch: pre-loop global load: unroll {} user {}", 0, load.user);
+                        "  prefetch: pre-loop global load: unroll {} user {}", u, load.user);
                     auto loadChain = duplicateChain(graph, {load.globalChain});
                     preChain.push_back(loadChain);
                 }
@@ -745,7 +745,7 @@ namespace rocRoller
             }
             graph.control.addElement(Sequence(), {preChain.back()}, {preBarrier});
 
-            auto addPrefetchChains = [&](int u, int pre, int post, bool duplicate) {
+            auto addLDSPrefetchChains = [&](int u, int pre, int post, bool duplicate) {
                 std::map<int, std::vector<int>> prefetchChain;
                 for(auto [user, _ignore1, _ignore2, chain] : m_prefetchFromLDSChains[forLoop][u])
                 {
@@ -764,7 +764,7 @@ namespace rocRoller
                 }
             };
 
-            addPrefetchChains(0, preBarrier, preNOP, true);
+            addLDSPrefetchChains(0, preBarrier, preNOP, true);
             graph.control.addElement(Sequence(), {preBarrier}, {preNOP});
 
             //
@@ -777,14 +777,13 @@ namespace rocRoller
             // SetCoordinates are intact.
             for(uint u = 0; u < numUnroll; ++u)
             {
-                auto prefetchCoordExpr = literal(numUnroll - u);
-                if(numInFlight > 1)
-                    prefetchCoordExpr = literal(numUnroll + u);
+                auto prefetchGlobalU   = (u + numInFlight) % numUnroll;
+                auto prefetchCoordExpr = literal(u + numInFlight);
 
-                for(auto load : globalLoadsByUnroll[u])
+                for(auto load : globalLoadsByUnroll[prefetchGlobalU])
                 {
-                    logger->debug("  prefetch: in-loop global load {} user {} expr {}",
-                                  u,
+                    logger->debug("  prefetch: in-loop: set coordinate: load {} user {} expr {}",
+                                  prefetchGlobalU,
                                   load.user,
                                   toString(prefetchCoordExpr));
 
@@ -838,7 +837,7 @@ namespace rocRoller
                 else if(u == 0)
                 {
                     graph.control.addElement(
-                        Body(), {segmentBoundaries[0]}, {globalLoads[0].globalChain});
+                        Body(), {segmentBoundaries[u]}, {globalLoads[0].globalChain});
                 }
                 else
                 {
@@ -869,13 +868,12 @@ namespace rocRoller
 
                 // Commit in-flight to LDS
                 auto globalStores = globalLoadsByUnroll[ldsPrefetchU];
-                if(globalPrefetchU == ldsPrefetchU)
-                {
-                    graph.control.addElement(Sequence(),
-                                             {globalLoads[globalLoads.size() - 1].globalChain},
-                                             {globalStores[0].ldsChain});
-                }
-                else if(separateMemOps)
+
+                graph.control.addElement(Sequence(),
+                                         {globalLoads[globalLoads.size() - 1].globalChain},
+                                         {globalStores[0].ldsChain});
+
+                if(separateMemOps)
                 {
                     graph.control.addElement(Sequence(), {nop}, {globalStores[0].ldsChain});
                 }
@@ -910,7 +908,7 @@ namespace rocRoller
                 // Prefetch from LDS
                 if(m_prefetchFromLDSChains[forLoop].contains(ldsPrefetchU))
                 {
-                    addPrefetchChains(ldsPrefetchU, barrier, segmentBoundaries[u + 1], false);
+                    addLDSPrefetchChains(ldsPrefetchU, barrier, segmentBoundaries[u + 1], false);
                 }
                 else
                 {

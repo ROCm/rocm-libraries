@@ -82,14 +82,12 @@ namespace rocRoller::KernelGraph
 
     void ControlFlowRWTracer::trace(int start)
     {
-        m_depth++;
         auto body = m_graph.control.getOutputNodeIndices<Body>(start).to<std::set>();
         for(auto const& b : body)
         {
             m_bodyParent.insert_or_assign(b, start);
         }
         generate(body);
-        m_depth--;
     }
 
     std::vector<ControlFlowRWTracer::ReadWriteRecord>
@@ -107,7 +105,7 @@ namespace rocRoller::KernelGraph
     {
         if(control < 0 || coordinate < 0)
             return;
-        m_trace.push_back({m_depth, control, coordinate, rw});
+        m_trace.push_back({control, coordinate, rw});
     }
 
     void ControlFlowRWTracer::trackConnections(int                     control,
@@ -125,7 +123,7 @@ namespace rocRoller::KernelGraph
             if(except.contains(c.coordinate))
                 continue;
             if(m_graph.coordinates.exists(c.coordinate))
-                m_trace.push_back({m_depth, control, c.coordinate, rw});
+                m_trace.push_back({control, c.coordinate, rw});
         }
     }
 
@@ -212,8 +210,6 @@ namespace rocRoller::KernelGraph
 
     void ControlFlowRWTracer::operator()(ForLoopOp const& op, int tag)
     {
-        m_depth++;
-
         //
         // Don't examine for loop intialize or increment operations.
         //
@@ -258,20 +254,16 @@ namespace rocRoller::KernelGraph
             m_bodyParent.insert_or_assign(b, tag);
         }
         generate(body);
-
-        m_depth--;
     }
 
     void ControlFlowRWTracer::operator()(Kernel const& op, int tag)
     {
-        m_depth++;
         auto body = m_graph.control.getOutputNodeIndices<Body>(tag).to<std::set>();
         for(auto const& b : body)
         {
             m_bodyParent.insert_or_assign(b, tag);
         }
         generate(body);
-        m_depth--;
     }
 
     void ControlFlowRWTracer::operator()(LoadLDSTile const& op, int tag)
@@ -325,26 +317,22 @@ namespace rocRoller::KernelGraph
 
     void ControlFlowRWTracer::operator()(Scope const& op, int tag)
     {
-        m_depth++;
         auto body = m_graph.control.getOutputNodeIndices<Body>(tag).to<std::set>();
         for(auto const& b : body)
         {
             m_bodyParent.insert_or_assign(b, tag);
         }
         generate(body);
-        m_depth--;
     }
 
     void ControlFlowRWTracer::operator()(SetCoordinate const& op, int tag)
     {
-        m_depth++;
         auto body = m_graph.control.getOutputNodeIndices<Body>(tag).to<std::set>();
         for(auto const& b : body)
         {
             m_bodyParent.insert_or_assign(b, tag);
         }
         generate(body);
-        m_depth--;
     }
 
     void ControlFlowRWTracer::operator()(StoreLDSTile const& op, int tag)

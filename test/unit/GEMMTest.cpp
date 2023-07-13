@@ -615,6 +615,33 @@ namespace GEMMDriverTest
         }
     }
 
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMUnrollKLDSMultiPrefetch)
+    {
+        GEMMProblem gemm;
+        gemm.k         = 64 * 4 * 3;
+        gemm.loadLDSA  = true;
+        gemm.loadLDSB  = true;
+        gemm.storeLDSD = false;
+        gemm.fuseLoops = false;
+        gemm.unrollK   = 3;
+        gemm.macK      = 4;
+        gemm.prefetch  = true;
+
+        for(auto inflight : {1, 2, 3})
+        {
+            gemm.prefetchInFlight = inflight;
+            for(auto ldsFactor : {0, 2})
+            {
+                gemm.prefetchLDSFactor = ldsFactor;
+                for(auto mixMemOps : {false, true})
+                {
+                    gemm.prefetchMixMemOps = mixMemOps;
+                    basicGEMM<float>(m_context, gemm, 1.e-6);
+                }
+            }
+        }
+    }
+
     TEST_F(GEMMTestGPU, GPU_BasicGEMMFP16)
     {
         GEMMProblem gemm;

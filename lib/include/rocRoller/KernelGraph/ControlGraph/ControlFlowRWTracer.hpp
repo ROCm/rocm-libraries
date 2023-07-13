@@ -37,7 +37,7 @@ namespace rocRoller::KernelGraph
 
         struct EventRecord
         {
-            int       depth, control, coordinate;
+            int       control, coordinate;
             ReadWrite rw;
         };
 
@@ -96,7 +96,6 @@ namespace rocRoller::KernelGraph
         std::set<int>                m_completedControlNodes;
         std::vector<EventRecord>     m_trace;
         std::unordered_map<int, int> m_bodyParent;
-        int                          m_depth = 0;
         bool                         m_trackConnections;
     };
 

@@ -20,6 +20,7 @@
 #include <rocRoller/KernelGraph/Transforms/AddLDS.hpp>
 #include <rocRoller/KernelGraph/Transforms/CleanArguments.hpp>
 #include <rocRoller/KernelGraph/Transforms/CleanLoops.hpp>
+#include <rocRoller/KernelGraph/Transforms/ConnectWorkgroups.hpp>
 #include <rocRoller/KernelGraph/Transforms/FuseLoops.hpp>
 #include <rocRoller/KernelGraph/Transforms/InlineIncrements.hpp>
 #include <rocRoller/KernelGraph/Transforms/LowerLinear.hpp>
@@ -2604,6 +2605,73 @@ namespace KernelGraphTest
         };
 
         EXPECT_FALSE(empty(kgraph.coordinates.findElements(scratchCoordinatePredicate)));
+    }
+
+    TEST_F(KernelGraphTest, LDSNoDeallocateInHotLoop)
+    {
+        using GD = Graph::Direction;
+
+        auto example = rocRollerTest::Graphs::GEMM<float>();
+
+        example.setTileSize(128, 256, 8);
+        example.setMFMA(32, 32, 2, 1);
+        example.setUseLDS(true, true, true);
+
+        auto kgraph = example.getKernelGraph();
+        auto params = example.getCommandParameters();
+
+        m_context->kernelOptions().unrollK           = 3;
+        m_context->kernelOptions().prefetch          = true;
+        m_context->kernelOptions().prefetchInFlight  = 3;
+        m_context->kernelOptions().prefetchLDSFactor = 3;
+        m_context->kernelOptions().prefetchMixMemOps = true;
+
+        std::vector<GraphTransformPtr> transforms;
+        transforms.push_back(std::make_shared<UpdateParameters>(params));
+        transforms.push_back(std::make_shared<LowerLinear>(m_context));
+        transforms.push_back(std::make_shared<LowerTile>(params, m_context));
+        transforms.push_back(std::make_shared<LowerTensorContraction>(params, m_context));
+        transforms.push_back(std::make_shared<ConnectWorkgroups>());
+        transforms.push_back(std::make_shared<AddLDS>(m_context));
+        transforms.push_back(std::make_shared<AddComputeIndex>());
+        transforms.push_back(std::make_shared<AddDeallocate>());
+
+        for(auto& t : transforms)
+            kgraph = kgraph.transform(t);
+
+        auto ldsDeallocatePredicate = [&](int tag) -> bool {
+            auto maybeDeallocate = kgraph.control.get<Deallocate>(tag);
+            if(!maybeDeallocate)
+                return false;
+            auto dimTag   = kgraph.mapper.get<Dimension>(tag);
+            auto maybeLDS = kgraph.coordinates.get<LDS>(dimTag);
+            return maybeLDS.has_value();
+        };
+
+        auto forKLoopPredicate = [&](int tag) -> bool {
+            auto maybeForLoop = kgraph.control.get<ForLoopOp>(tag);
+            if(!maybeForLoop)
+                return false;
+            return maybeForLoop->loopName == rocRoller::KLOOP;
+        };
+
+        auto kernel  = *only(kgraph.control.roots());
+        auto forLoop = *only(kgraph.control.findNodes(kernel, forKLoopPredicate, GD::Downstream));
+
+        auto ldsDeallocateFromKernel
+            = kgraph.control.findNodes(kernel, ldsDeallocatePredicate, GD::Downstream)
+                  .to<std::vector>();
+
+        std::vector<int> ldsDeallocateInsideLoop;
+        for(auto body : kgraph.control.getOutputNodeIndices<Body>(forLoop))
+        {
+            auto t = kgraph.control.findNodes(body, ldsDeallocatePredicate, GD::Downstream)
+                         .to<std::vector>();
+            std::copy(t.cbegin(), t.cend(), std::back_inserter(ldsDeallocateInsideLoop));
+        }
+
+        EXPECT_FALSE(ldsDeallocateFromKernel.empty());
+        EXPECT_TRUE(ldsDeallocateInsideLoop.empty());
     }
 
     TEST_F(KernelGraphTest, WaitCountZero)

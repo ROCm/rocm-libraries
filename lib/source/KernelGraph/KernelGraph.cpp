@@ -63,9 +63,10 @@ namespace rocRoller
             KernelGraph newGraph = transformation->apply(*this);
             auto        logger   = rocRoller::Log::getLogger();
 
-            logger->debug("KernelGraph::transform: {}, post: {}",
-                          transformation->name(),
-                          newGraph.toDOT(false, transformString));
+            if(Settings::getInstance()->get(Settings::LogGraphs))
+                logger->debug("KernelGraph::transform: {}, post: {}",
+                              transformation->name(),
+                              newGraph.toDOT(false, transformString));
 
             if(checkConstraints)
             {

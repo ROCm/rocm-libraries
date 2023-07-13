@@ -120,6 +120,9 @@ namespace rocRoller
             false,
             -1};
 
+        static inline SettingsOption<bool> LogGraphs{
+            "ROCROLLER_LOG_GRAPHS", "Whether to log graphs after each lowering stage.", true, -1};
+
         /**
          * @brief Generate defaultValue for SettingsBitField based on other defaultValues.
          *

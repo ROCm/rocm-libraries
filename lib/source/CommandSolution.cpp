@@ -248,8 +248,11 @@ namespace rocRoller
         m_context->kernel()->addCommandArguments(m_command->getArguments());
 
         m_kernelGraph = KernelGraph::translate(m_command);
-        logger->debug("CommandKernel::generateKernel: post translate: {}",
-                      m_kernelGraph.toDOT(false, "CommandKernel::generateKernel: post translate"));
+
+        if(Settings::getInstance()->get(Settings::LogGraphs))
+            logger->debug(
+                "CommandKernel::generateKernel: post translate: {}",
+                m_kernelGraph.toDOT(false, "CommandKernel::generateKernel: post translate"));
 
         if(Settings::getInstance()->get(Settings::EnforceGraphConstraints))
         {
@@ -301,9 +304,6 @@ namespace rocRoller
         {
             m_kernelGraph = m_kernelGraph.transform(t);
         }
-
-        logger->debug("CommandKernel::generateKernelGraph: end: {}",
-                      m_kernelGraph.toDOT(false, "CommandKernel::generateKernelGraph: end"));
     }
 
     Generator<Instruction> CommandKernel::kernelInstructions()
