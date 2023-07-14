@@ -1,0 +1,65 @@
+body {
+  font-family: helvetica, sans-serif;
+  font-size: 14px;
+}
+
+#cy {
+  position: absolute;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+}
+
+h1 {
+  opacity: 0.5;
+  font-size: 1em;
+}
+
+#buttons {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 20;
+}
+
+#info {
+  position: absolute;
+  bottom: 0%;
+  top: 50%;
+  right: 80%;
+  left: 0;
+  z-index: 20;
+}
+
+.pushed {
+  background-color: #ccc;
+}
+
+.input-group {
+  z-index: 20;
+  position: absolute;
+  top: 0%;
+  left: 50%;
+  right: 10%;
+}
+
+.container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
+.center-top-input {
+  z-index: 999;
+  position: absolute;
+  top: 5%;
+  left: 60%;
+  right: 10%;
+  transform: translate(-50%, -50%);
+  width: 65%;
+  height: 8%;
+  font-size: 16px;
+}

@@ -586,18 +586,20 @@ add_subdirectory(docs)
 add_subdirectory(client)
 
 if (NOT CODE_ANALYSIS)
+  set(TEST_REPORT_DIR "${CMAKE_BINARY_DIR}/test_report")
+
   include(GoogleTest)
   gtest_discover_tests(rocRollerTests
-    XML_OUTPUT_DIR test_report
+    XML_OUTPUT_DIR ${TEST_REPORT_DIR}
     TEST_FILTER "-*GPU_*"
   )
   gtest_discover_tests(rocRollerTests
-    XML_OUTPUT_DIR test_report
+    XML_OUTPUT_DIR ${TEST_REPORT_DIR}
     TEST_FILTER "*GPU_*"
     PROPERTIES "LABELS" "GPU"
   )
   gtest_discover_tests(ArchGenTests
-    XML_OUTPUT_DIR test_report
+    XML_OUTPUT_DIR ${TEST_REPORT_DIR}
   )
 
   # Add script linting
@@ -613,8 +615,23 @@ if (NOT CODE_ANALYSIS)
 
   # Add rrperf unit tests
   add_test(NAME PythonTest
-           COMMAND pytest --cov-report html:python_cov_html --cov=rrperf scripts ${PYTHON_TEST_SKIP} --junit-xml=${CMAKE_BINARY_DIR}/test_report/python_tests.xml
+           COMMAND pytest --cov-report html:python_cov_html --cov=rrperf scripts ${PYTHON_TEST_SKIP} --junit-xml=${TEST_REPORT_DIR}/python_tests.xml
            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   set_tests_properties(PythonTest
                        PROPERTIES ENVIRONMENT "ROCROLLER_BUILD_DIR=${CMAKE_BINARY_DIR};PYTHONPATH=${CMAKE_SOURCE_DIR}/scripts/lib")
+
+
+  add_test(NAME GraupelInstall
+           COMMAND npm install
+           WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/utils/graupel")
+
+  set_tests_properties(GraupelInstall PROPERTIES FIXTURES_SETUP Graupel)
+
+  add_test(NAME GraupelTests
+           COMMAND npm test
+           WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/utils/graupel")
+
+  set_tests_properties(GraupelTests PROPERTIES
+                       ENVIRONMENT "JEST_JUNIT_OUTPUT_FILE=${TEST_REPORT_DIR}/graupel_tests.xml"
+                       FIXTURES_REQUIRED Graupel)
 endif()
