@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <variant>
 
 #include <rocRoller/Graph/Hypergraph.hpp>
@@ -126,6 +127,12 @@ namespace rocRoller
             requires(std::constructible_from<Operation, T>)
                 std::set<std::pair<int, int>> ambiguousNodes()
             const;
+
+            template <typename T>
+            inline std::predicate<int> auto isElemType() const
+            {
+                return [this](int x) -> bool { return get<T>(x).has_value(); };
+            }
 
         private:
             virtual void clearCache() override;

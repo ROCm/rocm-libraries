@@ -345,8 +345,7 @@ namespace rocRoller
             for(auto const& candidate : candidates)
             {
                 auto [user, direction] = getOperationTarget(candidate, kgraph);
-                auto maybeUser         = kgraph.coordinates.get<User>(user);
-                if(!maybeUser)
+                if(!kgraph.coordinates.get<User>(user).has_value())
                     continue;
                 auto [required, path]   = findRequiredCoordinates(user, direction, kgraph);
                 auto forLoopCoordinates = filterCoordinates<ForLoop>(required, kgraph);
@@ -1024,62 +1023,105 @@ namespace rocRoller
             //
             // Need to build `operationUnroll` mapping.
             //
-            // TODO: This implementation is fragile.
-            //
             // First pass: Starting from each body edge out of the
-            // ForLoop, we do a depth first search and look for
-            // SetCoordinate nodes that set the appropriate Unroll
-            // coordinate.  We then associate the unroll value from
+            // ForLoop, we do a depth first search along body edges
+            // and look for SetCoordinate nodes that set the appropriate
+            // Unroll coordinate.  We then associate the unroll value from
             // the SetCoordinate node to the starting body edge.
             //
             // Second pass, go through the body edges again, and
             // propagate the Unroll value down.
             //
-            // The fragile part here is: when two unroll bodies are
-            // connected (via some kind of Sequence edge; usually from
-            // a loop-carried-dependency) the order in which they are
-            // visited during each pass matters...
+            // Finally we need to find the unroll value for all of the multiplies.
+            // We do this by populating macroTileToCoordVal with mappings from
+            // macrotiles to unroll values by looking through all loadtiled nodes
+            // and mapping it's macrotile to the previously assigned unroll.
+            // Once we have a mapping for all the macrotiles, we assign the unroll
+            // for the multiply to the unroll of its LHS macrotile.
+            //
+            // If there are ever any nodes other than SetCoordinate, LoadTiled, and
+            // Multiply in the forloop, they will need to be handled.
             //
             for(auto [forLoop, numUnroll] : m_prefetchLoops)
             {
-                std::map<int, int> bodyTopToCoordValue;
+                auto bodies
+                    = k.control.getOutputNodeIndices<Body>(forLoop).to<std::unordered_set>();
 
                 auto forLoopCoord     = getForLoop(forLoop, k);
                 auto maybeUnrollCoord = findUnrollNeighbour(k, forLoopCoord);
                 AssertFatal(maybeUnrollCoord, "Prefetch with no unroll coordinate.");
                 auto unrollCoord = *maybeUnrollCoord;
 
-                auto bodies = k.control.getOutputNodeIndices<Body>(forLoop).to<std::set>();
+                std::map<int, int> bodyTopToCoordValue;
                 for(auto bodyTop : bodies)
                 {
-                    for(auto bodyElem : k.control.depthFirstVisit(bodyTop, GD::Downstream))
+                    for(auto bodyElem :
+                        filter(k.control.isElemType<SetCoordinate>(),
+                               k.control.depthFirstVisit(
+                                   bodyTop, k.control.isElemType<Body>(), GD::Downstream)))
                     {
-                        auto maybeSetCoordinate = k.control.get<SetCoordinate>(bodyElem);
-                        if(!maybeSetCoordinate)
-                            continue;
-
+                        auto setCoord   = *(k.control.get<SetCoordinate>(bodyElem));
                         auto coordinate = k.mapper.get<Unroll>(bodyElem);
                         if(coordinate != unrollCoord)
                             continue;
 
                         AssertFatal(
                             evaluationTimes(
-                                maybeSetCoordinate
-                                    ->value)[rocRoller::Expression::EvaluationTime::Translate],
+                                setCoord.value)[rocRoller::Expression::EvaluationTime::Translate],
                             "Unroll value should be a literal");
 
-                        auto unrollCoordValue = getUnsignedInt(evaluate(maybeSetCoordinate->value));
+                        auto unrollCoordValue = getUnsignedInt(evaluate(setCoord.value));
 
                         bodyTopToCoordValue[bodyTop] = unrollCoordValue;
+                        break;
                     }
+                    AssertFatal(bodyTopToCoordValue.count(bodyTop),
+                                "SetCoordinate must belong to an unroll.");
                 }
 
                 for(auto bodyTop : bodies)
                 {
-                    for(auto bodyElem : k.control.depthFirstVisit(bodyTop, GD::Downstream))
+                    for(auto bodyElem : k.control.depthFirstVisit(
+                            bodyTop, k.control.isElemType<Body>(), GD::Downstream))
                     {
                         operationUnroll[bodyElem] = bodyTopToCoordValue[bodyTop];
                     }
+                }
+
+                std::map<int, int> macroTileToCoordVal;
+                for(auto bodyTop : bodies)
+                {
+                    for(auto loadTag : filter(k.control.isElemType<LoadTiled>(),
+                                              k.control.depthFirstVisit(bodyTop, GD::Downstream)))
+                    {
+                        auto [macroTileTag, macroTile] = k.getDimension<MacroTile>(loadTag);
+                        if(macroTileToCoordVal.count(macroTileTag))
+                        {
+                            AssertFatal(macroTileToCoordVal.at(macroTileTag)
+                                            == operationUnroll.at(loadTag),
+                                        "All loads that belong to a given unroll must use the same "
+                                        "macrotile.");
+                        }
+                        else
+                        {
+                            macroTileToCoordVal[macroTileTag] = operationUnroll.at(loadTag);
+                        }
+                    }
+                }
+
+                for(auto multiply : filter(k.control.isElemType<Multiply>(),
+                                           k.control.depthFirstVisit(forLoop, GD::Downstream)))
+                {
+                    auto [macroTileTagLHS, macLHS] = k.getDimension<MacroTile>(
+                        multiply, Connections::typeArgument<MacroTile>(NaryArgument::LHS));
+                    auto [macroTileTagRHS, macRHS] = k.getDimension<MacroTile>(
+                        multiply, Connections::typeArgument<MacroTile>(NaryArgument::RHS));
+
+                    AssertFatal(macroTileToCoordVal.at(macroTileTagLHS)
+                                    == macroTileToCoordVal.at(macroTileTagRHS),
+                                "The LHS and RHS of a multiply must be part of the same unroll.");
+
+                    operationUnroll[multiply] = macroTileToCoordVal.at(macroTileTagLHS);
                 }
             }
 
@@ -1088,11 +1130,9 @@ namespace rocRoller
             //
             for(auto [forLoop, numUnroll] : m_prefetchLoops)
             {
-                auto forLoopEdges = k.control.getNeighbours<GD::Downstream>(forLoop).to<std::set>();
-                for(auto edge : forLoopEdges)
+                for(auto edge : filter(k.control.isElemType<Body>(),
+                                       k.control.getNeighbours<GD::Downstream>(forLoop)))
                 {
-                    if(!k.control.get<Body>(edge))
-                        continue;
                     auto node = *only(k.control.getNeighbours<GD::Downstream>(edge));
 
                     m_prefetchUnrollBodyStarts[forLoop][operationUnroll[node]].insert(node);
@@ -1103,24 +1143,17 @@ namespace rocRoller
             //
             // Find separator edges and mark for deletion
             //
+            auto inOperationUnroll = [&](int x) -> bool { return operationUnroll.contains(x); };
             for(auto [forLoop, numUnroll] : m_prefetchLoops)
             {
-                auto bodies = k.control.getOutputNodeIndices<Body>(forLoop).to<std::set>();
-                for(auto bodyTop : bodies)
+                for(auto bodyTop : k.control.getOutputNodeIndices<Body>(forLoop))
                 {
-                    for(auto bodyElem :
-                        k.control.depthFirstVisit(bodyTop, GD::Downstream).to<std::unordered_set>())
+                    for(auto bodyElem : filter(inOperationUnroll,
+                                               k.control.depthFirstVisit(bodyTop, GD::Downstream)))
                     {
-                        if(!operationUnroll.contains(bodyElem))
-                            continue;
-
-                        auto bodyElemEdges
-                            = k.control.getNeighbours<GD::Downstream>(bodyElem).to<std::set>();
-                        for(auto edge : bodyElemEdges)
+                        for(auto edge : filter(k.control.isElemType<Sequence>(),
+                                               k.control.getNeighbours<GD::Downstream>(bodyElem)))
                         {
-                            if(!k.control.get<Sequence>(edge))
-                                continue;
-
                             auto otherElem = *only(k.control.getNeighbours<GD::Downstream>(edge));
 
                             if(operationUnroll.contains(otherElem)
@@ -1153,22 +1186,19 @@ namespace rocRoller
 
                     for(auto start : starts)
                     {
-                        for(auto elem : k.control.depthFirstVisit(start, GD::Downstream))
+                        for(auto elem : filter(k.control.isElemType<SetCoordinate>(),
+                                               k.control.depthFirstVisit(start, GD::Downstream)))
                         {
-                            auto maybeSetCoordinate = k.control.get<SetCoordinate>(elem);
-                            if(!maybeSetCoordinate)
-                                continue;
-
+                            auto setCoord   = *(k.control.get<SetCoordinate>(elem));
                             auto coordinate = k.mapper.get<Unroll>(elem);
 
                             AssertFatal(
                                 evaluationTimes(
-                                    maybeSetCoordinate
-                                        ->value)[rocRoller::Expression::EvaluationTime::Translate],
+                                    setCoord
+                                        .value)[rocRoller::Expression::EvaluationTime::Translate],
                                 "Unroll value should be a literal");
 
-                            auto unrollCoordValue
-                                = getUnsignedInt(evaluate(maybeSetCoordinate->value));
+                            auto unrollCoordValue = getUnsignedInt(evaluate(setCoord.value));
 
                             AssertFatal(coordinate != prefetchUnrollCoord);
                             logger->debug("  SetCoordinate {} Unroll {} value {}",
@@ -1208,11 +1238,10 @@ namespace rocRoller
                                 m_prefetchDelete[forLoop].insert(inEdge);
                             }
 
-                            for(auto outEdge : k.control.getNeighbours<GD::Downstream>(elem))
+                            for(auto outEdge :
+                                filter(k.control.isElemType<Sequence>(),
+                                       k.control.getNeighbours<GD::Downstream>(elem)))
                             {
-                                if(!k.control.get<Sequence>(outEdge))
-                                    continue;
-
                                 auto outNode
                                     = *only(k.control.getNeighbours<GD::Downstream>(outEdge));
 
@@ -1260,6 +1289,36 @@ namespace rocRoller
                     }
                 }
             }
+        }
+
+        ConstraintStatus AcceptablePrefetchNodes(const KernelGraph& k)
+        {
+            ConstraintStatus retval;
+
+            for(auto [forLoop, numUnroll] : findPrefetch(k))
+            {
+                for(auto bodyTop : k.control.getOutputNodeIndices<Body>(forLoop))
+                {
+                    for(auto bodyElem : k.control.depthFirstVisit(bodyTop, GD::Downstream))
+                    {
+                        if(k.control.get<Body>(bodyElem) || k.control.get<Sequence>(bodyElem)
+                           || k.control.get<SetCoordinate>(bodyElem)
+                           || k.control.get<LoadTiled>(bodyElem)
+                           || k.control.get<Multiply>(bodyElem))
+                        {
+                            continue;
+                        }
+                        retval.combine(false,
+                                       concatenate("Found unsupported node '",
+                                                   bodyElem,
+                                                   "' in forloop '",
+                                                   forLoop,
+                                                   "'."));
+                    }
+                }
+            }
+
+            return retval;
         }
     }
 }
