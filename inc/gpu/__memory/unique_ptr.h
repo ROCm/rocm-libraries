@@ -1,7 +1,7 @@
 #ifndef __GPU___MEMORY_UNIQUE_PTR_H__
 #define __GPU___MEMORY_UNIQUE_PTR_H__
 
-#include "hip/hip_runtime_api.h"
+#include "hip/hip_runtime.h"
 #include <cstddef>
 #include <type_traits>
 #include <memory>
@@ -109,6 +109,44 @@ struct _LIBGPU_TEMPLATE_VIS host_delete<_Tp[]> {
     operator()(_Up *__ptr) const _NOEXCEPT {
         static_assert(sizeof(_Up) >= 0, "cannot delete an incomplete type");
         gpu::free(const_cast<typename std::remove_const<_Up>::type *>(__ptr));
+    }
+};
+
+template <class _Tp>
+__global__ void offload_delete_kernel(_Tp *__ptr) {
+    __ptr->~_Tp();
+}
+
+// Launches a kernel which calls the destructor for the pointed to data, and queues an async free into the same stream after the kernel
+template <class _Tp>
+struct _LIBGPU_TEMPLATE_VIS offload_delete {
+    static_assert(!std::is_function<_Tp>::value, "offload_delete cannot be instantiated for function types");
+    static_assert(!std::is_array<_Tp>::value, "offload_delete cannot be instantiated for array types");
+#ifndef _LIBGPU_CXX03_LANG
+    __host__ _LIBGPU_INLINE_VISIBILITY constexpr offload_delete() _NOEXCEPT = default;
+#else
+    __host__ _LIBGPU_INLINE_VISIBILITY offload_delete() {}
+#endif
+    template <class _Up>
+    __host__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23
+    offload_delete(const offload_delete<_Up> &,
+                   typename std::enable_if<std::is_convertible<_Up *, _Tp *>::value>::type * = 0) _NOEXCEPT {}
+
+    __host__ _LIBGPU_INLINE_VISIBILITY _LIBGPU_CONSTEXPR_SINCE_CXX23 void operator()(_Tp *__ptr) const _NOEXCEPT {
+        static_assert(sizeof(_Tp) >= 0, "cannot delete an incomplete type");
+        static_assert(!std::is_void<_Tp>::value, "cannot delete an incomplete type");
+        // TODO: Clean this up. It's kind of ugly, but I can't put my finger on why or how to fix it
+        if (__ptr != nullptr)
+        {
+            hipLaunchKernelGGL(offload_delete_kernel, dim3(1), dim3(1), 0, internal::getEnqueingStream(), __ptr);
+            // TODO: figure out how to handle hipLaunchKernelGGL failures, since this function is noexcept. Maybe remove
+            // the noexcept designation?
+            // __LIBGPU_HIP_CHECK__(hipGetLastError());
+
+            // gpu::free queues an async free into the enqueuing stream, so it's guaranteed not to perform the free before
+            // offload_delete_kernel finishes. Thus we don't need to call hipStreamSynchronize
+            gpu::free(const_cast<typename std::remove_const<_Tp>::type *>(__ptr));
+        }
     }
 };
 
