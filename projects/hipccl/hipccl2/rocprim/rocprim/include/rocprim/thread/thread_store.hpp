@@ -89,12 +89,19 @@ ROCPRIM_DEVICE __forceinline__ void AsmThreadStore(void * ptr, T val)
     ROCPRIM_ASM_THREAD_STORE(cache_modifier, llvm_cache_modifier, double, uint64_t, flat_store_dwordx2, v, wait_cmd);
 
 // [HIP-CPU] MSVC: erronous inline assembly specification (Triggers error C2059: syntax error: 'volatile')
+
 #ifndef __HIP_CPU_RT__
+#if defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__)
+ROCPRIM_ASM_THREAD_STORE_GROUP(store_wb, "sc0 sc1", ""); // TODO: gfx942 validation
+ROCPRIM_ASM_THREAD_STORE_GROUP(store_cg, "sc0 sc1", "");
+ROCPRIM_ASM_THREAD_STORE_GROUP(store_wt, "sc0 sc1", "vmcnt");
+ROCPRIM_ASM_THREAD_STORE_GROUP(store_volatile, "sc0 sc1", "vmcnt");
+#else
 ROCPRIM_ASM_THREAD_STORE_GROUP(store_wb, "glc", "");
 ROCPRIM_ASM_THREAD_STORE_GROUP(store_cg, "glc slc", "");
 ROCPRIM_ASM_THREAD_STORE_GROUP(store_wt, "glc", "vmcnt");
 ROCPRIM_ASM_THREAD_STORE_GROUP(store_volatile, "glc", "vmcnt");
-
+#endif
 // TODO find correct modifiers to match these
 ROCPRIM_ASM_THREAD_STORE_GROUP(store_cs, "", "");
 #endif // __HIP_CPU_RT__
