@@ -2573,6 +2573,144 @@ namespace KernelGraphTest
                   "node 0 maps to coordinate node 0, which doesn't exist.");
     }
 
+    TEST_F(KernelGraphTestGPU, Conditional)
+    {
+        if(m_context->targetArchitecture().target().getMajorVersion() != 9
+           || m_context->targetArchitecture().target().getVersionString() == "gfx900")
+        {
+            GTEST_SKIP() << "Skipping GPU arithmetic tests for "
+                         << m_context->targetArchitecture().target().getVersionString();
+        }
+
+        rocRoller::KernelGraph::KernelGraph kgraph;
+
+        m_context->kernel()->setKernelDimensions(1);
+        m_context->kernel()->setWorkgroupSize({64, 1, 1});
+
+        auto kernel = kgraph.control.addElement(Kernel());
+        auto unit   = Expression::literal(1);
+        auto zero   = Expression::literal(0);
+        auto test   = std::make_shared<Register::Value>(
+            m_context, Register::Type::Scalar, DataType::Int32, 1);
+        test->allocateNow();
+        auto conditionalAssign = kgraph.control.addElement(
+            Assign{Register::Type::Vector, test->expression() = Expression::literal(0)});
+        kgraph.control.addElement(Body(), {kernel}, {conditionalAssign});
+
+        auto conditional = kgraph.control.addElement(
+            ConditionalOp{test->expression() < unit, "Test Conditional"});
+
+        kgraph.control.addElement(Sequence(), {conditionalAssign}, {conditional});
+
+        auto trueOp    = kgraph.control.addElement(Assign{Register::Type::Vector, unit});
+        auto trueBody  = kgraph.control.addElement(Body(), {conditional}, {trueOp});
+        auto falseOp   = kgraph.control.addElement(Assign{Register::Type::Vector, zero});
+        auto falseBody = kgraph.control.addElement(Else(), {conditional}, {falseOp});
+
+        m_context->schedule(rocRoller::KernelGraph::generate(kgraph, m_context->kernel()));
+
+        EXPECT_THAT(output(), testing::HasSubstr("s_cmp_lt_i32 s0, 1"));
+        EXPECT_THAT(output(), testing::HasSubstr("s_cbranch_scc0"));
+        EXPECT_THAT(output(), testing::HasSubstr("v_mov_b32 v0, 1"));
+        EXPECT_THAT(output(), testing::HasSubstr("v_mov_b32 v0, 0"));
+    }
+
+    TEST_F(KernelGraphTestGPU, ConditionalExecute)
+    {
+        if(m_context->targetArchitecture().target().getMajorVersion() != 9
+           || m_context->targetArchitecture().target().getVersionString() == "gfx900")
+        {
+            GTEST_SKIP() << "Skipping GPU arithmetic tests for "
+                         << m_context->targetArchitecture().target().getVersionString();
+        }
+
+        rocRoller::KernelGraph::KernelGraph kgraph;
+
+        std::vector<int> testValues = {22, 66};
+
+        auto zero  = Expression::literal(0u);
+        auto one   = Expression::literal(1u);
+        auto three = Expression::literal(3u);
+
+        auto k = m_context->kernel();
+
+        k->addArgument(
+            {"result", {DataType::Int32, PointerType::PointerGlobal}, DataDirection::WriteOnly});
+
+        k->setKernelDimensions(1);
+        k->setWorkitemCount({three, one, one});
+        k->setWorkgroupSize({1, 1, 1});
+        k->setDynamicSharedMemBytes(zero);
+        m_context->schedule(k->preamble());
+        m_context->schedule(k->prolog());
+
+        // global result
+        auto user = kgraph.coordinates.addElement(User("result"));
+        auto wg   = kgraph.coordinates.addElement(Workgroup());
+        kgraph.coordinates.addElement(PassThrough(), {wg}, {user});
+
+        // result
+        auto dstVGPR = kgraph.coordinates.addElement(VGPR());
+
+        // set result to testValues[0]
+        auto assignTrueBranch = kgraph.control.addElement(
+            Assign{Register::Type::Vector, Expression::literal(testValues[0])});
+        kgraph.mapper.connect(assignTrueBranch, dstVGPR, NaryArgument::DEST);
+
+        // set result to testValues[1]
+        auto assignFalseBranch = kgraph.control.addElement(
+            Assign{Register::Type::Vector, Expression::literal(testValues[1])});
+        kgraph.mapper.connect(assignFalseBranch, dstVGPR, NaryArgument::DEST);
+
+        auto workgroupExpr = k->workgroupIndex().at(0)->expression();
+        auto conditional
+            = kgraph.control.addElement(ConditionalOp{workgroupExpr < one, "Test Conditional"});
+
+        auto storeIndex = kgraph.control.addElement(StoreVGPR());
+        kgraph.mapper.connect<User>(storeIndex, user);
+        kgraph.mapper.connect<VGPR>(storeIndex, dstVGPR);
+
+        auto kernel = kgraph.control.addElement(Kernel());
+        kgraph.control.addElement(Body(), {kernel}, {conditional});
+        kgraph.control.addElement(Body(), {conditional}, {assignTrueBranch});
+        kgraph.control.addElement(Else(), {conditional}, {assignFalseBranch});
+        kgraph.control.addElement(Sequence(), {conditional}, {storeIndex});
+
+        m_context->schedule(rocRoller::KernelGraph::generate(kgraph, m_context->kernel()));
+
+        m_context->schedule(k->postamble());
+        m_context->schedule(k->amdgpu_metadata());
+
+        if(isLocalDevice())
+        {
+            auto d_result = make_shared_device<int>(3);
+
+            KernelArguments kargs;
+            kargs.append("result", d_result.get());
+
+            KernelInvocation kinv;
+            kinv.workitemCount = {3, 1, 1};
+            kinv.workgroupSize = {1, 1, 1};
+
+            auto executableKernel = m_context->instructions()->getExecutableKernel();
+            executableKernel->executeKernel(kargs, kinv);
+
+            std::vector<int> result(3);
+            ASSERT_THAT(
+                hipMemcpy(
+                    result.data(), d_result.get(), result.size() * sizeof(int), hipMemcpyDefault),
+                HasHipSuccess(0));
+            EXPECT_EQ(result[0], testValues[0]);
+            EXPECT_EQ(result[1], testValues[1]);
+            EXPECT_EQ(result[2], testValues[1]);
+        }
+        else
+        {
+            std::vector<char> assembledKernel = m_context->instructions()->assemble();
+            EXPECT_GT(assembledKernel.size(), 0);
+        }
+    }
+
     TEST_F(KernelGraphTest, GEMMWithScratch)
     {
         auto example = rocRollerTest::Graphs::GEMM<float>();

@@ -8,11 +8,12 @@ namespace rocRoller
     {
         struct Sequence;
         struct Body; // Of kernel, for loop, if, etc.
+        struct Else; // Alternative body for false conditional
 
         struct Initialize;
         struct ForLoopIncrement;
 
-        using ControlEdge = std::variant<Sequence, Initialize, ForLoopIncrement, Body>;
+        using ControlEdge = std::variant<Sequence, Initialize, ForLoopIncrement, Body, Else>;
 
         template <typename T>
         concept CControlEdge = std::constructible_from<ControlEdge, T>;

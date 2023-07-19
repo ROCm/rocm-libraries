@@ -75,6 +75,31 @@ namespace rocRoller
         };
 
         template <typename IO, typename Context>
+        struct MappingTraits<KernelGraph::ControlGraph::ConditionalOp, IO, Context>
+        {
+            using iot = IOTraits<IO>;
+            static void mapping(IO& io, KernelGraph::ControlGraph::ConditionalOp& op, Context&)
+            {
+                iot::mapRequired(io, "conditionName", op.conditionName);
+                iot::mapRequired(io, "condition", op.condition);
+
+                std::string conditionStr;
+                if(iot::outputting(io))
+                    conditionStr = toString(op.condition);
+
+                iot::mapRequired(io, "conditionStr", conditionStr);
+            }
+
+            static void mapping(IO& io, KernelGraph::ControlGraph::ConditionalOp& op)
+            {
+                AssertFatal((std::same_as<EmptyContext, Context>));
+
+                Context ctx;
+                mapping(io, op, ctx);
+            }
+        };
+
+        template <typename IO, typename Context>
         struct MappingTraits<KernelGraph::ControlGraph::UnrollOp, IO, Context>
         {
             using iot = IOTraits<IO>;

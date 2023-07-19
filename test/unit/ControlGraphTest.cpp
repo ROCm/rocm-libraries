@@ -373,6 +373,64 @@ namespace rocRollerTest
         EXPECT_EQ(NormalizedSource(expected), NormalizedSource(control.toDOT()));
     }
 
+    TEST(ControlGraphTest, Conditional)
+    {
+        ControlGraph control = ControlGraph();
+
+        int kernelIndex = control.addElement(Kernel());
+        int loadAIndex  = control.addElement(LoadLinear(DataType::Float));
+        int body1Index  = control.addElement(Body(), {kernelIndex}, {loadAIndex});
+        int condOp      = control.addElement(ConditionalOp());
+
+        control.addElement(Sequence(), {loadAIndex}, {condOp});
+
+        int addIndex   = control.addElement(Assign());
+        int mulIndex   = control.addElement(Assign());
+        int trueIndex  = control.addElement(Body(), {condOp}, {addIndex});
+        int falseIndex = control.addElement(Else(), {condOp}, {mulIndex});
+
+        int storeCIndex = control.addElement(StoreLinear());
+        control.addElement(Sequence(), {condOp}, {storeCIndex});
+
+        std::vector<int> root = control.roots().to<std::vector>();
+        EXPECT_EQ(1, root.size());
+        EXPECT_EQ(root[0], kernelIndex);
+
+        auto outputs = control.getOutputNodeIndices<Body>(condOp).to<std::vector>();
+        EXPECT_EQ(1, outputs.size());
+
+        auto outputs2 = control.getOutputNodeIndices<Else>(condOp).to<std::vector>();
+        EXPECT_EQ(1, outputs2.size());
+
+        std::string expected = R".(
+        digraph {
+                "1"[label="Kernel(1)"];
+                "2"[label="LoadLinear(2)"];
+                "3"[label="Body(3)",shape=box];
+                "4"[label="ConditionalOp : nullptr(4)"];
+                "5"[label="Sequence(5)",shape=box];
+                "6"[label="Assign Count nullptr(6)"];
+                "7"[label="Assign Count nullptr(7)"];
+                "8"[label="Body(8)",shape=box];
+                "9"[label="Else(9)",shape=box];
+                "10"[label="StoreLinear(10)"];
+                "11"[label="Sequence(11)",shape=box];
+                "1" -> "3"
+                "2" -> "5"
+                "3" -> "2"
+                "4" -> "8"
+                "4" -> "9"
+                "4" -> "11"
+                "5" -> "4"
+                "8" -> "6"
+                "9" -> "7"
+                "11" -> "10"
+            }
+        ).";
+
+        EXPECT_EQ(NormalizedSource(expected), NormalizedSource(control.toDOT()));
+    }
+
     TEST(ControlGraphTest, getSetCoordinates)
     {
         KernelGraph::KernelGraph kg;

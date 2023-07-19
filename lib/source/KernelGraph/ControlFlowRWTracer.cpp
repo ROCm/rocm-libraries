@@ -256,6 +256,23 @@ namespace rocRoller::KernelGraph
         generate(body);
     }
 
+    void ControlFlowRWTracer::operator()(ConditionalOp const& op, int tag)
+    {
+        auto trueBody = m_graph.control.getOutputNodeIndices<Body>(tag).to<std::set>();
+        for(auto const& b : trueBody)
+        {
+            m_bodyParent.insert_or_assign(b, tag);
+        }
+        generate(trueBody);
+
+        auto falseBody = m_graph.control.getOutputNodeIndices<Else>(tag).to<std::set>();
+        for(auto const& b : falseBody)
+        {
+            m_bodyParent.insert_or_assign(b, tag);
+        }
+        generate(falseBody);
+    }
+
     void ControlFlowRWTracer::operator()(Kernel const& op, int tag)
     {
         auto body = m_graph.control.getOutputNodeIndices<Body>(tag).to<std::set>();

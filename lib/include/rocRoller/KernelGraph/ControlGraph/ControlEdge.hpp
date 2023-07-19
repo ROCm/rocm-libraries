@@ -23,10 +23,15 @@ namespace rocRoller
 
         /**
          * Body edges indicate code nesting.  A Body node could indicate the body of a kernel,
-         * a for loop, an unrolled section, an if statement (potentially), or any other
+         * a for loop, an unrolled section, an if statement (for the true branch), or any other
          * control block.
          */
         RR_EMPTY_STRUCT_WITH_NAME(Body);
+
+        /**
+         * Else edge indicates the code that should be emmitted given a false condition. 
+         */
+        RR_EMPTY_STRUCT_WITH_NAME(Else);
 
         /**
          * Indicates code that should come before a Body edge.  Currently only applicable to

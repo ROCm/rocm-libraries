@@ -80,6 +80,34 @@ namespace rocRoller
         };
 
         /**
+         * ConditionalOp - Represents a conditional. 
+         * 
+         * Must have nodes connected via the following outgoing edges:
+         * 
+         * - True  body:
+         * - False body:
+         * 
+         * Code that follows the Conditional Op regardless of the validity of the condition should be connected via a Sequence edge.
+         * 
+         * Currently generates code that behaves like:
+         * 
+         * if(condition)
+         * <True Body>
+         * else
+         * <False Body>
+         * <Sequence>
+         *  
+        */
+        struct ConditionalOp
+        {
+            Expression::ExpressionPtr condition;
+
+            std::string conditionName;
+            std::string name() const;
+            std::string toString() const;
+        };
+
+        /**
          * UnrollOp - a kernel unroll.
          */
         struct UnrollOp

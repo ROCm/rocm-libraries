@@ -126,25 +126,33 @@ namespace rocRoller::KernelGraph::ControlGraph
 
         auto initNodes     = addDescendents(getOutputNodeIndices<Initialize>(startingNode));
         auto bodyNodes     = addDescendents(getOutputNodeIndices<Body>(startingNode));
+        auto elseNodes     = addDescendents(getOutputNodeIndices<Else>(startingNode));
         auto incNodes      = addDescendents(getOutputNodeIndices<ForLoopIncrement>(startingNode));
         auto sequenceNodes = addDescendents(getOutputNodeIndices<Sequence>(startingNode));
 
-        // {init, body, inc} nodes are in the body of the current node
+        // {init, body, else, inc} nodes are in the body of the current node
         writeOrderCache({startingNode}, initNodes, NodeOrdering::RightInBodyOfLeft);
         writeOrderCache({startingNode}, bodyNodes, NodeOrdering::RightInBodyOfLeft);
+        writeOrderCache({startingNode}, elseNodes, NodeOrdering::RightInBodyOfLeft);
         writeOrderCache({startingNode}, incNodes, NodeOrdering::RightInBodyOfLeft);
 
         // Sequence connected nodes are after the current node
         writeOrderCache({startingNode}, sequenceNodes, NodeOrdering::LeftFirst);
 
-        // {body, inc, sequence} are after init nodes
+        // {body, else, inc, sequence} are after init nodes
         writeOrderCache(initNodes, bodyNodes, NodeOrdering::LeftFirst);
+        writeOrderCache(initNodes, elseNodes, NodeOrdering::LeftFirst);
         writeOrderCache(initNodes, incNodes, NodeOrdering::LeftFirst);
         writeOrderCache(initNodes, sequenceNodes, NodeOrdering::LeftFirst);
 
-        // {inc, sequence} are after body nodes
+        // {else, inc, sequence} are after body nodes
+        writeOrderCache(bodyNodes, elseNodes, NodeOrdering::LeftFirst);
         writeOrderCache(bodyNodes, incNodes, NodeOrdering::LeftFirst);
         writeOrderCache(bodyNodes, sequenceNodes, NodeOrdering::LeftFirst);
+
+        // {inc, sequence} are after else nodes
+        writeOrderCache(elseNodes, incNodes, NodeOrdering::LeftFirst);
+        writeOrderCache(elseNodes, sequenceNodes, NodeOrdering::LeftFirst);
 
         // sequence are after inc nodes.
         writeOrderCache(incNodes, sequenceNodes, NodeOrdering::LeftFirst);
