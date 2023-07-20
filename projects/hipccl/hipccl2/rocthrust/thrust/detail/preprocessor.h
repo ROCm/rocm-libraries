@@ -78,7 +78,7 @@
   #define THRUST_PP_CAT2_IMPL0(a, b) THRUST_PP_CAT2_IMPL1(~, a ## b)
   #define THRUST_PP_CAT2_IMPL1(p, res) res
 #else
-  #define THRUST_PP_CAT2_IMPL0(a, b) a ## b
+  #define THRUST_PP_CAT2_IMPL0(a, b) a ## b  // cppcheck-suppress *
 #endif
 
 #define THRUST_PP_CAT3(a, b, c)                                               \
