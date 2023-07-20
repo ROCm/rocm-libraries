@@ -83,10 +83,17 @@ HIPCUB_DEVICE __forceinline__ void AsmThreadStore(void * ptr, T val)
     HIPCUB_ASM_THREAD_STORE(cache_modifier, llvm_cache_modifier, uint64_t, uint64_t, flat_store_dwordx2, v, wait_cmd); \
     HIPCUB_ASM_THREAD_STORE(cache_modifier, llvm_cache_modifier, double, uint64_t, flat_store_dwordx2, v, wait_cmd);
 
+#if defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__)
+HIPCUB_ASM_THREAD_STORE_GROUP(STORE_WB, "sc0 sc1", ""); // TODO: gfx942 validation
+HIPCUB_ASM_THREAD_STORE_GROUP(STORE_CG, "sc0 sc1", "");
+HIPCUB_ASM_THREAD_STORE_GROUP(STORE_WT, "sc0 sc1", "vmcnt");
+HIPCUB_ASM_THREAD_STORE_GROUP(STORE_VOLATILE, "sc0 sc1", "vmcnt");
+#else
 HIPCUB_ASM_THREAD_STORE_GROUP(STORE_WB, "glc", "");
 HIPCUB_ASM_THREAD_STORE_GROUP(STORE_CG, "glc slc", "");
 HIPCUB_ASM_THREAD_STORE_GROUP(STORE_WT, "glc", "vmcnt");
 HIPCUB_ASM_THREAD_STORE_GROUP(STORE_VOLATILE, "glc", "vmcnt");
+#endif
 
 // TODO find correct modifiers to match these
 HIPCUB_ASM_THREAD_STORE_GROUP(STORE_CS, "", "");
