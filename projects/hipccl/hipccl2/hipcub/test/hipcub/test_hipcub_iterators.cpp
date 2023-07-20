@@ -340,6 +340,16 @@ TYPED_TEST(HipcubIteratorTests, TestTexObj)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+
+    hipDeviceProp_t props;
+    HIP_CHECK(hipGetDeviceProperties(&props, device_id));
+    std::string deviceName = std::string(props.gcnArchName);
+    if (deviceName.rfind("gfx94", 0) == 0) {
+        // This is a gfx94x device, so skip this test
+        SCOPED_TRACE(testing::Message() << "Skipping texture cache text for " << deviceName);
+        return;
+    }
+
     HIP_CHECK(hipSetDevice(device_id));
 
     using T = typename TestFixture::input_type;
@@ -398,6 +408,16 @@ TYPED_TEST(HipcubIteratorTests, TestTexRef)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+
+    hipDeviceProp_t props;
+    HIP_CHECK(hipGetDeviceProperties(&props, device_id));
+    std::string deviceName = std::string(props.gcnArchName);
+    if (deviceName.rfind("gfx94", 0) == 0) {
+        // This is a gfx94x device, so skip this test
+        SCOPED_TRACE(testing::Message() << "Skipping texture cache text for " << deviceName);
+        return;
+    }
+
     HIP_CHECK(hipSetDevice(device_id));
 
     using T = typename TestFixture::input_type;
@@ -460,6 +480,16 @@ TYPED_TEST(HipcubIteratorTests, TestTexTransform)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
+
+    hipDeviceProp_t props;
+    HIP_CHECK(hipGetDeviceProperties(&props, device_id));
+    std::string deviceName = std::string(props.gcnArchName);
+    if (deviceName.rfind("gfx94", 0) == 0) {
+        // This is a gfx94x device, so skip this test
+        SCOPED_TRACE(testing::Message() << "Skipping texture cache text for " << deviceName);
+        return;
+    }
+
     HIP_CHECK(hipSetDevice(device_id));
 
     using T = typename TestFixture::input_type;
