@@ -11,7 +11,7 @@ def runCompileCommand(platform, project, jobName, boolean debug=false, boolean s
     //Set CI node's gfx arch as target if PR, otherwise use default targets of the library
     String amdgpuTargets = env.BRANCH_NAME.startsWith('PR-') ? '-DAMDGPU_TARGETS=\$gfx_arch' : ''
 
-    def getRocPRIM = auxiliary.getLibrary('rocPRIM', platform.jenkinsLabel, 'develop', sameOrg)
+    def getRocPRIM = auxiliary.getLibrary('rocPRIM', platform.jenkinsLabel, null, sameOrg)
 
     def command = """#!/usr/bin/env bash
                 set -x
