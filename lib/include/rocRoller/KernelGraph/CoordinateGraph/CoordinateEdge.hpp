@@ -13,7 +13,10 @@ namespace rocRoller
     {
         /**
          * EdgeType - type of edge in the coordinate transfrom graph.
-         * Traversal routines can be limited to only traversing a
+         * 
+         * NOTE: The order of nodes matter!
+         * 
+         * Traversal routines can be limited to traversing only a
          * particular type of edge.
          */
         enum class EdgeType : int
@@ -27,10 +30,13 @@ namespace rocRoller
 
         /*
          * Coordinate transform edges
+         *
+         * Represents the arithmetic from going to one set of coordinates
+         * to another.
          */
 
         /**
-         * DataFlow - used to denote data flow.
+         * DataFlow - used to denote data flow through storage locations.
          */
         RR_EMPTY_STRUCT_WITH_NAME(DataFlow);
 

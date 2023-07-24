@@ -20,6 +20,7 @@ namespace rocRoller
     {
         /*
          * Control flow graph nodes.
+         * Represent operations done on the input.
          */
 
         /**
@@ -146,6 +147,8 @@ namespace rocRoller
          *
          * Offsets and strides into the `target` dimension, based on
          * incrementing the `increment` dimension.
+         * 
+         * Introduced to prevent recomputation (e.g. of an address)
          *
          * @param target Target dimension.
          * @param increment Increment dimension

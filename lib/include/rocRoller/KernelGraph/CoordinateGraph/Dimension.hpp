@@ -16,6 +16,10 @@ namespace rocRoller
     {
         /*
          * Nodes (Dimensions)
+         *
+         * Used for two different purposes:
+         * - Coordinates (integer indices)
+         * - Storage (Registers, e.g. MacroTile)
          */
 
         struct BaseDimension
@@ -42,6 +46,8 @@ namespace rocRoller
          * coordinate transform, and that won't need to be referenced
          * in other parts of the code, the Adhoc dimension can be
          * used.
+         * 
+         * Can exist in the final graph.
          */
         struct Adhoc : public BaseDimension
         {
@@ -202,6 +208,10 @@ namespace rocRoller
 
         /**
          * LDS - represents local memory.
+         * 
+         * Multipurpose:
+         * - Represents storage
+         * - Represents address coordinate information
          */
         struct LDS : public BaseDimension
         {
@@ -213,7 +223,11 @@ namespace rocRoller
         };
 
         /**
-         * ForLoop -
+         * ForLoop - represents the coordinate value associated with
+         * the iterations of a for-loop.
+         *
+         * ForLoop dimensions elucidate how indexes depend on which
+         * for-loop iteration is being executed.
          */
         struct ForLoop : public BaseDimension
         {
@@ -224,6 +238,13 @@ namespace rocRoller
             std::string name() const override;
         };
 
+        /**
+         * Unroll - represents the coordinate value associated with
+         * the unrolled iterations of a for-loop.
+         *
+         * Unroll dimensions elucidate how indexes depend on which
+         * inner-iteration of an unrolled for-loop is being executed.
+         */
         struct Unroll : public BaseDimension
         {
             static constexpr bool HasValue = false;
@@ -234,6 +255,7 @@ namespace rocRoller
 
             std::string name() const override;
         };
+
         /**
          * MacroTileIndex - sub-dimension of a tile.  See MacroTile.
          */

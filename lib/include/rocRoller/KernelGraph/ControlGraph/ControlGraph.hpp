@@ -17,6 +17,12 @@ namespace rocRoller
      * Control flow is represented as a graph.  Nodes in the control flow graph represent
      * operations (like load/store or a for loop).  Edges in the graph encode dependencies
      * between nodes.
+     * 
+     * The graph answers the question:
+     * What are the series of operations needed to solve the problem?
+     * 
+     * Each node of the graph, when traversed, will help generate assembly code.
+     * It relies on coordinate transform graph expressions.
      *
      */
     namespace KernelGraph::ControlGraph
