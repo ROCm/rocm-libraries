@@ -38,6 +38,8 @@ namespace GEMMDriverTest
         int   k     = 128;
         float alpha = 2.0f;
         float beta  = 0.5f;
+        float factor
+            = 1.0f; // This is used for testing scratch/fixup.  It can be removed after StreamK is implemented.
 
         // output macro tile size
         int macM = 64;
@@ -94,11 +96,12 @@ namespace GEMMDriverTest
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
 
         // D (MxN) = alpha * A (MxK) X B (KxN) + beta * C (MxN)
-        int   M     = gemm.m;
-        int   N     = gemm.n;
-        int   K     = gemm.k;
-        float alpha = gemm.alpha;
-        float beta  = gemm.beta;
+        int   M      = gemm.m;
+        int   N      = gemm.n;
+        int   K      = gemm.k;
+        float alpha  = gemm.alpha;
+        float beta   = gemm.beta;
+        float factor = gemm.factor;
 
         AssertFatal(M % gemm.macM == 0, "MacroTile size mismatch (M)");
         AssertFatal(N % gemm.macN == 0, "MacroTile size mismatch (N)");
@@ -370,7 +373,7 @@ namespace GEMMDriverTest
                          M,
                          N,
                          K,
-                         alpha,
+                         factor * alpha,
                          beta,
                          gemm.transA == "T",
                          gemm.transB == "T");
@@ -464,6 +467,17 @@ namespace GEMMDriverTest
         GEMMProblem gemm;
         gemm.n             = gemm.macN;
         gemm.enableScratch = true;
+        gemm.factor        = 2.0f;
+        basicGEMM<float>(m_context, gemm, 1.e-6);
+    }
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMEnableScratchFixup)
+    {
+        GEMMProblem gemm;
+        gemm.n             = gemm.macN;
+        gemm.enableScratch = true;
+        gemm.alpha         = 1.0f;
+        gemm.beta          = 0.0f;
+        gemm.factor        = 2.0f;
         basicGEMM<float>(m_context, gemm, 1.e-6);
     }
 

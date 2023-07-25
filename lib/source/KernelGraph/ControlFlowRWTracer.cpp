@@ -101,6 +101,18 @@ namespace rocRoller::KernelGraph
         return rv;
     }
 
+    std::vector<ControlFlowRWTracer::ReadWriteRecord>
+        ControlFlowRWTracer::coordinatesReadWrite(int coordinate) const
+    {
+        std::vector<ControlFlowRWTracer::ReadWriteRecord> rv;
+        for(auto x : m_trace)
+        {
+            if(x.coordinate == coordinate)
+                rv.push_back({x.control, x.coordinate, x.rw});
+        }
+        return rv;
+    }
+
     void ControlFlowRWTracer::trackRegister(int control, int coordinate, ReadWrite rw)
     {
         if(control < 0 || coordinate < 0)

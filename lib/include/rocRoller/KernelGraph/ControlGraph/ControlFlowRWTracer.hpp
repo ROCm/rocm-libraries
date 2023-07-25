@@ -16,14 +16,15 @@ namespace rocRoller::KernelGraph
      * @brief Register read/write tracer.
      *
      * The tracer walks the control flow graph and records when
-     * registers are modified.
+     * registers are accessed/modified.
      *
-     * The main entry point is the `trace` method.  This walks the
-     * control graph and records when registers are modified.  After a
-     * trace is complete, the `deallocateLocations` method analyses
-     * the trace and returns a list of coordinate+control pairs: a
-     * Deallocate operation (to deallocate the register associated
-     * with the coordinate) can be added after the control node.
+     * The main entry point is the `trace` method. This walks the
+     * control graph and records the locations (control nodes)
+     * where a MacroTile coordinate representing a register file
+     * is accessed and/or modified. After a trace is complete,
+     * the `coordinatesReadWrite` methods can be used to access the
+     * recorded trace for all the coordinates or for a specific
+     * coordinate.
      */
     class ControlFlowRWTracer
     {
@@ -33,12 +34,6 @@ namespace rocRoller::KernelGraph
             READ,
             WRITE,
             READWRITE
-        };
-
-        struct EventRecord
-        {
-            int       control, coordinate;
-            ReadWrite rw;
         };
 
         struct ReadWriteRecord
@@ -54,13 +49,24 @@ namespace rocRoller::KernelGraph
         }
 
         /**
-         * @brief Walk the control graph and record register
-         * read/write locations.
+         * @brief Walk the control graph starting with the roots
+         * and record register read/write locations.
          */
         void trace();
+        /**
+         * @brief Walk the control graph starting with the `start`
+         * node and record register read/write locations in its body.
+         */
         void trace(int start);
 
+        /**
+         * @brief Get the trace record for all the MacroTile coordinates.
+         */
         std::vector<ReadWriteRecord> coordinatesReadWrite() const;
+        /**
+         * @brief Get the trace record for a particular MacroTile coordinate.
+         */
+        std::vector<ReadWriteRecord> coordinatesReadWrite(int coordinate) const;
 
         void operator()(Assign const& op, int tag);
         void operator()(Barrier const& op, int tag);
@@ -95,7 +101,7 @@ namespace rocRoller::KernelGraph
 
         KernelGraph                  m_graph;
         std::set<int>                m_completedControlNodes;
-        std::vector<EventRecord>     m_trace;
+        std::vector<ReadWriteRecord> m_trace;
         std::unordered_map<int, int> m_bodyParent;
         bool                         m_trackConnections;
     };

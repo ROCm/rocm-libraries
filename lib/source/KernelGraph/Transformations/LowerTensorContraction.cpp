@@ -1,5 +1,6 @@
 
 #include <rocRoller/CommandSolution.hpp>
+#include <rocRoller/KernelGraph/ControlGraph/ControlFlowRWTracer.hpp>
 #include <rocRoller/KernelGraph/Transforms/LowerTensorContraction.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
 #include <rocRoller/KernelGraph/Visitors.hpp>
@@ -12,7 +13,89 @@ namespace rocRoller
     {
         using namespace ControlGraph;
         using namespace CoordinateGraph;
+        namespace Expression = rocRoller::Expression;
         using namespace Expression;
+
+        /**
+         * Replace the use of an old macrotile in the given control nodes with a new macrotile
+         */
+        void replaceMacroTile(KernelGraph&             graph,
+                              std::unordered_set<int>& ops,
+                              int                      oldMacTileTag,
+                              int                      newMacTileTag)
+        {
+            for(auto const& opTag : ops)
+            {
+                auto element = graph.control.getElement(opTag);
+                visit(
+                    rocRoller::overloaded{
+                        [&](StoreTiled store) {
+                            graph.mapper.connect<MacroTile>(opTag, oldMacTileTag);
+
+                            // update the data flow in the coordinate graph
+                            auto dstTag = graph.mapper.get<User>(opTag);
+                            auto df
+                                = *only(graph.coordinates.getNeighbours<Graph::Direction::Upstream>(
+                                    dstTag));
+                            graph.coordinates.deleteElement(df);
+                            graph.coordinates.addElement(DataFlow(),
+                                                         std::vector<int>{newMacTileTag},
+                                                         std::vector<int>{dstTag});
+                        },
+                        [&](Assign assign) {
+                            GraphReindexer contractionReindexer;
+                            contractionReindexer.coordinates.emplace(oldMacTileTag, newMacTileTag);
+                            ReindexExpressionVisitor visitor(contractionReindexer);
+                            assign.expression = visitor.call(assign.expression);
+                            graph.control.setElement(opTag, assign);
+
+                            // update the data flow in the coordinate graph
+                            auto dstTag = only(graph.mapper.getConnections(opTag))->coordinate;
+                            std::vector<int> srcTags;
+                            for(auto const& edgeTag :
+                                graph.coordinates.getNeighbours<Graph::Direction::Upstream>(dstTag))
+                            {
+                                auto df = graph.coordinates.get<DataFlow>(edgeTag);
+                                if(!df)
+                                    continue;
+                                auto srcs
+                                    = graph.coordinates.getNeighbours<Graph::Direction::Upstream>(
+                                        edgeTag);
+                                for(auto const src : srcs)
+                                {
+                                    if(src == oldMacTileTag)
+                                        srcTags.push_back(newMacTileTag);
+                                    else
+                                        srcTags.push_back(src);
+                                }
+                                graph.coordinates.deleteElement(edgeTag);
+                            }
+                            graph.coordinates.addElement(
+                                DataFlow(), srcTags, std::vector<int>{dstTag});
+                        },
+                        [&](auto op) { Throw<FatalError>("Not handled yet."); }},
+                    std::get<Operation>(element));
+            }
+        }
+
+        std::tuple<int, int>
+            addFixup(KernelGraph& graph, int accumMacTileTag, int partialMacTileTag)
+        {
+            auto lhsExpr = std::make_shared<Expression::Expression>(
+                Expression::DataFlowTag{accumMacTileTag, Register::Type::Vector, DataType::None});
+            auto rhsExpr = std::make_shared<Expression::Expression>(
+                Expression::DataFlowTag{partialMacTileTag, Register::Type::Vector, DataType::None});
+
+            auto addExpr  = lhsExpr + rhsExpr;
+            auto fixupTag = graph.control.addElement(Assign{Register::Type::Vector, addExpr});
+
+            auto destTag = graph.coordinates.addElement(MacroTile());
+            graph.coordinates.addElement(
+                DataFlow(), {accumMacTileTag, partialMacTileTag}, {destTag});
+            graph.mapper.connect(fixupTag, destTag, NaryArgument::DEST);
+
+            return {fixupTag, destTag};
+        }
 
         std::tuple<int, int, int>
             loadStoreMacroTileSCRATCH(KernelGraph&                     graph,
@@ -61,9 +144,7 @@ namespace rocRoller
             storeConnections.push_back(DC<User>(globalScratchTag));
 
             // Load
-            auto loadScratchTileTag = createInternalTile(graph, varType, macTileTag, context);
-            graph.coordinates.addElement(View(), {macTileTag}, {loadScratchTileTag});
-
+            auto loadScratchTileTag    = createInternalTile(graph, varType, macTileTag, context);
             auto loadScratchTile       = *graph.coordinates.get<MacroTile>(loadScratchTileTag);
             loadScratchTile.layoutType = LayoutType::SCRATCH;
             graph.coordinates.setElement(loadScratchTileTag, loadScratchTile);
@@ -99,6 +180,43 @@ namespace rocRoller
             auto loadPartialTag = graph.control.addElement(LoadTiled(dataType));
             graph.control.addElement(Sequence(), {afterOpTag}, {loadPartialTag});
             return loadPartialTag;
+        }
+
+        int enableScratch(KernelGraph&             graph,
+                          int                      contractionTag,
+                          std::unordered_set<int>& uses,
+                          int                      forK,
+                          int                      macTileTag,
+                          VariableType             varType,
+                          ContextPtr               context)
+        {
+            std::vector<DeferredConnection> storeConnections, loadConnections;
+
+            auto [storeScratchTileTag, loadScratchTileTag, globalScratchTag]
+                = loadStoreMacroTileSCRATCH(
+                    graph, storeConnections, loadConnections, macTileTag, varType, context);
+
+            auto storePartialTag = storeScratchTile(graph, forK, varType.dataType);
+            auto waitZeroTag     = graph.control.addElement(WaitZero());
+            auto loadPartialTag  = loadScratchTile(graph, forK, varType.dataType);
+
+            graph.control.addElement(Sequence(), {storePartialTag}, {waitZeroTag});
+            graph.control.addElement(Sequence(), {waitZeroTag}, {loadPartialTag});
+
+            for(auto const& c : storeConnections)
+                graph.mapper.connect(storePartialTag, c.coordinate, c.connectionSpec);
+
+            for(auto const& c : loadConnections)
+                graph.mapper.connect(loadPartialTag, c.coordinate, c.connectionSpec);
+
+            // add fixup
+            auto [fixupTag, fixupDestTag] = addFixup(graph, macTileTag, loadScratchTileTag);
+            graph.control.addElement(Sequence(), {forK}, {fixupTag});
+            graph.control.addElement(Sequence(), {loadPartialTag}, {fixupTag});
+
+            replaceMacroTile(graph, uses, macTileTag, fixupDestTag);
+
+            return fixupTag;
         }
 
         void duplicateMacroTile(KernelGraph& graph, int load)
@@ -161,6 +279,17 @@ namespace rocRoller
                                  std::shared_ptr<Context>           context)
         {
             rocRoller::Log::getLogger()->debug("KernelGraph::lowerMatrixMultiply({})", tag);
+
+            // find the control nodes that follow the contraction and use its output macrotile
+            ControlFlowRWTracer tracer(graph);
+            tracer.trace();
+            auto                    readwrite = tracer.coordinatesReadWrite(d);
+            std::unordered_set<int> uses;
+            for(auto m : readwrite)
+            {
+                if(graph.control.compareNodes(tag, m.control) == NodeOrdering::LeftFirst)
+                    uses.insert(m.control);
+            }
 
             auto macrotile_a = graph.coordinates.getNode<MacroTile>(a);
             auto macrotile_b = graph.coordinates.getNode<MacroTile>(b);
@@ -296,35 +425,14 @@ namespace rocRoller
                 lastWaveMult = waveMult;
             }
 
-            int contractionOperation = forK;
-
+            int finalContractionOp = forK;
             if(context->kernelOptions().enableScratch)
             {
-                auto varType = getVariableType(graph, storeD);
-
-                std::vector<DeferredConnection> storeConnections, loadConnections;
-
-                auto [storeScratchTileTag, loadScratchTileTag, globalScratchTag]
-                    = loadStoreMacroTileSCRATCH(
-                        graph, storeConnections, loadConnections, d, varType, context);
-
-                auto storePartialTag = storeScratchTile(graph, forK, varType.dataType);
-                auto waitZeroTag     = graph.control.addElement(WaitZero());
-                auto loadPartialTag  = loadScratchTile(graph, forK, varType.dataType);
-
-                graph.control.addElement(Sequence(), {storePartialTag}, {waitZeroTag});
-                graph.control.addElement(Sequence(), {waitZeroTag}, {loadPartialTag});
-
-                for(auto const& c : storeConnections)
-                    graph.mapper.connect(storePartialTag, c.coordinate, c.connectionSpec);
-
-                for(auto const& c : loadConnections)
-                    graph.mapper.connect(loadPartialTag, c.coordinate, c.connectionSpec);
-
-                contractionOperation = loadPartialTag;
+                auto varType       = getVariableType(graph, storeD);
+                finalContractionOp = enableScratch(graph, tag, uses, forK, d, varType, context);
             }
 
-            // connect ops after contraction to for loop, remove contraction and its incoming edges
+            // connect ops after contraction to finalContractionOp, remove contraction and its incoming edges
             auto tensor_outgoing_edges
                 = graph.control.getNeighbours<Graph::Direction::Downstream>(tag).to<std::vector>();
             for(auto const e : tensor_outgoing_edges)
@@ -333,7 +441,7 @@ namespace rocRoller
                 auto dst  = graph.control.getNeighbours<Graph::Direction::Downstream>(e)
                                .to<std::vector>();
                 graph.control.deleteElement(e);
-                graph.control.addElement(e, elem, std::vector<int>{contractionOperation}, dst);
+                graph.control.addElement(e, elem, std::vector<int>{finalContractionOp}, dst);
             }
             auto tensor_incoming_edges
                 = graph.control.getNeighbours<Graph::Direction::Upstream>(tag).to<std::vector>();
