@@ -6,6 +6,23 @@
 //
 //===----------------------------------------------------------------------===//
 
+// Modifications Copyright (c) 2025 Advanced Micro Devices, Inc.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
 // type_traits
 // XFAIL: apple-clang-6.0
 //  The Apple-6 compiler gets is_constructible<void ()> wrong.
@@ -76,8 +93,8 @@ template <class T>
 __host__ __device__ void test_is_constructible()
 {
   static_assert((cuda::std::is_constructible<T>::value), "");
-#ifndef TEST_COMPILER_MSVC
-  // The fallback SFINAE version doesn't work reliable with MSVC, and we don't
+#if !defined(TEST_COMPILER_MSVC) && !defined(TEST_COMPILER_HIPCC)
+  // The fallback SFINAE version doesn't work reliable with MSVC/HIPCC, and we don't
   // use it, so waive it.
   static_assert((cuda::std::__libcpp_is_constructible<T>::type::value), "");
 #endif
@@ -90,8 +107,8 @@ template <class T, class A0>
 __host__ __device__ void test_is_constructible()
 {
   static_assert((cuda::std::is_constructible<T, A0>::value), "");
-#ifndef TEST_COMPILER_MSVC
-  // The fallback SFINAE version doesn't work reliable with MSVC, and we don't
+#if !defined(TEST_COMPILER_MSVC) && !defined(TEST_COMPILER_HIPCC)
+  // The fallback SFINAE version doesn't work reliable with MSVC/HIPCC, and we don't
   // use it, so waive it.
   static_assert((cuda::std::__libcpp_is_constructible<T, A0>::type::value), "");
 #endif
@@ -104,8 +121,8 @@ template <class T, class A0, class A1>
 __host__ __device__ void test_is_constructible()
 {
   static_assert((cuda::std::is_constructible<T, A0, A1>::value), "");
-#ifndef TEST_COMPILER_MSVC
-  // The fallback SFINAE version doesn't work reliable with MSVC, and we don't
+#if !defined(TEST_COMPILER_MSVC) && !defined(TEST_COMPILER_HIPCC)
+  // The fallback SFINAE version doesn't work reliable with MSVC/HIPCC, and we don't
   // use it, so waive it.
   static_assert((cuda::std::__libcpp_is_constructible<T, A0, A1>::type::value), "");
 #endif
@@ -118,8 +135,8 @@ template <class T, class A0, class A1, class A2>
 __host__ __device__ void test_is_constructible()
 {
   static_assert((cuda::std::is_constructible<T, A0, A1, A2>::value), "");
-#ifndef TEST_COMPILER_MSVC
-  // The fallback SFINAE version doesn't work reliable with MSVC, and we don't
+#if !defined(TEST_COMPILER_MSVC) && !defined(TEST_COMPILER_HIPCC)
+  // The fallback SFINAE version doesn't work reliable with MSVC/HIPCC, and we don't
   // use it, so waive it.
   static_assert((cuda::std::__libcpp_is_constructible<T, A0, A1, A2>::type::value), "");
 #endif
@@ -132,8 +149,8 @@ template <class T>
 __host__ __device__ void test_is_not_constructible()
 {
   static_assert((!cuda::std::is_constructible<T>::value), "");
-#ifndef TEST_COMPILER_MSVC
-  // The fallback SFINAE version doesn't work reliable with MSVC, and we don't
+#if !defined(TEST_COMPILER_MSVC) && !defined(TEST_COMPILER_HIPCC)
+  // The fallback SFINAE version doesn't work reliable with MSVC/HIPCC, and we don't
   // use it, so waive it.
   static_assert((!cuda::std::__libcpp_is_constructible<T>::type::value), "");
 #endif
@@ -146,8 +163,8 @@ template <class T, class A0>
 __host__ __device__ void test_is_not_constructible()
 {
   static_assert((!cuda::std::is_constructible<T, A0>::value), "");
-#if !defined(TEST_COMPILER_MSVC) && !(defined(TEST_COMPILER_CLANG) && __clang_major__ >= 16)
-  // The fallback SFINAE version doesn't work reliable with MSVC, and we don't
+#if !defined(TEST_COMPILER_MSVC) && !(defined(TEST_COMPILER_CLANG) && __clang_major__ >= 16) && !defined(TEST_COMPILER_HIPCC)
+  // The fallback SFINAE version doesn't work reliable with MSVC/HIPCC, and we don't
   // use it, so waive it.
   static_assert((!cuda::std::__libcpp_is_constructible<T, A0>::type::value), "");
 #endif
