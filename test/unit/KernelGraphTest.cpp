@@ -2812,7 +2812,7 @@ namespace KernelGraphTest
         EXPECT_TRUE(ldsDeallocateInsideLoop.empty());
     }
 
-    TEST_F(KernelGraphTest, WaitCountZero)
+    TEST_F(KernelGraphTest, WaitZero)
     {
         rocRoller::KernelGraph::KernelGraph kgraph;
 
@@ -2822,7 +2822,11 @@ namespace KernelGraphTest
 
         m_context->schedule(rocRoller::KernelGraph::generate(kgraph, m_context->kernel()));
 
-        EXPECT_THAT(output(), testing::HasSubstr("s_waitcnt vmcnt(0)"));
+        EXPECT_THAT(output(), testing::HasSubstr("s_waitcnt"));
+
+        EXPECT_THAT(output(), testing::HasSubstr("vmcnt(0)"));
+        EXPECT_THAT(output(), testing::HasSubstr("lgkmcnt(0)"));
+        EXPECT_THAT(output(), testing::HasSubstr("expcnt(0)"));
     }
 
 }

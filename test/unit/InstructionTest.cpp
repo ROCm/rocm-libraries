@@ -199,7 +199,6 @@ TEST_F(InstructionTest, WaitZero)
     auto inst = Instruction::Wait(WaitCount::Zero(m_context->targetArchitecture()));
     m_context->schedule(inst);
 
-    // EXPECT_EQ("s_waitcnt expcnt(2)\n\n", output());
     EXPECT_THAT(output(), testing::HasSubstr("s_waitcnt"));
 
     EXPECT_THAT(output(), testing::HasSubstr("vmcnt(0)"));

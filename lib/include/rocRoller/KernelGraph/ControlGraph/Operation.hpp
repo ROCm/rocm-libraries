@@ -303,7 +303,14 @@ namespace rocRoller
         };
 
         /**
-         * WaitZero - emit an s_waitcnt vmcnt(0).
+         * WaitZero - Emit a Wait Count of zero on all wait queues.
+         * 
+         * This is important in preventing certain race conditions.
+         * It forces the wait queues to be emptied before proceeding
+         * to the next graph nodes (connected by Sequence edges).
+         * 
+         * Example:
+         * Store tile -> WaitZero -> Store sync flags
          */
         RR_EMPTY_STRUCT_WITH_NAME(WaitZero);
 
