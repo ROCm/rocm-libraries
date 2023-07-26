@@ -337,7 +337,6 @@ namespace rocRoller
                     bufferReg->setName(concatenate("buffer", tag));
                     if(bufferReg->allocationState() == Register::AllocationState::Unallocated)
                     {
-                        co_yield Register::AllocateIfNeeded(bufferReg);
                         Register::ValuePtr basePointer;
                         auto               bufDesc = BufferDescriptor(bufferReg, m_context);
                         co_yield m_context->argLoader()->getValue(user->argumentName, basePointer);
@@ -583,10 +582,11 @@ namespace rocRoller
                 {
                     info.data = m_context->registerTagManager()->getRegister(macTileTag, tmpl);
                 }
-                co_yield Register::AllocateIfNeeded(info.data);
 
-                rocRoller::Log::getLogger()->debug(
-                    "  tag {} tile coord {} registers {}", tag, macTileTag, info.data->toString());
+                rocRoller::Log::getLogger()->debug("  tag {} tile coord {} registers {}",
+                                                   tag,
+                                                   macTileTag,
+                                                   info.data->description());
             }
             else
             {
@@ -602,12 +602,11 @@ namespace rocRoller
                     co_yield m_context->copier()->ensureType(vgpr, vgpr, Register::Type::Vector);
                     info.data = Register::Value::Placeholder(
                         m_context, Register::Type::Vector, dataType, vgpr->valueCount());
-                    co_yield info.data->allocate();
                     for(int i = 0; i < vgpr->valueCount(); ++i)
                     {
-                        Register::ValuePtr tmp = info.data->element({i});
+                        Register::ValuePtr dst = info.data->element({i});
                         co_yield generate(
-                            tmp,
+                            dst,
                             convert(dataType.dataType,
                                     std::make_shared<Expression::Expression>(vgpr->element({i}))));
                     }

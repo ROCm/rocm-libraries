@@ -94,7 +94,15 @@ std::vector<rocRoller::Register::ValuePtr>
     {
         auto reg
             = std::make_shared<rocRoller::Register::Value>(m_context, regType, dataType, regCount);
-        reg->allocateNow();
+        try
+        {
+            reg->allocateNow();
+        }
+        catch(...)
+        {
+            std::cout << i << std::endl;
+            throw;
+        }
         regs.push_back(reg);
     }
     return regs;

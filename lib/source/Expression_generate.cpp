@@ -220,7 +220,6 @@ namespace rocRoller
                 {
                     dest = resultPlaceholder(
                         {regType, varType}, true, valueCount / destInfo.packing);
-                    co_yield dest->allocate();
                 }
 
                 if(lhsInfo.packing != rhsInfo.packing)
@@ -348,7 +347,6 @@ namespace rocRoller
                 if(!dest)
                 {
                     dest = resultPlaceholder({regType, varType}, true, valueCount);
-                    co_yield dest->allocate();
                 }
 
                 for(size_t k = 0; k < valueCount; ++k)
@@ -397,7 +395,6 @@ namespace rocRoller
                 {
                     auto varType = promoteVariableTypes(results);
                     dest         = resultPlaceholder({regType, varType}, true, valueCount);
-                    co_yield dest->allocate();
                 }
 
                 //If dest, results have multiple elements, handled inside generateOp
@@ -437,8 +434,6 @@ namespace rocRoller
                 }
                 else
                 {
-                    co_yield Register::AllocateIfNeeded(dest);
-
                     for(size_t i = 0; i < dest->valueCount(); i++)
                     {
                         Register::ValuePtr arg;

@@ -3,7 +3,6 @@
 
 #include <rocRoller/CodeGen/Arithmetic/MatrixMultiply.hpp>
 #include <rocRoller/InstructionValues/Register.hpp>
-#include <rocRoller/InstructionValues/RegisterUtils.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 
 namespace rocRoller

@@ -196,6 +196,8 @@ namespace rocRoller
             m_allocationCoord = std::vector<int>(
                 count * std::max(static_cast<size_t>(1), info.elementSize / bytesPerRegister));
             std::iota(m_allocationCoord.begin(), m_allocationCoord.end(), 0);
+
+            m_allocation = Allocation::SameAs(*this, m_name);
         }
 
         template <std::ranges::input_range T>
@@ -206,6 +208,7 @@ namespace rocRoller
             , m_allocationCoord(coord.begin(), coord.end())
         {
             AssertFatal(ctx != nullptr);
+            m_allocation = Allocation::SameAs(*this, m_name);
         }
 
         inline Value::Value(ContextPtr         ctx,
@@ -218,6 +221,7 @@ namespace rocRoller
             , m_allocationCoord(coord)
         {
             AssertFatal(ctx != nullptr);
+            m_allocation = Allocation::SameAs(*this, m_name);
         }
 
         inline Value::Value(AllocationPtr alloc, Type regType, VariableType variableType, int count)
@@ -336,8 +340,7 @@ namespace rocRoller
             if(!IsRegister(m_regType))
                 return AllocationState::NoAllocation;
 
-            if(!m_allocation)
-                return AllocationState::Unallocated;
+            AssertFatal(m_allocation);
 
             return m_allocation->allocationState();
         }
@@ -354,11 +357,11 @@ namespace rocRoller
 
         inline Instruction Value::allocate()
         {
-            if(allocationState() != AllocationState::Unallocated)
-                throw std::runtime_error("Unnecessary allocation");
+            AssertFatal(allocationState() == AllocationState::Unallocated,
+                        "Unneccessary allocation",
+                        ShowValue(allocationState()));
 
-            if(!m_allocation)
-                m_allocation = Allocation::SameAs(*this, m_name);
+            AssertFatal(m_allocation);
 
             return Instruction::Allocate(shared_from_this());
         }
@@ -368,34 +371,24 @@ namespace rocRoller
             if(allocationState() != AllocationState::Unallocated)
                 return;
 
-            if(!m_allocation)
-                m_allocation = Allocation::SameAs(*this, m_name);
+            AssertFatal(m_allocation);
 
             inst.addAllocation(m_allocation);
         }
 
         inline bool Value::canAllocateNow() const
         {
-            auto allocation = m_allocation;
-            if(allocation == nullptr)
-                allocation = Allocation::SameAs(*this, m_name);
+            AssertFatal(m_allocation);
 
-            return allocation->canAllocateNow();
+            return m_allocation->canAllocateNow();
         }
 
         inline void Value::allocateNow()
         {
-            if(m_allocation == nullptr)
-                m_allocation = Allocation::SameAs(*this, m_name);
+            AssertFatal(m_allocation);
 
             m_allocation->allocateNow();
             m_contiguousIndices.reset();
-        }
-
-        inline void Value::freeNow()
-        {
-            m_allocation.reset();
-            updateContiguousIndices();
         }
 
         inline bool Value::isPlaceholder() const
@@ -454,7 +447,9 @@ namespace rocRoller
 
         inline void Value::updateContiguousIndices() const
         {
-            if(!m_allocation || m_allocationCoord.empty())
+            AssertFatal(m_allocation);
+
+            if(m_allocationCoord.empty() || allocationState() == AllocationState::Unallocated)
             {
                 m_contiguousIndices.reset();
                 return;
@@ -483,9 +478,7 @@ namespace rocRoller
             if(m_regType == Type::Accumulator || m_regType == Type::Scalar
                || m_regType == Type::Vector)
             {
-                return m_allocation != nullptr
-                       && m_allocation->allocationState() == AllocationState::Allocated
-                       && !m_allocationCoord.empty();
+                return allocationState() == AllocationState::Allocated;
             }
 
             return true;
@@ -608,14 +601,12 @@ namespace rocRoller
 
         inline Generator<int> Value::registerIndices() const
         {
-            if(m_regType == Type::Literal)
-                throw std::runtime_error("Literal values have no register indices.");
+            AssertFatal(m_regType != Type::Literal, "Literal values have no register indices.");
+            AssertFatal(m_regType != Type::Label, "Label values have no register indices.");
 
-            if(m_regType == Type::Label)
-                throw std::runtime_error("Label values have no register indices.");
-
-            if(!m_allocation || m_allocation->allocationState() != AllocationState::Allocated)
-                throw std::runtime_error("Can't get indices for unallocated registers.");
+            AssertFatal(allocationState() == AllocationState::Allocated,
+                        "Can't get indices for unallocated registers.",
+                        ShowValue(allocationState()));
 
             for(int coord : m_allocationCoord)
                 co_yield m_allocation->m_registerIndices.at(coord);
@@ -670,13 +661,16 @@ namespace rocRoller
             return m_name;
         }
 
-        inline void Value::setName(std::string const& name)
+        inline void Value::setName(std::string name)
         {
-            m_name = name;
-        }
+            if(allocationState() != AllocationState::NoAllocation)
+            {
+                AssertFatal(m_allocation);
 
-        inline void Value::setName(std::string&& name)
-        {
+                if(m_allocation->name() == "")
+                    m_allocation->setName(name);
+            }
+
             m_name = std::move(name);
         }
 
@@ -692,7 +686,7 @@ namespace rocRoller
         template <std::ranges::forward_range T>
         inline ValuePtr Value::subset(T const& indices) const
         {
-            AssertFatal(allocationState() == AllocationState::Allocated,
+            AssertFatal(allocationState() != AllocationState::NoAllocation,
                         ShowValue(allocationState()));
             AssertFatal(!m_allocationCoord.empty(), ShowValue(m_allocationCoord.size()));
             std::vector<int> coords;
@@ -801,11 +795,11 @@ namespace rocRoller
             }
         }
 
-        inline AllocationPtr Allocation::SameAs(Value const& val, std::string const& name)
+        inline AllocationPtr Allocation::SameAs(Value const& val, std::string name)
         {
             auto rv = std::make_shared<Allocation>(
                 val.m_context.lock(), val.m_regType, val.m_varType, val.valueCount());
-            rv->setName(name);
+            rv->setName(std::move(name));
             return rv;
         }
 
@@ -871,6 +865,21 @@ namespace rocRoller
             rv->setName(m_name);
 
             return rv;
+        }
+
+        inline std::string toString(Allocation::Options const& opts)
+        {
+            return concatenate("alignment: ",
+                               opts.alignment,
+                               ", phase: ",
+                               opts.alignmentPhase,
+                               ", contiguous: ",
+                               opts.contiguous);
+        }
+
+        inline std::ostream& operator<<(std::ostream& stream, Allocation::Options const& opts)
+        {
+            return stream << toString(opts);
         }
 
         inline std::string Allocation::descriptiveComment(std::string const& prefix) const
@@ -964,12 +973,7 @@ namespace rocRoller
             return m_name;
         }
 
-        inline void Allocation::setName(std::string const& name)
-        {
-            m_name = name;
-        }
-
-        inline void Allocation::setName(std::string&& name)
+        inline void Allocation::setName(std::string name)
         {
             m_name = std::move(name);
         }

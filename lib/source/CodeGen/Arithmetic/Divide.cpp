@@ -2,7 +2,6 @@
 #include <rocRoller/CodeGen/BranchGenerator.hpp>
 #include <rocRoller/CodeGen/CopyGenerator.hpp>
 #include <rocRoller/InstructionValues/LabelAllocator.hpp>
-#include <rocRoller/InstructionValues/RegisterUtils.hpp>
 #include <rocRoller/Utilities/Component.hpp>
 
 namespace rocRoller
@@ -241,7 +240,6 @@ namespace rocRoller
         co_yield m_context->copier()->copy(s_0->subset({0}), Register::Value::Literal(0), "");
         co_yield_(Instruction("s_cmp_lg_u64", {s_0}, {Register::Value::Literal(0)}, {}, ""));
         co_yield m_context->brancher()->branchIfZero(label_24, m_context->getSCC());
-        co_yield s_6->allocate();
         co_yield_(Instruction(
             "s_ashr_i32", {s_6->subset({0})}, {r1, Register::Value::Literal(31)}, {}, ""));
         co_yield_(Instruction("s_add_u32", {s_0->subset({0})}, {r0, s_6->subset({0})}, {}, ""));
@@ -252,7 +250,6 @@ namespace rocRoller
         co_yield_(Instruction("v_cvt_f32_u32_e32", {v_8}, {s_5->subset({1})}, {}, ""));
         co_yield_(Instruction(
             "s_sub_u32", {s_2}, {Register::Value::Literal(0), s_5->subset({0})}, {}, ""));
-        co_yield s_23->allocate();
         co_yield_(Instruction("s_subb_u32",
                               {s_23->subset({0})},
                               {Register::Value::Literal(0), s_5->subset({1})},
@@ -515,7 +512,6 @@ namespace rocRoller
             Instruction("v_cndmask_b32_e32", {v_7}, {v_7, v_14, m_context->getVCC()}, {}, ""));
         co_yield m_context->copier()->copy(v_8, Register::Value::Literal(0), "");
         co_yield_(Instruction::Label(label_26));
-        co_yield Register::AllocateIfNeeded(dest);
         co_yield_(Instruction("v_readlane_b32",
                               {dest->subset({0})},
                               {v_7, Register::Value::Literal(0)},
@@ -552,8 +548,6 @@ namespace rocRoller
         Register::ValuePtr l0, l1, r0, r1;
         co_yield get2DwordsVector(l0, l1, lhs);
         co_yield get2DwordsVector(r0, r1, rhs);
-
-        co_yield Register::AllocateIfNeeded(dest);
 
         auto v_2 = std::make_shared<Register::Value>(
             m_context, Register::Type::Vector, DataType::Int32, 1);

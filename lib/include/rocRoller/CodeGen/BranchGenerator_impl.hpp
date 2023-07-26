@@ -11,7 +11,6 @@
 #include "../AssemblyKernel.hpp"
 #include "../Context.hpp"
 #include "../InstructionValues/Register.hpp"
-#include "../InstructionValues/RegisterUtils.hpp"
 #include "../Utilities/Error.hpp"
 
 namespace rocRoller

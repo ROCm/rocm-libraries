@@ -2,7 +2,6 @@
 #include <rocRoller/CodeGen/BranchGenerator.hpp>
 #include <rocRoller/CodeGen/CopyGenerator.hpp>
 #include <rocRoller/InstructionValues/LabelAllocator.hpp>
-#include <rocRoller/InstructionValues/RegisterUtils.hpp>
 #include <rocRoller/Utilities/Component.hpp>
 
 namespace rocRoller
@@ -234,7 +233,6 @@ namespace rocRoller
         co_yield m_context->brancher()->branchIfZero(label_24, m_context->getSCC());
         co_yield_(Instruction(
             "s_ashr_i32", {s_0->subset({0})}, {r1, Register::Value::Literal(31)}, {}, ""));
-        co_yield s_6->allocate();
         co_yield_(Instruction("s_add_u32", {s_6->subset({0})}, {r0, s_0->subset({0})}, {}, ""));
         co_yield m_context->copier()->copy(s_0->subset({1}), s_0->subset({0}), "");
         co_yield_(Instruction("s_addc_u32", {s_6->subset({1})}, {r1, s_0->subset({0})}, {}, ""));
@@ -256,7 +254,6 @@ namespace rocRoller
             "v_mac_f32_e32", {v_7}, {Register::Value::Literal(0x4f800000), v_8}, {}, ""));
         co_yield_(Instruction("v_rcp_f32_e32", {v_7}, {v_7}, {}, ""));
         co_yield m_context->copier()->copy(v_10, Register::Value::Literal(0), "");
-        co_yield s_23->allocate();
         co_yield_(Instruction(
             "s_ashr_i32", {s_23->subset({0})}, {l1, Register::Value::Literal(31)}, {}, ""));
         co_yield m_context->copier()->copy(s_23->subset({1}), s_23->subset({0}), "");
@@ -503,7 +500,6 @@ namespace rocRoller
         co_yield m_context->copier()->copy(v_8, Register::Value::Literal(0), "");
         co_yield_(Instruction::Label(label_26));
 
-        co_yield Register::AllocateIfNeeded(dest);
         co_yield_(Instruction("v_readlane_b32",
                               {dest->subset({0})},
                               {v_7, Register::Value::Literal(0)},
@@ -588,7 +584,6 @@ namespace rocRoller
         co_yield m_context->copier()->copy(v_7, r0, "");
         co_yield m_context->copier()->copy(v_3, r1, "");
 
-        co_yield v_4->allocate();
         co_yield m_context->copier()->copy(v_4->subset({0}), Register::Value::Literal(0), "");
         co_yield_(Instruction("v_or_b32_e32", {v_4->subset({1})}, {v_2, v_3}, {}, ""));
         co_yield_(Instruction(
@@ -866,7 +861,6 @@ namespace rocRoller
             "v_cndmask_b32_e32", {v_2}, {v_2, v_4->subset({0}), m_context->getVCC()}, {}, ""));
         co_yield_(Instruction("v_xor_b32_e32", {v_19}, {v_19, v_8}, {}, ""));
         co_yield_(Instruction("v_xor_b32_e32", {v_2}, {v_2, v_8}, {}, ""));
-        co_yield Register::AllocateIfNeeded(dest);
         co_yield_(Instruction(
             "v_sub_co_u32_e32", {dest->subset({0})}, {m_context->getVCC(), v_19, v_8}, {}, ""));
         co_yield_(Instruction("v_subb_co_u32_e32",

@@ -36,8 +36,6 @@ namespace rocRoller
                         && dest->variableType() == DataType::Halfx2,
                     "loadAndPack destination must be a vector register of type Halfx2");
 
-        co_yield Register::AllocateIfNeeded(dest);
-
         // Use the same register for the destination and the temporary val1
         auto val1 = std::make_shared<Register::Value>(
             dest->allocation(), Register::Type::Vector, DataType::Half, dest->allocationCoord());
@@ -83,8 +81,6 @@ namespace rocRoller
                                               toPack->regType(),
                                               DataType::Halfx2,
                                               toPack->valueCount() / valuesPerWord);
-        co_yield Register::AllocateIfNeeded(result);
-
         for(int i = 0; i < result->registerCount(); i++)
         {
             co_yield m_context.lock()->copier()->pack(result->element({i}),

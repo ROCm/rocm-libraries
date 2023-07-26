@@ -206,8 +206,6 @@ namespace rocRoller
 
         auto ctx = m_context.lock();
 
-        co_yield Register::AllocateIfNeeded(dest);
-
         if(numBytes < m_wordSize)
         {
             AssertFatal(numBytes < m_wordSize && dest->registerCount() == 1);
@@ -269,8 +267,6 @@ namespace rocRoller
                     "Invalid number of bytes");
 
         auto ctx = m_context.lock();
-
-        co_yield Register::AllocateIfNeeded(data);
 
         if(numBytes < m_wordSize)
         {
@@ -387,8 +383,6 @@ namespace rocRoller
 
         auto ctx = m_context.lock();
 
-        co_yield Register::AllocateIfNeeded(dest);
-
         if(numBytes < m_wordSize)
         {
             auto offsetModifier = genOffsetModifier(offset);
@@ -444,8 +438,6 @@ namespace rocRoller
                     "Invalid number of bytes");
 
         auto ctx = m_context.lock();
-
-        co_yield Register::AllocateIfNeeded(data);
 
         if(numBytes < m_wordSize)
         {

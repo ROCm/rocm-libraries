@@ -79,7 +79,7 @@ namespace rocRoller
         std::optional<int>
             WaitStateObserver<DerivedObserver>::checkRegister(Register::ValuePtr const& reg) const
         {
-            if(!reg)
+            if(!reg || reg->allocationState() == Register::AllocationState::Unallocated)
             {
                 return std::nullopt;
             }

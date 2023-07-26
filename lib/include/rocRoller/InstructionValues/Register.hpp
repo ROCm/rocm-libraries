@@ -123,7 +123,6 @@ namespace rocRoller
 
             bool canAllocateNow() const;
             void allocateNow();
-            void freeNow();
 
             bool isPlaceholder() const;
             bool isZeroLiteral() const;
@@ -177,8 +176,7 @@ namespace rocRoller
             Value(AllocationPtr alloc, Type regType, VariableType variableType, T& coord);
 
             std::string name() const;
-            void        setName(std::string const& name);
-            void        setName(std::string&& name);
+            void        setName(std::string name);
 
             /**
              * Return negated copy.
@@ -348,7 +346,7 @@ namespace rocRoller
 
             ~Allocation();
 
-            static AllocationPtr SameAs(Value const& val, std::string const& name);
+            static AllocationPtr SameAs(Value const& val, std::string name);
 
             Instruction allocate();
             void        allocate(Instruction& inst);
@@ -376,8 +374,7 @@ namespace rocRoller
             void free();
 
             std::string name() const;
-            void        setName(std::string const& name);
-            void        setName(std::string&& name);
+            void        setName(std::string name);
 
         private:
             friend class Value;
@@ -402,6 +399,9 @@ namespace rocRoller
 
             void setRegisterCount();
         };
+
+        std::string   toString(Allocation::Options const& opts);
+        std::ostream& operator<<(std::ostream& stream, Allocation::Options const& opts);
     }
 }
 

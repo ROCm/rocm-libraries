@@ -544,7 +544,6 @@ namespace rocRoller
 
                 auto dst = m_context->registerTagManager()->getRegister(
                     vgprTag, Register::Type::Vector, load.varType.dataType);
-                co_yield Register::AllocateIfNeeded(dst);
 
                 if(load.scalar)
                 {
@@ -701,7 +700,6 @@ namespace rocRoller
                 auto indexes = coords.forward({userTag});
 
                 co_yield Instruction::Comment("GEN: StoreVGPR; user index");
-                co_yield offset->allocate();
                 co_yield generateOffset(offset, indexes[0], src->variableType().dataType);
 
                 Register::ValuePtr vPtr;

@@ -41,6 +41,8 @@ namespace rocRoller
 
             bool isFree(int idx) const;
 
+            std::string toString() const;
+
             /**
              *  Normally, registers are implicitly freed when their allocation goes out of scope.
              *  This is for manual control only.

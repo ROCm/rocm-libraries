@@ -367,7 +367,6 @@ co_yield generateOp<Expression::Add>(sgprSrdD->subset({0,1}), sgprSrdD->subset({
 co_yield Instruction::Comment(" initC: remove C-tile 0-0 from pool ");
 co_yield Instruction::Comment(" initC: remove AB-tile 0-4 from pool ");
 // co_yield fmm->zero(accDestination);
-co_yield Register::AllocateIfNeeded(accDestination);
 for(size_t i = 0; i < accDestination->valueCount(); ++i)
 {
     co_yield_(Instruction("v_accvgpr_write",

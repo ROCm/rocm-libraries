@@ -24,11 +24,51 @@ namespace rocRoller
             return m_regType;
         }
 
+        inline std::string Allocator::toString() const
+        {
+            std::ostringstream msg;
+
+            size_t                                        nextIdx = 0;
+            std::map<std::shared_ptr<Allocation>, size_t> allocs;
+
+            for(size_t i = 0; i < m_registers.size(); i++)
+            {
+                msg << std::setw(4) << i << ": ";
+                if(m_registers[i].expired())
+                {
+                    msg << " (free)";
+                }
+                else
+                {
+                    auto myAlloc = m_registers[i].lock();
+                    auto iter    = allocs.find(myAlloc);
+
+                    if(iter == allocs.end())
+                    {
+                        iter = allocs.insert(std::make_pair(myAlloc, nextIdx)).first;
+                        nextIdx++;
+                    }
+
+                    msg << "(" << iter->second << "): " << iter->first->descriptiveComment("");
+                }
+
+                msg << std::endl;
+            }
+
+            return msg.str();
+        }
+
         inline void Allocator::allocate(AllocationPtr alloc)
         {
             auto registers = findFree(alloc->registerCount(), alloc->options());
 
-            AssertFatal(!registers.empty(), "No more ", m_regType, " registers!");
+            AssertFatal(!registers.empty(),
+                        "No more ",
+                        m_regType,
+                        " registers!\n",
+                        toString(),
+                        alloc->options(),
+                        ShowValue(alloc->registerCount()));
 
             allocate(alloc, std::move(registers));
         }

@@ -72,7 +72,6 @@ namespace rocRoller
             co_yield_(Instruction("v_cvt_f32_f16", {dest}, {arg}, {}, ""));
             break;
         case DataType::Halfx2:
-            co_yield Register::AllocateIfNeeded(dest);
             co_yield_(Instruction("v_cvt_f32_f16", {dest->element({0})}, {arg}, {}, ""));
             co_yield generateOp<Expression::ShiftR>(
                 dest->element({1}), arg, Register::Value::Literal(16u));
@@ -98,7 +97,6 @@ namespace rocRoller
             co_yield_(Instruction("v_cvt_f16_f32", {dest}, {arg}, {}, ""));
             break;
         case DataType::Halfx2:
-            co_yield Register::AllocateIfNeeded(dest);
             co_yield generateOp<Expression::BitwiseAnd>(
                 dest->element({0}), arg, Register::Value::Literal(0xFFFF));
             co_yield generateOp<Expression::ShiftR>(
@@ -163,12 +161,10 @@ namespace rocRoller
         switch(dataType)
         {
         case DataType::Int32:
-            co_yield Register::AllocateIfNeeded(dest);
             co_yield signExtendDWord(dest->subset({1}), arg);
             co_yield m_context->copier()->copy(dest->subset({0}), arg);
             break;
         case DataType::UInt32:
-            co_yield Register::AllocateIfNeeded(dest);
             co_yield m_context->copier()->copy(dest->subset({1}), Register::Value::Literal(0));
             co_yield m_context->copier()->copy(dest->subset({0}), arg);
             break;
@@ -217,12 +213,10 @@ namespace rocRoller
         switch(dataType)
         {
         case DataType::Int32:
-            co_yield Register::AllocateIfNeeded(dest);
             co_yield signExtendDWord(dest->subset({1}), arg);
             co_yield m_context->copier()->copy(dest->subset({0}), arg);
             break;
         case DataType::UInt32:
-            co_yield Register::AllocateIfNeeded(dest);
             co_yield m_context->copier()->copy(dest->subset({1}), Register::Value::Literal(0));
             co_yield m_context->copier()->copy(dest->subset({0}), arg);
             break;

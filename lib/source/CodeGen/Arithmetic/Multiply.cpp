@@ -1,6 +1,5 @@
 #include <rocRoller/CodeGen/Arithmetic/Multiply.hpp>
 #include <rocRoller/CodeGen/CopyGenerator.hpp>
-#include <rocRoller/InstructionValues/RegisterUtils.hpp>
 #include <rocRoller/Utilities/Component.hpp>
 
 namespace rocRoller
@@ -64,8 +63,6 @@ namespace rocRoller
         AssertFatal(r1);
 
         // See the comments in the Vector Int64 generator below for more info
-
-        co_yield Register::AllocateIfNeeded(dest);
 
         AssertFatal(dest->regType() == Register::Type::Scalar);
         AssertFatal(dest->registerCount() == 2);
@@ -223,8 +220,6 @@ namespace rocRoller
             if(l1->regType() == Register::Type::Scalar)
                 co_yield moveToVGPR(l1);
         }
-
-        co_yield Register::AllocateIfNeeded(dest);
 
         AssertFatal(dest->regType() == Register::Type::Vector);
         AssertFatal(dest->registerCount() == 2);

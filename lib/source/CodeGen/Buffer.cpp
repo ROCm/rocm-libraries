@@ -147,7 +147,6 @@ namespace rocRoller
 
     Generator<Instruction> BufferDescriptor::setup()
     {
-        co_yield m_bufferResourceDescriptor->allocate();
         co_yield m_context->copier()->copy(
             m_bufferResourceDescriptor->subset({2}), Register::Value::Literal(2147483548), "");
         co_yield m_context->copier()->copy(m_bufferResourceDescriptor->subset({3}),

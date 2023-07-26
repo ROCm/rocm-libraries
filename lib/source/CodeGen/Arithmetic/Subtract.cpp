@@ -1,5 +1,4 @@
 #include <rocRoller/CodeGen/Arithmetic/Subtract.hpp>
-#include <rocRoller/InstructionValues/RegisterUtils.hpp>
 #include <rocRoller/Utilities/Component.hpp>
 
 namespace rocRoller
@@ -78,8 +77,6 @@ namespace rocRoller
         co_yield get2DwordsScalar(l0, l1, lhs);
         co_yield get2DwordsScalar(r0, r1, rhs);
 
-        co_yield Register::AllocateIfNeeded(dest);
-
         co_yield_(
             Instruction(
                 "s_sub_u32", {dest->subset({0})}, {l0, r0}, {}, "least significant half; sets scc")
@@ -102,8 +99,6 @@ namespace rocRoller
         co_yield get2DwordsVector(r0, r1, rhs);
 
         auto borrow = m_context->getVCC();
-
-        co_yield Register::AllocateIfNeeded(dest);
 
         co_yield_(
             Instruction(

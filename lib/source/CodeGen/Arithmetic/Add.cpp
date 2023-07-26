@@ -1,5 +1,4 @@
 #include <rocRoller/CodeGen/Arithmetic/Add.hpp>
-#include <rocRoller/InstructionValues/RegisterUtils.hpp>
 #include <rocRoller/Utilities/Component.hpp>
 
 namespace rocRoller
@@ -82,8 +81,6 @@ namespace rocRoller
         co_yield get2DwordsScalar(l0, l1, lhs);
         co_yield get2DwordsScalar(r0, r1, rhs);
 
-        co_yield Register::AllocateIfNeeded(dest);
-
         co_yield_(
             Instruction(
                 "s_add_u32", {dest->subset({0})}, {l0, r0}, {}, "least significant half; sets scc")
@@ -128,8 +125,6 @@ namespace rocRoller
         }
 
         auto carry = m_context->getVCC();
-
-        co_yield Register::AllocateIfNeeded(dest);
 
         // LOCK: Carry Register needed
         co_yield_(

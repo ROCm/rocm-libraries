@@ -112,9 +112,6 @@ TEST_F(RegisterTest, SimpleTests)
     EXPECT_EQ(r->isPlaceholder(), false);
     EXPECT_EQ(r_placeholder->isPlaceholder(), true);
     EXPECT_EQ(r_literal->isPlaceholder(), false);
-
-    r->freeNow();
-    EXPECT_EQ(r->allocationState(), Register::AllocationState::Unallocated);
 }
 
 TEST_F(RegisterTest, Literal)
@@ -220,11 +217,25 @@ TEST_F(RegisterTest, PrintAllocationState)
     EXPECT_THAT("Allocated", stream.str());
 }
 
-TEST_F(RegisterTest, NoAllocationSubset)
+TEST_F(RegisterTest, NoAllocationSubsetAndElement)
 {
     auto r
-        = std::make_shared<Register::Value>(m_context, Register::Type::Vector, DataType::Int32, 4);
-    EXPECT_THROW(r->subset({0}), FatalError);
+        = std::make_shared<Register::Value>(m_context, Register::Type::Vector, DataType::Int64, 4);
+
+    auto r2 = r->subset({0});
+    EXPECT_THROW(r2->getRegisterIds().to<std::vector>(), FatalError);
+
+    auto r3 = r->element({1});
+    EXPECT_THROW(r3->getRegisterIds().to<std::vector>(), FatalError);
+
+    r->allocateNow();
+
+    auto rIDs = r->getRegisterIds().to<std::vector>();
+    ASSERT_EQ(8, rIDs.size());
+
+    EXPECT_EQ(std::vector{rIDs[0]}, r2->getRegisterIds().to<std::vector>());
+
+    EXPECT_EQ((std::vector{rIDs[2], rIDs[3]}), r3->getRegisterIds().to<std::vector>());
 }
 
 TEST_F(RegisterTest, SubsetOutOfBounds)

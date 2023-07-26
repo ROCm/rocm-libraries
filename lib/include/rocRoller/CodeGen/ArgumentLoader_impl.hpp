@@ -68,6 +68,10 @@ namespace rocRoller
                 m_context.lock(), Register::Type::Scalar, DataType::Raw32, totalRegisters);
         }
 
+        // This is still needed even with deferred `subset()` since we generate
+        // different instructions depending on the alignment of the registers.
+        // The initial allocation of the arguments is also not something that
+        // can be deferred in order to alleviate register pressure.
         if(value->allocationState() != Register::AllocationState::Allocated)
             value->allocateNow();
 
@@ -75,7 +79,7 @@ namespace rocRoller
 
         int regIdx = 0;
 
-        auto regIndices = Generated(value->registerIndices());
+        auto regIndices = value->registerIndices().to<std::vector>();
         auto regIter    = regIndices.begin();
 
         auto argPtr = argumentPointer();

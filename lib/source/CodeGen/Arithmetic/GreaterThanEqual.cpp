@@ -81,13 +81,10 @@ namespace rocRoller
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
 
-        auto vTemp = std::make_shared<Register::Value>(
-            m_context, Register::Type::Vector, DataType::Int32, 2);
-        co_yield vTemp->allocate();
+        Register::ValuePtr tmp;
+        co_yield m_context->copier()->ensureType(tmp, rhs, Register::Type::Vector);
 
-        co_yield m_context->copier()->copy(vTemp, rhs, "");
-
-        co_yield_(Instruction("v_cmp_ge_i64", {dst}, {lhs, vTemp}, {}, ""));
+        co_yield_(Instruction("v_cmp_ge_i64", {dst}, {lhs, tmp}, {}, ""));
     }
 
     template <>

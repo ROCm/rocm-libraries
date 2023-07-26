@@ -10,7 +10,6 @@
 #include "../AssemblyKernel.hpp"
 #include "../Context.hpp"
 #include "../InstructionValues/Register.hpp"
-#include "../InstructionValues/RegisterUtils.hpp"
 #include "../Utilities/Error.hpp"
 
 namespace rocRoller
@@ -32,7 +31,6 @@ namespace rocRoller
                     "Invalid source register type");
         AssertFatal(dest->regType() == Register::Type::Scalar, "Invalid destination register type");
 
-        co_yield Register::AllocateIfNeeded(dest);
         if(src->regType() == Register::Type::Literal && dest->regType() == Register::Type::Scalar)
         {
             co_yield_(Instruction("s_cmov_b32", {dest}, {src}, {}, comment));
@@ -70,8 +68,6 @@ namespace rocRoller
             throw FatalError("Can not copy vector register into scalar register");
         }
 
-        // TODO: Remove AllocateIfNeeded when Register::subset can be invoked while unallocated
-        co_yield Register::AllocateIfNeeded(dest);
         if(src->regType() == Register::Type::Literal && dest->regType() == Register::Type::Vector)
         {
             // TODO this assumes 32bit
@@ -215,7 +211,6 @@ namespace rocRoller
                         || dest->regType() == Register::Type::Accumulator,
                     "Invalid destination register type");
 
-        co_yield Register::AllocateIfNeeded(dest);
         for(size_t i = 0; i < dest->valueCount(); ++i)
             co_yield copy(dest->element({i}), src, comment);
     }

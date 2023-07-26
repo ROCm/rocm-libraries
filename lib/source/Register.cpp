@@ -57,13 +57,15 @@ namespace rocRoller
                     co_yield RegisterId(m_regType, static_cast<int>(m_specialName));
                 }
             }
-            if(!m_allocation || m_allocation->allocationState() != AllocationState::Allocated)
+            else
             {
-                co_return;
-            }
-            for(int coord : m_allocationCoord)
-            {
-                co_yield RegisterId(m_regType, m_allocation->m_registerIndices.at(coord));
+                AssertFatal(allocationState() == AllocationState::Allocated,
+                            ShowValue(allocationState()));
+
+                for(int coord : m_allocationCoord)
+                {
+                    co_yield RegisterId(m_regType, m_allocation->m_registerIndices.at(coord));
+                }
             }
         }
 
