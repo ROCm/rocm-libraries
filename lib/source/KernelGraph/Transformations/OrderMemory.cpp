@@ -1,33 +1,49 @@
+#include <rocRoller/KernelGraph/ControlGraph/LastRWTracer.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/OrderMemory.hpp>
+#include <rocRoller/KernelGraph/Utils.hpp>
 
 namespace rocRoller
 {
     namespace KernelGraph
     {
+        std::set<std::pair<int, int>> allAmbiguousNodes(KernelGraph const& graph)
+        {
+            std::set<std::pair<int, int>> ambiguousNodes;
+            for(auto pair :
+                graph.control.ambiguousNodes<rocRoller::KernelGraph::ControlGraph::LoadTiled>())
+                ambiguousNodes.insert(pair);
+            for(auto pair :
+                graph.control.ambiguousNodes<rocRoller::KernelGraph::ControlGraph::StoreTiled>())
+                ambiguousNodes.insert(pair);
+            for(auto pair :
+                graph.control.ambiguousNodes<rocRoller::KernelGraph::ControlGraph::LoadLDSTile>())
+                ambiguousNodes.insert(pair);
+            for(auto pair :
+                graph.control.ambiguousNodes<rocRoller::KernelGraph::ControlGraph::StoreLDSTile>())
+                ambiguousNodes.insert(pair);
+            for(auto pair :
+                graph.control.ambiguousNodes<rocRoller::KernelGraph::ControlGraph::LoadLinear>())
+                ambiguousNodes.insert(pair);
+            for(auto pair :
+                graph.control.ambiguousNodes<rocRoller::KernelGraph::ControlGraph::StoreLinear>())
+                ambiguousNodes.insert(pair);
+            /* TODO: Handle these node types.
+            for(auto pair :
+                graph.control.ambiguousNodes<rocRoller::KernelGraph::ControlGraph::LoadVGPR>())
+                ambiguousNodes.insert(pair);
+            for(auto pair :
+                graph.control.ambiguousNodes<rocRoller::KernelGraph::ControlGraph::StoreVGPR>())
+                ambiguousNodes.insert(pair);
+            */
+            return ambiguousNodes;
+        }
+
         ConstraintStatus NoAmbiguousNodes(const KernelGraph& k)
         {
             ConstraintStatus retval;
             std::set<int>    searchNodes;
-
-            std::set<std::pair<int, int>> ambiguousNodes;
-            for(auto pair : k.control.ambiguousNodes<ControlGraph::LoadTiled>())
-                ambiguousNodes.insert(pair);
-            for(auto pair : k.control.ambiguousNodes<ControlGraph::StoreTiled>())
-                ambiguousNodes.insert(pair);
-            for(auto pair : k.control.ambiguousNodes<ControlGraph::LoadLDSTile>())
-                ambiguousNodes.insert(pair);
-            for(auto pair : k.control.ambiguousNodes<ControlGraph::StoreLDSTile>())
-                ambiguousNodes.insert(pair);
-            for(auto pair : k.control.ambiguousNodes<ControlGraph::LoadLinear>())
-                ambiguousNodes.insert(pair);
-            for(auto pair : k.control.ambiguousNodes<ControlGraph::StoreLinear>())
-                ambiguousNodes.insert(pair);
-            for(auto pair : k.control.ambiguousNodes<ControlGraph::LoadVGPR>())
-                ambiguousNodes.insert(pair);
-            for(auto pair : k.control.ambiguousNodes<ControlGraph::StoreVGPR>())
-                ambiguousNodes.insert(pair);
-
+            auto             ambiguousNodes = allAmbiguousNodes(k);
             for(auto ambiguousPair : ambiguousNodes)
             {
                 retval.combine(false,
@@ -53,15 +69,14 @@ namespace rocRoller
         }
 
         /**
-         * Rewrite HyperGraph to make sure ambiguous memory operations
-         * in the control graph are ordered.
+         * This transformation is used to provide the initial ordering of memory nodes in the first stage of the kernel graph.
          */
         KernelGraph OrderMemory::apply(KernelGraph const& k)
         {
             TIMER(t, "KernelGraph::OrderMemory");
-            rocRoller::Log::getLogger()->debug("KernelGraph::OrderMemory(TODO)");
+            rocRoller::Log::getLogger()->debug("KernelGraph::OrderMemory");
             auto newGraph = k;
-            //TODO: Implement
+            orderMemoryNodes(newGraph, allAmbiguousNodes(k), false);
             return newGraph;
         }
 

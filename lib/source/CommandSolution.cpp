@@ -263,6 +263,9 @@ namespace rocRoller
         }
 
         std::vector<KernelGraph::GraphTransformPtr> transforms;
+
+        transforms.push_back(std::make_shared<KernelGraph::OrderMemory>(
+            !m_context->kernelOptions().allowAmbiguousMemoryNodes));
         transforms.push_back(std::make_shared<KernelGraph::UpdateParameters>(m_preParameters));
         transforms.push_back(std::make_shared<KernelGraph::LowerLinear>(m_context));
         transforms.push_back(std::make_shared<KernelGraph::LowerTile>(m_preParameters, m_context));
@@ -290,10 +293,6 @@ namespace rocRoller
         transforms.push_back(std::make_shared<KernelGraph::AddConvert>());
         transforms.push_back(std::make_shared<KernelGraph::AddDeallocate>());
         transforms.push_back(std::make_shared<KernelGraph::InlineIncrements>());
-        if(m_context->kernelOptions().orderMemory)
-        {
-            transforms.push_back(std::make_shared<KernelGraph::OrderMemory>());
-        }
         transforms.push_back(std::make_shared<KernelGraph::CleanArguments>(m_context->kernel()));
         if(m_postParameters)
         {

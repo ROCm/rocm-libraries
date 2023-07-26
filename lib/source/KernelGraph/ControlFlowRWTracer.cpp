@@ -165,7 +165,8 @@ namespace rocRoller::KernelGraph
             AssertFatal(!nodes.empty(),
                         "Invalid control graph!",
                         ShowValue(m_graph.control),
-                        ShowValue(candidates));
+                        ShowValue(candidates),
+                        ShowValue(m_completedControlNodes));
 
             // Visit all the nodes we found.
             for(auto const& tag : nodes)

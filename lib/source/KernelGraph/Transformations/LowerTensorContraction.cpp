@@ -388,7 +388,9 @@ namespace rocRoller
             graph.coordinates.addElement(PassThrough(), {waveTileNumYA}, {smallKUnroll});
             graph.coordinates.addElement(PassThrough(), {waveTileNumXB}, {smallKUnroll});
 
-            int lastWaveMult = -1;
+            int lastWaveMult  = -1;
+            int lastSetCoordA = -1;
+            int lastSetCoordB = -1;
             for(uint k = 0; k < num_wave_tiles; k++)
             {
                 auto setCoordA = graph.control.addElement(SetCoordinate(literal(k)));
@@ -415,14 +417,21 @@ namespace rocRoller
 
                 graph.control.addElement(Sequence(), {setCoordA}, {waveMult});
                 graph.control.addElement(Sequence(), {setCoordB}, {waveMult});
+                graph.control.addElement(Sequence(), {setCoordA}, {setCoordB});
 
                 addConnectionsMultiply(graph, waveMult, newLoadA, newLoadB);
                 if(lastWaveMult >= 0)
                 {
                     graph.control.addElement(Sequence(), {lastWaveMult}, {waveMult});
+                    graph.control.addElement(Sequence(), {lastSetCoordA}, {setCoordA});
+                    graph.control.addElement(Sequence(), {lastSetCoordA}, {setCoordB});
+                    graph.control.addElement(Sequence(), {lastSetCoordB}, {setCoordA});
+                    graph.control.addElement(Sequence(), {lastSetCoordB}, {setCoordB});
                 }
 
-                lastWaveMult = waveMult;
+                lastWaveMult  = waveMult;
+                lastSetCoordA = setCoordA;
+                lastSetCoordB = setCoordB;
             }
 
             int finalContractionOp = forK;
@@ -503,6 +512,10 @@ namespace rocRoller
                 //graph.control.addElement(
                 //    e, elem, std::vector<int>{forWaveTilesY}, std::vector<int>{index});
                 graph.control.addElement(Sequence(), {forK}, {index});
+                if(context->kernelOptions().enableScratch)
+                {
+                    graph.control.addElement(Sequence(), {finalContractionOp}, {index});
+                }
             }
 
             for(auto const index : otherOps)
@@ -549,6 +562,26 @@ namespace rocRoller
             }
 
             // Delete original loadA and loadB.
+            for(auto edge :
+                graph.control.getNeighbours<Graph::Direction::Downstream>(loadA[0]).to<std::set>())
+            {
+                graph.control.deleteElement(edge);
+            }
+            for(auto edge :
+                graph.control.getNeighbours<Graph::Direction::Upstream>(loadA[0]).to<std::set>())
+            {
+                graph.control.deleteElement(edge);
+            }
+            for(auto edge :
+                graph.control.getNeighbours<Graph::Direction::Downstream>(loadB[0]).to<std::set>())
+            {
+                graph.control.deleteElement(edge);
+            }
+            for(auto edge :
+                graph.control.getNeighbours<Graph::Direction::Upstream>(loadB[0]).to<std::set>())
+            {
+                graph.control.deleteElement(edge);
+            }
             graph.control.deleteElement(loadA[0]);
             graph.control.deleteElement(loadB[0]);
             graph.mapper.purge(loadA[0]);
@@ -571,7 +604,7 @@ namespace rocRoller
             auto op             = kgraph.control.getNode<TensorContraction>(tag);
             auto [a_tag, a_mac] = kgraph.getDimension<MacroTile>(tag, NaryArgument::LHS);
             auto [b_tag, b_mac] = kgraph.getDimension<MacroTile>(tag, NaryArgument::RHS);
-            auto [d_tag, d_amc] = kgraph.getDimension<MacroTile>(tag, NaryArgument::DEST);
+            auto [d_tag, d_mac] = kgraph.getDimension<MacroTile>(tag, NaryArgument::DEST);
             if(a_mac.rank == 2 && b_mac.rank == 2 && op.aDims == std::vector<int>{1}
                && op.bDims == std::vector<int>{0})
             {

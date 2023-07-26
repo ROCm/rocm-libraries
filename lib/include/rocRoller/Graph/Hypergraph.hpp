@@ -329,10 +329,10 @@ namespace rocRoller
             /**
              * @brief Return all downstream nodes that are connected to `candidates` via the specified edge type.
              * The set of original candidates is included in the returned set.
-             * 
+             *
              * Note that this function recursively follows edges.
-             * 
-             * @param candidates Set of node ids 
+             *
+             * @param candidates Set of node ids
              * @return std::set<int> Set of node ids expanded
              */
             template <typename T>

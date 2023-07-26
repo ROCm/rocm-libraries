@@ -1,4 +1,5 @@
 
+#include <rocRoller/KernelGraph/ControlGraph/LastRWTracer.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/UnrollLoops.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
@@ -458,9 +459,29 @@ namespace rocRoller
 
                 // Connect the duplicated bodies to the loop, adding SetCoordinate nodes
                 // as needed.
+                std::set<int> previousLoads;
+                std::set<int> previousStores;
                 for(int i = 0; i < unrollAmount; i++)
                 {
                     connectWithSetCoord(duplicatedBodies[i], i);
+                    auto currentLoads
+                        = filter(graph.control.isElemType<LoadTiled>(),
+                                 graph.control.depthFirstVisit(duplicatedBodies[i],
+                                                               Graph::Direction::Downstream))
+                              .to<std::set>();
+
+                    auto currentStores
+                        = filter(graph.control.isElemType<StoreTiled>(),
+                                 graph.control.depthFirstVisit(duplicatedBodies[i],
+                                                               Graph::Direction::Downstream))
+                              .to<std::set>();
+                    if(i > 0)
+                    {
+                        orderMemoryNodes(graph, previousLoads, currentLoads, true);
+                        orderMemoryNodes(graph, previousStores, currentStores, true);
+                    }
+                    previousLoads  = currentLoads;
+                    previousStores = currentStores;
                 }
 
                 // If there are any loop carried dependencies, add Sequence nodes

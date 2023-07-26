@@ -41,7 +41,7 @@ namespace rocRoller
         unsigned int unrollK;
 
         bool fuseLoops;
-        bool orderMemory;
+        bool allowAmbiguousMemoryNodes;
 
         bool prefetch;
         int  prefetchInFlight;

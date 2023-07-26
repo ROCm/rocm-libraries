@@ -223,4 +223,62 @@ namespace rocRoller::KernelGraph::ControlGraph
     {
         return ControlGraph::ElementName(el);
     }
+
+    template <CForwardRangeOf<int> Range>
+    inline void ControlGraph::orderMemoryNodes(Range const& aControlStack,
+                                               Range const& bControlStack,
+                                               bool         ordered)
+    {
+        int src  = -1;
+        int dest = -1;
+        for(int i = 0; (i < aControlStack.size()) && (i < bControlStack.size()); ++i)
+        {
+            if(aControlStack.at(i) != bControlStack.at(i))
+            {
+                auto setCoordA = get<SetCoordinate>(aControlStack.at(i));
+                auto setCoordB = get<SetCoordinate>(bControlStack.at(i));
+                if(ordered)
+                {
+                    src  = aControlStack.at(i);
+                    dest = bControlStack.at(i);
+                }
+                else if(setCoordA && setCoordB
+                        && evaluationTimes(setCoordA->value)[Expression::EvaluationTime::Translate]
+                        && evaluationTimes(setCoordB->value)[Expression::EvaluationTime::Translate])
+                {
+                    src  = aControlStack.at(i);
+                    dest = bControlStack.at(i);
+                    if(getUnsignedInt(evaluate(setCoordB->value))
+                       < getUnsignedInt(evaluate(setCoordA->value)))
+                    {
+                        src  = bControlStack.at(i);
+                        dest = aControlStack.at(i);
+                    }
+                }
+                else
+                {
+                    src  = std::min(aControlStack.at(i), bControlStack.at(i));
+                    dest = std::max(aControlStack.at(i), bControlStack.at(i));
+                }
+                break;
+            }
+        }
+        if(src == -1 || dest == -1)
+        {
+            int aIndex = aControlStack.size() - 1;
+            int bIndex = bControlStack.size() - 1;
+            if(aControlStack.size() > bControlStack.size())
+            {
+                aIndex = bIndex;
+            }
+            else
+            {
+                bIndex = aIndex;
+            }
+            src  = std::min(aControlStack.at(aIndex), bControlStack.at(bIndex));
+            dest = std::max(aControlStack.at(aIndex), bControlStack.at(bIndex));
+        }
+
+        addElement(Sequence(), {src}, {dest});
+    }
 }

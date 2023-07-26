@@ -13,12 +13,15 @@ namespace rocRoller
         ConstraintStatus NoAmbiguousNodes(const KernelGraph& k);
 
         /**
-         * @brief Order ambiguous memory operations in the control graph.
+         * @brief Ensure there are no ambiguous memory operations in the control graph.
          */
         class OrderMemory : public GraphTransform
         {
         public:
-            OrderMemory() {}
+            OrderMemory(bool checkOrder = true)
+                : m_checkOrder(checkOrder)
+            {
+            }
 
             KernelGraph apply(KernelGraph const& original) override;
             std::string name() const override
@@ -28,8 +31,15 @@ namespace rocRoller
 
             std::vector<GraphConstraint> postConstraints() const override
             {
-                return {&NoAmbiguousNodes};
+                if(m_checkOrder)
+                {
+                    return {&NoAmbiguousNodes};
+                }
+                return {};
             }
+
+        private:
+            bool m_checkOrder = true;
         };
     }
 }

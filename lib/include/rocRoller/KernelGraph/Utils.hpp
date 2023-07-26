@@ -256,6 +256,39 @@ namespace rocRoller
                                VariableType varType,
                                int          macTileTag,
                                ContextPtr   context);
+
+        /**
+         * @brief Order all input pairs of memory nodes in graph.
+         *
+         * @param graph
+         * @param pairs Pairs of memory nodes to be ordered.
+         * @param ordered If true, the pairs are passed in order.
+         */
+        void orderMemoryNodes(KernelGraph&                         graph,
+                              std::set<std::pair<int, int>> const& pairs,
+                              bool                                 ordered);
+
+        /**
+         * @brief Order all memory nodes in srcs with respect to all memory nodes in dests.
+         *
+         * @param graph
+         * @param srcs
+         * @param dests
+         * @param ordered If true, all orderings will be src -> dest.
+         */
+        void orderMemoryNodes(KernelGraph&         graph,
+                              std::set<int> const& srcs,
+                              std::set<int> const& dests,
+                              bool                 ordered);
+
+        /**
+         * @brief Order all input nodes with respect to each other.
+         *
+         * @param graph
+         * @param nodes
+         * @param ordered If true, all orderings will be nodes[i-1] -> nodes[i].
+         */
+        void orderMemoryNodes(KernelGraph& graph, std::vector<int> const& nodes, bool ordered);
     }
 }
 

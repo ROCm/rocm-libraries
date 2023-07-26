@@ -1,6 +1,8 @@
 
 #include <rocRoller/KernelGraph/Utils.hpp>
 
+#include <rocRoller/KernelGraph/ControlGraph/LastRWTracer.hpp>
+
 namespace rocRoller
 {
     namespace KernelGraph
@@ -543,6 +545,56 @@ namespace rocRoller
             if(s)
                 return s->dataType;
             Throw<FatalError>("Invalid load/store operation.");
+        }
+
+        void orderMemoryNodes(KernelGraph&                         graph,
+                              std::set<std::pair<int, int>> const& pairs,
+                              bool                                 ordered)
+        {
+            LastRWTracer tracer(graph);
+            tracer.trace();
+            std::map<int, std::deque<int>> traces;
+            for(auto pair : pairs)
+            {
+                traces[pair.first]  = tracer.controlStack(pair.first);
+                traces[pair.second] = tracer.controlStack(pair.second);
+            }
+            for(auto pair : pairs)
+            {
+                if(pair.first != pair.second
+                   && graph.control.compareNodes(pair.first, pair.second)
+                          == NodeOrdering::Undefined)
+                {
+                    graph.control.orderMemoryNodes(
+                        traces.at(pair.first), traces.at(pair.second), ordered);
+                }
+            }
+        }
+
+        void orderMemoryNodes(KernelGraph&         graph,
+                              std::set<int> const& srcs,
+                              std::set<int> const& dests,
+                              bool                 ordered)
+        {
+            std::set<std::pair<int, int>> pairs;
+            for(auto src : srcs)
+            {
+                for(auto dest : dests)
+                {
+                    pairs.insert(std::make_pair(src, dest));
+                }
+            }
+            orderMemoryNodes(graph, pairs, ordered);
+        }
+
+        void orderMemoryNodes(KernelGraph& graph, std::vector<int> const& nodes, bool ordered)
+        {
+            std::set<std::pair<int, int>> pairs;
+            for(int i = 1; i < nodes.size(); i++)
+            {
+                pairs.insert(std::make_pair(nodes[i - 1], nodes[i]));
+            }
+            orderMemoryNodes(graph, pairs, ordered);
         }
     }
 }

@@ -72,6 +72,7 @@
 #include "KernelGraph/CoordinateGraph/Dimension.hpp"
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Expression.hpp>
+#include <rocRoller/KernelGraph/ControlGraph/LastRWTracer.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddLDS.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
 #include <rocRoller/KernelGraph/Visitors.hpp>
@@ -331,10 +332,10 @@ namespace rocRoller
          *    the loops associated coordinate is contained in the set
          *    above.
          *
-         * 3. Make sure there is a neighbouring Unroll coordinate
+         * 3. Make sure there is a neighboring Unroll coordinate
          *    beside the ForLoop coordinate.
          *
-         * 4. Make sure the size of the Unroll coorindate is
+         * 4. Make sure the size of the Unroll coordinate is
          *    consistent with the requested number of prefetches.
          */
         std::map<int, int> findPrefetch(KernelGraph const& kgraph)
@@ -644,12 +645,21 @@ namespace rocRoller
             {
                 for(auto const& dependency : dependencies)
                 {
-                    auto edge = *only(graph.control.getNeighbours<GD::Upstream>(dependency));
-                    graph.control.deleteElement(edge);
-                    graph.control.addElement(Sequence(), {barrier}, {dependency});
+                    for(auto body : filter(graph.control.isElemType<Body>(),
+                                           graph.control.getNeighbours<GD::Upstream>(dependency))
+                                        .to<std::vector>())
+                    {
+                        graph.control.deleteElement(body);
+                        graph.control.addElement(Sequence(), {barrier}, {dependency});
+                    }
                 }
-
                 graph.control.addElement(Body(), {operation}, {loadTileFromGlobalChain});
+
+                auto existingLoads
+                    = filter(graph.control.isElemType<LoadTiled>(),
+                             graph.control.depthFirstVisit(operation, Graph::Direction::Downstream))
+                          .to<std::set>();
+                orderMemoryNodes(graph, existingLoads, {loadTileFromGlobalChain}, true);
             }
             else
             {
@@ -754,11 +764,15 @@ namespace rocRoller
 
                 for(auto& [user, chain] : prefetchChain)
                 {
+                    logger->debug("  addPrefetchChains: connecting {} to {}", pre, chain[0]);
                     graph.control.addElement(Sequence(), {pre}, {chain[0]});
                     for(uint i = 1; i < chain.size(); ++i)
                     {
+                        logger->debug(
+                            "  addPrefetchChains: connecting {} to {}", chain[i - 1], chain[i]);
                         graph.control.addElement(Sequence(), {chain[i - 1]}, {chain[i]});
                     }
+                    logger->debug("  addPrefetchChains: connecting {} to {}", chain.back(), post);
                     graph.control.addElement(Sequence(), {chain.back()}, {post});
                 }
             };
@@ -812,13 +826,24 @@ namespace rocRoller
             {
                 logger->debug("  prefetch: in-loop: segment {}", u);
 
-                // Connect the segment to the preceeding segment boundary
+                // Connect the segment to the preceding segment boundary
                 for(auto tag : m_prefetchUnrollBodyStarts[forLoop][u])
                 {
                     if(u == 0)
                         graph.control.addElement(Body(), {segmentBoundaries[u]}, {tag});
                     else
-                        graph.control.addElement(Sequence(), {segmentBoundaries[u]}, {tag});
+                    {
+                        auto descOfTag = graph.control
+                                             .depthFirstVisit(tag,
+                                                              graph.control.isElemType<Sequence>(),
+                                                              GD::Downstream)
+                                             .to<std::set>();
+
+                        if(!descOfTag.contains(segmentBoundaries[u]))
+                        {
+                            graph.control.addElement(Sequence(), {segmentBoundaries[u]}, {tag});
+                        }
+                    }
                 }
 
                 auto globalPrefetchU = (u + numInFlight) % numUnroll;
@@ -829,6 +854,7 @@ namespace rocRoller
 
                 // Issue global loads
                 auto globalLoads = globalLoadsByUnroll[globalPrefetchU];
+                logger->debug("  Issue global loads: {}", globalLoads[0].globalChain);
                 if(separateMemOps)
                 {
                     graph.control.addElement(Sequence(), {nop}, {globalLoads[0].globalChain});
@@ -867,11 +893,6 @@ namespace rocRoller
 
                 // Commit in-flight to LDS
                 auto globalStores = globalLoadsByUnroll[ldsPrefetchU];
-
-                graph.control.addElement(Sequence(),
-                                         {globalLoads[globalLoads.size() - 1].globalChain},
-                                         {globalStores[0].ldsChain});
-
                 if(separateMemOps)
                 {
                     graph.control.addElement(Sequence(), {nop}, {globalStores[0].ldsChain});
@@ -896,6 +917,10 @@ namespace rocRoller
                     graph.control.addElement(
                         Sequence(), {globalStores[i - 1].ldsChain}, {globalStores[i].ldsChain});
 
+                    logger->debug("  prefetch: in-loop: connecting: {} to {}",
+                                  globalStores[i - 1].ldsChain,
+                                  globalStores[i].ldsChain);
+
                     logger->debug("  prefetch: in-loop: commit lds {} user {}",
                                   ldsPrefetchU,
                                   globalStores[i].user);
@@ -903,6 +928,13 @@ namespace rocRoller
 
                 graph.control.addElement(
                     Sequence(), {globalStores[globalStores.size() - 1].ldsChain}, {barrier});
+
+                logger->debug("  prefetch: in-loop: ordering {} to {}",
+                              globalLoads[globalLoads.size() - 1].globalChain,
+                              globalStores[0].ldsChain);
+                graph.control.addElement(Sequence(),
+                                         {globalLoads[globalLoads.size() - 1].globalChain},
+                                         {globalStores[0].ldsChain});
 
                 // Prefetch from LDS
                 if(m_prefetchFromLDSChains[forLoop].contains(ldsPrefetchU))
@@ -1186,8 +1218,10 @@ namespace rocRoller
 
                     for(auto start : starts)
                     {
-                        for(auto elem : filter(k.control.isElemType<SetCoordinate>(),
-                                               k.control.depthFirstVisit(start, GD::Downstream)))
+                        for(auto elem :
+                            filter(k.control.isElemType<SetCoordinate>(),
+                                   k.control.depthFirstVisit(
+                                       start, k.control.isElemType<Body>(), GD::Downstream)))
                         {
                             auto setCoord   = *(k.control.get<SetCoordinate>(elem));
                             auto coordinate = k.mapper.get<Unroll>(elem);
@@ -1219,11 +1253,7 @@ namespace rocRoller
 
                             // Find Load operation underneath
                             auto loadTag = *only(k.control.findNodes(
-                                elem,
-                                [&](int x) {
-                                    return isOperation<LoadTiled>(k.control.getElement(x));
-                                },
-                                GD::Downstream));
+                                elem, k.control.isElemType<LoadTiled>(), GD::Downstream));
 
                             auto userTag = k.mapper.get<User>(loadTag);
                             auto tileTag = k.mapper.get<MacroTile>(loadTag);
@@ -1250,7 +1280,6 @@ namespace rocRoller
 
                                 m_prefetchDelete[forLoop].insert(outEdge);
                             }
-
                             break;
                         }
                     }

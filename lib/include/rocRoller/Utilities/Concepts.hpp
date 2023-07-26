@@ -1,6 +1,7 @@
 #pragma once
 
 #include <concepts>
+#include <deque>
 #include <ranges>
 #include <set>
 #include <string>
@@ -70,6 +71,7 @@ namespace rocRoller
     static_assert(CForwardRangeOf<std::vector<int>, int>);
     static_assert(CForwardRangeOf<std::vector<short>, int>);
     static_assert(CForwardRangeOf<std::vector<float>, int>);
+    static_assert(CForwardRangeOf<std::deque<int>, int>);
     static_assert(CForwardRangeOf<std::set<int>, int>);
     static_assert(!CForwardRangeOf<std::set<std::string>, int>);
     static_assert(!CForwardRangeOf<int, int>);

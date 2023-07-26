@@ -134,6 +134,27 @@ namespace rocRoller
                 std::set<std::pair<int, int>> ambiguousNodes()
             const;
 
+            /**
+             * @brief Given two control stacks, add the necessary sequence edge such that the final nodes in the stack are relatively ordered.
+             *
+             * The final nodes in the control stacks are ordered by adding a sequence edge between the first nodes in the stacks that differ.
+             *
+             * If ordered is true, the order imposed is a -> b.
+             * Otherwise, the order is inferred based on the following rules:
+             * 1. If the differing nodes are translate time evaluatable setcoords, order the smaller one first.
+             * 2. Otherwise, order the smaller numbered node first.
+             *
+             *
+             * @tparam Range
+             * @param aControlStack Path in the body-parent tree (computed from the control graph) from root to a.
+             * @param bControlStack Path in the body-parent tree from root to b.
+             * @param ordered Inputs are passed in order.
+             */
+            template <CForwardRangeOf<int> Range>
+            void orderMemoryNodes(Range const& aControlStack,
+                                  Range const& bControlStack,
+                                  bool         ordered = true);
+
             template <typename T>
             inline std::predicate<int> auto isElemType() const
             {

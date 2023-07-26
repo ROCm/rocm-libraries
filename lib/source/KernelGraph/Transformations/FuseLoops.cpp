@@ -1,3 +1,4 @@
+#include <rocRoller/KernelGraph/ControlGraph/LastRWTracer.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/FuseLoops.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
@@ -25,6 +26,7 @@ namespace rocRoller
         namespace FuseLoopsNS
         {
             namespace CT = rocRoller::KernelGraph::CoordinateGraph;
+            using GD     = rocRoller::Graph::Direction;
             /**
              * @brief Find a path from a node to a ForLoopOp using only Sequence edges
              *
@@ -44,7 +46,7 @@ namespace rocRoller
                               [&](int tag) -> bool {
                                   return isOperation<ForLoopOp>(graph.control.getElement(tag));
                               },
-                              Graph::Direction::Downstream)
+                              GD::Downstream)
                           .to<std::vector>();
 
                 if(allForLoops.empty())
@@ -53,11 +55,10 @@ namespace rocRoller
                 auto firstForLoop = allForLoops[0];
 
                 // Find all of the nodes in between the node and the first for loop
-                auto pathToLoopWithEdges
-                    = graph.control
-                          .path<Graph::Direction::Downstream>(std::vector<int>{start},
-                                                              std::vector<int>{firstForLoop})
-                          .to<std::vector>();
+                auto pathToLoopWithEdges = graph.control
+                                               .path<GD::Downstream>(std::vector<int>{start},
+                                                                     std::vector<int>{firstForLoop})
+                                               .to<std::vector>();
 
                 // Filter out only the nodes
                 std::vector<int> pathToLoop;
@@ -122,42 +123,6 @@ namespace rocRoller
                 }
 
                 return {key, tag};
-            }
-
-            /**
-             * @brief Returns all of the load operations within a for loop.
-             *
-             * Doesn't include loads that are in a nested loop.
-             *
-             * @param graph
-             * @param loop
-             * @return std::vector<int>
-             */
-            std::vector<int> loadsUnderLoop(KernelGraph const& graph, int loop)
-            {
-                auto dontWalkPastForLoop = [&](int tag) -> bool {
-                    for(auto neighbour :
-                        graph.control.getNeighbours(tag, Graph::Direction::Downstream))
-                    {
-                        if(graph.control.get<ForLoopOp>(neighbour))
-                        {
-                            return false;
-                        }
-                    }
-                    return true;
-                };
-
-                std::vector<int> result;
-                auto loopBodies = graph.control.getOutputNodeIndices<Body>(loop).to<std::vector>();
-
-                for(auto const& op : graph.control.depthFirstVisit(
-                        loopBodies, dontWalkPastForLoop, Graph::Direction::Downstream))
-                {
-                    if(graph.control.get<LoadTiled>(op))
-                        result.push_back(op);
-                }
-
-                return result;
             }
 
             /**
@@ -227,6 +192,17 @@ namespace rocRoller
                 rocRoller::Log::getLogger()->debug("KernelGraph::fuseLoops({})", tag);
                 auto bodies = graph.control.getOutputNodeIndices<Body>(tag).to<std::set>();
 
+                auto dontWalkPastForLoop = [&](int tag) -> bool {
+                    for(auto neighbour : graph.control.getNeighbours(tag, GD::Downstream))
+                    {
+                        if(graph.control.get<ForLoopOp>(neighbour))
+                        {
+                            return false;
+                        }
+                    }
+                    return true;
+                };
+
                 // Find all of the paths from the top of one of a body to a
                 // ForLoopOp.
                 std::vector<std::vector<int>> paths;
@@ -285,7 +261,13 @@ namespace rocRoller
 
                 for(auto const& forLoopTag : forLoopsToFuse)
                 {
-                    auto loads = loadsUnderLoop(graph, forLoopTag);
+                    auto loads = filter(graph.control.isElemType<LoadTiled>(),
+                                        graph.control.depthFirstVisit(
+                                            graph.control.getOutputNodeIndices<Body>(forLoopTag)
+                                                .to<std::vector>(),
+                                            dontWalkPastForLoop,
+                                            GD::Downstream))
+                                     .to<std::vector>();
 
                     if(forLoopTag == fusedLoopTag)
                     {
@@ -296,9 +278,28 @@ namespace rocRoller
                     for(auto const& child :
                         graph.control.getOutputNodeIndices<Sequence>(forLoopTag).to<std::vector>())
                     {
-                        graph.control.addElement(Sequence(), {fusedLoopTag}, {child});
+                        if(fusedLoopTag != child)
+                        {
+                            graph.control.addElement(Sequence(), {fusedLoopTag}, {child});
+                        }
                         graph.control.deleteElement<Sequence>(std::vector<int>{forLoopTag},
                                                               std::vector<int>{child});
+                        std::unordered_set<int> toDelete;
+                        for(auto descSeqOfChild :
+                            filter(graph.control.isElemType<Sequence>(),
+                                   graph.control.depthFirstVisit(child, GD::Downstream)))
+                        {
+                            if(graph.control.getNeighbours<GD::Downstream>(descSeqOfChild)
+                                   .to<std::unordered_set>()
+                                   .contains(fusedLoopTag))
+                            {
+                                toDelete.insert(descSeqOfChild);
+                            }
+                        }
+                        for(auto edge : toDelete)
+                        {
+                            graph.control.deleteElement(edge);
+                        }
                     }
 
                     for(auto const& child :
@@ -314,7 +315,17 @@ namespace rocRoller
                     for(auto const& parent :
                         graph.control.getInputNodeIndices<Sequence>(forLoopTag).to<std::vector>())
                     {
-                        graph.control.addElement(Sequence(), {parent}, {fusedLoopTag});
+                        auto descOfFusedLoop
+                            = graph.control
+                                  .depthFirstVisit(fusedLoopTag,
+                                                   graph.control.isElemType<Sequence>(),
+                                                   GD::Downstream)
+                                  .to<std::unordered_set>();
+
+                        if(!descOfFusedLoop.contains(parent))
+                        {
+                            graph.control.addElement(Sequence(), {parent}, {fusedLoopTag});
+                        }
                         graph.control.deleteElement<Sequence>(std::vector<int>{parent},
                                                               std::vector<int>{forLoopTag});
                     }
@@ -329,6 +340,22 @@ namespace rocRoller
 
                     purgeFor(graph, forLoopTag);
                 }
+
+                auto children
+                    = graph.control.getOutputNodeIndices<Sequence>(fusedLoopTag).to<std::vector>();
+
+                auto loads = filter(graph.control.isElemType<LoadTiled>(),
+                                    graph.control.depthFirstVisit(
+                                        children, dontWalkPastForLoop, GD::Downstream))
+                                 .to<std::vector>();
+
+                auto stores = filter(graph.control.isElemType<StoreTiled>(),
+                                     graph.control.depthFirstVisit(
+                                         children, dontWalkPastForLoop, GD::Downstream))
+                                  .to<std::vector>();
+
+                orderMemoryNodes(graph, loads, true);
+                orderMemoryNodes(graph, stores, true);
             }
         }
 
