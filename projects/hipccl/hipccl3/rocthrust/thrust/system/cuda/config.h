@@ -81,7 +81,7 @@
 
 // Make sure the CUB namespace has been declared using the modern macros:
 
-CUB_NAMESPACE_BEGIN // cppcheck-suppress *
+CUB_NAMESPACE_BEGIN // cppcheck-suppress unknownMacro
 CUB_NAMESPACE_END
 
 #else // THRUST_IGNORE_CUB_VERSION_CHECK
