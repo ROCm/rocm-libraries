@@ -295,6 +295,7 @@ namespace rocRoller
 #include "GreaterThanEqual.hpp"
 #include "LessThan.hpp"
 #include "LessThanEqual.hpp"
+#include "LogicalAnd.hpp"
 #include "Modulo.hpp"
 #include "Multiply.hpp"
 #include "MultiplyAdd.hpp"

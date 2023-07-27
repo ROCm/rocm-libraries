@@ -231,6 +231,45 @@ namespace rocRoller
                                   ShowValue(rhsVal.regType));
             }
 
+            template <typename T>
+            requires(CBinary<T>&& CLogical<T>) ResultType operator()(T const& expr) const
+            {
+                auto lhsVal = call(expr.lhs);
+                auto rhsVal = call(expr.rhs);
+                return logical(lhsVal, rhsVal);
+            }
+
+            ResultType logical(ResultType const& lhsVal, ResultType const& rhsVal) const
+            {
+                // Can't compare between two different types on the GPU.
+                AssertFatal(lhsVal.regType == Register::Type::Literal
+                                || rhsVal.regType == Register::Type::Literal
+                                || lhsVal.varType == rhsVal.varType,
+                            ShowValue(lhsVal.varType),
+                            ShowValue(rhsVal.varType));
+
+                auto inputRegType = Register::PromoteType(lhsVal.regType, rhsVal.regType);
+                auto inputVarType = VariableType::Promote(lhsVal.varType, rhsVal.varType);
+
+                switch(inputRegType)
+                {
+                case Register::Type::Scalar:
+                    if(inputVarType == DataType::Bool32 || inputVarType == DataType::Raw32
+                       || inputVarType == DataType::UInt64)
+                        return {Register::Type::Special, DataType::Bool};
+                    break;
+
+                case Register::Type::Special:
+                    return {Register::Type::Special, DataType::Bool};
+
+                default:
+                    break;
+                }
+                Throw<FatalError>("Invalid register types: ",
+                                  ShowValue(lhsVal.regType),
+                                  ShowValue(rhsVal.regType));
+            }
+
             ResultType operator()(CommandArgumentPtr const& expr) const
             {
                 AssertFatal(expr != nullptr, "Null subexpression!");

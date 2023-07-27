@@ -215,6 +215,14 @@ namespace rocRoller
             constexpr static inline bool Commutative = true;
         };
 
+        struct LogicalAnd : Binary
+        {
+            constexpr static inline auto Type        = Category::Logical;
+            constexpr static inline auto EvalTimes   = EvaluationTimes::All();
+            constexpr static inline bool Associative = true;
+            constexpr static inline bool Commutative = true;
+        };
+
         struct Ternary
         {
             ExpressionPtr lhs, r1hs, r2hs;
@@ -378,6 +386,7 @@ namespace rocRoller
         ExpressionPtr operator<(ExpressionPtr a, ExpressionPtr b);
         ExpressionPtr operator<=(ExpressionPtr a, ExpressionPtr b);
         ExpressionPtr operator==(ExpressionPtr a, ExpressionPtr b);
+        ExpressionPtr operator&&(ExpressionPtr a, ExpressionPtr b);
 
         ExpressionPtr operator-(ExpressionPtr a);
 
@@ -437,6 +446,12 @@ namespace rocRoller
         concept CComparison = requires
         {
             requires static_cast<Category>(T::Type) == Category::Comparison;
+        };
+
+        template <typename T>
+        concept CLogical = requires
+        {
+            requires static_cast<Category>(T::Type) == Category::Logical;
         };
 
         template <typename T>

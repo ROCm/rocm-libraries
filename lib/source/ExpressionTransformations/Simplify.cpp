@@ -25,6 +25,9 @@ namespace rocRoller
         concept CIntegral = std::integral<T> && !std::same_as<bool, T>;
 
         template <typename T>
+        concept CBoolean = std::same_as<bool, T>;
+
+        template <typename T>
         struct SimplifyByConstant
         {
             ExpressionPtr call(ExpressionPtr lhs, CommandArgumentValue rhs)
@@ -100,6 +103,35 @@ namespace rocRoller
 
             template <typename RHS>
             requires(!CIntegral<RHS>) ExpressionPtr operator()(RHS rhs)
+            {
+                return nullptr;
+            }
+
+            ExpressionPtr call(ExpressionPtr lhs, CommandArgumentValue rhs)
+            {
+                m_lhs = lhs;
+                return visit(*this, rhs);
+            }
+
+        private:
+            ExpressionPtr m_lhs;
+        };
+
+        template <>
+        struct SimplifyByConstant<LogicalAnd>
+        {
+            template <typename RHS>
+            requires(CBoolean<RHS>) ExpressionPtr operator()(RHS rhs)
+            {
+                if(rhs == false)
+                    return literal(false);
+                if(rhs == true)
+                    return m_lhs;
+                return nullptr;
+            }
+
+            template <typename RHS>
+            requires(!CBoolean<RHS>) ExpressionPtr operator()(RHS rhs)
             {
                 return nullptr;
             }

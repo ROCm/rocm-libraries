@@ -256,6 +256,7 @@ set(rocroller_src
  lib/source/CodeGen/Arithmetic/GreaterThanEqual.cpp
  lib/source/CodeGen/Arithmetic/LessThan.cpp
  lib/source/CodeGen/Arithmetic/LessThanEqual.cpp
+ lib/source/CodeGen/Arithmetic/LogicalAnd.cpp
  lib/source/CodeGen/Arithmetic/MatrixMultiply.cpp
  lib/source/CodeGen/Arithmetic/Modulo.cpp
  lib/source/CodeGen/Arithmetic/Multiply.cpp

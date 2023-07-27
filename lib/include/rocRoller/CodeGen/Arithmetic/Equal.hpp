@@ -29,7 +29,11 @@ namespace rocRoller
 
             std::tie(ctx, registerType, dataType) = arg;
 
-            return registerType == REGISTER_TYPE && dataType == DATATYPE;
+            if constexpr(DATATYPE == DataType::Int32)
+                return registerType == REGISTER_TYPE
+                       && (dataType == DataType::Int32 || dataType == DataType::UInt32);
+            else
+                return registerType == REGISTER_TYPE && dataType == DATATYPE;
         }
 
         // Build function required by Component system to return the generator.

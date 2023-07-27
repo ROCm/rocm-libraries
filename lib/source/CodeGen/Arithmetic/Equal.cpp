@@ -38,6 +38,8 @@ namespace rocRoller
                                        "Start Compare writing to non-SCC dest"));
         }
 
+        // note s_cmp_eq_i32 and s_cmp_eq_u32 are same op-codes, both are
+        // provided for symmetry
         co_yield_(Instruction("s_cmp_eq_i32", {}, {lhs, rhs}, {}, ""));
 
         if(dst != nullptr && !dst->isSCC())

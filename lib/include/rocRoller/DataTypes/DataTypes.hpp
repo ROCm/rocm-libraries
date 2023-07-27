@@ -76,27 +76,27 @@ namespace rocRoller
      */
     enum class DataType : int
     {
-        Float = 0,
-        Double,
-        ComplexFloat,
-        ComplexDouble,
-        Half,
-        Halfx2,
-        Int8x4,
-        Int8,
-        Int16,
-        Int32,
-        Int64,
-        BFloat16,
-        Raw32,
-        UInt8,
-        UInt16,
-        UInt32,
-        UInt64,
-        Bool,
-        Bool32,
+        Float = 0, //< 32bit floating point
+        Double, //< 64bit floating point
+        ComplexFloat, //< Two 32bit floating point; real and imaginary
+        ComplexDouble, //< Two 64bit floating point; real and imaginary
+        Half, //< 16bit floating point (IEEE format)
+        Halfx2, //< Two 16bit floating point; packed into 32bits
+        Int8x4, //< Four 8bit signed integers; packed into 32bits
+        Int8, //< 8bit signed integer
+        Int16, //< 16bit signed integer
+        Int32, //< 32bit signed integer
+        Int64, //< 64bit signed integer
+        BFloat16, //< 16bit floating point (brain-float format)
+        Raw32, //< Thirty-two bits
+        UInt8, //< 8bit unsigned integer
+        UInt16, //< 16bit unsigned integer
+        UInt32, //< 32bit unsigned integer
+        UInt64, //< 64bit unsigned integer
+        Bool, //< Single bit boolean (SCC)
+        Bool32, //< Thirty-two booleans packed into 32bits.  Usually the result of a vector-comparison (VCC; On Wave32 VCC is a single Bool32; on Wave64 VCC is two Bool32s).
         Count,
-        None = Count /**< Represents: any, unknown/unspecified, or a deferred type. */
+        None = Count //< Represents: any, unknown/unspecified, or a deferred type.
     };
 
     std::string   toString(DataType d);

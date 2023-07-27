@@ -19,11 +19,13 @@ TEST_F(ExpressionTransformationTest, Simplify)
     r->allocateNow();
     auto v = r->expression();
 
-    auto zero = Expression::literal(0);
-    auto one  = Expression::literal(1);
-    auto a    = Expression::literal(33);
-    auto b    = Expression::literal(100);
-    auto c    = Expression::literal(12.f);
+    auto zero  = Expression::literal(0);
+    auto one   = Expression::literal(1);
+    auto a     = Expression::literal(33);
+    auto b     = Expression::literal(100);
+    auto c     = Expression::literal(12.f);
+    auto True  = Expression::literal(true);
+    auto False = Expression::literal(false);
 
     // negate
     EXPECT_EQ(Expression::toString(simplify(-(one + one))), "Negate(2i)");
@@ -54,11 +56,15 @@ TEST_F(ExpressionTransformationTest, Simplify)
     EXPECT_EQ(Expression::toString(simplify(v % a)), "Modulo(v0:I, 33i)");
     EXPECT_EQ(Expression::toString(simplify(b % v)), "Modulo(100i, v0:I)");
 
-    // bitwiseAnd
+    // bitwise and
     EXPECT_EQ(Expression::toString(simplify(one & b)), "0i");
     EXPECT_EQ(Expression::toString(simplify(one & a)), "1i");
     EXPECT_EQ(Expression::toString(simplify(v & zero)), "0i");
     EXPECT_EQ(Expression::toString(simplify(v & (zero + zero))), "0i");
+
+    // logical and
+    EXPECT_EQ(Expression::toString(simplify((v < one) && False)), "0b");
+    EXPECT_EQ(Expression::toString(simplify((v < one) && True)), "LessThan(v0:I, 1i)");
 
     // shiftL
     EXPECT_EQ(Expression::toString(simplify(v << zero)), "v0:I");

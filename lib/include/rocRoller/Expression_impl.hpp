@@ -124,6 +124,11 @@ namespace rocRoller
             return std::make_shared<Expression>(Equal{a, b});
         }
 
+        inline ExpressionPtr operator&&(ExpressionPtr a, ExpressionPtr b)
+        {
+            return std::make_shared<Expression>(LogicalAnd{a, b});
+        }
+
         inline ExpressionPtr operator-(ExpressionPtr a)
         {
             return std::make_shared<Expression>(Negate{a});
@@ -272,6 +277,7 @@ namespace rocRoller
         EXPRESSION_INFO(LessThan);
         EXPRESSION_INFO(LessThanEqual);
         EXPRESSION_INFO(Equal);
+        EXPRESSION_INFO(LogicalAnd);
 
         EXPRESSION_INFO(MagicMultiple);
         EXPRESSION_INFO(MagicShifts);
