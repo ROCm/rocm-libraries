@@ -27,8 +27,8 @@ namespace rocRoller
         struct Divide;
         struct Modulo;
         struct ShiftL;
-        struct ShiftR;
-        struct SignedShiftR;
+        struct LogicalShiftR;
+        struct ArithmeticShiftR;
         struct BitwiseAnd;
         struct BitwiseOr;
         struct BitwiseXor;
@@ -62,8 +62,8 @@ namespace rocRoller
             Divide,
             Modulo,
             ShiftL,
-            ShiftR,
-            SignedShiftR,
+            LogicalShiftR,
+            ArithmeticShiftR,
             BitwiseAnd,
             BitwiseOr,
             BitwiseXor,

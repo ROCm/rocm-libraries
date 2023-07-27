@@ -45,7 +45,7 @@ namespace rocRoller
     {
         auto l31 = Register::Value::Literal(31);
 
-        co_yield generateOp<Expression::SignedShiftR>(dst, src, l31);
+        co_yield generateOp<Expression::ArithmeticShiftR>(dst, src, l31);
     }
 
     Generator<Instruction> ArithmeticGenerator::get2DwordsScalar(Register::ValuePtr& lsd,
@@ -67,7 +67,7 @@ namespace rocRoller
                 lsd = input;
 
                 msd = Register::Value::Placeholder(
-                    m_context, Register::Type::Scalar, DataType::Raw32, 1);
+                    m_context, Register::Type::Scalar, DataType::Int32, 1);
 
                 co_yield signExtendDWord(msd, input);
 

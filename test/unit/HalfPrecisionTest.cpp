@@ -340,7 +340,8 @@ namespace rocRollerTest
 
                 // Store and Pack into LDS
                 co_yield generateOp<Expression::BitwiseAnd>(v_lo, v_a, mask);
-                co_yield generateOp<Expression::ShiftR>(v_hi, v_a, Register::Value::Literal(16));
+                co_yield generateOp<Expression::LogicalShiftR>(
+                    v_hi, v_a, Register::Value::Literal(16));
                 co_yield m_context->mem()->packAndStore(MemoryInstructions::Local,
                                                         lds_offset,
                                                         v_lo,
@@ -363,7 +364,8 @@ namespace rocRollerTest
 
                 // Store and pack into flat
                 co_yield generateOp<Expression::BitwiseAnd>(v_lo, v_a, mask);
-                co_yield generateOp<Expression::ShiftR>(v_hi, v_a, Register::Value::Literal(16));
+                co_yield generateOp<Expression::LogicalShiftR>(
+                    v_hi, v_a, Register::Value::Literal(16));
 
                 co_yield m_context->mem()->packAndStore(MemoryInstructions::Flat,
                                                         v_result,
@@ -385,7 +387,8 @@ namespace rocRollerTest
 
                 // Store and pack into flat
                 co_yield generateOp<Expression::BitwiseAnd>(v_lo, v_a, mask);
-                co_yield generateOp<Expression::ShiftR>(v_hi, v_a, Register::Value::Literal(16));
+                co_yield generateOp<Expression::LogicalShiftR>(
+                    v_hi, v_a, Register::Value::Literal(16));
 
                 co_yield m_context->mem()->packAndStore(MemoryInstructions::Flat,
                                                         v_result,

@@ -1,5 +1,6 @@
 #include <rocRoller/CodeGen/Arithmetic/ArithmeticGenerator.hpp>
-#include <rocRoller/CodeGen/Arithmetic/SignedShiftR.hpp>
+#include <rocRoller/CodeGen/Arithmetic/ArithmeticShiftR.hpp>
+#include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/Utilities/Component.hpp>
 
 namespace rocRoller
@@ -7,12 +8,12 @@ namespace rocRoller
     RegisterComponent(SignedShiftRGenerator);
 
     template <>
-    std::shared_ptr<BinaryArithmeticGenerator<Expression::SignedShiftR>>
-        GetGenerator<Expression::SignedShiftR>(Register::ValuePtr dst,
-                                               Register::ValuePtr lhs,
-                                               Register::ValuePtr rhs)
+    std::shared_ptr<BinaryArithmeticGenerator<Expression::ArithmeticShiftR>>
+        GetGenerator<Expression::ArithmeticShiftR>(Register::ValuePtr dst,
+                                                   Register::ValuePtr lhs,
+                                                   Register::ValuePtr rhs)
     {
-        return Component::Get<BinaryArithmeticGenerator<Expression::SignedShiftR>>(
+        return Component::Get<BinaryArithmeticGenerator<Expression::ArithmeticShiftR>>(
             getContextFromValues(dst, lhs, rhs), dst->regType(), dst->variableType().dataType);
     }
 
@@ -22,6 +23,13 @@ namespace rocRoller
     {
         AssertFatal(value != nullptr);
         AssertFatal(shiftAmount != nullptr);
+
+        if(!DataTypeInfo::Get(value->variableType().getArithmeticType()).isSigned)
+        {
+            // NOTE: Do not generate arithmetic shift instructions for unsigned variables
+            co_yield generateOp<Expression::LogicalShiftR>(dest, value, shiftAmount);
+            co_return;
+        }
 
         auto toShift = shiftAmount->regType() == Register::Type::Literal ? shiftAmount
                                                                          : shiftAmount->subset({0});

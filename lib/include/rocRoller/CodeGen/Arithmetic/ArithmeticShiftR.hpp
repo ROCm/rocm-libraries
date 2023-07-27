@@ -7,17 +7,17 @@ namespace rocRoller
 
     // GetGenerator function will return the Generator to use based on the provided arguments.
     template <>
-    std::shared_ptr<BinaryArithmeticGenerator<Expression::SignedShiftR>>
-        GetGenerator<Expression::SignedShiftR>(Register::ValuePtr dst,
-                                               Register::ValuePtr lhs,
-                                               Register::ValuePtr rhs);
+    std::shared_ptr<BinaryArithmeticGenerator<Expression::ArithmeticShiftR>>
+        GetGenerator<Expression::ArithmeticShiftR>(Register::ValuePtr dst,
+                                                   Register::ValuePtr lhs,
+                                                   Register::ValuePtr rhs);
 
     // Generator for all register types and datatypes.
-    class SignedShiftRGenerator : public BinaryArithmeticGenerator<Expression::SignedShiftR>
+    class SignedShiftRGenerator : public BinaryArithmeticGenerator<Expression::ArithmeticShiftR>
     {
     public:
         SignedShiftRGenerator(ContextPtr c)
-            : BinaryArithmeticGenerator<Expression::SignedShiftR>(c)
+            : BinaryArithmeticGenerator<Expression::ArithmeticShiftR>(c)
         {
         }
 

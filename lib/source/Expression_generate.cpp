@@ -201,10 +201,6 @@ namespace rocRoller
 
                 auto const destInfo = DataTypeInfo::Get(varType);
 
-                // TODO: Delete once FastDivision uses only libdivide.
-                if constexpr(std::same_as<MultiplyHigh, Operation>)
-                    varType = DataType::Int32;
-
                 int valueCount = resultValueCount(dest, {lhs, rhs});
 
                 // TODO: Should this be pushed to arithmetic generators?

@@ -132,11 +132,11 @@ namespace ArithmeticTest
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(20), 4);
 
-            co_yield generateOp<Expression::ShiftR>(v_c, v_a, v_b);
+            co_yield generateOp<Expression::LogicalShiftR>(v_c, v_a, v_b);
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(24), 4);
 
-            co_yield generateOp<Expression::SignedShiftR>(v_c, v_a, v_b);
+            co_yield generateOp<Expression::ArithmeticShiftR>(v_c, v_a, v_b);
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(28), 4);
 
@@ -409,12 +409,12 @@ namespace ArithmeticTest
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(20), 4);
 
-            co_yield generateOp<Expression::ShiftR>(s_c, s_a, s_b);
+            co_yield generateOp<Expression::LogicalShiftR>(s_c, s_a, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(24), 4);
 
-            co_yield generateOp<Expression::SignedShiftR>(s_c, s_a, s_b);
+            co_yield generateOp<Expression::ArithmeticShiftR>(s_c, s_a, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(28), 4);
@@ -752,7 +752,7 @@ namespace ArithmeticTest
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(40), 8);
 
-            co_yield generateOp<Expression::ShiftR>(v_c, v_a, v_b);
+            co_yield generateOp<Expression::LogicalShiftR>(v_c, v_a, v_b);
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(48), 8);
 
@@ -806,7 +806,7 @@ namespace ArithmeticTest
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(128), 8);
 
-            co_yield generateOp<Expression::SignedShiftR>(v_c, v_a, v_b);
+            co_yield generateOp<Expression::ArithmeticShiftR>(v_c, v_a, v_b);
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(136), 8);
 
@@ -1015,7 +1015,7 @@ namespace ArithmeticTest
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(40), 8);
 
-            co_yield generateOp<Expression::ShiftR>(s_c, s_a, s_b);
+            co_yield generateOp<Expression::LogicalShiftR>(s_c, s_a, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(48), 8);
@@ -1070,7 +1070,7 @@ namespace ArithmeticTest
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(128), 8);
 
-            co_yield generateOp<Expression::SignedShiftR>(s_c, s_a, s_b);
+            co_yield generateOp<Expression::ArithmeticShiftR>(s_c, s_a, s_b);
             co_yield m_context->copier()->copy(v_c, s_c, "Move result to vgpr to store.");
             co_yield m_context->mem()->store(
                 MemoryInstructions::Flat, v_result, v_c, Register::Value::Literal(136), 8);

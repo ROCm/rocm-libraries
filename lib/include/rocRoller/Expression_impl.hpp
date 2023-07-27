@@ -76,12 +76,17 @@ namespace rocRoller
 
         inline ExpressionPtr operator>>(ExpressionPtr a, ExpressionPtr b)
         {
-            return std::make_shared<Expression>(SignedShiftR{a, b});
+            return std::make_shared<Expression>(ArithmeticShiftR{a, b});
         }
 
-        inline ExpressionPtr shiftR(ExpressionPtr a, ExpressionPtr b)
+        inline ExpressionPtr arithmeticShiftR(ExpressionPtr a, ExpressionPtr b)
         {
-            return std::make_shared<Expression>(ShiftR{a, b});
+            return std::make_shared<Expression>(ArithmeticShiftR{a, b});
+        }
+
+        inline ExpressionPtr logicalShiftR(ExpressionPtr a, ExpressionPtr b)
+        {
+            return std::make_shared<Expression>(LogicalShiftR{a, b});
         }
 
         inline ExpressionPtr operator&(ExpressionPtr a, ExpressionPtr b)
@@ -263,8 +268,8 @@ namespace rocRoller
         EXPRESSION_INFO(Modulo);
 
         EXPRESSION_INFO(ShiftL);
-        EXPRESSION_INFO(ShiftR);
-        EXPRESSION_INFO(SignedShiftR);
+        EXPRESSION_INFO(LogicalShiftR);
+        EXPRESSION_INFO(ArithmeticShiftR);
         EXPRESSION_INFO(BitwiseAnd);
         EXPRESSION_INFO(BitwiseOr);
         EXPRESSION_INFO(BitwiseXor);

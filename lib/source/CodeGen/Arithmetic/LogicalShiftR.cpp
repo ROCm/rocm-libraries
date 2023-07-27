@@ -1,5 +1,5 @@
 #include <rocRoller/CodeGen/Arithmetic/ArithmeticGenerator.hpp>
-#include <rocRoller/CodeGen/Arithmetic/ShiftR.hpp>
+#include <rocRoller/CodeGen/Arithmetic/LogicalShiftR.hpp>
 #include <rocRoller/Utilities/Component.hpp>
 
 namespace rocRoller
@@ -7,10 +7,12 @@ namespace rocRoller
     RegisterComponent(ShiftRGenerator);
 
     template <>
-    std::shared_ptr<BinaryArithmeticGenerator<Expression::ShiftR>> GetGenerator<Expression::ShiftR>(
-        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs)
+    std::shared_ptr<BinaryArithmeticGenerator<Expression::LogicalShiftR>>
+        GetGenerator<Expression::LogicalShiftR>(Register::ValuePtr dst,
+                                                Register::ValuePtr lhs,
+                                                Register::ValuePtr rhs)
     {
-        return Component::Get<BinaryArithmeticGenerator<Expression::ShiftR>>(
+        return Component::Get<BinaryArithmeticGenerator<Expression::LogicalShiftR>>(
             getContextFromValues(dst, lhs, rhs), dst->regType(), dst->variableType().dataType);
     }
 

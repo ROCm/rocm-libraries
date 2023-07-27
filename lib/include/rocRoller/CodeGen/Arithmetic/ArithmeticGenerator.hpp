@@ -285,6 +285,7 @@ namespace rocRoller
 
 #include "Add.hpp"
 #include "AddShiftL.hpp"
+#include "ArithmeticShiftR.hpp"
 #include "BitwiseAnd.hpp"
 #include "BitwiseOr.hpp"
 #include "BitwiseXor.hpp"
@@ -296,6 +297,7 @@ namespace rocRoller
 #include "LessThan.hpp"
 #include "LessThanEqual.hpp"
 #include "LogicalAnd.hpp"
+#include "LogicalShiftR.hpp"
 #include "Modulo.hpp"
 #include "Multiply.hpp"
 #include "MultiplyAdd.hpp"
@@ -303,6 +305,4 @@ namespace rocRoller
 #include "Negate.hpp"
 #include "ShiftL.hpp"
 #include "ShiftLAdd.hpp"
-#include "ShiftR.hpp"
-#include "SignedShiftR.hpp"
 #include "Subtract.hpp"

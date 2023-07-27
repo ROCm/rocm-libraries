@@ -315,7 +315,7 @@ namespace rocRoller
         SIMPLE_BINARY_OP(Modulo, %);
 
         SIMPLE_BINARY_OP(ShiftL, <<);
-        SIMPLE_BINARY_OP(SignedShiftR, >>);
+        SIMPLE_BINARY_OP(ArithmeticShiftR, >>);
         SIMPLE_BINARY_OP(BitwiseAnd, &);
         SIMPLE_BINARY_OP(BitwiseOr, |);
         SIMPLE_BINARY_OP(BitwiseXor, ^);
@@ -348,7 +348,8 @@ namespace rocRoller
         };
 
         template <>
-        struct OperationEvaluatorVisitor<ShiftR> : public BinaryEvaluatorVisitor<ShiftR>
+        struct OperationEvaluatorVisitor<LogicalShiftR>
+            : public BinaryEvaluatorVisitor<LogicalShiftR>
         {
             template <typename T>
             std::enable_if_t<std::is_integral_v<T> && !std::is_same_v<T, bool>, T>

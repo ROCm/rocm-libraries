@@ -246,6 +246,7 @@ set(rocroller_src
  lib/source/CodeGen/Arithmetic/Add.cpp
  lib/source/CodeGen/Arithmetic/AddShiftL.cpp
  lib/source/CodeGen/Arithmetic/ArithmeticGenerator.cpp
+ lib/source/CodeGen/Arithmetic/ArithmeticShiftR.cpp
  lib/source/CodeGen/Arithmetic/BitwiseAnd.cpp
  lib/source/CodeGen/Arithmetic/BitwiseOr.cpp
  lib/source/CodeGen/Arithmetic/BitwiseXor.cpp
@@ -256,6 +257,7 @@ set(rocroller_src
  lib/source/CodeGen/Arithmetic/GreaterThanEqual.cpp
  lib/source/CodeGen/Arithmetic/LessThan.cpp
  lib/source/CodeGen/Arithmetic/LessThanEqual.cpp
+ lib/source/CodeGen/Arithmetic/LogicalShiftR.cpp
  lib/source/CodeGen/Arithmetic/LogicalAnd.cpp
  lib/source/CodeGen/Arithmetic/MatrixMultiply.cpp
  lib/source/CodeGen/Arithmetic/Modulo.cpp
@@ -265,8 +267,6 @@ set(rocroller_src
  lib/source/CodeGen/Arithmetic/Negate.cpp
  lib/source/CodeGen/Arithmetic/ShiftL.cpp
  lib/source/CodeGen/Arithmetic/ShiftLAdd.cpp
- lib/source/CodeGen/Arithmetic/ShiftR.cpp
- lib/source/CodeGen/Arithmetic/SignedShiftR.cpp
  lib/source/CodeGen/Arithmetic/Subtract.cpp
  lib/source/CodeGen/Buffer.cpp
  lib/source/CodeGen/Instruction.cpp

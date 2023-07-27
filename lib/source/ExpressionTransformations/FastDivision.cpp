@@ -30,18 +30,18 @@ namespace rocRoller
                                   bool&         isAdd)
         {
 #if LLVM_VERSION_MAJOR >= 14
-            UnsignedDivisonByConstantInfo magics
+            UnsignedDivisonByConstantInfo magicu
                 = UnsignedDivisonByConstantInfo::get(llvm::APInt(32, divisor));
 
-            magicNumber = magics.Magic.getLimitedValue();
-            numShifts   = magics.ShiftAmount;
-            isAdd       = magics.IsAdd;
+            magicNumber = magicu.Magic.getLimitedValue();
+            numShifts   = magicu.ShiftAmount;
+            isAdd       = magicu.IsAdd;
 #else
-            auto magics = llvm::APInt(32, divisor).magicu();
+            auto magicu = llvm::APInt(32, divisor).magicu();
 
-            magicNumber = magics.m.getLimitedValue();
-            numShifts   = magics.s;
-            isAdd       = magics.a;
+            magicNumber = magicu.m.getLimitedValue();
+            numShifts   = magicu.s;
+            isAdd       = magicu.a;
 #endif
         }
 
@@ -51,13 +51,13 @@ namespace rocRoller
                                 bool&         isNegative)
         {
 #if LLVM_VERSION_MAJOR >= 14
-            UnsignedDivisonByConstantInfo magics
-                = SignedDivisonByConstantInfo::get(llvm::APInt(32, divisor));
+            SignedDivisonByConstantInfo magics
+                = SignedDivisonByConstantInfo::get(llvm::APInt(32, divisor, true));
 
             magicNumber = magics.Magic.getLimitedValue();
             numShifts   = magics.ShiftAmount;
 #else
-            auto magics = llvm::APInt(32, divisor).magic();
+            auto magics = llvm::APInt(32, divisor, true).magic();
             magicNumber = (long int)magics.m.getLimitedValue();
             numShifts   = magics.s;
             isNegative  = magics.m.isNegative();
@@ -114,19 +114,22 @@ namespace rocRoller
             bool         isAdd;
 
             magicNumbersUnsigned(rhs, magicNumber, numShifts, isAdd);
-            auto magicNumberExpr = literal(magicNumber);
+
+            auto magicNumberExpr = literal(static_cast<unsigned int>(magicNumber));
             auto magicMultiple   = multiplyHigh(lhs, magicNumberExpr);
 
             if(isAdd)
             {
-                ExpressionPtr one           = literal(1);
-                ExpressionPtr numShiftsExpr = std::make_shared<Expression>(numShifts - 1);
-                return shiftR(shiftR(lhs - magicMultiple, one) + magicMultiple, numShiftsExpr);
+                ExpressionPtr one           = literal(1u);
+                ExpressionPtr numShiftsExpr = literal(numShifts - 1u);
+                return logicalShiftR(logicalShiftR(lhs - magicMultiple, one) + magicMultiple,
+                                     numShiftsExpr);
             }
             else
             {
-                ExpressionPtr numShiftsExpr = std::make_shared<Expression>(numShifts);
-                return shiftR(magicMultiple, numShiftsExpr);
+
+                ExpressionPtr numShiftsExpr = literal(numShifts);
+                return logicalShiftR(magicMultiple, numShiftsExpr);
             }
         }
 
@@ -139,7 +142,8 @@ namespace rocRoller
             bool         isNegative;
 
             magicNumbersSigned(rhs, magicNumber, numShifts, isNegative);
-            auto magicNumberExpr = literal(magicNumber);
+
+            auto magicNumberExpr = literal(static_cast<int>(magicNumber));
             auto magicMultiple   = multiplyHigh(lhs, magicNumberExpr);
 
             if(rhs > 0 && isNegative)
@@ -154,7 +158,7 @@ namespace rocRoller
             ExpressionPtr numShiftsExpr = literal(numShifts);
             ExpressionPtr signBitsExpr  = literal<int32_t>(sizeof(int) * 8 - 1);
 
-            return (magicMultiple >> numShiftsExpr) + shiftR(magicMultiple, signBitsExpr);
+            return (magicMultiple >> numShiftsExpr) + logicalShiftR(magicMultiple, signBitsExpr);
         }
 
         template <typename T>
@@ -169,22 +173,23 @@ namespace rocRoller
         {
             uint shiftAmount = std::countr_zero(rhs);
             auto new_rhs     = literal(shiftAmount);
-            return shiftR(lhs, new_rhs);
+            return arithmeticShiftR(lhs, new_rhs);
         }
 
         // Power of Two division for signed integers
         template <>
         ExpressionPtr powerOfTwoDivision(ExpressionPtr lhs, int rhs)
         {
-            int shiftAmount        = std::countr_zero(static_cast<unsigned int>(rhs));
-            int signBits           = sizeof(int) * 8 - 1;
-            int reverseShiftAmount = sizeof(int) * 8 - shiftAmount;
+            int          shiftAmount        = std::countr_zero(static_cast<unsigned int>(rhs));
+            unsigned int signBits           = sizeof(int) * 8 - 1;
+            unsigned int reverseShiftAmount = sizeof(int) * 8 - shiftAmount;
 
             auto shiftAmountExpr        = literal(shiftAmount);
             auto signBitsExpr           = literal(signBits);
             auto reverseShiftAmountExpr = literal(reverseShiftAmount);
 
-            return (lhs + shiftR(lhs >> signBitsExpr, reverseShiftAmountExpr)) >> shiftAmountExpr;
+            return (lhs + logicalShiftR(lhs >> signBitsExpr, reverseShiftAmountExpr))
+                   >> shiftAmountExpr;
         }
 
         template <typename T>
@@ -199,23 +204,25 @@ namespace rocRoller
         {
             unsigned int mask    = rhs - 1u;
             auto         new_rhs = literal(mask);
-            return std::make_shared<Expression>(BitwiseAnd({lhs, new_rhs}));
+            return lhs & new_rhs;
         }
 
         // Power of Two Modulo for signed integers
         template <>
         ExpressionPtr powerOfTwoModulo(ExpressionPtr lhs, int rhs)
         {
-            int shiftAmount        = std::countr_zero(static_cast<unsigned int>(rhs));
-            int signBits           = sizeof(int) * 8 - 1;
-            int reverseShiftAmount = sizeof(int) * 8 - shiftAmount;
-            int mask               = ~(rhs - 1);
+            int          shiftAmount        = std::countr_zero(static_cast<unsigned int>(rhs));
+            unsigned int signBits           = sizeof(int) * 8 - 1;
+            unsigned int reverseShiftAmount = sizeof(int) * 8 - shiftAmount;
+            int          mask               = ~(rhs - 1);
 
             auto maskExpr               = literal(mask);
             auto signBitsExpr           = literal(signBits);
             auto reverseShiftAmountExpr = literal(reverseShiftAmount);
 
-            return lhs - ((lhs + shiftR(lhs >> signBitsExpr, reverseShiftAmountExpr)) & maskExpr);
+            return lhs
+                   - ((lhs + logicalShiftR(lhs >> signBitsExpr, reverseShiftAmountExpr))
+                      & maskExpr);
         }
 
         struct DivisionByConstant
@@ -240,7 +247,7 @@ namespace rocRoller
                 // Power of 2 Division
                 else if(std::has_single_bit(cast_to_unsigned(rhs)))
                 {
-                    return powerOfTwoDivision<T>(m_lhs, rhs);
+                    return powerOfTwoDivision<T>(m_lhs, cast_to_unsigned(rhs));
                 }
                 else
                 {
@@ -281,16 +288,16 @@ namespace rocRoller
                 {
                     return literal(0);
                 }
-                // Power of 2 Division
+                // Power of 2 Modulo
                 else if(std::has_single_bit(cast_to_unsigned(rhs)))
                 {
                     return powerOfTwoModulo(m_lhs, rhs);
                 }
                 else
                 {
-                    auto div      = magicNumberDivisionByConstant(m_lhs, rhs);
-                    auto rhs_expr = literal(rhs);
-                    return m_lhs - (div * rhs_expr);
+                    auto div     = magicNumberDivisionByConstant(m_lhs, rhs);
+                    auto rhsExpr = literal(rhs);
+                    return m_lhs - (div * rhsExpr);
                 }
             }
 

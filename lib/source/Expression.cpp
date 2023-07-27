@@ -153,10 +153,6 @@ namespace rocRoller
 
                 auto varType = VariableType::Promote(lhsVal.varType, rhsVal.varType);
 
-                // TODO: Delete once FastDivision uses only libdivide.
-                if constexpr(std::same_as<MultiplyHigh, T>)
-                    varType = DataType::Int32;
-
                 return {regType, varType};
             }
 

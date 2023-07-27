@@ -135,7 +135,7 @@ namespace rocRoller
             constexpr static inline bool Commutative = false;
         };
 
-        struct ShiftR : Binary
+        struct LogicalShiftR : Binary
         {
             constexpr static inline auto Type        = Category::Arithmetic;
             constexpr static inline auto EvalTimes   = EvaluationTimes::All();
@@ -143,7 +143,7 @@ namespace rocRoller
             constexpr static inline bool Commutative = false;
         };
 
-        struct SignedShiftR : Binary
+        struct ArithmeticShiftR : Binary
         {
             constexpr static inline auto Type        = Category::Arithmetic;
             constexpr static inline auto EvalTimes   = EvaluationTimes::All();
@@ -391,7 +391,10 @@ namespace rocRoller
         ExpressionPtr operator-(ExpressionPtr a);
 
         ExpressionPtr multiplyHigh(ExpressionPtr a, ExpressionPtr b);
-        ExpressionPtr shiftR(ExpressionPtr a, ExpressionPtr b);
+
+        // arithmeticShiftR is the same as >>
+        ExpressionPtr arithmeticShiftR(ExpressionPtr a, ExpressionPtr b);
+        ExpressionPtr logicalShiftR(ExpressionPtr a, ExpressionPtr b);
 
         ExpressionPtr magicMultiple(ExpressionPtr a);
         ExpressionPtr magicShifts(ExpressionPtr a);
@@ -456,7 +459,8 @@ namespace rocRoller
 
         template <typename T>
         concept CShift
-            = std::same_as<ShiftL, T> || std::same_as<ShiftR, T> || std::same_as<SignedShiftR, T>;
+            = std::same_as<ShiftL, T> || std::same_as<LogicalShiftR,
+                                                      T> || std::same_as<ArithmeticShiftR, T>;
 
         template <typename T>
         concept CAssociativeBinary = requires

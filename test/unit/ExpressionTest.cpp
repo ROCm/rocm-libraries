@@ -858,11 +858,11 @@ namespace ExpressionTest
         auto b = std::make_shared<Expression::Expression>(cb);
 
         auto vals_shiftL       = a << b;
-        auto vals_shiftR       = shiftR(a, b);
+        auto vals_shiftR       = logicalShiftR(a, b);
         auto vals_signedShiftR = a >> b;
 
         auto expr_shiftL       = (a + b) << b;
-        auto expr_shiftR       = shiftR(a + b, b);
+        auto expr_shiftR       = logicalShiftR(a + b, b);
         auto expr_signedShiftR = (a + b) >> b;
 
         for(auto aVal : TestValues::int32Values)
@@ -966,6 +966,43 @@ namespace ExpressionTest
 
                 EXPECT_EQ(((aVal + bVal) * (int64_t)bVal) >> 32,
                           std::get<int>(Expression::evaluate(expr2, args)));
+            }
+        }
+    }
+
+    TEST_F(ExpressionTest, EvaluateMultiplyHighUnsigned)
+    {
+        auto command = std::make_shared<Command>();
+        auto ca      = command->allocateArgument({DataType::UInt32, PointerType::Value});
+        auto cb      = command->allocateArgument({DataType::UInt32, PointerType::Value});
+
+        auto a = std::make_shared<Expression::Expression>(ca);
+        auto b = std::make_shared<Expression::Expression>(cb);
+
+        auto expr1 = multiplyHigh(a, b);
+
+        auto expr2 = multiplyHigh(a + b, b);
+
+        std::vector<unsigned int> a_values = {
+            0, 1, 2, 4, 5, 7, 12, 19, 33, 63, 906, 3017123, 800000, 1234456, 4022112,
+            //2863311531u // Can cause overflow
+        };
+        for(auto aVal : a_values)
+        {
+            for(auto bVal : a_values)
+            {
+                KernelArguments runtimeArgs;
+                runtimeArgs.append("a", aVal);
+                runtimeArgs.append("b", bVal);
+                auto args = runtimeArgs.runtimeArguments();
+
+                EXPECT_EQ((aVal * (uint64_t)bVal) >> 32,
+                          std::get<unsigned int>(Expression::evaluate(expr1, args)))
+                    << ShowValue(aVal) << ShowValue(bVal);
+
+                EXPECT_EQ(((aVal + (uint64_t)bVal) * (uint64_t)bVal) >> 32,
+                          std::get<unsigned int>(Expression::evaluate(expr2, args)))
+                    << ShowValue(aVal) << ShowValue(bVal);
             }
         }
     }
@@ -1144,7 +1181,7 @@ namespace ExpressionTest
             intExpr % intExpr,
             intExpr << intExpr,
             intExpr >> intExpr,
-            shiftR(intExpr, intExpr),
+            logicalShiftR(intExpr, intExpr),
             intExpr & intExpr,
             intExpr ^ intExpr,
             intExpr > intExpr,
@@ -1517,7 +1554,7 @@ namespace ExpressionTest
         auto expr = [](Expression::ExpressionPtr a,
                        Expression::ExpressionPtr b,
                        Expression::ExpressionPtr c) {
-            return shiftR(convert(DataType::UInt32, b) + a, Ex::literal(4))
+            return logicalShiftR(convert(DataType::UInt32, b) + a, Ex::literal(4))
                    + convert(DataType::UInt32, c);
         };
 
@@ -1567,7 +1604,7 @@ namespace ExpressionTest
 
         auto expr = [](Expression::ExpressionPtr a,
                        Expression::ExpressionPtr b,
-                       Expression::ExpressionPtr c) { return Ex::shiftR((a + b), c); };
+                       Expression::ExpressionPtr c) { return Ex::logicalShiftR((a + b), c); };
 
         basicTernaryExpression(expr, a, b, c, r, true);
     }

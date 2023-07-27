@@ -73,7 +73,7 @@ namespace rocRoller
             break;
         case DataType::Halfx2:
             co_yield_(Instruction("v_cvt_f32_f16", {dest->element({0})}, {arg}, {}, ""));
-            co_yield generateOp<Expression::ShiftR>(
+            co_yield generateOp<Expression::LogicalShiftR>(
                 dest->element({1}), arg, Register::Value::Literal(16u));
             co_yield_(
                 Instruction("v_cvt_f32_f16", {dest->element({1})}, {dest->element({1})}, {}, ""));
@@ -99,7 +99,7 @@ namespace rocRoller
         case DataType::Halfx2:
             co_yield generateOp<Expression::BitwiseAnd>(
                 dest->element({0}), arg, Register::Value::Literal(0xFFFF));
-            co_yield generateOp<Expression::ShiftR>(
+            co_yield generateOp<Expression::LogicalShiftR>(
                 dest->element({1}), arg, Register::Value::Literal(16u));
             break;
         default:
