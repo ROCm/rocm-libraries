@@ -601,7 +601,7 @@ void test_future_value_retrieval(Future&& f, decltype(f.extract()) &return_value
   auto const r2 = f.extract();
 
   ASSERT_THROW(
-    auto x = f.extract();
+    auto x = f.extract();  // cppcheck-suppress unknownMacro
     THRUST_UNUSED_VAR(x)
     , thrust::event_error
   );
