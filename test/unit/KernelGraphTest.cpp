@@ -2609,10 +2609,11 @@ namespace KernelGraphTest
 
         m_context->schedule(rocRoller::KernelGraph::generate(kgraph, m_context->kernel()));
 
-        EXPECT_THAT(output(), testing::HasSubstr("s_cmp_lt_i32 s0, 1"));
-        EXPECT_THAT(output(), testing::HasSubstr("s_cbranch_scc0"));
-        EXPECT_THAT(output(), testing::HasSubstr("v_mov_b32 v0, 1"));
-        EXPECT_THAT(output(), testing::HasSubstr("v_mov_b32 v0, 0"));
+        EXPECT_THAT(output(), testing::HasSubstr("s_cmp_lt_i32 s0, 1")); //Conditional Test
+        EXPECT_THAT(output(), testing::HasSubstr("s_cbranch_scc0")); //Branch for False
+        EXPECT_THAT(output(), testing::HasSubstr("s_branch")); //Branch after True
+        EXPECT_THAT(output(), testing::HasSubstr("v_mov_b32 v0, 1")); //True Body
+        EXPECT_THAT(output(), testing::HasSubstr("v_mov_b32 v0, 0")); //False Body
     }
 
     TEST_F(KernelGraphTestGPU, ConditionalExecute)
@@ -2630,6 +2631,7 @@ namespace KernelGraphTest
 
         auto zero  = Expression::literal(0u);
         auto one   = Expression::literal(1u);
+        auto two   = Expression::literal(2u);
         auto three = Expression::literal(3u);
 
         auto k = m_context->kernel();
@@ -2653,9 +2655,12 @@ namespace KernelGraphTest
         auto dstVGPR = kgraph.coordinates.addElement(VGPR());
 
         // set result to testValues[0]
-        auto assignTrueBranch = kgraph.control.addElement(
+        auto assignTrueBranch1 = kgraph.control.addElement(
             Assign{Register::Type::Vector, Expression::literal(testValues[0])});
-        kgraph.mapper.connect(assignTrueBranch, dstVGPR, NaryArgument::DEST);
+        kgraph.mapper.connect(assignTrueBranch1, dstVGPR, NaryArgument::DEST);
+        auto assignTrueBranch2 = kgraph.control.addElement(
+            Assign{Register::Type::Vector, Expression::literal(testValues[0])});
+        kgraph.mapper.connect(assignTrueBranch2, dstVGPR, NaryArgument::DEST);
 
         // set result to testValues[1]
         auto assignFalseBranch = kgraph.control.addElement(
@@ -2663,18 +2668,22 @@ namespace KernelGraphTest
         kgraph.mapper.connect(assignFalseBranch, dstVGPR, NaryArgument::DEST);
 
         auto workgroupExpr = k->workgroupIndex().at(0)->expression();
-        auto conditional
-            = kgraph.control.addElement(ConditionalOp{workgroupExpr < one, "Test Conditional"});
+        auto firstConditional
+            = kgraph.control.addElement(ConditionalOp{workgroupExpr < one, "First Conditional"});
+        auto secondConditional = kgraph.control.addElement(
+            ConditionalOp{(workgroupExpr > one) && (workgroupExpr <= two), "Second Conditional"});
 
         auto storeIndex = kgraph.control.addElement(StoreVGPR());
         kgraph.mapper.connect<User>(storeIndex, user);
         kgraph.mapper.connect<VGPR>(storeIndex, dstVGPR);
 
         auto kernel = kgraph.control.addElement(Kernel());
-        kgraph.control.addElement(Body(), {kernel}, {conditional});
-        kgraph.control.addElement(Body(), {conditional}, {assignTrueBranch});
-        kgraph.control.addElement(Else(), {conditional}, {assignFalseBranch});
-        kgraph.control.addElement(Sequence(), {conditional}, {storeIndex});
+        kgraph.control.addElement(Body(), {kernel}, {firstConditional});
+        kgraph.control.addElement(Body(), {firstConditional}, {assignTrueBranch1});
+        kgraph.control.addElement(Else(), {firstConditional}, {secondConditional});
+        kgraph.control.addElement(Body(), {secondConditional}, {assignTrueBranch2});
+        kgraph.control.addElement(Else(), {secondConditional}, {assignFalseBranch});
+        kgraph.control.addElement(Sequence(), {firstConditional}, {storeIndex});
 
         m_context->schedule(rocRoller::KernelGraph::generate(kgraph, m_context->kernel()));
 
@@ -2702,7 +2711,7 @@ namespace KernelGraphTest
                 HasHipSuccess(0));
             EXPECT_EQ(result[0], testValues[0]);
             EXPECT_EQ(result[1], testValues[1]);
-            EXPECT_EQ(result[2], testValues[1]);
+            EXPECT_EQ(result[2], testValues[0]);
         }
         else
         {

@@ -31,16 +31,7 @@ namespace rocRoller
 
             std::tie(ctx, registerType, dataType) = arg;
 
-            // Int64 and UInt64 will generate the same instructions
-            if constexpr(DATATYPE == DataType::Int64)
-                return registerType == REGISTER_TYPE
-                       && (dataType == DataType::Int64 || dataType == DataType::UInt64);
-            // Int32 and UInt32 will generate the same instructions
-            else if constexpr(DATATYPE == DataType::Int32)
-                return registerType == REGISTER_TYPE
-                       && (dataType == DataType::Int32 || dataType == DataType::UInt32);
-            else
-                return registerType == REGISTER_TYPE && dataType == DATATYPE;
+            return registerType == REGISTER_TYPE && dataType == DATATYPE;
         }
 
         // Build function required by Component system to return the generator.

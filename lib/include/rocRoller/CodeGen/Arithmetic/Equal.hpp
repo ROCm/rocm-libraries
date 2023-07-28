@@ -32,6 +32,10 @@ namespace rocRoller
             if constexpr(DATATYPE == DataType::Int32)
                 return registerType == REGISTER_TYPE
                        && (dataType == DataType::Int32 || dataType == DataType::UInt32);
+
+            else if constexpr(DATATYPE == DataType::Int64)
+                return registerType == REGISTER_TYPE
+                       && (dataType == DataType::Int64 || dataType == DataType::UInt64);
             else
                 return registerType == REGISTER_TYPE && dataType == DATATYPE;
         }

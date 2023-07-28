@@ -14,6 +14,9 @@ namespace rocRoller
                                   DataType::Int32);
     RegisterComponentTemplateSpec(GreaterThanEqualGenerator,
                                   Register::Type::Scalar,
+                                  DataType::UInt32);
+    RegisterComponentTemplateSpec(GreaterThanEqualGenerator,
+                                  Register::Type::Scalar,
                                   DataType::Int64);
     RegisterComponentTemplateSpec(GreaterThanEqualGenerator,
                                   Register::Type::Vector,
@@ -54,6 +57,29 @@ namespace rocRoller
         }
 
         co_yield_(Instruction("s_cmp_ge_i32", {}, {lhs, rhs}, {}, ""));
+
+        if(dst != nullptr && !dst->isSCC())
+        {
+            co_yield m_context->copier()->copy(dst, m_context->getSCC(), "");
+            co_yield(Instruction::Unlock("End Compare writing to non-SCC dest"));
+        }
+    }
+
+    template <>
+    Generator<Instruction>
+        GreaterThanEqualGenerator<Register::Type::Scalar, DataType::UInt32>::generate(
+            Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs)
+    {
+        AssertFatal(lhs != nullptr);
+        AssertFatal(rhs != nullptr);
+
+        if(dst != nullptr && !dst->isSCC())
+        {
+            co_yield(Instruction::Lock(Scheduling::Dependency::SCC,
+                                       "Start Compare writing to non-SCC dest"));
+        }
+
+        co_yield_(Instruction("s_cmp_ge_u32", {}, {lhs, rhs}, {}, ""));
 
         if(dst != nullptr && !dst->isSCC())
         {
