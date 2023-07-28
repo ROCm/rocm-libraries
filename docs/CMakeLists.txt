@@ -115,6 +115,8 @@ mark_as_doc(build_doxygen)
 set(SPHINX_HTML_DIR "${SPHINX_DEFAULT_HTML_DIR}" CACHE PATH "Path to sphinx html output")
 
 # Sphinx pre-build steps --------------------
+
+# Prebuild Sphinx 
 add_custom_target(prebuild_sphinx
     DEPENDS 
         copysrc_to_builddir  
@@ -124,7 +126,7 @@ add_custom_target(prebuild_sphinx
         build_doxygen
 )
 
-
+# Aux docs
 # Copy docker README.md as docker.md
 add_custom_target(copyover_dockerreadme
     COMMAND cp ${CMAKE_CURRENT_SOURCE_DIR}/../docker/README.md ${DOCS_BUILD_DIR}/src/docker.md
