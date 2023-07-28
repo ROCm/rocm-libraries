@@ -238,6 +238,33 @@ TEST_F(RegisterTest, NoAllocationSubsetAndElement)
     EXPECT_EQ((std::vector{rIDs[2], rIDs[3]}), r3->getRegisterIds().to<std::vector>());
 }
 
+TEST_F(RegisterTest, AllocateAsNeededMultiLevel)
+{
+    auto r
+        = std::make_shared<Register::Value>(m_context, Register::Type::Vector, DataType::UInt64, 4);
+
+    auto r2 = r->subset({0, 2});
+    EXPECT_THROW(r2->getRegisterIds().to<std::vector>(), FatalError);
+
+    auto r3 = r2->element({1});
+    EXPECT_THROW(r3->getRegisterIds().to<std::vector>(), FatalError);
+
+    r3->allocateNow(); //Allocating r3 should allocate the underlying allocation, even though it's 2 levels down.
+
+    auto rIDs = r->getRegisterIds().to<std::vector>();
+    ASSERT_EQ(8, rIDs.size());
+
+    auto r2IDs = r2->getRegisterIds().to<std::vector>();
+    ASSERT_EQ(2, r2IDs.size());
+
+    auto r3IDs = r3->getRegisterIds().to<std::vector>();
+    ASSERT_EQ(1, r3IDs.size());
+
+    EXPECT_EQ((std::vector{rIDs[0], rIDs[2]}), r2->getRegisterIds().to<std::vector>());
+
+    EXPECT_EQ((std::vector{rIDs[2]}), r3->getRegisterIds().to<std::vector>());
+}
+
 TEST_F(RegisterTest, SubsetOutOfBounds)
 {
     auto r
