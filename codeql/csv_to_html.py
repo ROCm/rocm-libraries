@@ -17,18 +17,31 @@ titles = [
 ]
 df = pd.DataFrame([df.columns.values.tolist()] + df.values.tolist(), columns=titles)
 
-types_count = str(dict(Counter(df.iloc[:, 0].tolist())))[1:-1]
+types_count = pd.DataFrame([Counter(df.iloc[:, 0])])
 
 html = (
     "<h1>CodeQL Report</h1>\n"
     + "<text>"
-    + types_count
+    + types_count.to_html(index=False, justify="center")
     + "</text>\n<br></br>\n"
-    + df.to_html(justify="center")
+    + df.to_html(index=False, justify="center")
+)
+
+markdown = """## Results Summary
+
+{}
+
+<details><summary>Full table of results</summary>
+
+{}
+</details>
+
+""".format(
+    types_count.to_markdown(index=False), df.to_markdown(index=False)
 )
 
 with open("codeql/build/types_count.md", "w") as file:
-    file.write(types_count)
+    file.write(markdown)
 
 with open("codeql/build/codeql.html", "w") as file:
     file.write(html)
