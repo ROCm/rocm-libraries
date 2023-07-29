@@ -282,10 +282,9 @@ namespace rocRoller
 
             // find the control nodes that follow the contraction and use its output macrotile
             ControlFlowRWTracer tracer(graph);
-            tracer.trace();
-            auto                    readwrite = tracer.coordinatesReadWrite(d);
+
             std::unordered_set<int> uses;
-            for(auto m : readwrite)
+            for(auto m : tracer.coordinatesReadWrite(d))
             {
                 if(graph.control.compareNodes(tag, m.control) == NodeOrdering::LeftFirst)
                     uses.insert(m.control);
@@ -599,16 +598,16 @@ namespace rocRoller
             if(contractions.size() < 1)
                 return graph;
 
-            auto kgraph         = graph;
-            auto tag            = contractions[0];
-            auto op             = kgraph.control.getNode<TensorContraction>(tag);
-            auto [a_tag, a_mac] = kgraph.getDimension<MacroTile>(tag, NaryArgument::LHS);
-            auto [b_tag, b_mac] = kgraph.getDimension<MacroTile>(tag, NaryArgument::RHS);
-            auto [d_tag, d_mac] = kgraph.getDimension<MacroTile>(tag, NaryArgument::DEST);
-            if(a_mac.rank == 2 && b_mac.rank == 2 && op.aDims == std::vector<int>{1}
+            auto kgraph       = graph;
+            auto tag          = contractions[0];
+            auto op           = kgraph.control.getNode<TensorContraction>(tag);
+            auto [aTag, aMac] = kgraph.getDimension<MacroTile>(tag, NaryArgument::LHS);
+            auto [bTag, bMac] = kgraph.getDimension<MacroTile>(tag, NaryArgument::RHS);
+            auto [dTag, dMac] = kgraph.getDimension<MacroTile>(tag, NaryArgument::DEST);
+            if(aMac.rank == 2 && bMac.rank == 2 && op.aDims == std::vector<int>{1}
                && op.bDims == std::vector<int>{0})
             {
-                lowerMatrixMultiply(kgraph, tag, a_tag, b_tag, d_tag, m_params, m_context);
+                lowerMatrixMultiply(kgraph, tag, aTag, bTag, dTag, m_params, m_context);
             }
             else
             {

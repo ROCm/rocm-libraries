@@ -552,7 +552,7 @@ namespace rocRoller
                               bool                                 ordered)
         {
             LastRWTracer tracer(graph);
-            tracer.trace();
+
             std::map<int, std::deque<int>> traces;
             for(auto pair : pairs)
             {

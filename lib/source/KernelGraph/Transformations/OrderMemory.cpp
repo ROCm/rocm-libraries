@@ -7,33 +7,29 @@ namespace rocRoller
 {
     namespace KernelGraph
     {
+        namespace CG = rocRoller::KernelGraph::ControlGraph;
+
         std::set<std::pair<int, int>> allAmbiguousNodes(KernelGraph const& graph)
         {
             std::set<std::pair<int, int>> ambiguousNodes;
-            for(auto pair :
-                graph.control.ambiguousNodes<rocRoller::KernelGraph::ControlGraph::LoadTiled>())
+            for(auto pair : graph.control.ambiguousNodes<CG::LoadTiled>())
                 ambiguousNodes.insert(pair);
-            for(auto pair :
-                graph.control.ambiguousNodes<rocRoller::KernelGraph::ControlGraph::StoreTiled>())
+            for(auto pair : graph.control.ambiguousNodes<CG::StoreTiled>())
                 ambiguousNodes.insert(pair);
-            for(auto pair :
-                graph.control.ambiguousNodes<rocRoller::KernelGraph::ControlGraph::LoadLDSTile>())
+            for(auto pair : graph.control.ambiguousNodes<CG::LoadLDSTile>())
                 ambiguousNodes.insert(pair);
-            for(auto pair :
-                graph.control.ambiguousNodes<rocRoller::KernelGraph::ControlGraph::StoreLDSTile>())
+            for(auto pair : graph.control.ambiguousNodes<CG::StoreLDSTile>())
                 ambiguousNodes.insert(pair);
-            for(auto pair :
-                graph.control.ambiguousNodes<rocRoller::KernelGraph::ControlGraph::LoadLinear>())
+            for(auto pair : graph.control.ambiguousNodes<CG::LoadLinear>())
                 ambiguousNodes.insert(pair);
-            for(auto pair :
-                graph.control.ambiguousNodes<rocRoller::KernelGraph::ControlGraph::StoreLinear>())
+            for(auto pair : graph.control.ambiguousNodes<CG::StoreLinear>())
                 ambiguousNodes.insert(pair);
             /* TODO: Handle these node types.
             for(auto pair :
-                graph.control.ambiguousNodes<rocRoller::KernelGraph::ControlGraph::LoadVGPR>())
+                graph.control.ambiguousNodes<CG::LoadVGPR>())
                 ambiguousNodes.insert(pair);
             for(auto pair :
-                graph.control.ambiguousNodes<rocRoller::KernelGraph::ControlGraph::StoreVGPR>())
+                graph.control.ambiguousNodes<CG::StoreVGPR>())
                 ambiguousNodes.insert(pair);
             */
             return ambiguousNodes;
@@ -69,7 +65,8 @@ namespace rocRoller
         }
 
         /**
-         * This transformation is used to provide the initial ordering of memory nodes in the first stage of the kernel graph.
+         * This transformation is used to provide the initial ordering
+         * of memory nodes in the first stage of the kernel graph.
          */
         KernelGraph OrderMemory::apply(KernelGraph const& k)
         {

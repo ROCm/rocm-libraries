@@ -827,19 +827,23 @@ namespace rocRoller
                 logger->debug("  prefetch: in-loop: segment {}", u);
 
                 // Connect the segment to the preceding segment boundary
+                //
+                // Note that the first boundary is the forLoop, and
+                // the remaining boundaries are NOPs.  Therefore
+                // segmentBoundaries[u] is the "preceding" boundary.
                 for(auto tag : m_prefetchUnrollBodyStarts[forLoop][u])
                 {
                     if(u == 0)
                         graph.control.addElement(Body(), {segmentBoundaries[u]}, {tag});
                     else
                     {
-                        auto descOfTag = graph.control
-                                             .depthFirstVisit(tag,
-                                                              graph.control.isElemType<Sequence>(),
-                                                              GD::Downstream)
-                                             .to<std::set>();
+                        auto descOfSegmentStart
+                            = graph.control
+                                  .depthFirstVisit(
+                                      tag, graph.control.isElemType<Sequence>(), GD::Downstream)
+                                  .to<std::set>();
 
-                        if(!descOfTag.contains(segmentBoundaries[u]))
+                        if(!descOfSegmentStart.contains(segmentBoundaries[u]))
                         {
                             graph.control.addElement(Sequence(), {segmentBoundaries[u]}, {tag});
                         }

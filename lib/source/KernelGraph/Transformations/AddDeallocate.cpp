@@ -21,8 +21,6 @@ namespace rocRoller::KernelGraph
         auto graph  = original;
         auto tracer = LastRWTracer(graph);
 
-        tracer.trace();
-
         for(auto& [coordinate, controls] : tracer.lastRWLocations())
         {
             // If there is a single entry in the hot-loop set when we

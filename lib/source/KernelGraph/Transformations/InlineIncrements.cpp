@@ -29,8 +29,7 @@ namespace rocRoller
 
             void stageForLoop(KernelGraph const& graph, int forLoop)
             {
-                auto tracer = LastRWTracer(graph, true);
-                tracer.trace(forLoop);
+                auto tracer = LastRWTracer(graph, forLoop, true);
 
                 auto rw = tracer.lastRWLocations();
 

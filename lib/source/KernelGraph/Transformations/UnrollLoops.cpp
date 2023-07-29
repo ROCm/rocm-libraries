@@ -1,5 +1,4 @@
 
-#include <rocRoller/KernelGraph/ControlGraph/LastRWTracer.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/UnrollLoops.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
@@ -11,8 +10,6 @@ namespace rocRoller
 {
     namespace KernelGraph
     {
-        namespace CT = rocRoller::KernelGraph::CoordinateGraph;
-
         using GD = Graph::Direction;
 
         using namespace ControlGraph;
@@ -128,8 +125,7 @@ namespace rocRoller
                 return result;
             auto topForLoopCoord = *maybeTopForLoopCoord;
 
-            ControlFlowRWTracer tracer(kgraph);
-            tracer.trace(forLoop);
+            ControlFlowRWTracer tracer(kgraph, forLoop);
 
             auto readwrite = tracer.coordinatesReadWrite();
 
@@ -264,7 +260,7 @@ namespace rocRoller
         struct UnrollLoopsVisitor : public BaseGraphVisitor
         {
             UnrollLoopsVisitor(ContextPtr context)
-                : BaseGraphVisitor(context, Graph::Direction::Upstream, false)
+                : BaseGraphVisitor(context, GD::Upstream, false)
             {
             }
 
@@ -333,9 +329,7 @@ namespace rocRoller
                 {
                     if(isEdge<PassThrough>(std::get<Edge>(graph.coordinates.getElement(input))))
                     {
-                        int parent
-                            = *graph.coordinates.getNeighbours<Graph::Direction::Upstream>(input)
-                                   .begin();
+                        int parent = *graph.coordinates.getNeighbours<GD::Upstream>(input).begin();
                         graph.coordinates.addElement(
                             Split(), {parent}, {forLoopDimension, unrollDimension});
                         graph.coordinates.deleteElement(input);
@@ -349,8 +343,7 @@ namespace rocRoller
                     if(isEdge<PassThrough>(std::get<Edge>(graph.coordinates.getElement(output))))
                     {
                         int child
-                            = *graph.coordinates.getNeighbours<Graph::Direction::Downstream>(output)
-                                   .begin();
+                            = *graph.coordinates.getNeighbours<GD::Downstream>(output).begin();
                         graph.coordinates.addElement(
                             Join(), {forLoopDimension, unrollDimension}, {child});
                         graph.coordinates.deleteElement(output);
@@ -382,8 +375,7 @@ namespace rocRoller
 
                 // Delete edges between original ForLoopOp and original loop body
                 for(auto const& child :
-                    graph.control.getNeighbours<Graph::Direction::Downstream>(newTag)
-                        .to<std::vector>())
+                    graph.control.getNeighbours<GD::Downstream>(newTag).to<std::vector>())
                 {
                     if(isEdge<Body>(graph.control.getElement(child)))
                     {
@@ -466,14 +458,12 @@ namespace rocRoller
                     connectWithSetCoord(duplicatedBodies[i], i);
                     auto currentLoads
                         = filter(graph.control.isElemType<LoadTiled>(),
-                                 graph.control.depthFirstVisit(duplicatedBodies[i],
-                                                               Graph::Direction::Downstream))
+                                 graph.control.depthFirstVisit(duplicatedBodies[i], GD::Downstream))
                               .to<std::set>();
 
                     auto currentStores
                         = filter(graph.control.isElemType<StoreTiled>(),
-                                 graph.control.depthFirstVisit(duplicatedBodies[i],
-                                                               Graph::Direction::Downstream))
+                                 graph.control.depthFirstVisit(duplicatedBodies[i], GD::Downstream))
                               .to<std::set>();
                     if(i > 0)
                     {

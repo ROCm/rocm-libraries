@@ -7,8 +7,8 @@ namespace rocRoller::KernelGraph
     class LastRWTracer : public ControlFlowRWTracer
     {
     public:
-        LastRWTracer(KernelGraph const& graph, bool trackConnections = false)
-            : ControlFlowRWTracer(graph, trackConnections)
+        LastRWTracer(KernelGraph const& graph, int start = -1, bool trackConnections = false)
+            : ControlFlowRWTracer(graph, start, trackConnections)
         {
         }
 
