@@ -123,6 +123,7 @@ add_custom_target(prebuild_sphinx
         clip_designreadme 
         copyover_mainreadme
         copyover_dockerreadme
+        copyover_adddocs
         build_doxygen
 )
 
@@ -146,6 +147,12 @@ add_custom_target(copyover_mainreadme
 )
 clean_doc_output(${DOCS_BUILD_DIR}/src/main.md)
 
+add_custom_target(copyover_adddocs
+    COMMAND cp ${CMAKE_CURRENT_SOURCE_DIR}/README.md ${DOCS_BUILD_DIR}/src/addDocs.md
+    COMMENT "Copying over README.md to docs/build/src folder as addDocs.md."
+    DEPENDS copysrc_to_builddir
+)
+clean_doc_output(${DOCS_BUILD_DIR}/src/addDocs.md)
 
 # cut the top 2-36 lines as they are a ToC that does not
 # build correctly in the website 

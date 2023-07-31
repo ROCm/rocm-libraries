@@ -47,6 +47,7 @@ extensions = [
     'sphinx.ext.viewcode',
     'myst_parser',
     'sphinx_rtd_theme',
+    'sphinxcontrib.mermaid'
 ]
 
 # doxygen_xml_output = ""
