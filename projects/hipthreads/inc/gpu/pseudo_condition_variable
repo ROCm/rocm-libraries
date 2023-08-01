@@ -1,0 +1,85 @@
+// -*- C++ -*-
+//===----------------------------------------------------------------------===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+
+#ifndef __GPU_PSEUDO_CONDITION_VARIABLE__
+#define __GPU_PSEUDO_CONDITION_VARIABLE__
+
+#include "gpu/thread"
+#include "hip/hip_runtime.h" // Atomics aren't part of hip_runtime_api.h
+
+namespace gpu {
+
+// Like condition_variable_any but it calls gpu::this_thread::pseudo_yield(); when waiting for extended periods of time.
+class pseudo_condition_variable {
+    uint64_t wait_counter = 0;
+    uint64_t notify_counter = 0;
+
+  public:
+    __device__ constexpr pseudo_condition_variable() noexcept = default;
+
+    __device__ pseudo_condition_variable(const pseudo_condition_variable &) = delete;
+    __device__ pseudo_condition_variable &operator=(const pseudo_condition_variable &) = delete;
+
+    __device__ inline void notify_one() noexcept;
+    __device__ inline void notify_all() noexcept;
+
+    template <class _Lock>
+    __device__ inline void wait(_Lock &__lock);
+    template <class _Lock, class _Predicate>
+    __device__ inline void wait(_Lock &__lock, _Predicate __pred);
+};
+
+__device__ inline void pseudo_condition_variable::notify_one() noexcept {
+    // If (notify_counter + 1 <= wait_counter), increment notify_counter.
+    // If we increment notify_counter when nobody is waiting, then the next person to wait will skip waiting
+    uint64_t cached_ntfy_cnt;
+    do {
+        cached_ntfy_cnt = atomicAdd(&notify_counter, 0);
+        if (cached_ntfy_cnt >= atomicAdd(&wait_counter, 0))
+            return;
+    } while (atomicCAS(&notify_counter, cached_ntfy_cnt, cached_ntfy_cnt + 1) !=
+             cached_ntfy_cnt);
+}
+
+__device__ inline void pseudo_condition_variable::notify_all() noexcept {
+    atomicExch(&notify_counter, atomicAdd(&wait_counter, 0));
+}
+
+template <class _Lock>
+__device__ void pseudo_condition_variable::wait(_Lock &__lock) {
+    uint64_t myId = atomicAdd(&wait_counter, 1);
+    // It's possible that another thread calls notify here, and then checks the state of __lock before we get a chance
+    // to unlock it. Since we're supposed to ATOMICALLY unlock and 'sleep', it technically shouldn't be possible for
+    // another thread to 'wake' us before we've released the lock. However, from a user's perspective, this situation is
+    // nearly indistinguisable from another, perfectly legal occurence: were already a bit further ahead, in the loop
+    // 'sleeping' when the other thread called notify, then woke up and re-acquired the lock before they got the chance
+    // to do anything further. The only catch is if unlocking and re-locking a lock has side effects or doesn't return
+    // it to an identical state, the user might be able to differentiate between these two situations.
+    __lock.unlock();
+    for (uint64_t count = 0; myId >= atomicAdd(&notify_counter, 0); ++count) {
+        // TODO: Tune this parameter
+        if (count % 0x10000ULL == 0) {
+            // Note that if another thread calls notify between getting myId and unlocking the lock, we're guaranteed to
+            // never call yield, so this doesn't affect whether a user can differentiate between the 2 situations
+            // desicribed above.
+            gpu::this_thread::pseudo_yield();
+        }
+    }
+    __lock.lock();
+}
+
+template <class _Lock, class _Predicate>
+__device__ inline void pseudo_condition_variable::wait(_Lock &__lock, _Predicate __pred) {
+    while (!__pred())
+        wait(__lock);
+}
+
+} // namespace gpu
+
+#endif // __GPU_PSEUDO_CONDITION_VARIABLE__

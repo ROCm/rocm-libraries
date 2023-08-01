@@ -27,5 +27,5 @@ set(CMAKE_CXX_LINKER   ${HIP_HIPCC_EXECUTABLE})
 # Used for automatic generation of LLVM IR (by dissasembling bitcode generated during compilation from the "-save-temps" option)
 find_program(LLVM_DIS llvm-dis REQUIRED HINTS /opt/rocm/llvm/bin)
 
-
+add_subdirectory(src)
 add_subdirectory(test)
