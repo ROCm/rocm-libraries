@@ -1,0 +1,381 @@
+#ifndef __GPU_THREAD_H__
+#define __GPU_THREAD_H__
+
+#include <utility>
+#include <type_traits>
+#include <system_error>
+#include <iostream>
+
+// TODO: Define a custom assert macro for the GPU that cleans up the thread state (e.g. by setting
+// fn_table[gpu::this_thread::get_id()] = nullptr) before invoking __assert_fail(#expr, __FILE__, __LINE__,
+// __ASSERT_FUNCTION). Maybe do the cleanup work in a function that wraps around __assert_fail?
+#include <cassert>
+
+#include "hip/hip_runtime.h"
+
+#include "gpu/__functional/invoke.h"
+#include "gpu/__support/hip_check.h"
+#include "gpu/__clib/malloc.h"
+
+namespace gpu {
+
+namespace internal {
+
+enum {
+    MAX_VTHREADS = 0x100000, // TODO: Increase this later. For a demo prototype this is good enough.
+#if defined(__gfx1030__)
+    NUM_VCORES = 130U, // We can't occupy all cores or the host will have a hard time spawning vthreads or terminating us
+                     // TODO: this should be dynamic and depend on the number of CUs or something
+#elif defined(__gfx1034__)
+    NUM_VCORES = 33U,
+#elif defined(__gfx1100__)
+    NUM_VCORES = 83U, // Conservative for demo
+#elif defined(__HIP_DEVICE_COMPILE__)
+#warning "Running on a gpu that hasn't had NUM_VCORES configured"
+    NUM_VCORES = 15U,
+#else
+    NUM_VCORES = 0U,
+#endif
+};
+extern __device__ uint32_t numVcores;
+
+//====================================================================================================================//
+//      THREAD CLASS DEFINITION
+//====================================================================================================================//
+
+class thread {
+    volatile uint32_t vthreadId = MAX_VTHREADS;
+
+  public:
+    // TODO: temporary measure. Should to be replaced with an actual class.
+    // Right now a default constructed id is a valid thread id, and it shouldn't be.
+    typedef uint32_t id;
+
+    __host__ __device__ thread() noexcept {}
+    __host__ __device__ thread(const thread &) = delete;
+    __host__ __device__ thread(thread &&other) noexcept : vthreadId(other.vthreadId) { other.vthreadId = MAX_VTHREADS; }
+    __host__ __device__ thread &operator=(thread &&other) noexcept;
+
+    template <class Fn_t, class... Args_t>
+    explicit __host__ thread(Fn_t &&typed_fn, Args_t &&...args);
+    template <class Fn_t, class... Args_t>
+    explicit __device__ thread(Fn_t &&typed_fn, Args_t &&...args);
+
+    __host__ __device__ ~thread();
+
+    __host__ __device__ thread::id get_id() const noexcept { return vthreadId; }
+    __host__ __device__ bool joinable() const noexcept { return vthreadId < MAX_VTHREADS; }
+    __device__ void join();
+    __host__ void join();
+    __host__ __device__ void detach();
+
+    __device__ static unsigned int hardware_concurrency() noexcept { return NUM_VCORES; }
+    __host__ static inline unsigned int hardware_concurrency() noexcept;
+};
+
+//====================================================================================================================//
+//      GLOBAL VARIABLE DECLARATIONS
+//====================================================================================================================//
+
+// TODO: These globals currently prevent us from being a header-only library
+// Maybe use an inline (non-static) __device__ function that returns a pointer to a static local variable instead?
+// E.g. https://stackoverflow.com/questions/51612866/global-variables-in-header-only-library
+typedef void (*WrappedFnPointer)(void *);
+// These are indexed by the vthreadId
+extern __device__ volatile WrappedFnPointer wrapper_table[MAX_VTHREADS];
+extern __device__ void *volatile fn_table[MAX_VTHREADS];
+// TODO: Maybe change the above tables into a linked-list? We already have to allocate heap space for the fn anyways.
+/* E.g.
+__device__ volatile void *vthreadHead;
+__device__ void *volatile *vthreadTail = &vthreadHead;
+template <class Callable_t> class thread { // Or, make it a separate class from gpu::thread only used internally
+    void *next; // must always be device-accessible. Either zero-copy pinned host memory, or device memory
+    uint32_t threadId;
+    bool finished; // for join()
+    Callable_t fn;
+};
+// But how to implement kernel_terminate()? Just a global variable?
+*/
+
+extern __device__ volatile uint32_t nextVthreadId_stored;
+extern __device__ volatile uint32_t nextVthreadId_launched;
+// if nextVthreadId_launched > nextVthreadId_stored, then (nextVthreadId_launched-nextVthreadId_stored) vcores are
+// spinning waiting for work. Otherwise (nextVthreadId_stored-nextVthreadId_launched) vthreads have been constructed, but
+// not started/assigned to a vcore
+
+extern hipStream_t mainStream;
+extern bool started;
+
+// Doesn't need to be volatile because this will only ever be read/written to by a single vcore/(real, non-v) thread
+// TODO: switch to a ?32? wide array when we allow more than 1 thread per block
+extern __shared__ gpu::internal::thread::id currentVthreadId;
+
+//====================================================================================================================//
+//      INTERNAL/HELPER FUNCTIONS
+//====================================================================================================================//
+
+template <class Fn_t>
+static __device__ void wrapper(void *fn) {
+    Fn_t *typed_fn = static_cast<Fn_t *>(fn);
+    (*typed_fn)();
+    __threadfence();
+    // If we start using thread groups > 1, then this becomes necessary (and probably more stuff like it elsewhere)
+    //__syncthreads();
+    delete typed_fn;
+}
+
+template <class Fn_t, class... Args_t>
+static inline __device__ uint32_t store(Fn_t &&typed_fn, Args_t &&...args) {
+    // Store args by capturing them in a lambda. This allows wrapper<T> to focus on invoking an arbitrary object of
+    // callable type.
+    // Ideally, we would also forward args in the capture (...args = std::forward<Args_t>(args)) to avoid an extra copy,
+    // but that requires C++20
+    auto arg_wrapper =
+        new auto([typed_fn = std::forward<Fn_t>(typed_fn), args...] __device__() { gpu::__invoke(std::move(typed_fn), std::move(args)...); });
+    uint32_t vthreadId = atomicAdd(const_cast<uint32_t *>(&nextVthreadId_stored), 1);
+    if (vthreadId >= MAX_VTHREADS) {
+        delete arg_wrapper;
+        return MAX_VTHREADS;
+    }
+    wrapper_table[vthreadId] = wrapper<std::remove_reference_t<decltype(*arg_wrapper)>>;
+    __threadfence(); // ensure fn_table[i] != nullptr implies wrapper_table[i] != nullptr so invokeNext only needs to
+                     // check fn_table[i] != nullptr
+    // TODO: determine if using a __threadfence() is actually better than having invokeNext check both fn_table[i] !=
+    // nullptr and wrapper_table[i] != nullptr
+    fn_table[vthreadId] = static_cast<void *>(arg_wrapper);
+    return vthreadId;
+}
+
+// Before calling invokeNext(true), the caller should check that there is work available (nextVthreadId_launched <=
+// nextVthreadId_stored)
+static inline __device__ uint32_t invokeNext(const bool dontWait = false) {
+    uint32_t vthreadId = atomicAdd(const_cast<uint32_t *>(&nextVthreadId_launched), 1);
+    if (vthreadId >= MAX_VTHREADS) {
+        return MAX_VTHREADS;
+    }
+    currentVthreadId = vthreadId;
+    __threadfence(); // Make sure everybody sees our update to nextVthreadId_launched before the vthread function
+                     // potentially spawns a thread and in the process updates nextVthreadId_stored.
+    while (fn_table[vthreadId] == nullptr) {
+        // All constructed vthreads are already assigned/running. If dontWait == false, spin while we wait for work.
+        // If dontWait == true, construct dummy vthreads until we get some 'work' to run (an empty lambda).
+        //
+        // This hack is needed because incrementing nextVthreadId_launched signalled that we'd take responsibility for
+        // whatever work gets stored at fn_table[vthreadId].
+        if (dontWait) {
+            store([] __device__() { ; });
+        }
+    }
+    wrapper_table[vthreadId](fn_table[vthreadId]);
+    __threadfence(); // Make sure all the writes the vthread function made are visible before we do anything further
+    currentVthreadId = MAX_VTHREADS;
+    wrapper_table[vthreadId] = nullptr;
+    fn_table[vthreadId] = nullptr;
+    return vthreadId;
+}
+
+//====================================================================================================================//
+//      KERNELS
+//====================================================================================================================//
+
+//TODO: should these all be static? This creates duplicate copies in each compilation unit that includes this header
+// Maybe they should be declared inline instead (to avoid multiple definition errors)
+// Note that we need to disable -Wcuda-compat using a pragma if we do this
+static __global__ void threading_main() {
+    currentVthreadId = MAX_VTHREADS;
+    for (uint32_t vthreadId = invokeNext(); vthreadId < MAX_VTHREADS;) {
+        vthreadId = invokeNext();
+    }
+}
+
+template <class Fn_t, class... Args_t>
+static __global__ void spawnVthreadFromHost(thread *thd, Fn_t typed_fn, Args_t... args) {
+    new (thd) thread(std::move(typed_fn), std::move(args)...);
+}
+
+// This needs to be launched in the same stream as the host-side thread creation to ensure it happens after that
+static __global__ void kernel_terminate() {
+    // Wait for ALL queued/waiting and started/running vthreads to complete.
+    // Note that one of the vthreads might themselves spawn more vthreads we have to wait for!
+    for (uint32_t nextVthreadId_executed_local = 0; nextVthreadId_executed_local < nextVthreadId_stored + NUM_VCORES;) {
+        // We use a local copy of nextVthreadId_launched to force the read of nextVthreadId_launched to happen before
+        // the read of nextVthreadId_stored. If we don't force this ordering, it's possible that we read
+        // nextVthreadId_stored right before the last vthread spawns another vthread, finishes, and then the vcore it
+        // was on increments nextVthreadId_launched before we read it.
+        nextVthreadId_executed_local = nextVthreadId_launched;
+        // Looking at the example use of __threadfence() in
+        // https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#memory-fence-functions, we might need a
+        // threadfence between the load of nextVthreadId_launched and the load of nextVthreadId_stored
+    }
+    __threadfence();
+    // When a vcore sees that we have hit MAX_VTHREADS, it exits. We can use this to make them stop running.
+    nextVthreadId_launched = MAX_VTHREADS;
+    // The vcores are now spinning waiting for work and won't notice the update to nextVthreadId_launched until we give
+    // them some. So we'll give them an empty job to do.
+    // TODO: this could probably be parallelized if we launch this kernel with a block size of NUM_VCORES instead of 1.
+    for (int i = 0; i < NUM_VCORES; ++i) {
+        store([] __device__() { ; });
+    }
+    // The vcores should all exit on their own now.
+    // If we need to wait for them to actually exit, we can do that in host code using hipStreamSynchronize(mainStream).
+}
+
+static __global__ void kernel_join(thread::id vthreadId) {
+    while (fn_table[vthreadId] != nullptr) {
+        // spin while we wait for it to finish.
+    }
+}
+} // namespace internal
+
+//====================================================================================================================//
+//      USER FACING API
+//====================================================================================================================//
+
+using internal::thread;
+
+namespace this_thread {
+static inline __device__ gpu::thread::id get_id() noexcept {
+    using namespace internal;
+    return currentVthreadId;
+}
+
+static inline __device__ void pseudo_yield() {
+    using namespace internal;
+
+    // If there's no work waiting, return immediately.
+    if (nextVthreadId_launched > nextVthreadId_stored) {
+        return;
+    }
+    uint32_t old_vthreadId = currentVthreadId;
+    invokeNext(true);
+    currentVthreadId = old_vthreadId;
+}
+} // namespace this_thread
+
+static inline __host__ void start() {
+    using namespace internal;
+    if (started) {
+        throw std::logic_error("gpu::start() called twice");
+    }
+    started = true;
+    // TODO: investigate using hipExtStreamCreateWithCUMask for this
+    __LIBGPU_HIP_CHECK__(hipStreamCreateWithFlags(&mainStream, hipStreamNonBlocking));
+    hipLaunchKernelGGL(threading_main, dim3(thread::hardware_concurrency()), dim3(1), 0, mainStream);
+}
+
+static inline __host__ void finish(bool blocking = true) {
+    using namespace internal;
+    if (!started) {
+        throw std::logic_error("called gpu::finish() before calling gpu::start()");
+    }
+    hipLaunchKernelGGL(kernel_terminate, dim3(1), dim3(1), 0, getEnqueingStream());
+    __LIBGPU_HIP_CHECK__(hipGetLastError());
+    if (blocking) {
+        // We could wait for kernel_terminate to finish (with hipStreamSynchronize(enqueingStream)) before
+        // synchronizing on mainStream, but there's no need.
+        __LIBGPU_HIP_CHECK__(hipStreamSynchronize(mainStream));
+        __LIBGPU_HIP_CHECK__(hipStreamDestroy(mainStream));
+        // Don't destroy enqueingStream because unlike mainStream we won't re-create it if the user decides to 're-start the GPU'
+    }
+}
+
+[[gnu::const]]
+inline __host__ unsigned int thread::hardware_concurrency() noexcept {
+    try {
+        uint32_t temp;
+        __LIBGPU_HIP_CHECK__(hipMemcpyFromSymbol(&temp, HIP_SYMBOL(numVcores), sizeof(temp), 0, hipMemcpyDeviceToHost));
+        return temp;
+    }
+    catch (...) {
+        std::cerr << "Exception while fetching numVcores\n";
+        return 1;
+    }
+}
+
+__host__ __device__ inline thread &thread::operator=(thread &&other) noexcept {
+    if (joinable()) {
+#ifdef __HIP_DEVICE_COMPILE__
+        assert(!joinable() && "Attempted to assign to a gpu::thread object that still has an associated thread");
+#else
+        std::terminate();
+#endif
+    }
+    vthreadId = other.vthreadId;
+    other.vthreadId = MAX_VTHREADS;
+    return *this;
+}
+
+template <class Fn_t, class... Args_t>
+inline __host__ thread::thread(Fn_t &&typed_fn, Args_t &&...args) {
+    gpu::thread *temp, *temp_d;
+    // We would use hipHostMalloc here instead of malloc + hipHostRegister, except that hipHostFree performs an implicit
+    // hipDeviceSynchronize() which will cause problems
+    temp = static_cast<gpu::thread *>(std::malloc(sizeof(*temp)));
+    __LIBGPU_HIP_CHECK__(hipHostRegister(temp, sizeof(*temp), hipHostRegisterDefault));
+    __LIBGPU_HIP_CHECK__(hipHostGetDevicePointer(reinterpret_cast<void **>(&temp_d), temp, 0));
+    hipLaunchKernelGGL(spawnVthreadFromHost, dim3(1), dim3(1), 0, getEnqueingStream(), temp_d,
+                       std::forward<Fn_t>(typed_fn), std::forward<Args_t>(args)...);
+    __LIBGPU_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
+    __LIBGPU_HIP_CHECK__(hipHostUnregister(temp));
+    *this = std::move(*temp);
+    std::free(temp);
+}
+
+template <class Fn_t, class... Args_t>
+inline __device__ thread::thread(Fn_t &&typed_fn, Args_t &&...args) {
+    vthreadId = store(std::forward<Fn_t>(typed_fn), std::forward<Args_t>(args)...);
+}
+
+__host__ __device__ inline thread::~thread() {
+    if (joinable()) {
+#ifdef __HIP_DEVICE_COMPILE__
+        assert(!joinable() && "Attempted to destroy a gpu::thread object that still has an associated thread");
+#else
+        std::terminate();
+#endif
+    }
+}
+
+__device__ inline void thread::join() {
+    // TODO: check that the user has called gpu::start()
+    if (!joinable()) {
+        assert(joinable() && "Attempted to join a gpu::thread object that doesn't have an associated thread");
+    }
+    if (this->get_id() == gpu::this_thread::get_id()) {
+        assert(this->get_id() != gpu::this_thread::get_id() &&
+                   "Attempted to join the gpu::thread object associated with the active thread");
+    }
+    assert(vthreadId < nextVthreadId_stored && "Internal library error");
+    while (fn_table[vthreadId] != nullptr) {
+        // spin while we wait for it to finish.
+    }
+    vthreadId = MAX_VTHREADS;
+}
+
+__host__ inline void thread::join() {
+    if (!started) {
+        throw std::logic_error("called gpu::thread::join() before calling gpu::start()");
+    }
+    if (!joinable()) {
+        throw std::system_error(std::error_code(EINVAL, std::system_category()), "thread::join failed");
+    }
+    // TODO: This is an ugly way of doing this. Try to come up with something better
+    hipLaunchKernelGGL(kernel_join, dim3(1), dim3(1), 0, getEnqueingStream(), vthreadId);
+    __LIBGPU_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
+    vthreadId = MAX_VTHREADS;
+}
+
+__host__ __device__ inline void thread::detach() {
+    if (!joinable()) {
+#ifdef __HIP_DEVICE_COMPILE__
+        assert(joinable() && "Attempted to detach a gpu::thread object that doesn't have an associated thread");
+#else
+        throw std::system_error(std::error_code(EINVAL, std::system_category()), "thread::detach failed");
+#endif
+    }
+    vthreadId = MAX_VTHREADS;
+}
+
+} // namespace gpu
+
+#endif // __GPU_THREAD_H__
