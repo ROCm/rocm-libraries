@@ -66,13 +66,18 @@ namespace rocRoller
              */
             Generator<Instruction> generateOffset(Register::ValuePtr&       dst,
                                                   Expression::ExpressionPtr expr,
-                                                  DataType                  dtype)
+                                                  DataType                  dtype,
+                                                  Expression::ExpressionPtr offsetInBytes)
             {
                 auto const& info     = DataTypeInfo::Get(dtype);
                 auto        numBytes = Expression::literal(static_cast<uint>(info.elementSize));
 
                 // TODO: Consider moving numBytes into input of this function.
-                co_yield Expression::generate(dst, m_fastArith(expr * numBytes), m_context);
+                if(offsetInBytes)
+                    co_yield Expression::generate(
+                        dst, m_fastArith(expr * numBytes) + offsetInBytes, m_context);
+                else
+                    co_yield Expression::generate(dst, m_fastArith(expr * numBytes), m_context);
             }
 
             bool hasGeneratedInputs(int const& tag)
@@ -599,7 +604,8 @@ namespace rocRoller
                 co_yield Instruction::Comment("GEN: LoadVGPR; user index");
 
                 auto indexes = coords.reverse({userTag});
-                co_yield generateOffset(offset, indexes[0], vgpr->variableType().dataType);
+                co_yield generateOffset(
+                    offset, indexes[0], vgpr->variableType().dataType, user.offset);
 
                 Register::ValuePtr vPtr;
 
@@ -698,7 +704,8 @@ namespace rocRoller
                 auto indexes = coords.forward({userTag});
 
                 co_yield Instruction::Comment("GEN: StoreVGPR; user index");
-                co_yield generateOffset(offset, indexes[0], src->variableType().dataType);
+                co_yield generateOffset(
+                    offset, indexes[0], src->variableType().dataType, user.offset);
 
                 Register::ValuePtr vPtr;
 

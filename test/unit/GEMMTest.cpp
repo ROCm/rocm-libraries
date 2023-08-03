@@ -277,8 +277,6 @@ namespace GEMMDriverTest
 
         if(gemm.enableScratch)
         {
-            REQUIRE_ARCH_CAP(GPUCapability::ArchAccUnifiedRegs);
-
             AssertFatal(numWorkgroupY == 1,
                         "Current scratch space implementation assumes that the kernel is launched "
                         "with numWorkgroupY == 1");
@@ -286,18 +284,14 @@ namespace GEMMDriverTest
             hipDeviceProp_t deviceProperties;
             ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
 
-            auto numCUs        = deviceProperties.multiProcessorCount;
-            auto numElements   = gemm.macM * gemm.macN * numCUs;
-            auto deviceScratch = make_shared_device<T>(numElements, 0.0);
+            unsigned int numCUs = deviceProperties.multiProcessorCount;
 
-            runtimeArgs.append("S", deviceScratch.get());
-
-            command->allocateArgument(VariableType(dataType, PointerType::PointerGlobal),
+            command->allocateArgument(VariableType(DataType::UInt32, PointerType::PointerGlobal),
                                       DataDirection::ReadWrite,
                                       rocRoller::SCRATCH);
 
             kernelOptions->enableScratch   = true;
-            kernelOptions->numScratchTiles = numCUs;
+            kernelOptions->numScratchTiles = std::min(numCUs, numWorkgroupX * numWorkgroupY);
         }
 
         if(gemm.loopOverTiles > 0)
@@ -355,6 +349,12 @@ namespace GEMMDriverTest
              static_cast<uint>(gemm.macN / gemm.waveN / wavetilePerWavefrontN)});
 
         CommandKernel commandKernel(command, "GEMMTest", params, postParams, kernelOptions);
+
+        // Create scratch space
+        auto scratchSpaceRequired = commandKernel.scratchSpaceRequired();
+        auto deviceScratch        = make_shared_device<uint8_t>(scratchSpaceRequired, 0);
+        runtimeArgs.append("S", static_cast<void*>(deviceScratch.get()));
+
         commandKernel.launchKernel(runtimeArgs.runtimeArguments());
         m_context = commandKernel.getContext();
 
@@ -398,6 +398,25 @@ namespace GEMMDriverTest
         double rnorm = relativeNorm(d_result, h_result);
 
         ASSERT_LT(rnorm, acceptableError);
+
+        // Check that scratch flags have all been set
+        if(gemm.enableScratch)
+        {
+            std::vector<unsigned int> hostFlags(kernelOptions->numScratchTiles, 0);
+            // Flags come after partial tiles in scratch memory
+            ASSERT_THAT(
+                hipMemcpy(hostFlags.data(),
+                          deviceScratch.get()
+                              + gemm.macM * gemm.macN * kernelOptions->numScratchTiles * sizeof(T),
+                          kernelOptions->numScratchTiles * sizeof(unsigned int),
+                          hipMemcpyDeviceToHost),
+                HasHipSuccess(0));
+
+            for(int i = 0; i < hostFlags.size(); i++)
+            {
+                EXPECT_EQ(hostFlags[i], 1u) << i;
+            }
+        }
     }
 
     // This test is to ensure each scheduler properly yields insts for a basic GEMM
@@ -470,6 +489,7 @@ namespace GEMMDriverTest
         gemm.factor        = 2.0f;
         basicGEMM<float>(m_context, gemm, 1.e-6);
     }
+
     TEST_F(GEMMTestGPU, GPU_BasicGEMMEnableScratchFixup)
     {
         GEMMProblem gemm;

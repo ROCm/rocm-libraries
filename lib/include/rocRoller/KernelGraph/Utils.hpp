@@ -94,6 +94,20 @@ namespace rocRoller
         std::optional<int> findContainingOperation(int candidate, KernelGraph const& kgraph);
 
         /**
+         * @brief Create a new coordinate representing data within the scratch space. This will return a
+         * coordinate that can be added to a coordinate graph. It also allocates the required scratch space
+         * within the context.
+         *
+         * @param size
+         * @param varType
+         * @param context
+         * @return CT::User
+         */
+        CT::User newScratchCoordinate(Expression::ExpressionPtr size,
+                                      VariableType              varType,
+                                      ContextPtr                context);
+
+        /**
          * Replace operation with a new operation.  Does not delete the original operation.
          */
         int replaceWith(KernelGraph& graph, int op, int newOp, bool includeBody = true);

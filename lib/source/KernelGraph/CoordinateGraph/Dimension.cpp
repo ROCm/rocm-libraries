@@ -19,6 +19,15 @@ namespace rocRoller
         {
         }
 
+        BaseDimension::BaseDimension(Expression::ExpressionPtr size,
+                                     Expression::ExpressionPtr stride,
+                                     Expression::ExpressionPtr offset)
+            : size(size)
+            , stride(stride)
+            , offset(offset)
+        {
+        }
+
         std::string BaseDimension::toString() const
         {
             auto _size = size ? rocRoller::Expression::toString(size) : "NA";
@@ -68,6 +77,12 @@ namespace rocRoller
             return name() + stag;
         }
 
+        User::User(Expression::ExpressionPtr size, Expression::ExpressionPtr offset)
+            : BaseDimension(size, Expression::literal(1u), offset)
+            , argumentName(rocRoller::SCRATCH)
+        {
+        }
+
         User::User(std::string const& name)
             : BaseDimension()
             , argumentName(name)
@@ -75,7 +90,7 @@ namespace rocRoller
         }
 
         User::User(std::string const& name, Expression::ExpressionPtr size)
-            : BaseDimension(size, Expression::literal(1u))
+            : BaseDimension(size, Expression::literal(1u), Expression::literal(0u))
             , argumentName(name)
         {
         }

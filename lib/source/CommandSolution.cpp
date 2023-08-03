@@ -379,4 +379,14 @@ namespace rocRoller
     {
         return m_context;
     }
+
+    size_t CommandKernel::scratchSpaceRequired() const
+    {
+        auto amount = m_context->getScratchAmount();
+
+        AssertFatal(evaluationTimes(amount)[Expression::EvaluationTime::Translate],
+                    "Unable to evaluate the scratch space required");
+
+        return getUnsignedInt(evaluate(amount));
+    }
 }

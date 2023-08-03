@@ -340,7 +340,19 @@ namespace rocRoller
                         Register::ValuePtr basePointer;
                         auto               bufDesc = BufferDescriptor(bufferReg, m_context);
                         co_yield m_context->argLoader()->getValue(user->argumentName, basePointer);
-                        co_yield bufDesc.setBasePointer(basePointer);
+
+                        if(user->offset && !Expression::identical(user->offset, literal(0u)))
+                        {
+                            Register::ValuePtr tmpRegister;
+                            co_yield generate(tmpRegister,
+                                              simplify(basePointer->expression() + user->offset));
+                            co_yield bufDesc.setBasePointer(tmpRegister);
+                        }
+                        else
+                        {
+                            co_yield bufDesc.setBasePointer(basePointer);
+                        }
+
                         co_yield bufDesc.setDefaultOpts();
                         Register::ValuePtr limitValue;
                         co_yield generate(limitValue, user->size * L(numBytes));
@@ -525,6 +537,8 @@ namespace rocRoller
             info.n      = n;
             info.offset = offset;
 
+            Register::ValuePtr finalVGPR;
+
             if(!info.offset)
             {
                 info.offset = Register::Value::Literal(0u);
@@ -576,7 +590,22 @@ namespace rocRoller
 
                 if(m_context->registerTagManager()->hasRegister(macTileTag))
                 {
-                    info.data = m_context->registerTagManager()->getRegister(macTileTag);
+                    auto reg = m_context->registerTagManager()->getRegister(macTileTag);
+
+                    if(!m_context->targetArchitecture().HasCapability(
+                           GPUCapability::ArchAccUnifiedRegs)
+                       && reg->regType() != Register::Type::Vector)
+                    {
+                        // If no unifified acc/vgpr registers, create a temporary vgpr register.
+                        // The result of the load will be copied into finalVGPR after the load
+                        // has been performed.
+                        info.data = tmpl;
+                        finalVGPR = reg;
+                    }
+                    else
+                    {
+                        info.data = reg;
+                    }
                 }
                 else
                 {
@@ -634,6 +663,11 @@ namespace rocRoller
             else
             {
                 co_yield moveTileRuntimeStrides<Dir>(info);
+            }
+
+            if(finalVGPR)
+            {
+                co_yield m_context->copier()->copy(finalVGPR, info.data);
             }
         }
 

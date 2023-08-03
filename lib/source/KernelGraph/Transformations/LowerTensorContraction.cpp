@@ -116,7 +116,7 @@ namespace rocRoller
             auto strideX = sizeY;
             auto strideY = literal(1u);
 
-            auto globalScratch    = User(rocRoller::SCRATCH, simplify(sizeX * sizeY));
+            auto globalScratch    = newScratchCoordinate(simplify(sizeX * sizeY), varType, context);
             auto globalScratchTag = graph.coordinates.addElement(globalScratch);
 
             // Store
@@ -200,14 +200,33 @@ namespace rocRoller
             auto waitZeroTag     = graph.control.addElement(WaitZero());
             auto loadPartialTag  = loadScratchTile(graph, forK, varType.dataType);
 
-            graph.control.addElement(Sequence(), {storePartialTag}, {waitZeroTag});
-            graph.control.addElement(Sequence(), {waitZeroTag}, {loadPartialTag});
-
             for(auto const& c : storeConnections)
                 graph.mapper.connect(storePartialTag, c.coordinate, c.connectionSpec);
 
             for(auto const& c : loadConnections)
                 graph.mapper.connect(loadPartialTag, c.coordinate, c.connectionSpec);
+
+            // Store Flag
+            auto flagsScratch = newScratchCoordinate(
+                literal(context->kernelOptions().numScratchTiles), DataType::UInt32, context);
+            auto flagsScratchTag = graph.coordinates.addElement(flagsScratch);
+            auto wg              = graph.coordinates.addElement(Workgroup());
+            graph.coordinates.addElement(PassThrough(), {wg}, {flagsScratchTag});
+
+            auto flagVGPR = graph.coordinates.addElement(VGPR());
+
+            auto assignFlag
+                = graph.control.addElement(Assign{Register::Type::Vector, Expression::literal(1u)});
+            graph.mapper.connect(assignFlag, flagVGPR, NaryArgument::DEST);
+
+            auto storeFlag = graph.control.addElement(StoreVGPR());
+            graph.mapper.connect<User>(storeFlag, flagsScratchTag);
+            graph.mapper.connect<VGPR>(storeFlag, flagVGPR);
+
+            graph.control.addElement(Sequence(), {storePartialTag}, {waitZeroTag});
+            graph.control.addElement(Sequence(), {waitZeroTag}, {assignFlag});
+            graph.control.addElement(Sequence(), {assignFlag}, {storeFlag});
+            graph.control.addElement(Sequence(), {storeFlag}, {loadPartialTag});
 
             // add fixup
             auto [fixupTag, fixupDestTag] = addFixup(graph, macTileTag, loadScratchTileTag);

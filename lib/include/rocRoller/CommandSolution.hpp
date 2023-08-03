@@ -153,6 +153,16 @@ namespace rocRoller
          */
         KernelInvocation getKernelInvocation(RuntimeArguments const& args);
 
+        /**
+         * @brief Returns the total number of bytes required for scratch space
+         *
+         * If this value is greather than 0, the user is required to allocate this
+         * amount of device memory and pass it into the kernel.
+         *
+         * @return size_t
+         */
+        size_t scratchSpaceRequired() const;
+
     private:
         CommandPtr m_command;
 

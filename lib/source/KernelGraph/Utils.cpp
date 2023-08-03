@@ -408,6 +408,15 @@ namespace rocRoller
             return {required, path};
         }
 
+        CT::User newScratchCoordinate(ExpressionPtr size, VariableType varType, ContextPtr context)
+        {
+            auto currentOffset = context->getScratchAmount();
+            auto newCoordinate = User(size, currentOffset);
+            context->allocateScratch(size * literal(DataTypeInfo::Get(varType).elementSize));
+
+            return newCoordinate;
+        }
+
         std::optional<std::pair<int, Graph::Direction>>
             findStorageNeighbour(int tag, KernelGraph const& graph)
         {

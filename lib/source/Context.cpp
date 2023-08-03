@@ -16,7 +16,10 @@
 
 namespace rocRoller
 {
-    Context::Context() {}
+    Context::Context()
+        : m_scratchAllocator(Expression::literal(0u))
+    {
+    }
 
     ContextPtr Context::ForDefaultHipDevice(std::string const&   kernelName,
                                             KernelOptions const& kernelOpts)
@@ -165,6 +168,16 @@ namespace rocRoller
     void Context::setScopeManager(std::shared_ptr<KernelGraph::ScopeManager> scope)
     {
         m_scope = scope;
+    }
+
+    Expression::ExpressionPtr Context::getScratchAmount() const
+    {
+        return m_scratchAllocator;
+    }
+
+    void Context::allocateScratch(Expression::ExpressionPtr size)
+    {
+        m_scratchAllocator = simplify(m_scratchAllocator + size);
     }
 
 }

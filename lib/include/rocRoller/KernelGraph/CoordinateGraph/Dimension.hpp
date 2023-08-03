@@ -24,10 +24,13 @@ namespace rocRoller
 
         struct BaseDimension
         {
-            Expression::ExpressionPtr size, stride;
+            Expression::ExpressionPtr size, stride, offset;
 
             BaseDimension() noexcept;
             BaseDimension(Expression::ExpressionPtr size, Expression::ExpressionPtr stride);
+            BaseDimension(Expression::ExpressionPtr size,
+                          Expression::ExpressionPtr stride,
+                          Expression::ExpressionPtr offset);
 
             virtual std::string toString() const;
 
@@ -46,7 +49,7 @@ namespace rocRoller
          * coordinate transform, and that won't need to be referenced
          * in other parts of the code, the Adhoc dimension can be
          * used.
-         * 
+         *
          * Can exist in the final graph.
          */
         struct Adhoc : public BaseDimension
@@ -108,6 +111,14 @@ namespace rocRoller
 
             User(std::string const& name);
             User(std::string const& name, Expression::ExpressionPtr size);
+
+            /**
+             * @brief Constructor for a User dimension that is part of the scratch space.
+             *
+             * @param size How many elements make up the User dimension.
+             * @param offset Location of data within the scratch space
+             */
+            User(Expression::ExpressionPtr size, Expression::ExpressionPtr offset);
 
             std::string name() const override;
         };
@@ -208,7 +219,7 @@ namespace rocRoller
 
         /**
          * LDS - represents local memory.
-         * 
+         *
          * Multipurpose:
          * - Represents storage
          * - Represents address coordinate information

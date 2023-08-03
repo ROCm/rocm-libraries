@@ -17,6 +17,7 @@
 #include "CodeGen/CopyGenerator_fwd.hpp"
 #include "CodeGen/Instruction_fwd.hpp"
 #include "CodeGen/MemoryInstructions_fwd.hpp"
+#include "Expression_fwd.hpp"
 #include "GPUArchitecture/GPUArchitectureTarget_fwd.hpp"
 #include "InstructionValues/LDSAllocator_fwd.hpp"
 #include "InstructionValues/LabelAllocator_fwd.hpp"
@@ -98,6 +99,20 @@ namespace rocRoller
         GPUArchitecture const&        targetArchitecture() const;
         int                           hipDeviceIndex() const;
 
+        /**
+         * @brief Returns an expression representing how much scratch space is required (in bytes)
+         *
+         * @return Expression::ExpressionPtr
+         */
+        Expression::ExpressionPtr getScratchAmount() const;
+
+        /**
+         * @brief Allocate more scratch space
+         *
+         * @param size Number of bytes requested
+         */
+        void allocateScratch(Expression::ExpressionPtr size);
+
         std::shared_ptr<RegisterHazardMap> getRegisterHazardMap() const;
 
         /**
@@ -131,6 +146,7 @@ namespace rocRoller
         std::shared_ptr<MemoryInstructions>        m_mem;
         LabelAllocatorPtr                          m_labelAllocator;
         std::shared_ptr<LDSAllocator>              m_ldsAllocator;
+        Expression::ExpressionPtr                  m_scratchAllocator;
         std::shared_ptr<CopyGenerator>             m_copier;
         std::shared_ptr<BranchGenerator>           m_brancher;
         std::shared_ptr<RandomGenerator>           m_random;
