@@ -93,23 +93,19 @@ namespace rocRoller::KernelGraph
     std::vector<ControlFlowRWTracer::ReadWriteRecord>
         ControlFlowRWTracer::coordinatesReadWrite() const
     {
-        std::vector<ControlFlowRWTracer::ReadWriteRecord> rv;
-        for(auto x : m_trace)
-        {
-            rv.push_back({x.control, x.coordinate, x.rw});
-        }
-        return rv;
+        return m_trace;
     }
 
     std::vector<ControlFlowRWTracer::ReadWriteRecord>
         ControlFlowRWTracer::coordinatesReadWrite(int coordinate) const
     {
         std::vector<ControlFlowRWTracer::ReadWriteRecord> rv;
-        for(auto x : m_trace)
-        {
-            if(x.coordinate == coordinate)
-                rv.push_back({x.control, x.coordinate, x.rw});
-        }
+        std::copy_if(m_trace.begin(),
+                     m_trace.end(),
+                     std::back_inserter(rv),
+                     [coordinate](ControlFlowRWTracer::ReadWriteRecord x) {
+                         return coordinate == x.coordinate;
+                     });
         return rv;
     }
 
@@ -120,9 +116,9 @@ namespace rocRoller::KernelGraph
         m_trace.push_back({control, coordinate, rw});
     }
 
-    void ControlFlowRWTracer::trackConnections(int                     control,
-                                               std::unordered_set<int> except,
-                                               ReadWrite               rw)
+    void ControlFlowRWTracer::trackConnections(int                            control,
+                                               std::unordered_set<int> const& except,
+                                               ReadWrite                      rw)
     {
         if(!m_trackConnections)
             return;
@@ -130,7 +126,7 @@ namespace rocRoller::KernelGraph
         if(control < 0)
             return;
 
-        for(auto c : m_graph.mapper.getConnections(control))
+        for(auto const& c : m_graph.mapper.getConnections(control))
         {
             if(except.contains(c.coordinate))
                 continue;
