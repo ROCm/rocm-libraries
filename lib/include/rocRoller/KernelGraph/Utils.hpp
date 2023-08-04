@@ -142,6 +142,9 @@ namespace rocRoller
          */
         int getForLoop(int forLoopOp, KernelGraph const& kgraph);
 
+        template <CForwardRangeOf<int> Range>
+        int getForLoop(int forLoopOp, KernelGraph const& kgraph, Range within);
+
         /**
          * @brief Get a pair of expressions representing a for loop increment
          *

@@ -5,6 +5,19 @@
 
 namespace rocRoller::KernelGraph
 {
+    template <CForwardRangeOf<int> Range>
+    int getForLoop(int forLoopOp, KernelGraph const& kgraph, Range within)
+    {
+        namespace CG = rocRoller::KernelGraph::CoordinateGraph;
+
+        auto incr = kgraph.mapper.getConnections(forLoopOp)[0].coordinate;
+        for(auto f : kgraph.coordinates.getOutputNodeIndices(incr, CG::isEdge<CG::DataFlow>))
+        {
+            if(std::find(within.cbegin(), within.cend(), f) != within.cend())
+                return f;
+        }
+        return -1;
+    }
 
     template <typename T>
     std::unordered_set<int> filterCoordinates(auto const& candidates, KernelGraph const& kgraph)

@@ -28,6 +28,10 @@ namespace rocRoller
                 if(!(evaluationTimes(forLoopDim)[EvaluationTime::Translate]))
                     continue;
 
+                //Ensure RHS is translate time evaluatable.
+                if(!(evaluationTimes(rhs)[EvaluationTime::Translate]))
+                    continue;
+
                 //Only remove single iteration loops!
                 if(evaluate(rhs) != evaluate(forLoopDim))
                     continue;

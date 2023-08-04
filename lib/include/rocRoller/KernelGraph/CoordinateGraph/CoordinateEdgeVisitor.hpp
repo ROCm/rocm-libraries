@@ -59,14 +59,14 @@ namespace rocRoller
                 AssertFatal(srcs.size() == 1, ShowValue(srcs.size()));
                 std::vector<Expression::ExpressionPtr> rv(dsts.size());
 
-                // TODO: Audit/test this for > 2 destinations
                 auto input = indexes[0];
-                for(size_t i = 1; i < dsts.size(); i++)
+                for(int i = dsts.size() - 1; i > 0; i--)
                 {
-                    rv[i - 1] = input / getSize(dsts[i]);
-                    input     = input % getSize(dsts[i]);
+                    auto size = getSize(dsts[i]);
+                    rv[i]     = input % size;
+                    input     = input / size;
                 }
-                rv.back() = input;
+                rv[0] = input;
 
                 return rv;
             }

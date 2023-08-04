@@ -311,6 +311,9 @@ namespace rocRoller
                     target = *maybeParentLDS;
             }
 
+            auto reachable
+                = kgraph.coordinates.depthFirstVisit(target, direction).to<std::unordered_set>();
+
             auto dontWalkPastLoopOrStorageNodes = [&](int tag) -> bool {
                 auto element = kgraph.coordinates.getElement(tag);
                 auto edge    = std::get<CT::Edge>(element);
@@ -320,6 +323,8 @@ namespace rocRoller
                 for(auto neighbour : kgraph.coordinates.getNeighbours(tag, opposite(direction)))
                 {
                     if(neighbour == target)
+                        continue;
+                    if(!reachable.contains(neighbour))
                         continue;
                     if(isLoopishCoordinate(neighbour, kgraph))
                         follow = false;

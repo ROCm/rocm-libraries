@@ -1,36 +1,14 @@
 
-#include <memory>
+#include <rocRoller/CommandSolution.hpp>
 
-#include "CommandSolution.hpp"
-
-#include "ExecutableKernel.hpp"
-
-#include "AssemblyKernel.hpp"
-#include "KernelArguments.hpp"
-#include "KernelGraph/KernelGraph.hpp"
-#include "KernelGraph/Transforms/AddComputeIndex.hpp"
-#include "KernelGraph/Transforms/AddConvert.hpp"
-#include "KernelGraph/Transforms/AddDeallocate.hpp"
-#include "KernelGraph/Transforms/AddLDS.hpp"
-#include "KernelGraph/Transforms/CleanArguments.hpp"
-#include "KernelGraph/Transforms/CleanLoops.hpp"
-#include "KernelGraph/Transforms/ConnectWorkgroups.hpp"
-#include "KernelGraph/Transforms/FuseExpressions.hpp"
-#include "KernelGraph/Transforms/FuseLoops.hpp"
-#include "KernelGraph/Transforms/GraphTransform.hpp"
-#include "KernelGraph/Transforms/InlineIncrements.hpp"
-#include "KernelGraph/Transforms/LoopOverTileNumbers.hpp"
-#include "KernelGraph/Transforms/LowerLinear.hpp"
-#include "KernelGraph/Transforms/LowerTensorContraction.hpp"
-#include "KernelGraph/Transforms/LowerTile.hpp"
-#include "KernelGraph/Transforms/OrderMemory.hpp"
-#include "KernelGraph/Transforms/UnrollLoops.hpp"
-#include "KernelGraph/Transforms/UpdateParameters.hpp"
-#include "Operations/Command.hpp"
-#include "Scheduling/Costs/Cost.hpp"
-#include "Scheduling/Scheduler.hpp"
-#include "Utilities/Settings_fwd.hpp"
-#include "Utilities/Timer.hpp"
+#include <rocRoller/AssemblyKernel.hpp>
+#include <rocRoller/ExecutableKernel.hpp>
+#include <rocRoller/KernelArguments.hpp>
+#include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/KernelGraph/Transforms/All.hpp>
+#include <rocRoller/Operations/Command.hpp>
+#include <rocRoller/Utilities/Settings_fwd.hpp>
+#include <rocRoller/Utilities/Timer.hpp>
 
 namespace rocRoller
 {

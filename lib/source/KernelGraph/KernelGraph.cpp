@@ -53,6 +53,9 @@ namespace rocRoller
             auto transformString  = concatenate("KernelGraph::transform ", transformation->name());
             auto checkConstraints = Settings::getInstance()->get(Settings::EnforceGraphConstraints);
 
+            auto logger = rocRoller::Log::getLogger();
+            logger->debug(transformString);
+
             if(checkConstraints)
             {
                 auto check = (*this).checkConstraints(transformation->preConstraints());
@@ -61,7 +64,6 @@ namespace rocRoller
             }
 
             KernelGraph newGraph = transformation->apply(*this);
-            auto        logger   = rocRoller::Log::getLogger();
 
             if(Settings::getInstance()->get(Settings::LogGraphs))
                 logger->debug("KernelGraph::transform: {}, post: {}",

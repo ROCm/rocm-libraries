@@ -15,19 +15,7 @@
 #include <rocRoller/KernelGraph/Constraints.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/CoordinateGraph.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
-#include <rocRoller/KernelGraph/Transforms/AddComputeIndex.hpp>
-#include <rocRoller/KernelGraph/Transforms/AddDeallocate.hpp>
-#include <rocRoller/KernelGraph/Transforms/AddLDS.hpp>
-#include <rocRoller/KernelGraph/Transforms/CleanArguments.hpp>
-#include <rocRoller/KernelGraph/Transforms/CleanLoops.hpp>
-#include <rocRoller/KernelGraph/Transforms/ConnectWorkgroups.hpp>
-#include <rocRoller/KernelGraph/Transforms/FuseLoops.hpp>
-#include <rocRoller/KernelGraph/Transforms/InlineIncrements.hpp>
-#include <rocRoller/KernelGraph/Transforms/LowerLinear.hpp>
-#include <rocRoller/KernelGraph/Transforms/LowerTensorContraction.hpp>
-#include <rocRoller/KernelGraph/Transforms/LowerTile.hpp>
-#include <rocRoller/KernelGraph/Transforms/UnrollLoops.hpp>
-#include <rocRoller/KernelGraph/Transforms/UpdateParameters.hpp>
+#include <rocRoller/KernelGraph/Transforms/All.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
 #include <rocRoller/KernelGraph/Visitors.hpp>
 #include <rocRoller/Operations/Command.hpp>
@@ -2837,5 +2825,4 @@ namespace KernelGraphTest
         EXPECT_THAT(output(), testing::HasSubstr("lgkmcnt(0)"));
         EXPECT_THAT(output(), testing::HasSubstr("expcnt(0)"));
     }
-
 }

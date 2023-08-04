@@ -303,6 +303,7 @@ set(rocroller_src
  lib/source/KernelGraph/Transformations/AddConvert.cpp
  lib/source/KernelGraph/Transformations/AddDeallocate.cpp
  lib/source/KernelGraph/Transformations/AddLDS.cpp
+ lib/source/KernelGraph/Transformations/AddStreamK.cpp
  lib/source/KernelGraph/Transformations/CleanGraph.cpp
  lib/source/KernelGraph/Transformations/CleanLoops.cpp
  lib/source/KernelGraph/Transformations/ConnectWorkgroups.cpp
@@ -427,6 +428,7 @@ set(
   test/unit/GenericContextFixture.cpp
   test/unit/GPUContextFixture.cpp
 
+  test/unit/AddStreamKTest.cpp
   test/unit/AllocatingObserverTest.cpp
   test/unit/ArgumentLoaderTest.cpp
   test/unit/ArgumentValueTest.cpp
