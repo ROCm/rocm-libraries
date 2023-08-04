@@ -4,7 +4,7 @@
 
 namespace rocRoller
 {
-    RegisterComponent(ShiftRGenerator);
+    RegisterComponent(LogicalShiftRGenerator);
 
     template <>
     std::shared_ptr<BinaryArithmeticGenerator<Expression::LogicalShiftR>>
@@ -16,9 +16,9 @@ namespace rocRoller
             getContextFromValues(dst, lhs, rhs), dst->regType(), dst->variableType().dataType);
     }
 
-    Generator<Instruction> ShiftRGenerator::generate(Register::ValuePtr dest,
-                                                     Register::ValuePtr value,
-                                                     Register::ValuePtr shiftAmount)
+    Generator<Instruction> LogicalShiftRGenerator::generate(Register::ValuePtr dest,
+                                                            Register::ValuePtr value,
+                                                            Register::ValuePtr shiftAmount)
     {
         AssertFatal(value != nullptr);
         AssertFatal(shiftAmount != nullptr);

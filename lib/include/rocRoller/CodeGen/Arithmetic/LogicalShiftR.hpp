@@ -13,10 +13,10 @@ namespace rocRoller
                                                 Register::ValuePtr rhs);
 
     // Generator for all register types and datatypes.
-    class ShiftRGenerator : public BinaryArithmeticGenerator<Expression::LogicalShiftR>
+    class LogicalShiftRGenerator : public BinaryArithmeticGenerator<Expression::LogicalShiftR>
     {
     public:
-        ShiftRGenerator(ContextPtr c)
+        LogicalShiftRGenerator(ContextPtr c)
             : BinaryArithmeticGenerator<Expression::LogicalShiftR>(c)
         {
         }
@@ -40,7 +40,7 @@ namespace rocRoller
             if(!Match(arg))
                 return nullptr;
 
-            return std::make_shared<ShiftRGenerator>(std::get<0>(arg));
+            return std::make_shared<LogicalShiftRGenerator>(std::get<0>(arg));
         }
 
         // Method to generate instructions
