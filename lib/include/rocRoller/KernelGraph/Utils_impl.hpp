@@ -118,16 +118,9 @@ namespace rocRoller::KernelGraph
         }
 
         // Change coordinate values in Expressions
-        for(auto const& reindex : reindexer.control)
+        for(auto const& pair : reindexer.control)
         {
-            auto elem = graph.control.getElement(reindex.first);
-            if(isOperation<Assign>(elem))
-            {
-                auto                     new_assign = graph.control.getNode<Assign>(reindex.second);
-                ReindexExpressionVisitor visitor(reindexer);
-                new_assign.expression = visitor.call(new_assign.expression);
-                graph.control.setElement(reindex.second, new_assign);
-            }
+            reindexExpressions(graph, pair.second, reindexer);
         }
 
         // Return the new start nodes

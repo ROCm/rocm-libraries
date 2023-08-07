@@ -45,9 +45,7 @@ namespace rocRoller
                         [&](Assign assign) {
                             GraphReindexer contractionReindexer;
                             contractionReindexer.coordinates.emplace(oldMacTileTag, newMacTileTag);
-                            ReindexExpressionVisitor visitor(contractionReindexer);
-                            assign.expression = visitor.call(assign.expression);
-                            graph.control.setElement(opTag, assign);
+                            reindexExpressions(graph, opTag, contractionReindexer);
 
                             // update the data flow in the coordinate graph
                             auto dstTag = only(graph.mapper.getConnections(opTag))->coordinate;

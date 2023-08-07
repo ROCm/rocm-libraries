@@ -60,9 +60,9 @@ namespace rocRoller
                     return;
                 }
 
-                ReindexExpressionVisitor visitor(reindexer);
-                auto                     new_assign
-                    = Assign{assign.regType, visitor.call(assign.expression), assign.valueCount};
+                auto new_assign = Assign{assign.regType,
+                                         reindexExpression(assign.expression, reindexer),
+                                         assign.valueCount};
 
                 auto vgpr = graph.coordinates.addElement(VGPR());
 

@@ -290,6 +290,7 @@ set(rocroller_src
  lib/source/KernelGraph/KernelGraph_serialization.cpp
  lib/source/KernelGraph/LastRWTracer.cpp
  lib/source/KernelGraph/LowerFromCommand.cpp
+ lib/source/KernelGraph/Reindexer.cpp
  lib/source/KernelGraph/ScopeManager.cpp
  lib/source/KernelGraph/Utils.cpp
 
