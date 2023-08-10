@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "nodemon",
     "start": "webpack --mode=development && npm run server",
-    "server": "python3 -m http.server 8000 --bind 127.0.0.1",
+    "server": "python3 -m http.server --bind 127.0.0.1",
     "test": "jest",
     "docs": "npx typedoc --out docs --entryPointStrategy expand ./src"
   },

@@ -12,7 +12,9 @@ module Help {
 
     "For more commands, type `man` and to get help on a specific one, use `man <name>`, e.g. `man newInstance`. ",
 
-    "If you want to load a new graph, use `new path/to/yaml/or/asm/file.s`, e.g. `new kernels/sample.s`. This is an alias for `newInstance`",
+    "If you want to load a new graph, use `new path/to/kernel.s` (or .yaml), e.g. `new kernels/sample.s`. This is an alias for `newInstance`",
+
+    "You can also append `#path/to/kernel.s` to the URL then reload the page; the bash script `./url.sh <file-path>` will also echo the URL (if you want auto-complete on paths)", 
 
     "The end :)",
   ];

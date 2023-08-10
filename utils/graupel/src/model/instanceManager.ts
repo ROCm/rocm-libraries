@@ -83,7 +83,14 @@ function newInstance(id: string = "", path: string) {
   return CurrentInstance;
 }
 
-export let CurrentInstance: Instance = _newInstance("sample", "./kernels/sample.s");
+let default_file_path = ""
+if (window.location.hash.substring(1) != "") {
+  console.log("Loading graph: ", window.location.hash.substring(1))
+  default_file_path = window.location.hash.substring(1)
+} else {
+  throw Error("No path provided in URL, try appending #path/to/kernel.s, e.g. #kernels/sample.s")
+}
+export let CurrentInstance: Instance = _newInstance("sample", default_file_path);
 export let cy = CurrentInstance.cy;
 
 /**

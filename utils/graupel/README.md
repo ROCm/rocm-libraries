@@ -2,43 +2,48 @@
 
 rocRoller's graph visualization tool.
 
-# Setup
+## Setup
 
-*(from up to date Docker container)*
+From up-to-date Docker container, run
 
 1. `cd utils/graupel`
 1. `npm install`, if that fails try `npm install --save-dev`
 
 The script `utils/graupel/install-node` should work to install node on an existing container, although you may need to update your `$PATH`.
 
-# Usage
+## Usage
 
-## (Optional) Getting the Kernels as Inputs
+### Running the tool
+
+1. Change directory to `utils/graupel/` (the following paths are relative to this)
+2. Run `npm start`, a port will become availible for the graph visualizer
+   - If the port is in-use, use `npm start [port]`
+3. Run `new <filepath>` in the textbox, e.g. `new kernels/sample.s`
+4. Open your browser's console and spam the "Help Me" button ([raw prompts](src/controller/specialManipulators/help.ts)).
+5. Basic commands can be ran in the form of `commandName [arg] ...`, e.g. `highlight .control`.
+6. Useful commands:
+   - `idselect .coo[rdinate]15` and `idselect .con[trol]16` to select coordinate and control graph node 15 respectively (only first three letters of subgraph are needed to distinguish betweem them)
+7. Special CLI features:
+   - Prefixing with a \`(backtick) is code injection, e.g. `` `console.log(1 + 2); cy.$(".control-computeindex").difference("#control1529").addClass("highlight")``.
+   - Code injection beginning with `cy.` can be abbreviated to `.`, e.g. `.$(".control-computeindex").difference("#control1529").addClass("highlight")`.
+
+### (Optional) Getting *All* Kernels as Inputs
 
 1. In `build/`, run `ROCROLLER_SAVE_ASSEMBLY=1 ../scripts/rrperf run` to generate the assembly (`.s`) files which contain the metadata (at the end of the file) as the input for this tool (this may take a while)
 1. Change directory to `utils/graupel/` (the following paths are relative to this)
-1. Run `./getscripts` (this copies the above-generated `.s` files to `kernels/`). A file called `kernels.txt` is also generated, where each line is a `<filepath>` that can later be used for `load <filepath>` in the tool.
+1. Run `./kernels/getKernels.py -v` (this copies the above-generated `.s` files to `kernels/`). A file called `kernels.txt` is also generated, where each line is a `<filepath>` that can later be used for `new <filepath>` in the tool.
 
-## Running the tool
+## Development
 
-1. Change directory to `utils/graupel/` (the following paths are relative to this)
-1. Run the tool in browser via **one** the following commands:
-   - `npm start`, a localhost port will become availible for the graph visualizer.
-   - `npm run dev`, same as above, but auto-refreshes on a `*.ts` file save.
-1. Run `load <filepath>` in the textbox, e.g. `load kernels/GEMM_NN_hhhhf_MT64x64x64_WG128x2_LDS111_UNROLL0x0_PF2x0_Priority_gfx90a-sramecc+.s`
-1. Open your browser's console and press the "Help Me" button to see available commands.
-1. Basic commands can be ran in the form of `commandName arg ...`, e.g. `highlight .control`.
-   - Prefixing with a \`(backtick) is code injection, e.g. `` `console.log(1 + 2); cy.$(".control-computeindex").difference("#control1529").addClass("highlight")``.
-   - Code injection beginning with `cy.` can be abbreviated to `.`, e.g. `.$(".control-computeindex").difference("#control1529").addClass("highlight")`.
-1. `<control><space>` highlights the CLI. `<enter>` runs the command (or the search button).
+- `npm run dev` will also auto-refresh on `*.ts` file save
 
-# Tests
+## Tests
 
 in `utils/graupel/` run `npm test`
 
-# Architecture
+## Architecture
 
-## Overall
+### Overall
 
 ```mermaid
 flowchart LR
@@ -54,7 +59,7 @@ User --> View
 View --> User
 ```
 
-## View
+### View
 
 ```mermaid
 flowchart LR
@@ -78,7 +83,7 @@ CS --> |Calls| O
 
 ```
 
-## Controller
+### Controller
 
 ```mermaid
 flowchart LR
@@ -93,7 +98,7 @@ CLI --> |Calls| M
 M --> |Modifies| O
 ```
 
-## Model
+### Model
 
 ```mermaid
 flowchart LR
