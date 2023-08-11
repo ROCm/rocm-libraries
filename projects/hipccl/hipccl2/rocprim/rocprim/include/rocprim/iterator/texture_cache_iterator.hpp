@@ -26,6 +26,7 @@
 #include <type_traits>
 
 #include "../config.hpp"
+#include "../functional.hpp"
 #include "../detail/various.hpp"
 
 /// \addtogroup iteratormodule
@@ -111,7 +112,7 @@ struct match_texture_type
 
 /// \class texture_cache_iterator
 /// \brief A random-access input (read-only) iterator adaptor for dereferencing array values
-/// through texture cache.
+/// through texture cache.  This iterator is not functional on gfx94x architectures.
 ///
 /// \par Overview
 /// * A texture_cache_iterator wraps a device pointer of type T, where values are obtained
@@ -120,6 +121,8 @@ struct match_texture_type
 /// * Can only be constructed within host functions, and can only be dereferenced within
 /// device functions.
 /// * Accepts any data type from memory, and loads through texture cache.
+/// * This iterator is not functional on gfx94x architectures, as native texture fetch functions 
+/// are not supported in gfx94x.
 ///
 /// \tparam T - type of value that can be obtained by dereferencing the iterator.
 /// \tparam Difference - a type used for identify distance between iterators.
@@ -209,6 +212,10 @@ public:
         #else
         texture_type words[multiple];
 
+        #if defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__)
+        #pragma message "Texture cache iterator is not supported on gfx94x as the texture fetch functions in HIP are not available."
+        ROCPRIM_PRINT_ERROR_ONCE("WARNING: Usage of texture_cache_iterator on gfx94x device is not supported and will not produce valid results.")
+        #else
         ROCPRIM_UNROLL
         for(unsigned int i = 0; i < multiple; i++)
         {
@@ -218,7 +225,7 @@ public:
                 (texture_offset * multiple) + i
             );
         }
-
+        #endif
         return *reinterpret_cast<value_type*>(words);
         #endif
     }
