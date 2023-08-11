@@ -637,7 +637,8 @@ struct CachingDeviceAllocator
     virtual ~CachingDeviceAllocator()
     {
         if (!skip_cleanup)
-            FreeAllCached();
+            // silence warning: ignoring return value of function declared with 'nodiscard' attribute [-Wunused-result]
+            (void)FreeAllCached();
     }
 
 };
