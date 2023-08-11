@@ -24,11 +24,141 @@
 # hipCUB dependencies
 # ###########################
 
-# HIP dependency is handled earlier in the project cmake file
-# when VerifyCompiler.cmake is included.
+# NOTE1: the reason we don't scope global state meddling using add_subdirectory
+#        is because CMake < 3.24 lacks CMAKE_FIND_PACKAGE_TARGETS_GLOBAL which
+#        would promote IMPORTED targets of find_package(CONFIG) to be visible
+#        by other parts of the build. So we save and restore global state.
+#
+# NOTE2: We disable the ROCMChecks.cmake warning noting that we meddle with
+#        global state. This is consequence of abusing the CMake CXX language
+#        which HIP piggybacks on top of. This kind of HIP support has one chance
+#        at observing the global flags, at the find_package(HIP) invocation.
+#        The device compiler won't be able to pick up changes after that, hence
+#        the warning.
+#
+# NOTE3: hipCUB and rocPRIM share CMake options for building tests, benchmarks
+#        and examples. Until that's not fixed, we have to save/restore them.
+set(USER_CXX_FLAGS ${CMAKE_CXX_FLAGS})
+if(DEFINED BUILD_SHARED_LIBS)
+  set(USER_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
+endif()
+set(USER_ROCM_WARN_TOOLCHAIN_VAR ${ROCM_WARN_TOOLCHAIN_VAR})
 
-# For downloading, building, and installing required dependencies
-include(cmake/DownloadProject.cmake)
+set(ROCM_WARN_TOOLCHAIN_VAR OFF CACHE BOOL "")
+# Turn off warnings and errors for all warnings in dependencies
+separate_arguments(CXX_FLAGS_LIST NATIVE_COMMAND ${CMAKE_CXX_FLAGS})
+list(REMOVE_ITEM CXX_FLAGS_LIST /WX -Werror -Werror=pendantic -pedantic-errors)
+if(MSVC)
+  list(FILTER CXX_FLAGS_LIST EXCLUDE REGEX "/[Ww]([0-4]?)(all)?") # Remove MSVC warning flags
+  list(APPEND CXX_FLAGS_LIST /w)
+else()
+  list(FILTER CXX_FLAGS_LIST EXCLUDE REGEX "-W(all|extra|everything)") # Remove GCC/LLVM flags
+  list(APPEND CXX_FLAGS_LIST -w)
+endif()
+list(JOIN CXX_FLAGS_LIST " " CMAKE_CXX_FLAGS)
+# Don't build client dependencies as shared
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "Global flag to cause add_library() to create shared libraries if on." FORCE)
+
+foreach(SHARED_OPTION BUILD_TEST BUILD_BENCHMARK BUILD_EXAMPLE)
+  set(USER_${SHARED_OPTION} ${${SHARED_OPTION}})
+  set(${SHARED_OPTION} OFF)
+endforeach()
+
+include(FetchContent)
+
+# Test dependencies
+if(USER_BUILD_TEST)
+  # NOTE1: Google Test has created a mess with legacy FindGTest.cmake and newer GTestConfig.cmake
+  #
+  # FindGTest.cmake defines:   GTest::GTest, GTest::Main, GTEST_FOUND
+  #
+  # GTestConfig.cmake defines: GTest::gtest, GTest::gtest_main, GTest::gmock, GTest::gmock_main
+  #
+  # NOTE2: Finding GTest in MODULE mode, one cannot invoke find_package in CONFIG mode, because targets
+  #        will be duplicately defined.
+  #
+  # NOTE3: The following snippet first tries to find Google Test binary either in MODULE or CONFIG modes.
+  #        If neither succeeds it goes on to import Google Test into this build either from a system
+  #        source package (apt install googletest on Ubuntu 18.04 only) or GitHub and defines the MODULE
+  #        mode targets. Otherwise if MODULE or CONFIG succeeded, then it prints the result to the
+  #        console via a non-QUIET find_package call and if CONFIG succeeded, creates ALIAS targets
+  #        with the MODULE IMPORTED names.
+  if(NOT DEPENDENCIES_FORCE_DOWNLOAD)
+    find_package(GTest QUIET)
+  endif()
+  if(NOT TARGET GTest::GTest AND NOT TARGET GTest::gtest)
+    option(BUILD_GTEST "Builds the googletest subproject" ON)
+    option(BUILD_GMOCK "Builds the googlemock subproject" OFF)
+    option(INSTALL_GTEST "Enable installation of googletest." OFF)
+    if(EXISTS /usr/src/googletest AND NOT DEPENDENCIES_FORCE_DOWNLOAD)
+      FetchContent_Declare(
+        googletest
+        SOURCE_DIR /usr/src/googletest
+      )
+    else()
+      message(STATUS "Google Test not found. Fetching...")
+      FetchContent_Declare(
+        googletest
+        GIT_REPOSITORY https://github.com/google/googletest.git
+        GIT_TAG        release-1.11.0
+      )
+    endif()
+    FetchContent_MakeAvailable(googletest)
+    add_library(GTest::GTest ALIAS gtest)
+    add_library(GTest::Main  ALIAS gtest_main)
+  else()
+    find_package(GTest REQUIRED)
+    if(TARGET GTest::gtest_main AND NOT TARGET GTest::Main)
+      add_library(GTest::GTest ALIAS GTest::gtest)
+      add_library(GTest::Main  ALIAS GTest::gtest_main)
+    endif()
+  endif()
+endif(USER_BUILD_TEST)
+
+if(USER_BUILD_BENCHMARK)
+  if(NOT DEPENDENCIES_FORCE_DOWNLOAD)
+    find_package(benchmark CONFIG QUIET)
+  endif()
+  if(NOT TARGET benchmark::benchmark)
+    message(STATUS "Google Benchmark not found. Fetching...")
+    option(BENCHMARK_ENABLE_TESTING "Enable testing of the benchmark library." OFF)
+    option(BENCHMARK_ENABLE_INSTALL "Enable installation of benchmark." OFF)
+    FetchContent_Declare(
+      googlebench
+      GIT_REPOSITORY https://github.com/google/benchmark.git
+      GIT_TAG        v1.6.1
+    )
+    FetchContent_MakeAvailable(googlebench)
+    if(NOT TARGET benchmark::benchmark)
+      add_library(benchmark::benchmark ALIAS benchmark)
+    endif()
+  else()
+    find_package(benchmark CONFIG REQUIRED)
+  endif()
+endif(USER_BUILD_BENCHMARK)
+
+if(NOT DEPENDENCIES_FORCE_DOWNLOAD)
+  find_package(ROCM 0.7.3 CONFIG QUIET PATHS "${ROCM_ROOT}")
+endif()
+if(NOT ROCM_FOUND)
+  message(STATUS "ROCm CMake not found. Fetching...")
+  # We don't really want to consume the build and test targets of ROCm CMake.
+  # CMake 3.18 allows omitting them, even though there's a CMakeLists.txt in source root.
+  if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.18)
+    set(SOURCE_SUBDIR_ARG SOURCE_SUBDIR "DISABLE ADDING TO BUILD")
+  else()
+    set(SOURCE_SUBDIR_ARG)
+  endif()
+  FetchContent_Declare(
+    rocm-cmake
+    URL  https://github.com/RadeonOpenCompute/rocm-cmake/archive/refs/tags/rocm-5.2.0.tar.gz
+    ${SOURCE_SUBDIR_ARG}
+  )
+  FetchContent_MakeAvailable(rocm-cmake)
+  find_package(ROCM CONFIG REQUIRED NO_DEFAULT_PATH PATHS "${rocm-cmake_SOURCE_DIR}")
+else()
+  find_package(ROCM 0.7.3 CONFIG REQUIRED PATHS "${ROCM_ROOT}")
+endif()
 
 # CUB (only for CUDA platform)
 if(HIP_COMPILER STREQUAL "nvcc")
@@ -40,23 +170,23 @@ if(HIP_COMPILER STREQUAL "nvcc")
 
   if(NOT DEFINED CUB_INCLUDE_DIR)
     file(
-      DOWNLOAD https://github.com/NVIDIA/cub/archive/2.0.1.zip
-      ${CMAKE_CURRENT_BINARY_DIR}/cub-2.0.1.zip
-      STATUS cub_download_status LOG cub_download_log
+            DOWNLOAD https://github.com/NVIDIA/cub/archive/2.0.1.zip
+            ${CMAKE_CURRENT_BINARY_DIR}/cub-2.0.1.zip
+            STATUS cub_download_status LOG cub_download_log
     )
     list(GET cub_download_status 0 cub_download_error_code)
     if(cub_download_error_code)
       message(FATAL_ERROR "Error: downloading "
-        "https://github.com/NVIDIA/cub/archive/2.0.1.zip failed "
-        "error_code: ${cub_download_error_code} "
-        "log: ${cub_download_log} "
-      )
+              "https://github.com/NVIDIA/cub/archive/2.0.1.zip failed "
+              "error_code: ${cub_download_error_code} "
+              "log: ${cub_download_log} "
+              )
     endif()
 
     execute_process(
-      COMMAND ${CMAKE_COMMAND} -E tar xzf ${CMAKE_CURRENT_BINARY_DIR}/cub-2.0.1.zip
-      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-      RESULT_VARIABLE cub_unpack_error_code
+            COMMAND ${CMAKE_COMMAND} -E tar xzf ${CMAKE_CURRENT_BINARY_DIR}/cub-2.0.1.zip
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+            RESULT_VARIABLE cub_unpack_error_code
     )
     if(cub_unpack_error_code)
       message(FATAL_ERROR "Error: unpacking ${CMAKE_CURRENT_BINARY_DIR}/cub-2.0.1.zip failed")
@@ -66,23 +196,23 @@ if(HIP_COMPILER STREQUAL "nvcc")
 
   if(NOT DEFINED THRUST_INCLUDE_DIR)
     file(
-      DOWNLOAD https://github.com/NVIDIA/thrust/archive/2.0.1.zip
-      ${CMAKE_CURRENT_BINARY_DIR}/thrust-2.0.1.zip
-      STATUS thrust_download_status LOG thrust_download_log
+            DOWNLOAD https://github.com/NVIDIA/thrust/archive/2.0.1.zip
+            ${CMAKE_CURRENT_BINARY_DIR}/thrust-2.0.1.zip
+            STATUS thrust_download_status LOG thrust_download_log
     )
     list(GET thrust_download_status 0 thrust_download_error_code)
     if(thrust_download_error_code)
       message(FATAL_ERROR "Error: downloading "
-        "https://github.com/NVIDIA/thrust/archive/2.0.1.zip failed "
-        "error_code: ${thrust_download_error_code} "
-        "log: ${thrust_download_log} "
-      )
+              "https://github.com/NVIDIA/thrust/archive/2.0.1.zip failed "
+              "error_code: ${thrust_download_error_code} "
+              "log: ${thrust_download_log} "
+              )
     endif()
 
     execute_process(
-      COMMAND ${CMAKE_COMMAND} -E tar xzf ${CMAKE_CURRENT_BINARY_DIR}/thrust-2.0.1.zip
-      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-      RESULT_VARIABLE thrust_unpack_error_code
+            COMMAND ${CMAKE_COMMAND} -E tar xzf ${CMAKE_CURRENT_BINARY_DIR}/thrust-2.0.1.zip
+            WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+            RESULT_VARIABLE thrust_unpack_error_code
     )
     if(thrust_unpack_error_code)
       message(FATAL_ERROR "Error: unpacking ${CMAKE_CURRENT_BINARY_DIR}/thrust-2.0.1.zip failed")
@@ -91,96 +221,47 @@ if(HIP_COMPILER STREQUAL "nvcc")
   endif()
 else()
   # rocPRIM (only for ROCm platform)
-  if(NOT DOWNLOAD_ROCPRIM)
-    find_package(rocprim QUIET)
-  endif()
-  if(NOT rocprim_FOUND)
-    message(STATUS "Downloading and building rocprim.")
-    download_project(
-      PROJ                rocprim
-      GIT_REPOSITORY      https://github.com/ROCmSoftwarePlatform/rocPRIM.git
-      GIT_TAG             develop
-      GIT_SHALLOW         TRUE
-      INSTALL_DIR         ${CMAKE_CURRENT_BINARY_DIR}/deps/rocprim
-      CMAKE_ARGS          -DBUILD_TEST=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_PREFIX_PATH=/opt/rocm
-      LOG_DOWNLOAD        TRUE
-      LOG_CONFIGURE       TRUE
-      LOG_BUILD           TRUE
-      LOG_INSTALL         TRUE
-      BUILD_PROJECT       TRUE
-      UPDATE_DISCONNECTED TRUE # Never update automatically from the remote repository
-    )
-    find_package(rocprim REQUIRED CONFIG PATHS ${CMAKE_CURRENT_BINARY_DIR}/deps/rocprim NO_DEFAULT_PATH)
-  endif()
-endif()
-
-# Test dependencies
-if(BUILD_TEST)
   if(NOT DEPENDENCIES_FORCE_DOWNLOAD)
-    find_package(GTest 1.11.0 CONFIG QUIET)
+    # Add default install location for WIN32 and non-WIN32 as hint
+    find_package(rocprim CONFIG QUIET PATHS "${ROCM_ROOT}/lib/cmake/rocprim")
   endif()
-
-  if(NOT TARGET GTest::gtest)
-    message(STATUS "GTest not found or force download GTest on. Downloading and building GTest.")
-    if(WIN32)
-      set(COMPILER_OVERRIDE "-DCMAKE_CXX_COMPILER=cl")
-    endif()
-    set(GTEST_ROOT ${CMAKE_CURRENT_BINARY_DIR}/gtest CACHE PATH "")
-    download_project(
-      PROJ                googletest
-      GIT_REPOSITORY      https://github.com/google/googletest.git
-      GIT_TAG             release-1.11.0
-      GIT_SHALLOW         TRUE
-      INSTALL_DIR         ${GTEST_ROOT}
-      CMAKE_ARGS          -DBUILD_GTEST=ON -DINSTALL_GTEST=ON -Dgtest_force_shared_crt=ON -DBUILD_SHARED_LIBS=ON -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> ${COMPILER_OVERRIDE}
-      LOG_DOWNLOAD        TRUE
-      LOG_CONFIGURE       TRUE
-      LOG_BUILD           TRUE
-      LOG_INSTALL         TRUE
-      BUILD_PROJECT       TRUE
-      UPDATE_DISCONNECTED TRUE # Never update automatically from the remote repository
+  if(NOT TARGET roc::rocprim)
+    message(STATUS "rocPRIM not found. Fetching...")
+    FetchContent_Declare(
+            prim
+            GIT_REPOSITORY https://github.com/ROCmSoftwarePlatform/rocPRIM.git
+            GIT_TAG        develop
     )
-    list(APPEND CMAKE_PREFIX_PATH ${GTEST_ROOT})
-    find_package(GTest 1.11.0 EXACT CONFIG REQUIRED PATHS ${GTEST_ROOT})
+    FetchContent_MakeAvailable(prim)
+    if(NOT TARGET roc::rocprim)
+      add_library(roc::rocprim ALIAS rocprim)
+    endif()
+    if(NOT TARGET roc::rocprim_hip)
+      add_library(roc::rocprim_hip ALIAS rocprim_hip)
+    endif()
+  else()
+    find_package(rocprim CONFIG REQUIRED)
   endif()
 endif()
 
-# Benchmark dependencies
-if(BUILD_BENCHMARK)
-  if(NOT DEPENDENCIES_FORCE_DOWNLOAD)
-    # Google Benchmark (https://github.com/google/benchmark.git)
-    find_package(benchmark QUIET)
-  endif()
+foreach(SHARED_OPTION BUILD_TEST BUILD_BENCHMARK BUILD_EXAMPLE)
+  set(${SHARED_OPTION} ${USER_${SHARED_OPTION}})
+endforeach()
 
-  if(NOT benchmark_FOUND)
-    message(STATUS "Google Benchmark not found or force download Google Benchmark on. Downloading and building Google Benchmark.")
-    if(CMAKE_CONFIGURATION_TYPES)
-      message(FATAL_ERROR "DownloadProject.cmake doesn't support multi-configuration generators.")
-    endif()
-    set(GOOGLEBENCHMARK_ROOT ${CMAKE_CURRENT_BINARY_DIR}/deps/googlebenchmark CACHE PATH "")
-    if(NOT (CMAKE_CXX_COMPILER_ID STREQUAL "GNU"))
-      # hip-clang cannot compile googlebenchmark for some reason
-      if(WIN32)
-        set(COMPILER_OVERRIDE "-DCMAKE_CXX_COMPILER=cl")
-      else()
-        set(COMPILER_OVERRIDE "-DCMAKE_CXX_COMPILER=g++")
-      endif()
-    endif()
-
-    download_project(
-      PROJ           googlebenchmark
-      GIT_REPOSITORY https://github.com/google/benchmark.git
-      GIT_TAG        v1.6.1
-      GIT_SHALLOW    TRUE
-      INSTALL_DIR    ${GOOGLEBENCHMARK_ROOT}
-      CMAKE_ARGS     -DCMAKE_BUILD_TYPE=RELEASE -DBENCHMARK_ENABLE_TESTING=OFF -DBUILD_SHARED_LIBS=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_CXX_STANDARD=14 ${COMPILER_OVERRIDE}
-      LOG_DOWNLOAD   TRUE
-      LOG_CONFIGURE  TRUE
-      LOG_BUILD      TRUE
-      LOG_INSTALL    TRUE
-      BUILD_PROJECT  TRUE
-      UPDATE_DISCONNECTED TRUE
-    )
-  endif()
-  find_package(benchmark REQUIRED CONFIG PATHS ${GOOGLEBENCHMARK_ROOT})
+# Restore user global state
+set(CMAKE_CXX_FLAGS ${USER_CXX_FLAGS})
+if(DEFINED USER_BUILD_SHARED_LIBS)
+  set(BUILD_SHARED_LIBS ${USER_BUILD_SHARED_LIBS})
+else()
+  unset(BUILD_SHARED_LIBS CACHE )
 endif()
+set(ROCM_WARN_TOOLCHAIN_VAR ${USER_ROCM_WARN_TOOLCHAIN_VAR} CACHE BOOL "")
+
+include(ROCMSetupVersion)
+include(ROCMCreatePackage)
+include(ROCMInstallTargets)
+include(ROCMPackageConfigHelpers)
+include(ROCMInstallSymlinks)
+include(ROCMHeaderWrapper)
+include(ROCMCheckTargetIds)
+include(ROCMClients)

@@ -3,8 +3,27 @@
 # Redirect output to stderr.
 exec 1>&2
 
+check_failed=false
+
 # Do the code format check
 if ! "$(git rev-parse --show-toplevel)/scripts/code-format/check-format.sh" HEAD --cached 1>&2; then
+    printf "\n\033[31mFailed\033[0m: code format check.\n"
+    check_failed=true
+fi
+
+# Do the copyright check
+# update & apply copyright when hook config is set, otherwise just verify
+opts="-qc"
+if [ "$(git config --get --type bool --default false hooks.updateCopyright)" = "true" ]; then
+    opts="-qca"
+fi
+
+if ! "$(git rev-parse --show-toplevel)/scripts/copyright-date/check-copyright.sh" "$opts" 1>&2; then
+    printf "\n\033[31mFailed\033[0m: copyright date check.\n"
+    check_failed=true
+fi
+
+if $check_failed; then
     printf "
 Pre-commit check failed, please fix the reported errors.
 Note: Use '\033[33mgit commit --no-verify\033[0m' to bypass checks.\n"

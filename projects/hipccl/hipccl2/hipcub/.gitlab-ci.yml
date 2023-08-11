@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017-2022 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -55,6 +55,21 @@ clang-format:
     - cd $CI_PROJECT_DIR
     - git config --global --add safe.directory $CI_PROJECT_DIR
     - scripts/code-format/check-format.sh $CI_MERGE_REQUEST_DIFF_BASE_SHA --binary "$CLANG_FORMAT"
+
+copyright-date:
+  extends:
+    - .deps:rocm
+  stage: lint
+  needs: []
+  tags:
+    - rocm-build
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  script:
+    - cd $CI_PROJECT_DIR
+    - git config --global --add safe.directory $CI_PROJECT_DIR
+    - scripts/copyright-date/check-copyright.sh -v -d $CI_MERGE_REQUEST_DIFF_BASE_SHA
+
 
 # hipCUB with rocPRIM backend
 .rocm:
@@ -165,7 +180,10 @@ test:rocm:
       -D CMAKE_PREFIX_PATH=/opt/rocm
       -P $CI_PROJECT_DIR/cmake/GenerateResourceSpec.cmake
     - cat ./resources.json
-    - ctest
+    # Parallel execution (with other AMDGPU processes) can oversubscribe the SDMA queue.
+    # This causes the hipMemcpy to fail, which is not reported as an error by HIP.
+    # As a temporary workaround, disable the SDMA for test stability.
+    - HSA_ENABLE_SDMA=0 ctest
       --output-on-failure
       --repeat-until-fail 2
       --tests-regex "$GPU_TARGET"
@@ -213,7 +231,6 @@ benchmark:rocm:
       fi
     - cmake
       -G Ninja
-      -D rocprim_DIR="/opt/rocm/rocprim"
       -D CMAKE_CXX_FLAGS="-Wall -Wextra -Werror"
       "$GPU_TARGETS_ARG"
       -S $CI_PROJECT_DIR/test/extra

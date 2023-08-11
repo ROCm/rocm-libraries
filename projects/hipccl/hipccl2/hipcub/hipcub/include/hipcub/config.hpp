@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2022, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2023, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -115,6 +115,19 @@ hipError_t Debug(
 
 #ifndef HipcubDebug
     #define HipcubDebug(e) hipcub::Debug((hipError_t) (e), __FILE__, __LINE__)
+#endif
+
+#if __cpp_if_constexpr
+    #define HIPCUB_IF_CONSTEXPR constexpr
+#else
+    #if defined(_MSC_VER) && !defined(__clang__)
+        // MSVC (and not Clang pretending to be MSVC) unconditionally exposes if constexpr (even in C++14 mode),
+        // moreover it triggers warning C4127 (conditional expression is constant) when not using it. nvcc will
+        // be calling cl.exe for host-side codegen.
+        #define HIPCUB_IF_CONSTEXPR constexpr
+    #else
+        #define HIPCUB_IF_CONSTEXPR
+    #endif
 #endif
 
 END_HIPCUB_NAMESPACE
