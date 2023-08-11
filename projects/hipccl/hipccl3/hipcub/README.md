@@ -50,7 +50,7 @@ cd hipCUB; mkdir build; cd build
 # Build options:
 #   BUILD_TEST - OFF by default,
 #   BUILD_BENCHMARK - OFF by default.
-#   DOWNLOAD_ROCPRIM - OFF by default and at ON the rocPRIM will be downloaded to build folder,
+#   DEPENDENCIES_FORCE_DOWNLOAD - OFF by default and at ON the dependencies will be downloaded to build folder,
 #
 # ! IMPORTANT !
 # Set C++ compiler to HIP-aware clang. You can do it by adding 'CXX=<path-to-compiler>'

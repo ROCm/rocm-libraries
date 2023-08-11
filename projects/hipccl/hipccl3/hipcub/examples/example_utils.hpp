@@ -577,8 +577,20 @@ void RandomBits(
         memcpy(&key, word_buff, sizeof(K));
 
         K copy = key;
-        if (!std::isnan(copy))
-            break;          // avoids NaNs when generating random floating point numbers
+        if HIPCUB_IF_CONSTEXPR(std::is_floating_point<K>::value)
+#ifndef _WIN32
+            if(!std::isnan(copy))
+#else
+            // MSVC STL is missing the integral overload of std::isnan
+            // https://github.com/microsoft/STL/issues/3400
+            // They're right, the integral overloads were removed from the standard
+            // after national body comments. std::isnan is supposed to behave _identically_
+            // to the isnan CRT macro, where ISO C 7.12.3 states
+            // > In the synopses in this subclause, real-floating indicates that the
+            //   argument shall be an expression of real floating type.
+            if(!std::isnan(static_cast<double>(copy)))
+#endif
+                break; // avoids NaNs when generating random floating point numbers
     }
 }
 

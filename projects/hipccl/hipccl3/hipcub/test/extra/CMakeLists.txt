@@ -27,93 +27,102 @@ cmake_policy(VERSION 3.16...3.21)
 # hipCUB is installed from package or using `make install`
 project(hipCUB_package_install_test CXX)
 
-# CMake modules
-list(APPEND CMAKE_MODULE_PATH
-  ${CMAKE_CURRENT_SOURCE_DIR}/../../cmake
-  ${HIP_PATH}/cmake /opt/rocm/hip/cmake # FindHIP.cmake
-)
-
-# Verify that hip-clang is used on ROCM platform
-include(VerifyCompiler)
-
-# Download CUB
-include(DownloadProject)
-if(HIP_COMPILER STREQUAL "nvcc")
-  file(
-    DOWNLOAD https://github.com/NVIDIA/cub/archive/2.0.1.zip
-    ${CMAKE_CURRENT_BINARY_DIR}/cub-2.0.1.zip
-    STATUS cub_download_status LOG cub_download_log
-  )
-  list(GET cub_download_status 0 cub_download_error_code)
-  if(cub_download_error_code)
-    message(FATAL_ERROR "Error: downloading "
-      "https://github.com/NVIDIA/cub/archive/2.0.1.zip failed "
-      "error_code: ${cub_download_error_code} "
-      "log: ${cub_download_log} "
-    )
-  endif()
-
-  execute_process(
-    COMMAND ${CMAKE_COMMAND} -E tar xzf ${CMAKE_CURRENT_BINARY_DIR}/cub-2.0.1.zip
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    RESULT_VARIABLE cub_unpack_error_code
-  )
-  if(cub_unpack_error_code)
-    message(FATAL_ERROR "Error: unpacking ${CMAKE_CURRENT_BINARY_DIR}/cub-2.0.1.zip failed")
-  endif()
-  set(CUB_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/cub-2.0.1/ CACHE PATH "" FORCE)
-  message(STATUS "CUB_INCLUDE_DIR: ${CUB_INCLUDE_DIR}")
-
-  file(
-    DOWNLOAD https://github.com/NVIDIA/thrust/archive/2.0.1.zip
-    ${CMAKE_CURRENT_BINARY_DIR}/thrust-2.0.1.zip
-    STATUS thrust_download_status LOG thrust_download_log
-  )
-  list(GET thrust_download_status 0 thrust_download_error_code)
-  if(thrust_download_error_code)
-    message(FATAL_ERROR "Error: downloading "
-      "https://github.com/NVIDIA/thrust/archive/2.0.1.zip failed "
-      "error_code: ${thrust_download_error_code} "
-      "log: ${thrust_download_log} "
-    )
-  endif()
-
-  execute_process(
-    COMMAND ${CMAKE_COMMAND} -E tar xzf ${CMAKE_CURRENT_BINARY_DIR}/thrust-2.0.1.zip
-    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    RESULT_VARIABLE thrust_unpack_error_code
-  )
-  if(thrust_unpack_error_code)
-    message(FATAL_ERROR "Error: unpacking ${CMAKE_CURRENT_BINARY_DIR}/thrust-2.0.1.zip failed")
-  endif()
-  set(THRUST_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/thrust-2.0.1/ CACHE PATH "" FORCE)
-  message(STATUS "THRUST_INCLUDE_DIR: ${THRUST_INCLUDE_DIR}")
+# Set the ROCM install directory.
+if(WIN32)
+  set(ROCM_ROOT "$ENV{HIP_PATH}" CACHE PATH "Root directory of the ROCm installation")
+else()
+  set(ROCM_ROOT "/opt/rocm" CACHE PATH "Root directory of the ROCm installation")
 endif()
 
-# Download rocPRIM (only for ROCm platform)
-if(HIP_COMPILER STREQUAL "clang")
-  if(NOT DEFINED rocprim_DIR)
-    message(STATUS "Downloading and building rocPRIM.")
-    set(rocprim_DIR "${CMAKE_CURRENT_BINARY_DIR}/rocprim" CACHE PATH "")
-    download_project(
-      PROJ                rocprim
-      GIT_REPOSITORY      https://github.com/ROCmSoftwarePlatform/rocPRIM.git
-      GIT_TAG             master
-      INSTALL_DIR         ${rocprim_DIR}
-      CMAKE_ARGS          -DBUILD_TEST=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
-      LOG_DOWNLOAD        TRUE
-      LOG_CONFIGURE       TRUE
-      LOG_BUILD           TRUE
-      LOG_INSTALL         TRUE
-      BUILD_PROJECT       TRUE
-      UPDATE_DISCONNECTED TRUE # Never update automatically from the remote repository
-    )
+# Add hipCUB's CMake modules
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../cmake")
+
+# Find and verify HIP.
+include(VerifyCompiler)
+
+# CUB (only for CUDA platform)
+if(HIP_COMPILER STREQUAL "nvcc")
+
+  if(NOT DOWNLOAD_CUB)
+    find_package(cub QUIET)
+    find_package(thrust QUIET)
   endif()
-  find_package(rocprim REQUIRED CONFIG PATHS "${rocprim_DIR}")
+
+  if(NOT DEFINED CUB_INCLUDE_DIR)
+    file(
+      DOWNLOAD https://github.com/NVIDIA/cub/archive/2.0.1.zip
+      ${CMAKE_CURRENT_BINARY_DIR}/cub-2.0.1.zip
+      STATUS cub_download_status LOG cub_download_log
+    )
+    list(GET cub_download_status 0 cub_download_error_code)
+    if(cub_download_error_code)
+      message(FATAL_ERROR "Error: downloading "
+        "https://github.com/NVIDIA/cub/archive/2.0.1.zip failed "
+        "error_code: ${cub_download_error_code} "
+        "log: ${cub_download_log} "
+      )
+    endif()
+
+    execute_process(
+      COMMAND ${CMAKE_COMMAND} -E tar xzf ${CMAKE_CURRENT_BINARY_DIR}/cub-2.0.1.zip
+      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+      RESULT_VARIABLE cub_unpack_error_code
+    )
+    if(cub_unpack_error_code)
+      message(FATAL_ERROR "Error: unpacking ${CMAKE_CURRENT_BINARY_DIR}/cub-2.0.1.zip failed")
+    endif()
+    set(CUB_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/cub-2.0.1/ CACHE PATH "")
+  endif()
+
+  if(NOT DEFINED THRUST_INCLUDE_DIR)
+    file(
+      DOWNLOAD https://github.com/NVIDIA/thrust/archive/2.0.1.zip
+      ${CMAKE_CURRENT_BINARY_DIR}/thrust-2.0.1.zip
+      STATUS thrust_download_status LOG thrust_download_log
+    )
+    list(GET thrust_download_status 0 thrust_download_error_code)
+    if(thrust_download_error_code)
+      message(FATAL_ERROR "Error: downloading "
+        "https://github.com/NVIDIA/thrust/archive/2.0.1.zip failed "
+        "error_code: ${thrust_download_error_code} "
+        "log: ${thrust_download_log} "
+      )
+    endif()
+
+    execute_process(
+      COMMAND ${CMAKE_COMMAND} -E tar xzf ${CMAKE_CURRENT_BINARY_DIR}/thrust-2.0.1.zip
+      WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+      RESULT_VARIABLE thrust_unpack_error_code
+    )
+    if(thrust_unpack_error_code)
+      message(FATAL_ERROR "Error: unpacking ${CMAKE_CURRENT_BINARY_DIR}/thrust-2.0.1.zip failed")
+    endif()
+    set(THRUST_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/thrust-2.0.1/ CACHE PATH "")
+  endif()
+else()
+  # rocPRIM (only for ROCm platform)
+  if(NOT DEPENDENCIES_FORCE_DOWNLOAD)
+    # Add default install location for WIN32 and non-WIN32 as hint
+    find_package(rocprim CONFIG REQUIRED PATHS "${ROCM_ROOT}/lib/cmake/rocprim")
+  endif()
+  if(NOT TARGET roc::rocprim)
+    message(STATUS "rocPRIM not found. Fetching...")
+    FetchContent_Declare(
+      prim
+      GIT_REPOSITORY https://github.com/ROCmSoftwarePlatform/rocPRIM.git
+      GIT_TAG        develop
+    )
+    FetchContent_MakeAvailable(prim)
+    if(NOT TARGET roc::rocprim)
+      add_library(roc::rocprim ALIAS rocprim)
+    endif()
+  else()
+    find_package(rocprim CONFIG REQUIRED)
+  endif()
 endif()
 
 # Find hipCUB
-find_package(hipcub REQUIRED CONFIG HINTS ${hipcub_DIR} PATHS "/opt/rocm")
+find_package(hipcub CONFIG REQUIRED)
 
 # Build CXX flags
 set(CMAKE_CXX_STANDARD 14)
