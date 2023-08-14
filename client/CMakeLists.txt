@@ -32,7 +32,7 @@ if(BUILD_CLIENT)
   target_link_libraries(
     gemm
     PUBLIC
-    rocroller
+    rocroller_interface
     msgpackc-cxx
     gtest_main
     gmock
@@ -82,7 +82,7 @@ if(BUILD_CLIENT)
   target_link_libraries(
     codegen_stress
     PUBLIC
-    rocroller
+    rocroller_interface
     msgpackc-cxx
     gtest_main
     gmock

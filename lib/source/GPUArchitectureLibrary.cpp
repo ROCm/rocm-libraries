@@ -8,8 +8,6 @@
 
 namespace rocRoller
 {
-    std::map<GPUArchitectureTarget, GPUArchitecture> GPUArchitectureLibrary::GPUArchitectures
-        = GPUArchitectureLibrary::LoadLibrary();
 
     void GPUArchitectureLibrary::GetCurrentDevices(std::vector<GPUArchitecture>& retval,
                                                    int&                          default_device)
@@ -30,8 +28,7 @@ namespace rocRoller
 
             HIP_CHECK(hipGetDeviceProperties(&deviceProps, i));
 
-            retval.push_back(GPUArchitectureLibrary::GPUArchitectures.at(
-                GPUArchitectureTarget(deviceProps.gcnArchName)));
+            retval.push_back(GPUArchitectures.at(GPUArchitectureTarget(deviceProps.gcnArchName)));
         }
 
         if(count > 0)

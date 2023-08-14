@@ -17,57 +17,51 @@ namespace rocRoller
     inline bool GPUArchitectureLibrary::HasCapability(GPUArchitectureTarget const& isaVersion,
                                                       GPUCapability const&         capability)
     {
-        return GPUArchitectureLibrary::GPUArchitectures.find(isaVersion)
-                   != GPUArchitectureLibrary::GPUArchitectures.end()
-               && GPUArchitectureLibrary::GPUArchitectures.at(isaVersion).HasCapability(capability);
+        return GPUArchitectures.find(isaVersion) != GPUArchitectures.end()
+               && GPUArchitectures.at(isaVersion).HasCapability(capability);
     }
 
     inline bool GPUArchitectureLibrary::HasCapability(std::string const&   isaVersionString,
                                                       GPUCapability const& capability)
     {
         GPUArchitectureTarget isaVersion(isaVersionString);
-        return GPUArchitectureLibrary::GPUArchitectures.find(isaVersion)
-                   != GPUArchitectureLibrary::GPUArchitectures.end()
-               && GPUArchitectureLibrary::GPUArchitectures.at(isaVersion).HasCapability(capability);
+        return GPUArchitectures.find(isaVersion) != GPUArchitectures.end()
+               && GPUArchitectures.at(isaVersion).HasCapability(capability);
     }
 
     inline bool GPUArchitectureLibrary::HasCapability(std::string const& isaVersionString,
                                                       std::string const& capabilityString)
     {
         GPUArchitectureTarget isaVersion(isaVersionString);
-        return GPUArchitectureLibrary::GPUArchitectures.find(isaVersion)
-                   != GPUArchitectureLibrary::GPUArchitectures.end()
-               && GPUArchitectureLibrary::GPUArchitectures.at(isaVersion)
-                      .HasCapability(capabilityString);
+        return GPUArchitectures.find(isaVersion) != GPUArchitectures.end()
+               && GPUArchitectures.at(isaVersion).HasCapability(capabilityString);
     }
 
     inline int GPUArchitectureLibrary::GetCapability(GPUArchitectureTarget const& isaVersion,
                                                      GPUCapability const&         capability)
     {
-        return GPUArchitectureLibrary::GPUArchitectures.at(isaVersion).GetCapability(capability);
+        return GPUArchitectures.at(isaVersion).GetCapability(capability);
     }
 
     inline int GPUArchitectureLibrary::GetCapability(std::string const&   isaVersionString,
                                                      GPUCapability const& capability)
     {
         GPUArchitectureTarget isaVersion(isaVersionString);
-        return GPUArchitectureLibrary::GPUArchitectures.at(isaVersion).GetCapability(capability);
+        return GPUArchitectures.at(isaVersion).GetCapability(capability);
     }
 
     inline int GPUArchitectureLibrary::GetCapability(std::string const& isaVersionString,
                                                      std::string const& capabilityString)
     {
         GPUArchitectureTarget isaVersion(isaVersionString);
-        return GPUArchitectureLibrary::GPUArchitectures.at(isaVersion)
-            .GetCapability(capabilityString);
+        return GPUArchitectures.at(isaVersion).GetCapability(capabilityString);
     }
 
     inline rocRoller::GPUInstructionInfo
         GPUArchitectureLibrary::GetInstructionInfo(GPUArchitectureTarget const& isaVersion,
                                                    std::string const&           instruction)
     {
-        return GPUArchitectureLibrary::GPUArchitectures.at(isaVersion)
-            .GetInstructionInfo(instruction);
+        return GPUArchitectures.at(isaVersion).GetInstructionInfo(instruction);
     }
 
     inline rocRoller::GPUInstructionInfo
@@ -75,14 +69,13 @@ namespace rocRoller
                                                    std::string const& instruction)
     {
         GPUArchitectureTarget isaVersion(isaVersionString);
-        return GPUArchitectureLibrary::GPUArchitectures.at(isaVersion)
-            .GetInstructionInfo(instruction);
+        return GPUArchitectures.at(isaVersion).GetInstructionInfo(instruction);
     }
 
     inline GPUArchitecture GPUArchitectureLibrary::GetDevice(std::string const& isaVersionString)
     {
         GPUArchitectureTarget isaVersion(isaVersionString);
-        return GPUArchitectureLibrary::GPUArchitectures.at(isaVersion);
+        return GPUArchitectures.at(isaVersion);
     }
 
     inline std::vector<std::string> GPUArchitectureLibrary::getAllSupportedISAs()

@@ -41,7 +41,7 @@ rocRoller::ContextPtr BaseGPUContextFixture::createContextForArch(std::string co
 
     auto target = GPUArchitectureTarget(device);
 
-    auto currentDevice = GPUArchitectureLibrary::GetDefaultHipDeviceArch();
+    auto currentDevice = GPUArchitectureLibrary::getInstance()->GetDefaultHipDeviceArch();
 
     bool localDevice = currentDevice.target() == target;
 

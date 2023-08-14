@@ -25,7 +25,7 @@ namespace rocRoller
                                             KernelOptions const& kernelOpts)
     {
         int  idx  = -1;
-        auto arch = GPUArchitectureLibrary::GetDefaultHipDeviceArch(idx);
+        auto arch = GPUArchitectureLibrary::getInstance()->GetDefaultHipDeviceArch(idx);
 
         return Create(idx, arch, kernelName, kernelOpts);
     }
@@ -34,7 +34,7 @@ namespace rocRoller
                                      std::string const&   kernelName,
                                      KernelOptions const& kernelOpts)
     {
-        auto arch = GPUArchitectureLibrary::GetHipDeviceArch(deviceIdx);
+        auto arch = GPUArchitectureLibrary::getInstance()->GetHipDeviceArch(deviceIdx);
 
         return Create(deviceIdx, arch, kernelName, kernelOpts);
     }
@@ -43,7 +43,7 @@ namespace rocRoller
                                   std::string const&           kernelName,
                                   KernelOptions const&         kernelOpts)
     {
-        auto arch = GPUArchitectureLibrary::GetArch(target);
+        auto arch = GPUArchitectureLibrary::getInstance()->GetArch(target);
         return ForTarget(arch, kernelName, kernelOpts);
     }
 

@@ -52,68 +52,88 @@ TEST(GPUArchitectureTest, FullConstructor)
 
 TEST(GPUArchitectureTest, ValidateGeneratedDef)
 {
-    EXPECT_EQ(GPUArchitectureLibrary::HasCapability(GPUArchitectureTarget("gfx908:xnack-"),
-                                                    GPUCapability::HasExplicitNC),
+    EXPECT_EQ(GPUArchitectureLibrary::getInstance()->HasCapability(
+                  GPUArchitectureTarget("gfx908:xnack-"), GPUCapability::HasExplicitNC),
               false);
-    EXPECT_EQ(GPUArchitectureLibrary::HasCapability(GPUArchitectureTarget("gfx908:xnack-"),
-                                                    GPUCapability::HasDirectToLds),
+    EXPECT_EQ(GPUArchitectureLibrary::getInstance()->HasCapability(
+                  GPUArchitectureTarget("gfx908:xnack-"), GPUCapability::HasDirectToLds),
               false);
-    EXPECT_EQ(GPUArchitectureLibrary::HasCapability(GPUArchitectureTarget("gfx908:xnack-"),
-                                                    GPUCapability::HasAtomicAdd),
+    EXPECT_EQ(GPUArchitectureLibrary::getInstance()->HasCapability(
+                  GPUArchitectureTarget("gfx908:xnack-"), GPUCapability::HasAtomicAdd),
               true);
 
-    EXPECT_EQ(GPUArchitectureLibrary::GetCapability(GPUArchitectureTarget("gfx803"),
-                                                    GPUCapability::MaxVmcnt),
+    EXPECT_EQ(GPUArchitectureLibrary::getInstance()->GetCapability(GPUArchitectureTarget("gfx803"),
+                                                                   GPUCapability::MaxVmcnt),
               15);
-    EXPECT_EQ(GPUArchitectureLibrary::GetCapability(GPUArchitectureTarget("gfx90a"),
-                                                    GPUCapability::MaxVmcnt),
+    EXPECT_EQ(GPUArchitectureLibrary::getInstance()->GetCapability(GPUArchitectureTarget("gfx90a"),
+                                                                   GPUCapability::MaxVmcnt),
               63);
 
     EXPECT_EQ(GPUCapability("v_fma_f16"), GPUCapability::v_fma_f16);
 
-    EXPECT_EQ(GPUArchitectureLibrary::HasCapability(GPUArchitectureTarget("gfx908:xnack-"),
-                                                    GPUCapability::v_fma_f16),
-              GPUArchitectureLibrary::HasCapability("gfx908:xnack-", "v_fma_f16"));
+    EXPECT_EQ(GPUArchitectureLibrary::getInstance()->HasCapability(
+                  GPUArchitectureTarget("gfx908:xnack-"), GPUCapability::v_fma_f16),
+              GPUArchitectureLibrary::getInstance()->HasCapability("gfx908:xnack-", "v_fma_f16"));
 }
 
 TEST(GPUArchitectureTest, Xnack)
 {
-    EXPECT_EQ(GPUArchitectureLibrary::HasCapability("gfx1030", GPUCapability::HasXnack), false);
-    EXPECT_EQ(GPUArchitectureLibrary::HasCapability("gfx1012:xnack+", GPUCapability::HasXnack),
+    EXPECT_EQ(
+        GPUArchitectureLibrary::getInstance()->HasCapability("gfx1030", GPUCapability::HasXnack),
+        false);
+    EXPECT_EQ(GPUArchitectureLibrary::getInstance()->HasCapability("gfx1012:xnack+",
+                                                                   GPUCapability::HasXnack),
               true);
-    EXPECT_EQ(GPUArchitectureLibrary::HasCapability("gfx1012:xnack-", GPUCapability::HasXnack),
+    EXPECT_EQ(GPUArchitectureLibrary::getInstance()->HasCapability("gfx1012:xnack-",
+                                                                   GPUCapability::HasXnack),
               false);
-    EXPECT_EQ(GPUArchitectureLibrary::HasCapability("gfx908:xnack+", GPUCapability::HasXnack),
+    EXPECT_EQ(GPUArchitectureLibrary::getInstance()->HasCapability("gfx908:xnack+",
+                                                                   GPUCapability::HasXnack),
               true);
-    EXPECT_EQ(GPUArchitectureLibrary::HasCapability("gfx908:xnack-", GPUCapability::HasXnack),
+    EXPECT_EQ(GPUArchitectureLibrary::getInstance()->HasCapability("gfx908:xnack-",
+                                                                   GPUCapability::HasXnack),
               false);
 }
 
 TEST(GPUArchitectureTest, WaveFrontSize)
 {
-    EXPECT_EQ(GPUArchitectureLibrary::HasCapability("gfx1030", GPUCapability::HasWave64), true);
-    EXPECT_EQ(GPUArchitectureLibrary::HasCapability("gfx1012:xnack+", GPUCapability::HasWave64),
+    EXPECT_EQ(
+        GPUArchitectureLibrary::getInstance()->HasCapability("gfx1030", GPUCapability::HasWave64),
+        true);
+    EXPECT_EQ(GPUArchitectureLibrary::getInstance()->HasCapability("gfx1012:xnack+",
+                                                                   GPUCapability::HasWave64),
               true);
-    EXPECT_EQ(GPUArchitectureLibrary::HasCapability("gfx1012:xnack-", GPUCapability::HasWave64),
+    EXPECT_EQ(GPUArchitectureLibrary::getInstance()->HasCapability("gfx1012:xnack-",
+                                                                   GPUCapability::HasWave64),
               true);
-    EXPECT_EQ(GPUArchitectureLibrary::HasCapability("gfx908:xnack+", GPUCapability::HasWave64),
+    EXPECT_EQ(GPUArchitectureLibrary::getInstance()->HasCapability("gfx908:xnack+",
+                                                                   GPUCapability::HasWave64),
               true);
-    EXPECT_EQ(GPUArchitectureLibrary::HasCapability("gfx908:xnack-", GPUCapability::HasWave64),
-              true);
-
-    EXPECT_EQ(GPUArchitectureLibrary::HasCapability("gfx908:xnack+", GPUCapability::HasWave32),
-              false);
-    EXPECT_EQ(GPUArchitectureLibrary::HasCapability("gfx908:xnack-", GPUCapability::HasWave32),
-              false);
-    EXPECT_EQ(GPUArchitectureLibrary::HasCapability("gfx1030", GPUCapability::HasWave32), true);
-    EXPECT_EQ(GPUArchitectureLibrary::HasCapability("gfx1012:xnack+", GPUCapability::HasWave32),
-              true);
-    EXPECT_EQ(GPUArchitectureLibrary::HasCapability("gfx1012:xnack-", GPUCapability::HasWave32),
+    EXPECT_EQ(GPUArchitectureLibrary::getInstance()->HasCapability("gfx908:xnack-",
+                                                                   GPUCapability::HasWave64),
               true);
 
-    EXPECT_EQ(GPUArchitectureLibrary::GetCapability("gfx90a", GPUCapability::DefaultWavefrontSize),
+    EXPECT_EQ(GPUArchitectureLibrary::getInstance()->HasCapability("gfx908:xnack+",
+                                                                   GPUCapability::HasWave32),
+              false);
+    EXPECT_EQ(GPUArchitectureLibrary::getInstance()->HasCapability("gfx908:xnack-",
+                                                                   GPUCapability::HasWave32),
+              false);
+    EXPECT_EQ(
+        GPUArchitectureLibrary::getInstance()->HasCapability("gfx1030", GPUCapability::HasWave32),
+        true);
+    EXPECT_EQ(GPUArchitectureLibrary::getInstance()->HasCapability("gfx1012:xnack+",
+                                                                   GPUCapability::HasWave32),
+              true);
+    EXPECT_EQ(GPUArchitectureLibrary::getInstance()->HasCapability("gfx1012:xnack-",
+                                                                   GPUCapability::HasWave32),
+              true);
+
+    EXPECT_EQ(GPUArchitectureLibrary::getInstance()->GetCapability(
+                  "gfx90a", GPUCapability::DefaultWavefrontSize),
               64);
-    EXPECT_EQ(GPUArchitectureLibrary::GetCapability("gfx1030", GPUCapability::DefaultWavefrontSize),
+    EXPECT_EQ(GPUArchitectureLibrary::getInstance()->GetCapability(
+                  "gfx1030", GPUCapability::DefaultWavefrontSize),
               32);
 }
 
@@ -124,40 +144,64 @@ TEST(GPUArchitectureTest, Validate90aInstructions)
         = {"flat_store_dword", "flat_store_dwordx2", "flat_store_dwordx3", "flat_store_dwordx4"};
     for(std::string& inst : test_insts)
     {
-        auto queues = GPUArchitectureLibrary::GetInstructionInfo("gfx90a", inst).getWaitQueues();
+        auto queues = GPUArchitectureLibrary::getInstance()
+                          ->GetInstructionInfo("gfx90a", inst)
+                          .getWaitQueues();
         EXPECT_NE(std::find(queues.begin(), queues.end(), GPUWaitQueueType::VMQueue), queues.end());
         EXPECT_NE(std::find(queues.begin(), queues.end(), GPUWaitQueueType::LGKMDSQueue),
                   queues.end());
-        EXPECT_EQ(GPUArchitectureLibrary::GetInstructionInfo("gfx90a", inst).getWaitCount(), 0);
+        EXPECT_EQ(GPUArchitectureLibrary::getInstance()
+                      ->GetInstructionInfo("gfx90a", inst)
+                      .getWaitCount(),
+                  0);
     }
 
-    EXPECT_EQ(GPUArchitectureLibrary::GetInstructionInfo("gfx90a", "exp").getWaitCount(), 1);
-    EXPECT_EQ(GPUArchitectureLibrary::GetInstructionInfo("gfx90a", "exp").getWaitQueues()[0],
+    EXPECT_EQ(
+        GPUArchitectureLibrary::getInstance()->GetInstructionInfo("gfx90a", "exp").getWaitCount(),
+        1);
+    EXPECT_EQ(GPUArchitectureLibrary::getInstance()
+                  ->GetInstructionInfo("gfx90a", "exp")
+                  .getWaitQueues()[0],
               GPUWaitQueueType::EXPQueue);
-    EXPECT_EQ(GPUArchitectureLibrary::GetInstructionInfo("gfx90a", "exp").getLatency(), 0);
+    EXPECT_EQ(
+        GPUArchitectureLibrary::getInstance()->GetInstructionInfo("gfx90a", "exp").getLatency(), 0);
 
-    EXPECT_EQ(GPUArchitectureLibrary::GetInstructionInfo("gfx90a", "s_sendmsg").getWaitCount(), 1);
-    EXPECT_EQ(GPUArchitectureLibrary::GetInstructionInfo("gfx90a", "s_sendmsg").getWaitQueues()[0],
+    EXPECT_EQ(GPUArchitectureLibrary::getInstance()
+                  ->GetInstructionInfo("gfx90a", "s_sendmsg")
+                  .getWaitCount(),
+              1);
+    EXPECT_EQ(GPUArchitectureLibrary::getInstance()
+                  ->GetInstructionInfo("gfx90a", "s_sendmsg")
+                  .getWaitQueues()[0],
               GPUWaitQueueType::LGKMSendMsgQueue);
-    EXPECT_EQ(GPUArchitectureLibrary::GetInstructionInfo("gfx90a", "s_sendmsg").getLatency(), 0);
+    EXPECT_EQ(GPUArchitectureLibrary::getInstance()
+                  ->GetInstructionInfo("gfx90a", "s_sendmsg")
+                  .getLatency(),
+              0);
 
-    EXPECT_EQ(
-        GPUArchitectureLibrary::GetInstructionInfo("gfx90a", "v_mfma_f32_32x32x2f32").getLatency(),
-        16);
-    EXPECT_EQ(
-        GPUArchitectureLibrary::GetInstructionInfo("gfx90a", "v_accvgpr_read_b32").getLatency(), 1);
-    EXPECT_EQ(
-        GPUArchitectureLibrary::GetInstructionInfo("gfx90a", "v_accvgpr_write_b32").getLatency(),
-        2);
-    EXPECT_EQ(GPUArchitectureLibrary::GetInstructionInfo("gfx90a", "v_accvgpr_write").getLatency(),
+    EXPECT_EQ(GPUArchitectureLibrary::getInstance()
+                  ->GetInstructionInfo("gfx90a", "v_mfma_f32_32x32x2f32")
+                  .getLatency(),
+              16);
+    EXPECT_EQ(GPUArchitectureLibrary::getInstance()
+                  ->GetInstructionInfo("gfx90a", "v_accvgpr_read_b32")
+                  .getLatency(),
+              1);
+    EXPECT_EQ(GPUArchitectureLibrary::getInstance()
+                  ->GetInstructionInfo("gfx90a", "v_accvgpr_write_b32")
+                  .getLatency(),
+              2);
+    EXPECT_EQ(GPUArchitectureLibrary::getInstance()
+                  ->GetInstructionInfo("gfx90a", "v_accvgpr_write")
+                  .getLatency(),
               2);
 }
 
 TEST(GPUArchitectureTest, CheckDefFile)
 {
-    EXPECT_EQ(
-        GPUArchitectureLibrary::GetDevice("gfx90a").HasCapability(GPUCapability::SupportedISA),
-        true);
+    EXPECT_EQ(GPUArchitectureLibrary::getInstance()->GetDevice("gfx90a").HasCapability(
+                  GPUCapability::SupportedISA),
+              true);
 }
 
 TEST(GPUArchitectureTest, TargetComparison)

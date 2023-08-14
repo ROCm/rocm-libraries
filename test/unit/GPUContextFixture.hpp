@@ -21,7 +21,8 @@
  */
 inline auto supportedISAValues()
 {
-    return ::testing::ValuesIn(rocRoller::GPUArchitectureLibrary::getAllSupportedISAs());
+    return ::testing::ValuesIn(
+        rocRoller::GPUArchitectureLibrary::getInstance()->getAllSupportedISAs());
 }
 
 /**
@@ -37,7 +38,8 @@ inline auto supportedISAValues()
  */
 inline auto mfmaSupportedISAValues()
 {
-    return ::testing::ValuesIn(rocRoller::GPUArchitectureLibrary::getMFMASupportedISAs());
+    return ::testing::ValuesIn(
+        rocRoller::GPUArchitectureLibrary::getInstance()->getMFMASupportedISAs());
 }
 
 /**
@@ -51,7 +53,8 @@ inline auto mfmaSupportedISAValues()
  */
 inline auto currentGPUISA()
 {
-    auto currentDevice = rocRoller::GPUArchitectureLibrary::GetDefaultHipDeviceArch();
+    auto currentDevice
+        = rocRoller::GPUArchitectureLibrary::getInstance()->GetDefaultHipDeviceArch();
     return ::testing::Values(currentDevice.target().toString());
 }
 

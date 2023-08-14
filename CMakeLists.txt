@@ -161,8 +161,6 @@ ExternalProject_Add(spdlog
 add_executable(
   GPUArchitectureGenerator
   GPUArchitectureGenerator/source/GPUArchitectureGenerator.cpp
-  lib/source/Error.cpp
-  lib/source/GPUArchitecture.cpp
 )
 add_dependencies(GPUArchitectureGenerator spdlog)
 target_compile_features(GPUArchitectureGenerator PUBLIC cxx_std_20)
@@ -170,8 +168,8 @@ target_compile_options(GPUArchitectureGenerator PUBLIC  ${COROUTINES_COMPILE_OPT
 target_link_options(GPUArchitectureGenerator PUBLIC ${EXTRA_LINK_OPTIONS})
 target_link_libraries(
   GPUArchitectureGenerator PUBLIC
+  rocroller
   ${llvm_libs}
-  lldELF
   msgpackc-cxx
 )
 target_include_directories(GPUArchitectureGenerator PUBLIC
@@ -182,6 +180,7 @@ target_include_directories(GPUArchitectureGenerator PUBLIC
 
 target_include_directories(GPUArchitectureGenerator SYSTEM PUBLIC
                            ${CMAKE_CURRENT_BINARY_DIR}/spdlog/include/
+                           ${libdivide_SOURCE_DIR}/
                            ${LLVM_INCLUDE_DIRS}
                            ${LLD_INCLUDE_DIRS})
 
@@ -357,7 +356,11 @@ add_library(rocroller SHARED
 )
 
 add_dependencies(rocroller spdlog)
-ADD_DEPENDENCIES(rocroller GPUArchitecture_def)
+
+# Users of rocroller should link with rocroller_interface for GPUArchitecture_def dependency
+add_library(rocroller_interface INTERFACE)
+target_link_libraries(rocroller_interface INTERFACE rocroller)
+add_dependencies(rocroller_interface GPUArchitecture_def)
 
 target_compile_features(rocroller PUBLIC cxx_std_20)
 target_compile_options(rocroller PUBLIC ${COROUTINES_COMPILE_OPTION} ${EXTRA_COMPILE_OPTIONS})
@@ -406,7 +409,7 @@ add_executable(ComponentTest test/standalone/ComponentTest.cpp)
 target_compile_options(ComponentTest PUBLIC ${EXTRA_COMPILE_OPTIONS})
 target_link_options(ComponentTest PUBLIC ${EXTRA_LINK_OPTIONS})
 target_link_libraries(ComponentTest
-  rocroller
+  rocroller_interface
   msgpackc-cxx
 )
 target_include_directories(ComponentTest PUBLIC
@@ -517,7 +520,7 @@ target_include_directories(rocRollerTests PUBLIC
 target_link_options(rocRollerTests PUBLIC ${EXTRA_LINK_OPTIONS})
 target_link_libraries(
   rocRollerTests
-  rocroller
+  rocroller_interface
   msgpackc-cxx
   gtest_main
   gmock
@@ -539,8 +542,6 @@ endif()
 add_executable(
   ArchGenTests
   test/unit/GPUArchitectureGeneratorTest.cpp
-  lib/source/Error.cpp
-  lib/source/GPUArchitecture.cpp
 )
 add_dependencies(ArchGenTests spdlog)
 target_compile_features(ArchGenTests PUBLIC cxx_std_20)
@@ -564,7 +565,7 @@ endif()
 target_link_libraries(
   ArchGenTests PUBLIC
   ${llvm_libs}
-  lldELF
+  rocroller_interface
   gtest_main
   gmock
   msgpackc-cxx
