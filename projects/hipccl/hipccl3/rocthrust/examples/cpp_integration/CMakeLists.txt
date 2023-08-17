@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright 2020 Advanced Micro Devices, Inc.
+# Copyright 2020-2023 Advanced Micro Devices, Inc.
 # ########################################################################
 
 
@@ -18,10 +18,10 @@ target_link_libraries(${EXAMPLE_TARGET}
         rocthrust
         roc::rocprim_hip
 )
-foreach(amdgpu_target ${AMDGPU_TARGETS})
+foreach(gpu_target ${GPU_TARGETS})
     target_link_libraries(${EXAMPLE_TARGET}
         INTERFACE
-            --cuda-gpu-arch=${amdgpu_target}
+            --cuda-gpu-arch=${gpu_target}
     )
 endforeach()
 set_target_properties(${EXAMPLE_TARGET}

@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2023, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -77,10 +77,7 @@ for_each_n(execution_policy<Derived>& policy, Input first, Size count, UnaryOp o
     hip_rocprim::parallel_for(policy,
                               for_each_f<Input, wrapped_t>(first, wrapped_op),
                               count);
-    hip_rocprim::throw_on_error(
-        hip_rocprim::synchronize_optional(policy),
-        "for_each: failed to synchronize"
-    );
+
     return first + count;
 }
 

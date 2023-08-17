@@ -72,10 +72,10 @@ function(add_rocthrust_test TEST)
                 GTest::gtest_main)
     endif ()
     if (NOT WIN32)
-      foreach(amdgpu_target ${AMDGPU_TARGETS})
+      foreach(gpu_target ${GPU_TARGETS})
           target_link_libraries(${TEST_TARGET}
               PRIVATE
-                  --offload-arch=${amdgpu_target}
+                  --offload-arch=${gpu_target}
           )
       endforeach()
     endif()

@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019, 2021, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2023, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -28,11 +28,11 @@
 #pragma once
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
-#include <thrust/system/hip/config.h>
 
-#include <thrust/system/hip/detail/util.h>
 #include <thrust/detail/type_traits/result_of_adaptable_function.h>
+#include <thrust/system/hip/config.h>
 #include <thrust/system/hip/detail/par_to_seq.h>
+#include <thrust/system/hip/detail/util.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
@@ -128,7 +128,9 @@ void THRUST_HIP_FUNCTION
 parallel_for(execution_policy<Derived>& policy, F f, Size count)
 {
     if(count == 0)
+    {
         return;
+    }
 
     // struct workaround is required for HIP-clang
     struct workaround

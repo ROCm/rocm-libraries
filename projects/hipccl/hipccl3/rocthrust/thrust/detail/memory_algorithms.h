@@ -1,4 +1,5 @@
 // Copyright (c) 2018 NVIDIA Corporation
+// Modifications Copyright© 2023 Advanced Micro Devices, Inc. All rights reserved.
 // Author: Bryce Adelstein Lelbach <brycelelbach@gmail.com>
 //
 // Distributed under the Boost Software License v1.0 (boost.org/LICENSE_1_0.txt)
@@ -12,11 +13,14 @@
 #include <thrust/detail/type_traits.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/detail/allocator/allocator_traits.h>
+#include <thrust/detail/memory_wrapper.h>
 #include <thrust/addressof.h>
+
+#include <thrust/detail/nv_target.h>
 
 #include <utility>
 #include <new>
-#include <thrust/detail/memory_wrapper.h>
+
 
 THRUST_NAMESPACE_BEGIN
 
@@ -102,7 +106,6 @@ ForwardIt destroy_n(Allocator const& alloc, ForwardIt first, Size n)
   return first;
 }
 
-#if THRUST_CPP_DIALECT >= 2011
 template <typename ForwardIt, typename... Args>
 __host__ __device__
 void uninitialized_construct(
@@ -112,17 +115,23 @@ void uninitialized_construct(
   using T = typename iterator_traits<ForwardIt>::value_type;
 
   ForwardIt current = first;
-  #if !__CUDA_ARCH__ // No exceptions in CUDA.
-  try {
-  #endif
+  // No exceptions in CUDA.
+  NV_IF_TARGET(NV_IS_HOST, (
+    try {
+      for (; current != last; ++current)
+      {
+        ::new (static_cast<void*>(addressof(*current))) T(args...);
+      }
+    } catch (...) {
+      destroy(first, current);
+      throw;
+    }
+  ), (
     for (; current != last; ++current)
+    {
       ::new (static_cast<void*>(addressof(*current))) T(args...);
-  #if !__CUDA_ARCH__ // No exceptions in CUDA.
-  } catch (...) {
-    destroy(first, current);
-    throw;
-  }
-  #endif
+    }
+  ));
 }
 
 template <typename Allocator, typename ForwardIt, typename... Args>
@@ -140,17 +149,23 @@ void uninitialized_construct_with_allocator(
   typename traits::allocator_type alloc_T(alloc);
 
   ForwardIt current = first;
-  #if !__CUDA_ARCH__ // No exceptions in CUDA.
-  try {
-  #endif
+  // No exceptions in CUDA.
+  NV_IF_TARGET(NV_IS_HOST, (
+    try {
+      for (; current != last; ++current)
+      {
+        traits::construct(alloc_T, addressof(*current), args...);
+      }
+    } catch (...) {
+      destroy(alloc_T, first, current);
+      throw;
+    }
+  ), (
     for (; current != last; ++current)
+    {
       traits::construct(alloc_T, addressof(*current), args...);
-  #if !__CUDA_ARCH__ // No exceptions in CUDA.
-  } catch (...) {
-    destroy(alloc_T, first, current);
-    throw;
-  }
-  #endif
+    }
+  ));
 }
 
 template <typename ForwardIt, typename Size, typename... Args>
@@ -161,17 +176,23 @@ void uninitialized_construct_n(
   using T = typename iterator_traits<ForwardIt>::value_type;
 
   ForwardIt current = first;
-  #if !__CUDA_ARCH__ // No exceptions in CUDA.
-  try {
-  #endif
-    for (; n > 0; (void) ++current, --n)
+  // No exceptions in CUDA.
+  NV_IF_TARGET(NV_IS_HOST, (
+    try {
+      for (; n > 0; ++current, --n)
+      {
+        ::new (static_cast<void*>(addressof(*current))) T(args...);
+      }
+    } catch (...) {
+      destroy(first, current);
+      throw;
+    }
+  ), (
+    for (; n > 0; ++current, --n)
+    {
       ::new (static_cast<void*>(addressof(*current))) T(args...);
-  #if !__CUDA_ARCH__ // No exceptions in CUDA.
-  } catch (...) {
-    destroy(first, current);
-    throw;
-  }
-  #endif
+    }
+  ));
 }
 
 template <typename Allocator, typename ForwardIt, typename Size, typename... Args>
@@ -189,19 +210,24 @@ void uninitialized_construct_n_with_allocator(
   typename traits::allocator_type alloc_T(alloc);
 
   ForwardIt current = first;
-  #if !__CUDA_ARCH__ // No exceptions in CUDA.
-  try {
-  #endif
+  // No exceptions in CUDA.
+  NV_IF_TARGET(NV_IS_HOST, (
+    try {
+      for (; n > 0; (void) ++current, --n)
+      {
+        traits::construct(alloc_T, addressof(*current), args...);
+      }
+    } catch (...) {
+      destroy(alloc_T, first, current);
+      throw;
+    }
+  ), (
     for (; n > 0; (void) ++current, --n)
+    {
       traits::construct(alloc_T, addressof(*current), args...);
-  #if !__CUDA_ARCH__ // No exceptions in CUDA.
-  } catch (...) {
-    destroy(alloc_T, first, current);
-    throw;
-  }
-  #endif
+    }
+  ));
 }
-#endif
 
 ///////////////////////////////////////////////////////////////////////////////
 

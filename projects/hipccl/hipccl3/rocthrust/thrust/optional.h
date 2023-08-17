@@ -15,6 +15,7 @@
 
 #include <thrust/detail/config.h>
 #include <thrust/detail/cpp11_required.h>
+#include <thrust/detail/type_traits.h>
 
 #if THRUST_CPP_DIALECT >= 2011
 

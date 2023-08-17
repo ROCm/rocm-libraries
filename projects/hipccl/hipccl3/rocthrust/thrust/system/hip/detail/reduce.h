@@ -28,20 +28,20 @@
 #pragma once
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
-#include <thrust/system/hip/config.h>
 
-#include <thrust/detail/cstdint.h>
-#include <thrust/detail/temporary_array.h>
-#include <thrust/system/hip/detail/util.h>
-#include <thrust/detail/raw_reference_cast.h>
-#include <thrust/detail/type_traits/iterator/is_output_iterator.h>
-#include <thrust/system/hip/detail/par_to_seq.h>
-#include <thrust/system/hip/detail/get_value.h>
-#include <thrust/functional.h>
-#include <thrust/device_vector.h>
-#include <thrust/detail/minmax.h>
-#include <thrust/distance.h>
 #include <thrust/detail/alignment.h>
+#include <thrust/detail/cstdint.h>
+#include <thrust/detail/minmax.h>
+#include <thrust/detail/raw_reference_cast.h>
+#include <thrust/detail/temporary_array.h>
+#include <thrust/detail/type_traits/iterator/is_output_iterator.h>
+#include <thrust/device_vector.h>
+#include <thrust/distance.h>
+#include <thrust/functional.h>
+#include <thrust/system/hip/config.h>
+#include <thrust/system/hip/detail/get_value.h>
+#include <thrust/system/hip/detail/par_to_seq.h>
+#include <thrust/system/hip/detail/util.h>
 
 
 // rocprim include

@@ -35,6 +35,8 @@
 #include <thrust/system/hip/error.h>
 #include <thrust/system_error.h>
 
+#include <thrust/system/hip/detail/nv/target.h>
+
 // Define the value to 0, if you want to disable printf on device side.
 #ifndef THRUST_HIP_PRINTF_ENABLED
 #define THRUST_HIP_PRINTF_ENABLED 1
@@ -82,25 +84,28 @@ bool must_perform_optional_synchronization(execution_policy<Derived> &policy)
 }
 
 template <class Derived>
-hipError_t synchronize_stream(execution_policy<Derived>& policy)
+__host__ __device__ hipError_t synchronize_stream(execution_policy<Derived>& policy)
 {
   hipError_t result;
-if (THRUST_IS_HOST_CODE) {
-  #if THRUST_INCLUDE_HOST_CODE
-    result = hipStreamSynchronize(stream(policy));
-  #endif
-} else {
-  #if THRUST_INCLUDE_DEVICE_CODE
-    #if __THRUST_HAS_HIPRT__
-      THRUST_UNUSED_VAR(policy);
-      result = hipDeviceSynchronize();
-    #else
-      THRUST_UNUSED_VAR(policy);
-      result = hipSuccess;
-    #endif
-  #endif
-}
-return result;
+  // Can't use #if inside NV_IF_TARGET, use a temp macro to hoist the device
+  // instructions out of the target logic.
+#if __THRUST_HAS_HIPRT__
+
+#define THRUST_TEMP_DEVICE_CODE result = hipDeviceSynchronize();
+
+#else
+
+#define THRUST_TEMP_DEVICE_CODE result = hipSuccess
+
+#endif
+
+  NV_IF_TARGET(NV_IS_HOST,
+               (result = hipStreamSynchronize(stream(policy));),
+               (THRUST_UNUSED_VAR(policy); THRUST_TEMP_DEVICE_CODE;));
+
+#undef THRUST_TEMP_DEVICE_CODE
+
+  return result;
 }
 
 // Fallback implementation of the customization point.
@@ -108,30 +113,16 @@ template <class Derived> __host__ __device__
 hipError_t synchronize_stream_optional(execution_policy<Derived> &policy)
 {
   hipError_t result;
-  if (THRUST_IS_HOST_CODE) {
-    #if THRUST_INCLUDE_HOST_CODE
-      if(must_perform_optional_synchronization(policy)){
-        hipStreamSynchronize(stream(policy));
-        result = hipGetLastError();
-      }else{
-        result = hipSuccess;
-      }
-    #endif
-  } else {
-    #if THRUST_INCLUDE_DEVICE_CODE
-      #if __THRUST_HAS_HIPRT__
-        if(must_perform_optional_synchronization(policy)){
-          hipDeviceSynchronize();
-          result = hipGetLastError();
-        }else{
-          result = hipSuccess;
-        }
-      #else
-        THRUST_UNUSED_VAR(policy);
-        result = hipSuccess;
-      #endif
-    #endif
+
+  if (must_perform_optional_synchronization(policy))
+  {
+    result = synchronize_stream(policy);
   }
+  else
+  {
+    result = hipSuccess;
+  }
+
   return result;
 }
 
@@ -220,78 +211,62 @@ trivial_copy_device_to_device(Policy& policy, Type* dst, Type const* src, size_t
 
 inline void __host__ __device__ terminate()
 {
-  if (THRUST_IS_DEVICE_CODE) {
-    #if THRUST_INCLUDE_DEVICE_CODE
-      abort();
-    #endif
-  } else {
-    #if THRUST_INCLUDE_HOST_CODE
-      std::terminate();
-    #endif
-  }
+    NV_IF_TARGET(NV_IS_HOST, (std::terminate();), (abort();));
 }
 
 inline void __host__ __device__ throw_on_error(hipError_t status, char const* msg)
 {
-#if __THRUST_HAS_HIPRT__
-  // Clear the global HIP error state which may have been set by the last
-  // call. Otherwise, errors may "leak" to unrelated kernel launches.
-  hipError_t clear_error_status = hipGetLastError();
-  THRUST_UNUSED_VAR(clear_error_status);
- #endif
+    // Clear the global HIP error state which may have been set by the last
+    // call. Otherwise, errors may "leak" to unrelated kernel launches.
+    NV_IF_TARGET(NV_IS_HOST, (hipError_t clear_error_status = hipGetLastError(); THRUST_UNUSED_VAR(clear_error_status);));
 
-  if(hipSuccess != status)
-  {
-    if (THRUST_IS_HOST_CODE) {
-      #if THRUST_INCLUDE_HOST_CODE
-      throw thrust::system_error(status, thrust::hip_category(), msg);
-      #endif
-    } else {
-    #if THRUST_INCLUDE_DEVICE_CODE
-      #if __THRUST_HAS_HIPRT__
-        printf("Thrust HIP Backend Error %s: %s\n", hipGetErrorString(status),msg);
-      #else
-        THRUST_HIP_PRINTF("Error %d :%s \n", (int)status, msg);
-        #if THRUST_HIP_PRINTF_ENABLED == 0
-        THRUST_UNUSED_VAR(status);
-        THRUST_UNUSED_VAR(msg);
-        #endif
-      #endif
-      hip_rocprim::terminate();
+    if(hipSuccess != status)
+    {
+
+        // Can't use #if inside NV_IF_TARGET, use a temp macro to hoist the device
+        // instructions out of the target logic.
+    #if THRUST_HIP_PRINTF_ENABLED == 0
+    #define THRUST_TEMP_DEVICE_CODE                             \
+        THRUST_HIP_PRINTF("Error %d :%s \n", (int)status, msg); \
+        THRUST_UNUSED_VAR(status);                              \
+        THRUST_UNUSED_VAR(msg)
+    #else
+    #define THRUST_TEMP_DEVICE_CODE THRUST_HIP_PRINTF("Error %d :%s \n", (int)status, msg)
     #endif
-    }
+
+            NV_IF_TARGET(NV_IS_HOST,
+                        (throw thrust::system_error(status, thrust::hip_category(), msg);),
+                        (THRUST_TEMP_DEVICE_CODE; hip_rocprim::terminate();));
+
+#undef THRUST_TEMP_DEVICE_CODE
   }
 }
 
 // TODO this overload should be removed and messages should be passed.
 inline void __host__ __device__ throw_on_error(hipError_t status)
 {
-#if __THRUST_HAS_HIPRT__
-  // Clear the global HIP error state which may have been set by the last
-  // call. Otherwise, errors may "leak" to unrelated kernel launches.
-  hipError_t clear_error_status = hipGetLastError();
-  THRUST_UNUSED_VAR(clear_error_status);
- #endif
+    // Clear the global HIP error state which may have been set by the last
+    // call. Otherwise, errors may "leak" to unrelated kernel launches.
+    NV_IF_TARGET(NV_IS_HOST, (hipError_t clear_error_status = hipGetLastError(); THRUST_UNUSED_VAR(clear_error_status);));
 
-    if(hipSuccess != status)
-    {
-      if (THRUST_IS_HOST_CODE) {
-        #if THRUST_INCLUDE_HOST_CODE
-        throw thrust::system_error(status, thrust::hip_category());
-        #endif
-      } else {
-      #if THRUST_INCLUDE_DEVICE_CODE
-        #if __THRUST_HAS_HIPRT__
-          printf("Thrust HIP Backend Error %s\n", hipGetErrorString(status));
-        #else
-          THRUST_HIP_PRINTF("Error %d \n", (int)status);
-          #if THRUST_HIP_PRINTF_ENABLED == 0
-          THRUST_UNUSED_VAR(status);
-          #endif
-        #endif
-        hip_rocprim::terminate();
-      #endif
-    }
+  if(hipSuccess != status)
+  {
+
+        // Can't use #if inside NV_IF_TARGET, use a temp macro to hoist the device
+        // instructions out of the target logic.
+#if THRUST_HIP_PRINTF_ENABLED == 0
+#define THRUST_TEMP_DEVICE_CODE                    \
+    THRUST_HIP_PRINTF("Error %d \n", (int)status); \
+    THRUST_UNUSED_VAR(status)
+#else
+#define THRUST_TEMP_DEVICE_CODE THRUST_HIP_PRINTF("Error %d \n", (int)status)
+#endif
+
+        NV_IF_TARGET(NV_IS_HOST,
+                     (throw thrust::system_error(status, thrust::hip_category());),
+                     (THRUST_TEMP_DEVICE_CODE; hip_rocprim::terminate();));
+
+#undef THRUST_TEMP_DEVICE_CODE
   }
 }
 
@@ -314,15 +289,17 @@ struct transform_input_iterator_t
     {
     }
 
-    transform_input_iterator_t(const self_t&) = default;
+#if THRUST_CPP_DIALECT >= 2011
+  transform_input_iterator_t(const self_t &) = default;
+#endif
 
-    // UnaryOp might not be copy assignable, such as when it is a lambda.  Define
-    // an explicit copy assignment operator that doesn't try to assign it.
-    THRUST_HIP_FUNCTION self_t& operator=(const self_t& o)
-    {
-        input = o.input;
-        return *this;
-    }
+  // UnaryOp might not be copy assignable, such as when it is a lambda.  Define
+  // an explicit copy assignment operator that doesn't try to assign it.
+  THRUST_HIP_FUNCTION self_t& operator=(const self_t& o)
+  {
+    input = o.input;
+    return *this;
+  }
 
     /// Postfix increment
     THRUST_HIP_FUNCTION self_t operator++(int)

@@ -84,7 +84,7 @@ copyright-date:
     - !reference [.install-rocprim, script]
     # Setup env vars for testing
     - rng_seed_count=0; prng_seeds="0";
-    - if [ $CI_COMMIT_BRANCH == develop_stream ] ; then rng_seed_count=3; prng_seeds="0 1000";
+    - if [ $CI_COMMIT_BRANCH == develop_stream ] ; then rng_seed_count=3; prng_seeds="0, 1000";
     - fi;
     # Build rocThrust
     - cmake
@@ -94,7 +94,7 @@ copyright-date:
       -D BUILD_TEST=ON
       -D BUILD_EXAMPLES=ON
       -D BUILD_BENCHMARKS=ON
-      -D AMDGPU_TARGETS=$GPU_TARGETS
+      -D GPU_TARGETS=$GPU_TARGETS
       -D AMDGPU_TEST_TARGETS=$GPU_TARGETS
       -D RNG_SEED_COUNT=$rng_seed_count
       -D PRNG_SEEDS=$prng_seeds
