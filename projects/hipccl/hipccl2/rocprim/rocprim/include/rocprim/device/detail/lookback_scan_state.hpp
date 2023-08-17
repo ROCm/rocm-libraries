@@ -468,7 +468,7 @@ inline hipError_t is_sleep_scan_state_used(bool& use_sleep)
 #else
     const int asicRevision = 0;
 #endif
-    use_sleep = prop.gcnArch == 908 && asicRevision < 2;
+    use_sleep = std::string(prop.gcnArchName).find("908") != std::string::npos && asicRevision < 2;
     return hipSuccess;
 }
 
