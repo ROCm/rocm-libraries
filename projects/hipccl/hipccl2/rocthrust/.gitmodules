@@ -1,3 +1,6 @@
 [submodule "cub"]
 	path = dependencies/cub
-	url = https://github.com/NVlabs/cub.git
+	url = https://github.com/NVIDIA/cub
+[submodule "libcudacxx"]
+	path = dependencies/libcudacxx
+	url = https://github.com/NVIDIA/libcudacxx

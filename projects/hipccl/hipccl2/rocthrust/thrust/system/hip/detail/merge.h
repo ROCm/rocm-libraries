@@ -28,21 +28,21 @@
 #pragma once
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+
 #include <thrust/detail/cstdint.h>
 #include <thrust/detail/temporary_array.h>
-#include <thrust/system/hip/config.h>
-
-#include <thrust/system/hip/detail/get_value.h>
-#include <thrust/system/hip/detail/par_to_seq.h>
-#include <thrust/system/hip/detail/util.h>
 #include <thrust/detail/minmax.h>
-#include <thrust/extrema.h>
-#include <thrust/merge.h>
-#include <thrust/pair.h>
 #include <thrust/detail/mpl/math.h>
 #include <thrust/detail/range/head_flags.h>
 #include <thrust/distance.h>
+#include <thrust/extrema.h>
 #include <thrust/functional.h>
+#include <thrust/merge.h>
+#include <thrust/pair.h>
+#include <thrust/system/hip/config.h>
+#include <thrust/system/hip/detail/get_value.h>
+#include <thrust/system/hip/detail/par_to_seq.h>
+#include <thrust/system/hip/detail/util.h>
 
 
 // rocPRIM includes

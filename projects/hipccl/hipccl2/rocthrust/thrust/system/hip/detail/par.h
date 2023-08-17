@@ -45,6 +45,7 @@ namespace hip_rocprim
         hipStream_t stream;
 
     public:
+        __thrust_exec_check_disable__
         __host__ __device__ execute_on_stream_base(hipStream_t stream_ = default_stream())
             : stream(stream_)
         {

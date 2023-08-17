@@ -30,6 +30,7 @@ Thrust and CUB support the following C++ dialects:
 - C++11 (deprecated)
 - C++14
 - C++17
+- C++20
 
 ### Compilers
 

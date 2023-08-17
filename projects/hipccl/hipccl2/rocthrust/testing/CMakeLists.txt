@@ -25,10 +25,10 @@ else ()
             GTest::gtest
             GTest::gtest_main)
 endif ()
-foreach(amdgpu_target ${AMDGPU_TARGETS})
+foreach(gpu_target ${GPU_TARGETS})
     target_link_libraries(testing_common
         INTERFACE
-          --cuda-gpu-arch=${amdgpu_target}
+          --cuda-gpu-arch=${gpu_target}
     )
 endforeach()
 

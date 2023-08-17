@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -25,6 +25,8 @@
 #include <thrust/system/hip/config.h>
 #include <thrust/system/hip/detail/cross_system.h>
 
+#include <thrust/system/hip/detail/nv/target.h>
+
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
@@ -36,24 +38,24 @@ get_value(execution_policy<DerivedPolicy>& exec, Pointer ptr)
     typedef typename thrust::iterator_value<Pointer>::type result_type;
 
     // WORKAROUND
-#if defined(THRUST_HIP_DEVICE_CODE)
-    THRUST_UNUSED_VAR(exec);
-    void (*fptr)(cross_system<thrust::host_system_tag, DerivedPolicy>&, result_type*, Pointer)
-        = assign_value;
-    (void)fptr;
+    NV_IF_TARGET(
+        NV_IS_HOST,
+        (
+            // when called from host code, implement with assign_value
+            // note that this requires a type with default constructor
+            result_type result;
 
-    return *thrust::raw_pointer_cast(ptr);
-#else
-    // when called from host code, implement with assign_value
-    // note that this requires a type with default constructor
-    result_type result;
+            thrust::host_system_tag                              host_tag;
+            cross_system<thrust::host_system_tag, DerivedPolicy> systems(host_tag, exec);
+            assign_value(systems, &result, ptr);
 
-    thrust::host_system_tag                              host_tag;
-    cross_system<thrust::host_system_tag, DerivedPolicy> systems(host_tag, exec);
-    assign_value(systems, &result, ptr);
+            return result;),
+        (THRUST_UNUSED_VAR(exec);
+         void (*fptr)(cross_system<thrust::host_system_tag, DerivedPolicy>&, result_type*, Pointer)
+         = assign_value;
+         (void)fptr;
 
-    return result;
-#endif
+         return *thrust::raw_pointer_cast(ptr);))
 } // end get_value()
 
 } // end hip_rocprim

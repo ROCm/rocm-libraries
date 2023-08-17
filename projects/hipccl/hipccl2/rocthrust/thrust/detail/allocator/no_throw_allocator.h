@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -18,6 +18,8 @@
 #pragma once
 
 #include <thrust/detail/config.h>
+
+#include <thrust/detail/nv_target.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace detail
@@ -44,18 +46,18 @@ template<typename BaseAllocator>
     __host__ __device__
     void deallocate(typename super_t::pointer p, typename super_t::size_type n)
     {
-#if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
-      try
-      {
+      NV_IF_TARGET(NV_IS_HOST, (
+        try
+        {
+          super_t::deallocate(p, n);
+        } // end try
+        catch(...)
+        {
+          // catch anything
+        } // end catch
+      ), (
         super_t::deallocate(p, n);
-      } // end try
-      catch(...)
-      {
-        // catch anything
-      } // end catch
-#else
-      super_t::deallocate(p, n);
-#endif
+      ));
     } // end deallocate()
 
     inline __host__ __device__

@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2022, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2023, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -28,18 +28,19 @@
 #pragma once
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+
 #include <thrust/detail/cstdint.h>
+#include <thrust/detail/mpl/math.h>
 #include <thrust/detail/temporary_array.h>
-#include <thrust/system/hip/detail/util.h>
-#include <thrust/system/hip/detail/execution_policy.h>
-#include <thrust/system/hip/detail/get_value.h>
-#include <thrust/system/hip/detail/par_to_seq.h>
+#include <thrust/distance.h>
 #include <thrust/extrema.h>
 #include <thrust/pair.h>
 #include <thrust/set_operations.h>
+#include <thrust/system/hip/detail/execution_policy.h>
+#include <thrust/system/hip/detail/get_value.h>
+#include <thrust/system/hip/detail/par_to_seq.h>
+#include <thrust/system/hip/detail/util.h>
 
-#include <thrust/detail/mpl/math.h>
-#include <thrust/distance.h>
 
 // rocprim include
 #include <rocprim/rocprim.hpp>

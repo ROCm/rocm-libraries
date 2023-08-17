@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -23,10 +23,13 @@
 #include <thrust/system/detail/bad_alloc.h>
 #include <cassert>
 
-#if (defined(_NVHPC_CUDA) || defined(__CUDA_ARCH__)) && \
-    THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#include <thrust/system/cuda/detail/terminate.h>
-#endif
+#include <thrust/detail/nv_target.h>
+
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#  if (defined(_NVHPC_CUDA) || defined(__CUDA_ARCH__))
+#    include <thrust/system/cuda/detail/terminate.h>
+#  endif // NVCC device pass or NVC++
+#endif // CUDA
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 #include <thrust/system/hip/detail/terminate.h>
@@ -52,17 +55,19 @@ __host__ __device__
     // note that we pass cnt to deallocate, not a value derived from result.second
     deallocate(result.first, cnt);
 
-    if (THRUST_IS_HOST_CODE) {
-      #if THRUST_INCLUDE_HOST_CODE
-        throw thrust::system::detail::bad_alloc("temporary_buffer::allocate: get_temporary_buffer failed");
-      #endif
-    } else {
-      #if THRUST_INCLUDE_DEVICE_CODE && THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-        thrust::system::cuda::detail::terminate_with_message("temporary_buffer::allocate: get_temporary_buffer failed");
-      #elif THRUST_INCLUDE_DEVICE_CODE && THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
-            thrust::system::hip::detail::terminate_with_message("temporary_buffer::allocate: get_temporary_buffer failed");
-      #endif
-    }
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+    NV_IF_TARGET(NV_IS_HOST, (
+      throw thrust::system::detail::bad_alloc("temporary_buffer::allocate: get_temporary_buffer failed");
+    ), ( // NV_IS_DEVICE
+      thrust::system::cuda::detail::terminate_with_message("temporary_buffer::allocate: get_temporary_buffer failed");
+    ));
+#elif THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
+    NV_IF_TARGET(NV_IS_HOST, (
+      throw thrust::system::detail::bad_alloc("temporary_buffer::allocate: get_temporary_buffer failed");
+    ), ( // NV_IS_DEVICE
+      thrust::system::hip::detail::terminate_with_message("temporary_buffer::allocate: get_temporary_buffer failed");
+    ));
+#endif
   } // end if
 
   return result.first;

@@ -1,6 +1,6 @@
 /*******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2023, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -28,15 +28,15 @@
 #pragma once
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
-#include <thrust/system/hip/config.h>
-#include <thrust/system/hip/detail/reduce.h>
-#include <thrust/system/hip/detail/get_value.h>
 
 #include <thrust/detail/cstdint.h>
 #include <thrust/detail/temporary_array.h>
+#include <thrust/distance.h>
 #include <thrust/extrema.h>
 #include <thrust/pair.h>
-#include <thrust/distance.h>
+#include <thrust/system/hip/config.h>
+#include <thrust/system/hip/detail/get_value.h>
+#include <thrust/system/hip/detail/reduce.h>
 
 
 // rocprim include
@@ -313,7 +313,7 @@ minmax_element(execution_policy<Derived>& policy,
                ItemsIt                    last,
                BinaryPred                 binary_pred)
 {
-    pair<ItemsIt, ItemsIt> ret = thrust::make_pair(first, first);
+    auto ret = thrust::make_pair(first, first);
 
     typedef typename iterator_traits<ItemsIt>::value_type      InputType;
     typedef typename iterator_traits<ItemsIt>::difference_type IndexType;

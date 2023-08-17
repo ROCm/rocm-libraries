@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright© 2019 Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright© 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -41,6 +41,8 @@
 #include <thrust/system/hip/detail/util.h>
 #include <thrust/detail/temporary_array.h>
 #include <thrust/type_traits/is_trivially_relocatable.h>
+
+#include <thrust/system/hip/detail/nv/target.h>
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
@@ -85,23 +87,18 @@ namespace __copy
                         thrust::detail::true_type) // trivial copy
     {
         // WORKAROUND
-#if defined(THRUST_HIP_DEVICE_CODE)
-        THRUST_UNUSED_VAR(sys1);
-        THRUST_UNUSED_VAR(sys2);
-        THRUST_UNUSED_VAR(n);
-        THRUST_UNUSED_VAR(begin);
-        return result;
-#else
-        typedef typename iterator_traits<InputIt>::value_type InputTy;
-        if (n > 0) {
-          trivial_device_copy(derived_cast(sys1),
-                              derived_cast(sys2),
-                              reinterpret_cast<InputTy*>(thrust::raw_pointer_cast(&*result)),
-                              reinterpret_cast<InputTy const*>(thrust::raw_pointer_cast(&*begin)),
-                              n);
-        }
-        return result + n;
-#endif
+        NV_IF_TARGET(NV_IS_DEVICE,
+                     (THRUST_UNUSED_VAR(sys1); THRUST_UNUSED_VAR(sys2); THRUST_UNUSED_VAR(n);
+                      THRUST_UNUSED_VAR(begin);
+                      return result;),
+                     (typedef typename iterator_traits<InputIt>::value_type InputTy; if(n > 0) {
+                         trivial_device_copy(
+                             derived_cast(sys1),
+                             derived_cast(sys2),
+                             reinterpret_cast<InputTy*>(thrust::raw_pointer_cast(&*result)),
+                             reinterpret_cast<InputTy const*>(thrust::raw_pointer_cast(&*begin)),
+                             n);
+                     } return result + n;));
     }
 
     // non-trivial H->D copy
