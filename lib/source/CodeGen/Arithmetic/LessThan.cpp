@@ -9,6 +9,7 @@ namespace rocRoller
     RegisterComponentTemplateSpec(LessThanGenerator, Register::Type::Scalar, DataType::Int32);
     RegisterComponentTemplateSpec(LessThanGenerator, Register::Type::Vector, DataType::Int32);
     RegisterComponentTemplateSpec(LessThanGenerator, Register::Type::Scalar, DataType::UInt32);
+    RegisterComponentTemplateSpec(LessThanGenerator, Register::Type::Vector, DataType::UInt32);
     RegisterComponentTemplateSpec(LessThanGenerator, Register::Type::Scalar, DataType::Int64);
     RegisterComponentTemplateSpec(LessThanGenerator, Register::Type::Scalar, DataType::UInt64);
     RegisterComponentTemplateSpec(LessThanGenerator, Register::Type::Vector, DataType::Int64);
@@ -81,6 +82,16 @@ namespace rocRoller
         AssertFatal(rhs != nullptr);
 
         co_yield_(Instruction("v_cmp_lt_i32", {dst}, {lhs, rhs}, {}, ""));
+    }
+
+    template <>
+    Generator<Instruction> LessThanGenerator<Register::Type::Vector, DataType::UInt32>::generate(
+        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs)
+    {
+        AssertFatal(lhs != nullptr);
+        AssertFatal(rhs != nullptr);
+
+        co_yield_(Instruction("v_cmp_lt_u32", {dst}, {lhs, rhs}, {}, ""));
     }
 
     template <>

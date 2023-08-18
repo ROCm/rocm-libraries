@@ -11,6 +11,7 @@ namespace rocRoller
         struct ComputeIndex;
         struct ConditionalOp;
         struct Deallocate;
+        struct DoWhileOp;
         struct ForLoopOp;
         struct Kernel;
         struct LoadLDSTile;
@@ -34,6 +35,7 @@ namespace rocRoller
                                        ComputeIndex,
                                        ConditionalOp,
                                        Deallocate,
+                                       DoWhileOp,
                                        ForLoopOp,
                                        Kernel,
                                        LoadLDSTile,

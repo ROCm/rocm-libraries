@@ -19,6 +19,11 @@ namespace rocRoller::KernelGraph::ControlGraph
         return concatenate(name(), " ", conditionName, ": ", condition);
     }
 
+    std::string DoWhileOp::toString() const
+    {
+        return concatenate(name(), " ", loopName, ": ", condition);
+    }
+
     std::string UnrollOp::toString() const
     {
         return concatenate(name(), " ", size);
@@ -88,6 +93,7 @@ namespace rocRoller::KernelGraph::ControlGraph
 
     RR_CLASS_NAME_IMPL(SetCoordinate);
     RR_CLASS_NAME_IMPL(ConditionalOp);
+    RR_CLASS_NAME_IMPL(DoWhileOp);
     RR_CLASS_NAME_IMPL(ForLoopOp);
     RR_CLASS_NAME_IMPL(UnrollOp);
     RR_CLASS_NAME_IMPL(Assign);

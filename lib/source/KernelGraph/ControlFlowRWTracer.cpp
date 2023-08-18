@@ -215,7 +215,41 @@ namespace rocRoller::KernelGraph
         // Already in a Scope
     }
 
+    void ControlFlowRWTracer::operator()(ConditionalOp const& op, int tag)
+    {
+        auto trueBody = m_graph.control.getOutputNodeIndices<Body>(tag).to<std::set>();
+        for(auto const& b : trueBody)
+        {
+            m_bodyParent.insert_or_assign(b, tag);
+        }
+        generate(trueBody);
+
+        auto falseBody = m_graph.control.getOutputNodeIndices<Else>(tag).to<std::set>();
+        for(auto const& b : falseBody)
+        {
+            m_bodyParent.insert_or_assign(b, tag);
+        }
+        generate(falseBody);
+    }
+
     void ControlFlowRWTracer::operator()(Deallocate const& op, int tag) {}
+
+    void ControlFlowRWTracer::operator()(DoWhileOp const& op, int tag)
+    {
+        CollectDataFlowExpressionVisitor visitor;
+        visitor.call(op.condition);
+        for(auto src : visitor.tags)
+        {
+            trackRegister(tag, src, ReadWrite::READ);
+        }
+
+        auto body = m_graph.control.getOutputNodeIndices<Body>(tag).to<std::set>();
+        for(auto const& b : body)
+        {
+            m_bodyParent.insert_or_assign(b, tag);
+        }
+        generate(body);
+    }
 
     void ControlFlowRWTracer::operator()(ForLoopOp const& op, int tag)
     {
@@ -270,23 +304,6 @@ namespace rocRoller::KernelGraph
             m_bodyParent.insert_or_assign(b, tag);
         }
         generate(body);
-    }
-
-    void ControlFlowRWTracer::operator()(ConditionalOp const& op, int tag)
-    {
-        auto trueBody = m_graph.control.getOutputNodeIndices<Body>(tag).to<std::set>();
-        for(auto const& b : trueBody)
-        {
-            m_bodyParent.insert_or_assign(b, tag);
-        }
-        generate(trueBody);
-
-        auto falseBody = m_graph.control.getOutputNodeIndices<Else>(tag).to<std::set>();
-        for(auto const& b : falseBody)
-        {
-            m_bodyParent.insert_or_assign(b, tag);
-        }
-        generate(falseBody);
     }
 
     void ControlFlowRWTracer::operator()(Kernel const& op, int tag)

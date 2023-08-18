@@ -47,6 +47,34 @@ namespace rocRoller
         };
 
         /**
+         * DoWhileLoopOp - Represents a do-while loop.
+         *
+         * Must have nodes connected via the following outgoing edges:
+         *
+         * - Body: The loop body. The loop body must cause a change in the condition, this body will also be emitted at least once. 
+         *
+         * There may be multiple outgoing edges for any of these.  Code that follows the for loop should be connected via a Sequence edge.
+         *
+         * condition is a scalar or vector condition and is executed before each iteration to determine if we must exit the loop.
+         *
+         * Currently generates code that behaves like:
+         *
+         * while_top:
+         * <Body>
+	 * if(condition) goto while_top
+         * <Sequence>
+         */
+        struct DoWhileOp
+        {
+            Expression::ExpressionPtr condition;
+
+            std::string loopName;
+
+            std::string name() const;
+            std::string toString() const;
+        };
+
+        /**
          * ForLoopOp - Represents a for loop.
          *
          * Must have nodes connected via the following outgoing edges:

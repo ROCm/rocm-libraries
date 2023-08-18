@@ -2709,6 +2709,98 @@ namespace KernelGraphTest
         }
     }
 
+    TEST_F(KernelGraphTestGPU, DoWhileExecute)
+    {
+        rocRoller::KernelGraph::KernelGraph kgraph;
+
+        auto zero  = Expression::literal(0u);
+        auto one   = Expression::literal(1u);
+        auto three = Expression::literal(3u);
+
+        auto k = m_context->kernel();
+
+        k->addArgument(
+            {"result", {DataType::Int32, PointerType::PointerGlobal}, DataDirection::WriteOnly});
+
+        k->setKernelDimensions(1);
+        k->setWorkitemCount({three, one, one});
+        k->setWorkgroupSize({1, 1, 1});
+        k->setDynamicSharedMemBytes(zero);
+        m_context->schedule(k->preamble());
+        m_context->schedule(k->prolog());
+
+        // global result
+        auto user = kgraph.coordinates.addElement(User("result"));
+        auto wg   = kgraph.coordinates.addElement(Workgroup());
+        kgraph.coordinates.addElement(PassThrough(), {wg}, {user});
+
+        // result
+        auto dstVGPR = kgraph.coordinates.addElement(VGPR());
+
+        auto dfa = std::make_shared<Expression::Expression>(
+            Expression::DataFlowTag{dstVGPR, Register::Type::Vector, DataType::UInt32});
+        auto assignVGPR = kgraph.control.addElement(Assign{Register::Type::Vector, zero});
+        kgraph.mapper.connect(assignVGPR, dstVGPR, NaryArgument::DEST);
+        auto assignBody = kgraph.control.addElement(Assign{Register::Type::Vector, dfa + one});
+        kgraph.mapper.connect(assignBody, dstVGPR, NaryArgument::DEST);
+        auto workgroupExpr = k->workgroupIndex().at(0)->expression();
+
+        auto condVGPR = kgraph.coordinates.addElement(VGPR());
+        auto condDFT  = std::make_shared<Expression::Expression>(
+            Expression::DataFlowTag{condVGPR, Register::Type::Vector, DataType::UInt32});
+
+        auto assignCond = kgraph.control.addElement(Assign{Register::Type::Vector, workgroupExpr});
+        kgraph.mapper.connect(assignCond, condVGPR, NaryArgument::DEST);
+
+        auto doWhile = kgraph.control.addElement(DoWhileOp{dfa < condDFT, "Test DoWhile"});
+
+        auto storeIndex = kgraph.control.addElement(StoreVGPR());
+        kgraph.mapper.connect<User>(storeIndex, user);
+        kgraph.mapper.connect<VGPR>(storeIndex, dstVGPR);
+
+        auto kernel = kgraph.control.addElement(Kernel());
+        kgraph.control.addElement(Body(), {kernel}, {assignVGPR});
+        kgraph.control.addElement(Body(), {kernel}, {assignCond});
+        kgraph.control.addElement(Sequence(), {assignCond}, {doWhile});
+        kgraph.control.addElement(Sequence(), {assignVGPR}, {doWhile});
+        kgraph.control.addElement(Body(), {doWhile}, {assignBody});
+        kgraph.control.addElement(Sequence(), {doWhile}, {storeIndex});
+
+        m_context->schedule(rocRoller::KernelGraph::generate(kgraph, m_context->kernel()));
+
+        m_context->schedule(k->postamble());
+        m_context->schedule(k->amdgpu_metadata());
+
+        if(isLocalDevice())
+        {
+            auto d_result = make_shared_device<int>(3);
+
+            KernelArguments kargs;
+            kargs.append("result", d_result.get());
+
+            KernelInvocation kinv;
+            kinv.workitemCount = {3, 1, 1};
+            kinv.workgroupSize = {1, 1, 1};
+
+            auto executableKernel = m_context->instructions()->getExecutableKernel();
+            executableKernel->executeKernel(kargs, kinv);
+
+            std::vector<int> result(3);
+            ASSERT_THAT(
+                hipMemcpy(
+                    result.data(), d_result.get(), result.size() * sizeof(int), hipMemcpyDefault),
+                HasHipSuccess(0));
+            EXPECT_EQ(result[0], 1);
+            EXPECT_EQ(result[1], 1);
+            EXPECT_EQ(result[2], 2);
+        }
+        else
+        {
+            std::vector<char> assembledKernel = m_context->instructions()->assemble();
+            EXPECT_GT(assembledKernel.size(), 0);
+        }
+    }
+
     TEST_F(KernelGraphTest, GEMMWithScratch)
     {
         auto example = rocRollerTest::Graphs::GEMM<float>();

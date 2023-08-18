@@ -300,6 +300,48 @@ namespace rocRoller
                 co_yield Instruction::Unlock("Unlock Conditional");
             }
 
+            Generator<Instruction> operator()(int tag, DoWhileOp const& op, Transformer coords)
+            {
+                auto topLabel = m_context->labelAllocator()->label("DoWhileTop");
+
+                co_yield Instruction::Comment("Initialize DoWhileLoop");
+
+                auto connections = m_graph->mapper.getConnections(tag);
+
+                co_yield Instruction::Lock(Scheduling::Dependency::Branch, "Lock DoWhile");
+
+                //Do Body at least once
+                auto body = m_graph->control.getOutputNodeIndices<Body>(tag).to<std::set>();
+
+                auto [conditionRegisterType, conditionVariableType]
+                    = Expression::resultType(op.condition);
+                auto conditionResult = conditionRegisterType == Register::Type::Special
+                                               && conditionVariableType == DataType::Bool
+                                           ? m_context->getSCC()
+                                           : m_context->getVCC();
+
+                co_yield Instruction::Label(topLabel);
+                co_yield generate(body, coords);
+
+                //Check Condition
+                co_yield Expression::generate(
+                    conditionResult, m_fastArith(op.condition), m_context);
+
+                co_yield m_context->brancher()->branchIfNonZero(
+                    topLabel,
+                    conditionResult,
+                    concatenate("Condition: Bottom (jump to " + topLabel->toString()
+                                + " if true)"));
+
+                // TODO: Have deallocate nodes generate the proper wait count and remove this wait.
+                //       This is currently needed in case there are loads within a loop that are never
+                //       used within the loop. If there are, the wait count observer never releases
+                //       the registers.
+                co_yield Instruction::Wait(
+                    WaitCount::Zero("DEBUG: Wait after branch", m_context->targetArchitecture()));
+                co_yield Instruction::Unlock("Unlock DoWhile");
+            }
+
             Generator<Instruction> operator()(int tag, ForLoopOp const& op, Transformer coords)
             {
                 auto topLabel = m_context->labelAllocator()->label("ForLoopTop");
