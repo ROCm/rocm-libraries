@@ -48,6 +48,8 @@ namespace rocRoller
         int  prefetchLDSFactor;
         bool prefetchMixMemOps;
 
+        bool streamK;
+
         std::vector<int>  loopOverOutputTilesDimensions;
         std::string       loopOverOutputTilesTopLoop;
         std::vector<uint> loopOverOutputTilesCoordSizes;

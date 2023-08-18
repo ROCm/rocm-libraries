@@ -83,6 +83,7 @@ namespace GEMMDriverTest
 
         bool loopOverTiles = false;
         bool enableScratch = false;
+        bool streamK       = false;
     };
 
     template <typename T>
@@ -94,6 +95,10 @@ namespace GEMMDriverTest
 
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
+
+        hipDeviceProp_t deviceProperties;
+        ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
+        uint numCUs = deviceProperties.multiProcessorCount;
 
         // D (MxN) = alpha * A (MxK) X B (KxN) + beta * C (MxN)
         int   M      = gemm.m;
@@ -133,6 +138,11 @@ namespace GEMMDriverTest
         {
             // multiple output macro tiles per workgroup
             numWorkgroupX = M * N / gemm.macM / gemm.macN / 2;
+            numWorkgroupY = 1;
+        }
+        else if(gemm.streamK)
+        {
+            numWorkgroupX = numCUs;
             numWorkgroupY = 1;
         }
         else
@@ -277,6 +287,8 @@ namespace GEMMDriverTest
 
         if(gemm.enableScratch)
         {
+            REQUIRE_ARCH_CAP(GPUCapability::ArchAccUnifiedRegs);
+
             AssertFatal(numWorkgroupY == 1,
                         "Current scratch space implementation assumes that the kernel is launched "
                         "with numWorkgroupY == 1");
@@ -300,6 +312,16 @@ namespace GEMMDriverTest
             kernelOptions->loopOverOutputTilesCoordSizes
                 = {static_cast<uint>(M / gemm.macM), static_cast<uint>(N / gemm.macN)};
             kernelOptions->loopOverOutputTilesIteratedTiles = 2;
+        }
+
+        if(gemm.streamK)
+        {
+            kernelOptions->loopOverOutputTilesDimensions = {0, 1};
+            kernelOptions->loopOverOutputTilesCoordSizes
+                = {static_cast<uint>(M / gemm.macM), static_cast<uint>(N / gemm.macN)};
+            kernelOptions->streamK = true;
+
+            runtimeArgs.append("numCUs", numCUs);
         }
 
         auto params = std::make_shared<CommandParameters>();
@@ -470,6 +492,40 @@ namespace GEMMDriverTest
     TEST_F(GEMMTestGPU, GPU_BasicGEMM)
     {
         GEMMProblem gemm;
+        basicGEMM<float>(m_context, gemm, 1.e-6);
+    }
+
+    TEST_F(GEMMTestGPU, GPU_BasicGEMMStreamK)
+    {
+        hipDeviceProp_t deviceProperties;
+        ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
+        uint numCUs = deviceProperties.multiProcessorCount;
+
+        GEMMProblem gemm;
+
+        // TODO For now, make sure that number of M*N tiles is a
+        // multiple of the number of CUs.  This means: Stream-K does
+        // an integer number of output tiles; and, the global tile
+        // space divided by the number of CUs is a multiple of the
+        // number of K tiles, so no communication necessary.
+
+        gemm.m = gemm.macM * 8;
+        gemm.n = gemm.macN * numCUs / 2;
+
+        ASSERT_GE(gemm.m * gemm.n / gemm.macM / gemm.macN, numCUs);
+
+        gemm.streamK = true;
+        gemm.k       = gemm.macK * 8;
+
+        // It works with prefetching too!!
+        gemm.unrollK          = 2;
+        gemm.prefetch         = true;
+        gemm.prefetchInFlight = 2;
+
+        gemm.loadLDSA  = true; // false doesn't work
+        gemm.loadLDSB  = true; // false doesn't work
+        gemm.storeLDSD = true; // true or false both work
+
         basicGEMM<float>(m_context, gemm, 1.e-6);
     }
 

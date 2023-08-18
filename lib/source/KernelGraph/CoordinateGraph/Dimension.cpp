@@ -168,9 +168,9 @@ namespace rocRoller
             return BaseDimension::toString();
         }
 
-        MacroTileNumber MacroTile::tileNumber(int sdim) const
+        MacroTileNumber MacroTile::tileNumber(int sdim, Expression::ExpressionPtr size) const
         {
-            return MacroTileNumber(sdim, Expression::literal(1u), Expression::literal(1u));
+            return MacroTileNumber(sdim, size, Expression::literal(1u));
         }
 
         MacroTileIndex MacroTile::tileIndex(int sdim) const

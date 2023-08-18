@@ -7,6 +7,9 @@
 #include <rocRoller/KernelGraph/CoordinateGraph/CoordinateGraph.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/Transformer.hpp>
 
+// TODO Remove this when Workgroup removed from RegisterTagManager
+#include <rocRoller/KernelGraph/RegisterTagManager.hpp>
+
 namespace rocRoller
 {
     namespace KernelGraph::CoordinateGraph
@@ -36,7 +39,12 @@ namespace rocRoller
             {
                 if(deltas.count(tag) > 0)
                 {
-                    return literal(evaluate(deltas.at(tag)));
+                    auto expr = deltas.at(tag);
+                    if(evaluationTimes(expr)[EvaluationTime::Translate])
+                    {
+                        return literal(evaluate(deltas.at(tag)));
+                    }
+                    return simplify(expr);
                 }
                 return zero;
             }
@@ -274,6 +282,9 @@ namespace rocRoller
                                 ShowValue(dimensionWorkgroup.dim),
                                 ShowValue(kernelWorkgroupIndexes.size()));
                     auto expr = kernelWorkgroupIndexes.at(dimensionWorkgroup.dim)->expression();
+                    // TODO Remove this when Workgroup removed from RegisterTagManager
+                    m_context->registerTagManager()->addRegister(
+                        tag, kernelWorkgroupIndexes.at(dimensionWorkgroup.dim));
                     setCoordinate(tag, expr);
                 }
                 if(std::holds_alternative<Workitem>(dimension))

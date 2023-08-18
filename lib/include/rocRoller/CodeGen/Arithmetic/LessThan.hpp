@@ -61,6 +61,9 @@ namespace rocRoller
     Generator<Instruction> LessThanGenerator<Register::Type::Scalar, DataType::Int64>::generate(
         Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs);
     template <>
+    Generator<Instruction> LessThanGenerator<Register::Type::Scalar, DataType::UInt64>::generate(
+        Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs);
+    template <>
     Generator<Instruction> LessThanGenerator<Register::Type::Vector, DataType::Int64>::generate(
         Register::ValuePtr dst, Register::ValuePtr lhs, Register::ValuePtr rhs);
     template <>

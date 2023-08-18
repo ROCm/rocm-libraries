@@ -350,7 +350,7 @@ namespace rocRoller
             /**
              * Return MacroTileNumber corresponding to sub-dimension `sdim` of this tile.
              */
-            MacroTileNumber tileNumber(int sdim) const;
+            MacroTileNumber tileNumber(int sdim, Expression::ExpressionPtr size) const;
 
             /**
              * Return MacroTileIndex corresponding to sub-dimension `sdim` of this tile.

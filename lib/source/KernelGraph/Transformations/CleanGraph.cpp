@@ -135,11 +135,25 @@ namespace rocRoller
                 return d;
             }
 
+            Operation visitOperation(Assign const& op)
+            {
+                auto cleanOp       = op;
+                cleanOp.expression = m_cleanArguments.call(op.expression);
+                return cleanOp;
+            }
+
+            Operation visitOperation(ConditionalOp const& op)
+            {
+                auto cleanOp      = op;
+                cleanOp.condition = m_cleanArguments.call(op.condition);
+                return cleanOp;
+            }
+
             Operation visitOperation(ForLoopOp const& op)
             {
-                auto forOp      = op;
-                forOp.condition = m_cleanArguments.call(op.condition);
-                return forOp;
+                auto cleanOp      = op;
+                cleanOp.condition = m_cleanArguments.call(op.condition);
+                return cleanOp;
             }
 
             template <COperation T>

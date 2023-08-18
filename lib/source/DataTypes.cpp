@@ -351,6 +351,9 @@ namespace rocRoller
         if(rhs.dataType == DataType::Raw32)
             return lhs;
 
+        if(lhs.dataType == DataType::Bool32 && rhs.dataType == DataType::Bool)
+            return lhs;
+
         AssertFatal(lhsInfo.isIntegral == rhsInfo.isIntegral,
                     "No automatic promotion between integral and non-integral types",
                     ShowValue(lhs),

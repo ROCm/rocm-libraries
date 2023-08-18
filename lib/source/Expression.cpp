@@ -235,14 +235,21 @@ namespace rocRoller
                 return logical(lhsVal, rhsVal);
             }
 
-            ResultType logical(ResultType const& lhsVal, ResultType const& rhsVal) const
+            ResultType logical(ResultType lhsVal, ResultType rhsVal) const
             {
+                if(lhsVal.varType == DataType::Bool && rhsVal.varType == DataType::Bool32)
+                {
+                    std::swap(lhsVal, rhsVal);
+                }
+
                 // Can't compare between two different types on the GPU.
-                AssertFatal(lhsVal.regType == Register::Type::Literal
-                                || rhsVal.regType == Register::Type::Literal
-                                || lhsVal.varType == rhsVal.varType,
-                            ShowValue(lhsVal.varType),
-                            ShowValue(rhsVal.varType));
+                AssertFatal(
+                    lhsVal.regType == Register::Type::Literal
+                        || rhsVal.regType == Register::Type::Literal
+                        || lhsVal.varType == rhsVal.varType
+                        || (lhsVal.varType == DataType::Bool32 && rhsVal.varType == DataType::Bool),
+                    ShowValue(lhsVal.varType),
+                    ShowValue(rhsVal.varType));
 
                 auto inputRegType = Register::PromoteType(lhsVal.regType, rhsVal.regType);
                 auto inputVarType = VariableType::Promote(lhsVal.varType, rhsVal.varType);

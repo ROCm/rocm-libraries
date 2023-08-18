@@ -46,11 +46,11 @@ namespace rocRoller
             AddStreamK()                  = delete;
             AddStreamK(AddStreamK const&) = delete;
 
-            AddStreamK(std::vector<int> const&                       dims,
-                       std::vector<Expression::ExpressionPtr> const& tileNumberCoordSizes,
-                       std::string const&                            topLoop,
-                       Expression::ExpressionPtr                     numCUs,
-                       ContextPtr                                    context);
+            AddStreamK(std::vector<int> const&   dims,
+                       std::string const&        topLoop,
+                       std::string const&        accumulatorLoop,
+                       Expression::ExpressionPtr numCUs,
+                       ContextPtr                context);
 
             KernelGraph apply(KernelGraph const& original) override;
             std::string name() const override;
@@ -62,6 +62,7 @@ namespace rocRoller
                                Expression::ExpressionPtr numTilesPerCU);
 
             void stage(KernelGraph const& graph);
+            void setupArguments();
             void commit(KernelGraph& graph);
 
             ContextPtr m_context;
@@ -69,13 +70,15 @@ namespace rocRoller
             // Location
             std::vector<int> m_dimensions;
             std::string      m_topLoop;
+            std::string      m_accumulatorLoop;
 
             int m_topLoopOp;
+            int m_accumulatorLoopOp;
             int m_accumulatorCoord;
 
-            // Parameters
-            std::vector<Expression::ExpressionPtr> m_tileNumberCoordSizes;
-            Expression::ExpressionPtr              m_numCUs;
+            // Kernel arguments
+            std::vector<Expression::ExpressionPtr> m_numTiles, m_numTileArgExprs;
+            Expression::ExpressionPtr              m_numCUs, m_numTilesPerCU;
 
             // Staged MacroTileNumber coordinates
             //

@@ -13,9 +13,9 @@ namespace rocRoller
     {
         /**
          * EdgeType - type of edge in the coordinate transfrom graph.
-         * 
+         *
          * NOTE: The order of nodes matter!
-         * 
+         *
          * Traversal routines can be limited to traversing only a
          * particular type of edge.
          */

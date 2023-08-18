@@ -37,6 +37,40 @@ namespace rocRoller::KernelGraph
         LOAD_LDS_MATRIX_B,
     };
 
+    std::string toString(ComputeIndexChainType const& x)
+    {
+        switch(x)
+        {
+        case STORE_ELEM:
+            return "STORE_ELEM";
+        case STORE_WAVE_MATRIX_ACCUMULATOR:
+            return "STORE_WAVE_MATRIX_ACCUMULATOR";
+        case LOAD_ELEM:
+            return "LOAD_ELEM";
+        case LOAD_ELEM_MATRIX_A:
+            return "LOAD_ELEM_MATRIX_A";
+        case LOAD_ELEM_MATRIX_B:
+            return "LOAD_ELEM_MATRIX_B";
+        case LOAD_WAVE_MATRIX_A:
+            return "LOAD_WAVE_MATRIX_A";
+        case LOAD_WAVE_MATRIX_B:
+            return "LOAD_WAVE_MATRIX_B";
+        case LOAD_WAVE_MATRIX_ACCUMULATOR:
+            return "LOAD_WAVE_MATRIX_ACCUMULATOR";
+        case LOAD_LDS_MATRIX_A:
+            return "LOAD_LDS_MATRIX_A";
+        case LOAD_LDS_MATRIX_B:
+            return "LOAD_LDS_MATRIX_B";
+        }
+
+        Throw<FatalError>("Invalid ComputeIndexChainType");
+    }
+
+    std::ostream& operator<<(std::ostream& stream, ComputeIndexChainType const& obj)
+    {
+        return stream << toString(obj);
+    }
+
     struct ComputeIndexChainSpecification
     {
         int                     target;
@@ -90,6 +124,18 @@ namespace rocRoller::KernelGraph
             }
         }
         return graph.coordinates.addElement(Buffer(), {src}, {dst});
+    }
+
+    /**
+     * @brief True if ForLoopOp has translate-time increment.
+     */
+    bool uniformForLoop(std::optional<int> maybeForLoop, KernelGraph const& kgraph)
+    {
+        if(!maybeForLoop)
+            return false;
+
+        auto [lhs, rhs] = getForLoopIncrement(kgraph, *maybeForLoop);
+        return evaluationTimes(rhs)[EvaluationTime::Translate];
     }
 
     /**
@@ -281,34 +327,40 @@ namespace rocRoller::KernelGraph
         connections.push_back(DC<Stride>(colStride, 1));
         connections.push_back(DC<Buffer>(buffer));
 
-        auto ciRow = makeComputeIndex(graph,
-                                      source,
-                                      elemX,
-                                      -1,
-                                      rowOffset,
-                                      rowStride,
-                                      buffer,
-                                      forward,
-                                      dtype,
-                                      {elemY},
-                                      offsettype,
-                                      offsettype);
-        auto ciCol = makeComputeIndex(graph,
-                                      source,
-                                      elemY,
-                                      rowOffset,
-                                      colOffset,
-                                      colStride,
-                                      buffer,
-                                      forward,
-                                      dtype,
-                                      {elemX},
-                                      offsettype,
-                                      offsettype);
+        std::vector<int> ciOperations;
 
-        graph.control.addElement(Sequence(), {ciRow}, {ciCol});
+        auto rowZeros = std::vector<int>{elemY};
+        auto colZeros = std::vector<int>{elemX};
 
-        return {ciRow, ciCol, connections};
+        ciOperations.push_back(makeComputeIndex(graph,
+                                                source,
+                                                elemX,
+                                                -1,
+                                                rowOffset,
+                                                rowStride,
+                                                buffer,
+                                                forward,
+                                                dtype,
+                                                rowZeros,
+                                                offsettype,
+                                                offsettype));
+        ciOperations.push_back(makeComputeIndex(graph,
+                                                source,
+                                                elemY,
+                                                rowOffset,
+                                                colOffset,
+                                                colStride,
+                                                buffer,
+                                                forward,
+                                                dtype,
+                                                colZeros,
+                                                offsettype,
+                                                offsettype));
+
+        for(int i = 1; i < ciOperations.size(); ++i)
+            graph.control.addElement(Sequence(), {ciOperations[i - 1]}, {ciOperations[i]});
+
+        return {ciOperations.front(), ciOperations.back(), connections};
     }
 
     /**
@@ -577,11 +629,11 @@ namespace rocRoller::KernelGraph
         int baseFor    = -1;
         int baseUpdate = -1;
 
-        auto maybeForLoop = findContainingOperation<ForLoopOp>(op, graph);
-        if(maybeForLoop)
+        auto maybeForLoop      = findContainingOperation<ForLoopOp>(op, graph);
+        auto maybeForLoopCoord = getForLoop(maybeForLoop, graph, required);
+        if(maybeForLoop && maybeForLoopCoord && uniformForLoop(maybeForLoop, graph))
         {
-            auto forLoop = getForLoop(*maybeForLoop, graph);
-
+            int forLoop = *maybeForLoopCoord;
             int offset, stride;
             if(forward)
             {
@@ -892,17 +944,34 @@ namespace rocRoller::KernelGraph
             auto forLoopCoordinates  = filterCoordinates<ForLoop>(required, kgraph);
             auto unrollCoordinates   = filterCoordinates<Unroll>(required, kgraph);
 
-            auto maybeForLoop = findContainingOperation<ForLoopOp>(candidate, kgraph);
+            for(auto r : required)
+            {
+                auto e = std::get<Dimension>(kgraph.coordinates.getElement(r));
+                log->debug("  required: {}: {}", r, toString(e));
+            }
 
-            auto hasForLoop = !forLoopCoordinates.empty();
-            auto hasUnroll  = !unrollCoordinates.empty();
+            auto maybeForLoop = findContainingOperation<ForLoopOp>(candidate, kgraph);
+            auto hasForLoop   = !forLoopCoordinates.empty();
+            auto hasUnroll    = !unrollCoordinates.empty();
+
+            if(maybeForLoop)
+            {
+                log->debug("  containing for-loop: {}", *maybeForLoop);
+
+                if(!uniformForLoop(maybeForLoop, kgraph))
+                {
+                    log->debug("  forcing immediate");
+                    hasForLoop   = false;
+                    hasUnroll    = false;
+                    maybeForLoop = {};
+                }
+            }
 
             auto type = computeIndexChainType(kgraph, candidate);
+            log->debug("  type: {}", toString(type));
 
             if(hasForLoop)
             {
-                log->debug("KernelGraph::addComputeIndex({}): forLoop", candidate);
-
                 int location, forLoop;
                 if(maybeForLoop)
                 {
@@ -911,11 +980,13 @@ namespace rocRoller::KernelGraph
                 }
                 else
                 {
-                    // Prefetch; has a ForLoop dependency but occurs outside the loop
+                    // Prefetch; has a ForLoop dependency but occurs outside the loop.
                     auto maybeScope = findContainingOperation<Scope>(candidate, kgraph);
                     location        = *maybeScope;
                     forLoop         = -1;
                 }
+
+                log->debug("  staged as: hasForLoop, location {} forLoopOp {}", location, forLoop);
 
                 stageChain(
                     target, candidate, location, type, GD::Upstream, forLoop, unrollCoordinates);
@@ -924,7 +995,7 @@ namespace rocRoller::KernelGraph
 
             if(hasUnroll)
             {
-                log->debug("KernelGraph::addComputeIndex({}): hasUnroll", candidate);
+                log->debug("  staged as: hasUnroll");
 
                 auto kernel = *kgraph.control.roots().begin();
                 stageChain(target, candidate, kernel, type, GD::Downstream, -1, unrollCoordinates);
@@ -933,14 +1004,14 @@ namespace rocRoller::KernelGraph
 
             if(maybeForLoop)
             {
-                log->debug("KernelGraph::addComputeIndex({}): containing forLoop", candidate);
-
                 auto forLoop = *maybeForLoop;
+                log->debug("  staged as: maybeForLoop, forLoopOp {}", forLoop);
+
                 stageChain(target, candidate, forLoop, type, GD::Upstream, forLoop);
                 return;
             }
 
-            log->debug("KernelGraph::addComputeIndex({}): immediate", candidate);
+            log->debug("  staged as: immediate");
             stageChain(target, candidate, candidate, type, GD::Upstream);
         }
 
@@ -981,15 +1052,20 @@ namespace rocRoller::KernelGraph
                     kgraph.control.addElement(Sequence(), {chain.bottom}, {spec.location});
                 }
 
-                // If the chain has a increment
+                // If the chain has an update but no containing
+                // ForLoopOp, it is from a pre-fetch
                 if(chain.update > 0 && spec.forLoop < 0)
                 {
                     kgraph.control.deleteElement(chain.update);
                     kgraph.mapper.purge(chain.update);
                     chain.update = -1;
                 }
+
+                // Attach increment to associate ForLoop
                 if(chain.update > 0)
+                {
                     kgraph.control.addElement(ForLoopIncrement(), {spec.forLoop}, {chain.update});
+                }
 
                 // Add deferred connections
                 for(auto candidate : candidates)

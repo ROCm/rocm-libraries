@@ -29,7 +29,7 @@ namespace rocRoller
         RR_EMPTY_STRUCT_WITH_NAME(Body);
 
         /**
-         * Else edge indicates the code that should be emmitted given a false condition. 
+         * Else edge indicates the code that should be emmitted given a false condition.
          */
         RR_EMPTY_STRUCT_WITH_NAME(Else);
 

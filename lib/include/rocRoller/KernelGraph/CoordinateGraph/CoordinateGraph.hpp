@@ -24,18 +24,18 @@ namespace rocRoller
      * - data flow
      * - data locality
      * - how indexes are computed/transformed
-     * 
+     *
      * Given the geometry of a tensor (sizes, strides), the graph can
      * be used to determine index values of given working coordinates.
-     * 
+     *
      * The graph answers the question:
      * What is the relationship between the dimensions of:
      *  - Input and output tensors
      *  - GPU execution constructs such as workgroups, workitems, wavefronts
      *  - Software constructs such as loops & unrolls
      *  - Temporary storage such as registers (V/SGPRs), LDS, scratch space
-     * 
-     * It maps problem memory space to the hardware aspects, like 
+     *
+     * It maps problem memory space to the hardware aspects, like
      * workgroups, workitems, VGPRs, LDS, and software constraints,
      * like loop dimensions/unrolls.
      *

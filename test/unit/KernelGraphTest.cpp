@@ -1380,7 +1380,7 @@ namespace KernelGraphTest
         auto addDeallocate  = std::make_shared<AddDeallocate>();
         auto kgraph2        = kgraph1.transform(addDeallocate);
         auto addDeallocates = kgraph2.control.getNodes<Deallocate>().to<std::vector>();
-        EXPECT_EQ(addDeallocates.size(), 11);
+        EXPECT_EQ(addDeallocates.size(), 14);
 
         unrolled_kgraph_lds = kgraph_fused.transform(addLDSTransform);
         auto fusedStoreLDS = unrolled_kgraph_lds.control.getNodes<StoreLDSTile>().to<std::vector>();
@@ -1394,7 +1394,7 @@ namespace KernelGraphTest
         // Verify number of Deallocates after unroll/fuse/lds
         unrolled_kgraph_lds = unrolled_kgraph_lds.transform(addDeallocate);
         addDeallocates      = unrolled_kgraph_lds.control.getNodes<Deallocate>().to<std::vector>();
-        EXPECT_EQ(addDeallocates.size(), 32);
+        EXPECT_EQ(addDeallocates.size(), 35);
     }
 
     TEST_F(KernelGraphTest, InlineIncrement)

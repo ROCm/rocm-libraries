@@ -31,6 +31,7 @@ namespace rocRoller
         , unrollX(0)
         , unrollY(0)
         , unrollK(0)
+        , streamK(false)
         , transposeMemoryAccess({})
         , assertWaitCntState(true)
         , packMultipleElementsInto1VGPR(true)
@@ -63,9 +64,8 @@ namespace rocRoller
         os << "  prefetchLDSFactor:\t\t\t" << input.prefetchLDSFactor << std::endl;
         os << "  prefetchMixMemOps:\t\t\t" << input.prefetchMixMemOps << std::endl;
         os << "  setNextFreeVGPRToMax:\t" << input.setNextFreeVGPRToMax << std::endl;
-
+        os << "  streamK:\n" << input.streamK << std::endl;
         os << "  transposeMemoryAccess:\n" << input.transposeMemoryAccess << std::endl;
-
         os << "  assertWaitCntState:\t\t" << input.assertWaitCntState << std::endl;
         os << "  packMultipleElementsInto1VGPR:\t\t" << input.packMultipleElementsInto1VGPR
            << std::endl;

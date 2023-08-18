@@ -249,7 +249,20 @@ namespace rocRoller
         transforms.push_back(std::make_shared<KernelGraph::LowerTile>(m_preParameters, m_context));
         transforms.push_back(
             std::make_shared<KernelGraph::LowerTensorContraction>(m_preParameters, m_context));
-        if(!m_context->kernelOptions().loopOverOutputTilesDimensions.empty())
+        if(m_context->kernelOptions().streamK)
+        {
+            auto numCUsArg
+                = m_command->allocateArgument(DataType::UInt32, DataDirection::ReadOnly, "numCUs");
+            auto numCUsExpr = std::make_shared<Expression::Expression>(numCUsArg);
+
+            transforms.push_back(std::make_shared<KernelGraph::AddStreamK>(
+                m_context->kernelOptions().loopOverOutputTilesDimensions,
+                rocRoller::XLOOP,
+                rocRoller::KLOOP,
+                numCUsExpr,
+                m_context));
+        }
+        else if(!m_context->kernelOptions().loopOverOutputTilesDimensions.empty())
         {
             transforms.push_back(std::make_shared<KernelGraph::LoopOverTileNumbers>(
                 m_context->kernelOptions().loopOverOutputTilesDimensions,

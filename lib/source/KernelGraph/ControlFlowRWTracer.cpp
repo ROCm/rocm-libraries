@@ -14,7 +14,7 @@ namespace rocRoller::KernelGraph
      */
     struct CollectDataFlowExpressionVisitor
     {
-        std::vector<int> tags;
+        std::set<int> tags;
 
         template <Expression::CUnary Expr>
         void operator()(Expr const& expr)
@@ -57,7 +57,7 @@ namespace rocRoller::KernelGraph
 
         void operator()(Expression::DataFlowTag const& expr)
         {
-            tags.push_back(expr.tag);
+            tags.insert(expr.tag);
         }
 
         template <Expression::CValue Value>
@@ -256,6 +256,13 @@ namespace rocRoller::KernelGraph
 
         // auto incr = m_graph.control.getOutputNodeIndices<ForLoopIncrement>(tag).to<std::set>();
         // generate(incr);
+
+        CollectDataFlowExpressionVisitor visitor;
+        visitor.call(op.condition);
+        for(auto src : visitor.tags)
+        {
+            trackRegister(tag, src, ReadWrite::READ);
+        }
 
         auto body = m_graph.control.getOutputNodeIndices<Body>(tag).to<std::set>();
         for(auto const& b : body)

@@ -1,3 +1,41 @@
+/*
+ * When analysing when registers are modified, we construct a
+ * "read/write" tree, where leaves are operations that can modify
+ * registers and interior nodes are body-parents.  The root of the
+ * tree is the kernel.  For example, the tree corresponding to the
+ * pseudo-code:
+ *
+ *     v[0:3] = 0                 # Assign(2)
+ *     for i in range(4):         # ForLoopOp(3)
+ *         v[i] = i               # Assign(4)
+ *
+ * is:
+ *
+ *                           Kernel(1)
+ *                            /    \
+ *                   Assign(2)     ForLoopOp(3)
+ *                                      \
+ *                                     Assign(4)
+ *
+ * When we refer to a "control stack" in the LastRWTracer
+ * implementation below, we mean a simple vector representing the path
+ * from root of the tree to the leaf that modifies the register in
+ * question.
+ *
+ * In the example above, there are two stacks for the `v` register:
+ *
+ * 1. The stack for Assign(2) is: [1, 2]
+ * 2. The stack for Assign(4) is: [1, 3, 4]
+ *
+ * The common piece between those two stacks is simply [1], and hence
+ * the return value of `common` is 0.
+ *
+ * The return value of `lastRWLocations` is then: { `v`: [2, 3] }.
+ *
+ * At the time of writing, we want to also track register usage inside
+ * the condition expressions of ForLoopOps.  These are bit tricky,
+ * because they aren't really leaves.
+ */
 
 #include <limits>
 #include <variant>
@@ -52,6 +90,14 @@ namespace rocRoller::KernelGraph
             for(int i = 1; i < stacks.size(); ++i)
             {
                 c = std::min(c, common(stacks[i - 1], stacks[i]));
+            }
+
+            // Extra pass to handle conditions in ForLoopOps; bump c
+            // so that ForLoopOps become leaf-like.
+            for(auto const& stack : stacks)
+            {
+                if(c + 1 >= stack.size())
+                    c = std::max(0, c - 1);
             }
 
             for(auto const& stack : stacks)

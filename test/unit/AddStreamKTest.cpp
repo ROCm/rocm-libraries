@@ -70,9 +70,9 @@ namespace AddStreamKTest
     {
         rocRoller::KernelGraph::KernelGraph kgraph;
 
-        uint numTileM = 10u;
-        uint numTileN = 12u;
-        uint numTileK = 8u;
+        long int numTileM = 10;
+        long int numTileN = 12;
+        uint     numTileK = 8;
 
         hipDeviceProp_t deviceProperties;
         ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
@@ -81,7 +81,7 @@ namespace AddStreamKTest
         auto k = m_context->kernel();
 
         k->addArgument(
-            {"result", {DataType::Int32, PointerType::PointerGlobal}, DataDirection::WriteOnly});
+            {"result", {DataType::Int64, PointerType::PointerGlobal}, DataDirection::WriteOnly});
 
         k->setKernelDimensions(1);
         k->setWorkitemCount(
@@ -94,7 +94,7 @@ namespace AddStreamKTest
         // global result
         auto kernel = kgraph.control.addElement(Kernel());
         auto [forKCoord, forKOp]
-            = rangeFor(kgraph, Expression::literal(numTileK), rocRoller::KLOOP, DataType::UInt32);
+            = rangeFor(kgraph, Expression::literal(numTileK), rocRoller::KLOOP, DataType::Int64);
 
         auto user = kgraph.coordinates.addElement(User("result"));
 
@@ -127,14 +127,12 @@ namespace AddStreamKTest
         kgraph.control.addElement(Sequence(), {assignCUNumber}, {storeOp});
         kgraph.control.addElement(Sequence(), {storeOp}, {loopWaitOp});
 
-        auto addStreamK = std::make_shared<AddStreamK>(
-            std::vector<int>{0, 1},
-            std::vector<Expression::ExpressionPtr>{Expression::literal(numTileM),
-                                                   Expression::literal(numTileN)},
-            rocRoller::KLOOP,
-            Expression::literal(numCUs),
-            m_context);
-        kgraph = kgraph.transform(addStreamK);
+        auto addStreamK = std::make_shared<AddStreamK>(std::vector<int>{0, 1},
+                                                       rocRoller::KLOOP,
+                                                       rocRoller::KLOOP,
+                                                       Expression::literal(numCUs),
+                                                       m_context);
+        kgraph          = kgraph.transform(addStreamK);
 
         m_context->schedule(rocRoller::KernelGraph::generate(kgraph, m_context->kernel()));
 
@@ -147,6 +145,11 @@ namespace AddStreamKTest
 
             KernelArguments kargs(false);
             kargs.append("result", deviceResult.get());
+            kargs.append("numCUs", numCUs);
+            kargs.append("numTiles0", numTileM);
+            kargs.append("numTiles1", numTileN);
+            kargs.append("numTilesAcc", numTileK);
+            kargs.append("numTilesPerCU", (numTileM * numTileN * numTileK + numCUs - 1) / numCUs);
 
             KernelInvocation kinv;
             kinv.workitemCount = {numCUs, 1, 1};
@@ -249,9 +252,9 @@ namespace AddStreamKTest
     {
         rocRoller::KernelGraph::KernelGraph kgraph;
 
-        uint numTileM = 10u;
-        uint numTileN = 12u;
-        uint numTileK = 512u;
+        long int numTileM = 10;
+        long int numTileN = 12;
+        uint     numTileK = 512;
 
         hipDeviceProp_t deviceProperties;
         ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
@@ -275,7 +278,7 @@ namespace AddStreamKTest
         // global result
         auto kernel = kgraph.control.addElement(Kernel());
         auto [forKCoord, forKOp]
-            = rangeFor(kgraph, Expression::literal(numTileK), rocRoller::KLOOP, DataType::UInt32);
+            = rangeFor(kgraph, Expression::literal(numTileK), rocRoller::KLOOP, DataType::Int64);
 
         auto in  = kgraph.coordinates.addElement(User("in"));
         auto out = kgraph.coordinates.addElement(User("out"));
@@ -320,7 +323,6 @@ namespace AddStreamKTest
 
         auto preWaitOp  = kgraph.control.addElement(WaitZero());
         auto loopWaitOp = kgraph.control.addElement(WaitZero());
-        auto postWaitOp = kgraph.control.addElement(WaitZero());
 
         kgraph.control.addElement(Body(), {kernel}, {preWaitOp});
         kgraph.control.addElement(Sequence(), {preWaitOp}, {initOp});
@@ -330,14 +332,12 @@ namespace AddStreamKTest
         kgraph.control.addElement(Sequence(), {loopWaitOp}, {addOp});
         kgraph.control.addElement(Sequence(), {forKOp}, {storeOp});
 
-        auto addStreamK = std::make_shared<AddStreamK>(
-            std::vector<int>{0, 1},
-            std::vector<Expression::ExpressionPtr>{Expression::literal(numTileM),
-                                                   Expression::literal(numTileN)},
-            rocRoller::KLOOP,
-            Expression::literal(numCUs),
-            m_context);
-        kgraph = kgraph.transform(addStreamK);
+        auto addStreamK = std::make_shared<AddStreamK>(std::vector<int>{0, 1},
+                                                       rocRoller::KLOOP,
+                                                       rocRoller::KLOOP,
+                                                       Expression::literal(numCUs),
+                                                       m_context);
+        kgraph          = kgraph.transform(addStreamK);
 
         m_context->schedule(rocRoller::KernelGraph::generate(kgraph, m_context->kernel()));
 
@@ -354,6 +354,11 @@ namespace AddStreamKTest
             KernelArguments kargs(false);
             kargs.append("in", deviceX.get());
             kargs.append("out", deviceA.get());
+            kargs.append("numCUs", numCUs);
+            kargs.append("numTiles0", numTileM);
+            kargs.append("numTiles1", numTileN);
+            kargs.append("numTilesAcc", numTileK);
+            kargs.append("numTilesPerCU", (numTileM * numTileN * numTileK + numCUs - 1) / numCUs);
 
             KernelInvocation kinv;
             kinv.workitemCount = {numCUs, 1, 1};

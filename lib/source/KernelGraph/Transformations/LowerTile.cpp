@@ -85,15 +85,19 @@ namespace rocRoller
                                int                              macTileTag,
                                std::vector<int> const&          sdim)
         {
-            auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
-            auto sdimX   = sdim[0];
-            auto sdimY   = sdim[1];
+            auto macTile   = graph.coordinates.getNode<MacroTile>(macTileTag);
+            auto sdimX     = sdim[0];
+            auto sdimY     = sdim[1];
+            auto numTilesX = graph.coordinates.get<SubDimension>(sdim[0])->size
+                             / literal(static_cast<uint>(macTile.sizes[0]));
+            auto numTilesY = graph.coordinates.get<SubDimension>(sdim[1])->size
+                             / literal(static_cast<uint>(macTile.sizes[1]));
 
             connections.push_back(DC<SubDimension>(sdimX, 0));
             connections.push_back(DC<SubDimension>(sdimY, 1));
 
-            auto nMacX = graph.coordinates.addElement(macTile.tileNumber(0));
-            auto nMacY = graph.coordinates.addElement(macTile.tileNumber(1));
+            auto nMacX = graph.coordinates.addElement(macTile.tileNumber(0, numTilesX));
+            auto nMacY = graph.coordinates.addElement(macTile.tileNumber(1, numTilesY));
             auto iMacX = graph.coordinates.addElement(macTile.tileIndex(0));
             auto iMacY = graph.coordinates.addElement(macTile.tileIndex(1));
 
@@ -454,8 +458,8 @@ namespace rocRoller
             connections.push_back(DC<SubDimension>(sdimX, 0));
             connections.push_back(DC<SubDimension>(sdimY, 1));
 
-            auto nMacX = graph.coordinates.addElement(macTile.tileNumber(0));
-            auto nMacY = graph.coordinates.addElement(macTile.tileNumber(1));
+            auto nMacX = graph.coordinates.addElement(macTile.tileNumber(0, nullptr));
+            auto nMacY = graph.coordinates.addElement(macTile.tileNumber(1, nullptr));
             auto iMacX = graph.coordinates.addElement(macTile.tileIndex(0));
             auto iMacY = graph.coordinates.addElement(macTile.tileIndex(1));
 
