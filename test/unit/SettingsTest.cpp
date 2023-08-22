@@ -86,6 +86,10 @@ namespace rocRollerTest
         EXPECT_EQ(settings->get(Settings::LogLvl), Settings::LogLvl.defaultValue);
         EXPECT_EQ(settings->get(Settings::RandomSeed), Settings::RandomSeed.defaultValue);
         EXPECT_EQ(settings->get(Settings::Scheduler), Settings::Scheduler.defaultValue);
+
+        std::string help = settings->help();
+        EXPECT_THAT(help, testing::HasSubstr("default"));
+        EXPECT_THAT(help, testing::HasSubstr("bit"));
     }
 
     TEST_F(GenericSettings, LogLevelTest)

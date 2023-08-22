@@ -173,4 +173,73 @@ namespace rocRoller
     }
 
     inline Settings::Settings() {}
+
+    inline SettingsOptionBase::SettingsOptionBase(std::string name, std::string description)
+        : name(std::move(name))
+        , description(std::move(description))
+    {
+        m_instances.push_back(this);
+    }
+
+    inline std::string SettingsOptionBase::help() const
+    {
+        return this->name + ": " + this->description;
+    }
+
+    inline std::vector<SettingsOptionBase const*> const& SettingsOptionBase::instances()
+    {
+        return m_instances;
+    }
+
+    template <typename T>
+    inline SettingsOption<T>::SettingsOption(std::string name,
+                                             std::string description,
+                                             T           defaultValue,
+                                             int         bit)
+        : SettingsOptionBase(std::move(name), std::move(description))
+        , defaultValue(std::move(defaultValue))
+        , bit(bit)
+    {
+    }
+
+    template <typename T>
+    inline std::string SettingsOption<T>::help() const
+    {
+        std::string output = SettingsOptionBase::help() + " ( default: ";
+        if constexpr(std::is_same<decltype(this->defaultValue), std::bitset<32>>::value)
+        {
+            output += this->defaultValue.to_string();
+        }
+        else if constexpr(std::is_same<decltype(this->defaultValue), std::string>::value)
+        {
+            if(this->defaultValue.empty())
+            {
+                output += "\"\"";
+            }
+            else
+            {
+                output += this->defaultValue;
+            }
+        }
+        else
+        {
+            output += toString(this->defaultValue);
+        }
+        if(this->bit >= 0)
+        {
+            output += ", bit " + std::to_string(this->bit);
+        }
+        output += " )";
+        return output;
+    }
+
+    inline std::string Settings::help() const
+    {
+        auto const& options = SettingsOptionBase::instances();
+        std::string prefix  = "Environment Variables\n";
+        return std::accumulate(
+            options.begin(), options.end(), std::move(prefix), [](auto accum, auto setting) {
+                return std::move(accum) + setting->help() + "\n";
+            });
+    }
 }

@@ -7,14 +7,15 @@
 
 ParseOptions::ParseOptions() {}
 
-ParseOptions::ParseOptions(std::string helpMessage)
-    : m_helpMessage(std::move(helpMessage))
+ParseOptions::ParseOptions(std::string helpMessage, std::string suffixHelpMessage)
+    : m_prefixHelpMessage(std::move(helpMessage))
+    , m_suffixHelpMessage(std::move(suffixHelpMessage))
 {
 }
 
 void ParseOptions::print_help()
 {
-    std::cout << m_helpMessage << std::endl;
+    std::cout << m_prefixHelpMessage << std::endl;
 
     for(auto arg : m_validArgs)
     {
@@ -32,6 +33,8 @@ void ParseOptions::print_help()
 
         std::cout << "\t" << arg.second.usage() << std::endl;
     }
+
+    std::cout << m_suffixHelpMessage << std::endl;
 }
 
 void ParseOptions::parse_args(int argc, const char* argv[])

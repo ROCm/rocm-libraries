@@ -10,25 +10,50 @@
 #include <rocRoller/Scheduling/Costs/Cost_fwd.hpp>
 #include <rocRoller/Scheduling/Scheduler_fwd.hpp>
 
+#include <rocRoller/Utilities/Concepts.hpp>
 #include <rocRoller/Utilities/LazySingleton.hpp>
 #include <rocRoller/Utilities/Settings_fwd.hpp>
+#include <rocRoller/Utilities/Utils.hpp>
 
 namespace rocRoller
 {
+    /**
+     * @brief Base class for SettingsOption.
+     *
+     * Keeps track of its instances, so do not create temporaries.
+    */
+    struct SettingsOptionBase
+    {
+        std::string name;
+        std::string description;
+
+        SettingsOptionBase(std::string name, std::string description);
+        virtual std::string help() const;
+
+        /**
+         * @brief Getter for instances.
+        */
+        static std::vector<SettingsOptionBase const*> const& instances();
+
+    private:
+        inline static std::vector<SettingsOptionBase const*> m_instances;
+    };
+
     /**
      * @brief Options are represented by the SettingsOption struct.
      *
      * @tparam T type of underlying option.
      */
     template <typename T>
-    struct SettingsOption
+    struct SettingsOption : public SettingsOptionBase
     {
         using Type = T;
+        T   defaultValue;
+        int bit;
 
-        std::string name        = "";
-        std::string description = "";
-        T           defaultValue;
-        int         bit = -1;
+        SettingsOption(std::string name, std::string description, T defaultValue, int bit);
+
+        std::string help() const;
     };
 
     std::string toString(LogLevel level);
@@ -138,6 +163,12 @@ namespace rocRoller
 
             return bitField;
         }
+
+        /**
+         * @brief Creates a help dialog for the environment variables with
+         * their names, default values and bit-offset (if it has one).
+        */
+        std::string help() const;
 
         static inline SettingsOption<bitFieldType> SettingsBitField{
             "ROCROLLER_DEBUG",

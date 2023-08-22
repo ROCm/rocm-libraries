@@ -530,7 +530,8 @@ GEMMResult GEMM(GEMMProblem prob, bool checkResult, bool doVisualize)
 
 int main(int argc, const char* argv[])
 {
-    ParseOptions po("GEMM Driver: D (MxN) = alpha * A (MxK) * B (KxN) + beta * C (MxN)");
+    ParseOptions po("GEMM Driver: D (MxN) = alpha * A (MxK) * B (KxN) + beta * C (MxN)",
+                    Settings::getInstance()->help());
 
     // Problem definition
     po.addArg("M", Arg({"M"}, "Tensor Size M"));

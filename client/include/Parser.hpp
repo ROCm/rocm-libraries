@@ -24,7 +24,7 @@ class ParseOptions
 {
 public:
     ParseOptions();
-    explicit ParseOptions(std::string helpMessage);
+    explicit ParseOptions(std::string prefixHelpMessage, std::string suffixHelpMessage = "");
 
     ~ParseOptions() = default;
 
@@ -39,5 +39,6 @@ public:
 private:
     std::map<std::string, std::string> m_parsedArgs;
     std::map<std::string, Arg>         m_validArgs;
-    std::string                        m_helpMessage;
+    std::string                        m_prefixHelpMessage;
+    std::string                        m_suffixHelpMessage;
 };

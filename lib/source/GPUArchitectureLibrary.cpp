@@ -28,7 +28,7 @@ namespace rocRoller
 
             HIP_CHECK(hipGetDeviceProperties(&deviceProps, i));
 
-            retval.push_back(GPUArchitectures.at(GPUArchitectureTarget(deviceProps.gcnArchName)));
+            retval.push_back(m_gpuArchitectures.at(GPUArchitectureTarget(deviceProps.gcnArchName)));
         }
 
         if(count > 0)
@@ -43,9 +43,9 @@ namespace rocRoller
 
     GPUArchitecture GPUArchitectureLibrary::GetArch(GPUArchitectureTarget const& target)
     {
-        auto iter = GPUArchitectures.find(target);
+        auto iter = m_gpuArchitectures.find(target);
 
-        AssertFatal(iter != GPUArchitectures.end(),
+        AssertFatal(iter != m_gpuArchitectures.end(),
                     concatenate("Could not find info for GPU target ", target));
 
         return iter->second;
