@@ -564,8 +564,8 @@ namespace rocRoller
                 }
                 else
                 {
-                    auto tagReg = m_context->registerTagManager()->getRegister(
-                        expr.tag, expr.regType, expr.varType, 1);
+                    AssertFatal(m_context->registerTagManager()->hasRegister(expr.tag));
+                    auto tagReg = m_context->registerTagManager()->getRegister(expr.tag);
 
                     if(dest == nullptr)
                         dest = tagReg;

@@ -108,11 +108,11 @@ namespace rocRoller
             AssertFatal(src->registerCount() == dest->registerCount(),
                         src->registerCount(),
                         " ",
-                        src->toString(),
+                        src->description(),
                         " to ",
                         dest->registerCount(),
                         " ",
-                        dest->toString());
+                        dest->description());
 
             // Scalar/Vector -> Vector
             if(src->regType() == Register::Type::Scalar || src->regType() == Register::Type::Vector)

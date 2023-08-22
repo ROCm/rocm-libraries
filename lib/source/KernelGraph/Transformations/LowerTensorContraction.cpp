@@ -76,23 +76,45 @@ namespace rocRoller
             }
         }
 
-        std::tuple<int, int>
-            addFixup(KernelGraph& graph, int accumMacTileTag, int partialMacTileTag)
+        int copyAssign(KernelGraph& graph,
+                       int          srcMacTileTag,
+                       int          destMacTileTag,
+                       DataType     dataType,
+                       uint         numAGPRs)
+        {
+            auto srcExpr = std::make_shared<Expression::Expression>(
+                Expression::DataFlowTag{srcMacTileTag, Register::Type::Accumulator, dataType});
+
+            auto copyAssignTag
+                = graph.control.addElement(Assign{Register::Type::Vector, srcExpr, numAGPRs});
+
+            graph.coordinates.addElement(DataFlow(), {srcMacTileTag}, {destMacTileTag});
+            graph.mapper.connect(copyAssignTag, destMacTileTag, NaryArgument::DEST);
+
+            return copyAssignTag;
+        }
+
+        int addFixup(KernelGraph& graph,
+                     int          accumMacTileTag,
+                     int          partialMacTileTag,
+                     int          destMacTileTag,
+                     DataType     dataType,
+                     uint         numVGPRs)
         {
             auto lhsExpr = std::make_shared<Expression::Expression>(
                 Expression::DataFlowTag{accumMacTileTag, Register::Type::Vector, DataType::None});
             auto rhsExpr = std::make_shared<Expression::Expression>(
                 Expression::DataFlowTag{partialMacTileTag, Register::Type::Vector, DataType::None});
 
-            auto addExpr  = lhsExpr + rhsExpr;
-            auto fixupTag = graph.control.addElement(Assign{Register::Type::Vector, addExpr});
+            auto addExpr = lhsExpr + rhsExpr;
+            auto fixupTag
+                = graph.control.addElement(Assign{Register::Type::Vector, addExpr, numVGPRs});
 
-            auto destTag = graph.coordinates.addElement(MacroTile());
             graph.coordinates.addElement(
-                DataFlow(), {accumMacTileTag, partialMacTileTag}, {destTag});
-            graph.mapper.connect(fixupTag, destTag, NaryArgument::DEST);
+                DataFlow(), {accumMacTileTag, partialMacTileTag}, {destMacTileTag});
+            graph.mapper.connect(fixupTag, destMacTileTag, NaryArgument::DEST);
 
-            return {fixupTag, destTag};
+            return fixupTag;
         }
 
         std::tuple<int, int, int>
@@ -186,6 +208,7 @@ namespace rocRoller
                           int                      forK,
                           int                      macTileTag,
                           VariableType             varType,
+                          uint                     numAGPRs,
                           ContextPtr               context)
         {
             std::vector<DeferredConnection> storeConnections, loadConnections;
@@ -196,13 +219,9 @@ namespace rocRoller
 
             auto storePartialTag = storeScratchTile(graph, forK, varType.dataType);
             auto waitZeroTag     = graph.control.addElement(WaitZero());
-            auto loadPartialTag  = loadScratchTile(graph, forK, varType.dataType);
 
             for(auto const& c : storeConnections)
                 graph.mapper.connect(storePartialTag, c.coordinate, c.connectionSpec);
-
-            for(auto const& c : loadConnections)
-                graph.mapper.connect(loadPartialTag, c.coordinate, c.connectionSpec);
 
             // Store Flag
             auto flagsScratch = newScratchCoordinate(
@@ -224,16 +243,38 @@ namespace rocRoller
             graph.control.addElement(Sequence(), {storePartialTag}, {waitZeroTag});
             graph.control.addElement(Sequence(), {waitZeroTag}, {assignFlag});
             graph.control.addElement(Sequence(), {assignFlag}, {storeFlag});
-            graph.control.addElement(Sequence(), {storeFlag}, {loadPartialTag});
 
+            // clear waitcnt queues before ConditionalOp
+            // TODO : remove this WaitZero after waitcount observer handles if/else control flow.
+            auto waitZeroTag2 = graph.control.addElement(WaitZero());
+            graph.control.addElement(Sequence(), {storeFlag}, {waitZeroTag2});
+
+            // create destMacTileTag before the if/else part
+            auto destMacTileTag = graph.coordinates.addElement(MacroTile());
+            replaceMacroTile(graph, uses, macTileTag, destMacTileTag);
+
+            auto flagExpr = std::make_shared<Expression::Expression>(
+                Expression::DataFlowTag{flagVGPR, Register::Type::Vector, DataType::UInt32});
+            auto one            = Expression::literal(1);
+            auto conditionalTag = graph.control.addElement(ConditionalOp{(flagExpr == one)});
+            graph.control.addElement(Sequence(), {waitZeroTag2}, {conditionalTag});
+
+            auto loadPartialTag = graph.control.addElement(LoadTiled(varType.dataType));
+            for(auto const& c : loadConnections)
+                graph.mapper.connect(loadPartialTag, c.coordinate, c.connectionSpec);
+            auto trueBranch = graph.control.addElement(Body(), {conditionalTag}, {loadPartialTag});
             // add fixup
-            auto [fixupTag, fixupDestTag] = addFixup(graph, macTileTag, loadScratchTileTag);
-            graph.control.addElement(Sequence(), {forK}, {fixupTag});
+            // destMacTileTag = macTileTag + loadScratchTileTag
+            auto fixupTag = addFixup(
+                graph, macTileTag, loadScratchTileTag, destMacTileTag, varType.dataType, numAGPRs);
             graph.control.addElement(Sequence(), {loadPartialTag}, {fixupTag});
 
-            replaceMacroTile(graph, uses, macTileTag, fixupDestTag);
+            // copy AGPRs to VGPRs
+            auto copyTag
+                = copyAssign(graph, macTileTag, destMacTileTag, varType.dataType, numAGPRs);
+            auto falseBranch = graph.control.addElement(Else(), {conditionalTag}, {copyTag});
 
-            return fixupTag;
+            return conditionalTag;
         }
 
         void duplicateMacroTile(KernelGraph& graph, int load)
@@ -385,10 +426,10 @@ namespace rocRoller
             auto [waveB_tag, waveB] = graph.getDimension<WaveTile>(loadB[0]);
             uint num_elements       = waveA.sizes[0] * waveB.sizes[1];
             uint wfs                = context->kernel()->wavefront_size();
-            uint num_agpr           = num_elements / wfs; // number of output registers per thread
+            uint numAGPRs           = num_elements / wfs; // number of output registers per thread
 
             auto initD = graph.control.addElement(
-                Assign{Register::Type::Accumulator, literal(0.f), num_agpr});
+                Assign{Register::Type::Accumulator, literal(0.f), numAGPRs});
 
             graph.mapper.connect(initD, d, NaryArgument::DEST);
 
@@ -453,8 +494,9 @@ namespace rocRoller
             int finalContractionOp = forK;
             if(context->kernelOptions().enableScratch)
             {
-                auto varType       = getVariableType(graph, storeD);
-                finalContractionOp = enableScratch(graph, tag, uses, forK, d, varType, context);
+                auto varType = getVariableType(graph, storeD);
+                finalContractionOp
+                    = enableScratch(graph, tag, uses, forK, d, varType, numAGPRs, context);
             }
 
             // connect ops after contraction to finalContractionOp, remove contraction and its incoming edges

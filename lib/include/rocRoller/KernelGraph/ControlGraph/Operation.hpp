@@ -51,7 +51,7 @@ namespace rocRoller
          *
          * Must have nodes connected via the following outgoing edges:
          *
-         * - Body: The loop body. The loop body must cause a change in the condition, this body will also be emitted at least once. 
+         * - Body: The loop body. The loop body must cause a change in the condition, this body will also be emitted at least once.
          *
          * There may be multiple outgoing edges for any of these.  Code that follows the for loop should be connected via a Sequence edge.
          *
@@ -61,7 +61,7 @@ namespace rocRoller
          *
          * while_top:
          * <Body>
-	 * if(condition) goto while_top
+         * if(condition) goto while_top
          * <Sequence>
          */
         struct DoWhileOp

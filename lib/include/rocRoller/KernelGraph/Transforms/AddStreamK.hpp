@@ -10,7 +10,7 @@ namespace rocRoller
         /**
          * @brief Flatten tile space and stream accumulation tiles.
          *
- 	 * See `StreamKCoordinatetransformDesign`.
+         * See `StreamKCoordinatetransformDesign`.
          *
          * The AddStreamK transformation is typically in matrix-matrix
          * multiply problems of the form D = A B where A and B have
@@ -27,16 +27,16 @@ namespace rocRoller
          * tile-space; with the K tiles iterated over in the
          * inner-most "streaming" loop.
          *
-	 * The transformation is parameterised by:
-	 *
-	 * @param dims The sub-dimensions of dangling
-	 * `MacroTileNumber`s that should be included in the streaming
-	 * construct.
-	 *
-	 * @param tileNumberCoordSizes Sizes of `MacroTileNumber`s
-	 * matched by `dims`.
-	 *
-	 * @param topLoop Which accumulation loop to stream.
+         * The transformation is parameterised by:
+         *
+         * @param dims The sub-dimensions of dangling
+         * `MacroTileNumber`s that should be included in the streaming
+         * construct.
+         *
+         * @param tileNumberCoordSizes Sizes of `MacroTileNumber`s
+         * matched by `dims`.
+         *
+         * @param topLoop Which accumulation loop to stream.
          *
          * @param numCUs How many CUs/workgroups will be launched.
          */

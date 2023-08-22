@@ -217,6 +217,13 @@ namespace rocRoller::KernelGraph
 
     void ControlFlowRWTracer::operator()(ConditionalOp const& op, int tag)
     {
+        CollectDataFlowExpressionVisitor visitor;
+        visitor.call(op.condition);
+        for(auto src : visitor.tags)
+        {
+            trackRegister(tag, src, ReadWrite::READ);
+        }
+
         auto trueBody = m_graph.control.getOutputNodeIndices<Body>(tag).to<std::set>();
         for(auto const& b : trueBody)
         {
