@@ -20,20 +20,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-if(CMAKE_CXX_COMPILER MATCHES ".*nvcc$" OR "${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
-    # On the NVIDIA platform, use legacy FindHIP.cmake
-    # Module mode is only supported by the basic find_package signature, prevent leaking the path
-    list(APPEND CMAKE_MODULE_PATH "${ROCM_ROOT}/hip/cmake")
-    find_package(HIP REQUIRED)
-    list(POP_BACK CMAKE_MODULE_PATH)
-    if(HIP_COMPILER STREQUAL "clang")
-       # TODO: The HIP package on NVIDIA platform is incorrect at few versions
-       set(HIP_COMPILER "nvcc" CACHE STRING "HIP Compiler" FORCE)
-    endif()
-else()
-    # On the AMD platform, use hip-config.cmake
-    find_package(hip REQUIRED CONFIG NO_DEFAULT_PATH PATHS "${ROCM_ROOT}/lib/cmake/hip")
-endif()
+# HIP supports config-mode search for both NVIDIA and AMD platforms as of 5.7
+find_package(hip REQUIRED CONFIG PATHS "${ROCM_ROOT}/lib/cmake/hip")
 
 if(HIP_COMPILER STREQUAL "nvcc")
     if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
