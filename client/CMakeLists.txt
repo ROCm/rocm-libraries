@@ -16,6 +16,7 @@ if(BUILD_CLIENT)
     GraphInspector.cpp
     Parser.cpp
     gemm.cpp
+    GEMMParameters.cpp
     visualize.cpp
 
     ../test/unit/Utilities.cpp
