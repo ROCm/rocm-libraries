@@ -13,9 +13,10 @@ namespace rocRoller
 {
     namespace Register
     {
-        inline Allocator::Allocator(Type regType, int count)
+        inline Allocator::Allocator(Type regType, int count, AllocatorScheme scheme)
             : m_regType(regType)
             , m_registers(count)
+            , m_scheme(scheme)
         {
         }
 
@@ -122,26 +123,26 @@ namespace rocRoller
             return newAlloc;
         }
 
-        inline std::vector<int> Allocator::findFree(int                        count,
-                                                    Allocation::Options const& options) const
+        inline std::vector<int> Allocator::findFree(int                      count,
+                                                    AllocationOptions const& options) const
+        {
+            switch(m_scheme)
+            {
+            case AllocatorScheme::FirstFit:
+                return findFreeFirstFit(count, options);
+            case AllocatorScheme::PerfectFit:
+                return findFreePerfectFit(count, options);
+            default:
+                Throw<FatalError>("Allocator scheme not implemented.");
+            }
+        }
+
+        inline std::vector<int> Allocator::findFreeFirstFit(int                      count,
+                                                            AllocationOptions const& options) const
         {
             AssertFatal(count >= 0, "Negative count");
-            if(options.contiguous)
-            {
-                auto loc = findContiguousRange(0, count, options);
-                if(loc >= 0)
-                {
-                    // auto range = std::ranges::iota_view{loc, loc+count};
-                    // return {range.begin(), range.end()};
-                    std::vector<int> rv(count);
-                    std::iota(rv.begin(), rv.end(), loc);
-                    return rv;
-                }
-                else
-                {
-                    return {};
-                }
-            }
+
+            auto width = options.contiguousChunkWidth == 0 ? count : options.contiguousChunkWidth;
 
             std::vector<int> rv;
             rv.reserve(count);
@@ -150,49 +151,170 @@ namespace rocRoller
 
             while(rv.size() < count)
             {
-                idx = findContiguousRange(idx, 1, options);
+                auto [start, blockSize] = findContiguousRange(idx, width, options, rv);
+                idx                     = start;
 
-                if(idx < 0)
+                if(idx >= 0)
+                {
+                    std::vector<int> indices(width);
+                    std::iota(indices.begin(), indices.end(), idx);
+                    rv.insert(rv.end(), indices.begin(), indices.end());
+                }
+                else
+                {
                     return {};
-
-                rv.push_back(idx);
-
-                idx++;
+                }
             }
 
             return rv;
         }
 
-        inline int Allocator::findContiguousRange(int                        start,
-                                                  int                        count,
-                                                  Allocation::Options const& options) const
+        inline std::vector<int>
+            Allocator::findFreePerfectFit(int count, AllocationOptions const& options) const
         {
-            AssertFatal(start >= 0 && count >= 0, "Negative arguments");
-            if(options.alignment > 1)
-                start = Align(start, options);
+            AssertFatal(count >= 0, "Negative count");
 
-            while(start + count < m_registers.size())
+            std::vector<int> rv;
+            rv.reserve(count);
+
+            // Width of chunks
+            auto width = options.contiguousChunkWidth == 0 ? count : options.contiguousChunkWidth;
+
+            // Remaining number of registers left to handle
+            int currentCount = count;
+
+            // Free blocks that can be used. {start, size}
+            std::vector<std::pair<int, int>> candidates;
+
+            // Loop through register collection and pick out appropriate free blocks
+            int candidateIdx = 0;
+            while(candidateIdx >= 0 && candidateIdx < m_registers.size())
             {
-                bool good = true;
-                for(int i = start; i < start + count; i++)
+                auto candidate = findContiguousRange(candidateIdx, width, options, rv);
+                candidateIdx   = candidate.first;
+                if(candidateIdx >= 0)
                 {
-                    if(!isFree(i))
+                    candidates.push_back(candidate);
+                    candidateIdx += candidate.second;
+                }
+            }
+
+            while(currentCount > 0)
+            {
+                // Have we found a place for the current chunk?
+                bool found = false;
+
+                // If the last chunk is smaller than the given width, allocate what's left
+                width = std::min(width, currentCount);
+
+                for(auto& [idx, blockSize] : candidates)
+                {
+                    // Check for perfect fit
+                    if(blockSize == width)
                     {
-                        good = false;
+                        std::vector<int> indices(width);
+                        std::iota(indices.begin(), indices.end(), idx);
+                        rv.insert(rv.end(), indices.begin(), indices.end());
+
+                        // Update candidate
+                        blockSize = 0;
+
+                        found = true;
                         break;
                     }
                 }
 
-                if(good)
-                    return start;
+                // If a perfect fit was not found, use any other block
+                if(!found)
+                {
+                    for(auto& [idx, blockSize] : candidates)
+                    {
+                        if(blockSize < width)
+                        {
+                            continue;
+                        }
 
-                start = Align(start + 1, options);
+                        std::vector<int> indices(width);
+
+                        // Try to use the end of this free block
+                        int start = align(idx + blockSize - width, options);
+
+                        // Check if chunk is outside of block, or if it runs up against the end of the total number of registers
+                        if(start + width > idx + blockSize || start + width >= m_registers.size())
+                        {
+                            // Should not use end of block, revert to using beginning
+                            start = idx;
+
+                            // Update candidate
+                            idx += width;
+                        }
+
+                        std::iota(indices.begin(), indices.end(), start);
+                        rv.insert(rv.end(), indices.begin(), indices.end());
+
+                        // Update candidate
+                        blockSize -= width;
+
+                        found = true;
+                        break;
+                    }
+                }
+
+                if(!found)
+                {
+                    // Could not allocate this chunk, full failure
+                    return {};
+                }
+
+                currentCount -= width;
             }
 
-            return -1;
+            return rv;
         }
 
-        constexpr inline int Allocator::Align(int start, Allocation::Options const& options)
+        inline std::pair<int, int>
+            Allocator::findContiguousRange(int                      start,
+                                           int                      regCount,
+                                           AllocationOptions const& options,
+                                           std::vector<int> const&  reservedIndices) const
+        {
+            AssertFatal(start >= 0 && regCount >= 0, "Negative arguments");
+
+            // The start should always be aligned
+            start = align(start, options);
+
+            while(start < m_registers.size())
+            {
+                // Number of free registers in this block
+                int blockSize = 0;
+
+                for(int i = start; i < m_registers.size(); i++)
+                {
+                    // Check if register is not free, or if it's in our reserved list
+                    if(!isFree(i)
+                       || std::find(reservedIndices.begin(), reservedIndices.end(), i)
+                              != reservedIndices.end())
+                    {
+                        break;
+                    }
+
+                    blockSize++;
+                }
+
+                // If the block is large enough, we have succeeded
+                if(blockSize >= regCount)
+                    return {start, blockSize};
+
+                // Increment start by block size, or by 1 if in non-free section
+                int increment = blockSize > 0 ? blockSize : 1;
+
+                start = align(start + increment, options);
+            }
+
+            return {-1, 0};
+        }
+
+        constexpr inline int Allocator::align(int start, AllocationOptions const& options)
         {
             AssertFatal(options.alignment <= 1 || options.alignmentPhase < options.alignment,
                         ShowValue(options.alignment),

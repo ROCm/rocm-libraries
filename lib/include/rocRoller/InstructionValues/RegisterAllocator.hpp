@@ -9,17 +9,35 @@ namespace rocRoller
 {
     namespace Register
     {
+        enum class AllocatorScheme
+        {
+            FirstFit,
+            PerfectFit,
+
+            Count,
+        };
+
         class Allocator : public std::enable_shared_from_this<Allocator>
         {
         public:
-            Allocator(Type regType, int count);
+            Allocator(Type            regType,
+                      int             count,
+                      AllocatorScheme scheme = AllocatorScheme::PerfectFit);
 
             Type regType() const;
 
             size_t size() const;
-            int    maxUsed() const;
-            int    useCount() const;
-            int    currentlyFree() const;
+
+            /**
+             * Get the id of the largest register used
+             */
+            int maxUsed() const;
+
+            /**
+             * Get the number of registers that have been used
+             */
+            int useCount() const;
+            int currentlyFree() const;
 
             void allocate(AllocationPtr alloc);
 
@@ -32,12 +50,24 @@ namespace rocRoller
 
             bool canAllocate(std::shared_ptr<const Allocation> alloc) const;
 
-            std::vector<int> findFree(int count, Allocation::Options const& options) const;
+            std::vector<int> findFree(int count, AllocationOptions const& options) const;
 
-            //> Returns the first free range matching the criteria. Returns -1 if no such range exists.
-            int findContiguousRange(int start, int count, Allocation::Options const& options) const;
+            /**
+             * @brief Returns the first free range matching the criteria as index and block size. Returns {-1, 0} if no such range exists.
+             *
+             * @param start The start index to begin investigating. The start of the block will be greater than or equal to this value.
+             * @param regCount The number of registers required.  This will be the minimum size of the block.
+             * @param options The AllocationOptions
+             * @param reservedIndices Indices that can not be considered free for this investigation.
+             * @return std::pair<int, int> [blockStartingIndex, blockSize].
+             */
+            std::pair<int, int> findContiguousRange(int                      start,
+                                                    int                      regCount,
+                                                    AllocationOptions const& options,
+                                                    std::vector<int> const&  reservedIndices
+                                                    = {}) const;
 
-            constexpr static int Align(int start, Allocation::Options const& options);
+            constexpr static int align(int start, AllocationOptions const& options);
 
             bool isFree(int idx) const;
 
@@ -54,8 +84,15 @@ namespace rocRoller
 
             //> Allocate these specific registers.
             void allocate(AllocationPtr alloc, std::vector<int> const& registers);
+
             //> Allocate these specific registers.
             void allocate(AllocationPtr alloc, std::vector<int>&& registers);
+
+            std::vector<int> findFreeFirstFit(int count, AllocationOptions const& options) const;
+
+            std::vector<int> findFreePerfectFit(int count, AllocationOptions const& options) const;
+
+            AllocatorScheme m_scheme;
 
             Type m_regType;
 

@@ -26,6 +26,16 @@ namespace rocRoller
      */
     namespace Register
     {
+        struct AllocationOptions
+        {
+            /// Width of chunks to be used. 0 means fully contiguous.
+            int contiguousChunkWidth = 0;
+
+            /// Allocation x must have (x % alignment) == alignmentPhase. -1 means to use default for register type.
+            int alignment      = -1;
+            int alignmentPhase = 0;
+        };
+
         struct RegisterId
         {
             RegisterId(Type regType, int index)
@@ -38,7 +48,9 @@ namespace rocRoller
             auto        operator<=>(RegisterId const&) const = default;
             std::string toString() const;
         };
+
         std::string toString(RegisterId const& regId);
+
         // For some reason, GCC will not find the operator declared in Utils.hpp.
         std::ostream& operator<<(std::ostream& stream, RegisterId const& regId);
 
@@ -159,19 +171,27 @@ namespace rocRoller
             std::string toString() const;
             std::string description() const;
 
-            Value(ContextPtr ctx, Type regType, VariableType variableType, int count);
+            Value(ContextPtr        ctx,
+                  Type              regType,
+                  VariableType      variableType,
+                  int               count,
+                  AllocationOptions options = {});
+
             Value(ContextPtr         ctx,
                   Type               regType,
                   VariableType       variableType,
                   std::vector<int>&& coord);
+
             template <std::ranges::input_range T>
             Value(ContextPtr ctx, Type regType, VariableType variableType, T const& coord);
 
             Value(AllocationPtr alloc, Type regType, VariableType variableType, int count);
+
             Value(AllocationPtr      alloc,
                   Type               regType,
                   VariableType       variableType,
                   std::vector<int>&& coord);
+
             template <std::ranges::input_range T>
             Value(AllocationPtr alloc, Type regType, VariableType variableType, T& coord);
 
@@ -318,38 +338,18 @@ namespace rocRoller
          */
         struct Allocation : public std::enable_shared_from_this<Allocation>
         {
-            struct Options
-            {
-                /// For
-                bool contiguous = true;
-
-                /// Allocation x must have (x % alignment) == alignmentPhase
-                int alignment      = 1;
-                int alignmentPhase = 0;
-            };
-
-            /// One value of the given type.
-            Allocation(ContextPtr context, Type regType, VariableType variableType);
-
-            Allocation(ContextPtr context, Type regType, VariableType variableType, int count);
-
-            Allocation(ContextPtr     context,
-                       Type           regType,
-                       VariableType   variableType,
-                       int            count,
-                       Options const& options);
-            Allocation(ContextPtr   context,
-                       Type         regType,
-                       VariableType variableType,
-                       int          count,
-                       Options&&    options);
+            Allocation(ContextPtr        context,
+                       Type              regType,
+                       VariableType      variableType,
+                       int               count   = 1,
+                       AllocationOptions options = {});
 
             ~Allocation();
 
-            static AllocationPtr SameAs(Value const& val, std::string name);
+            static AllocationPtr
+                SameAs(Value const& val, std::string name, AllocationOptions const& options);
 
             Instruction allocate();
-            void        allocate(Instruction& inst);
 
             bool canAllocateNow() const;
             void allocateNow();
@@ -362,8 +362,8 @@ namespace rocRoller
 
             std::string descriptiveComment(std::string const& prefix) const;
 
-            int     registerCount() const;
-            Options options() const;
+            int               registerCount() const;
+            AllocationOptions options() const;
 
             std::vector<int> const& registerIndices() const;
 
@@ -385,7 +385,7 @@ namespace rocRoller
             Type         m_regType;
             VariableType m_variableType;
 
-            Options m_options;
+            AllocationOptions m_options;
 
             int m_valueCount;
             int m_registerCount;
@@ -400,8 +400,8 @@ namespace rocRoller
             void setRegisterCount();
         };
 
-        std::string   toString(Allocation::Options const& opts);
-        std::ostream& operator<<(std::ostream& stream, Allocation::Options const& opts);
+        std::string   toString(AllocationOptions const& opts);
+        std::ostream& operator<<(std::ostream& stream, AllocationOptions const& opts);
     }
 }
 

@@ -44,9 +44,10 @@ namespace RegisterAllocatorTest
         EXPECT_EQ(true, test.expired());
     }
 
-    TEST_F(RegisterAllocatorTest, Simple)
+    TEST_F(RegisterAllocatorTest, SimpleBasicScheme)
     {
-        auto allocator = std::make_shared<Register::Allocator>(Register::Type::Scalar, 10);
+        auto allocator = std::make_shared<Register::Allocator>(
+            Register::Type::Scalar, 10, Register::AllocatorScheme::FirstFit);
 
         EXPECT_EQ(-1, allocator->maxUsed());
         EXPECT_EQ(0, allocator->useCount());
@@ -61,7 +62,90 @@ namespace RegisterAllocatorTest
         EXPECT_EQ(0, allocator->useCount());
         EXPECT_EQ(allocator->currentlyFree(), 10);
 
-        EXPECT_EQ(0, allocator->findContiguousRange(0, 1, alloc0->options()));
+        auto [idx, blockSize] = allocator->findContiguousRange(0, 1, alloc0->options());
+        EXPECT_EQ(0, idx);
+
+        allocator->allocate(alloc0);
+
+        EXPECT_EQ(std::vector{0}, alloc0->registerIndices());
+        EXPECT_EQ(false, allocator->isFree(0));
+        EXPECT_EQ(0, allocator->maxUsed());
+        EXPECT_EQ(1, allocator->useCount());
+        EXPECT_EQ(allocator->currentlyFree(), 9);
+
+        auto [idx2, blockSize2] = allocator->findContiguousRange(0, 1, alloc0->options());
+        EXPECT_EQ(1, idx2);
+
+        auto alloc1 = std::make_shared<Register::Allocation>(
+            m_context, Register::Type::Scalar, DataType::Float, 3);
+
+        EXPECT_EQ((std::vector{1, 2, 3}),
+                  allocator->findFree(alloc1->registerCount(), alloc1->options()));
+        allocator->allocate(alloc1);
+
+        EXPECT_EQ((std::vector{1, 2, 3}), alloc1->registerIndices());
+        EXPECT_EQ(false, allocator->isFree(1));
+        EXPECT_EQ(false, allocator->isFree(2));
+        EXPECT_EQ(false, allocator->isFree(3));
+        EXPECT_EQ(true, allocator->isFree(4));
+        EXPECT_EQ(3, allocator->maxUsed());
+        EXPECT_EQ(4, allocator->useCount());
+        EXPECT_EQ(allocator->currentlyFree(), 6);
+
+        alloc0.reset();
+        EXPECT_EQ(true, allocator->isFree(0));
+        EXPECT_EQ(3, allocator->maxUsed());
+        EXPECT_EQ(4, allocator->useCount());
+        EXPECT_EQ(allocator->currentlyFree(), 7);
+
+        Register::AllocationOptions options;
+        options.contiguousChunkWidth = 1;
+
+        auto alloc2 = std::make_shared<Register::Allocation>(
+            m_context, Register::Type::Scalar, DataType::Float, 3, options);
+
+        allocator->allocate(alloc2);
+
+        EXPECT_EQ((std::vector{0, 4, 5}), alloc2->registerIndices());
+        EXPECT_EQ(false, allocator->isFree(0));
+        EXPECT_EQ(false, allocator->isFree(4));
+        EXPECT_EQ(false, allocator->isFree(5));
+        EXPECT_EQ(true, allocator->isFree(6));
+        EXPECT_EQ(allocator->currentlyFree(), 4);
+
+        auto alloc3 = std::make_shared<Register::Allocation>(
+            m_context, Register::Type::Scalar, DataType::Float, 5, options);
+
+        EXPECT_EQ(false, allocator->canAllocate(alloc3));
+
+        alloc1->free();
+        EXPECT_EQ(true, allocator->isFree(1));
+        EXPECT_EQ(true, allocator->isFree(2));
+        EXPECT_EQ(true, allocator->isFree(3));
+        EXPECT_EQ(5, allocator->maxUsed());
+        EXPECT_EQ(6, allocator->useCount());
+        EXPECT_EQ(allocator->currentlyFree(), 7);
+    }
+
+    TEST_F(RegisterAllocatorTest, SimplePerfectFitScheme)
+    {
+        auto allocator = std::make_shared<Register::Allocator>(
+            Register::Type::Scalar, 10, Register::AllocatorScheme::PerfectFit);
+
+        EXPECT_EQ(-1, allocator->maxUsed());
+        EXPECT_EQ(0, allocator->useCount());
+        EXPECT_EQ(allocator->regType(), Register::Type::Scalar);
+        EXPECT_EQ(allocator->size(), 10);
+        EXPECT_EQ(allocator->currentlyFree(), 10);
+
+        auto alloc0 = std::make_shared<Register::Allocation>(
+            m_context, Register::Type::Scalar, DataType::Float);
+
+        EXPECT_EQ(-1, allocator->maxUsed());
+        EXPECT_EQ(0, allocator->useCount());
+        EXPECT_EQ(allocator->currentlyFree(), 10);
+
+        EXPECT_EQ(0, allocator->findContiguousRange(0, 1, alloc0->options()).first);
 
         allocator->allocate(alloc0);
 
@@ -91,8 +175,8 @@ namespace RegisterAllocatorTest
         EXPECT_EQ(4, allocator->useCount());
         EXPECT_EQ(allocator->currentlyFree(), 7);
 
-        Register::Allocation::Options options;
-        options.contiguous = false;
+        Register::AllocationOptions options;
+        options.contiguousChunkWidth = 1;
 
         auto alloc2 = std::make_shared<Register::Allocation>(
             m_context, Register::Type::Scalar, DataType::Float, 3, options);
@@ -136,6 +220,282 @@ namespace RegisterAllocatorTest
         {
             EXPECT_NO_THROW({ createRegisters(regType, DataType::Float, 5); });
             EXPECT_THROW({ createRegisters(regType, DataType::Float, 55); }, FatalError);
+        }
+    }
+
+    TEST_F(RegisterAllocatorTest, PerfectFit)
+    {
+        auto allocator = std::make_shared<Register::Allocator>(
+            Register::Type::Scalar, 16, Register::AllocatorScheme::PerfectFit);
+
+        EXPECT_EQ(-1, allocator->maxUsed());
+        EXPECT_EQ(0, allocator->useCount());
+        EXPECT_EQ(allocator->regType(), Register::Type::Scalar);
+        EXPECT_EQ(allocator->size(), 16);
+        EXPECT_EQ(allocator->currentlyFree(), 16);
+
+        auto alloc0 = std::make_shared<Register::Allocation>(
+            m_context, Register::Type::Scalar, DataType::Float, 2);
+
+        auto alloc1 = std::make_shared<Register::Allocation>(
+            m_context, Register::Type::Scalar, DataType::Float, 4);
+
+        {
+            auto alloc2 = std::make_shared<Register::Allocation>(
+                m_context, Register::Type::Scalar, DataType::Float, 4);
+            auto alloc3 = std::make_shared<Register::Allocation>(
+                m_context, Register::Type::Scalar, DataType::Float, 2);
+            allocator->allocate(alloc2);
+            allocator->allocate(alloc0);
+            allocator->allocate(alloc3);
+            allocator->allocate(alloc1);
+
+            //[XXXX,XXXX,XXXX,OOOO]
+            EXPECT_EQ(11, allocator->maxUsed());
+            EXPECT_EQ(12, allocator->useCount());
+            EXPECT_EQ(allocator->currentlyFree(), 4);
+        }
+
+        //[OOOO,XXOO,XXXX,OOOO]
+        EXPECT_EQ(true, allocator->isFree(0));
+        EXPECT_EQ(true, allocator->isFree(1));
+        EXPECT_EQ(true, allocator->isFree(2));
+        EXPECT_EQ(true, allocator->isFree(3));
+        EXPECT_EQ(false, allocator->isFree(4));
+        EXPECT_EQ(false, allocator->isFree(5));
+        EXPECT_EQ(true, allocator->isFree(6));
+        EXPECT_EQ(true, allocator->isFree(7));
+        EXPECT_EQ(false, allocator->isFree(8));
+        EXPECT_EQ(false, allocator->isFree(9));
+        EXPECT_EQ(false, allocator->isFree(10));
+        EXPECT_EQ(false, allocator->isFree(11));
+        EXPECT_EQ(11, allocator->maxUsed());
+        EXPECT_EQ(12, allocator->useCount());
+        EXPECT_EQ(allocator->currentlyFree(), 10);
+
+        {
+            auto allocFit = std::make_shared<Register::Allocation>(
+                m_context, Register::Type::Scalar, DataType::Float, 2);
+            allocator->allocate(allocFit);
+
+            //[OOOO,XXXX,XXXX,OOOO]
+            EXPECT_EQ(true, allocator->isFree(0));
+            EXPECT_EQ(true, allocator->isFree(1));
+            EXPECT_EQ(false, allocator->isFree(6));
+            EXPECT_EQ(false, allocator->isFree(7));
+            EXPECT_EQ(11, allocator->maxUsed());
+            EXPECT_EQ(12, allocator->useCount());
+            EXPECT_EQ(allocator->currentlyFree(), 8);
+        }
+    }
+
+    TEST_F(RegisterAllocatorTest, EndOfBlockAlloc)
+    {
+        auto allocator = std::make_shared<Register::Allocator>(
+            Register::Type::Scalar, 16, Register::AllocatorScheme::PerfectFit);
+
+        EXPECT_EQ(-1, allocator->maxUsed());
+        EXPECT_EQ(0, allocator->useCount());
+        EXPECT_EQ(allocator->regType(), Register::Type::Scalar);
+        EXPECT_EQ(allocator->size(), 16);
+        EXPECT_EQ(allocator->currentlyFree(), 16);
+
+        auto alloc0 = std::make_shared<Register::Allocation>(
+            m_context, Register::Type::Scalar, DataType::Float, 1);
+
+        auto alloc1 = std::make_shared<Register::Allocation>(
+            m_context, Register::Type::Scalar, DataType::Float, 4);
+
+        {
+            auto alloc2 = std::make_shared<Register::Allocation>(
+                m_context, Register::Type::Scalar, DataType::Float, 1);
+            auto alloc3 = std::make_shared<Register::Allocation>(
+                m_context, Register::Type::Scalar, DataType::Float, 6);
+            allocator->allocate(alloc0);
+            allocator->allocate(alloc2);
+            allocator->allocate(alloc3);
+            allocator->allocate(alloc1);
+
+            //[XXXX,XXXX,XXXX,OOOO]
+            EXPECT_EQ(11, allocator->maxUsed());
+            EXPECT_EQ(12, allocator->useCount());
+            EXPECT_EQ(allocator->currentlyFree(), 4);
+        }
+
+        //[XOOO,OOOO,XXXX,OOOO]
+        EXPECT_EQ(false, allocator->isFree(0));
+        EXPECT_EQ(true, allocator->isFree(1));
+        EXPECT_EQ(true, allocator->isFree(2));
+        EXPECT_EQ(true, allocator->isFree(3));
+        EXPECT_EQ(true, allocator->isFree(4));
+        EXPECT_EQ(true, allocator->isFree(5));
+        EXPECT_EQ(true, allocator->isFree(6));
+        EXPECT_EQ(true, allocator->isFree(7));
+        EXPECT_EQ(false, allocator->isFree(8));
+        EXPECT_EQ(false, allocator->isFree(9));
+        EXPECT_EQ(false, allocator->isFree(10));
+        EXPECT_EQ(false, allocator->isFree(11));
+        EXPECT_EQ(11, allocator->maxUsed());
+        EXPECT_EQ(12, allocator->useCount());
+        EXPECT_EQ(allocator->currentlyFree(), 11);
+
+        {
+            Register::AllocationOptions opt;
+            opt.alignment = 2;
+
+            auto allocEnd = std::make_shared<Register::Allocation>(
+                m_context, Register::Type::Scalar, DataType::Float, 2, opt);
+            allocator->allocate(allocEnd);
+
+            //[XOOO,OOXX,XXXX,OOOO]
+            EXPECT_EQ(false, allocator->isFree(0));
+            EXPECT_EQ(true, allocator->isFree(1));
+            EXPECT_EQ(true, allocator->isFree(2));
+            EXPECT_EQ(true, allocator->isFree(3));
+            EXPECT_EQ(false, allocator->isFree(6));
+            EXPECT_EQ(false, allocator->isFree(7));
+            EXPECT_EQ(11, allocator->maxUsed());
+            EXPECT_EQ(12, allocator->useCount());
+            EXPECT_EQ(allocator->currentlyFree(), 9);
+        }
+    }
+
+    TEST_F(RegisterAllocatorTest, Contiguity)
+    {
+        auto allocator = std::make_shared<Register::Allocator>(
+            Register::Type::Scalar, 16, Register::AllocatorScheme::PerfectFit);
+        Register::AllocationOptions defaultOpt;
+
+        EXPECT_EQ(-1, allocator->maxUsed());
+        EXPECT_EQ(0, allocator->useCount());
+        EXPECT_EQ(allocator->regType(), Register::Type::Scalar);
+        EXPECT_EQ(allocator->size(), 16);
+        EXPECT_EQ(allocator->currentlyFree(), 16);
+
+        EXPECT_EQ(allocator->findContiguousRange(0, 1, defaultOpt).first, 0);
+        EXPECT_EQ(allocator->findContiguousRange(0, 1, defaultOpt).second, 16);
+
+        auto alloc0 = std::make_shared<Register::Allocation>(
+            m_context, Register::Type::Scalar, DataType::Float, 2);
+
+        auto alloc1 = std::make_shared<Register::Allocation>(
+            m_context, Register::Type::Scalar, DataType::Float, 1);
+
+        auto alloc2 = std::make_shared<Register::Allocation>(
+            m_context, Register::Type::Scalar, DataType::Float, 1);
+
+        auto alloc3 = std::make_shared<Register::Allocation>(
+            m_context, Register::Type::Scalar, DataType::Float, 2);
+
+        {
+            auto alloc4 = std::make_shared<Register::Allocation>(
+                m_context, Register::Type::Scalar, DataType::Float, 2);
+
+            auto alloc5 = std::make_shared<Register::Allocation>(
+                m_context, Register::Type::Scalar, DataType::Float, 1);
+
+            auto alloc6 = std::make_shared<Register::Allocation>(
+                m_context, Register::Type::Scalar, DataType::Float, 1);
+
+            auto alloc7 = std::make_shared<Register::Allocation>(
+                m_context, Register::Type::Scalar, DataType::Float, 2);
+
+            allocator->allocate(alloc4);
+            allocator->allocate(alloc0);
+            allocator->allocate(alloc5);
+            allocator->allocate(alloc1);
+            allocator->allocate(alloc6);
+            allocator->allocate(alloc2);
+            allocator->allocate(alloc7);
+            allocator->allocate(alloc3);
+
+            //[XXXX,XXXX,XXXX,OOOO]
+            EXPECT_EQ(11, allocator->maxUsed());
+            EXPECT_EQ(12, allocator->useCount());
+            EXPECT_EQ(allocator->currentlyFree(), 4);
+        }
+
+        //[OOXX,OXOX,OOXX,OOOO]
+        EXPECT_EQ(true, allocator->isFree(0));
+        EXPECT_EQ(true, allocator->isFree(1));
+        EXPECT_EQ(false, allocator->isFree(2));
+        EXPECT_EQ(false, allocator->isFree(3));
+        EXPECT_EQ(true, allocator->isFree(4));
+        EXPECT_EQ(false, allocator->isFree(5));
+        EXPECT_EQ(true, allocator->isFree(6));
+        EXPECT_EQ(false, allocator->isFree(7));
+        EXPECT_EQ(true, allocator->isFree(8));
+        EXPECT_EQ(true, allocator->isFree(9));
+        EXPECT_EQ(false, allocator->isFree(10));
+        EXPECT_EQ(false, allocator->isFree(11));
+        EXPECT_EQ(11, allocator->maxUsed());
+        EXPECT_EQ(12, allocator->useCount());
+        EXPECT_EQ(allocator->currentlyFree(), 10);
+
+        {
+            Register::AllocationOptions opt;
+            opt.contiguousChunkWidth = 1;
+
+            auto allocContig = std::make_shared<Register::Allocation>(
+                m_context, Register::Type::Scalar, DataType::Float, 4, opt);
+            allocator->allocate(allocContig);
+
+            //[XXXX,XXXX,OOXX,OOOO]
+            EXPECT_EQ(false, allocator->isFree(0));
+            EXPECT_EQ(false, allocator->isFree(1));
+            EXPECT_EQ(false, allocator->isFree(4));
+            EXPECT_EQ(false, allocator->isFree(6));
+            EXPECT_EQ(true, allocator->isFree(8));
+            EXPECT_EQ(true, allocator->isFree(9));
+            EXPECT_EQ(11, allocator->maxUsed());
+            EXPECT_EQ(12, allocator->useCount());
+            EXPECT_EQ(allocator->currentlyFree(), 6);
+        }
+
+        //[OOXX,OXOX,OOXX,OOOO]
+
+        {
+            Register::AllocationOptions opt;
+            opt.contiguousChunkWidth = 2;
+
+            auto allocContig = std::make_shared<Register::Allocation>(
+                m_context, Register::Type::Scalar, DataType::Float, 4, opt);
+            allocator->allocate(allocContig);
+
+            //[XXXX,OXOX,XXXX,OOOO]
+            EXPECT_EQ(false, allocator->isFree(0));
+            EXPECT_EQ(false, allocator->isFree(1));
+            EXPECT_EQ(true, allocator->isFree(4));
+            EXPECT_EQ(true, allocator->isFree(6));
+            EXPECT_EQ(false, allocator->isFree(8));
+            EXPECT_EQ(false, allocator->isFree(9));
+            EXPECT_EQ(11, allocator->maxUsed());
+            EXPECT_EQ(12, allocator->useCount());
+            EXPECT_EQ(allocator->currentlyFree(), 6);
+        }
+
+        //[OOXX,OXOX,OOXX,OOOO]
+
+        {
+            EXPECT_EQ(allocator->findContiguousRange(0, 4, defaultOpt).first, 12);
+            EXPECT_EQ(allocator->findContiguousRange(0, 4, defaultOpt).second, 4);
+            std::vector<int> freeReg = {12, 13, 14, 15};
+            EXPECT_EQ(allocator->findFree(4, defaultOpt), freeReg);
+
+            auto allocContig = std::make_shared<Register::Allocation>(
+                m_context, Register::Type::Scalar, DataType::Float, 4);
+            allocator->allocate(allocContig);
+
+            //[OOXX,OXOX,OOXX,XXXX]
+            EXPECT_EQ(true, allocator->isFree(0));
+            EXPECT_EQ(true, allocator->isFree(1));
+            EXPECT_EQ(true, allocator->isFree(4));
+            EXPECT_EQ(true, allocator->isFree(6));
+            EXPECT_EQ(true, allocator->isFree(8));
+            EXPECT_EQ(true, allocator->isFree(9));
+            EXPECT_EQ(15, allocator->maxUsed());
+            EXPECT_EQ(16, allocator->useCount());
+            EXPECT_EQ(allocator->currentlyFree(), 6);
         }
     }
 

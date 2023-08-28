@@ -185,7 +185,11 @@ namespace rocRoller
 
         inline Value::~Value() = default;
 
-        inline Value::Value(ContextPtr ctx, Type regType, VariableType variableType, int count)
+        inline Value::Value(ContextPtr        ctx,
+                            Type              regType,
+                            VariableType      variableType,
+                            int               count,
+                            AllocationOptions options)
             : m_context(ctx)
             , m_regType(regType)
             , m_varType(variableType)
@@ -197,7 +201,7 @@ namespace rocRoller
                 count * std::max(static_cast<size_t>(1), info.elementSize / bytesPerRegister));
             std::iota(m_allocationCoord.begin(), m_allocationCoord.end(), 0);
 
-            m_allocation = Allocation::SameAs(*this, m_name);
+            m_allocation = Allocation::SameAs(*this, m_name, options);
         }
 
         template <std::ranges::input_range T>
@@ -208,7 +212,7 @@ namespace rocRoller
             , m_allocationCoord(coord.begin(), coord.end())
         {
             AssertFatal(ctx != nullptr);
-            m_allocation = Allocation::SameAs(*this, m_name);
+            m_allocation = Allocation::SameAs(*this, m_name, {});
         }
 
         inline Value::Value(ContextPtr         ctx,
@@ -221,7 +225,7 @@ namespace rocRoller
             , m_allocationCoord(coord)
         {
             AssertFatal(ctx != nullptr);
-            m_allocation = Allocation::SameAs(*this, m_name);
+            m_allocation = Allocation::SameAs(*this, m_name, {});
         }
 
         inline Value::Value(AllocationPtr alloc, Type regType, VariableType variableType, int count)
@@ -332,7 +336,7 @@ namespace rocRoller
             Value::Placeholder(ContextPtr ctx, Type regType, VariableType variableType, int count)
         {
             AssertFatal(ctx != nullptr);
-            return std::make_shared<Value>(ctx, regType, variableType, count);
+            return std::make_shared<Value>(ctx, regType, variableType, count, AllocationOptions{});
         }
 
         inline AllocationState Value::allocationState() const
@@ -729,34 +733,11 @@ namespace rocRoller
             return element<std::initializer_list<T>>(indices);
         }
 
-        //> TODO: Get default options from data type + target info
-        inline Allocation::Allocation(ContextPtr context, Type regType, VariableType variableType)
-            : Allocation(context, regType, variableType, 1)
-        {
-        }
-
-        inline Allocation::Allocation(ContextPtr   context,
-                                      Type         regType,
-                                      VariableType variableType,
-                                      int          count)
-            : m_context(context)
-            , m_regType(regType)
-            , m_variableType(variableType)
-            , m_valueCount(count)
-        {
-            AssertFatal(context != nullptr);
-
-            setRegisterCount();
-
-            m_options.alignment
-                = variableType.registerAlignment(regType, count, context->targetArchitecture());
-        }
-
-        inline Allocation::Allocation(ContextPtr     context,
-                                      Type           regType,
-                                      VariableType   variableType,
-                                      int            count,
-                                      Options const& options)
+        inline Allocation::Allocation(ContextPtr        context,
+                                      Type              regType,
+                                      VariableType      variableType,
+                                      int               count,
+                                      AllocationOptions options)
             : m_context(context)
             , m_regType(regType)
             , m_variableType(variableType)
@@ -764,21 +745,13 @@ namespace rocRoller
             , m_valueCount(count)
         {
             AssertFatal(context != nullptr);
-            setRegisterCount();
-        }
 
-        inline Allocation::Allocation(ContextPtr   context,
-                                      Type         regType,
-                                      VariableType variableType,
-                                      int          count,
-                                      Options&&    options)
-            : m_context(context)
-            , m_regType(regType)
-            , m_variableType(variableType)
-            , m_valueCount(count)
-            , m_options(options)
-        {
-            AssertFatal(context != nullptr);
+            if(m_options.alignment <= 0)
+            {
+                m_options.alignment
+                    = variableType.registerAlignment(regType, count, context->targetArchitecture());
+            }
+
             setRegisterCount();
         }
 
@@ -795,10 +768,11 @@ namespace rocRoller
             }
         }
 
-        inline AllocationPtr Allocation::SameAs(Value const& val, std::string name)
+        inline AllocationPtr
+            Allocation::SameAs(Value const& val, std::string name, AllocationOptions const& options)
         {
             auto rv = std::make_shared<Allocation>(
-                val.m_context.lock(), val.m_regType, val.m_varType, val.valueCount());
+                val.m_context.lock(), val.m_regType, val.m_varType, val.valueCount(), options);
             rv->setName(std::move(name));
             return rv;
         }
@@ -838,11 +812,6 @@ namespace rocRoller
             return m_regType;
         }
 
-        //void Allocation::allocate(Instruction & inst)
-        //{
-        //    inst.addAllocation(*this);
-        //}
-
         inline AllocationState Allocation::allocationState() const
         {
             return m_allocationState;
@@ -867,17 +836,17 @@ namespace rocRoller
             return rv;
         }
 
-        inline std::string toString(Allocation::Options const& opts)
+        inline std::string toString(AllocationOptions const& opts)
         {
             return concatenate("alignment: ",
                                opts.alignment,
                                ", phase: ",
                                opts.alignmentPhase,
-                               ", contiguous: ",
-                               opts.contiguous);
+                               ", contiguousChunkWidth: ",
+                               opts.contiguousChunkWidth);
         }
 
-        inline std::ostream& operator<<(std::ostream& stream, Allocation::Options const& opts)
+        inline std::ostream& operator<<(std::ostream& stream, AllocationOptions const& opts)
         {
             return stream << toString(opts);
         }
@@ -924,7 +893,7 @@ namespace rocRoller
                   * static_cast<size_t>(DataTypeInfo::Get(m_variableType).registerCount);
         }
 
-        inline Allocation::Options Allocation::options() const
+        inline AllocationOptions Allocation::options() const
         {
             return m_options;
         }
