@@ -1,4 +1,7 @@
-from rrperf.problems import GEMMRun, CodeGenRun
+import pathlib
+from rrperf.problems import GEMMRun, CodeGenRun, TensileRun
+
+repo_dir = pathlib.Path(__file__).resolve().parent.parent.parent.parent
 
 fp16 = {
     "type_A": "half",
@@ -380,6 +383,35 @@ def guidepost_1():
     )
 
 
+def tensile_guidepost():
+    yield TensileRun(
+        config=str(
+            repo_dir
+            / "test"
+            / "unit"
+            / "GemmGuidePost"
+            / "HGemmGuidePost_Optimized.yaml"
+        ),
+    )
+
+
+def tensile_sgemm_guidepost():
+    yield TensileRun(
+        config=str(
+            repo_dir
+            / "test"
+            / "unit"
+            / "GemmGuidePost"
+            / "GemmGuidePost_Optimized.yaml"
+        ),
+    )
+
+
+def tensile_benchmarks():
+    yield from tensile_guidepost()
+    yield from tensile_sgemm_guidepost()
+
+
 def codegen():
     yield CodeGenRun(instCount=40000, instructions="comments")
     yield CodeGenRun(instCount=40000, instructions="simple_mfma")
@@ -390,6 +422,7 @@ def all():
     yield from sgemm()
     yield from hgemm()
     yield from codegen()
+    yield from tensile_benchmarks()
 
 
 def priority_problems():

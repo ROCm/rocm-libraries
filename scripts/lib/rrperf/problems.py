@@ -1,15 +1,33 @@
 import pathlib
 from dataclasses import dataclass, field, fields, asdict
 from typing import List
-
 import yaml
+
+repo_dir = pathlib.Path(__file__).resolve().parent.parent.parent.parent
 
 
 def field_dict(cls, obj):
     return {f.name: getattr(obj, f.name) for f in fields(cls)}
 
 
-@dataclass(frozen=True)
+def to_bool(val):
+    if val in ["True", "true", "T", "t", "1"]:
+        return True
+    elif val in ["False", "false", "F", "f", "0"]:
+        return False
+    else:
+        return bool(val)
+
+
+def convert_class_params(cls, obj):
+    for f in fields(cls):
+        if f.type == bool:
+            setattr(obj, f.name, to_bool(getattr(obj, f.name)))
+        else:
+            setattr(obj, f.name, f.type(getattr(obj, f.name)))
+
+
+@dataclass
 class RRPerfResult:
     """Base class for timing results.
 
@@ -53,6 +71,9 @@ class GEMMProblem:
     trans_A: str = "N"
     trans_B: str = "N"
 
+    def __post_init__(self):
+        convert_class_params(GEMMProblem, self)
+
 
 @dataclass(unsafe_hash=True)
 class GEMMSolution:
@@ -79,6 +100,9 @@ class GEMMSolution:
     prefetchInFlight: int = 2
     prefetchLDSFactor: int = 0
 
+    def __post_init__(self):
+        convert_class_params(GEMMSolution, self)
+
 
 @dataclass(unsafe_hash=True)
 class GEMM(GEMMProblem, GEMMSolution):
@@ -91,6 +115,9 @@ class GEMM(GEMMProblem, GEMMSolution):
     visualize: bool = False
 
     match_memory_access: bool = True
+
+    def __post_init__(self):
+        convert_class_params(GEMM, self)
 
     @property
     def token(self):
@@ -172,7 +199,7 @@ class GEMMRun(GEMM):
         return retval
 
 
-@dataclass(frozen=True)
+@dataclass
 class GEMMResult(GEMM, RRPerfResult):
     """GEMM result interface."""
 
@@ -196,7 +223,11 @@ class GEMMResult(GEMM, RRPerfResult):
             "k": self.mac_k,
             "WG": str(self.workgroup_size_x) + "/" + str(self.workgroup_size_y),
             "LDS": TF(self.loadLDS_A) + TF(self.loadLDS_B) + TF(self.storeLDS_D),
-            "PF": TF(self.prefetch) + "/" + str(self.prefetchInFlight) + "/" + str(self.prefetchLDSFactor),
+            "PF": TF(self.prefetch)
+            + "/"
+            + str(self.prefetchInFlight)
+            + "/"
+            + str(self.prefetchLDSFactor),
             "SCH": self.scheduler[0],
             "iters": "/".join(
                 [str(getattr(self, "num" + x)) for x in ["WarmUp", "Outer", "Inner"]]
@@ -285,11 +316,49 @@ class CodeGenRun(CodeGen):
         return retval
 
 
-@dataclass(frozen=True)
+@dataclass
 class CodeGenResult(CodeGen, RRPerfResult):
     """CodeGen result interface."""
 
     pass
+
+
+@dataclass(unsafe_hash=True)
+class TensileRun(GEMM):
+    """Tensile run interface."""
+
+    config: pathlib.Path = field(repr=False, default=None, hash=False)
+    output: pathlib.Path = field(repr=False, default=None, hash=False)
+    tensile_commit: str = "rocm-5.6.0"
+
+    @property
+    def group(self):
+        return "gemm"
+
+    def set_output(self, path: pathlib.Path):
+        self.output = path
+
+    def command(self, **extra_args) -> List[str]:
+        command = str(repo_dir / "scripts" / "benchmark_tensile")
+
+        arg_dict = asdict(self)
+        for key, value in extra_args.items():
+            arg_dict[key] = value
+
+        for non_gemm_arg in ["config", "output", "tensile_commit"]:
+            arg_dict.pop(non_gemm_arg, None)
+
+        args = list([f"{key}={value}" for key, value in arg_dict.items()])
+
+        retval = [
+            command,
+            str(self.config),
+            f"--yaml={str(self.output)}",
+            f"--tensile_commit={self.tensile_commit}",
+            "--kwargs",
+        ] + args
+
+        return retval
 
 
 #
@@ -314,6 +383,7 @@ def load_results(path: pathlib.Path):
     rv = []
     for r in yaml.load_all(path.read_text(), Loader=yaml.FullLoader):
         ResultClass = _client_to_result_class[r["client"]]
+        r.pop("path", None)
         rv.append(ResultClass(path=path, **r))
     return rv
 

@@ -35,7 +35,7 @@ BenchmarkProblems:
       OperationType: GEMM
       TransposeA: False
       TransposeB: True
-      UseBeta: False
+      UseBeta: True
     - # BenchmarkProblemSizeGroup
       InitialSolutionParameters:
       BenchmarkCommonParameters:
@@ -46,7 +46,7 @@ BenchmarkProblems:
          - AssertStrideBEqual: [{0: 1}]
          - AssertStrideCEqual: [{0: 1}]
          - AssertStrideDEqual: [{0: 1}]
-         - AssertAlphaValue: [1]
+         #- AssertAlphaValue: [1]
          #- AssertBetaValue:  [0]
          - DepthU: [16]
          - EdgeType: ['ShiftPtr']
@@ -64,7 +64,7 @@ BenchmarkProblems:
          - StaggerUStride: [0]
          - StoreRemapVectorWidth: [4]
          - StoreVectorWidth: [4]
-         - VectorAtomicWidth: [2]
+         - VectorAtomicWidth: [1]
          - VectorWidth: [2]
          - WaveSeparateGlobalReadA: [1]
          - WaveSeparateGlobalReadB: [1]
