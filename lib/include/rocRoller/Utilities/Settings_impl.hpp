@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <type_traits>
 
+#include "Settings.hpp"
 #include <rocRoller/Scheduling/Scheduler.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
@@ -24,7 +25,7 @@ namespace rocRoller
         // opt does not exist in m_values
         else
         {
-            typename Option::Type val = getValue(opt);
+            typename Option::Type val = opt.getValue();
             set(opt, val);
             return val;
         }
@@ -36,72 +37,27 @@ namespace rocRoller
         return getInstance()->get(opt);
     }
 
-    template <typename Option>
-    typename Option::Type Settings::getValue(Option const& opt)
+    template <typename T>
+    inline T SettingsOption<T>::getValue() const
     {
-        const char* var   = std::getenv(opt.name.c_str());
+        const char* var   = std::getenv(name.c_str());
         std::string s_var = "";
 
         // If explicit flag is set
         if(var)
         {
             s_var = var;
-            return getTypeValue<typename Option::Type>(s_var);
-        }
-        // If option is covered by bit field
-        else if(opt.bit >= 0)
-        {
-            return extractBitValue(opt);
+            return getTypeValue(s_var);
         }
         // Default to defaultValue
         else
         {
-            return opt.defaultValue;
-        }
-    }
-
-    template <typename T>
-    inline T Settings::getTypeValue(std::string const& var) const
-    {
-        if constexpr(CCountedEnum<T>)
-        {
-            return fromString<T>(var);
-        }
-        else if constexpr(std::same_as<Settings::bitFieldType, T>)
-        {
-            return bitFieldType{var};
-        }
-        else if constexpr(std::same_as<bool, T>)
-        {
-            return var != "0";
-        }
-        else if constexpr(std::same_as<std::string, T>)
-        {
-            return var;
-        }
-        else
-        {
-            std::istringstream stream(var);
-            T                  value;
-            stream >> value;
-            return value;
+            return defaultValue;
         }
     }
 
     template <typename Option>
-    inline typename Option::Type Settings::extractBitValue(Option const& opt)
-    {
-        if constexpr(std::is_same_v<typename Option::Type, bool>)
-        {
-            return get(SettingsBitField).test(opt.bit);
-        }
-        else
-        {
-            return opt.defaultValue;
-        }
-    }
 
-    template <typename Option>
     inline void Settings::set(Option const& opt, char const* val)
     {
         set(opt, std::string(val));
@@ -112,29 +68,7 @@ namespace rocRoller
     {
         if constexpr(std::is_same_v<typename Option::Type, T>)
         {
-            if(!getenv(opt.name.c_str()))
-                m_values[opt.name] = val;
-
-            // Setting new bitfield changes values of those covered by bitfield
-            if constexpr(std::is_same_v<typename Option::Type, bitFieldType>)
-            {
-                for(auto optName : m_setBitOptions)
-                {
-                    auto itr = m_values.find(optName);
-                    if(itr != m_values.end())
-                    {
-                        m_values.erase(itr);
-                    }
-                }
-
-                m_setBitOptions.clear();
-            }
-
-            // If corresponding env var is set, we will never get here since we grab from env
-            else if(opt.bit >= 0)
-            {
-                m_setBitOptions.push_back(opt.name);
-            }
+            m_values[opt.name] = val;
         }
         else
         {
@@ -172,7 +106,33 @@ namespace rocRoller
         return os << toString(input);
     }
 
-    inline Settings::Settings() {}
+    inline Settings::Settings()
+    {
+        auto settings = SettingsOptionBase::instances();
+
+        bitFieldType bitfield;
+        const char*  bitfieldChars = std::getenv(Settings::BitfieldName.c_str());
+
+        if(bitfieldChars)
+        {
+            bitfield = bitFieldType{bitfieldChars};
+
+            for(auto const* setting : settings)
+            {
+                if(setting->getBitIndex() >= 0)
+                {
+                    if(auto envVar = setting->getFromEnv())
+                    {
+                        m_values[setting->name] = *envVar;
+                    }
+                    else
+                    {
+                        m_values[setting->name] = bitfield.test(setting->getBitIndex());
+                    }
+                }
+            }
+        }
+    }
 
     inline SettingsOptionBase::SettingsOptionBase(std::string name, std::string description)
         : name(std::move(name))
@@ -200,6 +160,63 @@ namespace rocRoller
         , defaultValue(std::move(defaultValue))
         , bit(bit)
     {
+    }
+
+    template <typename T>
+    inline T SettingsOption<T>::getTypeValue(std::string const& var) const
+    {
+        if constexpr(CCountedEnum<T>)
+        {
+            return fromString<T>(var);
+        }
+        else if constexpr(std::same_as<Settings::bitFieldType, T>)
+        {
+            return Settings::bitFieldType{var};
+        }
+        else if constexpr(std::same_as<bool, T>)
+        {
+            return var != "0";
+        }
+        else if constexpr(std::same_as<std::string, T>)
+        {
+            return var;
+        }
+        else
+        {
+            std::istringstream stream(var);
+            T                  value;
+            stream >> value;
+            return value;
+        }
+    }
+
+    template <typename T>
+    inline std::optional<std::any> SettingsOption<T>::getFromEnv() const
+    {
+        const char* var   = std::getenv(name.c_str());
+        std::string s_var = "";
+
+        if(var)
+        {
+            s_var = var;
+            return getTypeValue(s_var);
+        }
+        else
+        {
+            return {};
+        }
+    }
+
+    template <typename T>
+    inline std::any SettingsOption<T>::getDefault() const
+    {
+        return defaultValue;
+    }
+
+    template <typename T>
+    inline int SettingsOption<T>::getBitIndex() const
+    {
+        return bit;
     }
 
     template <typename T>

@@ -25,30 +25,27 @@ namespace rocRollerTest
 
     class EnvSettings : public GenericContextFixture
     {
+    public:
         std::shared_ptr<Settings> m_settings = Settings::getInstance();
-
-        std::vector<std::pair<std::string, char*>> m_envVars;
+        std::vector<std::pair<std::string, std::optional<std::string>>> m_envVars;
 
         void SetUp()
         {
-            Settings::bitFieldType bf(0x0001);
+            for(auto const& setting : SettingsOptionBase::instances())
+            {
+                std::optional<std::string> val;
+                if(auto ptr = getenv(setting->name.c_str()))
+                {
+                    val = ptr;
+                }
+                m_envVars.emplace_back(setting->name, std::move(val));
+            }
 
-            m_settings->set(Settings::SettingsBitField, bf);
-
-            m_envVars.push_back(std::pair<std::string, char*>(
-                Settings::LogConsole.name, getenv(Settings::LogConsole.name.c_str())));
-            m_envVars.push_back(std::pair<std::string, char*>(
-                Settings::AssemblyFile.name, getenv(Settings::AssemblyFile.name.c_str())));
-            m_envVars.push_back(std::pair<std::string, char*>(
-                Settings::RandomSeed.name, getenv(Settings::RandomSeed.name.c_str())));
-            m_envVars.push_back(std::pair<std::string, char*>(
-                Settings::SaveAssembly.name, getenv(Settings::SaveAssembly.name.c_str())));
-            m_envVars.push_back(std::pair<std::string, char*>(
-                Settings::Scheduler.name, getenv(Settings::SaveAssembly.name.c_str())));
+            setenv(Settings::BitfieldName.c_str(), "11111111111111111111111111111111", 1);
             setenv(Settings::LogConsole.name.c_str(), "0", 1);
-            setenv(Settings::SaveAssembly.name.c_str(), "1", 1);
             setenv(Settings::AssemblyFile.name.c_str(), "assemblyFileTest.s", 1);
             setenv(Settings::RandomSeed.name.c_str(), "31415", 1);
+            setenv(Settings::SaveAssembly.name.c_str(), "1", 1);
             setenv(Settings::Scheduler.name.c_str(), "invalidScheduler", 1);
 
             GenericContextFixture::SetUp();
@@ -64,7 +61,7 @@ namespace rocRollerTest
                 }
                 else
                 {
-                    setenv(env.first.c_str(), env.second, 1);
+                    setenv(env.first.c_str(), env.second->c_str(), 1);
                 }
             }
 
@@ -76,8 +73,6 @@ namespace rocRollerTest
     {
         auto settings = Settings::getInstance();
 
-        EXPECT_EQ(settings->get(Settings::SettingsBitField),
-                  Settings::SettingsBitField.defaultValue);
         EXPECT_EQ(settings->get(Settings::LogConsole), Settings::LogConsole.defaultValue);
         EXPECT_EQ(settings->get(Settings::SaveAssembly), Settings::SaveAssembly.defaultValue);
         EXPECT_EQ(settings->get(Settings::AssemblyFile), Settings::AssemblyFile.defaultValue);
@@ -86,10 +81,6 @@ namespace rocRollerTest
         EXPECT_EQ(settings->get(Settings::LogLvl), Settings::LogLvl.defaultValue);
         EXPECT_EQ(settings->get(Settings::RandomSeed), Settings::RandomSeed.defaultValue);
         EXPECT_EQ(settings->get(Settings::Scheduler), Settings::Scheduler.defaultValue);
-
-        std::string help = settings->help();
-        EXPECT_THAT(help, testing::HasSubstr("default"));
-        EXPECT_THAT(help, testing::HasSubstr("bit"));
     }
 
     TEST_F(GenericSettings, LogLevelTest)
@@ -140,69 +131,68 @@ namespace rocRollerTest
     {
         auto settings = Settings::getInstance();
 
-        EXPECT_THROW(settings->set(Settings::SettingsBitField, "invalidValue"), FatalError);
-    }
+        settings->set(Settings::Scheduler, Scheduling::SchedulerProcedure::Cooperative);
+        EXPECT_THROW(settings->set(Settings::Scheduler, "invalidValue"), FatalError);
+        EXPECT_EQ(settings->get(Settings::Scheduler), Scheduling::SchedulerProcedure::Cooperative);
 
-    TEST_F(GenericSettings, BitFieldTest)
-    {
-        auto settings = Settings::getInstance();
-
-        Settings::bitFieldType bf(0x0000);
-
-        // All bit field options are set to false with 0x0000
-        settings->set(Settings::SettingsBitField, bf);
-        EXPECT_EQ(settings->get(Settings::LogConsole), false);
-        EXPECT_EQ(settings->get(Settings::SaveAssembly), false);
-        EXPECT_EQ(settings->get(Settings::BreakOnThrow), false);
-
-        // Turn on LogConsole bit
-        bf.reset().set(Settings::LogConsole.bit);
-        settings->set(Settings::SettingsBitField, bf);
-        EXPECT_EQ(settings->get(Settings::LogConsole), true); //failing
+        EXPECT_THROW(settings->set(Settings::LogConsole, "invalidValue"), FatalError);
     }
 
     TEST_F(EnvSettings, PrecedenceTest)
     {
-        auto                   settings = Settings::getInstance();
-        Settings::bitFieldType bf{0x0003};
+        Settings::reset();
+        auto settings = Settings::getInstance();
 
-        // Overwrite exisitng 0x0001 value in m_values map to 0x0011
-        settings->set(Settings::SettingsBitField, bf);
-
-        EXPECT_EQ(settings->get(Settings::SaveAssembly), true);
-        EXPECT_EQ(settings->get(Settings::AssemblyFile), "assemblyFileTest.s");
-        EXPECT_EQ(settings->get(Settings::RandomSeed), 31415);
-        EXPECT_EQ(settings->get(Settings::SettingsBitField), bf);
-
-        // Bitfield has this as true but env variable explicitly set it to false
+        // Env Vars take Precedence over bitfield
         EXPECT_EQ(settings->get(Settings::LogConsole), false);
+        EXPECT_EQ(settings->get(Settings::SaveAssembly), true);
+    }
 
-        // Create a default Settings object
-        settings->reset();
+    TEST_F(EnvSettings, EnvVarsTest)
+    {
+        Settings::reset();
+        auto settings = Settings::getInstance();
+        EXPECT_EQ(settings->get(Settings::LogConsole), false);
+        EXPECT_EQ(Settings::Get(Settings::SaveAssembly), true);
+        EXPECT_EQ(settings->get(Settings::AssemblyFile), "assemblyFileTest.s");
+        EXPECT_EQ(Settings::Get(Settings::RandomSeed), 31415);
+
+        // Set settings in memory
+        settings->set(Settings::LogConsole, true);
+        settings->set(Settings::AssemblyFile, "differentFile.s");
+        EXPECT_EQ(settings->get(Settings::LogConsole), true);
+        EXPECT_EQ(settings->get(Settings::AssemblyFile), "differentFile.s");
+
+        // Values set in memory should not persist
+        Settings::reset();
         settings = Settings::getInstance();
 
-        EXPECT_EQ(settings->get(Settings::SettingsBitField),
-                  Settings::SettingsBitField.defaultValue);
-        EXPECT_EQ(settings->get(Settings::BreakOnThrow), Settings::BreakOnThrow.defaultValue);
-        EXPECT_EQ(settings->get(Settings::LogFile), Settings::LogFile.defaultValue);
-        EXPECT_EQ(settings->get(Settings::LogLvl), Settings::LogLvl.defaultValue);
-
-        // Environment variables persist after reset
         EXPECT_EQ(settings->get(Settings::LogConsole), false);
+        EXPECT_EQ(Settings::Get(Settings::SaveAssembly), true);
         EXPECT_EQ(settings->get(Settings::AssemblyFile), "assemblyFileTest.s");
-        EXPECT_EQ(settings->get(Settings::RandomSeed), 31415);
-        EXPECT_EQ(settings->get(Settings::SaveAssembly), true);
+        EXPECT_EQ(Settings::Get(Settings::RandomSeed), 31415);
 
-        // Calling set will have no effect against the environment variables
-        std::string assemblyName = "newAssemblyFileTest.s";
-        settings->set(Settings::AssemblyFile, assemblyName);
-        settings->set(Settings::RandomSeed, 271828);
-        settings->set(Settings::SaveAssembly, false);
-
-        EXPECT_EQ(settings->get(Settings::AssemblyFile), "assemblyFileTest.s");
-        EXPECT_EQ(settings->get(Settings::RandomSeed), 31415);
-        EXPECT_EQ(settings->get(Settings::SaveAssembly), true);
-
+        // Fatal error reading unparseable env var
+        settings->set(Settings::BreakOnThrow, false);
         EXPECT_THROW(settings->get(Settings::Scheduler), FatalError);
+    }
+
+    TEST_F(EnvSettings, InfiniteRecursionTest)
+    {
+        // Settings ctor should not get from env,
+        // otherwise it may throw without a prior settings instance
+        // and infinitely recurse
+        Settings::reset();
+        unsetenv(Settings::BitfieldName.c_str());
+        auto settings = Settings::getInstance();
+        EXPECT_THROW(settings->get(Settings::Scheduler), FatalError);
+    }
+
+    TEST(SettingsTest, HelpString)
+    {
+        auto        settings = Settings::getInstance();
+        std::string help     = settings->help();
+        EXPECT_THAT(help, testing::HasSubstr("default"));
+        EXPECT_THAT(help, testing::HasSubstr("bit"));
     }
 }

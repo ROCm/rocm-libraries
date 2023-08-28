@@ -28,7 +28,10 @@ namespace rocRoller
         std::string description;
 
         SettingsOptionBase(std::string name, std::string description);
-        virtual std::string help() const;
+        virtual std::string             help() const;
+        virtual std::optional<std::any> getFromEnv() const  = 0;
+        virtual std::any                getDefault() const  = 0;
+        virtual int                     getBitIndex() const = 0;
 
         /**
          * @brief Getter for instances.
@@ -53,7 +56,12 @@ namespace rocRoller
 
         SettingsOption(std::string name, std::string description, T defaultValue, int bit);
 
-        std::string help() const;
+        std::string             help() const;
+        std::optional<std::any> getFromEnv() const;
+        std::any                getDefault() const;
+        T                       getTypeValue(std::string const&) const;
+        T                       getValue() const;
+        int                     getBitIndex() const;
     };
 
     std::string toString(LogLevel level);
@@ -66,115 +74,95 @@ namespace rocRoller
      * we probe m_values which maps an option name to its corresponding value. If opt does
      * not exist in m_values then we assign the value based on the following precedence order:
      *     1. the corresponding env variable will be used. If no env variable is set then
-     *     2. set(opt, val) will always set, or overwrite, the value of opt in m_values. Otherwise
-     *     3. the corresponding bit field value in SettingsBitField is used. Lastly
-     *     4. the default value is used if the value is not otherwise obtained.
+     *     2. the default value is used if the value is not otherwise obtained.
+     *
+     * A call to set(SettingsOption opt) sets (or overwrites) the corresponding value in m_values.
      */
     class Settings : public LazySingleton<Settings>
     {
     public:
         using bitFieldType = std::bitset<32>;
 
-        static inline SettingsOption<bool> LogConsole{
+        static inline const SettingsOption<bool> LogConsole{
             "ROCROLLER_LOG_CONSOLE", "Log debug info to stdout/stderr", true, 0};
 
-        static inline SettingsOption<bool> SaveAssembly{
+        static inline const SettingsOption<bool> SaveAssembly{
             "ROCROLLER_SAVE_ASSEMBLY",
             "Assembly code written to text file in the current working directory as it is "
             "generated",
             false,
             1};
 
-        static inline SettingsOption<bool> BreakOnThrow{
+        static inline const SettingsOption<bool> BreakOnThrow{
             "ROCROLLER_BREAK_ON_THROW", "Cause exceptions thrown to cause a segfault", false, 2};
 
-        static inline SettingsOption<std::string> ArchitectureFile{
+        static inline const SettingsOption<std::string> ArchitectureFile{
             "ROCROLLER_ARCHITECTURE_FILE",
             "GPU Architecture file",
             "source/rocRoller/GPUArchitecture_def.msgpack",
             -1};
 
-        static inline SettingsOption<std::string> AssemblyFile{
+        static inline const SettingsOption<std::string> AssemblyFile{
             "ROCROLLER_ASSEMBLY_FILE", "File name to write assembly", "", -1};
 
-        static inline SettingsOption<std::string> LogFile{
+        static inline const SettingsOption<std::string> LogFile{
             "ROCROLLER_LOG_FILE", "Log file name", "", -1};
 
-        static inline SettingsOption<Scheduling::SchedulerProcedure> Scheduler{
+        static inline const SettingsOption<Scheduling::SchedulerProcedure> Scheduler{
             "ROCROLLER_SCHEDULER",
             "Scheduler used when scheduling independent instruction streams.",
             Scheduling::SchedulerProcedure::Sequential,
             -1};
 
-        static inline SettingsOption<Scheduling::CostFunction> SchedulerCost{
+        static inline const SettingsOption<Scheduling::CostFunction> SchedulerCost{
             "ROCROLLER_SCHEDULER_COST",
             "Default cost function for schedulers.",
             Scheduling::CostFunction::LinearWeighted,
             -1};
 
-        static inline SettingsOption<std::string> SchedulerWeights{
+        static inline const SettingsOption<std::string> SchedulerWeights{
             "ROCROLLER_SCHEDULER_WEIGHTS",
             "Scheduler Weight (YAML) File for LinearWeighted cost function.",
             "",
             -1};
 
-        static inline SettingsOption<LogLevel> LogLvl{
+        static inline const SettingsOption<LogLevel> LogLvl{
             "ROCROLLER_LOG_LEVEL", "Log level", LogLevel::None, -1};
 
-        static inline SettingsOption<int> RandomSeed{"ROCROLLER_RANDOM_SEED",
-                                                     "Seed used with RandomGenerator class",
-                                                     std::numeric_limits<int>::min(),
-                                                     -1};
+        static inline const SettingsOption<int> RandomSeed{"ROCROLLER_RANDOM_SEED",
+                                                           "Seed used with RandomGenerator class",
+                                                           std::numeric_limits<int>::min(),
+                                                           -1};
 
-        static inline SettingsOption<bool> KernelAnalysis{
+        static inline const SettingsOption<bool> KernelAnalysis{
             "ROCROLLER_KERNEL_ANALYSIS",
             "Whether to track and report register liveness.",
             false,
             -1};
 
-        static inline SettingsOption<bool> AllowUnkownInstructions{
+        static inline const SettingsOption<bool> AllowUnkownInstructions{
             "ROCROLLER_ALLOW_UNKNOWN_INSTRUCTIONS",
             "Whether to allow arbitrary instructions.",
             false,
             -1};
 
-        static inline SettingsOption<bool> EnforceGraphConstraints{
+        static inline const SettingsOption<bool> EnforceGraphConstraints{
             "ROCROLLER_ENFORCE_GRAPH_CONSTRAINTS",
             "Whether to enforce kernel graph constraints. (Could negatively impact code gen "
             "performance)",
             false,
             -1};
 
-        static inline SettingsOption<bool> LogGraphs{
+        static inline const SettingsOption<bool> LogGraphs{
             "ROCROLLER_LOG_GRAPHS", "Whether to log graphs after each lowering stage.", true, -1};
 
-        /**
-         * @brief Generate defaultValue for SettingsBitField based on other defaultValues.
-         *
-         * Called in SettingsBitField struct to be set as its defaultValue.
-         */
-        static inline bitFieldType constructDefaultBitField()
-        {
-            bitFieldType bitField(SettingsBitField.defaultValue);
-
-            bitField.set(LogConsole.bit, LogConsole.defaultValue);
-            bitField.set(SaveAssembly.bit, SaveAssembly.defaultValue);
-            bitField.set(BreakOnThrow.bit, BreakOnThrow.defaultValue);
-
-            return bitField;
-        }
+        static inline const std::string BitfieldName = "ROCROLLER_DEBUG";
 
         /**
          * @brief Creates a help dialog for the environment variables with
          * their names, default values and bit-offset (if it has one).
         */
         std::string help() const;
-
-        static inline SettingsOption<bitFieldType> SettingsBitField{
-            "ROCROLLER_DEBUG",
-            "Bitfield mask to enable/disable other debug options",
-            constructDefaultBitField(),
-            -1};
 
         Settings();
 
