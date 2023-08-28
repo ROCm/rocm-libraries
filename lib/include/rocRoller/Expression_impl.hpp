@@ -52,10 +52,6 @@ namespace rocRoller
 
         inline ExpressionPtr operator*(ExpressionPtr a, ExpressionPtr b)
         {
-            if(std::holds_alternative<WaveTilePtr>(*a) || std::holds_alternative<WaveTilePtr>(*b))
-            {
-                Throw<FatalError>("Matrix multiplication not supported by *");
-            }
             return std::make_shared<Expression>(Multiply{a, b});
         }
 

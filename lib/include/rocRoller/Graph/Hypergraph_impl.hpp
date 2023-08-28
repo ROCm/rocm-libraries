@@ -34,7 +34,7 @@ namespace rocRoller
             throw std::runtime_error("Invalid ElementType");
         }
 
-        inline Direction opposite(Direction d)
+        constexpr inline Direction opposite(Direction d)
         {
             return d == Direction::Downstream ? Direction::Upstream : Direction::Downstream;
         }
@@ -644,32 +644,35 @@ namespace rocRoller
         Generator<int> Hypergraph<Node, Edge, Hyper>::path(RangeStart const& starts,
                                                            RangeEnd const&   ends) const
         {
-            std::map<int, bool> visitedElements;
-            co_yield path<Dir>(starts, ends, visitedElements);
-        }
-
-        template <typename Node, typename Edge, bool Hyper>
-        template <Direction Dir, CForwardRangeOf<int> RangeStart, CForwardRangeOf<int> RangeEnd>
-        Generator<int>
-            Hypergraph<Node, Edge, Hyper>::path(RangeStart const&    starts,
-                                                RangeEnd const&      ends,
-                                                std::map<int, bool>& visitedElements) const
-        {
-            co_yield path<Dir>(starts, ends, visitedElements, [](int) { return true; });
+            auto truePred = [](int) { return true; };
+            co_yield path<Dir>(starts, ends, truePred);
         }
 
         template <typename Node, typename Edge, bool Hyper>
         template <Direction            Dir,
-                  std::predicate<int>  Predicate,
                   CForwardRangeOf<int> RangeStart,
-                  CForwardRangeOf<int> RangeEnd>
-        Generator<int> Hypergraph<Node, Edge, Hyper>::path(RangeStart const&    starts,
-                                                           RangeEnd const&      ends,
-                                                           std::map<int, bool>& visitedElements,
-                                                           Predicate            edgeSelector) const
+                  CForwardRangeOf<int> RangeEnd,
+                  std::predicate<int>  Predicate>
+        Generator<int> Hypergraph<Node, Edge, Hyper>::path(RangeStart const& starts,
+                                                           RangeEnd const&   ends,
+                                                           Predicate         edgeSelector) const
         {
-            Direction const reverseDir
-                = (Dir == Direction::Downstream) ? Direction::Upstream : Direction::Downstream;
+            std::map<int, bool> visitedElements;
+            co_yield path<Dir>(starts, ends, edgeSelector, visitedElements);
+        }
+
+        template <typename Node, typename Edge, bool Hyper>
+        template <Direction            Dir,
+                  CForwardRangeOf<int> RangeStart,
+                  CForwardRangeOf<int> RangeEnd,
+                  std::predicate<int>  Predicate>
+        Generator<int>
+            Hypergraph<Node, Edge, Hyper>::path(RangeStart const&    starts,
+                                                RangeEnd const&      ends,
+                                                Predicate            edgeSelector,
+                                                std::map<int, bool>& visitedElements) const
+        {
+            constexpr Direction reverseDir = opposite(Dir);
 
             for(auto const end : ends)
             {
@@ -698,7 +701,7 @@ namespace rocRoller
 
                     std::vector<int> branchResults
                         = path<Dir>(
-                              starts, std::vector<int>{nextElement}, visitedElements, edgeSelector)
+                              starts, std::vector<int>{nextElement}, edgeSelector, visitedElements)
                               .template to<std::vector>();
                     results.insert(results.end(), branchResults.begin(), branchResults.end());
 
@@ -780,21 +783,17 @@ namespace rocRoller
         template <typename Node, typename Edge, bool Hyper>
         inline Generator<int> Hypergraph<Node, Edge, Hyper>::topologicalSort() const
         {
-            std::map<int, bool> visited;
-
             auto start = roots().template to<std::vector>();
             auto end   = leaves().template to<std::vector>();
-            co_yield path<Graph::Direction::Downstream>(start, end, visited);
+            co_yield path<Graph::Direction::Downstream>(start, end);
         }
 
         template <typename Node, typename Edge, bool Hyper>
         inline Generator<int> Hypergraph<Node, Edge, Hyper>::reverseTopologicalSort() const
         {
-            std::map<int, bool> visited;
-
             auto start = roots().template to<std::vector>();
             auto end   = leaves().template to<std::vector>();
-            co_yield path<Graph::Direction::Upstream>(end, start, visited);
+            co_yield path<Graph::Direction::Upstream>(end, start);
         }
 
         template <typename Node, typename Edge, bool Hyper>

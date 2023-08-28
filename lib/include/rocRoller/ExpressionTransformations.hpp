@@ -7,6 +7,8 @@ namespace rocRoller
 {
     namespace Expression
     {
+        ExpressionPtr identity(ExpressionPtr expr);
+
         ExpressionPtr launchTimeSubExpressions(ExpressionPtr expr, ContextPtr context);
 
         /**

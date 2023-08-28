@@ -46,7 +46,7 @@ namespace rocRoller
             Count
         };
 
-        Direction opposite(Direction);
+        constexpr Direction opposite(Direction);
 
         namespace mi = boost::multi_index;
 
@@ -230,18 +230,20 @@ namespace rocRoller
             * @brief Yields node indices that form the paths from the starts to the ends
             */
             template <Direction            Dir,
-                      std::predicate<int>  Predicate,
                       CForwardRangeOf<int> RangeStart,
-                      CForwardRangeOf<int> RangeEnd>
+                      CForwardRangeOf<int> RangeEnd,
+                      std::predicate<int>  Predicate>
             Generator<int> path(RangeStart const&    starts,
                                 RangeEnd const&      ends,
-                                std::map<int, bool>& visitedElements,
-                                Predicate            edgeSelector) const;
-
-            template <Direction Dir, CForwardRangeOf<int> RangeStart, CForwardRangeOf<int> RangeEnd>
-            Generator<int> path(RangeStart const&    starts,
-                                RangeEnd const&      ends,
+                                Predicate            edgeSelector,
                                 std::map<int, bool>& visitedElements) const;
+
+            template <Direction            Dir,
+                      CForwardRangeOf<int> RangeStart,
+                      CForwardRangeOf<int> RangeEnd,
+                      std::predicate<int>  Predicate>
+            Generator<int>
+                path(RangeStart const& starts, RangeEnd const& ends, Predicate edgeSelector) const;
 
             template <Direction Dir, CForwardRangeOf<int> RangeStart, CForwardRangeOf<int> RangeEnd>
             Generator<int> path(RangeStart const& starts, RangeEnd const& ends) const;

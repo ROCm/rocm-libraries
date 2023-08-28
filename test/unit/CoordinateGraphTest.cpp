@@ -113,13 +113,9 @@ namespace rocRollerTest
         auto result = std::get<unsigned int>(Expression::evaluate(exprs[0]));
         EXPECT_EQ(result, 0);
 
-        {
-            std::map<int, bool> visited;
-            EXPECT_NE(std::vector<int>(),
-                      ct.path<Graph::Direction::Upstream>(
-                            std::vector<int>{m}, std::vector<int>{x}, visited)
-                          .to<std::vector>());
-        }
+        EXPECT_NE(std::vector<int>(),
+                  ct.path<Graph::Direction::Upstream>(std::vector<int>{m}, std::vector<int>{x})
+                      .to<std::vector>());
 
         auto m_index = std::make_shared<Expression::Expression>(67u);
         exprs        = ct.reverse({m_index}, {x}, {m},
@@ -705,6 +701,152 @@ namespace rocRollerTest
         exprs = coords.forwardStride(tile_y, Expression::literal(2u), {D});
         sexpr = Expression::toString(exprs[0]);
         EXPECT_EQ(sexpr, "32j");
+    }
+
+    TEST_F(CoordinateGraphTest, SunderOne)
+    {
+        auto zero = Expression::literal(0u);
+        auto one  = Expression::literal(1u);
+
+        auto ct = CoordinateGraph();
+
+        auto input = ct.addElement(User());
+
+        auto linX = ct.addElement(Linear(Expression::literal(100u), one));
+        auto sw   = ct.addElement(Linear(Expression::literal(2u), one));
+
+        auto sunder = ct.addElement(Sunder(), {input}, {linX, sw});
+
+        auto a = ct.addElement(Linear());
+        auto b = ct.addElement(Linear(Expression::literal(10u), one));
+
+        ct.addElement(Tile(), {linX}, {a, b});
+
+        auto graph = ct.toDOT("");
+
+        auto aVal = Expression::literal(8u);
+        auto bVal = Expression::literal(3u);
+
+        auto exprX
+            = only(ct.reverse({aVal, bVal, zero}, {input}, {a, b, sw}, Expression::identity));
+        EXPECT_THROW(only(ct.reverse({aVal, bVal, one}, {input}, {a, b, sw}, Expression::identity)),
+                     FatalError)
+            << graph;
+
+        EXPECT_EQ("Add(Multiply(8j, 10j), 3j)", toString(*exprX)) << graph;
+    }
+
+    TEST_F(CoordinateGraphTest, SunderBasicTwo)
+    {
+        auto zero = Expression::literal(0u);
+        auto one  = Expression::literal(1u);
+        auto two  = Expression::literal(2u);
+
+        auto ct = CoordinateGraph();
+
+        auto input = ct.addElement(User());
+
+        auto linX = ct.addElement(Linear(Expression::literal(100u), one));
+        auto linY = ct.addElement(Linear(Expression::literal(24u), one));
+        auto sw   = ct.addElement(Linear(Expression::literal(2u), one));
+
+        auto sunder = ct.addElement(Sunder(), {input}, {linX, linY, sw});
+
+        auto a = ct.addElement(Linear());
+        auto b = ct.addElement(Linear(Expression::literal(10u), one));
+
+        ct.addElement(Tile(), {linX}, {a, b});
+
+        auto c = ct.addElement(Linear());
+        auto d = ct.addElement(Linear(Expression::literal(6u), one));
+
+        ct.addElement(Tile(), {linY}, {c, d});
+
+        auto graph = ct.toDOT("");
+
+        auto aVal = Expression::literal(8u);
+        auto bVal = Expression::literal(3u);
+        auto cVal = Expression::literal(1u);
+        auto dVal = Expression::literal(4u);
+
+        auto exprX = only(ct.reverse(
+            {aVal, bVal, nullptr, nullptr, zero}, {input}, {a, b, c, d, sw}, Expression::identity));
+        auto exprY = only(ct.reverse(
+            {nullptr, nullptr, cVal, dVal, one}, {input}, {a, b, c, d, sw}, Expression::identity));
+        EXPECT_THROW(only(ct.reverse({aVal, bVal, nullptr, nullptr, two},
+                                     {input},
+                                     {a, b, c, d, sw},
+                                     Expression::identity)),
+                     FatalError)
+            << graph;
+
+        EXPECT_EQ("Add(Multiply(8j, 10j), 3j)", toString(*exprX)) << graph;
+        EXPECT_EQ("Add(Add(Multiply(1j, 6j), 4j), 100j)", toString(*exprY)) << graph;
+    }
+
+    TEST_F(CoordinateGraphTest, SunderBasicThree)
+    {
+        auto zero  = Expression::literal(0u);
+        auto one   = Expression::literal(1u);
+        auto two   = Expression::literal(2u);
+        auto three = Expression::literal(3u);
+
+        auto ct = CoordinateGraph();
+
+        auto input = ct.addElement(User());
+
+        auto linX = ct.addElement(Linear(Expression::literal(100u), one));
+        auto linY = ct.addElement(Linear(Expression::literal(24u), one));
+        auto linZ = ct.addElement(Linear(Expression::literal(17u), one));
+        auto sw   = ct.addElement(Linear(Expression::literal(2u), one));
+
+        auto sunder = ct.addElement(Sunder(), {input}, {linX, linY, linZ, sw});
+
+        auto a = ct.addElement(Linear());
+        auto b = ct.addElement(Linear(Expression::literal(10u), one));
+
+        ct.addElement(Tile(), {linX}, {a, b});
+
+        auto c = ct.addElement(Linear());
+        auto d = ct.addElement(Linear(Expression::literal(6u), one));
+
+        ct.addElement(Tile(), {linY}, {c, d});
+
+        auto e = ct.addElement(Linear());
+        auto f = ct.addElement(Linear(Expression::literal(9u), one));
+
+        ct.addElement(Tile(), {linZ}, {e, f});
+        auto graph = ct.toDOT("");
+
+        auto aVal = Expression::literal(8u);
+        auto bVal = Expression::literal(3u);
+        auto cVal = Expression::literal(1u);
+        auto dVal = Expression::literal(4u);
+        auto eVal = Expression::literal(0u);
+        auto fVal = Expression::literal(19u);
+
+        auto exprX = only(ct.reverse({aVal, bVal, cVal, dVal, eVal, fVal, zero},
+                                     {input},
+                                     {a, b, c, d, e, f, sw},
+                                     Expression::identity));
+        auto exprY = only(ct.reverse({aVal, bVal, cVal, dVal, eVal, fVal, one},
+                                     {input},
+                                     {a, b, c, d, e, f, sw},
+                                     Expression::identity));
+        auto exprZ = only(ct.reverse({aVal, bVal, cVal, dVal, eVal, fVal, two},
+                                     {input},
+                                     {a, b, c, d, e, f, sw},
+                                     Expression::identity));
+        EXPECT_THROW(only(ct.reverse({aVal, bVal, cVal, dVal, eVal, fVal, three},
+                                     {input},
+                                     {a, b, c, d, e, f, sw},
+                                     Expression::identity)),
+                     FatalError)
+            << graph;
+
+        EXPECT_EQ("Add(Multiply(8j, 10j), 3j)", toString(*exprX)) << graph;
+        EXPECT_EQ("Add(Add(Multiply(1j, 6j), 4j), 100j)", toString(*exprY)) << graph;
+        EXPECT_EQ("Add(Add(Multiply(0j, 9j), 19j), Add(100j, 24j))", toString(*exprZ)) << graph;
     }
 
     TEST_F(CoordinateGraphTest, WaveTileBasic)

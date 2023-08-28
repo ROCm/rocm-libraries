@@ -15,6 +15,7 @@ namespace rocRoller
         struct MakeOutput;
         struct PassThrough;
         struct Split;
+        struct Sunder;
         struct Tile;
 
         using CoordinateTransformEdge = std::variant<ConstructMacroTile,
@@ -26,6 +27,7 @@ namespace rocRoller
                                                      MakeOutput,
                                                      PassThrough,
                                                      Split,
+                                                     Sunder,
                                                      Tile>;
 
         template <typename T>

@@ -82,7 +82,7 @@ namespace rocRoller
 
     /**
      * Returns an unsigned integer from a CommandArgumentValue.
-     * If the ComandArgumentValue is not an integer, an exception will be thrown.
+     * If the CommandArgumentValue is not an integer, an exception will be thrown.
      */
     unsigned int getUnsignedInt(CommandArgumentValue val);
 

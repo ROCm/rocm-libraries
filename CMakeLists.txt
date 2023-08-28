@@ -212,24 +212,17 @@ ADD_CUSTOM_TARGET(
 set(rocroller_src
 
  lib/source/Assembler.cpp
- lib/source/AssemblyKernel.cpp
  lib/source/AssemblyKernel_serialization.cpp
+ lib/source/AssemblyKernel.cpp
  lib/source/CommandSolution.cpp
  lib/source/Context.cpp
  lib/source/DataTypes.cpp
  lib/source/Error.cpp
  lib/source/ExecutableKernel.cpp
- lib/source/Expression.cpp
  lib/source/Expression_evaluate.cpp
  lib/source/Expression_generate.cpp
  lib/source/Expression_serialization.cpp
- lib/source/ExpressionTransformations/FastArithmetic.cpp
- lib/source/ExpressionTransformations/FastDivision.cpp
- lib/source/ExpressionTransformations/FastMultiplication.cpp
- lib/source/ExpressionTransformations/LaunchTimeSubExpressions.cpp
- lib/source/ExpressionTransformations/Simplify.cpp
- lib/source/ExpressionTransformations/FuseAssociative.cpp
- lib/source/ExpressionTransformations/FuseTernary.cpp
+ lib/source/Expression.cpp
  lib/source/GPUArchitecture.cpp
  lib/source/GPUArchitectureLibrary.cpp
  lib/source/KernelArguments.cpp
@@ -241,6 +234,15 @@ set(rocroller_src
  lib/source/ScheduledInstructions.cpp
  lib/source/Scheduler.cpp
  lib/source/Timer.cpp
+
+ lib/source/ExpressionTransformations/FastArithmetic.cpp
+ lib/source/ExpressionTransformations/FastDivision.cpp
+ lib/source/ExpressionTransformations/FastMultiplication.cpp
+ lib/source/ExpressionTransformations/FuseAssociative.cpp
+ lib/source/ExpressionTransformations/FuseTernary.cpp
+ lib/source/ExpressionTransformations/Identity.cpp
+ lib/source/ExpressionTransformations/LaunchTimeSubExpressions.cpp
+ lib/source/ExpressionTransformations/Simplify.cpp
 
  lib/source/CodeGen/Arithmetic/Add.cpp
  lib/source/CodeGen/Arithmetic/AddShiftL.cpp
@@ -296,6 +298,7 @@ set(rocroller_src
  lib/source/KernelGraph/ControlGraph/ControlGraph.cpp
  lib/source/KernelGraph/ControlGraph/Operation.cpp
 
+ lib/source/KernelGraph/CoordinateGraph/CoordinateGraph.cpp
  lib/source/KernelGraph/CoordinateGraph/Dimension.cpp
  lib/source/KernelGraph/CoordinateGraph/Transformer.cpp
 

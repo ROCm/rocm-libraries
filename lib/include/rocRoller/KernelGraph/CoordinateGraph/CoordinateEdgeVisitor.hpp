@@ -3,7 +3,7 @@
 
 #include <vector>
 
-#include <rocRoller/Expression_fwd.hpp>
+#include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/CoordinateEdge.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
 
@@ -127,6 +127,29 @@ namespace rocRoller
                 auto result = indexes[0] * getStride(dsts[0]);
                 for(uint d = 1; d < dsts.size(); ++d)
                     result = result + indexes[d] * getStride(dsts[d]);
+                return {result};
+            }
+
+            std::vector<Expression::ExpressionPtr> operator()(Sunder const& e)
+            {
+                AssertFatal(srcs.size() == 1, ShowValue(srcs.size()));
+                AssertFatal(dsts.size() > 1, ShowValue(dsts.size()));
+
+                int index = getUnsignedInt(evaluate(indexes.back()));
+                AssertFatal(index >= 0 && index < (dsts.size() - 1));
+
+                Expression::ExpressionPtr offset = nullptr;
+
+                for(int i = 0; i < index; i++)
+                {
+                    auto mySize = getSize(dsts[i]);
+                    offset      = offset ? offset + mySize : mySize;
+                }
+
+                auto result = indexes[index];
+                if(offset != nullptr)
+                    result = result + offset;
+
                 return {result};
             }
 

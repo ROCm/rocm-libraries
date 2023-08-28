@@ -182,6 +182,28 @@ namespace rocRoller
         RR_EMPTY_STRUCT_WITH_NAME(Split);
 
         /**
+         * Unevenly split (asunder) a dimension into subdimensions, and select the active
+         * dimension based on the last indexed input dimension.
+         *
+         * For example, with input dimensions
+         *
+         *   F = Dimension()
+         *
+         * and output dimensions
+         *
+         *   I = Dimension(size=n_i, stride=1)
+         *   J = Dimension(size=n_j, stride=1)
+         *   K = Dimension(size=2, stride=1)
+         *
+         * the inverse coordinate transform is
+         *
+         *   Sunder'(I, J, K; F)(i, j, k) = i     | k=0
+         *                                  j+n_i | k=1
+         *
+         */
+        RR_EMPTY_STRUCT_WITH_NAME(Sunder);
+
+        /**
          * Tile a dimension.
          *
          * For example, with an input dimension of

@@ -385,40 +385,29 @@ namespace rocRollerTest
         auto TestSplit10 = g.addElement(TestSplit{}, {sd3, sd8}, {sd6});
         auto TestSplit11 = g.addElement(TestSplit{}, {sd3}, {sd7});
 
-        std::map<int, bool> visited;
         EXPECT_EQ((std::vector<int>{u1, TestSplit4, sd2}),
-                  g.path<Graph::Direction::Downstream>(
-                       std::vector<int>{u1}, std::vector<int>{sd2}, visited)
+                  g.path<Graph::Direction::Downstream>(std::vector<int>{u1}, std::vector<int>{sd2})
                       .to<std::vector>());
 
-        visited.clear();
-        EXPECT_EQ((std::vector<int>{sd2, sd3, TestSplit4, u1}),
-                  g.path<Graph::Direction::Upstream>(
-                       std::vector<int>{sd2, sd3}, std::vector<int>{u1}, visited)
+        EXPECT_EQ(
+            (std::vector<int>{sd2, sd3, TestSplit4, u1}),
+            g.path<Graph::Direction::Upstream>(std::vector<int>{sd2, sd3}, std::vector<int>{u1})
+                .to<std::vector>());
+
+        EXPECT_EQ((std::vector<int>{}),
+                  g.path<Graph::Direction::Upstream>(std::vector<int>{sd2}, std::vector<int>{u1})
                       .to<std::vector>());
 
-        visited.clear();
-        EXPECT_EQ(
-            (std::vector<int>{}),
-            g.path<Graph::Direction::Upstream>(std::vector<int>{sd2}, std::vector<int>{u1}, visited)
-                .to<std::vector>());
+        EXPECT_EQ((std::vector<int>{sd6, TestSplit10, sd8, TestSplit9, sd2, sd3, TestSplit4, u1}),
+                  g.path<Graph::Direction::Upstream>(std::vector<int>{sd6}, std::vector<int>{u1})
+                      .to<std::vector>());
 
-        visited.clear();
-        EXPECT_EQ(
-            (std::vector<int>{sd6, TestSplit10, sd8, TestSplit9, sd2, sd3, TestSplit4, u1}),
-            g.path<Graph::Direction::Upstream>(std::vector<int>{sd6}, std::vector<int>{u1}, visited)
-                .to<std::vector>());
-
-        visited.clear();
         EXPECT_EQ((std::vector<int>{u1, TestSplit4, sd3, TestSplit11, sd7}),
-                  g.path<Graph::Direction::Downstream>(
-                       std::vector<int>{u1}, std::vector<int>{sd7}, visited)
+                  g.path<Graph::Direction::Downstream>(std::vector<int>{u1}, std::vector<int>{sd7})
                       .to<std::vector>());
 
-        visited.clear();
         EXPECT_EQ((std::vector<int>{u1, TestSplit4, sd3, sd2, TestSplit9, sd8, TestSplit10, sd6}),
-                  g.path<Graph::Direction::Downstream>(
-                       std::vector<int>{u1}, std::vector<int>{sd6}, visited)
+                  g.path<Graph::Direction::Downstream>(std::vector<int>{u1}, std::vector<int>{sd6})
                       .to<std::vector>());
     }
 

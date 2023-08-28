@@ -2,7 +2,6 @@
 
 #include <vector>
 
-#include "CoordinateEdgeVisitor.hpp"
 #include "CoordinateGraph.hpp"
 #include "Graph/Hypergraph.hpp"
 
@@ -12,28 +11,6 @@ namespace rocRoller
     namespace KernelGraph::CoordinateGraph
     {
 
-        inline std::vector<Expression::ExpressionPtr>
-            CoordinateGraph::forward(std::vector<Expression::ExpressionPtr> sdims,
-                                     std::vector<int> const&                srcs,
-                                     std::vector<int> const&                dsts,
-                                     Expression::ExpressionTransducer       transducer)
-        {
-            AssertFatal(sdims.size() == srcs.size(), ShowValue(sdims));
-            auto visitor = ForwardEdgeVisitor();
-            return traverse<Graph::Direction::Downstream>(sdims, srcs, dsts, visitor, transducer);
-        }
-
-        inline std::vector<Expression::ExpressionPtr>
-            CoordinateGraph::reverse(std::vector<Expression::ExpressionPtr> sdims,
-                                     std::vector<int> const&                srcs,
-                                     std::vector<int> const&                dsts,
-                                     Expression::ExpressionTransducer       transducer)
-        {
-            AssertFatal(sdims.size() == dsts.size(), ShowValue(sdims));
-            auto visitor = ReverseEdgeVisitor();
-            return traverse<Graph::Direction::Upstream>(sdims, srcs, dsts, visitor, transducer);
-        }
-
         template <Graph::Direction Dir, typename Visitor>
         inline std::vector<Expression::ExpressionPtr>
             CoordinateGraph::traverse(std::vector<Expression::ExpressionPtr> sdims,
@@ -42,10 +19,13 @@ namespace rocRoller
                                       Visitor&                               visitor,
                                       Expression::ExpressionTransducer       transducer)
         {
-            bool const forward = Dir == Graph::Direction::Downstream;
+            bool constexpr forward     = Dir == Graph::Direction::Downstream;
+            auto constexpr OppositeDir = opposite(Dir);
+
+            auto const& starts = forward ? srcs : dsts;
+            auto const& ends   = forward ? dsts : srcs;
 
             std::map<int, Expression::ExpressionPtr> exprMap;
-            std::map<int, bool>                      visited;
             std::vector<Expression::ExpressionPtr>   visitedExprs;
 
             auto edgeSelector = [this](int element) {
@@ -54,12 +34,11 @@ namespace rocRoller
 
             for(size_t i = 0; i < sdims.size(); i++)
             {
-                int key = forward ? srcs[i] : dsts[i];
+                int key = starts[i];
                 exprMap.emplace(key, sdims[i]);
             }
 
-            for(auto const elemId :
-                path<Dir>(forward ? srcs : dsts, forward ? dsts : srcs, visited, edgeSelector))
+            for(auto const elemId : path<Dir>(starts, ends, edgeSelector))
             {
                 Element const& element = getElement(elemId);
                 if(std::holds_alternative<Edge>(element))
@@ -97,30 +76,20 @@ namespace rocRoller
                         localDstTags.emplace_back(tag);
                     }
 
-                    if(forward)
-                    {
-                        visitor.setLocation(
-                            einds, localSrcs, localDsts, localSrcTags, localDstTags);
-                        visitedExprs = visitor.call(edge);
-                    }
-                    else
-                    {
-                        visitor.setLocation(
-                            einds, localSrcs, localDsts, localSrcTags, localDstTags);
-                        visitedExprs = visitor.call(edge);
-                    }
+                    visitor.setLocation(einds, localSrcs, localDsts, localSrcTags, localDstTags);
+                    visitedExprs = visitor.call(edge);
 
                     AssertFatal(visitedExprs.size() == keys.size(), ShowValue(visitedExprs));
                     for(size_t i = 0; i < visitedExprs.size(); i++)
                     {
-                        exprMap.emplace(keys[i], visitedExprs[i]);
+                        exprMap[keys[i]] = std::move(visitedExprs[i]);
                     }
                 }
             }
 
             std::vector<Expression::ExpressionPtr> results;
 
-            for(int const key : (forward ? dsts : srcs))
+            for(int const key : ends)
             {
                 AssertFatal(exprMap.contains(key),
                             "Path not found for ",
