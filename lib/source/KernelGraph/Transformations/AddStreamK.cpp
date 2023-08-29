@@ -9,9 +9,9 @@
  * tiles.  Tiles in the accumulation (K) dimension will be streamed.
  *
  * The flattened M * N * K global tile-space will be distributed
- * evenly among the CUs.
+ * evenly among the WGs.
  *
- * Each CU needs to iterate over its portion of the flattened
+ * Each WG needs to iterate over its portion of the flattened
  * global tile-space.
  *
  * To facilitate accumulation initialization and prefetching etc, we
@@ -30,14 +30,14 @@
  *
  * The local combined index
  *
- *    cuTile = forTileIdx + forAccumIdx
+ *    wgTile = forTileIdx + forAccumIdx
  *
- * is the current CUs local tile in its portion of the global
+ * is the current WGs local tile in its portion of the global
  * tile-space.  Then
  *
- *    tile = tilesPerCU * cu + cuTile
+ *    tile = tilesPerWG * wg + wgTile
  *
- * is the global tile that the CU is processing.  Given the global
+ * is the global tile that the WG is processing.  Given the global
  * tile, the M/N/K tile coordinates are
  *
  *    m = (tile / numTilesK) / numTilesN;
@@ -74,15 +74,15 @@ namespace rocRoller
         AddStreamK::AddStreamK(std::vector<int> const&   dims,
                                std::string const&        topLoop,
                                std::string const&        accumulatorLoop,
-                               Expression::ExpressionPtr numCUs,
+                               Expression::ExpressionPtr numWGs,
                                ContextPtr                context)
-            : m_dimensions(dims)
+            : m_dimensionIndices(dims)
             , m_topLoop(topLoop)
             , m_accumulatorLoop(accumulatorLoop)
-            , m_numCUs(numCUs)
+            , m_numWGs(numWGs)
             , m_context(context)
         {
-            m_numTileArgExprs.resize(m_dimensions.size() + 1);
+            m_numTileArgExprs.resize(m_dimensionIndices.size() + 1);
         }
 
         //
@@ -115,12 +115,12 @@ namespace rocRoller
         int AddStreamK::addTileSpaceCT(KernelGraph&              graph,
                                        bool                      forward,
                                        Expression::ExpressionPtr numTotalTiles,
-                                       Expression::ExpressionPtr numTilesPerCU)
+                                       Expression::ExpressionPtr numTilesPerWG)
         {
             // Create forward/reverse tile-numbers for each dimension
             // and attach to all staged tile-number coordinates
             std::vector<int> tileNumbers;
-            for(auto d : m_dimensions)
+            for(auto d : m_dimensionIndices)
             {
                 auto tileNumber
                     = graph.coordinates.addElement(MacroTileNumber(d, m_numTiles[d], nullptr));
@@ -142,7 +142,7 @@ namespace rocRoller
             // Appending means: accumulating dimension is fastest moving
             tileNumbers.push_back(m_accumulatorCoord);
 
-            // Create foward/reverse flattend tile-space
+            // Create foward/reverse flattened tile-space
             auto tileSpace = graph.coordinates.addElement(Linear(numTotalTiles, nullptr));
             if(forward)
             {
@@ -153,21 +153,21 @@ namespace rocRoller
                 graph.coordinates.addElement(Tile(), std::vector<int>{tileSpace}, tileNumbers);
             }
 
-            auto CUs        = graph.coordinates.addElement(Linear(m_numCUs, nullptr));
+            auto WGs        = graph.coordinates.addElement(Linear(m_numWGs, nullptr));
             auto workgroup  = graph.coordinates.addElement(Workgroup());
-            auto tilesByCUs = graph.coordinates.addElement(Linear(numTilesPerCU, nullptr));
+            auto tilesByWGs = graph.coordinates.addElement(Linear(numTilesPerWG, nullptr));
             if(forward)
             {
-                graph.coordinates.addElement(PassThrough(), {CUs}, {workgroup});
-                graph.coordinates.addElement(Tile(), {tileSpace}, {CUs, tilesByCUs});
+                graph.coordinates.addElement(PassThrough(), {WGs}, {workgroup});
+                graph.coordinates.addElement(Tile(), {tileSpace}, {WGs, tilesByWGs});
             }
             else
             {
-                graph.coordinates.addElement(PassThrough(), {workgroup}, {CUs});
-                graph.coordinates.addElement(Flatten(), {CUs, tilesByCUs}, {tileSpace});
+                graph.coordinates.addElement(PassThrough(), {workgroup}, {WGs});
+                graph.coordinates.addElement(Flatten(), {WGs, tilesByWGs}, {tileSpace});
             }
 
-            return tilesByCUs;
+            return tilesByWGs;
         }
 
         //
@@ -185,7 +185,7 @@ namespace rocRoller
 
             // Find all dangling MacroTileNumber dimensions associated
             // with the requested dimensions
-            for(auto dimension : m_dimensions)
+            for(auto dimension : m_dimensionIndices)
             {
                 auto danglingTileNumberPredicate = [&](int tag) {
                     auto maybeTileNumber = graph.coordinates.get<MacroTileNumber>(tag);
@@ -236,10 +236,10 @@ namespace rocRoller
             //
             // Compute size of global and local tile-spaces
             //
-            auto accumulatorCoordSize = m_numTiles.back();
+            auto accumulatorCoordSize = m_numTileArgExprs.back();
             auto numTotalTiles        = accumulatorCoordSize;
-            for(auto d : m_dimensions)
-                numTotalTiles = numTotalTiles * m_numTiles[d];
+            for(auto d : m_dimensionIndices)
+                numTotalTiles = numTotalTiles * m_numTiles.at(d);
             numTotalTiles = simplify(numTotalTiles);
 
             auto varType = resultType(numTotalTiles).varType;
@@ -248,32 +248,32 @@ namespace rocRoller
 
             Log::debug("  accumulatorCoordSize: {}", toString(accumulatorCoordSize));
             Log::debug("  numTotalTiles: {}", toString(numTotalTiles));
-            Log::debug("  numTilesPerCU: {}", toString(m_numTilesPerCU));
+            Log::debug("  numTilesPerWG: {}", toString(m_numTilesPerWG));
 
             //
             // Helper
             //
-            auto DF = [=](int tag) {
+            auto DF = [varType](int tag) {
                 return std::make_shared<Expression::Expression>(
                     Expression::DataFlowTag{tag, Register::Type::Scalar, varType});
             };
 
-            auto wg = graph.coordinates.addElement(Workgroup(0));
-            auto cu = std::make_shared<Expression::Expression>(
+            auto wg     = graph.coordinates.addElement(Workgroup(0));
+            auto wgExpr = std::make_shared<Expression::Expression>(
                 Expression::DataFlowTag{wg, Register::Type::Scalar, DataType::UInt32});
 
             //
             // Add forward/reverse tile-space coordinate transforms
             //
-            auto forwardTilesByCUs = addTileSpaceCT(graph, true, numTotalTiles, m_numTilesPerCU);
-            auto reverseTilesByCUs = addTileSpaceCT(graph, false, numTotalTiles, m_numTilesPerCU);
+            auto forwardTilesByWGs = addTileSpaceCT(graph, true, numTotalTiles, m_numTilesPerWG);
+            auto reverseTilesByWGs = addTileSpaceCT(graph, false, numTotalTiles, m_numTilesPerWG);
 
             //
             // Add tile and accumulator for loops dimensions and iterators
             //
-            auto forTileIncr       = graph.coordinates.addElement(Linear(m_numTilesPerCU, one));
-            auto forwardForTileIdx = graph.coordinates.addElement(ForLoop(m_numTilesPerCU, one));
-            auto reverseForTileIdx = graph.coordinates.addElement(ForLoop(m_numTilesPerCU, one));
+            auto forTileIncr       = graph.coordinates.addElement(Linear(m_numTilesPerWG, one));
+            auto forwardForTileIdx = graph.coordinates.addElement(ForLoop(m_numTilesPerWG, one));
+            auto reverseForTileIdx = graph.coordinates.addElement(ForLoop(m_numTilesPerWG, one));
             auto forwardForAccumIdx
                 = graph.coordinates.addElement(ForLoop(accumulatorCoordSize, one));
             auto reverseForAccumIdx
@@ -288,20 +288,20 @@ namespace rocRoller
                 m_accumulatorCoord, CG::isEdge<CG::DataFlow>));
 
             graph.coordinates.addElement(
-                Split(), {forwardTilesByCUs}, {forwardForTileIdx, forwardForAccumIdx});
+                Split(), {forwardTilesByWGs}, {forwardForTileIdx, forwardForAccumIdx});
             graph.coordinates.addElement(
-                Join(), {reverseForTileIdx, reverseForAccumIdx}, {reverseTilesByCUs});
+                Join(), {reverseForTileIdx, reverseForAccumIdx}, {reverseTilesByWGs});
 
             //
             // Create tile loop
             //
-            auto cuTilesOuterExpr    = DF(forTileIncr) < m_numTilesPerCU;
-            auto totalTilesOuterExpr = (m_numTilesPerCU * cu + DF(forTileIncr)) < numTotalTiles;
+            auto wgTilesOuterExpr    = DF(forTileIncr) < m_numTilesPerWG;
+            auto totalTilesOuterExpr = (m_numTilesPerWG * wgExpr + DF(forTileIncr)) < numTotalTiles;
             auto incrementOuterExpr  = DF(forTileIncr) + DF(forAccumIncr);
 
             auto forTileOp = conditionalFor(graph,
                                             forTileIncr,
-                                            cuTilesOuterExpr && totalTilesOuterExpr,
+                                            wgTilesOuterExpr && totalTilesOuterExpr,
                                             incrementOuterExpr,
                                             "StreamTileLoop",
                                             varType);
@@ -326,7 +326,9 @@ namespace rocRoller
             //
             auto currentNonAccumTileTag = graph.coordinates.addElement(Dimension());
             auto currentNonAccumTileExpr
-                = (m_numTilesPerCU * cu + DF(forTileIncr)) / accumulatorCoordSize;
+                = (m_numTilesPerWG * wgExpr + DF(forTileIncr)) / accumulatorCoordSize;
+            currentNonAccumTileExpr = Expression::fastDivision(currentNonAccumTileExpr, m_context);
+
             auto assignNonAccumTile
                 = graph.control.addElement(Assign{Register::Type::Scalar, currentNonAccumTileExpr});
             graph.mapper.connect(assignNonAccumTile, currentNonAccumTileTag, NaryArgument::DEST);
@@ -337,17 +339,19 @@ namespace rocRoller
             //
 
             auto differentAccumTileInnerExpr
-                = ((m_numTilesPerCU * cu + DF(forTileIncr) + DF(forAccumIncr))
+                = ((m_numTilesPerWG * wgExpr + DF(forTileIncr) + DF(forAccumIncr))
                    / accumulatorCoordSize)
                   == DF(currentNonAccumTileTag);
-            auto cuTilesInnerExpr = (DF(forTileIncr) + DF(forAccumIncr)) < m_numTilesPerCU;
+            differentAccumTileInnerExpr
+                = Expression::fastDivision(differentAccumTileInnerExpr, m_context);
+            auto wgTilesInnerExpr = (DF(forTileIncr) + DF(forAccumIncr)) < m_numTilesPerWG;
             auto totalTilesInnerExpr
-                = (m_numTilesPerCU * cu + DF(forTileIncr) + DF(forAccumIncr)) < numTotalTiles;
+                = (m_numTilesPerWG * wgExpr + DF(forTileIncr) + DF(forAccumIncr)) < numTotalTiles;
             auto incrementInnerExpr = DF(forAccumIncr) + one;
 
             auto forAccumOp = *graph.control.get<ForLoopOp>(m_accumulatorLoopOp);
             forAccumOp.condition
-                = differentAccumTileInnerExpr && cuTilesInnerExpr && totalTilesInnerExpr;
+                = differentAccumTileInnerExpr && wgTilesInnerExpr && totalTilesInnerExpr;
             graph.control.setElement(m_accumulatorLoopOp, forAccumOp);
 
             // TODO After the forAccumOp, need to do:
@@ -425,28 +429,28 @@ namespace rocRoller
 
         void AddStreamK::setupArguments()
         {
-            // On entry, numCUs is an Expression that either:
+            // On entry, numWGs is an Expression that either:
             //   1. Pulls a value from a CommandArgument
             //   2. Is a literal (for testing)
 
-            auto numCUsDT   = DataType::UInt32;
+            auto numWGsDT   = DataType::UInt32;
             auto numTilesDT = DataType::Int64;
 
             // Make kernel arguments:
             //
-            // numCUs:        Value
+            // numWGs:        Value
             // numTiles0:     Computed on host: M / macM
             // numTiles1:     Computed on host: N / macN
             // numTilesAcc:   Computed on host: K / macK
-            // numTilesPerCU: Computed on host: (numTiles0 * numTiles1 * numTilesAcc + numCUs - 1) / numCUs
+            // numTilesPerWG: Computed on host: (numTiles0 * numTiles1 * numTilesAcc + numWGs - 1) / numWGs
 
             // Note that m_numTileArgExprs was filled during staging
 
-            auto numCUsArg
-                = AssemblyKernelArgument{"numCUs", numCUsDT, DataDirection::ReadOnly, m_numCUs};
+            auto numWGsArg
+                = AssemblyKernelArgument{"numWGs", numWGsDT, DataDirection::ReadOnly, m_numWGs};
 
             std::vector<AssemblyKernelArgument> numTileArgs;
-            for(auto d : m_dimensions)
+            for(auto d : m_dimensionIndices)
             {
                 numTileArgs.push_back(AssemblyKernelArgument{concatenate("numTiles", d),
                                                              numTilesDT,
@@ -456,16 +460,16 @@ namespace rocRoller
             numTileArgs.push_back(AssemblyKernelArgument{
                 "numTilesAcc", numTilesDT, DataDirection::ReadOnly, m_numTileArgExprs.back()});
 
-            auto numTilesPerCUArgExpr = m_numTileArgExprs.back();
-            for(auto d : m_dimensions)
+            auto numTilesPerWGArgExpr = m_numTileArgExprs.back();
+            for(auto d : m_dimensionIndices)
             {
-                numTilesPerCUArgExpr = numTilesPerCUArgExpr * m_numTileArgExprs[d];
+                numTilesPerWGArgExpr = numTilesPerWGArgExpr * m_numTileArgExprs[d];
             }
-            numTilesPerCUArgExpr
-                = (numTilesPerCUArgExpr + m_numCUs - Expression::literal(1u)) / m_numCUs;
+            numTilesPerWGArgExpr
+                = (numTilesPerWGArgExpr + m_numWGs - Expression::literal(1u)) / m_numWGs;
 
-            auto numTilesPerCUArg = AssemblyKernelArgument{
-                "numTilesPerCU", numTilesDT, DataDirection::ReadOnly, numTilesPerCUArgExpr};
+            auto numTilesPerWGArg = AssemblyKernelArgument{
+                "numTilesPerWG", numTilesDT, DataDirection::ReadOnly, numTilesPerWGArgExpr};
 
             // Make expressions that reference the KernelArguments.
             // These expression are used throughout the transform.
@@ -477,19 +481,19 @@ namespace rocRoller
             {
                 m_numTiles.push_back(makeArgExpr(arg));
             }
-            m_numTilesPerCU = makeArgExpr(numTilesPerCUArg);
+            m_numTilesPerWG = makeArgExpr(numTilesPerWGArg);
 
             // Add arguments to the kernel
             auto k = m_context->kernel();
-            k->addArgument(numCUsArg);
+            k->addArgument(numWGsArg);
             for(auto arg : numTileArgs)
             {
                 k->addArgument(arg);
             }
-            k->addArgument(numTilesPerCUArg);
+            k->addArgument(numTilesPerWGArg);
 
-            // On exit, numCUs references the KernelArgument.
-            m_numCUs = makeArgExpr(numCUsArg);
+            // On exit, numWGs references the KernelArgument.
+            m_numWGs = makeArgExpr(numWGsArg);
         }
 
         KernelGraph AddStreamK::apply(KernelGraph const& original)

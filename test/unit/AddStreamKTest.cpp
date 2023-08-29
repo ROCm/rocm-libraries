@@ -55,7 +55,7 @@ namespace AddStreamKTest
     // - Kernel
     //   - WaitZero
     //   - ForLoop
-    //     - Assign(VGPR, CU-number)
+    //     - Assign(VGPR, WG-number)
     //     - StoreVGPR
     //     - WaitZero
     //
@@ -65,9 +65,10 @@ namespace AddStreamKTest
     //
     // Result will be: an M * N * K length array representing the
     // flattened tile-space.  The {m, n, k} entry in the array will be
-    // the number of the CU that processed it.
+    // the number of the WG that processed it.
     TEST_F(AddStreamKTestGPU, GPU_BasicStreamKStore)
     {
+
         rocRoller::KernelGraph::KernelGraph kgraph;
 
         long int numTileM = 10;
@@ -76,7 +77,7 @@ namespace AddStreamKTest
 
         hipDeviceProp_t deviceProperties;
         ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
-        uint numCUs = deviceProperties.multiProcessorCount;
+        uint numWGs = deviceProperties.multiProcessorCount;
 
         auto k = m_context->kernel();
 
@@ -85,11 +86,8 @@ namespace AddStreamKTest
 
         k->setKernelDimensions(1);
         k->setWorkitemCount(
-            {Expression::literal(numCUs), Expression::literal(1u), Expression::literal(1u)});
+            {Expression::literal(numWGs), Expression::literal(1u), Expression::literal(1u)});
         k->setWorkgroupSize({1, 1, 1});
-
-        m_context->schedule(k->preamble());
-        m_context->schedule(k->prolog());
 
         // global result
         auto kernel = kgraph.control.addElement(Kernel());
@@ -109,10 +107,15 @@ namespace AddStreamKTest
         kgraph.coordinates.addElement(Flatten(), {tileM, tileN, tileK}, {user});
 
         // result
-        auto dstVGPR        = kgraph.coordinates.addElement(VGPR());
-        auto cuExpr         = k->workgroupIndex().at(0)->expression();
-        auto assignCUNumber = kgraph.control.addElement(Assign{Register::Type::Vector, cuExpr});
-        kgraph.mapper.connect(assignCUNumber, dstVGPR, NaryArgument::DEST);
+        auto dstVGPR = kgraph.coordinates.addElement(VGPR());
+        auto wgDim   = kgraph.coordinates.addElement(Workgroup(0));
+        auto wgExpr  = std::make_shared<Expression::Expression>(
+            Expression::DataFlowTag{wgDim, Register::Type::Vector, DataType::UInt32});
+        auto assignWGNumber = kgraph.control.addElement(Assign{Register::Type::Vector, wgExpr});
+        kgraph.mapper.connect(assignWGNumber, dstVGPR, NaryArgument::DEST);
+        // auto assignWGNumber = kgraph.control.addElement(NOP{});
+
+        kgraph.coordinates.addElement(PassThrough(), {user}, {dstVGPR});
 
         auto storeOp = kgraph.control.addElement(StoreVGPR());
         kgraph.mapper.connect<User>(storeOp, user);
@@ -123,18 +126,23 @@ namespace AddStreamKTest
 
         kgraph.control.addElement(Body(), {kernel}, {preWaitOp});
         kgraph.control.addElement(Sequence(), {preWaitOp}, {forKOp});
-        kgraph.control.addElement(Body(), {forKOp}, {assignCUNumber});
-        kgraph.control.addElement(Sequence(), {assignCUNumber}, {storeOp});
+        kgraph.control.addElement(Body(), {forKOp}, {assignWGNumber});
+        kgraph.control.addElement(Sequence(), {assignWGNumber}, {storeOp});
         kgraph.control.addElement(Sequence(), {storeOp}, {loopWaitOp});
 
         auto addStreamK = std::make_shared<AddStreamK>(std::vector<int>{0, 1},
                                                        rocRoller::KLOOP,
                                                        rocRoller::KLOOP,
-                                                       Expression::literal(numCUs),
+                                                       Expression::literal(numWGs),
                                                        m_context);
         kgraph          = kgraph.transform(addStreamK);
+        auto kg2        = std::make_shared<rocRoller::KernelGraph::KernelGraph>(kgraph);
+        k->setKernelGraphMeta(kg2);
 
-        m_context->schedule(rocRoller::KernelGraph::generate(kgraph, m_context->kernel()));
+        m_context->schedule(k->preamble());
+        m_context->schedule(k->prolog());
+
+        m_context->schedule(rocRoller::KernelGraph::generate(*kg2, m_context->kernel()));
 
         m_context->schedule(k->postamble());
         m_context->schedule(k->amdgpu_metadata());
@@ -145,14 +153,14 @@ namespace AddStreamKTest
 
             KernelArguments kargs(false);
             kargs.append("result", deviceResult.get());
-            kargs.append("numCUs", numCUs);
+            kargs.append("numWGs", numWGs);
             kargs.append("numTiles0", numTileM);
             kargs.append("numTiles1", numTileN);
             kargs.append("numTilesAcc", numTileK);
-            kargs.append("numTilesPerCU", (numTileM * numTileN * numTileK + numCUs - 1) / numCUs);
+            kargs.append("numTilesPerWG", (numTileM * numTileN * numTileK + numWGs - 1) / numWGs);
 
             KernelInvocation kinv;
-            kinv.workitemCount = {numCUs, 1, 1};
+            kinv.workitemCount = {numWGs, 1, 1};
             kinv.workgroupSize = {1, 1, 1};
 
             auto executableKernel = m_context->instructions()->getExecutableKernel();
@@ -169,36 +177,36 @@ namespace AddStreamKTest
             std::vector<int> referenceResult(numTileM * numTileN * numTileK);
             {
                 auto totalTiles = numTileM * numTileN * numTileK;
-                auto tilesPerCU = (totalTiles + numCUs - 1) / numCUs;
+                auto tilesPerWG = (totalTiles + numWGs - 1) / numWGs;
 
-                for(uint cu = 0; cu < numCUs; cu++)
+                for(uint wg = 0; wg < numWGs; wg++)
                 {
                     uint forTileIdx, forKIdx;
 
                     forKIdx = 0;
                     for(forTileIdx = 0;
-                        (forTileIdx < tilesPerCU) && ((tilesPerCU * cu + forTileIdx) < totalTiles);
+                        (forTileIdx < tilesPerWG) && ((tilesPerWG * wg + forTileIdx) < totalTiles);
                         forTileIdx += forKIdx)
                     {
                         uint tile;
 
-                        tile = tilesPerCU * cu + forTileIdx;
+                        tile = tilesPerWG * wg + forTileIdx;
 
                         auto startMN = tile / numTileK;
                         for(forKIdx = 0;
-                            (((tilesPerCU * cu + forTileIdx + forKIdx) / numTileK) == startMN)
-                            && (tilesPerCU * cu + forTileIdx + forKIdx < totalTiles)
-                            && (forTileIdx + forKIdx < tilesPerCU);
+                            (((tilesPerWG * wg + forTileIdx + forKIdx) / numTileK) == startMN)
+                            && (tilesPerWG * wg + forTileIdx + forKIdx < totalTiles)
+                            && (forTileIdx + forKIdx < tilesPerWG);
                             forKIdx += 1)
                         {
-                            tile = tilesPerCU * cu + forTileIdx + forKIdx;
+                            tile = tilesPerWG * wg + forTileIdx + forKIdx;
 
                             uint m, n, k;
                             m = (tile / numTileK) / numTileN;
                             n = (tile / numTileK) % numTileN;
                             k = tile % numTileK;
 
-                            referenceResult[m * numTileN * numTileK + n * numTileK + k] = cu;
+                            referenceResult[m * numTileN * numTileK + n * numTileK + k] = wg;
                         }
                     }
                 }
@@ -245,7 +253,7 @@ namespace AddStreamKTest
     //
     // Input is an M * N * K length array of floating point values.
     //
-    // Result will be: an numCU length array.  The n'th CU will sum
+    // Result will be: a numCU length array.  The n'th WG will sum
     // the input values in it's local tile-space and store the result
     // in the n'th entry of the output array.
     TEST_F(AddStreamKTestGPU, GPU_BasicStreamKLoad)
@@ -258,7 +266,7 @@ namespace AddStreamKTest
 
         hipDeviceProp_t deviceProperties;
         ASSERT_THAT(hipGetDeviceProperties(&deviceProperties, 0), HasHipSuccess(0));
-        uint numCUs = deviceProperties.multiProcessorCount;
+        uint numWGs = deviceProperties.multiProcessorCount;
 
         auto k = m_context->kernel();
 
@@ -269,11 +277,8 @@ namespace AddStreamKTest
 
         k->setKernelDimensions(1);
         k->setWorkitemCount(
-            {Expression::literal(numCUs), Expression::literal(1u), Expression::literal(1u)});
+            {Expression::literal(numWGs), Expression::literal(1u), Expression::literal(1u)});
         k->setWorkgroupSize({1, 1, 1});
-
-        m_context->schedule(k->preamble());
-        m_context->schedule(k->prolog());
 
         // global result
         auto kernel = kgraph.control.addElement(Kernel());
@@ -335,11 +340,16 @@ namespace AddStreamKTest
         auto addStreamK = std::make_shared<AddStreamK>(std::vector<int>{0, 1},
                                                        rocRoller::KLOOP,
                                                        rocRoller::KLOOP,
-                                                       Expression::literal(numCUs),
+                                                       Expression::literal(numWGs),
                                                        m_context);
         kgraph          = kgraph.transform(addStreamK);
+        auto kg2        = std::make_shared<rocRoller::KernelGraph::KernelGraph>(kgraph);
+        k->setKernelGraphMeta(kg2);
 
-        m_context->schedule(rocRoller::KernelGraph::generate(kgraph, m_context->kernel()));
+        m_context->schedule(k->preamble());
+        m_context->schedule(k->prolog());
+
+        m_context->schedule(rocRoller::KernelGraph::generate(*kg2, m_context->kernel()));
 
         m_context->schedule(k->postamble());
         m_context->schedule(k->amdgpu_metadata());
@@ -349,64 +359,64 @@ namespace AddStreamKTest
             RandomGenerator random(17629u);
             auto            hostX = random.vector<float>(numTileM * numTileN * numTileK, -1.0, 1.0);
             auto            deviceX = make_shared_device(hostX);
-            auto            deviceA = make_shared_device<float>(numCUs);
+            auto            deviceA = make_shared_device<float>(numWGs);
 
             KernelArguments kargs(false);
             kargs.append("in", deviceX.get());
             kargs.append("out", deviceA.get());
-            kargs.append("numCUs", numCUs);
+            kargs.append("numWGs", numWGs);
             kargs.append("numTiles0", numTileM);
             kargs.append("numTiles1", numTileN);
             kargs.append("numTilesAcc", numTileK);
-            kargs.append("numTilesPerCU", (numTileM * numTileN * numTileK + numCUs - 1) / numCUs);
+            kargs.append("numTilesPerWG", (numTileM * numTileN * numTileK + numWGs - 1) / numWGs);
 
             KernelInvocation kinv;
-            kinv.workitemCount = {numCUs, 1, 1};
+            kinv.workitemCount = {numWGs, 1, 1};
             kinv.workgroupSize = {1, 1, 1};
 
             auto executableKernel = m_context->instructions()->getExecutableKernel();
             executableKernel->executeKernel(kargs, kinv);
 
-            std::vector<float> hostA(numCUs);
+            std::vector<float> hostA(numWGs);
             ASSERT_THAT(
                 hipMemcpy(
                     hostA.data(), deviceA.get(), hostA.size() * sizeof(float), hipMemcpyDefault),
                 HasHipSuccess(0));
 
             // Compute reference...
-            std::vector<float> referenceA(numCUs);
+            std::vector<float> referenceA(numWGs);
             {
                 auto totalTiles = numTileM * numTileN * numTileK;
-                auto tilesPerCU = (totalTiles + numCUs - 1) / numCUs;
+                auto tilesPerWG = (totalTiles + numWGs - 1) / numWGs;
 
-                for(uint cu = 0; cu < numCUs; cu++)
+                for(uint wg = 0; wg < numWGs; wg++)
                 {
                     uint forTileIdx, forKIdx;
 
                     forKIdx = 0;
                     for(forTileIdx = 0;
-                        (forTileIdx < tilesPerCU) && ((tilesPerCU * cu + forTileIdx) < totalTiles);
+                        (forTileIdx < tilesPerWG) && ((tilesPerWG * wg + forTileIdx) < totalTiles);
                         forTileIdx += forKIdx)
                     {
                         uint tile;
 
-                        tile = tilesPerCU * cu + forTileIdx;
+                        tile = tilesPerWG * wg + forTileIdx;
 
                         auto startMN = tile / numTileK;
                         for(forKIdx = 0;
-                            (((tilesPerCU * cu + forTileIdx + forKIdx) / numTileK) == startMN)
-                            && (tilesPerCU * cu + forTileIdx + forKIdx < totalTiles)
-                            && (forTileIdx + forKIdx < tilesPerCU);
+                            (((tilesPerWG * wg + forTileIdx + forKIdx) / numTileK) == startMN)
+                            && (tilesPerWG * wg + forTileIdx + forKIdx < totalTiles)
+                            && (forTileIdx + forKIdx < tilesPerWG);
                             forKIdx += 1)
                         {
-                            tile = tilesPerCU * cu + forTileIdx + forKIdx;
+                            tile = tilesPerWG * wg + forTileIdx + forKIdx;
 
                             uint m, n, k;
                             m = (tile / numTileK) / numTileN;
                             n = (tile / numTileK) % numTileN;
                             k = tile % numTileK;
 
-                            referenceA[cu] += hostX[m * numTileN * numTileK + n * numTileK + k];
+                            referenceA[wg] += hostX[m * numTileN * numTileK + n * numTileK + k];
                         }
                     }
                 }

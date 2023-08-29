@@ -22,8 +22,8 @@ namespace rocRoller
          *
          * The AddStreamK transform creates a flattened "global tile
          * space" from all of the M/N/K tiles.  The flattened M/N/K
-         * global tile-space is distributed evenly among the CUs.
-         * Each CU iterates over its portion of the flattened global
+         * global tile-space is distributed evenly among the WGs.
+         * Each WG iterates over its portion of the flattened global
          * tile-space; with the K tiles iterated over in the
          * inner-most "streaming" loop.
          *
@@ -38,7 +38,7 @@ namespace rocRoller
          *
          * @param topLoop Which accumulation loop to stream.
          *
-         * @param numCUs How many CUs/workgroups will be launched.
+         * @param numWGs How many workgroups will be launched.
          */
         class AddStreamK : public GraphTransform
         {
@@ -49,7 +49,7 @@ namespace rocRoller
             AddStreamK(std::vector<int> const&   dims,
                        std::string const&        topLoop,
                        std::string const&        accumulatorLoop,
-                       Expression::ExpressionPtr numCUs,
+                       Expression::ExpressionPtr numWGs,
                        ContextPtr                context);
 
             KernelGraph apply(KernelGraph const& original) override;
@@ -59,7 +59,7 @@ namespace rocRoller
             int addTileSpaceCT(KernelGraph&              graph,
                                bool                      forward,
                                Expression::ExpressionPtr numTotalTiles,
-                               Expression::ExpressionPtr numTilesPerCU);
+                               Expression::ExpressionPtr numTilesPerWG);
 
             void stage(KernelGraph const& graph);
             void setupArguments();
@@ -68,17 +68,37 @@ namespace rocRoller
             ContextPtr m_context;
 
             // Location
-            std::vector<int> m_dimensions;
-            std::string      m_topLoop;
-            std::string      m_accumulatorLoop;
 
+            /**
+             * The sub-dimensions of dangling `MacroTileNumber`s that should be included in the streaming
+             * construct
+             */
+            std::vector<int> m_dimensionIndices;
+            /**
+             * Name of the top loop
+             */
+            std::string m_topLoop;
+            /**
+             * Name of the K loop.
+             */
+            std::string m_accumulatorLoop;
+
+            /**
+             * Control node of the top loop.
+             */
             int m_topLoopOp;
+            /**
+             * Control node of the K loop.
+             */
             int m_accumulatorLoopOp;
+            /**
+             * Coordinate dimension of the K loop.
+             */
             int m_accumulatorCoord;
 
             // Kernel arguments
             std::vector<Expression::ExpressionPtr> m_numTiles, m_numTileArgExprs;
-            Expression::ExpressionPtr              m_numCUs, m_numTilesPerCU;
+            Expression::ExpressionPtr              m_numWGs, m_numTilesPerWG;
 
             // Staged MacroTileNumber coordinates
             //
