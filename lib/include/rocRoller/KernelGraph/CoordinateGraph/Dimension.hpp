@@ -167,7 +167,7 @@ namespace rocRoller
             static constexpr bool HasValue = false;
 
             Workgroup(int const dim = 0);
-
+            Workgroup(int const dim, Expression::ExpressionPtr stride);
             std::string name() const override;
         };
 

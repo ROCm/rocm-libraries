@@ -294,7 +294,10 @@ namespace rocRoller
 
                 co_yield Instruction::Label(falseLabel);
                 auto elseBody = m_graph->control.getOutputNodeIndices<Else>(tag).to<std::set>();
-                co_yield generate(elseBody, coords);
+                if(!elseBody.empty())
+                {
+                    co_yield generate(elseBody, coords);
+                }
 
                 co_yield Instruction::Label(botLabel);
                 co_yield Instruction::Unlock("Unlock Conditional");

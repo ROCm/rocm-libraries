@@ -219,6 +219,8 @@ namespace rocRoller
 
             auto storePartialTag = storeScratchTile(graph, forK, varType.dataType);
             auto waitZeroTag     = graph.control.addElement(WaitZero());
+            auto one             = Expression::literal(1u);
+            auto zero            = Expression::literal(0u);
 
             for(auto const& c : storeConnections)
                 graph.mapper.connect(storePartialTag, c.coordinate, c.connectionSpec);
@@ -227,13 +229,14 @@ namespace rocRoller
             auto flagsScratch = newScratchCoordinate(
                 literal(context->kernelOptions().numScratchTiles), DataType::UInt32, context);
             auto flagsScratchTag = graph.coordinates.addElement(flagsScratch);
-            auto wg              = graph.coordinates.addElement(Workgroup());
+            auto wg              = graph.coordinates.addElement(Workgroup(0, one));
+            auto wgExpr          = std::make_shared<Expression::Expression>(
+                Expression::DataFlowTag{wg, Register::Type::Scalar, DataType::UInt32});
             graph.coordinates.addElement(PassThrough(), {wg}, {flagsScratchTag});
 
             auto flagVGPR = graph.coordinates.addElement(VGPR());
 
-            auto assignFlag
-                = graph.control.addElement(Assign{Register::Type::Vector, Expression::literal(1u)});
+            auto assignFlag = graph.control.addElement(Assign{Register::Type::Vector, one});
             graph.mapper.connect(assignFlag, flagVGPR, NaryArgument::DEST);
 
             auto storeFlag = graph.control.addElement(StoreVGPR());
@@ -255,14 +258,40 @@ namespace rocRoller
 
             auto flagExpr = std::make_shared<Expression::Expression>(
                 Expression::DataFlowTag{flagVGPR, Register::Type::Vector, DataType::UInt32});
-            auto one            = Expression::literal(1);
             auto conditionalTag = graph.control.addElement(ConditionalOp{(flagExpr == one)});
             graph.control.addElement(Sequence(), {waitZeroTag2}, {conditionalTag});
 
             auto loadPartialTag = graph.control.addElement(LoadTiled(varType.dataType));
             for(auto const& c : loadConnections)
                 graph.mapper.connect(loadPartialTag, c.coordinate, c.connectionSpec);
-            auto trueBranch = graph.control.addElement(Body(), {conditionalTag}, {loadPartialTag});
+
+            //ReadFlag for workgroup + 1
+            auto elemNum      = graph.coordinates.addElement(ElementNumber(0, zero));
+            auto setCoordElem = graph.control.addElement(SetCoordinate(one));
+            graph.mapper.connect<ElementNumber>(setCoordElem, elemNum);
+
+            auto newWG = graph.coordinates.addElement(Linear());
+            graph.coordinates.addElement(Split(), {newWG}, {wg, elemNum});
+            auto loadFlag = graph.control.addElement(LoadVGPR(DataType::UInt32, false));
+
+            auto numScratch  = Expression::literal(context->kernelOptions().numScratchTiles);
+            auto boundsCheck = graph.control.addElement(ConditionalOp{(wgExpr + one < numScratch)});
+
+            graph.mapper.connect<User>(loadFlag, flagsScratchTag);
+            graph.mapper.connect<VGPR>(loadFlag, flagVGPR);
+            graph.coordinates.addElement(PassThrough(), {flagsScratchTag}, {newWG});
+
+            // WaitCycle --> True Body.
+            // If the condition is true to do fixup, we check to see if wg + 1 is out of bounds for
+            // flagsArray in scratch. If the wg + 1 is in bounds we perform the wait cycle.
+            // Else continue.
+            auto doWhile    = graph.control.addElement(DoWhileOp{(flagExpr == zero), "WaitCycle"});
+            auto trueBranch = graph.control.addElement(Body(), {conditionalTag}, {setCoordElem});
+            graph.control.addElement(Body(), {setCoordElem}, {boundsCheck});
+            auto boundTrue = graph.control.addElement(Body(), {boundsCheck}, {doWhile});
+            graph.control.addElement(Body(), {doWhile}, {loadFlag});
+            graph.control.addElement(Sequence(), {doWhile}, {loadPartialTag});
+
             // add fixup
             // destMacTileTag = macTileTag + loadScratchTileTag
             auto fixupTag = addFixup(
@@ -273,6 +302,9 @@ namespace rocRoller
             auto copyTag
                 = copyAssign(graph, macTileTag, destMacTileTag, varType.dataType, numAGPRs);
             auto falseBranch = graph.control.addElement(Else(), {conditionalTag}, {copyTag});
+            auto copyBoundsTag
+                = copyAssign(graph, macTileTag, destMacTileTag, varType.dataType, numAGPRs);
+            graph.control.addElement(Else(), {boundsCheck}, {copyBoundsTag});
 
             return conditionalTag;
         }

@@ -395,10 +395,15 @@ namespace GEMMDriverTest
                          M,
                          N,
                          K,
-                         factor * alpha,
+                         alpha,
                          beta,
                          gemm.transA == "T",
                          gemm.transB == "T");
+
+        if(factor > 1.0f && gemm.enableScratch)
+        {
+            rocRoller::MultFactor(h_result, factor, M, N, gemm.macM, gemm.macN);
+        }
 
         if(debuggable)
         {
@@ -542,6 +547,7 @@ namespace GEMMDriverTest
         GEMMProblem gemm;
         gemm.n             = gemm.macN;
         gemm.enableScratch = true;
+        gemm.beta          = 0.0f;
         gemm.factor        = 2.0f;
         basicGEMM<float>(m_context, gemm, 1.e-6);
     }

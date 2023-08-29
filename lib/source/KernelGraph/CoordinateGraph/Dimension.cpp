@@ -94,8 +94,14 @@ namespace rocRoller
             , argumentName(name)
         {
         }
+
         Workgroup::Workgroup(int const dim)
             : SubDimension(dim)
+        {
+        }
+
+        Workgroup::Workgroup(int const dim, Expression::ExpressionPtr stride)
+            : SubDimension(dim, nullptr, stride)
         {
         }
 

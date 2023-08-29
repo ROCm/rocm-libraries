@@ -106,4 +106,40 @@ namespace rocRoller
         }
     }
 
+    /*
+     * These routines are for the GEMM + Scratch/Fixup tests. In those tests, the last macroTile 
+     * skips the fixup step. So in the indices corresponding to that macroTile, we do not apply the 
+     * multiplicative factor. Further note that these tests have specified that N == macN. 
+     */
+    void MultFactor(std::vector<float>& data, float factor, int M, int N, int macM, int macN)
+    {
+        int lastMacroTile = M / macM;
+#pragma omp parallel for
+        for(int i = 0; i < M; i++)
+        {
+            if(((i + 1) % lastMacroTile) != 0)
+            {
+                for(int j = 0; j < N; j++)
+                {
+                    data[i * N + j] *= factor;
+                }
+            }
+        }
+    }
+
+    void MultFactor(std::vector<__half>& data, float factor, int M, int N, int macM, int macN)
+    {
+        int lastMacroTile = M / macM;
+#pragma omp parallel for
+        for(int i = 0; i < M; i++)
+        {
+            if(((i + 1) % lastMacroTile) != 0)
+            {
+                for(int j = 0; j < N; j++)
+                {
+                    data[i * N + j] = data[i * N + j] * __float2half(factor);
+                }
+            }
+        }
+    }
 }
