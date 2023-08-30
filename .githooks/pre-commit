@@ -77,7 +77,7 @@ fi
 # if black(python formatter) exists, run it on python files
 if command -v black >/dev/null; then
     for file in $files; do
-       if [[ -e $file ]] && echo $file | grep -Eq '\.py$'; then
+       if [[ -e $file ]] && ( echo $file | grep -Eq '\.py$' ||  grep -q "^#!.*python" "$file" ) ; then
             echo "black $file"
             black "$file"
             git add -u "$file"

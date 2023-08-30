@@ -149,7 +149,6 @@ def load_machine_specs(path):
 
 
 def get_machine_specs(devicenum, rocm_smi_path="rocm-smi"):
-
     cpuinfo = path("/proc/cpuinfo").read_text()
     meminfo = path("/proc/meminfo").read_text()
     version = path("/proc/version").read_text()

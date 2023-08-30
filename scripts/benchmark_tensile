@@ -17,26 +17,34 @@ sys.path.append(str(repo_dir / "scripts" / "lib"))
 import rrperf.git as git
 import rrperf.problems as problems
 
+
 class keyvalue(argparse.Action):
-    def __call__( self , parser, namespace,
-                 values, option_string = None):
+    def __call__(self, parser, namespace, values, option_string=None):
         setattr(namespace, self.dest, dict())
-          
+
         for value in values:
-            key, value = value.split('=')
+            key, value = value.split("=")
             getattr(namespace, self.dest)[key] = value
+
 
 def process_cli():
     parser = argparse.ArgumentParser(description="Run Tensile")
     parser.add_argument("config", type=str, help="Path of Tensile Config.")
-    parser.add_argument("--tensile_repo_url", type=str, default="https://github.com/ROCmSoftwarePlatform/Tensile.git", help="URL of Tensile Repo.")
-    parser.add_argument("--tensile_commit", type=str, default=None, help="Commit of Tensile to use.")
-    parser.add_argument("--yaml", type=str, default="out.yaml", help="Yaml output file.")
-    parser.add_argument('--kwargs', 
-                        nargs='*', 
-                        action = keyvalue,
-                        default=dict())
+    parser.add_argument(
+        "--tensile_repo_url",
+        type=str,
+        default="https://github.com/ROCmSoftwarePlatform/Tensile.git",
+        help="URL of Tensile Repo.",
+    )
+    parser.add_argument(
+        "--tensile_commit", type=str, default=None, help="Commit of Tensile to use."
+    )
+    parser.add_argument(
+        "--yaml", type=str, default="out.yaml", help="Yaml output file."
+    )
+    parser.add_argument("--kwargs", nargs="*", action=keyvalue, default=dict())
     return parser.parse_args()
+
 
 def parse_type(type_str):
     if type_str == "H":
@@ -46,14 +54,15 @@ def parse_type(type_str):
     else:
         raise ValueError(f"{type_str} is not a valid type string.")
 
+
 def parse_tensile_result(result_row):
     retval = dict()
-    retval["client"]="GEMMv00"
-    retval["path"]=result_row["WinnerName"]
-    retval["kernelGenerate"]=0
-    retval["kernelAssemble"]=0
-    retval["kernelExecute"]=[float(result_row["WinnerTimeUS"]) * 1000]
-    retval["K"]=int(result_row["SizeL"])
+    retval["client"] = "GEMMv00"
+    retval["path"] = result_row["WinnerName"]
+    retval["kernelGenerate"] = 0
+    retval["kernelAssemble"] = 0
+    retval["kernelExecute"] = [float(result_row["WinnerTimeUS"]) * 1000]
+    retval["K"] = int(result_row["SizeL"])
     retval["M"] = int(result_row["SizeI"])
     retval["N"] = int(result_row["SizeJ"])
     retval["scheduler"] = "Tensile"
@@ -91,10 +100,13 @@ def parse_tensile_result(result_row):
         retval["trans_B"] = "T"
     return retval
 
+
 if __name__ == "__main__":
     args = process_cli()
 
-    with tempfile.TemporaryDirectory(prefix="rocRoller_", suffix="_profileTensile") as tensile_repo:
+    with tempfile.TemporaryDirectory(
+        prefix="rocRoller_", suffix="_profileTensile"
+    ) as tensile_repo:
         print("Created temporary directory", tensile_repo)
         git.clone(args.tensile_repo_url, tensile_repo)
 
@@ -105,24 +117,34 @@ if __name__ == "__main__":
         if not tensile_path.exists():
             raise FileNotFoundError(f"Tensile not found at {tensile_path}")
 
-        with tempfile.TemporaryDirectory(prefix="rocRoller_", suffix="_profileTensile") as working_dir_name:
+        with tempfile.TemporaryDirectory(
+            prefix="rocRoller_", suffix="_profileTensile"
+        ) as working_dir_name:
             print("Created temporary directory", working_dir_name)
             subprocess.run(
-               [str(tensile_path), args.config, working_dir_name],
-               check=True,
+                [str(tensile_path), args.config, working_dir_name],
+                check=True,
             )
             results = []
-            for csv_file_name in list(glob.glob(working_dir_name + "/2_BenchmarkData/*.csv")):
-                with open(csv_file_name, mode='r') as csv_file:
-                    csv_reader = csv.DictReader(csv_file, skipinitialspace=True, delimiter=',')
+            for csv_file_name in list(
+                glob.glob(working_dir_name + "/2_BenchmarkData/*.csv")
+            ):
+                with open(csv_file_name, mode="r") as csv_file:
+                    csv_reader = csv.DictReader(
+                        csv_file, skipinitialspace=True, delimiter=","
+                    )
                     for row in csv_reader:
                         gemm_args = parse_tensile_result(row)
                         for key, value in args.kwargs.items():
                             if key not in gemm_args:
                                 gemm_args[key] = value
                         results += [problems.GEMMResult(**gemm_args)]
-        
+
         yamlfile = pathlib.Path(args.yaml)
         with yamlfile.open("w") as yfile:
-            yaml_text = yaml.dump_all([asdict(x) for x in results], yfile, default_flow_style=False, default_style=None)
-
+            yaml_text = yaml.dump_all(
+                [asdict(x) for x in results],
+                yfile,
+                default_flow_style=False,
+                default_style=None,
+            )
