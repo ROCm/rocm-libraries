@@ -63,7 +63,7 @@ BEGIN_HIPCUB_NAMESPACE
  *   keys-only sort)
  *
  * @tparam PTX_ARCH
- *   <b>[optional]</b> \ptxversion
+ *   <b>[optional]</b> ptx version
  *
  * @par Overview
  *   WarpMergeSort arranges items into ascending order using a comparison

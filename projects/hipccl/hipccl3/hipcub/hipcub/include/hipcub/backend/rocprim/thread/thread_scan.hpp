@@ -54,8 +54,8 @@ namespace internal {
      typename    T,
      typename    ScanOp>
  __device__ __forceinline__ T ThreadScanExclusive(
-     T                   inclusive,
-     T                   exclusive,
+     T                   inclusive,              ///< [in] Initial value for inclusive aggregate
+     T                   exclusive,              ///< [in] Initial value for exclusive aggregate
      T                   *input,                 ///< [in] Input array
      T                   *output,                ///< [out] Output array (may be aliased to \p input)
      ScanOp              scan_op,                ///< [in] Binary scan operator
@@ -131,7 +131,7 @@ namespace internal {
      typename    T,
      typename    ScanOp>
  __device__ __forceinline__ T ThreadScanInclusive(
-     T                   inclusive,
+     T                   inclusive,              ///< [in] Initial value for inclusive aggregate
      T                   *input,                 ///< [in] Input array
      T                   *output,                ///< [out] Output array (may be aliased to \p input)
      ScanOp              scan_op,                ///< [in] Binary scan operator

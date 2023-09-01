@@ -86,15 +86,14 @@ struct DigitExtractorAdopter
  * \tparam SMEM_CONFIG          <b>[optional]</b> Shared memory bank mode (default: \p hipSharedMemBankSizeFourByte)
  * \tparam BLOCK_DIM_Y          <b>[optional]</b> The thread block length in threads along the Y dimension (default: 1)
  * \tparam BLOCK_DIM_Z          <b>[optional]</b> The thread block length in threads along the Z dimension (default: 1)
- * \tparam ARCH                 <b>[optional]</b> \ptxversion
+ * \tparam ARCH                 <b>[optional]</b> ptx version
  *
  * \par Overview
  * Blah...
  * - Keys must be in a form suitable for radix ranking (i.e., unsigned bits).
- * - \blocked
  *
  * \par Performance Considerations
- * - \granularity
+ * - granularity
  *
  * \par Examples
  * \par

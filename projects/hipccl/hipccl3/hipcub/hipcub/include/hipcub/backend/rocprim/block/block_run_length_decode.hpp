@@ -316,7 +316,6 @@ public:
    * \p item_offsets can be used to retrieve each run-length decoded item's relative index within its run. E.g., the
    * run-length encoded array of `3, 1, 4` with the respective run lengths of `2, 1, 3` would yield the run-length
    * decoded array of `3, 3, 1, 4, 4, 4` with the relative offsets of `0, 1, 0, 0, 1, 2`.
-   * \smemreuse
    *
    * \param[out] decoded_items The run-length decoded items to be returned in a blocked arrangement
    * \param[out] item_offsets The run-length decoded items' relative offset within the run they belong to
