@@ -120,7 +120,7 @@ int warp_all(int predicate)
 /**
  * This function computes a lane mask of active lanes in the warp which which have
  * the same value for <tt>label</tt> as the lane which calls the function. The bit at
- * index \p i in the lane mask is set if the thread of lane \i calls this function
+ * index \p i in the lane mask is set if the thread of lane \p i calls this function
  * with the same value <tt>label</tt>. Only the least-significant \p LabelBits bits
  * are taken into account when labels are considered to be equal.
  */
@@ -147,7 +147,7 @@ ROCPRIM_DEVICE ROCPRIM_INLINE lane_mask_type match_any(unsigned int label)
 /**
  * This function computes a lane mask of active lanes in the warp which which have
  * the same value for <tt>label</tt> as the lane which calls the function. The bit at
- * index \p i in the lane mask is set if the thread of lane \i calls this function
+ * index \p i in the lane mask is set if the thread of lane \p i calls this function
  * with the same value <tt>label</tt>. Only the least-significant \p LabelBits bits
  * are taken into account when labels are considered to be equal.
  */

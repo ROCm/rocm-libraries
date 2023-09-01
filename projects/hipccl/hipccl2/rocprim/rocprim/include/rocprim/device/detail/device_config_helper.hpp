@@ -337,11 +337,13 @@ template<unsigned int                    BlockSize,
          ::rocprim::block_store_method   BlockStoreMethod,
          ::rocprim::block_scan_algorithm BlockScanMethod,
          unsigned int                    SizeLimit = ROCPRIM_GRID_SIZE_LIMIT>
-struct [[deprecated("The UseLookback switch has been removed, as scan now only supports the "
-                    "lookback-scan implementation. Use scan_config_v2 instead.")]] scan_config
-    : ::rocprim::detail::scan_config_params
+struct
+#ifndef DOXYGEN_SHOULD_SKIP_THIS // Doxygen seems to have trouble with the syntax used in this definition
+[[deprecated("The UseLookback switch has been removed, as scan now only supports the "
+                    "lookback-scan implementation. Use scan_config_v2 instead.")]] 
+#endif
+scan_config : ::rocprim::detail::scan_config_params
 {
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
     /// \brief Number of threads in a block.
     static constexpr unsigned int block_size = BlockSize;
     /// \brief Number of items processed by each thread.
@@ -356,7 +358,6 @@ struct [[deprecated("The UseLookback switch has been removed, as scan now only s
     static constexpr ::rocprim::block_scan_algorithm block_scan_method = BlockScanMethod;
     /// \brief Limit on the number of items for a single scan kernel launch.
     static constexpr unsigned int size_limit = SizeLimit;
-#endif
 
     constexpr scan_config()
         : ::rocprim::detail::scan_config_params{
@@ -459,12 +460,14 @@ template<unsigned int                    BlockSize,
          ::rocprim::block_store_method   BlockStoreMethod,
          ::rocprim::block_scan_algorithm BlockScanMethod,
          unsigned int                    SizeLimit = ROCPRIM_GRID_SIZE_LIMIT>
-struct [[deprecated(
+struct
+#ifndef DOXYGEN_SHOULD_SKIP_THIS // Doxygen seems to have trouble with the syntax used in this definition
+[[deprecated(
     "The UseLookback switch has been removed, as scan now only supports the lookback-scan "
-    "implementation. Use scan_by_key_config_v2 instead.")]] scan_by_key_config
-    : ::rocprim::detail::scan_by_key_config_params
+    "implementation. Use scan_by_key_config_v2 instead.")]]
+#endif
+scan_by_key_config : ::rocprim::detail::scan_by_key_config_params
 {
-#ifndef DOXYGEN_SHOULD_SKIP_THIS
     /// \brief Number of threads in a block.
     static constexpr unsigned int block_size = BlockSize;
     /// \brief Number of items processed by each thread.
@@ -479,7 +482,6 @@ struct [[deprecated(
     static constexpr ::rocprim::block_scan_algorithm block_scan_method = BlockScanMethod;
     /// \brief Limit on the number of items for a single scan kernel launch.
     static constexpr unsigned int size_limit = SizeLimit;
-#endif
 
     constexpr scan_by_key_config()
         : ::rocprim::detail::scan_by_key_config_params{
@@ -662,5 +664,8 @@ struct default_histogram_config_base
 } // namespace detail
 
 END_ROCPRIM_NAMESPACE
+
+/// @}
+// end of group primitivesmodule_deviceconfigs
 
 #endif //ROCPRIM_DEVICE_DETAIL_CONFIG_HELPER_HPP_

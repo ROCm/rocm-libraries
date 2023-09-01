@@ -43,12 +43,14 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 enum class select_method
 {
     flag = 0,
     predicate = 1,
     unique = 2
 };
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 template<select_method SelectMethod,
          unsigned int  BlockSize,

@@ -43,6 +43,7 @@ BEGIN_ROCPRIM_NAMESPACE
 class discard_iterator
 {
 public:
+    #ifndef DOXYGEN_SHOULD_SKIP_THIS // Skip internal implementation details.
     struct discard_value
     {
         ROCPRIM_HOST_DEVICE inline
@@ -62,6 +63,7 @@ public:
             return *this;
         }
     };
+    #endif // DOXYGEN_SHOULD_SKIP_THIS
 
     /// The type of the value that can be obtained by dereferencing the iterator.
     using value_type = discard_value;
@@ -86,7 +88,7 @@ public:
     ROCPRIM_HOST_DEVICE inline
     ~discard_iterator() = default;
 
-    //! \skip_doxy_start
+    #ifndef DOXYGEN_SHOULD_SKIP_THIS
     ROCPRIM_HOST_DEVICE inline
     discard_iterator& operator++()
     {
@@ -204,12 +206,13 @@ public:
     {
         return os;
     }
-    //! \skip_doxy_end
+    #endif // DOXYGEN_SHOULD_SKIP_THIS
 
 private:
     mutable size_t index_;
 };
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 ROCPRIM_HOST_DEVICE inline
 discard_iterator
 operator+(typename discard_iterator::difference_type distance,
@@ -217,6 +220,7 @@ operator+(typename discard_iterator::difference_type distance,
 {
     return iterator + distance;
 }
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 /// make_discard_iterator creates a discard_iterator using optional
 /// index parameter \p index.
@@ -230,9 +234,9 @@ make_discard_iterator(size_t index = 0)
     return discard_iterator(index);
 }
 
+END_ROCPRIM_NAMESPACE
+
 /// @}
 // end of group iteratormodule
-
-END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_ITERATOR_DISCARD_ITERATOR_HPP_

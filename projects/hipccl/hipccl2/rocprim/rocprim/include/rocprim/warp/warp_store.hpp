@@ -152,9 +152,8 @@ public:
     /// \tparam OutputIterator - [inferred] an iterator type for output (can be a simple
     /// pointer.
     ///
-    /// \param [out] block_output - the output iterator to store to.
+    /// \param [out] output - the output iterator to store to.
     /// \param [in] items - array that data is read from.
-    /// \param [in] storage - temporary storage for outputs.
     ///
     /// \par Overview
     /// * The type \p T must be such that an object of type \p OutputIterator
@@ -184,10 +183,9 @@ public:
     /// \tparam OutputIterator - [inferred] an iterator type for output (can be a simple
     /// pointer.
     ///
-    /// \param [out] block_output - the output iterator to store to.
+    /// \param [out] output - the output iterator to store to.
     /// \param [in] items - array that data is read from.
     /// \param [in] valid - maximum range of valid numbers to read.
-    /// \param [in] storage - temporary storage for outputs.
     ///
     /// \par Overview
     /// * The type \p T must be such that an object of type \p OutputIterator
@@ -211,9 +209,6 @@ public:
         block_store_direct_blocked(flat_id, output, items, valid);
     }
 };
-
-/// @}
-// end of group warpmodule
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 
@@ -369,5 +364,8 @@ public:
 #endif // DOXYGEN_SHOULD_SKIP_THIS
 
 END_ROCPRIM_NAMESPACE
+
+/// @}
+// end of group warpmodule
 
 #endif // ROCPRIM_WARP_WARP_STORE_HPP_

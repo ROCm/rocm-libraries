@@ -35,6 +35,7 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
+/// \brief These enum values are used to specify caching behaviour on store
 enum cache_store_modifier
 {
     store_default,   ///< Default (no modifier)

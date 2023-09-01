@@ -136,6 +136,7 @@ ROCPRIM_KERNEL
     init_lookback_scan_state(lookback_scan_state, number_of_blocks, flat_thread_id);
 }
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
     template <bool Exclusive,
               class BlockScan,
               class T,
@@ -213,6 +214,7 @@ ROCPRIM_KERNEL
                                    prefix_callback_op,
                                    scan_op);
     }
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 } // namespace detail
 

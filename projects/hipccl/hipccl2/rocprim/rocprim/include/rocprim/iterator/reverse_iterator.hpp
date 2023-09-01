@@ -62,10 +62,11 @@ public:
     /// The category of the iterator.
     using iterator_category = std::random_access_iterator_tag;
 
+    /// \brief Constructs a new reverse_iterator using the supplied source.
     ROCPRIM_HOST_DEVICE
     reverse_iterator(SourceIterator source_iterator) : source_iterator_(source_iterator) {}
 
-    //! \skip_doxy_start
+    #ifndef DOXYGEN_SHOULD_SKIP_THIS
     ROCPRIM_HOST_DEVICE
     reverse_iterator& operator++()
     {
@@ -176,12 +177,13 @@ public:
     {
         return other.source_iterator_ >= source_iterator_;
     }
-    //! \skip_doxy_end
+    #endif // DOXYGEN_SHOULD_SKIP_THIS
 
 private:
     SourceIterator source_iterator_;
 };
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 template<class SourceIterator>
 ROCPRIM_HOST_DEVICE reverse_iterator<SourceIterator>
                     operator+(typename reverse_iterator<SourceIterator>::difference_type distance,
@@ -189,6 +191,7 @@ ROCPRIM_HOST_DEVICE reverse_iterator<SourceIterator>
 {
     return iterator + distance;
 }
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 /// make_reverse_iterator creates a \p reverse_iterator wrapping \p source_iterator.
 ///
@@ -203,9 +206,9 @@ ROCPRIM_HOST_DEVICE reverse_iterator<SourceIterator>
     return reverse_iterator<SourceIterator>(source_iterator);
 }
 
+END_ROCPRIM_NAMESPACE
+
 /// @}
 // end of group iteratormodule
-
-END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_ITERATOR_REVERSE_ITERATOR_HPP_

@@ -55,19 +55,25 @@ template <typename T, typename Iter = T*>
 class future_value
 {
 public:
-    using value_type    = T;
-    using iterator_type = Iter;
+    using value_type    = T; ///< The type of the value this future will store.
+    using iterator_type = Iter; ///< An iterator type that can point at the \p value_type.
 
+    /// \brief Constructs a future value
+    /// \param iter - An iterator that will point to the value when it becomes available.
     explicit ROCPRIM_HOST_DEVICE future_value(const Iter iter)
         : iter_ {iter}
     {
     }
 
+    /// \brief Returns the value by dereferencing the iterator that the constructor was passed.
+    /// \note The value must be available at the point this is called.
     ROCPRIM_HOST_DEVICE operator T()
     {
         return *iter_;
     }
 
+    /// \brief Returns the value by dereferencing the iterator that the constructor was passed.
+    /// \note The value must be available at the point this is called.
     ROCPRIM_HOST_DEVICE operator T() const
     {
         return *iter_;

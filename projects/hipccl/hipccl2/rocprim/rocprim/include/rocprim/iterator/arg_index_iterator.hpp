@@ -94,6 +94,7 @@ public:
     {
     }
 
+    #ifndef DOXYGEN_SHOULD_SKIP_THIS
     ROCPRIM_HOST_DEVICE inline
     arg_index_iterator& operator++()
     {
@@ -102,7 +103,6 @@ public:
         return *this;
     }
 
-    //! \skip_doxy_start
     ROCPRIM_HOST_DEVICE inline
     arg_index_iterator operator++(int)
     {
@@ -212,13 +212,14 @@ public:
     {
         return os;
     }
-    //! \skip_doxy_end
+    #endif // DOXYGEN_SHOULD_SKIP_THIS
 
 private:
     InputIterator iterator_;
     difference_type offset_;
 };
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 template<
     class InputIterator,
     class Difference,
@@ -231,7 +232,7 @@ operator+(typename arg_index_iterator<InputIterator, Difference, InputValueType>
 {
     return iterator + distance;
 }
-
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 /// make_arg_index_iterator creates a arg_index_iterator using \p iterator as
 /// the underlying iterator and \p offset as the position (index) of \p iterator

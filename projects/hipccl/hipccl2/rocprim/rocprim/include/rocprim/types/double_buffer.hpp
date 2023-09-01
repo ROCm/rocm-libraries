@@ -28,6 +28,11 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
+/// \brief This class provides an convenient way to do double buffering
+///
+/// It tracks two versions of the buffer ("current" and "alternate"),
+/// which can be accessed with functions of the same name.
+/// You can also swap the buffers.
 template<class T>
 class double_buffer
 {
@@ -37,6 +42,8 @@ class double_buffer
 
 public:
 
+    /// \brief Constructs an empty double buffer object, initializing the 
+    /// buffer pointers to nullptr.
     ROCPRIM_HOST_DEVICE inline
     double_buffer()
     {
@@ -45,6 +52,10 @@ public:
         buffers[1] = nullptr;
     }
 
+    /// \brief Contructs a double buffer object using the supplied buffer pointers.
+    ///
+    /// \param current - Pointer to the buffer to designate as "current" (in use).
+    /// \param alternate - Pointer to the buffer to designate as "alternate" (not in use)
     ROCPRIM_HOST_DEVICE inline
     double_buffer(T * current, T * alternate)
     {
@@ -53,18 +64,21 @@ public:
         buffers[1] = alternate;
     }
 
+    /// \brief Returns a pointer to the current buffer.
     ROCPRIM_HOST_DEVICE inline
     T * current() const
     {
         return buffers[selector];
     }
 
+    /// \brief Returns a pointer to the alternate buffer.
     ROCPRIM_HOST_DEVICE inline
     T * alternate() const
     {
         return buffers[selector ^ 1];
     }
 
+    /// \brief Swaps the current and alternate buffers.
     ROCPRIM_HOST_DEVICE inline
     void swap()
     {

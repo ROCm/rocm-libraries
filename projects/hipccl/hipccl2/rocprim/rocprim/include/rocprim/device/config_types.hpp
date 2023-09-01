@@ -155,6 +155,7 @@ using default_or_custom_config =
         Config
     >::type;
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 enum class target_arch : unsigned int
 {
     // This must be zero, to initialize the device -> architecture cache
@@ -168,6 +169,7 @@ enum class target_arch : unsigned int
     gfx1102 = 1102,
     unknown = std::numeric_limits<unsigned int>::max(),
 };
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 /**
  * \brief Checks if the first `n` characters of `rhs` are equal to `lhs`

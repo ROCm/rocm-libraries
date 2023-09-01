@@ -36,8 +36,10 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
+/// \brief Functor that tests for equality.
 struct equality
 {
+    /// \brief Invocation operator
     template<class T>
     ROCPRIM_HOST_DEVICE inline
     constexpr bool operator()(const T& a, const T& b) const
@@ -46,8 +48,10 @@ struct equality
     }
 };
 
+/// \brief Functor that tests for inequality.
 struct inequality
 {
+    /// \brief Invocation operator
     template<class T>
     ROCPRIM_HOST_DEVICE inline
     constexpr bool operator()(const T& a, const T& b) const
@@ -56,14 +60,21 @@ struct inequality
     }
 };
 
+/// \brief Functor that tests for inequality using a user-supplied equality comparator.
 template <class EqualityOp>
 struct inequality_wrapper
 {
-    EqualityOp op;
+    EqualityOp op; ///< A binary equality comparator (see constructor for details).
 
+    /// \brief Constructs the wrapper using the provided equality comparator.
+    /// \param op - a binary equality comparator.
+    /// The signature of the function should be equivalent to the following:
+    /// <tt>T f(const T &a, const T &b);</tt>. The signature does not need to have
+    /// <tt>const &</tt>, but function object must not modify the objects passed to it.
     ROCPRIM_HOST_DEVICE inline
     inequality_wrapper(EqualityOp op) : op(op) {}
 
+    /// \brief Invocation operator
     template<class T>
     ROCPRIM_HOST_DEVICE inline
     bool operator()(const T &a, const T &b)
@@ -72,8 +83,10 @@ struct inequality_wrapper
     }
 };
 
+/// \brief Functor that returns the sum of its arguments.
 struct sum
 {
+    /// \brief Invocation operator
     template<class T>
     ROCPRIM_HOST_DEVICE inline
     constexpr T operator()(const T &a, const T &b) const
@@ -82,8 +95,10 @@ struct sum
     }
 };
 
+/// \brief Functor that returns the maximum of its arguments.
 struct max
 {
+    /// \brief Invocation operator
     template<class T>
     ROCPRIM_HOST_DEVICE inline
     constexpr T operator()(const T &a, const T &b) const
@@ -92,8 +107,10 @@ struct max
     }
 };
 
+/// \brief Functor that returns the minimum of its arguments.
 struct min
 {
+    /// \brief Invocation operator
     template<class T>
     ROCPRIM_HOST_DEVICE inline
     constexpr T operator()(const T &a, const T &b) const
@@ -102,8 +119,14 @@ struct min
     }
 };
 
+/// \brief Functor that returns the "arg max" of the given key-value pairs.
+///
+/// The "arg max" of a key-value pair is defined as:
+/// - b: if b's value is larger, or if the values are equal but b's key is smaller.
+/// - a: otherwise
 struct arg_max
 {
+    /// \brief Invocation operator
     template<
         class Key,
         class Value
@@ -117,8 +140,14 @@ struct arg_max
     }
 };
 
+/// \brief Functor that returns the "arg min" of the given key-value pairs.
+///
+/// The "arg min" of a key-value pair is defined as:
+/// - b: if b's value is smaller, or if the values are equal but b's key is smaller.
+/// - a: otherwise
 struct arg_min
 {
+    /// \brief Invocation operator (see struct description for details)
     template<
         class Key,
         class Value

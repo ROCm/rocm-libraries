@@ -86,10 +86,10 @@ enum class warp_load_method
 ///
 /// \par Overview
 /// * The \p warp_load class has a number of different methods to load data:
-///   * [warp_load_direct](\ref ::warp_load_method::warp_load_direct)
-///   * [warp_load_striped](\ref ::warp_load_method::warp_load_striped)
-///   * [warp_load_vectorize](\ref ::warp_load_method::warp_load_vectorize)
-///   * [warp_load_transpose](\ref ::warp_load_method::warp_load_transpose)
+///   * [warp_load_direct](\ref warp_load_method::warp_load_direct)
+///   * [warp_load_striped](\ref warp_load_method::warp_load_striped)
+///   * [warp_load_vectorize](\ref warp_load_method::warp_load_vectorize)
+///   * [warp_load_transpose](\ref warp_load_method::warp_load_transpose)
 ///
 /// \par Example:
 /// \parblock
@@ -152,7 +152,7 @@ public:
     ///
     /// \param [in] input - the input iterator to load from.
     /// \param [out] items - array that data is loaded to.
-    /// \param [in] storage - temporary storage for inputs.
+    /// \param [in] - temporary storage for inputs.
     ///
     /// \par Overview
     /// * The type \p T must be such that an object of type \p InputIterator
@@ -180,7 +180,7 @@ public:
     /// \param [in] input - the input iterator to load from.
     /// \param [out] items - array that data is loaded to.
     /// \param [in] valid - maximum range of valid numbers to load.
-    /// \param [in] storage - temporary storage for inputs.
+    /// \param [in] - temporary storage for inputs.
     ///
     /// \par Overview
     /// * The type \p T must be such that an object of type \p InputIterator
@@ -210,7 +210,7 @@ public:
     /// \param [out] items - array that data is loaded to.
     /// \param [in] valid - maximum range of valid numbers to load.
     /// \param [in] out_of_bounds - default value assigned to out-of-bound items.
-    /// \param [in] storage - temporary storage for inputs.
+    /// \param [in] - temporary storage for inputs.
     ///
     /// \par Overview
     /// * The type \p T must be such that an object of type \p InputIterator
@@ -235,9 +235,6 @@ public:
                                   out_of_bounds);
     }
 };
-
-/// @}
-// end of group warpmodule
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 
@@ -454,5 +451,8 @@ public:
 #endif // DOXYGEN_SHOULD_SKIP_THIS
 
 END_ROCPRIM_NAMESPACE
+
+/// @}
+// end of group warpmodule
 
 #endif // ROCPRIM_WARP_WARP_LOAD_HPP_

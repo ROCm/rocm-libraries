@@ -60,6 +60,7 @@ private:
 // For large types reduces bank conflicts to minimum
 // by values sliced into int32_t and each slice stored continuously.
 // Treatment of []= operator by proxy objects
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 template<class T, int n>
 class fast_array<T, n, std::enable_if_t<(sizeof(T) > sizeof(int32_t))>>
 {
@@ -107,6 +108,7 @@ private:
 
     int32_t data[words_no * n];
 };
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 template<class T,
          unsigned int BlockSizeX,

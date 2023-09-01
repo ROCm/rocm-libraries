@@ -138,6 +138,7 @@ struct empty_type {};
 /// as nop replacement for the HIP-CPU back-end
 struct empty_binary_op
 {
+    /// \brief Invocation operator.
     constexpr empty_type operator()(const empty_type&, const empty_type&) const { return empty_type{}; }
 };
 
@@ -152,18 +153,25 @@ using bfloat16 = ::hip_bfloat16;
 // TODO: introduce a ROCPRIM-specific macro to query this
 #define __AMDGCN_WAVEFRONT_SIZE 64
 #endif
+/// \brief The lane_mask_type is an integer that contains one bit per thread.
+///
+/// The total number of bits is equal to the total number of threads in a
+/// warp. Used to for warp-level operations.
+/// \note This is defined only on the device side.
 #if __AMDGCN_WAVEFRONT_SIZE == 32
 using lane_mask_type = unsigned int;
 #elif __AMDGCN_WAVEFRONT_SIZE == 64
 using lane_mask_type = unsigned long long int;
 #endif
 
+/// \brief Native half-precision floating point type
 #ifdef __HIP_CPU_RT__
 using native_half = half;
 #else
 using native_half = _Float16;
 #endif
 
+/// \brief native bfloat16 type
 #ifdef __HIP_CPU_RT__
 // TODO: Find a better type
 using native_bfloat16 = bfloat16;

@@ -153,6 +153,9 @@ struct tuple_element<I, const volatile T>
     using type = typename std::add_cv<typename tuple_element<I, T>::type>::type;
 };
 
+/// @brief \brief This is an alias used for convenience. It represents tuple_element<I, T>::type.
+/// @tparam T - type of the elements contained in the tuple
+/// @tparam I - size of the tuple (number of elements)
 template <size_t I, class T>
 using tuple_element_t = typename tuple_element<I, T>::type;
 
@@ -589,7 +592,7 @@ public:
     }
 
     /// \brief Converting constructor. Initializes each element of the tuple
-    /// with the corresponding value in \p ::rocprim::detail::custom_forward<UTypes>(values).
+    /// with the corresponding value in \p rocprim::detail::custom_forward<UTypes>(values).
     ///
     /// This overload only participates in overload resolution if:
     /// * <tt>sizeof...(Types) == sizeof...(UTypes)</tt>,
@@ -704,7 +707,7 @@ public:
     /// \param other tuple to replace the contents of this tuple
     template<class... UTypes>
     tuple& operator=(const tuple<UTypes...>& other) noexcept;
-    /// \brief For all \p i, assigns \p ::rocprim::detail::custom_forward<Ui>(get<i>(other)) to \p rocprim::get<i>(*this).
+    /// \brief For all \p i, assigns \p rocprim::detail::custom_forward<Ui>(get<i>(other)) to \p rocprim::get<i>(*this).
     /// \param other tuple to replace the contents of this tuple
     template<class... UTypes>
     tuple& operator=(tuple<UTypes...>&& other) noexcept;

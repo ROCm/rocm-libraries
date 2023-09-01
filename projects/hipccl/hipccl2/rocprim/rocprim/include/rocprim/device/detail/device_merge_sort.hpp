@@ -512,6 +512,7 @@ struct block_sort_impl<Key,
     }
 };
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
 template<typename Key, typename Value, unsigned int BlockSize, unsigned int ItemsPerThread>
 struct block_sort_impl<Key,
                        Value,
@@ -593,7 +594,6 @@ struct block_sort_impl<Key,
         }
     }
 };
-
 template<typename Key, typename Value, unsigned int BlockSize, unsigned int ItemsPerThread>
 struct block_sort_impl<Key,
                        Value,
@@ -675,6 +675,7 @@ struct block_sort_impl<Key,
         }
     }
 };
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 template<unsigned int         BlockSize,
          unsigned int         ItemsPerThread,
