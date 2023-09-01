@@ -57,7 +57,7 @@ BEGIN_HIPCUB_NAMESPACE
  *
  * \tparam T                        The data type to be exchanged.
  * \tparam BLOCK_THREADS            The thread block size in threads.
- * \tparam PTX_ARCH                 <b>[optional]</b> \ptxversion
+ * \tparam PTX_ARCH                 <b>[optional]</b> ptx version
  */
 template<typename T, int BLOCK_THREADS, int ARCH = HIPCUB_ARCH /* ignored */
          >

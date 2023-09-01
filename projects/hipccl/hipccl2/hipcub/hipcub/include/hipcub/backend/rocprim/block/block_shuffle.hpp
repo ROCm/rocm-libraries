@@ -85,9 +85,6 @@ public:
 
   /**
    * \brief Each <em>thread<sub>i</sub></em> obtains the \p input provided by <em>thread</em><sub><em>i</em>+<tt>distance</tt></sub>. The offset \p distance may be negative.
-   *
-   * \par
-   * - \smemreuse
    */
   HIPCUB_DEVICE inline void Offset(
       T   input,                  ///< [in] The input item from the calling thread (<em>thread<sub>i</sub></em>)
@@ -99,24 +96,16 @@ public:
 
   /**
  * \brief Each <em>thread<sub>i</sub></em> obtains the \p input provided by <em>thread</em><sub><em>i</em>+<tt>distance</tt></sub>.
- *
- * \par
- * - \smemreuse
  */
   HIPCUB_DEVICE inline void Rotate(
       T   input,                  ///< [in] The calling thread's input item
-      T&  output,                 ///< [out] The \p input item from thread <em>thread</em><sub>(<em>i</em>+<tt>distance></tt>)%<tt><BLOCK_THREADS></tt></sub> (may be aliased to \p input).  This value is not updated for <em>thread</em><sub>BLOCK_THREADS-1</sub>
+      T&  output,                 ///< [out] The \p input item from thread <em>thread</em><sub>(<em>i</em>+<tt>distance></tt>)%<tt>\<BLOCK_THREADS\></tt></sub> (may be aliased to \p input).  This value is not updated for <em>thread</em><sub>BLOCK_THREADS-1</sub>
       unsigned int distance = 1)  ///< [in] Offset distance (0 < \p distance < <tt>BLOCK_THREADS</tt>)
   {
     base_type::rotate(input,output,distance);
   }
   /**
   * \brief The thread block rotates its [<em>blocked arrangement</em>](index.html#sec5sec3) of \p input items, shifting it up by one item
-  *
-  * \par
-  * - \blocked
-  * - \granularity
-  * - \smemreuse
   */
   template <int ITEMS_PER_THREAD>
   HIPCUB_DEVICE inline void Up(
@@ -129,11 +118,6 @@ public:
 
    /**
    * \brief The thread block rotates its [<em>blocked arrangement</em>](index.html#sec5sec3) of \p input items, shifting it up by one item.  All threads receive the \p input provided by <em>thread</em><sub><tt>BLOCK_THREADS-1</tt></sub>.
-   *
-   * \par
-   * - \blocked
-   * - \granularity
-   * - \smemreuse
    */
   template <int ITEMS_PER_THREAD>
   HIPCUB_DEVICE inline void Up(
@@ -146,11 +130,6 @@ public:
 
    /**
    * \brief The thread block rotates its [<em>blocked arrangement</em>](index.html#sec5sec3) of \p input items, shifting it down by one item
-   *
-   * \par
-   * - \blocked
-   * - \granularity
-   * - \smemreuse
    */
   template <int ITEMS_PER_THREAD>
   HIPCUB_DEVICE inline void Down(
@@ -162,11 +141,6 @@ public:
 
    /**
    * \brief The thread block rotates its [<em>blocked arrangement</em>](index.html#sec5sec3) of input items, shifting it down by one item.  All threads receive \p input[0] provided by <em>thread</em><sub><tt>0</tt></sub>.
-   *
-   * \par
-   * - \blocked
-   * - \granularity
-   * - \smemreuse
    */
   template <int ITEMS_PER_THREAD>
   HIPCUB_DEVICE inline void Down(

@@ -203,7 +203,6 @@ private:
   const unsigned int linear_tid;
 
 public:
-  /// \smemstorage{BlockMergeSort}
   struct TempStorage : Uninitialized<_TempStorage> {};
 
   BlockMergeSortStrategy() = delete;
@@ -704,7 +703,6 @@ private:
  *   arithmetic types into ascending/descending order.
  *
  * @par A Simple Example
- * @blockcollective{BlockMergeSort}
  * @par
  * The code snippet below illustrates a sort of 512 integer keys that are
  * partitioned across 128 threads * where each thread owns 4 consecutive items.
