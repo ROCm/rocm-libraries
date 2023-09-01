@@ -27,6 +27,7 @@
 THRUST_NAMESPACE_BEGIN
 
 /*! \addtogroup reordering
+ *  \{
  *  \ingroup algorithms
  */
 

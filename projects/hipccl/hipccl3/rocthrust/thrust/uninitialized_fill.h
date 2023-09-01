@@ -27,6 +27,7 @@
 THRUST_NAMESPACE_BEGIN
 
 /*! \addtogroup filling
+ *  \{
  *  \ingroup transformations
  *  \{
  */

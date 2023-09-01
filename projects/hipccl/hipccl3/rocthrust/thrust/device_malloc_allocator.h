@@ -30,8 +30,9 @@
 
 THRUST_NAMESPACE_BEGIN
 
-// forward declarations to WAR circular #includes
+/// forward declaration to WAR circular \#includes
 template<typename> class device_ptr;
+/// forward declaration
 template<typename T> device_ptr<T> device_malloc(const std::size_t n);
 
 /*! \addtogroup allocators Allocators 

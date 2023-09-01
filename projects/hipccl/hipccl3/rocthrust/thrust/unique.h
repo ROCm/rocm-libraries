@@ -1014,7 +1014,6 @@ __host__ __device__
  *  \param exec The execution policy to use for parallelization.
  *  \param first The beginning of the input range.
  *  \param last  The end of the input range.
- *  \param binary_pred  The binary predicate used to determine equality.
  *  \return The number of runs of equal elements in <tt>[first, new_last)</tt>
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
@@ -1054,7 +1053,6 @@ __host__ __device__
  *
  *  This version of \p unique_count uses the function object \p binary_pred to test for equality.
  *
- *  \param exec The execution policy to use for parallelization.
  *  \param first The beginning of the input range.
  *  \param last  The end of the input range.
  *  \param binary_pred  The binary predicate used to determine equality.
@@ -1096,10 +1094,8 @@ __host__ __device__
  *
  *  This version of \p unique_count uses \c operator== to test for equality.
  *
- *  \param exec The execution policy to use for parallelization.
  *  \param first The beginning of the input range.
  *  \param last  The end of the input range.
- *  \param binary_pred  The binary predicate used to determine equality.
  *  \return The number of runs of equal elements in <tt>[first, new_last)</tt>
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
